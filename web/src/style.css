@@ -1,0 +1,6 @@
+html, body, #root { height: 100%; margin: 0; }
+
+/* xterm fills its glass frame; the terminal keeps an opaque dark surface
+   (the "machine output" layer — never glass). */
+.term { position: absolute; inset: 0; padding: 6px; border-radius: 12px; overflow: hidden; }
+.term .xterm { height: 100%; }
