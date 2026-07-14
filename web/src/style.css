@@ -1,5 +1,11 @@
 html, body, #root { height: 100%; margin: 0; }
 
+/* Dark scheme: theme's error red (#b00020) is too dark/saturated on the dark
+   surface — low contrast + red-on-dark chromostereopsis make it read blurry.
+   Lift to the brighter red xterm already uses (Terminal.jsx). Covers StatusPill
+   ("Exited"), the disconnected pill, and any color="error" text. */
+html.dark { --mui-palette-error-main: #ff6b81; }
+
 /* xterm fills its glass frame; the terminal keeps an opaque surface
    (the "machine output" layer — never glass), themed light/dark with the app. */
 /* Radius stays concentric with the outer glass frame: frame is radius.lg (26px)

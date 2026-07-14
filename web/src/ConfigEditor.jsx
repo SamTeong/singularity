@@ -24,6 +24,7 @@ const SCOPES = [
 export default function ConfigEditor({ cwd }) {
   const { mode } = useColorMode();
   const [data, setData] = useState(null);
+  const [loadedCwd, setLoadedCwd] = useState(null);
   const [loading, setLoading] = useState(false);
   const [scope, setScope] = useState('project');
   const [content, setContent] = useState('');
@@ -36,6 +37,7 @@ export default function ConfigEditor({ cwd }) {
     setLoading(true);
     fetch(`/config?cwd=${encodeURIComponent(cwd)}`).then((r) => r.json()).then((d) => {
       setData(d);
+      setLoadedCwd(cwd);
       setContent(d[scope]?.content ?? '');
       setDirty(false); setMsg(null);
     }).catch((e) => setMsg({ sev: 'error', text: String(e) })).finally(() => setLoading(false));
@@ -54,7 +56,7 @@ export default function ConfigEditor({ cwd }) {
   const save = async () => {
     const r = await fetch(`/config/${scope}`, {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ cwd, content }),
+      body: JSON.stringify({ cwd: loadedCwd, content }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.ok) { setMsg({ sev: 'success', text: `Saved${r.backup ? ' (.bak written)' : ''}` }); setDirty(false); load(); }
     else setMsg({ sev: 'error', text: r.error || 'save failed' });

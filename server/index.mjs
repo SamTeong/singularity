@@ -14,7 +14,9 @@ import { scanClaude, killClaudePid } from './procs.mjs';
 import { readConfig, writeConfig } from './config.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memory.mjs';
 import { statsFor } from './stats.mjs';
-import { getUsage } from './usage.mjs';
+import { getUsage, initUsageAutoRefresh } from './usage.mjs';
+import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
+import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -130,6 +132,46 @@ app.put('/config/:scope', async (req, reply) => {
   return r;
 });
 
+// Task board: kanban CRUD. /tasks/:id/status is called by each task's own
+// agent (curl) as well as UI drags.
+app.get('/tasks', async () => snapshotTasks());
+app.post('/tasks', async (req, reply) => {
+  try { return { ok: true, task: createTask(req.body || {}) }; }
+  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+});
+app.post('/tasks/:id/status', async (req, reply) => {
+  try { return { ok: true, task: updateTask(req.params.id, req.body || {}) }; }
+  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+});
+app.post('/tasks/:id/conclude', async (req, reply) => {
+  try { concludeTask(req.params.id, req.body?.outcome); return { ok: true }; }
+  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+});
+app.delete('/tasks/history/:id', async (req, reply) => {
+  try { deleteHistory(req.params.id); return { ok: true }; }
+  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+});
+
+// Cron jobs: list/create/update/delete + manual run. In-process UTC scheduler;
+// missed runs ignored on restart (nextFire recomputed from now).
+app.get('/crons', async () => snapshotCrons());
+app.post('/crons', async (req, reply) => {
+  try { return { ok: true, cron: createCron(req.body || {}) }; }
+  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+});
+app.post('/crons/:id', async (req, reply) => {
+  try { return { ok: true, cron: updateCron(req.params.id, req.body || {}) }; }
+  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+});
+app.delete('/crons/:id', async (req, reply) => {
+  try { deleteCron(req.params.id); return { ok: true }; }
+  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+});
+app.post('/crons/:id/run', async (req, reply) => {
+  try { return { ok: true, cron: runCron(req.params.id) }; }
+  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+});
+
 // Memory: cross-project search + guarded read/write.
 app.get('/memory/search', async (req) => searchMemory(req.query.q));
 app.get('/memory/files', async () => ({ files: listFiles() }));
@@ -147,6 +189,9 @@ app.put('/memory/file', async (req, reply) => {
 });
 
 reg.init(app.log);
+initTasks(app.log);
+initCrons(app.log);
+initUsageAutoRefresh(reg.bus);
 
 const server = await app.listen({ host: HOST, port: PORT });
 app.log.info(`daemon on ${server} (loopback only)${TOKEN ? ' [token required]' : ''}`);

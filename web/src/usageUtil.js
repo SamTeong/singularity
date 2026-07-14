@@ -24,11 +24,3 @@ export function meterColor(t, pct) {
   return t.vars.palette[k].main;
 }
 
-// A window (5h/7d) is reset-schedulable if its resetsAt is in the future and
-// within a sane horizon (skip absurd/past values). Used for the #3 one-shots.
-export function resetDelay(iso, capMs = 7.75 * 24 * 3.6e6) {
-  if (!iso) return null;
-  const ms = new Date(iso).getTime() - Date.now();
-  if (!Number.isFinite(ms) || ms <= 0 || ms > capMs) return null;
-  return ms;
-}

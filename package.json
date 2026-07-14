@@ -23,6 +23,8 @@
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
     "@zapac/mui-theme": "file:../_references/zapac-material-ui/zapac-mui-theme-0.1.0.tgz",
+    "cron-parser": "^5.6.2",
+    "cronstrue": "^3.24.0",
     "fastify": "^5.10.0",
     "node-pty": "^1.1.0",
     "playwright-core": "^1.61.1",

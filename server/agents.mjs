@@ -42,8 +42,8 @@ let recentRepos = [];
 let logger = null;
 function persist() {
   const data = {
-    agents: [...agents.values()].map(({ id, name, cwd, status, createdAt, model, scopes }) => ({
-      id, name, cwd, createdAt, model, scopes,
+    agents: [...agents.values()].map(({ id, name, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs }) => ({
+      id, name, cwd, createdAt, model, scopes, permissionMode, extraArgs, activeMs,
       status: status === 'running' || status === 'starting' || status === 'idle' ? 'detached' : status,
     })),
     recentRepos,
@@ -81,7 +81,21 @@ export function livePids() {
 }
 
 function emitList() { bus.emit('list', snapshot()); }
-function setStatus(a, status) { a.status = status; bus.emit('status', { id: a.id, status }); }
+// Single transition point for agent status. Tracks activeMs (persisted, wall
+// time spent 'running') across the running <-> idle/exited/detached edges.
+function setStatus(a, status) {
+  if (status === 'running' && a.status !== 'running') a.runningSince = Date.now();
+  else if (a.status === 'running' && status !== 'running') { a.activeMs = (a.activeMs || 0) + (Date.now() - a.runningSince); a.runningSince = null; }
+  a.status = status;
+  bus.emit('status', { id: a.id, status });
+}
+// Persisted activeMs plus the live delta while currently running.
+export function getActiveMs(id) {
+  const a = agents.get(id);
+  if (!a) return 0;
+  const base = a.activeMs || 0;
+  return a.status === 'running' && a.runningSince ? base + (Date.now() - a.runningSince) : base;
+}
 function pushBuf(a, data) {
   a.buf.push(data);
   let total = a.buf.reduce((n, s) => n + s.length, 0);
@@ -122,7 +136,9 @@ function wire(a) {
 // existing dirs under the scope root), resume if a session log already exists
 // for this id at this cwd (else fresh --session-id), optional ollama wrapper.
 // Shared by create + reattach so reattach keeps the model + scopes.
-export function buildSpawn({ id, name, cwd, model, scopes }) {
+// `prompt` (initial user message) is only sent on a fresh spawn — passing it
+// with --resume would re-submit it as a new message on every reattach.
+export function buildSpawn({ id, name, cwd, model, scopes, permissionMode, extraArgs }, prompt) {
   const claudeArgs = [];
   for (const s of (scopes || [])) {
     if (!s) continue;
@@ -132,6 +148,9 @@ export function buildSpawn({ id, name, cwd, model, scopes }) {
   const resuming = sessionLogExists(cwd, id);
   const sessionFlag = resuming ? ['--resume', id] : ['--session-id', id];
   claudeArgs.push(...sessionFlag, '--name', name);
+  if (permissionMode) claudeArgs.push('--permission-mode', permissionMode);
+  claudeArgs.push(...(extraArgs || []));
+  if (prompt && !resuming) claudeArgs.push(prompt);
   if (model && model !== 'claude') {
     if (OLLAMA_BIN === 'ollama') {
       throw new Error('ollama not found on PATH');
@@ -146,13 +165,13 @@ export function buildSpawn({ id, name, cwd, model, scopes }) {
 }
 
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, name, model, scopes, sessionId }) {
+export function create({ cwd, name, model, scopes, sessionId, prompt, permissionMode, extraArgs }) {
   const id = (sessionId && sessionId.trim()) || randomUUID();
   if (agents.has(id)) throw new Error('session id already in use');
   const displayName = name || id.slice(0, 8);
-  const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes });
+  const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
   const proc = spawn(bin, args, { cwd, cols: 80, rows: 24, env: process.env });
-  const a = { id, name: displayName, cwd, model, scopes, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [] };
+  const a = { id, name: displayName, cwd, model, scopes, permissionMode, extraArgs, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [] };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -206,6 +225,7 @@ export function reorder(ids) {
   if (!Array.isArray(ids) || ids.length !== agents.size) return;
   const next = new Map();
   for (const id of ids) { const a = agents.get(id); if (!a) return; next.set(id, a); }
+  if (next.size !== agents.size) return;
   agents.clear();
   for (const [id, a] of next) agents.set(id, a);
   persist();

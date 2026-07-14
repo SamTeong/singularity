@@ -17,45 +17,47 @@ import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import ReplayIcon from '@mui/icons-material/Replay';
 import TerminalIcon from '@mui/icons-material/Terminal';
+import SmartToyIcon from '@mui/icons-material/SmartToy';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import RemoveIcon from '@mui/icons-material/Remove';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import SettingsIcon from '@mui/icons-material/Settings';
 import BookIcon from '@mui/icons-material/Book';
 import SpeedIcon from '@mui/icons-material/Speed';
-import Brightness4Icon from '@mui/icons-material/Brightness4';
+import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
+import DarkModeIcon from '@mui/icons-material/DarkMode';
+import LightModeIcon from '@mui/icons-material/LightMode';
+import ScheduleIcon from '@mui/icons-material/Schedule';
 import { useTheme } from '@mui/material/styles';
 import { AmbientBackground, useColorMode, StatusPill, EmptyState } from '@zapac/mui-theme';
 import Terminal from './Terminal.jsx';
 import DirPicker from './DirPicker.jsx';
 import ProcessManager from './ProcessManager.jsx';
 import CreateAgentDialog from './CreateAgentDialog.jsx';
+import CreateTaskDialog from './CreateTaskDialog.jsx';
+import CreateCronDialog from './CreateCronDialog.jsx';
 import UsagePill from './UsagePill.jsx';
-import { resetDelay } from './usageUtil.js';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
 const ConfigEditor = lazy(() => import('./ConfigEditor.jsx'));
 const MemoryPanel = lazy(() => import('./MemoryPanel.jsx'));
 const UsageView = lazy(() => import('./UsageView.jsx'));
+const TasksBoard = lazy(() => import('./TasksBoard.jsx'));
+const CronJobs = lazy(() => import('./CronJobs.jsx'));
 
 const WS_URL = `ws://${location.host}/ws${window.__SING_TOKEN__ ? `?token=${encodeURIComponent(window.__SING_TOKEN__)}` : ''}`;
 
 // agent lifecycle -> the theme's fixed StatusPill kinds (done|active|review|error)
 const KIND = { starting: 'active', running: 'active', idle: 'review', detached: 'review', exited: 'error' };
-// Status ring color for the collapsed-rail numbered circles — an agent can die
-// (exit) while the rail is collapsed; the ring is the only signal there.
-const statusRing = (t, status) => ({
-  running: t.vars.palette.success.main,
-  starting: t.vars.palette.warning.main,
-  idle: t.vars.palette.warning.main,
-  detached: t.vars.palette.text.disabled,
-  exited: t.vars.palette.error.main,
-}[status] || t.vars.palette.glass.stroke);
 const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`);
 
 // Vertical nav rail entries (icon + label). The rail is the sidebar's primary
 // navigation; the ＋ "New agent" row above it opens the create dialog.
 const NAV = [
+  { v: 'tasks', icon: <ViewKanbanIcon />, label: 'Tasks' },
+  { v: 'cron', icon: <ScheduleIcon />, label: 'Cron' },
   { v: 'config', icon: <SettingsIcon />, label: 'Config' },
   { v: 'memory', icon: <BookIcon />, label: 'Memory' },
   { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
@@ -146,8 +148,22 @@ export default function App() {
   const [procsOpen, setProcsOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [tasks, setTasks] = useState([]);
+  const [taskHistory, setTaskHistory] = useState([]);
+  const [taskOpen, setTaskOpen] = useState(false);
+  const [crons, setCrons] = useState([]);
+  const [cronOpen, setCronOpen] = useState(false);
+  // Terminal dock height (px, drag-resizable) + minimized state, both persisted.
+  const [dockH, setDockH] = useState(() => {
+    const v = Number(localStorage.getItem('sing-dock-h'));
+    return v >= 140 && v <= 2000 ? v : 300;
+  });
+  const [dockMin, setDockMin] = useState(() => localStorage.getItem('sing-dock-min') === '1');
+  const mainRef = useRef(null);
   const [collapsed, setCollapsed] = useState(false);
-  const [view, setView] = useState('agents');
+  const [view, setView] = useState('tasks');
+  const visited = useRef({}); // view -> ever selected, so lazy panels mount once and stay mounted
+  if (view === 'config' || view === 'memory') visited.current[view] = true;
   const { resolved, toggle: toggleColorMode } = useColorMode();
   const [toast, setToast] = useState(null);
   const [stats, setStats] = useState({}); // id -> {turns, tokens}
@@ -155,7 +171,6 @@ export default function App() {
   const [dragId, setDragId] = useState(null); // id of the agent row being dragged
   const wsRef = useRef(null);
   const termHandlers = useRef({}); // id -> { write(data), reset() }
-  const usageTimers = useRef([]); // #3 reset-boundary one-shots
 
   // WS with auto-reconnect (exponential backoff, 0.5s → 8s). On reconnect the
   // fresh socket has no attachments — re-attach every mounted terminal, each
@@ -189,6 +204,13 @@ export default function App() {
           termHandlers.current[m.id]?.write(m.data);
         } else if (m.t === 'attached') {
           setActive(m.id);
+        } else if (m.t === 'usage') {
+          setUsage(m.data);
+        } else if (m.t === 'tasks') {
+          setTasks(m.tasks);
+          setTaskHistory(m.history || []);
+        } else if (m.t === 'crons') {
+          setCrons(m.crons);
         } else if (m.t === 'error') {
           setToast(m.msg);
         }
@@ -218,6 +240,38 @@ export default function App() {
     setDragId(null);
   };
 
+  // Task board actions. Moves/deletes go over REST; the server re-emits
+  // 'tasks' on the WS so state converges from there.
+  const moveTask = (id, column) => {
+    fetch(`/tasks/${id}/status`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ column }) })
+      .then((r) => r.json()).then((d) => { if (!d.ok) setToast(d.error); }).catch((e) => setToast(e.message));
+  };
+  const concludeTask = (id, outcome) => {
+    fetch(`/tasks/${id}/conclude`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ outcome }) })
+      .then((r) => r.json()).then((d) => { if (!d.ok) setToast(d.error); }).catch((e) => setToast(e.message));
+  };
+  const deleteHistory = (id) => {
+    fetch(`/tasks/history/${id}`, { method: 'DELETE' })
+      .then((r) => r.json()).then((d) => { if (!d.ok) setToast(d.error); }).catch((e) => setToast(e.message));
+  };
+
+  // Drag the dock's top edge to resize its height (measured up from the main
+  // pane's bottom), clamped so neither the dock nor the top view can vanish.
+  const startDockDrag = (e) => {
+    e.preventDefault();
+    const rect = mainRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const move = (ev) => {
+      const h = Math.min(rect.height - 140, Math.max(140, rect.bottom - ev.clientY));
+      setDockH(h);
+      localStorage.setItem('sing-dock-h', String(Math.round(h)));
+    };
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
+  const toggleDock = () => setDockMin((m) => { const n = !m; localStorage.setItem('sing-dock-min', n ? '1' : '0'); return n; });
+
   // Poll per-agent stats (turns/tokens from each session .jsonl).
   const agentKey = agents.map((a) => a.id).join(',');
   useEffect(() => {
@@ -234,30 +288,18 @@ export default function App() {
     fetch(`/usage${force ? '?force=1' : ''}`).then((r) => r.json()).then(setUsage).catch(() => {});
   }, []);
 
-  // #2 on-demand: fetch once the socket is up (app opened / reconnected).
+  // On-demand: fetch once the socket is up (app opened / reconnected). The
+  // backend pushes 'usage' updates on its own auto-refresh from here on.
   useEffect(() => { if (connected) refreshUsage(false); }, [connected, refreshUsage]);
-
-  // #3 reset-boundary one-shots: when a 5h/7d window resets, its % drops to 0 —
-  // schedule a single forced refetch just after each reset instant so a passive
-  // viewer sees it update. Rescheduled on every usage change. The 7d timer can be
-  // days out (best-effort across browser suspend; the on-open fetch #2 backstops).
-  useEffect(() => {
-    usageTimers.current.forEach(clearTimeout);
-    usageTimers.current = [];
-    for (const src of ['ollama', 'claude']) {
-      for (const win of ['session', 'weekly']) {
-        const delay = resetDelay(usage?.[src]?.[win]?.resetsAt);
-        if (delay != null) usageTimers.current.push(setTimeout(() => refreshUsage(true), delay + 2000));
-      }
-    }
-    return () => { usageTimers.current.forEach(clearTimeout); usageTimers.current = []; };
-  }, [usage, refreshUsage]);
 
   const activeAgent = agents.find((a) => a.id === active);
 
   return (
-    <Box sx={{ position: 'relative', height: '100dvh', display: 'flex', overflow: 'hidden' }}>
+    <Box ref={mainRef} sx={{ position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <AmbientBackground />
+
+      {/* Top row: sidebar + selected view. The terminal dock spans full width below. */}
+      <Box sx={{ flex: 1, minHeight: 0, display: 'flex' }}>
 
       {/* Sidebar */}
       <Box
@@ -268,8 +310,8 @@ export default function App() {
           zIndex: t.zapac.layers.nav,
           width: collapsed ? 64 : 320,
           flexShrink: 0,
-          m: 1.5,
-          mr: 0,
+          mt: 1.5,
+          ml: 1.5,
           borderRadius: `${t.zapac.radius.lg}px`,
           display: 'flex',
           flexDirection: 'column',
@@ -277,24 +319,29 @@ export default function App() {
           transition: 'width .2s ease',
         })}
       >
-        {/* Header: logo (+ title when expanded) */}
+        {/* Header: logo (+ title when expanded) + more menu (processes, dark mode). */}
         <Stack direction="row" spacing={1.25} sx={{ p: 2, pb: 1.5, alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}>
           <Logo active={agents.some((a) => a.status === 'running' || a.status === 'starting')} />
           {!collapsed && (
-            <Typography component="span" sx={{ flex: 1, fontSize: 16, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.01em' }}>Singularity</Typography>
+            <>
+              <Typography component="span" sx={{ flex: 1, fontSize: 16, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.01em' }}>Singularity</Typography>
+              <Tooltip title="More" placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+                <IconButton onClick={(e) => setMenuAnchor(e.currentTarget)} size="small"><MoreVertIcon /></IconButton>
+              </Tooltip>
+            </>
           )}
         </Stack>
 
         {/* Vertical nav rail: ＋ New agent, then Agents / Config / Memory. Icon-only when collapsed. */}
         <List sx={{ px: 1, pb: 1 }}>
           {/* Tooltips only when collapsed — expanded rows show their label already. */}
-          <Tooltip title={collapsed ? 'New agent' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+          <Tooltip title={collapsed ? 'New session' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
             <ListItemButton
               onClick={() => setCreateOpen(true)}
               sx={{ justifyContent: collapsed ? 'center' : 'flex-start', minHeight: 44, borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5 }}
             >
               <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center' }}><AddIcon /></ListItemIcon>
-              {!collapsed && <ListItemText primary="New agent" />}
+              {!collapsed && <ListItemText primary="New session" />}
             </ListItemButton>
           </Tooltip>
           {NAV.map((item) => (
@@ -323,171 +370,124 @@ export default function App() {
           </Box>
         )}
 
-        {/* Agent list — expanded: shown for every view (mirrors collapsed numbered-circles). */}
-        {!collapsed && (
-          <List sx={{ flex: 1, overflow: 'auto', px: 1 }}>
-            {agents.map((a) => (
-              <ListItemButton
-                key={a.id}
-                selected={a.id === active}
-                onClick={() => { setActive(a.id); setView('agents'); }}
-                draggable
-                onDragStart={() => setDragId(a.id)}
-                onDragOver={(e) => e.preventDefault()}
-                onDrop={() => dropAgent(a.id)}
-                onDragEnd={() => setDragId(null)}
-                sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5, alignItems: 'flex-start', opacity: dragId === a.id ? 0.4 : 1, '& .row-act': { opacity: a.status === 'detached' ? 1 : 0 }, '&:hover .row-act': { opacity: 1 } }}
-              >
-                <Stack sx={{ flex: 1, minWidth: 0 }} spacing={0.5}>
-                  <Typography variant="subtitle2" noWrap>{a.name}</Typography>
-                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{a.cwd}</Typography>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <StatusPill status={KIND[a.status] ?? 'review'}>{a.status}</StatusPill>
-                    {stats[a.id]?.turns > 0 && (
-                      <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>
-                        {stats[a.id].turns} turns · {fmtTokens(stats[a.id].tokens)} tok
-                      </Typography>
-                    )}
-                  </Stack>
-                </Stack>
-                <Stack direction="row" className="row-act" sx={{ transition: 'opacity .15s' }}>
-                  {a.status === 'detached' && (
-                    <Tooltip title="Reattach (claude --resume)" disableInteractive>
-                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'reattach', id: a.id }); }}><ReplayIcon fontSize="small" /></IconButton>
-                    </Tooltip>
-                  )}
-                  <Tooltip title={a.status === 'running' || a.status === 'starting' ? 'Kill' : 'Remove'} disableInteractive>
-                    <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'kill', id: a.id }); }}><CloseIcon fontSize="small" /></IconButton>
-                  </Tooltip>
-                </Stack>
-              </ListItemButton>
-            ))}
-          </List>
-        )}
-
-        {/* Collapsed agent list: numbered circles (1..N), selectable. */}
-        {collapsed && (
-          <List sx={{ flex: 1, overflow: 'auto', px: 1, pb: 1 }}>
-            {agents.map((a, i) => {
-              const sel = a.id === active && view === 'agents';
-              return (
-                <Tooltip
-                  key={a.id}
-                  placement="right"
-                  slotProps={{
-                    tooltip: {
-                      sx: { ...PAPER_TOOLTIP_SLOTPROPS.tooltip.sx, maxWidth: 280 },
-                    },
-                  }}
-                  title={
-                    <Stack spacing={0.5} sx={{ p: 0.5, maxWidth: 280 }}>
-                      <Typography variant="subtitle2" noWrap>{a.name || 'agent'}</Typography>
-                      <Typography variant="code" sx={{ fontSize: 11, opacity: 0.8 }} noWrap>{a.cwd}</Typography>
-                      {a.model && a.model !== 'claude' && (
-                        <Typography variant="code" sx={{ fontSize: 11, opacity: 0.8 }} noWrap>{a.model}</Typography>
-                      )}
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <StatusPill status={KIND[a.status] ?? 'review'}>{a.status}</StatusPill>
-                        {stats[a.id]?.turns > 0 && (
-                          <Typography variant="code" sx={{ fontSize: 11, opacity: 0.8 }}>
-                            {stats[a.id].turns} turns · {fmtTokens(stats[a.id].tokens)} tok
-                          </Typography>
-                        )}
-                      </Stack>
-                    </Stack>
-                  }
-                >
-                  <ListItemButton
-                    onClick={() => { setActive(a.id); setView('agents'); }}
-                    draggable
-                    onDragStart={() => setDragId(a.id)}
-                    onDragOver={(e) => e.preventDefault()}
-                    onDrop={() => dropAgent(a.id)}
-                    onDragEnd={() => setDragId(null)}
-                    sx={{ justifyContent: 'center', alignItems: 'center', minHeight: 40, borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5, opacity: dragId === a.id ? 0.4 : 1 }}
-                  >
-                    <Box
-                      sx={(t) => ({
-                        width: 28, height: 28, flexShrink: 0, borderRadius: '50%',
-                        display: 'grid', placeItems: 'center',
-                        fontSize: 13, fontWeight: 600,
-                        border: `2px solid ${statusRing(t, a.status)}`,
-                        bgcolor: sel ? t.vars.palette.primary.main : 'transparent',
-                        color: sel ? t.vars.palette.primary.contrastText : t.vars.palette.text.secondary,
-                      })}
-                    >
-                      {i + 1}
-                    </Box>
-                  </ListItemButton>
-                </Tooltip>
-              );
-            })}
-          </List>
-        )}
-
-        {/* Bottom-pinned: collapse toggle + more (processes, dark mode). */}
-        <Box sx={{ p: 1, mt: 'auto' }}>
-          <Stack direction="column" spacing={0.5} sx={{ width: 'fit-content' }}>
-            {/* placement=right + disableInteractive: the default bottom-placed
-                interactive tooltip opens over the neighbouring button and
-                swallows its clicks. */}
-            <Tooltip title="More" placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-              <IconButton onClick={(e) => setMenuAnchor(e.currentTarget)} size="small"><MoreVertIcon /></IconButton>
-            </Tooltip>
-          </Stack>
-        </Box>
+        <Box sx={{ flex: 1 }} />
       </Box>
 
-      {/* Main terminal pane */}
-      <Box sx={(t) => ({ position: 'relative', flex: 1, m: 1.5, minWidth: 0, zIndex: t.zapac.layers.content })}>
-        {(view === 'config' || view === 'memory' || view === 'usage') && (
-          <Box sx={(t) => ({ ...glass(t), position: 'absolute', inset: 0, borderRadius: `${t.zapac.radius.lg}px`, overflow: 'hidden' })}>
-            {/* Config/Memory stay mounted across switches (display:none when
-                hidden) so the live CodeMirror + unsaved edits survive — matching
-                agent-to-agent terminal persistence. Usage is stateless: only
-                mounted while selected. */}
-            <Suspense fallback={<Box sx={{ p: 3, color: 'text.secondary' }}>Loading…</Box>}>
+        {/* Selected view. Config/Memory mount once (visited) and stay mounted
+            across switches (display:none when hidden) so live CodeMirror +
+            unsaved edits survive; Tasks/Cron/Usage render on demand. */}
+        <Box sx={(t) => ({ ...glass(t), position: 'relative', flex: 1, mt: 1.5, mx: 1.5, minWidth: 0, borderRadius: `${t.zapac.radius.lg}px`, overflow: 'hidden', zIndex: t.zapac.layers.content })}>
+          <Suspense fallback={<Box sx={{ p: 3, color: 'text.secondary' }}>Loading…</Box>}>
+            {visited.current.config && (
               <Box sx={{ display: view === 'config' ? 'block' : 'none', height: '100%' }}>
                 <ConfigEditor cwd={activeAgent?.cwd || cwd} />
               </Box>
+            )}
+            {visited.current.memory && (
               <Box sx={{ display: view === 'memory' ? 'block' : 'none', height: '100%' }}>
                 <MemoryPanel />
               </Box>
-              {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
-            </Suspense>
-          </Box>
-        )}
-        {/* Terminals stay mounted across all views (display:none when hidden) so
-            switching Agents→Config→Agents keeps the live xterm + scrollback,
-            matching agent-to-agent switching. */}
-        {agents.filter((a) => a.status !== 'detached').map((a) => {
-          const show = view === 'agents' && a.id === active;
-          return (
-            <Box
-              key={a.id}
-              sx={(t) => ({
-                ...glass(t),
-                position: 'absolute', inset: 0,
-                display: show ? 'block' : 'none',
-                borderRadius: `${t.zapac.radius.lg}px`,
-                overflow: 'hidden',
-                p: 0.5,
-              })}
-            >
-              <Terminal agent={a} visible={show} sendMsg={sendMsg} registerOutput={(fn) => { if (fn) termHandlers.current[a.id] = fn; else delete termHandlers.current[a.id]; }} />
-            </Box>
-          );
-        })}
-        {view === 'agents' && (!activeAgent || activeAgent.status === 'detached') && (
-          <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
-            <EmptyState
-              icon={<TerminalIcon />}
-              title={activeAgent?.status === 'detached' ? 'Agent detached' : 'No agent selected'}
-              description={activeAgent?.status === 'detached' ? 'Click the reattach button to resume the conversation.' : 'Create an agent to begin.'}
-            />
-          </Box>
-        )}
+            )}
+            {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
+            {view === 'cron' && <CronJobs crons={crons} agents={agents} onAdd={() => setCronOpen(true)} onToast={setToast} />}
+            {view === 'tasks' && (
+              <TasksBoard
+                tasks={tasks}
+                history={taskHistory}
+                agents={agents}
+                stats={stats}
+                activeId={active}
+                onSelect={(sid) => sid && setActive(sid)}
+                onAdd={() => setTaskOpen(true)}
+                onMove={moveTask}
+                onConclude={concludeTask}
+                onDeleteHistory={deleteHistory}
+              />
+            )}
+          </Suspense>
+        </Box>
       </Box>
+
+      {/* Drag handle — resize the dock (hidden while minimized). */}
+      {!dockMin && <Box onMouseDown={startDockDrag} sx={{ height: 12, flexShrink: 0, mx: 1.5, cursor: 'row-resize' }} />}
+
+      {/* Terminal dock — full width, below sidebar + view: session list (left) + selected terminal (right). */}
+      <Box sx={(t) => ({ ...glass(t), position: 'relative', zIndex: t.zapac.layers.content, flexShrink: 0, height: dockMin ? 'auto' : dockH, mx: 1.5, mb: 1.5, mt: dockMin ? 1.5 : 0, borderRadius: `${t.zapac.radius.lg}px`, overflow: 'hidden', display: 'flex', flexDirection: 'column' })}>
+          <Stack direction="row" spacing={1} sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', borderBottom: dockMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` })}>
+            <SmartToyIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
+            <Typography variant="subtitle2" sx={{ flex: 1 }} noWrap>Sessions</Typography>
+            <Tooltip title={dockMin ? 'Restore' : 'Minimize'} disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+              <IconButton size="small" onClick={toggleDock}>
+                {dockMin ? <OpenInFullIcon fontSize="small" /> : <RemoveIcon fontSize="small" />}
+              </IconButton>
+            </Tooltip>
+          </Stack>
+
+          {/* Body kept mounted while minimized (display:none) so terminals keep
+              their live xterm + scrollback. */}
+          <Box sx={{ display: dockMin ? 'none' : 'flex', flex: 1, minHeight: 0 }}>
+            <List sx={(t) => ({ width: 260, flexShrink: 0, overflow: 'auto', px: 1, py: 0.5, borderRight: `1px solid ${t.vars.palette.glass.stroke}` })}>
+              {agents.map((a) => (
+                <ListItemButton
+                  key={a.id}
+                  selected={a.id === active}
+                  onClick={() => setActive(a.id)}
+                  draggable
+                  onDragStart={() => setDragId(a.id)}
+                  onDragOver={(e) => e.preventDefault()}
+                  onDrop={() => dropAgent(a.id)}
+                  onDragEnd={() => setDragId(null)}
+                  sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5, alignItems: 'flex-start', opacity: dragId === a.id ? 0.4 : 1, '& .row-act': { opacity: a.status === 'detached' ? 1 : 0 }, '&:hover .row-act': { opacity: 1 } }}
+                >
+                  <Stack sx={{ flex: 1, minWidth: 0 }} spacing={0.5}>
+                    <Typography variant="subtitle2" noWrap>{a.name}</Typography>
+                    <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{a.cwd}</Typography>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <StatusPill status={KIND[a.status] ?? 'review'}>{a.status}</StatusPill>
+                      {stats[a.id]?.turns > 0 && (
+                        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>
+                          {stats[a.id].turns} turns · {fmtTokens(stats[a.id].tokens)} tok
+                        </Typography>
+                      )}
+                    </Stack>
+                  </Stack>
+                  <Stack direction="row" className="row-act" sx={{ transition: 'opacity .15s' }}>
+                    {a.status === 'detached' && (
+                      <Tooltip title="Reattach (claude --resume)" disableInteractive>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'reattach', id: a.id }); }}><ReplayIcon fontSize="small" /></IconButton>
+                      </Tooltip>
+                    )}
+                    <Tooltip title={a.status === 'running' || a.status === 'starting' ? 'Kill' : 'Remove'} disableInteractive>
+                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'kill', id: a.id }); }}><CloseIcon fontSize="small" /></IconButton>
+                    </Tooltip>
+                  </Stack>
+                </ListItemButton>
+              ))}
+            </List>
+
+            {/* Selected terminal. All non-detached terminals stay mounted
+                (display:none when hidden) so scrollback + WS attach survive. */}
+            <Box sx={{ position: 'relative', flex: 1, minWidth: 0, p: 0.5 }}>
+              {agents.filter((a) => a.status !== 'detached').map((a) => {
+                const show = !dockMin && a.id === active;
+                return (
+                  <Box key={a.id} sx={{ position: 'absolute', inset: 0, display: show ? 'block' : 'none' }}>
+                    <Terminal agent={a} visible={show} sendMsg={sendMsg} registerOutput={(fn) => { if (fn) termHandlers.current[a.id] = fn; else delete termHandlers.current[a.id]; }} />
+                  </Box>
+                );
+              })}
+              {(!activeAgent || activeAgent.status === 'detached') && (
+                <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
+                  <EmptyState
+                    icon={<TerminalIcon />}
+                    title={activeAgent?.status === 'detached' ? 'Agent detached' : 'No agent selected'}
+                    description={activeAgent?.status === 'detached' ? 'Click the reattach button to resume the conversation.' : 'Create an agent to begin.'}
+                  />
+                </Box>
+              )}
+            </Box>
+          </Box>
+        </Box>
 
       {picking && <DirPicker start={cwd} onPick={(p) => { setCwd(p); setPicking(false); }} onClose={() => setPicking(false)} />}
       {procsOpen && <ProcessManager onClose={() => setProcsOpen(false)} />}
@@ -500,8 +500,7 @@ export default function App() {
         </MenuItem>
         <Divider />
         <MenuItem onClick={toggleColorMode}>
-          <ListItemIcon><Brightness4Icon fontSize="small" /></ListItemIcon>
-          <ListItemText>Dark mode</ListItemText>
+          <ListItemIcon>{resolved === 'dark' ? <DarkModeIcon fontSize="small" /> : <LightModeIcon fontSize="small" />}</ListItemIcon>
           <Switch edge="end" checked={resolved === 'dark'} onChange={toggleColorMode} onClick={(e) => e.stopPropagation()} />
         </MenuItem>
       </Menu>
@@ -515,6 +514,24 @@ export default function App() {
         recent={recent}
         onBrowse={() => setPicking(true)}
         sendMsg={sendMsg}
+      />
+
+      <CreateTaskDialog
+        open={taskOpen}
+        onClose={() => setTaskOpen(false)}
+        cwd={cwd}
+        setCwd={setCwd}
+        recent={recent}
+        onBrowse={() => setPicking(true)}
+      />
+
+      <CreateCronDialog
+        open={cronOpen}
+        onClose={() => setCronOpen(false)}
+        cwd={cwd}
+        setCwd={setCwd}
+        recent={recent}
+        onBrowse={() => setPicking(true)}
       />
 
       <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />

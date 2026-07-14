@@ -114,35 +114,49 @@ async function fetchOllama() {
 // session cookies transparently, so nothing expires and nothing is re-pasted.
 // Launch-per-scrape; a module-level in-flight promise coalesces concurrent
 // callers so two launches never fight over the profile-dir lock.
+// One launch-and-scrape at the given visibility. Serial by construction (the
+// inflight coalescer below never runs two concurrently), so headless→headful
+// retries reuse the profile dir without fighting over its lock.
+async function scrapeOllamaOnce(pw, headless) {
+  let ctx;
+  try {
+    ctx = await pw.chromium.launchPersistentContext(OLLAMA_PROFILE_DIR, { ...PW_STEALTH, headless });
+    await pwHideWebdriver(ctx);
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.goto(OLLAMA_SETTINGS_URL, { waitUntil: 'domcontentloaded', timeout: REQ_TIMEOUT_MS });
+    // Logged-out → redirect to /signin; CF challenge → no meter. Either way,
+    // the meter's absence within the wait means we need a (re-)login.
+    const gotMeter = await page.waitForSelector('[data-usage-meter]', { timeout: REQ_TIMEOUT_MS })
+      .then(() => true).catch(() => false);
+    if (!gotMeter || /\/signin/.test(page.url())) {
+      return { ok: false, source: 'ollama', needsAuth: true, error: 'no-login' };
+    }
+    const parsed = parseOllamaHtml(await page.content());
+    return parsed ?? { ok: false, source: 'ollama', needsAuth: true, error: 'no-login' };
+  } catch (e) {
+    return { ok: false, source: 'ollama', error: `browser: ${e.message}` };
+  } finally {
+    if (ctx) await ctx.close().catch(() => {});
+  }
+}
+
+// Browser mode: drive Edge against the persistent login profile (bootstrapped
+// via `npm run ollama-login`) — the browser handles Cloudflare + session cookies
+// transparently, so nothing expires and nothing is re-pasted. Try headless first
+// (invisible, fast); if it fails (Cloudflare challenge headless can't clear),
+// retry headful once — a visible window can pass the challenge. Set cfg.headless
+// === false to skip straight to headful. A module-level in-flight promise
+// coalesces concurrent callers so two launches never fight over the profile lock.
 let ollamaBrowserInflight = null;
 function fetchOllamaBrowser(cfg) {
   if (ollamaBrowserInflight) return ollamaBrowserInflight;
   ollamaBrowserInflight = (async () => {
     const pw = await import('playwright-core').catch(() => null);
     if (!pw) return { ok: false, source: 'ollama', error: 'playwright-core not installed (npm i playwright-core)' };
-    let ctx;
-    try {
-      ctx = await pw.chromium.launchPersistentContext(OLLAMA_PROFILE_DIR, {
-        ...PW_STEALTH,
-        headless: cfg.headless !== false, // default headless; set "headless":false to escape CF blocks
-      });
-      await pwHideWebdriver(ctx);
-      const page = ctx.pages()[0] ?? (await ctx.newPage());
-      await page.goto(OLLAMA_SETTINGS_URL, { waitUntil: 'domcontentloaded', timeout: REQ_TIMEOUT_MS });
-      // Logged-out → redirect to /signin; CF challenge → no meter. Either way,
-      // the meter's absence within the wait means we need a (re-)login.
-      const gotMeter = await page.waitForSelector('[data-usage-meter]', { timeout: REQ_TIMEOUT_MS })
-        .then(() => true).catch(() => false);
-      if (!gotMeter || /\/signin/.test(page.url())) {
-        return { ok: false, source: 'ollama', needsAuth: true, error: 'no-login' };
-      }
-      const parsed = parseOllamaHtml(await page.content());
-      return parsed ?? { ok: false, source: 'ollama', needsAuth: true, error: 'no-login' };
-    } catch (e) {
-      return { ok: false, source: 'ollama', error: `browser: ${e.message}` };
-    } finally {
-      if (ctx) await ctx.close().catch(() => {});
-    }
+    if (cfg.headless === false) return scrapeOllamaOnce(pw, false);
+    const first = await scrapeOllamaOnce(pw, true);
+    if (first.ok) return first;
+    return scrapeOllamaOnce(pw, false); // headless failed → headful fallback
   })();
   return ollamaBrowserInflight.finally(() => { ollamaBrowserInflight = null; });
 }
@@ -244,5 +258,50 @@ export async function getUsage({ force = false } = {}) {
     pull('ollama', fetchOllama, force),
     pull('claude', fetchClaude, force),
   ]);
-  return { ollama, claude };
+  const result = { ollama, claude };
+  usageBus?.emit('usage', result);
+  scheduleResetRefreshes(result);
+  return result;
+}
+
+// ---- Auto-refresh (backend-owned) ----------------------------------------------
+// The daemon schedules its own refreshes and pushes every cache update over the
+// agents bus as 'usage' (pty-ws fans it out to all tabs) — browsers just listen.
+const DEBOUNCE_MS = 30_000;
+let usageBus = null;
+let idleTimer = null;
+let resetTimers = [];
+
+// Schedulable if resetsAt is in the future and within a sane horizon (skip
+// absurd/past values). Well under the ~24.8d setTimeout limit.
+function resetDelay(iso, capMs = 7.75 * 24 * 3.6e6) {
+  if (!iso) return null;
+  const ms = new Date(iso).getTime() - Date.now();
+  if (!Number.isFinite(ms) || ms <= 0 || ms > capMs) return null;
+  return ms;
+}
+
+// One forced refresh just after each 5h/7d window resets, so a passive viewer
+// sees the % drop to 0. Rescheduled from every getUsage result.
+function scheduleResetRefreshes(result) {
+  resetTimers.forEach(clearTimeout);
+  resetTimers = [];
+  for (const src of ['ollama', 'claude']) {
+    for (const win of ['session', 'weekly']) {
+      const delay = resetDelay(result[src]?.[win]?.resetsAt);
+      if (delay != null) resetTimers.push(setTimeout(() => getUsage({ force: true }), delay + 2000));
+    }
+  }
+}
+
+// Wire the triggers: store the bus for 'usage' emits, and refresh 30s after an
+// agent goes idle (turn end likely spent tokens; the debounce coalesces a burst
+// of agents finishing into one pull).
+export function initUsageAutoRefresh(bus) {
+  usageBus = bus;
+  bus.on('status', ({ status }) => {
+    if (status !== 'idle') return;
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => getUsage({ force: true }), DEBOUNCE_MS);
+  });
 }

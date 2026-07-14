@@ -1,5 +1,7 @@
 // WebSocket wiring — fans agents.bus events to sockets, routes client messages to the registry.
 import * as reg from './agents.mjs';
+import { snapshotTasks } from './tasks.mjs';
+import { snapshotCrons } from './crons.mjs';
 
 function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
@@ -21,6 +23,18 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     const msg = JSON.stringify({ t: 'list', agents: reg.snapshot(), recentRepos: reg.getRecentRepos() });
     for (const ws of sockets) send(ws, msg);
   });
+  reg.bus.on('usage', (data) => {
+    const msg = JSON.stringify({ t: 'usage', data });
+    for (const ws of sockets) send(ws, msg);
+  });
+  reg.bus.on('tasks', ({ tasks, history }) => {
+    const msg = JSON.stringify({ t: 'tasks', tasks, history });
+    for (const ws of sockets) send(ws, msg);
+  });
+  reg.bus.on('crons', (crons) => {
+    const msg = JSON.stringify({ t: 'crons', crons });
+    for (const ws of sockets) send(ws, msg);
+  });
 
   wss.on('connection', (ws, req) => {
     // Browsers always send Origin on WS upgrades — reject cross-origin pages
@@ -33,6 +47,8 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     ws.attached = new Set();
     sockets.add(ws);
     send(ws, { t: 'list', agents: reg.snapshot(), recentRepos: reg.getRecentRepos() });
+    send(ws, { t: 'tasks', ...snapshotTasks() });
+    send(ws, { t: 'crons', crons: snapshotCrons() });
 
     ws.on('message', (raw) => {
       let m;
