@@ -170,7 +170,7 @@ export function create({ cwd, name, model, scopes, sessionId, prompt, permission
   if (agents.has(id)) throw new Error('session id already in use');
   const displayName = name || id.slice(0, 8);
   const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
-  const proc = spawn(bin, args, { cwd, cols: 80, rows: 24, env: process.env });
+  const proc = spawn(bin, args, { cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true });
   const a = { id, name: displayName, cwd, model, scopes, permissionMode, extraArgs, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [] };
   agents.set(id, a);
   wire(a);
@@ -197,7 +197,7 @@ export function reattach(id) {
   if (!a || a.proc) return a;
   const { bin, args } = buildSpawn(a);
   const proc = spawn(bin, args, {
-    cwd: a.cwd, cols: 80, rows: 24, env: process.env,
+    cwd: a.cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true,
   });
   a.proc = proc; a.pid = proc.pid; a.buf = []; a.status = 'starting';
   wire(a);
