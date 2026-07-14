@@ -43,7 +43,7 @@ test('buildSpawn: existing session log switches to --resume', () => {
     assert.ok(args.includes('--resume'));
     assert.ok(!args.includes('--session-id'));
   } finally {
-    rmSync(log, { force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -63,6 +63,6 @@ test('buildSpawn: ollama model on resume injects --model to override stripped tr
     // Environments without ollama on PATH throw before wrapping — logic untestable there.
     assert.match(e.message, /ollama not found/);
   } finally {
-    rmSync(log, { force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
 });

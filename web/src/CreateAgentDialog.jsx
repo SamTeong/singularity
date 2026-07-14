@@ -20,6 +20,7 @@ import AddIcon from '@mui/icons-material/Add';
 // New-agent dialog: owns the form fields (name/model/scopes/session id); cwd is
 // lifted to App (shared with the dir picker + config fallback). Emits `create`
 // over the WS via sendMsg, then resets its own fields and closes.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export default function CreateAgentDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg }) {
   const [name, setName] = useState('');
   const [model, setModel] = useState('claude');
@@ -27,6 +28,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
   const [scopeList, setScopeList] = useState([]);
   const [scopes, setScopes] = useState([]);
   const [sessionId, setSessionId] = useState('');
+  const sessionIdInvalid = sessionId.trim() !== '' && !UUID_RE.test(sessionId.trim());
 
   useEffect(() => {
     if (!open) return;
@@ -85,12 +87,12 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
             )}
             renderInput={(params) => <TextField {...params} label="skill-scopes" placeholder="" />}
           />
-          <TextField size="small" label="session id (optional, resume)" value={sessionId} onChange={(e) => setSessionId(e.target.value)} spellCheck={false} />
+          <TextField size="small" label="session id (optional, resume)" value={sessionId} onChange={(e) => setSessionId(e.target.value)} spellCheck={false} error={sessionIdInvalid} helperText={sessionIdInvalid ? 'must be a UUID' : ''} />
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
         <Button size="small" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
-        <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={!connected || !cwd.trim()}>Create</Button>
+        <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={!connected || !cwd.trim() || (model === '__ollama' && !ollamaModel.trim()) || sessionIdInvalid}>Create</Button>
       </DialogActions>
     </Dialog>
   );

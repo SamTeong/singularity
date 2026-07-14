@@ -68,6 +68,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
         case 'input': reg.input(m.id, m.data); break;
         case 'resize': reg.resize(m.id, m.cols, m.rows); break;
         case 'kill': reg.kill(m.id); break;
+        case 'reorder': reg.reorder(m.ids); break;
       }
     });
 

@@ -69,7 +69,7 @@ export function init(log) {
 
 // --- snapshots ---
 export function snapshot() {
-  return [...agents.values()].map(({ id, name, cwd, status, pid, createdAt }) => ({ id, name, cwd, status, pid, createdAt }));
+  return [...agents.values()].map(({ id, name, cwd, status, pid, createdAt, model, scopes }) => ({ id, name, cwd, status, pid, createdAt, model, scopes }));
 }
 export function getRecentRepos() { return recentRepos; }
 export function getBuf(id) { return agents.get(id)?.buf.join('') ?? ''; }
@@ -148,6 +148,7 @@ export function buildSpawn({ id, name, cwd, model, scopes }) {
 // create new agent (id IS the claude --session-id)
 export function create({ cwd, name, model, scopes, sessionId }) {
   const id = (sessionId && sessionId.trim()) || randomUUID();
+  if (agents.has(id)) throw new Error('session id already in use');
   const displayName = name || id.slice(0, 8);
   const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes });
   const proc = spawn(bin, args, { cwd, cols: 80, rows: 24, env: process.env });
@@ -195,6 +196,18 @@ export function kill(id) {
   if (!a) return;
   if (a.proc) { a.proc.kill(); return; } // onExit -> status exited + persist
   agents.delete(id);
+  persist();
+  emitList();
+}
+
+// Reorder the registry to match `ids` (a permutation of every current id);
+// rebuilds the Map in that insertion order, persists, and re-emits the list.
+export function reorder(ids) {
+  if (!Array.isArray(ids) || ids.length !== agents.size) return;
+  const next = new Map();
+  for (const id of ids) { const a = agents.get(id); if (!a) return; next.set(id, a); }
+  agents.clear();
+  for (const [id, a] of next) agents.set(id, a);
   persist();
   emitList();
 }

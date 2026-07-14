@@ -14,6 +14,7 @@ import { scanClaude, killClaudePid } from './procs.mjs';
 import { readConfig, writeConfig } from './config.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memory.mjs';
 import { statsFor } from './stats.mjs';
+import { getUsage } from './usage.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -72,6 +73,9 @@ app.get('/health', async () => ({ ok: true, pid: process.pid }));
 
 // Per-agent stats (turns + tokens) parsed from each session .jsonl.
 app.get('/agent-stats', async () => ({ stats: statsFor(reg.snapshot()) }));
+
+// Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
+app.get('/usage', async (req) => getUsage({ force: req.query.force === '1' }));
 
 // Dir picker: list subdirectories of `path` (browser can't read the FS). No file listing.
 app.get('/fs/browse', async (req, reply) => {

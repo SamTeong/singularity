@@ -17,6 +17,7 @@ export default defineConfig({
       '/skill-scopes': 'http://127.0.0.1:4317',
       '/config': 'http://127.0.0.1:4317',
       '/memory': 'http://127.0.0.1:4317',
+      '/usage': 'http://127.0.0.1:4317',
     },
   },
   build: { outDir: 'dist', emptyOutDir: true },

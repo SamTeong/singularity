@@ -8,6 +8,7 @@
     "build": "vite build --config web/vite.config.mjs",
     "dev": "concurrently -k \"npm:server\" \"npm:web\"",
     "start": "npm run build && npm run server",
+    "ollama-login": "node scripts/ollama-login.mjs",
     "test": "node --test \"server/*.test.mjs\""
   },
   "dependencies": {
@@ -24,6 +25,7 @@
     "@zapac/mui-theme": "file:../_references/zapac-material-ui/zapac-mui-theme-0.1.0.tgz",
     "fastify": "^5.10.0",
     "node-pty": "^1.1.0",
+    "playwright-core": "^1.61.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "ws": "^8.21.0"

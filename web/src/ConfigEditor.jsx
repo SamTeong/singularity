@@ -40,7 +40,7 @@ export default function ConfigEditor({ cwd }) {
       setDirty(false); setMsg(null);
     }).catch((e) => setMsg({ sev: 'error', text: String(e) })).finally(() => setLoading(false));
   };
-  useEffect(() => { load(); /* eslint-disable-line */ }, [cwd]);
+  useEffect(() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; load(); /* eslint-disable-line */ }, [cwd]);
   useEffect(() => { if (data) { setContent(data[scope]?.content ?? ''); setDirty(false); setMsg(null); } }, [scope, data]);
 
   const jsonError = useMemo(() => {

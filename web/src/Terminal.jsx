@@ -64,7 +64,7 @@ export default function Terminal({ agent, visible, sendMsg, registerOutput }) {
     sendMsg({ t: 'attach', id: agent.id });
     setTimeout(doFit, 50);
 
-    return () => { ro.disconnect(); term.dispose(); };
+    return () => { ro.disconnect(); term.dispose(); registerOutput(null); };
   }, [agent.id]);
 
   // Follow the app color mode live — no need to recreate the terminal.
