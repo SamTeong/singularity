@@ -14,6 +14,7 @@ export default defineConfig({
       '/agent-stats': 'http://127.0.0.1:4317',
       '/fs': 'http://127.0.0.1:4317',
       '/procs': 'http://127.0.0.1:4317',
+      '/models': 'http://127.0.0.1:4317',
       '/skill-scopes': 'http://127.0.0.1:4317',
       '/config': 'http://127.0.0.1:4317',
       '/memory': 'http://127.0.0.1:4317',

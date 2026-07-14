@@ -18,6 +18,7 @@ import DialogActions from '@mui/material/DialogActions';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import AddIcon from '@mui/icons-material/Add';
+import ModelSelect from './ModelSelect.jsx';
 import cronstrue from 'cronstrue';
 import { CronExpressionParser } from 'cron-parser';
 
@@ -42,8 +43,7 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
   const [name, setName] = useState('');
   const [cronExpr, setCronExpr] = useState('0 * * * *');
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState('claude');
-  const [ollamaModel, setOllamaModel] = useState('');
+  const [model, setModel] = useState('');
   const [scopeList, setScopeList] = useState([]);
   const [scopes, setScopes] = useState([]);
   const [permissionMode, setPermissionMode] = useState('acceptEdits');
@@ -57,8 +57,7 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
   }, [open]);
 
   const desc = useMemo(() => describe(cronExpr.trim()), [cronExpr]);
-  const resolvedModel = model === '__ollama' ? ollamaModel.trim() : model;
-  const canCreate = !busy && !!name.trim() && desc.ok && !!prompt.trim() && !!cwd.trim() && (model !== '__ollama' || !!ollamaModel.trim());
+  const canCreate = !busy && !!name.trim() && desc.ok && !!prompt.trim() && !!cwd.trim();
 
   const create = async () => {
     if (!canCreate) return;
@@ -70,12 +69,12 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           name: name.trim(), cronExpr: cronExpr.trim(), prompt: prompt.trim(), cwd: cwd.trim(),
-          model: resolvedModel, scopes, permissionMode, enabled,
+          model: model.trim(), scopes, permissionMode, enabled,
         }),
       });
       const d = await r.json();
       if (!d.ok) { setError(d.error || 'create failed'); return; }
-      setName(''); setCronExpr('0 * * * *'); setPrompt(''); setScopes([]); setOllamaModel(''); setModel('claude'); setPermissionMode('acceptEdits'); setEnabled(true);
+      setName(''); setCronExpr('0 * * * *'); setPrompt(''); setScopes([]); setModel(''); setPermissionMode('acceptEdits'); setEnabled(true);
       onClose();
     } catch (e) {
       setError(e.message);
@@ -106,18 +105,7 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
             <Tooltip title="Browse…"><IconButton onClick={onBrowse}><FolderOpenIcon /></IconButton></Tooltip>
           </Stack>
           <TextField size="small" label="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} multiline minRows={3} maxRows={10} />
-          <FormControl size="small" fullWidth>
-            <InputLabel>model</InputLabel>
-            <Select label="model" value={model} onChange={(e) => setModel(e.target.value)}>
-              <MenuItem value="claude">claude</MenuItem>
-              <MenuItem value="glm-5.2:cloud">glm-5.2:cloud</MenuItem>
-              <MenuItem value="kimi-k2.7-code:cloud">kimi-k2.7-code:cloud</MenuItem>
-              <MenuItem value="__ollama">other ollama…</MenuItem>
-            </Select>
-          </FormControl>
-          {model === '__ollama' && (
-            <TextField size="small" label="ollama model name" value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)} spellCheck={false} />
-          )}
+          <ModelSelect model={model} setModel={setModel} />
           <Autocomplete
             multiple size="small" disableCloseOnSelect options={scopeList} value={scopes}
             onChange={(_, v) => setScopes(v)}

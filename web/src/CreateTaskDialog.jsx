@@ -4,20 +4,17 @@ import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import Button from '@mui/material/Button';
-import Select from '@mui/material/Select';
-import FormControl from '@mui/material/FormControl';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import InputLabel from '@mui/material/InputLabel';
 import Checkbox from '@mui/material/Checkbox';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import MenuItem from '@mui/material/MenuItem';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import AddIcon from '@mui/icons-material/Add';
+import ModelSelect from './ModelSelect.jsx';
 
 // New-task dialog: CreateAgentDialog minus session id, plus title/description
 // (the requirements), plan-approval gate and merge policy. Submits POST /tasks
@@ -25,8 +22,7 @@ import AddIcon from '@mui/icons-material/Add';
 export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, onBrowse }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [model, setModel] = useState('claude');
-  const [ollamaModel, setOllamaModel] = useState('');
+  const [model, setModel] = useState('');
   const [scopeList, setScopeList] = useState([]);
   const [scopes, setScopes] = useState([]);
   const [requireApproval, setRequireApproval] = useState(false);
@@ -41,7 +37,6 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
 
   const create = async () => {
     if (busy || !cwd.trim() || !title.trim() || !description.trim()) return;
-    const resolvedModel = model === '__ollama' ? ollamaModel.trim() : model;
     setBusy(true);
     setError(null);
     try {
@@ -50,12 +45,12 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           repo: cwd.trim(), title: title.trim(), description: description.trim(),
-          model: resolvedModel, scopes, requirePlanApproval: requireApproval, mergeMode,
+          model: model.trim(), scopes, requirePlanApproval: requireApproval, mergeMode,
         }),
       });
       const d = await r.json();
       if (!d.ok) { setError(d.error || 'create failed'); return; }
-      setTitle(''); setDescription(''); setScopes([]); setOllamaModel(''); setModel('claude');
+      setTitle(''); setDescription(''); setScopes([]); setModel('');
       setRequireApproval(false); setMergeMode('manual');
       onClose();
     } catch (e) {
@@ -86,18 +81,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
           </Stack>
           <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} />
           <TextField size="small" label="requirements" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
-          <FormControl size="small" fullWidth>
-            <InputLabel>model</InputLabel>
-            <Select label="model" value={model} onChange={(e) => setModel(e.target.value)}>
-              <MenuItem value="claude">claude</MenuItem>
-              <MenuItem value="glm-5.2:cloud">glm-5.2:cloud</MenuItem>
-              <MenuItem value="kimi-k2.7-code:cloud">kimi-k2.7-code:cloud</MenuItem>
-              <MenuItem value="__ollama">other ollama…</MenuItem>
-            </Select>
-          </FormControl>
-          {model === '__ollama' && (
-            <TextField size="small" label="ollama model name" value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)} spellCheck={false} />
-          )}
+          <ModelSelect model={model} setModel={setModel} />
           <Autocomplete
             multiple
             size="small"
@@ -124,7 +108,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
         <Button size="small" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
-        <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={busy || !cwd.trim() || !title.trim() || !description.trim() || (model === '__ollama' && !ollamaModel.trim())}>Create</Button>
+        <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={busy || !cwd.trim() || !title.trim() || !description.trim()}>Create</Button>
       </DialogActions>
     </Dialog>
   );

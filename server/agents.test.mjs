@@ -33,6 +33,20 @@ test('buildSpawn: non-existent skill-scope is not added as --add-dir', () => {
   assert.ok(!args.includes('--add-dir'));
 });
 
+test('buildSpawn: claude alias (opus) runs via claude bin with --model', () => {
+  const { args } = buildSpawn({ id: freshId, name: 'demo', cwd, model: 'opus', scopes: [] });
+  assert.ok(!args.includes('launch'));
+  assert.ok(args.includes('--model'));
+  assert.equal(args[args.indexOf('--model') + 1], 'opus');
+  assert.ok(args.includes('--session-id'));
+});
+
+test('buildSpawn: typed full claude id runs via claude bin with --model', () => {
+  const { args } = buildSpawn({ id: freshId, name: 'demo', cwd, model: 'claude-opus-4-8', scopes: [] });
+  assert.ok(!args.includes('launch'));
+  assert.equal(args[args.indexOf('--model') + 1], 'claude-opus-4-8');
+});
+
 test('buildSpawn: existing session log switches to --resume', () => {
   const dir = join(homedir(), '.claude', 'projects', encodeCwd(cwd));
   const log = join(dir, `${freshId}.jsonl`);

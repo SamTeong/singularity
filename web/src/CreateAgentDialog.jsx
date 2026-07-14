@@ -3,19 +3,16 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
 import Button from '@mui/material/Button';
-import Select from '@mui/material/Select';
-import FormControl from '@mui/material/FormControl';
-import InputLabel from '@mui/material/InputLabel';
 import Checkbox from '@mui/material/Checkbox';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import MenuItem from '@mui/material/MenuItem';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import AddIcon from '@mui/icons-material/Add';
+import ModelSelect from './ModelSelect.jsx';
 
 // New-agent dialog: owns the form fields (name/model/scopes/session id); cwd is
 // lifted to App (shared with the dir picker + config fallback). Emits `create`
@@ -23,8 +20,7 @@ import AddIcon from '@mui/icons-material/Add';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export default function CreateAgentDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg }) {
   const [name, setName] = useState('');
-  const [model, setModel] = useState('claude');
-  const [ollamaModel, setOllamaModel] = useState('');
+  const [model, setModel] = useState('');
   const [scopeList, setScopeList] = useState([]);
   const [scopes, setScopes] = useState([]);
   const [sessionId, setSessionId] = useState('');
@@ -37,9 +33,8 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
 
   const create = () => {
     if (!connected || !cwd.trim()) return;
-    const resolvedModel = model === '__ollama' ? ollamaModel.trim() : model;
-    sendMsg({ t: 'create', cwd: cwd.trim(), name: name.trim(), model: resolvedModel, scopes, sessionId: sessionId.trim() });
-    setName(''); setScopes([]); setSessionId(''); setOllamaModel(''); setModel('claude');
+    sendMsg({ t: 'create', cwd: cwd.trim(), name: name.trim(), model: model.trim(), scopes, sessionId: sessionId.trim() });
+    setName(''); setScopes([]); setSessionId(''); setModel('');
     onClose();
   };
 
@@ -63,18 +58,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
             </Tooltip>
           </Stack>
           <TextField size="small" label="name (optional)" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
-          <FormControl size="small" fullWidth>
-            <InputLabel>model</InputLabel>
-            <Select label="model" value={model} onChange={(e) => setModel(e.target.value)}>
-              <MenuItem value="claude">claude</MenuItem>
-              <MenuItem value="glm-5.2:cloud">glm-5.2:cloud</MenuItem>
-              <MenuItem value="kimi-k2.7-code:cloud">kimi-k2.7-code:cloud</MenuItem>
-              <MenuItem value="__ollama">other ollama…</MenuItem>
-            </Select>
-          </FormControl>
-          {model === '__ollama' && (
-            <TextField size="small" label="ollama model name" value={ollamaModel} onChange={(e) => setOllamaModel(e.target.value)} spellCheck={false} />
-          )}
+          <ModelSelect model={model} setModel={setModel} />
           <Autocomplete
             multiple
             size="small"
@@ -92,7 +76,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
         <Button size="small" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
-        <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={!connected || !cwd.trim() || (model === '__ollama' && !ollamaModel.trim()) || sessionIdInvalid}>Create</Button>
+        <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={!connected || !cwd.trim() || sessionIdInvalid}>Create</Button>
       </DialogActions>
     </Dialog>
   );

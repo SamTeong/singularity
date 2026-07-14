@@ -17,6 +17,7 @@ import { statsFor } from './stats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
+import { CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -99,6 +100,10 @@ app.get('/fs/browse', async (req, reply) => {
 
 // Task manager: list claude.exe processes + kill a stale/orphaned one by PID.
 app.get('/procs', async () => ({ procs: await scanClaude() }));
+
+// Model picker source: claude aliases (mirror /model) + ollama presets. Free-text
+// in the UI — these are suggestions; any typed value is passed through verbatim.
+app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS }));
 
 // Skill-scope picker source: directories under ~/.agents/skill-scopes (excludes 'common').
 app.get('/skill-scopes', async () => {

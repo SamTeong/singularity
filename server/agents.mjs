@@ -6,6 +6,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, delimiter } from 'node:path';
 import { homedir } from 'node:os';
+import { isClaudeModel } from './models.mjs';
 
 const RING_MAX = 256 * 1024; // per-agent in-mem scrollback cap (bytes). Disk ring = Phase 3.
 const IDLE_MS = 2000; // no pty output for this long while running → 'idle' (waiting for input).
@@ -124,9 +125,9 @@ function wire(a) {
     clearTimeout(a.idleTimer);
     setStatus(a, 'exited');
     a.proc = null;
-    const resumeCmd = a.model && a.model !== 'claude'
-      ? `ollama launch claude --model ${a.model} -- --resume ${a.id}`
-      : `claude --resume ${a.id}`;
+    const resumeCmd = isClaudeModel(a.model)
+      ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
+      : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
     bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume: ${resumeCmd}\x1b[0m\r\n` });
     persist();
   });
@@ -151,17 +152,19 @@ export function buildSpawn({ id, name, cwd, model, scopes, permissionMode, extra
   if (permissionMode) claudeArgs.push('--permission-mode', permissionMode);
   claudeArgs.push(...(extraArgs || []));
   if (prompt && !resuming) claudeArgs.push(prompt);
-  if (model && model !== 'claude') {
-    if (OLLAMA_BIN === 'ollama') {
-      throw new Error('ollama not found on PATH');
-    }
-    // On resume the transcript recorded the ollama model with its tag stripped
-    // (glm-5.2:cloud -> glm-5.2); claude would request the stripped name and
-    // ollama rejects it. --model overrides the transcript model on resume.
-    if (resuming) claudeArgs.push('--model', model);
-    return { bin: OLLAMA_BIN, args: ['launch', 'claude', '--model', model, '--', ...claudeArgs] };
+  if (isClaudeModel(model)) {
+    // claude bin; --model only for a specific (non-default) alias or full id.
+    if (model && model !== 'claude') claudeArgs.push('--model', model);
+    return { bin: CLAUDE_BIN, args: claudeArgs };
   }
-  return { bin: CLAUDE_BIN, args: claudeArgs };
+  if (OLLAMA_BIN === 'ollama') {
+    throw new Error('ollama not found on PATH');
+  }
+  // On resume the transcript recorded the ollama model with its tag stripped
+  // (glm-5.2:cloud -> glm-5.2); claude would request the stripped name and
+  // ollama rejects it. --model overrides the transcript model on resume.
+  if (resuming) claudeArgs.push('--model', model);
+  return { bin: OLLAMA_BIN, args: ['launch', 'claude', '--model', model, '--', ...claudeArgs] };
 }
 
 // create new agent (id IS the claude --session-id)
