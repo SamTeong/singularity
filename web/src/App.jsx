@@ -208,30 +208,6 @@ export default function App() {
     return () => clearInterval(t);
   }, [connected, agentKey]);
 
-  // Ctrl+Alt+PgUp/PgDn — switch to prev/next non-detached agent session.
-  // Capture phase so it beats xterm's own keydown; ignore while a field/dialog
-  // has focus (don't steal the key from forms or the editor).
-  useEffect(() => {
-    const onKey = (e) => {
-      if (!e.ctrlKey || !e.altKey) return;
-      if (e.key !== 'PageUp' && e.key !== 'PageDown') return;
-      const tag = (e.target?.tagName || '').toLowerCase();
-      if (tag === 'input' || tag === 'textarea' || e.target?.isContentEditable) return;
-      if (createOpen || procsOpen || picking) return;
-      const live = agents.filter((a) => a.status !== 'detached');
-      if (live.length < 2) return;
-      e.preventDefault();
-      e.stopPropagation();
-      const idx = live.findIndex((a) => a.id === active);
-      const cur = idx < 0 ? 0 : idx;
-      const next = e.key === 'PageDown' ? (cur + 1) % live.length : (cur - 1 + live.length) % live.length;
-      setActive(live[next].id);
-      setView('agents');
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [agents, active, createOpen, procsOpen, picking]);
-
   const activeAgent = agents.find((a) => a.id === active);
 
   return (
