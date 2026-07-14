@@ -24,6 +24,27 @@ const TOKEN = process.env.SING_TOKEN || null;
 
 const app = Fastify({ logger: { level: 'info' } });
 
+// Browser cross-origin guard (DNS rebinding / drive-by pages hitting loopback).
+// The 127.0.0.1 bind does not stop the user's own browser acting as a confused
+// deputy: a malicious page can fetch/WS straight to localhost. Allow only our
+// own origins (daemon + Vite dev); requests without Origin (curl, same-origin
+// GET navigations) pass — this blocks browsers, not local tools.
+const SELF_HOSTS = new Set(
+  [PORT, 5317].flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
+);
+function originAllowed(origin) {
+  if (!origin) return true;
+  try { return SELF_HOSTS.has(new URL(origin).host); } catch { return false; }
+}
+app.addHook('onRequest', async (req, reply) => {
+  if (req.headers.host && !SELF_HOSTS.has(req.headers.host)) {
+    return reply.code(403).send({ error: 'forbidden host' });
+  }
+  if (!originAllowed(req.headers.origin)) {
+    return reply.code(403).send({ error: 'forbidden origin' });
+  }
+});
+
 // Token gate: allow the app shell + assets + health through; guard everything else.
 if (TOKEN) {
   app.addHook('onRequest', async (req, reply) => {
@@ -72,6 +93,19 @@ app.get('/fs/browse', async (req, reply) => {
 
 // Task manager: list claude.exe processes + kill a stale/orphaned one by PID.
 app.get('/procs', async () => ({ procs: await scanClaude() }));
+
+// Skill-scope picker source: directories under ~/.agents/skill-scopes (excludes 'common').
+app.get('/skill-scopes', async () => {
+  const root = join(homedir(), '.agents', 'skill-scopes');
+  let scopes = [];
+  try {
+    scopes = readdirSync(root, { withFileTypes: true })
+      .filter((d) => { try { return d.isDirectory() && d.name !== 'common'; } catch { return false; } })
+      .map((d) => d.name)
+      .sort((a, b) => a.localeCompare(b));
+  } catch {}
+  return { scopes };
+});
 app.post('/procs/kill', async (req, reply) => {
   const pid = Number(req.body?.pid);
   if (!Number.isInteger(pid)) return reply.code(400).send({ ok: false, error: 'bad pid' });
@@ -115,4 +149,4 @@ app.log.info(`daemon on ${server} (loopback only)${TOKEN ? ' [token required]' :
 
 // WS shares the Fastify HTTP server.
 const wss = new WebSocketServer({ server: app.server, path: '/ws' });
-attachPtyWs(wss, app.log, TOKEN);
+attachPtyWs(wss, app.log, TOKEN, originAllowed);

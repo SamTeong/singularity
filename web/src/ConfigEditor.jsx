@@ -11,7 +11,9 @@ import Switch from '@mui/material/Switch';
 import SaveIcon from '@mui/icons-material/Save';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
+import { EditorView } from '@codemirror/view';
 import { useColorMode } from '@zapac/mui-theme';
+import { cmTheme } from './cmTheme.js';
 
 const SCOPES = [
   { key: 'project', label: 'project' },
@@ -22,6 +24,7 @@ const SCOPES = [
 export default function ConfigEditor({ cwd }) {
   const { mode } = useColorMode();
   const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
   const [scope, setScope] = useState('project');
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -30,11 +33,12 @@ export default function ConfigEditor({ cwd }) {
 
   const load = () => {
     if (!cwd) return;
+    setLoading(true);
     fetch(`/config?cwd=${encodeURIComponent(cwd)}`).then((r) => r.json()).then((d) => {
       setData(d);
       setContent(d[scope]?.content ?? '');
       setDirty(false); setMsg(null);
-    }).catch((e) => setMsg({ sev: 'error', text: String(e) }));
+    }).catch((e) => setMsg({ sev: 'error', text: String(e) })).finally(() => setLoading(false));
   };
   useEffect(() => { load(); /* eslint-disable-line */ }, [cwd]);
   useEffect(() => { if (data) { setContent(data[scope]?.content ?? ''); setDirty(false); setMsg(null); } }, [scope, data]);
@@ -57,10 +61,11 @@ export default function ConfigEditor({ cwd }) {
   };
 
   if (!cwd) return <Box sx={{ p: 3 }}><Typography color="text.secondary">Select or create an agent — config is per repo (cwd).</Typography></Box>;
+  if (loading && !data) return <Box sx={{ p: 3 }}><Typography color="text.secondary">Loading config…</Typography></Box>;
 
   return (
     <Stack sx={{ height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
-      <Tabs value={scope} onChange={(_, v) => setScope(v)} variant="fullWidth">
+      <Tabs value={scope} onChange={(_, v) => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setScope(v); }} variant="fullWidth">
         {SCOPES.map((s) => <Tab key={s.key} value={s.key} label={s.label} />)}
       </Tabs>
 
@@ -69,8 +74,8 @@ export default function ConfigEditor({ cwd }) {
       </Typography>
 
       {scope === 'user' && (
-        <Alert severity="warning" sx={{ py: 0 }}
-          action={<FormControlLabel sx={{ mr: 0 }} control={<Switch size="small" checked={editUser} onChange={(e) => setEditUser(e.target.checked)} />} label="Edit anyway" />}>
+        <Alert severity="warning" sx={{ py: 0, '& .MuiAlert-action': { alignItems: 'center', paddingRight: 2 } }}
+          action={<FormControlLabel sx={{ mr: 0, '& .MuiFormControlLabel-label': { marginLeft: 1.5, lineHeight: 1 } }} control={<Switch size="small" checked={editUser} onChange={(e) => setEditUser(e.target.checked)} />} label="Edit anyway" />}>
           User scope is shared, versioned config{data?.user?.symlink ? ' (a symlink/junction into another repo)' : ''}. Edits mutate it for every project. Read-only by default.
         </Alert>
       )}
@@ -80,14 +85,14 @@ export default function ConfigEditor({ cwd }) {
           value={content}
           theme={mode === 'dark' ? 'dark' : 'light'}
           height="100%"
-          extensions={[json()]}
+          extensions={[EditorView.lineWrapping, json(), cmTheme]}
           editable={!readOnly}
           onChange={(v) => { setContent(v); setDirty(true); }}
         />
       </Box>
 
       <Stack direction="row" spacing={1.5} alignItems="center">
-        <Button variant="contained" startIcon={<SaveIcon />} onClick={save} disabled={readOnly || !dirty || !!jsonError}>Save</Button>
+        <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={save} disabled={readOnly || !dirty || !!jsonError}>Save</Button>
         {jsonError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>invalid JSON: {jsonError}</Typography>}
         {msg && !jsonError && <Typography color={msg.sev === 'error' ? 'error' : 'success.main'} sx={{ fontSize: 13 }}>{msg.text}</Typography>}
       </Stack>

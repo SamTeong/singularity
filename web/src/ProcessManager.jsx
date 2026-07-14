@@ -51,10 +51,12 @@ export default function ProcessManager({ onClose }) {
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-        Claude processes
-        <Typography component="span" variant="code" sx={{ color: 'text.secondary', fontSize: 12 }}>
-          {procs ? `${procs.length} running` : 'scanning…'}
-        </Typography>
+        <Stack direction="row" sx={{ alignItems: 'center', gap: 1, lineHeight: '24px' }}>
+          Claude processes
+          <Typography component="span" variant="code" sx={{ color: 'text.secondary', fontSize: 12, lineHeight: 'inherit' }}>
+            {procs ? `${procs.length} running` : 'scanning…'}
+          </Typography>
+        </Stack>
         <span style={{ flex: 1 }} />
         <Tooltip title="Rescan"><IconButton size="small" onClick={load}><RefreshIcon fontSize="small" /></IconButton></Tooltip>
       </DialogTitle>
@@ -89,12 +91,12 @@ export default function ProcessManager({ onClose }) {
           </TableBody>
         </Table>
       </DialogContent>
-      <DialogActions>
-        <Button color="error" disabled={busy || stale.length === 0} onClick={killAllStale}>
+      <DialogActions sx={{ px: 2, pb: 2, pt: 2 }}>
+        <Button size="small" color="error" sx={{ px: 2 }} disabled={busy || stale.length === 0} onClick={killAllStale}>
           Kill all stale ({stale.length})
         </Button>
         <span style={{ flex: 1 }} />
-        <Button onClick={onClose}>Close</Button>
+        <Button size="small" sx={{ px: 2 }} onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>
   );

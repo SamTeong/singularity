@@ -7,7 +7,8 @@
     "web": "vite --config web/vite.config.mjs",
     "build": "vite build --config web/vite.config.mjs",
     "dev": "concurrently -k \"npm:server\" \"npm:web\"",
-    "start": "npm run build && npm run server"
+    "start": "npm run build && npm run server",
+    "test": "node --test \"server/*.test.mjs\""
   },
   "dependencies": {
     "@codemirror/lang-json": "^6.0.2",

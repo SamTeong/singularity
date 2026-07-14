@@ -1,6 +1,8 @@
 html, body, #root { height: 100%; margin: 0; }
 
-/* xterm fills its glass frame; the terminal keeps an opaque dark surface
-   (the "machine output" layer — never glass). */
-.term { position: absolute; inset: 0; padding: 6px; border-radius: 12px; overflow: hidden; }
+/* xterm fills its glass frame; the terminal keeps an opaque surface
+   (the "machine output" layer — never glass), themed light/dark with the app. */
+/* Radius stays concentric with the outer glass frame: frame is radius.lg (26px)
+   less the 4px (p:0.5) frame pad less this 16px inset = 6px corner. */
+.term { position: absolute; inset: 16px; border-radius: 6px; overflow: hidden; }
 .term .xterm { height: 100%; }

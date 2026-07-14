@@ -1,6 +1,7 @@
 # Singularity — Implementation Plan (Handoff)
 
 > **Status:** ✅ Complete — all 6 phases built (plus a bonus Claude-process task manager). Backends verified headlessly; UI views screenshotted. Interactive acceptance gates confirmed by the user. See `README.md` to run.
+> **Deferred:** scrollback is a **256 KB per-agent in-memory ring** (see `RING_MAX` in `server/agents.mjs`), not the 5 MB on-disk ring described below — disk-backed scrollback (`logs/<id>.log`) is Phase 3, not yet built.
 > **Interactive visual version:** https://claude.ai/code/artifact/90de38bf-f2cf-4d9b-b369-4c4a807e7c93
 
 ## Context
@@ -78,11 +79,11 @@ pty.spawn('claude', ['--session-id', id, '--name', name], { cwd, cols, rows, env
 - client → server: `create{cwd,name}`, `attach{id}`, `input{id,data}`, `resize{id,cols,rows}`, `kill{id}`
 - server → client: `output{id,data}`, `status{id,status}`, `list{agents}`
 
-**Scrollback log:** append raw pty output to `<appdata>/logs/<id>.log`, **ring-capped at N MB (default 5 MB; surface the cap in the UI — no silent truncation)**. On `attach`, stream the file tail, then live output.
+**Scrollback log (Phase 3 — not yet built):** append raw pty output to `<appdata>/logs/<id>.log`, **ring-capped at N MB (default 5 MB; surface the cap in the UI — no silent truncation)**. On `attach`, stream the file tail, then live output. *Current implementation: a 256 KB per-agent in-memory ring only; nothing is written to disk and the cap is not surfaced in the UI.*
 
 **Reattach (the hard part — Windows has no tmux; leverage Claude Code's own session persistence):**
 - Browser refresh = re-attach WS + replay ring buffer. Instant, because the daemon still holds the pty.
-- Daemon/machine restart = ptys are gone. On daemon start, load `agents.json`, mark each agent `detached` (do **not** auto-spawn — mass respawn is expensive). A **Reattach** button runs `claude --resume <id>` in the same `cwd` → restores the actual conversation (not just terminal text) + replays the disk scrollback above the fresh TUI. Auto-reattach = opt-in toggle.
+- Daemon/machine restart = ptys are gone. On daemon start, load `agents.json`, mark each agent `detached` (do **not** auto-spawn — mass respawn is expensive). A **Reattach** button runs `claude --resume <id>` in the same `cwd` → restores the actual conversation (not just terminal text) + replays the in-memory scrollback ring above the fresh TUI. Auto-reattach = opt-in toggle.
 
 ## Config editor — REST `/config`
 
@@ -140,7 +141,7 @@ README.md
 
 - **node-pty native build (node 24 / win-x64).** Latest is `node-pty` 1.1.0. Pin it (ships prebuilds); fallback `@homebridge/node-pty-prebuilt-multiarch`; document `npm rebuild`. Prove in Phase 1.
 - **ConPTY + full-screen TUI.** `claude` uses alt-screen ANSI; xterm.js handles it, but test resize/redraw early (Phase 1).
-- **`--resume` redraw.** A resumed session redraws a fresh TUI, not the old pixels. Disk scrollback is shown above it; the conversation itself is restored. Acceptable — document in the UI.
+- **`--resume` redraw.** A resumed session redraws a fresh TUI, not the old pixels. The in-memory scrollback ring is shown above it; the conversation itself is restored. Acceptable — document in the UI.
 
 ## Verification (end-to-end)
 

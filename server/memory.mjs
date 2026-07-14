@@ -1,12 +1,26 @@
 // Memory backend: search + guarded read/write across per-project memory dirs
 // (~/.claude/projects/<encoded-cwd>/memory/*.md). Writes are confined to those
 // dirs — a path outside any project's memory/ is rejected.
-import { existsSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs';
 import { join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 
 const PROJECTS = join(homedir(), '.claude', 'projects');
 const RESULT_CAP = 300;
+
+// Search runs per keystroke (250ms debounce); cache file lines by mtime so only
+// changed files are re-read from disk. stat-per-file is cheap; the read isn't.
+const lineCache = new Map(); // path -> { mtimeMs, lines }
+function readLines(p) {
+  let mtimeMs;
+  try { mtimeMs = statSync(p).mtimeMs; } catch { return null; }
+  const hit = lineCache.get(p);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.lines;
+  let lines;
+  try { lines = readFileSync(p, 'utf8').split(/\r?\n/); } catch { return null; }
+  lineCache.set(p, { mtimeMs, lines });
+  return lines;
+}
 
 function memoryDirs() {
   if (!existsSync(PROJECTS)) return [];
@@ -44,8 +58,8 @@ export function searchMemory(q) {
   for (const { project, dir } of memoryDirs()) {
     for (const f of readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.md'))) {
       const p = join(dir, f);
-      let lines;
-      try { lines = readFileSync(p, 'utf8').split(/\r?\n/); } catch { continue; }
+      const lines = readLines(p);
+      if (!lines) continue;
       for (let i = 0; i < lines.length; i++) {
         if (lines[i].toLowerCase().includes(ql)) {
           results.push({ project, file: f, path: p, line: i + 1, text: lines[i].trim().slice(0, 200) });

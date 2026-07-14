@@ -5,7 +5,7 @@ function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
 }
 
-export function attachPtyWs(wss, log, token = null) {
+export function attachPtyWs(wss, log, token = null, originAllowed = () => true) {
   const sockets = new Set();
 
   // registry -> sockets
@@ -23,6 +23,9 @@ export function attachPtyWs(wss, log, token = null) {
   });
 
   wss.on('connection', (ws, req) => {
+    // Browsers always send Origin on WS upgrades — reject cross-origin pages
+    // (WS is not subject to CORS; without this any website can drive the ptys).
+    if (!originAllowed(req.headers.origin)) { ws.close(1008, 'forbidden origin'); return; }
     if (token) {
       const t = new URL(req.url, 'http://localhost').searchParams.get('token');
       if (t !== token) { ws.close(1008, 'unauthorized'); return; }
@@ -37,7 +40,7 @@ export function attachPtyWs(wss, log, token = null) {
       switch (m.t) {
         case 'create': {
           try {
-            const na = reg.create({ cwd: m.cwd, name: m.name });
+            const na = reg.create({ cwd: m.cwd, name: m.name, model: m.model, scopes: m.scopes, sessionId: m.sessionId });
             ws.attached.add(na.id);
             send(ws, { t: 'attached', id: na.id });
           } catch (e) {

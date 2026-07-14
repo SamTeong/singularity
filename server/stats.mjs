@@ -1,14 +1,22 @@
 // Per-agent stats from the session .jsonl (turns + total tokens). Cost in $ is
 // deliberately omitted — accurate $ needs per-model pricing that drifts; tokens
 // + turns is the stable signal (use codeburn/estimator for spend).
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { encodeCwd } from './agents.mjs';
+
+// Session logs grow to many MB and are polled every few seconds — cache the
+// parse result keyed on (mtime, size) so unchanged files are never re-read
+// (each full read is sync and stalls the pty relay).
+const cache = new Map(); // path -> { mtimeMs, size, result }
 
 export function parseSession(cwd, id) {
-  const enc = cwd.replace(/[:\\/]/g, '-');
-  const p = join(homedir(), '.claude', 'projects', enc, `${id}.jsonl`);
-  if (!existsSync(p)) return { turns: 0, tokens: 0, exists: false };
+  const p = join(homedir(), '.claude', 'projects', encodeCwd(cwd), `${id}.jsonl`);
+  let st;
+  try { st = statSync(p); } catch { return { turns: 0, tokens: 0, exists: false }; }
+  const hit = cache.get(p);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.result;
   let turns = 0, tokens = 0;
   try {
     for (const line of readFileSync(p, 'utf8').split(/\r?\n/)) {
@@ -20,7 +28,9 @@ export function parseSession(cwd, id) {
       if (u) tokens += (u.input_tokens || 0) + (u.output_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
     }
   } catch { /* partial/locked file — return what we have */ }
-  return { turns, tokens, exists: true };
+  const result = { turns, tokens, exists: true };
+  cache.set(p, { mtimeMs: st.mtimeMs, size: st.size, result });
+  return result;
 }
 
 // { id: {turns, tokens, exists} } for a list of {id, cwd}.

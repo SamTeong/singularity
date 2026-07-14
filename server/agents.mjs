@@ -8,26 +8,29 @@ import { join, delimiter } from 'node:path';
 import { homedir } from 'node:os';
 
 const RING_MAX = 256 * 1024; // per-agent in-mem scrollback cap (bytes). Disk ring = Phase 3.
+const IDLE_MS = 2000; // no pty output for this long while running → 'idle' (waiting for input).
 const RECENT_MAX = 10;
 
 // --- app-data dir ---
 export const APP_DIR = join(process.env.APPDATA || join(homedir(), '.config'), 'singularity');
 const STATE_FILE = join(APP_DIR, 'agents.json');
+const SCOPE_ROOT = join(homedir(), '.agents', 'skill-scopes');
 mkdirSync(APP_DIR, { recursive: true });
 
 // --- claude binary (Windows node-pty does NO PATH resolution) ---
-function resolveClaude() {
-  if (process.env.CLAUDE_BIN && existsSync(process.env.CLAUDE_BIN)) return process.env.CLAUDE_BIN;
+function resolveBin(name, envOverride) {
+  if (envOverride && existsSync(envOverride)) return envOverride;
   const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
   for (const dir of (process.env.PATH || '').split(delimiter)) {
     for (const ext of exts) {
-      const p = join(dir, 'claude' + ext);
+      const p = join(dir, name + ext);
       if (existsSync(p)) return p;
     }
   }
-  return 'claude';
+  return name;
 }
-const CLAUDE_BIN = resolveClaude();
+const CLAUDE_BIN = resolveBin('claude', process.env.CLAUDE_BIN);
+const OLLAMA_BIN = resolveBin('ollama', process.env.OLLAMA_BIN);
 
 export const bus = new EventEmitter();
 
@@ -36,18 +39,21 @@ const agents = new Map();
 let recentRepos = [];
 
 // --- persistence ---
+let logger = null;
 function persist() {
   const data = {
-    agents: [...agents.values()].map(({ id, name, cwd, status, createdAt }) => ({
-      id, name, cwd, createdAt,
+    agents: [...agents.values()].map(({ id, name, cwd, status, createdAt, model, scopes }) => ({
+      id, name, cwd, createdAt, model, scopes,
       status: status === 'running' || status === 'starting' || status === 'idle' ? 'detached' : status,
     })),
     recentRepos,
   };
-  try { writeFileSync(STATE_FILE, JSON.stringify(data, null, 2)); } catch {}
+  try { writeFileSync(STATE_FILE, JSON.stringify(data, null, 2)); }
+  catch (e) { logger?.warn({ err: e.message }, 'agents.json write failed — registry not persisted'); }
 }
 
 export function init(log) {
+  logger = log;
   try {
     if (existsSync(STATE_FILE)) {
       const data = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
@@ -87,26 +93,65 @@ function rememberRepo(cwd) {
 }
 
 function wire(a) {
+  // Idle heuristic: Claude Code's TUI spinner emits output continuously while
+  // working; a turn waiting for user input goes quiet. No pty output for
+  // IDLE_MS while 'running' → mark 'idle'; the next byte flips it back.
+  const armIdle = () => {
+    clearTimeout(a.idleTimer);
+    a.idleTimer = setTimeout(() => { if (a.status === 'running') setStatus(a, 'idle'); }, IDLE_MS);
+  };
   a.proc.onData((data) => {
     pushBuf(a, data);
-    if (a.status === 'starting') setStatus(a, 'running');
+    if (a.status === 'starting' || a.status === 'idle') setStatus(a, 'running');
     bus.emit('output', { id: a.id, data });
+    armIdle();
   });
   a.proc.onExit(({ exitCode }) => {
+    clearTimeout(a.idleTimer);
     setStatus(a, 'exited');
     a.proc = null;
-    bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}]\x1b[0m\r\n` });
+    const resumeCmd = a.model && a.model !== 'claude'
+      ? `ollama launch claude --model ${a.model} -- --resume ${a.id}`
+      : `claude --resume ${a.id}`;
+    bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume: ${resumeCmd}\x1b[0m\r\n` });
     persist();
   });
 }
 
+// Build (bin, args) for an agent's pty: skill-scopes → --add-dir <abs> (only
+// existing dirs under the scope root), resume if a session log already exists
+// for this id at this cwd (else fresh --session-id), optional ollama wrapper.
+// Shared by create + reattach so reattach keeps the model + scopes.
+export function buildSpawn({ id, name, cwd, model, scopes }) {
+  const claudeArgs = [];
+  for (const s of (scopes || [])) {
+    if (!s) continue;
+    const dir = join(SCOPE_ROOT, s);
+    if (existsSync(dir)) { claudeArgs.push('--add-dir', dir); }
+  }
+  const resuming = sessionLogExists(cwd, id);
+  const sessionFlag = resuming ? ['--resume', id] : ['--session-id', id];
+  claudeArgs.push(...sessionFlag, '--name', name);
+  if (model && model !== 'claude') {
+    if (OLLAMA_BIN === 'ollama') {
+      throw new Error('ollama not found on PATH');
+    }
+    // On resume the transcript recorded the ollama model with its tag stripped
+    // (glm-5.2:cloud -> glm-5.2); claude would request the stripped name and
+    // ollama rejects it. --model overrides the transcript model on resume.
+    if (resuming) claudeArgs.push('--model', model);
+    return { bin: OLLAMA_BIN, args: ['launch', 'claude', '--model', model, '--', ...claudeArgs] };
+  }
+  return { bin: CLAUDE_BIN, args: claudeArgs };
+}
+
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, name }) {
-  const id = randomUUID();
-  const proc = spawn(CLAUDE_BIN, ['--session-id', id, '--name', name || id.slice(0, 8)], {
-    cwd, cols: 80, rows: 24, env: process.env,
-  });
-  const a = { id, name: name || id.slice(0, 8), cwd, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [] };
+export function create({ cwd, name, model, scopes, sessionId }) {
+  const id = (sessionId && sessionId.trim()) || randomUUID();
+  const displayName = name || id.slice(0, 8);
+  const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes });
+  const proc = spawn(bin, args, { cwd, cols: 80, rows: 24, env: process.env });
+  const a = { id, name: displayName, cwd, model, scopes, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [] };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -116,21 +161,22 @@ export function create({ cwd, name }) {
 }
 
 // Claude logs a session to ~/.claude/projects/<encoded-cwd>/<id>.jsonl, where
-// encoded-cwd is the abs path with :, \, / all replaced by '-'.
+// encoded-cwd is the abs path with every non-alphanumeric replaced by '-'
+// (dots too: C:\Users\x\.claude -> C--Users-x--claude).
+export function encodeCwd(cwd) { return cwd.replace(/[^a-zA-Z0-9]/g, '-'); }
 function sessionLogExists(cwd, id) {
-  const encoded = cwd.replace(/[:\\/]/g, '-');
-  return existsSync(join(homedir(), '.claude', 'projects', encoded, `${id}.jsonl`));
+  return existsSync(join(homedir(), '.claude', 'projects', encodeCwd(cwd), `${id}.jsonl`));
 }
 
 // reattach a detached agent: `--resume <id>` if a conversation was persisted,
 // else spawn fresh with the same `--session-id` (a session that never had a
 // turn has no log to resume — resuming it errors "No conversation found").
+// buildSpawn keeps the agent's model + skill-scopes from create time.
 export function reattach(id) {
   const a = agents.get(id);
   if (!a || a.proc) return a;
-  const canResume = sessionLogExists(a.cwd, id);
-  const args = canResume ? ['--resume', id, '--name', a.name] : ['--session-id', id, '--name', a.name];
-  const proc = spawn(CLAUDE_BIN, args, {
+  const { bin, args } = buildSpawn(a);
+  const proc = spawn(bin, args, {
     cwd: a.cwd, cols: 80, rows: 24, env: process.env,
   });
   a.proc = proc; a.pid = proc.pid; a.buf = []; a.status = 'starting';

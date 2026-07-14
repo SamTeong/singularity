@@ -40,10 +40,10 @@ export default function DirPicker({ start, onPick, onClose }) {
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <Stack direction="row" spacing={1} sx={{ p: 2, pb: 1 }}>
+      <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2, pb: 1 }}>
         <TextField fullWidth size="small" value={path} spellCheck={false}
           onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load(path)} />
-        <Button variant="outlined" onClick={() => load(path)}>Go</Button>
+        <Button size="small" variant="outlined" onClick={() => load(path)}>Go</Button>
       </Stack>
       {err && <Typography color="error" sx={{ px: 2, pb: 1, fontSize: 13 }}>{err}</Typography>}
       <DialogContent dividers sx={{ p: 0, maxHeight: '50vh' }}>
@@ -65,9 +65,9 @@ export default function DirPicker({ start, onPick, onClose }) {
           )}
         </List>
       </DialogContent>
-      <DialogActions>
-        <Button onClick={onClose}>Cancel</Button>
-        <Button variant="contained" onClick={() => onPick(path)}>Use this folder</Button>
+      <DialogActions sx={{ px: 2, pb: 2, pt: 2 }}>
+        <Button size="small" color="error" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
+        <Button size="small" sx={{ px: 2 }} variant="contained" onClick={() => onPick(path)}>Use this folder</Button>
       </DialogActions>
     </Dialog>
   );
