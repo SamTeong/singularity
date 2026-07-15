@@ -1,0 +1,3 @@
+# Keep deps + build output out of the agent's view.
+node_modules
+web/dist
