@@ -25,6 +25,7 @@ const COLUMNS = ['todo', 'inprogress', 'inreview', 'done'];
 const PORT = Number(process.env.PORT);
 const MAX_REVIEW_REJECTS = 3;
 const RETENTION_MS = 7 * 24 * 3600 * 1000; // Done cards auto-conclude to history after this long.
+export const RATE_LIMIT_RE = /reached your session usage limit|Request rejected \(429\)/;
 
 const tasks = new Map(); // id -> task record (plain object, see plan/data model)
 let history = []; // concluded tasks: task fields + outcome, concludedAt, finalStats
@@ -80,6 +81,16 @@ export function initTasks(log) {
   }
   sweepRetention();
   setInterval(sweepRetention, 3600_000).unref();
+  // Ollama 429s surface only in the pty stream — flag the card so it doesn't
+  // sit looking idle. Rolling tail absorbs chunk splits.
+  const tails = new Map();
+  reg.bus.on('output', ({ id, data }) => {
+    const t = [...tasks.values()].find((x) => x.sessionId === id && x.column !== 'done');
+    if (!t || t.state === 'rate-limited') return;
+    const tail = ((tails.get(id) || '') + data).slice(-400);
+    tails.set(id, tail);
+    if (RATE_LIMIT_RE.test(tail)) updateTask(t.id, { state: 'rate-limited' });
+  });
 }
 
 export function snapshotTasks() { return { tasks: [...tasks.values()], history }; }
@@ -93,6 +104,9 @@ export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
   // Subagent model routing: an ollama model runs the whole fleet on that same
   // model (saves Claude budget); a claude model splits impl=sonnet, reviewer=opus.
   const ollama = !isClaudeModel(t.model);
+  // Ollama models have no prompt caching — every turn resends the full
+  // context, so nudge the orchestrator toward fewer, batched turns.
+  const turnEconomy = ollama ? `\n- Your model has no prompt caching — every turn resends the full context. Minimize turns: batch the board status curl together with your next Bash command instead of running it alone, avoid re-reading files you have already seen, and prefer one larger subagent over many small ones.` : '';
   const implModel = ollama ? t.model : 'sonnet';
   const reviewerModel = ollama ? t.model : 'opus';
   // Project agent defs: if the task's cwd ships .claude/agents/<role>.md, route
@@ -108,9 +122,12 @@ export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
   const implAgent = hasDef('senior-software-engineer') ? 'senior-software-engineer'
     : hasDef('junior-software-engineer') ? 'junior-software-engineer' : null;
   const reviewerAgent = hasDef('reviewer') ? 'reviewer' : null;
+  // Keep subagent fan-out and file I/O bounded — large subagent output eats
+  // context fast, especially for ollama models with no prompt caching.
+  const subagentEconomy = ` Run at most 3 subagents concurrently. Have each subagent write its full output to a file under \`${t.ticketDir}\` and return only a short summary (≤10 lines) — keep large results out of your context.`;
   const implSpawn = implAgent
-    ? `Use the Task tool with subagents (subagent_type: "${implAgent}", model: ${implModel}) for the implementation work where it helps; small changes you may do directly. The subagent def carries this repo's stack rules — still tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.`
-    : `Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.${cavecrew ? ' For read-only exploration (locating code, mapping structure, listing usages), spawn subagent_type: "caveman:cavecrew-investigator" instead of a generic subagent — its output is compressed.' : ''}`;
+    ? `Use the Task tool with subagents (subagent_type: "${implAgent}", model: ${implModel}) for the implementation work where it helps; small changes you may do directly. The subagent def carries this repo's stack rules — still tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.${subagentEconomy}`
+    : `Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.${cavecrew ? ' For read-only exploration (locating code, mapping structure, listing usages), spawn subagent_type: "caveman:cavecrew-investigator" instead of a generic subagent — its output is compressed.' : ''}${subagentEconomy}`;
   const fixSub = implAgent
     ? `subagent (subagent_type: "${implAgent}", model: ${implModel})`
     : `${implModel} subagent`;
@@ -131,7 +148,7 @@ ${t.description}`;
 
 - You are working directly in \`${t.repo}\` (not a git repo). Make all changes in place.
 - Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (the requirements, already written for you) and \`Plan.md\` (you write it during planning). This is the stable source of truth — you and your subagents read from here, not the working directory.
-- You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.
+- You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.${turnEconomy}
 
 ## Workflow
 
@@ -161,7 +178,7 @@ ${t.description}`;
 - You are in a dedicated git worktree (${t.worktree}) on branch ${t.branch}, branched from ${t.baseBranch} of the main repo at ${t.repo}. Do all work here.
 - Merge policy: ${t.mergeMode === 'auto' ? `after the review passes, merge ${t.branch} into ${t.baseBranch} in the main repo (git -C "${t.repo}" merge ${t.branch}). If the merge conflicts, abort it and park the task instead (see below).` : `leave the branch for the user to merge — do NOT merge or push.`}
 - Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (the requirements, already written for you) and \`Plan.md\` (you write it during planning). This is the stable source of truth — you and your subagents read from here, not the working directory.
-- You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.
+- You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.${turnEconomy}
 
 ## Workflow
 

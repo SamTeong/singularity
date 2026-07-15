@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 const scratch = mkdtempSync(join(tmpdir(), 'sing-tasks-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
 
-const { buildTaskPrompt, createTask } = await import('./tasks.mjs');
+const { buildTaskPrompt, createTask, RATE_LIMIT_RE } = await import('./tasks.mjs');
 
 function initRepo() {
   const repo = mkdtempSync(join(tmpdir(), 'sing-repo-'));
@@ -82,6 +82,43 @@ test('project defs win over cavecrew', () => {
   assert.doesNotMatch(p, /cavecrew/);
   assert.match(p, /subagent_type: "reviewer"/);
   rmSync(cwd, { recursive: true, force: true });
+});
+
+test('subagent economy guidance in prompt', () => {
+  const cwd = withAgents([]);
+  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
+  assert.match(p, /at most 3 subagents/);
+  assert.match(p, /write its full output to a file/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('ollama model → turn-economy guidance', () => {
+  const cwd = withAgents([]);
+  const p = buildTaskPrompt({ ...baseTask, model: 'glm-5.2:cloud', worktree: cwd }, false);
+  assert.match(p, /no prompt caching/);
+  assert.match(p, /batch the board status curl/);
+  assert.match(p, /model: glm-5.2:cloud/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('claude model → no turn-economy bullet', () => {
+  const p = buildTaskPrompt(baseTask, false);
+  assert.doesNotMatch(p, /no prompt caching/);
+});
+
+test('plain-kind prompt also gets turn-economy guidance', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'sing-plain-'));
+  const p = buildTaskPrompt({ ...baseTask, kind: 'plain', repo: cwd, worktree: null, mergeMode: null, model: 'glm-5.2:cloud' }, false);
+  assert.match(p, /no prompt caching/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('RATE_LIMIT_RE matches 429 + usage-limit strings', () => {
+  assert.match('API Error: Request rejected (429) · you (x) have reached your session usage limit', RATE_LIMIT_RE);
+  assert.match('reached your session usage limit', RATE_LIMIT_RE);
+  assert.match('Request rejected (429)', RATE_LIMIT_RE);
+  assert.doesNotMatch('session usage limit', RATE_LIMIT_RE);
+  assert.doesNotMatch('HTTP 429', RATE_LIMIT_RE);
 });
 
 // createTask: a failure after `git worktree add` succeeds but before the task
