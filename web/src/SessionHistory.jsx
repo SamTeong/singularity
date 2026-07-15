@@ -48,9 +48,12 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   const [authNeeded, setAuthNeeded] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [loadErr, setLoadErr] = useState(null);
+  const [sessErr, setSessErr] = useState(null);
   const chatBoxRef = useRef(null);
+  const chatIdRef = useRef(null);
 
-  useEffect(() => { fetch('/sessions').then((r) => r.json()).then((d) => setSessions(d.sessions || [])); }, []);
+  useEffect(() => { fetch('/sessions').then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load sessions.')); }, []);
 
   // Cross-session search (scope 'all'): results replace the left list, like
   // Memory. Scope 'one' filters the open transcript in the right view instead.
@@ -64,17 +67,18 @@ export default function SessionHistory({ sendMsg, registerChat }) {
 
   const open = (item) => {
     if (item.project === sel?.project && item.id === sel?.id) return;
-    setSel(item); setMatches(null); setQ('');
+    setSel(item); setMatches(null); setQ(''); setLoadErr(null);
     setLoadingFile(true);
     fetch(`/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}`).then((r) => r.json()).then((d) => {
       setTranscript(d.ok ? d : null);
-    }).finally(() => setLoadingFile(false));
+    }).catch(() => { setTranscript(null); setLoadErr('Failed to load session.'); }).finally(() => setLoadingFile(false));
   };
 
   // Chat: stream deltas from the WS into the last assistant message.
   useEffect(() => {
     if (!registerChat) return;
     registerChat((m) => {
+      if (m.chatId !== chatIdRef.current) return; // stale/superseded chat — ignore
       if (m.t === 'chat:delta') {
         setChatMsgs((prev) => {
           const next = prev.slice();
@@ -107,6 +111,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
     if (!text || streaming) return;
     const history = chatMsgs.filter((m) => m.content).map((m) => ({ role: m.role, content: m.content }));
     const chatId = (crypto?.randomUUID?.() || String(Date.now() + Math.random()));
+    chatIdRef.current = chatId;
     setChatMsgs((prev) => [...prev, { role: 'user', content: text }, { role: 'assistant', content: '', streaming: true }]);
     setStreaming(true); setAuthNeeded(false); setChatInput('');
     const one = scope === 'one' && sel;
@@ -184,7 +189,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                   </ListItemButton>
                 ))
               )}
-              {!leftResults && sessions.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No sessions.</Typography>}
+              {!leftResults && sessions.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{sessErr || 'No sessions.'}</Typography>}
               {leftResults && leftResults.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
             <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${t.vars.palette.glass.stroke}`, flexShrink: 0 })}>
@@ -226,7 +231,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
             ) : loadingFile ? (
               <Typography color="text.secondary">Loading…</Typography>
             ) : !transcript ? (
-              <Typography color="text.secondary">Session not found.</Typography>
+              <Typography color="text.secondary">{loadErr || 'Session not found.'}</Typography>
             ) : (
               <>
                 <Typography variant="subtitle2" noWrap>{transcript.meta?.title || sel?.title || sel?.id}</Typography>

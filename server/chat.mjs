@@ -38,14 +38,22 @@ function contextFor({ scope, project, id }) {
 
 // Parse an SSE chunk stream from the Messages API, emitting text deltas. The
 // reader is driven incrementally so a buffer can straddle chunk boundaries.
+// Returns true if a terminal event (chat:done/chat:error) was already sent
+// (or the stream was aborted), false if the connection just ended quietly.
 async function consumeStream(body, send, chatId, signal) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
   for (;;) {
-    if (signal?.aborted) { try { await reader.cancel(); } catch {} return; }
-    const { value, done } = await reader.read();
-    if (done) return;
+    if (signal?.aborted) { try { await reader.cancel(); } catch {} return true; }
+    let value, done;
+    try {
+      ({ value, done } = await reader.read());
+    } catch (e) {
+      if (signal?.aborted) return true; // aborted mid-read: superseded chat, emit nothing
+      throw e;
+    }
+    if (done) return false;
     buf += decoder.decode(value, { stream: true });
     let sep;
     while ((sep = buf.indexOf('\n\n')) >= 0) {
@@ -59,10 +67,10 @@ async function consumeStream(body, send, chatId, signal) {
         send({ t: 'chat:delta', chatId, text: payload.delta.text });
       } else if (payload.type === 'error') {
         send({ t: 'chat:error', chatId, msg: payload.error?.message || 'upstream error' });
-        return;
+        return true;
       } else if (payload.type === 'message_stop') {
         send({ t: 'chat:done', chatId });
-        return;
+        return true;
       }
     }
   }
@@ -105,7 +113,14 @@ export async function streamChat({ chatId, question, scope = 'one', project, id,
     send({ t: 'chat:error', chatId, msg });
     return;
   }
-  await consumeStream(resp.body, send, chatId, signal);
+  let sentTerminal;
+  try {
+    sentTerminal = await consumeStream(resp.body, send, chatId, signal);
+  } catch (e) {
+    if (signal?.aborted) return; // superseded chat — emit nothing
+    send({ t: 'chat:error', chatId, msg: `stream failed: ${e.message}` });
+    return;
+  }
   // Non-abort exit without an explicit message_stop (e.g. network end) → done.
-  send({ t: 'chat:done', chatId });
+  if (!sentTerminal && !signal?.aborted) send({ t: 'chat:done', chatId });
 }

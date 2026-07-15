@@ -98,7 +98,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
       }
     });
 
-    ws.on('close', () => sockets.delete(ws));
+    ws.on('close', () => { ws.chatAbort?.abort(); sockets.delete(ws); });
   });
   log?.info('pty-ws attached at /ws');
 }

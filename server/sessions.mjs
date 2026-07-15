@@ -172,6 +172,7 @@ function sessionTextItems(p) {
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.items;
   const s = readSessionForSearch(p);
   textCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, items: s });
+  if (textCache.size > 200) textCache.delete(textCache.keys().next().value);
   return s;
 }
 // Cheaper than readSession: keep text/thinking/tool whole-ish (truncate tool

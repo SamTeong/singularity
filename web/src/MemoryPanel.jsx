@@ -27,8 +27,9 @@ export default function MemoryPanel() {
   const [dirty, setDirty] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [err, setErr] = useState(null);
 
-  useEffect(() => { fetch('/memory/files').then((r) => r.json()).then((d) => setFiles(d.files || [])); }, []);
+  useEffect(() => { fetch('/memory/files').then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setErr('failed to load memory files')); }, []);
 
   const search = useCallback(() => {
     if (!q.trim()) { setResults(null); return; }
@@ -89,7 +90,7 @@ export default function MemoryPanel() {
                   {it.text && <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>}
                 </ListItemButton>
               ))}
-              {showing.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{results ? 'No matches.' : 'No memory files.'}</Typography>}
+              {showing.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{results ? 'No matches.' : (err || 'No memory files.')}</Typography>}
             </List>
           </>
         )}

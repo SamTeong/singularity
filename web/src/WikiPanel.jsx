@@ -63,7 +63,7 @@ export default function WikiPanel() {
       if (cancelled) return;
       if (d.error) { setWikis([]); setCapped(false); setErr(d.error); return; }
       setWikis(d.wikis || []); setCapped(!!d.capped); setErr(null);
-    });
+    }).catch(() => { if (!cancelled) { setWikis([]); setCapped(false); setErr('failed to load wikis'); } });
     return () => { cancelled = true; };
   }, [root]);
 
@@ -79,11 +79,11 @@ export default function WikiPanel() {
 
   const open = (item) => {
     if (item.path === sel?.path) return;
-    setSel(item); setLoadingFile(true);
+    setSel(item); setErr(null); setLoadingFile(true);
     fetch(`/wiki/file?path=${encodeURIComponent(item.path)}&root=${encodeURIComponent(root)}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : '');
       if (!d.ok) setErr(d.error);
-    }).finally(() => setLoadingFile(false));
+    }).catch(() => { setContent(''); setErr('failed to load page'); }).finally(() => setLoadingFile(false));
   };
 
   // Selecting a page expands its wiki so the selection is visible in the tree.
@@ -182,6 +182,10 @@ export default function WikiPanel() {
         ) : loadingFile ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
             <Typography color="text.secondary">Loading…</Typography>
+          </Box>
+        ) : err ? (
+          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
+            <Typography color="text.secondary">{err}</Typography>
           </Box>
         ) : (
           <>
