@@ -15,33 +15,15 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import Link from '@mui/material/Link';
 import { StatusPill, SearchInput, EmptyState } from '@zapac/mui-theme';
 import DirPicker from './DirPicker.jsx';
+import { parseFrontmatter } from './frontmatter.js';
+import MarkdownBody from './MarkdownBody.jsx';
 
 // Wiki root persists across sessions in localStorage (default ~/wiki).
 const DEFAULT_ROOT = '~/wiki';
 const loadRoot = () => localStorage.getItem('sing-wiki-root') || DEFAULT_ROOT;
 const folder = (rel) => { const i = rel.lastIndexOf('/'); return i < 0 ? '' : rel.slice(0, i); };
-
-// Split a leading YAML frontmatter block (---\n...\n---) from the body. Each
-// `key: value` line is parsed; `value` may be `[a, b, c]`. Returns {meta, body}.
-const parseFrontmatter = (src) => {
-  const m = src.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n?/);
-  if (!m) return { meta: {}, body: src };
-  const meta = {};
-  for (const line of m[1].split(/\r?\n/)) {
-    const i = line.indexOf(':');
-    if (i < 0) continue;
-    const k = line.slice(0, i).trim();
-    let v = line.slice(i + 1).trim();
-    if (v.startsWith('[') && v.endsWith(']')) v = v.slice(1, -1).split(',').map((s) => s.trim()).filter(Boolean);
-    if (k) meta[k] = v;
-  }
-  return { meta, body: src.slice(m[0].length) };
-};
 
 export default function WikiPanel() {
   const [root, setRoot] = useState(loadRoot);
@@ -195,21 +177,6 @@ export default function WikiPanel() {
               flex: 1, minHeight: 0, overflow: 'auto',
               border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px`,
               p: 3, pb: 4,
-              '& :is(h1,h2,h3,h4,h5,h6)': { fontWeight: 700, mt: 2.5, mb: 1, lineHeight: 1.25, '&:first-of-type': { mt: 0 } },
-              '& h1': { fontSize: 24 }, '& h2': { fontSize: 20 }, '& h3': { fontSize: 17 }, '& h4,& h5,& h6': { fontSize: 15 },
-              '& p': { my: 1.25, lineHeight: 1.7, fontSize: 14 },
-              '& ul,& ol': { pl: 3, my: 1.25, lineHeight: 1.7, fontSize: 14, '& li': { my: 0.4, '&::marker': { color: t.vars.palette.text.secondary } } },
-              '& :is(ul,ol) :is(ul,ol)': { my: 0.4 },
-              '& blockquote': { ml: 0, pl: 2, my: 1.5, borderLeft: `3px solid ${t.vars.palette.glass.stroke}`, color: 'text.secondary' },
-              '& a': { color: 'primary.main' },
-              '& :is(code,pre)': { fontFamily: 'var(--mui-font-CodeFont, monospace)', fontSize: 13 },
-              '& :not(pre) > code': { px: 0.5, py: 0.15, borderRadius: '4px', bgcolor: 'action.hover', fontSize: '0.9em' },
-              '& pre': { p: 1.5, my: 1.5, overflow: 'auto', borderRadius: `${t.zapac.radius.sm}px`, bgcolor: 'action.hover', border: `1px solid ${t.vars.palette.glass.stroke}` },
-              '& hr': { border: 'none', borderTop: `1px solid ${t.vars.palette.glass.stroke}`, my: 2.5 },
-              '& table': { borderCollapse: 'collapse', my: 1.5, width: '100%', fontSize: 13 },
-              '& th,& td': { border: `1px solid ${t.vars.palette.glass.stroke}`, px: 1, py: 0.75, textAlign: 'left' },
-              '& th': { bgcolor: 'action.hover', fontWeight: 700 },
-              '& img': { maxWidth: '100%' },
             })}>
               {(() => {
                 const { meta, body } = parseFrontmatter(content);
@@ -224,10 +191,7 @@ export default function WikiPanel() {
                         {tags.map((t2) => <StatusPill key={t2} status="review">{t2}</StatusPill>)}
                       </Stack>
                     )}
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}
-                      components={{ a: (p) => <Link {...p} target="_blank" rel="noopener noreferrer" /> }}>
-                      {body}
-                    </ReactMarkdown>
+                    <MarkdownBody>{body}</MarkdownBody>
                   </>
                 );
               })()}

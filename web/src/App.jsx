@@ -27,6 +27,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import SettingsIcon from '@mui/icons-material/Settings';
 import BookIcon from '@mui/icons-material/Book';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
+import SchoolIcon from '@mui/icons-material/School';
 import HistoryIcon from '@mui/icons-material/History';
 import SpeedIcon from '@mui/icons-material/Speed';
 import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
@@ -49,6 +50,7 @@ const ConfigEditor = lazy(() => import('./ConfigEditor.jsx'));
 const MemoryPanel = lazy(() => import('./MemoryPanel.jsx'));
 const SessionHistory = lazy(() => import('./SessionHistory.jsx'));
 const WikiPanel = lazy(() => import('./WikiPanel.jsx'));
+const SkillsPanel = lazy(() => import('./SkillsPanel.jsx'));
 const UsageView = lazy(() => import('./UsageView.jsx'));
 const TasksBoard = lazy(() => import('./TasksBoard.jsx'));
 const CronJobs = lazy(() => import('./CronJobs.jsx'));
@@ -67,6 +69,7 @@ const NAV = [
   { v: 'config', icon: <SettingsIcon />, label: 'Config' },
   { v: 'memory', icon: <BookIcon />, label: 'Memory' },
   { v: 'wiki', icon: <MenuBookIcon />, label: 'Wiki' },
+  { v: 'skills', icon: <SchoolIcon />, label: 'Skills' },
   { v: 'sessions', icon: <HistoryIcon />, label: 'Sessions' },
   { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
 ];
@@ -420,6 +423,7 @@ export default function App() {
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
+            {view === 'skills' && <SkillsPanel />}
             {view === 'cron' && <CronJobs crons={crons} agents={agents} onAdd={() => setCronOpen(true)} onToast={setToast} />}
             {view === 'tasks' && (
               <TasksBoard
