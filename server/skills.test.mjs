@@ -41,9 +41,12 @@ test('listSkills: excludes common, skips scopes with no skills, carries descript
 
 test('readSkill: rejects bad names', () => {
   assert.equal(readSkill('../x', 'freeze').ok, false);
-  assert.equal(readSkill('coding', '../freeze').ok, false);
   assert.equal(readSkill('a/b', 'freeze').ok, false);
   assert.equal(readSkill('', 'freeze').ok, false);
+  assert.equal(readSkill('..', 'x').ok, false, 'bare .. scope would traverse above root');
+  assert.equal(readSkill('coding', '..').ok, false, 'bare .. skill would traverse above skills dir');
+  assert.equal(readSkill('coding', '.').ok, false);
+  assert.equal(readSkill('coding', '...').ok, false);
   assert.equal(readSkill('coding', 'nope').ok, false, 'missing skill');
 });
 

@@ -7,8 +7,9 @@ import { join } from 'node:path';
 import * as reg from './agents.mjs';
 
 const SKILLS_CAP = 200; // backstop per scope — no silent truncation
-// Bare skill/scope names only — no path separators, no '..', no empties.
-const NAME_RE = /^[A-Za-z0-9._-]+$/;
+// Bare skill/scope names only — no path separators, no all-dots names ('.',
+// '..', '...') which join()/resolve() would collapse into a parent traversal.
+const NAME_RE = /^(?!\.+$)[A-Za-z0-9._-]+$/;
 
 // Parse a SKILL.md's leading YAML frontmatter (---\n...\n---) into structured
 // meta + body. Skill frontmatter uses block YAML lists for `triggers`:
