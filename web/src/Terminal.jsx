@@ -31,6 +31,7 @@ export default function Terminal({ agent, visible, sendMsg, registerOutput }) {
   const hostRef = useRef(null);
   const xtermRef = useRef(null);
   const fitRef = useRef(null);
+  const doFitRef = useRef(null);
 
   useEffect(() => {
     const term = new Xterm({
@@ -58,13 +59,22 @@ export default function Terminal({ agent, visible, sendMsg, registerOutput }) {
         sendMsg({ t: 'resize', id: agent.id, cols: term.cols, rows: term.rows });
       } catch {}
     };
-    const ro = new ResizeObserver(doFit);
+    doFitRef.current = doFit;
+
+    // debounce: sidebar/dock width transitions fire a resize storm mid-animation
+    let roTimer = null;
+    const ro = new ResizeObserver(() => {
+      clearTimeout(roTimer);
+      roTimer = setTimeout(doFit, 120);
+    });
     ro.observe(hostRef.current);
-    // attach to replay any existing scrollback + trigger initial resize sync
+    // fit to the real host size before replay, so scrollback doesn't render
+    // into a default 80x24 and then get reflowed
+    doFit();
     sendMsg({ t: 'attach', id: agent.id });
     setTimeout(doFit, 50);
 
-    return () => { ro.disconnect(); term.dispose(); registerOutput(null); };
+    return () => { clearTimeout(roTimer); ro.disconnect(); term.dispose(); registerOutput(null); };
   }, [agent.id]);
 
   // Follow the app color mode live — no need to recreate the terminal.
@@ -74,7 +84,7 @@ export default function Terminal({ agent, visible, sendMsg, registerOutput }) {
 
   useEffect(() => {
     if (visible) {
-      setTimeout(() => { try { fitRef.current?.fit(); xtermRef.current?.focus(); } catch {} }, 0);
+      setTimeout(() => { try { doFitRef.current?.(); xtermRef.current?.focus(); } catch {} }, 0);
     }
   }, [visible]);
 

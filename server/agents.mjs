@@ -43,8 +43,10 @@ let recentRepos = [];
 let logger = null;
 function persist() {
   const data = {
-    agents: [...agents.values()].map(({ id, name, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs }) => ({
-      id, name, cwd, createdAt, model, scopes, permissionMode, extraArgs, activeMs,
+    agents: [...agents.values()].map(({ id, name, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince }) => ({
+      id, name, cwd, createdAt, model, scopes, permissionMode, extraArgs,
+      // fold the live running-span in so a daemon exit while 'running' doesn't lose it
+      activeMs: status === 'running' && runningSince ? (activeMs || 0) + (Date.now() - runningSince) : activeMs,
       status: status === 'running' || status === 'starting' || status === 'idle' ? 'detached' : status,
     })),
     recentRepos,
