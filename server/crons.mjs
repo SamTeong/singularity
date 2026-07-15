@@ -13,7 +13,7 @@ import { join } from 'node:path';
 import { CronExpressionParser } from 'cron-parser';
 import * as reg from './agents.mjs';
 
-const CRONS_FILE = join(reg.APP_DIR, 'crons.json');
+const CRONS_FILE = join(reg.STATE_DIR, 'crons.json');
 const TICK_MS = 1000;
 
 const crons = new Map(); // id -> job (plain object)

@@ -1,10 +1,19 @@
 // Unit tests for consumeStream: the SSE parser for the Messages API stream.
 // A fake fetch-Response-shaped body (getReader().read() yielding queued
 // Uint8Array chunks then {done:true}) drives the parser without any network.
-// Run: npm test  (node --test server/)
-import { test } from 'node:test';
+// chat.mjs imports usage.mjs → app-dir.mjs (requires SINGULARITY_HOME) — point
+// it at a scratch temp dir before the dynamic import. Run: npm test
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { consumeStream } from './chat.mjs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+const scratch = mkdtempSync(join(tmpdir(), 'singularity-chat-test-'));
+process.env.SINGULARITY_HOME = join(scratch, 'sing');
+after(() => { rmSync(scratch, { recursive: true, force: true }); });
+
+const { consumeStream } = await import('./chat.mjs');
 
 // Queues each entry as one reader.read() resolution (string entries are
 // UTF-8 encoded), then returns {done:true} forever.

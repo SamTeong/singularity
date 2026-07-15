@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { parse as parsePath, normalize as normalizePath } from 'node:path';
 import { homedir } from 'node:os';
+import './migrate-state.mjs';
 import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid } from './procs.mjs';
@@ -24,10 +25,27 @@ import { CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
-const PORT = Number(process.env.PORT ?? 4317);
+const PORT = Number(process.env.PORT);
 // Optional loopback token (defense-in-depth on top of the 127.0.0.1 bind).
 // Set SING_TOKEN to require it on data endpoints + WS; the shell/assets stay open.
 const TOKEN = process.env.SING_TOKEN || null;
+
+// No baked-in machine defaults — all machine-specific config must come from .env
+// (loaded via --env-file-if-exists=.env). Fail fast with a clear list if any
+// required var is missing. SINGULARITY_HOME is enforced at app-dir.mjs load.
+function requireEnv() {
+  const missing = [];
+  if (!process.env.PORT || !Number(process.env.PORT)) missing.push('PORT (listen port, e.g. 4317)');
+  if (!reg.CLAUDE_BIN) missing.push('CLAUDE_BIN (absolute path to claude exe)');
+  if (!reg.OLLAMA_BIN) missing.push('OLLAMA_BIN (absolute path to ollama exe)');
+  if (!reg.SCOPE_ROOT || !existsSync(reg.SCOPE_ROOT)) missing.push('SING_SCOPE_ROOT (skill-scopes dir)');
+  if (!process.env.SING_USAGE_SKILL || !existsSync(process.env.SING_USAGE_SKILL)) missing.push('SING_USAGE_SKILL (path to claude-code-usage-report stats.mjs)');
+  if (!process.env.SING_USAGE_REPORTS) missing.push('SING_USAGE_REPORTS (spend-report output dir)');
+  if (missing.length) {
+    throw new Error(`Required env vars missing — copy .env.example → .env and fill them in:\n  - ${missing.join('\n  - ')}`);
+  }
+}
+requireEnv();
 
 const app = Fastify({ logger: { level: 'info' } });
 
@@ -144,9 +162,10 @@ app.get('/procs', async () => ({ procs: await scanClaude() }));
 // in the UI — these are suggestions; any typed value is passed through verbatim.
 app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS }));
 
-// Skill-scope picker source: directories under ~/.agents/skill-scopes (excludes 'common').
+// Skill-scope picker source: directories under SING_SCOPE_ROOT (excludes 'common').
 app.get('/skill-scopes', async () => {
-  const root = join(homedir(), '.agents', 'skill-scopes');
+  const root = reg.SCOPE_ROOT;
+  if (!root) return { scopes: [] };
   let scopes = [];
   try {
     scopes = readdirSync(root, { withFileTypes: true })

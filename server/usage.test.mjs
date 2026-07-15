@@ -1,9 +1,19 @@
 // Unit tests for usage normalization: the ollama HTML scraper parser and the
 // claude OAuth-response mapper. No network — both operate on captured fixtures.
+// usage.mjs pulls in app-dir.mjs (STATE_DIR/CACHE_DIR), which requires
+// SINGULARITY_HOME — point it at a scratch temp dir before the dynamic import.
 // Run: npm test  (node --test server/)
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { parseOllamaHtml, normalizeClaude } from './usage.mjs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+
+const scratch = mkdtempSync(join(tmpdir(), 'singularity-usage-test-'));
+process.env.SINGULARITY_HOME = join(scratch, 'sing');
+after(() => { rmSync(scratch, { recursive: true, force: true }); });
+
+const { parseOllamaHtml, normalizeClaude } = await import('./usage.mjs');
 
 // Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
 // response: plan badge, Session then Weekly meter (aria-label + segment buttons),

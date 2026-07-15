@@ -1,16 +1,21 @@
 // Unit tests for per-agent stats: pricing-table cost estimate from a fake
 // session .jsonl (parseSession) and the statusline-capture vs. estimate
-// cost-source precedence (statsFor). Fixtures use the agents.test.mjs
-// approach: write under the real ~/.claude/projects (and APP_DIR/cost),
-// clean up in a finally. Run: npm test  (node --test server/)
-import { test } from 'node:test';
+// cost-source precedence (statsFor). Transcripts write under the real
+// ~/.claude/projects (cleaned per-test in a finally); cost files route through
+// SINGULARITY_HOME scratch so they never touch the user's real state/. Run: npm test
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
-import { encodeCwd, APP_DIR } from './agents.mjs';
-import { parseSession, statsFor } from './stats.mjs';
+
+const scratch = mkdtempSync(join(tmpdir(), 'singularity-stats-test-'));
+process.env.SINGULARITY_HOME = join(scratch, 'sing');
+after(() => { rmSync(scratch, { recursive: true, force: true }); });
+
+const { encodeCwd, STATE_DIR } = await import('./agents.mjs');
+const { parseSession, statsFor } = await import('./stats.mjs');
 
 function writeTranscript(cwd, id, lines) {
   const dir = join(homedir(), '.claude', 'projects', encodeCwd(cwd));
@@ -65,7 +70,7 @@ test('statsFor: statusline capture file present → costSource "statusline" wins
   const dir = writeTranscript(cwd, id, [
     { type: 'assistant', message: { model: 'claude-sonnet-4-5', usage: { input_tokens: 100, output_tokens: 50 } } },
   ]);
-  const costDir = join(APP_DIR, 'cost');
+  const costDir = join(STATE_DIR, 'cost');
   const costFile = join(costDir, `${id}.json`);
   mkdirSync(costDir, { recursive: true });
   writeFileSync(costFile, JSON.stringify({ costUsd: 1.23, apiMs: 111, wallMs: 222 }));

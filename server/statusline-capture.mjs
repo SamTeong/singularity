@@ -1,12 +1,11 @@
 // Statusline hook invoked by Claude Code (~every 300ms) with a JSON payload on
-// stdin. Standalone — no imports from agents.mjs (that pulls in node-pty).
+// stdin. Standalone — imports app-dir.mjs (lightweight) not agents.mjs (pulls
+// in node-pty, too heavy for a 300ms-cadence child process).
 // Writes APP_DIR/cost/<session_id>.json for stats.mjs to read; prints a short
 // line back for the TUI's statusline.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-
-const APP_DIR = process.env.SINGULARITY_HOME || join(homedir(), '.singularity');
+import { STATE_DIR } from './app-dir.mjs';
 
 function fmtMs(ms) {
   const m = Math.round(ms / 60000);
@@ -25,8 +24,8 @@ process.stdin.on('end', () => {
   const apiMs = typeof cost.total_api_duration_ms === 'number' ? cost.total_api_duration_ms : null;
   const wallMs = typeof cost.total_duration_ms === 'number' ? cost.total_duration_ms : null;
   try {
-    mkdirSync(join(APP_DIR, 'cost'), { recursive: true });
-    writeFileSync(join(APP_DIR, 'cost', `${sessionId}.json`), JSON.stringify({ costUsd, apiMs, wallMs, updatedAt: Date.now() }));
+    mkdirSync(join(STATE_DIR, 'cost'), { recursive: true });
+    writeFileSync(join(STATE_DIR, 'cost', `${sessionId}.json`), JSON.stringify({ costUsd, apiMs, wallMs, updatedAt: Date.now() }));
   } catch { /* best-effort — stats.mjs falls back to the pricing estimate */ }
   const parts = [];
   if (costUsd != null) parts.push(`$${costUsd.toFixed(2)}`);

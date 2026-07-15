@@ -3,12 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "server": "node server/index.mjs",
+    "server": "node --env-file-if-exists=.env server/index.mjs",
     "web": "vite --config web/vite.config.mjs",
     "build": "vite build --config web/vite.config.mjs",
     "dev": "concurrently -k \"npm:server\" \"npm:web\"",
     "start": "npm run build && npm run server",
-    "ollama-login": "node scripts/ollama-login.mjs",
+    "ollama-login": "node --env-file-if-exists=.env scripts/ollama-login.mjs",
     "test": "node --test \"server/*.test.mjs\""
   },
   "dependencies": {

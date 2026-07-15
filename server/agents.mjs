@@ -4,37 +4,39 @@ import { spawn } from 'node-pty';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
-import { join, delimiter } from 'node:path';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { isClaudeModel } from './models.mjs';
+import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR } from './app-dir.mjs';
+export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR };
 
 const RING_MAX = 256 * 1024; // per-agent in-mem scrollback cap (bytes). Disk ring = Phase 3.
 const IDLE_MS = 2000; // no pty output for this long while running → 'idle' (waiting for input).
 const RECENT_MAX = 10;
 
 // --- app-data dir ---
-// All runtime state (agents.json, tasks.json, crons.json, worktrees/, cost/,
-// tickets/) lives here — a stable home dir shared with usage.mjs's ollama/usage
-// files. SINGULARITY_HOME overrides it (tests point it at a scratch temp dir).
-export const APP_DIR = process.env.SINGULARITY_HOME || join(homedir(), '.singularity');
-const STATE_FILE = join(APP_DIR, 'agents.json');
-const SCOPE_ROOT = join(homedir(), '.agents', 'skill-scopes');
+// APP_DIR is defined in app-dir.mjs (single source — also imported by the
+// statusline script + usage.mjs, which can't pull in agents.mjs without loading
+// node-pty). The daemon ensures it exists on load.
+const STATE_FILE = join(STATE_DIR, 'agents.json');
+// Skill-scopes surface root (for --add-dir <scope> into spawned agents). No
+// default — SING_SCOPE_ROOT must be set in .env. Null when unset; buildSpawn
+// then skips --add-dir. index.mjs requireEnv fails the daemon fast if unset.
+const SCOPE_ROOT = process.env.SING_SCOPE_ROOT || null;
 mkdirSync(APP_DIR, { recursive: true });
+mkdirSync(STATE_DIR, { recursive: true });
 
-// --- claude binary (Windows node-pty does NO PATH resolution) ---
-function resolveBin(name, envOverride) {
+// --- claude/ollama binaries: absolute paths from .env (no PATH fallback) ---
+// Windows node-pty does NO PATH resolution, so the daemon requires explicit
+// absolute paths. resolveBin returns the .env path if it exists, else null;
+// index.mjs requireEnv fails the daemon fast on null.
+function resolveBin(envOverride) {
   if (envOverride && existsSync(envOverride)) return envOverride;
-  const exts = process.platform === 'win32' ? ['.exe', '.cmd', '.bat', ''] : [''];
-  for (const dir of (process.env.PATH || '').split(delimiter)) {
-    for (const ext of exts) {
-      const p = join(dir, name + ext);
-      if (existsSync(p)) return p;
-    }
-  }
-  return name;
+  return null;
 }
-const CLAUDE_BIN = resolveBin('claude', process.env.CLAUDE_BIN);
-const OLLAMA_BIN = resolveBin('ollama', process.env.OLLAMA_BIN);
+const CLAUDE_BIN = resolveBin(process.env.CLAUDE_BIN);
+const OLLAMA_BIN = resolveBin(process.env.OLLAMA_BIN);
+export { CLAUDE_BIN, OLLAMA_BIN, SCOPE_ROOT };
 
 export const bus = new EventEmitter();
 
@@ -158,8 +160,8 @@ export function buildSpawn({ id, name, cwd, model, scopes, permissionMode, extra
   const claudeArgs = [];
   for (const s of (scopes || [])) {
     if (!s) continue;
-    const dir = join(SCOPE_ROOT, s);
-    if (existsSync(dir)) { claudeArgs.push('--add-dir', dir); }
+    const dir = SCOPE_ROOT ? join(SCOPE_ROOT, s) : null;
+    if (dir && existsSync(dir)) { claudeArgs.push('--add-dir', dir); }
   }
   const resuming = sessionLogExists(cwd, id);
   const sessionFlag = resuming ? ['--resume', id] : ['--session-id', id];
@@ -172,8 +174,8 @@ export function buildSpawn({ id, name, cwd, model, scopes, permissionMode, extra
     if (model && model !== 'claude') claudeArgs.push('--model', model);
     return { bin: CLAUDE_BIN, args: claudeArgs };
   }
-  if (OLLAMA_BIN === 'ollama') {
-    throw new Error('ollama not found on PATH');
+  if (!OLLAMA_BIN) {
+    throw new Error('ollama not found (OLLAMA_BIN not set in .env)');
   }
   // On resume the transcript recorded the ollama model with its tag stripped
   // (glm-5.2:cloud -> glm-5.2); claude would request the stripped name and
@@ -289,5 +291,3 @@ export function reorder(ids) {
   persist();
   emitList();
 }
-
-export { CLAUDE_BIN };

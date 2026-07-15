@@ -28,7 +28,7 @@ try {
   await page.goto('https://ollama.com/settings', { waitUntil: 'domcontentloaded' });
   const ok = await page.waitForSelector('[data-usage-meter]', { timeout: 5000 }).then(() => true).catch(() => false);
   console.log(ok
-    ? '\n✓ Logged in — profile saved. Set ~/.singularity/ollama.json to {"mode":"browser"}.'
+    ? '\n✓ Logged in — profile saved. Set ~/.singularity/state/ollama.json to {"mode":"browser"}.'
     : '\n⚠ No usage meter detected — login may not have completed. Re-run and finish sign-in first.');
 } finally {
   await ctx.close();

@@ -6,7 +6,7 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { encodeCwd, APP_DIR, getActiveMs } from './agents.mjs';
+import { encodeCwd, STATE_DIR, getActiveMs } from './agents.mjs';
 
 // $ per million tokens: [input, output]. Matched by longest prefix on the
 // transcript message model id. cache read = 0.1x input; cache write = 1.25x
@@ -82,7 +82,7 @@ export function parseSession(cwd, id) {
 // vs. wall duration for one session, refreshed ~every 300ms while it runs.
 export function readCostFile(id) {
   try {
-    const d = JSON.parse(readFileSync(join(APP_DIR, 'cost', `${id}.json`), 'utf8'));
+    const d = JSON.parse(readFileSync(join(STATE_DIR, 'cost', `${id}.json`), 'utf8'));
     return { costUsd: d.costUsd ?? null, apiMs: d.apiMs ?? null, wallMs: d.wallMs ?? null };
   } catch { return { costUsd: null, apiMs: null, wallMs: null }; }
 }

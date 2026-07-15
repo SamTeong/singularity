@@ -6,16 +6,11 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 
-const AGENTS = join(homedir(), '.agents');
-// Skill CLI — the materialized skill-scopes surface (same root the /skill-scopes
-// endpoint reads). Override via env for a relocated skill.
-const SKILL_STATS = process.env.SING_USAGE_SKILL
-  || join(AGENTS, 'skill-scopes', 'harness', '.claude', 'skills', 'claude-code-usage-report', 'scripts', 'stats.mjs');
-// Report output dir (matches the skill's REPORTS_DIR default).
-const REPORTS_DIR = process.env.SING_USAGE_REPORTS
-  || join(AGENTS, '.claude-code-usage-report', 'reports');
+// Skill CLI + report output dir — no defaults; both must be set in .env
+// (index.mjs requireEnv fails the daemon fast if missing).
+const SKILL_STATS = process.env.SING_USAGE_SKILL;
+const REPORTS_DIR = process.env.SING_USAGE_REPORTS;
 
 const REPORT_RE = /^report-.*\.html$/;
 

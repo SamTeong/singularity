@@ -8,10 +8,11 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { STATE_DIR, CACHE_DIR } from './app-dir.mjs';
 
-const OLLAMA_CFG = join(homedir(), '.singularity', 'ollama.json');
-export const OLLAMA_PROFILE_DIR = join(homedir(), '.singularity', 'pw-ollama-profile');
-const CACHE_FILE = join(homedir(), '.singularity', 'usage-cache.json');
+const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
+export const OLLAMA_PROFILE_DIR = join(CACHE_DIR, 'pw-ollama-profile');
+const CACHE_FILE = join(CACHE_DIR, 'usage-cache.json');
 
 // Anti-detection launch bits: Cloudflare Turnstile auto-fails a browser that
 // advertises automation (--enable-automation / navigator.webdriver=true) even
@@ -253,7 +254,7 @@ try {
 
 function persist() {
   try {
-    mkdirSync(join(homedir(), '.singularity'), { recursive: true });
+    mkdirSync(CACHE_DIR, { recursive: true });
     writeFileSync(CACHE_FILE, JSON.stringify(cache));
   } catch {}
 }

@@ -13,6 +13,8 @@ npm test             # node --test "server/*.test.mjs"
 
 Pieces separately: `npm run server` / `npm run web`. Shell: PowerShell primary; Bash tool POSIX only.
 
+Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `PORT`, `CLAUDE_BIN`, `OLLAMA_BIN`, `SING_SCOPE_ROOT`, `SING_USAGE_SKILL`, `SING_USAGE_REPORTS` (optional `SING_TOKEN`). Copy `.env.example` → `.env` (gitignored) and fill in. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
+
 ## Repo structure
 
 ```
@@ -25,9 +27,11 @@ Backend modules → routes in `server/index.mjs`. Add a concern = new module + r
 
 ## State
 
-Owned app state → `~/.singularity` (`APP_DIR`, override `SINGULARITY_HOME`):
-`agents.json`, `tasks.json`, `crons.json`, `worktrees/`, `tickets/<id>/`, `cost/<session_id>.json`.
-Route all new state through `reg.APP_DIR` from `agents.mjs` — never hardcode `~/.singularity`.
+Owned app state → `SINGULARITY_HOME` (required, no default — set in `.env`; `APP_DIR`):
+- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `ollama.json`, `tickets/<id>/`, `cost/<session_id>.json`
+- `cache/` (disposable): `usage-cache.json`, `pw-ollama-profile/`
+- `worktrees/` (git-registered, lives at `APP_DIR` root)
+Single source = `server/app-dir.mjs` (`APP_DIR`/`STATE_DIR`/`CACHE_DIR`/`WORKTREES_DIR`). Route all new state through `reg` from `agents.mjs` — never hardcode `~/.singularity`. `migrate-state.mjs` (imported by `index.mjs`) moves the pre-split flat layout into `state/`+`cache/` once.
 
 External (read-only, not owned): `~/.claude/projects` (session transcripts), `~/.claude/.credentials.json` (OAuth), `~/.agents` (spend, skill-scopes), `~/wiki` (client-chosen root).
 
@@ -39,9 +43,9 @@ Optional `SING_TOKEN` gates data endpoints + WS (`x-sing-token` header / `?token
 
 ## Working rules
 
-- `claude` binary resolved from PATH at daemon start (Windows node-pty needs a real exe). Override `CLAUDE_BIN=<path>`.
+- `claude`/`ollama` binaries: absolute paths from `CLAUDE_BIN`/`OLLAMA_BIN` (no PATH fallback — Windows node-pty does no PATH resolution).
 - Per-agent cost = turns + total tokens, not `$`. Dollar cost needs per-model pricing — use spend tooling.
-- Tests redirect state with `SINGULARITY_HOME=<scratch temp>` set before importing `agents.mjs`.
+- Tests redirect state with `SINGULARITY_HOME=<scratch temp>` set before a **dynamic** `import('./agents.mjs')` (static imports hoist above the env assignment; `app-dir.mjs` throws without it).
 - Config editor writes 3 `settings.json` scopes (user / project / project-local) with `.bak` backup + JSON validate; paths derived server-side, client never supplies a path.
 
 Surgical edits and goal-driven testing are covered in `~/.claude/CLAUDE.md`.

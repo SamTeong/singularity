@@ -2,3 +2,4 @@ node_modules/
 web/dist/
 *.log
 *.local.*
+.env

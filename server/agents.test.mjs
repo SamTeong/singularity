@@ -8,8 +8,8 @@
 // verify fork()'s transcript copy/rewrite (which runs before create() is
 // called) but not the returned-agent fields, since fork() throws before
 // returning. SINGULARITY_HOME is pointed at a scratch temp dir first (create()/
-// fork() persist() to APP_DIR/agents.json — else it'd clobber the user's real
-// agents.json), mirroring crons.test.mjs's convention: env tweaks before a
+// fork() persist() to APP_DIR/state/agents.json — else it'd clobber the user's
+// real agents.json), mirroring crons.test.mjs's convention: env tweaks before a
 // dynamic import of the module graph.
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
@@ -22,6 +22,11 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-agents-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 process.env.CLAUDE_BIN = join(scratch, 'not-an-exe'); // exists, not a valid executable → spawn throws synchronously
 writeFileSync(process.env.CLAUDE_BIN, 'not a real executable');
+// OLLAMA_BIN points at an existing dummy so buildSpawn's ollama-wrap branch
+// returns launch args (exercised by the test below) instead of throwing
+// "ollama not found" — resolveBin has no PATH fallback, so it must be set.
+process.env.OLLAMA_BIN = join(scratch, 'not-ollama');
+writeFileSync(process.env.OLLAMA_BIN, 'not real');
 after(() => {
   rmSync(scratch, { recursive: true, force: true });
   // node-pty's spawn() (even the failed attempt inside the fork test below)
@@ -99,7 +104,7 @@ test('fork: copies+rewrites transcript, then throws on create()\'s spawn (see fi
   mkdirSync(dir, { recursive: true });
   const srcLog = join(dir, `${srcId}.jsonl`);
   writeFileSync(srcLog, `{"sessionId":"${srcId}","type":"user"}\n`);
-  const stateFile = join(scratch, 'singularity', 'agents.json');
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
     agents: [{ id: srcId, name: 'srcname', cwd: forkCwd, createdAt: Date.now(), model: 'claude', scopes: ['x'] }],
     recentRepos: [],
@@ -127,7 +132,7 @@ test('fork: copies+rewrites transcript, then throws on create()\'s spawn (see fi
 test('create: dead (exited) dup id resumes via reattach instead of "already in use"', () => {
   const deadId = '20000000-bbbb-cccc-dddd-200000000002';
   const deadCwd = scratch;
-  const stateFile = join(scratch, 'singularity', 'agents.json');
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
     agents: [{ id: deadId, name: 'deadname', cwd: deadCwd, createdAt: Date.now(), model: 'claude', scopes: [] }],
     recentRepos: [],
@@ -145,7 +150,7 @@ test('create: dead (exited) dup id resumes via reattach instead of "already in u
 // kill()'s can't (no real pty in a unit test).
 test('remove: dead (detached) agent is dropped from the registry', () => {
   const goneId = '30000000-cccc-dddd-eeee-300000000003';
-  const stateFile = join(scratch, 'singularity', 'agents.json');
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
     agents: [{ id: goneId, name: 'gonename', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
     recentRepos: [],

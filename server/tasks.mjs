@@ -14,14 +14,14 @@ import { statsFor } from './stats.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const STATUSLINE_SCRIPT = join(__dirname, 'statusline-capture.mjs');
 
-const TASKS_FILE = join(reg.APP_DIR, 'tasks.json');
-const WORKTREE_ROOT = join(reg.APP_DIR, 'worktrees');
-// Ticket artifacts (Requirements.md + Plan.md) live under the app dir — stable and
+const TASKS_FILE = join(reg.STATE_DIR, 'tasks.json');
+const WORKTREE_ROOT = reg.WORKTREES_DIR;
+// Ticket artifacts (Requirements.md + Plan.md) live under state/ — stable and
 // cwd-independent, since a task's working directory varies (worktree or arbitrary
 // repo) and the source of truth can't live there.
-const TICKETS_ROOT = join(reg.APP_DIR, 'tickets');
+const TICKETS_ROOT = join(reg.STATE_DIR, 'tickets');
 const COLUMNS = ['todo', 'inprogress', 'inreview', 'done'];
-const PORT = Number(process.env.PORT ?? 4317);
+const PORT = Number(process.env.PORT);
 const MAX_REVIEW_REJECTS = 3;
 const RETENTION_MS = 7 * 24 * 3600 * 1000; // Done cards auto-conclude to history after this long.
 
@@ -76,7 +76,7 @@ export function snapshotTasks() { return { tasks: [...tasks.values()], history }
 
 // The whole autonomous workflow lives in this prompt — the daemon only stores
 // column/state and kills the session on 'done'. Transitions are prompt-driven.
-function buildTaskPrompt(t) {
+export function buildTaskPrompt(t) {
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
     `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
@@ -85,6 +85,26 @@ function buildTaskPrompt(t) {
   const ollama = !isClaudeModel(t.model);
   const implModel = ollama ? t.model : 'sonnet';
   const reviewerModel = ollama ? t.model : 'opus';
+  // Project agent defs: if the task's cwd ships .claude/agents/<role>.md, route
+  // subagents through that def (it carries the repo's stack + security rules)
+  // instead of a generic Task-tool subagent. Discovery is deterministic here —
+  // the orchestrator just uses the name we hand it. Defs are only present when
+  // tracked in the repo (worktrees check out tracked files), so absent → generic
+  // fallback. Model override still applies (defs have no model pin).
+  const taskCwd = t.worktree || t.repo;
+  const hasDef = (name) => existsSync(join(taskCwd, '.claude', 'agents', `${name}.md`));
+  const implAgent = hasDef('senior-software-engineer') ? 'senior-software-engineer'
+    : hasDef('junior-software-engineer') ? 'junior-software-engineer' : null;
+  const reviewerAgent = hasDef('reviewer') ? 'reviewer' : null;
+  const implSpawn = implAgent
+    ? `Use the Task tool with subagents (subagent_type: "${implAgent}", model: ${implModel}) for the implementation work where it helps; small changes you may do directly. The subagent def carries this repo's stack rules — still tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.`
+    : `Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.`;
+  const fixSub = implAgent
+    ? `subagent (subagent_type: "${implAgent}", model: ${implModel})`
+    : `${implModel} subagent`;
+  const reviewSpawn = (examine) => reviewerAgent
+    ? `spawn a reviewer subagent via the Task tool (subagent_type: "${reviewerAgent}", model: ${reviewerModel}). The reviewer def carries this repo's security checklist; the reviewer must ${examine} against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback`
+    : `spawn a reviewer subagent via the Task tool with model: ${reviewerModel}. The reviewer must ${examine} against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback`;
   const intro = `You are the orchestrator for the task "${t.title}" on a kanban board.
 
 ## Requirements
@@ -107,13 +127,13 @@ ${t.description}`;
    ${status('todo', 'awaiting plan approval')}` : ' No user approval of the plan is required — proceed once your questions (if any) are answered.'} Write the finalized plan to \`${t.ticketDir}/Plan.md\` before implementing.
 3. **Implement**: first run
    ${status('inprogress', 'implementing')}
-   then implement the plan. Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.
+   then implement the plan. ${implSpawn}
 4. **Review**: run
    ${status('inreview', 'reviewing')}
-   and spawn a reviewer subagent via the Task tool with model: ${reviewerModel}. The reviewer must independently examine the files you changed against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback.
+   and ${reviewSpawn('independently examine the files you changed')}.
 5. **On REJECT**: run
    ${status('inprogress', 'fixing (review N/' + MAX_REVIEW_REJECTS + ')')}
-   (N = rejection count), have a ${implModel} subagent implement the fixes and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
+   (N = rejection count), have a ${fixSub} implement the fixes and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
    ${status('inreview', 'parked — needs human')}
    summarize the blockers here in the terminal, and end your involvement.
 6. **On PASS**: conclude with a one-line summary of what was done and run
@@ -137,13 +157,13 @@ ${t.description}`;
    ${status('todo', 'awaiting plan approval')}` : ' No user approval of the plan is required — proceed once your questions (if any) are answered.'} Write the finalized plan to \`${t.ticketDir}/Plan.md\` before implementing.
 3. **Implement**: first run
    ${status('inprogress', 'implementing')}
-   then implement the plan. Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.
+   then implement the plan. ${implSpawn}
 4. **Review**: commit your work on ${t.branch}, then run
    ${status('inreview', 'reviewing')}
-   and spawn a reviewer subagent via the Task tool with model: ${reviewerModel}. The reviewer must independently examine the diff against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback on what must change.
+   and ${reviewSpawn('independently examine the diff')} on what must change.
 5. **On REJECT**: run
    ${status('inprogress', 'fixing (review N/' + MAX_REVIEW_REJECTS + ')')}
-   (N = rejection count), have a ${implModel} subagent implement the fixes, commit, and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
+   (N = rejection count), have a ${fixSub} implement the fixes, commit, and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
    ${status('inreview', 'parked — needs human')}
    summarize the blockers here in the terminal, and end your involvement.
 6. **On PASS**: apply the merge policy above (if it conflicts: run ${status('inreview', 'parked — merge conflict')} and stop). Then conclude with a one-line summary of what was done and run
@@ -174,7 +194,7 @@ export function createTask({ repo, title, description, model, scopes, requirePla
     model, scopes, requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
     column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
   };
-  // Statusline capture: per-session cost/duration written to APP_DIR/cost/<id>.json
+  // Statusline capture: per-session cost/duration written to state/cost/<id>.json
   // (read by stats.mjs). Passed as extraArgs so it also survives reattach.
   const extraArgs = ['--settings', JSON.stringify({ statusLine: { type: 'command', command: `node "${STATUSLINE_SCRIPT}"` } })];
   try {
