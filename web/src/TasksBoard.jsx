@@ -106,7 +106,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                   <TableRow key={h.id}>
                     <TableCell>{h.title}</TableCell>
                     <TableCell>{repoName(h.repo)}</TableCell>
-                    <TableCell>{h.branch}</TableCell>
+                    <TableCell>{h.branch || '—'}</TableCell>
                     <TableCell><Chip size="small" label={h.outcome} sx={{ height: 20, fontSize: 11 }} /></TableCell>
                     <TableCell>{fmtMs(s?.busyMs) || '—'}</TableCell>
                     <TableCell>{fmtMs(s?.apiMs) || '—'}</TableCell>
@@ -178,7 +178,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                           <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }} noWrap>{task.title}</Typography>
                           <Stack direction="row" className="card-act" sx={{ transition: 'opacity .15s' }}>
                             {col === 'done' && (
-                              <Tooltip title="Remove (worktree already gone; branch kept)" disableInteractive>
+                              <Tooltip title={task.branch ? 'Remove (worktree already gone; branch kept)' : 'Remove (moves to history)'} disableInteractive>
                                 <IconButton
                                   size="small"
                                   sx={{ mt: -0.5 }}
@@ -191,13 +191,13 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                                 </IconButton>
                               </Tooltip>
                             )}
-                            <Tooltip title="Abandon task (removes worktree, keeps branch)" disableInteractive>
+                            <Tooltip title={task.branch ? 'Abandon task (removes worktree, keeps branch)' : 'Abandon task (working directory left untouched)'} disableInteractive>
                               <IconButton
                                 size="small"
                                 sx={{ mt: -0.5, mr: -0.5 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (window.confirm(`Abandon task "${task.title}"? The worktree is removed; branch ${task.branch} is kept.`)) onConclude(task.id, 'abandoned');
+                                  if (window.confirm(task.branch ? `Abandon task "${task.title}"? The worktree is removed; branch ${task.branch} is kept.` : `Abandon task "${task.title}"? The working directory is left untouched.`)) onConclude(task.id, 'abandoned');
                                 }}
                               >
                                 <OutlinedFlagOutlinedIcon fontSize="small" />
@@ -206,7 +206,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                           </Stack>
                         </Stack>
                         <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }} noWrap>
-                          {repoName(task.repo)} · {task.branch}
+                          {repoName(task.repo)}{task.branch ? ` · ${task.branch}` : ''}
                         </Typography>
                         {line && (
                           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }} noWrap>

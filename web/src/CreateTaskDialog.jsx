@@ -79,7 +79,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
               options={recent}
               inputValue={cwd}
               onInputChange={(_, v) => setCwd(v)}
-              renderInput={(params) => <TextField {...params} size="small" label="repo path (git)" spellCheck={false} />}
+              renderInput={(params) => <TextField {...params} size="small" label="working directory" spellCheck={false} />}
             />
             <Tooltip title="Browse…">
               <IconButton onClick={onBrowse}><FolderOpenIcon /></IconButton>
@@ -102,12 +102,12 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
           />
           <FormControlLabel
             control={<Checkbox size="small" sx={{ py: 0.25 }} checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} />}
-            label="require plan approval before work starts"
+            label="require plan approval"
           />
           <FormControlLabel
             sx={{ mt: -2 }}
             control={<Checkbox size="small" sx={{ py: 0.25 }} checked={mergeMode === 'auto'} onChange={(e) => setMergeMode(e.target.checked ? 'auto' : 'manual')} />}
-            label="auto-merge on pass"
+            label="auto-merge on pass (git repos only)"
           />
           {error && <Typography variant="body2" color="error">{error}</Typography>}
         </Stack>

@@ -28,6 +28,11 @@ function git(repo, ...args) {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
 }
 
+function isGitWorkTree(repo) {
+  try { return git(repo, 'rev-parse', '--is-inside-work-tree') === 'true'; }
+  catch { return false; }
+}
+
 function persist() {
   try {
     writeFileSync(TASKS_FILE + '.tmp', JSON.stringify({ tasks: [...tasks.values()], history }, null, 2));
@@ -70,11 +75,41 @@ function buildTaskPrompt(t) {
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
     `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
-  return `You are the orchestrator for the task "${t.title}" on a kanban board.
+  const intro = `You are the orchestrator for the task "${t.title}" on a kanban board.
 
 ## Requirements
 
-${t.description}
+${t.description}`;
+  if (t.kind === 'plain') {
+    return `${intro}
+
+## Environment
+
+- You are working directly in \`${t.repo}\` (not a git repo). Make all changes in place.
+- You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.
+
+## Workflow
+
+1. **Analyze** the requirements against the codebase. If anything is ambiguous or underspecified, ask the user clarifying questions here in this terminal and wait for their answers. While waiting, run:
+   ${status('todo', 'clarifying')}
+2. **Plan** the implementation.${t.requirePlanApproval ? ` Present the plan here and wait for the user to approve it before writing any code. While waiting, run:
+   ${status('todo', 'awaiting plan approval')}` : ' No user approval of the plan is required — proceed once your questions (if any) are answered.'}
+3. **Implement**: first run
+   ${status('inprogress', 'implementing')}
+   then implement the plan. Use the Task tool with subagents (model: sonnet) for the implementation work where it helps; small changes you may do directly.
+4. **Review**: run
+   ${status('inreview', 'reviewing')}
+   and spawn a reviewer subagent via the Task tool with model: opus. The reviewer must independently examine the files you changed against the requirements and return a verdict: PASS, or REJECT with concrete feedback.
+5. **On REJECT**: run
+   ${status('inprogress', 'fixing (review N/' + MAX_REVIEW_REJECTS + ')')}
+   (N = rejection count), have a sonnet subagent implement the fixes and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
+   ${status('inreview', 'parked — needs human')}
+   summarize the blockers here in the terminal, and end your involvement.
+6. **On PASS**: conclude with a one-line summary of what was done and run
+   ${status('done', 'complete')}
+   as your very last action — the daemon terminates this session when the card reaches done.`;
+  }
+  return `${intro}
 
 ## Environment
 
@@ -106,26 +141,32 @@ ${t.description}
 
 export function createTask({ repo, title, description, model, scopes, requirePlanApproval, mergeMode }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
-  const baseBranch = git(repo, 'rev-parse', '--abbrev-ref', 'HEAD'); // also validates repo is git
+  if (!existsSync(repo)) throw new Error('working directory does not exist');
+  const kind = isGitWorkTree(repo) ? 'git' : 'plain';
   const id = randomUUID();
   const short = id.slice(0, 8);
-  const branch = `task/${short}`;
-  const worktree = join(WORKTREE_ROOT, short);
-  mkdirSync(WORKTREE_ROOT, { recursive: true });
-  git(repo, 'worktree', 'add', worktree, '-b', branch);
+  let baseBranch = null, branch = null, worktree = null, cwd = repo;
+  if (kind === 'git') {
+    baseBranch = git(repo, 'rev-parse', '--abbrev-ref', 'HEAD');
+    branch = `task/${short}`;
+    worktree = join(WORKTREE_ROOT, short);
+    mkdirSync(WORKTREE_ROOT, { recursive: true });
+    git(repo, 'worktree', 'add', worktree, '-b', branch);
+    cwd = worktree;
+  }
   const t = {
-    id, title: title.trim(), description: description.trim(), repo, worktree, branch, baseBranch,
-    model, scopes, requirePlanApproval: !!requirePlanApproval, mergeMode: mergeMode === 'auto' ? 'auto' : 'manual',
+    id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch,
+    model, scopes, requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
     column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
   };
   // Statusline capture: per-session cost/duration written to APP_DIR/cost/<id>.json
   // (read by stats.mjs). Passed as extraArgs so it also survives reattach.
   const extraArgs = ['--settings', JSON.stringify({ statusLine: { type: 'command', command: `node "${STATUSLINE_SCRIPT}"` } })];
   try {
-    const agent = reg.create({ cwd: worktree, name: t.title, model, scopes, prompt: buildTaskPrompt(t), permissionMode: 'acceptEdits', extraArgs });
+    const agent = reg.create({ cwd, name: t.title, model, scopes, prompt: buildTaskPrompt(t), permissionMode: 'acceptEdits', extraArgs });
     t.sessionId = agent.id;
   } catch (e) {
-    try { git(repo, 'worktree', 'remove', '--force', worktree); git(repo, 'branch', '-D', branch); } catch {}
+    if (kind === 'git') { try { git(repo, 'worktree', 'remove', '--force', worktree); git(repo, 'branch', '-D', branch); } catch {} }
     throw e;
   }
   tasks.set(id, t);
@@ -164,20 +205,22 @@ export async function concludeTask(id, outcome) {
   if (outcome !== 'completed' && outcome !== 'abandoned') throw new Error('bad outcome (expected completed|abandoned)');
   const t = tasks.get(id);
   if (!t) throw new Error('no such task');
-  const finalStats = t.sessionId ? statsFor([{ id: t.sessionId, cwd: t.worktree }])[t.sessionId] : null;
+  const finalStats = t.sessionId ? statsFor([{ id: t.sessionId, cwd: t.worktree ?? t.repo }])[t.sessionId] : null;
   const wasLive = reg.isLive(t.sessionId);
   if (wasLive) reg.kill(t.sessionId);
   // Windows: the just-killed pty process may still hold file locks for a
   // moment — wait for it to actually die before removing the worktree, or
   // `git worktree remove` fails and orphans the dir.
   for (let waited = 0; wasLive && reg.isLive(t.sessionId) && waited < 3000; waited += 200) await sleep(200);
-  // Worktree goes; the task branch stays (it may hold unmerged work).
-  try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
-  catch (e) {
-    logger?.warn({ err: e.message }, 'worktree remove failed — retrying once');
-    await sleep(1000);
+  if (t.kind !== 'plain') {
+    // Worktree goes; the task branch stays (it may hold unmerged work).
     try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
-    catch (e2) { logger?.warn({ err: e2.message }, 'worktree remove retry failed (already gone?)'); }
+    catch (e) {
+      logger?.warn({ err: e.message }, 'worktree remove failed — retrying once');
+      await sleep(1000);
+      try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
+      catch (e2) { logger?.warn({ err: e2.message }, 'worktree remove retry failed (already gone?)'); }
+    }
   }
   tasks.delete(id);
   history.push({ ...t, outcome, concludedAt: Date.now(), finalStats });
