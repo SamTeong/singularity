@@ -184,8 +184,9 @@ export function updateTask(id, { column, state }) {
     t.column = column;
     if (column === 'done' && !wasDone) {
       t.doneAt = Date.now();
-      // Task concluded — kill the pty so the session (and its cost) ends here.
-      if (reg.isLive(t.sessionId)) reg.kill(t.sessionId);
+      // Task concluded — remove the session outright (kills the pty, ending its
+      // cost) so it drops off the session list instead of lingering as 'exited'.
+      if (t.sessionId) reg.remove(t.sessionId);
     } else if (column !== 'done' && wasDone) {
       delete t.doneAt;
     }
