@@ -200,28 +200,31 @@ export function createTask({ repo, title, description, model, scopes, requirePla
     git(repo, 'worktree', 'add', worktree, '-b', branch);
     cwd = worktree;
   }
-  const ticketDir = join(TICKETS_ROOT, short);
-  mkdirSync(ticketDir, { recursive: true });
-  writeFileSync(join(ticketDir, 'Requirements.md'), `# ${title.trim()}\n\n${description.trim()}\n`);
-  const t = {
-    id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch, ticketDir,
-    model, scopes, requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
-    column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
-  };
-  // Statusline capture: per-session cost/duration written to state/cost/<id>.json
-  // (read by stats.mjs). Passed as extraArgs so it also survives reattach.
-  const extraArgs = ['--settings', JSON.stringify({ statusLine: { type: 'command', command: `node "${STATUSLINE_SCRIPT}"` } })];
+  // Everything from here on can fail (disk, spawn, ...) after `git worktree
+  // add` already succeeded — on any failure, best-effort clean up the
+  // worktree/branch before rethrowing so it doesn't orphan.
   try {
+    const ticketDir = join(TICKETS_ROOT, short);
+    mkdirSync(ticketDir, { recursive: true });
+    writeFileSync(join(ticketDir, 'Requirements.md'), `# ${title.trim()}\n\n${description.trim()}\n`);
+    const t = {
+      id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch, ticketDir,
+      model, scopes, requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
+      column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
+    };
+    // Statusline capture: per-session cost/duration written to state/cost/<id>.json
+    // (read by stats.mjs). Passed as extraArgs so it also survives reattach.
+    const extraArgs = ['--settings', JSON.stringify({ statusLine: { type: 'command', command: `node "${STATUSLINE_SCRIPT}"` } })];
     const agent = reg.create({ cwd, name: t.title, model, scopes, prompt: buildTaskPrompt(t), permissionMode: 'acceptEdits', extraArgs });
     t.sessionId = agent.id;
+    tasks.set(id, t);
+    persist();
+    emitTasks();
+    return t;
   } catch (e) {
     if (kind === 'git') { try { git(repo, 'worktree', 'remove', '--force', worktree); git(repo, 'branch', '-D', branch); } catch {} }
     throw e;
   }
-  tasks.set(id, t);
-  persist();
-  emitTasks();
-  return t;
 }
 
 export function updateTask(id, { column, state }) {

@@ -41,6 +41,7 @@ function requireEnv() {
   if (!reg.SCOPE_ROOT || !existsSync(reg.SCOPE_ROOT)) missing.push('SING_SCOPE_ROOT (skill-scopes dir)');
   if (!process.env.SING_USAGE_SKILL || !existsSync(process.env.SING_USAGE_SKILL)) missing.push('SING_USAGE_SKILL (path to claude-code-usage-report stats.mjs)');
   if (!process.env.SING_USAGE_REPORTS) missing.push('SING_USAGE_REPORTS (spend-report output dir)');
+  if (process.env.SING_TOKEN && !/^[A-Za-z0-9_-]+$/.test(process.env.SING_TOKEN)) missing.push('SING_TOKEN (set but contains characters outside [A-Za-z0-9_-])');
   if (missing.length) {
     throw new Error(`Required env vars missing — copy .env.example → .env and fill them in:\n  - ${missing.join('\n  - ')}`);
   }

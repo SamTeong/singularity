@@ -2,7 +2,8 @@
 // (claude-code, dotnet, myapp, …); each wiki is a recursive .md tree. Loose .md
 // files at the root are ignored — only top-level directories are wikis.
 // Read-only — no write/create: wikis are authored by the LLM, not the user.
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -22,21 +23,21 @@ export function resolveRoot(raw) {
 // Search runs per keystroke (250ms debounce); cache file lines by mtime so only
 // changed files are re-read from disk. stat-per-file is cheap; the read isn't.
 const lineCache = new Map(); // path -> { mtimeMs, lines }
-function readLines(p) {
+async function readLines(p) {
   let mtimeMs;
-  try { mtimeMs = statSync(p).mtimeMs; } catch { return null; }
+  try { mtimeMs = (await stat(p)).mtimeMs; } catch { return null; }
   const hit = lineCache.get(p);
   if (hit && hit.mtimeMs === mtimeMs) return hit.lines;
   let lines;
-  try { lines = readFileSync(p, 'utf8').split(/\r?\n/); } catch { return null; }
+  try { lines = (await readFile(p, 'utf8')).split(/\r?\n/); } catch { return null; }
   lineCache.set(p, { mtimeMs, lines });
   return lines;
 }
 
 // Top-level wiki directories under root (skip dot-dirs + vendored dirs).
-function wikiDirs(root) {
+async function wikiDirs(root) {
   let ents;
-  try { ents = readdirSync(root, { withFileTypes: true }); } catch { return []; }
+  try { ents = await readdir(root, { withFileTypes: true }); } catch { return []; }
   return ents
     .filter((d) => d.isDirectory() && !d.name.startsWith('.') && !SKIP_DIRS.has(d.name))
     .map((d) => ({ name: d.name, path: join(root, d.name) }))
@@ -45,15 +46,15 @@ function wikiDirs(root) {
 
 // Recursive .md walk under a wiki dir. Bounded by FILE_CAP. rel is relative to
 // the wiki dir, forward-slashed (e.g. "concepts/foo.md").
-function walk(wikiRoot, dir, out) {
+async function walk(wikiRoot, dir, out) {
   let ents;
-  try { ents = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  try { ents = await readdir(dir, { withFileTypes: true }); } catch { return; }
   for (const ent of ents) {
     if (ent.name.startsWith('.')) continue;
     const full = join(dir, ent.name);
     if (ent.isDirectory()) {
       if (SKIP_DIRS.has(ent.name)) continue;
-      walk(wikiRoot, full, out);
+      await walk(wikiRoot, full, out);
       if (out.length >= FILE_CAP) return;
     } else if (ent.isFile() && ent.name.toLowerCase().endsWith('.md')) {
       out.push({ path: full, rel: full.slice(wikiRoot.length).split(sep).join('/').replace(/^\//, '') });
@@ -74,15 +75,15 @@ export function isWikiPath(p, root) {
 }
 
 // Tree: one entry per top-level wiki dir, each carrying its recursive .md pages.
-export function listFiles(root) {
+export async function listFiles(root) {
   const r = resolveRoot(root);
   if (!r) return { wikis: [], capped: false, error: 'bad path' };
   if (!existsSync(r)) return { wikis: [], capped: false, error: 'not found' };
   const wikis = [];
   let capped = false;
-  for (const w of wikiDirs(r)) {
+  for (const w of await wikiDirs(r)) {
     const pages = [];
-    walk(w.path, w.path, pages);
+    await walk(w.path, w.path, pages);
     if (pages.length >= FILE_CAP) capped = true;
     wikis.push({ name: w.name, path: w.path, pages });
     if (wikis.reduce((n, x) => n + x.pages.length, 0) >= FILE_CAP) { capped = true; break; }
@@ -92,17 +93,17 @@ export function listFiles(root) {
 
 // Search across every wiki's pages. rel is "<wiki>/<page-rel>" so hits show
 // which wiki they belong to.
-export function searchWiki(q, root) {
+export async function searchWiki(q, root) {
   const ql = (q || '').toLowerCase();
   if (!ql) return { results: [], capped: false };
   const r = resolveRoot(root);
   if (!r || !existsSync(r)) return { results: [], capped: false };
   const results = [];
-  for (const w of wikiDirs(r)) {
+  for (const w of await wikiDirs(r)) {
     const pages = [];
-    walk(w.path, w.path, pages);
+    await walk(w.path, w.path, pages);
     for (const f of pages) {
-      const lines = readLines(f.path);
+      const lines = await readLines(f.path);
       if (!lines) continue;
       const file = f.rel.split('/').pop();
       const rel = `${w.name}/${f.rel}`;

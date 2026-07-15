@@ -19,6 +19,7 @@ process.stdin.on('end', () => {
   try { payload = JSON.parse(raw); } catch { process.exit(0); }
   const sessionId = payload?.session_id;
   if (!sessionId) process.exit(0);
+  if (!/^[0-9a-z-]+$/i.test(sessionId)) process.exit(0);
   const cost = payload.cost || {};
   const costUsd = typeof cost.total_cost_usd === 'number' ? cost.total_cost_usd : null;
   const apiMs = typeof cost.total_api_duration_ms === 'number' ? cost.total_api_duration_ms : null;

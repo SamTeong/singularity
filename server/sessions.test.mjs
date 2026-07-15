@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { readSession, sessionText } from './sessions.mjs';
+import { readSession, sessionText, searchSessions } from './sessions.mjs';
 
 const PROJECTS = join(homedir(), '.claude', 'projects');
 
@@ -55,6 +55,21 @@ test('sessionText: head+tail truncation keeps the opening and latest text plus t
     assert.ok(text.includes('HEAD_MARKER'), text);
     assert.ok(text.includes('TAIL_MARKER'), text);
     assert.ok(text.includes('[…truncated…]'), text);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('searchSessions: a target that stats fine but fails to read (e.g. a directory in its place) is skipped, no throw', async () => {
+  const project = 'sessions-test-vanish';
+  const id = 'ghost';
+  const dir = join(PROJECTS, project);
+  // A directory named like the session file: stat() succeeds (matching the
+  // real deleted-between-stat-and-read race), but readFile() throws (EISDIR).
+  mkdirSync(join(dir, `${id}.jsonl`), { recursive: true });
+  try {
+    const result = await searchSessions('anything', { project, id });
+    assert.deepEqual(result, { results: [], capped: false });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

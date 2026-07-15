@@ -172,7 +172,8 @@ async function sessionTextItems(p) {
   try { st = await stat(p); } catch { return null; }
   const hit = textCache.get(p);
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.items;
-  const s = await readSessionForSearch(p);
+  let s;
+  try { s = await readSessionForSearch(p); } catch { return null; }
   textCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, items: s });
   if (textCache.size > 200) textCache.delete(textCache.keys().next().value);
   return s;
