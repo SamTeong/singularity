@@ -25,6 +25,8 @@ scripts/   ollama-login.mjs helper
 
 Backend modules → routes in `server/index.mjs`. Add a concern = new module + route + co-located test.
 
+**New server route → also add its prefix to the Vite dev proxy** (`web/vite.config.mjs` `server.proxy`). Dev runs on :5317 and only proxies listed prefixes to the daemon (:4317); an unlisted route (e.g. `/skills`, `/skill`) falls through to the SPA shell → `fetch().json()` throws → "failed to load X" in the browser. `apply:'serve'` keeps proxy entries dev-only (daemon serves dist directly in prod).
+
 ## State
 
 Owned app state → `SINGULARITY_HOME` (required, no default — set in `.env`; `APP_DIR`):

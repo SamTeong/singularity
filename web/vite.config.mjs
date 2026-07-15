@@ -30,6 +30,8 @@ export default defineConfig({
       '/procs': 'http://127.0.0.1:4317',
       '/models': 'http://127.0.0.1:4317',
       '/skill-scopes': 'http://127.0.0.1:4317',
+      '/skills': 'http://127.0.0.1:4317',
+      '/skill': 'http://127.0.0.1:4317',
       '/config': 'http://127.0.0.1:4317',
       '/memory': 'http://127.0.0.1:4317',
       '/wiki': 'http://127.0.0.1:4317',

@@ -66,12 +66,12 @@ const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${
 const NAV = [
   { v: 'tasks', icon: <ViewKanbanIcon />, label: 'Tasks' },
   { v: 'cron', icon: <ScheduleIcon />, label: 'Cron' },
+  { v: 'sessions', icon: <HistoryIcon />, label: 'Sessions' },
+  { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
   { v: 'config', icon: <SettingsIcon />, label: 'Config' },
   { v: 'memory', icon: <BookIcon />, label: 'Memory' },
   { v: 'wiki', icon: <MenuBookIcon />, label: 'Wiki' },
   { v: 'skills', icon: <SchoolIcon />, label: 'Skills' },
-  { v: 'sessions', icon: <HistoryIcon />, label: 'Sessions' },
-  { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
 ];
 // Use theme.vars (the --mui-* CSS vars) not theme.palette — under cssVariables
 // theme.palette holds only the default (light) scheme's literals and won't switch
