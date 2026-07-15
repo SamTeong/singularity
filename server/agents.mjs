@@ -127,8 +127,16 @@ function wire(a) {
   });
   a.proc.onExit(({ exitCode }) => {
     clearTimeout(a.idleTimer);
-    setStatus(a, 'exited');
     a.proc = null;
+    // A task-completed session is dropped outright (see remove()) rather than
+    // left as a dead 'exited' row cluttering the session list.
+    if (a.removeOnExit) {
+      agents.delete(a.id);
+      persist();
+      emitList();
+      return;
+    }
+    setStatus(a, 'exited');
     const resumeCmd = isClaudeModel(a.model)
       ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
       : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
@@ -247,6 +255,20 @@ export function kill(id) {
   const a = agents.get(id);
   if (!a) return;
   if (a.proc) { a.proc.kill(); return; } // onExit -> status exited + persist
+  agents.delete(id);
+  persist();
+  emitList();
+}
+
+// Remove an agent from the registry entirely: a live pty is killed and the
+// entry dropped when it exits (removeOnExit); a dead/detached entry is dropped
+// immediately. Unlike kill(), which leaves a live agent as a resumable dead
+// 'exited' row, this is used when a task completes and its session should
+// leave the session list for good.
+export function remove(id) {
+  const a = agents.get(id);
+  if (!a) return;
+  if (a.proc) { a.removeOnExit = true; a.proc.kill(); return; } // onExit -> delete
   agents.delete(id);
   persist();
   emitList();

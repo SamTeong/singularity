@@ -32,7 +32,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create } = await import('./agents.mjs');
+const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot } = await import('./agents.mjs');
 
 test('encodeCwd replaces every non-alphanumeric (incl. dots) with "-"', () => {
   assert.equal(encodeCwd('C:\\git\\singularity'), 'C--git-singularity');
@@ -136,6 +136,24 @@ test('create: dead (exited) dup id resumes via reattach instead of "already in u
   // reattach → buildSpawn → spawn(CLAUDE_BIN=not-an-exe) throws synchronously,
   // proving we took the resume path, NOT the 'already in use' refusal.
   assert.throws(() => create({ sessionId: deadId, cwd: deadCwd, model: 'claude' }), /Cannot create process/);
+});
+
+// remove() on a dead/detached entry drops it from the registry immediately
+// (the task-done path: a completed session leaves the session list rather than
+// lingering as 'exited'). Seeded via init()+fake agents.json (no spawn); the
+// live-pty branch of remove() can't be exercised here for the same reason
+// kill()'s can't (no real pty in a unit test).
+test('remove: dead (detached) agent is dropped from the registry', () => {
+  const goneId = '30000000-cccc-dddd-eeee-300000000003';
+  const stateFile = join(scratch, 'singularity', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: goneId, name: 'gonename', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    recentRepos: [],
+  }));
+  init(); // loads goneId as 'detached', proc: null
+  assert.ok(snapshot().some((a) => a.id === goneId), 'seeded agent is present');
+  remove(goneId);
+  assert.ok(!snapshot().some((a) => a.id === goneId), 'agent removed after remove()');
 });
 
 test('buildSpawn: ollama model on resume injects --model to override stripped transcript model', () => {
