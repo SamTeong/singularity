@@ -174,7 +174,15 @@ export function buildSpawn({ id, name, cwd, model, scopes, permissionMode, extra
 // create new agent (id IS the claude --session-id)
 export function create({ cwd, name, model, scopes, sessionId, prompt, permissionMode, extraArgs }) {
   const id = (sessionId && sessionId.trim()) || randomUUID();
-  if (agents.has(id)) throw new Error('session id already in use');
+  const existing = agents.get(id);
+  if (existing) {
+    if (existing.proc) throw new Error('session id already in use');
+    // id belongs to an exited/detached agent (e.g. its claude proc died on a
+    // usage-limit hit and onExit left a dead 'exited' entry in the registry).
+    // The user re-entered the id to bring the conversation back → resume it
+    // rather than refusing. reattach keeps the original model + skill-scopes.
+    return reattach(id);
+  }
   const displayName = name || id.slice(0, 8);
   const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
   const proc = spawn(bin, args, { cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true });
@@ -211,6 +219,24 @@ export function reattach(id) {
   persist();
   emitList();
   return a;
+}
+
+// fork a session: copies the source's transcript (uuid rewritten to the new
+// id so claude's own history doesn't collide with the source) into a new
+// session log, then create()s a fresh agent over it — no log yet → create()
+// falls back to a fresh --session-id spawn, i.e. a config-only copy.
+export function fork(srcId, name) {
+  const src = agents.get(srcId);
+  if (!src) throw new Error('source not found');
+  const newId = randomUUID();
+  const dir = join(homedir(), '.claude', 'projects', encodeCwd(src.cwd));
+  const srcLog = join(dir, `${srcId}.jsonl`);
+  if (existsSync(srcLog)) {
+    const content = readFileSync(srcLog, 'utf8').replaceAll(srcId, newId); // uuid → collision-free global replace
+    writeFileSync(join(dir, `${newId}.jsonl`), content);
+  }
+  // no source log → nothing written → create() spawns fresh with --session-id (fallback = copy)
+  return create({ cwd: src.cwd, name, model: src.model, scopes: src.scopes, sessionId: newId });
 }
 
 export function input(id, data) { agents.get(id)?.proc?.write(data); }

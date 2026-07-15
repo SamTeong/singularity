@@ -1,11 +1,38 @@
-// Unit tests for the spawn/encoding logic: encodeCwd + buildSpawn.
+// Unit tests for the spawn/encoding logic: encodeCwd + buildSpawn, plus fork().
+// fork() ends with a real create() call, which spawns a real pty (node-pty) —
+// undesirable in a unit test (launches a real, live child process). CLAUDE_BIN
+// is pointed at a file that exists but isn't a valid executable, so node-pty's
+// spawn() fails fast with a synchronous throw instead of launching anything
+// (confirmed: even a spawn that exits immediately leaves a ConPTY handle that
+// doesn't release on kill() and hangs `node --test`). That lets the test
+// verify fork()'s transcript copy/rewrite (which runs before create() is
+// called) but not the returned-agent fields, since fork() throws before
+// returning. APPDATA is pointed at a scratch temp dir first (create()/fork()
+// persist() to APP_DIR/agents.json — else it'd clobber the user's real
+// agents.json), mirroring crons.test.mjs's convention: env tweaks before a
+// dynamic import of the module graph.
 // Run: npm test  (node --test server/)
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { encodeCwd, buildSpawn } from './agents.mjs';
+import { homedir, tmpdir } from 'node:os';
+
+const scratch = mkdtempSync(join(tmpdir(), 'singularity-agents-test-'));
+process.env.APPDATA = scratch;
+process.env.CLAUDE_BIN = join(scratch, 'not-an-exe'); // exists, not a valid executable → spawn throws synchronously
+writeFileSync(process.env.CLAUDE_BIN, 'not a real executable');
+after(() => {
+  rmSync(scratch, { recursive: true, force: true });
+  // node-pty's spawn() (even the failed attempt inside the fork test below)
+  // leaves a ConPTY handle that never releases on its own — force this file's
+  // isolated test-runner process (node:test's default --test-isolation=process
+  // spawns one node process per file) to exit rather than hang. Deferred a
+  // tick so node:test's own result reporting flushes first.
+  setImmediate(() => process.exit(0));
+});
+
+const { encodeCwd, buildSpawn, init, fork, create } = await import('./agents.mjs');
 
 test('encodeCwd replaces every non-alphanumeric (incl. dots) with "-"', () => {
   assert.equal(encodeCwd('C:\\git\\singularity'), 'C--git-singularity');
@@ -59,6 +86,56 @@ test('buildSpawn: existing session log switches to --resume', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// fork() reads the source agent out of the live registry — seeded here via
+// init()+a fake agents.json (the pattern init() itself uses to reload
+// detached agents after a daemon restart) rather than via create(), so
+// seeding the source never spawns anything either.
+test('fork: copies+rewrites transcript, then throws on create()\'s spawn (see file header)', () => {
+  const srcId = '10000000-aaaa-bbbb-cccc-100000000001';
+  const forkCwd = scratch;
+  const dir = join(homedir(), '.claude', 'projects', encodeCwd(forkCwd));
+  mkdirSync(dir, { recursive: true });
+  const srcLog = join(dir, `${srcId}.jsonl`);
+  writeFileSync(srcLog, `{"sessionId":"${srcId}","type":"user"}\n`);
+  const stateFile = join(scratch, 'singularity', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: srcId, name: 'srcname', cwd: forkCwd, createdAt: Date.now(), model: 'claude', scopes: ['x'] }],
+    recentRepos: [],
+  }));
+  try {
+    init(); // loads srcId into the registry as 'detached', proc: null — no spawn
+    assert.throws(() => fork(srcId, 'copyname'), /Cannot create process/);
+
+    // the transcript copy/rewrite ran before create()'s spawn threw.
+    const newFile = readdirSync(dir).find((f) => f !== `${srcId}.jsonl`);
+    assert.ok(newFile, 'a new session log was written');
+    const newId = newFile.replace('.jsonl', '');
+    const content = readFileSync(join(dir, newFile), 'utf8');
+    assert.ok(content.includes(`"sessionId":"${newId}"`));
+    assert.ok(!content.includes(srcId));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// create() refuses a live id ('session id already in use') but resumes a dead
+// one — a claude proc that exited (e.g. usage-limit hit) leaves an 'exited'
+// entry with proc:null in the registry; re-entering its id must resume the
+// conversation, not error. Seeded via init()+fake agents.json (no spawn).
+test('create: dead (exited) dup id resumes via reattach instead of "already in use"', () => {
+  const deadId = '20000000-bbbb-cccc-dddd-200000000002';
+  const deadCwd = scratch;
+  const stateFile = join(scratch, 'singularity', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: deadId, name: 'deadname', cwd: deadCwd, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    recentRepos: [],
+  }));
+  init(); // loads deadId as 'detached', proc: null
+  // reattach → buildSpawn → spawn(CLAUDE_BIN=not-an-exe) throws synchronously,
+  // proving we took the resume path, NOT the 'already in use' refusal.
+  assert.throws(() => create({ sessionId: deadId, cwd: deadCwd, model: 'claude' }), /Cannot create process/);
 });
 
 test('buildSpawn: ollama model on resume injects --model to override stripped transcript model', () => {
