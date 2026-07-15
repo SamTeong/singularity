@@ -40,7 +40,7 @@ function contextFor({ scope, project, id }) {
 // reader is driven incrementally so a buffer can straddle chunk boundaries.
 // Returns true if a terminal event (chat:done/chat:error) was already sent
 // (or the stream was aborted), false if the connection just ended quietly.
-async function consumeStream(body, send, chatId, signal) {
+export async function consumeStream(body, send, chatId, signal) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
