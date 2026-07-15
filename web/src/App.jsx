@@ -22,8 +22,8 @@ import TerminalIcon from '@mui/icons-material/Terminal';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
-import RemoveIcon from '@mui/icons-material/Remove';
-import OpenInFullIcon from '@mui/icons-material/OpenInFull';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import SettingsIcon from '@mui/icons-material/Settings';
 import BookIcon from '@mui/icons-material/Book';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
@@ -444,14 +444,10 @@ export default function App() {
 
       {/* Terminal dock — full width, below sidebar + view: session list (left) + selected terminal (right). */}
       <Box sx={(t) => ({ ...glass(t), position: 'relative', zIndex: t.zapac.layers.content, flexShrink: 0, height: dockMin ? 'auto' : dockH, mx: 1.5, mb: 1.5, mt: dockMin ? 1.5 : 0, borderRadius: `${t.zapac.radius.lg}px`, overflow: 'hidden', display: 'flex', flexDirection: 'column' })}>
-          <Stack direction="row" spacing={1} sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', borderBottom: dockMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` })}>
+          <Stack direction="row" spacing={1} onClick={toggleDock} title={dockMin ? 'Restore' : 'Minimize'} sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none', borderBottom: dockMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` })}>
             <SmartToyIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
             <Typography variant="subtitle2" sx={{ flex: 1 }} noWrap>Sessions</Typography>
-            <Tooltip title={dockMin ? 'Restore' : 'Minimize'} disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-              <IconButton size="small" onClick={toggleDock}>
-                {dockMin ? <OpenInFullIcon fontSize="small" /> : <RemoveIcon fontSize="small" />}
-              </IconButton>
-            </Tooltip>
+            {dockMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />}
           </Stack>
 
           {/* Body kept mounted while minimized (display:none) so terminals keep
