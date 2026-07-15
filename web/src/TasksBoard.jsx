@@ -18,7 +18,7 @@ import HistoryIcon from '@mui/icons-material/History';
 import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import VerticalAlignBottomIcon from '@mui/icons-material/VerticalAlignBottom';
+import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
 import VerticalSplitIcon from '@mui/icons-material/VerticalSplit';
 import { StatusPill } from '@zapac/mui-theme';
 import TranscriptView from './TranscriptView.jsx';
@@ -228,7 +228,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                   <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }} noWrap>{selRow.title}</Typography>
                   <Tooltip title={side === 'bottom' ? 'Dock right' : 'Dock bottom'} disableInteractive>
                     <IconButton size="small" onClick={toggleSide}>
-                      {side === 'bottom' ? <VerticalSplitIcon fontSize="small" /> : <VerticalAlignBottomIcon fontSize="small" />}
+                      {side === 'bottom' ? <VerticalSplitIcon fontSize="small" /> : <HorizontalSplitIcon fontSize="small" />}
                     </IconButton>
                   </Tooltip>
                   {panelMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />}
