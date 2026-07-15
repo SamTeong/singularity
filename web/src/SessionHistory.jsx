@@ -144,7 +144,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
         ) : (
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search sessions…" value={q} onChange={setQ} shortcut="" /></Box>
                 <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
               </Stack>
@@ -162,7 +162,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                 ))}
               </Stack>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
-                {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${sessions.length} sessions`}
+                {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${sessions.length} session${sessions.length === 1 ? '' : 's'}`}
               </Typography>
             </Box>
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
@@ -181,8 +181,8 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                     onClick={() => open(s)}
                     sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}
                   >
-                    <Typography variant="subtitle2" noWrap>{s.title || s.id}</Typography>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 0.25 }}>
+                    <Typography variant="subtitle2" noWrap>{s.title || `${s.id.slice(0, 8)}…`}</Typography>
+                    <Stack direction="row" spacing={1} sx={{ mt: 0.25, alignItems: 'center' }}>
                       <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{s.cwd || s.project}</Typography>
                     </Stack>
                     <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>{relTime(s.mtime)}</Typography>
@@ -193,7 +193,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
               {leftResults && leftResults.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
             <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${t.vars.palette.glass.stroke}`, flexShrink: 0 })}>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <Select size="small" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} sx={{ height: 34, '& .MuiSelect-select': { py: 0.5, fontSize: 12 } }}>
                   {[25, 50, 100].map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
                 </Select>

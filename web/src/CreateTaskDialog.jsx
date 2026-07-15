@@ -35,6 +35,11 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
     fetch('/skill-scopes').then((r) => r.json()).then((d) => setScopeList(d.scopes || [])).catch(() => {});
   }, [open]);
 
+  const reset = () => {
+    setTitle(''); setDescription(''); setScopes([]); setModel('');
+    setRequireApproval(false); setMergeMode('manual');
+  };
+
   const create = async () => {
     if (busy || !cwd.trim() || !title.trim() || !description.trim()) return;
     setBusy(true);
@@ -50,8 +55,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
       });
       const d = await r.json();
       if (!d.ok) { setError(d.error || 'create failed'); return; }
-      setTitle(''); setDescription(''); setScopes([]); setModel('');
-      setRequireApproval(false); setMergeMode('manual');
+      reset();
       onClose();
     } catch (e) {
       setError(e.message);
@@ -60,13 +64,15 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
     }
   };
 
+  const cancel = () => { reset(); onClose(); };
+
   if (!open) return null;
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>New task</DialogTitle>
       <DialogContent sx={{ pb: 1.5 }}>
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
-          <Stack direction="row" spacing={0.5} alignItems="center">
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
             <Autocomplete
               freeSolo
               fullWidth
@@ -107,7 +113,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
-        <Button size="small" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
+        <Button size="small" sx={{ px: 2 }} onClick={cancel}>Cancel</Button>
         <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={busy || !cwd.trim() || !title.trim() || !description.trim()}>Create</Button>
       </DialogActions>
     </Dialog>

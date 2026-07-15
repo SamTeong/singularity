@@ -51,9 +51,12 @@ function statsLine(s) {
 }
 
 // Kanban board (top pane of the Tasks view). Columns are fixed; cards move via
-// the daemon (agent curls) or a manual drag (override, no side effects beyond
-// the column label). Clicking a card selects its session's terminal below.
+// the daemon (agent curls) or a manual drag (override). Dragging into Done
+// kills the task's live agent session server-side, so that drop is confirmed.
+// Clicking a card selects its session's terminal below.
 // Header toggles to a History table (concluded tasks — completed or abandoned).
+const LIVE_STATUS = new Set(['starting', 'running', 'idle']);
+
 export default function TasksBoard({ tasks, history, agents, stats, activeId, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
   const [dragId, setDragId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -61,12 +64,17 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   const drop = (col) => {
     const t = tasks.find((x) => x.id === dragId);
     setDragId(null);
-    if (t && t.column !== col) onMove(t.id, col);
+    if (!t || t.column === col) return;
+    if (col === 'done') {
+      const agent = agents.find((a) => a.id === t.sessionId);
+      if (agent && LIVE_STATUS.has(agent.status) && !window.confirm(`Move "${t.title}" to Done? Its live agent session will be ended.`)) return;
+    }
+    onMove(t.id, col);
   };
 
   return (
     <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1}>
-      <Stack direction="row" alignItems="center" spacing={1}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
         <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Tasks</Typography>
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={showHistory ? <ViewKanbanOutlinedIcon /> : <HistoryIcon />} onClick={() => setShowHistory((v) => !v)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>
@@ -166,7 +174,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                           '&:hover .card-act': { opacity: 1 },
                         })}
                       >
-                        <Stack direction="row" alignItems="flex-start" spacing={0.5}>
+                        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'flex-start' }}>
                           <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }} noWrap>{task.title}</Typography>
                           <Stack direction="row" className="card-act" sx={{ transition: 'opacity .15s' }}>
                             {col === 'done' && (
@@ -205,7 +213,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                             {line}
                           </Typography>
                         )}
-                        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 0.5, flexWrap: 'wrap', rowGap: 0.5 }}>
+                        <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
                           {task.state && <Chip size="small" label={task.state} sx={{ height: 20, fontSize: 11 }} />}
                           {agent && <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>}
                         </Stack>

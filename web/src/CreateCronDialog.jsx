@@ -59,6 +59,10 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
   const desc = useMemo(() => describe(cronExpr.trim()), [cronExpr]);
   const canCreate = !busy && !!name.trim() && desc.ok && !!prompt.trim() && !!cwd.trim();
 
+  const reset = () => {
+    setName(''); setCronExpr('0 * * * *'); setPrompt(''); setScopes([]); setModel(''); setPermissionMode('acceptEdits'); setEnabled(true);
+  };
+
   const create = async () => {
     if (!canCreate) return;
     setBusy(true);
@@ -74,7 +78,7 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
       });
       const d = await r.json();
       if (!d.ok) { setError(d.error || 'create failed'); return; }
-      setName(''); setCronExpr('0 * * * *'); setPrompt(''); setScopes([]); setModel(''); setPermissionMode('acceptEdits'); setEnabled(true);
+      reset();
       onClose();
     } catch (e) {
       setError(e.message);
@@ -82,6 +86,8 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
       setBusy(false);
     }
   };
+
+  const cancel = () => { reset(); onClose(); };
 
   if (!open) return null;
   return (
@@ -96,7 +102,7 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
               {desc.ok ? `${desc.descr} · next ${new Date(desc.nextIso).toLocaleString()}` : `invalid: ${desc.descr}`}
             </Typography>
           </Stack>
-          <Stack direction="row" spacing={0.5} alignItems="center">
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
             <Autocomplete
               freeSolo fullWidth options={recent} inputValue={cwd}
               onInputChange={(_, v) => setCwd(v)}
@@ -126,7 +132,7 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
-        <Button size="small" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
+        <Button size="small" sx={{ px: 2 }} onClick={cancel}>Cancel</Button>
         <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={!canCreate}>Create</Button>
       </DialogActions>
     </Dialog>

@@ -93,7 +93,7 @@ export default function ConfigEditor({ cwd }) {
         />
       </Box>
 
-      <Stack direction="row" spacing={1.5} alignItems="center">
+      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
         <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={save} disabled={readOnly || !dirty || !!jsonError}>Save</Button>
         {jsonError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>invalid JSON: {jsonError}</Typography>}
         {msg && !jsonError && <Typography color={msg.sev === 'error' ? 'error' : 'success.main'} sx={{ fontSize: 13 }}>{msg.text}</Typography>}

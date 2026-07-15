@@ -56,7 +56,7 @@ export default function CronJobs({ crons, agents, onAdd, onToast }) {
 
   return (
     <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1}>
-      <Stack direction="row" alignItems="center" spacing={1}>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
         <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Cron jobs</Typography>
         <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>UTC</Typography>
         <Box sx={{ flex: 1 }} />

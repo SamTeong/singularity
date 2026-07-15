@@ -14,10 +14,11 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import Link from '@mui/material/Link';
-import { StatusPill, SearchInput } from '@zapac/mui-theme';
+import { StatusPill, SearchInput, EmptyState } from '@zapac/mui-theme';
 import DirPicker from './DirPicker.jsx';
 
 // Wiki root persists across sessions in localStorage (default ~/wiki).
@@ -109,7 +110,7 @@ export default function WikiPanel() {
         ) : (
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search wiki…" value={q} onChange={setQ} shortcut="" /></Box>
                 <Tooltip title="Pick wiki folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
@@ -118,7 +119,7 @@ export default function WikiPanel() {
               </Stack>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{root}</Typography>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
-                {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${wikis.length} wikis · ${pageCount}${capped ? '+' : ''} pages`}
+                {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${wikis.length} wiki${wikis.length === 1 ? '' : 's'} · ${pageCount}${capped ? '+' : ''} page${pageCount === 1 ? '' : 's'}`}
               </Typography>
             </Box>
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
@@ -126,7 +127,7 @@ export default function WikiPanel() {
                 results.map((it, i) => (
                   <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path} onClick={() => open(it)}
                     sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}>
-                    <Stack direction="row" spacing={1} alignItems="center">
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                       <StatusPill status="review">{it.rel.split('/')[0]}</StatusPill>
                       <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.rel.split('/').slice(1).join('/')}{it.line ? `:${it.line}` : ''}</Typography>
                     </Stack>
@@ -142,7 +143,7 @@ export default function WikiPanel() {
                         sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.25 }}>
                         <ListItemIcon sx={{ minWidth: 28 }}>{open2 ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
                         <ListItemIcon sx={{ minWidth: 24 }}>{open2 ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
-                        <ListItemText primary={w.name} primaryTypographyProps={{ variant: 'subtitle2', noWrap: true }} />
+                        <ListItemText primary={w.name} slotProps={{ primary: { variant: 'subtitle2', noWrap: true } }} />
                         <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{w.pages.length}</Typography>
                       </ListItemButton>
                       <Collapse in={open2} timeout="auto" unmountOnExit>
@@ -152,7 +153,7 @@ export default function WikiPanel() {
                             return (
                               <ListItemButton key={p.path} selected={sel?.path === p.path} onClick={() => openPage(w, p)}
                                 sx={{ pl: 5, borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}>
-                                <Stack direction="row" spacing={1} alignItems="center">
+                                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                                   {f && <StatusPill status="review">{f}</StatusPill>}
                                   <Typography variant="code" sx={{ fontSize: 11 }} noWrap>{p.rel.split('/').pop()}</Typography>
                                 </Stack>
@@ -177,7 +178,7 @@ export default function WikiPanel() {
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
         {!sel ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <Typography color="text.secondary">Select a page to view.</Typography>
+            <EmptyState icon={<MenuBookIcon />} title="Select a page" description="Browse a wiki on the left to view its content here." />
           </Box>
         ) : loadingFile ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>

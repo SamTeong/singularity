@@ -31,7 +31,7 @@ function Bar({ label, win }) {
         <Typography variant="code" sx={{ display: 'block', fontSize: 10, color: 'text.disabled' }}>{fmtWall(win.resetsAt)}</Typography>
       )}
       {win.models?.length > 0 && (
-        <Stack direction="row" spacing={1} flexWrap="wrap" sx={{ mt: 0.5 }}>
+        <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
           {win.models.map((m) => (
             <Typography key={m.model} variant="code" sx={{ fontSize: 10, color: 'text.secondary' }}>
               {m.model}: {m.pctUsed != null ? `${m.pctUsed}%` : `${m.requests} req`}
@@ -53,7 +53,7 @@ function ProviderCard({ label, u }) {
   };
   return (
     <Box sx={(t) => ({ p: 2, borderRadius: `${t.zapac.radius.md}px`, border: `1px solid ${t.vars.palette.glass.stroke}` })}>
-      <Stack direction="row" spacing={1} alignItems="baseline" sx={{ mb: 1.5 }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'baseline' }}>
         <Typography sx={{ fontSize: 15, fontWeight: 600 }}>{label}</Typography>
         {u?.plan && <Typography variant="code" sx={{ fontSize: 11, px: 0.75, py: 0.25, borderRadius: 1, bgcolor: 'action.selected', color: 'text.secondary', textTransform: 'capitalize' }}>{u.plan}</Typography>}
       </Stack>
@@ -83,7 +83,7 @@ function ProviderCard({ label, u }) {
 export default function UsageView({ usage, onRefresh }) {
   return (
     <Stack sx={{ height: '100%', p: 3, minHeight: 0, overflow: 'auto' }} spacing={2}>
-      <Stack direction="row" alignItems="center" spacing={1.5}>
+      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
         <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Usage</Typography>
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>

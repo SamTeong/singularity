@@ -31,12 +31,16 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
     fetch('/skill-scopes').then((r) => r.json()).then((d) => setScopeList(d.scopes || [])).catch(() => {});
   }, [open]);
 
+  const reset = () => { setName(''); setScopes([]); setSessionId(''); setModel(''); };
+
   const create = () => {
     if (!connected || !cwd.trim()) return;
     sendMsg({ t: 'create', cwd: cwd.trim(), name: name.trim(), model: model.trim(), scopes, sessionId: sessionId.trim() });
-    setName(''); setScopes([]); setSessionId(''); setModel('');
+    reset();
     onClose();
   };
+
+  const cancel = () => { reset(); onClose(); };
 
   if (!open) return null;
   return (
@@ -44,7 +48,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
       <DialogTitle>New agent</DialogTitle>
       <DialogContent sx={{ pb: 1.5 }}>
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
-          <Stack direction="row" spacing={0.5} alignItems="center">
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
             <Autocomplete
               freeSolo
               fullWidth
@@ -75,7 +79,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
-        <Button size="small" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
+        <Button size="small" sx={{ px: 2 }} onClick={cancel}>Cancel</Button>
         <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={!connected || !cwd.trim() || sessionIdInvalid}>Create</Button>
       </DialogActions>
     </Dialog>

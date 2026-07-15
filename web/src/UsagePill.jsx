@@ -11,7 +11,7 @@ function Meter({ label, win }) {
   const t = useTheme();
   const pct = win?.pctUsed;
   return (
-    <Stack direction="row" spacing={0.75} alignItems="center">
+    <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
       <Typography variant="code" sx={{ width: 16, fontSize: 10, color: 'text.secondary' }}>{label}</Typography>
       <Box sx={(th) => ({ flex: 1, height: 5, borderRadius: 3, bgcolor: th.vars.palette.glass.stroke, overflow: 'hidden' })}>
         <Box sx={{ width: `${Math.min(100, pct ?? 0)}%`, height: '100%', bgcolor: meterColor(t, pct), transition: 'width .3s' }} />
@@ -30,7 +30,7 @@ function ProviderRow({ label, u }) {
   const bad = !u.ok;
   return (
     <Box>
-      <Stack direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.25 }}>
+      <Stack direction="row" spacing={0.75} sx={{ mb: 0.25, alignItems: 'center' }}>
         <Typography sx={{ fontSize: 11, fontWeight: 600 }}>{label}</Typography>
         {u.plan && <Typography variant="code" sx={{ fontSize: 9, px: 0.5, borderRadius: 1, bgcolor: 'action.selected', color: 'text.secondary', textTransform: 'capitalize' }}>{u.plan}</Typography>}
         <Box sx={{ flex: 1 }} />

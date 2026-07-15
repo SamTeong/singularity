@@ -40,7 +40,7 @@ export default function DirPicker({ start, onPick, onClose }) {
 
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ p: 2, pb: 1 }}>
+      <Stack direction="row" spacing={1} sx={{ p: 2, pb: 1, alignItems: 'center' }}>
         <TextField fullWidth size="small" value={path} spellCheck={false}
           onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load(path)} />
         <Button size="small" variant="outlined" onClick={() => load(path)}>Go</Button>

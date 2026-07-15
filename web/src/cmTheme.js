@@ -10,5 +10,5 @@ export const cmTheme = EditorView.theme({
   '.cm-content': { fontFamily: '"JetBrains Mono", ui-monospace, SF Mono, Menlo, Consolas, monospace' },
   '.cm-activeLine': { backgroundColor: 'rgba(152,91,156,0.08)' },
   '.cm-activeLineGutter': { backgroundColor: 'transparent' },
-  '.cm-focused': { outline: 'none' },
+  '.cm-focused': { outline: 'none', boxShadow: 'inset 0 0 0 2px rgba(152,91,156,0.5)' },
 });

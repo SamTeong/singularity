@@ -9,10 +9,11 @@ import ListItemButton from '@mui/material/ListItemButton';
 import SaveIcon from '@mui/icons-material/Save';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import BookIcon from '@mui/icons-material/Book';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorView } from '@codemirror/view';
-import { StatusPill, SearchInput, useColorMode } from '@zapac/mui-theme';
+import { StatusPill, SearchInput, useColorMode, EmptyState } from '@zapac/mui-theme';
 import { cmTheme } from './cmTheme.js';
 
 export default function MemoryPanel() {
@@ -71,19 +72,19 @@ export default function MemoryPanel() {
         ) : (
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
-              <Stack direction="row" spacing={1} alignItems="center">
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search all memory…" value={q} onChange={setQ} shortcut="" /></Box>
                 <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
               </Stack>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
-                {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${files.length} files`}
+                {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${files.length} file${files.length === 1 ? '' : 's'}`}
               </Typography>
             </Box>
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
               {showing.map((it, i) => (
                 <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path && !results} onClick={() => open(it)}
                   sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}>
-                  <Stack direction="row" spacing={1} alignItems="center">
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <StatusPill status="review">{it.project}</StatusPill>
                     <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.file}{it.line ? `:${it.line}` : ''}</Typography>
                   </Stack>
@@ -100,7 +101,7 @@ export default function MemoryPanel() {
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
         {!sel ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <Typography color="text.secondary">Select a file to view or edit.</Typography>
+            <EmptyState icon={<BookIcon />} title="Select a file" description="Browse or search memory files on the left to view or edit here." />
           </Box>
         ) : loadingFile ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
@@ -113,7 +114,7 @@ export default function MemoryPanel() {
               <CodeMirror value={content} theme={mode === 'dark' ? 'dark' : 'light'} height="100%"
                 extensions={[EditorView.lineWrapping, markdown(), cmTheme]} onChange={(v) => { setContent(v); setDirty(true); }} />
             </Box>
-            <Stack direction="row" spacing={1.5} alignItems="center" sx={{ mt: 1.5 }}>
+            <Stack direction="row" spacing={1.5} sx={{ mt: 1.5, alignItems: 'center' }}>
               <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={save} disabled={!dirty}>Save</Button>
               {msg && <Typography color={msg.sev === 'error' ? 'error' : 'success.main'} sx={{ fontSize: 13 }}>{msg.text}</Typography>}
             </Stack>

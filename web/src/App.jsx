@@ -461,7 +461,7 @@ export default function App() {
                   <Stack sx={{ flex: 1, minWidth: 0 }} spacing={0.5}>
                     <Typography variant="subtitle2" noWrap>{a.name}</Typography>
                     <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{a.cwd}</Typography>
-                    <Stack direction="row" spacing={1} alignItems="center">
+                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                       <StatusPill status={KIND[a.status] ?? 'review'}>{a.status}</StatusPill>
                       {stats[a.id]?.turns > 0 && (
                         <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>
