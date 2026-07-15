@@ -13,7 +13,10 @@ const IDLE_MS = 2000; // no pty output for this long while running → 'idle' (w
 const RECENT_MAX = 10;
 
 // --- app-data dir ---
-export const APP_DIR = join(process.env.APPDATA || join(homedir(), '.config'), 'singularity');
+// All runtime state (agents.json, tasks.json, crons.json, worktrees/, cost/,
+// tickets/) lives here — a stable home dir shared with usage.mjs's ollama/usage
+// files. SINGULARITY_HOME overrides it (tests point it at a scratch temp dir).
+export const APP_DIR = process.env.SINGULARITY_HOME || join(homedir(), '.singularity');
 const STATE_FILE = join(APP_DIR, 'agents.json');
 const SCOPE_ROOT = join(homedir(), '.agents', 'skill-scopes');
 mkdirSync(APP_DIR, { recursive: true });

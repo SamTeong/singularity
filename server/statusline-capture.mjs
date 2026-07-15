@@ -6,7 +6,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
-const APP_DIR = join(process.env.APPDATA || join(homedir(), '.config'), 'singularity');
+const APP_DIR = process.env.SINGULARITY_HOME || join(homedir(), '.singularity');
 
 function fmtMs(ms) {
   const m = Math.round(ms / 60000);

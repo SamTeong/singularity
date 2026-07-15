@@ -17,6 +17,7 @@ import { listFiles as wikiFiles, searchWiki, readWikiFile } from './wiki.mjs';
 import { listSessions, readSession, searchSessions } from './sessions.mjs';
 import { statsFor } from './stats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
+import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
@@ -103,6 +104,20 @@ app.get('/agent-stats', async () => ({ stats: statsFor(reg.snapshot()) }));
 
 // Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
 app.get('/usage', async (req) => getUsage({ force: req.query.force === '1' }));
+
+// Spend report: newest self-contained HTML from the claude-code-usage-report
+// skill (rendered on demand by /spend/refresh, served whole to a sandboxed iframe).
+app.get('/spend/status', async () => reportStatus());
+app.get('/spend/report', async (req, reply) => {
+  const html = latestReportHtml();
+  if (html == null) return reply.code(404).send({ ok: false, error: 'no report' });
+  return reply.type('text/html').send(html);
+});
+app.post('/spend/refresh', async (req, reply) => {
+  const r = await generateReport();
+  if (!r.ok) reply.code(400);
+  return r;
+});
 
 // Dir picker: list subdirectories of `path` (browser can't read the FS). No file listing.
 app.get('/fs/browse', async (req, reply) => {

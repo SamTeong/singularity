@@ -1,9 +1,9 @@
 // Unit tests for cron job CRUD (createCron/updateCron/deleteCron/snapshotCrons)
 // — pure state, no reg.create spawns (fire/runCron are never called). crons.mjs
-// persists to APP_DIR/crons.json (APP_DIR derives from process.env.APPDATA via
-// agents.mjs), so APPDATA is pointed at a scratch temp dir *before* the module
-// graph is imported (dynamic import after the env tweak) to avoid touching the
-// user's real crons.json. Run: npm test  (node --test server/)
+// persists to APP_DIR/crons.json (APP_DIR derives from process.env.SINGULARITY_HOME
+// via agents.mjs), so SINGULARITY_HOME is pointed at a scratch temp dir *before* the
+// module graph is imported (dynamic import after the env tweak) to avoid touching
+// the user's real crons.json. Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-crons-test-'));
-process.env.APPDATA = scratch;
+process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 const { createCron, updateCron, deleteCron, snapshotCrons } = await import('./crons.mjs');

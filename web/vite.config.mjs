@@ -22,6 +22,7 @@ export default defineConfig({
       '/sessions': 'http://127.0.0.1:4317',
       '/session': 'http://127.0.0.1:4317',
       '/usage': 'http://127.0.0.1:4317',
+      '/spend': 'http://127.0.0.1:4317',
       '/tasks': 'http://127.0.0.1:4317',
       '/crons': 'http://127.0.0.1:4317',
     },

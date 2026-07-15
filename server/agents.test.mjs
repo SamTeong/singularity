@@ -7,8 +7,8 @@
 // doesn't release on kill() and hangs `node --test`). That lets the test
 // verify fork()'s transcript copy/rewrite (which runs before create() is
 // called) but not the returned-agent fields, since fork() throws before
-// returning. APPDATA is pointed at a scratch temp dir first (create()/fork()
-// persist() to APP_DIR/agents.json — else it'd clobber the user's real
+// returning. SINGULARITY_HOME is pointed at a scratch temp dir first (create()/
+// fork() persist() to APP_DIR/agents.json — else it'd clobber the user's real
 // agents.json), mirroring crons.test.mjs's convention: env tweaks before a
 // dynamic import of the module graph.
 // Run: npm test  (node --test server/)
@@ -19,7 +19,7 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-agents-test-'));
-process.env.APPDATA = scratch;
+process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 process.env.CLAUDE_BIN = join(scratch, 'not-an-exe'); // exists, not a valid executable → spawn throws synchronously
 writeFileSync(process.env.CLAUDE_BIN, 'not a real executable');
 after(() => {

@@ -1,12 +1,16 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
+import Collapse from '@mui/material/Collapse';
+import IconButton from '@mui/material/IconButton';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useTheme } from '@mui/material/styles';
 import { PROVIDERS, fmtReset, meterColor } from './usageUtil.js';
+import SpendView from './SpendView.jsx';
 
 const fmtWall = (iso) => {
   if (!iso) return '';
@@ -81,18 +85,37 @@ function ProviderCard({ label, u }) {
 
 // Full usage view (main pane). Both providers side by side, manual force-refresh.
 export default function UsageView({ usage, onRefresh }) {
+  const [open, setOpen] = useState(true);
   return (
-    <Stack sx={{ height: '100%', p: 3, minHeight: 0, overflow: 'auto' }} spacing={2}>
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-        <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Usage</Typography>
-        <Box sx={{ flex: 1 }} />
-        <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
+    <Stack sx={{ height: '100%', minHeight: 0 }}>
+      <Stack sx={{ p: 3, pb: 2, flexShrink: 0 }} spacing={2}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <IconButton
+            size="small"
+            onClick={() => setOpen((o) => !o)}
+            aria-label={open ? 'Collapse usage' : 'Expand usage'}
+            sx={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .2s' }}
+          >
+            <ExpandMoreIcon />
+          </IconButton>
+          <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Usage</Typography>
+          <Box sx={{ flex: 1 }} />
+          <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
+        </Stack>
+        <Collapse in={open}>
+          <Stack spacing={2}>
+            <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+              Account-wide 5-hour session and 7-day weekly limits. Cached ~60s; Refresh forces a live pull.
+            </Typography>
+            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+              {PROVIDERS.map((p) => <ProviderCard key={p.key} label={p.label} u={usage?.[p.key]} />)}
+            </Box>
+          </Stack>
+        </Collapse>
       </Stack>
-      <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-        Account-wide 5-hour session and 7-day weekly limits. Cached ~60s; Refresh forces a live pull.
-      </Typography>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-        {PROVIDERS.map((p) => <ProviderCard key={p.key} label={p.label} u={usage?.[p.key]} />)}
+      {/* Spend report (claude-code-usage-report skill) fills the rest of the pane. */}
+      <Box sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${t.vars.palette.glass.stroke}` })}>
+        <SpendView />
       </Box>
     </Stack>
   );

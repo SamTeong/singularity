@@ -8,6 +8,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rename
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as reg from './agents.mjs';
+import { isClaudeModel } from './models.mjs';
 import { statsFor } from './stats.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -15,6 +16,10 @@ const STATUSLINE_SCRIPT = join(__dirname, 'statusline-capture.mjs');
 
 const TASKS_FILE = join(reg.APP_DIR, 'tasks.json');
 const WORKTREE_ROOT = join(reg.APP_DIR, 'worktrees');
+// Ticket artifacts (Requirements.md + Plan.md) live under the app dir — stable and
+// cwd-independent, since a task's working directory varies (worktree or arbitrary
+// repo) and the source of truth can't live there.
+const TICKETS_ROOT = join(reg.APP_DIR, 'tickets');
 const COLUMNS = ['todo', 'inprogress', 'inreview', 'done'];
 const PORT = Number(process.env.PORT ?? 4317);
 const MAX_REVIEW_REJECTS = 3;
@@ -75,6 +80,11 @@ function buildTaskPrompt(t) {
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
     `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+  // Subagent model routing: an ollama model runs the whole fleet on that same
+  // model (saves Claude budget); a claude model splits impl=sonnet, reviewer=opus.
+  const ollama = !isClaudeModel(t.model);
+  const implModel = ollama ? t.model : 'sonnet';
+  const reviewerModel = ollama ? t.model : 'opus';
   const intro = `You are the orchestrator for the task "${t.title}" on a kanban board.
 
 ## Requirements
@@ -86,6 +96,7 @@ ${t.description}`;
 ## Environment
 
 - You are working directly in \`${t.repo}\` (not a git repo). Make all changes in place.
+- Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (the requirements, already written for you) and \`Plan.md\` (you write it during planning). This is the stable source of truth — you and your subagents read from here, not the working directory.
 - You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.
 
 ## Workflow
@@ -93,16 +104,16 @@ ${t.description}`;
 1. **Analyze** the requirements against the codebase. If anything is ambiguous or underspecified, ask the user clarifying questions here in this terminal and wait for their answers. While waiting, run:
    ${status('todo', 'clarifying')}
 2. **Plan** the implementation.${t.requirePlanApproval ? ` Present the plan here and wait for the user to approve it before writing any code. While waiting, run:
-   ${status('todo', 'awaiting plan approval')}` : ' No user approval of the plan is required — proceed once your questions (if any) are answered.'}
+   ${status('todo', 'awaiting plan approval')}` : ' No user approval of the plan is required — proceed once your questions (if any) are answered.'} Write the finalized plan to \`${t.ticketDir}/Plan.md\` before implementing.
 3. **Implement**: first run
    ${status('inprogress', 'implementing')}
-   then implement the plan. Use the Task tool with subagents (model: sonnet) for the implementation work where it helps; small changes you may do directly.
+   then implement the plan. Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.
 4. **Review**: run
    ${status('inreview', 'reviewing')}
-   and spawn a reviewer subagent via the Task tool with model: opus. The reviewer must independently examine the files you changed against the requirements and return a verdict: PASS, or REJECT with concrete feedback.
+   and spawn a reviewer subagent via the Task tool with model: ${reviewerModel}. The reviewer must independently examine the files you changed against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback.
 5. **On REJECT**: run
    ${status('inprogress', 'fixing (review N/' + MAX_REVIEW_REJECTS + ')')}
-   (N = rejection count), have a sonnet subagent implement the fixes and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
+   (N = rejection count), have a ${implModel} subagent implement the fixes and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
    ${status('inreview', 'parked — needs human')}
    summarize the blockers here in the terminal, and end your involvement.
 6. **On PASS**: conclude with a one-line summary of what was done and run
@@ -115,6 +126,7 @@ ${t.description}`;
 
 - You are in a dedicated git worktree (${t.worktree}) on branch ${t.branch}, branched from ${t.baseBranch} of the main repo at ${t.repo}. Do all work here.
 - Merge policy: ${t.mergeMode === 'auto' ? `after the review passes, merge ${t.branch} into ${t.baseBranch} in the main repo (git -C "${t.repo}" merge ${t.branch}). If the merge conflicts, abort it and park the task instead (see below).` : `leave the branch for the user to merge — do NOT merge or push.`}
+- Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (the requirements, already written for you) and \`Plan.md\` (you write it during planning). This is the stable source of truth — you and your subagents read from here, not the working directory.
 - You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.
 
 ## Workflow
@@ -122,16 +134,16 @@ ${t.description}`;
 1. **Analyze** the requirements against the codebase. If anything is ambiguous or underspecified, ask the user clarifying questions here in this terminal and wait for their answers. While waiting, run:
    ${status('todo', 'clarifying')}
 2. **Plan** the implementation.${t.requirePlanApproval ? ` Present the plan here and wait for the user to approve it before writing any code. While waiting, run:
-   ${status('todo', 'awaiting plan approval')}` : ' No user approval of the plan is required — proceed once your questions (if any) are answered.'}
+   ${status('todo', 'awaiting plan approval')}` : ' No user approval of the plan is required — proceed once your questions (if any) are answered.'} Write the finalized plan to \`${t.ticketDir}/Plan.md\` before implementing.
 3. **Implement**: first run
    ${status('inprogress', 'implementing')}
-   then implement the plan. Use the Task tool with subagents (model: sonnet) for the implementation work where it helps; small changes you may do directly.
+   then implement the plan. Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.
 4. **Review**: commit your work on ${t.branch}, then run
    ${status('inreview', 'reviewing')}
-   and spawn a reviewer subagent via the Task tool with model: opus. The reviewer must independently examine the diff against the requirements and return a verdict: PASS, or REJECT with concrete feedback on what must change.
+   and spawn a reviewer subagent via the Task tool with model: ${reviewerModel}. The reviewer must independently examine the diff against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback on what must change.
 5. **On REJECT**: run
    ${status('inprogress', 'fixing (review N/' + MAX_REVIEW_REJECTS + ')')}
-   (N = rejection count), have a sonnet subagent implement the fixes, commit, and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
+   (N = rejection count), have a ${implModel} subagent implement the fixes, commit, and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
    ${status('inreview', 'parked — needs human')}
    summarize the blockers here in the terminal, and end your involvement.
 6. **On PASS**: apply the merge policy above (if it conflicts: run ${status('inreview', 'parked — merge conflict')} and stop). Then conclude with a one-line summary of what was done and run
@@ -154,8 +166,11 @@ export function createTask({ repo, title, description, model, scopes, requirePla
     git(repo, 'worktree', 'add', worktree, '-b', branch);
     cwd = worktree;
   }
+  const ticketDir = join(TICKETS_ROOT, short);
+  mkdirSync(ticketDir, { recursive: true });
+  writeFileSync(join(ticketDir, 'Requirements.md'), `# ${title.trim()}\n\n${description.trim()}\n`);
   const t = {
-    id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch,
+    id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch, ticketDir,
     model, scopes, requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
     column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
   };
