@@ -1,6 +1,7 @@
 // buildTaskPrompt branches on whether the task's cwd ships project agent defs
 // (.claude/agents/<role>.md). These checks pin that branching: defs present →
-// subagents routed via subagent_type; absent → generic fallback.
+// subagents routed via subagent_type; absent → generic fallback, or (with the
+// caveman plugin enabled) the cavecrew fallback.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
@@ -32,7 +33,7 @@ function withAgents(files) {
 
 test('project agent defs present → subagents routed via subagent_type', () => {
   const cwd = withAgents(['reviewer.md', 'senior-software-engineer.md']);
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd });
+  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
   assert.match(p, /subagent_type: "reviewer"/);
   assert.match(p, /subagent_type: "senior-software-engineer"/);
   assert.match(p, /security checklist/);
@@ -41,7 +42,7 @@ test('project agent defs present → subagents routed via subagent_type', () => 
 
 test('no defs → generic fallback, no subagent_type', () => {
   const cwd = withAgents([]);
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd });
+  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
   assert.doesNotMatch(p, /subagent_type/);
   assert.match(p, /spawn a reviewer subagent via the Task tool with model/);
   rmSync(cwd, { recursive: true, force: true });
@@ -49,8 +50,24 @@ test('no defs → generic fallback, no subagent_type', () => {
 
 test('only junior def → impl routes to junior-software-engineer', () => {
   const cwd = withAgents(['junior-software-engineer.md']);
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd });
+  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
   assert.match(p, /subagent_type: "junior-software-engineer"/);
   assert.doesNotMatch(p, /senior-software-engineer/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('no defs + caveman plugin → cavecrew fallback', () => {
+  const cwd = withAgents([]);
+  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, true);
+  assert.match(p, /subagent_type: "caveman:cavecrew-reviewer"/);
+  assert.match(p, /caveman:cavecrew-investigator/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('project defs win over cavecrew', () => {
+  const cwd = withAgents(['reviewer.md', 'senior-software-engineer.md']);
+  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, true);
+  assert.doesNotMatch(p, /cavecrew/);
+  assert.match(p, /subagent_type: "reviewer"/);
   rmSync(cwd, { recursive: true, force: true });
 });

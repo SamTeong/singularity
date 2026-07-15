@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import * as reg from './agents.mjs';
 import { isClaudeModel } from './models.mjs';
 import { statsFor } from './stats.mjs';
@@ -48,6 +49,15 @@ function persist() {
 function emitTasks() { reg.bus.emit('tasks', snapshotTasks()); }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+// Caveman plugin (user scope) ships compressed cavecrew subagents — usable from
+// any cwd. Detected from ~/.claude/settings.json enabledPlugins.
+function cavecrewAvailable() {
+  try {
+    const s = JSON.parse(readFileSync(join(homedir(), '.claude', 'settings.json'), 'utf8'));
+    return Object.keys(s.enabledPlugins || {}).some((k) => k.startsWith('caveman@'));
+  } catch { return false; }
+}
+
 export function initTasks(log) {
   logger = log;
   try {
@@ -76,7 +86,7 @@ export function snapshotTasks() { return { tasks: [...tasks.values()], history }
 
 // The whole autonomous workflow lives in this prompt — the daemon only stores
 // column/state and kills the session on 'done'. Transitions are prompt-driven.
-export function buildTaskPrompt(t) {
+export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
     `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
@@ -90,7 +100,9 @@ export function buildTaskPrompt(t) {
   // instead of a generic Task-tool subagent. Discovery is deterministic here —
   // the orchestrator just uses the name we hand it. Defs are only present when
   // tracked in the repo (worktrees check out tracked files), so absent → generic
-  // fallback. Model override still applies (defs have no model pin).
+  // fallback. Model override still applies (defs have no model pin). When no
+  // def exists and the user-scope caveman plugin is enabled, fall back further
+  // to caveman's global compressed cavecrew subagents instead of generic ones.
   const taskCwd = t.worktree || t.repo;
   const hasDef = (name) => existsSync(join(taskCwd, '.claude', 'agents', `${name}.md`));
   const implAgent = hasDef('senior-software-engineer') ? 'senior-software-engineer'
@@ -98,13 +110,15 @@ export function buildTaskPrompt(t) {
   const reviewerAgent = hasDef('reviewer') ? 'reviewer' : null;
   const implSpawn = implAgent
     ? `Use the Task tool with subagents (subagent_type: "${implAgent}", model: ${implModel}) for the implementation work where it helps; small changes you may do directly. The subagent def carries this repo's stack rules — still tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.`
-    : `Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.`;
+    : `Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.${cavecrew ? ' For read-only exploration (locating code, mapping structure, listing usages), spawn subagent_type: "caveman:cavecrew-investigator" instead of a generic subagent — its output is compressed.' : ''}`;
   const fixSub = implAgent
     ? `subagent (subagent_type: "${implAgent}", model: ${implModel})`
     : `${implModel} subagent`;
   const reviewSpawn = (examine) => reviewerAgent
     ? `spawn a reviewer subagent via the Task tool (subagent_type: "${reviewerAgent}", model: ${reviewerModel}). The reviewer def carries this repo's security checklist; the reviewer must ${examine} against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback`
-    : `spawn a reviewer subagent via the Task tool with model: ${reviewerModel}. The reviewer must ${examine} against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback`;
+    : cavecrew
+      ? `spawn a reviewer subagent via the Task tool (subagent_type: "caveman:cavecrew-reviewer", model: ${reviewerModel}). The reviewer must ${examine} against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback`
+      : `spawn a reviewer subagent via the Task tool with model: ${reviewerModel}. The reviewer must ${examine} against the requirements and plan in \`${t.ticketDir}\` (\`Requirements.md\` + \`Plan.md\`) and return a verdict: PASS, or REJECT with concrete feedback`;
   const intro = `You are the orchestrator for the task "${t.title}" on a kanban board.
 
 ## Requirements
