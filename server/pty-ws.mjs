@@ -37,6 +37,17 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     for (const ws of sockets) send(ws, msg);
   });
 
+  // Heartbeat: prune dead sockets that never sent a TCP FIN (e.g. laptop sleep,
+  // network drop) instead of leaving them in `sockets` until OS timeout.
+  // terminate() below fires 'close', so the existing close handler still runs.
+  setInterval(() => {
+    for (const ws of wss.clients) {
+      if (ws.isAlive === false) { ws.terminate(); continue; }
+      ws.isAlive = false;
+      ws.ping();
+    }
+  }, 30_000).unref();
+
   wss.on('connection', (ws, req) => {
     // Browsers always send Origin on WS upgrades — reject cross-origin pages
     // (WS is not subject to CORS; without this any website can drive the ptys).
@@ -45,6 +56,8 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
       const t = new URL(req.url, 'http://localhost').searchParams.get('token');
       if (t !== token) { ws.close(1008, 'unauthorized'); return; }
     }
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
     ws.attached = new Set();
     sockets.add(ws);
     send(ws, { t: 'list', agents: reg.snapshot(), recentRepos: reg.getRecentRepos() });

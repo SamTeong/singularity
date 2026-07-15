@@ -26,5 +26,19 @@ export default defineConfig({
       '/crons': 'http://127.0.0.1:4317',
     },
   },
-  build: { outDir: 'dist', emptyOutDir: true },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // Split stable vendor code into its own cacheable chunks (index was ~1MB minified).
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return;
+          if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react';
+          if (/[\\/](@mui|@emotion)[\\/]/.test(id)) return 'mui';
+          if (/[\\/]@xterm[\\/]/.test(id)) return 'xterm';
+        },
+      },
+    },
+  },
 });
