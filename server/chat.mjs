@@ -19,16 +19,16 @@ const MAX_TOKENS = 2048;
 const ALL_CAP = 60000;   // scope 'all' context cap (chars)
 
 // Build the context block prepended to the identity string.
-function contextFor({ scope, project, id }) {
+async function contextFor({ scope, project, id }) {
   if (scope === 'one' && project && id) {
-    const text = sessionText(project, id);
+    const text = await sessionText(project, id);
     if (!text) return '\n\nThe selected session transcript is empty.';
     return `\n\nYou are answering questions about ONE Claude Code session. Below is its transcript. Cite turns by role when useful.\n\n<session>\n${text}\n</session>`;
   }
   // scope 'all': a directory of the most recent sessions (metadata only — full
   // text of every session won't fit). The user can open/search a specific one
   // to drill in.
-  const dirs = listSessions({ cap: 100 });
+  const dirs = await listSessions({ cap: 100 });
   if (!dirs.length) return '\n\nNo sessions found.';
   const lines = dirs.map((s) => `- ${s.title || s.id}  (${s.cwd || s.project}, ${new Date(s.mtime).toISOString().slice(0, 10)})`);
   let text = lines.join('\n');
@@ -82,7 +82,7 @@ export async function streamChat({ chatId, question, scope = 'one', project, id,
     send({ t: 'chat:error', chatId, needsAuth: true, msg: 'Claude not signed in — run `claude` to log in' });
     return;
   }
-  const system = IDENTITY + contextFor({ scope, project, id });
+  const system = IDENTITY + await contextFor({ scope, project, id });
   const messages = [...history, { role: 'user', content: question }];
 
   let resp;

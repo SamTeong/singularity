@@ -20,7 +20,7 @@ function writeSession(project, id, lines) {
   return dir;
 }
 
-test('readSession: valid lines parse, a garbage/truncated line is skipped, no throw', () => {
+test('readSession: valid lines parse, a garbage/truncated line is skipped, no throw', async () => {
   const project = 'sessions-test-parse';
   const id = 'fixture-1';
   const dir = writeSession(project, id, [
@@ -29,7 +29,7 @@ test('readSession: valid lines parse, a garbage/truncated line is skipped, no th
     JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi there' }] }, timestamp: '2026-07-15T00:00:01Z' }),
   ]);
   try {
-    const s = readSession(project, id);
+    const s = await readSession(project, id);
     assert.equal(s.ok, true);
     assert.equal(s.meta.turns, 1);
     assert.deepEqual(s.messages, [
@@ -41,7 +41,7 @@ test('readSession: valid lines parse, a garbage/truncated line is skipped, no th
   }
 });
 
-test('sessionText: head+tail truncation keeps the opening and latest text plus the marker', () => {
+test('sessionText: head+tail truncation keeps the opening and latest text plus the marker', async () => {
   const project = 'sessions-test-trunc';
   const id = 'fixture-2';
   const dir = writeSession(project, id, [
@@ -51,7 +51,7 @@ test('sessionText: head+tail truncation keeps the opening and latest text plus t
     JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'TAIL_MARKER' }] } }),
   ]);
   try {
-    const text = sessionText(project, id, 50); // small custom cap forces truncation
+    const text = await sessionText(project, id, 50); // small custom cap forces truncation
     assert.ok(text.includes('HEAD_MARKER'), text);
     assert.ok(text.includes('TAIL_MARKER'), text);
     assert.ok(text.includes('[…truncated…]'), text);
@@ -60,10 +60,10 @@ test('sessionText: head+tail truncation keeps the opening and latest text plus t
   }
 });
 
-test('readSession: pathFor rejects project/id containing ".." or separators', () => {
-  assert.deepEqual(readSession('..', 'foo'), { ok: false, error: 'not found' });
-  assert.deepEqual(readSession('proj/evil', 'foo'), { ok: false, error: 'not found' });
-  assert.deepEqual(readSession('proj', '../escape'), { ok: false, error: 'not found' });
-  assert.deepEqual(readSession('proj', 'a\\b'), { ok: false, error: 'not found' });
-  assert.deepEqual(readSession('', 'foo'), { ok: false, error: 'not found' });
+test('readSession: pathFor rejects project/id containing ".." or separators', async () => {
+  assert.deepEqual(await readSession('..', 'foo'), { ok: false, error: 'not found' });
+  assert.deepEqual(await readSession('proj/evil', 'foo'), { ok: false, error: 'not found' });
+  assert.deepEqual(await readSession('proj', '../escape'), { ok: false, error: 'not found' });
+  assert.deepEqual(await readSession('proj', 'a\\b'), { ok: false, error: 'not found' });
+  assert.deepEqual(await readSession('', 'foo'), { ok: false, error: 'not found' });
 });

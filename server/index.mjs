@@ -229,15 +229,15 @@ app.get('/wiki/file', async (req, reply) => {
 
 // Session history: list transcripts (reverse-chrono), read one, search across
 // all or one. Chat goes over the WS (streaming) — see pty-ws.mjs.
-app.get('/sessions', async (req) => ({ sessions: listSessions({ cap: Number(req.query.cap) || 5000 }) }));
+app.get('/sessions', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000 }) }));
 app.get('/session', async (req, reply) => {
   const { project, id } = req.query || {};
   if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
-  const r = readSession(project, id);
+  const r = await readSession(project, id);
   if (!r.ok) reply.code(404);
   return r;
 });
-app.get('/sessions/search', async (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id }));
+app.get('/sessions/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id }));
 
 reg.init(app.log);
 initTasks(app.log);

@@ -3,7 +3,8 @@
 // session; `project` is the encoded-cwd dirname (we pull the real cwd out of
 // the events themselves rather than decoding the lossy dirname). The chat
 // module reuses readSession()/sessionText() to build LLM context.
-import { existsSync, readdirSync, statSync, readFileSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync } from 'node:fs';
+import { readdir, stat, readFile, open } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 
@@ -26,16 +27,17 @@ function parseEvents(text) {
 
 // Read only the first PEEK_BYTES of a file — stat the size + head chunk so the
 // list endpoint never reads whole multi-MB transcripts. Returns null if gone.
-function peek(p) {
+async function peek(p) {
   let st;
-  try { st = statSync(p); } catch { return null; }
+  try { st = await stat(p); } catch { return null; }
   let head = '';
   try {
-    const fd = openSync(p, 'r');
-    const buf = Buffer.alloc(PEEK_BYTES);
-    const n = readSync(fd, buf, 0, Math.min(PEEK_BYTES, st.size), 0);
-    head = buf.slice(0, n).toString('utf8');
-    closeSync(fd);
+    const fh = await open(p, 'r');
+    try {
+      const buf = Buffer.alloc(PEEK_BYTES);
+      const { bytesRead } = await fh.read(buf, 0, Math.min(PEEK_BYTES, st.size), 0);
+      head = buf.slice(0, bytesRead).toString('utf8');
+    } finally { await fh.close(); }
   } catch {}
   return { st, head };
 }
@@ -56,18 +58,18 @@ function peekMeta(events) {
 // (mtime,size)-keyed cache holds the peeked meta so repeated list calls don't
 // re-read heads of unchanged files.
 const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title }
-export function listSessions({ cap = 5000 } = {}) {
+export async function listSessions({ cap = 5000 } = {}) {
   if (!existsSync(PROJECTS)) return [];
   const out = [];
-  for (const proj of readdirSync(PROJECTS, { withFileTypes: true })) {
+  for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {
     if (!proj.isDirectory()) continue;
     const dir = join(PROJECTS, proj.name);
     let files;
-    try { files = readdirSync(dir); } catch { continue; }
+    try { files = await readdir(dir); } catch { continue; }
     for (const f of files) {
       if (!f.endsWith('.jsonl')) continue;
       const p = join(dir, f);
-      const pk = peek(p);
+      const pk = await peek(p);
       if (!pk) continue;
       const { st } = pk;
       let cwd = null, title = null;
@@ -105,10 +107,10 @@ function trunc(s, n) {
 // readSession: full parse into a renderable message list + meta. tool_use inputs
 // and tool_result bodies are truncated in the payload (the raw file is the
 // source of truth); text/thinking are kept whole for the chat context.
-export function readSession(project, id) {
+export async function readSession(project, id) {
   const p = pathFor(project, id);
   if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
-  const events = parseEvents(readFileSync(p, 'utf8'));
+  const events = parseEvents(await readFile(p, 'utf8'));
   const messages = [];
   let cwd = null, title = null, turns = 0, firstTs = null, lastTs = null;
   for (const e of events) {
@@ -146,8 +148,8 @@ export function readSession(project, id) {
 // sessionText: flatten a session into a compact transcript for LLM context.
 // [user]/[assistant] turns + [tool: name] calls; head+tail cap keeps both the
 // opening problem statement and the most recent turns when the log is long.
-export function sessionText(project, id, cap = TEXT_CAP) {
-  const s = readSession(project, id);
+export async function sessionText(project, id, cap = TEXT_CAP) {
+  const s = await readSession(project, id);
   if (!s.ok) return '';
   const lines = [];
   for (const m of s.messages) {
@@ -165,20 +167,20 @@ export function sessionText(project, id, cap = TEXT_CAP) {
 // {project,id} given, else every *.jsonl. Returns line-indexed matches capped
 // at RESULT_CAP. The text per message is cached by (mtime,size) like memory.mjs.
 const textCache = new Map(); // path -> { mtimeMs, size, items: [{role,text}] }
-function sessionTextItems(p) {
+async function sessionTextItems(p) {
   let st;
-  try { st = statSync(p); } catch { return null; }
+  try { st = await stat(p); } catch { return null; }
   const hit = textCache.get(p);
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.items;
-  const s = readSessionForSearch(p);
+  const s = await readSessionForSearch(p);
   textCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, items: s });
   if (textCache.size > 200) textCache.delete(textCache.keys().next().value);
   return s;
 }
 // Cheaper than readSession: keep text/thinking/tool whole-ish (truncate tool
 // bodies to a search-friendly 500) and drop the meta — search only needs text.
-function readSessionForSearch(p) {
-  const events = parseEvents(readFileSync(p, 'utf8'));
+async function readSessionForSearch(p) {
+  const events = parseEvents(await readFile(p, 'utf8'));
   const items = [];
   let cwd = null;
   for (const e of events) {
@@ -209,7 +211,7 @@ function snippet(text, at, q) {
   return (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
 }
 
-export function searchSessions(q, { project, id } = {}) {
+export async function searchSessions(q, { project, id } = {}) {
   const ql = (q || '').toLowerCase();
   if (!ql) return { results: [], capped: false };
   const targets = [];
@@ -217,17 +219,17 @@ export function searchSessions(q, { project, id } = {}) {
     const p = pathFor(project, id);
     if (p && existsSync(p)) targets.push({ project, id, path: p });
   } else if (existsSync(PROJECTS)) {
-    for (const proj of readdirSync(PROJECTS, { withFileTypes: true })) {
+    for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {
       if (!proj.isDirectory()) continue;
       const dir = join(PROJECTS, proj.name);
       let files;
-      try { files = readdirSync(dir); } catch { continue; }
+      try { files = await readdir(dir); } catch { continue; }
       for (const f of files) if (f.endsWith('.jsonl')) targets.push({ project: proj.name, id: f.slice(0, -6), path: join(dir, f) });
     }
   }
   const results = [];
   for (const t of targets) {
-    const items = sessionTextItems(t.path);
+    const items = await sessionTextItems(t.path);
     if (!items) continue;
     for (const it of items) {
       const at = it.text.toLowerCase().indexOf(ql);
