@@ -4,7 +4,7 @@
 // the events themselves rather than decoding the lossy dirname). The chat
 // module reuses readSession()/sessionText() to build LLM context.
 import { existsSync, readdirSync, statSync, readFileSync, openSync, readSync, closeSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
 
 const PROJECTS = join(homedir(), '.claude', 'projects');
@@ -85,7 +85,17 @@ export function listSessions({ cap = 5000 } = {}) {
   return out.slice(0, cap);
 }
 
-function pathFor(project, id) { return join(PROJECTS, project, `${id}.jsonl`); }
+// Path guard: project/id come from the client query — reject separators (no
+// nested traversal) and confirm the joined path still resolves under PROJECTS
+// (mirrors isWikiPath/isMemoryPath in wiki.mjs/memory.mjs).
+function pathFor(project, id) {
+  if (!project || !id || /[\\/]/.test(project) || /[\\/]/.test(id)) return null;
+  const p = join(PROJECTS, project, `${id}.jsonl`);
+  const root = resolve(PROJECTS);
+  const abs = resolve(p);
+  if (abs !== root && !abs.startsWith(root + sep)) return null;
+  return p;
+}
 
 function trunc(s, n) {
   s = typeof s === 'string' ? s : JSON.stringify(s);
@@ -97,7 +107,7 @@ function trunc(s, n) {
 // source of truth); text/thinking are kept whole for the chat context.
 export function readSession(project, id) {
   const p = pathFor(project, id);
-  if (!existsSync(p)) return { ok: false, error: 'not found' };
+  if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
   const events = parseEvents(readFileSync(p, 'utf8'));
   const messages = [];
   let cwd = null, title = null, turns = 0, firstTs = null, lastTs = null;
@@ -204,7 +214,7 @@ export function searchSessions(q, { project, id } = {}) {
   const targets = [];
   if (project && id) {
     const p = pathFor(project, id);
-    if (existsSync(p)) targets.push({ project, id, path: p });
+    if (p && existsSync(p)) targets.push({ project, id, path: p });
   } else if (existsSync(PROJECTS)) {
     for (const proj of readdirSync(PROJECTS, { withFileTypes: true })) {
       if (!proj.isDirectory()) continue;

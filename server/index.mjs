@@ -30,6 +30,10 @@ const TOKEN = process.env.SING_TOKEN || null;
 
 const app = Fastify({ logger: { level: 'info' } });
 
+// Safety net: the daemon hosts live PTY agents — an unhandled rejection must be
+// logged and survive, never crash the process.
+process.on('unhandledRejection', (e) => app.log.error({ err: e?.message ?? String(e) }, 'unhandled rejection'));
+
 // Browser cross-origin guard (DNS rebinding / drive-by pages hitting loopback).
 // The 127.0.0.1 bind does not stop the user's own browser acting as a confused
 // deputy: a malicious page can fetch/WS straight to localhost. Allow only our
@@ -222,7 +226,14 @@ initTasks(app.log);
 initCrons(app.log);
 initUsageAutoRefresh(reg.bus);
 
-const server = await app.listen({ host: HOST, port: PORT });
+let server;
+try {
+  server = await app.listen({ host: HOST, port: PORT });
+} catch (e) {
+  if (e.code === 'EADDRINUSE') app.log.error(`port ${PORT} already in use — is Singularity already running?`);
+  else app.log.error(e);
+  process.exit(1);
+}
 app.log.info(`daemon on ${server} (loopback only)${TOKEN ? ' [token required]' : ''}`);
 
 // WS shares the Fastify HTTP server.

@@ -4,7 +4,7 @@
 // 'tasks' on the shared agents bus; pty-ws fans it out.
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as reg from './agents.mjs';
@@ -29,8 +29,10 @@ function git(repo, ...args) {
 }
 
 function persist() {
-  try { writeFileSync(TASKS_FILE, JSON.stringify({ tasks: [...tasks.values()], history }, null, 2)); }
-  catch (e) { logger?.warn({ err: e.message }, 'tasks.json write failed'); }
+  try {
+    writeFileSync(TASKS_FILE + '.tmp', JSON.stringify({ tasks: [...tasks.values()], history }, null, 2));
+    renameSync(TASKS_FILE + '.tmp', TASKS_FILE); // atomic swap — a crash mid-write never truncates TASKS_FILE
+  } catch (e) { logger?.warn({ err: e.message }, 'tasks.json write failed'); }
 }
 
 function emitTasks() { reg.bus.emit('tasks', snapshotTasks()); }

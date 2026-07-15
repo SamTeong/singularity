@@ -210,9 +210,12 @@ async function fetchClaude() {
   const oauth = claudeOauthToken();
   if (!oauth) {
     // Distinguish no-creds vs expired for the UI's auth prompt.
-    const err = !existsSync(CREDENTIALS_PATH) ? 'no-credentials'
-      : !JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth?.accessToken ? 'no-token'
-      : 'token-expired';
+    let err;
+    if (!existsSync(CREDENTIALS_PATH)) err = 'no-credentials';
+    else {
+      try { err = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth?.accessToken ? 'token-expired' : 'no-token'; }
+      catch { err = 'bad credentials'; }
+    }
     return { ok: false, source: 'claude', needsAuth: true, error: err };
   }
 
@@ -301,7 +304,7 @@ function scheduleResetRefreshes(result) {
   for (const src of ['ollama', 'claude']) {
     for (const win of ['session', 'weekly']) {
       const delay = resetDelay(result[src]?.[win]?.resetsAt);
-      if (delay != null) resetTimers.push(setTimeout(() => getUsage({ force: true }), delay + 2000));
+      if (delay != null) resetTimers.push(setTimeout(() => getUsage({ force: true }).catch(() => {}), delay + 2000));
     }
   }
 }
@@ -314,6 +317,6 @@ export function initUsageAutoRefresh(bus) {
   bus.on('status', ({ status }) => {
     if (status !== 'idle') return;
     clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => getUsage({ force: true }), DEBOUNCE_MS);
+    idleTimer = setTimeout(() => getUsage({ force: true }).catch(() => {}), DEBOUNCE_MS);
   });
 }

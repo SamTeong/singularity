@@ -3,7 +3,7 @@
 import { spawn } from 'node-pty';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, delimiter } from 'node:path';
 import { homedir } from 'node:os';
 import { isClaudeModel } from './models.mjs';
@@ -49,8 +49,10 @@ function persist() {
     })),
     recentRepos,
   };
-  try { writeFileSync(STATE_FILE, JSON.stringify(data, null, 2)); }
-  catch (e) { logger?.warn({ err: e.message }, 'agents.json write failed — registry not persisted'); }
+  try {
+    writeFileSync(STATE_FILE + '.tmp', JSON.stringify(data, null, 2));
+    renameSync(STATE_FILE + '.tmp', STATE_FILE); // atomic swap — a crash mid-write never truncates STATE_FILE
+  } catch (e) { logger?.warn({ err: e.message }, 'agents.json write failed — registry not persisted'); }
 }
 
 export function init(log) {

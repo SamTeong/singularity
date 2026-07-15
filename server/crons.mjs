@@ -8,7 +8,7 @@
 // no past occurrence is ever replayed. Daemon down / machine asleep = the
 // in-process tick loop simply stops; on wake it resumes from now.
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { CronExpressionParser } from 'cron-parser';
 import * as reg from './agents.mjs';
@@ -24,8 +24,10 @@ const KILL_CONFIRM_MS = 6000; // kill only after this much sustained idle
 let logger = null;
 
 function persist() {
-  try { writeFileSync(CRONS_FILE, JSON.stringify({ crons: [...crons.values()] }, null, 2)); }
-  catch (e) { logger?.warn({ err: e.message }, 'crons.json write failed'); }
+  try {
+    writeFileSync(CRONS_FILE + '.tmp', JSON.stringify({ crons: [...crons.values()] }, null, 2));
+    renameSync(CRONS_FILE + '.tmp', CRONS_FILE); // atomic swap — a crash mid-write never truncates CRONS_FILE
+  } catch (e) { logger?.warn({ err: e.message }, 'crons.json write failed'); }
 }
 
 function emitCrons() { reg.bus.emit('crons', snapshotCrons()); }
@@ -49,6 +51,14 @@ export function initCrons(log) {
       log?.info({ crons: crons.size }, 'loaded crons.json');
     }
   } catch (e) { log?.warn({ err: e.message }, 'crons.json load failed'); }
+
+  // A cron-fired session still alive at the last shutdown reloads (via reg.init)
+  // as a dead 'detached' registry entry — reg never auto-kills it, so it'd sit
+  // there forever. Sweep those now that the registry is loaded.
+  for (const job of crons.values()) {
+    if (job.lastSessionId && reg.getStatus(job.lastSessionId) && !reg.isLive(job.lastSessionId)) reg.kill(job.lastSessionId);
+  }
+
   for (const job of crons.values()) if (job.enabled) recomputeNext(job);
 
   // Auto-kill on completion. A cron-fired agent going idle means its turn is
@@ -93,6 +103,7 @@ function spawnForJob(job) {
   job.lastSessionId = agent.id;
   job.lastFiredAt = Date.now();
   job.updatedAt = Date.now();
+  job.lastError = null;
   cronSessions.add(agent.id);
   persist();
   emitCrons();
@@ -107,7 +118,10 @@ function fire(job) {
     return;
   }
   try { spawnForJob(job); }
-  catch (e) { logger?.warn({ id: job.id, err: e.message }, 'cron spawn failed'); }
+  catch (e) {
+    logger?.warn({ id: job.id, err: e.message }, 'cron spawn failed');
+    job.lastError = e.message; job.updatedAt = Date.now(); persist(); emitCrons();
+  }
   recomputeNext(job);
 }
 
