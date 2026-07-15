@@ -18,6 +18,8 @@ import HistoryIcon from '@mui/icons-material/History';
 import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
 import VerticalSplitIcon from '@mui/icons-material/VerticalSplit';
 import { StatusPill } from '@zapac/mui-theme';
@@ -218,20 +220,26 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                   overflow: 'hidden',
                   borderRadius: `${t.zapac.radius.sm}px`,
                   border: `1px solid ${t.vars.palette.glass.stroke}`,
-                  ...(side === 'bottom' ? { width: '100%', height: panelMin ? 'auto' : panelH } : { height: '100%', width: panelMin ? 'auto' : panelW }),
+                  ...(side === 'bottom' ? { width: '100%', height: panelMin ? 'auto' : panelH } : { height: '100%', width: panelMin ? 36 : panelW }),
                 })}
               >
+                {/* Right-docked + collapsed → slim vertical strip: rotated title, stacked icons. */}
                 <Stack
-                  direction="row" spacing={1} onClick={togglePanelMin}
-                  sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, alignItems: 'center', cursor: 'pointer', userSelect: 'none', borderBottom: panelMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` })}
+                  direction={side === 'right' && panelMin ? 'column' : 'row'} spacing={1} onClick={togglePanelMin}
+                  sx={(t) => ({ flexShrink: 0, alignItems: 'center', cursor: 'pointer', userSelect: 'none',
+                    ...(side === 'right' && panelMin
+                      ? { flex: 1, minHeight: 0, py: 1 }
+                      : { px: 1.5, height: 36, borderBottom: panelMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` }) })}
                 >
-                  <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }} noWrap>{selRow.title}</Typography>
+                  <Typography variant="subtitle2" noWrap sx={side === 'right' && panelMin ? { flex: 1, minHeight: 0, writingMode: 'vertical-rl' } : { flex: 1, minWidth: 0 }}>{selRow.title}</Typography>
                   <Tooltip title={side === 'bottom' ? 'Dock right' : 'Dock bottom'} disableInteractive>
                     <IconButton size="small" onClick={toggleSide}>
                       {side === 'bottom' ? <VerticalSplitIcon fontSize="small" /> : <HorizontalSplitIcon fontSize="small" />}
                     </IconButton>
                   </Tooltip>
-                  {panelMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />}
+                  {side === 'right'
+                    ? (panelMin ? <ChevronLeftIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ChevronRightIcon sx={{ fontSize: 18, color: 'text.secondary' }} />)
+                    : (panelMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />)}
                 </Stack>
                 <Box sx={{ display: panelMin ? 'none' : 'block', flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
                   {loadingT ? (
