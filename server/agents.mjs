@@ -218,6 +218,7 @@ export function create({ cwd, name, model, scopes, sessionId, prompt, permission
   }
   const displayName = name || id.slice(0, 8);
   const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
+  ensureTrusted(cwd);
   const proc = spawn(bin, args, { cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true });
   const a = { id, name: displayName, cwd, model, scopes, permissionMode, extraArgs, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [] };
   agents.set(id, a);
@@ -232,6 +233,24 @@ export function create({ cwd, name, model, scopes, sessionId, prompt, permission
 // encoded-cwd is the abs path with every non-alphanumeric replaced by '-'
 // (dots too: C:\Users\x\.claude -> C--Users-x--claude).
 export function encodeCwd(cwd) { return cwd.replace(/[^a-zA-Z0-9]/g, '-'); }
+
+// Pre-seed Claude's per-directory workspace-trust flag for `cwd` so a
+// daemon-spawned claude doesn't stall on the blocking "Quick safety check"
+// prompt. Claude keys ~/.claude.json projects on the abs cwd with \→/ (case
+// preserved). Short-circuits if already trusted (fewer writes, smaller race
+// window vs Claude's own frequent writes). Atomic temp+rename so a concurrent
+// Claude read never sees a half-written file. Never throws into the spawn path.
+export function ensureTrusted(cwd, file = join(homedir(), '.claude.json')) {
+  try {
+    const key = cwd.replace(/\\/g, '/');
+    const json = JSON.parse(readFileSync(file, 'utf8'));
+    if (json.projects?.[key]?.hasTrustDialogAccepted === true) return;
+    ((json.projects ??= {})[key] ??= {}).hasTrustDialogAccepted = true;
+    const tmp = `${file}.${process.pid}.tmp`;
+    writeFileSync(tmp, JSON.stringify(json, null, 2));
+    renameSync(tmp, file);
+  } catch { /* unreadable/missing/parse-fail → let the prompt show once */ }
+}
 function sessionLogExists(cwd, id) {
   return existsSync(join(homedir(), '.claude', 'projects', encodeCwd(cwd), `${id}.jsonl`));
 }
@@ -244,6 +263,7 @@ export function reattach(id) {
   const a = agents.get(id);
   if (!a || a.proc) return a;
   const { bin, args } = buildSpawn(a);
+  ensureTrusted(a.cwd);
   const proc = spawn(bin, args, {
     cwd: a.cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true,
   });

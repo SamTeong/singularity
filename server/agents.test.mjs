@@ -39,7 +39,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus } = await import('./agents.mjs');
+const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted } = await import('./agents.mjs');
 
 test('encodeCwd replaces every non-alphanumeric (incl. dots) with "-"', () => {
   assert.equal(encodeCwd('C:\\git\\singularity'), 'C--git-singularity');
@@ -206,6 +206,42 @@ test('respawnAll: kills a live agent and resumes it with the same id + new pid',
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('ensureTrusted: upserts hasTrustDialogAccepted:true keyed on cwd with \\→/', () => {
+  const file = join(scratch, 'trust-upsert.json');
+  writeFileSync(file, JSON.stringify({ projects: {} }));
+  ensureTrusted('C:\\Users\\user', file);
+  const json = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(json.projects['C:/Users/user'].hasTrustDialogAccepted, true);
+});
+
+test('ensureTrusted: flips an existing false entry to true, preserves other keys', () => {
+  const file = join(scratch, 'trust-flip.json');
+  writeFileSync(file, JSON.stringify({
+    projects: { 'C:/Users/user': { hasTrustDialogAccepted: false, other: 1 } },
+  }));
+  ensureTrusted('C:\\Users\\user', file);
+  const json = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(json.projects['C:/Users/user'].hasTrustDialogAccepted, true);
+  assert.equal(json.projects['C:/Users/user'].other, 1); // sibling fields untouched
+});
+
+test('ensureTrusted: no-op (no write) when already trusted', () => {
+  const file = join(scratch, 'trust-noop.json');
+  writeFileSync(file, JSON.stringify({ projects: { 'C:/x': { hasTrustDialogAccepted: true } } }));
+  const before = readFileSync(file, 'utf8');
+  ensureTrusted('C:\\x', file);
+  assert.equal(readFileSync(file, 'utf8'), before); // short-circuit → byte-identical
+});
+
+test('ensureTrusted: creates projects map when missing, never throws on bad/missing file', () => {
+  const file = join(scratch, 'trust-empty.json');
+  writeFileSync(file, JSON.stringify({}));
+  ensureTrusted('C:\\y', file);
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).projects['C:/y'].hasTrustDialogAccepted, true);
+  // missing file + unparseable file both swallow silently
+  assert.doesNotThrow(() => ensureTrusted('C:\\z', join(scratch, 'does-not-exist.json')));
 });
 
 test('buildSpawn: ollama model on resume injects --model to override stripped transcript model', () => {
