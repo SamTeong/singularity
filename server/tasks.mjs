@@ -4,7 +4,7 @@
 // 'tasks' on the shared agents bus; pty-ws fans it out.
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as reg from './agents.mjs';
@@ -36,6 +36,7 @@ function persist() {
 }
 
 function emitTasks() { reg.bus.emit('tasks', snapshotTasks()); }
+function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
 export function initTasks(log) {
   logger = log;
@@ -47,6 +48,16 @@ export function initTasks(log) {
       log?.info({ tasks: tasks.size, history: history.length }, 'loaded tasks.json');
     }
   } catch (e) { log?.warn({ err: e.message }, 'tasks.json load failed'); }
+  // Crash between `git worktree add` and persist leaves an orphaned worktree
+  // dir with no task record — flag it (log-only, no auto-delete).
+  if (existsSync(WORKTREE_ROOT)) {
+    const referenced = new Set([...tasks.values()].map((t) => t.worktree));
+    for (const d of readdirSync(WORKTREE_ROOT, { withFileTypes: true })) {
+      if (!d.isDirectory()) continue;
+      const full = join(WORKTREE_ROOT, d.name);
+      if (!referenced.has(full)) log?.warn({ dir: full }, 'orphaned worktree dir — no task references it');
+    }
+  }
   sweepRetention();
   setInterval(sweepRetention, 3600_000).unref();
 }
@@ -149,15 +160,25 @@ export function updateTask(id, { column, state }) {
 // with a stats snapshot. Replaces the old hard-delete for board cards:
 // 'abandoned' from any column, 'completed' when removing a Done card (or via
 // the retention sweep).
-export function concludeTask(id, outcome) {
+export async function concludeTask(id, outcome) {
   if (outcome !== 'completed' && outcome !== 'abandoned') throw new Error('bad outcome (expected completed|abandoned)');
   const t = tasks.get(id);
   if (!t) throw new Error('no such task');
   const finalStats = t.sessionId ? statsFor([{ id: t.sessionId, cwd: t.worktree }])[t.sessionId] : null;
-  if (reg.isLive(t.sessionId)) reg.kill(t.sessionId);
+  const wasLive = reg.isLive(t.sessionId);
+  if (wasLive) reg.kill(t.sessionId);
+  // Windows: the just-killed pty process may still hold file locks for a
+  // moment — wait for it to actually die before removing the worktree, or
+  // `git worktree remove` fails and orphans the dir.
+  for (let waited = 0; wasLive && reg.isLive(t.sessionId) && waited < 3000; waited += 200) await sleep(200);
   // Worktree goes; the task branch stays (it may hold unmerged work).
   try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
-  catch (e) { logger?.warn({ err: e.message }, 'worktree remove failed (already gone?)'); }
+  catch (e) {
+    logger?.warn({ err: e.message }, 'worktree remove failed — retrying once');
+    await sleep(1000);
+    try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
+    catch (e2) { logger?.warn({ err: e2.message }, 'worktree remove retry failed (already gone?)'); }
+  }
   tasks.delete(id);
   history.push({ ...t, outcome, concludedAt: Date.now(), finalStats });
   persist();
@@ -174,11 +195,11 @@ export function deleteHistory(id) {
 
 // Done cards older than RETENTION_MS auto-conclude ('completed') so the board
 // doesn't accumulate stale cards forever; the history entry keeps the record.
-function sweepRetention() {
+async function sweepRetention() {
   const cutoff = Date.now() - RETENTION_MS;
   for (const t of [...tasks.values()]) {
     if (t.column === 'done' && t.doneAt && t.doneAt < cutoff) {
-      try { concludeTask(t.id, 'completed'); }
+      try { await concludeTask(t.id, 'completed'); }
       catch (e) { logger?.warn({ err: e.message, id: t.id }, 'retention sweep: conclude failed'); }
     }
   }

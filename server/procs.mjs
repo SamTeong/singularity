@@ -39,9 +39,20 @@ export async function scanClaude() {
 }
 
 // Kill a PID only after re-verifying it is currently a claude.exe (loopback API guard).
+// Two checks: the full scan above (for the caller's tracked/stale/external
+// classification), then a single-PID re-query immediately before the kill to
+// narrow the TOCTOU gap. A PID-reuse window remains between that re-query and
+// the actual kill() call — unavoidable without an atomic OS-level primitive.
 export async function killClaudePid(pid) {
   const procs = await scanClaude();
   if (!procs.some((p) => p.pid === pid)) return { ok: false, error: 'not a claude.exe pid' };
+  try {
+    const { stdout } = await execFileP('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      `[bool](Get-CimInstance Win32_Process -Filter "ProcessId=${pid} AND Name='claude.exe'")`,
+    ], { windowsHide: true });
+    if (stdout.trim() !== 'True') return { ok: false, error: 'process changed before kill' };
+  } catch (e) { return { ok: false, error: e.message }; }
   try { process.kill(pid); return { ok: true }; }
   catch (e) { return { ok: false, error: e.message }; }
 }

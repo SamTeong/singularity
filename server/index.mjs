@@ -65,6 +65,17 @@ if (TOKEN) {
   });
 }
 
+// Recursively collect file mtimes under `dir` (used by the dist-staleness check below).
+function walkMtimes(dir) {
+  const out = [];
+  for (const d of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, d.name);
+    if (d.isDirectory()) out.push(...walkMtimes(p));
+    else out.push(statSync(p).mtimeMs);
+  }
+  return out;
+}
+
 const webDist = join(__dirname, '..', 'web', 'dist');
 if (existsSync(webDist)) {
   app.register(fastifyStatic, { root: webDist, index: false });
@@ -74,6 +85,13 @@ if (existsSync(webDist)) {
     if (TOKEN) html = html.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(TOKEN)};</script></head>`);
     reply.type('text/html').send(html);
   });
+  // Best-effort staleness check: warn if dist predates the web source it was built from.
+  try {
+    const distMtime = statSync(join(webDist, 'index.html')).mtimeMs;
+    const srcRoot = join(__dirname, '..', 'web', 'src');
+    const newestSrc = Math.max(...walkMtimes(srcRoot));
+    if (newestSrc > distMtime) app.log.warn('web/dist is older than web/src — run npm run build');
+  } catch {}
 } else {
   app.log.warn('web/dist not built — run `npm run web` (Vite dev) separately for Phase 1');
 }
@@ -155,7 +173,7 @@ app.post('/tasks/:id/status', async (req, reply) => {
   catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
 });
 app.post('/tasks/:id/conclude', async (req, reply) => {
-  try { concludeTask(req.params.id, req.body?.outcome); return { ok: true }; }
+  try { await concludeTask(req.params.id, req.body?.outcome); return { ok: true }; }
   catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
 });
 app.delete('/tasks/history/:id', async (req, reply) => {
