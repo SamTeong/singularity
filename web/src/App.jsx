@@ -468,35 +468,37 @@ export default function App() {
                   onDragOver={(e) => e.preventDefault()}
                   onDrop={() => dropAgent(a.id)}
                   onDragEnd={() => setDragId(null)}
-                  sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5, alignItems: 'flex-start', opacity: dragId === a.id ? 0.4 : 1, '& .row-act': { opacity: a.status === 'detached' ? 1 : 0 }, '&:hover .row-act': { opacity: 1 } }}
+                  sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5, flexDirection: 'column', alignItems: 'stretch', gap: 0.5, opacity: dragId === a.id ? 0.4 : 1, '& .row-act': { opacity: a.status === 'detached' ? 1 : 0 }, '&:hover .row-act': { opacity: 1 } }}
                 >
-                  <Stack sx={{ flex: 1, minWidth: 0 }} spacing={0.5}>
-                    <Typography variant="subtitle2" noWrap>{a.name}</Typography>
-                    <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{a.cwd}</Typography>
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                      <StatusPill status={KIND[a.status] ?? 'review'}>{a.status}</StatusPill>
-                      {stats[a.id]?.turns > 0 && (
-                        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>
-                          {stats[a.id].turns} turns · {fmtTokens(stats[a.id].tokens)} tok
-                        </Typography>
+                  {/* Row 1: name (left) + actions (right). */}
+                  <Stack direction="row" sx={{ alignItems: 'center', minWidth: 0 }}>
+                    <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{a.name}</Typography>
+                    <Stack direction="row" className="row-act" sx={{ flexShrink: 0, transition: 'opacity .15s' }}>
+                      <Tooltip title="Duplicate (config only)" disableInteractive>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'create', cwd: a.cwd, name: nextName(a), model: a.model, scopes: a.scopes }); }}><ContentCopyIcon fontSize="small" /></IconButton>
+                      </Tooltip>
+                      <Tooltip title="Fork (config + conversation)" disableInteractive>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'fork', id: a.id, name: nextName(a) }); }}><CallSplitIcon fontSize="small" /></IconButton>
+                      </Tooltip>
+                      {a.status === 'detached' && (
+                        <Tooltip title="Reattach (claude --resume)" disableInteractive>
+                          <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'reattach', id: a.id }); }}><ReplayIcon fontSize="small" /></IconButton>
+                        </Tooltip>
                       )}
+                      <Tooltip title={a.status === 'running' || a.status === 'starting' ? 'Kill' : 'Remove'} disableInteractive>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'kill', id: a.id }); }}><CloseIcon fontSize="small" /></IconButton>
+                      </Tooltip>
                     </Stack>
                   </Stack>
-                  <Stack direction="row" className="row-act" sx={{ transition: 'opacity .15s' }}>
-                    <Tooltip title="Duplicate (config only)" disableInteractive>
-                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'create', cwd: a.cwd, name: nextName(a), model: a.model, scopes: a.scopes }); }}><ContentCopyIcon fontSize="small" /></IconButton>
-                    </Tooltip>
-                    <Tooltip title="Fork (config + conversation)" disableInteractive>
-                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'fork', id: a.id, name: nextName(a) }); }}><CallSplitIcon fontSize="small" /></IconButton>
-                    </Tooltip>
-                    {a.status === 'detached' && (
-                      <Tooltip title="Reattach (claude --resume)" disableInteractive>
-                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'reattach', id: a.id }); }}><ReplayIcon fontSize="small" /></IconButton>
-                      </Tooltip>
+                  {/* Row 2: cwd + status/tokens, full width. */}
+                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{a.cwd}</Typography>
+                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                    <StatusPill status={KIND[a.status] ?? 'review'}>{a.status}</StatusPill>
+                    {stats[a.id]?.turns > 0 && (
+                      <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>
+                        {stats[a.id].turns} turns · {fmtTokens(stats[a.id].tokens)} tok
+                      </Typography>
                     )}
-                    <Tooltip title={a.status === 'running' || a.status === 'starting' ? 'Kill' : 'Remove'} disableInteractive>
-                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'kill', id: a.id }); }}><CloseIcon fontSize="small" /></IconButton>
-                    </Tooltip>
                   </Stack>
                 </ListItemButton>
               ))}
