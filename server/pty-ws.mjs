@@ -79,6 +79,17 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
           }
           break;
         }
+        case 'fork': {
+          try {
+            const na = reg.fork(m.id, m.name);
+            ws.attached.add(na.id);
+            send(ws, { t: 'attached', id: na.id });
+          } catch (e) {
+            log?.error({ err: e.message }, 'fork failed');
+            send(ws, { t: 'error', msg: `fork failed: ${e.message}` });
+          }
+          break;
+        }
         case 'reattach': {
           try {
             const a = reg.reattach(m.id);

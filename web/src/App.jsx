@@ -14,6 +14,8 @@ import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Snackbar from '@mui/material/Snackbar';
 import AddIcon from '@mui/icons-material/Add';
+import ContentCopyIcon from '@mui/icons-material/ContentCopy';
+import CallSplitIcon from '@mui/icons-material/CallSplit';
 import CloseIcon from '@mui/icons-material/Close';
 import ReplayIcon from '@mui/icons-material/Replay';
 import TerminalIcon from '@mui/icons-material/Terminal';
@@ -233,6 +235,16 @@ export default function App() {
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg));
   }, []);
+
+  // Copy/Fork target name: strip a trailing _N from the source, pick the lowest
+  // free _N across existing session names. Unnamed source (name == id prefix) → blank.
+  const nextName = (a) => {
+    if (a.name === a.id.slice(0, 8)) return '';
+    const base = a.name.replace(/_\d+$/, '');
+    const taken = new Set(agents.map((x) => x.name));
+    let n = 2; while (taken.has(`${base}_${n}`)) n++;
+    return `${base}_${n}`;
+  };
 
   // Drag-and-drop reorder: optimistically move dragId onto overId's slot,
   // then tell the server to persist the new order (it re-emits 'list').
@@ -471,6 +483,12 @@ export default function App() {
                     </Stack>
                   </Stack>
                   <Stack direction="row" className="row-act" sx={{ transition: 'opacity .15s' }}>
+                    <Tooltip title="Duplicate (config only)" disableInteractive>
+                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'create', cwd: a.cwd, name: nextName(a), model: a.model, scopes: a.scopes }); }}><ContentCopyIcon fontSize="small" /></IconButton>
+                    </Tooltip>
+                    <Tooltip title="Fork (config + conversation)" disableInteractive>
+                      <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'fork', id: a.id, name: nextName(a) }); }}><CallSplitIcon fontSize="small" /></IconButton>
+                    </Tooltip>
                     {a.status === 'detached' && (
                       <Tooltip title="Reattach (claude --resume)" disableInteractive>
                         <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'reattach', id: a.id }); }}><ReplayIcon fontSize="small" /></IconButton>
