@@ -16,6 +16,7 @@ import { readConfig, writeConfig } from './config.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memory.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile } from './wiki.mjs';
 import { listSessions, readSession, searchSessions } from './sessions.mjs';
+import { listSkills, readSkill } from './skills.mjs';
 import { statsFor } from './stats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
@@ -258,6 +259,15 @@ app.get('/wiki/files', async (req) => wikiFiles(req.query.root));
 app.get('/wiki/search', async (req) => searchWiki(req.query.q, req.query.root));
 app.get('/wiki/file', async (req, reply) => {
   const r = readWikiFile(req.query.path, req.query.root);
+  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
+  return r;
+});
+
+// Skills viewer: tree of skill scopes → skills, read a skill's SKILL.md.
+// Read-only — no write. Paths server-derived from (scope, skill).
+app.get('/skills', async () => listSkills());
+app.get('/skill', async (req, reply) => {
+  const r = readSkill(req.query.scope, req.query.skill);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
