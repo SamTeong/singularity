@@ -192,16 +192,28 @@ export function normalizeClaude(raw, plan) {
   };
 }
 
-async function fetchClaude() {
-  if (!existsSync(CREDENTIALS_PATH)) {
-    return { ok: false, source: 'claude', needsAuth: true, error: 'no-credentials' };
-  }
+// Read the Claude Code OAuth token from ~/.claude/.credentials.json. Returns
+// {accessToken, expiresAt, subscriptionType} or null when absent/expired. The
+// daemon's own usage scrape uses it; exported so the session-history chat can
+// reuse the same credentials for /v1/messages instead of keeping its own copy.
+export function claudeOauthToken() {
+  if (!existsSync(CREDENTIALS_PATH)) return null;
   let oauth;
   try { oauth = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth; }
-  catch (e) { return { ok: false, source: 'claude', error: `bad credentials: ${e.message}` }; }
-  if (!oauth?.accessToken) return { ok: false, source: 'claude', needsAuth: true, error: 'no-token' };
-  if (oauth.expiresAt && Number(oauth.expiresAt) < Date.now()) {
-    return { ok: false, source: 'claude', needsAuth: true, error: 'token-expired' };
+  catch { return null; }
+  if (!oauth?.accessToken) return null;
+  if (oauth.expiresAt && Number(oauth.expiresAt) < Date.now()) return null;
+  return { accessToken: oauth.accessToken, expiresAt: oauth.expiresAt ?? null, subscriptionType: oauth.subscriptionType ?? null };
+}
+
+async function fetchClaude() {
+  const oauth = claudeOauthToken();
+  if (!oauth) {
+    // Distinguish no-creds vs expired for the UI's auth prompt.
+    const err = !existsSync(CREDENTIALS_PATH) ? 'no-credentials'
+      : !JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth?.accessToken ? 'no-token'
+      : 'token-expired';
+    return { ok: false, source: 'claude', needsAuth: true, error: err };
   }
 
   let resp;

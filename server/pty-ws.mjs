@@ -2,6 +2,7 @@
 import * as reg from './agents.mjs';
 import { snapshotTasks } from './tasks.mjs';
 import { snapshotCrons } from './crons.mjs';
+import { streamChat } from './chat.mjs';
 
 function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
@@ -85,6 +86,15 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
         case 'resize': reg.resize(m.id, m.cols, m.rows); break;
         case 'kill': reg.kill(m.id); break;
         case 'reorder': reg.reorder(m.ids); break;
+        case 'chat': {
+          // One in-flight chat per socket: a new request cancels the prior.
+          if (ws.chatAbort) ws.chatAbort.abort();
+          ws.chatAbort = new AbortController();
+          streamChat(m, (msg) => send(ws, msg), ws.chatAbort.signal).catch((e) =>
+            send(ws, { t: 'chat:error', chatId: m.chatId, msg: String(e) }));
+          break;
+        }
+        case 'chat:stop': ws.chatAbort?.abort(); break;
       }
     });
 

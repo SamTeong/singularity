@@ -13,6 +13,8 @@ import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid } from './procs.mjs';
 import { readConfig, writeConfig } from './config.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memory.mjs';
+import { listFiles as wikiFiles, searchWiki, readWikiFile } from './wiki.mjs';
+import { listSessions, readSession, searchSessions } from './sessions.mjs';
 import { statsFor } from './stats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
@@ -192,6 +194,28 @@ app.put('/memory/file', async (req, reply) => {
   if (!r.ok) reply.code(400);
   return r;
 });
+
+// Wiki: recursive .md browse + search + read-only file view under a client-
+// selected root (default ~/wiki). No write — wikis are LLM-authored.
+app.get('/wiki/files', async (req) => wikiFiles(req.query.root));
+app.get('/wiki/search', async (req) => searchWiki(req.query.q, req.query.root));
+app.get('/wiki/file', async (req, reply) => {
+  const r = readWikiFile(req.query.path, req.query.root);
+  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
+  return r;
+});
+
+// Session history: list transcripts (reverse-chrono), read one, search across
+// all or one. Chat goes over the WS (streaming) — see pty-ws.mjs.
+app.get('/sessions', async (req) => ({ sessions: listSessions({ cap: Number(req.query.cap) || 5000 }) }));
+app.get('/session', async (req, reply) => {
+  const { project, id } = req.query || {};
+  if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
+  const r = readSession(project, id);
+  if (!r.ok) reply.code(404);
+  return r;
+});
+app.get('/sessions/search', async (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id }));
 
 reg.init(app.log);
 initTasks(app.log);

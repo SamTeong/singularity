@@ -24,6 +24,8 @@ import RemoveIcon from '@mui/icons-material/Remove';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import SettingsIcon from '@mui/icons-material/Settings';
 import BookIcon from '@mui/icons-material/Book';
+import MenuBookIcon from '@mui/icons-material/MenuBook';
+import HistoryIcon from '@mui/icons-material/History';
 import SpeedIcon from '@mui/icons-material/Speed';
 import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
@@ -43,6 +45,8 @@ import UsagePill from './UsagePill.jsx';
 // terminal view — split them out of the initial (terminal) bundle.
 const ConfigEditor = lazy(() => import('./ConfigEditor.jsx'));
 const MemoryPanel = lazy(() => import('./MemoryPanel.jsx'));
+const SessionHistory = lazy(() => import('./SessionHistory.jsx'));
+const WikiPanel = lazy(() => import('./WikiPanel.jsx'));
 const UsageView = lazy(() => import('./UsageView.jsx'));
 const TasksBoard = lazy(() => import('./TasksBoard.jsx'));
 const CronJobs = lazy(() => import('./CronJobs.jsx'));
@@ -60,6 +64,8 @@ const NAV = [
   { v: 'cron', icon: <ScheduleIcon />, label: 'Cron' },
   { v: 'config', icon: <SettingsIcon />, label: 'Config' },
   { v: 'memory', icon: <BookIcon />, label: 'Memory' },
+  { v: 'wiki', icon: <MenuBookIcon />, label: 'Wiki' },
+  { v: 'sessions', icon: <HistoryIcon />, label: 'Sessions' },
   { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
 ];
 // Use theme.vars (the --mui-* CSS vars) not theme.palette — under cssVariables
@@ -163,7 +169,7 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [view, setView] = useState('tasks');
   const visited = useRef({}); // view -> ever selected, so lazy panels mount once and stay mounted
-  if (view === 'config' || view === 'memory') visited.current[view] = true;
+  if (view === 'config' || view === 'memory' || view === 'wiki' || view === 'sessions') visited.current[view] = true;
   const { resolved, toggle: toggleColorMode } = useColorMode();
   const [toast, setToast] = useState(null);
   const [stats, setStats] = useState({}); // id -> {turns, tokens}
@@ -171,6 +177,7 @@ export default function App() {
   const [dragId, setDragId] = useState(null); // id of the agent row being dragged
   const wsRef = useRef(null);
   const termHandlers = useRef({}); // id -> { write(data), reset() }
+  const chatHandler = useRef(null); // session-history chat -> {t:'chat:*', ...}
 
   // WS with auto-reconnect (exponential backoff, 0.5s → 8s). On reconnect the
   // fresh socket has no attachments — re-attach every mounted terminal, each
@@ -211,6 +218,8 @@ export default function App() {
           setTaskHistory(m.history || []);
         } else if (m.t === 'crons') {
           setCrons(m.crons);
+        } else if (m.t === 'chat:delta' || m.t === 'chat:done' || m.t === 'chat:error') {
+          chatHandler.current?.(m);
         } else if (m.t === 'error') {
           setToast(m.msg);
         }
@@ -386,6 +395,16 @@ export default function App() {
             {visited.current.memory && (
               <Box sx={{ display: view === 'memory' ? 'block' : 'none', height: '100%' }}>
                 <MemoryPanel />
+              </Box>
+            )}
+            {visited.current.wiki && (
+              <Box sx={{ display: view === 'wiki' ? 'block' : 'none', height: '100%' }}>
+                <WikiPanel />
+              </Box>
+            )}
+            {visited.current.sessions && (
+              <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>
+                <SessionHistory sendMsg={sendMsg} registerChat={(cb) => { chatHandler.current = cb; }} />
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
