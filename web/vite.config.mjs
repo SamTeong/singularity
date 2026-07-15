@@ -2,12 +2,26 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 // Phase 1: Vite dev server proxies WS to the daemon on 4317.
+// Dev-only mirror of the daemon's serve-time SING_TOKEN injection (index.mjs) —
+// without it the Vite-served shell has no window.__SING_TOKEN__ and every data
+// call 401s. apply:'serve' keeps the token out of the built dist/index.html
+// (the daemon injects at serve time there; baking it into dist would persist it).
+const singTokenInject = {
+  name: 'sing-token-inject',
+  apply: 'serve',
+  transformIndexHtml(html) {
+    const t = process.env.SING_TOKEN;
+    return t ? html.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(t)};</script></head>`) : html;
+  },
+};
+
 export default defineConfig({
   root: 'web',
-  plugins: [react()],
+  plugins: [react(), singTokenInject],
   server: {
     host: '127.0.0.1',
     port: 5317,
+    open: true,
     proxy: {
       '/ws': { target: 'ws://127.0.0.1:4317', ws: true },
       '/health': 'http://127.0.0.1:4317',
