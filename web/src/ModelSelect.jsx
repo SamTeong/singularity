@@ -9,7 +9,7 @@ import Box from '@mui/material/Box';
 // /model's list is baked into the claude binary and shifts over time, so the
 // suggestions are convenience defaults, not a closed set. Controlled via
 // inputValue/onInputChange (same pattern as the cwd picker in the dialogs).
-export default function ModelSelect({ model, setModel }) {
+export default function ModelSelect({ model, setModel, label = 'model', placeholder = 'claude (default)' }) {
   const [options, setOptions] = useState([]);
 
   useEffect(() => {
@@ -35,7 +35,7 @@ export default function ModelSelect({ model, setModel }) {
       onInputChange={(_, v) => setModel(v || '')}
       getOptionLabel={(o) => (typeof o === 'string' ? o : o.label)}
       isOptionEqualToValue={(o, v) => (typeof o === 'string' ? o : o.label) === v}
-      renderInput={(params) => <TextField {...params} label="model" placeholder="claude (default)" spellCheck={false} />}
+      renderInput={(params) => <TextField {...params} label={label} placeholder={placeholder} spellCheck={false} />}
       renderGroup={(props) => (
         <li key={props.key}>
           <Box sx={{ px: 1.75, pt: 0.5, pb: 0.25, fontSize: 12, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: 0.5 }}>{props.group}</Box>
