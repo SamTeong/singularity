@@ -12,7 +12,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import SchoolIcon from '@mui/icons-material/School';
-import { StatusPill, EmptyState } from '@zapac/mui-theme';
+import { StatusPill, SearchInput, EmptyState } from '@zapac/mui-theme';
 import MarkdownBody from './MarkdownBody.jsx';
 
 // Skills viewer: tree of skill scopes → skills (left), rendered SKILL.md
@@ -20,6 +20,7 @@ import MarkdownBody from './MarkdownBody.jsx';
 // derives paths from (scope, skill).
 export default function SkillsPanel() {
   const [scopes, setScopes] = useState([]);
+  const [q, setQ] = useState('');
   const [loadErr, setLoadErr] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
   const [sel, setSel] = useState(null); // { scope, skill }
@@ -54,21 +55,35 @@ export default function SkillsPanel() {
     }).catch(() => setErr('failed to load skill')).finally(() => setLoading(false));
   };
 
-  const skillCount = scopes.reduce((n, s) => n + s.skills.length, 0);
+  // Client-side filter — skills (name + description) and scope names. A scope
+  // whose own name matches keeps all its skills; otherwise only matching skills.
+  const query = q.trim().toLowerCase();
+  const view = !query ? scopes : scopes
+    .map((sc) => {
+      if (sc.name.toLowerCase().includes(query)) return sc;
+      const skills = sc.skills.filter((sk) =>
+        sk.name.toLowerCase().includes(query) || (sk.description || '').toLowerCase().includes(query));
+      return skills.length ? { ...sc, skills } : null;
+    })
+    .filter(Boolean);
+
+  // While searching, auto-expand matching scopes so hits are visible.
+  const isExpanded = (name) => (query ? true : expanded.has(name));
+  const skillCount = view.reduce((n, s) => n + s.skills.length, 0);
 
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* left: scope → skill tree */}
       <Stack sx={(t) => ({ width: 300, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0 })}>
         <Box sx={{ p: 1.5, pb: 0.5 }}>
-          <Typography variant="subtitle2" sx={{ px: 1 }}>Skills</Typography>
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 0.5, ml: 1, display: 'block' }}>
-            {loadErr ? `${loadErr}` : `${scopes.length} scope${scopes.length === 1 ? '' : 's'} · ${skillCount} skill${skillCount === 1 ? '' : 's'}`}
+          <SearchInput placeholder="Search skills…" value={q} onChange={setQ} shortcut="" />
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
+            {loadErr ? `${loadErr}` : `${view.length} scope${view.length === 1 ? '' : 's'} · ${skillCount} skill${skillCount === 1 ? '' : 's'}`}
           </Typography>
         </Box>
         <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
-          {scopes.map((sc) => {
-            const open2 = expanded.has(sc.name);
+          {view.map((sc) => {
+            const open2 = isExpanded(sc.name);
             return (
               <Box key={sc.name}>
                 <ListItemButton onClick={() => toggleScope(sc.name)}
@@ -98,7 +113,7 @@ export default function SkillsPanel() {
               </Box>
             );
           })}
-          {scopes.length === 0 && !loadErr && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No scopes.</Typography>}
+          {view.length === 0 && !loadErr && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{query ? 'No matches.' : 'No scopes.'}</Typography>}
           {loadErr && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{loadErr}.</Typography>}
         </List>
       </Stack>
