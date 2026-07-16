@@ -1,5 +1,11 @@
 {
   "env": {
     "PONYTAIL_DEFAULT_MODE": "full"
+  },
+  "permissions": {
+    "allow": [
+      "Write(~/.singularity/state/tickets/**)",
+      "Edit(~/.singularity/state/tickets/**)"
+    ]
   }
 }
