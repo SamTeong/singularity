@@ -68,10 +68,11 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   const [dragId, setDragId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
 
-  // History transcript panel: selecting a row loads its session's transcript
-  // read-only, dockable bottom/right, resizable + collapsible, all persisted —
-  // mirrors the terminal dock pattern in App.jsx.
-  const [selHistId, setSelHistId] = useState(null);
+  // Transcript panel: selecting a History row — or a Done-column card — loads its
+  // session's transcript read-only, dockable bottom/right, resizable + collapsible,
+  // all persisted — mirrors the terminal dock pattern in App.jsx. Driven by a
+  // generic item {id,title,sessionId,worktree,repo} so both entry points share it.
+  const [tx, setTx] = useState(null);
   const [transcript, setTranscript] = useState(null);
   const [loadingT, setLoadingT] = useState(false);
   const [errT, setErrT] = useState(null);
@@ -79,19 +80,18 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   const [panelMin, setPanelMin] = useState(() => localStorage.getItem('sing-hist-min') === '1');
   const [panelH, setPanelH] = useState(() => { const v = Number(localStorage.getItem('sing-hist-h')); return v >= 140 && v <= 2000 ? v : 300; });
   const [panelW, setPanelW] = useState(() => { const v = Number(localStorage.getItem('sing-hist-w')); return v >= 200 && v <= 1600 ? v : 420; });
-  const histRef = useRef(null);
+  const dockRef = useRef(null);
   const histReqRef = useRef(0); // guards against a slower stale fetch overwriting a newer selection
-  const selRow = history.find((h) => h.id === selHistId) || null;
 
-  const selectHistRow = (h) => {
-    if (selHistId === h.id) { setSelHistId(null); return; }
-    setSelHistId(h.id);
+  const openTranscript = (item) => {
+    if (tx?.id === item.id) { setTx(null); return; }
+    setTx(item);
     setTranscript(null); setErrT(null);
     const seq = ++histReqRef.current;
-    if (!h.sessionId) { setErrT('No transcript found for this task.'); return; }
+    if (!item.sessionId) { setErrT('No transcript found for this task.'); return; }
     setLoadingT(true);
-    const slug = (h.worktree ?? h.repo).replace(/[^a-zA-Z0-9]/g, '-');
-    fetch(`/session?project=${encodeURIComponent(slug)}&id=${encodeURIComponent(h.sessionId)}`)
+    const slug = (item.worktree ?? item.repo).replace(/[^a-zA-Z0-9]/g, '-');
+    fetch(`/session?project=${encodeURIComponent(slug)}&id=${encodeURIComponent(item.sessionId)}`)
       .then((r) => r.json())
       .then((d) => { if (seq !== histReqRef.current) return; if (d.ok) setTranscript(d); else setErrT('No transcript found for this task.'); })
       .catch(() => { if (seq === histReqRef.current) setErrT('No transcript found for this task.'); })
@@ -108,7 +108,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   // to resize — mirrors App.jsx's startDockDrag.
   const startPanelDrag = (e) => {
     e.preventDefault();
-    const rect = histRef.current?.getBoundingClientRect();
+    const rect = dockRef.current?.getBoundingClientRect();
     if (!rect) return;
     const move = (ev) => {
       if (side === 'bottom') {
@@ -137,6 +137,65 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
     onMove(t.id, col);
   };
 
+  // Shared dockable transcript panel — rendered in both the History table view
+  // and the board view (for a selected Done card). Reads the generic `tx` item.
+  const dock = tx && (
+    <>
+      {/* Drag handle — resize the panel (hidden while minimized). */}
+      {!panelMin && (
+        <Box
+          onMouseDown={startPanelDrag}
+          sx={{
+            flexShrink: 0,
+            cursor: side === 'bottom' ? 'row-resize' : 'col-resize',
+            ...(side === 'bottom' ? { height: 8, mx: 1 } : { width: 8, my: 1 }),
+          }}
+        />
+      )}
+      <Box
+        sx={(t) => ({
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          borderRadius: `${t.zapac.radius.sm}px`,
+          border: `1px solid ${t.vars.palette.glass.stroke}`,
+          ...(side === 'bottom' ? { width: '100%', height: panelMin ? 'auto' : panelH } : { height: '100%', width: panelMin ? 36 : panelW }),
+        })}
+      >
+        {/* Right-docked + collapsed → slim vertical strip: rotated title, stacked icons. */}
+        <Stack
+          direction={side === 'right' && panelMin ? 'column' : 'row'} spacing={1} onClick={togglePanelMin}
+          sx={(t) => ({ flexShrink: 0, alignItems: 'center', cursor: 'pointer', userSelect: 'none',
+            ...(side === 'right' && panelMin
+              ? { flex: 1, minHeight: 0, py: 1 }
+              : { px: 1.5, height: 36, borderBottom: panelMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` }) })}
+        >
+          <Typography variant="subtitle2" noWrap sx={side === 'right' && panelMin ? { flex: 1, minHeight: 0, writingMode: 'vertical-rl' } : { flex: 1, minWidth: 0 }}>{tx.title}</Typography>
+          <Tooltip title={side === 'bottom' ? 'Dock right' : 'Dock bottom'} disableInteractive>
+            <IconButton size="small" onClick={toggleSide}>
+              {side === 'bottom' ? <VerticalSplitIcon fontSize="small" /> : <HorizontalSplitIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+          {side === 'right'
+            ? (panelMin ? <ChevronLeftIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ChevronRightIcon sx={{ fontSize: 18, color: 'text.secondary' }} />)
+            : (panelMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />)}
+        </Stack>
+        <Box sx={{ display: panelMin ? 'none' : 'block', flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
+          {loadingT ? (
+            <Typography color="text.secondary">Loading…</Typography>
+          ) : errT ? (
+            <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
+              <Typography color="text.secondary">{errT}</Typography>
+            </Box>
+          ) : transcript ? (
+            <TranscriptView messages={transcript.messages || []} />
+          ) : null}
+        </Box>
+      </Box>
+    </>
+  );
+
   return (
     <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1}>
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
@@ -148,7 +207,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
         <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Task</Button>
       </Stack>
       {showHistory ? (
-        <Stack ref={histRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0 }}>
+        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0 }}>
           <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
             <Table size="small" stickyHeader>
               <TableHead>
@@ -169,7 +228,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                 {history.map((h) => {
                   const s = h.finalStats;
                   return (
-                    <TableRow key={h.id} hover selected={selHistId === h.id} onClick={() => selectHistRow(h)} sx={{ cursor: 'pointer' }}>
+                    <TableRow key={h.id} hover selected={tx?.id === h.id} onClick={() => openTranscript({ id: h.id, title: h.title, sessionId: h.sessionId, worktree: h.worktree, repo: h.repo })} sx={{ cursor: 'pointer' }}>
                       <TableCell>{h.title}</TableCell>
                       <TableCell>{repoName(h.repo)}</TableCell>
                       <TableCell>{h.branch || '—'}</TableCell>
@@ -198,66 +257,11 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
               </TableBody>
             </Table>
           </Box>
-
-          {selRow && (
-            <>
-              {/* Drag handle — resize the panel (hidden while minimized). */}
-              {!panelMin && (
-                <Box
-                  onMouseDown={startPanelDrag}
-                  sx={{
-                    flexShrink: 0,
-                    cursor: side === 'bottom' ? 'row-resize' : 'col-resize',
-                    ...(side === 'bottom' ? { height: 8, mx: 1 } : { width: 8, my: 1 }),
-                  }}
-                />
-              )}
-              <Box
-                sx={(t) => ({
-                  flexShrink: 0,
-                  display: 'flex',
-                  flexDirection: 'column',
-                  overflow: 'hidden',
-                  borderRadius: `${t.zapac.radius.sm}px`,
-                  border: `1px solid ${t.vars.palette.glass.stroke}`,
-                  ...(side === 'bottom' ? { width: '100%', height: panelMin ? 'auto' : panelH } : { height: '100%', width: panelMin ? 36 : panelW }),
-                })}
-              >
-                {/* Right-docked + collapsed → slim vertical strip: rotated title, stacked icons. */}
-                <Stack
-                  direction={side === 'right' && panelMin ? 'column' : 'row'} spacing={1} onClick={togglePanelMin}
-                  sx={(t) => ({ flexShrink: 0, alignItems: 'center', cursor: 'pointer', userSelect: 'none',
-                    ...(side === 'right' && panelMin
-                      ? { flex: 1, minHeight: 0, py: 1 }
-                      : { px: 1.5, height: 36, borderBottom: panelMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` }) })}
-                >
-                  <Typography variant="subtitle2" noWrap sx={side === 'right' && panelMin ? { flex: 1, minHeight: 0, writingMode: 'vertical-rl' } : { flex: 1, minWidth: 0 }}>{selRow.title}</Typography>
-                  <Tooltip title={side === 'bottom' ? 'Dock right' : 'Dock bottom'} disableInteractive>
-                    <IconButton size="small" onClick={toggleSide}>
-                      {side === 'bottom' ? <VerticalSplitIcon fontSize="small" /> : <HorizontalSplitIcon fontSize="small" />}
-                    </IconButton>
-                  </Tooltip>
-                  {side === 'right'
-                    ? (panelMin ? <ChevronLeftIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ChevronRightIcon sx={{ fontSize: 18, color: 'text.secondary' }} />)
-                    : (panelMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />)}
-                </Stack>
-                <Box sx={{ display: panelMin ? 'none' : 'block', flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
-                  {loadingT ? (
-                    <Typography color="text.secondary">Loading…</Typography>
-                  ) : errT ? (
-                    <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
-                      <Typography color="text.secondary">{errT}</Typography>
-                    </Box>
-                  ) : transcript ? (
-                    <TranscriptView messages={transcript.messages || []} />
-                  ) : null}
-                </Box>
-              </Box>
-            </>
-          )}
+          {dock}
         </Stack>
       ) : (
-        <Stack direction="row" spacing={1} sx={{ flex: 1, minHeight: 0 }}>
+        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0 }}>
+          <Stack direction="row" spacing={1} sx={{ flex: 1, minHeight: 0 }}>
           {COLUMNS.map(([col, label]) => {
             const cards = tasks.filter((t) => t.column === col);
             return (
@@ -280,7 +284,8 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                 <Stack spacing={0.75} sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                   {cards.map((task) => {
                     const agent = agents.find((a) => a.id === task.sessionId);
-                    const sel = task.sessionId === activeId;
+                    // Done cards open the transcript dock; others select the terminal.
+                    const sel = col === 'done' ? tx?.id === task.id : task.sessionId === activeId;
                     const line = statsLine(stats?.[task.sessionId]);
                     return (
                       <Box
@@ -288,7 +293,9 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                         draggable
                         onDragStart={() => setDragId(task.id)}
                         onDragEnd={() => setDragId(null)}
-                        onClick={() => onSelect(task.sessionId)}
+                        onClick={() => (col === 'done'
+                          ? openTranscript({ id: task.id, title: task.title, sessionId: task.sessionId, worktree: task.worktree, repo: task.repo })
+                          : onSelect(task.sessionId))}
                         sx={(t) => ({
                           p: 1, cursor: 'pointer', flexShrink: 0,
                           borderRadius: `${t.zapac.radius.sm}px`,
@@ -349,6 +356,8 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
               </Stack>
             );
           })}
+          </Stack>
+          {dock}
         </Stack>
       )}
     </Stack>
