@@ -26,12 +26,14 @@ const TERM_THEME = {
   },
 };
 
-export default function Terminal({ agent, visible, sendMsg, registerOutput }) {
+export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOutput }) {
   const { mode } = useColorMode();
   const hostRef = useRef(null);
   const xtermRef = useRef(null);
   const fitRef = useRef(null);
   const doFitRef = useRef(null);
+  const switchRef = useRef(onSwitch);
+  switchRef.current = onSwitch;
 
   useEffect(() => {
     const term = new Xterm({
@@ -46,6 +48,32 @@ export default function Terminal({ agent, visible, sendMsg, registerOutput }) {
     term.open(hostRef.current);
     xtermRef.current = term;
     fitRef.current = fit;
+
+    // Ctrl+C copies when there's a selection, else falls through to SIGINT.
+    term.attachCustomKeyEventHandler((e) => {
+      if (e.type === 'keydown' && e.ctrlKey && e.key === 'c' && term.hasSelection()) {
+        navigator.clipboard?.writeText(term.getSelection());
+        return false;
+      }
+      // Alt+Up/Down cycles sessions even while the terminal has focus.
+      if (e.type === 'keydown' && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+        switchRef.current?.(e.key === 'ArrowUp' ? -1 : 1);
+        return false;
+      }
+      return true;
+    });
+
+    // Right-click = copy selection, else paste (Windows Terminal semantics).
+    const onContextMenu = (e) => {
+      e.preventDefault();
+      if (term.hasSelection()) {
+        navigator.clipboard?.writeText(term.getSelection());
+        term.clearSelection();
+      } else {
+        navigator.clipboard?.readText().then((t) => t && term.paste(t)).catch(() => {});
+      }
+    };
+    hostRef.current.addEventListener('contextmenu', onContextMenu);
 
     // keystrokes -> daemon
     term.onData((data) => sendMsg({ t: 'input', id: agent.id, data }));
@@ -74,7 +102,8 @@ export default function Terminal({ agent, visible, sendMsg, registerOutput }) {
     sendMsg({ t: 'attach', id: agent.id });
     setTimeout(doFit, 50);
 
-    return () => { clearTimeout(roTimer); ro.disconnect(); term.dispose(); registerOutput(null); };
+    const host = hostRef.current;
+    return () => { clearTimeout(roTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); term.dispose(); registerOutput(null); };
   }, [agent.id]);
 
   // Follow the app color mode live — no need to recreate the terminal.

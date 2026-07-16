@@ -318,6 +318,14 @@ export default function App() {
 
   const activeAgent = agents.find((a) => a.id === active);
 
+  // Alt+Up/Down cycles sessions (dir -1/+1), wrapping. Detached ones excluded.
+  const cycleSession = (dir) => {
+    const list = agents.filter((a) => a.status !== 'detached');
+    if (list.length < 2) return;
+    const i = list.findIndex((a) => a.id === active);
+    setActive(list[(i + dir + list.length) % list.length].id);
+  };
+
   return (
     <Box ref={mainRef} sx={{ position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       <AmbientBackground />
@@ -511,7 +519,7 @@ export default function App() {
                 const show = !dockMin && a.id === active;
                 return (
                   <Box key={a.id} sx={{ position: 'absolute', inset: 0, display: show ? 'block' : 'none' }}>
-                    <Terminal agent={a} visible={show} sendMsg={sendMsg} registerOutput={(fn) => { if (fn) termHandlers.current[a.id] = fn; else delete termHandlers.current[a.id]; }} />
+                    <Terminal agent={a} visible={show} sendMsg={sendMsg} onSwitch={cycleSession} registerOutput={(fn) => { if (fn) termHandlers.current[a.id] = fn; else delete termHandlers.current[a.id]; }} />
                   </Box>
                 );
               })}
