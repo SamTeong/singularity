@@ -107,8 +107,10 @@ export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
   // Ollama models have no prompt caching — every turn resends the full
   // context, so nudge the orchestrator toward fewer, batched turns.
   const turnEconomy = ollama ? `\n- Your model has no prompt caching — every turn resends the full context. Minimize turns: batch the board status curl together with your next Bash command instead of running it alone, avoid re-reading files you have already seen, and prefer one larger subagent over many small ones.` : '';
-  const implModel = ollama ? t.model : 'sonnet';
-  const reviewerModel = ollama ? t.model : 'opus';
+  // Impl/reviewer models: explicit dialog overrides win; else the claude split
+  // (impl=sonnet, reviewer=opus) or, for ollama, mirror the orchestrator model.
+  const implModel = t.implModel || (ollama ? t.model : 'sonnet');
+  const reviewerModel = t.reviewerModel || (ollama ? t.model : 'opus');
   // Project agent defs: if the task's cwd ships .claude/agents/<role>.md, route
   // subagents through that def (it carries the repo's stack + security rules)
   // instead of a generic Task-tool subagent. Discovery is deterministic here —
@@ -202,7 +204,7 @@ ${t.description}`;
    as your very last action — the daemon terminates this session when the card reaches done.`;
 }
 
-export function createTask({ repo, title, description, model, scopes, requirePlanApproval, mergeMode }) {
+export function createTask({ repo, title, description, model, implModel, reviewerModel, scopes, requirePlanApproval, mergeMode }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
   if (!existsSync(repo)) throw new Error('working directory does not exist');
   const kind = isGitWorkTree(repo) ? 'git' : 'plain';
@@ -226,7 +228,7 @@ export function createTask({ repo, title, description, model, scopes, requirePla
     writeFileSync(join(ticketDir, 'Requirements.md'), `# ${title.trim()}\n\n${description.trim()}\n`);
     const t = {
       id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch, ticketDir,
-      model, scopes, requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
+      model, implModel, reviewerModel, scopes, requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
       column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
     };
     // Statusline capture: per-session cost/duration written to state/cost/<id>.json

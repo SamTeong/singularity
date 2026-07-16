@@ -106,6 +106,27 @@ test('claude model → no turn-economy bullet', () => {
   assert.doesNotMatch(p, /no prompt caching/);
 });
 
+test('claude model, no overrides → impl=sonnet, reviewer=opus', () => {
+  const p = buildTaskPrompt(baseTask, false);
+  assert.match(p, /model: sonnet\b/);
+  assert.match(p, /model: opus\b/);
+});
+
+test('impl/reviewer overrides win over the claude defaults', () => {
+  const p = buildTaskPrompt({ ...baseTask, implModel: 'haiku', reviewerModel: 'opus[1m]' }, false);
+  assert.match(p, /model: haiku\b/);
+  assert.match(p, /model: opus\[1m\]/);
+  assert.doesNotMatch(p, /model: sonnet\b/);
+});
+
+test('ollama model, no overrides → impl+reviewer mirror the orchestrator', () => {
+  const cwd = withAgents([]);
+  const p = buildTaskPrompt({ ...baseTask, model: 'glm-5.2:cloud', worktree: cwd }, false);
+  const hits = p.match(/model: glm-5\.2:cloud\b/g) || [];
+  assert.ok(hits.length >= 2, 'both impl and reviewer spawns use the ollama model');
+  rmSync(cwd, { recursive: true, force: true });
+});
+
 test('plain-kind prompt also gets turn-economy guidance', () => {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-plain-'));
   const p = buildTaskPrompt({ ...baseTask, kind: 'plain', repo: cwd, worktree: null, mergeMode: null, model: 'glm-5.2:cloud' }, false);

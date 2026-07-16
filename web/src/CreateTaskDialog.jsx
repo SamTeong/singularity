@@ -23,6 +23,9 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [model, setModel] = useState('');
+  const [implModel, setImplModel] = useState('sonnet');
+  const [reviewerModel, setReviewerModel] = useState('opus');
+  const [claudeSet, setClaudeSet] = useState(null);
   const [scopeList, setScopeList] = useState([]);
   const [scopes, setScopes] = useState([]);
   const [requireApproval, setRequireApproval] = useState(false);
@@ -33,10 +36,21 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
   useEffect(() => {
     if (!open) return;
     fetch('/skill-scopes').then((r) => r.json()).then((d) => setScopeList(d.scopes || [])).catch(() => {});
+    fetch('/models').then((r) => r.json()).then((d) => setClaudeSet(new Set(d.claude || []))).catch(() => {});
   }, [open]);
+
+  // Mirror of server isClaudeModel: empty/'claude'/known alias/claude-* id → claude.
+  const isClaude = (m) => !m || (claudeSet ? claudeSet.has(m) : m === 'claude') || m.startsWith('claude-');
+  // Pre-fill impl/reviewer from the orchestrator model: claude → sonnet/opus,
+  // ollama → mirror it. Re-derives whenever the orchestrator model changes.
+  useEffect(() => {
+    if (isClaude(model)) { setImplModel('sonnet'); setReviewerModel('opus'); }
+    else { setImplModel(model); setReviewerModel(model); }
+  }, [model, claudeSet]);
 
   const reset = () => {
     setTitle(''); setDescription(''); setScopes([]); setModel('');
+    setImplModel('sonnet'); setReviewerModel('opus');
     setRequireApproval(false); setMergeMode('manual');
   };
 
@@ -50,7 +64,8 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           repo: cwd.trim(), title: title.trim(), description: description.trim(),
-          model: model.trim(), scopes, requirePlanApproval: requireApproval, mergeMode,
+          model: model.trim(), implModel: implModel.trim(), reviewerModel: reviewerModel.trim(),
+          scopes, requirePlanApproval: requireApproval, mergeMode,
         }),
       });
       const d = await r.json();
@@ -88,6 +103,10 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
           <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} />
           <TextField size="small" label="requirements" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
           <ModelSelect model={model} setModel={setModel} />
+          <Stack direction="row" spacing={1}>
+            <ModelSelect model={implModel} setModel={setImplModel} label="implementor model" placeholder="" />
+            <ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" placeholder="" />
+          </Stack>
           <Autocomplete
             multiple
             size="small"
