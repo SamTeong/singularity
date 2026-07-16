@@ -4,7 +4,6 @@
   },
   "permissions": {
     "allow": [
-      "Write(~/.singularity/state/tickets/**)",
       "Edit(~/.singularity/state/tickets/**)"
     ]
   }

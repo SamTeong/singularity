@@ -204,7 +204,7 @@ ${t.description}`;
    as your very last action — the daemon terminates this session when the card reaches done.`;
 }
 
-export function createTask({ repo, title, description, model, implModel, reviewerModel, scopes, requirePlanApproval, mergeMode }) {
+export function createTask({ repo, title, description, model, implModel, reviewerModel, scopes, requirePlanApproval, mergeMode, mock }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
   if (!existsSync(repo)) throw new Error('working directory does not exist');
   const kind = isGitWorkTree(repo) ? 'git' : 'plain';
@@ -234,7 +234,10 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     // Statusline capture: per-session cost/duration written to state/cost/<id>.json
     // (read by stats.mjs). Passed as extraArgs so it also survives reattach.
     const extraArgs = ['--settings', JSON.stringify({ statusLine: { type: 'command', command: `node "${STATUSLINE_SCRIPT}"` } })];
-    const agent = reg.create({ cwd, name: t.title, model, scopes, prompt: buildTaskPrompt(t), permissionMode: 'acceptEdits', extraArgs });
+    // mock (demo only): spawn an idle claude with no workflow prompt — a live
+    // session for the status pill, but no turn ever starts, so zero tokens. The
+    // demo driver moves the card itself. Real tasks always get the prompt.
+    const agent = reg.create({ cwd, name: t.title, model, scopes, prompt: mock ? undefined : buildTaskPrompt(t), permissionMode: 'acceptEdits', extraArgs });
     t.sessionId = agent.id;
     tasks.set(id, t);
     persist();

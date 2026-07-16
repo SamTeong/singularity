@@ -141,12 +141,16 @@ function wire(a) {
       emitList();
       return;
     }
-    setStatus(a, 'exited');
+    setStatus(a, 'exited'); // status event for crons auto-kill; tracks activeMs
     const resumeCmd = isClaudeModel(a.model)
       ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
       : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
     bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume: ${resumeCmd}\x1b[0m\r\n` });
+    // Drop the session from the list rather than leaving a dead 'exited' row;
+    // resume still works off the on-disk session log (new session, same id).
+    agents.delete(a.id);
     persist();
+    emitList();
   });
 }
 
