@@ -1,5 +1,33 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import { spawn } from 'node:child_process';
+
+// Dev-only: open a browser tab on start ONLY if no tab is already open. An open
+// tab keeps a live WS to the daemon (auto-reconnects after restart), so the
+// daemon's /health reports clients>0. We poll it briefly; if a tab reconnects
+// we skip opening (Vite HMR reloads that tab on its own). On a genuine fresh
+// start nothing connects, so after the window we open the tab.
+const smartOpen = {
+  name: 'sing-smart-open',
+  apply: 'serve',
+  configureServer(server) {
+    server.httpServer?.once('listening', async () => {
+      const url = 'http://127.0.0.1:5317/';
+      const deadline = Date.now() + 2500;
+      while (Date.now() < deadline) {
+        try {
+          const r = await fetch('http://127.0.0.1:4317/health');
+          if (r.ok && (await r.json()).clients > 0) return; // existing tab — leave it
+        } catch { /* daemon not up yet */ }
+        await new Promise((res) => setTimeout(res, 300));
+      }
+      const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', url]]
+        : process.platform === 'darwin' ? ['open', [url]]
+        : ['xdg-open', [url]];
+      spawn(cmd[0], cmd[1], { stdio: 'ignore', detached: true }).unref();
+    });
+  },
+};
 
 // Phase 1: Vite dev server proxies WS to the daemon on 4317.
 // Dev-only mirror of the daemon's serve-time SING_TOKEN injection (index.mjs) —
@@ -17,11 +45,11 @@ const singTokenInject = {
 
 export default defineConfig({
   root: 'web',
-  plugins: [react(), singTokenInject],
+  plugins: [react(), singTokenInject, smartOpen],
   server: {
     host: '127.0.0.1',
     port: 5317,
-    open: true,
+    open: false,
     proxy: {
       '/ws': { target: 'ws://127.0.0.1:4317', ws: true },
       '/health': 'http://127.0.0.1:4317',

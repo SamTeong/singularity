@@ -117,7 +117,8 @@ if (existsSync(webDist)) {
   app.log.warn('web/dist not built — run `npm run web` (Vite dev) separately for Phase 1');
 }
 
-app.get('/health', async () => ({ ok: true, pid: process.pid }));
+let wss; // assigned after listen; /health reports live WS client count for dev smart-open
+app.get('/health', async () => ({ ok: true, pid: process.pid, clients: wss?.clients.size ?? 0 }));
 
 // Per-agent stats (turns + tokens) parsed from each session .jsonl.
 app.get('/agent-stats', async () => ({ stats: statsFor(reg.snapshot()) }));
@@ -300,5 +301,5 @@ try {
 app.log.info(`daemon on ${server} (loopback only)${TOKEN ? ' [token required]' : ''}`);
 
 // WS shares the Fastify HTTP server.
-const wss = new WebSocketServer({ server: app.server, path: '/ws' });
+wss = new WebSocketServer({ server: app.server, path: '/ws' });
 attachPtyWs(wss, app.log, TOKEN, originAllowed);
