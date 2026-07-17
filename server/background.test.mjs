@@ -1,10 +1,11 @@
 // Unit tests for the background-task pure functions (inWindow / evalGate /
-// pickDef / watchdogDecision) + createTask tag normalization. background.mjs
-// pulls in agents.mjs -> app-dir.mjs, which throws without SINGULARITY_HOME, so
-// point it at a scratch temp dir *before* the dynamic import (same pattern as
-// crons.test.mjs). No agent is ever spawned: the pure fns take a cfg argument,
-// and the tags test exercises the exported normalizeTags helper directly rather
-// than createTask (which would try to spawn a real claude). Run: npm test
+// pickDef / pickRunnableDef / watchdogDecision / migrateLegacyConfig) +
+// createTask tag normalization. background.mjs pulls in agents.mjs ->
+// app-dir.mjs, which throws without SINGULARITY_HOME, so point it at a scratch
+// temp dir *before* the dynamic import (same pattern as crons.test.mjs). No
+// agent is ever spawned: the pure fns take a def argument, and the tags test
+// exercises the exported normalizeTags helper directly rather than createTask
+// (which would try to spawn a real claude). Run: npm test
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -15,97 +16,171 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-background-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { inWindow, evalGate, pickDef, watchdogDecision, updateBackgroundConfig } = await import('./background.mjs');
+const { inWindow, evalGate, pickDef, pickRunnableDef, watchdogDecision, migrateLegacyConfig } = await import('./background.mjs');
 const { normalizeTags } = await import('./tasks.mjs');
 
-const cfg = () => ({
+// Full per-def config shape (window/thresholds/tokenCaps) — same values the old
+// global DEFAULT_CONFIG shipped, now owned by each def.
+const def = (over = {}) => ({
+  id: 'a', title: 'a', enabled: true, cooldownHours: 24, lastRunAt: null,
   window: { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] },
   thresholds: {
     claude: { start: 50, stop: 75, weeklyMax: 75 },
     ollama: { start: 50, stop: 75, weeklyMax: 75 },
   },
   tokenCaps: { claude: 15_000_000, ollama: 2_000_000 },
+  ...over,
 });
 const src = (over = {}) => ({ ok: true, session: { pctUsed: 10 }, weekly: { pctUsed: 10 }, ...over });
 
 // ---- inWindow ------------------------------------------------------------------
 // 2026-07-15 = Wednesday (getDay 3), 2026-07-18 = Saturday (getDay 6).
 test('inWindow: weekday inside hours is true', () => {
-  assert.equal(inWindow(cfg(), new Date(2026, 6, 15, 10)), true);
+  assert.equal(inWindow(def(), new Date(2026, 6, 15, 10)), true);
 });
 test('inWindow: weekend is false', () => {
-  assert.equal(inWindow(cfg(), new Date(2026, 6, 18, 10)), false);
+  assert.equal(inWindow(def(), new Date(2026, 6, 18, 10)), false);
 });
 test('inWindow: startHour inclusive, endHour exclusive', () => {
-  assert.equal(inWindow(cfg(), new Date(2026, 6, 15, 9)), true);
-  assert.equal(inWindow(cfg(), new Date(2026, 6, 15, 18)), false);
-  assert.equal(inWindow(cfg(), new Date(2026, 6, 15, 8)), false);
+  assert.equal(inWindow(def(), new Date(2026, 6, 15, 9)), true);
+  assert.equal(inWindow(def(), new Date(2026, 6, 15, 18)), false);
+  assert.equal(inWindow(def(), new Date(2026, 6, 15, 8)), false);
 });
 
 // ---- evalGate ------------------------------------------------------------------
 test('evalGate: claude within budget → claude', () => {
-  const g = evalGate({ claude: src(), ollama: src() }, cfg());
+  const g = evalGate({ claude: src(), ollama: src() }, def());
   assert.equal(g.backend, 'claude');
 });
 test('evalGate: claude over start → ollama', () => {
-  const g = evalGate({ claude: src({ session: { pctUsed: 60 } }), ollama: src() }, cfg());
+  const g = evalGate({ claude: src({ session: { pctUsed: 60 } }), ollama: src() }, def());
   assert.equal(g.backend, 'ollama');
 });
 test('evalGate: both over → null with reason', () => {
   const g = evalGate({
     claude: src({ session: { pctUsed: 60 } }),
     ollama: src({ weekly: { pctUsed: 80 } }),
-  }, cfg());
+  }, def());
   assert.equal(g.backend, null);
   assert.equal(typeof g.reason, 'string');
   assert.ok(g.reason.length > 0);
 });
 test('evalGate: claude ok:false fails closed → ollama evaluated', () => {
-  const g = evalGate({ claude: { ok: false, error: 'auth' }, ollama: src() }, cfg());
+  const g = evalGate({ claude: { ok: false, error: 'auth' }, ollama: src() }, def());
   assert.equal(g.backend, 'ollama');
 });
 
-// ---- pickDef -------------------------------------------------------------------
+// ---- pickDef (forced-bypass: ignores window+gate) -------------------------------
 const now = 1_000_000_000_000;
 const hr = 3_600_000;
 test('pickDef: cooldown excludes a recently-run def', () => {
-  const c = { defs: [{ id: 'a', enabled: true, cooldownHours: 24, lastRunAt: now - hr }] };
-  assert.equal(pickDef(c, now), null);
+  const defs = [def({ lastRunAt: now - hr })];
+  assert.equal(pickDef(defs, now), null);
 });
 test('pickDef: round-robin picks the oldest lastRunAt', () => {
-  const c = { defs: [
-    { id: 'new', enabled: true, cooldownHours: 1, lastRunAt: now - 2 * hr },
-    { id: 'old', enabled: true, cooldownHours: 1, lastRunAt: now - 10 * hr },
-  ] };
-  assert.equal(pickDef(c, now).id, 'old');
+  const defs = [
+    def({ id: 'new', cooldownHours: 1, lastRunAt: now - 2 * hr }),
+    def({ id: 'old', cooldownHours: 1, lastRunAt: now - 10 * hr }),
+  ];
+  assert.equal(pickDef(defs, now).id, 'old');
 });
 test('pickDef: null lastRunAt wins (never run)', () => {
-  const c = { defs: [
-    { id: 'ran', enabled: true, cooldownHours: 1, lastRunAt: now - 10 * hr },
-    { id: 'fresh', enabled: true, cooldownHours: 1, lastRunAt: null },
-  ] };
-  assert.equal(pickDef(c, now).id, 'fresh');
+  const defs = [
+    def({ id: 'ran', cooldownHours: 1, lastRunAt: now - 10 * hr }),
+    def({ id: 'fresh', cooldownHours: 1, lastRunAt: null }),
+  ];
+  assert.equal(pickDef(defs, now).id, 'fresh');
 });
 test('pickDef: disabled defs are skipped', () => {
-  const c = { defs: [{ id: 'a', enabled: false, cooldownHours: 1, lastRunAt: null }] };
-  assert.equal(pickDef(c, now), null);
+  const defs = [def({ enabled: false, cooldownHours: 1, lastRunAt: null })];
+  assert.equal(pickDef(defs, now), null);
+});
+
+// ---- pickRunnableDef (normal path: window + per-def gate folded together) ------
+// Fixed instant inside the default window (Wed 2026-07-15 10:00 local).
+const inWin = new Date(2026, 6, 15, 10).getTime();
+const outWin = new Date(2026, 6, 18, 10).getTime(); // Saturday
+
+test('pickRunnableDef: out-of-window def is skipped → no def ready', () => {
+  const defs = [def({ lastRunAt: null })];
+  const r = pickRunnableDef(defs, { claude: src(), ollama: src() }, outWin);
+  assert.equal(r.def, null);
+  assert.equal(r.backend, null);
+  assert.equal(r.reason, 'no def ready');
+});
+test('pickRunnableDef: bypassWindow picks an out-of-window def if its gate passes', () => {
+  const defs = [def({ lastRunAt: null })];
+  const r = pickRunnableDef(defs, { claude: src(), ollama: src() }, outWin, { bypassWindow: true });
+  assert.equal(r.def.id, 'a');
+  assert.equal(r.backend, 'claude');
+});
+test('pickRunnableDef: all in-window candidates fail their own gate → joined reasons', () => {
+  const defs = [def({ id: 'x', title: 'x', lastRunAt: null })];
+  const usage = { claude: src({ session: { pctUsed: 90 } }), ollama: src({ session: { pctUsed: 90 } }) };
+  const r = pickRunnableDef(defs, usage, inWin);
+  assert.equal(r.def, null);
+  assert.ok(r.reason.includes('x:'), 'reason names the failing def');
+});
+test('pickRunnableDef: oldest passing candidate wins, skipping a younger passer', () => {
+  const defs = [
+    def({ id: 'new', cooldownHours: 1, lastRunAt: inWin - 2 * hr }),
+    def({ id: 'old', cooldownHours: 1, lastRunAt: inWin - 10 * hr }),
+  ];
+  const r = pickRunnableDef(defs, { claude: src(), ollama: src() }, inWin);
+  assert.equal(r.def.id, 'old');
+  assert.equal(r.backend, 'claude');
 });
 
 // ---- watchdogDecision ----------------------------------------------------------
 test('watchdogDecision: session pct at/over stop → stop', () => {
-  assert.equal(watchdogDecision({ claude: src({ session: { pctUsed: 75 } }) }, 'claude', cfg(), 0), 'stop');
+  assert.equal(watchdogDecision({ claude: src({ session: { pctUsed: 75 } }) }, 'claude', def(), 0), 'stop');
 });
 test('watchdogDecision: weekly at/over weeklyMax → stop', () => {
-  assert.equal(watchdogDecision({ claude: src({ weekly: { pctUsed: 90 } }) }, 'claude', cfg(), 0), 'stop');
+  assert.equal(watchdogDecision({ claude: src({ weekly: { pctUsed: 90 } }) }, 'claude', def(), 0), 'stop');
 });
 test('watchdogDecision: token cap reached → stop', () => {
-  assert.equal(watchdogDecision({ claude: src() }, 'claude', cfg(), 15_000_000), 'stop');
+  assert.equal(watchdogDecision({ claude: src() }, 'claude', def(), 15_000_000), 'stop');
 });
 test('watchdogDecision: ok:false fails closed → stop', () => {
-  assert.equal(watchdogDecision({ claude: { ok: false } }, 'claude', cfg(), 0), 'stop');
+  assert.equal(watchdogDecision({ claude: { ok: false } }, 'claude', def(), 0), 'stop');
 });
 test('watchdogDecision: within budget → continue', () => {
-  assert.equal(watchdogDecision({ claude: src() }, 'claude', cfg(), 100), 'continue');
+  assert.equal(watchdogDecision({ claude: src() }, 'claude', def(), 100), 'continue');
+});
+
+// ---- migrateLegacyConfig (global → per-def seeding) ----------------------------
+test('migrateLegacyConfig: old flat shape seeds window/thresholds/models/tokenCaps onto every def', () => {
+  const legacyWindow = { startHour: 8, endHour: 17, days: [1, 2, 3, 4, 5] };
+  const legacyThresholds = { claude: { start: 40, stop: 70, weeklyMax: 70 }, ollama: { start: 40, stop: 70, weeklyMax: 70 } };
+  const legacyModels = { claude: 'opus', ollama: 'glm-5.2:cloud' };
+  const legacyTokenCaps = { claude: 10_000_000, ollama: 1_000_000 };
+  const loaded = {
+    enabled: true, tickMinutes: 60,
+    window: legacyWindow, thresholds: legacyThresholds, models: legacyModels, tokenCaps: legacyTokenCaps,
+    defs: [{ id: 'a', title: 'A', enabled: true, cooldownHours: 24, lastRunAt: null }],
+  };
+  const { defs, migrated } = migrateLegacyConfig(loaded);
+  assert.equal(migrated, true);
+  assert.deepEqual(defs[0].window, legacyWindow);
+  assert.deepEqual(defs[0].thresholds, legacyThresholds);
+  assert.deepEqual(defs[0].models, legacyModels);
+  assert.deepEqual(defs[0].tokenCaps, legacyTokenCaps);
+});
+test('migrateLegacyConfig: a def with its own config is left untouched even when legacy keys are present', () => {
+  const ownWindow = { startHour: 7, endHour: 12, days: [6, 0] };
+  const loaded = {
+    window: { startHour: 8, endHour: 17, days: [1, 2, 3, 4, 5] },
+    defs: [{ id: 'a', window: ownWindow }],
+  };
+  const { defs, migrated } = migrateLegacyConfig(loaded);
+  assert.equal(migrated, true);
+  assert.deepEqual(defs[0].window, ownWindow, 'own window not clobbered by legacy top-level window');
+});
+test('migrateLegacyConfig: already-migrated shape (no legacy keys) is a no-op', () => {
+  const loaded = { defs: [{ id: 'a', window: { startHour: 9, endHour: 18, days: [1] } }] };
+  const { defs, migrated } = migrateLegacyConfig(loaded);
+  assert.equal(migrated, false);
+  assert.deepEqual(defs, loaded.defs);
 });
 
 // ---- normalizeTags (createTask tag handling) -----------------------------------
@@ -115,19 +190,4 @@ test('normalizeTags: trims, lowercases, drops blanks, dedupes', () => {
 test('normalizeTags: undefined/empty → []', () => {
   assert.deepEqual(normalizeTags(undefined), []);
   assert.deepEqual(normalizeTags([]), []);
-});
-
-// ---- updateBackgroundConfig (nested-merge safety) ------------------------------
-// Editing one threshold field via the UI must NOT wipe its siblings — else the
-// gate/watchdog compare against undefined and silently stop firing.
-test('updateBackgroundConfig: partial threshold edit preserves siblings', () => {
-  const c = updateBackgroundConfig({ thresholds: { claude: { start: 55 } } });
-  assert.equal(c.thresholds.claude.start, 55);
-  assert.equal(c.thresholds.claude.stop, 75, 'stop preserved');
-  assert.equal(c.thresholds.claude.weeklyMax, 75, 'weeklyMax preserved');
-  assert.equal(c.thresholds.ollama.stop, 75, 'other backend untouched');
-});
-test('updateBackgroundConfig: ignores defs key (defs go through def routes)', () => {
-  const c = updateBackgroundConfig({ defs: [{ id: 'x' }] });
-  assert.deepEqual(c.defs, [], 'defs not overwritten via config route');
 });

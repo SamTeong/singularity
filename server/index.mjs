@@ -22,7 +22,7 @@ import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
-import { initBackground, snapshotBackground, updateBackgroundConfig, createDef, updateDef, deleteDef, runBackgroundNow } from './background.mjs';
+import { initBackground, snapshotBackground, createDef, updateDef, deleteDef, runBackgroundNow } from './background.mjs';
 import { CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -239,10 +239,10 @@ app.post('/crons/:id/run', async (req, reply) => {
   catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
 });
 
-// Background tasks: quota-soak runs during working hours. Config + per-def CRUD
-// + manual trigger (?force=1 bypasses the usage gate). Scheduler lives in-process.
+// Background tasks: quota-soak runs during working hours. Per-def CRUD (each
+// def carries its own window/thresholds/models/tokenCaps) + manual trigger
+// (?force=1 bypasses the usage gate). Scheduler lives in-process.
 app.get('/background', async () => snapshotBackground());
-app.put('/background/config', async (req) => ({ ok: true, config: updateBackgroundConfig(req.body || {}) }));
 app.post('/background/defs', async (req, reply) => {
   try { return { ok: true, def: createDef(req.body || {}) }; }
   catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }

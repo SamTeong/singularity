@@ -1,11 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Switch from '@mui/material/Switch';
-import Chip from '@mui/material/Chip';
-import TextField from '@mui/material/TextField';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Table from '@mui/material/Table';
@@ -15,6 +13,7 @@ import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
@@ -22,7 +21,6 @@ import CreateBackgroundDialog from './CreateBackgroundDialog.jsx';
 
 const KIND = { starting: 'active', running: 'active', idle: 'review', detached: 'review', exited: 'error' };
 const repoName = (p) => (p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-const DAYS = [['Su', 0], ['Mo', 1], ['Tu', 2], ['We', 3], ['Th', 4], ['Fr', 5], ['Sa', 6]];
 
 const fmtRel = (ts) => {
   if (!ts) return '—';
@@ -46,32 +44,11 @@ const fmtNext = (iso) => {
 };
 const fmtHM = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
-// Debounced-on-blur text/number field: local input state, commits to onCommit only
-// when the value actually changed (and is a valid number for type=number). Resyncs
-// when the persisted value changes upstream (WS push).
-function EditField({ label, value, type = 'text', width = 96, onCommit }) {
-  const [v, setV] = useState(String(value ?? ''));
-  useEffect(() => { setV(String(value ?? '')); }, [value]);
-  const commit = () => {
-    const nv = type === 'number' ? Number(v) : v;
-    if (type === 'number' && Number.isNaN(nv)) { setV(String(value ?? '')); return; }
-    if (nv !== value) onCommit(nv);
-  };
-  return (
-    <TextField
-      size="small" label={label} type={type} value={v}
-      onChange={(e) => setV(e.target.value)}
-      onBlur={commit}
-      onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); }}
-      sx={{ width }}
-    />
-  );
-}
-
 // Automation view: the scheduled cron jobs (top section) plus the background
 // quota-soak scheduler (below). Cron rows fire on a cron expr; background defs are
 // picked round-robin during a working-hours window when spare quota is available.
 export default function CronJobs({ crons, agents, background, recent, onAdd, onToast }) {
+  // false (closed) | true (create) | a def object (edit that row)
   const [defOpen, setDefOpen] = useState(false);
 
   const toggle = (id, enabled) =>
@@ -84,10 +61,6 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
     fetch(`/crons/${id}`, { method: 'DELETE' })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
 
-  // Background handlers — PUT accepts a partial config (deep-merged server-side).
-  const putConfig = (patch) =>
-    fetch('/background/config', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch) })
-      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
   const runBg = () =>
     fetch('/background/run', { method: 'POST' })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.reason || d.error); }).catch((e) => onToast?.(e.message));
@@ -100,11 +73,6 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
 
   const config = background?.config;
   const lastTick = background?.lastTick;
-  const days = config?.window?.days || [];
-  const toggleDay = (d) => {
-    const next = days.includes(d) ? days.filter((x) => x !== d) : [...days, d].sort((a, b) => a - b);
-    putConfig({ window: { days: next } });
-  };
 
   return (
     <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1.5}>
@@ -189,57 +157,12 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 3, mb: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Background</Typography>
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>local time</Typography>
-          <Box sx={{ flex: 1 }} />
-          {config && (
-            <Tooltip title={config.enabled ? 'Disable background runs' : 'Enable background runs'} disableInteractive>
-              <Switch size="small" checked={!!config.enabled} onChange={() => putConfig({ enabled: !config.enabled })} />
-            </Tooltip>
-          )}
         </Stack>
 
         {!config ? (
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>Loading…</Typography>
         ) : (
           <Stack spacing={1.5}>
-            {/* Window */}
-            <Stack spacing={0.5}>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>Window</Typography>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
-                <EditField label="start hour" type="number" width={90} value={config.window?.startHour} onCommit={(v) => putConfig({ window: { startHour: v } })} />
-                <EditField label="end hour" type="number" width={90} value={config.window?.endHour} onCommit={(v) => putConfig({ window: { endHour: v } })} />
-                <Stack direction="row" spacing={0.5}>
-                  {DAYS.map(([lbl, d]) => (
-                    <Chip key={d} size="small" label={lbl} variant={days.includes(d) ? 'filled' : 'outlined'} color={days.includes(d) ? 'primary' : 'default'} onClick={() => toggleDay(d)} sx={{ height: 24, fontSize: 11 }} />
-                  ))}
-                </Stack>
-              </Stack>
-            </Stack>
-
-            {/* Thresholds */}
-            <Stack spacing={0.5}>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>Thresholds (% used)</Typography>
-              {['claude', 'ollama'].map((b) => (
-                <Stack key={b} direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
-                  <Typography variant="code" sx={{ fontSize: 11, width: 54 }}>{b}</Typography>
-                  <EditField label="start <" type="number" width={90} value={config.thresholds?.[b]?.start} onCommit={(v) => putConfig({ thresholds: { [b]: { start: v } } })} />
-                  <EditField label="stop ≥" type="number" width={90} value={config.thresholds?.[b]?.stop} onCommit={(v) => putConfig({ thresholds: { [b]: { stop: v } } })} />
-                  <EditField label="weekly max" type="number" width={110} value={config.thresholds?.[b]?.weeklyMax} onCommit={(v) => putConfig({ thresholds: { [b]: { weeklyMax: v } } })} />
-                </Stack>
-              ))}
-            </Stack>
-
-            {/* Models + token caps */}
-            <Stack spacing={0.5}>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>Models & token caps</Typography>
-              {['claude', 'ollama'].map((b) => (
-                <Stack key={b} direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
-                  <Typography variant="code" sx={{ fontSize: 11, width: 54 }}>{b}</Typography>
-                  <EditField label="model" width={160} value={config.models?.[b]} onCommit={(v) => putConfig({ models: { [b]: v } })} />
-                  <EditField label="token cap" type="number" width={140} value={config.tokenCaps?.[b]} onCommit={(v) => putConfig({ tokenCaps: { [b]: v } })} />
-                </Stack>
-              ))}
-            </Stack>
-
             {/* Last-tick status */}
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {lastTick
@@ -284,6 +207,9 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                           <Tooltip title="Run the scheduler now (picks a ready task, not necessarily this one)" disableInteractive>
                             <IconButton size="small" onClick={runBg}><PlayArrowIcon fontSize="small" /></IconButton>
                           </Tooltip>
+                          <Tooltip title="Edit" disableInteractive>
+                            <IconButton size="small" onClick={() => setDefOpen(def)}><EditOutlinedIcon fontSize="small" /></IconButton>
+                          </Tooltip>
                           <Tooltip title="Delete" disableInteractive>
                             <IconButton size="small" onClick={() => { if (window.confirm(`Delete background task "${def.title}"?`)) removeDef(def.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>
                           </Tooltip>
@@ -298,7 +224,13 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
         )}
       </Box>
 
-      <CreateBackgroundDialog open={defOpen} onClose={() => setDefOpen(false)} recent={recent} onToast={onToast} />
+      <CreateBackgroundDialog
+        open={!!defOpen}
+        def={typeof defOpen === 'object' ? defOpen : null}
+        onClose={() => setDefOpen(false)}
+        recent={recent}
+        onToast={onToast}
+      />
     </Stack>
   );
 }

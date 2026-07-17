@@ -1,7 +1,8 @@
 // Background tasks: quota-soak agent runs during working hours. A minute-
-// resolution tick, when due by tickMinutes and inside the configured window,
-// gates on live 5h/7d usage (Claude first, else Ollama), picks the oldest
-// off-cooldown def round-robin, and spawns it as a normal Tasks-board card
+// resolution tick, when due by TICK_MINUTES and inside a def's own window,
+// gates on live 5h/7d usage (Claude first, else Ollama) against that def's own
+// thresholds, picks the oldest off-cooldown def round-robin, and spawns it as
+// a normal Tasks-board card
 // tagged 'background' with an unattended prompt + a deny rule barring writes to
 // C:\git\singularity. A watchdog re-polls usage while a run is live and injects
 // a wrap-up (then hard-kills after a grace) when the budget is spent.
@@ -19,7 +20,8 @@ import { parseSession } from './stats.mjs';
 import { isClaudeModel } from './models.mjs';
 
 const BACKGROUND_FILE = join(reg.STATE_DIR, 'background.json');
-const TICK_MS = 60_000; // minute-resolution timer; logic fires when due by tickMinutes
+const TICK_MS = 60_000; // minute-resolution timer; logic fires when due by TICK_MINUTES
+const TICK_MINUTES = 60; // fixed cadence — no per-install override
 const WATCHDOG_MS = 120_000;
 const KILL_GRACE_MS = 5 * 60_000;
 const WRAPUP = 'Usage budget reached — stop working now, write Report.md with current progress + remaining steps, move the card to inreview, then stop.';
@@ -32,20 +34,19 @@ const WRAPUP = 'Usage budget reached — stop working now, write Report.md with 
 // Residual risk: Bash-side writes (echo > file) are only prompt-banned; accepted.
 const DENY = { permissions: { deny: ['Edit(//c/git/singularity/**)'] } };
 
-const DEFAULT_CONFIG = {
-  enabled: false,
+// Per-task defaults — every def merges over this on create, and legacy flat
+// installs get seeded from their old top-level copy (see migrateLegacyConfig).
+const DEFAULT_DEF = {
   window: { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] },
-  tickMinutes: 60,
   thresholds: {
     claude: { start: 50, stop: 75, weeklyMax: 75 },
     ollama: { start: 50, stop: 75, weeklyMax: 75 },
   },
   models: { claude: 'opus', ollama: 'glm-5.2:cloud' },
   tokenCaps: { claude: 15_000_000, ollama: 2_000_000 },
-  defs: [],
 };
 
-let config = structuredClone(DEFAULT_CONFIG);
+let config = { defs: [] };
 let lastTick = null; // { at, action:'ran'|'skipped', reason }
 let logger = null;
 let lastDueAt = 0; // when the tick logic last ran (minute-resolution gating)
@@ -53,9 +54,9 @@ let injectedTaskId = null; // watchdog: wrap-up injected for this bg task (once)
 
 // ---- Pure functions (exported, unit-tested) ------------------------------------
 
-// Daemon-local: is `date` a configured weekday within [startHour, endHour)?
-export function inWindow(cfg, date) {
-  const { startHour, endHour, days } = cfg.window;
+// Daemon-local: is `date` within this def's configured weekday+hour window?
+export function inWindow(def, date) {
+  const { startHour, endHour, days } = def.window;
   const h = date.getHours();
   return days.includes(date.getDay()) && h >= startHour && h < endHour;
 }
@@ -71,33 +72,57 @@ function gateReason(u, th, name) {
   return null;
 }
 
-// Claude first, then Ollama. Each source fails only its own gate (fail closed).
-export function evalGate(usage, cfg) {
+// Claude first, then Ollama, against this def's own thresholds. Each source
+// fails only its own gate (fail closed).
+export function evalGate(usage, def) {
   const reasons = [];
   for (const backend of ['claude', 'ollama']) {
-    const r = gateReason(usage?.[backend], cfg.thresholds[backend], backend);
+    const r = gateReason(usage?.[backend], def.thresholds[backend], backend);
     if (r == null) return { backend, reason: `${backend} within budget` };
     reasons.push(r);
   }
   return { backend: null, reason: reasons.join('; ') };
 }
 
-// Oldest off-cooldown enabled def (null lastRunAt = oldest), or null.
-export function pickDef(cfg, now) {
-  const ready = (cfg.defs || []).filter((d) =>
+// Oldest off-cooldown enabled def (null lastRunAt = oldest), ignoring window and
+// gate entirely — used only for a forced (bypassGate) manual run.
+export function pickDef(defs, now) {
+  const ready = (defs || []).filter((d) =>
     d.enabled && (d.lastRunAt == null || now - d.lastRunAt > d.cooldownHours * 3_600_000));
   ready.sort((a, b) => (a.lastRunAt ?? -Infinity) - (b.lastRunAt ?? -Infinity));
   return ready[0] || null;
 }
 
+// Def-first pass for the normal (non-forced) run path: candidates are enabled +
+// off-cooldown + (in their own window, unless bypassWindow), oldest lastRunAt
+// first. Returns the first candidate whose own gate passes as { def, backend,
+// reason: null }, or { def: null, backend: null, reason } when none qualify —
+// 'no def ready' when there were no candidates at all, else the joined
+// per-candidate gate reasons.
+export function pickRunnableDef(defs, usage, now, { bypassWindow = false } = {}) {
+  const ready = (defs || []).filter((d) =>
+    d.enabled &&
+    (d.lastRunAt == null || now - d.lastRunAt > d.cooldownHours * 3_600_000) &&
+    (bypassWindow || inWindow(d, new Date(now))));
+  ready.sort((a, b) => (a.lastRunAt ?? -Infinity) - (b.lastRunAt ?? -Infinity));
+  if (ready.length === 0) return { def: null, backend: null, reason: 'no def ready' };
+  const reasons = [];
+  for (const def of ready) {
+    const gate = evalGate(usage, def);
+    if (gate.backend) return { def, backend: gate.backend, reason: null };
+    reasons.push(`${def.title}: ${gate.reason}`);
+  }
+  return { def: null, backend: null, reason: reasons.join('; ') };
+}
+
 // Should a live run stop? Fail closed on unavailable usage.
-export function watchdogDecision(usage, backend, cfg, tokens) {
+export function watchdogDecision(usage, backend, def, tokens) {
   const u = usage?.[backend];
-  const th = cfg.thresholds[backend];
+  const th = def.thresholds[backend];
   if (!u || !u.ok) return 'stop';
   if ((u.session?.pctUsed ?? 0) >= th.stop) return 'stop';
   if ((u.weekly?.pctUsed ?? 0) >= th.weeklyMax) return 'stop';
-  if (tokens >= cfg.tokenCaps[backend]) return 'stop';
+  if (tokens >= def.tokenCaps[backend]) return 'stop';
   return 'continue';
 }
 
@@ -134,22 +159,20 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
     emit();
     return null;
   };
-  if (!manual && !config.enabled) return refuse('disabled');
-  if (!bypassWindow && !inWindow(config, new Date(now))) return refuse('outside window');
   if (liveBgTask()) return refuse('a background run is already live');
 
-  let backend;
-  if (bypassGate) backend = 'claude'; // forced run: no gate, default to claude budget/model
-  else {
-    const gate = evalGate(await getUsage(), config);
-    if (!gate.backend) return refuse(gate.reason);
-    backend = gate.backend;
+  let def, backend;
+  if (bypassGate) { // forced run: no gate, default to claude budget/model
+    backend = 'claude';
+    def = pickDef(config.defs, now);
+    if (!def) return refuse('no def ready');
+  } else {
+    const picked = pickRunnableDef(config.defs, await getUsage(), now, { bypassWindow });
+    if (!picked.def) return refuse(picked.reason);
+    ({ def, backend } = picked);
   }
 
-  const def = pickDef(config, now);
-  if (!def) return refuse('no def ready');
-
-  const model = def.model || config.models[backend];
+  const model = def.models[backend];
   const task = createTask({
     repo: def.cwd, title: def.title, description: def.description, model,
     tags: ['background'], background: true, permissionSettings: DENY,
@@ -164,7 +187,7 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
 
 function tick() {
   const now = Date.now();
-  if (now - lastDueAt < config.tickMinutes * 60_000) return;
+  if (now - lastDueAt < TICK_MINUTES * 60_000) return;
   lastDueAt = now;
   attemptRun({ bypassWindow: false, bypassGate: false, manual: false })
     .catch((e) => logger?.warn({ err: e.message }, 'background tick failed'));
@@ -176,12 +199,13 @@ async function watchdog() {
   const task = liveBgTask();
   if (!task) { injectedTaskId = null; return; }
   if (injectedTaskId === task.id) return; // already wrapping up this run
-  let decision = 'stop'; // fail closed: a thrown poll leaves the run unsupervised → stop
+  let decision = 'stop'; // fail closed: a thrown poll (or a missing def) leaves the run unsupervised → stop
   try {
+    const def = config.defs.find((d) => d.lastTaskId === task.id);
     const usage = await getUsage();
     const tokens = parseSession(task.worktree || task.repo, task.sessionId).tokens;
     const backend = isClaudeModel(task.model) ? 'claude' : 'ollama';
-    decision = watchdogDecision(usage, backend, config, tokens);
+    decision = def ? watchdogDecision(usage, backend, def, tokens) : 'stop';
   } catch (e) { logger?.warn({ err: e.message }, 'background watchdog poll failed — stopping run (fail closed)'); }
   if (decision !== 'stop') return;
 
@@ -196,52 +220,53 @@ async function watchdog() {
   }, KILL_GRACE_MS).unref();
 }
 
+// Old flat shape stored window/thresholds/models/tokenCaps once at the top
+// level, shared by every def. Seed those onto any def missing them; a def that
+// already has its own copy (already migrated, or created post-refactor) is left
+// untouched. Pure — exported so the migration test doesn't touch the filesystem.
+export function migrateLegacyConfig(loaded) {
+  const legacy = ['window', 'thresholds', 'models', 'tokenCaps'].filter((k) => loaded?.[k] != null);
+  const defs = (loaded?.defs || []).map((d) => {
+    if (legacy.length === 0) return d;
+    const seeded = { ...d };
+    for (const k of legacy) if (seeded[k] === undefined) seeded[k] = loaded[k];
+    return seeded;
+  });
+  return { defs, migrated: legacy.length > 0 };
+}
+
 export function initBackground(log) {
   logger = log;
   try {
     if (existsSync(BACKGROUND_FILE)) {
       const loaded = JSON.parse(readFileSync(BACKGROUND_FILE, 'utf8'));
-      config = { ...structuredClone(DEFAULT_CONFIG), ...loaded }; // fill any keys added since last write
-      log?.info({ defs: config.defs.length, enabled: config.enabled }, 'loaded background.json');
+      const { defs, migrated } = migrateLegacyConfig(loaded);
+      config = { defs };
+      if (migrated) persist(); // rewrite state/background.json to the new {defs} shape
+      log?.info({ defs: config.defs.length, migrated }, 'loaded background.json');
     } else {
       persist(); // materialize the shipped default so the file exists
     }
   } catch (e) { log?.warn({ err: e.message }, 'background.json load failed'); }
-  lastDueAt = Date.now(); // wait one tickMinutes before the first run
+  lastDueAt = Date.now(); // wait one TICK_MINUTES before the first run
   setInterval(tick, TICK_MS).unref();
   setInterval(() => { watchdog().catch(() => {}); }, WATCHDOG_MS).unref();
 }
 
 // ---- CRUD -----------------------------------------------------------------------
 
-// Config-only route: defs are managed via the dedicated def routes, so a `defs`
-// key here is ignored. `thresholds` is two levels deep ({claude:{...},
-// ollama:{...}}) — merge per-backend so editing one field (e.g. claude.start)
-// doesn't wipe its siblings (claude.stop/weeklyMax) and silently disable the gate.
-export function updateBackgroundConfig(partial) {
-  const flatDeep = new Set(['window', 'models', 'tokenCaps']);
-  const scalar = new Set(['enabled', 'tickMinutes']);
-  for (const [k, v] of Object.entries(partial || {})) {
-    if (k === 'thresholds' && v && typeof v === 'object') {
-      for (const [backend, tv] of Object.entries(v)) {
-        if (tv && typeof tv === 'object') config.thresholds[backend] = { ...config.thresholds[backend], ...tv };
-      }
-    } else if (flatDeep.has(k) && v && typeof v === 'object') {
-      config[k] = { ...config[k], ...v };
-    } else if (scalar.has(k)) {
-      config[k] = v;
-    } // unknown keys (defs, ...) ignored — defs go through the def routes
-  }
-  persist();
-  emit();
-  return config;
-}
-
-export function createDef({ title, description, cwd, cooldownHours, model, enabled }) {
+export function createDef({ title, description, cwd, cooldownHours, enabled, window, thresholds, models, tokenCaps }) {
   if (!title?.trim() || !description?.trim() || !cwd?.trim()) throw new Error('title, description, cwd required');
   const def = {
     id: randomUUID(), title: title.trim(), description: description.trim(), cwd: cwd.trim(),
-    cooldownHours: cooldownHours ?? 24, enabled: enabled !== false, model: model || null,
+    cooldownHours: cooldownHours ?? 24, enabled: enabled !== false,
+    window: { ...DEFAULT_DEF.window, ...window },
+    thresholds: {
+      claude: { ...DEFAULT_DEF.thresholds.claude, ...thresholds?.claude },
+      ollama: { ...DEFAULT_DEF.thresholds.ollama, ...thresholds?.ollama },
+    },
+    models: { ...DEFAULT_DEF.models, ...models },
+    tokenCaps: { ...DEFAULT_DEF.tokenCaps, ...tokenCaps },
     lastRunAt: null, lastTaskId: null,
   };
   config.defs.push(def);
@@ -250,12 +275,24 @@ export function createDef({ title, description, cwd, cooldownHours, model, enabl
   return def;
 }
 
+// `thresholds` is two levels deep ({claude:{...}, ollama:{...}}) — merge
+// per-backend so editing one field (e.g. claude.start) doesn't wipe its
+// siblings (claude.stop/weeklyMax) and silently disable the gate. Same for
+// window/models/tokenCaps (single level, merge preserves untouched keys).
 export function updateDef(id, partial) {
   const def = config.defs.find((d) => d.id === id);
   if (!def) throw new Error('no such def');
-  for (const k of ['title', 'description', 'cwd', 'cooldownHours', 'model', 'enabled', 'lastRunAt', 'lastTaskId']) {
+  for (const k of ['title', 'description', 'cwd', 'cooldownHours', 'enabled', 'lastRunAt', 'lastTaskId']) {
     if (partial[k] !== undefined) def[k] = partial[k];
   }
+  if (partial.window) def.window = { ...def.window, ...partial.window };
+  if (partial.thresholds) {
+    for (const [backend, tv] of Object.entries(partial.thresholds)) {
+      if (tv && typeof tv === 'object') def.thresholds[backend] = { ...def.thresholds[backend], ...tv };
+    }
+  }
+  if (partial.models) def.models = { ...def.models, ...partial.models };
+  if (partial.tokenCaps) def.tokenCaps = { ...def.tokenCaps, ...partial.tokenCaps };
   persist();
   emit();
   return def;
