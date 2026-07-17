@@ -2,6 +2,7 @@
 import * as reg from './agents.mjs';
 import { snapshotTasks } from './tasks.mjs';
 import { snapshotCrons } from './crons.mjs';
+import { snapshotBackground } from './background.mjs';
 import { streamChat } from './chat.mjs';
 
 function send(ws, msg) {
@@ -36,6 +37,10 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     const msg = JSON.stringify({ t: 'crons', crons });
     for (const ws of sockets) send(ws, msg);
   });
+  reg.bus.on('background', (data) => {
+    const msg = JSON.stringify({ t: 'background', ...data });
+    for (const ws of sockets) send(ws, msg);
+  });
 
   // Heartbeat: prune dead sockets that never sent a TCP FIN (e.g. laptop sleep,
   // network drop) instead of leaving them in `sockets` until OS timeout.
@@ -63,6 +68,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     send(ws, { t: 'list', agents: reg.snapshot(), recentRepos: reg.getRecentRepos() });
     send(ws, { t: 'tasks', ...snapshotTasks() });
     send(ws, { t: 'crons', crons: snapshotCrons() });
+    send(ws, { t: 'background', ...snapshotBackground() });
 
     ws.on('message', (raw) => {
       let m;

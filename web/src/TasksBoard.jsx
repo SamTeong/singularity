@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -67,6 +67,23 @@ const LIVE_STATUS = new Set(['starting', 'running', 'idle']);
 export default function TasksBoard({ tasks, history, agents, stats, activeId, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
   const [dragId, setDragId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
+  const [activeTags, setActiveTags] = useState(() => new Set());
+
+  // Distinct tags across live tasks + history (union, deduped, sorted). The filter
+  // pill row is shared by Board and History; OR semantics — a task matches if it
+  // carries ANY active tag; empty active-set shows everything.
+  const allTags = useMemo(() => {
+    const s = new Set();
+    for (const t of tasks) (t.tags || []).forEach((x) => s.add(x));
+    for (const h of history) (h.tags || []).forEach((x) => s.add(x));
+    return [...s].sort();
+  }, [tasks, history]);
+  const matchesTags = (item) => activeTags.size === 0 || (item.tags || []).some((t) => activeTags.has(t));
+  const toggleTag = (tag) => setActiveTags((prev) => {
+    const n = new Set(prev);
+    if (n.has(tag)) n.delete(tag); else n.add(tag);
+    return n;
+  });
 
   // Transcript panel: selecting a History row — or a Done-column card — loads its
   // session's transcript read-only, dockable bottom/right, resizable + collapsible,
@@ -206,6 +223,26 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
         </Button>
         <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Task</Button>
       </Stack>
+      {allTags.length > 0 && (
+        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
+          {allTags.map((tag) => {
+            const on = activeTags.has(tag);
+            return (
+              <Chip
+                key={tag}
+                size="small"
+                label={tag}
+                variant={on ? 'filled' : 'outlined'}
+                color={on ? 'primary' : 'default'}
+                onClick={() => toggleTag(tag)}
+                onDelete={on ? () => toggleTag(tag) : undefined}
+                sx={{ height: 22, fontSize: 11 }}
+              />
+            );
+          })}
+          {activeTags.size > 0 && <Button size="small" onClick={() => setActiveTags(new Set())}>Clear all</Button>}
+        </Stack>
+      )}
       {showHistory ? (
         <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0 }}>
           <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
@@ -225,11 +262,18 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                 </TableRow>
               </TableHead>
               <TableBody>
-                {history.map((h) => {
+                {history.filter(matchesTags).map((h) => {
                   const s = h.finalStats;
                   return (
                     <TableRow key={h.id} hover selected={tx?.id === h.id} onClick={() => openTranscript({ id: h.id, title: h.title, sessionId: h.sessionId, worktree: h.worktree, repo: h.repo })} sx={{ cursor: 'pointer' }}>
-                      <TableCell>{h.title}</TableCell>
+                      <TableCell>
+                        {h.title}
+                        {(h.tags || []).length > 0 && (
+                          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, mt: 0.5 }}>
+                            {h.tags.map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 18, fontSize: 10 }} />)}
+                          </Stack>
+                        )}
+                      </TableCell>
                       <TableCell>{repoName(h.repo)}</TableCell>
                       <TableCell>{h.branch || '—'}</TableCell>
                       <TableCell><Chip size="small" label={h.outcome} sx={{ height: 20, fontSize: 11 }} /></TableCell>
@@ -263,7 +307,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
         <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0 }}>
           <Stack direction="row" spacing={1} sx={{ flex: 1, minHeight: 0 }}>
           {COLUMNS.map(([col, label]) => {
-            const cards = tasks.filter((t) => t.column === col);
+            const cards = tasks.filter((t) => t.column === col && matchesTags(t));
             return (
               <Stack
                 key={col}
@@ -347,6 +391,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                         )}
                         <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
                           {task.state && <Chip size="small" label={task.state} sx={{ height: 20, fontSize: 11 }} />}
+                          {(task.tags || []).map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 20, fontSize: 11 }} />)}
                           {agent && <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>}
                         </Stack>
                       </Box>

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback, Suspense, lazy } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo, Suspense, lazy } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -67,7 +67,7 @@ const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${
 // navigation; the ＋ "New agent" row above it opens the create dialog.
 const NAV = [
   { v: 'tasks', icon: <ViewKanbanIcon />, label: 'Tasks' },
-  { v: 'cron', icon: <ScheduleIcon />, label: 'Cron' },
+  { v: 'cron', icon: <ScheduleIcon />, label: 'Automation' },
   { v: 'sessions', icon: <HistoryIcon />, label: 'Sessions' },
   { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
 ];
@@ -163,6 +163,7 @@ export default function App() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [crons, setCrons] = useState([]);
   const [cronOpen, setCronOpen] = useState(false);
+  const [background, setBackground] = useState(null); // { config, lastTick, liveTaskId }
   // Terminal dock height (px, drag-resizable) + minimized state, both persisted.
   const [dockH, setDockH] = useState(() => {
     const v = Number(localStorage.getItem('sing-dock-h'));
@@ -222,6 +223,8 @@ export default function App() {
           setTaskHistory(m.history || []);
         } else if (m.t === 'crons') {
           setCrons(m.crons);
+        } else if (m.t === 'background') {
+          setBackground({ config: m.config, lastTick: m.lastTick, liveTaskId: m.liveTaskId });
         } else if (m.t === 'chat:delta' || m.t === 'chat:done' || m.t === 'chat:error') {
           chatHandler.current?.(m);
         } else if (m.t === 'error') {
@@ -314,6 +317,20 @@ export default function App() {
   // On-demand: fetch once the socket is up (app opened / reconnected). The
   // backend pushes 'usage' updates on its own auto-refresh from here on.
   useEffect(() => { if (connected) refreshUsage(false); }, [connected, refreshUsage]);
+
+  // Background snapshot: initial load on connect; live updates arrive over the WS.
+  useEffect(() => {
+    if (!connected) return;
+    fetch('/background').then((r) => r.json()).then(setBackground).catch(() => {});
+  }, [connected]);
+
+  // Distinct tags across live tasks + history — options for the task tags input.
+  const tagOptions = useMemo(() => {
+    const s = new Set();
+    for (const t of tasks) (t.tags || []).forEach((x) => s.add(x));
+    for (const h of taskHistory) (h.tags || []).forEach((x) => s.add(x));
+    return [...s].sort();
+  }, [tasks, taskHistory]);
 
   const activeAgent = agents.find((a) => a.id === active);
   const usageTip = usageSummary(usage); // per-provider 5h/7d summary for the collapsed tooltip
@@ -453,7 +470,7 @@ export default function App() {
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
             {view === 'skills' && <SkillsPanel />}
-            {view === 'cron' && <CronJobs crons={crons} agents={agents} onAdd={() => setCronOpen(true)} onToast={setToast} />}
+            {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} onAdd={() => setCronOpen(true)} onToast={setToast} />}
             {view === 'tasks' && (
               <TasksBoard
                 tasks={tasks}
@@ -608,6 +625,7 @@ export default function App() {
         setCwd={setCwd}
         recent={recent}
         onBrowse={() => setPicking(true)}
+        tagOptions={tagOptions}
       />
 
       <CreateCronDialog

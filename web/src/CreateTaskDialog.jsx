@@ -19,9 +19,10 @@ import ModelSelect from './ModelSelect.jsx';
 // New-task dialog: CreateAgentDialog minus session id, plus title/description
 // (the requirements), plan-approval gate and merge policy. Submits POST /tasks
 // (REST, not WS — the create is request/response with a possible error).
-export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, onBrowse }) {
+export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, onBrowse, tagOptions = [] }) {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
+  const [tags, setTags] = useState([]);
   const [model, setModel] = useState('');
   const [implModel, setImplModel] = useState('sonnet');
   const [reviewerModel, setReviewerModel] = useState('opus');
@@ -49,7 +50,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
   }, [model, claudeSet]);
 
   const reset = () => {
-    setTitle(''); setDescription(''); setScopes([]); setModel('');
+    setTitle(''); setDescription(''); setTags([]); setScopes([]); setModel('');
     setImplModel('sonnet'); setReviewerModel('opus');
     setRequireApproval(false); setMergeMode('manual');
   };
@@ -65,7 +66,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
         body: JSON.stringify({
           repo: cwd.trim(), title: title.trim(), description: description.trim(),
           model: model.trim(), implModel: implModel.trim(), reviewerModel: reviewerModel.trim(),
-          scopes, requirePlanApproval: requireApproval, mergeMode,
+          scopes, tags, requirePlanApproval: requireApproval, mergeMode,
         }),
       });
       const d = await r.json();
@@ -118,6 +119,15 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
               <li {...props}><Checkbox size="small" checked={selected} style={{ marginRight: 8 }} />{option}</li>
             )}
             renderInput={(params) => <TextField {...params} label="skill-scopes" placeholder="" />}
+          />
+          <Autocomplete
+            multiple
+            freeSolo
+            size="small"
+            options={tagOptions}
+            value={tags}
+            onChange={(_, v) => setTags(v)}
+            renderInput={(params) => <TextField {...params} label="tags (optional)" placeholder="" />}
           />
           <FormControlLabel
             control={<Checkbox size="small" sx={{ py: 0.25 }} checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} />}

@@ -204,7 +204,44 @@ ${t.description}`;
    as your very last action — the daemon terminates this session when the card reaches done.`;
 }
 
-export function createTask({ repo, title, description, model, implModel, reviewerModel, scopes, requirePlanApproval, mergeMode, mock }) {
+// Normalize free-form tags: trim, lowercase, drop blanks, dedupe.
+export function normalizeTags(tags) {
+  return [...new Set((tags || []).map((s) => String(s).trim().toLowerCase()).filter(Boolean))];
+}
+
+// Unattended variant of the workflow prompt for background quota-soak runs: no
+// clarifying questions, no plan approval, no impl/reviewer subagent dance — just
+// do the work, write a report, and hand the card to a human for review. The
+// daemon's watchdog (background.mjs) stops the run when the budget is spent.
+export function buildBackgroundPrompt(t) {
+  const cwd = t.worktree || t.repo;
+  const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
+  const status = (column, state) =>
+    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+  return `You are an unattended background agent working on "${t.title}".
+
+## Requirements
+
+${t.description}
+
+## Environment
+
+- You are working directly in \`${cwd}\`. Do the work described above in place.
+- Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (already written for you). Write your \`Report.md\` there.
+
+## Rules
+
+- NO clarifying questions, NO plan-approval step, NO impl/reviewer subagent workflow — just do the work directly and efficiently. Nobody is watching this terminal.
+- NEVER modify anything under \`C:\\git\\singularity\`. If the work implies changes there, describe them in the report instead of making them.
+- At the START, run:
+  ${status('inprogress', 'working')}
+- When the work is done, write \`Report.md\` to \`${t.ticketDir}\` summarizing what you did / found / proposed, and print a short summary in this terminal.
+- As your LAST action, move the card to In Review:
+  ${status('inreview', 'awaiting human review')}
+  Do NOT move the card to done — a human concludes the run.`;
+}
+
+export function createTask({ repo, title, description, model, implModel, reviewerModel, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
   if (!existsSync(repo)) throw new Error('working directory does not exist');
   const kind = isGitWorkTree(repo) ? 'git' : 'plain';
@@ -228,16 +265,19 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     writeFileSync(join(ticketDir, 'Requirements.md'), `# ${title.trim()}\n\n${description.trim()}\n`);
     const t = {
       id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch, ticketDir,
-      model, implModel, reviewerModel, scopes, requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
+      model, implModel, reviewerModel, scopes, tags: normalizeTags(tags), requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
       column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
     };
     // Statusline capture: per-session cost/duration written to state/cost/<id>.json
     // (read by stats.mjs). Passed as extraArgs so it also survives reattach.
-    const extraArgs = ['--settings', JSON.stringify({ statusLine: { type: 'command', command: `node "${STATUSLINE_SCRIPT}"` } })];
+    // permissionSettings (e.g. background-run deny rules) ride the same --settings
+    // object as a sibling key so a single flag carries both.
+    const extraArgs = ['--settings', JSON.stringify({ statusLine: { type: 'command', command: `node "${STATUSLINE_SCRIPT}"` }, ...(permissionSettings || {}) })];
     // mock (demo only): spawn an idle claude with no workflow prompt — a live
     // session for the status pill, but no turn ever starts, so zero tokens. The
     // demo driver moves the card itself. Real tasks always get the prompt.
-    const agent = reg.create({ cwd, name: t.title, model, scopes, prompt: mock ? undefined : buildTaskPrompt(t), permissionMode: 'acceptEdits', extraArgs });
+    const prompt = mock ? undefined : (promptOverride ?? (background ? buildBackgroundPrompt(t) : buildTaskPrompt(t)));
+    const agent = reg.create({ cwd, name: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs });
     t.sessionId = agent.id;
     tasks.set(id, t);
     persist();
