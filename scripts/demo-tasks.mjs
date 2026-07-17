@@ -27,7 +27,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const authHeaders = TOKEN ? { 'x-sing-token': TOKEN } : {};
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const STEP_MS = 1500;
+const STEP_MS = 3000;
 const REJECT_RATE = 0.3;
 const MAX_REJECTS = 3;          // mirrors MAX_REVIEW_REJECTS in server/tasks.mjs
 const DONE_TTL_MS = 3000;       // dwell on Done before auto-delete
