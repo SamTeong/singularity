@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useCallback, Suspense, lazy } from 
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import Badge from '@mui/material/Badge';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import List from '@mui/material/List';
@@ -42,7 +43,8 @@ import ProcessManager from './ProcessManager.jsx';
 import CreateAgentDialog from './CreateAgentDialog.jsx';
 import CreateTaskDialog from './CreateTaskDialog.jsx';
 import CreateCronDialog from './CreateCronDialog.jsx';
-import UsagePill from './UsagePill.jsx';
+import { ProviderRow } from './UsagePill.jsx';
+import { PROVIDERS, usageSummary } from './usageUtil.js';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
@@ -68,10 +70,6 @@ const NAV = [
   { v: 'cron', icon: <ScheduleIcon />, label: 'Cron' },
   { v: 'sessions', icon: <HistoryIcon />, label: 'Sessions' },
   { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
-  { v: 'config', icon: <SettingsIcon />, label: 'Config' },
-  { v: 'memory', icon: <BookIcon />, label: 'Memory' },
-  { v: 'wiki', icon: <MenuBookIcon />, label: 'Wiki' },
-  { v: 'skills', icon: <SchoolIcon />, label: 'Skills' },
 ];
 // Use theme.vars (the --mui-* CSS vars) not theme.palette — under cssVariables
 // theme.palette holds only the default (light) scheme's literals and won't switch
@@ -145,6 +143,7 @@ const PAPER_TOOLTIP_SLOTPROPS = {
       color: 'var(--mui-palette-text-primary) !important',
       border: '1px solid var(--mui-palette-divider) !important',
       backdropFilter: 'blur(8px)',
+      whiteSpace: 'pre-line', // multi-line titles (usage summary) break on \n
     },
   },
 };
@@ -317,6 +316,7 @@ export default function App() {
   useEffect(() => { if (connected) refreshUsage(false); }, [connected, refreshUsage]);
 
   const activeAgent = agents.find((a) => a.id === active);
+  const usageTip = usageSummary(usage); // per-provider 5h/7d summary for the collapsed tooltip
 
   // Alt+Up/Down cycles sessions (dir -1/+1), wrapping. Detached ones excluded.
   const cycleSession = (dir) => {
@@ -351,9 +351,13 @@ export default function App() {
           transition: 'width .2s ease',
         })}
       >
-        {/* Header: logo (+ title when expanded) + more menu (processes, dark mode). */}
-        <Stack direction="row" spacing={1.25} sx={{ p: 2, pb: 1.5, alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}>
-          <Logo active={agents.some((a) => a.status === 'running' || a.status === 'starting')} />
+        {/* Header: logo (+ title when expanded) + more menu (nav overflow, processes, dark mode). */}
+        <Stack direction={collapsed ? 'column' : 'row'} spacing={1.25} sx={{ p: 2, pb: 1.5, alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}>
+          <Tooltip title={connected ? '' : 'disconnected'} placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+            <Badge variant="dot" color="error" overlap="circular" anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} invisible={connected}>
+              <Logo active={agents.some((a) => a.status === 'running' || a.status === 'starting')} />
+            </Badge>
+          </Tooltip>
           {!collapsed && (
             <>
               <Typography component="span" sx={{ flex: 1, fontSize: 16, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.01em' }}>Singularity</Typography>
@@ -362,9 +366,14 @@ export default function App() {
               </Tooltip>
             </>
           )}
+          {collapsed && (
+            <Tooltip title="More" placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+              <IconButton onClick={(e) => setMenuAnchor(e.currentTarget)} size="small"><MoreVertIcon /></IconButton>
+            </Tooltip>
+          )}
         </Stack>
 
-        {/* Vertical nav rail: ＋ New agent, then Agents / Config / Memory. Icon-only when collapsed. */}
+        {/* Vertical nav rail: ＋ New agent, then Tasks / Cron / Sessions / Usage. Icon-only when collapsed. */}
         <List sx={{ px: 1, pb: 1 }}>
           {/* Tooltips only when collapsed — expanded rows show their label already. */}
           <Tooltip title={collapsed ? 'New session' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
@@ -376,29 +385,41 @@ export default function App() {
               {!collapsed && <ListItemText primary="New session" />}
             </ListItemButton>
           </Tooltip>
-          {NAV.map((item) => (
-            <Tooltip key={item.v} title={collapsed ? item.label : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-              <ListItemButton
-                selected={view === item.v}
-                onClick={() => (view === item.v ? setCollapsed((c) => !c) : setView(item.v))}
-                sx={{ justifyContent: collapsed ? 'center' : 'flex-start', minHeight: 44, borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5 }}
-              >
-                <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center' }}>{item.icon}</ListItemIcon>
-                {!collapsed && <ListItemText primary={item.label} />}
-              </ListItemButton>
-            </Tooltip>
-          ))}
+          {NAV.map((item) => {
+            const isUsage = item.v === 'usage';
+            const tooltipLabel = isUsage && usageTip ? usageTip : item.label;
+            return (
+              <Tooltip key={item.v} title={collapsed ? tooltipLabel : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+                <ListItemButton
+                  selected={view === item.v}
+                  onClick={() => {
+                    if (view === item.v) { setCollapsed((c) => !c); return; }
+                    setView(item.v);
+                    if (isUsage) refreshUsage(true);
+                  }}
+                  sx={{ justifyContent: collapsed ? 'center' : 'flex-start', alignItems: collapsed || !isUsage ? 'center' : 'flex-start', minHeight: 44, borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5 }}
+                >
+                  <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', mt: collapsed || !isUsage ? 0 : '2px' }}>{item.icon}</ListItemIcon>
+                  {!collapsed && (
+                    <ListItemText
+                      primary={item.label}
+                      secondary={isUsage ? (
+                        <Stack spacing={0.75} sx={{ mt: 0.75 }}>
+                          {PROVIDERS.map((p) => <ProviderRow key={p.key} label={p.label} u={usage?.[p.key]} />)}
+                        </Stack>
+                      ) : null}
+                      secondaryTypographyProps={isUsage ? { component: 'div' } : undefined}
+                    />
+                  )}
+                </ListItemButton>
+              </Tooltip>
+            );
+          })}
         </List>
 
-        {!collapsed && (
+        {!collapsed && !connected && (
           <Box sx={{ px: 2, pb: 1 }}>
-            <StatusPill status={connected ? 'done' : 'error'}>{connected ? 'connected' : 'disconnected'}</StatusPill>
-          </Box>
-        )}
-
-        {!collapsed && (
-          <Box sx={{ px: 2, pb: 1 }}>
-            <UsagePill usage={usage} onOpen={() => { setView('usage'); refreshUsage(true); }} />
+            <StatusPill status="error">disconnected</StatusPill>
           </Box>
         )}
 
@@ -539,8 +560,25 @@ export default function App() {
       {picking && <DirPicker start={cwd} onPick={(p) => { setCwd(p); setPicking(false); }} onClose={() => setPicking(false)} />}
       {procsOpen && <ProcessManager onClose={() => setProcsOpen(false)} />}
 
-      {/* More menu: processes + dark mode only (nav lives in the rail). */}
+      {/* More menu: Config/Memory/Wiki/Skills nav, then processes + dark mode. */}
       <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)} keepMounted>
+        <MenuItem onClick={() => { setView('config'); setMenuAnchor(null); }}>
+          <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Config</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setView('skills'); setMenuAnchor(null); }}>
+          <ListItemIcon><SchoolIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Skills</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setView('memory'); setMenuAnchor(null); }}>
+          <ListItemIcon><BookIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Memory</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setView('wiki'); setMenuAnchor(null); }}>
+          <ListItemIcon><MenuBookIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Wiki</ListItemText>
+        </MenuItem>
+        <Divider />
         <MenuItem onClick={() => { setProcsOpen(true); setMenuAnchor(null); }}>
           <ListItemIcon><MonitorHeartIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Claude processes</ListItemText>

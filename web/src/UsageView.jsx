@@ -9,7 +9,7 @@ import IconButton from '@mui/material/IconButton';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useTheme } from '@mui/material/styles';
-import { PROVIDERS, fmtReset, meterColor } from './usageUtil.js';
+import { PROVIDERS, fmtReset, meterColor, segTicks } from './usageUtil.js';
 import SpendView from './SpendView.jsx';
 
 const fmtWall = (iso) => {
@@ -18,15 +18,18 @@ const fmtWall = (iso) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
-function Bar({ label, win }) {
+function Bar({ label, win, segments }) {
   const t = useTheme();
   if (!win) return null;
   const pct = win.pctUsed;
   return (
     <Box>
       <Typography sx={{ fontSize: 13, mb: 0.5 }}>{label}</Typography>
-      <Box sx={(th) => ({ height: 10, borderRadius: 5, bgcolor: th.vars.palette.glass.stroke, overflow: 'hidden' })}>
+      <Box sx={(th) => ({ position: 'relative', height: 10, borderRadius: 5, bgcolor: th.vars.palette.glass.stroke, overflow: 'hidden' })}>
         <Box sx={{ width: `${Math.min(100, pct ?? 0)}%`, height: '100%', bgcolor: meterColor(t, pct), transition: 'width .3s' }} />
+        {segments > 1 && (
+          <Box sx={(th) => ({ position: 'absolute', inset: 0, pointerEvents: 'none', backgroundImage: segTicks(th.vars.palette.background.paper, segments) })} />
+        )}
       </Box>
       <Typography variant="code" sx={{ display: 'block', fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
         {pct == null ? '—' : `${pct}% used`}{win.resetsAt ? ` · resets in ${fmtReset(win.resetsAt)}` : ''}
@@ -66,8 +69,8 @@ function ProviderCard({ label, u }) {
         <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography>
       ) : u.ok ? (
         <Stack spacing={2}>
-          <Bar label="Session (5h)" win={u.session} />
-          <Bar label="Weekly (7d)" win={u.weekly} />
+          <Bar label="Session (5h)" win={u.session} segments={5} />
+          <Bar label="Weekly (7d)" win={u.weekly} segments={7} />
           {u.extra?.enabled && (
             <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary' }}>
               Extra usage: {u.extra.used ?? '—'} / {u.extra.monthlyLimit ?? '—'}
