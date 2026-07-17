@@ -15,7 +15,7 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-background-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { inWindow, evalGate, pickDef, watchdogDecision } = await import('./background.mjs');
+const { inWindow, evalGate, pickDef, watchdogDecision, updateBackgroundConfig } = await import('./background.mjs');
 const { normalizeTags } = await import('./tasks.mjs');
 
 const cfg = () => ({
@@ -115,4 +115,19 @@ test('normalizeTags: trims, lowercases, drops blanks, dedupes', () => {
 test('normalizeTags: undefined/empty → []', () => {
   assert.deepEqual(normalizeTags(undefined), []);
   assert.deepEqual(normalizeTags([]), []);
+});
+
+// ---- updateBackgroundConfig (nested-merge safety) ------------------------------
+// Editing one threshold field via the UI must NOT wipe its siblings — else the
+// gate/watchdog compare against undefined and silently stop firing.
+test('updateBackgroundConfig: partial threshold edit preserves siblings', () => {
+  const c = updateBackgroundConfig({ thresholds: { claude: { start: 55 } } });
+  assert.equal(c.thresholds.claude.start, 55);
+  assert.equal(c.thresholds.claude.stop, 75, 'stop preserved');
+  assert.equal(c.thresholds.claude.weeklyMax, 75, 'weeklyMax preserved');
+  assert.equal(c.thresholds.ollama.stop, 75, 'other backend untouched');
+});
+test('updateBackgroundConfig: ignores defs key (defs go through def routes)', () => {
+  const c = updateBackgroundConfig({ defs: [{ id: 'x' }] });
+  assert.deepEqual(c.defs, [], 'defs not overwritten via config route');
 });

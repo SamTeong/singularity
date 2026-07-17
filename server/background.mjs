@@ -23,9 +23,14 @@ const TICK_MS = 60_000; // minute-resolution timer; logic fires when due by tick
 const WATCHDOG_MS = 120_000;
 const KILL_GRACE_MS = 5 * 60_000;
 const WRAPUP = 'Usage budget reached — stop working now, write Report.md with current progress + remaining steps, move the card to inreview, then stop.';
-// Agent may write anywhere EXCEPT the singularity checkout (deny rules + prompt
+// Agent may write anywhere EXCEPT the singularity checkout (deny rule + prompt
 // ban). Merged into the same --settings JSON as the statusline in tasks.mjs.
-const DENY = { permissions: { deny: ['Edit(C://git//singularity/**)', 'Write(C://git//singularity/**)'] } };
+// Claude Code normalizes paths to POSIX before matching (C:\git\singularity →
+// /c/git/singularity) and a leading // anchors to the filesystem root. A single
+// Edit(...) rule covers Write/NotebookEdit too — a separate Write(...) rule is
+// accepted but never matched (and warns at startup), so we don't list one.
+// Residual risk: Bash-side writes (echo > file) are only prompt-banned; accepted.
+const DENY = { permissions: { deny: ['Edit(//c/git/singularity/**)'] } };
 
 const DEFAULT_CONFIG = {
   enabled: false,
@@ -171,13 +176,14 @@ async function watchdog() {
   const task = liveBgTask();
   if (!task) { injectedTaskId = null; return; }
   if (injectedTaskId === task.id) return; // already wrapping up this run
-  let usage, tokens;
+  let decision = 'stop'; // fail closed: a thrown poll leaves the run unsupervised → stop
   try {
-    usage = await getUsage();
-    tokens = parseSession(task.worktree || task.repo, task.sessionId).tokens;
-  } catch (e) { logger?.warn({ err: e.message }, 'background watchdog poll failed'); return; }
-  const backend = isClaudeModel(task.model) ? 'claude' : 'ollama';
-  if (watchdogDecision(usage, backend, config, tokens) !== 'stop') return;
+    const usage = await getUsage();
+    const tokens = parseSession(task.worktree || task.repo, task.sessionId).tokens;
+    const backend = isClaudeModel(task.model) ? 'claude' : 'ollama';
+    decision = watchdogDecision(usage, backend, config, tokens);
+  } catch (e) { logger?.warn({ err: e.message }, 'background watchdog poll failed — stopping run (fail closed)'); }
+  if (decision !== 'stop') return;
 
   injectedTaskId = task.id;
   reg.input(task.sessionId, '\r' + WRAPUP + '\r');
@@ -208,11 +214,23 @@ export function initBackground(log) {
 
 // ---- CRUD -----------------------------------------------------------------------
 
+// Config-only route: defs are managed via the dedicated def routes, so a `defs`
+// key here is ignored. `thresholds` is two levels deep ({claude:{...},
+// ollama:{...}}) — merge per-backend so editing one field (e.g. claude.start)
+// doesn't wipe its siblings (claude.stop/weeklyMax) and silently disable the gate.
 export function updateBackgroundConfig(partial) {
-  const deep = new Set(['window', 'thresholds', 'models', 'tokenCaps']);
+  const flatDeep = new Set(['window', 'models', 'tokenCaps']);
+  const scalar = new Set(['enabled', 'tickMinutes']);
   for (const [k, v] of Object.entries(partial || {})) {
-    if (deep.has(k) && v && typeof v === 'object') config[k] = { ...config[k], ...v };
-    else config[k] = v;
+    if (k === 'thresholds' && v && typeof v === 'object') {
+      for (const [backend, tv] of Object.entries(v)) {
+        if (tv && typeof tv === 'object') config.thresholds[backend] = { ...config.thresholds[backend], ...tv };
+      }
+    } else if (flatDeep.has(k) && v && typeof v === 'object') {
+      config[k] = { ...config[k], ...v };
+    } else if (scalar.has(k)) {
+      config[k] = v;
+    } // unknown keys (defs, ...) ignored — defs go through the def routes
   }
   persist();
   emit();
