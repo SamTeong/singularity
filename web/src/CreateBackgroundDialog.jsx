@@ -18,11 +18,11 @@ import ModelSelect from './ModelSelect.jsx';
 const DAYS = [['Su', 0], ['Mo', 1], ['Tu', 2], ['We', 3], ['Th', 4], ['Fr', 5], ['Sa', 6]];
 const DEFAULT_WINDOW = { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] };
 const DEFAULT_THRESHOLDS = {
-  claude: { start: 50, stop: 75, weeklyMax: 75 },
-  ollama: { start: 50, stop: 75, weeklyMax: 75 },
+  claude: { start: 50, stop: 75, weeklyMax: 50 },
+  ollama: { start: 50, stop: 75, weeklyMax: 50 },
 };
 const DEFAULT_MODELS = { claude: 'opus', ollama: 'glm-5.2:cloud' };
-const DEFAULT_TOKEN_CAPS = { claude: 15_000_000, ollama: 2_000_000 };
+const DEFAULT_TOKEN_CAPS = { claude: 15_000_000, ollama: 15_000_000 };
 
 // Add/edit-background-def dialog: title, description, cwd, cooldownHours,
 // enabled, plus the per-task window/thresholds/models/tokenCaps that used to
@@ -40,12 +40,19 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
   const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS);
   const [models, setModels] = useState(DEFAULT_MODELS);
   const [tokenCaps, setTokenCaps] = useState(DEFAULT_TOKEN_CAPS);
+  const [scopeList, setScopeList] = useState([]);
+  const [scopes, setScopes] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
   // The dialog never unmounts (renders null while closed), so a plain useState
   // initializer only runs once — resync on every open, either from `def` (edit)
   // or back to blank/defaults (create).
+  useEffect(() => {
+    if (!open) return;
+    fetch('/skill-scopes').then((r) => r.json()).then((d) => setScopeList(d.scopes || [])).catch(() => {});
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     if (def) {
@@ -58,9 +65,10 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
       setThresholds(def.thresholds || DEFAULT_THRESHOLDS);
       setModels(def.models || DEFAULT_MODELS);
       setTokenCaps(def.tokenCaps || DEFAULT_TOKEN_CAPS);
+      setScopes(def.scopes || []);
     } else {
       setTitle(''); setDescription(''); setCwd(''); setCooldownHours('24'); setEnabled(true);
-      setWindowCfg(DEFAULT_WINDOW); setThresholds(DEFAULT_THRESHOLDS); setModels(DEFAULT_MODELS); setTokenCaps(DEFAULT_TOKEN_CAPS);
+      setWindowCfg(DEFAULT_WINDOW); setThresholds(DEFAULT_THRESHOLDS); setModels(DEFAULT_MODELS); setTokenCaps(DEFAULT_TOKEN_CAPS); setScopes([]);
     }
     setError(null);
   }, [open, def]);
@@ -87,7 +95,7 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
         body: JSON.stringify({
           title: title.trim(), description: description.trim(), cwd: cwd.trim(),
           cooldownHours: Number(cooldownHours) || 24, enabled,
-          window: windowCfg, thresholds, models, tokenCaps,
+          window: windowCfg, thresholds, models, tokenCaps, scopes,
         }),
       });
       const d = await r.json();
@@ -113,6 +121,14 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
             freeSolo fullWidth options={recent} inputValue={cwd}
             onInputChange={(_, v) => setCwd(v)}
             renderInput={(params) => <TextField {...params} size="small" label="working directory" spellCheck={false} />}
+          />
+          <Autocomplete
+            multiple size="small" disableCloseOnSelect
+            options={scopeList} value={scopes} onChange={(_, v) => setScopes(v)}
+            renderOption={(props, option, { selected }) => (
+              <li {...props}><Checkbox size="small" checked={selected} style={{ marginRight: 8 }} />{option}</li>
+            )}
+            renderInput={(params) => <TextField {...params} size="small" label="skill-scopes" placeholder="" />}
           />
           <TextField size="small" label="cooldown (hours)" type="number" value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
           <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled" />

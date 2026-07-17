@@ -39,11 +39,12 @@ const DENY = { permissions: { deny: ['Edit(//c/git/singularity/**)'] } };
 const DEFAULT_DEF = {
   window: { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] },
   thresholds: {
-    claude: { start: 50, stop: 75, weeklyMax: 75 },
-    ollama: { start: 50, stop: 75, weeklyMax: 75 },
+    claude: { start: 50, stop: 75, weeklyMax: 50 },
+    ollama: { start: 50, stop: 75, weeklyMax: 50 },
   },
   models: { claude: 'opus', ollama: 'glm-5.2:cloud' },
-  tokenCaps: { claude: 15_000_000, ollama: 2_000_000 },
+  tokenCaps: { claude: 15_000_000, ollama: 15_000_000 },
+  scopes: [],
 };
 
 let config = { defs: [] };
@@ -175,7 +176,7 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
   const model = def.models[backend];
   const task = createTask({
     repo: def.cwd, title: def.title, description: def.description, model,
-    tags: ['background'], background: true, permissionSettings: DENY,
+    scopes: def.scopes, tags: ['background'], background: true, permissionSettings: DENY,
   });
   def.lastRunAt = now;
   def.lastTaskId = task.id;
@@ -255,7 +256,7 @@ export function initBackground(log) {
 
 // ---- CRUD -----------------------------------------------------------------------
 
-export function createDef({ title, description, cwd, cooldownHours, enabled, window, thresholds, models, tokenCaps }) {
+export function createDef({ title, description, cwd, cooldownHours, enabled, window, thresholds, models, tokenCaps, scopes }) {
   if (!title?.trim() || !description?.trim() || !cwd?.trim()) throw new Error('title, description, cwd required');
   const def = {
     id: randomUUID(), title: title.trim(), description: description.trim(), cwd: cwd.trim(),
@@ -267,6 +268,7 @@ export function createDef({ title, description, cwd, cooldownHours, enabled, win
     },
     models: { ...DEFAULT_DEF.models, ...models },
     tokenCaps: { ...DEFAULT_DEF.tokenCaps, ...tokenCaps },
+    scopes: Array.isArray(scopes) ? scopes : [],
     lastRunAt: null, lastTaskId: null,
   };
   config.defs.push(def);
@@ -293,6 +295,7 @@ export function updateDef(id, partial) {
   }
   if (partial.models) def.models = { ...def.models, ...partial.models };
   if (partial.tokenCaps) def.tokenCaps = { ...def.tokenCaps, ...partial.tokenCaps };
+  if (Array.isArray(partial.scopes)) def.scopes = partial.scopes;
   persist();
   emit();
   return def;
