@@ -25,7 +25,7 @@ const SCOPES = [
 
 export default function ConfigEditor() {
   const { mode } = useColorMode();
-  const [cwd, setCwd] = useState(null);
+  const [cwd, setCwd] = useState('~');
   const [picking, setPicking] = useState(false);
   const [data, setData] = useState(null);
   const [loadedCwd, setLoadedCwd] = useState(null);
@@ -54,8 +54,10 @@ export default function ConfigEditor() {
     try { JSON.parse(content); return null; } catch (e) { return e.message; }
   }, [content]);
 
-  const readOnly = scope === 'user' && !editUser;
   const info = data?.[scope];
+  // cwd=~ makes project/local resolve to the same shared ~/.claude file as user scope.
+  const isUserFile = !!info?.path && info.path === data?.user?.path;
+  const readOnly = isUserFile && !editUser;
 
   const save = async () => {
     const r = await fetch(`/config/${scope}`, {
@@ -68,15 +70,6 @@ export default function ConfigEditor() {
 
   const pick = (p) => { setCwd(p); setPicking(false); };
 
-  if (!cwd) return (
-    <Box sx={{ p: 3 }}>
-      <Stack spacing={1.5} alignItems="flex-start">
-        <Typography color="text.secondary">Config is per repo — pick a folder (cwd) to edit.</Typography>
-        <Button size="small" variant="outlined" startIcon={<FolderOpenIcon />} onClick={() => setPicking(true)}>Choose folder</Button>
-      </Stack>
-      {picking && <DirPicker start="~" onPick={pick} onClose={() => setPicking(false)} />}
-    </Box>
-  );
   if (loading && !data) return <Box sx={{ p: 3 }}><Typography color="text.secondary">Loading config…</Typography></Box>;
 
   return (
@@ -85,20 +78,21 @@ export default function ConfigEditor() {
         {SCOPES.map((s) => <Tab key={s.key} value={s.key} label={s.label} />)}
       </Tabs>
 
-      <Stack direction="row" spacing={1} alignItems="center">
-        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, flex: 1 }}>
-          {info?.path} {info && !info.exists && '· (does not exist — save creates it)'}
-        </Typography>
-        <Button size="small" startIcon={<FolderOpenIcon />} onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}>Change</Button>
-      </Stack>
+      <Box sx={{ display: 'grid', gridTemplateColumns: '1fr auto', columnGap: 1, alignItems: 'center' }}>
+        <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
+          <Typography noWrap variant="code" sx={{ alignSelf: 'center', flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>
+            {info?.path} {info && !info.exists && '· (does not exist — save creates it)'}
+          </Typography>
+          {isUserFile && (
+            <Alert severity="warning" sx={{ flex: 1, minWidth: 0, py: 0, '& .MuiAlert-action': { alignItems: 'center', paddingRight: 2 } }}
+              action={<FormControlLabel sx={{ mr: 0, '& .MuiFormControlLabel-label': { marginLeft: 1.5, lineHeight: 1 } }} control={<Switch size="small" checked={editUser} onChange={(e) => setEditUser(e.target.checked)} />} label="Edit anyway" />}>
+              User scope is shared, versioned config{data?.user?.symlink ? ' (a symlink/junction into another repo)' : ''}. Edits mutate it for every project. Read-only by default.
+            </Alert>
+          )}
+        </Stack>
+        <Button size="small" startIcon={<FolderOpenIcon />} onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}>Select root</Button>
+      </Box>
       {picking && <DirPicker start={cwd} onPick={pick} onClose={() => setPicking(false)} />}
-
-      {scope === 'user' && (
-        <Alert severity="warning" sx={{ py: 0, '& .MuiAlert-action': { alignItems: 'center', paddingRight: 2 } }}
-          action={<FormControlLabel sx={{ mr: 0, '& .MuiFormControlLabel-label': { marginLeft: 1.5, lineHeight: 1 } }} control={<Switch size="small" checked={editUser} onChange={(e) => setEditUser(e.target.checked)} />} label="Edit anyway" />}>
-          User scope is shared, versioned config{data?.user?.symlink ? ' (a symlink/junction into another repo)' : ''}. Edits mutate it for every project. Read-only by default.
-        </Alert>
-      )}
 
       <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
         <CodeMirror
@@ -112,9 +106,10 @@ export default function ConfigEditor() {
       </Box>
 
       <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-        <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={save} disabled={readOnly || !dirty || !!jsonError}>Save</Button>
         {jsonError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>invalid JSON: {jsonError}</Typography>}
         {msg && !jsonError && <Typography color={msg.sev === 'error' ? 'error' : 'success.main'} sx={{ fontSize: 13 }}>{msg.text}</Typography>}
+        <Box sx={{ flex: 1 }} />
+        <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={save} disabled={readOnly || !dirty || !!jsonError}>Save</Button>
       </Stack>
     </Stack>
   );

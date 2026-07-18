@@ -69,7 +69,7 @@ export default function SkillsPanel() {
 
   // While searching, auto-expand matching scopes so hits are visible.
   const isExpanded = (name) => (query ? true : expanded.has(name));
-  const skillCount = view.reduce((n, s) => n + s.skills.length, 0);
+  const skillCount = new Set(view.flatMap((s) => s.skills.map((sk) => sk.name))).size;
 
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>

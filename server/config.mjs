@@ -5,7 +5,12 @@ import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, lstat
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 
+function expandTilde(p) {
+  return p === '~' || p.startsWith('~/') || p.startsWith('~\\') ? homedir() + p.slice(1) : p;
+}
+
 function scopePaths(cwd) {
+  cwd = expandTilde(cwd);
   return {
     user: join(homedir(), '.claude', 'settings.json'),
     project: join(cwd, '.claude', 'settings.json'),
