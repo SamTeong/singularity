@@ -115,8 +115,9 @@ export default function MemoryPanel() {
                 extensions={[EditorView.lineWrapping, markdown(), cmTheme]} onChange={(v) => { setContent(v); setDirty(true); }} />
             </Box>
             <Stack direction="row" spacing={1.5} sx={{ mt: 1.5, alignItems: 'center' }}>
-              <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={save} disabled={!dirty}>Save</Button>
               {msg && <Typography color={msg.sev === 'error' ? 'error' : 'success.main'} sx={{ fontSize: 13 }}>{msg.text}</Typography>}
+              <Box sx={{ flex: 1 }} />
+              <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={save} disabled={!dirty}>Save</Button>
             </Stack>
           </>
         )}
