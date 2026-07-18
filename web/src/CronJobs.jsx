@@ -22,6 +22,7 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
 import CreateBackgroundDialog from './CreateBackgroundDialog.jsx';
 import MarkdownBody from './MarkdownBody.jsx';
@@ -184,6 +185,23 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
         {/* Background (quota-soak) section */}
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 3, mb: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Background</Typography>
+          <Tooltip
+            disableInteractive
+            title={
+              <Box component="div" sx={{ fontSize: 12 }}>
+                Uses spare AI usage quota.<br />
+                Every hour tasks to execute are identified by:
+                <Box component="ol" sx={{ my: 0.5, pl: 2.5 }}>
+                  <li>Current time falls inside the task's day/hour window</li>
+                  <li>Current AI usage is below the start threshold</li>
+                </Box>
+                The oldest off-cooldown task would be spawned as a Tasks-board card.<br />
+                To start task immediately, trigger via ‘Run now’.
+              </Box>
+            }
+          >
+            <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.secondary', cursor: 'help' }} />
+          </Tooltip>
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>local time</Typography>
           <Box sx={{ flex: 1 }} />
           <ToggleButtonGroup size="small" exclusive value={bgView} onChange={(_, v) => v && setBgView(v)}>
