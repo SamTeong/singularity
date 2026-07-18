@@ -14,6 +14,8 @@ import { json } from '@codemirror/lang-json';
 import { EditorView } from '@codemirror/view';
 import { useColorMode } from '@zapac/mui-theme';
 import { cmTheme } from './cmTheme.js';
+import DirPicker from './DirPicker.jsx';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 
 const SCOPES = [
   { key: 'project', label: 'project' },
@@ -21,8 +23,10 @@ const SCOPES = [
   { key: 'user', label: 'user' },
 ];
 
-export default function ConfigEditor({ cwd }) {
+export default function ConfigEditor() {
   const { mode } = useColorMode();
+  const [cwd, setCwd] = useState(null);
+  const [picking, setPicking] = useState(false);
   const [data, setData] = useState(null);
   const [loadedCwd, setLoadedCwd] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -62,7 +66,17 @@ export default function ConfigEditor({ cwd }) {
     else setMsg({ sev: 'error', text: r.error || 'save failed' });
   };
 
-  if (!cwd) return <Box sx={{ p: 3 }}><Typography color="text.secondary">Select or create an agent — config is per repo (cwd).</Typography></Box>;
+  const pick = (p) => { setCwd(p); setPicking(false); };
+
+  if (!cwd) return (
+    <Box sx={{ p: 3 }}>
+      <Stack spacing={1.5} alignItems="flex-start">
+        <Typography color="text.secondary">Config is per repo — pick a folder (cwd) to edit.</Typography>
+        <Button size="small" variant="outlined" startIcon={<FolderOpenIcon />} onClick={() => setPicking(true)}>Choose folder</Button>
+      </Stack>
+      {picking && <DirPicker start="~" onPick={pick} onClose={() => setPicking(false)} />}
+    </Box>
+  );
   if (loading && !data) return <Box sx={{ p: 3 }}><Typography color="text.secondary">Loading config…</Typography></Box>;
 
   return (
@@ -71,9 +85,13 @@ export default function ConfigEditor({ cwd }) {
         {SCOPES.map((s) => <Tab key={s.key} value={s.key} label={s.label} />)}
       </Tabs>
 
-      <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>
-        {info?.path} {info && !info.exists && '· (does not exist — save creates it)'}
-      </Typography>
+      <Stack direction="row" spacing={1} alignItems="center">
+        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, flex: 1 }}>
+          {info?.path} {info && !info.exists && '· (does not exist — save creates it)'}
+        </Typography>
+        <Button size="small" startIcon={<FolderOpenIcon />} onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}>Change</Button>
+      </Stack>
+      {picking && <DirPicker start={cwd} onPick={pick} onClose={() => setPicking(false)} />}
 
       {scope === 'user' && (
         <Alert severity="warning" sx={{ py: 0, '& .MuiAlert-action': { alignItems: 'center', paddingRight: 2 } }}

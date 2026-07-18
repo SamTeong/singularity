@@ -487,7 +487,7 @@ export default function App() {
           <Suspense fallback={<Box sx={{ p: 3, color: 'text.secondary' }}>Loading…</Box>}>
             {visited.current.config && (
               <Box sx={{ display: view === 'config' ? 'block' : 'none', height: '100%' }}>
-                <ConfigEditor cwd={activeAgent?.cwd || cwd} />
+                <ConfigEditor />
               </Box>
             )}
             {visited.current.memory && (
