@@ -9,7 +9,7 @@ import IconButton from '@mui/material/IconButton';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useTheme } from '@mui/material/styles';
-import { PROVIDERS, fmtReset, meterColor, segTicks } from './usageUtil.js';
+import { PROVIDERS, fmtReset, meterColor, segTicks, usd } from './usageUtil.js';
 import SpendView from './SpendView.jsx';
 
 const fmtWall = (iso) => {
@@ -18,17 +18,28 @@ const fmtWall = (iso) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
-function Bar({ label, win, segments }) {
+function Bar({ label, win, segments, windowMs }) {
   const t = useTheme();
   if (!win) return null;
   const pct = win.pctUsed;
+  // "Now" marker: track spans the rolling window ending at resetsAt, so now sits
+  // at (1 - remaining/windowMs) from the left. Clamp to keep it on the track.
+  const nowPct = windowMs && win.resetsAt
+    ? Math.min(100, Math.max(0, (1 - (new Date(win.resetsAt).getTime() - Date.now()) / windowMs) * 100))
+    : null;
   return (
     <Box>
       <Typography sx={{ fontSize: 13, mb: 0.5 }}>{label}</Typography>
-      <Box sx={(th) => ({ position: 'relative', height: 10, borderRadius: 5, bgcolor: th.vars.palette.glass.stroke, overflow: 'hidden' })}>
-        <Box sx={{ width: `${Math.min(100, pct ?? 0)}%`, height: '100%', bgcolor: meterColor(t, pct), transition: 'width .3s' }} />
-        {segments > 1 && (
-          <Box sx={(th) => ({ position: 'absolute', inset: 0, pointerEvents: 'none', backgroundImage: segTicks(th.vars.palette.background.paper, segments) })} />
+      <Box sx={{ position: 'relative' }}>
+        <Box sx={(th) => ({ position: 'relative', height: 10, borderRadius: 5, bgcolor: th.vars.palette.glass.stroke, overflow: 'hidden' })}>
+          <Box sx={{ width: `${Math.min(100, pct ?? 0)}%`, height: '100%', bgcolor: meterColor(t, pct), transition: 'width .3s' }} />
+          {segments > 1 && (
+            <Box sx={(th) => ({ position: 'absolute', inset: 0, pointerEvents: 'none', backgroundImage: segTicks(th.vars.palette.background.paper, segments) })} />
+          )}
+        </Box>
+        {/* Marker sits outside the clipped track so it can overhang top/bottom. */}
+        {nowPct != null && (
+          <Box sx={{ position: 'absolute', top: -3, bottom: -3, left: `${nowPct}%`, width: 2, ml: '-1px', borderRadius: 1, bgcolor: '#2dd4bf', pointerEvents: 'none' }} />
         )}
       </Box>
       <Typography variant="code" sx={{ display: 'block', fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
@@ -69,12 +80,18 @@ function ProviderCard({ label, u }) {
         <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography>
       ) : u.ok ? (
         <Stack spacing={2}>
-          <Bar label="Session (5h)" win={u.session} segments={5} />
-          <Bar label="Weekly (7d)" win={u.weekly} segments={7} />
-          {u.extra?.enabled && (
-            <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary' }}>
-              Extra usage: {u.extra.used ?? '—'} / {u.extra.monthlyLimit ?? '—'}
-            </Typography>
+          <Bar label="Session (5h)" win={u.session} segments={5} windowMs={5 * 3.6e6} />
+          <Bar label="Weekly (7d)" win={u.weekly} segments={7} windowMs={7 * 24 * 3.6e6} />
+          {/* Extra usage ($ overage): monthly $ budget, not a rolling window → no
+              ticks. Draw as a meter so the view isn't blank when plan windows null
+              out on overage; $ amounts under the bar. */}
+          {u.extra?.enabled && u.extra.pctUsed != null && (
+            <Box>
+              <Bar label="Extra usage ($)" win={u.extra} segments={1} />
+              <Typography variant="code" sx={{ display: 'block', fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
+                {usd(u.extra.used)} / {usd(u.extra.monthlyLimit)}
+              </Typography>
+            </Box>
           )}
         </Stack>
       ) : (

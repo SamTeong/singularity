@@ -5,7 +5,7 @@ Local web UI to run + steer multiple Claude Code agents. Browser shell + loopbac
 ## Run
 
 ```
-npm install          # once — needs local @zapac/mui-theme tarball (file:../_references/...), not portable
+npm install          # once — @zapac/mui-theme is vendored (file:vendor/zapac-mui-theme-*.tgz)
 npm start            # build web + serve on http://127.0.0.1:4317
 npm run dev          # daemon (:4317) + Vite (:5317) → open :5317; Vite proxies /ws + REST to daemon
 npm test             # node --test "server/*.test.mjs"

@@ -96,7 +96,7 @@ export default function ProcessManager({ onClose }) {
           Kill all stale ({stale.length})
         </Button>
         <span style={{ flex: 1 }} />
-        <Button size="small" sx={{ px: 2 }} onClick={onClose}>Close</Button>
+        <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>
   );

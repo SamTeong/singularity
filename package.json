@@ -22,7 +22,7 @@
     "@uiw/react-codemirror": "^4.25.11",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/xterm": "^5.5.0",
-    "@zapac/mui-theme": "file:../_references/zapac-material-ui/zapac-mui-theme-0.1.0.tgz",
+    "@zapac/mui-theme": "file:vendor/zapac-mui-theme-0.2.0.tgz",
     "cron-parser": "^5.6.2",
     "cronstrue": "^3.24.0",
     "fastify": "^5.10.0",

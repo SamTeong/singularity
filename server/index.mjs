@@ -8,11 +8,12 @@ import { dirname, join } from 'node:path';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { parse as parsePath, normalize as normalizePath } from 'node:path';
 import { homedir } from 'node:os';
+import { spawn } from 'node:child_process';
 import './migrate-state.mjs';
 import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid } from './procs.mjs';
-import { readConfig, writeConfig } from './config.mjs';
+import { readConfig, writeConfig, claudeTheme } from './config.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memory.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile } from './wiki.mjs';
 import { listSessions, readSession, searchSessions } from './sessions.mjs';
@@ -22,7 +23,7 @@ import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
-import { initBackground, snapshotBackground, createDef, updateDef, deleteDef, runBackgroundNow } from './background.mjs';
+import { initBackground, snapshotBackground, createDef, updateDef, deleteDef, runBackgroundNow, listReports, getReport } from './background.mjs';
 import { CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -184,6 +185,17 @@ app.post('/procs/kill', async (req, reply) => {
   if (!Number.isInteger(pid)) return reply.code(400).send({ ok: false, error: 'bad pid' });
   return killClaudePid(pid);
 });
+app.post('/restart', async (req, reply) => {
+  reply.send({ ok: true });
+  // ponytail: no supervisor — daemon respawns itself detached, then exits. Kills all live PTY sessions.
+  // In dev (concurrently -k) vite won't come back; button is meant for `npm start`.
+  setTimeout(() => {
+    spawn(process.execPath, [...process.execArgv, process.argv[1]], {
+      detached: true, stdio: 'ignore', cwd: process.cwd(), env: process.env,
+    }).unref();
+    process.exit(0);
+  }, 100);
+});
 
 // Config editor: 3-scope resolver + backup-then-write.
 app.get('/config', async (req, reply) => {
@@ -191,6 +203,7 @@ app.get('/config', async (req, reply) => {
   if (!cwd) return reply.code(400).send({ error: 'cwd required' });
   return readConfig(cwd);
 });
+app.get('/claude/theme', async () => ({ theme: claudeTheme() }));
 app.put('/config/:scope', async (req, reply) => {
   const { cwd, content } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
@@ -259,6 +272,12 @@ app.post('/background/run', async (req, reply) => {
   try { const { taskId } = await runBackgroundNow({ force: req.query.force === '1' }); return { ok: true, taskId }; }
   catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
 });
+app.get('/background/reports', async () => ({ reports: listReports() }));
+app.get('/background/reports/:taskId', async (req, reply) => {
+  const r = getReport(req.params.taskId);
+  if (!r) return reply.code(404).send({ ok: false, error: 'not found' });
+  return { ok: true, ...r };
+});
 
 // Memory: cross-project search + guarded read/write.
 app.get('/memory/search', async (req) => searchMemory(req.query.q));
@@ -314,12 +333,20 @@ initBackground(app.log);
 initUsageAutoRefresh(reg.bus);
 
 let server;
-try {
-  server = await app.listen({ host: HOST, port: PORT });
-} catch (e) {
-  if (e.code === 'EADDRINUSE') app.log.error(`port ${PORT} already in use — is Singularity already running?`);
-  else app.log.error(e);
-  process.exit(1);
+// ponytail: retry bind — a /restart child waits for the old daemon to free the port
+for (let tries = 20; ; tries--) {
+  try {
+    server = await app.listen({ host: HOST, port: PORT });
+    break;
+  } catch (e) {
+    if (e.code === 'EADDRINUSE' && tries > 1) {
+      await new Promise((r) => setTimeout(r, 250));
+      continue;
+    }
+    if (e.code === 'EADDRINUSE') app.log.error(`port ${PORT} already in use — is Singularity already running?`);
+    else app.log.error(e);
+    process.exit(1);
+  }
 }
 app.log.info(`daemon on ${server} (loopback only)${TOKEN ? ' [token required]' : ''}`);
 

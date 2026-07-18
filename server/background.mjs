@@ -177,6 +177,7 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
   const task = createTask({
     repo: def.cwd, title: def.title, description: def.description, model,
     scopes: def.scopes, tags: ['background'], background: true, permissionSettings: DENY,
+    conclude: def.conclude,
   });
   def.lastRunAt = now;
   def.lastTaskId = task.id;
@@ -256,8 +257,15 @@ export function initBackground(log) {
 
 // ---- CRUD -----------------------------------------------------------------------
 
-export function createDef({ title, description, cwd, cooldownHours, enabled, window, thresholds, models, tokenCaps, scopes }) {
+// Per-def choice for how a run concludes: 'inreview' (default — a human reviews
+// the report before the card reaches done) or 'done' (report is trusted enough
+// to auto-conclude). The watchdog's budget-kill path always forces 'inreview'
+// regardless of this setting (see watchdog() above).
+const CONCLUDE_VALUES = ['inreview', 'done'];
+
+export function createDef({ title, description, cwd, cooldownHours, enabled, window, thresholds, models, tokenCaps, scopes, conclude }) {
   if (!title?.trim() || !description?.trim() || !cwd?.trim()) throw new Error('title, description, cwd required');
+  if (conclude !== undefined && !CONCLUDE_VALUES.includes(conclude)) throw new Error(`conclude must be one of ${CONCLUDE_VALUES.join('|')}`);
   const def = {
     id: randomUUID(), title: title.trim(), description: description.trim(), cwd: cwd.trim(),
     cooldownHours: cooldownHours ?? 24, enabled: enabled !== false,
@@ -269,6 +277,7 @@ export function createDef({ title, description, cwd, cooldownHours, enabled, win
     models: { ...DEFAULT_DEF.models, ...models },
     tokenCaps: { ...DEFAULT_DEF.tokenCaps, ...tokenCaps },
     scopes: Array.isArray(scopes) ? scopes : [],
+    conclude: conclude ?? 'inreview',
     lastRunAt: null, lastTaskId: null,
   };
   config.defs.push(def);
@@ -284,7 +293,8 @@ export function createDef({ title, description, cwd, cooldownHours, enabled, win
 export function updateDef(id, partial) {
   const def = config.defs.find((d) => d.id === id);
   if (!def) throw new Error('no such def');
-  for (const k of ['title', 'description', 'cwd', 'cooldownHours', 'enabled', 'lastRunAt', 'lastTaskId']) {
+  if (partial.conclude !== undefined && !CONCLUDE_VALUES.includes(partial.conclude)) throw new Error(`conclude must be one of ${CONCLUDE_VALUES.join('|')}`);
+  for (const k of ['title', 'description', 'cwd', 'cooldownHours', 'enabled', 'lastRunAt', 'lastTaskId', 'conclude']) {
     if (partial[k] !== undefined) def[k] = partial[k];
   }
   if (partial.window) def.window = { ...def.window, ...partial.window };
@@ -307,6 +317,39 @@ export function deleteDef(id) {
   config.defs.splice(i, 1);
   persist();
   emit();
+}
+
+// ---- Reports ----------------------------------------------------------------
+
+// Background-tagged tasks (live + concluded), newest first, with whether
+// Report.md exists in their ticket dir. ticketDir/id are read from the stored
+// task/history records only.
+export function listReports() {
+  const { tasks, history } = snapshotTasks();
+  const entries = [...tasks, ...history]
+    .filter((t) => (t.tags || []).includes('background'))
+    .map((t) => ({
+      taskId: t.id,
+      title: t.title,
+      createdAt: t.createdAt,
+      concludedAt: t.concludedAt ?? null,
+      status: t.outcome ?? t.column,
+      hasReport: existsSync(join(t.ticketDir, 'Report.md')),
+    }));
+  entries.sort((a, b) => (b.concludedAt ?? b.createdAt) - (a.concludedAt ?? a.createdAt));
+  return entries;
+}
+
+// Report.md content for one background task. ticketDir is resolved only from
+// the stored task/history record by id — never from client input. Returns
+// null when the id is unknown or not background-tagged, or has no Report.md.
+export function getReport(taskId) {
+  const { tasks, history } = snapshotTasks();
+  const t = [...tasks, ...history].find((x) => x.id === taskId && (x.tags || []).includes('background'));
+  if (!t) return null;
+  const file = join(t.ticketDir, 'Report.md');
+  if (!existsSync(file)) return null;
+  return { taskId: t.id, title: t.title, content: readFileSync(file, 'utf8') };
 }
 
 // Manual trigger: bypass the window (and, with force, the gate too). Still

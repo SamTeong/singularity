@@ -8,7 +8,7 @@
 // (which would try to spawn a real claude). Run: npm test
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -16,8 +16,9 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-background-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { inWindow, evalGate, pickDef, pickRunnableDef, watchdogDecision, migrateLegacyConfig } = await import('./background.mjs');
-const { normalizeTags } = await import('./tasks.mjs');
+const { inWindow, evalGate, pickDef, pickRunnableDef, watchdogDecision, migrateLegacyConfig, createDef, updateDef, listReports, getReport } = await import('./background.mjs');
+const { normalizeTags, initTasks } = await import('./tasks.mjs');
+const { STATE_DIR } = await import('./agents.mjs');
 
 // Full per-def config shape (window/thresholds/tokenCaps) — same values the old
 // global DEFAULT_CONFIG shipped, now owned by each def.
@@ -190,4 +191,61 @@ test('normalizeTags: trims, lowercases, drops blanks, dedupes', () => {
 test('normalizeTags: undefined/empty → []', () => {
   assert.deepEqual(normalizeTags(undefined), []);
   assert.deepEqual(normalizeTags([]), []);
+});
+
+// ---- conclude field (createDef/updateDef) --------------------------------------
+test('createDef: conclude defaults to "inreview"', () => {
+  const d = createDef({ title: 'conclude-default', description: 'd', cwd: 'C:\\x' });
+  assert.equal(d.conclude, 'inreview');
+});
+test('createDef: rejects an invalid conclude value', () => {
+  assert.throws(() => createDef({ title: 'conclude-bad', description: 'd', cwd: 'C:\\x', conclude: 'garbage' }));
+});
+test('updateDef: accepts conclude "done"', () => {
+  const d = createDef({ title: 'conclude-update', description: 'd', cwd: 'C:\\x' });
+  assert.equal(updateDef(d.id, { conclude: 'done' }).conclude, 'done');
+});
+test('updateDef: rejects a garbage conclude value', () => {
+  const d = createDef({ title: 'conclude-update-bad', description: 'd', cwd: 'C:\\x' });
+  assert.throws(() => updateDef(d.id, { conclude: 'garbage' }));
+});
+
+// ---- reports (listReports / getReport) -----------------------------------------
+test('listReports/getReport: background-tagged entries with correct hasReport, non-background excluded, content read/missing', () => {
+  const ticketA = join(scratch, 'ticket-a'); // has a Report.md
+  const ticketB = join(scratch, 'ticket-b'); // no Report.md
+  mkdirSync(ticketA, { recursive: true });
+  mkdirSync(ticketB, { recursive: true });
+  writeFileSync(join(ticketA, 'Report.md'), '# report a\n');
+  writeFileSync(join(STATE_DIR, 'tasks.json'), JSON.stringify({
+    tasks: [
+      { id: 'live1', title: 'Live BG', tags: ['background'], ticketDir: ticketA, column: 'inprogress', createdAt: 1000 },
+      { id: 'live2', title: 'Not BG', tags: [], ticketDir: ticketB, column: 'todo', createdAt: 2000 },
+    ],
+    history: [
+      { id: 'hist1', title: 'Hist BG', tags: ['background'], ticketDir: ticketB, outcome: 'completed', concludedAt: 3000, createdAt: 500 },
+    ],
+  }));
+  initTasks();
+
+  const reports = listReports();
+  const ids = reports.map((r) => r.taskId);
+  assert.ok(ids.includes('live1'));
+  assert.ok(ids.includes('hist1'));
+  assert.ok(!ids.includes('live2'), 'non-background task excluded');
+  assert.equal(reports[0].taskId, 'hist1', 'newest first (concludedAt 3000 beats live1 createdAt 1000)');
+
+  const live1 = reports.find((r) => r.taskId === 'live1');
+  assert.equal(live1.hasReport, true);
+  assert.equal(live1.status, 'inprogress');
+
+  const hist1 = reports.find((r) => r.taskId === 'hist1');
+  assert.equal(hist1.hasReport, false);
+  assert.equal(hist1.status, 'completed');
+  assert.equal(hist1.concludedAt, 3000);
+
+  assert.equal(getReport('live1').content, '# report a\n');
+  assert.equal(getReport('hist1'), null, 'no Report.md written for this one');
+  assert.equal(getReport('live2'), null, 'not background-tagged');
+  assert.equal(getReport('nope'), null, 'unknown id');
 });

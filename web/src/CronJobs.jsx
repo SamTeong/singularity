@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -11,13 +11,20 @@ import TableHead from '@mui/material/TableHead';
 import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
+import Chip from '@mui/material/Chip';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import ToggleButton from '@mui/material/ToggleButton';
+import List from '@mui/material/List';
+import ListItemButton from '@mui/material/ListItemButton';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ScheduleIcon from '@mui/icons-material/Schedule';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
 import CreateBackgroundDialog from './CreateBackgroundDialog.jsx';
+import MarkdownBody from './MarkdownBody.jsx';
 
 const KIND = { starting: 'active', running: 'active', idle: 'review', detached: 'review', exited: 'error' };
 const repoName = (p) => (p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
@@ -50,6 +57,27 @@ const fmtHM = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', min
 export default function CronJobs({ crons, agents, background, recent, onAdd, onToast }) {
   // false (closed) | true (create) | a def object (edit that row)
   const [defOpen, setDefOpen] = useState(false);
+  // Background section subview: 'tasks' (defs table, default) | 'reports'.
+  const [bgView, setBgView] = useState('tasks');
+  const [reports, setReports] = useState([]);
+  const [selReport, setSelReport] = useState(null); // taskId
+  const [reportContent, setReportContent] = useState(null);
+  const [reportLoading, setReportLoading] = useState(false);
+
+  useEffect(() => {
+    if (bgView !== 'reports') return;
+    fetch('/background/reports').then((r) => r.json()).then((d) => setReports(d.reports || [])).catch(() => onToast?.('Failed to load reports.'));
+  }, [bgView]);
+
+  const openReport = (taskId) => {
+    setSelReport(taskId);
+    setReportContent(null);
+    setReportLoading(true);
+    fetch(`/background/reports/${taskId}`).then((r) => r.json())
+      .then((d) => setReportContent(d.ok ? d.content : null))
+      .catch(() => setReportContent(null))
+      .finally(() => setReportLoading(false));
+  };
 
   const toggle = (id, enabled) =>
     fetch(`/crons/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) })
@@ -157,10 +185,48 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 3, mb: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Background</Typography>
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>local time</Typography>
+          <Box sx={{ flex: 1 }} />
+          <ToggleButtonGroup size="small" exclusive value={bgView} onChange={(_, v) => v && setBgView(v)}>
+            <ToggleButton value="tasks" sx={{ px: 1.5, py: 0.25, textTransform: 'none', fontSize: 12 }}>Tasks</ToggleButton>
+            <ToggleButton value="reports" sx={{ px: 1.5, py: 0.25, textTransform: 'none', fontSize: 12 }}>Reports</ToggleButton>
+          </ToggleButtonGroup>
         </Stack>
 
         {!config ? (
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>Loading…</Typography>
+        ) : bgView === 'reports' ? (
+          reports.length === 0 ? (
+            <Box sx={{ py: 3, display: 'grid', placeItems: 'center' }}>
+              <EmptyState icon={<DescriptionOutlinedIcon />} title="No reports yet" description="Background runs write a Report.md when they finish — it will show up here." />
+            </Box>
+          ) : (
+            <Stack direction="row" sx={{ height: 420, border: (t) => `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: (t) => `${t.zapac.radius.sm}px` }}>
+              <List dense sx={(t) => ({ width: 260, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, overflow: 'auto', py: 0 })}>
+                {reports.map((r) => (
+                  <ListItemButton key={r.taskId} selected={selReport === r.taskId} onClick={() => openReport(r.taskId)} sx={{ display: 'block' }}>
+                    <Typography variant="subtitle2" noWrap>{r.title}</Typography>
+                    <Stack direction="row" spacing={1} sx={{ mt: 0.25, alignItems: 'center' }}>
+                      <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{fmtRel(r.concludedAt ?? r.createdAt)}</Typography>
+                      <Chip size="small" label={r.status} sx={{ height: 18, fontSize: 10 }} />
+                    </Stack>
+                  </ListItemButton>
+                ))}
+              </List>
+              <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto', p: 2 }}>
+                {!selReport ? (
+                  <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
+                    <EmptyState icon={<DescriptionOutlinedIcon />} title="Select a report" description="Pick a background run on the left to read its Report.md." />
+                  </Box>
+                ) : reportLoading ? (
+                  <Typography color="text.secondary">Loading…</Typography>
+                ) : reportContent == null ? (
+                  <Typography color="text.secondary">No Report.md for this run.</Typography>
+                ) : (
+                  <MarkdownBody>{reportContent}</MarkdownBody>
+                )}
+              </Box>
+            </Stack>
+          )
         ) : (
           <Stack spacing={1.5}>
             {/* Last-tick status */}

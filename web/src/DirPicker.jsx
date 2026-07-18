@@ -66,7 +66,7 @@ export default function DirPicker({ start, onPick, onClose }) {
         </List>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 2 }}>
-        <Button size="small" color="error" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
+        <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
         <Button size="small" sx={{ px: 2 }} variant="contained" onClick={() => onPick(path)}>Use this folder</Button>
       </DialogActions>
     </Dialog>

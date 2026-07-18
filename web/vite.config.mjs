@@ -28,6 +28,7 @@ export default defineConfig({
       '/agent-stats': 'http://127.0.0.1:4317',
       '/fs': 'http://127.0.0.1:4317',
       '/procs': 'http://127.0.0.1:4317',
+      '/restart': 'http://127.0.0.1:4317',
       '/models': 'http://127.0.0.1:4317',
       '/skill-scopes': 'http://127.0.0.1:4317',
       '/skills': 'http://127.0.0.1:4317',
@@ -38,6 +39,7 @@ export default defineConfig({
       '/sessions': 'http://127.0.0.1:4317',
       '/session': 'http://127.0.0.1:4317',
       '/usage': 'http://127.0.0.1:4317',
+      '/claude': 'http://127.0.0.1:4317',
       '/spend': 'http://127.0.0.1:4317',
       '/tasks': 'http://127.0.0.1:4317',
       '/crons': 'http://127.0.0.1:4317',
@@ -49,12 +51,14 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        // Split stable vendor code into its own cacheable chunks (index was ~1MB minified).
+        // Split stable vendor code into cacheable chunks (index was ~1MB minified).
+        // React/MUI/emotion/@zapac stay in ONE chunk: splitting them apart put a
+        // circular dep across chunk boundaries → TDZ crash in the minified prod
+        // build ("Cannot access X before initialization"). xterm is independent.
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
-          if (/[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'react';
-          if (/[\\/](@mui|@emotion)[\\/]/.test(id)) return 'mui';
           if (/[\\/]@xterm[\\/]/.test(id)) return 'xterm';
+          if (/[\\/](react|react-dom|scheduler|@mui|@emotion|@zapac)[\\/]/.test(id)) return 'vendor';
         },
       },
     },

@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 const scratch = mkdtempSync(join(tmpdir(), 'sing-tasks-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
 
-const { buildTaskPrompt, createTask, RATE_LIMIT_RE } = await import('./tasks.mjs');
+const { buildTaskPrompt, buildBackgroundPrompt, createTask, RATE_LIMIT_RE } = await import('./tasks.mjs');
 
 function initRepo() {
   const repo = mkdtempSync(join(tmpdir(), 'sing-repo-'));
@@ -140,6 +140,21 @@ test('RATE_LIMIT_RE matches 429 + usage-limit strings', () => {
   assert.match('Request rejected (429)', RATE_LIMIT_RE);
   assert.doesNotMatch('session usage limit', RATE_LIMIT_RE);
   assert.doesNotMatch('HTTP 429', RATE_LIMIT_RE);
+});
+
+test('buildBackgroundPrompt: conclude "done" moves the card to done as the last action', () => {
+  const p = buildBackgroundPrompt({ ...baseTask, conclude: 'done' });
+  assert.match(p, /move the card to Done/);
+  assert.match(p, /tasks\/t1\/status.*-d '\{"column":"done","state":"report ready"\}'/);
+  assert.doesNotMatch(p, /Do NOT move the card to done/);
+});
+test('buildBackgroundPrompt: conclude "inreview" (or absent) keeps the human-review text verbatim', () => {
+  const p = buildBackgroundPrompt({ ...baseTask, conclude: 'inreview' });
+  const pAbsent = buildBackgroundPrompt(baseTask);
+  for (const prompt of [p, pAbsent]) {
+    assert.match(prompt, /move the card to In Review/);
+    assert.match(prompt, /Do NOT move the card to done — a human concludes the run\./);
+  }
 });
 
 // createTask: a failure after `git worktree add` succeeds but before the task

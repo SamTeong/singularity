@@ -22,11 +22,13 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-agents-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 process.env.CLAUDE_BIN = join(scratch, 'not-an-exe'); // exists, not a valid executable → spawn throws synchronously
 writeFileSync(process.env.CLAUDE_BIN, 'not a real executable');
-// OLLAMA_BIN points at an existing dummy so buildSpawn's ollama-wrap branch
-// returns launch args (exercised by the test below) instead of throwing
-// "ollama not found" — resolveBin has no PATH fallback, so it must be set.
-process.env.OLLAMA_BIN = join(scratch, 'not-ollama');
-writeFileSync(process.env.OLLAMA_BIN, 'not real');
+// OLLAMA_BIN points at the real system shell: a harmless, long-lived process
+// that ignores claude's argv and stays alive until killed. buildSpawn's
+// ollama-wrap branch (model outside CLAUDE_ALIASES) routes spawn() through
+// this bin, so the respawnAll test below gets a genuine live pty without
+// needing a real `claude` binary — CLAUDE_BIN stays invalid (spawn throws
+// synchronously) for every other test, which spawns via the claude-model path.
+process.env.OLLAMA_BIN = 'C:\\Windows\\System32\\cmd.exe';
 after(() => {
   rmSync(scratch, { recursive: true, force: true });
   // node-pty's spawn() (even the failed attempt inside the fork test below)
@@ -37,7 +39,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot } = await import('./agents.mjs');
+const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus } = await import('./agents.mjs');
 
 test('encodeCwd replaces every non-alphanumeric (incl. dots) with "-"', () => {
   assert.equal(encodeCwd('C:\\git\\singularity'), 'C--git-singularity');
@@ -159,6 +161,51 @@ test('remove: dead (detached) agent is dropped from the registry', () => {
   assert.ok(snapshot().some((a) => a.id === goneId), 'seeded agent is present');
   remove(goneId);
   assert.ok(!snapshot().some((a) => a.id === goneId), 'agent removed after remove()');
+});
+
+// respawnAll() kills every live agent; onExit resumes it with the same config
+// (id, cwd, model, scopes...) once the session log makes resume available.
+// Uses a real ollama-model agent (spawn routed through OLLAMA_BIN = cmd.exe,
+// see the file header) so there's a genuine live proc to kill and a genuine
+// onExit/setImmediate/create() cycle to observe — the claude-model path can't
+// produce one here since CLAUDE_BIN is deliberately invalid for every other test.
+test('respawnAll: kills a live agent and resumes it with the same id + new pid', async () => {
+  const respawnCwd = scratch;
+  const id = '40000000-dddd-eeee-ffff-400000000004';
+  const a = create({ cwd: respawnCwd, name: 'resp-test', model: 'glm-5.2:cloud', sessionId: id });
+  const firstPid = a.pid;
+  assert.ok(firstPid, 'agent spawned with a real pid');
+
+  // Drop a session log after the fact so the post-kill respawn resolves to
+  // --resume (buildSpawn/sessionLogExists) instead of a fresh --session-id.
+  const dir = join(homedir(), '.claude', 'projects', encodeCwd(respawnCwd));
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, `${id}.jsonl`), `{"sessionId":"${id}","type":"user"}\n`);
+
+  try {
+    respawnAll();
+
+    // Wait for kill -> onExit -> setImmediate(create) to settle: same id back
+    // in the registry with a live proc and a different pid.
+    const deadline = Date.now() + 5000;
+    let respawned;
+    while (Date.now() < deadline) {
+      respawned = snapshot().find((x) => x.id === id);
+      if (respawned?.pid && respawned.pid !== firstPid) break;
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    assert.ok(respawned, 'agent still present after respawn');
+    assert.notEqual(respawned.pid, firstPid, 'respawn produced a new (live) pid');
+
+    // Tidy up the respawned live pty before the next test / file teardown.
+    await new Promise((resolve) => {
+      const onStatus = ({ id: sid, status }) => { if (sid === id && status === 'exited') { bus.off('status', onStatus); resolve(); } };
+      bus.on('status', onStatus);
+      kill(id);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('buildSpawn: ollama model on resume injects --model to override stripped transcript model', () => {

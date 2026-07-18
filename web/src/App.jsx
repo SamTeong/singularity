@@ -14,11 +14,17 @@ import Switch from '@mui/material/Switch';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Snackbar from '@mui/material/Snackbar';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
+import DialogActions from '@mui/material/DialogActions';
+import Button from '@mui/material/Button';
 import AddIcon from '@mui/icons-material/Add';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CallSplitIcon from '@mui/icons-material/CallSplit';
 import CloseIcon from '@mui/icons-material/Close';
 import ReplayIcon from '@mui/icons-material/Replay';
+import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
@@ -177,6 +183,9 @@ export default function App() {
   if (view === 'config' || view === 'memory' || view === 'wiki' || view === 'sessions') visited.current[view] = true;
   const { resolved, toggle: toggleColorMode } = useColorMode();
   const [toast, setToast] = useState(null);
+  const [respawnCount, setRespawnCount] = useState(0); // >0 -> respawn-confirm dialog open, holds live-session count
+  const [restartOpen, setRestartOpen] = useState(false); // restart-daemon confirm dialog
+  const [restarting, setRestarting] = useState(false); // true while polling /health for the new daemon
   const [stats, setStats] = useState({}); // id -> {turns, tokens}
   const [usage, setUsage] = useState(null); // { ollama, claude } from /usage
   const [dragId, setDragId] = useState(null); // id of the agent row being dragged
@@ -335,12 +344,40 @@ export default function App() {
   const activeAgent = agents.find((a) => a.id === active);
   const usageTip = usageSummary(usage); // per-provider 5h/7d summary for the collapsed tooltip
 
+  // A running claude process picks its TUI theme once at spawn (queried from
+  // the terminal background) — xterm's palette flips live but a live session's
+  // colors won't until it's respawned. Offer that after every theme toggle.
+  const onToggleTheme = () => {
+    toggleColorMode();
+    const live = agents.filter((a) => a.status === 'running' || a.status === 'idle' || a.status === 'starting').length;
+    if (live) setRespawnCount(live);
+  };
+
   // Alt+Up/Down cycles sessions (dir -1/+1), wrapping. Detached ones excluded.
   const cycleSession = (dir) => {
     const list = agents.filter((a) => a.status !== 'detached');
     if (list.length < 2) return;
     const i = list.findIndex((a) => a.id === active);
     setActive(list[(i + dir + list.length) % list.length].id);
+  };
+
+  // Restart the daemon: it respawns itself detached and exits, so the socket
+  // drops. Poll /health until a new pid answers, then reload the shell.
+  const doRestart = async () => {
+    setRestartOpen(false);
+    setRestarting(true);
+    setToast('Restarting server…');
+    const before = await fetch('/health').then((r) => r.json()).then((d) => d.pid).catch(() => null);
+    await fetch('/restart', { method: 'POST' }).catch(() => {}); // connection drops; ignore
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 800));
+      try {
+        const d = await fetch('/health').then((r) => r.json());
+        if (d.ok && d.pid !== before) { location.reload(); return; }
+      } catch {} // expected while the daemon is down
+    }
+    setRestarting(false);
+    setToast('Server did not come back — restart it manually.');
   };
 
   return (
@@ -526,13 +563,18 @@ export default function App() {
                       <Tooltip title="Fork (config + conversation)" disableInteractive>
                         <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'fork', id: a.id, name: nextName(a) }); }}><CallSplitIcon fontSize="small" /></IconButton>
                       </Tooltip>
+                      {(a.status === 'running' || a.status === 'idle' || a.status === 'starting') && (
+                        <Tooltip title="Restart (kill + resume, keeps conversation)" disableInteractive>
+                          <IconButton size="small" sx={{ color: 'error.main', '&:hover': { color: 'error.main' } }} onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'respawn', id: a.id }); }}><RestartAltIcon fontSize="small" /></IconButton>
+                        </Tooltip>
+                      )}
                       {a.status === 'detached' && (
                         <Tooltip title="Reattach (claude --resume)" disableInteractive>
                           <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'reattach', id: a.id }); }}><ReplayIcon fontSize="small" /></IconButton>
                         </Tooltip>
                       )}
                       <Tooltip title={a.status === 'running' || a.status === 'starting' ? 'Kill' : 'Remove'} disableInteractive>
-                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'kill', id: a.id }); }}><CloseIcon fontSize="small" /></IconButton>
+                        <IconButton size="small" sx={{ color: 'error.main', '&:hover': { color: 'error.main' } }} onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'kill', id: a.id }); }}><CloseIcon fontSize="small" /></IconButton>
                       </Tooltip>
                     </Stack>
                   </Stack>
@@ -600,12 +642,57 @@ export default function App() {
           <ListItemIcon><MonitorHeartIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Claude processes</ListItemText>
         </MenuItem>
+        {/* Self-respawn only works when the daemon serves the built UI (npm start).
+            In dev, concurrently -k kills Vite too, so the shell can't reconnect. */}
+        {import.meta.env.PROD && (
+          <MenuItem disabled={restarting} onClick={() => { setRestartOpen(true); setMenuAnchor(null); }}>
+            <ListItemIcon><RestartAltIcon fontSize="small" sx={{ color: 'warning.main' }} /></ListItemIcon>
+            <ListItemText>Restart server</ListItemText>
+          </MenuItem>
+        )}
         <Divider />
-        <MenuItem onClick={toggleColorMode}>
+        <MenuItem onClick={onToggleTheme}>
           <ListItemIcon>{resolved === 'dark' ? <DarkModeIcon fontSize="small" /> : <LightModeIcon fontSize="small" />}</ListItemIcon>
-          <Switch edge="end" checked={resolved === 'dark'} onChange={toggleColorMode} onClick={(e) => e.stopPropagation()} />
+          <Switch edge="end" checked={resolved === 'dark'} onChange={onToggleTheme} onClick={(e) => e.stopPropagation()} />
         </MenuItem>
       </Menu>
+
+      {/* After a theme toggle, offer to respawn live sessions so their claude
+          TUI re-queries the terminal background and matches the new theme. */}
+      <Dialog open={respawnCount > 0} onClose={() => setRespawnCount(0)} maxWidth="sm" fullWidth>
+        <DialogTitle>Restart sessions to match theme?</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            Theme changed. {respawnCount} running session{respawnCount === 1 ? '' : 's'} still use the old theme. Restart them to match?
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
+            This restarts each session — any in-flight turn is interrupted (conversation history is kept). Session order may change.
+          </Typography>
+        </DialogContent>
+        <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
+          <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={() => setRespawnCount(0)}>Dismiss</Button>
+          <Button size="small" sx={{ px: 2 }} variant="contained" onClick={() => { sendMsg({ t: 'respawnAll' }); setRespawnCount(0); }}>Restart</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Restart the server — respawns itself detached, killing every live session. */}
+      <Dialog open={restartOpen} onClose={() => setRestartOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Restart server?</DialogTitle>
+        <DialogContent>
+          {(() => {
+            const liveCount = agents.filter((a) => a.status === 'running' || a.status === 'idle' || a.status === 'starting').length;
+            return (
+              <Typography variant="body2">
+                Restarting the server kills all {liveCount} running session{liveCount === 1 ? '' : 's'} (conversations are lost). Continue?
+              </Typography>
+            );
+          })()}
+        </DialogContent>
+        <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
+          <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={() => setRestartOpen(false)}>Cancel</Button>
+          <Button size="small" sx={{ px: 2 }} variant="contained" onClick={doRestart}>Restart</Button>
+        </DialogActions>
+      </Dialog>
 
       <CreateAgentDialog
         open={createOpen}

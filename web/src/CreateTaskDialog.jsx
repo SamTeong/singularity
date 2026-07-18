@@ -142,7 +142,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
-        <Button size="small" sx={{ px: 2 }} onClick={cancel}>Cancel</Button>
+        <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={cancel}>Cancel</Button>
         <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={busy || !cwd.trim() || !title.trim() || !description.trim()}>Create</Button>
       </DialogActions>
     </Dialog>

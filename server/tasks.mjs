@@ -218,6 +218,15 @@ export function buildBackgroundPrompt(t) {
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
     `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+  // conclude 'done' trusts the report enough to auto-conclude the card; default
+  // 'inreview' hands it to a human. The watchdog's budget-kill path always
+  // forces inreview regardless of this setting (see background.mjs watchdog()).
+  const lastStep = t.conclude === 'done'
+    ? `As your LAST action, move the card to Done:
+  ${status('done', 'report ready')}`
+    : `As your LAST action, move the card to In Review:
+  ${status('inreview', 'awaiting human review')}
+  Do NOT move the card to done — a human concludes the run.`;
   return `You are an unattended background agent working on "${t.title}".
 
 ## Requirements
@@ -236,12 +245,10 @@ ${t.description}
 - At the START, run:
   ${status('inprogress', 'working')}
 - When the work is done, write \`Report.md\` to \`${t.ticketDir}\` summarizing what you did / found / proposed, and print a short summary in this terminal.
-- As your LAST action, move the card to In Review:
-  ${status('inreview', 'awaiting human review')}
-  Do NOT move the card to done — a human concludes the run.`;
+- ${lastStep}`;
 }
 
-export function createTask({ repo, title, description, model, implModel, reviewerModel, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background }) {
+export function createTask({ repo, title, description, model, implModel, reviewerModel, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, conclude }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
   if (!existsSync(repo)) throw new Error('working directory does not exist');
   const kind = isGitWorkTree(repo) ? 'git' : 'plain';
@@ -267,6 +274,7 @@ export function createTask({ repo, title, description, model, implModel, reviewe
       id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch, ticketDir,
       model, implModel, reviewerModel, scopes, tags: normalizeTags(tags), requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
       column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
+      ...(background ? { conclude: conclude === 'done' ? 'done' : 'inreview' } : {}),
     };
     // Statusline capture: per-session cost/duration written to state/cost/<id>.json
     // (read by stats.mjs). Passed as extraArgs so it also survives reattach.

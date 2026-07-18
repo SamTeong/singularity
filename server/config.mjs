@@ -13,6 +13,18 @@ function scopePaths(cwd) {
   };
 }
 
+// Claude's own UI theme, resolved to light|dark — drives the embedded terminal
+// palette so xterm's background matches what claude paints. Reads the global
+// settings.json `theme`; 'light*' → light, everything else → dark. 'auto' lands
+// here as dark: claude resolves auto by querying the terminal bg (OSC 11), which
+// doesn't survive the Windows ConPTY round-trip, so claude renders dark.
+export function claudeTheme() {
+  try {
+    const t = JSON.parse(readFileSync(scopePaths('').user, 'utf8')).theme;
+    return typeof t === 'string' && t.toLowerCase().includes('light') ? 'light' : 'dark';
+  } catch { return 'dark'; }
+}
+
 export function readConfig(cwd) {
   const paths = scopePaths(cwd);
   const out = {};

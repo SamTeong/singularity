@@ -12,6 +12,10 @@ import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
+import FormControl from '@mui/material/FormControl';
+import InputLabel from '@mui/material/InputLabel';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
 import AddIcon from '@mui/icons-material/Add';
 import ModelSelect from './ModelSelect.jsx';
 
@@ -36,6 +40,7 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
   const [cwd, setCwd] = useState('');
   const [cooldownHours, setCooldownHours] = useState('24');
   const [enabled, setEnabled] = useState(true);
+  const [conclude, setConclude] = useState('inreview');
   const [windowCfg, setWindowCfg] = useState(DEFAULT_WINDOW);
   const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS);
   const [models, setModels] = useState(DEFAULT_MODELS);
@@ -61,13 +66,14 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
       setCwd(def.cwd || '');
       setCooldownHours(String(def.cooldownHours ?? 24));
       setEnabled(def.enabled !== false);
+      setConclude(def.conclude || 'inreview');
       setWindowCfg(def.window || DEFAULT_WINDOW);
       setThresholds(def.thresholds || DEFAULT_THRESHOLDS);
       setModels(def.models || DEFAULT_MODELS);
       setTokenCaps(def.tokenCaps || DEFAULT_TOKEN_CAPS);
       setScopes(def.scopes || []);
     } else {
-      setTitle(''); setDescription(''); setCwd(''); setCooldownHours('24'); setEnabled(true);
+      setTitle(''); setDescription(''); setCwd(''); setCooldownHours('24'); setEnabled(true); setConclude('inreview');
       setWindowCfg(DEFAULT_WINDOW); setThresholds(DEFAULT_THRESHOLDS); setModels(DEFAULT_MODELS); setTokenCaps(DEFAULT_TOKEN_CAPS); setScopes([]);
     }
     setError(null);
@@ -94,7 +100,7 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           title: title.trim(), description: description.trim(), cwd: cwd.trim(),
-          cooldownHours: Number(cooldownHours) || 24, enabled,
+          cooldownHours: Number(cooldownHours) || 24, enabled, conclude,
           window: windowCfg, thresholds, models, tokenCaps, scopes,
         }),
       });
@@ -132,6 +138,13 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
           />
           <TextField size="small" label="cooldown (hours)" type="number" value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
           <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled" />
+          <FormControl size="small" fullWidth>
+            <InputLabel>on completion</InputLabel>
+            <Select label="on completion" value={conclude} onChange={(e) => setConclude(e.target.value)}>
+              <MenuItem value="inreview">In review (default)</MenuItem>
+              <MenuItem value="done">Done</MenuItem>
+            </Select>
+          </FormControl>
 
           {/* Window */}
           <Stack spacing={0.5}>
@@ -178,7 +191,7 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
-        <Button size="small" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
+        <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
         <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={!editing ? <AddIcon /> : undefined} onClick={submit} disabled={!canSubmit}>
           {editing ? 'Save' : 'Create'}
         </Button>

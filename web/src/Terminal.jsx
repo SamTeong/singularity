@@ -1,7 +1,7 @@
 import React, { useEffect, useRef } from 'react';
+import { useColorMode } from '@zapac/mui-theme';
 import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
-import { useColorMode } from '@zapac/mui-theme';
 
 // Machine-output layer — opaque, never glass — but themed light/dark with the
 // app. xterm's default 16-color ANSI palette is built for a dark background and
@@ -27,7 +27,10 @@ const TERM_THEME = {
 };
 
 export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOutput }) {
-  const { mode } = useColorMode();
+  // Terminal palette follows the app's color mode. Use useColorMode().resolved,
+  // not theme.palette.mode — under cssVariables the latter is frozen at the
+  // default scheme and won't switch with the .dark class.
+  const mode = useColorMode().resolved === 'light' ? 'light' : 'dark';
   const hostRef = useRef(null);
   const xtermRef = useRef(null);
   const fitRef = useRef(null);
@@ -106,7 +109,7 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     return () => { clearTimeout(roTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); term.dispose(); registerOutput(null); };
   }, [agent.id]);
 
-  // Follow the app color mode live — no need to recreate the terminal.
+  // Apply the app theme live — no need to recreate the terminal.
   useEffect(() => {
     if (xtermRef.current) xtermRef.current.options.theme = TERM_THEME[mode] ?? TERM_THEME.dark;
   }, [mode]);

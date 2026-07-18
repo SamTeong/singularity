@@ -133,6 +133,17 @@ function wire(a) {
   a.proc.onExit(({ exitCode }) => {
     clearTimeout(a.idleTimer);
     a.proc = null;
+    // Theme-change respawn (see respawnAll): resume with the same config
+    // instead of the normal exited/removed handling below. setImmediate defers
+    // create() until this onExit call (and the Map mutation here) fully unwinds.
+    if (a.respawnAfterExit) {
+      const cfg = a.respawnAfterExit;
+      agents.delete(a.id); // drop the dead entry so create() takes the fresh-spawn-over-existing-log path
+      setImmediate(() => { try { create({ sessionId: a.id, ...cfg }); } catch (e) { logger?.warn({ err: e.message }, 'respawn failed'); } });
+      persist();
+      emitList();
+      return;
+    }
     // A task-completed session is dropped outright (see remove()) rather than
     // left as a dead 'exited' row cluttering the session list.
     if (a.removeOnExit) {
@@ -281,6 +292,23 @@ export function remove(id) {
   agents.delete(id);
   persist();
   emitList();
+}
+
+// Respawn one live agent: kill it, and its onExit resumes with the same config
+// (log survives → --resume, history kept). Used to pick up a new terminal theme.
+export function respawn(id) {
+  const a = agents.get(id);
+  if (!a?.proc) return false;
+  a.respawnAfterExit = { name: a.name, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs };
+  a.proc.kill();
+  return true;
+}
+
+// Respawn every live agent (e.g. after an app theme toggle).
+export function respawnAll() {
+  const ids = [];
+  for (const a of agents.values()) if (respawn(a.id)) ids.push(a.id);
+  return ids;
 }
 
 // Reorder the registry to match `ids` (a permutation of every current id);

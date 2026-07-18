@@ -1,7 +1,4 @@
 {
-  "env": {
-    "PONYTAIL_DEFAULT_MODE": "full"
-  },
   "permissions": {
     "allow": [
       "Edit(~/.singularity/state/tickets/**)"
