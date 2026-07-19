@@ -18,7 +18,7 @@ import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memo
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions } from './sessions.mjs';
 import { listSkills, readSkill } from './skills.mjs';
-import { statsFor } from './stats.mjs';
+import { statsFor, sessionStats } from './stats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
@@ -349,6 +349,14 @@ app.get('/session', async (req, reply) => {
   return r;
 });
 app.get('/sessions/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id }));
+// Per-session cost + token breakdown for the visible list page (batched so a
+// page flip is one request; stats.mjs caches each parse by mtime/size).
+app.post('/sessions/stats', async (req) => {
+  const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
+  const stats = {};
+  for (const it of items) if (it?.project && it?.id) stats[it.id] = sessionStats(it.project, it.id);
+  return { stats };
+});
 
 reg.init(app.log);
 initTasks(app.log);

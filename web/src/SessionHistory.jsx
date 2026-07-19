@@ -32,6 +32,14 @@ function relTime(ms) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
+const fmtTok = (n) => {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k`;
+  return String(n || 0);
+};
+const fmtUsd = (n) => (n == null ? null : n > 0 && n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`);
+const shortModel = (id) => id.match(/opus|sonnet|haiku|fable|mythos/i)?.[0].toLowerCase() || id;
+
 export default function SessionHistory({ sendMsg, registerChat }) {
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
@@ -49,6 +57,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   const [authNeeded, setAuthNeeded] = useState(false);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
+  const [stats, setStats] = useState({}); // id -> { costUsd, costSource, inputTokens, ... }
   const [loadErr, setLoadErr] = useState(null);
   const [sessErr, setSessErr] = useState(null);
   const railW = useResizable('sing-sesshist-w', 340);
@@ -67,9 +76,18 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   }, []);
   useEffect(() => { if (scope === 'all') { const id = setTimeout(() => searchAll(q), 250); return () => clearTimeout(id); } }, [q, scope, searchAll]);
 
+  // Batch-fetch cost + token breakdown; merge into the id-keyed stats map.
+  const loadStats = useCallback((items) => {
+    const list = (items || []).filter((it) => it?.project && it?.id).map((it) => ({ project: it.project, id: it.id }));
+    if (!list.length) return;
+    fetch('/sessions/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list }) })
+      .then((r) => r.json()).then((d) => setStats((prev) => ({ ...prev, ...(d.stats || {}) }))).catch(() => {});
+  }, []);
+
   const open = (item) => {
     if (item.project === sel?.project && item.id === sel?.id) return;
     setSel(item); setMatches(null); setQ(''); setLoadErr(null);
+    loadStats([item]); // ensure detail-header stats even when opened from search
     setLoadingFile(true);
     fetch(`/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}`).then((r) => r.json()).then((d) => {
       setTranscript(d.ok ? d : null);
@@ -136,6 +154,9 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   const curPage = Math.min(page, pageCount);
   const pageItems = leftList.slice((curPage - 1) * pageSize, curPage * pageSize);
   useEffect(() => { setPage(1); }, [q, scope, pageSize]);
+  // Fetch cost/tokens for the visible session rows (not the per-match search rows).
+  const pageKey = pageItems.map((s) => s.id).join(',');
+  useEffect(() => { if (!leftResults) loadStats(pageItems); /* eslint-disable-line */ }, [pageKey, leftResults, loadStats]);
 
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
@@ -187,7 +208,9 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                     <Stack direction="row" spacing={1} sx={{ mt: 0.25, alignItems: 'center' }}>
                       <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(s.cwd) || s.project}</Typography>
                     </Stack>
-                    <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>{relTime(s.mtime)}</Typography>
+                    <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>
+                      {relTime(s.mtime)}{stats[s.id]?.costUsd != null ? ` · ${fmtUsd(stats[s.id].costUsd)}` : ''}
+                    </Typography>
                   </ListItemButton>
                 ))
               )}
@@ -238,10 +261,17 @@ export default function SessionHistory({ sendMsg, registerChat }) {
             ) : (
               <>
                 <Typography variant="subtitle2" noWrap>{transcript.meta?.title || sel?.title || sel?.id}</Typography>
-                <Stack direction="row" spacing={1.5} sx={{ mb: 1.5 }}>
+                <Stack direction="row" spacing={1.5} sx={{ mb: 0.5 }}>
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(transcript.meta?.cwd || sel?.cwd)}</Typography>
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{transcript.meta?.turns ?? 0} turns · {relTime(sel.mtime)}</Typography>
                 </Stack>
+                {sel && stats[sel.id] && (
+                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block', mb: 1.5 }}>
+                    {fmtTok(stats[sel.id].inputTokens)} in · {fmtTok(stats[sel.id].outputTokens)} out · {fmtTok(stats[sel.id].cacheReadTokens)} cache read · {fmtTok(stats[sel.id].cacheWriteTokens)} cache write
+                    {stats[sel.id].models?.length ? ` · ${stats[sel.id].models.map(shortModel).join(', ')}` : ''}
+                    {stats[sel.id].costUsd != null ? ` · ${fmtUsd(stats[sel.id].costUsd)} ${stats[sel.id].costSource === 'statusline' ? 'exact' : 'est'}` : ''}
+                  </Typography>
+                )}
                 {searching && effScope === 'one' && (
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mb: 1.5 }}>
                     {viewFiltered.length} match{viewFiltered.length === 1 ? '' : 'es'} in this session

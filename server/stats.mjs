@@ -41,12 +41,20 @@ function priceFor(model) {
 const cache = new Map(); // path -> { mtimeMs, size, result }
 
 export function parseSession(cwd, id) {
-  const p = join(homedir(), '.claude', 'projects', encodeCwd(cwd), `${id}.jsonl`);
+  return parseByPath(join(homedir(), '.claude', 'projects', encodeCwd(cwd), `${id}.jsonl`));
+}
+
+// Full parse of one transcript path into turns + per-bucket token totals + est
+// cost + models seen. Cached by (mtime,size). Shared by agent stats (via cwd)
+// and session stats (via project dirname).
+function parseByPath(p) {
   let st;
-  try { st = statSync(p); } catch { return { turns: 0, tokens: 0, exists: false, estCostUsd: null }; }
+  try { st = statSync(p); } catch { return { turns: 0, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, models: [], exists: false, estCostUsd: null }; }
   const hit = cache.get(p);
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.result;
   let turns = 0, tokens = 0, estCostUsd = null;
+  let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0;
+  const models = new Set();
   try {
     for (const line of readFileSync(p, 'utf8').split(/\r?\n/)) {
       if (!line) continue;
@@ -59,7 +67,10 @@ export function parseSession(cwd, id) {
       const output = u.output_tokens || 0;
       const cacheRead = u.cache_read_input_tokens || 0;
       const cacheCreate = u.cache_creation_input_tokens || 0;
+      inputTokens += input; outputTokens += output;
+      cacheReadTokens += cacheRead; cacheWriteTokens += cacheCreate;
       tokens += input + output + cacheRead + cacheCreate;
+      if (o.message?.model && o.message.model !== '<synthetic>') models.add(o.message.model);
       const price = priceFor(o.message?.model);
       if (!price) continue; // unknown model prefix — skip, leaves estCostUsd null for pure-unknown sessions
       let cost = (input * price.input + output * price.output) / 1e6;
@@ -73,9 +84,21 @@ export function parseSession(cwd, id) {
       estCostUsd = (estCostUsd || 0) + cost;
     }
   } catch { /* partial/locked file — return what we have */ }
-  const result = { turns, tokens, exists: true, estCostUsd };
+  const result = { turns, tokens, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, models: [...models], exists: true, estCostUsd };
   cache.set(p, { mtimeMs: st.mtimeMs, size: st.size, result });
   return result;
+}
+
+// Session-history stats keyed by the encoded-cwd project dirname (as the
+// session list already has it), merging the exact statusline cost when present.
+export function sessionStats(project, id) {
+  const session = parseByPath(join(homedir(), '.claude', 'projects', project, `${id}.jsonl`));
+  const cost = readCostFile(id);
+  return {
+    ...session,
+    costUsd: cost.costUsd ?? session.estCostUsd ?? null,
+    costSource: cost.costUsd != null ? 'statusline' : session.estCostUsd != null ? 'estimate' : null,
+  };
 }
 
 // Statusline capture file written by statusline-capture.mjs: exact cost + API
