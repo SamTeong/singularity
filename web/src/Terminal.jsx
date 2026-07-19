@@ -86,6 +86,23 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     };
     hostRef.current.addEventListener('contextmenu', onContextMenu);
 
+    // WebGL + scrollback-trim desyncs the .xterm-viewport DOM scrollHeight: the
+    // browser clamps wheel-down before the true bottom, so you get stuck a few
+    // lines short (arrow keys still snap via scrollOnUserInput). Only when the
+    // DOM is maxed but the buffer says there's more below do we force a snap —
+    // no interference with scrolling up or through history.
+    // ponytail: reactive snap on the stuck state; drop if xterm fixes the desync.
+    const viewport = hostRef.current.querySelector('.xterm-viewport');
+    const onWheel = (e) => {
+      if (e.deltaY <= 0 || !viewport) return;
+      requestAnimationFrame(() => {
+        const atDomBottom = viewport.scrollTop + viewport.clientHeight >= viewport.scrollHeight - 1;
+        const b = term.buffer.active;
+        if (atDomBottom && b.viewportY < b.baseY) term.scrollToBottom();
+      });
+    };
+    hostRef.current.addEventListener('wheel', onWheel, { passive: true });
+
     // keystrokes -> daemon
     term.onData((data) => sendMsg({ t: 'input', id: agent.id, data }));
 
@@ -114,7 +131,7 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     setTimeout(doFit, 50);
 
     const host = hostRef.current;
-    return () => { clearTimeout(roTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); term.dispose(); registerOutput(null); };
+    return () => { clearTimeout(roTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); host.removeEventListener('wheel', onWheel); term.dispose(); registerOutput(null); };
   }, [agent.id]);
 
   // Apply the app theme live — no need to recreate the terminal.
