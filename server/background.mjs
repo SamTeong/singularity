@@ -98,7 +98,7 @@ export function pickDef(defs, now) {
 // off-cooldown + (in their own window, unless bypassWindow), oldest lastRunAt
 // first. Returns the first candidate whose own gate passes as { def, backend,
 // reason: null }, or { def: null, backend: null, reason } when none qualify —
-// 'no def ready' when there were no candidates at all, else the joined
+// 'did not find eligible task to run' when there were no candidates at all, else the joined
 // per-candidate gate reasons.
 export function pickRunnableDef(defs, usage, now, { bypassWindow = false } = {}) {
   const ready = (defs || []).filter((d) =>
@@ -106,7 +106,7 @@ export function pickRunnableDef(defs, usage, now, { bypassWindow = false } = {})
     (d.lastRunAt == null || now - d.lastRunAt > d.cooldownHours * 3_600_000) &&
     (bypassWindow || inWindow(d, new Date(now))));
   ready.sort((a, b) => (a.lastRunAt ?? -Infinity) - (b.lastRunAt ?? -Infinity));
-  if (ready.length === 0) return { def: null, backend: null, reason: 'no def ready' };
+  if (ready.length === 0) return { def: null, backend: null, reason: 'did not find eligible task to run' };
   const reasons = [];
   for (const def of ready) {
     const gate = evalGate(usage, def);
@@ -166,7 +166,7 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
   if (bypassGate) { // forced run: no gate, default to claude budget/model
     backend = 'claude';
     def = pickDef(config.defs, now);
-    if (!def) return refuse('no def ready');
+    if (!def) return refuse('did not find eligible task to run');
   } else {
     const picked = pickRunnableDef(config.defs, await getUsage(), now, { bypassWindow });
     if (!picked.def) return refuse(picked.reason);

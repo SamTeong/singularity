@@ -102,12 +102,12 @@ test('pickDef: disabled defs are skipped', () => {
 const inWin = new Date(2026, 6, 15, 10).getTime();
 const outWin = new Date(2026, 6, 18, 10).getTime(); // Saturday
 
-test('pickRunnableDef: out-of-window def is skipped → no def ready', () => {
+test('pickRunnableDef: out-of-window def is skipped → did not find eligible task to run', () => {
   const defs = [def({ lastRunAt: null })];
   const r = pickRunnableDef(defs, { claude: src(), ollama: src() }, outWin);
   assert.equal(r.def, null);
   assert.equal(r.backend, null);
-  assert.equal(r.reason, 'no def ready');
+  assert.equal(r.reason, 'did not find eligible task to run');
 });
 test('pickRunnableDef: bypassWindow picks an out-of-window def if its gate passes', () => {
   const defs = [def({ lastRunAt: null })];
