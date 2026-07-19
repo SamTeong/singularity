@@ -4,6 +4,7 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
 import ClearIcon from '@mui/icons-material/Clear';
+import Tooltip from '@mui/material/Tooltip';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
@@ -16,13 +17,19 @@ import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import SchoolIcon from '@mui/icons-material/School';
 import { StatusPill, SearchInput, EmptyState } from '@zapac/mui-theme';
+import DirPicker from './DirPicker.jsx';
 import MarkdownBody from './MarkdownBody.jsx';
+import { tildify, untildify } from './paths.js';
 import { useResizable, ResizeHandle } from './useResizable.jsx';
 
 // Skills viewer: tree of skill scopes → skills (left), rendered SKILL.md
 // (right). Read-only — no write. Skills live under SING_SCOPE_ROOT; the server
 // derives paths from (scope, skill).
 export default function SkillsPanel() {
+  const [root, setRoot] = useState('');
+  const [rootLoaded, setRootLoaded] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [flat, setFlat] = useState(false); // server-detected layout
   const [scopes, setScopes] = useState([]);
   const [q, setQ] = useState('');
   const [loadErr, setLoadErr] = useState(null);
@@ -34,16 +41,29 @@ export default function SkillsPanel() {
   const [err, setErr] = useState(null);
   const railW = useResizable('sing-skills-w', 300);
 
+  // Load the FS-persisted root once on mount (skills load via the [root] effect).
   useEffect(() => {
+    fetch('/skills/root').then((r) => r.json()).then((d) => { setRoot(d.root || ''); }).catch(() => {}).finally(() => setRootLoaded(true));
+  }, []);
+
+  useEffect(() => {
+    if (!rootLoaded) return;
     let cancelled = false;
-    fetch('/skills').then((r) => r.json()).then((d) => {
+    setSel(null); setSkill(null);
+    fetch(`/skills?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       if (cancelled) return;
+      setFlat(!!d.flat);
       if (d.error) { setLoadErr(d.error); setScopes([]); return; }
       setScopes(d.scopes || []);
       setLoadErr(null);
     }).catch(() => { if (!cancelled) setLoadErr('failed to load skills'); });
     return () => { cancelled = true; };
-  }, []);
+  }, [root, rootLoaded]);
+
+  const pickRoot = (p) => {
+    setRoot(p); setPicking(false);
+    fetch('/skills/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
+  };
 
   const toggleScope = (name) => setExpanded((s) => {
     const n = new Set(s);
@@ -55,7 +75,7 @@ export default function SkillsPanel() {
     const key = { scope, skill: skillName };
     if (sel?.scope === scope && sel?.skill === skillName) return;
     setSel(key); setErr(null); setLoading(true); setSkill(null);
-    fetch(`/skill?scope=${encodeURIComponent(scope)}&skill=${encodeURIComponent(skillName)}`).then((r) => r.json()).then((d) => {
+    fetch(`/skill?root=${encodeURIComponent(untildify(root))}&scope=${encodeURIComponent(scope)}&skill=${encodeURIComponent(skillName)}&flat=${flat ? '1' : '0'}`).then((r) => r.json()).then((d) => {
       if (!d.ok) { setErr(d.error || 'failed to load skill'); setSkill(null); }
       else setSkill({ name: d.name, description: d.description, triggers: d.triggers || [], body: d.body });
     }).catch(() => setErr('failed to load skill')).finally(() => setLoading(false));
@@ -96,9 +116,13 @@ export default function SkillsPanel() {
                 </IconButton>
               )}
             </Box>
+            <Tooltip title="Pick skills folder" placement="bottom" disableInteractive>
+              <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
+            </Tooltip>
             <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
           </Stack>
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap title={tildify(root)}>{root ? tildify(root) : '(no root — pick a folder)'}</Typography>
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
             {loadErr ? `${loadErr}` : `${view.length} scope${view.length === 1 ? '' : 's'} · ${skillCount} skill${skillCount === 1 ? '' : 's'}`}
           </Typography>
         </Box>
@@ -176,6 +200,8 @@ export default function SkillsPanel() {
           </>
         )}
       </Stack>
+
+      {picking && <DirPicker start={untildify(root || '~')} onPick={pickRoot} onClose={() => setPicking(false)} />}
     </Box>
   );
 }

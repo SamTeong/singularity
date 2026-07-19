@@ -28,10 +28,17 @@ mkdirSync(join(root, 'common', '.claude', 'skills', 'x'), { recursive: true });
 writeFileSync(join(root, 'common', '.claude', 'skills', 'x', 'SKILL.md'), '---\nname: x\ndescription: hidden\n---\n');
 mkdirSync(join(root, 'empty', '.claude'), { recursive: true });
 
+// Flat layout: a bare .claude/skills-style dir (subfolder-per-skill, no scopes).
+const flatRoot = join(scratch, 'flat');
+mkdirSync(join(flatRoot, 'declawed'), { recursive: true });
+writeFileSync(join(flatRoot, 'declawed', 'SKILL.md'), '---\nname: declawed\ndescription: De-slop text.\n---\n\n# declawed\n\nbody');
+mkdirSync(join(flatRoot, 'not-a-skill'), { recursive: true }); // no SKILL.md → skipped
+
 const { listSkills, readSkill } = await import('./skills.mjs');
 
-test('listSkills: excludes common, skips scopes with no skills, carries description', () => {
-  const { scopes } = listSkills();
+test('listSkills: grouped — excludes common, skips scopes with no skills, carries description', () => {
+  const { scopes, flat } = listSkills(root);
+  assert.equal(flat, false);
   assert.deepEqual(scopes.map((s) => s.name), ['coding'], 'common excluded, empty skipped');
   const coding = scopes[0];
   assert.deepEqual(coding.skills.map((s) => s.name), ['freeze', 'noisy'], 'sorted');
@@ -39,23 +46,41 @@ test('listSkills: excludes common, skips scopes with no skills, carries descript
   assert.equal(coding.skills.find((s) => s.name === 'noisy').description, '');
 });
 
-test('readSkill: rejects bad names', () => {
-  assert.equal(readSkill('../x', 'freeze').ok, false);
-  assert.equal(readSkill('a/b', 'freeze').ok, false);
-  assert.equal(readSkill('', 'freeze').ok, false);
-  assert.equal(readSkill('..', 'x').ok, false, 'bare .. scope would traverse above root');
-  assert.equal(readSkill('coding', '..').ok, false, 'bare .. skill would traverse above skills dir');
-  assert.equal(readSkill('coding', '.').ok, false);
-  assert.equal(readSkill('coding', '...').ok, false);
-  assert.equal(readSkill('coding', 'nope').ok, false, 'missing skill');
+test('listSkills: flat — root is a .claude/skills dir, one scope', () => {
+  const { scopes, flat } = listSkills(flatRoot);
+  assert.equal(flat, true);
+  assert.equal(scopes.length, 1, 'single synthetic scope');
+  assert.equal(scopes[0].name, 'flat');
+  assert.deepEqual(scopes[0].skills.map((s) => s.name), ['declawed'], 'no-SKILL.md subdir skipped');
 });
 
-test('readSkill: returns structured meta + body + path for a real skill', () => {
-  const r = readSkill('coding', 'freeze');
+test('listSkills: bad root reports error', () => {
+  assert.equal(listSkills(join(scratch, 'nope')).error, 'skills root not found');
+});
+
+test('readSkill: grouped rejects bad names', () => {
+  assert.equal(readSkill(root, '../x', 'freeze').ok, false);
+  assert.equal(readSkill(root, 'a/b', 'freeze').ok, false);
+  assert.equal(readSkill(root, '..', 'x').ok, false, 'bare .. scope would traverse above root');
+  assert.equal(readSkill(root, 'coding', '..').ok, false, 'bare .. skill would traverse above skills dir');
+  assert.equal(readSkill(root, 'coding', '.').ok, false);
+  assert.equal(readSkill(root, 'coding', '...').ok, false);
+  assert.equal(readSkill(root, 'coding', 'nope').ok, false, 'missing skill');
+});
+
+test('readSkill: grouped returns structured meta + body + path', () => {
+  const r = readSkill(root, 'coding', 'freeze');
   assert.ok(r.ok);
   assert.equal(r.name, 'freeze');
   assert.equal(r.description, 'Lock edits to a directory.');
   assert.deepEqual(r.triggers, ['freeze edits']);
   assert.match(r.body, /# freeze/);
   assert.match(r.path, /coding.*SKILL\.md$/);
+});
+
+test('readSkill: flat resolves <root>/<skill>/SKILL.md, ignores scope', () => {
+  const r = readSkill(flatRoot, null, 'declawed', true);
+  assert.ok(r.ok);
+  assert.equal(r.name, 'declawed');
+  assert.equal(readSkill(flatRoot, null, '..', true).ok, false, 'bad skill name still rejected in flat');
 });

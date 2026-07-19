@@ -1,15 +1,32 @@
-// Skills viewer backend: list skill scopes + their skills, read a skill's
-// SKILL.md. Read-only — no write (skills are versioned, symlinked into
-// ~/.agents/skills). All paths server-derived from (scope, skill); the client
-// never supplies a path.
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+// Skills viewer backend: list skills under a client-chosen root + read a skill's
+// SKILL.md. Read-only — no write. Two root layouts, auto-detected:
+//   grouped — <root>/<scope>/.claude/skills/<skill>/SKILL.md (skill-scopes dir)
+//   flat    — <root>/<skill>/SKILL.md                        (a .claude/skills dir)
+// All paths server-derived from (root, scope, skill) + layout flag; the client
+// never supplies a path. Root persists on the daemon FS (survives cache clear).
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { basename, join } from 'node:path';
+import { STATE_DIR } from './app-dir.mjs';
 import * as reg from './agents.mjs';
 
 const SKILLS_CAP = 200; // backstop per scope — no silent truncation
 // Bare skill/scope names only — no path separators, no all-dots names ('.',
 // '..', '...') which join()/resolve() would collapse into a parent traversal.
 const NAME_RE = /^(?!\.+$)[A-Za-z0-9._-]+$/;
+
+// Skills root choice, FS-persisted. Defaults to SING_SCOPE_ROOT (the grouped
+// skill-scopes dir) when unset.
+const ROOT_FILE = join(STATE_DIR, 'skills-root.json');
+export function getSkillsRoot() {
+  try { const r = JSON.parse(readFileSync(ROOT_FILE, 'utf8')).root; if (typeof r === 'string' && r) return r; }
+  catch {}
+  return reg.SCOPE_ROOT || '';
+}
+export function setSkillsRoot(root) {
+  if (typeof root !== 'string' || !root) return { ok: false, error: 'bad root' };
+  try { mkdirSync(STATE_DIR, { recursive: true }); writeFileSync(ROOT_FILE, JSON.stringify({ root })); return { ok: true, root }; }
+  catch (e) { return { ok: false, error: e.message }; }
+}
 
 // Parse a SKILL.md's leading YAML frontmatter (---\n...\n---) into structured
 // meta + body. Skill frontmatter uses block YAML lists for `triggers`:
@@ -42,48 +59,68 @@ function parseSkill(src) {
   return { ...out, body: src.slice(m[0].length) };
 }
 
-// List scopes (exclude 'common', matching /skill-scopes) with nested skills.
-export function listSkills() {
-  const root = reg.SCOPE_ROOT;
-  if (!root || !existsSync(root)) return { scopes: [], error: root ? 'scope root not found' : 'scope root not configured' };
-  let scopes;
-  try {
-    scopes = readdirSync(root, { withFileTypes: true })
-      .filter((d) => { try { return d.isDirectory() && d.name !== 'common'; } catch { return false; } })
-      .map((d) => d.name)
-      .sort((a, b) => a.localeCompare(b));
-  } catch { return { scopes: [], error: 'scope root unreadable' }; }
-
-  const out = [];
-  for (const scope of scopes) {
-    const skillsDir = join(root, scope, '.claude', 'skills');
-    let skillNames;
-    try { skillNames = readdirSync(skillsDir, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); }
-    catch { continue; } // scope without a skills dir — skip silently
-    let capped = false;
-    const skills = [];
-    for (const name of skillNames.sort((a, b) => a.localeCompare(b))) {
-      const md = join(skillsDir, name, 'SKILL.md');
-      if (!existsSync(md)) continue;
-      let description = '';
-      try { description = parseSkill(readFileSync(md, 'utf8')).description; } catch {}
-      skills.push({ name, description });
-      if (skills.length >= SKILLS_CAP) { capped = true; break; }
-    }
-    if (skills.length) out.push({ name: scope, skills, capped });
+// Read a `.claude/skills`-style dir (subfolder-per-skill, each with SKILL.md).
+// Returns { skills, capped }.
+function readSkillsDir(dir) {
+  let names;
+  try { names = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); }
+  catch { return null; } // not a readable dir
+  let capped = false;
+  const skills = [];
+  for (const name of names.sort((a, b) => a.localeCompare(b))) {
+    const md = join(dir, name, 'SKILL.md');
+    if (!existsSync(md)) continue;
+    let description = '';
+    try { description = parseSkill(readFileSync(md, 'utf8')).description; } catch {}
+    skills.push({ name, description });
+    if (skills.length >= SKILLS_CAP) { capped = true; break; }
   }
-  return { scopes: out };
+  return { skills, capped };
 }
 
-// Read a skill's SKILL.md. Path fully server-derived; scope+skill are bare
-// names. Returns structured meta (name/description/triggers) + body so the
-// client renders without re-parsing block YAML lists.
-export function readSkill(scope, skill) {
-  if (!reg.SCOPE_ROOT) return { ok: false, error: 'scope root not configured' };
-  if (typeof scope !== 'string' || !NAME_RE.test(scope) || typeof skill !== 'string' || !NAME_RE.test(skill)) {
-    return { ok: false, error: 'bad name' };
+// List skills under `root`, auto-detecting layout. `root` is a full path (the
+// client untildifies); falls back to the persisted/scope root when omitted.
+// Grouped: each subdir with a .claude/skills becomes a scope. Flat: the root
+// itself is a skills dir → one scope (basename of root). Grouped wins if both.
+export function listSkills(root) {
+  root = root || getSkillsRoot();
+  if (!root) return { scopes: [], flat: false, error: 'skills root not configured' };
+  if (!existsSync(root)) return { scopes: [], flat: false, error: 'skills root not found' };
+
+  let subdirs;
+  try {
+    subdirs = readdirSync(root, { withFileTypes: true })
+      .filter((d) => { try { return (d.isDirectory() || d.isSymbolicLink()) && d.name !== 'common'; } catch { return false; } })
+      .map((d) => d.name)
+      .sort((a, b) => a.localeCompare(b));
+  } catch { return { scopes: [], flat: false, error: 'skills root unreadable' }; }
+
+  // Grouped: collect scopes that hold a .claude/skills with ≥1 skill.
+  const grouped = [];
+  for (const scope of subdirs) {
+    const r = readSkillsDir(join(root, scope, '.claude', 'skills'));
+    if (r && r.skills.length) grouped.push({ name: scope, skills: r.skills, capped: r.capped });
   }
-  const p = join(reg.SCOPE_ROOT, scope, '.claude', 'skills', skill, 'SKILL.md');
+  if (grouped.length) return { scopes: grouped, flat: false };
+
+  // Flat: the root itself is a skills dir.
+  const r = readSkillsDir(root);
+  if (r && r.skills.length) return { scopes: [{ name: basename(root) || root, skills: r.skills, capped: r.capped }], flat: true };
+
+  return { scopes: [], flat: false };
+}
+
+// Read a skill's SKILL.md. Path fully server-derived from validated bare names +
+// the client-chosen root. `flat` selects the layout: flat → <root>/<skill>, else
+// grouped → <root>/<scope>/.claude/skills/<skill>.
+export function readSkill(root, scope, skill, flat) {
+  root = root || getSkillsRoot();
+  if (!root) return { ok: false, error: 'skills root not configured' };
+  if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
+  if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };
+  const p = flat
+    ? join(root, skill, 'SKILL.md')
+    : join(root, scope, '.claude', 'skills', skill, 'SKILL.md');
   if (!existsSync(p)) return { ok: false, error: 'not found' };
   try {
     const parsed = parseSkill(readFileSync(p, 'utf8'));
