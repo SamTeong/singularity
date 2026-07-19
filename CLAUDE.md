@@ -13,6 +13,8 @@ pnpm test            # node --test "server/*.test.mjs"
 
 Pieces separately: `pnpm server` / `pnpm web`. Shell: PowerShell primary; Bash tool POSIX only.
 
+`pnpm web`/`pnpm start` build takes ~2–3min — run with `run_in_background` (or `timeout: 300000`); the default 120s timeout always fires and auto-backgrounds it.
+
 Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `PORT`, `CLAUDE_BIN`, `SING_USAGE_SKILL`, `SING_USAGE_REPORTS` (optional: `OLLAMA_BIN` — absent → ollama models unavailable; `SING_SCOPE_ROOT` — absent → no skill-scopes; `SING_TOKEN`; daemon boots without any of these). Copy `.env.example` → `.env` (gitignored) and fill in. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
 
 ## Repo structure
