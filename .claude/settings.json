@@ -1,6 +1,10 @@
 {
   "permissions": {
     "allow": [
+      "Agent(junior-software-engineer)",
+      "Agent(planner)",
+      "Agent(reviewer)",
+      "Agent(senior-software-engineer)",
       "Task(junior-software-engineer)",
       "Task(planner)",
       "Task(reviewer)",
