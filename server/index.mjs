@@ -15,7 +15,7 @@ import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid } from './procs.mjs';
 import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
-import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memory.mjs';
+import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions } from './sessions.mjs';
@@ -326,18 +326,20 @@ app.get('/background/reports/:taskId', async (req, reply) => {
   return { ok: true, ...r };
 });
 
-// Memory: cross-project search + guarded read/write.
-app.get('/memory/search', async (req) => searchMemory(req.query.q));
-app.get('/memory/files', async () => ({ files: listFiles() }));
+// Memory: cross-project search + guarded read/write under a client-selected root.
+app.get('/memory/root', async () => ({ root: getMemoryRoot() }));
+app.put('/memory/root', async (req) => setMemoryRoot(req.body?.root));
+app.get('/memory/search', async (req) => searchMemory(req.query.q, req.query.root));
+app.get('/memory/files', async (req) => ({ files: listFiles(req.query.root) }));
 app.get('/memory/file', async (req, reply) => {
-  const r = readMemoryFile(req.query.path);
+  const r = readMemoryFile(req.query.path, req.query.root);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
 app.put('/memory/file', async (req, reply) => {
-  const { path, content } = req.body || {};
+  const { path, content, root } = req.body || {};
   if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = writeMemoryFile(path, content);
+  const r = writeMemoryFile(path, content, root);
   if (!r.ok) reply.code(400);
   return r;
 });
