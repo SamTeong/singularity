@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -31,6 +31,11 @@ export default function MemoryPanel() {
   const [dirty, setDirty] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
   const [msg, setMsg] = useState(null);
+  // Stable extensions + onChange: @uiw/react-codemirror's reconfigure effect lists both
+  // in its deps, so fresh identities each render reconfigure the editor and drop the
+  // open Ctrl+F search panel (flash-close).
+  const extensions = useMemo(() => [EditorView.lineWrapping, markdown(), cmTheme], []);
+  const onChange = useCallback((v) => { setContent(v); setDirty(true); }, []);
   const [err, setErr] = useState(null);
   const railW = useResizable('sing-memory-w', 340);
 
@@ -78,7 +83,7 @@ export default function MemoryPanel() {
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                  <SearchInput placeholder="Search all memory…" value={q} onChange={setQ} shortcut="" />
+                  <SearchInput placeholder="Search memory…" value={q} onChange={setQ} shortcut="" />
                   {q && (
                     <IconButton size="small" onClick={() => setQ('')} aria-label="Clear search"
                       sx={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', '&:hover': { transform: 'translateY(-50%)' } }}>
@@ -125,7 +130,7 @@ export default function MemoryPanel() {
             <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel.path)}</Typography>
             <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
               <CodeMirror value={content} theme={mode === 'dark' ? 'dark' : 'light'} height="100%"
-                extensions={[EditorView.lineWrapping, markdown(), cmTheme]} onChange={(v) => { setContent(v); setDirty(true); }} />
+                extensions={extensions} onChange={onChange} />
             </Box>
             <Stack direction="row" spacing={1.5} sx={{ mt: 1.5, alignItems: 'center' }}>
               {msg && <Typography color={msg.sev === 'error' ? 'error' : 'success.main'} sx={{ fontSize: 13 }}>{msg.text}</Typography>}

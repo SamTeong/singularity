@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Tabs from '@mui/material/Tabs';
@@ -61,6 +61,19 @@ export default function ConfigEditor() {
     return next;
   });
 
+  // Drop a path from the list and persist to FS. Match on the same normalized
+  // key shownList dedups by, so collapsed variants (~ vs expanded home) all go.
+  const normKey = (p) => tildify(p).replace(/\\/g, '/').toLowerCase();
+  const forget = (p) => setConfigList((prev) => {
+    const k = normKey(p);
+    const next = prev.filter((x) => normKey(x) !== k);
+    fetch('/config/roots', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ roots: next }),
+    }).catch(() => {});
+    return next;
+  });
+
   const load = () => {
     if (!cwd) return;
     const full = untildify(cwd);
@@ -102,6 +115,13 @@ export default function ConfigEditor() {
 
   const info = data?.[scope];
 
+  // Stable extensions: a fresh array/json() each render makes @uiw/react-codemirror
+  // reconfigure the editor, which drops the open Ctrl+F search panel (flash-close).
+  const extensions = useMemo(() => [EditorView.lineWrapping, json(), cmTheme], []);
+  // Stable onChange too: @uiw's reconfigure effect lists onChange in its deps, so a
+  // fresh arrow each render reconfigures the editor and drops the search panel.
+  const onChange = useCallback((v) => { setContent(v); setDirty(true); }, []);
+
   const save = async () => {
     const r = await fetch(`/config/${scope}`, {
       method: 'PUT', headers: { 'content-type': 'application/json' },
@@ -125,7 +145,7 @@ export default function ConfigEditor() {
   // Dedup on a normalized key (tildified, forward slashes, lowercased) so `~`
   // and its expanded home path, or `/` vs `\`, don't show as separate entries.
   const shownList = [...new Map(
-    configList.map((p) => [tildify(p).replace(/\\/g, '/').toLowerCase(), p]),
+    configList.map((p) => [normKey(p), p]),
   ).values()].sort((a, b) => a.localeCompare(b));
 
   if (loading && !data) return <Box sx={{ p: 3 }}><Typography color="text.secondary">Loading config…</Typography></Box>;
@@ -142,7 +162,7 @@ export default function ConfigEditor() {
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                  <SearchInput placeholder="Search config" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} />
+                  <SearchInput placeholder="Search config…" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} />
                   {q && (
                     <IconButton size="small" onClick={() => setQ('')} aria-label="Clear search"
                       sx={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', '&:hover': { transform: 'translateY(-50%)' } }}>
@@ -172,8 +192,13 @@ export default function ConfigEditor() {
                 <>
                   {shownList.map((p) => (
                     <ListItemButton key={p} selected={p === loadedCwd} onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setCwd(p); }}
-                      sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, mb: 0.25 }}>
+                      sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
                       <ListItemText primary={tildify(p)} primaryTypographyProps={{ noWrap: true, title: p, sx: { fontFamily: 'monospace', fontSize: 12 } }} />
+                      <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
+                        onClick={(e) => { e.stopPropagation(); forget(p); }}
+                        sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
+                        <ClearIcon fontSize="small" />
+                      </IconButton>
                     </ListItemButton>
                   ))}
                   {shownList.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No config paths.</Typography>}
@@ -200,8 +225,8 @@ export default function ConfigEditor() {
           value={content}
           theme={mode === 'dark' ? 'dark' : 'light'}
           height="100%"
-          extensions={[EditorView.lineWrapping, json(), cmTheme]}
-          onChange={(v) => { setContent(v); setDirty(true); }}
+          extensions={extensions}
+          onChange={onChange}
         />
       </Box>
 
