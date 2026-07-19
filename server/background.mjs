@@ -145,7 +145,7 @@ function liveBgTask() {
 
 export function snapshotBackground() {
   const live = liveBgTask();
-  return { config, lastTick, liveTaskId: live ? live.id : null };
+  return { config, lastTick, liveTaskId: live ? live.id : null, nextDueAt: lastDueAt + TICK_MINUTES * 60_000 };
 }
 
 // ---- Scheduler ------------------------------------------------------------------

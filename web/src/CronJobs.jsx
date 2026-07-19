@@ -13,8 +13,6 @@ import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import Chip from '@mui/material/Chip';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
-import ToggleButton from '@mui/material/ToggleButton';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import AddIcon from '@mui/icons-material/Add';
@@ -24,6 +22,8 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
+import HistoryIcon from '@mui/icons-material/History';
+import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
 import CreateBackgroundDialog from './CreateBackgroundDialog.jsx';
 import MarkdownBody from './MarkdownBody.jsx';
@@ -108,6 +108,15 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
 
   const config = background?.config;
   const lastTick = background?.lastTick;
+
+  const bgToggle = (
+    <Button size="small"
+      startIcon={bgView === 'reports' ? <ViewKanbanOutlinedIcon /> : <HistoryIcon />}
+      onClick={() => setBgView((v) => (v === 'reports' ? 'tasks' : 'reports'))}
+      sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>
+      {bgView === 'reports' ? 'Tasks' : 'Reports'}
+    </Button>
+  );
 
   // Drag-to-reorder is cosmetic (scheduler still picks oldest-lastRunAt). During
   // a drag we render a local override; a fresh server snapshot (id order changed)
@@ -235,10 +244,15 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
           </Tooltip>
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>local time</Typography>
           <Box sx={{ flex: 1 }} />
-          <ToggleButtonGroup size="small" exclusive value={bgView} onChange={(_, v) => v && setBgView(v)}>
-            <ToggleButton value="tasks" sx={{ px: 1.5, py: 0.25, textTransform: 'none', fontSize: 12 }}>Tasks</ToggleButton>
-            <ToggleButton value="reports" sx={{ px: 1.5, py: 0.25, textTransform: 'none', fontSize: 12 }}>Reports</ToggleButton>
-          </ToggleButtonGroup>
+          {bgView !== 'reports' && (
+            <>
+              <Tooltip title="Run the scheduler now (picks a ready task)" disableInteractive>
+                <Button size="small" startIcon={<PlayArrowIcon />} onClick={runBg} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Run now</Button>
+              </Tooltip>
+              <Button size="small" startIcon={<AddIcon />} onClick={() => setDefOpen(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Add background task</Button>
+            </>
+          )}
+          {bgToggle}
         </Stack>
 
         {!config ? (
@@ -283,18 +297,11 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {lastTick
                 ? `${lastTick.action === 'ran' ? 'ran' : 'skipped'} ${fmtHM(lastTick.at)}${lastTick.reason ? ` — ${lastTick.reason}` : ''}`
-                : 'no ticks yet'}
+                : `Waiting for first run in ${Math.max(0, Math.ceil((background.nextDueAt - Date.now()) / 60000))} minutes`}
             </Typography>
 
             {/* Defs table */}
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Typography variant="caption" sx={{ color: 'text.secondary' }}>Tasks</Typography>
-              <Box sx={{ flex: 1 }} />
-              <Tooltip title="Run the scheduler now (picks a ready task)" disableInteractive>
-                <Button size="small" startIcon={<PlayArrowIcon />} onClick={runBg} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Run now</Button>
-              </Tooltip>
-              <Button size="small" startIcon={<AddIcon />} onClick={() => setDefOpen(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Add background task</Button>
-            </Stack>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Tasks</Typography>
             {(config.defs || []).length === 0 ? (
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>No background tasks. Add one to soak spare quota during the window.</Typography>
             ) : (
