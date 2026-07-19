@@ -336,7 +336,7 @@ export async function concludeTask(id, outcome) {
   // `git worktree remove` fails and orphans the dir.
   for (let waited = 0; wasLive && reg.isLive(t.sessionId) && waited < 3000; waited += 200) await sleep(200);
   if (t.kind !== 'plain') {
-    // Worktree goes; the task branch stays (it may hold unmerged work).
+    // Worktree goes unconditionally.
     try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
     catch (e) {
       logger?.warn({ err: e.message }, 'worktree remove failed — retrying once');
@@ -344,6 +344,10 @@ export async function concludeTask(id, outcome) {
       try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
       catch (e2) { logger?.warn({ err: e2.message }, 'worktree remove retry failed (already gone?)'); }
     }
+    // Branch: safe-delete only. `-d` deletes if merged into its base (auto-merge
+    // tasks) and refuses if unmerged (manual mode → user still owns the branch).
+    try { git(t.repo, 'branch', '-d', t.branch); }
+    catch { /* unmerged — keep the branch */ }
   }
   tasks.delete(id);
   history.push({ ...t, outcome, concludedAt: Date.now(), finalStats });
