@@ -213,10 +213,10 @@ async function watchdog() {
 
   injectedTaskId = task.id;
   reg.input(task.sessionId, '\r' + WRAPUP + '\r');
-  setTimeout(() => {
+  setTimeout(async () => {
     if (reg.isLive(task.sessionId)) {
       reg.kill(task.sessionId);
-      try { updateTask(task.id, { column: 'inreview', state: 'stopped — budget' }); }
+      try { await updateTask(task.id, { column: 'inreview', state: 'stopped — budget' }); }
       catch (e) { logger?.warn({ err: e.message }, 'background watchdog updateTask failed'); }
     }
   }, KILL_GRACE_MS).unref();

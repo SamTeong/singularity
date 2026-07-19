@@ -4,7 +4,7 @@
 // caveman plugin enabled) the cavecrew fallback.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 const scratch = mkdtempSync(join(tmpdir(), 'sing-tasks-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
 
-const { buildTaskPrompt, buildBackgroundPrompt, createTask, RATE_LIMIT_RE } = await import('./tasks.mjs');
+const { buildTaskPrompt, buildBackgroundPrompt, createTask, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree } = await import('./tasks.mjs');
 
 function initRepo() {
   const repo = mkdtempSync(join(tmpdir(), 'sing-repo-'));
@@ -134,6 +134,22 @@ test('plain-kind prompt also gets turn-economy guidance', () => {
   rmSync(cwd, { recursive: true, force: true });
 });
 
+test('buildTaskPrompt terminal column: mergeMode "auto" ends on done', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'sing-merge-'));
+  const p = buildTaskPrompt({ ...baseTask, worktree: cwd, mergeMode: 'auto' }, false);
+  assert.match(p, /"column":"done"/);
+  assert.match(p, /complete/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('buildTaskPrompt terminal column: mergeMode "manual" never reaches done', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'sing-merge-'));
+  const p = buildTaskPrompt({ ...baseTask, worktree: cwd, mergeMode: 'manual' }, false);
+  assert.match(p, /awaiting human merge/);
+  assert.doesNotMatch(p, /"column":"done"/);
+  rmSync(cwd, { recursive: true, force: true });
+});
+
 test('RATE_LIMIT_RE matches 429 + usage-limit strings', () => {
   assert.match('API Error: Request rejected (429) · you (x) have reached your session usage limit', RATE_LIMIT_RE);
   assert.match('reached your session usage limit', RATE_LIMIT_RE);
@@ -173,5 +189,57 @@ test('createTask: failed spawn cleans up the worktree it just created', () => {
     assert.equal(list.length, 1, 'only the main worktree should remain — task worktree was cleaned up');
   } finally {
     rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('cleanupGitTask: merged branch → worktree removed, branch deleted', async () => {
+  const repo = initRepo();
+  const wtParent = mkdtempSync(join(tmpdir(), 'sing-wt-'));
+  const wt = join(wtParent, 'wt');
+  try {
+    execFileSync('git', ['-C', repo, 'worktree', 'add', wt, '-b', 'task/x']);
+    writeFileSync(join(wt, 'g.txt'), 'y');
+    execFileSync('git', ['-C', wt, 'add', '.']);
+    execFileSync('git', ['-C', wt, 'commit', '-q', '-m', 'work']);
+    execFileSync('git', ['-C', repo, 'merge', 'task/x', '-q']);
+    await cleanupGitTask({ kind: 'git', repo, worktree: wt, branch: 'task/x' });
+    assert.equal(existsSync(wt), false);
+    const list = execFileSync('git', ['-C', repo, 'branch', '--list', 'task/x'], { encoding: 'utf8' }).trim();
+    assert.equal(list, '');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+    rmSync(wtParent, { recursive: true, force: true });
+  }
+});
+
+// State shared between the next two tests: an unmerged branch/worktree cleaned
+// up by cleanupGitTask, then recreated by ensureWorktree.
+let sharedRepo, sharedWt, sharedWtParent, sharedBase;
+
+test('cleanupGitTask: unmerged branch → worktree removed, branch kept', async () => {
+  sharedRepo = initRepo();
+  sharedBase = execFileSync('git', ['-C', sharedRepo, 'rev-parse', '--abbrev-ref', 'HEAD'], { encoding: 'utf8' }).trim();
+  sharedWtParent = mkdtempSync(join(tmpdir(), 'sing-wt-'));
+  sharedWt = join(sharedWtParent, 'wt');
+  execFileSync('git', ['-C', sharedRepo, 'worktree', 'add', sharedWt, '-b', 'task/y']);
+  writeFileSync(join(sharedWt, 'g.txt'), 'y');
+  execFileSync('git', ['-C', sharedWt, 'add', '.']);
+  execFileSync('git', ['-C', sharedWt, 'commit', '-q', '-m', 'work']);
+  await cleanupGitTask({ kind: 'git', repo: sharedRepo, worktree: sharedWt, branch: 'task/y' });
+  assert.equal(existsSync(sharedWt), false);
+  const list = execFileSync('git', ['-C', sharedRepo, 'branch', '--list', 'task/y'], { encoding: 'utf8' }).trim();
+  assert.match(list, /task\/y/);
+});
+
+test('ensureWorktree: recreates when missing, reusing the existing branch; no-op once present', () => {
+  try {
+    ensureWorktree({ kind: 'git', repo: sharedRepo, worktree: sharedWt, branch: 'task/y', baseBranch: sharedBase });
+    assert.equal(existsSync(sharedWt), true);
+    const wtList = execFileSync('git', ['-C', sharedRepo, 'worktree', 'list'], { encoding: 'utf8' });
+    assert.ok(wtList.includes(sharedWt.replace(/\\/g, '/')), 'worktree list includes the recreated worktree');
+    assert.doesNotThrow(() => ensureWorktree({ kind: 'git', repo: sharedRepo, worktree: sharedWt, branch: 'task/y', baseBranch: sharedBase }));
+  } finally {
+    rmSync(sharedRepo, { recursive: true, force: true });
+    rmSync(sharedWtParent, { recursive: true, force: true });
   }
 });

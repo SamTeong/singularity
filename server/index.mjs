@@ -262,7 +262,7 @@ app.post('/tasks', async (req, reply) => {
   catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
 });
 app.post('/tasks/:id/status', async (req, reply) => {
-  try { return { ok: true, task: updateTask(req.params.id, req.body || {}) }; }
+  try { return { ok: true, task: await updateTask(req.params.id, req.body || {}) }; }
   catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
 });
 app.post('/tasks/:id/conclude', async (req, reply) => {

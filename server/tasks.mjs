@@ -50,6 +50,38 @@ function persist() {
 function emitTasks() { reg.bus.emit('tasks', snapshotTasks()); }
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
+// Remove a git task's worktree and safe-delete its branch. `-d` deletes a
+// merged branch (Done ⟹ merged) and refuses an unmerged one, so a stray
+// unmerged branch is never nuked. Async: a just-killed pty may still hold
+// Windows file locks, so retry the worktree removal once after a beat.
+export async function cleanupGitTask(t) {
+  if (t.kind === 'plain') return;
+  if (existsSync(t.worktree)) {
+    try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
+    catch (e) {
+      logger?.warn({ err: e.message }, 'worktree remove failed — retrying once');
+      await sleep(1000);
+      try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
+      catch (e2) { logger?.warn({ err: e2.message }, 'worktree remove retry failed (already gone?)'); }
+    }
+  }
+  try { git(t.repo, 'branch', '-d', t.branch); }
+  catch { /* unmerged — keep the branch */ }
+}
+
+// Recreate a git task's worktree when it's gone (cleaned on Done, then the card
+// moved back). Reuse the branch if it still exists (unmerged work kept), else
+// branch fresh off the current base — a clean slate on top of the merged work.
+// No-op if the worktree is already present.
+export function ensureWorktree(t) {
+  if (t.kind === 'plain' || existsSync(t.worktree)) return;
+  mkdirSync(WORKTREE_ROOT, { recursive: true });
+  let branchExists = true;
+  try { git(t.repo, 'rev-parse', '--verify', `refs/heads/${t.branch}`); } catch { branchExists = false; }
+  if (branchExists) git(t.repo, 'worktree', 'add', t.worktree, t.branch);
+  else git(t.repo, 'worktree', 'add', t.worktree, '-b', t.branch, t.baseBranch);
+}
+
 // Caveman plugin (user scope) ships compressed cavecrew subagents — usable from
 // any cwd. Detected from ~/.claude/settings.json enabledPlugins.
 function cavecrewAvailable() {
@@ -199,9 +231,13 @@ ${t.description}`;
    (N = rejection count), have a ${fixSub} implement the fixes, commit, and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
    ${status('inreview', 'parked — needs human')}
    summarize the blockers here in the terminal, and end your involvement.
-6. **On PASS**: apply the merge policy above (if it conflicts: run ${status('inreview', 'parked — merge conflict')} and stop). Then conclude with a one-line summary of what was done and run
+6. **On PASS**: apply the merge policy above.${t.mergeMode === 'auto'
+  ? ` If it conflicts, run ${status('inreview', 'parked — merge conflict')} and stop. Otherwise conclude with a one-line summary of what was done and run
    ${status('done', 'complete')}
-   as your very last action — the daemon terminates this session when the card reaches done.`;
+   as your very last action — the daemon ends this session and reclaims the worktree when the card reaches Done.`
+  : ` Do NOT merge — leave ${t.branch} for a human. Conclude with a one-line summary of what was done and run
+   ${status('inreview', 'awaiting human merge')}
+   as your very last action — a human reviews, merges, and moves the card to Done.`}`;
 }
 
 // Normalize free-form tags: trim, lowercase, drop blanks, dedupe.
@@ -297,7 +333,7 @@ export function createTask({ repo, title, description, model, implModel, reviewe
   }
 }
 
-export function updateTask(id, { column, state }) {
+export async function updateTask(id, { column, state }) {
   const t = tasks.get(id);
   if (!t) throw new Error('no such task');
   if (column !== undefined) {
@@ -306,11 +342,17 @@ export function updateTask(id, { column, state }) {
     t.column = column;
     if (column === 'done' && !wasDone) {
       t.doneAt = Date.now();
-      // Task concluded — remove the session outright (kills the pty, ending its
-      // cost) so it drops off the session list instead of lingering as 'exited'.
-      if (t.sessionId) reg.remove(t.sessionId);
+      // Done ⟹ merged & terminal: drop the session (stops cost) and reclaim the
+      // worktree + branch now. Wait for the pty to die first (Windows file locks).
+      if (t.sessionId) {
+        const wasLive = reg.isLive(t.sessionId);
+        reg.remove(t.sessionId);
+        for (let waited = 0; wasLive && reg.isLive(t.sessionId) && waited < 3000; waited += 200) await sleep(200);
+      }
+      await cleanupGitTask(t);
     } else if (column !== 'done' && wasDone) {
       delete t.doneAt;
+      ensureWorktree(t); // moved back out of Done → give it a working tree again
     }
   }
   if (state !== undefined) t.state = String(state).slice(0, 120);
@@ -335,20 +377,7 @@ export async function concludeTask(id, outcome) {
   // moment — wait for it to actually die before removing the worktree, or
   // `git worktree remove` fails and orphans the dir.
   for (let waited = 0; wasLive && reg.isLive(t.sessionId) && waited < 3000; waited += 200) await sleep(200);
-  if (t.kind !== 'plain') {
-    // Worktree goes unconditionally.
-    try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
-    catch (e) {
-      logger?.warn({ err: e.message }, 'worktree remove failed — retrying once');
-      await sleep(1000);
-      try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
-      catch (e2) { logger?.warn({ err: e2.message }, 'worktree remove retry failed (already gone?)'); }
-    }
-    // Branch: safe-delete only. `-d` deletes if merged into its base (auto-merge
-    // tasks) and refuses if unmerged (manual mode → user still owns the branch).
-    try { git(t.repo, 'branch', '-d', t.branch); }
-    catch { /* unmerged — keep the branch */ }
-  }
+  await cleanupGitTask(t);
   tasks.delete(id);
   history.push({ ...t, outcome, concludedAt: Date.now(), finalStats });
   persist();
