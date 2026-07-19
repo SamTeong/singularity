@@ -15,6 +15,7 @@ import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid } from './procs.mjs';
 import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memory.mjs';
+import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions } from './sessions.mjs';
 import { listSkills, readSkill } from './skills.mjs';
@@ -311,6 +312,28 @@ app.put('/memory/file', async (req, reply) => {
   const { path, content } = req.body || {};
   if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
   const r = writeMemoryFile(path, content);
+  if (!r.ok) reply.code(400);
+  return r;
+});
+
+// Rules: persisted list of rule dirs (default ~/.claude/rules), each a
+// recursive .md tree — browse + search + guarded read/write.
+app.get('/rules/roots', async () => ({ roots: getRulesRoots() }));
+app.put('/rules/roots', async (req) => setRulesRoots(req.body?.roots));
+app.post('/rules/files', async (req) => listRuleFiles(req.body?.roots));
+app.post('/rules/search', async (req) => {
+  const { roots, q } = req.body || {};
+  return searchRules(roots, q);
+});
+app.get('/rules/file', async (req, reply) => {
+  const r = readRuleFile(req.query.path);
+  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
+  return r;
+});
+app.put('/rules/file', async (req, reply) => {
+  const { path, content } = req.body || {};
+  if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
+  const r = writeRuleFile(path, content);
   if (!r.ok) reply.code(400);
   return r;
 });
