@@ -32,6 +32,7 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import SettingsIcon from '@mui/icons-material/Settings';
+import WebhookIcon from '@mui/icons-material/Webhook';
 import BookIcon from '@mui/icons-material/Book';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 import SchoolIcon from '@mui/icons-material/School';
@@ -57,6 +58,7 @@ import { useResizable, ResizeHandle } from './useResizable.jsx';
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
 const ConfigEditor = lazy(() => import('./ConfigEditor.jsx'));
+const HooksEditor = lazy(() => import('./HooksEditor.jsx'));
 const MemoryPanel = lazy(() => import('./MemoryPanel.jsx'));
 const SessionHistory = lazy(() => import('./SessionHistory.jsx'));
 const WikiPanel = lazy(() => import('./WikiPanel.jsx'));
@@ -184,7 +186,7 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [view, setView] = useState('tasks');
   const visited = useRef({}); // view -> ever selected, so lazy panels mount once and stay mounted
-  if (view === 'config' || view === 'memory' || view === 'wiki' || view === 'sessions') visited.current[view] = true;
+  if (view === 'config' || view === 'hooks' || view === 'memory' || view === 'wiki' || view === 'sessions') visited.current[view] = true;
   const { resolved, toggle: toggleColorMode } = useColorMode();
   const [toast, setToast] = useState(null);
   const [respawnCount, setRespawnCount] = useState(0); // >0 -> respawn-confirm dialog open, holds live-session count
@@ -497,6 +499,11 @@ export default function App() {
                 <ConfigEditor />
               </Box>
             )}
+            {visited.current.hooks && (
+              <Box sx={{ display: view === 'hooks' ? 'block' : 'none', height: '100%' }}>
+                <HooksEditor />
+              </Box>
+            )}
             {visited.current.memory && (
               <Box sx={{ display: view === 'memory' ? 'block' : 'none', height: '100%' }}>
                 <MemoryPanel />
@@ -634,6 +641,10 @@ export default function App() {
         <MenuItem onClick={() => { setView('config'); setMenuAnchor(null); }}>
           <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Config</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setView('hooks'); setMenuAnchor(null); }}>
+          <ListItemIcon><WebhookIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Hooks</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => { setView('skills'); setMenuAnchor(null); }}>
           <ListItemIcon><SchoolIcon fontSize="small" /></ListItemIcon>
