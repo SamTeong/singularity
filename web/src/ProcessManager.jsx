@@ -41,7 +41,7 @@ export default function ProcessManager({ onClose }) {
   };
 
   const confirmKill = (p) => {
-    if (p.kind !== 'stale' && !window.confirm(`Kill ${p.kind} claude.exe (PID ${p.pid})? This ends a live session.`)) return;
+    if (p.kind !== 'stale' && !window.confirm(`Kill ${p.kind} ${p.name} (PID ${p.pid})? This ends a live session.`)) return;
     kill(p.pid);
   };
 
@@ -52,7 +52,7 @@ export default function ProcessManager({ onClose }) {
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1, lineHeight: '24px' }}>
-          Claude processes
+          Processes
           <Typography component="span" variant="code" sx={{ color: 'text.secondary', fontSize: 12, lineHeight: 'inherit' }}>
             {procs ? `${procs.length} running` : 'scanning…'}
           </Typography>
@@ -65,6 +65,7 @@ export default function ProcessManager({ onClose }) {
           <TableHead>
             <TableRow>
               <TableCell>PID</TableCell>
+              <TableCell>Name</TableCell>
               <TableCell>Started</TableCell>
               <TableCell>Session</TableCell>
               <TableCell>Kind</TableCell>
@@ -75,6 +76,7 @@ export default function ProcessManager({ onClose }) {
             {(procs || []).map((p) => (
               <TableRow key={p.pid} hover>
                 <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.pid}</Typography></TableCell>
+                <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.name}</Typography></TableCell>
                 <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.started?.slice(11) || '—'}</Typography></TableCell>
                 <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.session ? p.session.slice(0, 8) : '—'}</Typography></TableCell>
                 <TableCell>
@@ -86,7 +88,7 @@ export default function ProcessManager({ onClose }) {
               </TableRow>
             ))}
             {procs && procs.length === 0 && (
-              <TableRow><TableCell colSpan={5}><Typography sx={{ color: 'text.secondary', py: 2, textAlign: 'center' }}>No claude.exe running.</Typography></TableCell></TableRow>
+              <TableRow><TableCell colSpan={6}><Typography sx={{ color: 'text.secondary', py: 2, textAlign: 'center' }}>No processes running.</Typography></TableCell></TableRow>
             )}
           </TableBody>
         </Table>

@@ -161,7 +161,7 @@ app.get('/fs/browse', async (req, reply) => {
   }
 });
 
-// Task manager: list claude.exe processes + kill a stale/orphaned one by PID.
+// Task manager: list claude.exe + this repo's dev-tooling processes, kill a stale/orphaned one by PID.
 app.get('/procs', async () => ({ procs: await scanClaude() }));
 
 // Model picker source: claude aliases (mirror /model) + ollama presets. Free-text
