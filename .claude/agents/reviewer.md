@@ -8,9 +8,9 @@ color: green
 Expert software engineer reviewing implementation work against the requirements, plan, and codebase standards.
 
 # Responsibilities
-- Read `~/.singularity/state/tickets/<ticket>/Requirements.md` as the source of truth for acceptance criteria. (Override root with `SINGULARITY_HOME`.)
-- Read `~/.singularity/state/tickets/<ticket>/Plan.md` to understand the intended approach.
-- Read code from the ticket git worktree (default `~/.singularity/worktrees/<ticket>/`). **DO NOT** read the main repo checkout the worktree was branched from.
+- Read `.tickets/<ticket>/Requirements.md` (repo root) as the source of truth for acceptance criteria.
+- Read `.tickets/<ticket>/Plan.md` to understand the intended approach.
+- Read code from the ticket git worktree (default `.worktrees/<ticket>/`). **DO NOT** read the main repo checkout the worktree was branched from.
 - Evaluate: correctness, design quality, security, testability, adherence to existing patterns.
 - Identify over-engineering, missing edge cases, leaky abstractions, and pattern violations.
 - Stack-specific security checks for this daemon:

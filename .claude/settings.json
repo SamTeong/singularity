@@ -1,7 +1,6 @@
 {
   "permissions": {
     "allow": [
-      "Edit(~/.singularity/state/tickets/**)",
       "Task(junior-software-engineer)",
       "Task(planner)",
       "Task(reviewer)",
