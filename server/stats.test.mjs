@@ -15,7 +15,7 @@ process.env.SINGULARITY_HOME = join(scratch, 'sing');
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
 const { encodeCwd, STATE_DIR } = await import('./agents.mjs');
-const { parseSession, statsFor } = await import('./stats.mjs');
+const { parseSession, statsFor, sessionStats } = await import('./stats.mjs');
 
 function writeTranscript(cwd, id, lines) {
   const dir = join(homedir(), '.claude', 'projects', encodeCwd(cwd));
@@ -59,6 +59,28 @@ test('parseSession: unknown model → estCostUsd stays null (tokens/turns still 
     assert.equal(result.turns, 1);
     assert.equal(result.tokens, 30);
     assert.equal(result.estCostUsd, null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sessionStats: per-bucket token breakdown + models, keyed by project dirname', () => {
+  const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-breakdown';
+  const id = randomUUID();
+  const dir = writeTranscript(cwd, id, [
+    { type: 'assistant', message: { model: 'claude-opus-4-8', usage: { input_tokens: 1000, output_tokens: 500, cache_read_input_tokens: 200, cache_creation_input_tokens: 100 } } },
+    { type: 'assistant', message: { model: 'claude-sonnet-4-5', usage: { input_tokens: 10, output_tokens: 5 } } },
+  ]);
+  try {
+    const s = sessionStats(encodeCwd(cwd), id); // route passes the encoded-cwd project dirname
+    assert.equal(s.inputTokens, 1010);
+    assert.equal(s.outputTokens, 505);
+    assert.equal(s.cacheReadTokens, 200);
+    assert.equal(s.cacheWriteTokens, 100);
+    assert.equal(s.tokens, 1815);
+    assert.deepEqual([...s.models].sort(), ['claude-opus-4-8', 'claude-sonnet-4-5']);
+    assert.equal(s.costSource, 'estimate');
+    assert.ok(s.costUsd > 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
