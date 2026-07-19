@@ -17,6 +17,7 @@ import DirPicker from './DirPicker.jsx';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ClearIcon from '@mui/icons-material/Clear';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
@@ -140,7 +141,15 @@ export default function ConfigEditor() {
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search config" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} /></Box>
+                <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
+                  <SearchInput placeholder="Search config" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} />
+                  {q && (
+                    <IconButton size="small" onClick={() => setQ('')} aria-label="Clear search"
+                      sx={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', '&:hover': { transform: 'translateY(-50%)' } }}>
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </Box>
                 <Tooltip title="Select root folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}><FolderOpenIcon /></IconButton>
                 </Tooltip>
