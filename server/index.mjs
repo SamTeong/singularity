@@ -42,9 +42,9 @@ function requireEnv() {
   const missing = [];
   if (!process.env.PORT || !Number(process.env.PORT)) missing.push('PORT (listen port, e.g. 4317)');
   if (!reg.CLAUDE_BIN) missing.push('CLAUDE_BIN (absolute path to claude exe)');
-  // OLLAMA_BIN is optional: absent → ollama-model spawns fail at buildSpawn with
-  // a clear error, but the daemon (and all claude-model features) boot fine.
-  if (!reg.SCOPE_ROOT || !existsSync(reg.SCOPE_ROOT)) missing.push('SING_SCOPE_ROOT (skill-scopes dir)');
+  // OLLAMA_BIN + SING_SCOPE_ROOT are optional: absent OLLAMA_BIN fails only
+  // ollama-model spawns (clear buildSpawn error); absent SING_SCOPE_ROOT just
+  // means no skill-scopes to pick/add-dir. The daemon boots fine without either.
   if (!process.env.SING_USAGE_SKILL || !existsSync(process.env.SING_USAGE_SKILL)) missing.push('SING_USAGE_SKILL (path to claude-code-usage-report stats.mjs)');
   if (!process.env.SING_USAGE_REPORTS) missing.push('SING_USAGE_REPORTS (spend-report output dir)');
   if (process.env.SING_TOKEN && !/^[A-Za-z0-9_-]+$/.test(process.env.SING_TOKEN)) missing.push('SING_TOKEN (set but contains characters outside [A-Za-z0-9_-])');
