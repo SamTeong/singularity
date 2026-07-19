@@ -1,7 +1,7 @@
 import React from 'react';
 import Box from '@mui/material/Box';
 import Link from '@mui/material/Link';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import MermaidBlock from './MermaidBlock.jsx';
 
@@ -20,7 +20,22 @@ const preRenderer = ({ children }) => {
   return <pre>{children}</pre>;
 };
 
-export default function MarkdownBody({ children }) {
+// [[target|label]] / [[target]] → markdown link with a wiki: scheme so the `a`
+// renderer can intercept the click. Target is URL-encoded so pipes/spaces don't
+// break link parsing.
+const WIKILINK_RE = /\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g;
+const expandWikilinks = (src) => src.replace(WIKILINK_RE, (_, target, label) =>
+  `[${label || target}](wiki:${encodeURIComponent(target.trim())})`);
+
+export default function MarkdownBody({ children, onWikiLink }) {
+  const src = onWikiLink ? expandWikilinks(children || '') : children;
+  const anchor = (p) => {
+    if (onWikiLink && p.href?.startsWith('wiki:')) {
+      const target = decodeURIComponent(p.href.slice(5));
+      return <Link {...p} href="#" onClick={(e) => { e.preventDefault(); onWikiLink(target); }} sx={{ cursor: 'pointer' }} />;
+    }
+    return <Link {...p} target="_blank" rel="noopener noreferrer" />;
+  };
   return (
     <Box sx={(t) => ({
       '& :is(h1,h2,h3,h4,h5,h6)': { fontWeight: 700, mt: 2.5, mb: 1, lineHeight: 1.25, '&:first-of-type': { mt: 0 } },
@@ -40,8 +55,9 @@ export default function MarkdownBody({ children }) {
       '& img': { maxWidth: '100%' },
     })}>
       <ReactMarkdown remarkPlugins={[remarkGfm]}
-        components={{ a: (p) => <Link {...p} target="_blank" rel="noopener noreferrer" />, pre: preRenderer }}>
-        {children}
+        urlTransform={(url) => (url.startsWith('wiki:') ? url : defaultUrlTransform(url))}
+        components={{ a: anchor, pre: preRenderer }}>
+        {src}
       </ReactMarkdown>
     </Box>
   );

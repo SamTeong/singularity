@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import IconButton from '@mui/material/IconButton';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import Collapse from '@mui/material/Collapse';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
@@ -14,6 +16,7 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import SchoolIcon from '@mui/icons-material/School';
 import { StatusPill, SearchInput, EmptyState } from '@zapac/mui-theme';
 import MarkdownBody from './MarkdownBody.jsx';
+import { useResizable, ResizeHandle } from './useResizable.jsx';
 
 // Skills viewer: tree of skill scopes → skills (left), rendered SKILL.md
 // (right). Read-only — no write. Skills live under SING_SCOPE_ROOT; the server
@@ -23,10 +26,12 @@ export default function SkillsPanel() {
   const [q, setQ] = useState('');
   const [loadErr, setLoadErr] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set());
+  const [collapsed, setCollapsed] = useState(false);
   const [sel, setSel] = useState(null); // { scope, skill }
   const [skill, setSkill] = useState(null); // { name, description, triggers, body }
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
+  const railW = useResizable('sing-skills-w', 300);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,10 +78,17 @@ export default function SkillsPanel() {
 
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
-      {/* left: scope → skill tree */}
-      <Stack sx={(t) => ({ width: 300, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0 })}>
+      {/* left: scope → skill tree (collapsible) */}
+      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
+        {collapsed ? (
+          <IconButton size="small" onClick={() => setCollapsed(false)} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>
+        ) : (
+          <>
         <Box sx={{ p: 1.5, pb: 0.5 }}>
-          <SearchInput placeholder="Search skills…" value={q} onChange={setQ} shortcut="" />
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+            <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search skills…" value={q} onChange={setQ} shortcut="" /></Box>
+            <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
+          </Stack>
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
             {loadErr ? `${loadErr}` : `${view.length} scope${view.length === 1 ? '' : 's'} · ${skillCount} skill${skillCount === 1 ? '' : 's'}`}
           </Typography>
@@ -116,7 +128,10 @@ export default function SkillsPanel() {
           {view.length === 0 && !loadErr && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{query ? 'No matches.' : 'No scopes.'}</Typography>}
           {loadErr && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{loadErr}.</Typography>}
         </List>
+          </>
+        )}
       </Stack>
+      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
 
       {/* right: rendered SKILL.md */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>

@@ -19,6 +19,7 @@ import FormControlLabel from '@mui/material/FormControlLabel';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import AddIcon from '@mui/icons-material/Add';
 import ModelSelect from './ModelSelect.jsx';
+import { tildify, untildify } from './paths.js';
 import cronstrue from 'cronstrue';
 import { CronExpressionParser } from 'cron-parser';
 
@@ -72,7 +73,7 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          name: name.trim(), cronExpr: cronExpr.trim(), prompt: prompt.trim(), cwd: cwd.trim(),
+          name: name.trim(), cronExpr: cronExpr.trim(), prompt: prompt.trim(), cwd: untildify(cwd.trim()),
           model: model.trim(), scopes, permissionMode, enabled,
         }),
       });
@@ -104,7 +105,7 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
           </Stack>
           <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
             <Autocomplete
-              freeSolo fullWidth options={recent} inputValue={cwd}
+              freeSolo fullWidth options={(recent || []).map(tildify)} inputValue={cwd}
               onInputChange={(_, v) => setCwd(v)}
               renderInput={(params) => <TextField {...params} size="small" label="agent working dir" spellCheck={false} />}
             />

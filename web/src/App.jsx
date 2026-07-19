@@ -23,7 +23,7 @@ import AddIcon from '@mui/icons-material/Add';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CallSplitIcon from '@mui/icons-material/CallSplit';
 import CloseIcon from '@mui/icons-material/Close';
-import ReplayIcon from '@mui/icons-material/Replay';
+import LinkIcon from '@mui/icons-material/Link';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import SmartToyIcon from '@mui/icons-material/SmartToy';
@@ -45,12 +45,14 @@ import { useTheme } from '@mui/material/styles';
 import { AmbientBackground, useColorMode, StatusPill, EmptyState } from '@zapac/mui-theme';
 import Terminal from './Terminal.jsx';
 import DirPicker from './DirPicker.jsx';
+import { setHome, tildify } from './paths.js';
 import ProcessManager from './ProcessManager.jsx';
 import CreateAgentDialog from './CreateAgentDialog.jsx';
 import CreateTaskDialog from './CreateTaskDialog.jsx';
 import CreateCronDialog from './CreateCronDialog.jsx';
 import { ProviderRow } from './UsagePill.jsx';
 import { PROVIDERS, usageSummary } from './usageUtil.js';
+import { useResizable, ResizeHandle } from './useResizable.jsx';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
@@ -176,6 +178,8 @@ export default function App() {
     return v >= 140 && v <= 2000 ? v : 300;
   });
   const [dockMin, setDockMin] = useState(() => localStorage.getItem('sing-dock-min') === '1');
+  // Session-list panel width (px, drag-resizable), persisted.
+  const listW = useResizable('sing-list-w', 260, { min: 160, max: 640 });
   const mainRef = useRef(null);
   const [collapsed, setCollapsed] = useState(false);
   const [view, setView] = useState('tasks');
@@ -244,6 +248,9 @@ export default function App() {
     connect();
     return () => { unmounted = true; clearTimeout(timer); ws.close(); };
   }, []);
+
+  // Home dir, for tildify() to collapse full paths to `~` on display.
+  useEffect(() => { fetch('/env').then((r) => r.json()).then((d) => setHome(d.home)).catch(() => {}); }, []);
 
   const sendMsg = useCallback((msg) => {
     const ws = wsRef.current;
@@ -540,7 +547,7 @@ export default function App() {
           {/* Body kept mounted while minimized (display:none) so terminals keep
               their live xterm + scrollback. */}
           <Box sx={{ display: dockMin ? 'none' : 'flex', flex: 1, minHeight: 0 }}>
-            <List sx={(t) => ({ width: 260, flexShrink: 0, overflow: 'auto', px: 1, py: 0.5, borderRight: `1px solid ${t.vars.palette.glass.stroke}` })}>
+            <List sx={(t) => ({ width: listW.width, flexShrink: 0, overflow: 'auto', px: 1, py: 0.5, borderRight: `1px solid ${t.vars.palette.glass.stroke}` })}>
               {agents.map((a) => (
                 <ListItemButton
                   key={a.id}
@@ -570,7 +577,7 @@ export default function App() {
                       )}
                       {a.status === 'detached' && (
                         <Tooltip title="Reattach (claude --resume)" disableInteractive>
-                          <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'reattach', id: a.id }); }}><ReplayIcon fontSize="small" /></IconButton>
+                          <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'reattach', id: a.id }); }}><LinkIcon fontSize="small" /></IconButton>
                         </Tooltip>
                       )}
                       <Tooltip title={a.status === 'running' || a.status === 'starting' ? 'Kill' : 'Remove'} disableInteractive>
@@ -579,7 +586,7 @@ export default function App() {
                     </Stack>
                   </Stack>
                   {/* Row 2: cwd + status/tokens, full width. */}
-                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{a.cwd}</Typography>
+                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(a.cwd)}</Typography>
                   <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                     <StatusPill status={KIND[a.status] ?? 'review'}>{a.status}</StatusPill>
                     {stats[a.id]?.turns > 0 && (
@@ -591,6 +598,9 @@ export default function App() {
                 </ListItemButton>
               ))}
             </List>
+
+            {/* Drag handle — resize the session-list width. */}
+            <ResizeHandle onMouseDown={listW.startDrag} />
 
             {/* Selected terminal. All non-detached terminals stay mounted
                 (display:none when hidden) so scrollback + WS attach survive. */}
@@ -724,7 +734,7 @@ export default function App() {
         onBrowse={() => setPicking(true)}
       />
 
-      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
+      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} />
     </Box>
   );
 }

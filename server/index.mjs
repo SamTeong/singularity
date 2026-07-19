@@ -6,16 +6,16 @@ import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
-import { parse as parsePath, normalize as normalizePath } from 'node:path';
+import { parse as parsePath } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
 import './migrate-state.mjs';
 import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid } from './procs.mjs';
-import { readConfig, writeConfig, claudeTheme } from './config.mjs';
+import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memory.mjs';
-import { listFiles as wikiFiles, searchWiki, readWikiFile } from './wiki.mjs';
+import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions } from './sessions.mjs';
 import { listSkills, readSkill } from './skills.mjs';
 import { statsFor } from './stats.mjs';
@@ -23,7 +23,7 @@ import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
-import { initBackground, snapshotBackground, createDef, updateDef, deleteDef, runBackgroundNow, listReports, getReport } from './background.mjs';
+import { initBackground, snapshotBackground, createDef, updateDef, deleteDef, reorderDefs, runBackgroundNow, listReports, getReport } from './background.mjs';
 import { CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -146,7 +146,6 @@ app.post('/spend/refresh', async (req, reply) => {
 app.get('/fs/browse', async (req, reply) => {
   let p = req.query.path;
   if (!p) return reply.code(400).send({ error: 'bad path' });
-  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = normalizePath(homedir() + p.slice(1));
   if (!existsSync(p)) return reply.code(400).send({ error: 'bad path' });
   try {
     const dirs = readdirSync(p, { withFileTypes: true })
@@ -166,6 +165,10 @@ app.get('/procs', async () => ({ procs: await scanClaude() }));
 // Model picker source: claude aliases (mirror /model) + ollama presets. Free-text
 // in the UI — these are suggestions; any typed value is passed through verbatim.
 app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS }));
+
+// Home dir, for the client to collapse full paths to `~` on display (pure
+// presentation — the backend itself always deals in full paths).
+app.get('/env', async () => ({ home: homedir() }));
 
 // Skill-scope picker source: directories under SING_SCOPE_ROOT (excludes 'common').
 app.get('/skill-scopes', async () => {
@@ -204,6 +207,19 @@ app.get('/config', async (req, reply) => {
   return readConfig(cwd);
 });
 app.get('/claude/theme', async () => ({ theme: claudeTheme() }));
+// Recursively find dirs under `root` that hold a .claude/settings*.json.
+app.get('/config/scan', async (req, reply) => {
+  const root = req.query.root;
+  if (!root || !existsSync(root)) return reply.code(400).send({ error: 'bad root' });
+  return findConfigRoots(root);
+});
+// FS-persisted config root list (survives browser cache clear).
+app.get('/config/roots', async () => ({ roots: getConfigRoots() }));
+app.put('/config/roots', async (req) => setConfigRoots(req.body?.roots));
+app.post('/config/search', async (req) => {
+  const { roots, q } = req.body || {};
+  return { results: searchConfig(roots, q) };
+});
 app.put('/config/:scope', async (req, reply) => {
   const { cwd, content } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
@@ -268,6 +284,10 @@ app.delete('/background/defs/:id', async (req, reply) => {
   try { deleteDef(req.params.id); return { ok: true }; }
   catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
 });
+app.patch('/background/reorder', async (req, reply) => {
+  try { reorderDefs((req.body || {}).ids); return { ok: true }; }
+  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+});
 app.post('/background/run', async (req, reply) => {
   try { const { taskId } = await runBackgroundNow({ force: req.query.force === '1' }); return { ok: true, taskId }; }
   catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
@@ -297,8 +317,12 @@ app.put('/memory/file', async (req, reply) => {
 
 // Wiki: recursive .md browse + search + read-only file view under a client-
 // selected root (default ~/wiki). No write — wikis are LLM-authored.
+// FS-persisted wiki root choice (survives browser cache clear).
+app.get('/wiki/root', async () => ({ root: getWikiRoot() }));
+app.put('/wiki/root', async (req) => setWikiRoot(req.body?.root));
 app.get('/wiki/files', async (req) => wikiFiles(req.query.root));
 app.get('/wiki/search', async (req) => searchWiki(req.query.q, req.query.root));
+app.get('/wiki/graph', async (req) => wikiGraph(req.query.root, req.query.wiki));
 app.get('/wiki/file', async (req, reply) => {
   const r = readWikiFile(req.query.path, req.query.root);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);

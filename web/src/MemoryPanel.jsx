@@ -15,6 +15,8 @@ import { markdown } from '@codemirror/lang-markdown';
 import { EditorView } from '@codemirror/view';
 import { StatusPill, SearchInput, useColorMode, EmptyState } from '@zapac/mui-theme';
 import { cmTheme } from './cmTheme.js';
+import { tildify, untildify } from './paths.js';
+import { useResizable, ResizeHandle } from './useResizable.jsx';
 
 export default function MemoryPanel() {
   const { mode } = useColorMode();
@@ -29,6 +31,7 @@ export default function MemoryPanel() {
   const [loadingFile, setLoadingFile] = useState(false);
   const [msg, setMsg] = useState(null);
   const [err, setErr] = useState(null);
+  const railW = useResizable('sing-memory-w', 340);
 
   useEffect(() => { fetch('/memory/files').then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setErr('failed to load memory files')); }, []);
 
@@ -46,7 +49,7 @@ export default function MemoryPanel() {
     if (item.path === sel?.path) return;
     if (dirty && !window.confirm('Discard unsaved changes?')) return;
     setSel(item); setMsg(null); setLoadingFile(true);
-    fetch(`/memory/file?path=${encodeURIComponent(item.path)}`).then((r) => r.json()).then((d) => {
+    fetch(`/memory/file?path=${encodeURIComponent(untildify(item.path))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : ''); setDirty(false);
       if (!d.ok) setMsg({ sev: 'error', text: d.error });
     }).finally(() => setLoadingFile(false));
@@ -55,7 +58,7 @@ export default function MemoryPanel() {
   const save = async () => {
     const r = await fetch('/memory/file', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path: sel.path, content }),
+      body: JSON.stringify({ path: untildify(sel.path), content }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     setMsg(r.ok ? { sev: 'success', text: 'Saved' } : { sev: 'error', text: r.error });
     if (r.ok) setDirty(false);
@@ -66,7 +69,7 @@ export default function MemoryPanel() {
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* left: search + list (collapsible) */}
-      <Stack sx={(t) => ({ width: collapsed ? 40 : 340, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
+      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
         {collapsed ? (
           <IconButton size="small" onClick={() => setCollapsed(false)} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>
         ) : (
@@ -96,6 +99,7 @@ export default function MemoryPanel() {
           </>
         )}
       </Stack>
+      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
 
       {/* right: editor */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
@@ -109,7 +113,7 @@ export default function MemoryPanel() {
           </Box>
         ) : (
           <>
-            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{sel.path}</Typography>
+            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel.path)}</Typography>
             <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
               <CodeMirror value={content} theme={mode === 'dark' ? 'dark' : 'light'} height="100%"
                 extensions={[EditorView.lineWrapping, markdown(), cmTheme]} onChange={(v) => { setContent(v); setDirty(true); }} />
