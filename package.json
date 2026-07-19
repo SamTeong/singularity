@@ -12,6 +12,7 @@
     "test": "node --test \"server/*.test.mjs\""
   },
   "dependencies": {
+    "@codemirror/lang-javascript": "^6.2.5",
     "@codemirror/lang-json": "^6.0.2",
     "@codemirror/lang-markdown": "^6.5.0",
     "@emotion/react": "^11.14.0",

@@ -14,6 +14,7 @@ import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid } from './procs.mjs';
 import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
+import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memory.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions } from './sessions.mjs';
@@ -224,6 +225,30 @@ app.put('/config/:scope', async (req, reply) => {
   const { cwd, content } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
   const r = writeConfig(cwd, req.params.scope, content);
+  if (!r.ok) reply.code(400);
+  return r;
+});
+
+// Hooks editor: list + read + write hook script files under a root's .claude/hooks/.
+app.get('/hooks/roots', async () => ({ roots: getHookRoots() }));
+app.put('/hooks/roots', async (req) => setHookRoots(req.body?.roots));
+app.post('/hooks/list', async (req) => {
+  const roots = req.body?.roots || [];
+  return { groups: roots.map((cwd) => ({ cwd, files: listHooks(cwd) })) };
+});
+app.post('/hooks/search', async (req) => {
+  const { roots, q } = req.body || {};
+  return { results: searchHooks(roots, q) };
+});
+app.get('/hooks/file', async (req, reply) => {
+  const r = readHook(req.query.path);
+  if (r.error) return reply.code(400).send(r);
+  return r;
+});
+app.put('/hooks/file', async (req, reply) => {
+  const { path, content } = req.body || {};
+  if (!path || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
+  const r = writeHook(path, content);
   if (!r.ok) reply.code(400);
   return r;
 });
