@@ -12,8 +12,10 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
 import Tooltip from '@mui/material/Tooltip';
+import Collapse from '@mui/material/Collapse';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChatBubbleOutlinedIcon from '@mui/icons-material/ChatBubbleOutlined';
 import SubjectIcon from '@mui/icons-material/Subject';
 import SearchIcon from '@mui/icons-material/Search';
@@ -40,6 +42,24 @@ const fmtTok = (n) => {
 const fmtUsd = (n) => (n == null ? null : n > 0 && n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`);
 const shortModel = (id) => id.match(/opus|sonnet|haiku|fable|mythos/i)?.[0].toLowerCase() || id;
 
+// Small pulsing status dot for running sessions/subagents.
+function PulseDot({ sx }) {
+  return (
+    <Box
+      sx={{
+        width: 8, height: 8, borderRadius: '50%', bgcolor: 'success.main', flexShrink: 0,
+        animation: 'sing-pulse-dot 1.4s ease-in-out infinite',
+        '@keyframes sing-pulse-dot': {
+          '0%': { opacity: 1, transform: 'scale(1)' },
+          '50%': { opacity: 0.4, transform: 'scale(0.75)' },
+          '100%': { opacity: 1, transform: 'scale(1)' },
+        },
+        ...sx,
+      }}
+    />
+  );
+}
+
 export default function SessionHistory({ sendMsg, registerChat }) {
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
@@ -60,11 +80,17 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   const [stats, setStats] = useState({}); // id -> { costUsd, costSource, inputTokens, ... }
   const [loadErr, setLoadErr] = useState(null);
   const [sessErr, setSessErr] = useState(null);
+  const [expanded, setExpanded] = useState(new Set()); // "project:id" -> subagent tree expanded
   const railW = useResizable('sing-sesshist-w', 340);
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
 
-  useEffect(() => { fetch('/sessions').then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load sessions.')); }, []);
+  useEffect(() => {
+    const load = () => fetch('/sessions').then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load sessions.'));
+    load();
+    const iv = setInterval(load, 5000);
+    return () => clearInterval(iv);
+  }, []);
 
   // Cross-session search (scope 'all'): results replace the left list, like
   // Memory. Scope 'one' filters the open transcript in the right view instead.
@@ -197,22 +223,65 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                   </ListItemButton>
                 ))
               ) : (
-                pageItems.map((s) => (
-                  <ListItemButton
-                    key={`${s.project}:${s.id}`}
-                    selected={sel?.project === s.project && sel?.id === s.id}
-                    onClick={() => open(s)}
-                    sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}
-                  >
-                    <Typography variant="subtitle2" noWrap>{s.title || `${s.id.slice(0, 8)}…`}</Typography>
-                    <Stack direction="row" spacing={1} sx={{ mt: 0.25, alignItems: 'center' }}>
-                      <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(s.cwd) || s.project}</Typography>
-                    </Stack>
-                    <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>
-                      {relTime(s.mtime)}{stats[s.id]?.costUsd != null ? ` · ${fmtUsd(stats[s.id].costUsd)}` : ''}
-                    </Typography>
-                  </ListItemButton>
-                ))
+                pageItems.map((s) => {
+                  const skey = `${s.project}:${s.id}`;
+                  const hasSubs = !!s.subagents?.length;
+                  const isExpanded = expanded.has(skey);
+                  const toggleExpanded = (e) => {
+                    e.stopPropagation();
+                    setExpanded((prev) => {
+                      const next = new Set(prev);
+                      if (next.has(skey)) next.delete(skey); else next.add(skey);
+                      return next;
+                    });
+                  };
+                  return (
+                    <React.Fragment key={skey}>
+                      <ListItemButton
+                        selected={sel?.project === s.project && sel?.id === s.id}
+                        onClick={() => open(s)}
+                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}
+                      >
+                        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                          {hasSubs && (
+                            <IconButton size="small" onClick={toggleExpanded} sx={{ p: 0.25, ml: -0.5 }}>
+                              {isExpanded ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
+                            </IconButton>
+                          )}
+                          <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{s.title || `${s.id.slice(0, 8)}…`}</Typography>
+                          {s.running && <PulseDot />}
+                          {hasSubs && !isExpanded && (
+                            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>⚡{s.subagents.length}</Typography>
+                          )}
+                        </Stack>
+                        <Stack direction="row" spacing={1} sx={{ mt: 0.25, alignItems: 'center' }}>
+                          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(s.cwd) || s.project}</Typography>
+                        </Stack>
+                        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>
+                          {relTime(s.mtime)}{stats[s.id]?.costUsd != null ? ` · ${fmtUsd(stats[s.id].costUsd)}` : ''}
+                        </Typography>
+                      </ListItemButton>
+                      {hasSubs && (
+                        <Collapse in={isExpanded}>
+                          {s.subagents.map((sub) => (
+                            <ListItemButton
+                              key={sub.id}
+                              selected={sel?.project === s.project && sel?.id === sub.id}
+                              onClick={() => open({ project: s.project, id: sub.id, title: sub.title || sub.agentId, cwd: s.cwd })}
+                              sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25, pl: 3 }}
+                            >
+                              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                                <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0, fontSize: 12 }}>{sub.title || sub.agentId}</Typography>
+                                {sub.running && <PulseDot />}
+                              </Stack>
+                              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>{relTime(sub.mtime)}</Typography>
+                            </ListItemButton>
+                          ))}
+                        </Collapse>
+                      )}
+                    </React.Fragment>
+                  );
+                })
               )}
               {!leftResults && sessions.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{sessErr || 'No sessions.'}</Typography>}
               {leftResults && leftResults.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}

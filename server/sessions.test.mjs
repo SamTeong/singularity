@@ -6,10 +6,10 @@
 // Run: npm test  (node --test server/)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { readSession, sessionText, searchSessions } from './sessions.mjs';
+import { readSession, sessionText, searchSessions, listSessions } from './sessions.mjs';
 
 const PROJECTS = join(homedir(), '.claude', 'projects');
 
@@ -81,4 +81,67 @@ test('readSession: pathFor rejects project/id containing ".." or separators', as
   assert.deepEqual(await readSession('proj', '../escape'), { ok: false, error: 'not found' });
   assert.deepEqual(await readSession('proj', 'a\\b'), { ok: false, error: 'not found' });
   assert.deepEqual(await readSession('', 'foo'), { ok: false, error: 'not found' });
+});
+
+test('listSessions: discovers subagent transcripts and attaches them to the parent row', async () => {
+  const project = 'sessions-test-subagents';
+  const parentId = 'parent-1';
+  const dir = writeSession(project, parentId, [
+    JSON.stringify({ type: 'user', message: { content: 'hi' }, timestamp: '2026-07-15T00:00:00Z' }),
+  ]);
+  const subDir = join(dir, parentId, 'subagents');
+  mkdirSync(subDir, { recursive: true });
+  writeFileSync(join(subDir, 'agent-x.jsonl'), JSON.stringify({ type: 'user', message: { content: 'sub' } }) + '\n');
+  writeFileSync(join(subDir, 'agent-x.meta.json'), JSON.stringify({ agentType: 'reviewer', description: 'checks stuff' }));
+  try {
+    const sessions = await listSessions();
+    const parent = sessions.find((s) => s.project === project && s.id === parentId);
+    assert.ok(parent, 'parent row found');
+    assert.equal(parent.subagents.length, 1);
+    assert.equal(parent.subagents[0].id, `${parentId}/subagents/agent-x`);
+    assert.equal(parent.subagents[0].agentId, 'agent-x');
+    assert.equal(parent.subagents[0].title, 'reviewer: checks stuff');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readSession: nested subagent id opens via the pathFor relaxation; escapes and plain slashes stay rejected', async () => {
+  const project = 'sessions-test-nested-path';
+  const parentId = 'parent-2';
+  const dir = writeSession(project, parentId, [
+    JSON.stringify({ type: 'user', message: { content: 'hi' }, timestamp: '2026-07-15T00:00:00Z' }),
+  ]);
+  const subDir = join(dir, parentId, 'subagents');
+  mkdirSync(subDir, { recursive: true });
+  writeFileSync(join(subDir, 'agent-x.jsonl'), JSON.stringify({ type: 'user', message: { content: 'sub reply' }, timestamp: '2026-07-15T00:00:01Z' }) + '\n');
+  try {
+    const nested = await readSession(project, `${parentId}/subagents/agent-x`);
+    assert.equal(nested.ok, true);
+    assert.equal(nested.messages[0].text, 'sub reply');
+
+    assert.deepEqual(await readSession(project, '../evil/subagents/agent-x'), { ok: false, error: 'not found' });
+    assert.deepEqual(await readSession(project, 'a/b'), { ok: false, error: 'not found' });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('listSessions: running merges isLive with the mtime recency heuristic', async () => {
+  const project = 'sessions-test-running';
+  const liveId = 'parent-live';
+  const staleId = 'parent-stale';
+  const dir = writeSession(project, liveId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
+  writeSession(project, staleId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
+  const old = new Date(Date.now() - 60000);
+  utimesSync(join(dir, `${staleId}.jsonl`), old, old);
+  try {
+    const sessions = await listSessions({ isLive: (id) => id === liveId });
+    const live = sessions.find((s) => s.project === project && s.id === liveId);
+    const stale = sessions.find((s) => s.project === project && s.id === staleId);
+    assert.equal(live.running, true);
+    assert.equal(stale.running, false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

@@ -392,7 +392,7 @@ app.get('/skill', async (req, reply) => {
 
 // Session history: list transcripts (reverse-chrono), read one, search across
 // all or one. Chat goes over the WS (streaming) — see pty-ws.mjs.
-app.get('/sessions', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000 }) }));
+app.get('/sessions', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive }) }));
 app.get('/session', async (req, reply) => {
   const { project, id } = req.query || {};
   if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });

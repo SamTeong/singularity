@@ -13,6 +13,7 @@ const PEEK_BYTES = 65536;     // list only peeks the head — full MB reads are 
 const RESULT_CAP = 200;
 const TOOL_TRUNC = 300;       // tool_use inputs / tool_result bodies in the view payload
 const TEXT_CAP = 80000;       // sessionText head+tail cap (chars)
+const RUNNING_MS = 30000;     // external-session recency heuristic: mtime within this window counts as running
 
 // Parse JSONL text (head chunk or full file) into event objects, skipping
 // unparseable lines. Pure, no FS — shared by peek + full read.
@@ -58,7 +59,7 @@ function peekMeta(events) {
 // (mtime,size)-keyed cache holds the peeked meta so repeated list calls don't
 // re-read heads of unchanged files.
 const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title }
-export async function listSessions({ cap = 5000 } = {}) {
+export async function listSessions({ cap = 5000, isLive = () => false, now = Date.now() } = {}) {
   if (!existsSync(PROJECTS)) return [];
   const out = [];
   for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {
@@ -80,18 +81,73 @@ export async function listSessions({ cap = 5000 } = {}) {
         ({ cwd, title } = peekMeta(parseEvents(pk.head)));
         metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, title });
       }
-      out.push({ id: f.slice(0, -6), project: proj.name, cwd, title, mtime: st.mtimeMs, size: st.size });
+      const id = f.slice(0, -6);
+      const row = { id, project: proj.name, cwd, title, mtime: st.mtimeMs, size: st.size };
+      row.running = isLive(id) || (now - st.mtimeMs) < RUNNING_MS;
+      // Subagents are separate transcripts under <parent-id>/subagents/agent-*.jsonl,
+      // full-session shape. Their tool_result bodies are inline in the jsonl (the
+      // sibling tool-results/ dir is not referenced), so readSession renders them
+      // unchanged — no ref resolution needed.
+      const subagents = await listSubagents(dir, id, isLive, now);
+      if (subagents.length) row.subagents = subagents;
+      out.push(row);
     }
   }
   out.sort((a, b) => b.mtime - a.mtime);
   return out.slice(0, cap);
 }
 
+// Scan <parentDir>/<parentId>/subagents/agent-*.jsonl and reduce each to a row.
+// Reuses peek/peekMeta/metaCache for title fallback — same as the parent loop.
+async function listSubagents(parentDir, parentId, isLive, now) {
+  const subDir = join(parentDir, parentId, 'subagents');
+  let files;
+  try { files = await readdir(subDir); } catch { return []; }
+  const out = [];
+  for (const f of files) {
+    if (!f.endsWith('.jsonl')) continue;
+    const p = join(subDir, f);
+    const pk = await peek(p);
+    if (!pk) continue;
+    const { st } = pk;
+    const agentId = f.slice(0, -6);
+    let title = null;
+    try {
+      const meta = JSON.parse(await readFile(join(subDir, `${agentId}.meta.json`), 'utf8'));
+      if (meta.agentType) title = meta.description ? `${meta.agentType}: ${meta.description}` : meta.agentType;
+    } catch {}
+    if (!title) {
+      const hit = metaCache.get(p);
+      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+        title = hit.title;
+      } else {
+        const peeked = peekMeta(parseEvents(pk.head));
+        title = peeked.title;
+        metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd: peeked.cwd, title: peeked.title });
+      }
+    }
+    out.push({
+      id: `${parentId}/subagents/${agentId}`,
+      agentId,
+      title,
+      mtime: st.mtimeMs,
+      size: st.size,
+      running: isLive(agentId) || (now - st.mtimeMs) < RUNNING_MS,
+    });
+  }
+  return out;
+}
+
 // Path guard: project/id come from the client query — reject separators (no
 // nested traversal) and confirm the joined path still resolves under PROJECTS
-// (mirrors isWikiPath/isMemoryPath in wiki.mjs/memory.mjs).
+// (mirrors isWikiPath/isMemoryPath in wiki.mjs/memory.mjs). The one relaxation:
+// a subagent open-ref shaped "<parent-id>/subagents/agent-x" is allowed through
+// as a nested relative path; anything else with a separator in id stays banned.
+const SUBAGENT_ID = /^[^\\/]+\/subagents\/agent-[^\\/]+$/;
 function pathFor(project, id) {
-  if (!project || !id || /[\\/]/.test(project) || /[\\/]/.test(id)) return null;
+  if (!project || !id || /[\\/]/.test(project)) return null;
+  const nested = SUBAGENT_ID.test(id);
+  if (!nested && /[\\/]/.test(id)) return null;
   const p = join(PROJECTS, project, `${id}.jsonl`);
   const root = resolve(PROJECTS);
   const abs = resolve(p);
