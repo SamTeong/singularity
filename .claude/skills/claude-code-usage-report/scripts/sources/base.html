@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang='en'><head><meta charset='utf-8'>
+<meta name='viewport' content='width=device-width, initial-scale=1'>
+<title>Claude Code Usage Report</title>
+<script>(function(){try{document.documentElement.dataset.theme=localStorage.getItem('agents-report-theme')||'light';}catch(e){document.documentElement.dataset.theme='light';}})();</script>
+<style>
+{{STYLE}}
+</style></head><body>
+<canvas id="glow"></canvas>
+<div class="topbar" id="topbar"><div class="wrap topbar-in"><div class="brand"><svg class="mk" viewBox="0 0 24 24" fill="none"><path d="M12 2 3 7v10l9 5 9-5V7l-9-5Z" stroke="var(--clay)" stroke-width="1.6"/><path d="M12 7 7.5 9.5v5L12 17l4.5-2.5v-5L12 7Z" fill="var(--clay)" opacity=".9"/></svg><span>claude-code</span>&nbsp;<b>usage report</b></div><div class="spacer"></div><span class="pill hide-sm"><span class="dot"></span>local only</span><button class="iconbtn" id="theme-tgl" onclick="__tgl()" aria-label="Toggle theme" title="Toggle theme"><svg id="thI" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/></svg></button></div></div>
+{{HERO}}
+<section class='rsec' id='rsec-digest' data-sec='sec-token-burn-digest'>{{DIGEST}}</section>
+<section class='rsec' id='rsec-breakdown' data-sec='sec-breakdown'>{{BREAKDOWN}}</section>
+<section class='rsec' id='rsec-token-economics' data-sec='sec-token-economics'>{{TOKEN_ECONOMICS}}</section>
+<section class='rsec' id='rsec-efficiency' data-sec='sec-efficiency'>{{EFFICIENCY}}</section>
+<section class='rsec' id='rsec-rate-limits' data-sec='sec-rate-limit-utilization-5h-7d'>{{RATE_LIMITS}}</section>
+<section class='rsec' id='rsec-when-you-work' data-sec='sec-when-you-work'>{{WHEN_YOU_WORK}}</section>
+<section class='rsec' id='rsec-sessions' data-sec='sec-sessions'>{{SESSIONS}}</section>
+<section class='rsec' id='rsec-usage-patterns' data-sec='sec-usage-patterns'>{{USAGE_PATTERNS}}</section>
+<section class='rsec' id='rsec-by-project' data-sec='sec-by-project'>{{PROJECTS}}</section>
+<section class='rsec' id='rsec-models' data-sec='sec-models'>{{MODELS}}</section>
+<section class='rsec' id='rsec-roadmap' data-sec='sec-insights-roadmap-what-could-come-next'>{{ROADMAP}}</section>
+</div><!-- #report-sections -->
+{{FOOTER}}
+</div>
+{{SIDEBAR}}
+{{SCRIPTS}}
+{{MOTION}}
+</body></html>

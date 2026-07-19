@@ -1,0 +1,128 @@
+<script>
+/* Self-contained motion: no external libraries. Reveal-on-scroll uses
+   IntersectionObserver; the ambient glow is a 2D-canvas render of drifting
+   radial gradients in the report's palette. Everything no-ops under
+   prefers-reduced-motion and pauses while the tab is hidden. */
+(function(){
+  var REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var css = function(v){return getComputedStyle(document.documentElement).getPropertyValue(v).trim();};
+
+  /* sticky topbar border-on-scroll */
+  var topbar = document.getElementById('topbar');
+  addEventListener('scroll', function(){ if(topbar) topbar.classList.toggle('stuck', scrollY > 10); });
+
+  /* card reveal-on-scroll */
+  function initReveal(){
+    var els = document.querySelectorAll('.rv');
+    if(REDUCED || !('IntersectionObserver' in window)){
+      els.forEach(function(e){ e.classList.add('in'); });
+      return;
+    }
+    var io = new IntersectionObserver(function(ents){
+      ents.forEach(function(en){ if(en.isIntersecting){ en.target.classList.add('in'); io.unobserve(en.target); } });
+    }, {rootMargin:'0px 0px -10% 0px'});
+    els.forEach(function(e){ io.observe(e); });
+  }
+
+  /* ambient glow: drifting radial gradients, matched to the zapac purple→cyan identity */
+  function toRGBA(c, a){
+    c = (c || '').trim();
+    if(c[0] === '#'){
+      var h = c.slice(1);
+      if(h.length === 3) h = h[0]+h[0]+h[1]+h[1]+h[2]+h[2];
+      var n = parseInt(h, 16);
+      return 'rgba('+((n>>16)&255)+','+((n>>8)&255)+','+(n&255)+','+a+')';
+    }
+    var m = c.match(/\d+\.?\d*/g) || [0,0,0];
+    return 'rgba('+(m[0]||0)+','+(m[1]||0)+','+(m[2]||0)+','+a+')';
+  }
+  function initGlow(){
+    var canvas = document.getElementById('glow');
+    if(REDUCED || !canvas) return;
+    var ctx = canvas.getContext('2d'); if(!ctx) return;
+    var dpr = Math.min(devicePixelRatio || 1, 1.5), W, H, raf;
+    var col = {};
+    function readCol(){ col.paper = css('--paper'); col.c1 = css('--clay'); col.c2 = css('--azure'); col.c3 = css('--cyan'); }
+    function size(){ W = innerWidth; H = innerHeight; canvas.width = W*dpr; canvas.height = H*dpr; canvas.style.width = W+'px'; canvas.style.height = H+'px'; ctx.setTransform(dpr,0,0,dpr,0,0); }
+    readCol(); size(); addEventListener('resize', size);
+    /* [relX, relY, radiusFactor, colorKey, phase, speed] */
+    var blobs = [[0.82,0.10,0.95,'c2',0.0,0.06],[0.12,0.30,1.05,'c1',2.1,0.05],[0.50,0.98,0.85,'c3',4.0,0.045]];
+    var t0 = performance.now();
+    function frame(){
+      var t = (performance.now() - t0) / 1000;
+      ctx.fillStyle = toRGBA(col.paper, 1); ctx.fillRect(0,0,W,H);
+      blobs.forEach(function(b){
+        var cx = (b[0] + Math.sin(t*b[5] + b[4])*0.06) * W;
+        var cy = (b[1] + Math.cos(t*b[5]*0.8 + b[4])*0.06) * H;
+        var r = b[2] * Math.max(W,H) * 0.6;
+        var g = ctx.createRadialGradient(cx,cy,0,cx,cy,r);
+        g.addColorStop(0, toRGBA(col[b[3]], 0.32));
+        g.addColorStop(1, toRGBA(col[b[3]], 0));
+        ctx.fillStyle = g; ctx.fillRect(0,0,W,H);
+      });
+      raf = requestAnimationFrame(frame);
+    }
+    frame();
+    document.addEventListener('visibilitychange', function(){ if(document.hidden) cancelAnimationFrame(raf); else frame(); });
+    window.updateGlow = function(){ readCol(); };
+  }
+  window.updateGlow = window.updateGlow || function(){};
+
+  if(document.readyState === 'complete'){ initReveal(); initGlow(); }
+  else addEventListener('load', function(){ initReveal(); initGlow(); });
+})();
+</script>
+
+<script>
+/* Hero flag count-up + wire updateFlag into the report's render(range). */
+(function(){
+  var REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var firstFlag = true;
+  function money(n){ return '$' + (n||0).toFixed(2); }
+  function tween(to, cb){
+    var t0 = performance.now(), dur = 1400;
+    function step(){ var p = Math.min((performance.now()-t0)/dur, 1); cb(to*(1-Math.pow(1-p,3))); if(p<1) requestAnimationFrame(step); }
+    requestAnimationFrame(step);
+  }
+  function updateFlag(range){
+    try{
+      var list = filterSessions(range);
+      var cost=0, tok=0, models={};
+      list.forEach(function(s){ cost+=s.cost||0; tok+=s.tok||0; if(s.model) models[s.model]=1; });
+      var ap = document.querySelector('.range-preset.active');
+      el('flagRange').textContent = ap ? ap.textContent.toLowerCase() : (range.from + ' → ' + range.to);
+      var fn = el('flagNum');
+      if(firstFlag && !REDUCED){
+        firstFlag = false;
+        tween(cost, function(v){ fn.textContent = money(v); });
+        tween(list.length, function(v){ el('flagSessions').textContent = fmtInt(Math.round(v)); });
+        tween(tok, function(v){ el('flagTokens').textContent = fmtAbbr(Math.round(v)); });
+        tween(Object.keys(models).length, function(v){ el('flagModels').textContent = Math.round(v); });
+      }else{
+        firstFlag = false;
+        fn.textContent = money(cost);
+        el('flagSessions').textContent = fmtInt(list.length);
+        el('flagTokens').textContent = fmtAbbr(tok);
+        el('flagModels').textContent = Object.keys(models).length;
+      }
+      /* TrendChip: selected preset vs equal-width prior window (over all sessions).
+         Shown only for 'last 7 days' / 'last 30 days'; hidden for 'all time' and custom ranges. */
+      var tr = el('heroTrend');
+      if(tr){
+        tr.innerHTML = '';
+        var p = range.preset;
+        if(p==='7d'||p==='30d'){
+          var N = p==='7d'?7:30;
+          var last=0, prior=0, pf=addDays(range.to,-(2*N-1)), pt=addDays(range.to,-N);
+          SESSIONS.forEach(function(s){ var d=s.ts.slice(0,10), c=s.cost||0;
+            if(d>=range.from && d<=range.to) last+=c; else if(d>=pf && d<=pt) prior+=c; });
+          var dp = prior>0 ? (last-prior)/prior*100 : null;
+          tr.innerHTML = trendChip(dp);
+        }
+      }
+    }catch(e){}
+  }
+  var _r = render;
+  render = function(range){ _r(range); updateFlag(range); };
+})();
+</script>
