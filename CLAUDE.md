@@ -13,7 +13,7 @@ pnpm test            # node --test "server/*.test.mjs"
 
 Pieces separately: `pnpm server` / `pnpm web`. Shell: PowerShell primary; Bash tool POSIX only.
 
-Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `PORT`, `CLAUDE_BIN`, `OLLAMA_BIN`, `SING_SCOPE_ROOT`, `SING_USAGE_SKILL`, `SING_USAGE_REPORTS` (optional `SING_TOKEN`). Copy `.env.example` → `.env` (gitignored) and fill in. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
+Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `PORT`, `CLAUDE_BIN`, `SING_SCOPE_ROOT`, `SING_USAGE_SKILL`, `SING_USAGE_REPORTS` (optional: `OLLAMA_BIN` — absent → ollama models unavailable but daemon boots; `SING_TOKEN`). Copy `.env.example` → `.env` (gitignored) and fill in. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
 
 ## Repo structure
 

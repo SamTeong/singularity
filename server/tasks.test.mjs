@@ -14,6 +14,10 @@ import { tmpdir } from 'node:os';
 // hoisted above this assignment, so a dynamic import is required.
 const scratch = mkdtempSync(join(tmpdir(), 'sing-tasks-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
+// agents.mjs captures OLLAMA_BIN once at load. Clear it here (before import) so
+// the "failed spawn cleans up" test gets a deterministic buildSpawn throw
+// regardless of whether ollama is installed on the machine running the suite.
+delete process.env.OLLAMA_BIN;
 
 const { buildTaskPrompt, buildBackgroundPrompt, createTask, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree } = await import('./tasks.mjs');
 
@@ -174,10 +178,10 @@ test('buildBackgroundPrompt: conclude "inreview" (or absent) keeps the human-rev
 });
 
 // createTask: a failure after `git worktree add` succeeds but before the task
-// is persisted/spawned must not orphan the worktree. OLLAMA_BIN is unset in
-// this test process (no .env loaded), so routing to a non-claude model makes
-// reg.create's buildSpawn throw synchronously ("ollama not found") — a
-// deterministic failure with no mocking needed.
+// is persisted/spawned must not orphan the worktree. OLLAMA_BIN is cleared at
+// the top of this file, so routing to a non-claude model makes reg.create's
+// buildSpawn throw synchronously ("ollama not found") — a deterministic failure
+// with no mocking needed.
 test('createTask: failed spawn cleans up the worktree it just created', () => {
   const repo = initRepo();
   try {

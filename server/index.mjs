@@ -42,7 +42,8 @@ function requireEnv() {
   const missing = [];
   if (!process.env.PORT || !Number(process.env.PORT)) missing.push('PORT (listen port, e.g. 4317)');
   if (!reg.CLAUDE_BIN) missing.push('CLAUDE_BIN (absolute path to claude exe)');
-  if (!reg.OLLAMA_BIN) missing.push('OLLAMA_BIN (absolute path to ollama exe)');
+  // OLLAMA_BIN is optional: absent → ollama-model spawns fail at buildSpawn with
+  // a clear error, but the daemon (and all claude-model features) boot fine.
   if (!reg.SCOPE_ROOT || !existsSync(reg.SCOPE_ROOT)) missing.push('SING_SCOPE_ROOT (skill-scopes dir)');
   if (!process.env.SING_USAGE_SKILL || !existsSync(process.env.SING_USAGE_SKILL)) missing.push('SING_USAGE_SKILL (path to claude-code-usage-report stats.mjs)');
   if (!process.env.SING_USAGE_REPORTS) missing.push('SING_USAGE_REPORTS (spend-report output dir)');
