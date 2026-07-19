@@ -36,6 +36,7 @@ export default defineConfig({
       '/skill': 'http://127.0.0.1:4317',
       '/config': 'http://127.0.0.1:4317',
       '/hooks': 'http://127.0.0.1:4317',
+      '/rules': 'http://127.0.0.1:4317',
       '/memory': 'http://127.0.0.1:4317',
       '/wiki': 'http://127.0.0.1:4317',
       '/sessions': 'http://127.0.0.1:4317',
