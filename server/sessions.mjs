@@ -155,6 +155,20 @@ function pathFor(project, id) {
   return p;
 }
 
+// Fallback resolver: the session id is a globally-unique UUID, so when the
+// caller's project slug is stale (worktree relocated by a state migration,
+// cleaned-up worktree, session that ran in the repo not the worktree) the file
+// still lives under *some* project dir. Scan for <id>.jsonl. Skipped for nested
+// subagent ids — their project dir is authoritative. Miss-path only.
+async function findById(id) {
+  if (/[\\/]/.test(id) || !existsSync(PROJECTS)) return null;
+  for (const proj of await readdir(PROJECTS)) {
+    const p = join(PROJECTS, proj, `${id}.jsonl`);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
 function trunc(s, n) {
   s = typeof s === 'string' ? s : JSON.stringify(s);
   return s.length > n ? `${s.slice(0, n)}…` : s;
@@ -164,7 +178,8 @@ function trunc(s, n) {
 // and tool_result bodies are truncated in the payload (the raw file is the
 // source of truth); text/thinking are kept whole for the chat context.
 export async function readSession(project, id) {
-  const p = pathFor(project, id);
+  let p = pathFor(project, id);
+  if (!p || !existsSync(p)) p = await findById(id); // stale project slug → locate by unique id
   if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
   const events = parseEvents(await readFile(p, 'utf8'));
   const messages = [];
