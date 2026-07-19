@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { useColorMode } from '@zapac/mui-theme';
 import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
+import { WebglAddon } from '@xterm/addon-webgl';
 
 // Machine-output layer — opaque, never glass — but themed light/dark with the
 // app. xterm's default 16-color ANSI palette is built for a dark background and
@@ -44,11 +45,18 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
       fontSize: 13,
       cursorBlink: true,
       theme: TERM_THEME[mode] ?? TERM_THEME.dark,
-      scrollback: 10000,
+      scrollback: 5000,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(hostRef.current);
+    // GPU renderer — DOM renderer (xterm default) is the choppy-scroll culprit.
+    // On WebGL context loss, dispose so xterm falls back to the DOM renderer.
+    try {
+      const webgl = new WebglAddon();
+      webgl.onContextLoss(() => webgl.dispose());
+      term.loadAddon(webgl);
+    } catch {}
     xtermRef.current = term;
     fitRef.current = fit;
 

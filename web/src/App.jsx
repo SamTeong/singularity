@@ -349,6 +349,18 @@ export default function App() {
   }, [tasks, taskHistory]);
 
   const activeAgent = agents.find((a) => a.id === active);
+
+  // Cap live terminals: each mounted xterm holds a full scrollback buffer, so
+  // mounting every agent's terminal grows memory without bound. Keep the active
+  // agent + the most-recently-viewed few mounted (instant switch); the daemon
+  // replays scrollback on re-attach for the rest.
+  // ponytail: MRU list, bump the cap if switching to an evicted agent feels slow.
+  const MOUNT_LRU = 4;
+  const mruRef = useRef([]);
+  if (active && mruRef.current[0] !== active) {
+    mruRef.current = [active, ...mruRef.current.filter((id) => id !== active)];
+  }
+  const mountedSet = new Set(mruRef.current.slice(0, MOUNT_LRU));
   const usageTip = usageSummary(usage); // per-provider 5h/7d summary for the collapsed tooltip
 
   // A running claude process picks its TUI theme once at spawn (queried from
@@ -605,7 +617,7 @@ export default function App() {
             {/* Selected terminal. All non-detached terminals stay mounted
                 (display:none when hidden) so scrollback + WS attach survive. */}
             <Box sx={{ position: 'relative', flex: 1, minWidth: 0, p: 0.5 }}>
-              {agents.filter((a) => a.status !== 'detached').map((a) => {
+              {agents.filter((a) => a.status !== 'detached' && mountedSet.has(a.id)).map((a) => {
                 const show = !dockMin && a.id === active;
                 return (
                   <Box key={a.id} sx={{ position: 'absolute', inset: 0, display: show ? 'block' : 'none' }}>
