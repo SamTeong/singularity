@@ -1,15 +1,21 @@
 // Unit tests for the session-history backend: readSession over a fixture
-// .jsonl (valid lines + garbage), sessionText head+tail truncation, and the
-// pathFor path-containment guard (project/id from the client). Fixtures
-// follow the agents.test.mjs pattern: write under the real
-// ~/.claude/projects, clean up in a finally.
+// .jsonl (valid lines + garbage), sessionText head+tail truncation, the
+// pathFor path-containment guard (project/id from the client), and the
+// FS-persisted sessions root. Fixtures follow the agents.test.mjs pattern:
+// write under the real ~/.claude/projects, clean up in a finally.
 // Run: npm test  (node --test server/)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
-import { readSession, sessionText, searchSessions, listSessions } from './sessions.mjs';
+import { homedir, tmpdir } from 'node:os';
+import { mkdtempSync } from 'node:fs';
+
+// sessions.mjs imports app-dir.mjs (STATE_DIR), which throws without
+// SINGULARITY_HOME. Point it at a scratch temp dir before a dynamic import
+// (static imports hoist above the env assignment).
+process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
+const { readSession, sessionText, searchSessions, listSessions, getSessionsRoot, setSessionsRoot, resolveRoot } = await import('./sessions.mjs');
 
 const PROJECTS = join(homedir(), '.claude', 'projects');
 
@@ -143,5 +149,37 @@ test('listSessions: running merges isLive with the mtime recency heuristic', asy
     assert.equal(stale.running, false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('sessions root persists to FS: default, roundtrip, bad input', () => {
+  assert.equal(getSessionsRoot(), '~/.claude/projects'); // default when file absent
+  const scratchRoot = mkdtempSync(join(tmpdir(), 'sing-sessions-root-'));
+  assert.deepEqual(setSessionsRoot(scratchRoot), { ok: true, root: scratchRoot });
+  assert.equal(getSessionsRoot(), scratchRoot); // read back from disk
+  assert.equal(setSessionsRoot('').ok, false); // rejects empty
+  assert.equal(resolveRoot(scratchRoot), scratchRoot);
+});
+
+test('listSessions/readSession/searchSessions scope to an explicit root, ignoring the persisted default', async () => {
+  const scratchRoot = mkdtempSync(join(tmpdir(), 'sing-sessions-scoped-'));
+  const project = 'scoped-proj';
+  const id = 'scoped-1';
+  mkdirSync(join(scratchRoot, project), { recursive: true });
+  writeFileSync(join(scratchRoot, project, `${id}.jsonl`), JSON.stringify({ type: 'user', message: { content: 'FINDME_SCOPED' } }) + '\n');
+  try {
+    const sessions = await listSessions({ root: scratchRoot });
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].id, id);
+
+    const read = await readSession(project, id, scratchRoot);
+    assert.equal(read.ok, true);
+    assert.equal(read.messages[0].text, 'FINDME_SCOPED');
+
+    const { results } = await searchSessions('FINDME_SCOPED', { root: scratchRoot });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].project, project);
+  } finally {
+    rmSync(scratchRoot, { recursive: true, force: true });
   }
 });

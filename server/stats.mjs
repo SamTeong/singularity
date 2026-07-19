@@ -7,6 +7,7 @@ import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd, STATE_DIR, getActiveMs } from './agents.mjs';
+import { pathFor } from './sessions.mjs';
 
 // $ per million tokens: [input, output]. Matched by longest prefix on the
 // transcript message model id. cache read = 0.1x input; cache write = 1.25x
@@ -91,8 +92,11 @@ function parseByPath(p) {
 
 // Session-history stats keyed by the encoded-cwd project dirname (as the
 // session list already has it), merging the exact statusline cost when present.
-export function sessionStats(project, id) {
-  const session = parseByPath(join(homedir(), '.claude', 'projects', project, `${id}.jsonl`));
+const EMPTY_SESSION = { turns: 0, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, models: [], exists: false, estCostUsd: null };
+
+export function sessionStats(project, id, root) {
+  const p = pathFor(project, id, root);
+  const session = p ? parseByPath(p) : EMPTY_SESSION;
   const cost = readCostFile(id);
   return {
     ...session,

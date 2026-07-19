@@ -18,17 +18,19 @@ const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 2048;
 const ALL_CAP = 60000;   // scope 'all' context cap (chars)
 
-// Build the context block prepended to the identity string.
-async function contextFor({ scope, project, id }) {
+// Build the context block prepended to the identity string. `root` is the
+// client-selected sessions root (optional — defaults to the FS-persisted
+// choice, see sessions.mjs).
+async function contextFor({ scope, project, id, root }) {
   if (scope === 'one' && project && id) {
-    const text = await sessionText(project, id);
+    const text = await sessionText(project, id, undefined, root);
     if (!text) return '\n\nThe selected session transcript is empty.';
     return `\n\nYou are answering questions about ONE Claude Code session. Below is its transcript. Cite turns by role when useful.\n\n<session>\n${text}\n</session>`;
   }
   // scope 'all': a directory of the most recent sessions (metadata only — full
   // text of every session won't fit). The user can open/search a specific one
   // to drill in.
-  const dirs = await listSessions({ cap: 100 });
+  const dirs = await listSessions({ cap: 100, root });
   if (!dirs.length) return '\n\nNo sessions found.';
   const lines = dirs.map((s) => `- ${s.title || s.id}  (${s.cwd || s.project}, ${new Date(s.mtime).toISOString().slice(0, 10)})`);
   let text = lines.join('\n');
@@ -76,13 +78,13 @@ export async function consumeStream(body, send, chatId, signal) {
   }
 }
 
-export async function streamChat({ chatId, question, scope = 'one', project, id, history = [] }, send, signal) {
+export async function streamChat({ chatId, question, scope = 'one', project, id, history = [], root }, send, signal) {
   const oauth = claudeOauthToken();
   if (!oauth) {
     send({ t: 'chat:error', chatId, needsAuth: true, msg: 'Claude not signed in — run `claude` to log in' });
     return;
   }
-  const system = IDENTITY + await contextFor({ scope, project, id });
+  const system = IDENTITY + await contextFor({ scope, project, id, root });
   const messages = [...history, { role: 'user', content: question }];
 
   let resp;

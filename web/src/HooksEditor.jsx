@@ -1,28 +1,29 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
-import Button from '@mui/material/Button';
 import Typography from '@mui/material/Typography';
-import SaveIcon from '@mui/icons-material/Save';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { javascript } from '@codemirror/lang-javascript';
 import { EditorView } from '@codemirror/view';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import { useColorMode, SearchInput } from '@zapac/mui-theme';
+import { useColorMode, EmptyState } from '@zapac/mui-theme';
+import WebhookIcon from '@mui/icons-material/Webhook';
 import { cmTheme } from './cmTheme.js';
 import DirPicker from './DirPicker.jsx';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ClearIcon from '@mui/icons-material/Clear';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import ListSubheader from '@mui/material/ListSubheader';
 import { tildify, untildify } from './paths.js';
-import { useResizable, ResizeHandle } from './useResizable.jsx';
+import Rail from './panelkit/Rail.jsx';
+import RailSearch from './panelkit/RailSearch.jsx';
+import SaveBar from './panelkit/SaveBar.jsx';
+import { useRootList, normKey } from './panelkit/useRootList.js';
 
 // Language extension per file extension: JS family → javascript(), .json → json(),
 // everything else (.ps1/.sh/…) → plain (no lang extension).
@@ -35,8 +36,8 @@ function langFor(path) {
 
 export default function HooksEditor() {
   const { mode } = useColorMode();
+  const { roots, remember, forget } = useRootList('/hooks', { initial: ['~'] });
   const [picking, setPicking] = useState(false);
-  const [rootList, setRootList] = useState(['~']);
   const [groups, setGroups] = useState([]); // [{ cwd, files:[{path,rel,name}] }]
   const [path, setPath] = useState(null); // selected file path
   const [content, setContent] = useState('');
@@ -44,38 +45,18 @@ export default function HooksEditor() {
   const [msg, setMsg] = useState(null);
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null); // content-search hits, null = show file list
-  const [collapsed, setCollapsed] = useState(false);
-  const railW = useResizable('sing-hooks-w', 300);
-
-  // Load the FS-persisted root list once on mount.
-  useEffect(() => {
-    fetch('/hooks/roots').then((r) => r.json()).then((d) => { if (d.roots?.length) setRootList(d.roots); }).catch(() => {});
-  }, []);
 
   // Fetch grouped hook files whenever the root list changes.
   useEffect(() => {
     fetch('/hooks/list', {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ roots: rootList.map(untildify) }),
+      body: JSON.stringify({ roots: roots.map(untildify) }),
     }).then((r) => r.json()).then((d) => setGroups(d.groups || [])).catch(() => setGroups([]));
-  }, [rootList]);
-
-  // Merge paths into the root list (MRU-first, deduped, capped) and persist to FS.
-  const remember = (paths) => setRootList((prev) => {
-    const next = [...new Set([...paths, ...prev])].slice(0, 50);
-    fetch('/hooks/roots', {
-      method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ roots: next }),
-    }).catch(() => {});
-    return next;
-  });
-
-  // Drop a root from the list and persist to FS.
-  const normKey = (p) => tildify(p).replace(/\\/g, '/').toLowerCase();
+  }, [roots]);
 
   // Dedup groups on normalized cwd (~ vs expanded home, / vs \) — picking home
   // while ~ is present otherwise renders two identical groups. First-seen wins,
-  // order preserved (mirrors ConfigEditor's shownList dedup).
+  // order preserved (mirrors ConfigEditor's shownRoots dedup).
   const shownGroups = useMemo(() => {
     const seen = new Set();
     return groups.filter((g) => {
@@ -85,15 +66,6 @@ export default function HooksEditor() {
       return true;
     }).sort((a, b) => normKey(a.cwd).localeCompare(normKey(b.cwd))); // alpha by displayed form
   }, [groups]);
-  const forget = (p) => setRootList((prev) => {
-    const k = normKey(p);
-    const next = prev.filter((x) => normKey(x) !== k);
-    fetch('/hooks/roots', {
-      method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ roots: next }),
-    }).catch(() => {});
-    return next;
-  });
 
   const loadFile = (p) => {
     if (dirty && !window.confirm('Discard unsaved changes?')) return;
@@ -111,11 +83,11 @@ export default function HooksEditor() {
     const id = setTimeout(() => {
       fetch('/hooks/search', {
         method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ roots: rootList.map(untildify), q: term }),
+        body: JSON.stringify({ roots: roots.map(untildify), q: term }),
       }).then((r) => r.json()).then((d) => setResults(d.results || [])).catch(() => setResults([]));
     }, 250);
     return () => clearTimeout(id);
-  }, [q, rootList]);
+  }, [q, roots]);
 
   // Stable extensions: a fresh array/lang() each render makes @uiw/react-codemirror
   // reconfigure the editor, dropping the open Ctrl+F search panel (flash-close).
@@ -144,28 +116,16 @@ export default function HooksEditor() {
 
   return (
     <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>
-      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
-        {collapsed ? (
-          <Tooltip title="Show hook files" placement="right" disableInteractive>
-            <IconButton size="small" onClick={() => setCollapsed(false)} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>
-          </Tooltip>
-        ) : (
+      <Rail storageKey="sing-hooks-w" defaultWidth={300} collapsedTitle="Show hook files">
+        {({ collapse }) => (
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                  <SearchInput placeholder="Search hooks…" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} />
-                  {q && (
-                    <IconButton size="small" onClick={() => setQ('')} aria-label="Clear search"
-                      sx={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', '&:hover': { transform: 'translateY(-50%)' } }}>
-                      <ClearIcon fontSize="small" />
-                    </IconButton>
-                  )}
-                </Box>
+                <RailSearch placeholder="Search hooks…" value={q} onChange={setQ} />
                 <Tooltip title="Select root folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}><FolderOpenIcon /></IconButton>
                 </Tooltip>
-                <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
+                <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
               </Stack>
             </Box>
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
@@ -208,31 +168,29 @@ export default function HooksEditor() {
             </List>
           </>
         )}
-      </Stack>
-      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
+      </Rail>
 
     <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
-      <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>
-        {path ? tildify(path) : 'Select a hook file'}
-      </Typography>
-      {picking && <DirPicker start={untildify(rootList[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
-
-      <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
-        <CodeMirror
-          value={content}
-          theme={mode === 'dark' ? 'dark' : 'light'}
-          height="100%"
-          extensions={extensions}
-          onChange={onChange}
-          editable={!!path}
-        />
-      </Box>
-
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-        {msg && <Typography color={msg.sev === 'error' ? 'error' : 'success.main'} sx={{ fontSize: 13 }}>{msg.text}</Typography>}
-        <Box sx={{ flex: 1 }} />
-        <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={save} disabled={!dirty || !path}>Save</Button>
-      </Stack>
+      {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
+      {!path ? (
+        <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
+          <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Browse on the left to view or edit here." />
+        </Box>
+      ) : (
+        <>
+          <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>{tildify(path)}</Typography>
+          <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
+            <CodeMirror
+              value={content}
+              theme={mode === 'dark' ? 'dark' : 'light'}
+              height="100%"
+              extensions={extensions}
+              onChange={onChange}
+            />
+          </Box>
+          <SaveBar msg={msg} disabled={!dirty} onSave={save} />
+        </>
+      )}
     </Stack>
     </Box>
   );

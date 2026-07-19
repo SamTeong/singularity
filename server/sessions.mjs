@@ -1,20 +1,44 @@
 // Session history backend: enumerate, read, and search the Claude Code
-// transcripts at ~/.claude/projects/<project>/<id>.jsonl. Each .jsonl is one
-// session; `project` is the encoded-cwd dirname (we pull the real cwd out of
-// the events themselves rather than decoding the lossy dirname). The chat
-// module reuses readSession()/sessionText() to build LLM context.
-import { existsSync } from 'node:fs';
+// transcripts at <root>/<project>/<id>.jsonl (root is FS-persisted and client-
+// selectable, default ~/.claude/projects — mirrors memory.mjs's root pattern).
+// Each .jsonl is one session; `project` is the encoded-cwd dirname (we pull
+// the real cwd out of the events themselves rather than decoding the lossy
+// dirname). The chat module reuses readSession()/sessionText() to build LLM
+// context.
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { readdir, stat, readFile, open } from 'node:fs/promises';
-import { join, resolve, sep } from 'node:path';
+import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd } from './agents.mjs';
+import { STATE_DIR } from './app-dir.mjs';
 
-const PROJECTS = join(homedir(), '.claude', 'projects');
+const DEFAULT_ROOT = join(homedir(), '.claude', 'projects');
 const PEEK_BYTES = 65536;     // list only peeks the head — full MB reads are deferred to open
 const RESULT_CAP = 200;
 const TOOL_TRUNC = 300;       // tool_use inputs / tool_result bodies in the view payload
 const TEXT_CAP = 80000;       // sessionText head+tail cap (chars)
 const RUNNING_MS = 30000;     // external-session recency heuristic: mtime within this window counts as running
+
+// Sessions root choice, FS-persisted (survives browser cache clear). Defaults
+// to ~/.claude/projects.
+const ROOT_FILE = join(STATE_DIR, 'sessions-root.json');
+export function getSessionsRoot() {
+  try { const r = JSON.parse(readFileSync(ROOT_FILE, 'utf8')).root; return typeof r === 'string' && r ? r : '~/.claude/projects'; }
+  catch { return '~/.claude/projects'; }
+}
+export function setSessionsRoot(root) {
+  if (typeof root !== 'string' || !root) return { ok: false, error: 'bad root' };
+  try { mkdirSync(STATE_DIR, { recursive: true }); writeFileSync(ROOT_FILE, JSON.stringify({ root })); return { ok: true, root }; }
+  catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Resolve a ~-prefixed client path to an absolute one. Falls back to the
+// FS-persisted root (then the default) when raw is empty.
+export function resolveRoot(raw) {
+  let p = raw || getSessionsRoot();
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = normalize(homedir() + p.slice(1));
+  try { return resolve(p); } catch { return DEFAULT_ROOT; }
+}
 
 // Parse JSONL text (head chunk or full file) into event objects, skipping
 // unparseable lines. Pure, no FS — shared by peek + full read.
@@ -56,11 +80,12 @@ function peekMeta(events) {
   return { cwd, title };
 }
 
-// listSessions: every *.jsonl under PROJECTS, reverse-chrono by mtime. The
-// (mtime,size)-keyed cache holds the peeked meta so repeated list calls don't
-// re-read heads of unchanged files.
+// listSessions: every *.jsonl under the resolved root, reverse-chrono by
+// mtime. The (mtime,size)-keyed cache holds the peeked meta so repeated list
+// calls don't re-read heads of unchanged files.
 const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title }
-export async function listSessions({ cap = 5000, isLive = () => false, now = Date.now() } = {}) {
+export async function listSessions({ cap = 5000, isLive = () => false, now = Date.now(), root } = {}) {
+  const PROJECTS = resolveRoot(root);
   if (!existsSync(PROJECTS)) return [];
   const out = [];
   for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {
@@ -142,25 +167,28 @@ async function listSubagents(parentDir, parentId, isLive, now) {
 // Live subagents for one agent session: the daemon agent's id IS its Claude
 // session id (agents.mjs create()), logged under <encodeCwd(cwd)>/<id>.jsonl,
 // so its subagents live in the sibling <id>/subagents/ dir. Reuses listSubagents.
-export async function subagentsFor(cwd, id, isLive = () => false, now = Date.now()) {
+export async function subagentsFor(cwd, id, isLive = () => false, now = Date.now(), root = DEFAULT_ROOT) {
   if (!cwd || !id) return [];
+  const PROJECTS = resolveRoot(root);
   return listSubagents(join(PROJECTS, encodeCwd(cwd)), id, isLive, now);
 }
 
 // Path guard: project/id come from the client query — reject separators (no
-// nested traversal) and confirm the joined path still resolves under PROJECTS
-// (mirrors isWikiPath/isMemoryPath in wiki.mjs/memory.mjs). The one relaxation:
-// a subagent open-ref shaped "<parent-id>/subagents/agent-x" is allowed through
-// as a nested relative path; anything else with a separator in id stays banned.
+// nested traversal) and confirm the joined path still resolves under the
+// active root (mirrors isWikiPath/isMemoryPath in wiki.mjs/memory.mjs). The
+// one relaxation: a subagent open-ref shaped "<parent-id>/subagents/agent-x"
+// is allowed through as a nested relative path; anything else with a
+// separator in id stays banned.
 const SUBAGENT_ID = /^[^\\/]+\/subagents\/agent-[^\\/]+$/;
-function pathFor(project, id) {
+export function pathFor(project, id, root) {
   if (!project || !id || /[\\/]/.test(project)) return null;
   const nested = SUBAGENT_ID.test(id);
   if (!nested && /[\\/]/.test(id)) return null;
+  const PROJECTS = resolveRoot(root);
   const p = join(PROJECTS, project, `${id}.jsonl`);
-  const root = resolve(PROJECTS);
+  const rootAbs = resolve(PROJECTS);
   const abs = resolve(p);
-  if (abs !== root && !abs.startsWith(root + sep)) return null;
+  if (abs !== rootAbs && !abs.startsWith(rootAbs + sep)) return null;
   return p;
 }
 
@@ -169,7 +197,8 @@ function pathFor(project, id) {
 // cleaned-up worktree, session that ran in the repo not the worktree) the file
 // still lives under *some* project dir. Scan for <id>.jsonl. Skipped for nested
 // subagent ids — their project dir is authoritative. Miss-path only.
-async function findById(id) {
+async function findById(id, root) {
+  const PROJECTS = resolveRoot(root);
   if (/[\\/]/.test(id) || !existsSync(PROJECTS)) return null;
   for (const proj of await readdir(PROJECTS)) {
     const p = join(PROJECTS, proj, `${id}.jsonl`);
@@ -186,9 +215,9 @@ function trunc(s, n) {
 // readSession: full parse into a renderable message list + meta. tool_use inputs
 // and tool_result bodies are truncated in the payload (the raw file is the
 // source of truth); text/thinking are kept whole for the chat context.
-export async function readSession(project, id) {
-  let p = pathFor(project, id);
-  if (!p || !existsSync(p)) p = await findById(id); // stale project slug → locate by unique id
+export async function readSession(project, id, root) {
+  let p = pathFor(project, id, root);
+  if (!p || !existsSync(p)) p = await findById(id, root); // stale project slug → locate by unique id
   if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
   const events = parseEvents(await readFile(p, 'utf8'));
   const messages = [];
@@ -228,8 +257,8 @@ export async function readSession(project, id) {
 // sessionText: flatten a session into a compact transcript for LLM context.
 // [user]/[assistant] turns + [tool: name] calls; head+tail cap keeps both the
 // opening problem statement and the most recent turns when the log is long.
-export async function sessionText(project, id, cap = TEXT_CAP) {
-  const s = await readSession(project, id);
+export async function sessionText(project, id, cap = TEXT_CAP, root) {
+  const s = await readSession(project, id, root);
   if (!s.ok) return '';
   const lines = [];
   for (const m of s.messages) {
@@ -244,8 +273,9 @@ export async function sessionText(project, id, cap = TEXT_CAP) {
 }
 
 // searchSessions: substring search over session text. Scoped to one file when
-// {project,id} given, else every *.jsonl. Returns line-indexed matches capped
-// at RESULT_CAP. The text per message is cached by (mtime,size) like memory.mjs.
+// {project,id} given, else every *.jsonl under the resolved root. Returns
+// line-indexed matches capped at RESULT_CAP. The text per message is cached
+// by (mtime,size) like memory.mjs.
 const textCache = new Map(); // path -> { mtimeMs, size, items: [{role,text}] }
 async function sessionTextItems(p) {
   let st;
@@ -292,12 +322,13 @@ function snippet(text, at, q) {
   return (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
 }
 
-export async function searchSessions(q, { project, id } = {}) {
+export async function searchSessions(q, { project, id, root } = {}) {
   const ql = (q || '').toLowerCase();
   if (!ql) return { results: [], capped: false };
+  const PROJECTS = resolveRoot(root);
   const targets = [];
   if (project && id) {
-    const p = pathFor(project, id);
+    const p = pathFor(project, id, root);
     if (p && existsSync(p)) targets.push({ project, id, path: p });
   } else if (existsSync(PROJECTS)) {
     for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {

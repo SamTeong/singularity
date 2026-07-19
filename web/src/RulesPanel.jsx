@@ -2,30 +2,30 @@ import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
-import SaveIcon from '@mui/icons-material/Save';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ClearIcon from '@mui/icons-material/Clear';
 import GavelIcon from '@mui/icons-material/Gavel';
 import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorView } from '@codemirror/view';
-import { useColorMode, SearchInput, EmptyState } from '@zapac/mui-theme';
+import { useColorMode, EmptyState } from '@zapac/mui-theme';
 import { cmTheme } from './cmTheme.js';
 import DirPicker from './DirPicker.jsx';
 import { tildify, untildify } from './paths.js';
-import { useResizable, ResizeHandle } from './useResizable.jsx';
+import Rail from './panelkit/Rail.jsx';
+import RailSearch from './panelkit/RailSearch.jsx';
+import SaveBar from './panelkit/SaveBar.jsx';
+import { useRootList, normKey } from './panelkit/useRootList.js';
 
 export default function RulesPanel() {
   const { mode } = useColorMode();
-  const [roots, setRoots] = useState([]);
+  const { roots, shownRoots, remember, forget } = useRootList('/rules');
   const [files, setFiles] = useState([]);
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null); // search hits, null = browse
@@ -33,15 +33,8 @@ export default function RulesPanel() {
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
   const [picking, setPicking] = useState(false);
   const [msg, setMsg] = useState(null);
-  const railW = useResizable('sing-rules-w', 300);
-
-  // Load the FS-persisted root list once on mount.
-  useEffect(() => {
-    fetch('/rules/roots').then((r) => r.json()).then((d) => { if (d.roots?.length) setRoots(d.roots); }).catch(() => {});
-  }, []);
 
   // Refresh the browse list whenever the root list changes.
   useEffect(() => {
@@ -51,29 +44,6 @@ export default function RulesPanel() {
       body: JSON.stringify({ roots }),
     }).then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setFiles([]));
   }, [roots]);
-
-  // Merge paths into the list (MRU-first, deduped, capped) and persist to FS.
-  const remember = (paths) => setRoots((prev) => {
-    const next = [...new Set([...paths, ...prev])].slice(0, 50);
-    fetch('/rules/roots', {
-      method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ roots: next }),
-    }).catch(() => {});
-    return next;
-  });
-
-  // Drop a path from the list and persist to FS. Match on the same normalized
-  // key shownRoots dedups by, so collapsed variants (~ vs expanded home) all go.
-  const normKey = (p) => tildify(p).replace(/\\/g, '/').toLowerCase();
-  const forget = (p) => setRoots((prev) => {
-    const k = normKey(p);
-    const next = prev.filter((x) => normKey(x) !== k);
-    fetch('/rules/roots', {
-      method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ roots: next }),
-    }).catch(() => {});
-    return next;
-  });
 
   // Debounced content search across rule roots (empty q → browse list).
   useEffect(() => {
@@ -120,45 +90,22 @@ export default function RulesPanel() {
     remember([untildify(p)]);
   };
 
-  const toggleCollapsed = () => {
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
-    setCollapsed((c) => !c);
-  };
-
-  // Dedup on a normalized key (tildified, forward slashes, lowercased) so `~`
-  // and its expanded home path, or `/` vs `\`, don't show as separate entries.
-  const shownRoots = [...new Map(
-    roots.map((p) => [normKey(p), p]),
-  ).values()].sort((a, b) => normKey(a).localeCompare(normKey(b))); // sort by displayed (tildified) form
-
-  // Group by normKey (tildified/slash/case-folded) so a file's base and the
-  // shownRoots key match even across ~ vs expanded-home or / vs \ variants.
+  // Group by normKey so a file's base and the shownRoots key match even across
+  // ~ vs expanded-home or / vs \ variants.
   const filesByRoot = (root) => files.filter((f) => normKey(f.root) === normKey(root));
 
   return (
     <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>
-      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
-        {collapsed ? (
-          <Tooltip title="Show rule paths" placement="right" disableInteractive>
-            <IconButton size="small" onClick={toggleCollapsed} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>
-          </Tooltip>
-        ) : (
+      <Rail storageKey="sing-rules-w" defaultWidth={300} collapsedTitle="Show rule paths">
+        {({ collapse }) => (
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                  <SearchInput placeholder="Search rules…" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} />
-                  {q && (
-                    <IconButton size="small" onClick={() => setQ('')} aria-label="Clear search"
-                      sx={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', '&:hover': { transform: 'translateY(-50%)' } }}>
-                      <ClearIcon fontSize="small" />
-                    </IconButton>
-                  )}
-                </Box>
+                <RailSearch placeholder="Search rules…" value={q} onChange={setQ} />
                 <Tooltip title="Select root folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}><FolderOpenIcon /></IconButton>
                 </Tooltip>
-                <IconButton size="small" onClick={toggleCollapsed}><ChevronLeftIcon /></IconButton>
+                <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
               </Stack>
             </Box>
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
@@ -199,14 +146,13 @@ export default function RulesPanel() {
             </List>
           </>
         )}
-      </Stack>
-      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
+      </Rail>
 
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
         {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
         {!sel ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <EmptyState icon={<GavelIcon />} title="Select a file" description="Browse or search rule files on the left to view or edit here." />
+            <EmptyState icon={<GavelIcon />} title="Select a rule" description="Browse on the left to view or edit here." />
           </Box>
         ) : loadingFile ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
@@ -219,11 +165,7 @@ export default function RulesPanel() {
               <CodeMirror value={content} theme={mode === 'dark' ? 'dark' : 'light'} height="100%"
                 extensions={extensions} onChange={onChange} />
             </Box>
-            <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center' }}>
-              {msg && <Typography color={msg.sev === 'error' ? 'error' : 'success.main'} sx={{ fontSize: 13 }}>{msg.text}</Typography>}
-              <Box sx={{ flex: 1 }} />
-              <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={save} disabled={!dirty}>Save</Button>
-            </Stack>
+            <SaveBar msg={msg} disabled={!dirty} onSave={save} />
           </>
         )}
       </Stack>

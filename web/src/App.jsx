@@ -80,7 +80,6 @@ const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${
 const NAV = [
   { v: 'tasks', icon: <ViewKanbanIcon />, label: 'Tasks' },
   { v: 'cron', icon: <ScheduleIcon />, label: 'Automation' },
-  { v: 'sessions', icon: <HistoryIcon />, label: 'Transcripts' },
   { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
 ];
 // Use theme.vars (the --mui-* CSS vars) not theme.palette — under cssVariables
@@ -461,7 +460,7 @@ export default function App() {
           )}
         </Stack>
 
-        {/* Vertical nav rail: ＋ New agent, then Tasks / Cron / Transcripts / Usage. Icon-only when collapsed. */}
+        {/* Vertical nav rail: ＋ New agent, then Tasks / Cron / Usage. Icon-only when collapsed. */}
         <List sx={{ px: 1, pb: 1 }}>
           {/* Tooltips only when collapsed — expanded rows show their label already. */}
           <Tooltip title={collapsed ? 'New session' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
@@ -674,7 +673,7 @@ export default function App() {
       {picking && <DirPicker start={cwd} onPick={(p) => { setCwd(p); setPicking(false); }} onClose={() => setPicking(false)} />}
       {procsOpen && <ProcessManager onClose={() => setProcsOpen(false)} />}
 
-      {/* More menu: Config/Memory/Wiki/Skills nav, then processes + dark mode. */}
+      {/* More menu: Config/Hooks/Skills/Rules/Memory/Transcripts/Wiki nav, then processes + dark mode. */}
       <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)} keepMounted>
         <MenuItem onClick={() => { setView('config'); setMenuAnchor(null); }}>
           <ListItemIcon><SettingsIcon fontSize="small" /></ListItemIcon>
@@ -695,6 +694,10 @@ export default function App() {
         <MenuItem onClick={() => { setView('memory'); setMenuAnchor(null); }}>
           <ListItemIcon><BookIcon fontSize="small" /></ListItemIcon>
           <ListItemText>Memory</ListItemText>
+        </MenuItem>
+        <MenuItem onClick={() => { setView('sessions'); setMenuAnchor(null); }}>
+          <ListItemIcon><HistoryIcon fontSize="small" /></ListItemIcon>
+          <ListItemText>Transcripts</ListItemText>
         </MenuItem>
         <MenuItem onClick={() => { setView('wiki'); setMenuAnchor(null); }}>
           <ListItemIcon><MenuBookIcon fontSize="small" /></ListItemIcon>

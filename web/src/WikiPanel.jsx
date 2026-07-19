@@ -3,7 +3,6 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
-import ClearIcon from '@mui/icons-material/Clear';
 import Tooltip from '@mui/material/Tooltip';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
@@ -22,13 +21,14 @@ import HubIcon from '@mui/icons-material/Hub';
 import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
-import { StatusPill, SearchInput, EmptyState } from '@zapac/mui-theme';
+import { StatusPill, EmptyState } from '@zapac/mui-theme';
 import DirPicker from './DirPicker.jsx';
 import { parseFrontmatter } from './frontmatter.js';
 import MarkdownBody from './MarkdownBody.jsx';
 import WikiGraph from './WikiGraph.jsx';
 import { tildify, untildify } from './paths.js';
-import { useResizable, ResizeHandle } from './useResizable.jsx';
+import Rail from './panelkit/Rail.jsx';
+import RailSearch from './panelkit/RailSearch.jsx';
 
 // Wiki root persists across sessions on the daemon FS (survives browser cache
 // clear). Default ~/wiki; loaded from /wiki/root on mount.
@@ -48,12 +48,10 @@ export default function WikiPanel() {
   const [err, setErr] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set()); // wiki names
   const [sel, setSel] = useState(null); // {path, rel}
-  const [collapsed, setCollapsed] = useState(false);
   const [cats, setCats] = useState([]); // active category filter (empty = all)
   const [content, setContent] = useState('');
   const [loadingFile, setLoadingFile] = useState(false);
   const [graphView, setGraphView] = useState(null); // null | 'main' (right pane) | 'dock' (bottom of left nav)
-  const railW = useResizable('sing-wiki-w', 380);
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
   useEffect(() => {
@@ -147,22 +145,12 @@ export default function WikiPanel() {
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* left: search + wiki tree (collapsible) */}
-      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
-        {collapsed ? (
-          <IconButton size="small" onClick={() => setCollapsed(false)} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>
-        ) : (
+      <Rail storageKey="sing-wiki-w" defaultWidth={380} collapsedTitle="Show wiki pages">
+        {({ collapse }) => (
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
-                  <SearchInput placeholder="Search wiki…" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} />
-                  {q && (
-                    <IconButton size="small" onClick={() => setQ('')} aria-label="Clear search"
-                      sx={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', '&:hover': { transform: 'translateY(-50%)' } }}>
-                      <ClearIcon fontSize="small" />
-                    </IconButton>
-                  )}
-                </Box>
+                <RailSearch placeholder="Search wiki…" value={q} onChange={setQ} />
                 <Tooltip title="Select wiki folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
                 </Tooltip>
@@ -170,7 +158,7 @@ export default function WikiPanel() {
                   <span><IconButton size="small" color={graphView ? 'primary' : 'default'} disabled={!graphWiki}
                     onClick={() => setGraphView((v) => (v ? null : 'dock'))}><HubIcon /></IconButton></span>
                 </Tooltip>
-                <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
+                <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
               </Stack>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tildify(root)}</Typography>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
@@ -246,8 +234,7 @@ export default function WikiPanel() {
             )}
           </>
         )}
-      </Stack>
-      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
+      </Rail>
 
       {/* right: read-only viewer (or link graph) */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
@@ -266,7 +253,7 @@ export default function WikiPanel() {
           </>
         ) : !sel ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <EmptyState icon={<MenuBookIcon />} title="Select a page" description="Browse a wiki on the left to view its content here." />
+            <EmptyState icon={<MenuBookIcon />} title="Select a page" description="Browse on the left to view here." />
           </Box>
         ) : loadingFile ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>

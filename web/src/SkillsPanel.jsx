@@ -16,62 +16,33 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import SchoolIcon from '@mui/icons-material/School';
-import { StatusPill, SearchInput, EmptyState } from '@zapac/mui-theme';
+import { StatusPill, EmptyState } from '@zapac/mui-theme';
 import DirPicker from './DirPicker.jsx';
 import MarkdownBody from './MarkdownBody.jsx';
 import { tildify, untildify } from './paths.js';
-import { useResizable, ResizeHandle } from './useResizable.jsx';
+import Rail from './panelkit/Rail.jsx';
+import RailSearch from './panelkit/RailSearch.jsx';
+import { useRootList } from './panelkit/useRootList.js';
 
 // Skills viewer: tree of roots → scopes → skills (left), rendered SKILL.md
 // (right). Read-only — no write. Each root's layout (grouped vs flat) is
 // auto-detected server-side; the server derives paths from (root, scope, skill).
 export default function SkillsPanel() {
-  const [roots, setRoots] = useState([]);
-  const [rootsLoaded, setRootsLoaded] = useState(false);
+  const { roots, shownRoots, remember, forget, loaded } = useRootList('/skills');
   const [picking, setPicking] = useState(false);
   const [dataByRoot, setDataByRoot] = useState({}); // root -> { flat, scopes, error }
   const [q, setQ] = useState('');
   const [expandedRoots, setExpandedRoots] = useState(() => new Set());
   const [expandedScopes, setExpandedScopes] = useState(() => new Set()); // keys: `${root}::${scope}`
-  const [collapsed, setCollapsed] = useState(false);
   const [sel, setSel] = useState(null); // { root, scope, skill, flat }
   const [skill, setSkill] = useState(null); // { name, description, triggers, body }
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
-  const railW = useResizable('sing-skills-w', 300);
-
-  // Load the FS-persisted root list once on mount (skills load via the [roots] effect).
-  useEffect(() => {
-    fetch('/skills/roots').then((r) => r.json()).then((d) => { if (d.roots?.length) setRoots(d.roots); }).catch(() => {}).finally(() => setRootsLoaded(true));
-  }, []);
-
-  // Merge paths into the list (MRU-first, deduped, capped) and persist to FS.
-  const remember = (paths) => setRoots((prev) => {
-    const next = [...new Set([...paths, ...prev])].slice(0, 50);
-    fetch('/skills/roots', {
-      method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ roots: next }),
-    }).catch(() => {});
-    return next;
-  });
-
-  // Drop a path from the list and persist to FS. Match on the same normalized
-  // key shownRoots dedups by, so collapsed variants (~ vs expanded home) all go.
-  const normKey = (p) => tildify(p).replace(/\\/g, '/').toLowerCase();
-  const forget = (p) => setRoots((prev) => {
-    const k = normKey(p);
-    const next = prev.filter((x) => normKey(x) !== k);
-    fetch('/skills/roots', {
-      method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ roots: next }),
-    }).catch(() => {});
-    return next;
-  });
 
   // Fetch each root's skills independently — one root's slow/failed fetch
   // doesn't block the others.
   useEffect(() => {
-    if (!rootsLoaded) return;
+    if (!loaded) return;
     let cancelled = false;
     roots.forEach((r) => {
       fetch(`/skills?root=${encodeURIComponent(untildify(r))}`).then((res) => res.json()).then((d) => {
@@ -80,7 +51,7 @@ export default function SkillsPanel() {
       }).catch(() => { if (!cancelled) setDataByRoot((prev) => ({ ...prev, [r]: { flat: false, scopes: [], error: 'failed to load skills' } })); });
     });
     return () => { cancelled = true; };
-  }, [roots, rootsLoaded]);
+  }, [roots, loaded]);
 
   const pickRoot = (p) => { remember([untildify(p)]); setPicking(false); };
 
@@ -103,12 +74,6 @@ export default function SkillsPanel() {
       else setSkill({ name: d.name, description: d.description, triggers: d.triggers || [], body: d.body });
     }).catch(() => setErr('failed to load skill')).finally(() => setLoading(false));
   };
-
-  // Dedup on a normalized key (tildified, forward slashes, lowercased) so `~`
-  // and its expanded home path, or `/` vs `\`, don't show as separate entries.
-  const shownRoots = [...new Map(
-    roots.map((p) => [normKey(p), p]),
-  ).values()].sort((a, b) => normKey(a).localeCompare(normKey(b))); // sort by displayed (tildified) form
 
   // Client-side filter — a root whose own path matches keeps all its scopes;
   // otherwise only scopes/skills (name + description) that match.
@@ -137,26 +102,16 @@ export default function SkillsPanel() {
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* left: root → scope → skill tree (collapsible) */}
-      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
-        {collapsed ? (
-          <IconButton size="small" onClick={() => setCollapsed(false)} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>
-        ) : (
+      <Rail storageKey="sing-skills-w" defaultWidth={300} collapsedTitle="Show skill paths">
+        {({ collapse }) => (
           <>
         <Box sx={{ p: 1.5, pb: 0.5 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
-              <SearchInput placeholder="Search skills…" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} />
-              {q && (
-                <IconButton size="small" onClick={() => setQ('')} aria-label="Clear search"
-                  sx={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', '&:hover': { transform: 'translateY(-50%)' } }}>
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              )}
-            </Box>
+            <RailSearch placeholder="Search skills…" value={q} onChange={setQ} />
             <Tooltip title="Select skills folder" placement="bottom" disableInteractive>
               <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
             </Tooltip>
-            <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
+            <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
           </Stack>
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
             {totalScopes} scope{totalScopes === 1 ? '' : 's'} · {totalSkills} skill{totalSkills === 1 ? '' : 's'}
@@ -225,14 +180,13 @@ export default function SkillsPanel() {
         </List>
           </>
         )}
-      </Stack>
-      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
+      </Rail>
 
       {/* right: rendered SKILL.md */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
         {!sel ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <EmptyState icon={<SchoolIcon />} title="Select a skill" description="Browse roots on the left to view a skill here." />
+            <EmptyState icon={<SchoolIcon />} title="Select a skill" description="Browse on the left to view here." />
           </Box>
         ) : loading ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>

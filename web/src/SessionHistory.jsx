@@ -18,12 +18,18 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChatBubbleOutlinedIcon from '@mui/icons-material/ChatBubbleOutlined';
 import SubjectIcon from '@mui/icons-material/Subject';
-import SearchIcon from '@mui/icons-material/Search';
 import HistoryIcon from '@mui/icons-material/History';
-import { SearchInput, EmptyState } from '@zapac/mui-theme';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import { EmptyState } from '@zapac/mui-theme';
 import TranscriptView from './TranscriptView.jsx';
-import { tildify } from './paths.js';
-import { useResizable, ResizeHandle } from './useResizable.jsx';
+import DirPicker from './DirPicker.jsx';
+import { tildify, untildify } from './paths.js';
+import Rail from './panelkit/Rail.jsx';
+import RailSearch from './panelkit/RailSearch.jsx';
+
+// Transcripts root persists across sessions on the daemon FS. Default
+// ~/.claude/projects; loaded from /sessions/root on mount.
+const DEFAULT_ROOT = '~/.claude/projects';
 
 function relTime(ms) {
   if (!Number.isFinite(ms)) return ''; // subagent/search opens carry no mtime — avoid new Date(NaN) throw
@@ -71,7 +77,6 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   const [loadingFile, setLoadingFile] = useState(false);
   const [matches, setMatches] = useState(null); // cross-session results (scope 'all')
   const [capped, setCapped] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
   const [chatMsgs, setChatMsgs] = useState([]);
   const [chatInput, setChatInput] = useState('');
   const [streaming, setStreaming] = useState(false);
@@ -82,43 +87,55 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   const [loadErr, setLoadErr] = useState(null);
   const [sessErr, setSessErr] = useState(null);
   const [expanded, setExpanded] = useState(new Set()); // "project:id" -> subagent tree expanded
-  const railW = useResizable('sing-sesshist-w', 340);
+  const [root, setRoot] = useState(DEFAULT_ROOT);
+  const [picking, setPicking] = useState(false);
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
 
+  // Load the FS-persisted root once on mount (sessions load via the [root] effect).
   useEffect(() => {
-    const load = () => fetch('/sessions').then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.'));
+    fetch('/sessions/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    const load = () => fetch(`/sessions?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.'));
     load();
     const iv = setInterval(load, 5000);
     return () => clearInterval(iv);
-  }, []);
+  }, [root]);
 
   // Cross-session search (scope 'all'): results replace the left list, like
   // Memory. Scope 'one' filters the open transcript in the right view instead.
   const searchAll = useCallback((query) => {
     if (!query.trim()) { setMatches(null); setCapped(false); return; }
-    fetch(`/sessions/search?q=${encodeURIComponent(query.trim())}`).then((r) => r.json()).then((d) => {
+    fetch(`/sessions/search?q=${encodeURIComponent(query.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setMatches(d.results || []); setCapped(!!d.capped);
     });
-  }, []);
-  useEffect(() => { if (scope === 'all') { const id = setTimeout(() => searchAll(q), 250); return () => clearTimeout(id); } }, [q, scope, searchAll]);
+  }, [root]);
+  useEffect(() => { if (scope === 'all') { const id = setTimeout(() => searchAll(q), 250); return () => clearTimeout(id); } }, [q, scope, root, searchAll]);
 
   // Batch-fetch cost + token breakdown; merge into the id-keyed stats map.
   const loadStats = useCallback((items) => {
     const list = (items || []).filter((it) => it?.project && it?.id).map((it) => ({ project: it.project, id: it.id }));
     if (!list.length) return;
-    fetch('/sessions/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list }) })
+    fetch('/sessions/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list, root: untildify(root) }) })
       .then((r) => r.json()).then((d) => setStats((prev) => ({ ...prev, ...(d.stats || {}) }))).catch(() => {});
-  }, []);
+  }, [root]);
 
   const open = (item) => {
     if (item.project === sel?.project && item.id === sel?.id) return;
     setSel(item); setMatches(null); setQ(''); setLoadErr(null);
     loadStats([item]); // ensure detail-header stats even when opened from search
     setLoadingFile(true);
-    fetch(`/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}`).then((r) => r.json()).then((d) => {
+    fetch(`/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setTranscript(d.ok ? d : null);
     }).catch(() => { setTranscript(null); setLoadErr('Failed to load transcript.'); }).finally(() => setLoadingFile(false));
+  };
+
+  const pickRoot = (p) => {
+    setRoot(p); setPicking(false);
+    setSel(null); setTranscript(null); setMatches(null); setQ(''); setPage(1);
+    fetch('/sessions/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
   };
 
   // Chat: stream deltas from the WS into the last assistant message.
@@ -162,7 +179,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
     setChatMsgs((prev) => [...prev, { role: 'user', content: text }, { role: 'assistant', content: '', streaming: true }]);
     setStreaming(true); setAuthNeeded(false); setChatInput('');
     const one = scope === 'one' && sel;
-    sendMsg({ t: 'chat', chatId, scope: one ? 'one' : 'all', project: one ? sel.project : null, id: one ? sel.id : null, question: text, history });
+    sendMsg({ t: 'chat', chatId, scope: one ? 'one' : 'all', project: one ? sel.project : null, id: one ? sel.id : null, question: text, history, root: untildify(root) });
   };
 
   // scope 'one' needs a selected session; fall back to 'all' when none.
@@ -188,16 +205,18 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* left: search + session list (collapsible) */}
-      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
-        {collapsed ? (
-          <IconButton size="small" onClick={() => setCollapsed(false)} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>
-        ) : (
+      <Rail storageKey="sing-sesshist-w" defaultWidth={340} collapsedTitle="Show transcripts">
+        {({ collapse }) => (
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search transcripts…" value={q} onChange={setQ} shortcut="" /></Box>
-                <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
+                <RailSearch placeholder="Search transcripts…" value={q} onChange={setQ} />
+                <Tooltip title="Select transcripts folder" placement="bottom" disableInteractive>
+                  <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
+                </Tooltip>
+                <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
               </Stack>
+              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tildify(root)}</Typography>
               <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
                 {['all', 'one'].map((s) => (
                   <Tooltip key={s} title={s === 'one' ? 'Search + chat about the selected transcript' : 'Search + chat across all transcripts'}>
@@ -301,8 +320,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
             </Box>
           </>
         )}
-      </Stack>
-      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
+      </Rail>
 
       {/* right: View / Chat */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0 }} spacing={0}>
@@ -387,11 +405,13 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
               />
-              <Button variant="contained" onClick={sendChat} disabled={streaming || authNeeded || !chatInput.trim()}>Send</Button>
+              <Button size="small" variant="contained" onClick={sendChat} disabled={streaming || authNeeded || !chatInput.trim()}>Send</Button>
             </Stack>
           </Stack>
         )}
       </Stack>
+
+      {picking && <DirPicker start={untildify(root)} onPick={pickRoot} onClose={() => setPicking(false)} />}
     </Box>
   );
 }

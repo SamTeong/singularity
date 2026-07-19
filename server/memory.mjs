@@ -50,7 +50,8 @@ function memoryDirs(root) {
   return readdirSync(root, { withFileTypes: true })
     .filter((d) => d.isDirectory())
     .map((d) => ({ project: d.name, dir: join(root, d.name, 'memory') }))
-    .filter((x) => existsSync(x.dir));
+    .filter((x) => existsSync(x.dir))
+    .sort((a, b) => a.project.localeCompare(b.project));
 }
 
 // Path guard: must resolve to <root>/<project>/memory/<...>.md, no escape.
@@ -67,7 +68,7 @@ export function isMemoryPath(p, rootRaw) {
 export function listFiles(rootRaw) {
   const out = [];
   for (const { project, dir } of memoryDirs(resolveRoot(rootRaw))) {
-    for (const f of readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.md'))) {
+    for (const f of readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.md')).sort((a, b) => a.localeCompare(b))) {
       out.push({ project, file: f, path: join(dir, f) });
     }
   }

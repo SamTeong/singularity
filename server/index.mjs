@@ -18,7 +18,7 @@ import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot } from './wiki.mjs';
-import { listSessions, readSession, searchSessions, subagentsFor } from './sessions.mjs';
+import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { listSkills, readSkill, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
@@ -394,16 +394,20 @@ app.get('/skill', async (req, reply) => {
 });
 
 // Session history: list transcripts (reverse-chrono), read one, search across
-// all or one. Chat goes over the WS (streaming) — see pty-ws.mjs.
-app.get('/sessions', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive }) }));
+// all or one, under a client-selected root (default ~/.claude/projects).
+// FS-persisted root choice (survives browser cache clear). Chat goes over the
+// WS (streaming) — see pty-ws.mjs.
+app.get('/sessions/root', async () => ({ root: getSessionsRoot() }));
+app.put('/sessions/root', async (req) => setSessionsRoot(req.body?.root));
+app.get('/sessions', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive, root: req.query.root }) }));
 app.get('/session', async (req, reply) => {
-  const { project, id } = req.query || {};
+  const { project, id, root } = req.query || {};
   if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
-  const r = await readSession(project, id);
+  const r = await readSession(project, id, root);
   if (!r.ok) reply.code(404);
   return r;
 });
-app.get('/sessions/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id }));
+app.get('/sessions/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id, root: req.query.root }));
 // Live subagents nested under the dock's agent rows (indicator only). Scoped to
 // live agents so it stays cheap — no full 500-session scan like /sessions.
 app.get('/subagents', async () => {
@@ -419,8 +423,9 @@ app.get('/subagents', async () => {
 // page flip is one request; stats.mjs caches each parse by mtime/size).
 app.post('/sessions/stats', async (req) => {
   const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
+  const root = req.body?.root;
   const stats = {};
-  for (const it of items) if (it?.project && it?.id) stats[it.id] = sessionStats(it.project, it.id);
+  for (const it of items) if (it?.project && it?.id) stats[it.id] = sessionStats(it.project, it.id, root);
   return { stats };
 });
 
