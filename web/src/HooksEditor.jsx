@@ -72,6 +72,19 @@ export default function HooksEditor() {
 
   // Drop a root from the list and persist to FS.
   const normKey = (p) => tildify(p).replace(/\\/g, '/').toLowerCase();
+
+  // Dedup groups on normalized cwd (~ vs expanded home, / vs \) — picking home
+  // while ~ is present otherwise renders two identical groups. First-seen wins,
+  // order preserved (mirrors ConfigEditor's shownList dedup).
+  const shownGroups = useMemo(() => {
+    const seen = new Set();
+    return groups.filter((g) => {
+      const k = normKey(g.cwd);
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }, [groups]);
   const forget = (p) => setRootList((prev) => {
     const k = normKey(p);
     const next = prev.filter((x) => normKey(x) !== k);
@@ -169,7 +182,7 @@ export default function HooksEditor() {
                 </>
               ) : (
                 <>
-                  {groups.map((g) => (
+                  {shownGroups.map((g) => (
                     <React.Fragment key={g.cwd}>
                       <ListSubheader disableSticky sx={{ bgcolor: 'transparent', lineHeight: '28px', px: 1, '&:hover .del': { opacity: 1 } }}>
                         <Stack direction="row" sx={{ alignItems: 'center' }}>
@@ -189,7 +202,7 @@ export default function HooksEditor() {
                       {g.files.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 11, px: 2, py: 0.5 }}>No hooks.</Typography>}
                     </React.Fragment>
                   ))}
-                  {groups.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No hook roots.</Typography>}
+                  {shownGroups.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No hook roots.</Typography>}
                 </>
               )}
             </List>

@@ -2,12 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 // hooks.mjs imports app-dir.mjs (STATE_DIR), which throws without SINGULARITY_HOME.
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
-const { listHooks, searchHooks, writeHook, getHookRoots, setHookRoots } = await import('./hooks.mjs');
+const { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } = await import('./hooks.mjs');
 
 function makeRoot(files) {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-hooks-'));
@@ -48,6 +48,33 @@ test('writeHook writes a .bak on second write; guard rejects non-hooks path', ()
   const bad = writeHook(join(cwd, 'evil.txt'), 'x');
   assert.equal(bad.ok, false);
   assert.match(bad.error, /bad path/);
+});
+
+test('readHook reads back real hook content; missing file → exists:false', () => {
+  const cwd = makeRoot({ 'r.mjs': 'hello world' });
+  const p = join(cwd, '.claude', 'hooks', 'r.mjs');
+  const r = readHook(p);
+  assert.equal(r.exists, true);
+  assert.equal(r.content, 'hello world');
+  // A path under .claude/hooks that doesn't exist → exists:false, empty content.
+  const miss = readHook(join(cwd, '.claude', 'hooks', 'nope.mjs'));
+  assert.equal(miss.exists, false);
+  assert.equal(miss.content, '');
+});
+
+test('guard rejects traversal that climbs out of .claude/hooks (resolved, not raw)', () => {
+  const cwd = makeRoot({ 'w.mjs': 'v1' });
+  const hooksDir = join(cwd, '.claude', 'hooks');
+  // Raw string: contains the segment but climbs out via `..`. Built by hand (not
+  // path.join, which would normalize `..` away and mask the bug).
+  const evil = `${hooksDir}${sep}..${sep}..${sep}escape.txt`;
+  const w = writeHook(evil, 'x');
+  assert.equal(w.ok, false);
+  assert.match(w.error, /bad path/);
+  assert.equal(existsSync(join(cwd, 'escape.txt')), false); // nothing written outside
+  const r = readHook(evil);
+  assert.equal(r.exists, false);
+  assert.equal(r.error, 'bad path');
 });
 
 test('hook roots persist to FS: default ~, dedup, roundtrip', () => {

@@ -3,14 +3,17 @@
 // paths are guarded to contain a .claude/hooks/ segment so this can't read/write
 // arbitrary files. Roots are an independent FS-persisted list under STATE_DIR.
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { join, sep, resolve } from 'node:path';
 import { STATE_DIR } from './app-dir.mjs';
 
-// A client path must live under a `.claude/hooks/` segment. Normalize `/`→sep
-// (browser may send forward slashes) before testing.
+// A client path must live under a `.claude/hooks/` segment. Resolve first so `..`
+// is collapsed (a raw string can contain the segment yet climb out of it), then
+// test the RESOLVED absolute path. Returns the resolved path on success, else null.
 const HOOKS_SEG = `${sep}.claude${sep}hooks${sep}`;
 function guard(path) {
-  return typeof path === 'string' && path.replace(/\//g, sep).includes(HOOKS_SEG);
+  if (typeof path !== 'string' || !path) return null;
+  const abs = resolve(path);
+  return abs.replace(/\//g, sep).includes(HOOKS_SEG) ? abs : null;
 }
 
 // Bounded recursive walk of <cwd>/.claude/hooks — files only, sorted by rel.
@@ -56,19 +59,21 @@ export function searchHooks(roots, q) {
 }
 
 export function readHook(path) {
-  if (!guard(path)) return { path, exists: false, error: 'bad path' };
-  const exists = existsSync(path);
-  return { path, exists, content: exists ? readFileSync(path, 'utf8') : '' };
+  const abs = guard(path);
+  if (!abs) return { path, exists: false, error: 'bad path' };
+  const exists = existsSync(abs);
+  return { path: abs, exists, content: exists ? readFileSync(abs, 'utf8') : '' };
 }
 
 // Write raw content back with a .bak backup (mirror writeConfig). No JSON
 // validation — hook files are scripts, not JSON.
 export function writeHook(path, content) {
-  if (!guard(path)) return { ok: false, error: 'bad path' };
+  const abs = guard(path);
+  if (!abs) return { ok: false, error: 'bad path' };
   try {
-    if (existsSync(path)) copyFileSync(path, `${path}.bak`);
-    writeFileSync(path, content);
-    return { ok: true, backup: existsSync(`${path}.bak`), path };
+    if (existsSync(abs)) copyFileSync(abs, `${abs}.bak`);
+    writeFileSync(abs, content);
+    return { ok: true, backup: existsSync(`${abs}.bak`), path: abs };
   } catch (e) {
     return { ok: false, error: e.message };
   }
