@@ -129,9 +129,11 @@ export default function RulesPanel() {
   // and its expanded home path, or `/` vs `\`, don't show as separate entries.
   const shownRoots = [...new Map(
     roots.map((p) => [normKey(p), p]),
-  ).values()].sort((a, b) => a.localeCompare(b));
+  ).values()].sort((a, b) => normKey(a).localeCompare(normKey(b))); // sort by displayed (tildified) form
 
-  const filesByRoot = (root) => files.filter((f) => f.root === root);
+  // Group by normKey (tildified/slash/case-folded) so a file's base and the
+  // shownRoots key match even across ~ vs expanded-home or / vs \ variants.
+  const filesByRoot = (root) => files.filter((f) => normKey(f.root) === normKey(root));
 
   return (
     <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>

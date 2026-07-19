@@ -83,7 +83,7 @@ export default function HooksEditor() {
       if (seen.has(k)) return false;
       seen.add(k);
       return true;
-    });
+    }).sort((a, b) => normKey(a.cwd).localeCompare(normKey(b.cwd))); // alpha by displayed form
   }, [groups]);
   const forget = (p) => setRootList((prev) => {
     const k = normKey(p);

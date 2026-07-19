@@ -19,7 +19,7 @@ import { searchMemory, listFiles, readMemoryFile, writeMemoryFile } from './memo
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions } from './sessions.mjs';
-import { listSkills, readSkill, getSkillsRoot, setSkillsRoot } from './skills.mjs';
+import { listSkills, readSkill, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
@@ -382,8 +382,8 @@ app.get('/wiki/file', async (req, reply) => {
 // Read-only — no write. Paths server-derived from (scope, skill).
 // FS-persisted skills root choice (survives browser cache clear). Root layout
 // (grouped scope dir vs flat .claude/skills) is auto-detected server-side.
-app.get('/skills/root', async () => ({ root: getSkillsRoot() }));
-app.put('/skills/root', async (req) => setSkillsRoot(req.body?.root));
+app.get('/skills/roots', async () => ({ roots: getSkillsRoots() }));
+app.put('/skills/roots', async (req) => setSkillsRoots(req.body?.roots));
 app.get('/skills', async (req) => listSkills(req.query.root));
 app.get('/skill', async (req, reply) => {
   const r = readSkill(req.query.root, req.query.scope, req.query.skill, req.query.flat === '1');

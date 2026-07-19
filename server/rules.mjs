@@ -1,6 +1,7 @@
-// Rules backend: a list of persisted rule roots (default ~/.claude/rules),
-// each a recursive .md tree, browsable/searchable/editable. Model on
-// wiki.mjs (recursive walk, resolveRoot, mtime line cache) + config.mjs
+// Rules backend: a list of persisted rule *base* roots (default ~), each
+// scanned at <base>/.claude/rules — the Claude Code project convention. Pick a
+// project (or home) dir; its .claude/rules tree is browsable/searchable/editable.
+// Model on wiki.mjs (recursive walk, resolveRoot, mtime line cache) + config.mjs
 // (roots persistence) + memory.mjs (write guard).
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
@@ -14,13 +15,19 @@ const FILE_CAP = 2000;
 const SKIP_DIRS = new Set(['.git', '.obsidian', '.vscode', 'node_modules', '.next', '.cache', 'dist', 'build']);
 
 // Rule root list: FS-persisted (survives browser cache clear) under STATE_DIR.
-// Seeded with '~/.claude/rules' when absent/empty.
+// Seeded with '~' (→ ~/.claude/rules) when absent/empty.
 const ROOTS_FILE = join(STATE_DIR, 'rules-roots.json');
 export function getRulesRoots() {
   try {
     const r = JSON.parse(readFileSync(ROOTS_FILE, 'utf8'));
-    return Array.isArray(r) && r.length ? r : ['~/.claude/rules'];
-  } catch { return ['~/.claude/rules']; }
+    return Array.isArray(r) && r.length ? r : ['~'];
+  } catch { return ['~']; }
+}
+
+// The rules dir for a picked base root: <base>/.claude/rules (absolute).
+function rulesDir(base) {
+  const r = resolveRoot(base);
+  return r ? resolve(join(r, '.claude', 'rules')) : null;
 }
 export function setRulesRoots(roots) {
   const clean = [...new Set((roots || []).filter((r) => typeof r === 'string' && r))].slice(0, 50);
@@ -53,9 +60,10 @@ async function readLines(p) {
   return lines;
 }
 
-// Recursive .md walk under a root. Bounded by FILE_CAP. rel is relative to
-// root, forward-slashed (e.g. "sub/foo.md"); file is the basename.
-async function walk(root, dir, out) {
+// Recursive .md walk under scanDir. Bounded by FILE_CAP. `root` is the base the
+// user picked (used verbatim so the client can group files under it); rel is
+// relative to scanDir, forward-slashed (e.g. "sub/foo.md"); file is the basename.
+async function walk(root, scanDir, dir, out) {
   let ents;
   try { ents = await readdir(dir, { withFileTypes: true }); } catch { return; }
   for (const ent of ents) {
@@ -63,39 +71,39 @@ async function walk(root, dir, out) {
     const full = join(dir, ent.name);
     if (ent.isDirectory()) {
       if (SKIP_DIRS.has(ent.name)) continue;
-      await walk(root, full, out);
+      await walk(root, scanDir, full, out);
       if (out.length >= FILE_CAP) return;
     } else if (ent.isFile() && ent.name.toLowerCase().endsWith('.md')) {
-      const rel = full.slice(root.length).split(sep).join('/').replace(/^\//, '');
+      const rel = full.slice(scanDir.length).split(sep).join('/').replace(/^\//, '');
       out.push({ root, path: full, rel, file: ent.name });
       if (out.length >= FILE_CAP) return;
     }
   }
 }
 
-// List .md files under each of the given roots. Skips roots that don't exist.
+// List .md files under each base's <base>/.claude/rules. Skips missing dirs.
 export async function listRuleFiles(roots) {
   const files = [];
   let capped = false;
   for (const raw of roots || []) {
-    const r = resolveRoot(raw);
-    if (!r || !existsSync(r)) continue;
-    await walk(r, r, files);
+    const dir = rulesDir(raw);
+    if (!dir || !existsSync(dir)) continue;
+    await walk(raw, dir, dir, files);
     if (files.length >= FILE_CAP) { capped = true; break; }
   }
   return { files, capped };
 }
 
-// Search .md content across every root.
+// Search .md content across every base's .claude/rules.
 export async function searchRules(roots, q) {
   const ql = (q || '').toLowerCase();
   if (!ql) return { results: [], capped: false };
   const results = [];
   for (const raw of roots || []) {
-    const r = resolveRoot(raw);
-    if (!r || !existsSync(r)) continue;
+    const dir = rulesDir(raw);
+    if (!dir || !existsSync(dir)) continue;
     const files = [];
-    await walk(r, r, files);
+    await walk(raw, dir, dir, files);
     for (const f of files) {
       const lines = await readLines(f.path);
       if (!lines) continue;
@@ -110,15 +118,15 @@ export async function searchRules(roots, q) {
   return { results, capped: false };
 }
 
-// Path guard: must resolve to <root>/<...>.md under ONE of the persisted
-// roots — server-derived, never trusts the client's root.
+// Path guard: must resolve to a .md under ONE base's <base>/.claude/rules —
+// server-derived, never trusts the client's root.
 export function isRulePath(p) {
   if (!p) return false;
   const abs = resolve(p);
   if (!abs.toLowerCase().endsWith('.md')) return false;
   return getRulesRoots().some((raw) => {
-    const r = resolveRoot(raw);
-    return r && (abs === r || abs.startsWith(r + sep));
+    const dir = rulesDir(raw);
+    return dir && (abs === dir || abs.startsWith(dir + sep));
   });
 }
 

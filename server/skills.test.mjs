@@ -8,7 +8,7 @@ import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-skills-test-'));
 const root = join(scratch, 'scopes');
@@ -34,7 +34,8 @@ mkdirSync(join(flatRoot, 'declawed'), { recursive: true });
 writeFileSync(join(flatRoot, 'declawed', 'SKILL.md'), '---\nname: declawed\ndescription: De-slop text.\n---\n\n# declawed\n\nbody');
 mkdirSync(join(flatRoot, 'not-a-skill'), { recursive: true }); // no SKILL.md → skipped
 
-const { listSkills, readSkill } = await import('./skills.mjs');
+const { listSkills, readSkill, getSkillsRoots, setSkillsRoots } = await import('./skills.mjs');
+const { STATE_DIR } = await import('./app-dir.mjs');
 
 test('listSkills: grouped — excludes common, skips scopes with no skills, carries description', () => {
   const { scopes, flat } = listSkills(root);
@@ -83,4 +84,37 @@ test('readSkill: flat resolves <root>/<skill>/SKILL.md, ignores scope', () => {
   assert.ok(r.ok);
   assert.equal(r.name, 'declawed');
   assert.equal(readSkill(flatRoot, null, '..', true).ok, false, 'bad skill name still rejected in flat');
+});
+
+// Runs before any roots file (new or old) exists, so this exercises the final
+// fallback: the user's ~/.claude/skills (a flat skills dir).
+test('getSkillsRoots: defaults to ~/.claude/skills when nothing is configured', () => {
+  assert.deepEqual(getSkillsRoots(), [join(homedir(), '.claude', 'skills')]);
+});
+
+// Runs before any setSkillsRoots call, so `skills-roots.json` doesn't exist yet
+// and the old single-root file is the only thing to migrate from.
+test('getSkillsRoots: migrates from old skills-root.json when present', () => {
+  mkdirSync(STATE_DIR, { recursive: true });
+  writeFileSync(join(STATE_DIR, 'skills-root.json'), JSON.stringify({ root }));
+  assert.deepEqual(getSkillsRoots(), [root]);
+});
+
+test('setSkillsRoots: persists + getSkillsRoots reads back the array', () => {
+  const r = setSkillsRoots([root, flatRoot]);
+  assert.deepEqual(r, { ok: true, roots: [root, flatRoot] });
+  assert.deepEqual(getSkillsRoots(), [root, flatRoot]);
+});
+
+test('setSkillsRoots: dedups and caps at 50', () => {
+  const many = Array.from({ length: 60 }, (_, i) => `${root}-${i % 10}`);
+  const r = setSkillsRoots(many);
+  assert.equal(r.ok, true);
+  assert.equal(r.roots.length, 10, 'deduped to 10 unique values');
+  assert.deepEqual(getSkillsRoots(), r.roots);
+});
+
+test('setSkillsRoots: bad input (non-array) reports ok:false', () => {
+  assert.equal(setSkillsRoots('not-an-array').ok, false);
+  assert.equal(setSkillsRoots(null).ok, false);
 });

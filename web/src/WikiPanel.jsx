@@ -163,7 +163,7 @@ export default function WikiPanel() {
                     </IconButton>
                   )}
                 </Box>
-                <Tooltip title="Pick wiki folder" placement="bottom" disableInteractive>
+                <Tooltip title="Select wiki folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
                 </Tooltip>
                 <Tooltip title={graphWiki ? `Graph of ${graphWiki}` : 'Link graph'} placement="bottom" disableInteractive>

@@ -146,7 +146,7 @@ export default function ConfigEditor() {
   // and its expanded home path, or `/` vs `\`, don't show as separate entries.
   const shownList = [...new Map(
     configList.map((p) => [normKey(p), p]),
-  ).values()].sort((a, b) => a.localeCompare(b));
+  ).values()].sort((a, b) => normKey(a).localeCompare(normKey(b))); // sort by displayed (tildified) form
 
   if (loading && !data) return <Box sx={{ p: 3 }}><Typography color="text.secondary">Loading config…</Typography></Box>;
 
