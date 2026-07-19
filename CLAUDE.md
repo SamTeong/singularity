@@ -30,10 +30,11 @@ Backend modules → routes in `server/index.mjs`. Add a concern = new module + r
 ## State
 
 Owned app state → `SINGULARITY_HOME` (required, no default — set in `.env`; `APP_DIR`):
-- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `ollama.json`, `tickets/<id>/`, `cost/<session_id>.json`
+- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `ollama.json`, `cost/<session_id>.json`
 - `cache/` (disposable): `usage-cache.json`, `pw-ollama-profile/`
-- `worktrees/` (git-registered, lives at `APP_DIR` root)
-Single source = `server/app-dir.mjs` (`APP_DIR`/`STATE_DIR`/`CACHE_DIR`/`WORKTREES_DIR`). Route all new state through `reg` from `agents.mjs` — never hardcode `~/.singularity`. `migrate-state.mjs` (imported by `index.mjs`) moves the pre-split flat layout into `state/`+`cache/` once.
+
+`.worktrees/` + `.tickets/<id>/` live at the **repo root** (git-registered / gitignored), NOT under `APP_DIR` — Claude only honors repo-controllable permissions (allow-rules/hooks) for paths inside the trusted project root; external paths fire Task-permission prompts.
+Single source = `server/app-dir.mjs` (`APP_DIR`/`STATE_DIR`/`CACHE_DIR`/`WORKTREES_DIR`/`TICKETS_DIR`). Route all new state through `reg` from `agents.mjs` — never hardcode `~/.singularity`. `migrate-state.mjs` (imported by `index.mjs`) moves the pre-split flat layout into `state/`+`cache/` once.
 
 External (read-only, not owned): `~/.claude/projects` (session transcripts), `~/.claude/.credentials.json` (OAuth), `~/.agents` (spend, skill-scopes), `~/wiki` (client-chosen root).
 

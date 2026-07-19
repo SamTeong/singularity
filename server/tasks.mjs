@@ -17,10 +17,11 @@ const STATUSLINE_SCRIPT = join(__dirname, 'statusline-capture.mjs');
 
 const TASKS_FILE = join(reg.STATE_DIR, 'tasks.json');
 const WORKTREE_ROOT = reg.WORKTREES_DIR;
-// Ticket artifacts (Requirements.md + Plan.md) live under state/ — stable and
-// cwd-independent, since a task's working directory varies (worktree or arbitrary
-// repo) and the source of truth can't live there.
-const TICKETS_ROOT = join(reg.STATE_DIR, 'tickets');
+// Ticket artifacts (Requirements.md + Plan.md) live at the repo root (trusted —
+// so Claude honors repo-controllable permissions) — stable and cwd-independent,
+// since a task's working directory varies (worktree or arbitrary repo) and the
+// source of truth can't live there.
+const TICKETS_ROOT = reg.TICKETS_DIR;
 const COLUMNS = ['todo', 'inprogress', 'inreview', 'done'];
 const PORT = Number(process.env.PORT);
 const MAX_REVIEW_REJECTS = 3;
