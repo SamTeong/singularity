@@ -5,13 +5,13 @@ Local web UI to run + steer multiple Claude Code agents. Browser shell + loopbac
 ## Run
 
 ```
-npm install          # once — @zapac/mui-theme is vendored (file:vendor/zapac-mui-theme-*.tgz)
-npm start            # build web + serve on http://127.0.0.1:4317
-npm run dev          # daemon (:4317) + Vite (:5317) → open :5317; Vite proxies /ws + REST to daemon
-npm test             # node --test "server/*.test.mjs"
+pnpm install         # once — @zapac/mui-theme is vendored (file:vendor/zapac-mui-theme-*.tgz)
+pnpm start           # build web + serve on http://127.0.0.1:4317
+pnpm dev             # daemon (:4317) + Vite (:5317) → open :5317; Vite proxies /ws + REST to daemon
+pnpm test            # node --test "server/*.test.mjs"
 ```
 
-Pieces separately: `npm run server` / `npm run web`. Shell: PowerShell primary; Bash tool POSIX only.
+Pieces separately: `pnpm server` / `pnpm web`. Shell: PowerShell primary; Bash tool POSIX only.
 
 Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `PORT`, `CLAUDE_BIN`, `OLLAMA_BIN`, `SING_SCOPE_ROOT`, `SING_USAGE_SKILL`, `SING_USAGE_REPORTS` (optional `SING_TOKEN`). Copy `.env.example` → `.env` (gitignored) and fill in. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
 

@@ -6,15 +6,15 @@ See `PLAN.md` for full design and phase plan.
 ## Run
 
 ```
-npm install          # once
-npm start            # build web + serve on http://127.0.0.1:4317
+pnpm install         # once
+pnpm start           # build web + serve on http://127.0.0.1:4317
 ```
 
 Dev (live-reload web):
 ```
-npm run dev          # daemon (127.0.0.1:4317) + Vite (127.0.0.1:5317) → open :5317
+pnpm dev             # daemon (127.0.0.1:4317) + Vite (127.0.0.1:5317) → open :5317
 ```
-Vite proxies `/ws` + all REST to the daemon. Run pieces separately with `npm run server` / `npm run web`.
+Vite proxies `/ws` + all REST to the daemon. Run pieces separately with `pnpm server` / `pnpm web`.
 
 ## Features
 
@@ -41,4 +41,4 @@ Optional token (defense-in-depth): set `SING_TOKEN=<secret>` — data endpoints 
 - `claude` binary is PATH-resolved at daemon start (Windows node-pty needs a real exe path). Override with `CLAUDE_BIN=<path>`.
 - App data (registry + recent repos, tasks, cron jobs, ticket requirements/plans) lives under `~\.singularity\` (`agents.json`, `tasks.json`, `crons.json`, `tickets/<id>/`). Override the location with `SINGULARITY_HOME=<path>`.
 - Per-agent cost is shown as **turns + total tokens**, not `$` — accurate dollar cost needs per-model pricing; use your spend tooling for that.
-- **Not portable as-is:** the UI theme is a local tarball dep (`@zapac/mui-theme` → `file:../_references/...`), so `npm install` only succeeds on a machine where that path exists. Vendor/publish the package (or swap in your own MUI theme) to build elsewhere.
+- **Not portable as-is:** the UI theme is a local tarball dep (`@zapac/mui-theme` → `file:../_references/...`), so `pnpm install` only succeeds on a machine where that path exists. Vendor/publish the package (or swap in your own MUI theme) to build elsewhere.

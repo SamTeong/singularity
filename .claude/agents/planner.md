@@ -55,13 +55,13 @@ Depends on: —
 - [ ] Co-located `server/crons.test.mjs` case for pause/unpause
 
 ### Success Criteria
-- [ ] `npm test` passes, including the new case
-- [ ] Paused cron does not fire on its schedule (manual check via `npm run dev`)
+- [ ] `pnpm test` passes, including the new case
+- [ ] Paused cron does not fire on its schedule (manual check via `pnpm dev`)
 ```
 
 **Example Overall Success Criteria** — after all phases, validates the feature end-to-end.
 ```
 ## Overall Success Criteria
-- [ ] `npm test` green
+- [ ] `pnpm test` green
 - [ ] Manual check: pause a cron in the UI, confirm it stops firing; unpause, confirm it resumes
 ```
