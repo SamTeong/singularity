@@ -26,6 +26,7 @@ import { tildify } from './paths.js';
 import { useResizable, ResizeHandle } from './useResizable.jsx';
 
 function relTime(ms) {
+  if (!Number.isFinite(ms)) return ''; // subagent/search opens carry no mtime — avoid new Date(NaN) throw
   const s = (Date.now() - ms) / 1000;
   if (s < 60) return 'just now';
   if (s < 3600) return `${Math.floor(s / 60)}m ago`;
@@ -86,7 +87,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   const chatIdRef = useRef(null);
 
   useEffect(() => {
-    const load = () => fetch('/sessions').then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load sessions.'));
+    const load = () => fetch('/sessions').then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.'));
     load();
     const iv = setInterval(load, 5000);
     return () => clearInterval(iv);
@@ -117,7 +118,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
     setLoadingFile(true);
     fetch(`/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}`).then((r) => r.json()).then((d) => {
       setTranscript(d.ok ? d : null);
-    }).catch(() => { setTranscript(null); setLoadErr('Failed to load session.'); }).finally(() => setLoadingFile(false));
+    }).catch(() => { setTranscript(null); setLoadErr('Failed to load transcript.'); }).finally(() => setLoadingFile(false));
   };
 
   // Chat: stream deltas from the WS into the last assistant message.
@@ -194,24 +195,24 @@ export default function SessionHistory({ sendMsg, registerChat }) {
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search sessions…" value={q} onChange={setQ} shortcut="" /></Box>
+                <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search transcripts…" value={q} onChange={setQ} shortcut="" /></Box>
                 <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
               </Stack>
               <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
                 {['all', 'one'].map((s) => (
-                  <Tooltip key={s} title={s === 'one' ? 'Search + chat about the selected session' : 'Search + chat across all sessions'}>
+                  <Tooltip key={s} title={s === 'one' ? 'Search + chat about the selected transcript' : 'Search + chat across all transcripts'}>
                     <Button
                       size="small"
                       variant={effScope === s ? 'contained' : 'outlined'}
                       disabled={s === 'one' && !sel}
                       onClick={() => setScope(s)}
                       sx={{ px: 1.5, minWidth: 0, fontSize: 12, textTransform: 'none' }}
-                    >{s === 'all' ? 'All' : 'This session'}</Button>
+                    >{s === 'all' ? 'All' : 'This transcript'}</Button>
                   </Tooltip>
                 ))}
               </Stack>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
-                {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${sessions.length} session${sessions.length === 1 ? '' : 's'}`}
+                {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${sessions.length} transcript${sessions.length === 1 ? '' : 's'}`}
               </Typography>
             </Box>
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
@@ -267,7 +268,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                             <ListItemButton
                               key={sub.id}
                               selected={sel?.project === s.project && sel?.id === sub.id}
-                              onClick={() => open({ project: s.project, id: sub.id, title: sub.title || sub.agentId, cwd: s.cwd })}
+                              onClick={() => open({ project: s.project, id: sub.id, title: sub.title || sub.agentId, cwd: s.cwd, mtime: sub.mtime })}
                               sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25, pl: 3 }}
                             >
                               <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
@@ -283,7 +284,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                   );
                 })
               )}
-              {!leftResults && sessions.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{sessErr || 'No sessions.'}</Typography>}
+              {!leftResults && sessions.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{sessErr || 'No transcripts.'}</Typography>}
               {leftResults && leftResults.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
             <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${t.vars.palette.glass.stroke}`, flexShrink: 0 })}>
@@ -312,7 +313,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
           </Tabs>
           {tab === 'chat' && (
             <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>
-              {effScope === 'one' && sel ? `context: ${sel.title || sel.id}` : 'context: all sessions'}
+              {effScope === 'one' && sel ? `context: ${sel.title || sel.id}` : 'context: all transcripts'}
             </Typography>
           )}
         </Stack>
@@ -321,12 +322,12 @@ export default function SessionHistory({ sendMsg, registerChat }) {
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
             {!sel ? (
               <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
-                <EmptyState icon={<HistoryIcon />} title="Select a session" description="Browse transcripts of every Claude Code session on this machine." />
+                <EmptyState icon={<HistoryIcon />} title="Select a transcript" description="Browse transcripts of every Claude Code session on this machine." />
               </Box>
             ) : loadingFile ? (
               <Typography color="text.secondary">Loading…</Typography>
             ) : !transcript ? (
-              <Typography color="text.secondary">{loadErr || 'Session not found.'}</Typography>
+              <Typography color="text.secondary">{loadErr || 'Transcript not found.'}</Typography>
             ) : (
               <>
                 <Typography variant="subtitle2" noWrap>{transcript.meta?.title || sel?.title || sel?.id}</Typography>
@@ -343,7 +344,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                 )}
                 {searching && effScope === 'one' && (
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mb: 1.5 }}>
-                    {viewFiltered.length} match{viewFiltered.length === 1 ? '' : 'es'} in this session
+                    {viewFiltered.length} match{viewFiltered.length === 1 ? '' : 'es'} in this transcript
                   </Typography>
                 )}
                 <TranscriptView messages={viewFiltered} />
@@ -358,8 +359,8 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                 <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
                   <EmptyState
                     icon={<ChatBubbleOutlinedIcon />}
-                    title={effScope === 'one' && sel ? `Ask about this session` : 'Ask across all sessions'}
-                    description={effScope === 'one' && sel ? 'The transcript is sent as context.' : 'A directory of recent sessions is sent as context. Switch to "This session" for full detail.'}
+                    title={effScope === 'one' && sel ? `Ask about this transcript` : 'Ask across all transcripts'}
+                    description={effScope === 'one' && sel ? 'The transcript is sent as context.' : 'A directory of recent transcripts is sent as context. Switch to "This transcript" for full detail.'}
                   />
                 </Box>
               )}
@@ -381,7 +382,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
             <Stack direction="row" spacing={1} sx={{ p: 1.5, borderTop: (t) => `1px solid ${t.vars.palette.glass.stroke}` }}>
               <TextField
                 size="small" multiline maxRows={4} fullWidth
-                placeholder={authNeeded ? 'Sign in via `claude` to chat…' : (streaming ? 'Generating…' : 'Ask about this session…')}
+                placeholder={authNeeded ? 'Sign in via `claude` to chat…' : (streaming ? 'Generating…' : 'Ask about this transcript…')}
                 value={chatInput} disabled={streaming || authNeeded}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}

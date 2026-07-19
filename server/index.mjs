@@ -18,7 +18,7 @@ import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot } from './wiki.mjs';
-import { listSessions, readSession, searchSessions } from './sessions.mjs';
+import { listSessions, readSession, searchSessions, subagentsFor } from './sessions.mjs';
 import { listSkills, readSkill, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
@@ -404,6 +404,17 @@ app.get('/session', async (req, reply) => {
   return r;
 });
 app.get('/sessions/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id }));
+// Live subagents nested under the dock's agent rows (indicator only). Scoped to
+// live agents so it stays cheap — no full 500-session scan like /sessions.
+app.get('/subagents', async () => {
+  const out = {};
+  for (const a of reg.snapshot()) {
+    if (a.status !== 'running' && a.status !== 'idle' && a.status !== 'starting') continue;
+    const subs = await subagentsFor(a.cwd, a.id, reg.isLive);
+    if (subs.length) out[a.id] = subs;
+  }
+  return { subagents: out };
+});
 // Per-session cost + token breakdown for the visible list page (batched so a
 // page flip is one request; stats.mjs caches each parse by mtime/size).
 app.post('/sessions/stats', async (req) => {

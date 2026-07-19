@@ -7,6 +7,7 @@ import { existsSync } from 'node:fs';
 import { readdir, stat, readFile, open } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
+import { encodeCwd } from './agents.mjs';
 
 const PROJECTS = join(homedir(), '.claude', 'projects');
 const PEEK_BYTES = 65536;     // list only peeks the head — full MB reads are deferred to open
@@ -136,6 +137,14 @@ async function listSubagents(parentDir, parentId, isLive, now) {
     });
   }
   return out;
+}
+
+// Live subagents for one agent session: the daemon agent's id IS its Claude
+// session id (agents.mjs create()), logged under <encodeCwd(cwd)>/<id>.jsonl,
+// so its subagents live in the sibling <id>/subagents/ dir. Reuses listSubagents.
+export async function subagentsFor(cwd, id, isLive = () => false, now = Date.now()) {
+  if (!cwd || !id) return [];
+  return listSubagents(join(PROJECTS, encodeCwd(cwd)), id, isLive, now);
 }
 
 // Path guard: project/id come from the client query — reject separators (no

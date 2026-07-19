@@ -80,7 +80,7 @@ const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${
 const NAV = [
   { v: 'tasks', icon: <ViewKanbanIcon />, label: 'Tasks' },
   { v: 'cron', icon: <ScheduleIcon />, label: 'Automation' },
-  { v: 'sessions', icon: <HistoryIcon />, label: 'Sessions' },
+  { v: 'sessions', icon: <HistoryIcon />, label: 'Transcripts' },
   { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
 ];
 // Use theme.vars (the --mui-* CSS vars) not theme.palette — under cssVariables
@@ -195,6 +195,7 @@ export default function App() {
   const [restartOpen, setRestartOpen] = useState(false); // restart-daemon confirm dialog
   const [restarting, setRestarting] = useState(false); // true while polling /health for the new daemon
   const [stats, setStats] = useState({}); // id -> {turns, tokens}
+  const [subagents, setSubagents] = useState({}); // agentId -> [{agentId, title, running, mtime}]
   const [usage, setUsage] = useState(null); // { ollama, claude } from /usage
   const [dragId, setDragId] = useState(null); // id of the agent row being dragged
   const wsRef = useRef(null);
@@ -328,6 +329,16 @@ export default function App() {
     return () => clearInterval(t);
   }, [connected, agentKey]);
 
+  // Poll live subagents — indicator-only rows nested under the dock agent row.
+  // Server scopes this to live agents, so it stays cheap (no full-history scan).
+  useEffect(() => {
+    if (!connected) return undefined;
+    const pull = () => fetch('/subagents').then((r) => r.json()).then((d) => setSubagents(d.subagents || {})).catch(() => {});
+    pull();
+    const t = setInterval(pull, 5000);
+    return () => clearInterval(t);
+  }, [connected, agentKey]);
+
   // Usage (Ollama Cloud + Claude 5h/7d). On-demand only — no interval poll.
   // Server caches ~60s so repeated opens are cheap; force=1 bypasses.
   const refreshUsage = useCallback((force = false) => {
@@ -450,7 +461,7 @@ export default function App() {
           )}
         </Stack>
 
-        {/* Vertical nav rail: ＋ New agent, then Tasks / Cron / Sessions / Usage. Icon-only when collapsed. */}
+        {/* Vertical nav rail: ＋ New agent, then Tasks / Cron / Transcripts / Usage. Icon-only when collapsed. */}
         <List sx={{ px: 1, pb: 1 }}>
           {/* Tooltips only when collapsed — expanded rows show their label already. */}
           <Tooltip title={collapsed ? 'New session' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
@@ -575,8 +586,8 @@ export default function App() {
           <Box sx={{ display: dockMin ? 'none' : 'flex', flex: 1, minHeight: 0 }}>
             <List sx={(t) => ({ width: listW.width, flexShrink: 0, overflow: 'auto', px: 1, py: 0.5, borderRight: `1px solid ${t.vars.palette.glass.stroke}` })}>
               {agents.map((a) => (
+                <React.Fragment key={a.id}>
                 <ListItemButton
-                  key={a.id}
                   selected={a.id === active}
                   onClick={() => setActive(a.id)}
                   draggable
@@ -622,6 +633,14 @@ export default function App() {
                     )}
                   </Stack>
                 </ListItemButton>
+                {/* Live subagents (Task tool) — indicator only, no PTY to attach. */}
+                {(subagents[a.id] || []).map((sub) => (
+                  <Stack key={sub.id} direction="row" spacing={0.75} sx={{ alignItems: 'center', pl: 2.5, pr: 1, py: 0.25, minWidth: 0 }}>
+                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, bgcolor: sub.running ? 'success.main' : 'text.disabled', animation: sub.running ? 'sing-sub-pulse 1.4s ease-in-out infinite' : 'none', '@keyframes sing-sub-pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.35 } } }} />
+                    <Typography variant="code" noWrap sx={{ fontSize: 11, color: 'text.secondary', flex: 1, minWidth: 0 }}>{sub.title || sub.agentId}</Typography>
+                  </Stack>
+                ))}
+                </React.Fragment>
               ))}
             </List>
 

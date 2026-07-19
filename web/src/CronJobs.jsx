@@ -114,7 +114,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
       startIcon={bgView === 'reports' ? <ViewKanbanOutlinedIcon /> : <HistoryIcon />}
       onClick={() => setBgView((v) => (v === 'reports' ? 'tasks' : 'reports'))}
       sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>
-      {bgView === 'reports' ? 'Tasks' : 'Reports'}
+      {bgView === 'reports' ? 'Jobs' : 'Reports'}
     </Button>
   );
 
@@ -301,7 +301,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
             </Typography>
 
             {/* Defs table */}
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Tasks</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Jobs</Typography>
             {(config.defs || []).length === 0 ? (
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>No background tasks. Add one to soak spare quota during the window.</Typography>
             ) : (
