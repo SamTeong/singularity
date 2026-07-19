@@ -13,6 +13,7 @@ import DialogActions from '@mui/material/DialogActions';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import AddIcon from '@mui/icons-material/Add';
 import ModelSelect from './ModelSelect.jsx';
+import { tildify, untildify } from './paths.js';
 
 // New-agent dialog: owns the form fields (name/model/scopes/session id); cwd is
 // lifted to App (shared with the dir picker + config fallback). Emits `create`
@@ -35,7 +36,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
 
   const create = () => {
     if (!connected || !cwd.trim()) return;
-    sendMsg({ t: 'create', cwd: cwd.trim(), name: name.trim(), model: model.trim(), scopes, sessionId: sessionId.trim() });
+    sendMsg({ t: 'create', cwd: untildify(cwd.trim()), name: name.trim(), model: model.trim(), scopes, sessionId: sessionId.trim() });
     reset();
     onClose();
   };
@@ -52,7 +53,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
             <Autocomplete
               freeSolo
               fullWidth
-              options={recent}
+              options={(recent || []).map(tildify)}
               inputValue={cwd}
               onInputChange={(_, v) => setCwd(v)}
               renderInput={(params) => <TextField {...params} size="small" label="cwd (repo path)" spellCheck={false} />}

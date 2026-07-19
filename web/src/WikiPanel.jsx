@@ -8,6 +8,8 @@ import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
+import Autocomplete from '@mui/material/Autocomplete';
+import TextField from '@mui/material/TextField';
 import Collapse from '@mui/material/Collapse';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
@@ -15,18 +17,28 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
+import HubIcon from '@mui/icons-material/Hub';
+import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
+import OpenInFullIcon from '@mui/icons-material/OpenInFull';
+import CloseIcon from '@mui/icons-material/Close';
 import { StatusPill, SearchInput, EmptyState } from '@zapac/mui-theme';
 import DirPicker from './DirPicker.jsx';
 import { parseFrontmatter } from './frontmatter.js';
 import MarkdownBody from './MarkdownBody.jsx';
+import WikiGraph from './WikiGraph.jsx';
+import { tildify, untildify } from './paths.js';
+import { useResizable, ResizeHandle } from './useResizable.jsx';
 
-// Wiki root persists across sessions in localStorage (default ~/wiki).
+// Wiki root persists across sessions on the daemon FS (survives browser cache
+// clear). Default ~/wiki; loaded from /wiki/root on mount.
 const DEFAULT_ROOT = '~/wiki';
-const loadRoot = () => localStorage.getItem('sing-wiki-root') || DEFAULT_ROOT;
 const folder = (rel) => { const i = rel.lastIndexOf('/'); return i < 0 ? '' : rel.slice(0, i); };
+// Category = top-level subfolder of the page (concepts/flows/entities); a page
+// lives in exactly one, so filtering is single-membership.
+const category = (rel) => { const i = rel.indexOf('/'); return i < 0 ? '' : rel.slice(0, i); };
 
 export default function WikiPanel() {
-  const [root, setRoot] = useState(loadRoot);
+  const [root, setRoot] = useState(DEFAULT_ROOT);
   const [picking, setPicking] = useState(false);
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null); // search hits
@@ -36,13 +48,21 @@ export default function WikiPanel() {
   const [expanded, setExpanded] = useState(() => new Set()); // wiki names
   const [sel, setSel] = useState(null); // {path, rel}
   const [collapsed, setCollapsed] = useState(false);
+  const [cats, setCats] = useState([]); // active category filter (empty = all)
   const [content, setContent] = useState('');
   const [loadingFile, setLoadingFile] = useState(false);
+  const [graphView, setGraphView] = useState(null); // null | 'main' (right pane) | 'dock' (bottom of left nav)
+  const railW = useResizable('sing-wiki-w', 380);
+
+  // Load the FS-persisted root once on mount (files load via the [root] effect).
+  useEffect(() => {
+    fetch('/wiki/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setSel(null); setContent(''); setErr(null);
-    fetch(`/wiki/files?root=${encodeURIComponent(root)}`).then((r) => r.json()).then((d) => {
+    fetch(`/wiki/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       if (cancelled) return;
       if (d.error) { setWikis([]); setCapped(false); setErr(d.error); return; }
       setWikis(d.wikis || []); setCapped(!!d.capped); setErr(null);
@@ -52,7 +72,7 @@ export default function WikiPanel() {
 
   const search = useCallback(() => {
     if (!q.trim()) { setResults(null); return; }
-    fetch(`/wiki/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(root)}`).then((r) => r.json()).then((d) => {
+    fetch(`/wiki/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setResults(d.results || []); setCapped(!!d.capped);
     });
   }, [q, root]);
@@ -63,7 +83,7 @@ export default function WikiPanel() {
   const open = (item) => {
     if (item.path === sel?.path) return;
     setSel(item); setErr(null); setLoadingFile(true);
-    fetch(`/wiki/file?path=${encodeURIComponent(item.path)}&root=${encodeURIComponent(root)}`).then((r) => r.json()).then((d) => {
+    fetch(`/wiki/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : '');
       if (!d.ok) setErr(d.error);
     }).catch(() => { setContent(''); setErr('failed to load page'); }).finally(() => setLoadingFile(false));
@@ -74,37 +94,86 @@ export default function WikiPanel() {
     setExpanded((s) => (s.has(wiki.name) ? s : new Set([...s, wiki.name])));
     open({ path: page.path, rel: `${wiki.name}/${page.rel}` });
   };
+  // Jump from a [[wikilink]]. Target (e.g. "entities/session-manager") resolves
+  // within the current page's wiki first, then any wiki; matches full rel or
+  // basename, with/without .md.
+  const jumpTo = (target) => {
+    const want = target.replace(/\.md$/i, '').toLowerCase();
+    const match = (w) => w.pages.find((p) => {
+      const rel = p.rel.replace(/\.md$/i, '').toLowerCase();
+      return rel === want || rel.split('/').pop() === want;
+    });
+    const cur = wikis.find((w) => w.name === sel?.rel.split('/')[0]);
+    for (const w of [cur, ...wikis].filter(Boolean)) {
+      const page = match(w);
+      if (page) { openPage(w, page); return; }
+    }
+    // ponytail: unresolved link is a no-op (don't blank the current page)
+  };
   const toggleWiki = (name) => setExpanded((s) => {
     const n = new Set(s);
     if (n.has(name)) n.delete(name); else n.add(name);
     return n;
   });
 
-  const pickRoot = (p) => { localStorage.setItem('sing-wiki-root', p); setRoot(p); setPicking(false); };
-  const pageCount = wikis.reduce((n, w) => n + w.pages.length, 0);
+  const pickRoot = (p) => {
+    setRoot(p); setPicking(false);
+    fetch('/wiki/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
+  };
+
+  // Distinct categories across all pages, and the tree filtered to active ones.
+  const allCats = [...new Set(wikis.flatMap((w) => w.pages.map((p) => category(p.rel)).filter(Boolean)))].sort();
+  const catSet = new Set(cats);
+  const viewWikis = cats.length === 0 ? wikis
+    : wikis.map((w) => ({ ...w, pages: w.pages.filter((p) => catSet.has(category(p.rel))) })).filter((w) => w.pages.length);
+  const pageCount = viewWikis.reduce((n, w) => n + w.pages.length, 0);
+
+  // Graph scope = the selected page's wiki (fallback: first wiki). Node ids are
+  // page rels relative to that wiki, so they map straight to openPage.
+  const graphWiki = sel?.rel.split('/')[0] || wikis[0]?.name;
+  const openByRel = (rel) => {
+    const w = wikis.find((x) => x.name === graphWiki);
+    const want = rel.replace(/\.md$/i, '').toLowerCase();
+    const page = w?.pages.find((p) => {
+      const r = p.rel.replace(/\.md$/i, '').toLowerCase();
+      return r === want || r.split('/').pop() === want.split('/').pop();
+    });
+    // 'main' graph hides the viewer, so drop back to it; 'dock' stays open.
+    if (page) { if (graphView === 'main') setGraphView(null); openPage(w, page); }
+  };
+  const selectedRel = sel && sel.rel.split('/')[0] === graphWiki ? sel.rel.split('/').slice(1).join('/') : null;
 
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* left: search + wiki tree (collapsible) */}
-      <Stack sx={(t) => ({ width: collapsed ? 40 : 340, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
+      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
         {collapsed ? (
           <IconButton size="small" onClick={() => setCollapsed(false)} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>
         ) : (
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search wiki…" value={q} onChange={setQ} shortcut="" /></Box>
+                <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search wiki…" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} /></Box>
                 <Tooltip title="Pick wiki folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
                 </Tooltip>
+                <Tooltip title={graphWiki ? `Graph of ${graphWiki}` : 'Link graph'} placement="bottom" disableInteractive>
+                  <span><IconButton size="small" color={graphView ? 'primary' : 'default'} disabled={!graphWiki}
+                    onClick={() => setGraphView((v) => (v ? null : 'dock'))}><HubIcon /></IconButton></span>
+                </Tooltip>
                 <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
               </Stack>
-              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{root}</Typography>
+              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tildify(root)}</Typography>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
-                {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${wikis.length} wiki${wikis.length === 1 ? '' : 's'} · ${pageCount}${capped ? '+' : ''} page${pageCount === 1 ? '' : 's'}`}
+                {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${viewWikis.length} wiki${viewWikis.length === 1 ? '' : 's'} · ${pageCount}${capped ? '+' : ''} page${pageCount === 1 ? '' : 's'}`}
               </Typography>
+              {!results && allCats.length > 0 && (
+                <Autocomplete multiple size="small" options={allCats} value={cats} onChange={(_, v) => setCats(v)}
+                  disableCloseOnSelect ChipProps={{ size: 'small' }} sx={{ mt: 1, ml: 2, mr: 1 }}
+                  renderInput={(params) => <TextField {...params} variant="standard" placeholder={cats.length ? '' : 'Filter categories…'} />} />
+              )}
             </Box>
-            <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
+            <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
               {results ? (
                 results.map((it, i) => (
                   <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path} onClick={() => open(it)}
@@ -117,7 +186,7 @@ export default function WikiPanel() {
                   </ListItemButton>
                 ))
               ) : (
-                wikis.map((w) => {
+                viewWikis.map((w) => {
                   const open2 = expanded.has(w.name);
                   return (
                     <Box key={w.path}>
@@ -149,16 +218,44 @@ export default function WikiPanel() {
                   );
                 })
               )}
-              {!results && wikis.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{err ? `${err}.` : 'No wikis.'}</Typography>}
+              {!results && viewWikis.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{err ? `${err}.` : (cats.length ? 'No pages in selected categories.' : 'No wikis.')}</Typography>}
               {results && results.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
+            {graphView === 'dock' && graphWiki && (
+              <Stack sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${t.vars.palette.glass.stroke}`, p: 1 })} spacing={0.5}>
+                <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                  <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · link graph</Typography>
+                  <Tooltip title="Expand to main pane" placement="bottom" disableInteractive>
+                    <IconButton size="small" onClick={() => setGraphView('main')}><OpenInFullIcon sx={{ fontSize: 15 }} /></IconButton>
+                  </Tooltip>
+                  <Tooltip title="Close graph" placement="bottom" disableInteractive>
+                    <IconButton size="small" onClick={() => setGraphView(null)}><CloseIcon sx={{ fontSize: 16 }} /></IconButton>
+                  </Tooltip>
+                </Stack>
+                <WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} />
+              </Stack>
+            )}
           </>
         )}
       </Stack>
+      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
 
-      {/* right: read-only viewer */}
+      {/* right: read-only viewer (or link graph) */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
-        {!sel ? (
+        {graphView === 'main' && graphWiki ? (
+          <>
+            <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+              <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · link graph</Typography>
+              <Tooltip title="Dock to sidebar" placement="bottom" disableInteractive>
+                <IconButton size="small" onClick={() => setGraphView('dock')}><HorizontalSplitIcon sx={{ fontSize: 16 }} /></IconButton>
+              </Tooltip>
+              <Tooltip title="Close graph" placement="bottom" disableInteractive>
+                <IconButton size="small" onClick={() => setGraphView(null)}><CloseIcon sx={{ fontSize: 16 }} /></IconButton>
+              </Tooltip>
+            </Stack>
+            <WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} />
+          </>
+        ) : !sel ? (
           <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
             <EmptyState icon={<MenuBookIcon />} title="Select a page" description="Browse a wiki on the left to view its content here." />
           </Box>
@@ -191,7 +288,7 @@ export default function WikiPanel() {
                         {tags.map((t2) => <StatusPill key={t2} status="review">{t2}</StatusPill>)}
                       </Stack>
                     )}
-                    <MarkdownBody>{body}</MarkdownBody>
+                    <MarkdownBody onWikiLink={jumpTo}>{body}</MarkdownBody>
                   </>
                 );
               })()}
@@ -200,7 +297,7 @@ export default function WikiPanel() {
         )}
       </Stack>
 
-      {picking && <DirPicker start={root} onPick={pickRoot} onClose={() => setPicking(false)} />}
+      {picking && <DirPicker start={untildify(root)} onPick={pickRoot} onClose={() => setPicking(false)} />}
     </Box>
   );
 }

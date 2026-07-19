@@ -48,6 +48,6 @@ Optional `SING_TOKEN` gates data endpoints + WS (`x-sing-token` header / `?token
 - `claude`/`ollama` binaries: absolute paths from `CLAUDE_BIN`/`OLLAMA_BIN` (no PATH fallback — Windows node-pty does no PATH resolution).
 - Per-agent cost = turns + total tokens, not `$`. Dollar cost needs per-model pricing — use spend tooling.
 - Tests redirect state with `SINGULARITY_HOME=<scratch temp>` set before a **dynamic** `import('./agents.mjs')` (static imports hoist above the env assignment; `app-dir.mjs` throws without it).
-- Config editor writes 3 `settings.json` scopes (user / project / project-local) with `.bak` backup + JSON validate; paths derived server-side, client never supplies a path.
+- Config editor writes 2 scopes — `settings.json` (project) + `settings.local.json` (project-local) — with `.bak` backup + JSON validate; paths derived server-side, client never supplies a path. User-level `~/.claude/settings.json` is reachable by picking root `~` (project scope resolves to it), not a separate tab.
 
 Surgical edits and goal-driven testing are covered in `~/.claude/CLAUDE.md`.

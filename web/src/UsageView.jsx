@@ -18,7 +18,7 @@ const fmtWall = (iso) => {
   return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 };
 
-function Bar({ label, win, segments, windowMs }) {
+function Bar({ label, win, segments, windowMs, dp = 0 }) {
   const t = useTheme();
   if (!win) return null;
   const pct = win.pctUsed;
@@ -43,7 +43,7 @@ function Bar({ label, win, segments, windowMs }) {
         )}
       </Box>
       <Typography variant="code" sx={{ display: 'block', fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
-        {pct == null ? '—' : `${pct}% used`}{win.resetsAt ? ` · resets in ${fmtReset(win.resetsAt)}` : ''}
+        {pct == null ? '—' : `${pct.toFixed(dp)}% used`}{win.resetsAt ? ` · resets in ${fmtReset(win.resetsAt)}` : ''}
       </Typography>
       {win.resetsAt && (
         <Typography variant="code" sx={{ display: 'block', fontSize: 10, color: 'text.disabled' }}>{fmtWall(win.resetsAt)}</Typography>
@@ -87,7 +87,7 @@ function ProviderCard({ label, u }) {
               out on overage; $ amounts under the bar. */}
           {u.extra?.enabled && u.extra.pctUsed != null && (
             <Box>
-              <Bar label="Extra usage ($)" win={u.extra} segments={1} />
+              <Bar label="Extra usage ($)" win={u.extra} segments={1} dp={1} />
               <Typography variant="code" sx={{ display: 'block', fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
                 {usd(u.extra.used)} / {usd(u.extra.monthlyLimit)}
               </Typography>

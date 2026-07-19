@@ -16,7 +16,7 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-background-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { inWindow, evalGate, pickDef, pickRunnableDef, watchdogDecision, migrateLegacyConfig, createDef, updateDef, listReports, getReport } = await import('./background.mjs');
+const { inWindow, evalGate, pickDef, pickRunnableDef, watchdogDecision, migrateLegacyConfig, createDef, updateDef, reorderDefs, snapshotBackground, listReports, getReport } = await import('./background.mjs');
 const { normalizeTags, initTasks } = await import('./tasks.mjs');
 const { STATE_DIR } = await import('./agents.mjs');
 
@@ -209,6 +209,19 @@ test('updateDef: rejects a garbage conclude value', () => {
   const d = createDef({ title: 'conclude-update-bad', description: 'd', cwd: 'C:\\x' });
   assert.throws(() => updateDef(d.id, { conclude: 'garbage' }));
 });
+
+// ---- reorderDefs (cosmetic row order) ------------------------------------------
+test('reorderDefs: reorders config.defs by id list; omitted ids sink to the tail', () => {
+  const a = createDef({ title: 'ro-a', description: 'd', cwd: 'C:\\x' });
+  const b = createDef({ title: 'ro-b', description: 'd', cwd: 'C:\\x' });
+  const c = createDef({ title: 'ro-c', description: 'd', cwd: 'C:\\x' });
+  reorderDefs([c.id, b.id, a.id]);
+  const pos = (id) => snapshotBackground().config.defs.findIndex((x) => x.id === id);
+  assert.ok(pos(c.id) < pos(b.id) && pos(b.id) < pos(a.id), 'listed ids follow the given order');
+  reorderDefs([a.id]); // b, c omitted → keep their relative order after a
+  assert.ok(pos(a.id) < pos(b.id) && pos(a.id) < pos(c.id) && pos(c.id) < pos(b.id), 'omitted ids sink to tail, relative order kept');
+});
+test('reorderDefs: rejects a non-array', () => assert.throws(() => reorderDefs('nope')));
 
 // ---- reports (listReports / getReport) -----------------------------------------
 test('listReports/getReport: background-tagged entries with correct hasReport, non-background excluded, content read/missing', () => {

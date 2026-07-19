@@ -15,6 +15,7 @@ import DialogActions from '@mui/material/DialogActions';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import AddIcon from '@mui/icons-material/Add';
 import ModelSelect from './ModelSelect.jsx';
+import { tildify, untildify } from './paths.js';
 
 // New-task dialog: CreateAgentDialog minus session id, plus title/description
 // (the requirements), plan-approval gate and merge policy. Submits POST /tasks
@@ -64,7 +65,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          repo: cwd.trim(), title: title.trim(), description: description.trim(),
+          repo: untildify(cwd.trim()), title: title.trim(), description: description.trim(),
           model: model.trim(), implModel: implModel.trim(), reviewerModel: reviewerModel.trim(),
           scopes, tags, requirePlanApproval: requireApproval, mergeMode,
         }),
@@ -92,7 +93,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
             <Autocomplete
               freeSolo
               fullWidth
-              options={recent}
+              options={(recent || []).map(tildify)}
               inputValue={cwd}
               onInputChange={(_, v) => setCwd(v)}
               renderInput={(params) => <TextField {...params} size="small" label="working directory" spellCheck={false} />}

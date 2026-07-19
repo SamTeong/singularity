@@ -319,6 +319,17 @@ export function deleteDef(id) {
   emit();
 }
 
+// Cosmetic row order (drag-to-reorder in the UI). Purely display — the
+// scheduler still picks oldest-lastRunAt round-robin, not this order. `ids` is
+// the full desired order; any def omitted keeps its relative tail position.
+export function reorderDefs(ids) {
+  if (!Array.isArray(ids)) throw new Error('ids array required');
+  const rank = new Map(ids.map((id, i) => [id, i]));
+  config.defs.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
+  persist();
+  emit();
+}
+
 // ---- Reports ----------------------------------------------------------------
 
 // Background-tagged tasks (live + concluded), newest first, with whether

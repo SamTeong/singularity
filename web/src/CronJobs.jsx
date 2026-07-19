@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -22,9 +23,11 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
 import CreateBackgroundDialog from './CreateBackgroundDialog.jsx';
 import MarkdownBody from './MarkdownBody.jsx';
+import { useResizable, ResizeHandle } from './useResizable.jsx';
 
 const KIND = { starting: 'active', running: 'active', idle: 'review', detached: 'review', exited: 'error' };
 const repoName = (p) => (p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
@@ -63,6 +66,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
   const [selReport, setSelReport] = useState(null); // taskId
   const [reportContent, setReportContent] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
+  const railW = useResizable('sing-cron-w', 260);
 
   useEffect(() => {
     if (bgView !== 'reports') return;
@@ -98,9 +102,37 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
   const removeDef = (id) =>
     fetch(`/background/defs/${id}`, { method: 'DELETE' })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
+  const saveOrder = (ids) =>
+    fetch('/background/reorder', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) })
+      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
 
   const config = background?.config;
   const lastTick = background?.lastTick;
+
+  // Drag-to-reorder is cosmetic (scheduler still picks oldest-lastRunAt). During
+  // a drag we render a local override; a fresh server snapshot (id order changed)
+  // clears it. dragId = the row being dragged.
+  const defs = config?.defs || [];
+  const [dragId, setDragId] = useState(null);
+  const [localDefs, setLocalDefs] = useState(null);
+  const rows = localDefs ?? defs;
+  const idOrder = defs.map((d) => d.id).join(',');
+  useEffect(() => { setLocalDefs(null); }, [idOrder]);
+
+  const onDragOverRow = (e, overId) => {
+    e.preventDefault();
+    if (!dragId || dragId === overId) return;
+    const from = rows.findIndex((d) => d.id === dragId);
+    const to = rows.findIndex((d) => d.id === overId);
+    if (from < 0 || to < 0) return;
+    const next = rows.slice();
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    setLocalDefs(next);
+  };
+  const onDrop = () => {
+    setDragId(null);
+    if (localDefs) saveOrder(localDefs.map((d) => d.id));
+  };
 
   return (
     <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1.5}>
@@ -184,6 +216,23 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
         {/* Background (quota-soak) section */}
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 3, mb: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Background</Typography>
+          <Tooltip
+            disableInteractive
+            title={
+              <Box component="div" sx={{ fontSize: 12 }}>
+                Uses spare AI usage quota.<br />
+                Every hour tasks to execute are identified by:
+                <Box component="ol" sx={{ my: 0.5, pl: 2.5 }}>
+                  <li>Current time falls inside the task's day/hour window</li>
+                  <li>Current AI usage is below the start threshold</li>
+                </Box>
+                The oldest off-cooldown task would be spawned as a Tasks-board card.<br />
+                To start task immediately, trigger via ‘Run now’.
+              </Box>
+            }
+          >
+            <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.secondary', cursor: 'help' }} />
+          </Tooltip>
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>local time</Typography>
           <Box sx={{ flex: 1 }} />
           <ToggleButtonGroup size="small" exclusive value={bgView} onChange={(_, v) => v && setBgView(v)}>
@@ -201,7 +250,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
             </Box>
           ) : (
             <Stack direction="row" sx={{ height: 420, border: (t) => `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: (t) => `${t.zapac.radius.sm}px` }}>
-              <List dense sx={(t) => ({ width: 260, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, overflow: 'auto', py: 0 })}>
+              <List dense sx={(t) => ({ width: railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, overflow: 'auto', py: 0 })}>
                 {reports.map((r) => (
                   <ListItemButton key={r.taskId} selected={selReport === r.taskId} onClick={() => openReport(r.taskId)} sx={{ display: 'block' }}>
                     <Typography variant="subtitle2" noWrap>{r.title}</Typography>
@@ -212,6 +261,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                   </ListItemButton>
                 ))}
               </List>
+              <ResizeHandle onMouseDown={railW.startDrag} />
               <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto', p: 2 }}>
                 {!selReport ? (
                   <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
@@ -240,6 +290,9 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <Typography variant="caption" sx={{ color: 'text.secondary' }}>Tasks</Typography>
               <Box sx={{ flex: 1 }} />
+              <Tooltip title="Run the scheduler now (picks a ready task)" disableInteractive>
+                <Button size="small" startIcon={<PlayArrowIcon />} onClick={runBg} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Run now</Button>
+              </Tooltip>
               <Button size="small" startIcon={<AddIcon />} onClick={() => setDefOpen(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Add background task</Button>
             </Stack>
             {(config.defs || []).length === 0 ? (
@@ -249,6 +302,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                 <TableHead>
                   <TableRow>
                     <TableCell padding="checkbox" />
+                    <TableCell padding="checkbox" />
                     <TableCell>Title</TableCell>
                     <TableCell>Working dir</TableCell>
                     <TableCell>Cooldown</TableCell>
@@ -257,8 +311,26 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {config.defs.map((def) => (
-                    <TableRow key={def.id} selected={background?.liveTaskId && def.lastTaskId === background.liveTaskId}>
+                  {rows.map((def) => (
+                    <TableRow
+                      key={def.id}
+                      selected={background?.liveTaskId && def.lastTaskId === background.liveTaskId}
+                      onDragOver={(e) => onDragOverRow(e, def.id)}
+                      onDrop={onDrop}
+                      sx={dragId === def.id ? { opacity: 0.4 } : undefined}
+                    >
+                      <TableCell padding="checkbox">
+                        <Tooltip title="Drag to reorder (display only)" disableInteractive>
+                          <Box
+                            draggable
+                            onDragStart={() => setDragId(def.id)}
+                            onDragEnd={() => setDragId(null)}
+                            sx={{ display: 'grid', placeItems: 'center', cursor: 'grab', color: 'text.disabled', '&:active': { cursor: 'grabbing' } }}
+                          >
+                            <DragIndicatorIcon fontSize="small" />
+                          </Box>
+                        </Tooltip>
+                      </TableCell>
                       <TableCell padding="checkbox">
                         <Tooltip title={def.enabled ? 'Disable' : 'Enable'} disableInteractive>
                           <Switch size="small" checked={!!def.enabled} onChange={() => toggleDef(def.id, def.enabled)} />
@@ -270,9 +342,6 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                       <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{fmtRel(def.lastRunAt)}</Typography></TableCell>
                       <TableCell align="right">
                         <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
-                          <Tooltip title="Run the scheduler now (picks a ready task, not necessarily this one)" disableInteractive>
-                            <IconButton size="small" onClick={runBg}><PlayArrowIcon fontSize="small" /></IconButton>
-                          </Tooltip>
                           <Tooltip title="Edit" disableInteractive>
                             <IconButton size="small" onClick={() => setDefOpen(def)}><EditOutlinedIcon fontSize="small" /></IconButton>
                           </Tooltip>

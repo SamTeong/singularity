@@ -12,6 +12,7 @@ import ListItemText from '@mui/material/ListItemText';
 import Typography from '@mui/material/Typography';
 import FolderIcon from '@mui/icons-material/Folder';
 import NorthIcon from '@mui/icons-material/North';
+import { tildify, untildify } from './paths.js';
 
 // Modal folder browser backed by GET /fs/browse. Directories only.
 export default function DirPicker({ start, onPick, onClose }) {
@@ -41,8 +42,8 @@ export default function DirPicker({ start, onPick, onClose }) {
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <Stack direction="row" spacing={1} sx={{ p: 2, pb: 1, alignItems: 'center' }}>
-        <TextField fullWidth size="small" value={path} spellCheck={false}
-          onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && load(path)} />
+        <TextField fullWidth size="small" value={tildify(path)} spellCheck={false}
+          onChange={(e) => setPath(untildify(e.target.value))} onKeyDown={(e) => e.key === 'Enter' && load(path)} />
         <Button size="small" variant="outlined" onClick={() => load(path)}>Go</Button>
       </Stack>
       {err && <Typography color="error" sx={{ px: 2, pb: 1, fontSize: 13 }}>{err}</Typography>}

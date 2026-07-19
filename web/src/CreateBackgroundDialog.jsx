@@ -18,6 +18,7 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import AddIcon from '@mui/icons-material/Add';
 import ModelSelect from './ModelSelect.jsx';
+import { tildify, untildify } from './paths.js';
 
 const DAYS = [['Su', 0], ['Mo', 1], ['Tu', 2], ['We', 3], ['Th', 4], ['Fr', 5], ['Sa', 6]];
 const DEFAULT_WINDOW = { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] };
@@ -99,7 +100,7 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
         method,
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          title: title.trim(), description: description.trim(), cwd: cwd.trim(),
+          title: title.trim(), description: description.trim(), cwd: untildify(cwd.trim()),
           cooldownHours: Number(cooldownHours) || 24, enabled, conclude,
           window: windowCfg, thresholds, models, tokenCaps, scopes,
         }),
@@ -124,7 +125,7 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
           <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} />
           <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
           <Autocomplete
-            freeSolo fullWidth options={recent} inputValue={cwd}
+            freeSolo fullWidth options={(recent || []).map(tildify)} inputValue={cwd}
             onInputChange={(_, v) => setCwd(v)}
             renderInput={(params) => <TextField {...params} size="small" label="working directory" spellCheck={false} />}
           />

@@ -20,6 +20,8 @@ import SearchIcon from '@mui/icons-material/Search';
 import HistoryIcon from '@mui/icons-material/History';
 import { SearchInput, EmptyState } from '@zapac/mui-theme';
 import TranscriptView from './TranscriptView.jsx';
+import { tildify } from './paths.js';
+import { useResizable, ResizeHandle } from './useResizable.jsx';
 
 function relTime(ms) {
   const s = (Date.now() - ms) / 1000;
@@ -49,6 +51,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   const [pageSize, setPageSize] = useState(50);
   const [loadErr, setLoadErr] = useState(null);
   const [sessErr, setSessErr] = useState(null);
+  const railW = useResizable('sing-sesshist-w', 340);
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
 
@@ -137,7 +140,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* left: search + session list (collapsible) */}
-      <Stack sx={(t) => ({ width: collapsed ? 40 : 340, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
+      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
         {collapsed ? (
           <IconButton size="small" onClick={() => setCollapsed(false)} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>
         ) : (
@@ -168,7 +171,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
               {leftResults ? (
                 pageItems.map((r, i) => (
                   <ListItemButton key={`${r.project}:${r.id}:${r.lineIndex}:${i}`} onClick={() => open({ project: r.project, id: r.id, title: r.id, cwd: r.cwd })} sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}>
-                    <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{r.cwd || r.project}</Typography>
+                    <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(r.cwd) || r.project}</Typography>
                     <Typography sx={{ fontSize: 12, color: 'text.secondary' }} noWrap>[{r.role}] {r.snippet}</Typography>
                   </ListItemButton>
                 ))
@@ -182,7 +185,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                   >
                     <Typography variant="subtitle2" noWrap>{s.title || `${s.id.slice(0, 8)}…`}</Typography>
                     <Stack direction="row" spacing={1} sx={{ mt: 0.25, alignItems: 'center' }}>
-                      <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{s.cwd || s.project}</Typography>
+                      <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(s.cwd) || s.project}</Typography>
                     </Stack>
                     <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>{relTime(s.mtime)}</Typography>
                   </ListItemButton>
@@ -206,6 +209,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
           </>
         )}
       </Stack>
+      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
 
       {/* right: View / Chat */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0 }} spacing={0}>
@@ -235,7 +239,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
               <>
                 <Typography variant="subtitle2" noWrap>{transcript.meta?.title || sel?.title || sel?.id}</Typography>
                 <Stack direction="row" spacing={1.5} sx={{ mb: 1.5 }}>
-                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{transcript.meta?.cwd || sel?.cwd}</Typography>
+                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(transcript.meta?.cwd || sel?.cwd)}</Typography>
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{transcript.meta?.turns ?? 0} turns · {relTime(sel.mtime)}</Typography>
                 </Stack>
                 {searching && effScope === 'one' && (
