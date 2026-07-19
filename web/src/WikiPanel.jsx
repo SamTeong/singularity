@@ -3,6 +3,7 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
+import ClearIcon from '@mui/icons-material/Clear';
 import Tooltip from '@mui/material/Tooltip';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
@@ -153,7 +154,15 @@ export default function WikiPanel() {
           <>
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search wiki…" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} /></Box>
+                <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
+                  <SearchInput placeholder="Search wiki…" value={q} onChange={setQ} shortcut="" sx={{ minWidth: 0 }} />
+                  {q && (
+                    <IconButton size="small" onClick={() => setQ('')} aria-label="Clear search"
+                      sx={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', '&:hover': { transform: 'translateY(-50%)' } }}>
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </Box>
                 <Tooltip title="Pick wiki folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
                 </Tooltip>

@@ -3,6 +3,7 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import IconButton from '@mui/material/IconButton';
+import ClearIcon from '@mui/icons-material/Clear';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
@@ -86,7 +87,15 @@ export default function SkillsPanel() {
           <>
         <Box sx={{ p: 1.5, pb: 0.5 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <Box sx={{ flex: 1, minWidth: 0 }}><SearchInput placeholder="Search skills…" value={q} onChange={setQ} shortcut="" /></Box>
+            <Box sx={{ flex: 1, minWidth: 0, position: 'relative' }}>
+              <SearchInput placeholder="Search skills…" value={q} onChange={setQ} shortcut="" />
+              {q && (
+                <IconButton size="small" onClick={() => setQ('')} aria-label="Clear search"
+                  sx={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', '&:hover': { transform: 'translateY(-50%)' } }}>
+                  <ClearIcon fontSize="small" />
+                </IconButton>
+              )}
+            </Box>
             <IconButton size="small" onClick={() => setCollapsed(true)}><ChevronLeftIcon /></IconButton>
           </Stack>
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
