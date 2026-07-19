@@ -12,6 +12,7 @@ import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import AddIcon from '@mui/icons-material/Add';
+import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import OutlinedFlagOutlinedIcon from '@mui/icons-material/OutlinedFlagOutlined';
 import HistoryIcon from '@mui/icons-material/History';
@@ -240,7 +241,17 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
               />
             );
           })}
-          {activeTags.size > 0 && <Button size="small" onClick={() => setActiveTags(new Set())}>Clear all</Button>}
+          {activeTags.size > 0 && (
+            <Chip
+              size="small"
+              label="Clear all"
+              variant="outlined"
+              onClick={() => setActiveTags(new Set())}
+              onDelete={() => setActiveTags(new Set())}
+              deleteIcon={<CloseIcon />}
+              sx={{ height: 22, fontSize: 11, ml: 0.5, color: 'text.secondary' }}
+            />
+          )}
         </Stack>
       )}
       {showHistory ? (
