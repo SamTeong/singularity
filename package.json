@@ -10,7 +10,7 @@
     "dev": "concurrently -k \"npm:server\" \"npm:web\"",
     "start": "npm run build && npm run server",
     "ollama-login": "node --env-file-if-exists=.env scripts/ollama-login.mjs",
-    "test": "node --test \"server/*.test.mjs\""
+    "test": "node --test --test-force-exit \"server/*.test.mjs\""
   },
   "dependencies": {
     "@codemirror/lang-javascript": "^6.2.5",

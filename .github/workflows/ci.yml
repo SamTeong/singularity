@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Cancel in-flight runs on the same branch when a new commit lands.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        # node-pty ships prebuilds for linux + windows. macos omitted unless
+        # prebuild availability is confirmed.
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        # pnpm test invokes node with a glob quoted POSIX-style; bash keeps
+        # that consistent across OSes (Windows cmd handles quoting differently).
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm test
+
+      # pnpm v9 supports --audit-level; fails the step only on moderate+.
+      # Advisory for low/info — keeps supply-chain signal without breaking
+      # the build on noise.
+      - run: pnpm audit --audit-level=moderate
+        continue-on-error: true
