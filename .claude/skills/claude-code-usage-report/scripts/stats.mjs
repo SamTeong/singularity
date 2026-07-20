@@ -176,6 +176,23 @@ function _csv_field(v) {
   return s;
 }
 
+// Build a COLS-ordered value array from a row object, asserting the object
+// sets exactly the COLS keyset — catches a forgotten or misspelled column that
+// would otherwise silently write "" (the `c in rowd ? rowd[c] : ""` fallback
+// can't distinguish "intentionally blank" from "omitted by mistake"). Mismatch
+// is logged to stderr, never thrown, so the SessionEnd hook can't block on it.
+// Centralized so both row builders (record + backfill) route through one path.
+function _row_array(rowd) {
+  const got = Object.keys(rowd).sort().join(",");
+  const want = COLS.slice().sort().join(",");
+  if (got !== want) {
+    const missing = COLS.filter((c) => !(c in rowd));
+    const extra = Object.keys(rowd).filter((k) => !COLS.includes(k));
+    console.error(`stats.mjs: row schema mismatch (missing=[${missing.join(",")}] extra=[${extra.join(",")}])`);
+  }
+  return COLS.map((c) => (c in rowd ? rowd[c] : ""));
+}
+
 // ---- general helpers ----
 
 function* iter_jsonl(p) {
@@ -234,8 +251,11 @@ function read_cost_state(sid) {
   if (isFile(j)) {
     try {
       return _extract_state(JSON.parse(fs.readFileSync(j, "utf-8")));
-    } catch {
-      /* fall through */
+    } catch (e) {
+      // File present but unparseable — abnormal (statusline writes verbatim
+      // JSON). Log so the dropped cost-state is diagnosable; fall through to
+      // the no-state path. A missing file (no statusline) is silent below.
+      console.error(`stats.mjs: corrupt cost-state for ${sid}: ${e && e.message}`);
     }
   }
   return null;
@@ -1222,12 +1242,21 @@ function cmd_record() {
   let data;
   try {
     data = JSON.parse(readStdin() || "{}");
-  } catch {
+  } catch (e) {
+    // Abnormal: SessionEnd fired with a malformed payload. Log so it's
+    // diagnosable; exit 0 so the hook never blocks.
+    console.error(`stats.mjs record: bad stdin JSON: ${e && e.message}`);
     process.exit(0);
   }
   const sid = data.session_id;
-  if (!sid || sid === ZERO_UUID || !/^[0-9a-fA-F-]{1,64}$/.test(sid)) process.exit(0);
+  if (!sid || sid === ZERO_UUID || !/^[0-9a-fA-F-]{1,64}$/.test(sid)) {
+    console.error(`stats.mjs record: bad session_id: ${sid}`);
+    process.exit(0);
+  }
   const state = read_cost_state(sid);
+  // No state / no cost = no statusline wired (or a $0 session). Normal early
+  // exit per the capture contract — stay silent to avoid spamming every
+  // SessionEnd for statusline-less setups.
   if (!state || state.cost === null || state.cost === undefined || state.cost === "") process.exit(0);
   const t = session_totals(sid);
   let dur = _inum(state.duration_ms);
@@ -1257,8 +1286,9 @@ function cmd_record() {
     tool_calls: t.tool_calls,
     start_epoch: t.start_epoch ? Math.trunc(t.start_epoch) : "",
     facets_json: JSON.stringify(t.facets),
+    est_cost_usd: "",
   };
-  _prepend_row(COLS.map((c) => (c in rowd ? rowd[c] : "")));
+  _prepend_row(rowd);
   if (state.raw !== null && state.raw !== undefined) _archive(sid, state.raw);
   try {
     fs.unlinkSync(path.join(STATE_DIR, `${sid}.json`));
@@ -1277,8 +1307,8 @@ function _archive(sid, raw) {
   }
 }
 
-function _prepend_row(row) {
-  const line = row.map((x) => _csv_field(x)).join(",");
+function _prepend_row(rowd) {
+  const line = _row_array(rowd).map((x) => _csv_field(x)).join(",");
   if (!isFile(STATS_CSV)) {
     fs.writeFileSync(STATS_CSV, HEADER + "\n" + line + "\n", { encoding: "utf-8", mode: 0o600 });
     return;
@@ -1401,7 +1431,7 @@ function _rebuild_stats_csv(excludeSid, files) {
   });
   const out_lines = [HEADER];
   for (const r of rows) {
-    out_lines.push(COLS.map((c) => _csv_field(c in r ? r[c] : "")).join(","));
+    out_lines.push(_row_array(r).map((v) => _csv_field(v)).join(","));
   }
   fs.writeFileSync(STATS_CSV, out_lines.join("\n") + "\n", { encoding: "utf-8", mode: 0o600 });
   // Now that snapshots are folded into stats.csv, clear their staging files —
@@ -1500,6 +1530,7 @@ export function _load_stats(csvPath = STATS_CSV) {
         ? _msg_cost(row.last_model, i, o, cr, cc)
         : (_fnum(row.total_cost_usd) || _fnum(row.est_cost_usd)),
       model: (row.last_model || "").trim(),
+      disp: (row.model_display_name || "").trim(),
       in: i, out: o, cr, cc, tok: i + o + cr + cc,
       dur: _inum(row.duration_ms),
       api: _inum(row.api_duration_ms),

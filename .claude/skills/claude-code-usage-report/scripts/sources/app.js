@@ -1,6 +1,6 @@
 const CFG = {
   PALETTE: ["var(--ac)", "var(--azure)", "var(--amber)", "var(--sage)", "var(--ink-soft)", "#aa41af", "#3c69c8", "#00a5e6"],
-  TOKEN: [{name:"input",key:"in",col:"var(--azure)"},{name:"output",key:"out",col:"var(--ac)"},{name:"cache_read",key:"cr",col:"var(--sage)"},{name:"cache_creation",key:"cc",col:"var(--amber)"}],
+  TOKEN: [{name:"Input",key:"in",col:"var(--azure)"},{name:"Output",key:"out",col:"var(--ac)"},{name:"Cache read",key:"cr",col:"var(--sage)"},{name:"Cache creation",key:"cc",col:"var(--amber)"}],
   HEAT: ["transparent","color-mix(in srgb,var(--ac) 22%,transparent)","color-mix(in srgb,var(--ac) 45%,transparent)","color-mix(in srgb,var(--ac) 70%,transparent)","var(--ac)"],
   LINE_COV: 0.05,
   PRESETS: [{id:"7d",label:"last 7 days",days:7},{id:"30d",label:"last 30 days",days:30},{id:"all",label:"all time"}]
@@ -100,7 +100,7 @@ function svgScatter(S,cmap){
             "<text x='"+P+"' y='"+(P-12)+"'>$"+Math.max.apply(null,ys).toFixed(2)+"</text>"+
             "<text x='"+(W-P)+"' y='"+(H-P+18)+"' text-anchor='end'>tokens (log) →</text>"+
             "<text x='"+P+"' y='"+(H-P+18)+"'>cost ↑</text>";
-  pts.forEach(function(s){var x=fx(Math.log10(s.tok)),y=fy(s.cost);var col=cmap[s.model||'others']||'var(--ink-faint)';inner+="<circle cx='"+x.toFixed(1)+"' cy='"+y.toFixed(1)+"' r='4' fill='"+col+"' opacity='0.6'><title>"+esc(s.model||'others')+" · $"+s.cost.toFixed(2)+" · "+fmtInt(s.tok)+" tok</title></circle>";});
+  pts.forEach(function(s){var x=fx(Math.log10(s.tok)),y=fy(s.cost);var col=cmap[s.model||'others']||'var(--ink-faint)';var name=s.disp||s.model||'others';var tip=name+(s.disp?(" ("+esc(s.model||'')+")"):"")+" · $"+s.cost.toFixed(2)+" · "+fmtInt(s.tok)+" tok";inner+="<circle cx='"+x.toFixed(1)+"' cy='"+y.toFixed(1)+"' r='4' fill='"+col+"' opacity='0.6'><title>"+tip+"</title></circle>";});
   return svgWrap(W,H,inner);
 }
 function svgPareto(par){
@@ -118,11 +118,11 @@ function svgPareto(par){
   if(par.n>cap)inner+="<text x='"+(W-P)+"' y='"+(H-P+18)+"' text-anchor='end'>top "+cap+" of "+par.n+" sessions</text>";
   return svgWrap(W,H,inner);
 }
-function svgTreemap(pm,cmap){
+function svgTreemap(pm,cmap,dispMap){
   var items=Object.keys(pm).map(function(m){return [m,pm[m].cost];}).filter(function(x){return x[1]>0;}).sort(function(a,b){return b[1]-a[1];});
   if(!items.length)return '<p class="muted">No data.</p>';
   var W=1000,H=170,tot=items.reduce(function(a,b){return a+b[1];},0)||1,x=0,inner='';
-  items.forEach(function(it){var m=it[0],c=it[1],w=c/tot*W;inner+="<rect x='"+x.toFixed(1)+"' y='0' width='"+w.toFixed(1)+"' height='"+H+"' rx='12' ry='12' fill='"+(cmap[m]||'var(--ink-faint)')+"' stroke='var(--surface)' stroke-width='3'><title>"+escAttr(m)+" · $"+c.toFixed(2)+" · "+(c/tot*100).toFixed(1)+"%</title></rect>";if(w>64){var label=esc(m.split('/').pop().slice(0,18));inner+="<text x='"+(x+7).toFixed(1)+"' y='22' fill='#fff' style='font-size:11px'>"+label+"</text><text x='"+(x+7).toFixed(1)+"' y='39' fill='#fff' style='font-size:11px'>$"+Math.round(c)+"</text>";}x+=w;});
+  items.forEach(function(it){var m=it[0],c=it[1],w=c/tot*W;inner+="<rect x='"+x.toFixed(1)+"' y='0' width='"+w.toFixed(1)+"' height='"+H+"' rx='12' ry='12' fill='"+(cmap[m]||'var(--ink-faint)')+"' stroke='var(--surface)' stroke-width='3'><title>"+escAttr(m)+" · $"+c.toFixed(2)+" · "+(c/tot*100).toFixed(1)+"%</title></rect>";if(w>64){var label=esc(((dispMap&&dispMap[m])?dispMap[m]:m).split('/').pop().slice(0,18));inner+="<text x='"+(x+7).toFixed(1)+"' y='22' fill='#fff' style='font-size:11px'>"+label+"</text><text x='"+(x+7).toFixed(1)+"' y='39' fill='#fff' style='font-size:11px'>$"+Math.round(c)+"</text>";}x+=w;});
   return svgWrap(W,H,inner,'treemap');
 }
 // month-grid calendar (design-system: Charts > Daily spend calendar) — renders the
@@ -167,15 +167,15 @@ function tokenBars(bucket,vis){
   var rows='';keys.forEach(function(k){var b=bucket[k];var tot=0;var segs='';CFG.TOKEN.forEach(function(tk){if(visKeys.indexOf(tk.key)<0)return;var v=b[tk.key];if(v<=0)return;tot+=v;segs+="<div class='seg' style='width:"+(v/mx*100).toFixed(4)+"%;background:"+tk.col+"' data-tip='"+tk.name+" · "+fmtInt(v)+"'></div>";});rows+="<div class='bar-row'><div class='bar-label'>"+esc(k)+"</div><div class='sbar-track'>"+segs+"</div><div class='bar-val'>"+fmtAbbr(tot)+"</div></div>";});
   return rows;
 }
-function barChart(counts,color,fmt,color_map){
+function barChart(counts,color,fmt,color_map,labelMap){
   var keys=Object.keys(counts);if(!keys.length)return '<p class="muted">No data.</p>';
   var mx=0;keys.forEach(function(k){if(counts[k]>mx)mx=counts[k];});mx=mx||1;
-  var rows='';keys.forEach(function(k){var v=counts[k];var pct=Math.max(3,Math.round(v/mx*100));var val=fmt?fmt(v):v;var bcol=color_map?(color_map[k]||color):color;rows+="<div class='bar-row'><div class='bar-label'>"+esc(k)+"</div><div class='bar-track'><div class='bar' style='width:"+pct+"%;background:"+bcol+"'></div></div><div class='bar-val'>"+esc(val)+"</div></div>";});
+  var rows='';keys.forEach(function(k){var v=counts[k];var pct=Math.max(3,Math.round(v/mx*100));var val=fmt?fmt(v):v;var bcol=color_map?(color_map[k]||color):color;var lbl=(labelMap&&labelMap[k])?labelMap[k]:k;rows+="<div class='bar-row'><div class='bar-label' title='"+escAttr(k)+"'>"+esc(lbl)+"</div><div class='bar-track'><div class='bar' style='width:"+pct+"%;background:"+bcol+"'></div></div><div class='bar-val'>"+esc(val)+"</div></div>";});
   return rows;
 }
-function shareBars(months,cmap){
+function shareBars(months,cmap,dispMap){
   var keys=Object.keys(months).sort().reverse();if(!keys.length)return '<p class="muted">No data.</p>';
-  var rows='';keys.forEach(function(k){var cbm=months[k].cost_by_model;var tot=Object.keys(cbm).reduce(function(a,m){return a+cbm[m];},0)||1;var segs='';Object.keys(cbm).sort(function(a,b){return cbm[b]-cbm[a];}).forEach(function(m){var w=cbm[m]/tot*100;if(w<=0)return;segs+="<div class='seg' style='width:"+w.toFixed(3)+"%;background:"+(cmap[m]||'var(--ink-faint)')+"' data-tip='"+escAttr(m)+" · "+w.toFixed(1)+"%'></div>";});rows+="<div class='bar-row'><div class='bar-label'>"+esc(k)+"</div><div class='sbar-track'>"+segs+"</div><div class='bar-val'>$"+Math.round(tot)+"</div></div>";});
+  var rows='';keys.forEach(function(k){var cbm=months[k].cost_by_model;var tot=Object.keys(cbm).reduce(function(a,m){return a+cbm[m];},0)||1;var segs='';Object.keys(cbm).sort(function(a,b){return cbm[b]-cbm[a];}).forEach(function(m){var w=cbm[m]/tot*100;if(w<=0)return;var tipM=(dispMap&&dispMap[m])?dispMap[m]+" ("+m+")":m;segs+="<div class='seg' style='width:"+w.toFixed(3)+"%;background:"+(cmap[m]||'var(--ink-faint)')+"' data-tip='"+escAttr(tipM+" · "+w.toFixed(1)+"%")+"'></div>";});rows+="<div class='bar-row'><div class='bar-label'>"+esc(k)+"</div><div class='sbar-track'>"+segs+"</div><div class='bar-val'>$"+Math.round(tot)+"</div></div>";});
   return rows;
 }
 function periodTable(bucket,label,active){
@@ -303,6 +303,9 @@ function renderRateLimits(sessions){
 function renderModelQuotas(L){
   L=L||{};
   var pm=L.per_model||{};
+  // 'design' is claumon's alias for seven_day_omelette (the API-key quota bucket,
+  // see stats.mjs) — not a Claude model name, so surface a user-facing label.
+  var QLABEL={sonnet:'Sonnet',opus:'Opus',design:'API key'};
   var order=['sonnet','opus','design'];
   var have=order.filter(function(m){return pm[m]&&pm[m].utilization!=null;});
   if(!have.length){
@@ -314,7 +317,7 @@ function renderModelQuotas(L){
     var w=pm[m]; if(!w||w.utilization==null)return;
     var p=Number(w.utilization),pct=Math.max(2,Math.min(100,p));
     var reset=w.resets_at?(' resets '+esc(String(w.resets_at).slice(0,19).replace('T',' '))):'';
-    html+="<div class='bar-row'><div class='bar-label'>"+esc(m)+"</div><div class='bar-track'><div class='bar' style='width:"+pct.toFixed(1)+"%;background:"+colorFor(p)+"'></div></div><div class='bar-val'>"+p.toFixed(1)+"%"+reset+"</div></div>";
+    html+="<div class='bar-row'><div class='bar-label'>"+esc(QLABEL[m]||m)+"</div><div class='bar-track'><div class='bar' style='width:"+pct.toFixed(1)+"%;background:"+colorFor(p)+"'></div></div><div class='bar-val'>"+p.toFixed(1)+"%"+reset+"</div></div>";
   });
   var eu=L.extra_usage,cards='';
   if(eu&&eu.is_enabled){
@@ -374,15 +377,15 @@ function renderForecast(F){
   });
   return rows+"<p class='muted' style='margin-top:4px'>Model "+esc(F.modelVersion||'v2.1-js')+" · fit "+esc(F.fitAt||'—')+" · 80% CI from monotone Gamma-process MC</p>";
 }
-function perModelEfficiency(rates,days,cmap){
+function perModelEfficiency(rates,days,cmap,dispMap){
   var keys=Object.keys(rates);if(!keys.length)return '<p class="muted">No data.</p>';
   var dkeys=Object.keys(days).filter(isDate).sort();
   var arr=keys.map(function(m){return [m,rates[m]];}).sort(function(a,b){return b[1].cost-a[1].cost;});
-  var cards='';arr.forEach(function(x){var m=x[0],v=x[1];var series=dkeys.map(function(k){return (days[k].cost_by_model||{})[m]||0;});var spark=sparkline(series,cmap[m]||'var(--ac)');cards+="<div class='eff'><div class='nm'><span class='lg-swatch' style='background:"+(cmap[m]||'var(--ink-faint)')+";margin-right:6px'></span>"+esc(m)+"</div><div class='row'><span>cache hit</span><span>"+Math.round(v.cache_hit*100)+"%</span></div><div class='row'><span>$/1M tok</span><span>$"+v.cost_per_mtok.toFixed(2)+"</span></div><div class='row'><span>cost</span><span>$"+v.cost.toFixed(2)+"</span></div>"+spark+"</div>";});
+  var cards='';arr.forEach(function(x){var m=x[0],v=x[1];var series=dkeys.map(function(k){return (days[k].cost_by_model||{})[m]||0;});var spark=sparkline(series,cmap[m]||'var(--ac)');cards+="<div class='eff'><div class='nm' title='"+escAttr(m)+"'><span class='lg-swatch' style='background:"+(cmap[m]||'var(--ink-faint)')+";margin-right:6px'></span>"+esc((dispMap&&dispMap[m])||m)+"</div><div class='row'><span>cache hit</span><span>"+Math.round(v.cache_hit*100)+"%</span></div><div class='row'><span>$/1M tok</span><span>$"+v.cost_per_mtok.toFixed(2)+"</span></div><div class='row'><span>cost</span><span>$"+v.cost.toFixed(2)+"</span></div>"+spark+"</div>";});
   return "<div class='eff-grid'>"+cards+"</div>";
 }
 function topTable(sessions){
-  var top=sessions.slice(0,10);var rows='';top.forEach(function(s){rows+="<tr><td>"+esc(s.ts)+"</td><td class='hide-sm'>"+esc(s.sid.slice(0,8))+"</td><td><span class='tag'>"+esc(s.model||'-')+"</span></td><td class='n'>$"+s.cost.toFixed(2)+"</td><td class='n'>"+fmtInt(s.tok)+"</td></tr>";});
+  var top=sessions.slice(0,10);var rows='';top.forEach(function(s){rows+="<tr><td>"+esc(s.ts)+"</td><td class='hide-sm'>"+esc(s.sid.slice(0,8))+"</td><td><span class='tag' title='"+escAttr(s.model||'')+"'>"+esc(s.disp||s.model||'-')+"</span></td><td class='n'>$"+s.cost.toFixed(2)+"</td><td class='n'>"+fmtInt(s.tok)+"</td></tr>";});
   return "<table class='tbl'><thead><tr><th>Timestamp</th><th class='hide-sm'>Session</th><th>Model</th><th class='n'>Cost</th><th class='n'>Tokens</th></tr></thead><tbody>"+rows+"</tbody></table>";
 }
 
@@ -391,10 +394,11 @@ function aggregate(S){
   var t={sessions:0,cost:0,in:0,out:0,cr:0,cc:0,dur:0,api:0,la:0,lr:0,turns:0,tools:0};
   var days={},months={},per_model={},models=[],modelSet={};
   var usage={tools:{},tool_errors:0,agents:{},skills:{},compactions:0},projects={};
+  var model_disp={};
   for(var i=0;i<S.length;i++){
     var s=S[i];
     t.sessions++;t.cost+=s.cost;t.in+=s.in;t.out+=s.out;t.cr+=s.cr;t.cc+=s.cc;t.dur+=s.dur;t.api+=s.api;t.la+=s.la;t.lr+=s.lr;t.turns+=s.turns;t.tools+=s.tools;
-    if(s.model){if(!modelSet[s.model]){modelSet[s.model]=1;models.push(s.model);}var pm=per_model[s.model]||(per_model[s.model]={sessions:0,cost:0,tokens:0,in:0,out:0,cr:0,cc:0});pm.sessions++;pm.cost+=s.cost;pm.tokens+=s.tok;pm.in+=s.in;pm.out+=s.out;pm.cr+=s.cr;pm.cc+=s.cc;}
+    if(s.model){if(!modelSet[s.model]){modelSet[s.model]=1;models.push(s.model);}var pm=per_model[s.model]||(per_model[s.model]={sessions:0,cost:0,tokens:0,in:0,out:0,cr:0,cc:0});pm.sessions++;pm.cost+=s.cost;pm.tokens+=s.tok;pm.in+=s.in;pm.out+=s.out;pm.cr+=s.cr;pm.cc+=s.cc;if(s.disp)model_disp[s.model]=s.disp;}
     var dk=s.ts.slice(0,10),mk=s.ts.slice(0,7);
     var bmk=s.model||'others';
     if(dk){var dd=days[dk]||(days[dk]={sessions:0,cost:0,in:0,out:0,cr:0,cc:0,api:0,dur:0,cost_by_model:{},by_model:{}});dd.sessions++;dd.cost+=s.cost;dd.in+=s.in;dd.out+=s.out;dd.cr+=s.cr;dd.cc+=s.cc;dd.api+=s.api||0;dd.dur+=s.dur||0;if(s.cost)dd.cost_by_model[bmk]=(dd.cost_by_model[bmk]||0)+s.cost;var dbm=dd.by_model[bmk]||(dd.by_model[bmk]={sessions:0,cost:0,in:0,out:0,cr:0,cc:0});dbm.sessions++;dbm.cost+=s.cost;dbm.in+=s.in;dbm.out+=s.out;dbm.cr+=s.cr;dbm.cc+=s.cc;}
@@ -410,7 +414,7 @@ function aggregate(S){
   }
   models.sort();
   var ss=S.slice().sort(function(a,b){return b.cost-a.cost;});
-  return {totals:t,days:days,months:months,per_model:per_model,models:models,sessions:ss,n:S.length,usage:usage,projects:projects};
+  return {totals:t,days:days,months:months,per_model:per_model,models:models,sessions:ss,n:S.length,usage:usage,projects:projects,model_disp:model_disp};
 }
 function deriveStats(agg,range){
   var t=agg.totals,costs=agg.sessions.map(function(s){return s.cost;});
@@ -528,17 +532,17 @@ function renderHero(agg,st,firstDate){
 function render(range){
   var S=filterSessions(range);
   var agg=aggregate(S);
-  if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','sec-burn-highlights','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-throughput','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-model-quotas','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
+  if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','burn-cards','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-cadence','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-model-quotas','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
   var st=deriveStats(agg,range),t=agg.totals;
   var chartModels=agg.models.slice();
   var hasOthers=Object.keys(agg.days).some(function(k){return 'others' in agg.days[k].cost_by_model;})||Object.keys(agg.months).some(function(k){return 'others' in agg.months[k].cost_by_model;});
   if(hasOthers)chartModels.push('others');
   var cmap=modelColorMap(chartModels);
-  CHART={day:costByModel(agg.days),month:costByModel(agg.months),models:chartModels,colors:cmap};
+  CHART={day:costByModel(agg.days),month:costByModel(agg.months),models:chartModels,colors:cmap,disp:agg.model_disp};
   // hero
   el('kpi').innerHTML=renderHero(agg,st,FIRST_DATE);
   // burn highlights — top 3 of 4 range-reactive drivers, ranked by severity
-  el('sec-burn-highlights').innerHTML=burnHighlights(agg,SESSIONS);initBurnFilter();
+  el('burn-cards').innerHTML=burnHighlights(agg,SESSIONS);initBurnFilter();
   // spend over time
   el('sec-cumulative').innerHTML=svgCumulative(agg.days,st.run);
   el('sec-runrate').innerHTML="<div class='notes'>"+
@@ -558,8 +562,8 @@ function render(range){
   var ccWaste={};ccKeys.forEach(function(k){var d=agg.days[k];ccWaste[k]=d.cr?(d.cc/d.cr):0;});
   el('cc-ratio').innerHTML=barChart(ccWaste,'var(--ink-soft)',function(v){return v.toFixed(2);});
   // efficiency
-  el('sec-eff-models').innerHTML=perModelEfficiency(st.rates,agg.days,cmap);
-  el('sec-throughput').innerHTML=colcards([
+  el('sec-eff-models').innerHTML=perModelEfficiency(st.rates,agg.days,cmap,agg.model_disp);
+  el('sec-cadence').innerHTML=colcards([
     {title:'Cadence',stats:[
       ["turns / session",agg.n?(t.turns/agg.n).toFixed(1):'—'],
       ["tools / session",agg.n?(t.tools/agg.n).toFixed(1):'—']]},
@@ -588,11 +592,11 @@ function render(range){
   el('sec-pareto-title').textContent="Pareto · top-10 sessions = "+Math.round(st.pareto.top10_pct)+"% of spend";
   el('sec-toptable').innerHTML=topTable(agg.sessions);
   // models
-  el('sec-treemap').innerHTML=svgTreemap(agg.per_model,cmap);
+  el('sec-treemap').innerHTML=svgTreemap(agg.per_model,cmap,agg.model_disp);
   var modelSessions={},modelCost={};Object.keys(agg.per_model).forEach(function(m){modelSessions[m]=agg.per_model[m].sessions;modelCost[m]=agg.per_model[m].cost;});
-  el('sec-model-sessions').innerHTML=barChart(modelSessions,'var(--ink-soft)',null,cmap);
-  el('sec-model-cost').innerHTML=barChart(modelCost,'var(--ac)',function(v){return fmtMoney(v);},cmap);
-  el('sec-share').innerHTML=shareBars(agg.months,cmap);
+  el('sec-model-sessions').innerHTML=barChart(modelSessions,'var(--ink-soft)',null,cmap,agg.model_disp);
+  el('sec-model-cost').innerHTML=barChart(modelCost,'var(--ac)',function(v){return fmtMoney(v);},cmap,agg.model_disp);
+  el('sec-share').innerHTML=shareBars(agg.months,cmap,agg.model_disp);
   // usage patterns
   var totTool=0;Object.keys(agg.usage.tools).forEach(function(k){totTool+=agg.usage.tools[k];});
   var errRate=totTool?(agg.usage.tool_errors/totTool*100):0;
@@ -652,14 +656,14 @@ function _chart(target,data){
   keys.forEach(function(k){var t=0;Object.keys(data[k]).forEach(function(m){if(vis.has(m))t+=data[k][m];});totals[k]=t;if(t>mx)mx=t;});
   mx=mx||1;var h='',any=false;
   keys.forEach(function(k){var t=totals[k];if(t<=0)return;any=true;var segs='';
-    CHART.models.forEach(function(m){if(!vis.has(m))return;var c=data[k][m]||0;if(c<=0)return;segs+='<div class="seg" style="width:'+(c/mx*100).toFixed(4)+'%;background:'+CHART.colors[m]+'" data-tip="'+escAttr(m+' · '+fmtMoney(c))+'"></div>';});
+    CHART.models.forEach(function(m){if(!vis.has(m))return;var c=data[k][m]||0;if(c<=0)return;var segM=(CHART.disp&&CHART.disp[m])?CHART.disp[m]:m;segs+='<div class="seg" style="width:'+(c/mx*100).toFixed(4)+'%;background:'+CHART.colors[m]+'" data-tip="'+escAttr(segM+' · '+fmtMoney(c))+'"></div>';});
     h+='<div class="bar-row"><div class="bar-label">'+esc(k)+'</div><div class="sbar-track">'+segs+'</div><div class="bar-val">'+fmtMoney(t)+'</div></div>';
   });
   target.innerHTML=any?h:'<p class="muted">No data for selected models.</p>';
 }
 function _legend(){
   var filtered=ACTIVE.size>0,target=el('model-filter');
-  target.innerHTML=CHART.models.map(function(m){var off=filtered&&!ACTIVE.has(m)?' off':'';return '<button class="lg-item'+off+'" data-m="'+escAttr(m)+'"><span class="lg-swatch" style="background:'+CHART.colors[m]+'"></span>'+esc(m)+'</button>';}).join('')+'<button class="lg-all'+(filtered?'':' active')+'">all</button>';
+  target.innerHTML=CHART.models.map(function(m){var off=filtered&&!ACTIVE.has(m)?' off':'';return '<button class="lg-item'+off+'" data-m="'+escAttr(m)+'" title="'+escAttr(m)+'"><span class="lg-swatch" style="background:'+CHART.colors[m]+'"></span>'+esc((CHART.disp&&CHART.disp[m])||m)+'</button>';}).join('')+'<button class="lg-all'+(filtered?'':' active')+'">all</button>';
   target.querySelectorAll('button[data-m]').forEach(function(b){b.onclick=function(){_toggle(b.dataset.m);};});
   target.querySelector('.lg-all').onclick=function(){ACTIVE=new Set();_draw();};
 }
@@ -741,7 +745,7 @@ function svgTokenYield(data,cmap,vis){
   models.forEach(function(m){
     var col=cmap[m]||'var(--ink-faint)',run=[];
     function flush(){if(run.length>=2)lines+=pathD(run.map(function(p){return [fx(p.i),fy(p.e)];}),col,false,'none',2);run=[];}
-    days.forEach(function(d,i){var c=data.series[m][d];if(c&&c.e!=null){run.push({i:i,e:c.e});var tip=esc(m+' · '+d+' · '+c.e.toFixed(2)+' Mtok/1% ('+fmtAbbr(c.t)+' tok / '+c.d.toFixed(1)+'%)');dots+="<circle cx='"+fx(i).toFixed(1)+"' cy='"+fy(c.e).toFixed(1)+"' r='3' fill='"+col+"' opacity='0.9'><title>"+tip+"</title></circle>";}else{flush();}});
+    days.forEach(function(d,i){var c=data.series[m][d];if(c&&c.e!=null){run.push({i:i,e:c.e});var tipM=(CHART.disp&&CHART.disp[m])?CHART.disp[m]:m;var tip=esc(tipM+' · '+d+' · '+c.e.toFixed(2)+' Mtok/1% ('+fmtAbbr(c.t)+' tok / '+c.d.toFixed(1)+'%)');dots+="<circle cx='"+fx(i).toFixed(1)+"' cy='"+fy(c.e).toFixed(1)+"' r='3' fill='"+col+"' opacity='0.9'><title>"+tip+"</title></circle>";}else{flush();}});
     flush();
   });
   return svgWrap(W,H,axes+yticks+xlabels+lines+dots,'chart');
@@ -750,7 +754,7 @@ var TY_ACTIVE=new Set(),TY_GAUGE='7d';
 function tyVisSet(data){return TY_ACTIVE.size?TY_ACTIVE:new Set(data.models);}
 function renderTYLegend(data){
   var filtered=TY_ACTIVE.size>0,target=el('ty-legend');if(!target)return;
-  target.innerHTML=data.models.map(function(m){var off=filtered&&!TY_ACTIVE.has(m)?' off':'';var col=(CHART.colors&&CHART.colors[m])||'var(--ink-faint)';return '<button class="lg-item'+off+'" data-m="'+escAttr(m)+'"><span class="lg-swatch" style="background:'+col+'"></span>'+esc(m)+'</button>';}).join('')+'<button class="lg-all'+(filtered?'':' active')+'">all</button>';
+  target.innerHTML=data.models.map(function(m){var off=filtered&&!TY_ACTIVE.has(m)?' off':'';var col=(CHART.colors&&CHART.colors[m])||'var(--ink-faint)';var lbl=(CHART.disp&&CHART.disp[m])||m;return '<button class="lg-item'+off+'" data-m="'+escAttr(m)+'" title="'+escAttr(m)+'"><span class="lg-swatch" style="background:'+col+'"></span>'+esc(lbl)+'</button>';}).join('')+'<button class="lg-all'+(filtered?'':' active')+'">all</button>';
   target.querySelectorAll('button[data-m]').forEach(function(b){b.onclick=function(){_toggleTY(b.dataset.m);};});
   target.querySelector('.lg-all').onclick=function(){TY_ACTIVE=new Set();renderTY();};
 }
@@ -769,7 +773,7 @@ function renderTY(){
   el('sec-token-yield').innerHTML=svgTokenYield(data,cmap,vis)+"<p class='muted' style='margin-top:6px'>Mtok consumed per 1% of the "+esc(TY_GAUGE)+" window burned — per-session gauge deltas, reset-aware. Claude models only — they share the account 5h/7d quota, so lines compare each model's token density per quota point (higher = more tokens per 1%). Non-Claude models (separate quotas) are excluded; non-Pro/pre-statusline sessions carry no gauge.</p>";
   var order=data.models.slice().sort(function(a,b){return data.agg[b].e-data.agg[a].e;}),map={};
   order.forEach(function(m){map[m]=data.agg[m].e;});
-  el('sec-token-yield-summary').innerHTML="<div class='subhead' style='margin-top:10px'>Overall Mtok per 1% ("+esc(TY_GAUGE)+")</div>"+barChart(map,'var(--ac)',function(v){return v.toFixed(2)+' Mtok/%';},cmap);
+  el('sec-token-yield-summary').innerHTML="<div class='subhead' style='margin-top:10px'>Overall Mtok per 1% ("+esc(TY_GAUGE)+")</div>"+barChart(map,'var(--ac)',function(v){return v.toFixed(2)+' Mtok/%';},cmap,(CHART&&CHART.disp)||{});
 }
 
 // ---- view + theme toggles ----

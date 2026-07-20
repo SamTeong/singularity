@@ -143,7 +143,7 @@ function _build_sessions_json(sessions) {
   const out = [];
   for (const s of sessions) {
     const d = {
-      ts: s.ts, sid: s.sid, cost: s.cost, model: s.model,
+      ts: s.ts, sid: s.sid, cost: s.cost, model: s.model, disp: s.disp,
       in: s.in, out: s.out, cr: s.cr, cc: s.cc, tok: s.tok,
       dur: s.dur, api: s.api, la: s.la, lr: s.lr,
       r5: s.rl5, r7: s.rl7,
@@ -197,10 +197,10 @@ const TOKEN_ECONOMICS_HTML = `<header class='shead' id='sec-token-economics'><di
 const EFFICIENCY_HTML = `<header class='shead' id='sec-efficiency'><div class='shead-title'><h2>Efficiency</h2><span class='sub'>what a session costs in tokens, time, and lines</span></div></header>
 <h3 class='subhead'>Per-model efficiency</h3>
 <div id='sec-eff-models' class='rv'></div>
-<div class='card rv'><div id='sec-throughput'></div></div>`;
+<div class='card rv'><div id='sec-cadence'></div></div>`;
 
 const RATE_LIMITS_HTML = `<header class='shead' id='sec-rate-limit-utilization-5h-7d'><div class='shead-title'><h2>Rate-limit utilization · 5h &amp; 7d</h2><span class='sub'>how close you run to the usage caps</span></div></header>
-<div class='card rv'><h3>5h / 7d usage-limit efficiency (Claude models only)</h3><div id='sec-ratelimits'></div></div>
+<div class='card rv'><h3>5h / 7d utilization (Claude models only)</h3><div id='sec-ratelimits'></div></div>
 <div class='card rv'><h3>Token yield per rate-limit %</h3><div class='ctl-row'><div id='ty-legend' class='legend'></div><div class='toggle'><button id='tybtn-7d' class='active' onclick="showTY('7d')">7d</button><button id='tybtn-5h' onclick="showTY('5h')">5h</button></div></div><div id='sec-token-yield'></div><div id='sec-token-yield-summary'></div></div>
 <div class='card rv'><h3>Per-model weekly quotas</h3><div id='sec-model-quotas'></div></div>
 <div class='card rv'><h3>Rate-limit forecast at reset</h3><div id='sec-forecast'></div></div>`;
@@ -317,10 +317,10 @@ function _load_forecast() {
   }
 }
 
-// ---- burn highlights section (client-side; app.js fills #sec-burn-highlights) ----
+// ---- burn highlights section (client-side; app.js fills #burn-cards) ----
 
-const DIGEST_HTML = `<header class='shead' id='sec-token-burn-digest'><div class='shead-title'><h2>Burn highlights</h2><span class='sub'>top reasons your tokens burned</span></div></header>
-<div id='sec-burn-highlights'></div>`;
+const BURN_HTML = `<header class='shead' id='sec-burn-highlights'><div class='shead-title'><h2>Burn highlights</h2><span class='sub'>top reasons your tokens burned</span></div></header>
+<div id='burn-cards'></div>`;
 
 function render_scripts(sessions) {
   const secs = _build_sessions_json(sessions);
@@ -356,7 +356,7 @@ export function render(c) {
   return _fill(_source("base.html"), {
     STYLE: render_style(),
     HERO: render_hero(),
-    DIGEST: DIGEST_HTML,
+    BURN: BURN_HTML,
     BREAKDOWN: BREAKDOWN_HTML,
     TOKEN_ECONOMICS: TOKEN_ECONOMICS_HTML,
     EFFICIENCY: EFFICIENCY_HTML,
