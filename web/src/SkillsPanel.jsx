@@ -23,6 +23,7 @@ import MarkdownBody from './MarkdownBody.jsx';
 import { tildify, untildify } from './paths.js';
 import Rail from './panelkit/Rail.jsx';
 import RailSearch from './panelkit/RailSearch.jsx';
+import RailGroupToggle from './panelkit/RailGroupToggle.jsx';
 import { useRootList } from './panelkit/useRootList.js';
 
 // Skills viewer: tree of roots → scopes → skills (left), rendered SKILL.md
@@ -100,6 +101,18 @@ export default function SkillsPanel() {
   const totalScopes = view.reduce((n, r) => n + r.scopes.length, 0);
   const totalSkills = view.reduce((n, r) => n + new Set(r.scopes.flatMap((sc) => sc.skills.map((sk) => sk.name))).size, 0);
 
+  // Expand/collapse-all over both levels (roots + scopes). Search auto-expands
+  // matches, so the toggle is disabled while a query is active.
+  const rootKeys = view.map((r) => r.root);
+  const scopeKeys = view.flatMap((r) => r.scopes.map((sc) => `${r.root}::${sc.name}`));
+  const allOpen = rootKeys.length > 0
+    && rootKeys.every((k) => expandedRoots.has(k))
+    && scopeKeys.every((k) => expandedScopes.has(k));
+  const toggleAll = () => {
+    if (allOpen) { setExpandedRoots(new Set()); setExpandedScopes(new Set()); }
+    else { setExpandedRoots(new Set(rootKeys)); setExpandedScopes(new Set(scopeKeys)); }
+  };
+
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
       {/* left: root → scope → skill tree (collapsible) */}
@@ -109,6 +122,7 @@ export default function SkillsPanel() {
         <Box sx={{ p: 1.5, pb: 0.5 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
             <RailSearch placeholder="Search skills…" value={q} onChange={setQ} />
+            <RailGroupToggle allOpen={allOpen} onToggle={toggleAll} disabled={!!query} />
             <Tooltip title="Select skills folder" placement="bottom" disableInteractive>
               <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
             </Tooltip>

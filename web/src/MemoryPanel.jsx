@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -6,17 +6,20 @@ import IconButton from '@mui/material/IconButton';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import BookIcon from '@mui/icons-material/Book';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import Tooltip from '@mui/material/Tooltip';
 import DirPicker from './DirPicker.jsx';
 import { markdown } from '@codemirror/lang-markdown';
-import { StatusPill, EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@zapac/mui-theme';
 import CmEditor from './CmEditor.jsx';
 import DetailPane from './DetailPane.jsx';
 import { tildify, untildify } from './paths.js';
 import Rail from './panelkit/Rail.jsx';
 import RailSearch from './panelkit/RailSearch.jsx';
+import RailGroupToggle from './panelkit/RailGroupToggle.jsx';
 import SaveBar from './panelkit/SaveBar.jsx';
 
 // Memory root persists across sessions on the daemon FS (survives browser cache
@@ -83,6 +86,26 @@ export default function MemoryPanel() {
 
   const showing = results ?? files;
 
+  // Group rows by project folder (encoded cwd, e.g. c--git-myapp). Backend already
+  // tags each row with `project`; this is a pure render grouping. Collapsed set
+  // holds project names the user folded — default expanded (empty set).
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const toggleGroup = (p) => setCollapsed((s) => {
+    const n = new Set(s);
+    n.has(p) ? n.delete(p) : n.add(p);
+    return n;
+  });
+  const groups = useMemo(() => {
+    const m = new Map();
+    for (const it of showing) {
+      if (!m.has(it.project)) m.set(it.project, []);
+      m.get(it.project).push(it);
+    }
+    return [...m].sort((a, b) => a[0].localeCompare(b[0]));
+  }, [showing]);
+  const allOpen = groups.length > 0 && groups.every(([p]) => !collapsed.has(p));
+  const toggleAll = () => setCollapsed(allOpen ? new Set(groups.map(([p]) => p)) : new Set());
+
   return (
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
       <Rail storageKey="sing-memory-w" defaultWidth={340} collapsedTitle="Show memory files">
@@ -91,6 +114,7 @@ export default function MemoryPanel() {
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <RailSearch placeholder="Search memory…" value={q} onChange={setQ} />
+                <RailGroupToggle allOpen={allOpen} onToggle={toggleAll} />
                 <Tooltip title="Select memory folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
                 </Tooltip>
@@ -102,16 +126,29 @@ export default function MemoryPanel() {
               </Typography>
             </Box>
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {showing.map((it, i) => (
-                <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path && !results} onClick={() => open(it)}
-                  sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}>
-                  <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                    <StatusPill status="review">{it.project}</StatusPill>
-                    <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.file}{it.line ? `:${it.line}` : ''}</Typography>
-                  </Stack>
-                  {it.text && <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>}
-                </ListItemButton>
-              ))}
+              {groups.map(([project, items]) => {
+                const isCol = collapsed.has(project);
+                return (
+                  <Box key={project}>
+                    <ListItemButton onClick={() => toggleGroup(project)}
+                      sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.25 }}>
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }}>
+                        {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
+                        <FolderOpenIcon fontSize="small" color="action" />
+                        <Typography variant="code" sx={{ fontSize: 12 }} noWrap>{project}</Typography>
+                        <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary', ml: 'auto' }}>{items.length}</Typography>
+                      </Stack>
+                    </ListItemButton>
+                    {!isCol && items.map((it, i) => (
+                      <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path && !results} onClick={() => open(it)}
+                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25, pl: 4 }}>
+                        <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.file}{it.line ? `:${it.line}` : ''}</Typography>
+                        {it.text && <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>}
+                      </ListItemButton>
+                    ))}
+                  </Box>
+                );
+              })}
               {showing.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{results ? 'No matches.' : (err || 'No memory files.')}</Typography>}
             </List>
           </>

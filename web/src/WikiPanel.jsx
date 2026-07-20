@@ -30,6 +30,7 @@ import WikiGraph from './WikiGraph.jsx';
 import { tildify, untildify } from './paths.js';
 import Rail from './panelkit/Rail.jsx';
 import RailSearch from './panelkit/RailSearch.jsx';
+import RailGroupToggle from './panelkit/RailGroupToggle.jsx';
 import { useCapabilities } from './useCapabilities.js';
 
 // Wiki root persists across sessions on the daemon FS (survives browser cache
@@ -134,6 +135,10 @@ export default function WikiPanel() {
   const viewWikis = cats.length === 0 ? wikis
     : wikis.map((w) => ({ ...w, pages: w.pages.filter((p) => catSet.has(category(p.rel))) })).filter((w) => w.pages.length);
   const pageCount = viewWikis.reduce((n, w) => n + w.pages.length, 0);
+  // Expand/collapse-all over the wiki tree (browse only — search is flat).
+  const wikiKeys = viewWikis.map((w) => w.name);
+  const allOpen = wikiKeys.length > 0 && wikiKeys.every((k) => expanded.has(k));
+  const toggleAll = () => setExpanded(allOpen ? new Set() : new Set(wikiKeys));
 
   // Graph scope = the selected page's wiki (fallback: first wiki). Node ids are
   // page rels relative to that wiki, so they map straight to openPage.
@@ -159,6 +164,7 @@ export default function WikiPanel() {
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <RailSearch placeholder="Search wiki…" value={q} onChange={setQ} />
+                <RailGroupToggle allOpen={allOpen} onToggle={toggleAll} disabled={!!results} />
                 <Tooltip title="Select wiki folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
                 </Tooltip>

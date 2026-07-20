@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -9,6 +9,8 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ClearIcon from '@mui/icons-material/Clear';
 import GavelIcon from '@mui/icons-material/Gavel';
 import { markdown } from '@codemirror/lang-markdown';
@@ -19,6 +21,7 @@ import DirPicker from './DirPicker.jsx';
 import { tildify, untildify } from './paths.js';
 import Rail from './panelkit/Rail.jsx';
 import RailSearch from './panelkit/RailSearch.jsx';
+import RailGroupToggle from './panelkit/RailGroupToggle.jsx';
 import SaveBar from './panelkit/SaveBar.jsx';
 import { useRootList, normKey } from './panelkit/useRootList.js';
 
@@ -88,6 +91,33 @@ export default function RulesPanel() {
   // ~ vs expanded-home or / vs \ variants.
   const filesByRoot = (root) => files.filter((f) => normKey(f.root) === normKey(root));
 
+  // Collapsible section state — set of normKey(root) the user folded. Default
+  // expanded (empty). Shared across browse + search so a fold persists in view.
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const toggleGroup = (root) => setCollapsed((s) => {
+    const k = normKey(root);
+    const n = new Set(s);
+    n.has(k) ? n.delete(k) : n.add(k);
+    return n;
+  });
+  // Search hits grouped by root (flat list → [{root, items}], …), alpha by root.
+  const searchGroups = useMemo(() => {
+    const m = new Map();
+    for (const it of results || []) {
+      const k = normKey(it.root);
+      if (!m.has(k)) m.set(k, { root: it.root, items: [] });
+      m.get(k).items.push(it);
+    }
+    return [...m.values()].sort((a, b) => normKey(a.root).localeCompare(normKey(b.root)));
+  }, [results]);
+
+  // Keys for the groups currently displayed (browse or search) → drive the
+  // expand/collapse-all toggle. shownRoots are bare strings; searchGroups are
+  // {root, items} objects — normalize both to root keys.
+  const groupKeys = (results ? searchGroups : shownRoots.map((r) => ({ root: r }))).map((g) => normKey(g.root));
+  const allOpen = groupKeys.length > 0 && groupKeys.every((k) => !collapsed.has(k));
+  const toggleAll = () => setCollapsed(allOpen ? new Set(groupKeys) : new Set());
+
   return (
     <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>
       <Rail storageKey="sing-rules-w" defaultWidth={300} collapsedTitle="Show rule paths">
@@ -96,6 +126,7 @@ export default function RulesPanel() {
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <RailSearch placeholder="Search rules…" value={q} onChange={setQ} />
+                <RailGroupToggle allOpen={allOpen} onToggle={toggleAll} />
                 <Tooltip title="Select root folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}><FolderOpenIcon /></IconButton>
                 </Tooltip>
@@ -103,40 +134,43 @@ export default function RulesPanel() {
               </Stack>
             </Box>
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {results ? (
-                <>
-                  {results.map((it, i) => (
-                    <ListItemButton key={`${it.path}:${it.line}:${i}`} selected={sel?.path === it.path} onClick={() => open(it)}
-                      sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', py: 0.5, mb: 0.25 }}>
-                      <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                      <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
-                    </ListItemButton>
-                  ))}
-                  {results.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
-                </>
-              ) : (
-                <>
-                  {shownRoots.map((root) => (
-                    <Box key={root} sx={{ mb: 0.5 }}>
-                      <ListItemButton sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, '&:hover .del': { opacity: 1 } }}>
-                        <ListItemText primary={tildify(root)} primaryTypographyProps={{ noWrap: true, title: root, sx: { fontFamily: 'monospace', fontSize: 12 } }} />
+              {(results ? searchGroups : shownRoots.map((root) => ({ root, items: filesByRoot(root) }))).map((g) => {
+                const isCol = collapsed.has(normKey(g.root));
+                const count = g.items.length;
+                return (
+                  <Box key={g.root} sx={{ mb: 0.5 }}>
+                    <ListItemButton sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, '&:hover .del': { opacity: 1 } }}>
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.root)}>
+                        {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
+                        <FolderOpenIcon fontSize="small" color="action" />
+                        <ListItemText primary={tildify(g.root)} primaryTypographyProps={{ noWrap: true, title: g.root, sx: { fontFamily: 'monospace', fontSize: 12 } }} />
+                        <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
+                      </Stack>
+                      {!results && (
                         <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
-                          onClick={(e) => { e.stopPropagation(); forget(root); }}
+                          onClick={(e) => { e.stopPropagation(); forget(g.root); }}
                           sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
                           <ClearIcon fontSize="small" />
                         </IconButton>
+                      )}
+                    </ListItemButton>
+                    {!isCol && g.items.map((it, i) => results ? (
+                      <ListItemButton key={`${it.path}:${it.line}:${i}`} selected={sel?.path === it.path} onClick={() => open(it)}
+                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', py: 0.5, pl: 4, mb: 0.25 }}>
+                        <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
+                        <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
                       </ListItemButton>
-                      {filesByRoot(root).map((f) => (
-                        <ListItemButton key={f.path} selected={sel?.path === f.path} onClick={() => open(f)}
-                          sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, pl: 3, mb: 0.25 }}>
-                          <ListItemText primary={tildify(f.rel)} primaryTypographyProps={{ noWrap: true, title: f.path, sx: { fontSize: 12 } }} />
-                        </ListItemButton>
-                      ))}
-                    </Box>
-                  ))}
-                  {shownRoots.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No rule paths.</Typography>}
-                </>
-              )}
+                    ) : (
+                      <ListItemButton key={it.path} selected={sel?.path === it.path} onClick={() => open(it)}
+                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, pl: 4, mb: 0.25 }}>
+                        <ListItemText primary={tildify(it.rel)} primaryTypographyProps={{ noWrap: true, title: it.path, sx: { fontSize: 12 } }} />
+                      </ListItemButton>
+                    ))}
+                  </Box>
+                );
+              })}
+              {results && results.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
+              {!results && shownRoots.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No rule paths.</Typography>}
             </List>
           </>
         )}

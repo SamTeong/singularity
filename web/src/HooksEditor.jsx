@@ -13,14 +13,16 @@ import DetailPane from './DetailPane.jsx';
 import DirPicker from './DirPicker.jsx';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ClearIcon from '@mui/icons-material/Clear';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
-import ListSubheader from '@mui/material/ListSubheader';
 import { tildify, untildify } from './paths.js';
 import Rail from './panelkit/Rail.jsx';
 import RailSearch from './panelkit/RailSearch.jsx';
+import RailGroupToggle from './panelkit/RailGroupToggle.jsx';
 import SaveBar from './panelkit/SaveBar.jsx';
 import { useRootList, normKey } from './panelkit/useRootList.js';
 
@@ -65,6 +67,26 @@ export default function HooksEditor() {
     }).sort((a, b) => normKey(a.cwd).localeCompare(normKey(b.cwd))); // alpha by displayed form
   }, [groups]);
 
+  // Collapsible section state — set of normKey(cwd) the user folded. Default
+  // expanded (empty). Shared across browse + search so a fold persists in view.
+  const [collapsed, setCollapsed] = useState(() => new Set());
+  const toggleGroup = (cwd) => setCollapsed((s) => {
+    const k = normKey(cwd);
+    const n = new Set(s);
+    n.has(k) ? n.delete(k) : n.add(k);
+    return n;
+  });
+  // Search hits grouped by cwd (flat list → [[cwd, items], …]), alpha by cwd.
+  const searchGroups = useMemo(() => {
+    const m = new Map();
+    for (const it of results || []) {
+      const k = normKey(it.cwd);
+      if (!m.has(k)) m.set(k, { cwd: it.cwd, items: [] });
+      m.get(k).items.push(it);
+    }
+    return [...m.values()].sort((a, b) => normKey(a.cwd).localeCompare(normKey(b.cwd)));
+  }, [results]);
+
   const loadFile = (p) => {
     if (dirty && !window.confirm('Discard unsaved changes?')) return;
     fetch(`/hooks/file?path=${encodeURIComponent(p)}`).then((r) => r.json()).then((d) => {
@@ -92,6 +114,12 @@ export default function HooksEditor() {
   const lang = langFor(path);
   const onChange = (v) => { setContent(v); setDirty(true); };
 
+  // Keys for the groups currently displayed (browse or search) → drive the
+  // expand/collapse-all toggle.
+  const groupKeys = (results ? searchGroups : shownGroups).map((g) => normKey(g.cwd));
+  const allOpen = groupKeys.length > 0 && groupKeys.every((k) => !collapsed.has(k));
+  const toggleAll = () => setCollapsed(allOpen ? new Set(groupKeys) : new Set());
+
   const save = async () => {
     const r = await fetch('/hooks/file', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
@@ -115,6 +143,7 @@ export default function HooksEditor() {
             <Box sx={{ p: 1.5, pb: 0.5 }}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <RailSearch placeholder="Search hooks…" value={q} onChange={setQ} />
+                <RailGroupToggle allOpen={allOpen} onToggle={toggleAll} />
                 <Tooltip title="Select root folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}><FolderOpenIcon /></IconButton>
                 </Tooltip>
@@ -122,42 +151,43 @@ export default function HooksEditor() {
               </Stack>
             </Box>
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {results ? (
-                <>
-                  {results.map((it, i) => (
-                    <ListItemButton key={`${it.path}:${i}`} selected={it.path === path} onClick={() => loadFile(it.path)}
-                      sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', py: 0.5, mb: 0.25 }}>
-                      <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                      <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
+              {(results ? searchGroups : shownGroups.map((g) => ({ cwd: g.cwd, items: g.files }))).map((g) => {
+                const isCol = collapsed.has(normKey(g.cwd));
+                const count = g.items.length;
+                return (
+                  <Box key={g.cwd}>
+                    <ListItemButton sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
+                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.cwd)}>
+                        {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
+                        <FolderOpenIcon fontSize="small" color="action" />
+                        <Typography noWrap title={g.cwd} sx={{ flex: 1, minWidth: 0, fontFamily: 'monospace', fontSize: 11, color: 'text.secondary' }}>{tildify(g.cwd)}</Typography>
+                        <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
+                      </Stack>
+                      {!results && (
+                        <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
+                          onClick={(e) => { e.stopPropagation(); forget(g.cwd); }} sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
+                          <ClearIcon fontSize="small" />
+                        </IconButton>
+                      )}
                     </ListItemButton>
-                  ))}
-                  {results.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
-                </>
-              ) : (
-                <>
-                  {shownGroups.map((g) => (
-                    <React.Fragment key={g.cwd}>
-                      <ListSubheader disableSticky sx={{ bgcolor: 'transparent', lineHeight: '28px', px: 1, '&:hover .del': { opacity: 1 } }}>
-                        <Stack direction="row" sx={{ alignItems: 'center' }}>
-                          <Typography noWrap title={g.cwd} sx={{ flex: 1, minWidth: 0, fontFamily: 'monospace', fontSize: 11, color: 'text.secondary' }}>{tildify(g.cwd)}</Typography>
-                          <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
-                            onClick={() => forget(g.cwd)} sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
-                            <ClearIcon fontSize="small" />
-                          </IconButton>
-                        </Stack>
-                      </ListSubheader>
-                      {g.files.map((f) => (
-                        <ListItemButton key={f.path} selected={f.path === path} onClick={() => loadFile(f.path)}
-                          sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, mb: 0.25, pl: 2 }}>
-                          <ListItemText primary={f.rel} primaryTypographyProps={{ noWrap: true, title: f.path, sx: { fontFamily: 'monospace', fontSize: 12 } }} />
-                        </ListItemButton>
-                      ))}
-                      {g.files.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 11, px: 2, py: 0.5 }}>No hooks.</Typography>}
-                    </React.Fragment>
-                  ))}
-                  {shownGroups.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No hook roots.</Typography>}
-                </>
-              )}
+                    {!isCol && g.items.map((it, i) => results ? (
+                      <ListItemButton key={`${it.path}:${i}`} selected={it.path === path} onClick={() => loadFile(it.path)}
+                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', py: 0.5, mb: 0.25, pl: 4 }}>
+                        <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
+                        <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
+                      </ListItemButton>
+                    ) : (
+                      <ListItemButton key={it.path} selected={it.path === path} onClick={() => loadFile(it.path)}
+                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, mb: 0.25, pl: 4 }}>
+                        <ListItemText primary={it.rel} primaryTypographyProps={{ noWrap: true, title: it.path, sx: { fontFamily: 'monospace', fontSize: 12 } }} />
+                      </ListItemButton>
+                    ))}
+                    {!isCol && count === 0 && <Typography color="text.secondary" sx={{ fontSize: 11, px: 2, py: 0.5 }}>No hooks.</Typography>}
+                  </Box>
+                );
+              })}
+              {results && (results.length === 0) && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
+              {!results && shownGroups.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No hook roots.</Typography>}
             </List>
           </>
         )}
