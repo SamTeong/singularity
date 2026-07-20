@@ -16,7 +16,7 @@ import { untildify } from './paths.js';
 // lifted to App (shared with the dir picker + config fallback). Emits `create`
 // over the WS via sendMsg, then resets its own fields and closes.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export default function CreateAgentDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg }) {
+export default function CreateAgentDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg, onSessionCreated }) {
   const [name, setName] = useState('');
   const [model, setModel] = useState('');
   const [scopes, setScopes] = useState([]);
@@ -28,6 +28,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
   const create = () => {
     if (!connected || !cwd.trim()) return;
     sendMsg({ t: 'create', cwd: untildify(cwd.trim()), name: name.trim(), model: model.trim(), scopes, sessionId: sessionId.trim() });
+    onSessionCreated?.();
     reset();
     onClose();
   };

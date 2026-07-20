@@ -302,6 +302,9 @@ export default function App() {
   };
 
   const toggleDock = () => setDockMin((m) => { const n = !m; localStorage.setItem('sing-dock-min', n ? '1' : '0'); return n; });
+  // Starting a new session should reveal the Sessions dock even if the user
+  // had it minimized — no-op if already expanded.
+  const expandDock = () => setDockMin((m) => { if (!m) return m; localStorage.setItem('sing-dock-min', '0'); return false; });
 
   // Poll per-agent stats (turns/tokens from each session .jsonl).
   const agentKey = agents.map((a) => a.id).join(',');
@@ -586,7 +589,7 @@ export default function App() {
                     <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{a.name}</Typography>
                     <Stack direction="row" className="row-act" sx={{ flexShrink: 0, transition: 'opacity .15s' }}>
                       <Tooltip title="Duplicate (config only)" disableInteractive>
-                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'create', cwd: a.cwd, name: nextName(a), model: a.model, scopes: a.scopes }); }}><ContentCopyIcon fontSize="small" /></IconButton>
+                        <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'create', cwd: a.cwd, name: nextName(a), model: a.model, scopes: a.scopes }); expandDock(); }}><ContentCopyIcon fontSize="small" /></IconButton>
                       </Tooltip>
                       <Tooltip title="Fork (config + conversation)" disableInteractive>
                         <IconButton size="small" onClick={(e) => { e.stopPropagation(); sendMsg({ t: 'fork', id: a.id, name: nextName(a) }); }}><CallSplitIcon fontSize="small" /></IconButton>
@@ -754,6 +757,7 @@ export default function App() {
         recent={recent}
         onBrowse={() => setPicking(true)}
         sendMsg={sendMsg}
+        onSessionCreated={expandDock}
       />
 
       <CreateTaskDialog
