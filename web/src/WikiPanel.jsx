@@ -30,6 +30,7 @@ import WikiGraph from './WikiGraph.jsx';
 import { tildify, untildify } from './paths.js';
 import Rail from './panelkit/Rail.jsx';
 import RailSearch from './panelkit/RailSearch.jsx';
+import { useCapabilities } from './useCapabilities.js';
 
 // Wiki root persists across sessions on the daemon FS (survives browser cache
 // clear). Default ~/wiki; loaded from /wiki/root on mount.
@@ -53,6 +54,12 @@ export default function WikiPanel() {
   const [content, setContent] = useState('');
   const [loadingFile, setLoadingFile] = useState(false);
   const [graphView, setGraphView] = useState(null); // null | 'main' (right pane) | 'dock' (bottom of left nav)
+  const caps = useCapabilities();
+  // wiki.available is false when the configured root has no wiki subfolders.
+  // The root-picker button (top of the rail) is the enable action — keep it
+  // reachable; surface the hint in the viewer's empty state.
+  const wikiUnavailable = caps && caps.wiki?.available === false;
+  const wikiHint = caps?.wiki?.hint;
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
   useEffect(() => {
@@ -254,7 +261,7 @@ export default function WikiPanel() {
           </>
         ) : (
           <DetailPane
-            empty={!sel && <EmptyState icon={<MenuBookIcon />} title="Select a page" description="Browse on the left to view here." />}
+            empty={!sel && <EmptyState icon={<MenuBookIcon />} title={wikiUnavailable ? 'Wiki not configured' : 'Select a page'} description={wikiUnavailable ? wikiHint : 'Browse on the left to view here.'} />}
             loading={loadingFile}
             error={err}
           >

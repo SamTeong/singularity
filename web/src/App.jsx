@@ -47,7 +47,7 @@ import { useTheme } from '@mui/material/styles';
 import { AmbientBackground, useColorMode, StatusPill, EmptyState } from '@zapac/mui-theme';
 import Terminal from './Terminal.jsx';
 import DirPicker from './DirPicker.jsx';
-import { setHome, tildify } from './paths.js';
+import { setHome, tildify, untildify } from './paths.js';
 import { fmtTokens } from './format.js';
 import { KIND } from './agentStatus.js';
 import ProcessManager from './ProcessManager.jsx';
@@ -162,7 +162,10 @@ export default function App() {
   const [active, setActive] = useState(null);
   const [connected, setConnected] = useState(false);
   const [recent, setRecent] = useState([]);
-  const [cwd, setCwd] = useState('C:\\git\\singularity');
+  // '~' until the user picks — the Create*Dialogs untildify before sending, and
+  // the DirPicker call below untildifies its start. /env loads home on mount so
+  // tildify/untildify resolve to the real home before any Browse click.
+  const [cwd, setCwd] = useState('~');
   const [picking, setPicking] = useState(false);
   const [procsOpen, setProcsOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState(null);
@@ -652,7 +655,7 @@ export default function App() {
           </Box>
         </Box>
 
-      {picking && <DirPicker start={cwd} onPick={(p) => { setCwd(p); setPicking(false); }} onClose={() => setPicking(false)} />}
+      {picking && <DirPicker start={untildify(cwd)} onPick={(p) => { setCwd(p); setPicking(false); }} onClose={() => setPicking(false)} />}
       {procsOpen && <ProcessManager onClose={() => setProcsOpen(false)} />}
 
       {/* More menu: Config/Hooks/Skills/Rules/Memory/Transcripts/Wiki nav, then processes + dark mode. */}

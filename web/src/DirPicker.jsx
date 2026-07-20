@@ -16,7 +16,7 @@ import { tildify, untildify } from './paths.js';
 
 // Modal folder browser backed by GET /fs/browse. Directories only.
 export default function DirPicker({ start, onPick, onClose }) {
-  const [path, setPath] = useState(start || 'C:\\');
+  const [path, setPath] = useState(start || '/');
   const [parent, setParent] = useState(null);
   const [dirs, setDirs] = useState([]);
   const [err, setErr] = useState(null);
@@ -34,7 +34,9 @@ export default function DirPicker({ start, onPick, onClose }) {
       })
       .catch((e) => setErr(String(e)));
   };
-  useEffect(() => { load(start || 'C:\\'); }, []);
+  // '/' is a real FS root on both POSIX and Windows (current drive root). The
+  // /fs/browse handler doesn't untildify, so '~' can't be the fallback here.
+  useEffect(() => { load(start || '/'); }, []);
 
   const sep = path.includes('/') && !path.includes('\\') ? '/' : '\\';
   const child = (name) => (path.endsWith(sep) ? path + name : path + sep + name);
