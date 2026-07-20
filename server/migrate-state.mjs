@@ -4,9 +4,26 @@
 // root (trusted); tickets/ relocates there below, worktrees/ is git-registered
 // and not auto-moved. Imported for its side effect from index.mjs only — NOT
 // pulled into tests or the statusline script.
-import { existsSync, mkdirSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, renameSync, cpSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { APP_DIR, STATE_DIR, CACHE_DIR, TICKETS_DIR } from './app-dir.mjs';
+
+// renameSync across volumes throws EXDEV — fall back to recursive copy + unlink
+// so state on a different volume than TRUSTED_ROOT (e.g. macOS external state)
+// doesn't strand tickets. Best-effort: swallow non-EXDEV as before; for EXDEV,
+// do the copy+unlink and only swallow if THAT fails.
+function renameAcrossVolume(old, neu) {
+  try {
+    renameSync(old, neu);
+  } catch (err) {
+    if (err && err.code === 'EXDEV') {
+      cpSync(old, neu, { recursive: true });
+      rmSync(old, { recursive: true, force: true });
+    } else {
+      throw err;
+    }
+  }
+}
 
 mkdirSync(STATE_DIR, { recursive: true });
 mkdirSync(CACHE_DIR, { recursive: true });
@@ -25,7 +42,7 @@ for (const [name, dir] of moves) {
   const old = join(APP_DIR, name);
   const neu = join(dir, name);
   if (existsSync(old) && !existsSync(neu)) {
-    try { renameSync(old, neu); } catch { /* best-effort — leave in place */ }
+    try { renameAcrossVolume(old, neu); } catch { /* best-effort — leave in place */ }
   }
 }
 
@@ -36,6 +53,6 @@ for (const [name, dir] of moves) {
 {
   const oldTickets = join(STATE_DIR, 'tickets');
   if (existsSync(oldTickets) && !existsSync(TICKETS_DIR)) {
-    try { renameSync(oldTickets, TICKETS_DIR); } catch { /* best-effort */ }
+    try { renameAcrossVolume(oldTickets, TICKETS_DIR); } catch { /* best-effort */ }
   }
 }
