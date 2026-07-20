@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 
@@ -37,29 +37,57 @@ test('searchHooks returns matching line + snippet', () => {
 
 test('writeHook writes a .bak on second write; guard rejects non-hooks path', () => {
   const cwd = makeRoot({ 'w.mjs': 'v1' });
-  const p = join(cwd, '.claude', 'hooks', 'w.mjs');
-  const first = writeHook(p, 'v2');
-  assert.equal(first.ok, true);
-  assert.equal(existsSync(`${p}.bak`), true);
-  const second = writeHook(p, 'v3');
-  assert.equal(second.ok, true);
-  assert.equal(second.backup, true);
-  // Guard: a path outside .claude/hooks is rejected.
-  const bad = writeHook(join(cwd, 'evil.txt'), 'x');
-  assert.equal(bad.ok, false);
-  assert.match(bad.error, /bad path/);
+  setHookRoots(['~', cwd]); // register cwd so guard's root-containment check allows it
+  try {
+    const p = join(cwd, '.claude', 'hooks', 'w.mjs');
+    const first = writeHook(p, 'v2');
+    assert.equal(first.ok, true);
+    assert.equal(existsSync(`${p}.bak`), true);
+    const second = writeHook(p, 'v3');
+    assert.equal(second.ok, true);
+    assert.equal(second.backup, true);
+    // Guard: a path outside .claude/hooks is rejected.
+    const bad = writeHook(join(cwd, 'evil.txt'), 'x');
+    assert.equal(bad.ok, false);
+    assert.match(bad.error, /bad path/);
+  } finally {
+    setHookRoots(['~']); // restore default so later tests see a clean root list
+  }
 });
 
 test('readHook reads back real hook content; missing file → exists:false', () => {
   const cwd = makeRoot({ 'r.mjs': 'hello world' });
-  const p = join(cwd, '.claude', 'hooks', 'r.mjs');
-  const r = readHook(p);
-  assert.equal(r.exists, true);
-  assert.equal(r.content, 'hello world');
-  // A path under .claude/hooks that doesn't exist → exists:false, empty content.
-  const miss = readHook(join(cwd, '.claude', 'hooks', 'nope.mjs'));
-  assert.equal(miss.exists, false);
-  assert.equal(miss.content, '');
+  setHookRoots(['~', cwd]);
+  try {
+    const p = join(cwd, '.claude', 'hooks', 'r.mjs');
+    const r = readHook(p);
+    assert.equal(r.exists, true);
+    assert.equal(r.content, 'hello world');
+    // A path under .claude/hooks that doesn't exist → exists:false, empty content.
+    const miss = readHook(join(cwd, '.claude', 'hooks', 'nope.mjs'));
+    assert.equal(miss.exists, false);
+    assert.equal(miss.content, '');
+  } finally {
+    setHookRoots(['~']);
+  }
+});
+
+test('guard rejects a hooks-shaped path outside any configured hook root', () => {
+  const registered = makeRoot({ 'ok.mjs': 'v1' });
+  const outside = makeRoot({ 'sneaky.mjs': 'v1' }); // valid .claude/hooks/ shape, but never registered
+  setHookRoots(['~', registered]);
+  try {
+    const p = join(outside, '.claude', 'hooks', 'sneaky.mjs');
+    const w = writeHook(p, 'pwned');
+    assert.equal(w.ok, false);
+    assert.match(w.error, /bad path/);
+    assert.equal(readFileSync(p, 'utf8'), 'v1'); // untouched
+    const r = readHook(p);
+    assert.equal(r.exists, false);
+    assert.equal(r.error, 'bad path');
+  } finally {
+    setHookRoots(['~']);
+  }
 });
 
 test('guard rejects traversal that climbs out of .claude/hooks (resolved, not raw)', () => {

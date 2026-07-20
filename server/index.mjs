@@ -54,7 +54,30 @@ function requireEnv() {
 }
 requireEnv();
 
-const app = Fastify({ logger: { level: 'info' } });
+// The ?token= form of the auth gate (below) puts SING_TOKEN in the request URL —
+// redact it from the default req serializer so it never lands in log output.
+// Shape mirrors Fastify's own default (lib/logger-pino.js `serializers.req`);
+// only `url` is transformed.
+function redactTokenParam(url) {
+  return url.replace(/([?&]token=)[^&]*/i, '$1[redacted]');
+}
+const app = Fastify({
+  logger: {
+    level: 'info',
+    serializers: {
+      req(req) {
+        return {
+          method: req.method,
+          url: redactTokenParam(req.url),
+          version: req.headers && req.headers['accept-version'],
+          host: req.host,
+          remoteAddress: req.ip,
+          remotePort: req.socket ? req.socket.remotePort : undefined,
+        };
+      },
+    },
+  },
+});
 
 // Safety net: the daemon hosts live PTY agents — an unhandled rejection must be
 // logged and survive, never crash the process.
@@ -83,13 +106,22 @@ async function shutdown() {
 process.on('SIGTERM', shutdown);
 process.on('SIGINT', shutdown);
 
+// web/dist absent → running via `pnpm dev` (daemon on PORT, Vite dev server on
+// :5317 proxying to it); present → `pnpm start` serves the built shell straight
+// from this daemon and Vite never runs. Same signal the static-serving branch
+// below already uses to tell dev from prod.
+const webDist = join(__dirname, '..', 'web', 'dist');
+const DEV = !existsSync(webDist);
+
 // Browser cross-origin guard (DNS rebinding / drive-by pages hitting loopback).
 // The 127.0.0.1 bind does not stop the user's own browser acting as a confused
 // deputy: a malicious page can fetch/WS straight to localhost. Allow only our
 // own origins (daemon + Vite dev); requests without Origin (curl, same-origin
-// GET navigations) pass — this blocks browsers, not local tools.
+// GET navigations) pass — this blocks browsers, not local tools. The Vite dev
+// origin (:5317) is only trusted in dev — a prod build never runs Vite, so
+// there's no reason to keep it in the allowlist there.
 const SELF_HOSTS = new Set(
-  [PORT, 5317].flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
+  (DEV ? [PORT, 5317] : [PORT]).flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
 );
 function originAllowed(origin) {
   if (!origin) return true;
@@ -132,7 +164,6 @@ function walkMtimes(dir) {
   return out;
 }
 
-const webDist = join(__dirname, '..', 'web', 'dist');
 if (existsSync(webDist)) {
   app.register(fastifyStatic, { root: webDist, index: false });
   // Serve the shell via a route so the token can be injected for the client.

@@ -1,19 +1,41 @@
 // Hooks editor backend: list + read + write hook script files under a root's
 // .claude/hooks/ directory (raw file content, not settings.json). Client-supplied
-// paths are guarded to contain a .claude/hooks/ segment so this can't read/write
-// arbitrary files. Roots are an independent FS-persisted list under STATE_DIR.
+// paths are guarded to resolve under ONE of the configured hook roots'
+// <root>/.claude/hooks — mirror rules.mjs isRulePath / memory.mjs isMemoryPath
+// (resolve-then-containment against known roots), not a bare path-segment check
+// (which can't stop a write to ANY */.claude/hooks/ on the machine — hooks are
+// auto-executed by Claude). Roots are an independent FS-persisted list under STATE_DIR.
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from 'node:fs';
-import { join, sep, resolve } from 'node:path';
+import { join, sep, resolve, normalize } from 'node:path';
+import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
 
-// A client path must live under a `.claude/hooks/` segment. Resolve first so `..`
-// is collapsed (a raw string can contain the segment yet climb out of it), then
-// test the RESOLVED absolute path. Returns the resolved path on success, else null.
-const HOOKS_SEG = `${sep}.claude${sep}hooks${sep}`;
+// Resolve a ~-prefixed client path to an absolute one (mirror rules.mjs resolveRoot).
+function resolveRoot(raw) {
+  if (!raw) return null;
+  let p = raw;
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = normalize(homedir() + p.slice(1));
+  try { return resolve(p); } catch { return null; }
+}
+
+// The hooks dir for a picked base root: <base>/.claude/hooks (absolute).
+function hooksDir(base) {
+  const r = resolveRoot(base);
+  return r ? resolve(join(r, '.claude', 'hooks')) : null;
+}
+
+// A client path must resolve under one of the configured hook roots' hooksDir.
+// Resolve first so `..` is collapsed (a raw string can contain the right segment
+// yet climb out of it), then test the RESOLVED absolute path against every
+// known root. Returns the resolved path on success, else null.
 function guard(path) {
   if (typeof path !== 'string' || !path) return null;
   const abs = resolve(path);
-  return abs.replace(/\//g, sep).includes(HOOKS_SEG) ? abs : null;
+  const inRoot = getHookRoots().some((raw) => {
+    const dir = hooksDir(raw);
+    return dir && (abs === dir || abs.startsWith(dir + sep));
+  });
+  return inRoot ? abs : null;
 }
 
 // Bounded recursive walk of <cwd>/.claude/hooks — files only, sorted by rel.

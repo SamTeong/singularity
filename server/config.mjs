@@ -2,7 +2,7 @@
 // read them, and write with a .bak backup + JSON validation. Paths are derived
 // server-side from (cwd, scope) — the client never supplies a path.
 import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
 
@@ -110,10 +110,32 @@ export function setConfigRoots(roots) {
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
+// Resolve a ~-prefixed client path to an absolute one (mirror rules.mjs resolveRoot).
+function resolveRoot(raw) {
+  if (!raw) return null;
+  let p = raw;
+  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = normalize(homedir() + p.slice(1));
+  try { return resolve(p); } catch { return null; }
+}
+
+// A write target's cwd must resolve under one of the pinned config roots
+// (getConfigRoots) — mirrors rules.mjs isRulePath / memory.mjs isMemoryPath so
+// the editor can't be pointed at an arbitrary directory to plant a
+// settings.json Claude will auto-execute (hooks/permissions) on next run there.
+function isKnownConfigRoot(cwd) {
+  if (!cwd) return false;
+  const abs = resolve(cwd);
+  return getConfigRoots().some((raw) => {
+    const root = resolveRoot(raw);
+    return root && (abs === root || abs.startsWith(root + sep));
+  });
+}
+
 export function writeConfig(cwd, scope, content) {
+  if (!EDIT_SCOPES.includes(scope)) return { ok: false, error: 'bad scope' };
+  if (!isKnownConfigRoot(cwd)) return { ok: false, error: 'cwd outside config roots' };
   const paths = scopePaths(cwd);
   const p = paths[scope];
-  if (!p) return { ok: false, error: 'bad scope' };
   try { JSON.parse(content); } catch (e) { return { ok: false, error: `invalid JSON: ${e.message}` }; }
   try {
     if (existsSync(p)) copyFileSync(p, `${p}.bak`);
