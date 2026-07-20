@@ -23,6 +23,16 @@ const WORKTREE_ROOT = reg.WORKTREES_DIR;
 // source of truth can't live there.
 const TICKETS_ROOT = reg.TICKETS_DIR;
 const COLUMNS = ['todo', 'inprogress', 'inreview', 'done'];
+// Per-column state vocabulary (SSOT). updateTask hard-rejects a state that
+// isn't valid for its column. OVERLAY_STATES may appear on any column —
+// transient, set by the log-tail watcher, cleared on the next real transition.
+const STATES = {
+  todo: ['analyzing', 'clarifying', 'awaiting plan approval'],
+  inprogress: ['working', 'implementing', 'fixing'],
+  inreview: ['reviewing', 'parked — needs human', 'parked — merge conflict', 'awaiting human merge', 'awaiting human review', 'stopped — budget'],
+  done: ['complete', 'report ready'],
+};
+const OVERLAY_STATES = ['rate-limited'];
 const PORT = Number(process.env.PORT);
 const MAX_REVIEW_REJECTS = 3;
 const RETENTION_MS = 7 * 24 * 3600 * 1000; // Done cards auto-conclude to history after this long.
@@ -198,8 +208,8 @@ ${t.description}`;
    ${status('inreview', 'reviewing')}
    and ${reviewSpawn('independently examine the files you changed')}.
 5. **On REJECT**: run
-   ${status('inprogress', 'fixing (review N/' + MAX_REVIEW_REJECTS + ')')}
-   (N = rejection count), have a ${fixSub} implement the fixes and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
+   ${status('inprogress', 'fixing')}
+   have a ${fixSub} implement the fixes and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
    ${status('inreview', 'parked — needs human')}
    summarize the blockers here in the terminal, and end your involvement.
 6. **On PASS**: conclude with a one-line summary of what was done and run
@@ -228,8 +238,8 @@ ${t.description}`;
    ${status('inreview', 'reviewing')}
    and ${reviewSpawn('independently examine the diff')} on what must change.
 5. **On REJECT**: run
-   ${status('inprogress', 'fixing (review N/' + MAX_REVIEW_REJECTS + ')')}
-   (N = rejection count), have a ${fixSub} implement the fixes, commit, and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
+   ${status('inprogress', 'fixing')}
+   have a ${fixSub} implement the fixes, commit, and go back to step 4. After ${MAX_REVIEW_REJECTS} rejections, stop: run
    ${status('inreview', 'parked — needs human')}
    summarize the blockers here in the terminal, and end your involvement.
 6. **On PASS**: apply the merge policy above.${t.mergeMode === 'auto'
@@ -343,6 +353,7 @@ export async function updateTask(id, { column, state }) {
     t.column = column;
     if (column === 'done' && !wasDone) {
       t.doneAt = Date.now();
+      t.state = 'complete'; // clear stale agent state (e.g. "awaiting human review") on manual move; matches auto-flow done state, explicit state param below still wins
       // Done ⟹ merged & terminal: drop the session (stops cost) and reclaim the
       // worktree + branch now. Wait for the pty to die first (Windows file locks).
       if (t.sessionId) {
@@ -356,7 +367,13 @@ export async function updateTask(id, { column, state }) {
       ensureWorktree(t); // moved back out of Done → give it a working tree again
     }
   }
-  if (state !== undefined) t.state = String(state).slice(0, 120);
+  if (state !== undefined) {
+    const col = column ?? t.column;
+    const s = String(state).slice(0, 120);
+    const allowed = [...(STATES[col] ?? []), ...OVERLAY_STATES];
+    if (!allowed.includes(s)) throw new Error(`bad state for ${col} (expected ${allowed.join('|')})`);
+    t.state = s;
+  }
   t.updatedAt = Date.now();
   persist();
   emitTasks();

@@ -19,7 +19,7 @@ process.env.SINGULARITY_HOME = join(scratch, 'sing');
 // regardless of whether ollama is installed on the machine running the suite.
 delete process.env.OLLAMA_BIN;
 
-const { buildTaskPrompt, buildBackgroundPrompt, createTask, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree } = await import('./tasks.mjs');
+const { buildTaskPrompt, buildBackgroundPrompt, createTask, updateTask, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree } = await import('./tasks.mjs');
 
 function initRepo() {
   const repo = mkdtempSync(join(tmpdir(), 'sing-repo-'));
@@ -160,6 +160,27 @@ test('RATE_LIMIT_RE matches 429 + usage-limit strings', () => {
   assert.match('Request rejected (429)', RATE_LIMIT_RE);
   assert.doesNotMatch('session usage limit', RATE_LIMIT_RE);
   assert.doesNotMatch('HTTP 429', RATE_LIMIT_RE);
+});
+
+// updateTask validates `state` against the per-column STATES map. Seeded
+// directly into tasks.json + initTasks() (mirrors agents.test.mjs's
+// seed-via-JSON + init() pattern) so this never goes through createTask's
+// real agent spawn.
+test('updateTask: state validated against the per-column STATES map', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'seed-1', title: 'seed', description: 'd', column: 'inprogress', state: 'working', kind: 'plain', repo: '/r' }],
+    history: [],
+  }));
+  initTasks(null);
+
+  const ok = await updateTask('seed-1', { state: 'implementing' });
+  assert.equal(ok.state, 'implementing');
+
+  await assert.rejects(() => updateTask('seed-1', { state: 'reviewing' }), /bad state for inprogress/);
+
+  const overlay = await updateTask('seed-1', { state: 'rate-limited' });
+  assert.equal(overlay.state, 'rate-limited');
 });
 
 test('buildBackgroundPrompt: conclude "done" moves the card to done as the last action', () => {
