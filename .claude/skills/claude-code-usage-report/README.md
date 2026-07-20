@@ -29,7 +29,7 @@ node scripts/screenshot-example.mjs  # refresh the 3 screenshots (needs playwrig
 
 ## What it shows
 
-- **Token-burn digest** — "where did my tokens go lately": last-14-day totals, fresh/cache-read/cache-create split, top burning sessions and projects, daily burn trend, and a flag on anomalously heavy sessions.
+- **Burn highlights** — top 3 (of 4 candidate) reasons your tokens burned in the selected range: heavy-session concentration, outlier sessions vs. your baseline, context compactions, long/high-turn sessions. Client-side, reacts to the 7d/30d/all range picker like every other section.
 - **Spend** — total, $/hour, $/line, run-rate + 30-day projection, cumulative curve, daily calendar heatmap.
 - **Token economics** — input / output / cache-read / cache-creation composition per day; cache-hit ratio.
 - **Efficiency** — per-session cost, $/hour, $/line (gated at 5% line coverage).

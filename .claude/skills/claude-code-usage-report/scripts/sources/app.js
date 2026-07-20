@@ -338,7 +338,6 @@ function fmtEta(e){
   var s=med?(pad2(med.getMonth()+1)+'-'+pad2(med.getDate())+' '+pad2(med.getHours())+':'+pad2(med.getMinutes())):'—';
   return s+(e.upper?'':' · open-ended')+'  ·  P∞ '+Math.round(e.pInf*100)+'%';
 }
-function pad2(n){return String(n).padStart(2,'0');}
 function renderForecast(F){
   F=F||{};
   var g=F.gauges||{};
@@ -421,6 +420,66 @@ function deriveStats(agg,range){
 }
 function filterSessions(range){return SESSIONS.filter(function(s){var d=s.ts.slice(0,10);return d>=range.from && d<=range.to;});}
 
+// ---- burn highlights ----
+// 4 candidate "why did tokens burn" drivers over the current range, scored
+// [0,1] against all-time baselines (median tokens/turns from the full
+// SESSIONS global); top 3 by score become cards, badge reflects each score.
+function clamp01(x){return Math.max(0,Math.min(1,x));}
+function burnHighlights(agg,allSessions){
+  var t=agg.totals,n=agg.n;
+  var medTok=percentile(allSessions.map(function(s){return s.tok;}).sort(function(a,b){return a-b;}),0.5);
+  var medTurns=percentile(allSessions.map(function(s){return s.turns;}).sort(function(a,b){return a-b;}),0.5);
+  var totTok=t.in+t.out+t.cr+t.cc;
+  var byTok=agg.sessions.slice().sort(function(a,b){return b.tok-a.tok;});
+  var top3Tok=byTok.slice(0,3).reduce(function(a,s){return a+s.tok;},0);
+  var share=totTok?(top3Tok/totTok):0;
+  var outliers=medTok?agg.sessions.filter(function(s){return s.tok>3*medTok;}):[];
+  var mult=outliers.length?Math.max.apply(null,outliers.map(function(s){return s.tok/medTok;})):0;
+  var compTotal=agg.usage.compactions||0;
+  var compSessions=agg.sessions.filter(function(s){return s.facets&&s.facets.ce>0;}).length;
+  var compRate=n?compTotal/n:0;
+  var avgTurns=n?t.turns/n:0;
+  var turnOutliers=medTurns?agg.sessions.filter(function(s){return s.turns>3*medTurns;}).length:0;
+  var drivers=[
+    {area:'Heavy-session concentration',score:clamp01((share-0.3)/0.5),
+      metric:"Top 3 sessions = "+Math.round(share*100)+"% of tokens",
+      why:"A few long runs carry most of the burn.",fix:"Split big tasks; /clear between them."},
+    {area:'Outlier sessions vs baseline',score:outliers.length?clamp01(mult/6):0,
+      metric:outliers.length+" run(s) >3× your median (peak "+mult.toFixed(1)+"×)",
+      why:"Individual sessions spiked far above your norm.",fix:"Open the flagged runs in Sessions; trim context."},
+    {area:'Context compactions',score:clamp01(compRate/2),
+      metric:compTotal+" compactions across "+compSessions+" sessions",
+      why:"Context filled and re-compacted, re-billing input.",fix:"/clear or start fresh sooner; keep context lean."},
+    {area:'Long / high-turn sessions',score:medTurns?clamp01((avgTurns/medTurns-1)/2):0,
+      metric:"Avg "+avgTurns.toFixed(1)+" turns/session; "+turnOutliers+" run(s) >3× typical",
+      why:"Long conversations re-read growing context each turn.",fix:"Break work into shorter sessions."}
+  ];
+  drivers.sort(function(a,b){return b.score-a.score;});
+  var cards='';
+  drivers.forEach(function(d,i){
+    var badge=d.score>=0.6?'st-part':(d.score>=0.33?'st-idea':'st-ok');
+    var label=d.score>=0.6?'HIGH':(d.score>=0.33?'MED':'LOW');
+    var extra=i>=3?" data-extra='1'":'';  // beyond the top 3 — hidden until "View more"
+    cards+="<div class='sg'"+extra+"><span class='sg-b "+badge+"'>"+label+"</span><span class='sg-a'>"+esc(d.area)+"</span>"+
+      "<span class='sg-t'><b>"+esc(d.metric)+"</b><br>"+esc(d.why)+"<br><span class='muted'>→ "+esc(d.fix)+"</span></span></div>";
+  });
+  var more=drivers.length>3
+    ?"<div class='filter-bar'><span class='filter-lbl'>Burn drivers</span><button id='burn-more' class='lg-all' type='button' aria-pressed='false'>View more</button></div>"
+    :'';
+  return more+"<div class='sgs hide-extra' id='burn-sgs'>"+cards+"</div>";
+}
+// Wire the "View more" toggle; called after each burnHighlights render (grid is
+// rebuilt on every range change, so the button + handler are re-created too).
+function initBurnFilter(){
+  var btn=el('burn-more'),grid=el('burn-sgs');if(!btn||!grid)return;
+  btn.onclick=function(){
+    var shown=!grid.classList.toggle('hide-extra');
+    btn.textContent=shown?'View less':'View more';
+    btn.classList.toggle('active',shown);
+    btn.setAttribute('aria-pressed',shown?'true':'false');
+  };
+}
+
 // ---- hero ----
 function renderHero(agg,st,firstDate){
   var t=agg.totals,fromNote='from '+firstDate;
@@ -469,7 +528,7 @@ function renderHero(agg,st,firstDate){
 function render(range){
   var S=filterSessions(range);
   var agg=aggregate(S);
-  if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-throughput','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-model-quotas','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
+  if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','sec-burn-highlights','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-throughput','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-model-quotas','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
   var st=deriveStats(agg,range),t=agg.totals;
   var chartModels=agg.models.slice();
   var hasOthers=Object.keys(agg.days).some(function(k){return 'others' in agg.days[k].cost_by_model;})||Object.keys(agg.months).some(function(k){return 'others' in agg.months[k].cost_by_model;});
@@ -478,6 +537,8 @@ function render(range){
   CHART={day:costByModel(agg.days),month:costByModel(agg.months),models:chartModels,colors:cmap};
   // hero
   el('kpi').innerHTML=renderHero(agg,st,FIRST_DATE);
+  // burn highlights — top 3 of 4 range-reactive drivers, ranked by severity
+  el('sec-burn-highlights').innerHTML=burnHighlights(agg,SESSIONS);initBurnFilter();
   // spend over time
   el('sec-cumulative').innerHTML=svgCumulative(agg.days,st.run);
   el('sec-runrate').innerHTML="<div class='notes'>"+

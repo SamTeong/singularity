@@ -39,13 +39,6 @@ const FORECAST_JSON = path.join(SKILL_STATE_DIR, "forecast.json");
 // Nominal window lengths, per claumon forecast.service.go durationFor. Used as
 // DurationHours in the rate prior (rho = uFinal / durationHours, percent/hour).
 const GAUGE_DUR_HOURS = { five_hour: 5, seven_day: 7 * 24 };
-// Token-burn digest: "where did my tokens go lately" summary, persisted so
-// render.mjs reads it rather than recomputing (split compute/render, same
-// pattern as forecast.json). Pure aggregation over already-loaded sessions —
-// cheap, so rebuilt on every `report` (no staleness cache needed).
-const DIGEST_JSON = path.join(SKILL_STATE_DIR, "digest.json");
-const DIGEST_WINDOW_DAYS = 14;
-const DIGEST_TOP_N = 5;
 // Reports sit beside the state dir, so USAGE_REPORT_STATE relocates them too.
 const REPORTS_DIR = path.join(path.dirname(SKILL_STATE_DIR), "reports");
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -1609,9 +1602,6 @@ function cmd_report() {
   // Lazy-rebuild the rate-limit forecast (Phase D) so render.mjs embeds a fresh
   // fit. Pass the loaded sessions for the statusline-rl fallback when OAuth is off.
   c.forecast = _load_forecast(c.sessions);
-  // Rebuild the token-burn digest so render.mjs's (disk-reading) loader picks up
-  // a fresh file every render.
-  c.digest = _load_digest(c.sessions);
   const html_doc = render(c);
   fs.mkdirSync(REPORTS_DIR, { recursive: true });
   const out = path.join(REPORTS_DIR, `report-${reportStamp(new Date())}.html`);
@@ -1880,124 +1870,6 @@ function cmd_forecast(args) {
       print(`    no open window to project${g.source === "statusline" ? " (statusline fallback: enable OAuth polling for a projection)" : ""}`);
     }
   }
-}
-
-// ---- token-burn digest ----
-// "Where did my tokens go lately" — top burning sessions/projects, daily burn
-// trend, and cache-read/fresh-input split over a recent window, plus a flag on
-// anomalously heavy sessions (tok far above the all-time median). Every input
-// field (tok/cost/in/out/cr/cc/ts/facets.cwd) is already on each session
-// object from _load_stats; this is pure aggregation, no new capture/parsing.
-
-function _proj_label(cwd) {
-  // Mirrors app.js projLabel(): last 2 path segments, so a long absolute path
-  // reads as e.g. "git/singularity" instead of the full local path.
-  if (!cwd) return "unknown";
-  const parts = cwd.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean);
-  return parts.length ? parts.slice(-2).join("/") : cwd;
-}
-
-function _build_digest(sessions) {
-  const nowMs = Date.now();
-  const windowStartMs = nowMs - DIGEST_WINDOW_DAYS * 86400000;
-  const win = sessions.filter((s) => {
-    const d = parseDateTime(s.ts);
-    return d && d.getTime() >= windowStartMs;
-  });
-  const out = {
-    builtAt: now_local(),
-    windowDays: DIGEST_WINDOW_DAYS,
-    ok: win.length > 0,
-  };
-  if (!out.ok) {
-    fs.writeFileSync(DIGEST_JSON, JSON.stringify(out, null, 2), { encoding: "utf-8", mode: 0o600 });
-    return out;
-  }
-  win.sort((a, b) => (a.ts < b.ts ? -1 : a.ts > b.ts ? 1 : 0));
-  out.windowStart = win[0].ts.slice(0, 10);
-  out.windowEnd = win[win.length - 1].ts.slice(0, 10);
-
-  const totals = { sessions: 0, tok: 0, cost: 0, in: 0, out: 0, cr: 0, cc: 0 };
-  const days = {}; // date -> {tok,cost,in,out,cr,cc}
-  const projects = {}; // label -> {tok,cost,sessions}
-  for (const s of win) {
-    totals.sessions++; totals.tok += s.tok; totals.cost += s.cost;
-    totals.in += s.in; totals.out += s.out; totals.cr += s.cr; totals.cc += s.cc;
-    const dk = s.ts.slice(0, 10);
-    const dd = days[dk] || (days[dk] = { tok: 0, cost: 0, in: 0, out: 0, cr: 0, cc: 0 });
-    dd.tok += s.tok; dd.cost += s.cost; dd.in += s.in; dd.out += s.out; dd.cr += s.cr; dd.cc += s.cc;
-    const label = _proj_label(s.facets && s.facets.cwd);
-    const pp = projects[label] || (projects[label] = { project: label, tok: 0, cost: 0, sessions: 0 });
-    pp.tok += s.tok; pp.cost += s.cost; pp.sessions++;
-  }
-  out.totals = totals;
-  out.dailyBurn = Object.keys(days).sort().map((dk) => ({ date: dk, ...days[dk] }));
-
-  const cacheBase = totals.in + totals.cr + totals.cc;
-  out.cacheSplit = cacheBase > 0
-    ? {
-        freshPct: (totals.in / cacheBase) * 100,
-        cacheReadPct: (totals.cr / cacheBase) * 100,
-        cacheCreatePct: (totals.cc / cacheBase) * 100,
-      }
-    : { freshPct: 0, cacheReadPct: 0, cacheCreatePct: 0 };
-
-  const projSession = (s) => ({
-    ts: s.ts, sid: s.sid, model: s.model, project: _proj_label(s.facets && s.facets.cwd),
-    tok: s.tok, cost: s.cost,
-  });
-  out.topSessions = win.slice().sort((a, b) => b.tok - a.tok).slice(0, DIGEST_TOP_N).map(projSession);
-  out.topProjects = Object.values(projects).sort((a, b) => b.tok - a.tok).slice(0, DIGEST_TOP_N);
-
-  // Anomaly flag: window sessions whose tok blows past the all-time baseline —
-  // more than 3x the all-time median (and at least the all-time p90), so a
-  // single quiet history doesn't make every session in the window "anomalous".
-  const allTok = sessions.map((s) => s.tok).sort((a, b) => a - b);
-  const medianTok = _percentile(allTok, 0.5);
-  const p90Tok = _percentile(allTok, 0.9);
-  out.baseline = { medianTok, p90Tok };
-  const threshold = Math.max(p90Tok, medianTok * 3);
-  out.anomalies = medianTok > 0
-    ? win.filter((s) => s.tok > threshold)
-        .sort((a, b) => b.tok - a.tok)
-        .slice(0, DIGEST_TOP_N)
-        .map((s) => ({ ...projSession(s), multiple: s.tok / medianTok }))
-    : [];
-
-  fs.writeFileSync(DIGEST_JSON, JSON.stringify(out, null, 2), { encoding: "utf-8", mode: 0o600 });
-  return out;
-}
-
-// Public: rebuild + persist the digest, mirroring _load_forecast's role
-// alongside cmd_report so render.mjs's own (disk-reading) loader gets a fresh
-// file. Aggregation is cheap so this always rebuilds — no staleness gate.
-export function _load_digest(sessions) {
-  return _build_digest(sessions);
-}
-
-function cmd_digest() {
-  if (!isFile(STATS_CSV)) {
-    printErr(`stats.csv not found at ${STATS_CSV}. Run \`node ${SCRIPT} backfill\` first.`);
-    process.exit(1);
-  }
-  const c = _load_stats();
-  const d = _build_digest(c.sessions);
-  print(`digest -> ${DIGEST_JSON}`);
-  if (!d.ok) {
-    print(`  no sessions in the last ${DIGEST_WINDOW_DAYS}d`);
-    return;
-  }
-  print(`  window: ${d.windowStart}..${d.windowEnd} (${d.windowDays}d): ${d.totals.sessions} sessions, ${_abbr(d.totals.tok)} tok, $${fixed(d.totals.cost, 2)}`);
-  print(`  cache split: fresh ${fixed(d.cacheSplit.freshPct, 1)}% / cache-read ${fixed(d.cacheSplit.cacheReadPct, 1)}% / cache-create ${fixed(d.cacheSplit.cacheCreatePct, 1)}%`);
-  if (d.topSessions.length) {
-    const top = d.topSessions[0];
-    print(`  top session: ${top.project} — ${_abbr(top.tok)} tok, $${fixed(top.cost, 2)} (${top.ts})`);
-  }
-  if (d.topProjects.length) {
-    const top = d.topProjects[0];
-    print(`  top project: ${top.project} — ${_abbr(top.tok)} tok across ${top.sessions} session(s)`);
-  }
-  print(`  anomalies flagged: ${d.anomalies.length} (median ${_abbr(d.baseline.medianTok)} tok, p90 ${_abbr(d.baseline.p90Tok)} tok)`);
 }
 
 function _map_usage(raw) {
@@ -2402,7 +2274,7 @@ async function main() {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
   if (!cmd) {
-    printErr("usage: stats.mjs {record,backfill,report,priors,install,estimate,fetch-usage,fetch-pricing,forecast,digest,pricing}");
+    printErr("usage: stats.mjs {record,backfill,report,priors,install,estimate,fetch-usage,fetch-pricing,forecast,pricing}");
     process.exit(2);
   }
   if (cmd === "record") {
@@ -2427,8 +2299,6 @@ async function main() {
     });
   } else if (cmd === "forecast") {
     cmd_forecast({ force: argv.includes("--force") });
-  } else if (cmd === "digest") {
-    cmd_digest();
   } else if (cmd === "fetch-pricing") {
     await cmd_fetch_pricing({ oauth: argv.includes("--oauth") });
   } else if (cmd === "pricing") {

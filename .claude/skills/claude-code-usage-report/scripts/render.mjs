@@ -21,7 +21,6 @@ const SOURCES_DIR = path.join(SCRIPT_DIR, "sources");
 const STATE_ROOT = process.env.USAGE_REPORT_STATE || path.join(HOME, ".agents", ".claude-code-usage-report", "state");
 const USAGE_LATEST_JSON = path.join(STATE_ROOT, "usage-latest.json");
 const FORECAST_JSON = path.join(STATE_ROOT, "forecast.json");
-const DIGEST_JSON = path.join(STATE_ROOT, "digest.json");
 
 function _source(name) {
   return fs.readFileSync(path.join(SOURCES_DIR, name), "utf-8");
@@ -78,18 +77,6 @@ function _inum(v) {
   if (v === null || v === undefined || v === "") return 0;
   const f = parseFloat(v);
   return Number.isNaN(f) ? 0 : Math.trunc(f);
-}
-
-function fixed(n, d) {
-  return Number(n || 0).toFixed(d);
-}
-
-function abbr(n) {
-  n = Number(n || 0);
-  for (const [u, div] of [["b", 1e9], ["m", 1e6], ["k", 1e3]]) {
-    if (Math.abs(n) >= div) return fixed(n / div, 1) + u;
-  }
-  return fixed(n, 0);
 }
 
 // ---- roadmap (claude-code-usage-report-suggestions integration) ----
@@ -330,104 +317,10 @@ function _load_forecast() {
   }
 }
 
-function _load_digest() {
-  // Token-burn digest. Rebuilt by stats.mjs's own _load_digest right before
-  // render(); null when digest.json is missing/corrupt (e.g. skill not yet
-  // installed against this state dir).
-  if (!isFile(DIGEST_JSON)) return null;
-  try {
-    return JSON.parse(fs.readFileSync(DIGEST_JSON, "utf-8"));
-  } catch {
-    return null;
-  }
-}
+// ---- burn highlights section (client-side; app.js fills #sec-burn-highlights) ----
 
-// ---- token-burn digest section ----
-
-const DIGEST_HTML = `<header class='shead' id='sec-token-burn-digest'><div class='shead-title'><h2>Token-burn digest</h2><span class='sub'>where the tokens went, lately</span></div></header>
-{{DIGEST_BODY}}`;
-
-function _digestSessionRows(rows) {
-  return rows
-    .map(
-      (s) =>
-        `<tr><td>${esc(s.ts)}</td><td>${esc(s.project)}</td><td><span class='tag'>${esc(s.model || "-")}</span></td>` +
-        `<td class='n'>${abbr(s.tok)}</td><td class='n'>$${fixed(s.cost, 2)}</td></tr>`
-    )
-    .join("");
-}
-
-function _digestProjectRows(rows) {
-  return rows
-    .map(
-      (p) =>
-        `<tr><td>${esc(p.project)}</td><td class='n'>${p.sessions}</td>` +
-        `<td class='n'>${abbr(p.tok)}</td><td class='n'>$${fixed(p.cost, 2)}</td></tr>`
-    )
-    .join("");
-}
-
-function _digestDailyRows(rows) {
-  // Most-recent day first, capped to the window length (already ≤ windowDays).
-  return rows
-    .slice()
-    .reverse()
-    .map((d) => `<tr><td>${esc(d.date)}</td><td class='n'>${abbr(d.tok)}</td><td class='n'>$${fixed(d.cost, 2)}</td></tr>`)
-    .join("");
-}
-
-function render_digest(digest) {
-  if (!digest || !digest.ok) {
-    const body =
-      "<p class='muted'>Not enough recent sessions to build a digest yet" +
-      (digest ? "" : " — run <code>node stats.mjs report</code> once to build it") +
-      ".</p>";
-    return _fill(DIGEST_HTML, { DIGEST_BODY: body });
-  }
-  const t = digest.totals;
-  const cs = digest.cacheSplit;
-  const summary =
-    `<div class='card rv'><h3>Last ${digest.windowDays}d (${esc(digest.windowStart)} &ndash; ${esc(digest.windowEnd)})</h3>` +
-    `<div class='eff-grid'>` +
-    `<div class='eff'><div class='nm'>Sessions</div><div class='row'><span>count</span><span>${t.sessions}</span></div></div>` +
-    `<div class='eff'><div class='nm'>Tokens</div><div class='row'><span>total</span><span>${abbr(t.tok)}</span></div></div>` +
-    `<div class='eff'><div class='nm'>Cost</div><div class='row'><span>total</span><span>$${fixed(t.cost, 2)}</span></div></div>` +
-    `<div class='eff'><div class='nm'>Input mix</div><div class='row'><span>fresh</span><span>${fixed(cs.freshPct, 1)}%</span></div>` +
-    `<div class='row'><span>cache-read</span><span>${fixed(cs.cacheReadPct, 1)}%</span></div>` +
-    `<div class='row'><span>cache-create</span><span>${fixed(cs.cacheCreatePct, 1)}%</span></div></div>` +
-    `</div></div>`;
-
-  const topSessions =
-    `<div class='card rv'><h3>Top burning sessions</h3><div class='scroll'><table class='tbl'>` +
-    `<thead><tr><th>Timestamp</th><th>Project</th><th>Model</th><th class='n'>Tokens</th><th class='n'>Cost</th></tr></thead>` +
-    `<tbody>${_digestSessionRows(digest.topSessions)}</tbody></table></div></div>`;
-
-  const topProjects =
-    `<div class='card rv'><h3>Top burning projects</h3><div class='scroll'><table class='tbl'>` +
-    `<thead><tr><th>Project</th><th class='n'>Sessions</th><th class='n'>Tokens</th><th class='n'>Cost</th></tr></thead>` +
-    `<tbody>${_digestProjectRows(digest.topProjects)}</tbody></table></div></div>`;
-
-  const dailyBurn =
-    `<div class='card rv'><h3>Daily burn trend</h3><div class='scroll'><table class='tbl'>` +
-    `<thead><tr><th>Date</th><th class='n'>Tokens</th><th class='n'>Cost</th></tr></thead>` +
-    `<tbody>${_digestDailyRows(digest.dailyBurn)}</tbody></table></div></div>`;
-
-  const anomalies = digest.anomalies.length
-    ? digest.anomalies
-        .map(
-          (a) =>
-            `<div class='note warn'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8'><path d='M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z'/></svg>` +
-            `<span class='txt'><b>${esc(a.project)}</b> at ${esc(a.ts)} burned ${abbr(a.tok)} tok ` +
-            `(${fixed(a.multiple, 1)}&times; the all-time median, $${fixed(a.cost, 2)}, ${esc(a.model || "-")}).</span></div>`
-        )
-        .join("")
-    : "<p class='muted'>No anomalously heavy sessions in this window.</p>";
-  const anomaliesBlock = `<div class='card rv'><h3>Anomalies</h3><div class='notes'>${anomalies}</div></div>`;
-
-  return _fill(DIGEST_HTML, {
-    DIGEST_BODY: summary + `<div class='grid2'>${topSessions}${topProjects}</div>` + dailyBurn + anomaliesBlock,
-  });
-}
+const DIGEST_HTML = `<header class='shead' id='sec-token-burn-digest'><div class='shead-title'><h2>Burn highlights</h2><span class='sub'>top reasons your tokens burned</span></div></header>
+<div id='sec-burn-highlights'></div>`;
 
 function render_scripts(sessions) {
   const secs = _build_sessions_json(sessions);
@@ -463,7 +356,7 @@ export function render(c) {
   return _fill(_source("base.html"), {
     STYLE: render_style(),
     HERO: render_hero(),
-    DIGEST: render_digest(_load_digest()),
+    DIGEST: DIGEST_HTML,
     BREAKDOWN: BREAKDOWN_HTML,
     TOKEN_ECONOMICS: TOKEN_ECONOMICS_HTML,
     EFFICIENCY: EFFICIENCY_HTML,
