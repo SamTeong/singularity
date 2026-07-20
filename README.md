@@ -6,6 +6,7 @@ See `PLAN.md` for full design and phase plan.
 ## Run
 
 ```
+pnpm bootstrap       # first-time: generate .env (detects CLAUDE_BIN) + install + start
 pnpm install         # once
 pnpm start           # build web + serve on http://127.0.0.1:4317
 ```
@@ -38,7 +39,7 @@ Optional token (defense-in-depth): set `SING_TOKEN=<secret>` — data endpoints 
 
 ## Notes
 
-- `claude` binary is PATH-resolved at daemon start (Windows node-pty needs a real exe path). Override with `CLAUDE_BIN=<path>`.
-- App data (registry + recent repos, tasks, cron jobs) lives under `~\.singularity\` (`agents.json`, `tasks.json`, `crons.json`). Override the location with `SINGULARITY_HOME=<path>`. Git worktrees + ticket requirements/plans (`.worktrees/`, `.tickets/<id>/`) live at the repo root instead (trusted, gitignored) so Claude honors the repo's permission rules.
+- `CLAUDE_BIN` must be an **absolute path** in `.env` — the daemon does no PATH resolution (Windows node-pty needs a real exe path). `pnpm bootstrap` detects it for you; otherwise set it by hand.
+- App data (registry, tasks, cron jobs, picker roots) lives under `SINGULARITY_HOME` (set in `.env`; `pnpm bootstrap` defaults it to `~/.singularity`). Git worktrees + ticket requirements/plans (`.worktrees/`, `.tickets/<id>/`) live at the repo root, or `SING_TRUSTED_ROOT` if set (trusted, gitignored) so Claude honors the repo's permission rules.
 - Per-agent cost is shown as **turns + total tokens**, not `$` — accurate dollar cost needs per-model pricing; use your spend tooling for that.
-- **Not portable as-is:** the UI theme is a local tarball dep (`@zapac/mui-theme` → `file:../_references/...`), so `pnpm install` only succeeds on a machine where that path exists. Vendor/publish the package (or swap in your own MUI theme) to build elsewhere.
+- The UI theme (`@zapac/mui-theme`) is vendored as a tgz in `vendor/`, so `pnpm install` works anywhere — no external path dependency.

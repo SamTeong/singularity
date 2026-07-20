@@ -5,6 +5,7 @@ Local web UI to run + steer multiple Claude Code agents. Browser shell + loopbac
 ## Run
 
 ```
+pnpm bootstrap       # first-time: generate .env (detect CLAUDE_BIN) + install + start
 pnpm install         # once — @zapac/mui-theme is vendored (file:vendor/zapac-mui-theme-*.tgz)
 pnpm start           # build web + serve on http://127.0.0.1:4317
 pnpm dev             # daemon (:4317) + Vite (:5317) → open :5317; Vite proxies /ws + REST to daemon
@@ -15,7 +16,7 @@ Pieces separately: `pnpm server` / `pnpm web`. Shell: PowerShell primary; Bash t
 
 `pnpm web`/`pnpm start` build takes ~2–3min — run with `run_in_background` (or `timeout: 300000`); the default 120s timeout always fires and auto-backgrounds it.
 
-Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `PORT`, `CLAUDE_BIN`, `SING_USAGE_SKILL`, `SING_USAGE_REPORTS` (optional: `OLLAMA_BIN` — absent → ollama models unavailable; `SING_SCOPE_ROOT` — absent → no skill-scopes; `SING_TOKEN`; daemon boots without any of these). Copy `.env.example` → `.env` (gitignored) and fill in. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
+Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `PORT`, `CLAUDE_BIN` are REQUIRED; `OLLAMA_BIN` (absent → ollama models unavailable), `SING_SCOPE_ROOT` (absent → no skill-scopes; skills viewer auto-detects flat `~/.claude/skills` + `<project>/.claude/skills` vs grouped), `SING_TRUSTED_ROOT` (absent → default = this clone), `SING_USAGE_SKILL`/`SING_USAGE_REPORTS` (absent → spend/usage-report degrade silently; `/capabilities` reports them), `SING_TOKEN` are OPTIONAL — daemon boots without any. MCP (lean-ctx) is auto-detected, not required. `pnpm bootstrap` generates a `.env` with these filled (detects `CLAUDE_BIN`) for first-time setup. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
 
 ## Repo structure
 
@@ -32,10 +33,10 @@ Backend modules → routes in `server/index.mjs`. Add a concern = new module + r
 ## State
 
 Owned app state → `SINGULARITY_HOME` (required, no default — set in `.env`; `APP_DIR`):
-- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `ollama.json`
+- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `background.json`, `ollama.json`, plus per-user picker roots — `config-roots.json`, `hook-roots.json`, `memory-root.json`, `rules-roots.json`, `sessions-root.json`, `skills-roots.json` (+ legacy `skills-root.json`), `wiki-root.json`
 - `cache/` (disposable): `usage-cache.json`, `pw-ollama-profile/`
 
-`.worktrees/` + `.tickets/<id>/` live at the **repo root** (git-registered / gitignored), NOT under `APP_DIR` — Claude only honors repo-controllable permissions (allow-rules/hooks) for paths inside the trusted project root; external paths fire Task-permission prompts.
+`.worktrees/` + `.tickets/<id>/` live at `TRUSTED_ROOT` (default = this clone; override via `SING_TRUSTED_ROOT` in `.env`), NOT under `APP_DIR` — Claude only honors repo-controllable permissions (allow-rules/hooks) for paths inside the trusted project root; external paths fire Task-permission prompts.
 Single source = `server/app-dir.mjs` (`APP_DIR`/`STATE_DIR`/`CACHE_DIR`/`WORKTREES_DIR`/`TICKETS_DIR`). Route all new state through `reg` from `agents.mjs` — never hardcode `~/.singularity`. `migrate-state.mjs` (imported by `index.mjs`) moves the pre-split flat layout into `state/`+`cache/` once.
 
 External (read-only, not owned): `~/.claude/projects` (session transcripts), `~/.claude/.credentials.json` (OAuth), `~/.agents` (spend, skill-scopes), `~/wiki` (client-chosen root).
