@@ -3,7 +3,6 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
-import Autocomplete from '@mui/material/Autocomplete';
 import Button from '@mui/material/Button';
 import Checkbox from '@mui/material/Checkbox';
 import Chip from '@mui/material/Chip';
@@ -18,7 +17,9 @@ import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
 import AddIcon from '@mui/icons-material/Add';
 import ModelSelect from './ModelSelect.jsx';
-import { tildify, untildify } from './paths.js';
+import CwdPicker from './CwdPicker.jsx';
+import ScopeSelect from './ScopeSelect.jsx';
+import { untildify } from './paths.js';
 
 const DAYS = [['Su', 0], ['Mo', 1], ['Tu', 2], ['We', 3], ['Th', 4], ['Fr', 5], ['Sa', 6]];
 const DEFAULT_WINDOW = { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] };
@@ -46,7 +47,6 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
   const [thresholds, setThresholds] = useState(DEFAULT_THRESHOLDS);
   const [models, setModels] = useState(DEFAULT_MODELS);
   const [tokenCaps, setTokenCaps] = useState(DEFAULT_TOKEN_CAPS);
-  const [scopeList, setScopeList] = useState([]);
   const [scopes, setScopes] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -54,11 +54,6 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
   // The dialog never unmounts (renders null while closed), so a plain useState
   // initializer only runs once — resync on every open, either from `def` (edit)
   // or back to blank/defaults (create).
-  useEffect(() => {
-    if (!open) return;
-    fetch('/skill-scopes').then((r) => r.json()).then((d) => setScopeList(d.scopes || [])).catch(() => {});
-  }, [open]);
-
   useEffect(() => {
     if (!open) return;
     if (def) {
@@ -124,19 +119,8 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
           <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} />
           <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
-          <Autocomplete
-            freeSolo fullWidth options={(recent || []).map(tildify)} inputValue={cwd}
-            onInputChange={(_, v) => setCwd(v)}
-            renderInput={(params) => <TextField {...params} size="small" label="working directory" spellCheck={false} />}
-          />
-          <Autocomplete
-            multiple size="small" disableCloseOnSelect
-            options={scopeList} value={scopes} onChange={(_, v) => setScopes(v)}
-            renderOption={(props, option, { selected }) => (
-              <li {...props}><Checkbox size="small" checked={selected} style={{ marginRight: 8 }} />{option}</li>
-            )}
-            renderInput={(params) => <TextField {...params} size="small" label="skill-scopes" placeholder="" />}
-          />
+          <CwdPicker value={cwd} onChange={setCwd} recent={recent} label="working directory" />
+          <ScopeSelect open={open} value={scopes} onChange={setScopes} />
           <TextField size="small" label="cooldown (hours)" type="number" value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
           <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled" />
           <FormControl size="small" fullWidth>

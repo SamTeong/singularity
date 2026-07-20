@@ -25,6 +25,10 @@ import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
 import VerticalSplitIcon from '@mui/icons-material/VerticalSplit';
 import { StatusPill } from '@zapac/mui-theme';
 import TranscriptView from './TranscriptView.jsx';
+import { repoName } from './paths.js';
+import { fmtUsd, fmtTokens } from './format.js';
+import { KIND } from './agentStatus.js';
+import { useResizable } from './useResizable.jsx';
 
 const COLUMNS = [
   ['todo', 'To-Do'],
@@ -32,19 +36,14 @@ const COLUMNS = [
   ['inreview', 'In Review'],
   ['done', 'Done'],
 ];
-// agent lifecycle -> StatusPill kinds (mirrors KIND in App.jsx)
-const KIND = { starting: 'active', running: 'active', idle: 'review', detached: 'review', exited: 'error' };
-const repoName = (p) => (p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
 
-// Duration/cost/token formatters — fmtTokens mirrors the 1-liner in App.jsx.
+// Duration formatter — cost/token formatters live in format.js.
 const fmtMs = (ms) => {
   if (!ms) return null;
   const m = ms / 60000;
   if (m < 60) return `${m < 10 ? m.toFixed(1) : Math.round(m)}m`;
   return `${(m / 60).toFixed(1)}h`;
 };
-const fmtUsd = (n) => (n > 0 ? `$${n.toFixed(2)}` : null);
-const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`);
 
 // Card stats line: "18m busy · 12m api · $0.84 · 350k tok" — omits null/zero parts.
 function statsLine(s) {
@@ -96,9 +95,10 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   const [errT, setErrT] = useState(null);
   const [side, setSide] = useState(() => (localStorage.getItem('sing-hist-side') === 'right' ? 'right' : 'bottom'));
   const [panelMin, setPanelMin] = useState(() => localStorage.getItem('sing-hist-min') === '1');
-  const [panelH, setPanelH] = useState(() => { const v = Number(localStorage.getItem('sing-hist-h')); return v >= 140 && v <= 2000 ? v : 300; });
   const [panelW, setPanelW] = useState(() => { const v = Number(localStorage.getItem('sing-hist-w')); return v >= 200 && v <= 1600 ? v : 420; });
   const dockRef = useRef(null);
+  // Panel height (bottom-docked) is a drag-resizable axis:'y' — mirrors App.jsx's dock.
+  const { width: panelH, startDrag: startPanelHeightDrag } = useResizable('sing-hist-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: dockRef });
   const histReqRef = useRef(0); // guards against a slower stale fetch overwriting a newer selection
 
   const openTranscript = (item) => {
@@ -123,26 +123,22 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   const togglePanelMin = () => setPanelMin((m) => { const n = !m; localStorage.setItem('sing-hist-min', n ? '1' : '0'); return n; });
 
   // Drag the panel's inner edge (top when bottom-docked, left when right-docked)
-  // to resize — mirrors App.jsx's startDockDrag.
-  const startPanelDrag = (e) => {
+  // to resize. Height reuses useResizable (mirrors App.jsx's dock); width stays
+  // bespoke — it's anchored to the panel's right edge, not the left.
+  const startPanelWidthDrag = (e) => {
     e.preventDefault();
     const rect = dockRef.current?.getBoundingClientRect();
     if (!rect) return;
     const move = (ev) => {
-      if (side === 'bottom') {
-        const h = Math.min(rect.height - 140, Math.max(140, rect.bottom - ev.clientY));
-        setPanelH(h);
-        localStorage.setItem('sing-hist-h', String(Math.round(h)));
-      } else {
-        const w = Math.min(rect.width - 200, Math.max(200, rect.right - ev.clientX));
-        setPanelW(w);
-        localStorage.setItem('sing-hist-w', String(Math.round(w)));
-      }
+      const w = Math.min(rect.width - 200, Math.max(200, rect.right - ev.clientX));
+      setPanelW(w);
+      localStorage.setItem('sing-hist-w', String(Math.round(w)));
     };
     const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
+  const startPanelDrag = side === 'bottom' ? startPanelHeightDrag : startPanelWidthDrag;
 
   const drop = (col) => {
     const t = tasks.find((x) => x.id === dragId);

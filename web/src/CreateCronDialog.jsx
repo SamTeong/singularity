@@ -1,25 +1,23 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
-import Autocomplete from '@mui/material/Autocomplete';
 import Button from '@mui/material/Button';
 import Select from '@mui/material/Select';
 import FormControl from '@mui/material/FormControl';
 import InputLabel from '@mui/material/InputLabel';
 import Checkbox from '@mui/material/Checkbox';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
 import MenuItem from '@mui/material/MenuItem';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import FormControlLabel from '@mui/material/FormControlLabel';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import AddIcon from '@mui/icons-material/Add';
 import ModelSelect from './ModelSelect.jsx';
-import { tildify, untildify } from './paths.js';
+import CwdPicker from './CwdPicker.jsx';
+import ScopeSelect from './ScopeSelect.jsx';
+import { untildify } from './paths.js';
 import cronstrue from 'cronstrue';
 import { CronExpressionParser } from 'cron-parser';
 
@@ -45,17 +43,11 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
   const [cronExpr, setCronExpr] = useState('0 * * * *');
   const [prompt, setPrompt] = useState('');
   const [model, setModel] = useState('');
-  const [scopeList, setScopeList] = useState([]);
   const [scopes, setScopes] = useState([]);
   const [permissionMode, setPermissionMode] = useState('acceptEdits');
   const [enabled, setEnabled] = useState(true);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    fetch('/skill-scopes').then((r) => r.json()).then((d) => setScopeList(d.scopes || [])).catch(() => {});
-  }, [open]);
 
   const desc = useMemo(() => describe(cronExpr.trim()), [cronExpr]);
   const canCreate = !busy && !!name.trim() && desc.ok && !!prompt.trim() && !!cwd.trim();
@@ -103,22 +95,10 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
               {desc.ok ? `${desc.descr} · next ${new Date(desc.nextIso).toLocaleString()}` : `invalid: ${desc.descr}`}
             </Typography>
           </Stack>
-          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-            <Autocomplete
-              freeSolo fullWidth options={(recent || []).map(tildify)} inputValue={cwd}
-              onInputChange={(_, v) => setCwd(v)}
-              renderInput={(params) => <TextField {...params} size="small" label="agent working dir" spellCheck={false} />}
-            />
-            <Tooltip title="Browse…"><IconButton onClick={onBrowse}><FolderOpenIcon /></IconButton></Tooltip>
-          </Stack>
+          <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="agent working dir" />
           <TextField size="small" label="prompt" value={prompt} onChange={(e) => setPrompt(e.target.value)} multiline minRows={3} maxRows={10} />
           <ModelSelect model={model} setModel={setModel} />
-          <Autocomplete
-            multiple size="small" disableCloseOnSelect options={scopeList} value={scopes}
-            onChange={(_, v) => setScopes(v)}
-            renderOption={(props, option, { selected }) => (<li {...props}><Checkbox size="small" checked={selected} style={{ marginRight: 8 }} />{option}</li>)}
-            renderInput={(params) => <TextField {...params} label="skill-scopes" placeholder="" />}
-          />
+          <ScopeSelect open={open} value={scopes} onChange={setScopes} />
           <FormControl size="small" fullWidth>
             <InputLabel>permission mode</InputLabel>
             <Select label="permission mode" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>

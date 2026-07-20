@@ -20,3 +20,6 @@ export function untildify(p) {
   if (p[0] === '~' && (p[1] === '/' || p[1] === '\\')) return HOME + p.slice(1);
   return p;
 }
+
+// Last path segment (repo/basename), trailing separators trimmed first.
+export const repoName = (p) => (p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();

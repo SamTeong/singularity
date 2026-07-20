@@ -48,6 +48,8 @@ import { AmbientBackground, useColorMode, StatusPill, EmptyState } from '@zapac/
 import Terminal from './Terminal.jsx';
 import DirPicker from './DirPicker.jsx';
 import { setHome, tildify } from './paths.js';
+import { fmtTokens } from './format.js';
+import { KIND } from './agentStatus.js';
 import ProcessManager from './ProcessManager.jsx';
 import CreateAgentDialog from './CreateAgentDialog.jsx';
 import CreateTaskDialog from './CreateTaskDialog.jsx';
@@ -70,10 +72,6 @@ const TasksBoard = lazy(() => import('./TasksBoard.jsx'));
 const CronJobs = lazy(() => import('./CronJobs.jsx'));
 
 const WS_URL = `ws://${location.host}/ws${window.__SING_TOKEN__ ? `?token=${encodeURIComponent(window.__SING_TOKEN__)}` : ''}`;
-
-// agent lifecycle -> the theme's fixed StatusPill kinds (done|active|review|error)
-const KIND = { starting: 'active', running: 'active', idle: 'review', detached: 'review', exited: 'error' };
-const fmtTokens = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${n}`);
 
 // Vertical nav rail entries (icon + label). The rail is the sidebar's primary
 // navigation; the ＋ "New agent" row above it opens the create dialog.
@@ -175,15 +173,14 @@ export default function App() {
   const [crons, setCrons] = useState([]);
   const [cronOpen, setCronOpen] = useState(false);
   const [background, setBackground] = useState(null); // { config, lastTick, liveTaskId }
-  // Terminal dock height (px, drag-resizable) + minimized state, both persisted.
-  const [dockH, setDockH] = useState(() => {
-    const v = Number(localStorage.getItem('sing-dock-h'));
-    return v >= 140 && v <= 2000 ? v : 300;
-  });
+  // Terminal dock minimized state, persisted (height is a useResizable below).
   const [dockMin, setDockMin] = useState(() => localStorage.getItem('sing-dock-min') === '1');
   // Session-list panel width (px, drag-resizable), persisted.
   const listW = useResizable('sing-list-w', 260, { min: 160, max: 640 });
   const mainRef = useRef(null);
+  // Terminal dock height (px, drag-resizable), persisted — resizes up from the
+  // main pane's bottom, clamped so neither the dock nor the top view can vanish.
+  const { width: dockH, startDrag: startDockDrag } = useResizable('sing-dock-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: mainRef });
   const [collapsed, setCollapsed] = useState(false);
   const [view, setView] = useState('tasks');
   const visited = useRef({}); // view -> ever selected, so lazy panels mount once and stay mounted
@@ -301,21 +298,6 @@ export default function App() {
       .then((r) => r.json()).then((d) => { if (!d.ok) setToast(d.error); }).catch((e) => setToast(e.message));
   };
 
-  // Drag the dock's top edge to resize its height (measured up from the main
-  // pane's bottom), clamped so neither the dock nor the top view can vanish.
-  const startDockDrag = (e) => {
-    e.preventDefault();
-    const rect = mainRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const move = (ev) => {
-      const h = Math.min(rect.height - 140, Math.max(140, rect.bottom - ev.clientY));
-      setDockH(h);
-      localStorage.setItem('sing-dock-h', String(Math.round(h)));
-    };
-    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
-  };
   const toggleDock = () => setDockMin((m) => { const n = !m; localStorage.setItem('sing-dock-min', n ? '1' : '0'); return n; });
 
   // Poll per-agent stats (turns/tokens from each session .jsonl).

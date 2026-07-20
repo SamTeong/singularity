@@ -24,6 +24,7 @@ import { EmptyState } from '@zapac/mui-theme';
 import TranscriptView from './TranscriptView.jsx';
 import DirPicker from './DirPicker.jsx';
 import { tildify, untildify } from './paths.js';
+import { fmtUsd, fmtTokens, relTime } from './format.js';
 import Rail from './panelkit/Rail.jsx';
 import RailSearch from './panelkit/RailSearch.jsx';
 
@@ -31,22 +32,6 @@ import RailSearch from './panelkit/RailSearch.jsx';
 // ~/.claude/projects; loaded from /sessions/root on mount.
 const DEFAULT_ROOT = '~/.claude/projects';
 
-function relTime(ms) {
-  if (!Number.isFinite(ms)) return ''; // subagent/search opens carry no mtime — avoid new Date(NaN) throw
-  const s = (Date.now() - ms) / 1000;
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  if (s < 2592000) return `${Math.floor(s / 86400)}d ago`;
-  return new Date(ms).toISOString().slice(0, 10);
-}
-
-const fmtTok = (n) => {
-  if (n >= 1e6) return `${(n / 1e6).toFixed(n >= 1e7 ? 0 : 1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(n >= 1e4 ? 0 : 1)}k`;
-  return String(n || 0);
-};
-const fmtUsd = (n) => (n == null ? null : n > 0 && n < 0.01 ? '<$0.01' : `$${n.toFixed(2)}`);
 const shortModel = (id) => id.match(/opus|sonnet|haiku|fable|mythos/i)?.[0].toLowerCase() || id;
 
 // Small pulsing status dot for running sessions/subagents.
@@ -355,7 +340,7 @@ export default function SessionHistory({ sendMsg, registerChat }) {
                 </Stack>
                 {sel && stats[sel.id] && (
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block', mb: 1.5 }}>
-                    {fmtTok(stats[sel.id].inputTokens)} in · {fmtTok(stats[sel.id].outputTokens)} out · {fmtTok(stats[sel.id].cacheReadTokens)} cache read · {fmtTok(stats[sel.id].cacheWriteTokens)} cache write
+                    {fmtTokens(stats[sel.id].inputTokens)} in · {fmtTokens(stats[sel.id].outputTokens)} out · {fmtTokens(stats[sel.id].cacheReadTokens)} cache read · {fmtTokens(stats[sel.id].cacheWriteTokens)} cache write
                     {stats[sel.id].models?.length ? ` · ${stats[sel.id].models.map(shortModel).join(', ')}` : ''}
                     {stats[sel.id].costUsd != null ? ` · ${fmtUsd(stats[sel.id].costUsd)} ${stats[sel.id].costSource === 'statusline' ? 'exact' : 'est'}` : ''}
                   </Typography>

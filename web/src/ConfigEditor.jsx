@@ -1,16 +1,13 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
 import Typography from '@mui/material/Typography';
-import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
-import { EditorView } from '@codemirror/view';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import { useColorMode } from '@zapac/mui-theme';
-import { cmTheme } from './cmTheme.js';
+import CmEditor from './CmEditor.jsx';
 import DirPicker from './DirPicker.jsx';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
@@ -30,7 +27,6 @@ const SCOPES = [
 ];
 
 export default function ConfigEditor() {
-  const { mode } = useColorMode();
   const [cwd, setCwd] = useState('~');
   const [picking, setPicking] = useState(false);
   const [data, setData] = useState(null);
@@ -85,12 +81,7 @@ export default function ConfigEditor() {
 
   const info = data?.[scope];
 
-  // Stable extensions: a fresh array/json() each render makes @uiw/react-codemirror
-  // reconfigure the editor, which drops the open Ctrl+F search panel (flash-close).
-  const extensions = useMemo(() => [EditorView.lineWrapping, json(), cmTheme], []);
-  // Stable onChange too: @uiw's reconfigure effect lists onChange in its deps, so a
-  // fresh arrow each render reconfigures the editor and drops the search panel.
-  const onChange = useCallback((v) => { setContent(v); setDirty(true); }, []);
+  const onChange = (v) => { setContent(v); setDirty(true); };
 
   const save = async () => {
     const r = await fetch(`/config/${scope}`, {
@@ -172,15 +163,7 @@ export default function ConfigEditor() {
         </Typography>
         {picking && <DirPicker start={untildify(cwd)} onPick={pick} onClose={() => setPicking(false)} />}
 
-        <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
-          <CodeMirror
-            value={content}
-            theme={mode === 'dark' ? 'dark' : 'light'}
-            height="100%"
-            extensions={extensions}
-            onChange={onChange}
-          />
-        </Box>
+        <CmEditor value={content} onChange={onChange} extensions={[json()]} />
 
         <SaveBar msg={jsonError ? null : msg} disabled={!dirty || !!jsonError} onSave={save}>
           {jsonError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>invalid JSON: {jsonError}</Typography>}

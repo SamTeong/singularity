@@ -22,6 +22,7 @@ import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
 import OpenInFullIcon from '@mui/icons-material/OpenInFull';
 import CloseIcon from '@mui/icons-material/Close';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
+import DetailPane from './DetailPane.jsx';
 import DirPicker from './DirPicker.jsx';
 import { parseFrontmatter } from './frontmatter.js';
 import MarkdownBody from './MarkdownBody.jsx';
@@ -251,21 +252,13 @@ export default function WikiPanel() {
             </Stack>
             <WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} />
           </>
-        ) : !sel ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <EmptyState icon={<MenuBookIcon />} title="Select a page" description="Browse on the left to view here." />
-          </Box>
-        ) : loadingFile ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <Typography color="text.secondary">Loading…</Typography>
-          </Box>
-        ) : err ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <Typography color="text.secondary">{err}</Typography>
-          </Box>
         ) : (
-          <>
-            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{sel.rel}</Typography>
+          <DetailPane
+            empty={!sel && <EmptyState icon={<MenuBookIcon />} title="Select a page" description="Browse on the left to view here." />}
+            loading={loadingFile}
+            error={err}
+          >
+            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{sel?.rel}</Typography>
             <Box sx={(t) => ({
               flex: 1, minHeight: 0, overflow: 'auto',
               border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px`,
@@ -289,7 +282,7 @@ export default function WikiPanel() {
                 );
               })()}
             </Box>
-          </>
+          </DetailPane>
         )}
       </Stack>
 

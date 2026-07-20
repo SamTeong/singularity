@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setHome, tildify, untildify } from './paths.js';
+import { setHome, tildify, untildify, repoName } from './paths.js';
 
 setHome('C:\\Users\\user');
 
@@ -32,4 +32,10 @@ test('untildify passes through full paths unchanged', () => {
 test('round-trips through tildify + untildify', () => {
   const full = 'C:\\Users\\user\\wiki';
   assert.equal(untildify(tildify(full)), full);
+});
+
+test('repoName takes the last path segment, either separator', () => {
+  assert.equal(repoName('C:\\git\\singularity'), 'singularity');
+  assert.equal(repoName('/home/user/wiki/'), 'wiki');
+  assert.equal(repoName(''), '');
 });

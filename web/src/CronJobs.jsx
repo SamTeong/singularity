@@ -28,20 +28,12 @@ import { StatusPill, EmptyState } from '@zapac/mui-theme';
 import CreateBackgroundDialog from './CreateBackgroundDialog.jsx';
 import MarkdownBody from './MarkdownBody.jsx';
 import { useResizable, ResizeHandle } from './useResizable.jsx';
+import { repoName } from './paths.js';
+import { relTime } from './format.js';
+import { KIND } from './agentStatus.js';
 
-const KIND = { starting: 'active', running: 'active', idle: 'review', detached: 'review', exited: 'error' };
-const repoName = (p) => (p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop();
-
-const fmtRel = (ts) => {
-  if (!ts) return '—';
-  const s = Math.round((Date.now() - ts) / 1000);
-  if (s < 60) return `${s}s ago`;
-  const m = Math.round(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return new Date(ts).toLocaleDateString();
-};
+// "—" for no timestamp yet (never fired/run), else the shared relTime.
+const fmtRel = (ts) => (ts ? relTime(ts) : '—');
 const fmtNext = (iso) => {
   if (!iso) return '—';
   const s = Math.round((new Date(iso).getTime() - Date.now()) / 1000);

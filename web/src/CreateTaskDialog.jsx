@@ -6,16 +6,15 @@ import Autocomplete from '@mui/material/Autocomplete';
 import Button from '@mui/material/Button';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import IconButton from '@mui/material/IconButton';
-import Tooltip from '@mui/material/Tooltip';
 import Dialog from '@mui/material/Dialog';
 import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import AddIcon from '@mui/icons-material/Add';
 import ModelSelect from './ModelSelect.jsx';
-import { tildify, untildify } from './paths.js';
+import CwdPicker from './CwdPicker.jsx';
+import ScopeSelect from './ScopeSelect.jsx';
+import { untildify } from './paths.js';
 
 // New-task dialog: CreateAgentDialog minus session id, plus title/description
 // (the requirements), plan-approval gate and merge policy. Submits POST /tasks
@@ -28,7 +27,6 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
   const [implModel, setImplModel] = useState('sonnet');
   const [reviewerModel, setReviewerModel] = useState('opus');
   const [claudeSet, setClaudeSet] = useState(null);
-  const [scopeList, setScopeList] = useState([]);
   const [scopes, setScopes] = useState([]);
   const [requireApproval, setRequireApproval] = useState(false);
   const [mergeMode, setMergeMode] = useState('manual');
@@ -37,7 +35,6 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
 
   useEffect(() => {
     if (!open) return;
-    fetch('/skill-scopes').then((r) => r.json()).then((d) => setScopeList(d.scopes || [])).catch(() => {});
     fetch('/models').then((r) => r.json()).then((d) => setClaudeSet(new Set(d.claude || []))).catch(() => {});
   }, [open]);
 
@@ -89,19 +86,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
       <DialogTitle>New task</DialogTitle>
       <DialogContent sx={{ pb: 1.5 }}>
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
-          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-            <Autocomplete
-              freeSolo
-              fullWidth
-              options={(recent || []).map(tildify)}
-              inputValue={cwd}
-              onInputChange={(_, v) => setCwd(v)}
-              renderInput={(params) => <TextField {...params} size="small" label="working directory" spellCheck={false} />}
-            />
-            <Tooltip title="Browse…">
-              <IconButton onClick={onBrowse}><FolderOpenIcon /></IconButton>
-            </Tooltip>
-          </Stack>
+          <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
           <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} />
           <TextField size="small" label="requirements" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
           <ModelSelect model={model} setModel={setModel} />
@@ -109,18 +94,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
             <ModelSelect model={implModel} setModel={setImplModel} label="implementor model" placeholder="" />
             <ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" placeholder="" />
           </Stack>
-          <Autocomplete
-            multiple
-            size="small"
-            disableCloseOnSelect
-            options={scopeList}
-            value={scopes}
-            onChange={(_, v) => setScopes(v)}
-            renderOption={(props, option, { selected }) => (
-              <li {...props}><Checkbox size="small" checked={selected} style={{ marginRight: 8 }} />{option}</li>
-            )}
-            renderInput={(params) => <TextField {...params} label="skill-scopes" placeholder="" />}
-          />
+          <ScopeSelect open={open} value={scopes} onChange={setScopes} />
           <Autocomplete
             multiple
             freeSolo

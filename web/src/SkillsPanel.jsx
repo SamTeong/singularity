@@ -17,6 +17,7 @@ import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import SchoolIcon from '@mui/icons-material/School';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
+import DetailPane from './DetailPane.jsx';
 import DirPicker from './DirPicker.jsx';
 import MarkdownBody from './MarkdownBody.jsx';
 import { tildify, untildify } from './paths.js';
@@ -184,37 +185,27 @@ export default function SkillsPanel() {
 
       {/* right: rendered SKILL.md */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
-        {!sel ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <EmptyState icon={<SchoolIcon />} title="Select a skill" description="Browse on the left to view here." />
+        <DetailPane
+          empty={!sel && <EmptyState icon={<SchoolIcon />} title="Select a skill" description="Browse on the left to view here." />}
+          loading={loading}
+          error={err}
+        >
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.root)} / {sel?.flat ? '(flat)' : sel?.scope} / {sel?.skill}</Typography>
+          <Box sx={(t) => ({
+            flex: 1, minHeight: 0, overflow: 'auto',
+            border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px`,
+            p: 3, pb: 4,
+          })}>
+            {skill?.name && <Typography variant="h1" sx={{ fontSize: 26, fontWeight: 800, mt: 0, mb: 1, letterSpacing: '-0.01em' }}>{skill.name}</Typography>}
+            {skill?.description && <Typography sx={{ color: 'text.secondary', fontSize: 14, lineHeight: 1.6, mb: 2 }}>{skill.description}</Typography>}
+            {skill?.triggers?.length > 0 && (
+              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 2.5, alignItems: 'center' }}>
+                {skill.triggers.map((t2) => <StatusPill key={t2} status="review">{t2}</StatusPill>)}
+              </Stack>
+            )}
+            <MarkdownBody>{skill?.body || ''}</MarkdownBody>
           </Box>
-        ) : loading ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <Typography color="text.secondary">Loading…</Typography>
-          </Box>
-        ) : err ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <Typography color="text.secondary">{err}</Typography>
-          </Box>
-        ) : (
-          <>
-            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel.root)} / {sel.flat ? '(flat)' : sel.scope} / {sel.skill}</Typography>
-            <Box sx={(t) => ({
-              flex: 1, minHeight: 0, overflow: 'auto',
-              border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px`,
-              p: 3, pb: 4,
-            })}>
-              {skill?.name && <Typography variant="h1" sx={{ fontSize: 26, fontWeight: 800, mt: 0, mb: 1, letterSpacing: '-0.01em' }}>{skill.name}</Typography>}
-              {skill?.description && <Typography sx={{ color: 'text.secondary', fontSize: 14, lineHeight: 1.6, mb: 2 }}>{skill.description}</Typography>}
-              {skill?.triggers?.length > 0 && (
-                <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 2.5, alignItems: 'center' }}>
-                  {skill.triggers.map((t2) => <StatusPill key={t2} status="review">{t2}</StatusPill>)}
-                </Stack>
-              )}
-              <MarkdownBody>{skill?.body || ''}</MarkdownBody>
-            </Box>
-          </>
-        )}
+        </DetailPane>
       </Stack>
 
       {picking && <DirPicker start={untildify(roots[roots.length - 1] || '~')} onPick={pickRoot} onClose={() => setPicking(false)} />}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -10,11 +10,10 @@ import BookIcon from '@mui/icons-material/Book';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import Tooltip from '@mui/material/Tooltip';
 import DirPicker from './DirPicker.jsx';
-import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorView } from '@codemirror/view';
-import { StatusPill, useColorMode, EmptyState } from '@zapac/mui-theme';
-import { cmTheme } from './cmTheme.js';
+import { StatusPill, EmptyState } from '@zapac/mui-theme';
+import CmEditor from './CmEditor.jsx';
+import DetailPane from './DetailPane.jsx';
 import { tildify, untildify } from './paths.js';
 import Rail from './panelkit/Rail.jsx';
 import RailSearch from './panelkit/RailSearch.jsx';
@@ -25,7 +24,6 @@ import SaveBar from './panelkit/SaveBar.jsx';
 const DEFAULT_ROOT = '~/.claude/projects';
 
 export default function MemoryPanel() {
-  const { mode } = useColorMode();
   const [root, setRoot] = useState(DEFAULT_ROOT);
   const [picking, setPicking] = useState(false);
   const [q, setQ] = useState('');
@@ -37,11 +35,7 @@ export default function MemoryPanel() {
   const [dirty, setDirty] = useState(false);
   const [loadingFile, setLoadingFile] = useState(false);
   const [msg, setMsg] = useState(null);
-  // Stable extensions + onChange: @uiw/react-codemirror's reconfigure effect lists both
-  // in its deps, so fresh identities each render reconfigure the editor and drop the
-  // open Ctrl+F search panel (flash-close).
-  const extensions = useMemo(() => [EditorView.lineWrapping, markdown(), cmTheme], []);
-  const onChange = useCallback((v) => { setContent(v); setDirty(true); }, []);
+  const onChange = (v) => { setContent(v); setDirty(true); };
   const [err, setErr] = useState(null);
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
@@ -126,24 +120,14 @@ export default function MemoryPanel() {
 
       {/* right: editor */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
-        {!sel ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <EmptyState icon={<BookIcon />} title="Select a memory" description="Browse on the left to view or edit here." />
-          </Box>
-        ) : loadingFile ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <Typography color="text.secondary">Loading…</Typography>
-          </Box>
-        ) : (
-          <>
-            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel.path)}</Typography>
-            <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
-              <CodeMirror value={content} theme={mode === 'dark' ? 'dark' : 'light'} height="100%"
-                extensions={extensions} onChange={onChange} />
-            </Box>
-            <SaveBar msg={msg} disabled={!dirty} onSave={save} />
-          </>
-        )}
+        <DetailPane
+          empty={!sel && <EmptyState icon={<BookIcon />} title="Select a memory" description="Browse on the left to view or edit here." />}
+          loading={loadingFile}
+        >
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.path)}</Typography>
+          <CmEditor value={content} onChange={onChange} extensions={[markdown()]} />
+          <SaveBar msg={msg} disabled={!dirty} onSave={save} />
+        </DetailPane>
       </Stack>
 
       {picking && <DirPicker start={untildify(root)} onPick={pickRoot} onClose={() => setPicking(false)} />}

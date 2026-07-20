@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -11,11 +11,10 @@ import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ClearIcon from '@mui/icons-material/Clear';
 import GavelIcon from '@mui/icons-material/Gavel';
-import CodeMirror from '@uiw/react-codemirror';
 import { markdown } from '@codemirror/lang-markdown';
-import { EditorView } from '@codemirror/view';
-import { useColorMode, EmptyState } from '@zapac/mui-theme';
-import { cmTheme } from './cmTheme.js';
+import { EmptyState } from '@zapac/mui-theme';
+import CmEditor from './CmEditor.jsx';
+import DetailPane from './DetailPane.jsx';
 import DirPicker from './DirPicker.jsx';
 import { tildify, untildify } from './paths.js';
 import Rail from './panelkit/Rail.jsx';
@@ -24,7 +23,6 @@ import SaveBar from './panelkit/SaveBar.jsx';
 import { useRootList, normKey } from './panelkit/useRootList.js';
 
 export default function RulesPanel() {
-  const { mode } = useColorMode();
   const { roots, shownRoots, remember, forget } = useRootList('/rules');
   const [files, setFiles] = useState([]);
   const [q, setQ] = useState('');
@@ -68,11 +66,7 @@ export default function RulesPanel() {
     }).finally(() => setLoadingFile(false));
   };
 
-  // Stable extensions + onChange: @uiw/react-codemirror's reconfigure effect lists both
-  // in its deps, so fresh identities each render reconfigure the editor and drop the
-  // open Ctrl+F search panel (flash-close).
-  const extensions = useMemo(() => [EditorView.lineWrapping, markdown(), cmTheme], []);
-  const onChange = useCallback((v) => { setContent(v); setDirty(true); }, []);
+  const onChange = (v) => { setContent(v); setDirty(true); };
 
   const save = async () => {
     const r = await fetch('/rules/file', {
@@ -150,24 +144,14 @@ export default function RulesPanel() {
 
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
         {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
-        {!sel ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <EmptyState icon={<GavelIcon />} title="Select a rule" description="Browse on the left to view or edit here." />
-          </Box>
-        ) : loadingFile ? (
-          <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-            <Typography color="text.secondary">Loading…</Typography>
-          </Box>
-        ) : (
-          <>
-            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel.path)}</Typography>
-            <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
-              <CodeMirror value={content} theme={mode === 'dark' ? 'dark' : 'light'} height="100%"
-                extensions={extensions} onChange={onChange} />
-            </Box>
-            <SaveBar msg={msg} disabled={!dirty} onSave={save} />
-          </>
-        )}
+        <DetailPane
+          empty={!sel && <EmptyState icon={<GavelIcon />} title="Select a rule" description="Browse on the left to view or edit here." />}
+          loading={loadingFile}
+        >
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.path)}</Typography>
+          <CmEditor value={content} onChange={onChange} extensions={[markdown()]} />
+          <SaveBar msg={msg} disabled={!dirty} onSave={save} />
+        </DetailPane>
       </Stack>
     </Box>
   );

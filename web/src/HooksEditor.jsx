@@ -1,16 +1,15 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { javascript } from '@codemirror/lang-javascript';
-import { EditorView } from '@codemirror/view';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
-import { useColorMode, EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@zapac/mui-theme';
 import WebhookIcon from '@mui/icons-material/Webhook';
-import { cmTheme } from './cmTheme.js';
+import CmEditor from './CmEditor.jsx';
+import DetailPane from './DetailPane.jsx';
 import DirPicker from './DirPicker.jsx';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
@@ -35,7 +34,6 @@ function langFor(path) {
 }
 
 export default function HooksEditor() {
-  const { mode } = useColorMode();
   const { roots, remember, forget } = useRootList('/hooks', { initial: ['~'] });
   const [picking, setPicking] = useState(false);
   const [groups, setGroups] = useState([]); // [{ cwd, files:[{path,rel,name}] }]
@@ -89,15 +87,10 @@ export default function HooksEditor() {
     return () => clearTimeout(id);
   }, [q, roots]);
 
-  // Stable extensions: a fresh array/lang() each render makes @uiw/react-codemirror
-  // reconfigure the editor, dropping the open Ctrl+F search panel (flash-close).
-  // Recompute only when the selected file's extension changes.
-  const extensions = useMemo(() => {
-    const lang = langFor(path);
-    return lang ? [EditorView.lineWrapping, lang, cmTheme] : [EditorView.lineWrapping, cmTheme];
-  }, [path]);
-  // Stable onChange too: @uiw's reconfigure effect lists onChange in its deps.
-  const onChange = useCallback((v) => { setContent(v); setDirty(true); }, []);
+  // Language extension depends on the selected file — CmEditor recomputes its
+  // stable extensions array only when `path` changes.
+  const lang = langFor(path);
+  const onChange = (v) => { setContent(v); setDirty(true); };
 
   const save = async () => {
     const r = await fetch('/hooks/file', {
@@ -172,25 +165,11 @@ export default function HooksEditor() {
 
     <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
       {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
-      {!path ? (
-        <Box sx={{ flex: 1, display: 'grid', placeItems: 'center' }}>
-          <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Browse on the left to view or edit here." />
-        </Box>
-      ) : (
-        <>
-          <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>{tildify(path)}</Typography>
-          <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
-            <CodeMirror
-              value={content}
-              theme={mode === 'dark' ? 'dark' : 'light'}
-              height="100%"
-              extensions={extensions}
-              onChange={onChange}
-            />
-          </Box>
-          <SaveBar msg={msg} disabled={!dirty} onSave={save} />
-        </>
-      )}
+      <DetailPane empty={!path && <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Browse on the left to view or edit here." />}>
+        <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>{tildify(path)}</Typography>
+        <CmEditor value={content} onChange={onChange} extensions={lang ? [lang] : []} deps={[path]} />
+        <SaveBar msg={msg} disabled={!dirty} onSave={save} />
+      </DetailPane>
     </Stack>
     </Box>
   );
