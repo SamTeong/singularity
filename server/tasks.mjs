@@ -107,6 +107,18 @@ function cavecrewAvailable() {
   } catch { return false; }
 }
 
+// Is an MCP server installed at user scope (~/.claude.json .mcpServers)? The
+// daemon isn't cwd-anchored to a user project, so project-scope .mcp.json is
+// not consulted — user scope is the stable signal. Used to gate the lean-ctx
+// instruction in task prompts (don't tell subagents to use ctx_read/ctx_search
+// when lean-ctx isn't installed) and to report /capabilities.leanCtx.
+export function detectMcp(name) {
+  try {
+    const s = JSON.parse(readFileSync(join(homedir(), '.claude.json'), 'utf8'));
+    return !!(s.mcpServers && s.mcpServers[name]);
+  } catch { return false; }
+}
+
 export function initTasks(log) {
   logger = log;
   try {
@@ -171,12 +183,17 @@ export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
   const implAgent = hasDef('senior-software-engineer') ? 'senior-software-engineer'
     : hasDef('junior-software-engineer') ? 'junior-software-engineer' : null;
   const reviewerAgent = hasDef('reviewer') ? 'reviewer' : null;
+  // Only instruct subagents to prefer lean-ctx compressed reads when lean-ctx
+  // is actually installed at user scope — otherwise the instruction references
+  // tools the subagent doesn't have.
+  const leanCtx = detectMcp('lean-ctx');
+  const leanCtxClause = leanCtx ? ' and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads' : '';
   // Keep subagent fan-out and file I/O bounded — large subagent output eats
   // context fast, especially for ollama models with no prompt caching.
   const subagentEconomy = ` Run at most 3 subagents concurrently. Have each subagent write its full output to a file under \`${t.ticketDir}\` and return only a short summary (≤10 lines) — keep large results out of your context.`;
   const implSpawn = implAgent
-    ? `Use the Task tool with subagents (subagent_type: "${implAgent}", model: ${implModel}) for the implementation work where it helps; small changes you may do directly. The subagent def carries this repo's stack rules — still tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.${subagentEconomy}`
-    : `Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features) and to use lean-ctx (ctx_read/ctx_search) over native Read for bulk reads.${cavecrew ? ' For read-only exploration (locating code, mapping structure, listing usages), spawn subagent_type: "caveman:cavecrew-investigator" instead of a generic subagent — its output is compressed.' : ''}${subagentEconomy}`;
+    ? `Use the Task tool with subagents (subagent_type: "${implAgent}", model: ${implModel}) for the implementation work where it helps; small changes you may do directly. The subagent def carries this repo's stack rules — still tell subagents to keep changes minimal (no speculative abstractions or features)${leanCtxClause}.${subagentEconomy}`
+    : `Use the Task tool with subagents (model: ${implModel}) for the implementation work where it helps; small changes you may do directly. Tell subagents to keep changes minimal (no speculative abstractions or features)${leanCtxClause}.${cavecrew ? ' For read-only exploration (locating code, mapping structure, listing usages), spawn subagent_type: "caveman:cavecrew-investigator" instead of a generic subagent — its output is compressed.' : ''}${subagentEconomy}`;
   const fixSub = implAgent
     ? `subagent (subagent_type: "${implAgent}", model: ${implModel})`
     : `${implModel} subagent`;

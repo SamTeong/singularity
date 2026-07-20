@@ -17,13 +17,13 @@ import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, ge
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile } from './rules.mjs';
-import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot } from './wiki.mjs';
+import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { listSkills, readSkill, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
-import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
+import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { initBackground, snapshotBackground, createDef, updateDef, deleteDef, reorderDefs, runBackgroundNow, listReports, getReport } from './background.mjs';
 import { CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
@@ -45,8 +45,10 @@ function requireEnv() {
   // OLLAMA_BIN + SING_SCOPE_ROOT are optional: absent OLLAMA_BIN fails only
   // ollama-model spawns (clear buildSpawn error); absent SING_SCOPE_ROOT just
   // means no skill-scopes to pick/add-dir. The daemon boots fine without either.
-  if (!process.env.SING_USAGE_SKILL || !existsSync(process.env.SING_USAGE_SKILL)) missing.push('SING_USAGE_SKILL (path to claude-code-usage-report stats.mjs)');
-  if (!process.env.SING_USAGE_REPORTS) missing.push('SING_USAGE_REPORTS (spend-report output dir)');
+  // SING_USAGE_SKILL + SING_USAGE_REPORTS are likewise optional (author-specific
+  // claude-code-usage-report skill): absent → spend/usage-report degrade silently
+  // (spend.mjs existsSync-guards its skill path; stats.mjs has an est-cost
+  // fallback). /capabilities reports all of these as available:false.
   if (process.env.SING_TOKEN && !/^[A-Za-z0-9_-]+$/.test(process.env.SING_TOKEN)) missing.push('SING_TOKEN (set but contains characters outside [A-Za-z0-9_-])');
   if (missing.length) {
     throw new Error(`Required env vars missing — copy .env.example → .env and fill them in:\n  - ${missing.join('\n  - ')}`);
@@ -140,7 +142,7 @@ app.addHook('onRequest', async (req, reply) => {
 if (TOKEN) {
   app.addHook('onRequest', async (req, reply) => {
     const url = req.raw.url.split('?')[0];
-    if (url === '/' || url === '/health' || url.startsWith('/assets')) return;
+    if (url === '/' || url === '/health' || url === '/capabilities' || url.startsWith('/assets')) return;
     const t = req.headers['x-sing-token'] || req.query?.token;
     if (t !== TOKEN) reply.code(401).send({ error: 'unauthorized' });
   });
@@ -233,6 +235,30 @@ app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS
 // Home dir, for the client to collapse full paths to `~` on display (pure
 // presentation — the backend itself always deals in full paths).
 app.get('/env', async () => ({ home: homedir() }));
+
+// Optional-feature flags for the shell: which features are wired up on this
+// machine so the UI can show inline "set X to enable" hints instead of failing
+// opaquely. No secrets — just boolean availability + a human hint per feature.
+// Not token-gated (mirrors /health) so the shell can render hints pre-auth.
+app.get('/capabilities', async () => {
+  const wikiRoot = getWikiRoot();
+  const wikiAbs = resolveRoot(wikiRoot);
+  let wikiAvailable = false;
+  if (wikiAbs && existsSync(wikiAbs)) {
+    try { wikiAvailable = readdirSync(wikiAbs, { withFileTypes: true }).some((d) => d.isDirectory() && !d.name.startsWith('.')); }
+    catch { wikiAvailable = false; }
+  }
+  const usageReportAvailable = !!(process.env.SING_USAGE_SKILL && existsSync(process.env.SING_USAGE_SKILL));
+  return {
+    ollama:      { available: !!reg.OLLAMA_BIN, hint: 'Set OLLAMA_BIN in .env to enable Ollama model spawns.' },
+    skillScopes: { available: !!(process.env.SING_SCOPE_ROOT && existsSync(process.env.SING_SCOPE_ROOT)), hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
+    usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable spend reports.' },
+    spend:       { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the spend view.' },
+    wiki:        { available: wikiAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
+    leanCtx:     { available: detectMcp('lean-ctx'), hint: 'Install the lean-ctx MCP server to enable compressed reads in task subagents.' },
+    token:       { available: !!process.env.SING_TOKEN, hint: 'Set SING_TOKEN in .env to require an auth token on data endpoints.' },
+  };
+});
 
 // Skill-scope picker source: directories under SING_SCOPE_ROOT (excludes 'common').
 app.get('/skill-scopes', async () => {
