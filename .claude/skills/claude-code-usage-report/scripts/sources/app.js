@@ -296,39 +296,6 @@ function renderRateLimits(sessions){
     {title:'Headroom',stats:[["near-cap (>80%)",fmtInt(nearCap)],["capped (100%)",fmtInt(capped)],["$/7d%-pt at peak",fmtMoney($per7pt)]]}
   ]);
 }
-// Per-model weekly quotas + extra-usage credits from the OAuth usage snapshot
-// (USAGE_LATEST, embedded by render.mjs). Point-in-time, not per-session, so it
-// lives outside the SESSIONS payload. Empty-state when OAuth polling is off or
-// the plan exposes no per-model breakdown. utilization is in percent (API contract).
-function renderModelQuotas(L){
-  L=L||{};
-  var pm=L.per_model||{};
-  // 'design' is claumon's alias for seven_day_omelette (the API-key quota bucket,
-  // see stats.mjs) — not a Claude model name, so surface a user-facing label.
-  var QLABEL={sonnet:'Sonnet',opus:'Opus',design:'API key'};
-  var order=['sonnet','opus','design'];
-  var have=order.filter(function(m){return pm[m]&&pm[m].utilization!=null;});
-  if(!have.length){
-    return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No per-model quota data.</h4><p>Captured from the OAuth usage API (opt-in): run <code>node stats.mjs fetch-usage --oauth --save</code> with <code>USAGE_REPORT_OAUTH=1</code>. Absent on some plans.</p></div>";
-  }
-  var colorFor=function(p){return p>=80?'var(--ac)':(p>=50?'var(--amber)':'var(--sage)');};
-  var html='';
-  order.forEach(function(m){
-    var w=pm[m]; if(!w||w.utilization==null)return;
-    var p=Number(w.utilization),pct=Math.max(2,Math.min(100,p));
-    var reset=w.resets_at?(' resets '+esc(String(w.resets_at).slice(0,19).replace('T',' '))):'';
-    html+="<div class='bar-row'><div class='bar-label'>"+esc(QLABEL[m]||m)+"</div><div class='bar-track'><div class='bar' style='width:"+pct.toFixed(1)+"%;background:"+colorFor(p)+"'></div></div><div class='bar-val'>"+p.toFixed(1)+"%"+reset+"</div></div>";
-  });
-  var eu=L.extra_usage,cards='';
-  if(eu&&eu.is_enabled){
-    cards=colcards([{title:'Extra-usage credits',stats:[
-      ["monthly limit",eu.monthly_limit!=null?fmtInt(eu.monthly_limit):'—'],
-      ["used credits",eu.used_credits!=null?fmtInt(eu.used_credits):'—'],
-      ["utilization",eu.utilization!=null?(Number(eu.utilization).toFixed(1)+'%'):'—']
-    ]}]);
-  }
-  return html+cards+"<p class='muted' style='margin-top:6px'>Snapshot: "+esc(L.fetched_at||'—')+" · OAuth usage API (opt-in)</p>";
-}
 // Empirical-Bayes rate-limit forecast (FORECAST, embedded by render.mjs). Projects
 // each gauge's utilization at its reset boundary with an 80% credible interval
 // + ETA-to-threshold, fit from OAuth usage-snapshots (or a prior-only statusline
@@ -532,7 +499,7 @@ function renderHero(agg,st,firstDate){
 function render(range){
   var S=filterSessions(range);
   var agg=aggregate(S);
-  if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','burn-cards','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-cadence','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-model-quotas','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
+  if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','burn-cards','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-cadence','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
   var st=deriveStats(agg,range),t=agg.totals;
   var chartModels=agg.models.slice();
   var hasOthers=Object.keys(agg.days).some(function(k){return 'others' in agg.days[k].cost_by_model;})||Object.keys(agg.months).some(function(k){return 'others' in agg.months[k].cost_by_model;});
@@ -578,8 +545,6 @@ function render(range){
   ]);
   // rate-limit utilization (5h / 7d) — forward-only, Claude.ai Pro/Max only
   el('sec-ratelimits').innerHTML=renderRateLimits(agg.sessions);
-  // per-model weekly quotas + extra-usage credits (OAuth snapshot, opt-in)
-  el('sec-model-quotas').innerHTML=renderModelQuotas(USAGE_LATEST);
   // rate-limit forecast at reset (EB model, OAuth snapshots + statusline fallback)
   el('sec-forecast').innerHTML=renderForecast(FORECAST);
   // token yield per rate-limit % (per-model deltas of the 5h/7d gauge)

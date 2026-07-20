@@ -29,7 +29,6 @@ const TOTALS_CACHE_VERSION = 1;
 // (claudeAiOauth.accessToken); OS keychain not handled in v1 (documented fallback).
 const CREDENTIALS_PATH = path.join(CLAUDE_DIR, ".credentials.json");
 const USAGE_SNAPSHOTS_JSONL = path.join(SKILL_STATE_DIR, "usage-snapshots.jsonl");
-const USAGE_LATEST_JSON = path.join(SKILL_STATE_DIR, "usage-latest.json");
 const USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage";
 const USAGE_API_BETA = "oauth-2025-04-20";
 const USAGE_API_TIMEOUT_MS = 10000;
@@ -1615,10 +1614,11 @@ function _ensure_fresh() {
 
 function cmd_report() {
   _ensure_fresh();
-  // Refresh the OAuth usage snapshot (5h/7d gauges + per-model quotas) each run,
-  // best-effort. Only when creds are present (logged in) so it's a silent no-op
-  // when logged out. Runs as a child (its exit(0)/stderr can't affect the report);
-  // --oauth bypasses the env gate so no USAGE_REPORT_OAUTH=1 is needed per run.
+  // Refresh the OAuth usage snapshot (5h/7d gauges) each run, best-effort.
+  // Appends to usage-snapshots.jsonl (consumed by the rate-limit forecast).
+  // Only when creds are present (logged in) so it's a silent no-op when logged
+  // out. Runs as a child (its exit(0)/stderr can't affect the report); --oauth
+  // bypasses the env gate so no USAGE_REPORT_OAUTH=1 is needed per run.
   if (_read_access_token()) {
     try {
       execFileSync(process.execPath, [SCRIPT, "fetch-usage", "--oauth", "--save"],
@@ -1862,7 +1862,7 @@ function _build_forecast(sessions) {
 }
 
 // Public: lazy-rebuild + read. Called from cmd_report so render.mjs gets a
-// fresh forecast payload alongside the SESSIONS/USAGE_LATEST embeds.
+// fresh forecast payload alongside the SESSIONS embed.
 export function _load_forecast(sessions) {
   if (_forecast_stale()) _build_forecast(sessions);
   if (!isFile(FORECAST_JSON)) return null;
@@ -1991,8 +1991,6 @@ async function cmd_fetch_usage(args) {
     try {
       fs.appendFileSync(USAGE_SNAPSHOTS_JSONL, JSON.stringify(rec) + "\n",
         { encoding: "utf-8", mode: 0o600 });
-      fs.writeFileSync(USAGE_LATEST_JSON, JSON.stringify(rec, null, 2),
-        { encoding: "utf-8", mode: 0o600 });
     } catch (e) {
       printErr("fetch-usage: write failed: " + e.message);
       process.exit(0);
@@ -2016,7 +2014,7 @@ async function cmd_fetch_usage(args) {
     print("  extra-usage: enabled  used " + (usage.extra_usage.used_credits ?? "—") +
       " / " + (usage.extra_usage.monthly_limit ?? "—"));
   }
-  if (args.save) print("saved → " + USAGE_LATEST_JSON);
+  if (args.save) print("saved → " + USAGE_SNAPSHOTS_JSONL);
 }
 
 // ---- fetch-pricing (live pricing refresh; Phase F, same off-by-default gate as fetch-usage) ----
