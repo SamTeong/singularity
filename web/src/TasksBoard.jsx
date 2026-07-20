@@ -339,8 +339,11 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                 <Stack spacing={0.75} sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                   {cards.map((task) => {
                     const agent = agents.find((a) => a.id === task.sessionId);
-                    // Done cards open the transcript dock; others select the terminal.
-                    const sel = col === 'done' ? tx?.id === task.id : task.sessionId === activeId;
+                    // Done cards open the transcript dock; a live session selects the
+                    // terminal; a card whose session already exited (nothing to attach)
+                    // also falls back to the transcript so it's still viewable.
+                    const usesTx = col === 'done' || !(agent && LIVE_STATUS.has(agent.status));
+                    const sel = usesTx ? tx?.id === task.id : task.sessionId === activeId;
                     const line = statsLine(stats?.[task.sessionId]);
                     return (
                       <Box
@@ -348,7 +351,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                         draggable
                         onDragStart={() => setDragId(task.id)}
                         onDragEnd={() => setDragId(null)}
-                        onClick={() => (col === 'done'
+                        onClick={() => (usesTx
                           ? openTranscript({ id: task.id, title: task.title, sessionId: task.sessionId, worktree: task.worktree, repo: task.repo })
                           : onSelect(task.sessionId))}
                         sx={(t) => ({
