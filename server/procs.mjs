@@ -1,10 +1,14 @@
 // Claude process scanner + guarded killer — powers the in-app task manager.
 // Windows: query Win32_Process via built-in powershell.exe (CIM). Classifies
 // each claude.exe as tracked / stale / external so the UI can safely target orphans.
+// macOS: `ps -axo pid=,ppid=,comm=,command=` (no started-time column in that
+// format — the UI only shows it informatively, null is fine). Re-parented-to-
+// launchd (ppid 0/1) => orphaned for the dev-tooling liveness test.
 //
-// Also scans this repo's own dev tooling (node.exe/esbuild.exe/OpenConsole.exe)
-// scoped to cmdlines under REPO_ROOT — these can orphan and hold node_modules
-// file locks open if their parent (pnpm dev/test) dies or gets killed.
+// Also scans this repo's own dev tooling (node.exe/esbuild.exe/OpenConsole.exe
+// on Windows; node/esbuild on macOS) scoped to cmdlines under REPO_ROOT —
+// these can orphan and hold node_modules file locks open if their parent
+// (pnpm dev/test) dies or gets killed.
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +17,7 @@ import { livePids } from './agents.mjs';
 
 const execFileP = promisify(execFile);
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
+const IS_DARWIN = process.platform === 'darwin';
 
 // PS projects only the fields we need; DateTime formatted to avoid /Date()/ JSON noise.
 // `alive` is the full running-pid set, used to tell a genuinely orphaned
@@ -26,6 +31,13 @@ const PS = [
   "[PSCustomObject]@{ rows=$rows; alive=$alive } | ConvertTo-Json -Compress -Depth 4",
 ];
 
+// `ps` columns: pid, ppid, comm (basename of executable), command (full argv
+// joined). `ps` has no reliable started-time column in this format — callers
+// tolerate null (UI shows it only informatively).
+const PS_ARGS = ['-axo', 'pid=,ppid=,comm=,command='];
+// Dev-tooling binaries we care about on macOS (no .exe; OpenConsole is Windows-only).
+const DARWIN_DEV_NAMES = new Set(['node', 'esbuild']);
+
 function extractSession(cmd) {
   const m = cmd && cmd.match(/--(?:session-id|resume)\s+(\S+)/);
   return m ? m[1].replace(/["']/g, '') : null;
@@ -35,7 +47,20 @@ function extractSession(cmd) {
 // repo — never match unrelated node/esbuild processes elsewhere on the box.
 function inRepo(cmd) { return !!cmd && cmd.toLowerCase().includes(REPO_ROOT.toLowerCase()); }
 
+// Classify a claude row: tracked if livePids() has it, else stale if a session
+// id is recoverable from its cmdline, else external. Shared across platforms.
+function classifyClaude(row, live) {
+  const session = extractSession(row.cmd);
+  const kind = live.has(row.pid) ? 'tracked' : session ? 'stale' : 'external';
+  return { pid: row.pid, ppid: row.ppid, name: row.name, started: row.started, session, kind };
+}
+
 export async function scanClaude() {
+  if (IS_DARWIN) return scanClaudeDarwin();
+  return scanClaudeWindows();
+}
+
+async function scanClaudeWindows() {
   let out;
   try {
     ({ stdout: out } = await execFileP('powershell.exe', PS, { windowsHide: true, maxBuffer: 8 * 1024 * 1024 }));
@@ -54,13 +79,48 @@ export async function scanClaude() {
   return rows
     .filter((r) => r.name === 'claude.exe' || inRepo(r.cmd))
     .map((r) => {
-      if (r.name === 'claude.exe') {
-        const session = extractSession(r.cmd);
-        const kind = live.has(r.pid) ? 'tracked' : session ? 'stale' : 'external';
-        return { pid: r.pid, ppid: r.ppid, name: r.name, started: r.started, session, kind };
-      }
+      if (r.name === 'claude.exe') return classifyClaude(r, live);
       // Repo dev tooling: stale only if its parent (pnpm dev/test) is gone.
       const kind = alive.has(r.ppid) ? 'external' : 'stale';
+      return { pid: r.pid, ppid: r.ppid, name: r.name, started: r.started, session: null, kind };
+    });
+}
+
+async function scanClaudeDarwin() {
+  let out;
+  try {
+    ({ stdout: out } = await execFileP('ps', PS_ARGS, { maxBuffer: 8 * 1024 * 1024 }));
+  } catch {
+    return []; // no ps / no matches
+  }
+  // Build a pid set of all currently-running processes for the orphan test
+  // (stand-in for Windows' Get-Process alive set). A ppid of 0/1 means the
+  // process was re-parented to launchd after its real parent died => orphaned.
+  const allPids = new Set();
+  const rows = [];
+  for (const line of out.split('\n')) {
+    if (!line.trim()) continue;
+    // pid=,ppid=,comm=,command= — the first three columns are whitespace-
+    // trimmed (trailing `=` strips padding); command is the rest of the line
+    // with spaces preserved.
+    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
+    if (!m) continue;
+    const pid = Number(m[1]);
+    const ppid = Number(m[2]);
+    const name = m[3];
+    const cmd = m[4] ?? '';
+    allPids.add(pid);
+    rows.push({ pid, ppid, name, started: null, cmd });
+  }
+  const live = livePids();
+  return rows
+    .filter((r) => r.name === 'claude' || (DARWIN_DEV_NAMES.has(r.name) && inRepo(r.cmd)))
+    .map((r) => {
+      if (r.name === 'claude') return classifyClaude(r, live);
+      // Repo dev tooling: stale only if its parent is gone. On darwin we have
+      // no Get-Process alive set, so liveness = ppid is a positive pid still in
+      // the ps rows; ppid 0/1 = re-parented to launchd => orphaned => stale.
+      const kind = r.ppid > 1 && allPids.has(r.ppid) ? 'external' : 'stale';
       return { pid: r.pid, ppid: r.ppid, name: r.name, started: r.started, session: null, kind };
     });
 }
@@ -75,6 +135,13 @@ export async function killClaudePid(pid) {
   const procs = await scanClaude();
   const target = procs.find((p) => p.pid === pid);
   if (!target) return { ok: false, error: 'not a tracked process' };
+  if (IS_DARWIN) {
+    // Re-verify by re-scanning: the scan above found the pid only if it's
+    // still a claude process. Skip the CIM re-query (Windows-only primitive);
+    // the small TOCTOU gap before process.kill is unavoidable on darwin too.
+    try { process.kill(pid); return { ok: true }; }
+    catch (e) { return { ok: false, error: e.message }; }
+  }
   try {
     const { stdout } = await execFileP('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',

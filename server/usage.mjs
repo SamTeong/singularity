@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { execFileSync } from 'node:child_process';
 import { STATE_DIR, CACHE_DIR } from './app-dir.mjs';
 
 const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
@@ -197,14 +198,39 @@ export function normalizeClaude(raw, plan) {
 // {accessToken, expiresAt, subscriptionType} or null when absent/expired. The
 // daemon's own usage scrape uses it; exported so the session-history chat can
 // reuse the same credentials for /v1/messages instead of keeping its own copy.
+//
+// macOS note: Claude Code stores its OAuth token in the Keychain under the
+// "Claude Code-credentials" generic password, not in .credentials.json. When
+// the file is absent or has no accessToken on darwin, fall back to
+// `security find-generic-password -s "Claude Code-credentials" -w`, which
+// prints the same JSON blob to stdout. This stays synchronous because
+// chat.mjs calls claudeOauthToken() without await — `security` is a fast
+// local lookup so the brief event-loop block is acceptable.
 export function claudeOauthToken() {
-  if (!existsSync(CREDENTIALS_PATH)) return null;
-  let oauth;
-  try { oauth = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth; }
-  catch { return null; }
+  const fromFile = readCredentialsFile();
+  const oauth = fromFile ?? readKeychainOnDarwin();
   if (!oauth?.accessToken) return null;
   if (oauth.expiresAt && Number(oauth.expiresAt) < Date.now()) return null;
   return { accessToken: oauth.accessToken, expiresAt: oauth.expiresAt ?? null, subscriptionType: oauth.subscriptionType ?? null };
+}
+
+function readCredentialsFile() {
+  if (!existsSync(CREDENTIALS_PATH)) return null;
+  try { return JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth; }
+  catch { return null; }
+}
+
+// darwin-only Keychain fallback. Returns the parsed claudeAiOauth object or
+// null on any failure (no entry, user denies, parse fail) — never throws.
+function readKeychainOnDarwin() {
+  if (process.platform !== 'darwin') return null;
+  try {
+    const stdout = execFileSync(
+      'security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
+    );
+    return JSON.parse(stdout).claudeAiOauth;
+  } catch { return null; }
 }
 
 async function fetchClaude() {

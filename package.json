@@ -2,6 +2,7 @@
   "name": "singularity",
   "private": true,
   "type": "module",
+  "engines": { "node": ">=20.12" },
   "scripts": {
     "server": "node --env-file-if-exists=.env server/index.mjs",
     "web": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js --config web/vite.config.mjs",
