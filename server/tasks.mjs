@@ -37,6 +37,10 @@ export const RATE_LIMIT_RE = /reached your session usage limit|Request rejected 
 const tasks = new Map(); // id -> task record (plain object, see plan/data model)
 let history = []; // concluded tasks: task fields + outcome, concludedAt, finalStats
 let logger = null;
+// Rolling output tail per session id, for rate-limit detection (see initTasks).
+// Cleared wherever a task's session leaves the board for good (done-transition,
+// conclude) so this never grows across a daemon's lifetime.
+const tails = new Map();
 
 function git(repo, ...args) {
   return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
@@ -51,7 +55,12 @@ function persist() {
   try {
     writeFileSync(TASKS_FILE + '.tmp', JSON.stringify({ tasks: [...tasks.values()], history }, null, 2));
     renameSync(TASKS_FILE + '.tmp', TASKS_FILE); // atomic swap — a crash mid-write never truncates TASKS_FILE
-  } catch (e) { logger?.warn({ err: e.message }, 'tasks.json write failed'); }
+  } catch (e) {
+    logger?.warn({ err: e.message }, 'tasks.json write failed');
+    const err = new Error(`tasks.json write failed: ${e.message}`);
+    err.persistFailure = true; // flags a genuine disk write failure vs. a validation error — index.mjs routes surface it as 500
+    throw err;
+  }
 }
 
 function emitTasks() { reg.bus.emit('tasks', snapshotTasks()); }
@@ -122,7 +131,6 @@ export function initTasks(log) {
   setInterval(sweepRetention, 3600_000).unref();
   // Ollama 429s surface only in the pty stream — flag the card so it doesn't
   // sit looking idle. Rolling tail absorbs chunk splits.
-  const tails = new Map();
   reg.bus.on('output', ({ id, data }) => {
     const t = [...tasks.values()].find((x) => x.sessionId === id && x.column !== 'done');
     if (!t || t.state === 'rate-limited') return;
@@ -339,7 +347,24 @@ export function createTask({ repo, title, description, model, implModel, reviewe
   }
 }
 
-export async function updateTask(id, { column, state }) {
+// Serialize all task mutations: the done-transition below awaits a ≤3s
+// pty-death wait mid-update, and an un-awaited bus listener (rate-limit
+// detection, see initTasks) can fire updateTask concurrently on the same or a
+// different task — without this, the two can interleave across that await and
+// clobber state/updatedAt. Single-user local daemon + rare overlap, so a
+// process-wide chain (vs. a per-task lock) is the simplest correct fix.
+let mutationChain = Promise.resolve();
+function serialized(fn) {
+  const result = mutationChain.then(fn, fn);
+  mutationChain = result.then(() => {}, () => {}); // keep the chain alive past a rejection
+  return result;
+}
+
+export function updateTask(id, body) {
+  return serialized(() => updateTaskInner(id, body));
+}
+
+async function updateTaskInner(id, { column, state }) {
   const t = tasks.get(id);
   if (!t) throw new Error('no such task');
   if (column !== undefined) {
@@ -354,6 +379,7 @@ export async function updateTask(id, { column, state }) {
       if (t.sessionId) {
         const wasLive = reg.isLive(t.sessionId);
         reg.remove(t.sessionId);
+        tails.delete(t.sessionId); // session leaving the board for good — stop tracking its rate-limit tail
         for (let waited = 0; wasLive && reg.isLive(t.sessionId) && waited < 3000; waited += 200) await sleep(200);
       }
       await cleanupGitTask(t);
@@ -383,9 +409,10 @@ export async function concludeTask(id, outcome) {
   if (outcome !== 'completed' && outcome !== 'abandoned') throw new Error('bad outcome (expected completed|abandoned)');
   const t = tasks.get(id);
   if (!t) throw new Error('no such task');
-  const finalStats = t.sessionId ? statsFor([{ id: t.sessionId, cwd: t.worktree ?? t.repo }])[t.sessionId] : null;
+  const finalStats = t.sessionId ? (await statsFor([{ id: t.sessionId, cwd: t.worktree ?? t.repo }]))[t.sessionId] : null;
   const wasLive = reg.isLive(t.sessionId);
   if (wasLive) reg.kill(t.sessionId);
+  if (t.sessionId) tails.delete(t.sessionId); // session concluded for good — stop tracking its rate-limit tail
   // Windows: the just-killed pty process may still hold file locks for a
   // moment — wait for it to actually die before removing the worktree, or
   // `git worktree remove` fails and orphans the dir.

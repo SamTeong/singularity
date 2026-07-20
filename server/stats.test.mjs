@@ -25,7 +25,7 @@ function writeTranscript(cwd, id, lines) {
   return dir;
 }
 
-test('parseSession: turns/tokens/estCostUsd from a known-model usage block', () => {
+test('parseSession: turns/tokens/estCostUsd from a known-model usage block', async () => {
   const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-known';
   const id = randomUUID();
   const dir = writeTranscript(cwd, id, [
@@ -38,7 +38,7 @@ test('parseSession: turns/tokens/estCostUsd from a known-model usage block', () 
     },
   ]);
   try {
-    const result = parseSession(cwd, id);
+    const result = await parseSession(cwd, id);
     assert.equal(result.exists, true);
     assert.equal(result.turns, 1);
     assert.equal(result.tokens, 1800); // 1000+500+200+100
@@ -49,14 +49,14 @@ test('parseSession: turns/tokens/estCostUsd from a known-model usage block', () 
   }
 });
 
-test('parseSession: unknown model → estCostUsd stays null (tokens/turns still counted)', () => {
+test('parseSession: unknown model → estCostUsd stays null (tokens/turns still counted)', async () => {
   const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-unknown';
   const id = randomUUID();
   const dir = writeTranscript(cwd, id, [
     { type: 'assistant', message: { model: 'gpt-4o', usage: { input_tokens: 10, output_tokens: 20 } } },
   ]);
   try {
-    const result = parseSession(cwd, id);
+    const result = await parseSession(cwd, id);
     assert.equal(result.turns, 1);
     assert.equal(result.tokens, 30);
     assert.equal(result.estCostUsd, null);
@@ -65,7 +65,7 @@ test('parseSession: unknown model → estCostUsd stays null (tokens/turns still 
   }
 });
 
-test('sessionStats: per-bucket token breakdown + models, keyed by project dirname', () => {
+test('sessionStats: per-bucket token breakdown + models, keyed by project dirname', async () => {
   const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-breakdown';
   const id = randomUUID();
   const dir = writeTranscript(cwd, id, [
@@ -73,7 +73,7 @@ test('sessionStats: per-bucket token breakdown + models, keyed by project dirnam
     { type: 'assistant', message: { model: 'claude-sonnet-4-5', usage: { input_tokens: 10, output_tokens: 5 } } },
   ]);
   try {
-    const s = sessionStats(encodeCwd(cwd), id); // route passes the encoded-cwd project dirname
+    const s = await sessionStats(encodeCwd(cwd), id); // route passes the encoded-cwd project dirname
     assert.equal(s.inputTokens, 1010);
     assert.equal(s.outputTokens, 505);
     assert.equal(s.cacheReadTokens, 200);
@@ -87,7 +87,7 @@ test('sessionStats: per-bucket token breakdown + models, keyed by project dirnam
   }
 });
 
-test('statsFor: global statusline cost-state file present → costSource "statusline" wins over the estimate', () => {
+test('statsFor: global statusline cost-state file present → costSource "statusline" wins over the estimate', async () => {
   const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-statusline';
   const id = randomUUID();
   const dir = writeTranscript(cwd, id, [
@@ -97,7 +97,7 @@ test('statsFor: global statusline cost-state file present → costSource "status
   mkdirSync(COST_STATE_DIR, { recursive: true });
   writeFileSync(costFile, JSON.stringify({ session_id: id, cost: { total_cost_usd: 1.23, total_api_duration_ms: 111, total_duration_ms: 222 } }));
   try {
-    const out = statsFor([{ id, cwd }]);
+    const out = await statsFor([{ id, cwd }]);
     assert.equal(out[id].costSource, 'statusline');
     assert.equal(out[id].costUsd, 1.23);
     assert.equal(out[id].apiMs, 111);
@@ -108,14 +108,14 @@ test('statsFor: global statusline cost-state file present → costSource "status
   }
 });
 
-test('statsFor: no cost-state file → costSource "estimate" (falls back to the pricing table)', () => {
+test('statsFor: no cost-state file → costSource "estimate" (falls back to the pricing table)', async () => {
   const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-estimate';
   const id = randomUUID();
   const dir = writeTranscript(cwd, id, [
     { type: 'assistant', message: { model: 'claude-sonnet-4-5', usage: { input_tokens: 100, output_tokens: 50 } } },
   ]);
   try {
-    const out = statsFor([{ id, cwd }]);
+    const out = await statsFor([{ id, cwd }]);
     assert.equal(out[id].costSource, 'estimate');
     assert.ok(out[id].costUsd > 0);
   } finally {

@@ -5,7 +5,8 @@
 // foreground and task/background. Prices drift with Anthropic's rate card — treat
 // estCostUsd as a fallback/cross-check; the statusline value (costSource:
 // 'statusline') is authoritative when present.
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
+import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd, getActiveMs } from './agents.mjs';
@@ -45,8 +46,14 @@ function priceFor(model) {
 
 // Session logs grow to many MB and are polled every few seconds — cache the
 // parse result keyed on (mtime, size) so unchanged files are never re-read
-// (each full read is sync and stalls the pty relay).
+// (each full read is async now, but still real I/O worth skipping).
 const cache = new Map(); // path -> { mtimeMs, size, result }
+const CACHE_MAX = 1000; // simple size cap — evict the oldest-inserted entry past this (not true LRU, just bounds memory)
+
+function cacheSet(path, st, result) {
+  cache.set(path, { mtimeMs: st.mtimeMs, size: st.size, result });
+  if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
+}
 
 export function parseSession(cwd, id) {
   return parseByPath(join(homedir(), '.claude', 'projects', encodeCwd(cwd), `${id}.jsonl`));
@@ -54,17 +61,19 @@ export function parseSession(cwd, id) {
 
 // Full parse of one transcript path into turns + per-bucket token totals + est
 // cost + models seen. Cached by (mtime,size). Shared by agent stats (via cwd)
-// and session stats (via project dirname).
-function parseByPath(p) {
+// and session stats (via project dirname). Async (fs/promises) so a batch of
+// these (see /sessions/stats in index.mjs) can't stall the event loop / pty relay.
+async function parseByPath(p) {
   let st;
-  try { st = statSync(p); } catch { return { turns: 0, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, models: [], exists: false, estCostUsd: null }; }
+  try { st = await stat(p); } catch { return { turns: 0, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, models: [], exists: false, estCostUsd: null }; }
   const hit = cache.get(p);
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.result;
   let turns = 0, tokens = 0, estCostUsd = null;
   let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0;
   const models = new Set();
   try {
-    for (const line of readFileSync(p, 'utf8').split(/\r?\n/)) {
+    const content = await readFile(p, 'utf8');
+    for (const line of content.split(/\r?\n/)) {
       if (!line) continue;
       let o;
       try { o = JSON.parse(line); } catch { continue; }
@@ -93,7 +102,7 @@ function parseByPath(p) {
     }
   } catch { /* partial/locked file — return what we have */ }
   const result = { turns, tokens, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, models: [...models], exists: true, estCostUsd };
-  cache.set(p, { mtimeMs: st.mtimeMs, size: st.size, result });
+  cacheSet(p, st, result);
   return result;
 }
 
@@ -101,9 +110,9 @@ function parseByPath(p) {
 // session list already has it), merging the exact statusline cost when present.
 const EMPTY_SESSION = { turns: 0, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, models: [], exists: false, estCostUsd: null };
 
-export function sessionStats(project, id, root) {
+export async function sessionStats(project, id, root) {
   const p = pathFor(project, id, root);
-  const session = p ? parseByPath(p) : EMPTY_SESSION;
+  const session = p ? await parseByPath(p) : EMPTY_SESSION;
   const cost = readCostFile(id);
   return {
     ...session,
@@ -129,10 +138,10 @@ export function readCostFile(id) {
 // { id: {turns, tokens, exists, estCostUsd, costUsd, costSource, apiMs, wallMs, busyMs} }
 // for a list of {id, cwd}. costUsd = the global statusline cost-state value when
 // present, else the pricing-table estimate; costSource labels which ('statusline'|'estimate'|null).
-export function statsFor(agents) {
+export async function statsFor(agents) {
   const out = {};
   for (const a of agents) {
-    const session = parseSession(a.cwd, a.id);
+    const session = await parseSession(a.cwd, a.id);
     const cost = readCostFile(a.id);
     const costUsd = cost.costUsd ?? session.estCostUsd ?? null;
     const costSource = cost.costUsd != null ? 'statusline' : session.estCostUsd != null ? 'estimate' : null;

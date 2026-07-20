@@ -137,7 +137,12 @@ function persist() {
   try {
     writeFileSync(BACKGROUND_FILE + '.tmp', JSON.stringify(config, null, 2));
     renameSync(BACKGROUND_FILE + '.tmp', BACKGROUND_FILE); // atomic swap
-  } catch (e) { logger?.warn({ err: e.message }, 'background.json write failed'); }
+  } catch (e) {
+    logger?.warn({ err: e.message }, 'background.json write failed');
+    const err = new Error(`background.json write failed: ${e.message}`);
+    err.persistFailure = true; // flags a genuine disk write failure vs. a validation error — index.mjs routes surface it as 500
+    throw err;
+  }
 }
 
 function emit() { reg.bus.emit('background', snapshotBackground()); }
@@ -212,7 +217,7 @@ async function watchdog() {
   try {
     const def = config.defs.find((d) => d.lastTaskId === task.id);
     const usage = await getUsage();
-    const tokens = parseSession(task.worktree || task.repo, task.sessionId).tokens;
+    const tokens = (await parseSession(task.worktree || task.repo, task.sessionId)).tokens;
     const backend = isClaudeModel(task.model) ? 'claude' : 'ollama';
     decision = def ? watchdogDecision(usage, backend, def, tokens) : 'stop';
   } catch (e) { logger?.warn({ err: e.message }, 'background watchdog poll failed — stopping run (fail closed)'); }

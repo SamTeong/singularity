@@ -59,6 +59,29 @@ const app = Fastify({ logger: { level: 'info' } });
 // Safety net: the daemon hosts live PTY agents — an unhandled rejection must be
 // logged and survive, never crash the process.
 process.on('unhandledRejection', (e) => app.log.error({ err: e?.message ?? String(e) }, 'unhandled rejection'));
+// Same net for a synchronous throw (a setInterval tick, a bus listener, a
+// setTimeout callback) — without this, any of those crashes the whole daemon
+// and orphans every live agent pty.
+process.on('uncaughtException', (e) => app.log.error({ err: e?.message ?? String(e) }, 'uncaught exception'));
+
+// Graceful shutdown: kill every live agent pty first (each kill's onExit fully
+// persists its own final state — activeMs, registry entry — before this
+// returns), bounded so one hung pty can't wedge shutdown forever. Shared by
+// SIGTERM/SIGINT and /restart so a restart never orphans a running claude.
+let shuttingDown = false;
+async function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  const live = reg.snapshot().filter((a) => reg.isLive(a.id));
+  app.log.info({ count: live.length }, 'shutting down — killing live agents');
+  for (const a of live) reg.kill(a.id);
+  const deadline = Date.now() + 5000;
+  while (live.some((a) => reg.isLive(a.id)) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+  try { await app.close(); } catch {}
+  process.exit(0);
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
 
 // Browser cross-origin guard (DNS rebinding / drive-by pages hitting loopback).
 // The 127.0.0.1 bind does not stop the user's own browser acting as a confused
@@ -90,6 +113,13 @@ if (TOKEN) {
     if (t !== TOKEN) reply.code(401).send({ error: 'unauthorized' });
   });
 }
+
+// createTask/updateTask/createCron/... funnel their state changes through a
+// persist() that now throws (flagged `.persistFailure`) on a genuine disk
+// write failure instead of silently swallowing it — surface that as 500 (the
+// request succeeded but state wasn't durably saved), vs. 400 for a plain
+// validation error.
+const errStatus = (e) => (e.persistFailure ? 500 : 400);
 
 // Recursively collect file mtimes under `dir` (used by the dist-staleness check below).
 function walkMtimes(dir) {
@@ -126,7 +156,7 @@ let wss; // assigned after listen; /health reports live WS client count for dev 
 app.get('/health', async () => ({ ok: true, pid: process.pid, clients: wss?.clients.size ?? 0 }));
 
 // Per-agent stats (turns + tokens) parsed from each session .jsonl.
-app.get('/agent-stats', async () => ({ stats: statsFor(reg.snapshot()) }));
+app.get('/agent-stats', async () => ({ stats: await statsFor(reg.snapshot()) }));
 
 // Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
 app.get('/usage', async (req) => getUsage({ force: req.query.force === '1' }));
@@ -193,13 +223,15 @@ app.post('/procs/kill', async (req, reply) => {
 });
 app.post('/restart', async (req, reply) => {
   reply.send({ ok: true });
-  // ponytail: no supervisor — daemon respawns itself detached, then exits. Kills all live PTY sessions.
+  // ponytail: no supervisor — daemon respawns itself detached, then exits via
+  // the same graceful shutdown() as SIGTERM/SIGINT (kills all live PTY sessions
+  // and waits for them before exiting, instead of a bare process.exit).
   // In dev (concurrently -k) vite won't come back; button is meant for `npm start`.
   setTimeout(() => {
     spawn(process.execPath, [...process.execArgv, process.argv[1]], {
       detached: true, stdio: 'ignore', cwd: process.cwd(), env: process.env,
     }).unref();
-    process.exit(0);
+    shutdown();
   }, 100);
 });
 
@@ -260,19 +292,19 @@ app.put('/hooks/file', async (req, reply) => {
 app.get('/tasks', async () => snapshotTasks());
 app.post('/tasks', async (req, reply) => {
   try { return { ok: true, task: createTask(req.body || {}) }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/tasks/:id/status', async (req, reply) => {
   try { return { ok: true, task: await updateTask(req.params.id, req.body || {}) }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/tasks/:id/conclude', async (req, reply) => {
   try { await concludeTask(req.params.id, req.body?.outcome); return { ok: true }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.delete('/tasks/history/:id', async (req, reply) => {
   try { deleteHistory(req.params.id); return { ok: true }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 
 // Cron jobs: list/create/update/delete + manual run. In-process UTC scheduler;
@@ -280,19 +312,19 @@ app.delete('/tasks/history/:id', async (req, reply) => {
 app.get('/crons', async () => snapshotCrons());
 app.post('/crons', async (req, reply) => {
   try { return { ok: true, cron: createCron(req.body || {}) }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/crons/:id', async (req, reply) => {
   try { return { ok: true, cron: updateCron(req.params.id, req.body || {}) }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.delete('/crons/:id', async (req, reply) => {
   try { deleteCron(req.params.id); return { ok: true }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/crons/:id/run', async (req, reply) => {
   try { return { ok: true, cron: runCron(req.params.id) }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 
 // Background tasks: quota-soak runs during working hours. Per-def CRUD (each
@@ -301,23 +333,23 @@ app.post('/crons/:id/run', async (req, reply) => {
 app.get('/background', async () => snapshotBackground());
 app.post('/background/defs', async (req, reply) => {
   try { return { ok: true, def: createDef(req.body || {}) }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.patch('/background/defs/:id', async (req, reply) => {
   try { return { ok: true, def: updateDef(req.params.id, req.body || {}) }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.delete('/background/defs/:id', async (req, reply) => {
   try { deleteDef(req.params.id); return { ok: true }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.patch('/background/reorder', async (req, reply) => {
   try { reorderDefs((req.body || {}).ids); return { ok: true }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/background/run', async (req, reply) => {
   try { const { taskId } = await runBackgroundNow({ force: req.query.force === '1' }); return { ok: true, taskId }; }
-  catch (e) { return reply.code(400).send({ ok: false, error: e.message }); }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.get('/background/reports', async () => ({ reports: listReports() }));
 app.get('/background/reports/:taskId', async (req, reply) => {
@@ -425,7 +457,7 @@ app.post('/sessions/stats', async (req) => {
   const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
   const root = req.body?.root;
   const stats = {};
-  for (const it of items) if (it?.project && it?.id) stats[it.id] = sessionStats(it.project, it.id, root);
+  for (const it of items) if (it?.project && it?.id) stats[it.id] = await sessionStats(it.project, it.id, root);
   return { stats };
 });
 

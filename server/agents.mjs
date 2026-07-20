@@ -59,7 +59,12 @@ function persist() {
   try {
     writeFileSync(STATE_FILE + '.tmp', JSON.stringify(data, null, 2));
     renameSync(STATE_FILE + '.tmp', STATE_FILE); // atomic swap — a crash mid-write never truncates STATE_FILE
-  } catch (e) { logger?.warn({ err: e.message }, 'agents.json write failed — registry not persisted'); }
+  } catch (e) {
+    logger?.warn({ err: e.message }, 'agents.json write failed — registry not persisted');
+    const err = new Error(`agents.json write failed: ${e.message}`);
+    err.persistFailure = true; // flags a genuine disk write failure vs. a validation error — index.mjs routes surface it as 500
+    throw err;
+  }
 }
 
 export function init(log) {

@@ -27,7 +27,12 @@ function persist() {
   try {
     writeFileSync(CRONS_FILE + '.tmp', JSON.stringify({ crons: [...crons.values()] }, null, 2));
     renameSync(CRONS_FILE + '.tmp', CRONS_FILE); // atomic swap — a crash mid-write never truncates CRONS_FILE
-  } catch (e) { logger?.warn({ err: e.message }, 'crons.json write failed'); }
+  } catch (e) {
+    logger?.warn({ err: e.message }, 'crons.json write failed');
+    const err = new Error(`crons.json write failed: ${e.message}`);
+    err.persistFailure = true; // flags a genuine disk write failure vs. a validation error — index.mjs routes surface it as 500
+    throw err;
+  }
 }
 
 function emitCrons() { reg.bus.emit('crons', snapshotCrons()); }
