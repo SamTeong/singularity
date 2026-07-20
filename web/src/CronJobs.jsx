@@ -296,7 +296,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
             {/* Last-tick status */}
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {lastTick
-                ? `${lastTick.action === 'ran' ? 'ran' : 'skipped'} ${fmtHM(lastTick.at)}${lastTick.reason ? ` — ${lastTick.reason}` : ''}`
+                ? `${lastTick.action === 'ran' ? 'started' : 'skipped'} ${fmtHM(lastTick.at)}${lastTick.reason ? ` — ${lastTick.reason}` : ''}`
                 : `Waiting for first run in ${Math.max(0, Math.ceil((background.nextDueAt - Date.now()) / 60000))} minutes`}
             </Typography>
 
