@@ -32,7 +32,7 @@ Backend modules → routes in `server/index.mjs`. Add a concern = new module + r
 ## State
 
 Owned app state → `SINGULARITY_HOME` (required, no default — set in `.env`; `APP_DIR`):
-- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `ollama.json`, `cost/<session_id>.json`
+- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `ollama.json`
 - `cache/` (disposable): `usage-cache.json`, `pw-ollama-profile/`
 
 `.worktrees/` + `.tickets/<id>/` live at the **repo root** (git-registered / gitignored), NOT under `APP_DIR` — Claude only honors repo-controllable permissions (allow-rules/hooks) for paths inside the trusted project root; external paths fire Task-permission prompts.
@@ -49,7 +49,7 @@ Optional `SING_TOKEN` gates data endpoints + WS (`x-sing-token` header / `?token
 ## Working rules
 
 - `claude`/`ollama` binaries: absolute paths from `CLAUDE_BIN`/`OLLAMA_BIN` (no PATH fallback — Windows node-pty does no PATH resolution).
-- Per-agent cost = turns + total tokens, not `$`. Dollar cost needs per-model pricing — use spend tooling.
+- Per-agent cost = turns + total tokens, plus `$` from the **global statusline** (`claude-code-usage-report` skill, `~/.claude/settings.json`) — the single source of truth for every session, foreground and task/background. `server/stats.mjs:readCostFile` reads `~/.agents/.claude-code-usage-report/state/cost-state/<id>.json` (full payload, `cost.total_cost_usd`); honors `USAGE_REPORT_STATE`. No per-task statusline override, no parallel capture script — one statusline, one store. Token estimates (`est_cost_usd`) are the pricing-table fallback only.
 - Tests redirect state with `SINGULARITY_HOME=<scratch temp>` set before a **dynamic** `import('./agents.mjs')` (static imports hoist above the env assignment; `app-dir.mjs` throws without it). Same applies to ad-hoc `node -e` scripts importing server modules — run as `node --env-file-if-exists=.env -e "..."`.
 - Config editor writes 2 scopes — `settings.json` (project) + `settings.local.json` (project-local) — with `.bak` backup + JSON validate; paths derived server-side, client never supplies a path. User-level `~/.claude/settings.json` is reachable by picking root `~` (project scope resolves to it), not a separate tab.
 

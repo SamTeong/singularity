@@ -3,8 +3,9 @@
 // gates on live 5h/7d usage (Claude first, else Ollama) against that def's own
 // thresholds, picks the oldest off-cooldown def round-robin, and spawns it as
 // a normal Tasks-board card
-// tagged 'background' with an unattended prompt + a deny rule barring writes to
-// C:\git\singularity. A watchdog re-polls usage while a run is live and injects
+// tagged 'background' with an unattended prompt. No write guard on the
+// checkout is in effect (deny array empty, prompt ban removed). A watchdog
+// re-polls usage while a run is live and injects
 // a wrap-up (then hard-kills after a grace) when the budget is spent.
 //
 // State: STATE_DIR/background.json (atomic tmp+rename, like crons). Emits
@@ -25,14 +26,17 @@ const TICK_MINUTES = 60; // fixed cadence — no per-install override
 const WATCHDOG_MS = 120_000;
 const KILL_GRACE_MS = 5 * 60_000;
 const WRAPUP = 'Usage budget reached — stop working now, write Report.md with current progress + remaining steps, move the card to inreview, then stop.';
-// Agent may write anywhere EXCEPT the singularity checkout (deny rule + prompt
-// ban). Merged into the same --settings JSON as the statusline in tasks.mjs.
-// Claude Code normalizes paths to POSIX before matching (C:\git\singularity →
-// /c/git/singularity) and a leading // anchors to the filesystem root. A single
-// Edit(...) rule covers Write/NotebookEdit too — a separate Write(...) rule is
-// accepted but never matched (and warns at startup), so we don't list one.
-// Residual risk: Bash-side writes (echo > file) are only prompt-banned; accepted.
-const DENY = { permissions: { deny: ['Edit(//c/git/singularity/**)'] } };
+// No write guard on the singularity checkout is in effect: the settings deny
+// array is intentionally empty, and the prompt-side ban was removed from
+// tasks.mjs. Re-enable the hard guard by adding 'Edit(//c/git/singularity/**)'
+// back here: Claude Code normalizes paths to POSIX (C:\git\singularity →
+// /c/git/singularity) before matching, a leading // anchors to the filesystem
+// root, and a single Edit(...) rule also covers Write/NotebookEdit (a separate
+// Write(...) rule is accepted but never matched, and warns at startup).
+// Merged into the same --settings JSON as the statusline in tasks.mjs.
+// Residual risk: a background run can write freely to the singularity checkout
+// (Edit or Bash echo>file) — no settings block, no prompt ban. Accepted.
+const DENY = { permissions: { deny: [] } };
 
 // Per-task defaults — every def merges over this on create, and legacy flat
 // installs get seeded from their old top-level copy (see migrateLegacyConfig).
@@ -138,9 +142,12 @@ function persist() {
 
 function emit() { reg.bus.emit('background', snapshotBackground()); }
 
-// Single-flight: the one live background-tagged card not yet done, or null.
+// Single-flight: the one actively-running background-tagged card, or null. Only
+// todo/inprogress count as live — an inreview card has concluded (session dead,
+// budget freed, awaiting a human) and must not block the next run.
 function liveBgTask() {
-  return snapshotTasks().tasks.find((t) => (t.tags || []).includes('background') && t.column !== 'done') || null;
+  return snapshotTasks().tasks.find((t) =>
+    (t.tags || []).includes('background') && (t.column === 'todo' || t.column === 'inprogress')) || null;
 }
 
 export function snapshotBackground() {

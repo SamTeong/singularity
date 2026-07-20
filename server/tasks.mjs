@@ -5,15 +5,11 @@
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
 import * as reg from './agents.mjs';
 import { isClaudeModel } from './models.mjs';
 import { statsFor } from './stats.mjs';
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const STATUSLINE_SCRIPT = join(__dirname, 'statusline-capture.mjs');
 
 const TASKS_FILE = join(reg.STATE_DIR, 'tasks.json');
 const WORKTREE_ROOT = reg.WORKTREES_DIR;
@@ -288,7 +284,6 @@ ${t.description}
 ## Rules
 
 - NO clarifying questions, NO plan-approval step, NO impl/reviewer subagent workflow — just do the work directly and efficiently. Nobody is watching this terminal.
-- NEVER modify anything under \`C:\\git\\singularity\`. If the work implies changes there, describe them in the report instead of making them.
 - At the START, run:
   ${status('inprogress', 'working')}
 - When the work is done, write \`Report.md\` to \`${t.ticketDir}\` summarizing what you did / found / proposed, and print a short summary in this terminal.
@@ -323,11 +318,11 @@ export function createTask({ repo, title, description, model, implModel, reviewe
       column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
       ...(background ? { conclude: conclude === 'done' ? 'done' : 'inreview' } : {}),
     };
-    // Statusline capture: per-session cost/duration written to state/cost/<id>.json
-    // (read by stats.mjs). Passed as extraArgs so it also survives reattach.
-    // permissionSettings (e.g. background-run deny rules) ride the same --settings
-    // object as a sibling key so a single flag carries both.
-    const extraArgs = ['--settings', JSON.stringify({ statusLine: { type: 'command', command: `node "${STATUSLINE_SCRIPT}"` }, ...(permissionSettings || {}) })];
+    // Cost is captured by the global statusline (claude-code-usage-report skill,
+    // from ~/.claude/settings.json) writing the full payload to cost-state/<id>.json,
+    // read by stats.mjs — no per-task statusline override. permissionSettings
+    // (e.g. background-run deny rules) still ride --settings as a sibling key.
+    const extraArgs = ['--settings', JSON.stringify(permissionSettings || {})];
     // mock (demo only): spawn an idle claude with no workflow prompt — a live
     // session for the status pill, but no turn ever starts, so zero tokens. The
     // demo driver moves the card itself. Real tasks always get the prompt.

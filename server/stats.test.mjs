@@ -1,8 +1,8 @@
 // Unit tests for per-agent stats: pricing-table cost estimate from a fake
-// session .jsonl (parseSession) and the statusline-capture vs. estimate
+// session .jsonl (parseSession) and the global statusline cost-state vs. estimate
 // cost-source precedence (statsFor). Transcripts write under the real
 // ~/.claude/projects (cleaned per-test in a finally); cost files route through
-// SINGULARITY_HOME scratch so they never touch the user's real state/. Run: npm test
+// USAGE_REPORT_STATE scratch so they never touch the user's real cost-state. Run: npm test
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
@@ -12,10 +12,11 @@ import { randomUUID } from 'node:crypto';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-stats-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
+process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { encodeCwd, STATE_DIR } = await import('./agents.mjs');
-const { parseSession, statsFor, sessionStats } = await import('./stats.mjs');
+const { encodeCwd } = await import('./agents.mjs');
+const { parseSession, statsFor, sessionStats, COST_STATE_DIR } = await import('./stats.mjs');
 
 function writeTranscript(cwd, id, lines) {
   const dir = join(homedir(), '.claude', 'projects', encodeCwd(cwd));
@@ -86,16 +87,15 @@ test('sessionStats: per-bucket token breakdown + models, keyed by project dirnam
   }
 });
 
-test('statsFor: statusline capture file present → costSource "statusline" wins over the estimate', () => {
+test('statsFor: global statusline cost-state file present → costSource "statusline" wins over the estimate', () => {
   const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-statusline';
   const id = randomUUID();
   const dir = writeTranscript(cwd, id, [
     { type: 'assistant', message: { model: 'claude-sonnet-4-5', usage: { input_tokens: 100, output_tokens: 50 } } },
   ]);
-  const costDir = join(STATE_DIR, 'cost');
-  const costFile = join(costDir, `${id}.json`);
-  mkdirSync(costDir, { recursive: true });
-  writeFileSync(costFile, JSON.stringify({ costUsd: 1.23, apiMs: 111, wallMs: 222 }));
+  const costFile = join(COST_STATE_DIR, `${id}.json`);
+  mkdirSync(COST_STATE_DIR, { recursive: true });
+  writeFileSync(costFile, JSON.stringify({ session_id: id, cost: { total_cost_usd: 1.23, total_api_duration_ms: 111, total_duration_ms: 222 } }));
   try {
     const out = statsFor([{ id, cwd }]);
     assert.equal(out[id].costSource, 'statusline');
@@ -108,7 +108,7 @@ test('statsFor: statusline capture file present → costSource "statusline" wins
   }
 });
 
-test('statsFor: no capture file → costSource "estimate" (falls back to the pricing table)', () => {
+test('statsFor: no cost-state file → costSource "estimate" (falls back to the pricing table)', () => {
   const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\stats-estimate';
   const id = randomUUID();
   const dir = writeTranscript(cwd, id, [

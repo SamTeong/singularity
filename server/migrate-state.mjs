@@ -18,7 +18,6 @@ const moves = [
   ['crons.json', STATE_DIR],
   ['ollama.json', STATE_DIR],
   ['tickets', STATE_DIR],
-  ['cost', STATE_DIR],
   ['usage-cache.json', CACHE_DIR],
   ['pw-ollama-profile', CACHE_DIR],
 ];

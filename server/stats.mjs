@@ -1,13 +1,20 @@
 // Per-agent stats from the session .jsonl (turns + tokens) plus cost, both from
 // a pricing-table estimate (per-model token buckets) and, when present, the
-// exact statusline capture file (APP_DIR/cost/<id>.json). Prices drift with
-// Anthropic's rate card — treat estCostUsd as a fallback/cross-check; the
-// statusline value (costSource: 'statusline') is authoritative when present.
+// exact statusline value written by the global statusline (claude-code-usage-report
+// skill) to cost-state/<id>.json — the single source of truth for all sessions,
+// foreground and task/background. Prices drift with Anthropic's rate card — treat
+// estCostUsd as a fallback/cross-check; the statusline value (costSource:
+// 'statusline') is authoritative when present.
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { encodeCwd, STATE_DIR, getActiveMs } from './agents.mjs';
+import { encodeCwd, getActiveMs } from './agents.mjs';
 import { pathFor } from './sessions.mjs';
+
+// Mirror of statusline.mjs's state root so the two never drift. Full payload
+// (cost.total_cost_usd / total_api_duration_ms / total_duration_ms) per session.
+const stateRoot = process.env.USAGE_REPORT_STATE || join(homedir(), '.agents', '.claude-code-usage-report', 'state');
+export const COST_STATE_DIR = join(stateRoot, 'cost-state');
 
 // $ per million tokens: [input, output]. Matched by longest prefix on the
 // transcript message model id. cache read = 0.1x input; cache write = 1.25x
@@ -105,18 +112,23 @@ export function sessionStats(project, id, root) {
   };
 }
 
-// Statusline capture file written by statusline-capture.mjs: exact cost + API
-// vs. wall duration for one session, refreshed ~every 300ms while it runs.
+// Global statusline cost-state file: exact cost + API vs. wall duration for one
+// session (full payload), refreshed ~every 300ms while it runs.
 export function readCostFile(id) {
   try {
-    const d = JSON.parse(readFileSync(join(STATE_DIR, 'cost', `${id}.json`), 'utf8'));
-    return { costUsd: d.costUsd ?? null, apiMs: d.apiMs ?? null, wallMs: d.wallMs ?? null };
+    const d = JSON.parse(readFileSync(join(COST_STATE_DIR, `${id}.json`), 'utf8'));
+    const c = d.cost || {};
+    return {
+      costUsd: typeof c.total_cost_usd === 'number' ? c.total_cost_usd : null,
+      apiMs: typeof c.total_api_duration_ms === 'number' ? c.total_api_duration_ms : null,
+      wallMs: typeof c.total_duration_ms === 'number' ? c.total_duration_ms : null,
+    };
   } catch { return { costUsd: null, apiMs: null, wallMs: null }; }
 }
 
 // { id: {turns, tokens, exists, estCostUsd, costUsd, costSource, apiMs, wallMs, busyMs} }
-// for a list of {id, cwd}. costUsd = statusline capture when present, else the
-// pricing-table estimate; costSource labels which ('statusline'|'estimate'|null).
+// for a list of {id, cwd}. costUsd = the global statusline cost-state value when
+// present, else the pricing-table estimate; costSource labels which ('statusline'|'estimate'|null).
 export function statsFor(agents) {
   const out = {};
   for (const a of agents) {
