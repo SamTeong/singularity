@@ -40,7 +40,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
       <DialogTitle>New agent</DialogTitle>
       <DialogContent sx={{ pb: 1.5 }}>
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
-          <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="cwd (repo path)" />
+          <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
           <TextField size="small" label="name (optional)" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
           <ModelSelect model={model} setModel={setModel} />
           <ScopeSelect open={open} value={scopes} onChange={setScopes} />

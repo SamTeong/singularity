@@ -179,7 +179,10 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
       >
         {/* Right-docked + collapsed → slim vertical strip: rotated title, stacked icons. */}
         <Stack
-          direction={side === 'right' && panelMin ? 'column' : 'row'} spacing={1} onClick={togglePanelMin}
+          direction={side === 'right' && panelMin ? 'column' : 'row'} spacing={1} role="button" tabIndex={0}
+          aria-label={panelMin ? `Expand ${tx.title} transcript` : `Collapse ${tx.title} transcript`}
+          onClick={togglePanelMin}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePanelMin(e); } }}
           sx={(t) => ({ flexShrink: 0, alignItems: 'center', cursor: 'pointer', userSelect: 'none',
             ...(side === 'right' && panelMin
               ? { flex: 1, minHeight: 0, py: 1 }
@@ -341,15 +344,20 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                     const usesTx = col === 'done' || !(agent && LIVE_STATUS.has(agent.status));
                     const sel = usesTx ? tx?.id === task.id : task.sessionId === activeId;
                     const line = statsLine(stats?.[task.sessionId]);
+                    const activate = () => (usesTx
+                      ? openTranscript({ id: task.id, title: task.title, sessionId: task.sessionId, worktree: task.worktree, repo: task.repo })
+                      : onSelect(task.sessionId));
                     return (
                       <Box
                         key={task.id}
                         draggable
                         onDragStart={() => setDragId(task.id)}
                         onDragEnd={() => setDragId(null)}
-                        onClick={() => (usesTx
-                          ? openTranscript({ id: task.id, title: task.title, sessionId: task.sessionId, worktree: task.worktree, repo: task.repo })
-                          : onSelect(task.sessionId))}
+                        role="button"
+                        tabIndex={0}
+                        aria-label={task.title}
+                        onClick={activate}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
                         sx={(t) => ({
                           p: 1, cursor: 'pointer', flexShrink: 0,
                           borderRadius: `${t.zapac.radius.sm}px`,

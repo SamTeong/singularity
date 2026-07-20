@@ -228,7 +228,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                   <li>Current AI usage is below the start threshold</li>
                 </Box>
                 The oldest off-cooldown task would be spawned as a Tasks-board card.<br />
-                To start task immediately, trigger via ‘Run now’.
+                To start task immediately, trigger via 'Run now'.
               </Box>
             }
           >

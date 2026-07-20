@@ -527,7 +527,7 @@ export default function App() {
             )}
             {visited.current.sessions && (
               <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>
-                <SessionHistory sendMsg={sendMsg} registerChat={(cb) => { chatHandler.current = cb; }} />
+                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={(cb) => { chatHandler.current = cb; }} />
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
@@ -556,7 +556,7 @@ export default function App() {
 
       {/* Terminal dock — full width, below sidebar + view: session list (left) + selected terminal (right). */}
       <Box sx={(t) => ({ ...glass(t), position: 'relative', zIndex: t.zapac.layers.content, flexShrink: 0, height: dockMin ? 'auto' : dockH, mx: 1.5, mb: 1.5, mt: dockMin ? 1.5 : 0, borderRadius: `${t.zapac.radius.lg}px`, overflow: 'hidden', display: 'flex', flexDirection: 'column' })}>
-          <Stack direction="row" spacing={1} onClick={toggleDock} title={dockMin ? 'Restore' : 'Minimize'} sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none', borderBottom: dockMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` })}>
+          <Stack direction="row" spacing={1} role="button" tabIndex={0} onClick={toggleDock} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDock(); } }} title={dockMin ? 'Restore' : 'Minimize'} sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none', borderBottom: dockMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` })}>
             <SmartToyIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
             <Typography variant="subtitle2" sx={{ flex: 1 }} noWrap>Sessions</Typography>
             {dockMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />}
@@ -617,7 +617,7 @@ export default function App() {
                 {/* Live subagents (Task tool) — indicator only, no PTY to attach. */}
                 {(subagents[a.id] || []).map((sub) => (
                   <Stack key={sub.id} direction="row" spacing={0.75} sx={{ alignItems: 'center', pl: 2.5, pr: 1, py: 0.25, minWidth: 0 }}>
-                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, bgcolor: sub.running ? 'success.main' : 'text.disabled', animation: sub.running ? 'sing-sub-pulse 1.4s ease-in-out infinite' : 'none', '@keyframes sing-sub-pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.35 } } }} />
+                    <Box sx={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, bgcolor: sub.running ? 'success.main' : 'text.disabled', animation: sub.running ? 'sing-sub-pulse 1.4s ease-in-out infinite' : 'none', '@keyframes sing-sub-pulse': { '0%,100%': { opacity: 1 }, '50%': { opacity: 0.35 } }, '@media (prefers-reduced-motion: reduce)': { animation: 'none' } }} />
                     <Typography variant="code" noWrap sx={{ fontSize: 11, color: 'text.secondary', flex: 1, minWidth: 0 }}>{sub.title || sub.agentId}</Typography>
                   </Stack>
                 ))}

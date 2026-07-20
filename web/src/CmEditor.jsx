@@ -12,7 +12,7 @@ import { cmTheme } from './cmTheme.js';
 // `deps` controls when `extensions` is recomputed (default: never again after
 // mount); pass e.g. [path] when the language extension depends on the selected file.
 export default function CmEditor({ value, onChange, extensions = [], deps = [], height = '100%' }) {
-  const { mode } = useColorMode();
+  const { resolved } = useColorMode(); // 'light' | 'dark' — system mode mapped through the OS
   // eslint-disable-next-line react-hooks/exhaustive-deps -- deps is caller-controlled, mirroring each panel's own useMemo before this was extracted
   const cmExtensions = useMemo(() => [EditorView.lineWrapping, ...extensions, cmTheme], deps);
   // Callers pass a fresh onChange each render; forward through a ref so
@@ -22,7 +22,7 @@ export default function CmEditor({ value, onChange, extensions = [], deps = [], 
   const stableOnChange = useCallback((v) => onChangeRef.current(v), []);
   return (
     <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
-      <CodeMirror value={value} theme={mode === 'dark' ? 'dark' : 'light'} height={height} extensions={cmExtensions} onChange={stableOnChange} />
+      <CodeMirror value={value} theme={resolved === 'dark' ? 'dark' : 'light'} height={height} extensions={cmExtensions} onChange={stableOnChange} />
     </Box>
   );
 }

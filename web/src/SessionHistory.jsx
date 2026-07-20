@@ -46,13 +46,15 @@ function PulseDot({ sx }) {
           '50%': { opacity: 0.4, transform: 'scale(0.75)' },
           '100%': { opacity: 1, transform: 'scale(1)' },
         },
+        // Reduced-motion: hold the steady (opacity 1, scale 1) state instead of animating.
+        '@media (prefers-reduced-motion: reduce)': { animation: 'none' },
         ...sx,
       }}
     />
   );
 }
 
-export default function SessionHistory({ sendMsg, registerChat }) {
+export default function SessionHistory({ active, sendMsg, registerChat }) {
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
   const [q, setQ] = useState('');
@@ -82,12 +84,15 @@ export default function SessionHistory({ sendMsg, registerChat }) {
     fetch('/sessions/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
   }, []);
 
+  // Poll the session list only while the Sessions view is active — avoids
+  // background fetches when the panel is mounted-but-hidden behind another view.
   useEffect(() => {
+    if (!active) return;
     const load = () => fetch(`/sessions?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.'));
     load();
     const iv = setInterval(load, 5000);
     return () => clearInterval(iv);
-  }, [root]);
+  }, [root, active]);
 
   // Cross-session search (scope 'all'): results replace the left list, like
   // Memory. Scope 'one' filters the open transcript in the right view instead.

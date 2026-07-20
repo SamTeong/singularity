@@ -9,7 +9,7 @@ import { useColorMode } from '@zapac/mui-theme';
 export default function MermaidBlock({ chart }) {
   const rawId = useId();
   const id = `mmd-${rawId.replace(/[^A-Za-z0-9_-]/g, '')}`;
-  const { mode } = useColorMode();
+  const { resolved } = useColorMode(); // 'light' | 'dark' — system mode mapped through the OS
   const [svg, setSvg] = useState('');
   const [err, setErr] = useState(null);
 
@@ -19,7 +19,7 @@ export default function MermaidBlock({ chart }) {
     (async () => {
       try {
         const mermaid = (await import('mermaid')).default;
-        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: mode === 'dark' ? 'dark' : 'default' });
+        mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: resolved === 'dark' ? 'dark' : 'default' });
         const { svg: out } = await mermaid.render(id, String(chart).replace(/\n$/, ''));
         if (!cancelled) setSvg(out);
       } catch (e) {
@@ -27,7 +27,7 @@ export default function MermaidBlock({ chart }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [chart, mode, id]);
+  }, [chart, resolved, id]);
 
   if (err) {
     return <Box component="pre" sx={{ m: 0, p: 1.5, fontSize: 12, color: 'error.main', bgcolor: 'action.hover', borderRadius: 1, overflow: 'auto' }}>{err}</Box>;
