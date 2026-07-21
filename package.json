@@ -4,6 +4,7 @@
   "type": "module",
   "engines": { "node": ">=20.12" },
   "scripts": {
+    "postinstall": "node scripts/fix-pty-helper.mjs",
     "bootstrap": "node --env-file-if-exists=.env scripts/bootstrap.mjs",
     "server": "node --env-file-if-exists=.env server/index.mjs",
     "web": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js --config web/vite.config.mjs",
