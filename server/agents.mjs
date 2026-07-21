@@ -3,7 +3,7 @@
 import { spawn } from 'node-pty';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { isClaudeModel } from './models.mjs';
@@ -204,6 +204,21 @@ export function buildSpawn({ id, name, cwd, model, scopes, permissionMode, extra
   return { bin: OLLAMA_BIN, args: ['launch', 'claude', '--model', model, '--', ...claudeArgs] };
 }
 
+// node-pty's raw spawn failure ("posix_spawnp failed." on macOS/Linux) names
+// neither the binary nor the cause. Wrap so the surfaced error is actionable —
+// the usual culprit is CLAUDE_BIN/OLLAMA_BIN pointing at a non-executable file
+// (missing +x, wrong arch, or a path that isn't the real binary).
+function spawnPty(bin, args, opts) {
+  try {
+    return spawn(bin, args, opts);
+  } catch (e) {
+    let hint = '';
+    try { accessSync(bin, constants.X_OK); }
+    catch { hint = ' — not executable; `chmod +x` it or point CLAUDE_BIN/OLLAMA_BIN at the real binary'; }
+    throw new Error(`failed to launch ${bin}: ${e.message}${hint}`);
+  }
+}
+
 // create new agent (id IS the claude --session-id)
 export function create({ cwd, name, model, scopes, sessionId, prompt, permissionMode, extraArgs }) {
   const id = (sessionId && sessionId.trim()) || randomUUID();
@@ -219,7 +234,7 @@ export function create({ cwd, name, model, scopes, sessionId, prompt, permission
   const displayName = name || id.slice(0, 8);
   const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
   ensureTrusted(cwd);
-  const proc = spawn(bin, args, { cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true });
+  const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true });
   const a = { id, name: displayName, cwd, model, scopes, permissionMode, extraArgs, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [] };
   agents.set(id, a);
   wire(a);
@@ -264,7 +279,7 @@ export function reattach(id) {
   if (!a || a.proc) return a;
   const { bin, args } = buildSpawn(a);
   ensureTrusted(a.cwd);
-  const proc = spawn(bin, args, {
+  const proc = spawnPty(bin, args, {
     cwd: a.cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true,
   });
   a.proc = proc; a.pid = proc.pid; a.buf = []; a.status = 'starting';
