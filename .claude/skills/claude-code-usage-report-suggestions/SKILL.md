@@ -1,6 +1,6 @@
 ---
 name: claude-code-usage-report-suggestions
-description: Audit and improve the Claude Code Usage Report pipeline end-to-end — collection, CSV schema, aggregation, report/visualizations. Produces a prioritized roadmap; implements chosen items by editing claude-code-usage-report's stats.mjs. Read-only until approved. Node stdlib only, runs locally.
+description: Audit and improve the Claude Code Usage Report pipeline end-to-end — collection, CSV schema, aggregation, report/visualizations. Produces a prioritized roadmap; implements chosen items by editing claude-code-usage-report's scripts. Read-only until approved. Node stdlib only, runs locally.
 disable-model-invocation: true
 metadata:
   version: 1.0.0
