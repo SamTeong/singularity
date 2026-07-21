@@ -113,17 +113,18 @@ process.on('SIGINT', shutdown);
 // from this daemon and Vite never runs. Same signal the static-serving branch
 // below already uses to tell dev from prod.
 const webDist = join(__dirname, '..', 'web', 'dist');
-const DEV = !existsSync(webDist);
 
 // Browser cross-origin guard (DNS rebinding / drive-by pages hitting loopback).
 // The 127.0.0.1 bind does not stop the user's own browser acting as a confused
 // deputy: a malicious page can fetch/WS straight to localhost. Allow only our
 // own origins (daemon + Vite dev); requests without Origin (curl, same-origin
 // GET navigations) pass — this blocks browsers, not local tools. The Vite dev
-// origin (:5317) is only trusted in dev — a prod build never runs Vite, so
-// there's no reason to keep it in the allowlist there.
+// origin (:5317) is always trusted: DEV is inferred from dist presence, but
+// `pnpm dev` can leave a stale dist around → DEV=false → the proxied :5317 WS
+// Origin would 403 and the shell shows "disconnected". Loopback-only bind makes
+// trusting the dev port unconditionally free.
 const SELF_HOSTS = new Set(
-  (DEV ? [PORT, 5317] : [PORT]).flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
+  [PORT, 5317].flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
 );
 function originAllowed(origin) {
   if (!origin) return true;
