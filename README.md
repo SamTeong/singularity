@@ -5,7 +5,7 @@ One control plane for your whole fleet of coding agents for spec-driven developm
 ## Run
 
 ```
-pnpm bootstrap       # run on first setup to generate .env (CLAUDE_BIN is detected) + install + start
+pnpm bootstrap       # run on first setup to generate .env (CLAUDE_BIN is detected) + wire usage-report + install + start
 pnpm install         # installs dependencies, runs postinstall hook
 pnpm postinstall     # mac: run if agents fail with "posix_spawnp failed"
 pnpm start           # build web + serve on http://127.0.0.1:4317
@@ -50,6 +50,6 @@ Optional token (defense-in-depth): set `SING_TOKEN=<secret>` — data endpoints 
 
 - `CLAUDE_BIN` must be an **absolute path** in `.env` — the daemon does no PATH resolution and Windows node-pty needs a real exe path. `pnpm bootstrap` detects it for you; otherwise set it by hand.
 - App data (registry, tasks, cron jobs, picker roots) lives under `SINGULARITY_HOME` (set in `.env`; `pnpm bootstrap` defaults it to `~/.singularity`). Git worktrees + ticket requirements/plans (`.worktrees/`, `.tickets/<id>/`) live at the repo root, or `SING_TRUSTED_ROOT` if set (trusted, gitignored) so Claude honors the repo's permission rules.
-- Per-session cost is shown as **turns + total tokens + `$`** — the dollar figure comes from the global statusline (`claude-code-usage-report` skill), the single source of truth for every session; a pricing-table estimate is the fallback when no statusline cost exists.
+- Per-session cost is shown as **turns + total tokens + `$`** — the dollar figure comes from the global statusline (`claude-code-usage-report` skill), the single source of truth for every session; a pricing-table estimate is the fallback when no statusline cost exists. `pnpm bootstrap` wires this skill (SessionEnd hook + statusline into `~/.claude/settings.json`) and fills `SING_USAGE_SKILL` / `SING_USAGE_REPORTS` in `.env`; it skips a statusline you already have and never fails bootstrap if the wiring can't be written.
 - The UI theme (`@zapac/mui-theme`) is vendored as a tgz in `vendor/`, so `pnpm install` works anywhere — no external path dependency.
 - **`spawn failed: posix_spawnp failed`** on macOS/Linux means node-pty's `spawn-helper` prebuilt lost its execute bit (pnpm's store sometimes extracts it `0644`), so every agent spawn fails. The `postinstall` hook (`scripts/fix-pty-helper.mjs`) restores `+x` automatically after each install; run `pnpm run postinstall` by hand if it recurs. This is not related to `CLAUDE_BIN`.

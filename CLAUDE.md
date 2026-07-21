@@ -1,15 +1,16 @@
 # Singularity — Claude Code Configuration
 
-Local web UI to run + steer multiple Claude Code agents. Browser shell + loopback Node daemon (Fastify + ws). See `README.md` for features.
+Local web UI — control plane for a fleet of coding agents (spec-driven dev). Browser shell + loopback Node daemon (Fastify + ws).
 
 ## Run
 
 ```
-pnpm bootstrap       # first-time: generate .env (detect CLAUDE_BIN) + install + start
-pnpm install         # once — @zapac/mui-theme is vendored (file:vendor/zapac-mui-theme-*.tgz)
+pnpm bootstrap       # first setup: generate .env (detects CLAUDE_BIN) + wire usage-report skill + install + start
+pnpm install         # installs dependencies, runs postinstall hook. @zapac/mui-theme is vendored (file:vendor/zapac-mui-theme-*.tgz)
+pnpm postinstall     # mac: run if agents fail with "posix_spawnp failed"
 pnpm start           # build web + serve on http://127.0.0.1:4317
-pnpm dev             # daemon (:4317) + Vite (:5317) → open :5317; Vite proxies /ws + REST to daemon
-pnpm test            # node --test "server/*.test.mjs"
+pnpm dev             # daemon (:4317) + Vite (:5317) → browse UI at 127.0.0.1:5317; Vite proxies /ws + REST to daemon
+pnpm test            # node --test-force-exit "server/*.test.mjs"
 ```
 
 Pieces separately: `pnpm server` / `pnpm web`. Shell: PowerShell primary; Bash tool POSIX only.
