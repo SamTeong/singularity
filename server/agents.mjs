@@ -7,8 +7,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessS
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { isClaudeModel } from './models.mjs';
-import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR } from './app-dir.mjs';
-export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR };
+import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
+export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR };
 
 const RING_MAX = 256 * 1024; // per-agent in-mem scrollback cap (bytes). Disk ring = Phase 3.
 const IDLE_MS = 2000; // no pty output for this long while running → 'idle' (waiting for input).

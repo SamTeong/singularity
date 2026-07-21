@@ -18,6 +18,7 @@ const WORKTREE_ROOT = reg.WORKTREES_DIR;
 // since a task's working directory varies (worktree or arbitrary repo) and the
 // source of truth can't live there.
 const TICKETS_ROOT = reg.TICKETS_DIR;
+const REPORTS_ROOT = reg.REPORTS_DIR;
 const COLUMNS = ['todo', 'inprogress', 'inreview', 'done'];
 // Per-column state vocabulary (SSOT). updateTask hard-rejects a state that
 // isn't valid for its column. OVERLAY_STATES may appear on any column —
@@ -304,14 +305,15 @@ ${t.description}
 ## Environment
 
 - You are working directly in \`${cwd}\`. Do the work described above in place.
-- Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (already written for you). Write your \`Report.md\` there.
+- Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (already written for you).
+- Write your \`Report.md\` to \`${t.reportDir}\` — a persistent store kept across cleanups, NOT the ticket dir.
 
 ## Rules
 
 - NO clarifying questions, NO plan-approval step, NO impl/reviewer subagent workflow — just do the work directly and efficiently. Nobody is watching this terminal.
 - At the START, run:
   ${status('inprogress', 'working')}
-- When the work is done, write \`Report.md\` to \`${t.ticketDir}\` summarizing what you did / found / proposed, and print a short summary in this terminal.
+- When the work is done, write \`Report.md\` to \`${t.reportDir}\` summarizing what you did / found / proposed, and print a short summary in this terminal.
 - ${lastStep}`;
 }
 
@@ -337,8 +339,12 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     const ticketDir = join(TICKETS_ROOT, short);
     mkdirSync(ticketDir, { recursive: true });
     writeFileSync(join(ticketDir, 'Requirements.md'), `# ${title.trim()}\n\n${description.trim()}\n`);
+    // Background reports go to a persistent .reports/<short> the hygiene sweep
+    // leaves alone; the transient ticketDir holds only working artifacts.
+    let reportDir = ticketDir;
+    if (background) { reportDir = join(REPORTS_ROOT, short); mkdirSync(reportDir, { recursive: true }); }
     const t = {
-      id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch, ticketDir,
+      id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch, ticketDir, reportDir,
       model, implModel, reviewerModel, scopes, tags: normalizeTags(tags), requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
       column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
       ...(background ? { conclude: conclude === 'done' ? 'done' : 'inreview' } : {}),

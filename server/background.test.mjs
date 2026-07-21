@@ -227,16 +227,21 @@ test('reorderDefs: rejects a non-array', () => assert.throws(() => reorderDefs('
 test('listReports/getReport: background-tagged entries with correct hasReport, non-background excluded, content read/missing', () => {
   const ticketA = join(scratch, 'ticket-a'); // has a Report.md
   const ticketB = join(scratch, 'ticket-b'); // no Report.md
+  const reportC = join(scratch, 'report-c'); // persistent reportDir with a Report.md
   mkdirSync(ticketA, { recursive: true });
   mkdirSync(ticketB, { recursive: true });
+  mkdirSync(reportC, { recursive: true });
   writeFileSync(join(ticketA, 'Report.md'), '# report a\n');
+  writeFileSync(join(reportC, 'Report.md'), '# report c\n');
   writeFileSync(join(STATE_DIR, 'tasks.json'), JSON.stringify({
     tasks: [
-      { id: 'live1', title: 'Live BG', tags: ['background'], ticketDir: ticketA, column: 'inprogress', createdAt: 1000 },
+      { id: 'live1', title: 'Live BG', tags: ['background'], ticketDir: ticketA, reportDir: ticketA, column: 'inprogress', createdAt: 1000 },
       { id: 'live2', title: 'Not BG', tags: [], ticketDir: ticketB, column: 'todo', createdAt: 2000 },
+      // reportDir distinct from ticketDir (no Report.md in ticketDir) → read from reportDir
+      { id: 'live3', title: 'Live BG w/ reportDir', tags: ['background'], ticketDir: ticketB, reportDir: reportC, column: 'inprogress', createdAt: 1500 },
     ],
     history: [
-      { id: 'hist1', title: 'Hist BG', tags: ['background'], ticketDir: ticketB, outcome: 'completed', concludedAt: 3000, createdAt: 500 },
+      { id: 'hist1', title: 'Hist BG', tags: ['background'], ticketDir: ticketB, reportDir: ticketB, outcome: 'completed', concludedAt: 3000, createdAt: 500 },
     ],
   }));
   initTasks();
@@ -257,7 +262,11 @@ test('listReports/getReport: background-tagged entries with correct hasReport, n
   assert.equal(hist1.status, 'completed');
   assert.equal(hist1.concludedAt, 3000);
 
+  const live3 = reports.find((r) => r.taskId === 'live3');
+  assert.equal(live3.hasReport, true, 'reportDir Report.md found (ticketDir has none)');
+
   assert.equal(getReport('live1').content, '# report a\n');
+  assert.equal(getReport('live3').content, '# report c\n', 'reportDir read when distinct from ticketDir');
   assert.equal(getReport('hist1'), null, 'no Report.md written for this one');
   assert.equal(getReport('live2'), null, 'not background-tagged');
   assert.equal(getReport('nope'), null, 'unknown id');

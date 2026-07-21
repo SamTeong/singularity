@@ -32,3 +32,7 @@ const TRUSTED_ROOT = process.env.SING_TRUSTED_ROOT ? resolve(untildify(process.e
 export { TRUSTED_ROOT };
 export const WORKTREES_DIR = join(TRUSTED_ROOT, '.worktrees');
 export const TICKETS_DIR = join(TRUSTED_ROOT, '.tickets');
+// Persistent home for background-job Report.md, kept separate from the
+// transient .tickets working artifacts (Requirements/Plan) which the hygiene
+// sweep purges once a task ages out.
+export const REPORTS_DIR = join(TRUSTED_ROOT, '.reports');

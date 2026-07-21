@@ -345,8 +345,8 @@ export function reorderDefs(ids) {
 // ---- Reports ----------------------------------------------------------------
 
 // Background-tagged tasks (live + concluded), newest first, with whether
-// Report.md exists in their ticket dir. ticketDir/id are read from the stored
-// task/history records only.
+// Report.md exists in their persistent reportDir (.reports/<short>).
+// reportDir/id are read from the stored task/history records only.
 export function listReports() {
   const { tasks, history } = snapshotTasks();
   const entries = [...tasks, ...history]
@@ -357,20 +357,20 @@ export function listReports() {
       createdAt: t.createdAt,
       concludedAt: t.concludedAt ?? null,
       status: t.outcome ?? t.column,
-      hasReport: existsSync(join(t.ticketDir, 'Report.md')),
+      hasReport: existsSync(join(t.reportDir, 'Report.md')),
     }));
   entries.sort((a, b) => (b.concludedAt ?? b.createdAt) - (a.concludedAt ?? a.createdAt));
   return entries;
 }
 
-// Report.md content for one background task. ticketDir is resolved only from
-// the stored task/history record by id — never from client input. Returns
-// null when the id is unknown or not background-tagged, or has no Report.md.
+// Report.md content for one background task. reportDir is resolved only from
+// the stored task/history record by id — never from client input. Returns null
+// when the id is unknown or not background-tagged, or has no Report.md.
 export function getReport(taskId) {
   const { tasks, history } = snapshotTasks();
   const t = [...tasks, ...history].find((x) => x.id === taskId && (x.tags || []).includes('background'));
   if (!t) return null;
-  const file = join(t.ticketDir, 'Report.md');
+  const file = join(t.reportDir, 'Report.md');
   if (!existsSync(file)) return null;
   return { taskId: t.id, title: t.title, content: readFileSync(file, 'utf8') };
 }
