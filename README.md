@@ -19,14 +19,14 @@ Vite proxies `/ws` + all REST to the daemon. Run pieces separately with `pnpm se
 
 ## Features
 
-- **Agents** — spawn/steer live `claude` PTY sessions per repo (cwd picker + recent list), status dots, kill, per-agent turns/tokens (parsed from the session `.jsonl`).
+- **Sessions** — spawn/steer live `claude` PTY sessions per repo (cwd picker + recent list), status dots, kill, per-session turns/tokens (parsed from the session `.jsonl`).
 - **Reattach** — survives daemon restart: agents load as `detached`; ⟳ runs `claude --resume <id>` (or a fresh `--session-id` if no conversation was logged).
 - **Claude processes** (🧠) — task manager: lists all `claude.exe`, classifies tracked / stale / external, kill stale/orphaned ones.
 - **Config** — edit the 3 `settings.json` scopes (user / project / project-local) with JSON lint + `.bak` backup; user scope read-only by default (guardrail).
 - **Memory** — cross-project search + markdown editor over `~/.claude/projects/*/memory/*.md`, writes confined to memory dirs.
-- **Cron jobs** — schedule prompts on a cron expression (UTC), skip a fire if the previous run is still active, auto-kill the session once it goes idle.
-- **Tasks board** — kanban over git-worktree task sessions (one worktree + branch + agent per card) with a workflow prompt, plus a history view of concluded tasks.
-- **Session history** — browse/search every Claude Code transcript on the machine, and chat over a past session, streamed via the daemon.
+- **Automation** — *Scheduled* prompts on a cron expression (UTC; skip a fire if the previous run is still active, auto-kill the session once idle) plus *Background* quota-soak jobs.
+- **Tasks** — kanban board over git-worktree task sessions (one worktree + branch + session per card) with a workflow prompt, plus a history view of concluded tasks.
+- **Transcripts** — browse/search every Claude Code transcript on the machine, and chat over a past session, streamed via the daemon.
 - **Wiki** — read-only recursive `.md` browser + search over a chosen root (default `~/wiki`).
 - **Usage** — Claude + Ollama Cloud usage meters (5h/7d limits).
 
