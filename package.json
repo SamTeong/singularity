@@ -2,6 +2,7 @@
   "name": "singularity",
   "private": true,
   "type": "module",
+  "packageManager": "pnpm@11.15.0",
   "engines": { "node": ">=20.12" },
   "scripts": {
     "postinstall": "node scripts/fix-pty-helper.mjs",
