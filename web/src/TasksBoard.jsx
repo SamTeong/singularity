@@ -11,6 +11,7 @@ import TableHead from '@mui/material/TableHead';
 import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
+import TableSortLabel from '@mui/material/TableSortLabel';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
@@ -68,6 +69,10 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   const [dragId, setDragId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [activeTags, setActiveTags] = useState(() => new Set());
+  // History table sort: click a header to sort, click again to reverse. Numeric
+  // fields compare by value, strings by localeCompare. Default = newest first.
+  const [sort, setSort] = useState({ key: 'concludedAt', dir: 'desc' });
+  const changeSort = (key) => setSort((p) => p.key === key ? { key, dir: p.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
 
   // Distinct tags across live tasks + history (union, deduped, sorted). The filter
   // pill row is shared by Board and History; OR semantics — a task matches if it
@@ -84,6 +89,32 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
     if (n.has(tag)) n.delete(tag); else n.add(tag);
     return n;
   });
+
+  // Sort value per header key. Numeric fields fall back to 0; strings to ''.
+  const sortValue = (h, key) => {
+    const s = h.finalStats;
+    switch (key) {
+      case 'title': return h.title;
+      case 'repo': return repoName(h.repo);
+      case 'branch': return h.branch || '';
+      case 'outcome': return h.outcome;
+      case 'busyMs': return s?.busyMs ?? 0;
+      case 'apiMs': return s?.apiMs ?? 0;
+      case 'costUsd': return s?.costUsd ?? 0;
+      case 'tokens': return s?.tokens ?? 0;
+      case 'concludedAt': return h.concludedAt ? new Date(h.concludedAt).getTime() : 0;
+      default: return 0;
+    }
+  };
+  const sortedHistory = useMemo(() => {
+    const dir = sort.dir === 'desc' ? -1 : 1;
+    return history.filter(matchesTags).slice().sort((a, b) => {
+      const va = sortValue(a, sort.key), vb = sortValue(b, sort.key);
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+      return String(va).localeCompare(String(vb)) * dir;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [history, activeTags, sort]);
 
   // Transcript panel: selecting a History row — or a Done-column card — loads its
   // session's transcript read-only, dockable bottom/right, resizable + collapsible,
@@ -259,20 +290,20 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
-                  <TableCell>Title</TableCell>
-                  <TableCell>Repo</TableCell>
-                  <TableCell>Branch</TableCell>
-                  <TableCell>Outcome</TableCell>
-                  <TableCell>Busy</TableCell>
-                  <TableCell>API</TableCell>
-                  <TableCell>Cost</TableCell>
-                  <TableCell>Tokens</TableCell>
-                  <TableCell>Concluded</TableCell>
+                  <TableCell sortDirection={sort.key === 'title' ? sort.dir : false}><TableSortLabel active={sort.key === 'title'} direction={sort.dir} onClick={() => changeSort('title')}>Title</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'repo' ? sort.dir : false}><TableSortLabel active={sort.key === 'repo'} direction={sort.dir} onClick={() => changeSort('repo')}>Repo</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'branch' ? sort.dir : false}><TableSortLabel active={sort.key === 'branch'} direction={sort.dir} onClick={() => changeSort('branch')}>Branch</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'outcome' ? sort.dir : false}><TableSortLabel active={sort.key === 'outcome'} direction={sort.dir} onClick={() => changeSort('outcome')}>Outcome</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'busyMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'busyMs'} direction={sort.dir} onClick={() => changeSort('busyMs')}>Busy</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'apiMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'apiMs'} direction={sort.dir} onClick={() => changeSort('apiMs')}>API</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'costUsd' ? sort.dir : false}><TableSortLabel active={sort.key === 'costUsd'} direction={sort.dir} onClick={() => changeSort('costUsd')}>Cost</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'tokens' ? sort.dir : false}><TableSortLabel active={sort.key === 'tokens'} direction={sort.dir} onClick={() => changeSort('tokens')}>Tokens</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'concludedAt' ? sort.dir : false}><TableSortLabel active={sort.key === 'concludedAt'} direction={sort.dir} onClick={() => changeSort('concludedAt')}>Concluded</TableSortLabel></TableCell>
                   <TableCell />
                 </TableRow>
               </TableHead>
               <TableBody>
-                {history.filter(matchesTags).map((h) => {
+                {sortedHistory.map((h) => {
                   const s = h.finalStats;
                   return (
                     <TableRow key={h.id} hover selected={tx?.id === h.id} onClick={() => openTranscript({ id: h.id, title: h.title, sessionId: h.sessionId, worktree: h.worktree, repo: h.repo })} sx={{ cursor: 'pointer' }}>

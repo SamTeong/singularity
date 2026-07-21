@@ -12,6 +12,7 @@ import TableHead from '@mui/material/TableHead';
 import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
+import TableSortLabel from '@mui/material/TableSortLabel';
 import Chip from '@mui/material/Chip';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
@@ -120,13 +121,36 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
   const idOrder = defs.map((d) => d.id).join(',');
   useEffect(() => { setLocalDefs(null); }, [idOrder]);
 
+  // Background Jobs table sort: null = source order (defs/id order, the order
+  // the scheduler iterates). Click a header to sort, click again to reverse.
+  const [sort, setSort] = useState(null);
+  const changeSort = (key) => setSort((p) => p?.key === key ? { key, dir: p.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  const sortValue = (def, key) => {
+    switch (key) {
+      case 'title': return def.title;
+      case 'cwd': return repoName(def.cwd);
+      case 'cooldownHours': return def.cooldownHours;
+      case 'lastRunAt': return def.lastRunAt ? new Date(def.lastRunAt).getTime() : 0;
+      default: return 0;
+    }
+  };
+  const sortedRows = (() => {
+    if (!sort) return rows;
+    const dir = sort.dir === 'desc' ? -1 : 1;
+    return rows.slice().sort((a, b) => {
+      const va = sortValue(a, sort.key), vb = sortValue(b, sort.key);
+      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+      return String(va).localeCompare(String(vb)) * dir;
+    });
+  })();
+
   const onDragOverRow = (e, overId) => {
     e.preventDefault();
     if (!dragId || dragId === overId) return;
-    const from = rows.findIndex((d) => d.id === dragId);
-    const to = rows.findIndex((d) => d.id === overId);
+    const from = sortedRows.findIndex((d) => d.id === dragId);
+    const to = sortedRows.findIndex((d) => d.id === overId);
     if (from < 0 || to < 0) return;
-    const next = rows.slice();
+    const next = sortedRows.slice();
     next.splice(to, 0, next.splice(from, 1)[0]);
     setLocalDefs(next);
   };
@@ -137,7 +161,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
 
   return (
     <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1.5}>
-      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto' }}>
+      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
         {/* Scheduled (cron) section */}
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Scheduled</Typography>
@@ -255,7 +279,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
               <EmptyState icon={<DescriptionOutlinedIcon />} title="No reports yet" description="Background runs write a Report.md when they finish — it will show up here." />
             </Box>
           ) : (
-            <Stack direction="row" sx={{ height: 420, border: (t) => `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: (t) => `${t.zapac.radius.sm}px` }}>
+            <Stack direction="row" sx={{ flex: 1, minHeight: 0, border: (t) => `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: (t) => `${t.zapac.radius.sm}px` }}>
               <List dense sx={(t) => ({ width: railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, overflow: 'auto', py: 0 })}>
                 {reports.map((r) => (
                   <ListItemButton key={r.taskId} selected={selReport === r.taskId} onClick={() => openReport(r.taskId)} sx={{ display: 'block' }}>
@@ -302,15 +326,15 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                   <TableRow>
                     <TableCell padding="checkbox" />
                     <TableCell padding="checkbox" />
-                    <TableCell>Title</TableCell>
-                    <TableCell>Working dir</TableCell>
-                    <TableCell>Cooldown</TableCell>
-                    <TableCell>Last run</TableCell>
+                    <TableCell sortDirection={sort?.key === 'title' ? sort.dir : false}><TableSortLabel active={sort?.key === 'title'} direction={sort?.key === 'title' ? sort.dir : 'asc'} onClick={() => changeSort('title')}>Title</TableSortLabel></TableCell>
+                    <TableCell sortDirection={sort?.key === 'cwd' ? sort.dir : false}><TableSortLabel active={sort?.key === 'cwd'} direction={sort?.key === 'cwd' ? sort.dir : 'asc'} onClick={() => changeSort('cwd')}>Working dir</TableSortLabel></TableCell>
+                    <TableCell sortDirection={sort?.key === 'cooldownHours' ? sort.dir : false}><TableSortLabel active={sort?.key === 'cooldownHours'} direction={sort?.key === 'cooldownHours' ? sort.dir : 'asc'} onClick={() => changeSort('cooldownHours')}>Cooldown</TableSortLabel></TableCell>
+                    <TableCell sortDirection={sort?.key === 'lastRunAt' ? sort.dir : false}><TableSortLabel active={sort?.key === 'lastRunAt'} direction={sort?.key === 'lastRunAt' ? sort.dir : 'asc'} onClick={() => changeSort('lastRunAt')}>Last run</TableSortLabel></TableCell>
                     <TableCell align="right" />
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {rows.map((def) => (
+                  {sortedRows.map((def) => (
                     <TableRow
                       key={def.id}
                       selected={background?.liveTaskId && def.lastTaskId === background.liveTaskId}

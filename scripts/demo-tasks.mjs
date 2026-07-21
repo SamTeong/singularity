@@ -76,7 +76,7 @@ async function runTask(n) {
     if (rejects < MAX_REJECTS && Math.random() < REJECT_RATE) {
       rejects++;
       assert(rejects <= MAX_REJECTS, 'reject count exceeded server cap');
-      await move(task, 'inprogress', `fixing (review ${rejects}/${MAX_REJECTS})`); // mock-REJECT
+      await move(task, 'inprogress', 'fixing'); // mock-REJECT (server state vocab is closed)
       continue;
     }
     break; // mock-APPROVE
