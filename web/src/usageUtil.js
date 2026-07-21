@@ -5,6 +5,13 @@ export const PROVIDERS = [
   { key: 'ollama', label: 'Ollama' },
 ];
 
+// Providers to render given /capabilities. Ollama surfaces (meter card, rail
+// tooltip) hide when OLLAMA_BIN is absent. caps null (loading/fetch fail) → show
+// all, matching useCapabilities' "null means available" convention.
+export function visibleProviders(caps) {
+  return caps?.ollama?.available === false ? PROVIDERS.filter((p) => p.key !== 'ollama') : PROVIDERS;
+}
+
 // Relative countdown to an ISO reset instant: "40m" / "3h" / "5d" / "now".
 export function fmtReset(iso) {
   if (!iso) return '—';
@@ -37,10 +44,10 @@ export const usd = (credits) => (credits == null ? '—' : `$${(credits / 100).t
 // Per-provider summary for the collapsed rail tooltip, one line per provider:
 // "Claude — 5h: 13%, 7d: 22%\nOllama — 5h: 0%, 7d: 99%". Extra usage ($) appended
 // when active. Null if nothing loaded. Render with whiteSpace: 'pre-line'.
-export function usageSummary(usage) {
+export function usageSummary(usage, caps) {
   const win = (label, w) => `${label}: ${w?.pctUsed == null ? '—' : `${Math.round(w.pctUsed)}%`}`;
   const parts = [];
-  for (const p of PROVIDERS) {
+  for (const p of visibleProviders(caps)) {
     const u = usage?.[p.key];
     if (!u?.ok) continue;
     const extra = u.extra?.enabled && u.extra.pctUsed != null

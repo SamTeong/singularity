@@ -8,7 +8,8 @@ import Collapse from '@mui/material/Collapse';
 import IconButton from '@mui/material/IconButton';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { PROVIDERS, usd } from './usageUtil.js';
+import { visibleProviders, usd } from './usageUtil.js';
+import { useCapabilities } from './useCapabilities.js';
 import { Meter } from './Meter.jsx';
 import SpendView from './SpendView.jsx';
 
@@ -57,6 +58,7 @@ function ProviderCard({ label, u }) {
 // Full usage view (main pane). Both providers side by side, manual force-refresh.
 export default function UsageView({ usage, onRefresh }) {
   const [open, setOpen] = useState(true);
+  const caps = useCapabilities();
   return (
     <Stack sx={{ height: '100%', minHeight: 0 }}>
       <Stack sx={{ p: 3, pb: 2, flexShrink: 0 }} spacing={2}>
@@ -79,7 +81,7 @@ export default function UsageView({ usage, onRefresh }) {
               Account-wide 5-hour session and 7-day weekly limits. Cached ~60s; Refresh forces a live pull.
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-              {PROVIDERS.map((p) => <ProviderCard key={p.key} label={p.label} u={usage?.[p.key]} />)}
+              {visibleProviders(caps).map((p) => <ProviderCard key={p.key} label={p.label} u={usage?.[p.key]} />)}
             </Box>
           </Stack>
         </Collapse>

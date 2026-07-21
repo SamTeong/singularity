@@ -55,7 +55,8 @@ import CreateAgentDialog from './CreateAgentDialog.jsx';
 import CreateTaskDialog from './CreateTaskDialog.jsx';
 import CreateCronDialog from './CreateCronDialog.jsx';
 import { ProviderRow } from './UsagePill.jsx';
-import { PROVIDERS, usageSummary } from './usageUtil.js';
+import { visibleProviders, usageSummary } from './usageUtil.js';
+import { useCapabilities } from './useCapabilities.js';
 import { useResizable, ResizeHandle } from './useResizable.jsx';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
@@ -363,7 +364,8 @@ export default function App() {
     mruRef.current = [active, ...mruRef.current.filter((id) => id !== active)];
   }
   const mountedSet = new Set(mruRef.current.slice(0, MOUNT_LRU));
-  const usageTip = usageSummary(usage); // per-provider 5h/7d summary for the collapsed tooltip
+  const caps = useCapabilities();
+  const usageTip = usageSummary(usage, caps); // per-provider 5h/7d summary for the collapsed tooltip
 
   // A running claude process picks its TUI theme once at spawn (queried from
   // the terminal background) — xterm's palette flips live but a live session's
@@ -480,7 +482,7 @@ export default function App() {
                       primary={item.label}
                       secondary={isUsage ? (
                         <Stack spacing={0.75} sx={{ mt: 0.75 }}>
-                          {PROVIDERS.map((p) => <ProviderRow key={p.key} label={p.label} u={usage?.[p.key]} />)}
+                          {visibleProviders(caps).map((p) => <ProviderRow key={p.key} label={p.label} u={usage?.[p.key]} />)}
                         </Stack>
                       ) : null}
                       secondaryTypographyProps={isUsage ? { component: 'div' } : undefined}
