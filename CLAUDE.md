@@ -1,6 +1,6 @@
 # Singularity — Claude Code Configuration
 
-Local web UI to run + steer multiple Claude Code agents. Browser shell + loopback Node daemon (Fastify + ws). See `README.md` for features, `PLAN.md` for design.
+Local web UI to run + steer multiple Claude Code agents. Browser shell + loopback Node daemon (Fastify + ws). See `README.md` for features.
 
 ## Run
 

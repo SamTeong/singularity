@@ -1,7 +1,7 @@
 # Singularity
 
 Local web UI to run + steer multiple Claude Code agents. Browser + loopback Node daemon.
-See `PLAN.md` for full design and phase plan.
+See `CLAUDE.md` for repo layout + working rules.
 
 ## Run
 
@@ -22,7 +22,10 @@ Vite proxies `/ws` + all REST to the daemon. Run pieces separately with `pnpm se
 - **Sessions** — spawn/steer live `claude` PTY sessions per repo (cwd picker + recent list), status dots, kill, per-session turns/tokens (parsed from the session `.jsonl`).
 - **Reattach** — survives daemon restart: agents load as `detached`; ⟳ runs `claude --resume <id>` (or a fresh `--session-id` if no conversation was logged).
 - **Claude processes** (🧠) — task manager: lists all `claude.exe`, classifies tracked / stale / external, kill stale/orphaned ones.
-- **Config** — edit the 3 `settings.json` scopes (user / project / project-local) with JSON lint + `.bak` backup; user scope read-only by default (guardrail).
+- **Config** — edit 2 scopes (`settings.json` + `settings.local.json`) with JSON lint + `.bak` backup; the user-level `~/.claude/settings.json` is reached by picking root `~` (project scope resolves to it), not a separate tab.
+- **Hooks** — edit hook files (JS/JSON/shell) across picker roots with syntax highlighting + `.bak` backup.
+- **Skills** — read-only viewer: roots → scopes → skills tree with rendered `SKILL.md` (grouped vs flat layout auto-detected).
+- **Rules** — browse + edit rules markdown (`*.md`) across picker roots.
 - **Memory** — cross-project search + markdown editor over `~/.claude/projects/*/memory/*.md`, writes confined to memory dirs.
 - **Automation** — *Scheduled* prompts on a cron expression (UTC; skip a fire if the previous run is still active, auto-kill the session once idle) plus *Background* quota-soak jobs.
 - **Tasks** — kanban board over git-worktree task sessions (one worktree + branch + session per card) with a workflow prompt, plus a history view of concluded tasks.
@@ -41,5 +44,5 @@ Optional token (defense-in-depth): set `SING_TOKEN=<secret>` — data endpoints 
 
 - `CLAUDE_BIN` must be an **absolute path** in `.env` — the daemon does no PATH resolution (Windows node-pty needs a real exe path). `pnpm bootstrap` detects it for you; otherwise set it by hand.
 - App data (registry, tasks, cron jobs, picker roots) lives under `SINGULARITY_HOME` (set in `.env`; `pnpm bootstrap` defaults it to `~/.singularity`). Git worktrees + ticket requirements/plans (`.worktrees/`, `.tickets/<id>/`) live at the repo root, or `SING_TRUSTED_ROOT` if set (trusted, gitignored) so Claude honors the repo's permission rules.
-- Per-agent cost is shown as **turns + total tokens**, not `$` — accurate dollar cost needs per-model pricing; use your spend tooling for that.
+- Per-session cost is shown as **turns + total tokens + `$`** — the dollar figure comes from the global statusline (`claude-code-usage-report` skill), the single source of truth for every session; a pricing-table estimate is the fallback when no statusline cost exists.
 - The UI theme (`@zapac/mui-theme`) is vendored as a tgz in `vendor/`, so `pnpm install` works anywhere — no external path dependency.
