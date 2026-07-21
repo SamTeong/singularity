@@ -7,7 +7,8 @@ See `CLAUDE.md` for repo layout + working rules.
 
 ```
 pnpm bootstrap       # first-time: generate .env (detects CLAUDE_BIN) + install + start
-pnpm install         # once
+pnpm install         # once — runs postinstall (fixes node-pty spawn-helper +x bit)
+pnpm run postinstall # run by hand if agents fail with "spawn failed: posix_spawnp failed"
 pnpm start           # build web + serve on http://127.0.0.1:4317
 ```
 
@@ -46,3 +47,4 @@ Optional token (defense-in-depth): set `SING_TOKEN=<secret>` — data endpoints 
 - App data (registry, tasks, cron jobs, picker roots) lives under `SINGULARITY_HOME` (set in `.env`; `pnpm bootstrap` defaults it to `~/.singularity`). Git worktrees + ticket requirements/plans (`.worktrees/`, `.tickets/<id>/`) live at the repo root, or `SING_TRUSTED_ROOT` if set (trusted, gitignored) so Claude honors the repo's permission rules.
 - Per-session cost is shown as **turns + total tokens + `$`** — the dollar figure comes from the global statusline (`claude-code-usage-report` skill), the single source of truth for every session; a pricing-table estimate is the fallback when no statusline cost exists.
 - The UI theme (`@zapac/mui-theme`) is vendored as a tgz in `vendor/`, so `pnpm install` works anywhere — no external path dependency.
+- **`spawn failed: posix_spawnp failed`** on macOS/Linux means node-pty's `spawn-helper` prebuilt lost its execute bit (pnpm's store sometimes extracts it `0644`), so every agent spawn fails. The `postinstall` hook (`scripts/fix-pty-helper.mjs`) restores `+x` automatically after each install; run `pnpm run postinstall` by hand if it recurs. This is unrelated to `CLAUDE_BIN` — that path is fine.
