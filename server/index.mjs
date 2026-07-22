@@ -21,6 +21,7 @@ import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoo
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { listSkills, readSkill, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
+import { getSysStats } from './sysstats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
@@ -191,6 +192,9 @@ app.get('/health', async () => ({ ok: true, pid: process.pid, clients: wss?.clie
 
 // Per-agent stats (turns + tokens) parsed from each session .jsonl.
 app.get('/agent-stats', async () => ({ stats: await statsFor(reg.snapshot()) }));
+
+// Machine-wide CPU% + RAM readout (More menu, below Processes).
+app.get('/sysstats', async () => getSysStats());
 
 // Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
 app.get('/usage', async (req) => getUsage({ force: req.query.force === '1' }));
