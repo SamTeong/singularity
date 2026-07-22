@@ -26,7 +26,7 @@ import { getUsage, initUsageAutoRefresh } from './usage.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
-import { initBackground, snapshotBackground, createDef, updateDef, deleteDef, reorderDefs, runBackgroundNow, listReports, getReport } from './background.mjs';
+import { initBackground, snapshotBackground, createDef, updateDef, deleteDef, reorderDefs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
 import { CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -98,6 +98,7 @@ let shuttingDown = false;
 async function shutdown() {
   if (shuttingDown) return;
   shuttingDown = true;
+  reg.beginDrain(); // keep live entries in agents.json (reload as detached) instead of onExit deleting them
   const live = reg.snapshot().filter((a) => reg.isLive(a.id));
   app.log.info({ count: live.length }, 'shutting down — killing live agents');
   for (const a of live) reg.kill(a.id);
@@ -418,6 +419,10 @@ app.get('/background/reports/:taskId', async (req, reply) => {
   const r = getReport(req.params.taskId);
   if (!r) return reply.code(404).send({ ok: false, error: 'not found' });
   return { ok: true, ...r };
+});
+app.patch('/background/reports/:taskId/flag', async (req, reply) => {
+  try { return { ok: true, ...setReportFlag(req.params.taskId, !!(req.body || {}).flagged) }; }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 
 // Memory: cross-project search + guarded read/write under a client-selected root.

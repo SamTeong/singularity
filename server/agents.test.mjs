@@ -39,7 +39,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted } = await import('./agents.mjs');
+const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain } = await import('./agents.mjs');
 
 test('encodeCwd replaces every non-alphanumeric (incl. dots) with "-"', () => {
   assert.equal(encodeCwd('C:\\git\\singularity'), 'C--git-singularity');
@@ -206,6 +206,28 @@ test('respawnAll: kills a live agent and resumes it with the same id + new pid',
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// beginDrain(): daemon shutdown snapshots every live session to agents.json as
+// detached, and the ensuing pty-exit (onExit) no-ops instead of deleting — so a
+// restart reloads the sessions rather than dropping them from the list. Kept
+// last: draining is a module-global one-way flag, so it must not affect the
+// tests above. Uses the ollama/cmd.exe live-pty trick (see file header).
+test('beginDrain: live session persists to agents.json and survives its pty exit', async () => {
+  const id = '50000000-aaaa-bbbb-cccc-500000000005';
+  const a = create({ cwd: scratch, name: 'drain-test', model: 'glm-5.2:cloud', sessionId: id });
+  assert.ok(a.pid, 'agent spawned live');
+  const readAgents = () => JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'agents.json'), 'utf8')).agents;
+
+  beginDrain(); // snapshots the live fleet to disk as detached
+  const onDisk = readAgents().find((x) => x.id === id);
+  assert.ok(onDisk, 'live session written to agents.json at drain');
+  assert.equal(onDisk.status, 'detached', 'stored as detached (resumable)');
+
+  kill(id); // pty dies → onExit must NOT delete the entry while draining
+  await new Promise((r) => setTimeout(r, 500)); // let onExit fire
+  assert.ok(snapshot().find((x) => x.id === id), 'entry retained in registry after pty exit (drain guard)');
+  assert.ok(readAgents().find((x) => x.id === id), 'entry retained in agents.json after pty exit');
 });
 
 test('ensureTrusted: upserts hasTrustDialogAccepted:true keyed on cwd with \\→/', () => {

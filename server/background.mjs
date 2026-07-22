@@ -21,6 +21,7 @@ import { parseSession } from './stats.mjs';
 import { isClaudeModel } from './models.mjs';
 
 const BACKGROUND_FILE = join(reg.STATE_DIR, 'background.json');
+const FLAGS_FILE = join(reg.STATE_DIR, 'report-flags.json'); // Set of unflagged (dismissed) taskIds; absent = all flagged (need attention)
 const TICK_MS = 60_000; // minute-resolution timer; logic fires when due by TICK_MINUTES
 const TICK_MINUTES = 60; // fixed cadence — no per-install override
 const WATCHDOG_MS = 120_000;
@@ -344,11 +345,43 @@ export function reorderDefs(ids) {
 
 // ---- Reports ----------------------------------------------------------------
 
+// Flag-state: a set of report taskIds the user has unflagged (dismissed).
+// Everything not in the set is flagged (= still needs attention), so new
+// reports default flagged. Persisted separately from background.json so def
+// CRUD never touches it; atomic tmp+rename like persist().
+function loadUnflagged() {
+  try {
+    if (existsSync(FLAGS_FILE)) return new Set(JSON.parse(readFileSync(FLAGS_FILE, 'utf8')));
+  } catch (e) { logger?.warn({ err: e.message }, 'report-flags.json load failed'); }
+  return new Set();
+}
+function saveUnflagged(set) {
+  try {
+    writeFileSync(FLAGS_FILE + '.tmp', JSON.stringify([...set]));
+    renameSync(FLAGS_FILE + '.tmp', FLAGS_FILE);
+  } catch (e) { logger?.warn({ err: e.message }, 'report-flags.json write failed'); throw e; }
+}
+
+// Flag/unflag a report. flagged=true means it needs attention; unflagging
+// records a dismissal. Only prunes to real report ids on write to keep the file
+// from growing unbounded as tasks age out of history.
+export function setReportFlag(taskId, flagged) {
+  const ids = new Set(listReports().map((r) => r.taskId));
+  if (!ids.has(taskId)) throw new Error('no such report');
+  const set = loadUnflagged();
+  if (flagged) set.delete(taskId); else set.add(taskId);
+  for (const id of set) if (!ids.has(id)) set.delete(id); // drop stale ids
+  saveUnflagged(set);
+  emit();
+  return { taskId, flagged: !!flagged };
+}
+
 // Background-tagged tasks (live + concluded), newest first, with whether
-// Report.md exists in their persistent reportDir (.reports/<short>).
-// reportDir/id are read from the stored task/history records only.
+// Report.md exists in their persistent reportDir (.reports/<short>) and whether
+// it is flagged (needs attention). reportDir/id are read from stored records only.
 export function listReports() {
   const { tasks, history } = snapshotTasks();
+  const unflagged = loadUnflagged();
   const entries = [...tasks, ...history]
     .filter((t) => (t.tags || []).includes('background'))
     .map((t) => ({
@@ -358,6 +391,7 @@ export function listReports() {
       concludedAt: t.concludedAt ?? null,
       status: t.outcome ?? t.column,
       hasReport: existsSync(join(t.reportDir, 'Report.md')),
+      flagged: !unflagged.has(t.id),
     }));
   entries.sort((a, b) => (b.concludedAt ?? b.createdAt) - (a.concludedAt ?? a.createdAt));
   return entries;

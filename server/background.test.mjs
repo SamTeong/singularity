@@ -16,7 +16,7 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-background-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { inWindow, evalGate, pickDef, pickRunnableDef, watchdogDecision, migrateLegacyConfig, createDef, updateDef, reorderDefs, snapshotBackground, listReports, getReport } = await import('./background.mjs');
+const { inWindow, evalGate, pickDef, pickRunnableDef, watchdogDecision, migrateLegacyConfig, createDef, updateDef, reorderDefs, snapshotBackground, listReports, getReport, setReportFlag } = await import('./background.mjs');
 const { normalizeTags, initTasks } = await import('./tasks.mjs');
 const { STATE_DIR } = await import('./agents.mjs');
 
@@ -270,4 +270,16 @@ test('listReports/getReport: background-tagged entries with correct hasReport, n
   assert.equal(getReport('hist1'), null, 'no Report.md written for this one');
   assert.equal(getReport('live2'), null, 'not background-tagged');
   assert.equal(getReport('nope'), null, 'unknown id');
+});
+
+// ---- setReportFlag (flag-state, depends on tasks.json set up above) ------------
+test('setReportFlag: new reports default flagged; unflag/flag persists across listReports', () => {
+  assert.equal(listReports().find((r) => r.taskId === 'live1').flagged, true, 'flagged by default');
+  setReportFlag('live1', false);
+  assert.equal(listReports().find((r) => r.taskId === 'live1').flagged, false, 'unflagged');
+  setReportFlag('live1', true);
+  assert.equal(listReports().find((r) => r.taskId === 'live1').flagged, true, 'flagged again');
+});
+test('setReportFlag: rejects an unknown report id', () => {
+  assert.throws(() => setReportFlag('nope', true));
 });

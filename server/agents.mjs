@@ -43,6 +43,15 @@ export const bus = new EventEmitter();
 // id -> { id, name, cwd, status, pid, createdAt, proc, buf:string[] }
 const agents = new Map();
 let recentRepos = [];
+// Set during daemon shutdown: killing live ptys then fires onExit, whose normal
+// path deletes the entry + re-persists — that would wipe running sessions from
+// agents.json. While draining we keep them so init() reloads them as 'detached'
+// (resumable) instead of dropping them from the list on restart.
+let draining = false;
+// persist() writes the current fleet as detached (running→detached mapping), so
+// this snapshots every live session to disk at drain time — the authoritative
+// last write. onExit then no-ops (guard below), leaving the file intact.
+export function beginDrain() { draining = true; try { persist(); } catch { /* best-effort at shutdown */ } }
 
 // --- persistence ---
 let logger = null;
@@ -138,6 +147,10 @@ function wire(a) {
   a.proc.onExit(({ exitCode }) => {
     clearTimeout(a.idleTimer);
     a.proc = null;
+    // Daemon shutdown killed this pty: keep the entry as-is (agents.json already
+    // holds it as detached from the last persist) so restart reloads it. Don't
+    // delete/persist here or the running session vanishes from the list.
+    if (draining) return;
     // Theme-change respawn (see respawnAll): resume with the same config
     // instead of the normal exited/removed handling below. setImmediate defers
     // create() until this onExit call (and the Map mutation here) fully unwinds.

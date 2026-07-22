@@ -15,6 +15,7 @@ import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import TableSortLabel from '@mui/material/TableSortLabel';
 import Chip from '@mui/material/Chip';
+import Badge from '@mui/material/Badge';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
 import AddIcon from '@mui/icons-material/Add';
@@ -26,6 +27,8 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import HistoryIcon from '@mui/icons-material/History';
 import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined';
+import FlagIcon from '@mui/icons-material/Flag';
+import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
 import CreateBackgroundDialog from '@/features/automation/CreateBackgroundDialog.jsx';
 import MarkdownBody from '@/components/MarkdownBody.jsx';
@@ -62,10 +65,16 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
   const [reportLoading, setReportLoading] = useState(false);
   const railW = useResizable('sing-cron-w', 260);
 
-  useEffect(() => {
-    if (bgView !== 'reports') return;
+  // Fetch on mount + on every bgView change so the unread badge shows even from
+  // the Jobs view, and the list refreshes when re-entering Reports.
+  const loadReports = () =>
     fetch('/background/reports').then((r) => r.json()).then((d) => setReports(d.reports || [])).catch(() => onToast?.('Failed to load reports.'));
-  }, [bgView]);
+  useEffect(() => { loadReports(); }, [bgView]);
+  const flaggedReports = reports.filter((r) => r.flagged).length;
+
+  const setFlag = (taskId, flagged) =>
+    fetch(`/background/reports/${taskId}/flag`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ flagged }) })
+      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); else loadReports(); }).catch((e) => onToast?.(e.message));
 
   const openReport = (taskId) => {
     setSelReport(taskId);
@@ -104,12 +113,14 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
   const lastTick = background?.lastTick;
 
   const bgToggle = (
-    <Button size="small"
-      startIcon={bgView === 'reports' ? <ViewKanbanOutlinedIcon /> : <HistoryIcon />}
-      onClick={() => setBgView((v) => (v === 'reports' ? 'tasks' : 'reports'))}
-      sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>
-      {bgView === 'reports' ? 'Jobs' : 'Reports'}
-    </Button>
+    <Badge color="primary" badgeContent={bgView === 'reports' ? 0 : flaggedReports} max={99} anchorOrigin={{ vertical: 'top', horizontal: 'left' }}>
+      <Button size="small"
+        startIcon={bgView === 'reports' ? <ViewKanbanOutlinedIcon /> : <HistoryIcon />}
+        onClick={() => setBgView((v) => (v === 'reports' ? 'tasks' : 'reports'))}
+        sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>
+        {bgView === 'reports' ? 'Jobs' : 'Reports'}
+      </Button>
+    </Badge>
   );
 
   // Drag-to-reorder is cosmetic (scheduler still picks oldest-lastRunAt). During
@@ -284,7 +295,15 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
               <List dense sx={(t) => ({ width: railW.width, flexShrink: 0, borderRight: `1px solid ${getTokens(t).glass.stroke}`, overflow: 'auto', py: 0 })}>
                 {reports.map((r) => (
                   <ListItemButton key={r.taskId} selected={selReport === r.taskId} onClick={() => openReport(r.taskId)} sx={{ display: 'block' }}>
-                    <Typography variant="subtitle2" noWrap>{r.title}</Typography>
+                    <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
+                      {r.flagged && <Box sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: 'primary.main', flexShrink: 0 }} />}
+                      <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0, fontWeight: r.flagged ? 600 : 400 }}>{r.title}</Typography>
+                      <Tooltip title={r.flagged ? 'Unflag' : 'Flag'}>
+                        <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => { e.stopPropagation(); setFlag(r.taskId, !r.flagged); }}>
+                          {r.flagged ? <FlagIcon fontSize="inherit" /> : <FlagOutlinedIcon fontSize="inherit" />}
+                        </IconButton>
+                      </Tooltip>
+                    </Stack>
                     <Stack direction="row" spacing={1} sx={{ mt: 0.25, alignItems: 'center' }}>
                       <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{fmtRel(r.concludedAt ?? r.createdAt)}</Typography>
                       <Chip size="small" label={r.status} sx={{ height: 18, fontSize: 10 }} />
