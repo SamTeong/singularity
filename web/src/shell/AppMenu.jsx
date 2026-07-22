@@ -5,7 +5,6 @@ import Typography from '@mui/material/Typography';
 import Menu from '@mui/material/Menu';
 import MenuItem from '@mui/material/MenuItem';
 import Divider from '@mui/material/Divider';
-import Switch from '@mui/material/Switch';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import SettingsIcon from '@mui/icons-material/Settings';
@@ -17,11 +16,9 @@ import SchoolIcon from '@mui/icons-material/School';
 import HistoryIcon from '@mui/icons-material/History';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
-import DarkModeIcon from '@mui/icons-material/DarkMode';
-import LightModeIcon from '@mui/icons-material/LightMode';
+import PaletteIcon from '@mui/icons-material/Palette';
 import Sparkline from '@/components/Sparkline.jsx';
 import { useSysStats } from '@/hooks/useSysStats.js';
-import SkinSwitcher from '@/theme/SkinSwitcher.jsx';
 
 // Overflow-nav entries surfaced from the More menu (view id + icon + label).
 const NAV_ITEMS = [
@@ -32,6 +29,7 @@ const NAV_ITEMS = [
   { v: 'memory', icon: <BookIcon fontSize="small" />, label: 'Memory' },
   { v: 'sessions', icon: <HistoryIcon fontSize="small" />, label: 'Transcripts' },
   { v: 'wiki', icon: <MenuBookIcon fontSize="small" />, label: 'Wiki' },
+  { v: 'appearance', icon: <PaletteIcon fontSize="small" />, label: 'Appearance' },
 ];
 
 const SPARK_WINDOWS = [[5, '5 min'], [30, '30 min'], [60, '1 hour']];
@@ -39,10 +37,10 @@ const SPARK_WINDOWS = [[5, '5 min'], [30, '30 min'], [60, '1 hour']];
 /**
  * The "More" overflow menu: secondary nav (Config/Hooks/…/Wiki), the process
  * manager, a live machine CPU/RAM readout (polled only while the menu is open),
- * an optional server-restart entry, the theme-skin picker, and the light/dark
- * toggle. Navigation + heavy actions are delegated via callbacks.
+ * an optional server-restart entry, and the Appearance (theme) view. Navigation
+ * + heavy actions are delegated via callbacks.
  */
-export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses, onOpenRestart, restarting, resolved, onToggleTheme, showColorToggle = true }) {
+export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses, onOpenRestart, restarting }) {
   const open = !!anchorEl;
   const [sparkWin, setSparkWin] = useState(30); // sparkline window in minutes (5 / 30 / 60)
   const sysStats = useSysStats(open);
@@ -98,16 +96,6 @@ export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses
           <ListItemText>Restart server</ListItemText>
         </MenuItem>
       )}
-      {/* Registry-driven skin picker — renders only when ≥2 skins registered. */}
-      <SkinSwitcher onSelect={onClose} />
-      {/* Light/dark toggle — hidden for dark-only skins (e.g. Phosphor Console). */}
-      {showColorToggle && [
-        <Divider key="d" />,
-        <MenuItem key="t" onClick={onToggleTheme}>
-          <ListItemIcon>{resolved === 'dark' ? <DarkModeIcon fontSize="small" /> : <LightModeIcon fontSize="small" />}</ListItemIcon>
-          <Switch edge="end" checked={resolved === 'dark'} onChange={onToggleTheme} onClick={(e) => e.stopPropagation()} />
-        </MenuItem>,
-      ]}
     </Menu>
   );
 }

@@ -37,6 +37,7 @@ const SkillsPanel = lazy(() => import('@/features/skills/SkillsPanel.jsx'));
 const UsageView = lazy(() => import('@/features/usage/UsageView.jsx'));
 const TasksBoard = lazy(() => import('@/features/tasks/TasksBoard.jsx'));
 const CronJobs = lazy(() => import('@/features/automation/CronJobs.jsx'));
+const AppearanceView = lazy(() => import('@/features/appearance/AppearanceView.jsx'));
 
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
@@ -55,13 +56,10 @@ export default function AppShell() {
     agents, active, setActive, connected, tasks, taskHistory, crons, background, recent,
     usage, stats, sendMsg, refreshUsage, registerChat, registerError,
   } = useAgents();
-  const { resolved, toggle: toggleColorMode } = useColorMode();
-  // The active skin optionally paints a full-bleed background behind the shell,
-  // and declares whether it supports light/dark toggling.
+  const { toggle: toggleColorMode } = useColorMode();
+  // The active skin optionally paints a full-bleed background behind the shell.
   const { skinId } = useThemeSkin();
-  const activeSkin = getSkin(skinId);
-  const SkinBackground = activeSkin?.Background;
-  const supportsColorMode = activeSkin?.supportsColorMode !== false;
+  const SkinBackground = getSkin(skinId)?.Background;
 
   const [cwd, setCwd] = useState('~');
   const [picking, setPicking] = useState(false);
@@ -71,7 +69,9 @@ export default function AppShell() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [cronOpen, setCronOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  const [view, setView] = useState('tasks');
+  // Persisted so the selected view survives a skin switch (which remounts the
+  // whole shell) and page reloads — otherwise switching theme bounces to Tasks.
+  const [view, setView] = useState(() => localStorage.getItem('sing-view') || 'tasks');
   const [toast, setToast] = useState(null);
   const [respawnCount, setRespawnCount] = useState(0); // >0 -> respawn-confirm dialog open, holds live-session count
   const [restartOpen, setRestartOpen] = useState(false); // restart-daemon confirm dialog
@@ -89,6 +89,9 @@ export default function AppShell() {
   // Panels that mount once and stay mounted — track which have ever been shown.
   const visited = useRef({});
   if (PERSISTENT_VIEWS.includes(view)) visited.current[view] = true;
+
+  // Remember the selected view across skin remounts + reloads.
+  useEffect(() => { localStorage.setItem('sing-view', view); }, [view]);
 
   // Surface daemon 'error' frames as a toast (the provider owns no UI state).
   useEffect(() => registerError(setToast), [registerError]);
@@ -178,6 +181,7 @@ export default function AppShell() {
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
+            {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} />}
             {view === 'skills' && <SkillsPanel />}
             {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} onAdd={() => setCronOpen(true)} onToast={setToast} />}
             {view === 'tasks' && (
@@ -220,9 +224,6 @@ export default function AppShell() {
         onOpenProcesses={() => setProcsOpen(true)}
         onOpenRestart={() => setRestartOpen(true)}
         restarting={restarting}
-        resolved={resolved}
-        onToggleTheme={onToggleTheme}
-        showColorToggle={supportsColorMode}
       />
 
       {/* After a theme toggle, offer to respawn live sessions so their claude TUI
