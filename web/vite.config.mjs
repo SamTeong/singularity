@@ -1,5 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+
+// `@/` → web/src, so imports are location-independent (no fragile ../../..).
+// Node's test runner does NOT resolve this alias — *.test.mjs files must keep
+// relative imports to their co-located source.
+const srcDir = fileURLToPath(new URL('./src', import.meta.url));
 
 // Phase 1: Vite dev server proxies WS to the daemon on 4317.
 // Dev-only mirror of the daemon's serve-time SING_TOKEN injection (index.mjs) —
@@ -18,6 +24,7 @@ const singTokenInject = {
 export default defineConfig({
   root: 'web',
   plugins: [react(), singTokenInject],
+  resolve: { alias: { '@': srcDir } },
   server: {
     host: '127.0.0.1',
     port: 5317,
