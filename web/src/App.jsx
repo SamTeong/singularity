@@ -58,6 +58,7 @@ import { ProviderRow } from './UsagePill.jsx';
 import { visibleProviders, usageSummary } from './usageUtil.js';
 import { useCapabilities } from './useCapabilities.js';
 import { useResizable, ResizeHandle } from './useResizable.jsx';
+import SkinSwitcher from './theme/SkinSwitcher.jsx';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
@@ -810,6 +811,8 @@ export default function App() {
             <ListItemText>Restart server</ListItemText>
           </MenuItem>
         )}
+        {/* Registry-driven skin picker — renders only when ≥2 skins registered. */}
+        <SkinSwitcher onSelect={() => setMenuAnchor(null)} />
         <Divider />
         <MenuItem onClick={onToggleTheme}>
           <ListItemIcon>{resolved === 'dark' ? <DarkModeIcon fontSize="small" /> : <LightModeIcon fontSize="small" />}</ListItemIcon>
