@@ -11,9 +11,9 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import LinkIcon from '@mui/icons-material/Link';
 import CloseIcon from '@mui/icons-material/Close';
 import { StatusPill } from '@zapac/mui-theme';
-import { KIND } from '../agentStatus.js';
-import { tildify } from '../paths.js';
-import { fmtTokens } from '../format.js';
+import { KIND } from '@/lib/agentStatus.js';
+import { tildify } from '@/lib/paths.js';
+import { fmtTokens } from '@/lib/format.js';
 
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
 

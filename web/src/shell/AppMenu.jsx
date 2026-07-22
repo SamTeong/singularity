@@ -19,9 +19,9 @@ import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import DarkModeIcon from '@mui/icons-material/DarkMode';
 import LightModeIcon from '@mui/icons-material/LightMode';
-import Sparkline from '../components/Sparkline.jsx';
-import { useSysStats } from '../hooks/useSysStats.js';
-import SkinSwitcher from '../theme/SkinSwitcher.jsx';
+import Sparkline from '@/components/Sparkline.jsx';
+import { useSysStats } from '@/hooks/useSysStats.js';
+import SkinSwitcher from '@/theme/SkinSwitcher.jsx';
 
 // Overflow-nav entries surfaced from the More menu (view id + icon + label).
 const NAV_ITEMS = [

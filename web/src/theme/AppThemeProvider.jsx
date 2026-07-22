@@ -13,11 +13,11 @@
  * a remount, mirroring how a colour-mode change already prompts session respawn.
  */
 import { createContext, use, useCallback, useMemo, useState } from 'react';
-import { DEFAULT_SKIN_ID, getSkin, listSkins } from './registry.js';
+import { DEFAULT_SKIN_ID, getSkin, listSkins } from '@/theme/registry.js';
 
 const STORAGE_KEY = 'sing-skin';
 
-/** @type {React.Context<{ skinId: string, setSkin: (id: string) => void, skins: import('./registry.js').Skin[] } | null>} */
+/** @type {React.Context<{ skinId: string, setSkin: (id: string) => void, skins: import('@/theme/registry.js').Skin[] } | null>} */
 const ThemeSkinContext = createContext(null);
 
 function readInitialSkinId() {
@@ -67,7 +67,7 @@ export function AppThemeProvider({ children, defaultMode = 'dark' }) {
 
 /**
  * Read the active skin and switch skins.
- * @returns {{ skinId: string, setSkin: (id: string) => void, skins: import('./registry.js').Skin[] }}
+ * @returns {{ skinId: string, setSkin: (id: string) => void, skins: import('@/theme/registry.js').Skin[] }}
  */
 export function useThemeSkin() {
   const ctx = use(ThemeSkinContext);

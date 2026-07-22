@@ -9,7 +9,7 @@
  */
 import { ZapacThemeProvider } from '@zapac/mui-theme';
 import { useTheme } from '@mui/material/styles';
-import { assertSkinContract } from '../contract.js';
+import { assertSkinContract } from '@/theme/contract.js';
 
 /** Dev-only: verify the vendored theme still satisfies the token contract. */
 function ContractCheck() {
@@ -26,7 +26,7 @@ function ZapacProvider({ children, defaultMode = 'dark' }) {
   );
 }
 
-/** @type {import('../registry.js').Skin} */
+/** @type {import('@/theme/registry.js').Skin} */
 export const zapacSkin = {
   id: 'zapac',
   label: 'ZAPAC',

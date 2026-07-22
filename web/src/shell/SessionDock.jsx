@@ -8,12 +8,12 @@ import TerminalIcon from '@mui/icons-material/Terminal';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { EmptyState } from '@zapac/mui-theme';
-import Terminal from '../Terminal.jsx';
-import { ResizeHandle } from '../useResizable.jsx';
-import { nextSessionName, nextCycledSession } from '../lib/sessionName.js';
-import { useAgents } from '../providers/AgentsProvider.jsx';
-import { glass } from './shellStyles.js';
-import SessionRow from './SessionRow.jsx';
+import Terminal from '@/features/sessions/Terminal.jsx';
+import { ResizeHandle } from '@/hooks/useResizable.jsx';
+import { nextSessionName, nextCycledSession } from '@/lib/sessionName.js';
+import { useAgents } from '@/providers/AgentsProvider.jsx';
+import { glass } from '@/shell/shellStyles.js';
+import SessionRow from '@/shell/SessionRow.jsx';
 
 // Cap live terminals: each mounted xterm holds a full scrollback buffer, so
 // mounting every agent's terminal grows memory without bound. Keep the active

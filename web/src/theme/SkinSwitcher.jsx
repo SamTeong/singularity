@@ -16,7 +16,7 @@ import ListItemText from '@mui/material/ListItemText';
 import Typography from '@mui/material/Typography';
 import CheckIcon from '@mui/icons-material/Check';
 import PaletteIcon from '@mui/icons-material/Palette';
-import { useThemeSkin } from './AppThemeProvider.jsx';
+import { useThemeSkin } from '@/theme/AppThemeProvider.jsx';
 
 export default function SkinSwitcher({ onSelect }) {
   const { skinId, setSkin, skins } = useThemeSkin();

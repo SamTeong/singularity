@@ -17,8 +17,8 @@
  * theme is Phase 5.
  *
  * ── To activate, once the theme below is built ──────────────────────────────
- *   import { registerSkin } from '../registry.js';
- *   import { phosphorSkin } from './skins/phosphor.jsx';
+ *   import { registerSkin } from '@/theme/registry.js';
+ *   import { phosphorSkin } from '@/theme/skins/skins/phosphor.jsx';
  *   registerSkin(phosphorSkin);
  * The switcher and provider pick it up with no further changes — that is the
  * whole point of the registry.
@@ -26,7 +26,7 @@
 
 // import { ThemeProvider } from '@mui/material/styles';
 // import CssBaseline from '@mui/material/CssBaseline';
-// import { createPhosphorTheme } from './phosphor.theme.js';  // Phase 5
+// import { createPhosphorTheme } from '@/theme/skins/phosphor.theme.js';  // Phase 5
 //
 // function PhosphorProvider({ children, defaultMode = 'dark' }) {
 //   const theme = createPhosphorTheme(defaultMode);
@@ -38,7 +38,7 @@
 //   );
 // }
 //
-// /** @type {import('../registry.js').Skin} */
+// /** @type {import('@/theme/registry.js').Skin} */
 // export const phosphorSkin = {
 //   id: 'phosphor',
 //   label: 'Phosphor Console',

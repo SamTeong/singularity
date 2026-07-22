@@ -5,14 +5,14 @@
  * registry is populated before `AppThemeProvider` first renders. Add a new
  * built-in skin by importing its descriptor and calling `registerSkin` here.
  */
-import { registerSkin } from './registry.js';
-import { zapacSkin } from './skins/zapac.jsx';
+import { registerSkin } from '@/theme/registry.js';
+import { zapacSkin } from '@/theme/skins/zapac.jsx';
 
 registerSkin(zapacSkin);
 // Phase 5: once `skins/phosphor.jsx` builds a full theme, activate it here:
-//   import { phosphorSkin } from './skins/phosphor.jsx';
+//   import { phosphorSkin } from '@/theme/skins/phosphor.jsx';
 //   registerSkin(phosphorSkin);
 
-export { AppThemeProvider, useThemeSkin } from './AppThemeProvider.jsx';
-export { getTokens } from './contract.js';
-export { listSkins, getSkin, registerSkin, DEFAULT_SKIN_ID } from './registry.js';
+export { AppThemeProvider, useThemeSkin } from '@/theme/AppThemeProvider.jsx';
+export { getTokens } from '@/theme/contract.js';
+export { listSkins, getSkin, registerSkin, DEFAULT_SKIN_ID } from '@/theme/registry.js';

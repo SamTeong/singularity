@@ -13,13 +13,13 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import SpeedIcon from '@mui/icons-material/Speed';
-import Logo from '../components/Logo.jsx';
-import { ProviderRow } from '../UsagePill.jsx';
-import { visibleProviders, usageSummary } from '../usageUtil.js';
-import { useCapabilities } from '../useCapabilities.js';
+import Logo from '@/components/Logo.jsx';
+import { ProviderRow } from '@/features/usage/UsagePill.jsx';
+import { visibleProviders, usageSummary } from '@/lib/usageUtil.js';
+import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { StatusPill } from '@zapac/mui-theme';
-import { useAgents } from '../providers/AgentsProvider.jsx';
-import { glass, PAPER_TOOLTIP_SLOTPROPS } from './shellStyles.js';
+import { useAgents } from '@/providers/AgentsProvider.jsx';
+import { glass, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
 
 // Vertical nav rail entries (icon + label). The rail is the sidebar's primary
 // navigation; the ＋ "New agent" row above it opens the create dialog.

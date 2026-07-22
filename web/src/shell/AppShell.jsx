@@ -8,32 +8,32 @@ import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
 import { AmbientBackground, useColorMode } from '@zapac/mui-theme';
-import DirPicker from '../DirPicker.jsx';
-import { untildify } from '../paths.js';
-import ProcessManager from '../ProcessManager.jsx';
-import CreateAgentDialog from '../CreateAgentDialog.jsx';
-import CreateTaskDialog from '../CreateTaskDialog.jsx';
-import CreateCronDialog from '../CreateCronDialog.jsx';
-import { useResizable } from '../useResizable.jsx';
-import { useAgents } from '../providers/AgentsProvider.jsx';
-import { useTaskActions } from '../hooks/useTaskActions.js';
-import Sidebar from './Sidebar.jsx';
-import SessionDock from './SessionDock.jsx';
-import AppMenu from './AppMenu.jsx';
-import { glass } from './shellStyles.js';
+import DirPicker from '@/components/DirPicker.jsx';
+import { untildify } from '@/lib/paths.js';
+import ProcessManager from '@/features/processes/ProcessManager.jsx';
+import CreateAgentDialog from '@/features/sessions/CreateAgentDialog.jsx';
+import CreateTaskDialog from '@/features/tasks/CreateTaskDialog.jsx';
+import CreateCronDialog from '@/features/automation/CreateCronDialog.jsx';
+import { useResizable } from '@/hooks/useResizable.jsx';
+import { useAgents } from '@/providers/AgentsProvider.jsx';
+import { useTaskActions } from '@/hooks/useTaskActions.js';
+import Sidebar from '@/shell/Sidebar.jsx';
+import SessionDock from '@/shell/SessionDock.jsx';
+import AppMenu from '@/shell/AppMenu.jsx';
+import { glass } from '@/shell/shellStyles.js';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
-const ConfigEditor = lazy(() => import('../ConfigEditor.jsx'));
-const HooksEditor = lazy(() => import('../HooksEditor.jsx'));
-const RulesPanel = lazy(() => import('../RulesPanel.jsx'));
-const MemoryPanel = lazy(() => import('../MemoryPanel.jsx'));
-const SessionHistory = lazy(() => import('../SessionHistory.jsx'));
-const WikiPanel = lazy(() => import('../WikiPanel.jsx'));
-const SkillsPanel = lazy(() => import('../SkillsPanel.jsx'));
-const UsageView = lazy(() => import('../UsageView.jsx'));
-const TasksBoard = lazy(() => import('../TasksBoard.jsx'));
-const CronJobs = lazy(() => import('../CronJobs.jsx'));
+const ConfigEditor = lazy(() => import('@/features/config/ConfigEditor.jsx'));
+const HooksEditor = lazy(() => import('@/features/config-hooks/HooksEditor.jsx'));
+const RulesPanel = lazy(() => import('@/features/rules/RulesPanel.jsx'));
+const MemoryPanel = lazy(() => import('@/features/memory/MemoryPanel.jsx'));
+const SessionHistory = lazy(() => import('@/features/transcripts/SessionHistory.jsx'));
+const WikiPanel = lazy(() => import('@/features/wiki/WikiPanel.jsx'));
+const SkillsPanel = lazy(() => import('@/features/skills/SkillsPanel.jsx'));
+const UsageView = lazy(() => import('@/features/usage/UsageView.jsx'));
+const TasksBoard = lazy(() => import('@/features/tasks/TasksBoard.jsx'));
+const CronJobs = lazy(() => import('@/features/automation/CronJobs.jsx'));
 
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
