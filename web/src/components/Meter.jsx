@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -33,7 +34,7 @@ export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
 
   const track = (
     <Box sx={{ position: 'relative', flex: sm ? 1 : undefined }}>
-      <Box sx={(th) => ({ position: 'relative', height: sm ? 5 : 10, borderRadius: sm ? 3 : 5, bgcolor: th.vars.palette.glass.stroke, overflow: 'hidden' })}>
+      <Box sx={(th) => ({ position: 'relative', height: sm ? 5 : 10, borderRadius: sm ? 3 : 5, bgcolor: getTokens(th).glass.stroke, overflow: 'hidden' })}>
         <Box sx={{ width: `${Math.min(100, pct ?? 0)}%`, height: '100%', bgcolor: meterColor(t, pct), transition: 'width .3s' }} />
         {segments > 1 && (
           <Box sx={(th) => ({ position: 'absolute', inset: 0, pointerEvents: 'none', backgroundImage: segTicks(th.vars.palette.background.paper, segments) })} />

@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -125,7 +126,7 @@ export default function ConfigEditor() {
                 <>
                   {results.map((it, i) => (
                     <ListItemButton key={`${it.path}:${i}`} selected={it.cwd === loadedCwd && it.scope === scope} onClick={() => openResult(it)}
-                      sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', py: 0.5, mb: 0.25 }}>
+                      sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, mb: 0.25 }}>
                       <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
                       <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
                     </ListItemButton>
@@ -136,7 +137,7 @@ export default function ConfigEditor() {
                 <>
                   {shownRoots.map((p) => (
                     <ListItemButton key={p} selected={p === loadedCwd} onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setCwd(p); }}
-                      sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
+                      sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
                       <ListItemText primary={tildify(p)} primaryTypographyProps={{ noWrap: true, title: p, sx: { fontFamily: 'monospace', fontSize: 12 } }} />
                       <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
                         onClick={(e) => { e.stopPropagation(); forget(p); }}

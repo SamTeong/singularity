@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import { useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -47,8 +48,8 @@ export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag,
   };
 
   return (
-    <Box sx={(t) => ({ ...glass(t), position: 'relative', zIndex: t.zapac.layers.content, flexShrink: 0, height: dockMin ? 'auto' : dockH, mx: 1.5, mb: 1.5, mt: dockMin ? 1.5 : 0, borderRadius: `${t.zapac.radius.lg}px`, overflow: 'hidden', display: 'flex', flexDirection: 'column' })}>
-      <Stack direction="row" spacing={1} role="button" tabIndex={0} onClick={toggleDock} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDock(); } }} title={dockMin ? 'Restore' : 'Minimize'} sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none', borderBottom: dockMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` })}>
+    <Box sx={(t) => ({ ...glass(t), position: 'relative', zIndex: getTokens(t).layers.content, flexShrink: 0, height: dockMin ? 'auto' : dockH, mx: 1.5, mb: 1.5, mt: dockMin ? 1.5 : 0, borderRadius: `${getTokens(t).radius.lg}px`, overflow: 'hidden', display: 'flex', flexDirection: 'column' })}>
+      <Stack direction="row" spacing={1} role="button" tabIndex={0} onClick={toggleDock} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDock(); } }} title={dockMin ? 'Restore' : 'Minimize'} sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none', borderBottom: dockMin ? 'none' : `1px solid ${getTokens(t).glass.stroke}` })}>
         <SmartToyIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
         <Typography variant="subtitle2" sx={{ flex: 1 }} noWrap>Sessions</Typography>
         {dockMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />}
@@ -57,7 +58,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag,
       {/* Body kept mounted while minimized (display:none) so terminals keep
           their live xterm + scrollback. */}
       <Box sx={{ display: dockMin ? 'none' : 'flex', flex: 1, minHeight: 0 }}>
-        <List sx={(t) => ({ width: listW.width, flexShrink: 0, overflow: 'auto', px: 1, py: 0.5, borderRight: `1px solid ${t.vars.palette.glass.stroke}` })}>
+        <List sx={(t) => ({ width: listW.width, flexShrink: 0, overflow: 'auto', px: 1, py: 0.5, borderRight: `1px solid ${getTokens(t).glass.stroke}` })}>
           {agents.map((a) => (
             <SessionRow
               key={a.id}

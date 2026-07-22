@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React from 'react';
 import Box from '@mui/material/Box';
 import Link from '@mui/material/Link';
@@ -43,14 +44,14 @@ export default function MarkdownBody({ children, onWikiLink }) {
       '& p': { my: 1.25, lineHeight: 1.7, fontSize: 14 },
       '& ul,& ol': { pl: 3, my: 1.25, lineHeight: 1.7, fontSize: 14, '& li': { my: 0.4, '&::marker': { color: t.vars.palette.text.secondary } } },
       '& :is(ul,ol) :is(ul,ol)': { my: 0.4 },
-      '& blockquote': { ml: 0, pl: 2, my: 1.5, borderLeft: `3px solid ${t.vars.palette.glass.stroke}`, color: 'text.secondary' },
+      '& blockquote': { ml: 0, pl: 2, my: 1.5, borderLeft: `3px solid ${getTokens(t).glass.stroke}`, color: 'text.secondary' },
       '& a': { color: 'primary.main' },
       '& :is(code,pre)': { fontFamily: 'var(--mui-font-CodeFont, monospace)', fontSize: 13 },
       '& :not(pre) > code': { px: 0.5, py: 0.15, borderRadius: '4px', bgcolor: 'action.hover', fontSize: '0.9em' },
-      '& pre': { p: 1.5, my: 1.5, overflow: 'auto', borderRadius: `${t.zapac.radius.sm}px`, bgcolor: 'action.hover', border: `1px solid ${t.vars.palette.glass.stroke}` },
-      '& hr': { border: 'none', borderTop: `1px solid ${t.vars.palette.glass.stroke}`, my: 2.5 },
+      '& pre': { p: 1.5, my: 1.5, overflow: 'auto', borderRadius: `${getTokens(t).radius.sm}px`, bgcolor: 'action.hover', border: `1px solid ${getTokens(t).glass.stroke}` },
+      '& hr': { border: 'none', borderTop: `1px solid ${getTokens(t).glass.stroke}`, my: 2.5 },
       '& table': { borderCollapse: 'collapse', my: 1.5, width: '100%', fontSize: 13 },
-      '& th,& td': { border: `1px solid ${t.vars.palette.glass.stroke}`, px: 1, py: 0.75, textAlign: 'left' },
+      '& th,& td': { border: `1px solid ${getTokens(t).glass.stroke}`, px: 1, py: 0.75, textAlign: 'left' },
       '& th': { bgcolor: 'action.hover', fontWeight: 700 },
       '& img': { maxWidth: '100%' },
     })}>

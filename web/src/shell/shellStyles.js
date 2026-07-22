@@ -2,19 +2,24 @@
  * Shared shell surface styles — the glass recipe and the paper-tooltip slot
  * props, used by the sidebar, main view, and session dock.
  */
+import { getTokens } from '@/theme/contract.js';
 
-// Use theme.vars (the --mui-* CSS vars) not theme.palette — under cssVariables
-// theme.palette holds only the default (light) scheme's literals and won't switch
-// with the .dark class; theme.vars is the scheme-switching reference.
-export const glass = (t) => ({
-  background: t.vars.palette.glass.surface,
-  backdropFilter: `blur(${t.vars.palette.glass.blur})`,
-  border: `1px solid ${t.vars.palette.glass.stroke}`,
-  // cardShadow + a crisp 1px top-edge sheen — the canonical glass recipe's
-  // highlight (DESIGN §4), as an inset shadow so it clips to the radius and
-  // never fights child stacking.
-  boxShadow: `${t.vars.palette.glass.cardShadow}, inset 0 1px 0 rgba(255,255,255,0.18)`,
-});
+// The glass recipe reads its surface tokens through getTokens() (the skin-
+// agnostic accessor) so a non-ZAPAC skin only has to satisfy that contract.
+// getTokens resolves from theme.vars (the scheme-switching CSS-var reference)
+// under cssVariables, not theme.palette.
+export const glass = (t) => {
+  const { glass: g } = getTokens(t);
+  return {
+    background: g.surface,
+    backdropFilter: `blur(${g.blur})`,
+    border: `1px solid ${g.stroke}`,
+    // cardShadow + a crisp 1px top-edge sheen — the canonical glass recipe's
+    // highlight (DESIGN §4), as an inset shadow so it clips to the radius and
+    // never fights child stacking.
+    boxShadow: `${g.cardShadow}, inset 0 1px 0 rgba(255,255,255,0.18)`,
+  };
+};
 
 // Paper-surface tooltip styling, shared across the nav rail + collapsed list.
 export const PAPER_TOOLTIP_SLOTPROPS = {

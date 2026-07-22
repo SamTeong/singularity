@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -131,7 +132,7 @@ export default function MemoryPanel() {
                 return (
                   <Box key={project}>
                     <ListItemButton onClick={() => toggleGroup(project)}
-                      sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.25 }}>
+                      sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}>
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }}>
                         {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
                         <FolderOpenIcon fontSize="small" color="action" />
@@ -141,7 +142,7 @@ export default function MemoryPanel() {
                     </ListItemButton>
                     {!isCol && items.map((it, i) => (
                       <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path && !results} onClick={() => open(it)}
-                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25, pl: 4 }}>
+                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25, pl: 4 }}>
                         <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.file}{it.line ? `:${it.line}` : ''}</Typography>
                         {it.text && <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>}
                       </ListItemButton>

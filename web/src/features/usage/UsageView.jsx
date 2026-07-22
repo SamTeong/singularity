@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -22,7 +23,7 @@ function ProviderCard({ label, u }) {
     claude: 'OAuth token missing/expired — run `claude /login`.',
   };
   return (
-    <Box sx={(t) => ({ p: 2, borderRadius: `${t.zapac.radius.md}px`, border: `1px solid ${t.vars.palette.glass.stroke}` })}>
+    <Box sx={(t) => ({ p: 2, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}>
       <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'baseline' }}>
         <Typography sx={{ fontSize: 15, fontWeight: 600 }}>{label}</Typography>
         {u?.plan && <Typography variant="code" sx={{ fontSize: 11, px: 0.75, py: 0.25, borderRadius: 1, bgcolor: 'action.selected', color: 'text.secondary', textTransform: 'capitalize' }}>{u.plan}</Typography>}
@@ -87,7 +88,7 @@ export default function UsageView({ usage, onRefresh }) {
         </Collapse>
       </Stack>
       {/* Spend report (claude-code-usage-report skill) fills the rest of the pane. */}
-      <Box sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${t.vars.palette.glass.stroke}` })}>
+      <Box sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${getTokens(t).glass.stroke}` })}>
         <SpendView />
       </Box>
     </Stack>

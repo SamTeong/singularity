@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import { useCallback, useMemo, useRef } from 'react';
 import Box from '@mui/material/Box';
 import CodeMirror from '@uiw/react-codemirror';
@@ -21,7 +22,7 @@ export default function CmEditor({ value, onChange, extensions = [], deps = [], 
   onChangeRef.current = onChange;
   const stableOnChange = useCallback((v) => onChangeRef.current(v), []);
   return (
-    <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px` })}>
+    <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${getTokens(t).glass.stroke}`, borderRadius: `${getTokens(t).radius.sm}px` })}>
       <CodeMirror value={value} theme={resolved === 'dark' ? 'dark' : 'light'} height={height} extensions={cmExtensions} onChange={stableOnChange} />
     </Box>
   );

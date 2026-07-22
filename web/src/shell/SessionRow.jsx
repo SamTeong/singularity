@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -38,7 +39,7 @@ export default function SessionRow({
         onDragOver={dragHandlers.onDragOver}
         onDrop={dragHandlers.onDrop}
         onDragEnd={dragHandlers.onDragEnd}
-        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5, flexDirection: 'column', alignItems: 'stretch', gap: 0.5, opacity: dragging ? 0.4 : 1, '& .row-act': { opacity: a.status === 'detached' ? 1 : 0 }, '&:hover .row-act': { opacity: 1 } }}
+        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.5, flexDirection: 'column', alignItems: 'stretch', gap: 0.5, opacity: dragging ? 0.4 : 1, '& .row-act': { opacity: a.status === 'detached' ? 1 : 0 }, '&:hover .row-act': { opacity: 1 } }}
       >
         {/* Row 1: name (left) + actions (right). */}
         <Stack direction="row" sx={{ alignItems: 'center', minWidth: 0 }}>

@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useState, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -188,7 +189,7 @@ export default function WikiPanel() {
               {results ? (
                 results.map((it, i) => (
                   <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path} onClick={() => open(it)}
-                    sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}>
+                    sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
                     <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                       <StatusPill status="review">{it.rel.split('/')[0]}</StatusPill>
                       <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.rel.split('/').slice(1).join('/')}{it.line ? `:${it.line}` : ''}</Typography>
@@ -202,7 +203,7 @@ export default function WikiPanel() {
                   return (
                     <Box key={w.path}>
                       <ListItemButton onClick={() => toggleWiki(w.name)}
-                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.25 }}>
+                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}>
                         <ListItemIcon sx={{ minWidth: 28 }}>{open2 ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
                         <ListItemIcon sx={{ minWidth: 24 }}>{open2 ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
                         <ListItemText primary={w.name} slotProps={{ primary: { variant: 'subtitle2', noWrap: true } }} />
@@ -214,7 +215,7 @@ export default function WikiPanel() {
                             const f = folder(p.rel);
                             return (
                               <ListItemButton key={p.path} selected={sel?.path === p.path} onClick={() => openPage(w, p)}
-                                sx={{ pl: 5, borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}>
+                                sx={{ pl: 5, borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
                                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                                   {f && <StatusPill status="review">{f}</StatusPill>}
                                   <Typography variant="code" sx={{ fontSize: 11 }} noWrap>{p.rel.split('/').pop()}</Typography>
@@ -233,7 +234,7 @@ export default function WikiPanel() {
               {results && results.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
             {graphView === 'dock' && graphWiki && (
-              <Stack sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${t.vars.palette.glass.stroke}`, p: 1 })} spacing={0.5}>
+              <Stack sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${getTokens(t).glass.stroke}`, p: 1 })} spacing={0.5}>
                 <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                   <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · link graph</Typography>
                   <Tooltip title="Expand to main pane" placement="bottom" disableInteractive>
@@ -274,7 +275,7 @@ export default function WikiPanel() {
             <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{sel?.rel}</Typography>
             <Box sx={(t) => ({
               flex: 1, minHeight: 0, overflow: 'auto',
-              border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px`,
+              border: `1px solid ${getTokens(t).glass.stroke}`, borderRadius: `${getTokens(t).radius.sm}px`,
               p: 3, pb: 4,
             })}>
               {(() => {

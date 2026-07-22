@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -46,12 +47,12 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
       sx={(t) => ({
         ...glass(t),
         position: 'relative',
-        zIndex: t.zapac.layers.nav,
+        zIndex: getTokens(t).layers.nav,
         width: collapsed ? 64 : 320,
         flexShrink: 0,
         mt: 1.5,
         ml: 1.5,
-        borderRadius: `${t.zapac.radius.lg}px`,
+        borderRadius: `${getTokens(t).radius.lg}px`,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
@@ -86,7 +87,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
         <Tooltip title={collapsed ? 'New session' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
           <ListItemButton
             onClick={onNewSession}
-            sx={{ justifyContent: collapsed ? 'center' : 'flex-start', minHeight: 44, borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5 }}
+            sx={{ justifyContent: collapsed ? 'center' : 'flex-start', minHeight: 44, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.5 }}
           >
             <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center' }}><AddIcon /></ListItemIcon>
             {!collapsed && <ListItemText primary="New session" />}
@@ -104,7 +105,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                   setView(item.v);
                   if (isUsage) refreshUsage(true);
                 }}
-                sx={{ justifyContent: collapsed ? 'center' : 'flex-start', alignItems: collapsed || !isUsage ? 'center' : 'flex-start', minHeight: 44, borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.5 }}
+                sx={{ justifyContent: collapsed ? 'center' : 'flex-start', alignItems: collapsed || !isUsage ? 'center' : 'flex-start', minHeight: 44, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.5 }}
               >
                 <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', mt: collapsed || !isUsage ? 0 : '2px' }}>{item.icon}</ListItemIcon>
                 {!collapsed && (

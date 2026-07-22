@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -203,8 +204,8 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          borderRadius: `${t.zapac.radius.sm}px`,
-          border: `1px solid ${t.vars.palette.glass.stroke}`,
+          borderRadius: `${getTokens(t).radius.sm}px`,
+          border: `1px solid ${getTokens(t).glass.stroke}`,
           ...(side === 'bottom' ? { width: '100%', height: panelMin ? 'auto' : panelH } : { height: '100%', width: panelMin ? 36 : panelW }),
         })}
       >
@@ -217,7 +218,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
           sx={(t) => ({ flexShrink: 0, alignItems: 'center', cursor: 'pointer', userSelect: 'none',
             ...(side === 'right' && panelMin
               ? { flex: 1, minHeight: 0, py: 1 }
-              : { px: 1.5, height: 36, borderBottom: panelMin ? 'none' : `1px solid ${t.vars.palette.glass.stroke}` }) })}
+              : { px: 1.5, height: 36, borderBottom: panelMin ? 'none' : `1px solid ${getTokens(t).glass.stroke}` }) })}
         >
           <Typography variant="subtitle2" noWrap sx={side === 'right' && panelMin ? { flex: 1, minHeight: 0, writingMode: 'vertical-rl' } : { flex: 1, minWidth: 0 }}>{tx.title}</Typography>
           <Tooltip title={side === 'bottom' ? 'Dock right' : 'Dock bottom'} disableInteractive>
@@ -357,8 +358,8 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                 onDrop={() => drop(col)}
                 sx={(t) => ({
                   flex: 1, minWidth: 0, minHeight: 0,
-                  borderRadius: `${t.zapac.radius.sm}px`,
-                  border: `1px solid ${t.vars.palette.glass.stroke}`,
+                  borderRadius: `${getTokens(t).radius.sm}px`,
+                  border: `1px solid ${getTokens(t).glass.stroke}`,
                   p: 0.75,
                 })}
               >
@@ -391,9 +392,9 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
                         sx={(t) => ({
                           p: 1, cursor: 'pointer', flexShrink: 0,
-                          borderRadius: `${t.zapac.radius.sm}px`,
-                          border: `1px solid ${sel ? t.vars.palette.primary.main : t.vars.palette.glass.stroke}`,
-                          background: t.vars.palette.glass.surface,
+                          borderRadius: `${getTokens(t).radius.sm}px`,
+                          border: `1px solid ${sel ? t.vars.palette.primary.main : getTokens(t).glass.stroke}`,
+                          background: getTokens(t).glass.surface,
                           opacity: dragId === task.id ? 0.4 : 1,
                           '& .card-act': { opacity: 0 },
                           '&:hover .card-act': { opacity: 1 },

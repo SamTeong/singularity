@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -93,7 +94,7 @@ export default function WikiGraph({ root, wiki, selected, onOpenPage }) {
     <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
       <Box ref={ref} sx={(t) => ({
         position: 'absolute', inset: 0,
-        border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px`,
+        border: `1px solid ${getTokens(t).glass.stroke}`, borderRadius: `${getTokens(t).radius.sm}px`,
       })} />
       {(state.loading || state.error || state.empty) && (
         <Stack sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', pointerEvents: 'none' }}>

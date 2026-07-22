@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -139,7 +140,7 @@ export default function RulesPanel() {
                 const count = g.items.length;
                 return (
                   <Box key={g.root} sx={{ mb: 0.5 }}>
-                    <ListItemButton sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, '&:hover .del': { opacity: 1 } }}>
+                    <ListItemButton sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, '&:hover .del': { opacity: 1 } }}>
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.root)}>
                         {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
                         <FolderOpenIcon fontSize="small" color="action" />
@@ -156,13 +157,13 @@ export default function RulesPanel() {
                     </ListItemButton>
                     {!isCol && g.items.map((it, i) => results ? (
                       <ListItemButton key={`${it.path}:${it.line}:${i}`} selected={sel?.path === it.path} onClick={() => open(it)}
-                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', py: 0.5, pl: 4, mb: 0.25 }}>
+                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, pl: 4, mb: 0.25 }}>
                         <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
                         <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
                       </ListItemButton>
                     ) : (
                       <ListItemButton key={it.path} selected={sel?.path === it.path} onClick={() => open(it)}
-                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, py: 0.25, pl: 4, mb: 0.25 }}>
+                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, pl: 4, mb: 0.25 }}>
                         <ListItemText primary={tildify(it.rel)} primaryTypographyProps={{ noWrap: true, title: it.path, sx: { fontSize: 12 } }} />
                       </ListItemButton>
                     ))}

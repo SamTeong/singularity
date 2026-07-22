@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import { useState } from 'react';
 import Stack from '@mui/material/Stack';
 import IconButton from '@mui/material/IconButton';
@@ -15,7 +16,7 @@ export default function Rail({ storageKey, defaultWidth, collapsedTitle, childre
   const railW = useResizable(storageKey, defaultWidth);
   return (
     <>
-      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
+      <Stack sx={(t) => ({ width: collapsed ? 40 : railW.width, flexShrink: 0, borderRight: `1px solid ${getTokens(t).glass.stroke}`, minHeight: 0, transition: 'width .2s ease' })}>
         {collapsed ? (
           <Tooltip title={collapsedTitle} placement="right" disableInteractive>
             <IconButton size="small" onClick={() => setCollapsed(false)} sx={{ m: 0.5 }}><ChevronRightIcon /></IconButton>

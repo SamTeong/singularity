@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import { useEffect, useMemo, useRef, useState, Suspense, lazy } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -146,7 +147,7 @@ export default function AppShell() {
 
         {/* Selected view. Persistent views mount once (visited) and stay mounted
             (display:none when hidden); Tasks/Cron/Usage render on demand. */}
-        <Box sx={(t) => ({ ...glass(t), position: 'relative', flex: 1, mt: 1.5, mx: 1.5, minWidth: 0, borderRadius: `${t.zapac.radius.lg}px`, overflow: 'hidden', zIndex: t.zapac.layers.content })}>
+        <Box sx={(t) => ({ ...glass(t), position: 'relative', flex: 1, mt: 1.5, mx: 1.5, minWidth: 0, borderRadius: `${getTokens(t).radius.lg}px`, overflow: 'hidden', zIndex: getTokens(t).layers.content })}>
           <Suspense fallback={<Box sx={{ p: 3, color: 'text.secondary' }}>Loading…</Box>}>
             {visited.current.config && (
               <Box sx={{ display: view === 'config' ? 'block' : 'none', height: '100%' }}><ConfigEditor /></Box>

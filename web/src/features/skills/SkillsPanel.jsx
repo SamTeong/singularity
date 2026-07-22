@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -138,7 +139,7 @@ export default function SkillsPanel() {
             return (
               <Box key={r.root}>
                 <ListItemButton onClick={() => toggleRoot(r.root)}
-                  sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
+                  sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
                   <ListItemIcon sx={{ minWidth: 28 }}>{rOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
                   <ListItemIcon sx={{ minWidth: 24 }}>{rOpen ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
                   <ListItemText primary={tildify(r.root)} primaryTypographyProps={{ variant: 'subtitle2', noWrap: true, title: r.root }} />
@@ -158,7 +159,7 @@ export default function SkillsPanel() {
                       return (
                         <Box key={scopeKey}>
                           <ListItemButton onClick={() => toggleScope(scopeKey)}
-                            sx={{ pl: 3, borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.25 }}>
+                            sx={{ pl: 3, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}>
                             <ListItemIcon sx={{ minWidth: 28 }}>{scOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
                             <ListItemIcon sx={{ minWidth: 24 }}>{scOpen ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
                             <ListItemText primary={label} slotProps={{ primary: { variant: 'subtitle2', noWrap: true } }} />
@@ -170,7 +171,7 @@ export default function SkillsPanel() {
                                 const isSel = sel?.root === r.root && sel?.scope === sc.name && sel?.skill === sk.name;
                                 return (
                                   <ListItemButton key={sk.name} selected={isSel} onClick={() => open(r.root, sc.name, sk.name, r.flat)}
-                                    sx={{ pl: 7, borderRadius: (t) => `${t.zapac.radius.sm}px`, mb: 0.25 }}
+                                    sx={{ pl: 7, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}
                                     title={sk.description || sk.name}
                                   >
                                     <Typography variant="code" sx={{ fontSize: 12 }} noWrap>{sk.name}</Typography>
@@ -207,7 +208,7 @@ export default function SkillsPanel() {
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.root)} / {sel?.flat ? '(flat)' : sel?.scope} / {sel?.skill}</Typography>
           <Box sx={(t) => ({
             flex: 1, minHeight: 0, overflow: 'auto',
-            border: `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: `${t.zapac.radius.sm}px`,
+            border: `1px solid ${getTokens(t).glass.stroke}`, borderRadius: `${getTokens(t).radius.sm}px`,
             p: 3, pb: 4,
           })}>
             {skill?.name && <Typography variant="h1" sx={{ fontSize: 26, fontWeight: 800, mt: 0, mb: 1, letterSpacing: '-0.01em' }}>{skill.name}</Typography>}

@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -227,7 +228,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
               {leftResults ? (
                 pageItems.map((r, i) => (
-                  <ListItemButton key={`${r.project}:${r.id}:${r.lineIndex}:${i}`} onClick={() => open({ project: r.project, id: r.id, title: r.id, cwd: r.cwd })} sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}>
+                  <ListItemButton key={`${r.project}:${r.id}:${r.lineIndex}:${i}`} onClick={() => open({ project: r.project, id: r.id, title: r.id, cwd: r.cwd })} sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
                     <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(r.cwd) || r.project}</Typography>
                     <Typography sx={{ fontSize: 12, color: 'text.secondary' }} noWrap>[{r.role}] {r.snippet}</Typography>
                   </ListItemButton>
@@ -250,7 +251,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
                       <ListItemButton
                         selected={sel?.project === s.project && sel?.id === s.id}
                         onClick={() => open(s)}
-                        sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25 }}
+                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}
                       >
                         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                           {hasSubs && (
@@ -278,7 +279,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
                               key={sub.id}
                               selected={sel?.project === s.project && sel?.id === sub.id}
                               onClick={() => open({ project: s.project, id: sub.id, title: sub.title || sub.agentId, cwd: s.cwd, mtime: sub.mtime })}
-                              sx={{ borderRadius: (t) => `${t.zapac.radius.sm}px`, display: 'block', mb: 0.25, pl: 3 }}
+                              sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25, pl: 3 }}
                             >
                               <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                                 <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0, fontSize: 12 }}>{sub.title || sub.agentId}</Typography>
@@ -296,7 +297,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
               {!leftResults && sessions.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{sessErr || 'No transcripts.'}</Typography>}
               {leftResults && leftResults.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
-            <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${t.vars.palette.glass.stroke}`, flexShrink: 0 })}>
+            <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${getTokens(t).glass.stroke}`, flexShrink: 0 })}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                 <Select size="small" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} sx={{ height: 34, '& .MuiSelect-select': { py: 0.5, fontSize: 12 } }}>
                   {[25, 50, 100].map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
@@ -314,7 +315,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
 
       {/* right: View / Chat */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0 }} spacing={0}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', px: 1.5, py: 1, borderBottom: (t) => `1px solid ${t.vars.palette.glass.stroke}` }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', px: 1.5, py: 1, borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ minHeight: 36, flex: 1 }}>
             <Tab icon={<SubjectIcon />} iconPosition="start" value="view" label="View" sx={{ minHeight: 36, textTransform: 'none' }} />
             <Tab icon={<ChatBubbleOutlinedIcon />} iconPosition="start" value="chat" label="Chat" sx={{ minHeight: 36, textTransform: 'none' }} />
@@ -376,10 +377,10 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
                 {chatMsgs.map((m, i) => (
                   <Box key={i} sx={{ alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
                     <Box sx={(t) => ({
-                      px: 1.5, py: 1, borderRadius: `${t.zapac.radius.sm}px`,
-                      bgcolor: m.error ? 'error.main' : m.role === 'user' ? 'primary.main' : (t.vars.palette.glass.surface),
+                      px: 1.5, py: 1, borderRadius: `${getTokens(t).radius.sm}px`,
+                      bgcolor: m.error ? 'error.main' : m.role === 'user' ? 'primary.main' : (getTokens(t).glass.surface),
                       color: m.error || m.role === 'user' ? 'common.white' : 'text.primary',
-                      border: m.role === 'assistant' && !m.error ? `1px solid ${t.vars.palette.glass.stroke}` : 'none',
+                      border: m.role === 'assistant' && !m.error ? `1px solid ${getTokens(t).glass.stroke}` : 'none',
                     })}>
                       <Typography sx={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.content || (m.streaming ? '…' : '')}</Typography>
                     </Box>
@@ -387,7 +388,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
                 ))}
               </Stack>
             </Box>
-            <Stack direction="row" spacing={1} sx={{ p: 1.5, borderTop: (t) => `1px solid ${t.vars.palette.glass.stroke}` }}>
+            <Stack direction="row" spacing={1} sx={{ p: 1.5, borderTop: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
               <TextField
                 size="small" multiline maxRows={4} fullWidth
                 placeholder={authNeeded ? 'Sign in via `claude` to chat…' : (streaming ? 'Generating…' : 'Ask about this transcript…')}

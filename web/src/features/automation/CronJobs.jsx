@@ -1,3 +1,4 @@
+import { getTokens } from '@/theme/contract.js';
 import React, { useState, useEffect } from 'react';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import Box from '@mui/material/Box';
@@ -279,8 +280,8 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
               <EmptyState icon={<DescriptionOutlinedIcon />} title="No reports yet" description="Background runs write a Report.md when they finish — it will show up here." />
             </Box>
           ) : (
-            <Stack direction="row" sx={{ flex: 1, minHeight: 0, border: (t) => `1px solid ${t.vars.palette.glass.stroke}`, borderRadius: (t) => `${t.zapac.radius.sm}px` }}>
-              <List dense sx={(t) => ({ width: railW.width, flexShrink: 0, borderRight: `1px solid ${t.vars.palette.glass.stroke}`, overflow: 'auto', py: 0 })}>
+            <Stack direction="row" sx={{ flex: 1, minHeight: 0, border: (t) => `1px solid ${getTokens(t).glass.stroke}`, borderRadius: (t) => `${getTokens(t).radius.sm}px` }}>
+              <List dense sx={(t) => ({ width: railW.width, flexShrink: 0, borderRight: `1px solid ${getTokens(t).glass.stroke}`, overflow: 'auto', py: 0 })}>
                 {reports.map((r) => (
                   <ListItemButton key={r.taskId} selected={selReport === r.taskId} onClick={() => openReport(r.taskId)} sx={{ display: 'block' }}>
                     <Typography variant="subtitle2" noWrap>{r.title}</Typography>
