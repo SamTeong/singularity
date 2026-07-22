@@ -138,7 +138,7 @@ export default function ConfigEditor() {
                   {shownRoots.map((p) => (
                     <ListItemButton key={p} selected={p === loadedCwd} onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setCwd(p); }}
                       sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
-                      <ListItemText primary={tildify(p)} primaryTypographyProps={{ noWrap: true, title: p, sx: { fontFamily: 'monospace', fontSize: 12 } }} />
+                      <ListItemText primary={tildify(p)} slotProps={{ primary: { noWrap: true, title: p, sx: { fontFamily: 'monospace', fontSize: 12 } } }} />
                       <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
                         onClick={(e) => { e.stopPropagation(); forget(p); }}
                         sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>

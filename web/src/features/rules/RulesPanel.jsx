@@ -144,7 +144,7 @@ export default function RulesPanel() {
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.root)}>
                         {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
                         <FolderOpenIcon fontSize="small" color="action" />
-                        <ListItemText primary={tildify(g.root)} primaryTypographyProps={{ noWrap: true, title: g.root, sx: { fontFamily: 'monospace', fontSize: 12 } }} />
+                        <ListItemText primary={tildify(g.root)} slotProps={{ primary: { noWrap: true, title: g.root, sx: { fontFamily: 'monospace', fontSize: 12 } } }} />
                         <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
                       </Stack>
                       {!results && (
@@ -164,7 +164,7 @@ export default function RulesPanel() {
                     ) : (
                       <ListItemButton key={it.path} selected={sel?.path === it.path} onClick={() => open(it)}
                         sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, pl: 4, mb: 0.25 }}>
-                        <ListItemText primary={tildify(it.rel)} primaryTypographyProps={{ noWrap: true, title: it.path, sx: { fontSize: 12 } }} />
+                        <ListItemText primary={tildify(it.rel)} slotProps={{ primary: { noWrap: true, title: it.path, sx: { fontSize: 12 } } }} />
                       </ListItemButton>
                     ))}
                   </Box>

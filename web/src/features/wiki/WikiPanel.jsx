@@ -181,7 +181,7 @@ export default function WikiPanel() {
               </Typography>
               {!results && allCats.length > 0 && (
                 <Autocomplete multiple size="small" options={allCats} value={cats} onChange={(_, v) => setCats(v)}
-                  disableCloseOnSelect ChipProps={{ size: 'small' }} sx={{ mt: 1, ml: 2, mr: 1 }}
+                  disableCloseOnSelect slotProps={{ chip: { size: 'small' } }} sx={{ mt: 1, ml: 2, mr: 1 }}
                   renderInput={(params) => <TextField {...params} variant="standard" placeholder={cats.length ? '' : 'Filter categories…'} />} />
               )}
             </Box>

@@ -211,13 +211,16 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
               <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
                 {['all', 'one'].map((s) => (
                   <Tooltip key={s} title={s === 'one' ? 'Search + chat about the selected transcript' : 'Search + chat across all transcripts'}>
-                    <Button
-                      size="small"
-                      variant={effScope === s ? 'contained' : 'outlined'}
-                      disabled={s === 'one' && !sel}
-                      onClick={() => setScope(s)}
-                      sx={{ px: 1.5, minWidth: 0, fontSize: 12, textTransform: 'none' }}
-                    >{s === 'all' ? 'All' : 'This transcript'}</Button>
+                    {/* span: Tooltip needs a live event target — a disabled button fires none. */}
+                    <span>
+                      <Button
+                        size="small"
+                        variant={effScope === s ? 'contained' : 'outlined'}
+                        disabled={s === 'one' && !sel}
+                        onClick={() => setScope(s)}
+                        sx={{ px: 1.5, minWidth: 0, fontSize: 12, textTransform: 'none' }}
+                      >{s === 'all' ? 'All' : 'This transcript'}</Button>
+                    </span>
                   </Tooltip>
                 ))}
               </Stack>

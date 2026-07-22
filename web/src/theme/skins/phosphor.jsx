@@ -48,6 +48,7 @@ if (!phosphorTheme.tokens) {
   // ── ZAPAC-compat shim (temporary — see file header) ──
   phosphorTheme.zapac = { radius, fonts, space: n.space, layers: n.layers, motion };
   phosphorTheme.vars.palette.glass = glass;
+  phosphorTheme.palette.glass = glass;
 }
 
 function PhosphorProvider({ children }) {

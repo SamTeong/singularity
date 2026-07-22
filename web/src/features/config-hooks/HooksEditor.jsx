@@ -180,7 +180,7 @@ export default function HooksEditor() {
                     ) : (
                       <ListItemButton key={it.path} selected={it.path === path} onClick={() => loadFile(it.path)}
                         sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, mb: 0.25, pl: 4 }}>
-                        <ListItemText primary={it.rel} primaryTypographyProps={{ noWrap: true, title: it.path, sx: { fontFamily: 'monospace', fontSize: 12 } }} />
+                        <ListItemText primary={it.rel} slotProps={{ primary: { noWrap: true, title: it.path, sx: { fontFamily: 'monospace', fontSize: 12 } } }} />
                       </ListItemButton>
                     ))}
                     {!isCol && count === 0 && <Typography color="text.secondary" sx={{ fontSize: 11, px: 2, py: 0.5 }}>No hooks.</Typography>}

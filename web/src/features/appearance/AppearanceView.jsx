@@ -73,11 +73,9 @@ export default function AppearanceView({ onToggleColorMode }) {
       </Typography>
       <Stack
         direction="row"
-        flexWrap="wrap"
-        gap={2}
         role="radiogroup"
         aria-label="Theme skin"
-        sx={{ mb: 4 }}
+        sx={{ flexWrap: 'wrap', gap: 2, mb: 4 }}
       >
         {skins.map((skin) => (
           <SkinCard key={skin.id} skin={skin} active={skin.id === skinId} onSelect={() => setSkin(skin.id)} />

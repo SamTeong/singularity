@@ -142,7 +142,7 @@ export default function SkillsPanel() {
                   sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
                   <ListItemIcon sx={{ minWidth: 28 }}>{rOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
                   <ListItemIcon sx={{ minWidth: 24 }}>{rOpen ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
-                  <ListItemText primary={tildify(r.root)} primaryTypographyProps={{ variant: 'subtitle2', noWrap: true, title: r.root }} />
+                  <ListItemText primary={tildify(r.root)} slotProps={{ primary: { variant: 'subtitle2', noWrap: true, title: r.root } }} />
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mr: 0.5 }}>{r.error || r.scopes.length}</Typography>
                   <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
                     onClick={(e) => { e.stopPropagation(); forget(r.root); }}
