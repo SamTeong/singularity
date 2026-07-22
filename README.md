@@ -36,7 +36,7 @@ MIT
 - **Memory** — view and edit project memory.
 - **Transcripts** — view transcripts.
 - **Wiki** — view wiki with linked pages.
-- **Claude processes** — task manager for Claude processes.
+- **Processes** — task manager for Claude processes.
 - **Light/Dark mode** — supports light and dark mode.
 
 ## Security

@@ -26,6 +26,7 @@ export default defineConfig({
       '/ws': { target: 'ws://127.0.0.1:4317', ws: true },
       '/health': 'http://127.0.0.1:4317',
       '/agent-stats': 'http://127.0.0.1:4317',
+      '/sysstats': 'http://127.0.0.1:4317',
       '/fs': 'http://127.0.0.1:4317',
       '/procs': 'http://127.0.0.1:4317',
       '/restart': 'http://127.0.0.1:4317',

@@ -102,6 +102,47 @@ const LOGO_NODES = [-90, -30, 30, 90, 150, 210].map((a) => {
   return [+(16 + 11 * Math.cos(r)).toFixed(2), +(16 + 11 * Math.sin(r)).toFixed(2)];
 });
 
+// Inline-SVG sparkline over a 0-100 value series: faint 25/50/75 grid (behind),
+// a dotted 90% threshold line, then the data polyline on top. Values are
+// percentages, so the y-scale is fixed 0-100 (grid + threshold read absolutely).
+const SPARK_Y = (p, h) => h - (p / 100) * h; // pct -> svg y
+// `capacity` = full sample count for the selected window, so the x-axis spans
+// the whole window even when under-filled: newest sample sits at the right edge,
+// older ones step left, leaving blank space on the left until data accumulates.
+function Sparkline({ values, color, capacity, width = 180, height = 44 }) {
+  const cap = Math.max(capacity || values.length, 2);
+  const n = values.length;
+  const points = n >= 2
+    ? values.map((v, i) => `${width * (1 - (n - 1 - i) / (cap - 1))},${SPARK_Y(Math.min(100, Math.max(0, v)), height)}`).join(' ')
+    : '';
+  const refY = SPARK_Y(90, height);
+  return (
+    <Box component="svg" viewBox={`0 0 ${width} ${height}`} width={width} height={height} sx={{ display: 'block', overflow: 'visible' }}>
+      {/* Grid — horizontal at 25/50/75%, vertical at width quarters (~7.5-min marks over 30 min). */}
+      {[25, 50, 75].map((p) => (
+        <line key={`h${p}`} x1={0} y1={SPARK_Y(p, height)} x2={width} y2={SPARK_Y(p, height)} stroke="var(--mui-palette-divider)" strokeWidth={0.5} />
+      ))}
+      {[0.25, 0.5, 0.75].map((f) => (
+        <line key={`v${f}`} x1={f * width} y1={0} x2={f * width} y2={height} stroke="var(--mui-palette-divider)" strokeWidth={0.5} />
+      ))}
+      {/* 90% threshold. */}
+      <line x1={0} y1={refY} x2={width} y2={refY} stroke="var(--mui-palette-warning-main)" strokeWidth={0.75} strokeDasharray="3 2" opacity={0.8} />
+      <text x={width} y={refY - 2} textAnchor="end" fontSize={8} fill="var(--mui-palette-warning-main)" opacity={0.9}>90%</text>
+      {points && (
+        <polyline
+          points={points}
+          fill="none"
+          stroke={color}
+          strokeWidth={1.5}
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      )}
+    </Box>
+  );
+}
+
 function Logo({ active }) {
   const t = useTheme();
   const line = t.vars.palette.text.secondary;
@@ -197,6 +238,8 @@ export default function App() {
   const [stats, setStats] = useState({}); // id -> {turns, tokens}
   const [subagents, setSubagents] = useState({}); // agentId -> [{agentId, title, running, mtime}]
   const [usage, setUsage] = useState(null); // { ollama, claude } from /usage
+  const [sysStats, setSysStats] = useState(null); // { cpu, mem } from /sysstats, polled while More menu is open
+  const [sparkWin, setSparkWin] = useState(30); // sparkline window in minutes (5 / 30 / 60)
   const [dragId, setDragId] = useState(null); // id of the agent row being dragged
   const wsRef = useRef(null);
   const termHandlers = useRef({}); // id -> { write(data), reset() }
@@ -231,7 +274,13 @@ export default function App() {
         } else if (m.t === 'status') {
           setAgents((as) => as.map((a) => (a.id === m.id ? { ...a, status: m.status } : a)));
         } else if (m.t === 'output') {
-          termHandlers.current[m.id]?.write(m.data);
+          // Drop output while the tab is hidden. xterm flushes its internal
+          // write buffer on a timer, but browsers throttle background-tab
+          // timers to ~1/min — a continuously-streaming session (Claude's TUI
+          // spinner) then accumulates an unbounded write buffer overnight →
+          // tab OOM. The daemon keeps a 256KB ring and replays it on re-attach
+          // (visibilitychange effect below), so nothing is lost.
+          if (!document.hidden) termHandlers.current[m.id]?.write(m.data);
         } else if (m.t === 'attached') {
           setActive(m.id);
         } else if (m.t === 'usage') {
@@ -252,6 +301,22 @@ export default function App() {
     };
     connect();
     return () => { unmounted = true; clearTimeout(timer); ws.close(); };
+  }, []);
+
+  // Tab hidden → live output is dropped (see onmessage). On regain, reset each
+  // terminal and re-attach so the daemon replays current scrollback — same path
+  // as WS reconnect.
+  useEffect(() => {
+    const onVis = () => {
+      const ws = wsRef.current;
+      if (document.hidden || ws?.readyState !== WebSocket.OPEN) return;
+      for (const [id, h] of Object.entries(termHandlers.current)) {
+        h.reset();
+        ws.send(JSON.stringify({ t: 'attach', id }));
+      }
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
 
   // Home dir, for tildify() to collapse full paths to `~` on display.
@@ -342,6 +407,15 @@ export default function App() {
     if (!connected) return;
     fetch('/background').then((r) => r.json()).then(setBackground).catch(() => {});
   }, [connected]);
+
+  // Machine CPU/RAM readout: poll only while the More menu is open.
+  useEffect(() => {
+    if (!menuAnchor) return;
+    const pull = () => fetch('/sysstats').then((r) => r.json()).then(setSysStats).catch(() => {});
+    pull();
+    const id = setInterval(pull, 2000);
+    return () => clearInterval(id);
+  }, [menuAnchor]);
 
   // Distinct tags across live tasks + history — options for the task tags input.
   const tagOptions = useMemo(() => {
@@ -696,8 +770,38 @@ export default function App() {
         <Divider />
         <MenuItem onClick={() => { setProcsOpen(true); setMenuAnchor(null); }}>
           <ListItemIcon><MonitorHeartIcon fontSize="small" /></ListItemIcon>
-          <ListItemText>Claude processes</ListItemText>
+          <ListItemText>Processes</ListItemText>
         </MenuItem>
+        <Box sx={{ px: 2, py: 1 }}>
+          <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
+            CPU  {sysStats?.cpu == null ? '—' : sysStats.cpu + '%'}
+          </Typography>
+          <Sparkline values={(sysStats?.history?.cpu || []).slice(-sparkWin * 30)} capacity={sparkWin * 30} color="var(--mui-palette-primary-main)" />
+          <Typography sx={{ fontSize: 11, color: 'text.secondary', mt: 1.5 }}>
+            RAM  {sysStats ? `${sysStats.mem.pct}% (${(sysStats.mem.used / 1024 ** 3).toFixed(1)} / ${(sysStats.mem.total / 1024 ** 3).toFixed(1)} GB)` : '—'}
+          </Typography>
+          <Sparkline values={(sysStats?.history?.mem || []).slice(-sparkWin * 30)} capacity={sparkWin * 30} color="var(--mui-palette-info-main)" />
+          {/* Window pills — slice the tail of the 1 h ring (samples = minutes * 30 @ 2s). */}
+          <Stack direction="row" spacing={0.5} sx={{ mt: 0.75 }}>
+            {[[5, '5 min'], [30, '30 min'], [60, '1 hour']].map(([m, label]) => (
+              <Box
+                key={m}
+                role="button"
+                tabIndex={0}
+                onClick={() => setSparkWin(m)}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSparkWin(m); } }}
+                sx={{
+                  px: 1, py: 0.25, borderRadius: 1, fontSize: 10, cursor: 'pointer', userSelect: 'none',
+                  color: sparkWin === m ? 'primary.main' : 'text.secondary',
+                  bgcolor: sparkWin === m ? 'action.selected' : 'transparent',
+                  '&:hover': { bgcolor: sparkWin === m ? 'action.selected' : 'action.hover' },
+                }}
+              >
+                {label}
+              </Box>
+            ))}
+          </Stack>
+        </Box>
         {/* Self-respawn only works when the daemon serves the built UI (npm start).
             In dev, concurrently -k kills Vite too, so the shell can't reconnect. */}
         {import.meta.env.PROD && (
