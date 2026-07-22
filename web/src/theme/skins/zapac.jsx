@@ -7,7 +7,7 @@
  * pre-paint color-scheme script, and exposes `useColorMode` for light/dark
  * toggling. This module just packages it as a registry {@link Skin}.
  */
-import { ZapacThemeProvider } from '@zapac/mui-theme';
+import { ZapacThemeProvider, AmbientBackground } from '@zapac/mui-theme';
 import { useTheme } from '@mui/material/styles';
 import { assertSkinContract } from '@/theme/contract.js';
 
@@ -32,5 +32,6 @@ export const zapacSkin = {
   label: 'ZAPAC',
   description: 'Glass-over-gradient on the Zühlke purple→cyan identity.',
   Provider: ZapacProvider,
+  Background: AmbientBackground, // the flowing WebGL gradient field behind the glass
   supportsColorMode: true,
 };

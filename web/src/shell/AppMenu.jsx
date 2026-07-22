@@ -42,7 +42,7 @@ const SPARK_WINDOWS = [[5, '5 min'], [30, '30 min'], [60, '1 hour']];
  * an optional server-restart entry, the theme-skin picker, and the light/dark
  * toggle. Navigation + heavy actions are delegated via callbacks.
  */
-export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses, onOpenRestart, restarting, resolved, onToggleTheme }) {
+export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses, onOpenRestart, restarting, resolved, onToggleTheme, showColorToggle = true }) {
   const open = !!anchorEl;
   const [sparkWin, setSparkWin] = useState(30); // sparkline window in minutes (5 / 30 / 60)
   const sysStats = useSysStats(open);
@@ -100,11 +100,14 @@ export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses
       )}
       {/* Registry-driven skin picker — renders only when ≥2 skins registered. */}
       <SkinSwitcher onSelect={onClose} />
-      <Divider />
-      <MenuItem onClick={onToggleTheme}>
-        <ListItemIcon>{resolved === 'dark' ? <DarkModeIcon fontSize="small" /> : <LightModeIcon fontSize="small" />}</ListItemIcon>
-        <Switch edge="end" checked={resolved === 'dark'} onChange={onToggleTheme} onClick={(e) => e.stopPropagation()} />
-      </MenuItem>
+      {/* Light/dark toggle — hidden for dark-only skins (e.g. Phosphor Console). */}
+      {showColorToggle && [
+        <Divider key="d" />,
+        <MenuItem key="t" onClick={onToggleTheme}>
+          <ListItemIcon>{resolved === 'dark' ? <DarkModeIcon fontSize="small" /> : <LightModeIcon fontSize="small" />}</ListItemIcon>
+          <Switch edge="end" checked={resolved === 'dark'} onChange={onToggleTheme} onClick={(e) => e.stopPropagation()} />
+        </MenuItem>,
+      ]}
     </Menu>
   );
 }

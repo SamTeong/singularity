@@ -1,50 +1,72 @@
 /**
- * Phosphor Console skin — SCAFFOLD (not yet registered).
+ * Phosphor Console skin — NERV/MAGI tactical CRT command deck.
  *
- * A NERV/MAGI tactical console skin: a black CRT command deck where colour IS
- * state (mint nominal · orange chrome · blue pending · amber caution · red
- * critical), depth comes from border + glow + hue, and type is bimodal mono.
- * See the `phosphor-console` skill for the full design language.
+ * Wraps the vendored `phosphor-console-theme` (a full dark-only cssVariables MUI
+ * theme). Its structural tokens live under `theme.nerv.*` and its surface colours
+ * under `theme.vars.palette.nerv.*` — a different namespace from ZAPAC's.
  *
- * ── Why this is a scaffold, not a working skin yet ──────────────────────────
- * Under MUI's `cssVariables` theming, app components read `theme.vars.palette.*`
- * (the scheme-switching CSS-var reference). A real second skin must therefore be
- * a *fully built* theme — its own `createTheme({ cssVariables, colorSchemes,
- * ... , zapac: { radius, space, fonts, motion, layers } })` — so that
- * `theme.vars.palette.glass` and the `zapac.*` token namespace resolve. Nesting
- * a plain override under the ZAPAC provider would update `theme.palette` but not
- * the generated CSS vars, so it would not take visual effect. Building that full
- * theme is Phase 5.
+ * This adapter bridges Phosphor to the app in two ways, both applied once at load:
  *
- * ── To activate, once the theme below is built ──────────────────────────────
- *   import { registerSkin } from '@/theme/registry.js';
- *   import { phosphorSkin } from '@/theme/skins/skins/phosphor.jsx';
- *   registerSkin(phosphorSkin);
- * The switcher and provider pick it up with no further changes — that is the
- * whole point of the registry.
+ *  1. `theme.tokens` — the normalized bundle {@link module:theme/contract getTokens}
+ *     reads, so the app's own components (which call getTokens) are skin-agnostic.
+ *
+ *  2. ZAPAC-compat layer (`theme.zapac` + `theme.vars.palette.glass`) — the app
+ *     still uses a few @zapac house components (StatusPill, EmptyState, SearchInput)
+ *     that hardcode `theme.zapac.*` / `theme.vars.palette.glass.*`. Those reads throw
+ *     on a theme without that shape. Until those components are replaced with
+ *     skin-neutral equivalents (the UI-theming pass), this shim maps Phosphor's
+ *     `nerv` tokens onto the ZAPAC namespace so they render instead of crashing.
+ *     Remove it once no @zapac component remains.
  */
+import { ThemeProvider } from '@mui/material/styles';
+import CssBaseline from '@mui/material/CssBaseline';
+import InitColorSchemeScript from '@mui/material/InitColorSchemeScript';
+import { theme as phosphorTheme } from 'phosphor-console-theme/theme';
 
-// import { ThemeProvider } from '@mui/material/styles';
-// import CssBaseline from '@mui/material/CssBaseline';
-// import { createPhosphorTheme } from '@/theme/skins/phosphor.theme.js';  // Phase 5
-//
-// function PhosphorProvider({ children, defaultMode = 'dark' }) {
-//   const theme = createPhosphorTheme(defaultMode);
-//   return (
-//     <ThemeProvider theme={theme} defaultMode={defaultMode} disableTransitionOnChange>
-//       <CssBaseline />
-//       {children}
-//     </ThemeProvider>
-//   );
-// }
-//
-// /** @type {import('@/theme/registry.js').Skin} */
-// export const phosphorSkin = {
-//   id: 'phosphor',
-//   label: 'Phosphor Console',
-//   description: 'NERV/MAGI tactical CRT command deck — colour is state.',
-//   Provider: PhosphorProvider,
-//   supportsColorMode: false, // console is dark-only
-// };
+if (!phosphorTheme.tokens) {
+  const n = phosphorTheme.nerv;
+  const v = phosphorTheme.vars.palette;
 
-export {};
+  // Radius: Phosphor is sharp (chips 2px, segments 4px, hero chamfer). Alias the
+  // ZAPAC scale (sm/md/lg/pill) onto it so both getTokens and @zapac components resolve.
+  const radius = { ...n.radius, sm: n.radius.chip, md: n.radius.seg, lg: n.radius.seg, pill: n.radius.chip };
+  // Fonts: Phosphor UI type is mono. Provide the `ui` alias @zapac expects.
+  const fonts = { ...n.fonts, ui: n.fonts.mono };
+  // Motion: mechanical/linear — expose ZAPAC's `ease`/`easeInOut` easing keys.
+  const motion = { ...n.motion, ease: n.motion.linear, easeInOut: n.motion.linear };
+  // Flat CRT "glass": black void surface, no blur, chrome-orange stroke, panel glow.
+  const glass = {
+    surface: v.background.paper,
+    surface2: v.nerv.surface2,
+    blur: '0px',
+    stroke: v.nerv.stroke,
+    strokeStrong: v.nerv.stroke,
+    cardShadow: v.nerv.glowPanel,
+  };
+
+  phosphorTheme.tokens = { radius, space: n.space, layers: n.layers, motion, fonts, glass };
+  // ── ZAPAC-compat shim (temporary — see file header) ──
+  phosphorTheme.zapac = { radius, fonts, space: n.space, layers: n.layers, motion };
+  phosphorTheme.vars.palette.glass = glass;
+}
+
+function PhosphorProvider({ children }) {
+  return (
+    <>
+      <InitColorSchemeScript attribute="class" defaultMode="dark" />
+      <ThemeProvider theme={phosphorTheme} defaultMode="dark" disableTransitionOnChange>
+        <CssBaseline />
+        {children}
+      </ThemeProvider>
+    </>
+  );
+}
+
+/** @type {import('../registry.js').Skin} */
+export const phosphorSkin = {
+  id: 'phosphor',
+  label: 'Phosphor Console',
+  description: 'NERV/MAGI tactical CRT command deck — colour is state.',
+  Provider: PhosphorProvider,
+  supportsColorMode: false, // dark-only
+};

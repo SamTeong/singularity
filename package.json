@@ -37,6 +37,7 @@
     "fastify": "^5.10.0",
     "mermaid": "^11.16.0",
     "node-pty": "^1.1.0",
+    "phosphor-console-theme": "file:vendor/phosphor-console-theme-0.1.0.tgz",
     "playwright-core": "^1.61.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",

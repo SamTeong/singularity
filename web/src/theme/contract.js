@@ -35,6 +35,10 @@ const EMPTY = Object.freeze({});
  * @returns {SkinTokens}
  */
 export function getTokens(theme) {
+  // A skin may attach a pre-normalized bundle at `theme.tokens` (the preferred
+  // path — see skins/phosphor.jsx). Otherwise fall back to the ZAPAC mapping,
+  // reading its `zapac` namespace + the glass palette group.
+  if (theme?.tokens) return theme.tokens;
   const z = theme?.zapac ?? EMPTY;
   const glass = theme?.vars?.palette?.glass ?? theme?.palette?.glass ?? EMPTY;
   return {

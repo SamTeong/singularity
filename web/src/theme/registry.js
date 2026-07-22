@@ -15,6 +15,8 @@
  * @property {string} [description] Short blurb for the switcher.
  * @property {React.ComponentType<{ children: React.ReactNode, defaultMode?: 'light'|'dark' }>} Provider
  *   Theme-boundary component that themes everything below it.
+ * @property {React.ComponentType} [Background] Optional full-bleed background
+ *   painted behind the shell (e.g. ZAPAC's ambient gradient). Omit for none.
  * @property {boolean} [supportsColorMode] Whether the skin honours light/dark
  *   toggling via `@zapac/mui-theme`'s `useColorMode`. Defaults to true.
  */

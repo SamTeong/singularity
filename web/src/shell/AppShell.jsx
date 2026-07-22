@@ -8,7 +8,9 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
-import { AmbientBackground, useColorMode } from '@zapac/mui-theme';
+import { useColorMode } from '@zapac/mui-theme';
+import { useThemeSkin } from '@/theme/AppThemeProvider.jsx';
+import { getSkin } from '@/theme/registry.js';
 import DirPicker from '@/components/DirPicker.jsx';
 import { untildify } from '@/lib/paths.js';
 import ProcessManager from '@/features/processes/ProcessManager.jsx';
@@ -54,6 +56,12 @@ export default function AppShell() {
     usage, stats, sendMsg, refreshUsage, registerChat, registerError,
   } = useAgents();
   const { resolved, toggle: toggleColorMode } = useColorMode();
+  // The active skin optionally paints a full-bleed background behind the shell,
+  // and declares whether it supports light/dark toggling.
+  const { skinId } = useThemeSkin();
+  const activeSkin = getSkin(skinId);
+  const SkinBackground = activeSkin?.Background;
+  const supportsColorMode = activeSkin?.supportsColorMode !== false;
 
   const [cwd, setCwd] = useState('~');
   const [picking, setPicking] = useState(false);
@@ -132,7 +140,7 @@ export default function AppShell() {
 
   return (
     <Box ref={mainRef} sx={{ position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-      <AmbientBackground />
+      {SkinBackground && <SkinBackground />}
 
       {/* Top row: sidebar + selected view. The terminal dock spans full width below. */}
       <Box sx={{ flex: 1, minHeight: 0, display: 'flex' }}>
@@ -214,6 +222,7 @@ export default function AppShell() {
         restarting={restarting}
         resolved={resolved}
         onToggleTheme={onToggleTheme}
+        showColorToggle={supportsColorMode}
       />
 
       {/* After a theme toggle, offer to respawn live sessions so their claude TUI

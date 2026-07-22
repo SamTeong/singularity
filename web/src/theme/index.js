@@ -7,11 +7,10 @@
  */
 import { registerSkin } from '@/theme/registry.js';
 import { zapacSkin } from '@/theme/skins/zapac.jsx';
+import { phosphorSkin } from '@/theme/skins/phosphor.jsx';
 
 registerSkin(zapacSkin);
-// Phase 5: once `skins/phosphor.jsx` builds a full theme, activate it here:
-//   import { phosphorSkin } from '@/theme/skins/phosphor.jsx';
-//   registerSkin(phosphorSkin);
+registerSkin(phosphorSkin);
 
 export { AppThemeProvider, useThemeSkin } from '@/theme/AppThemeProvider.jsx';
 export { getTokens } from '@/theme/contract.js';
