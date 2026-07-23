@@ -1,34 +1,40 @@
-// Unit tests for the spawn/encoding logic: encodeCwd + buildSpawn, plus fork().
-// fork() ends with a real create() call, which spawns a real pty (node-pty) —
-// undesirable in a unit test (launches a real, live child process). CLAUDE_BIN
-// is pointed at a file that exists but isn't a valid executable, so node-pty's
-// spawn() fails fast with a synchronous throw instead of launching anything
-// (confirmed: even a spawn that exits immediately leaves a ConPTY handle that
-// doesn't release on kill() and hangs `node --test`). That lets the test
-// verify fork()'s transcript copy/rewrite (which runs before create() is
-// called) but not the returned-agent fields, since fork() throws before
-// returning. SINGULARITY_HOME is pointed at a scratch temp dir first (create()/
-// fork() persist() to APP_DIR/state/agents.json — else it'd clobber the user's
-// real agents.json), mirroring crons.test.mjs's convention: env tweaks before a
-// dynamic import of the module graph.
+// Unit tests for the spawn/encoding logic: encodeCwd + buildSpawn, plus fork()/
+// create()/respawnAll()/beginDrain(), which spawn a real pty (node-pty). A
+// cross-platform "keepalive" bin stands in for the claude/ollama binary: an
+// interactive process that ignores its argv and stays alive until killed —
+// cmd.exe on Windows (an interactive REPL that survives bad commands), a
+// sleep-forever shell script on POSIX. Both CLAUDE_BIN and OLLAMA_BIN point at
+// it, so every spawn path yields a genuine, cleanly-killable live pty on both
+// platforms; spawn-path tests start one and kill+wait before finishing.
+// (An invalid bin can't be used as a "spawn throws synchronously" trick here:
+// node-pty on POSIX forkpty()s and the child execvp-fails ASYNCHRONOUSLY — it
+// never throws synchronously, unlike Windows ConPTY.) SINGULARITY_HOME is
+// pointed at a scratch temp dir first (create()/fork() persist() to
+// APP_DIR/state/agents.json — else it'd clobber the user's real agents.json),
+// mirroring crons.test.mjs's convention: env tweaks before a dynamic import of
+// the module graph.
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-agents-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
-process.env.CLAUDE_BIN = join(scratch, 'not-an-exe'); // exists, not a valid executable → spawn throws synchronously
-writeFileSync(process.env.CLAUDE_BIN, 'not a real executable');
-// OLLAMA_BIN points at the real system shell: a harmless, long-lived process
-// that ignores claude's argv and stays alive until killed. buildSpawn's
-// ollama-wrap branch (model outside CLAUDE_ALIASES) routes spawn() through
-// this bin, so the respawnAll test below gets a genuine live pty without
-// needing a real `claude` binary — CLAUDE_BIN stays invalid (spawn throws
-// synchronously) for every other test, which spawns via the claude-model path.
-process.env.OLLAMA_BIN = 'C:\\Windows\\System32\\cmd.exe';
+// A long-lived process that ignores its argv and blocks until killed, so both
+// the claude-model path (CLAUDE_BIN) and the ollama-wrap path (OLLAMA_BIN)
+// yield a real, killable pty without needing the actual binaries.
+let keepalive;
+if (process.platform === 'win32') {
+  keepalive = 'C:\\Windows\\System32\\cmd.exe'; // interactive REPL: survives unknown argv, reads the pty until killed
+} else {
+  keepalive = join(scratch, 'keepalive.sh');
+  writeFileSync(keepalive, '#!/bin/sh\nexec sleep 2147483647\n'); // execs sleep → ignores argv, blocks until SIGHUP
+  chmodSync(keepalive, 0o755);
+}
+process.env.CLAUDE_BIN = keepalive;
+process.env.OLLAMA_BIN = keepalive;
 after(() => {
   rmSync(scratch, { recursive: true, force: true });
   // node-pty's spawn() (even the failed attempt inside the fork test below)
@@ -40,6 +46,18 @@ after(() => {
 });
 
 const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain } = await import('./agents.mjs');
+
+// Kill a live pty and wait for its onExit to settle (status 'exited'), so a
+// test never leaks a running child into the next test or file teardown.
+function killAndWait(id) {
+  return new Promise((resolve) => {
+    const onStatus = ({ id: sid, status }) => {
+      if (sid === id && status === 'exited') { bus.off('status', onStatus); resolve(); }
+    };
+    bus.on('status', onStatus);
+    kill(id);
+  });
+}
 
 test('encodeCwd replaces every non-alphanumeric (incl. dots) with "-"', () => {
   assert.equal(encodeCwd('C:\\git\\singularity'), 'C--git-singularity');
@@ -99,7 +117,7 @@ test('buildSpawn: existing session log switches to --resume', () => {
 // init()+a fake agents.json (the pattern init() itself uses to reload
 // detached agents after a daemon restart) rather than via create(), so
 // seeding the source never spawns anything either.
-test('fork: copies+rewrites transcript, then throws on create()\'s spawn (see file header)', () => {
+test('fork: copies+rewrites the source transcript into the new session log', async () => {
   const srcId = '10000000-aaaa-bbbb-cccc-100000000001';
   const forkCwd = scratch;
   const dir = join(homedir(), '.claude', 'projects', encodeCwd(forkCwd));
@@ -113,15 +131,17 @@ test('fork: copies+rewrites transcript, then throws on create()\'s spawn (see fi
   }));
   try {
     init(); // loads srcId into the registry as 'detached', proc: null — no spawn
-    assert.throws(() => fork(srcId, 'copyname'), /Cannot create process/);
-
-    // the transcript copy/rewrite ran before create()'s spawn threw.
-    const newFile = readdirSync(dir).find((f) => f !== `${srcId}.jsonl`);
-    assert.ok(newFile, 'a new session log was written');
-    const newId = newFile.replace('.jsonl', '');
-    const content = readFileSync(join(dir, newFile), 'utf8');
-    assert.ok(content.includes(`"sessionId":"${newId}"`));
-    assert.ok(!content.includes(srcId));
+    const forked = fork(srcId, 'copyname'); // copies+rewrites the transcript, then spawns a real pty over it
+    try {
+      // the copied log carries the NEW id everywhere and no trace of the source id.
+      const newLog = join(dir, `${forked.id}.jsonl`);
+      assert.ok(existsSync(newLog), 'a new session log was written for the fork');
+      const content = readFileSync(newLog, 'utf8');
+      assert.ok(content.includes(`"sessionId":"${forked.id}"`));
+      assert.ok(!content.includes(srcId));
+    } finally {
+      await killAndWait(forked.id);
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -131,7 +151,7 @@ test('fork: copies+rewrites transcript, then throws on create()\'s spawn (see fi
 // one — a claude proc that exited (e.g. usage-limit hit) leaves an 'exited'
 // entry with proc:null in the registry; re-entering its id must resume the
 // conversation, not error. Seeded via init()+fake agents.json (no spawn).
-test('create: dead (exited) dup id resumes via reattach instead of "already in use"', () => {
+test('create: dead (exited) dup id resumes via reattach instead of "already in use"', async () => {
   const deadId = '20000000-bbbb-cccc-dddd-200000000002';
   const deadCwd = scratch;
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
@@ -140,9 +160,15 @@ test('create: dead (exited) dup id resumes via reattach instead of "already in u
     recentRepos: [],
   }));
   init(); // loads deadId as 'detached', proc: null
-  // reattach → buildSpawn → spawn(CLAUDE_BIN=not-an-exe) throws synchronously,
-  // proving we took the resume path, NOT the 'already in use' refusal.
-  assert.throws(() => create({ sessionId: deadId, cwd: deadCwd, model: 'claude' }), /Cannot create process/);
+  // re-entering a dead id takes the resume path (reattach → spawn a live pty),
+  // NOT the 'already in use' refusal — a fresh live pid on the same id proves it.
+  const a = create({ sessionId: deadId, cwd: deadCwd, model: 'claude' });
+  try {
+    assert.equal(a.id, deadId);
+    assert.ok(a.pid, 'reattach spawned a live pty (resume path taken, not refused)');
+  } finally {
+    await killAndWait(deadId);
+  }
 });
 
 // remove() on a dead/detached entry drops it from the registry immediately

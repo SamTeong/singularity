@@ -4,7 +4,7 @@
 // caveman plugin enabled) the cavecrew fallback.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -261,7 +261,13 @@ test('ensureWorktree: recreates when missing, reusing the existing branch; no-op
     ensureWorktree({ kind: 'git', repo: sharedRepo, worktree: sharedWt, branch: 'task/y', baseBranch: sharedBase });
     assert.equal(existsSync(sharedWt), true);
     const wtList = execFileSync('git', ['-C', sharedRepo, 'worktree', 'list'], { encoding: 'utf8' });
-    assert.ok(wtList.includes(sharedWt.replace(/\\/g, '/')), 'worktree list includes the recreated worktree');
+    // Normalize both sides: the Windows CI runner's tmpdir() is an 8.3 short
+    // path (RUNNER~1) while `git worktree list` emits the long form; realpath
+    // (on the real path) + slash/case folding reconciles short/long + drive-
+    // letter casing so the compare holds.
+    const slash = (s) => s.replace(/\\/g, '/').toLowerCase();
+    const wanted = slash(realpathSync.native(sharedWt));
+    assert.ok(slash(wtList).includes(wanted), 'worktree list includes the recreated worktree');
     assert.doesNotThrow(() => ensureWorktree({ kind: 'git', repo: sharedRepo, worktree: sharedWt, branch: 'task/y', baseBranch: sharedBase }));
   } finally {
     rmSync(sharedRepo, { recursive: true, force: true });
