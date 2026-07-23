@@ -14,6 +14,15 @@ const SKILLS_CAP = 200; // backstop per scope — no silent truncation
 // '..', '...') which join()/resolve() would collapse into a parent traversal.
 const NAME_RE = /^(?!\.+$)[A-Za-z0-9._-]+$/;
 
+// Supporting files (scripts/, references/, agents/, assets/) listed as a
+// subtree beneath each skill in the rail. Recursively walked, relative paths
+// (POSIX '/') returned flat — the client indents by depth. Bound to avoid
+// runaway trees on weird skills.
+const FILES_CAP = 100;
+const FILE_DEPTH = 6;
+const MD_EXT = new Set(['md', 'markdown']);
+const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico']);
+
 // Skills root list, FS-persisted. Falls back to the old single-root file
 // (migration) then `~/.claude/skills` (a flat skills dir) when unset.
 const ROOTS_FILE = join(STATE_DIR, 'skills-roots.json');
@@ -79,10 +88,31 @@ function readSkillsDir(dir) {
     if (!existsSync(md)) continue;
     let description = '';
     try { description = parseSkill(readFileSync(md, 'utf8')).description; } catch {}
-    skills.push({ name, description });
+    skills.push({ name, description, files: listSkillFiles(join(dir, name)) });
     if (skills.length >= SKILLS_CAP) { capped = true; break; }
   }
   return { skills, capped };
+}
+
+// Supporting files inside a skill dir, relative POSIX paths, sorted. SKILL.md
+// excluded. Symlink dirs bounded by FILE_DEPTH so a cycle can't exhaust the
+// walk. Returns an array of strings (empty if unreadable).
+function listSkillFiles(dir) {
+  const out = [];
+  const walk = (d, depth) => {
+    if (depth > FILE_DEPTH || out.length >= FILES_CAP) return;
+    let ents;
+    try { ents = readdirSync(d, { withFileTypes: true }); } catch { return; }
+    for (const e of ents.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (out.length >= FILES_CAP) return;
+      if (e.name === 'SKILL.md' && depth === 0) continue;
+      if (e.isDirectory() || e.isSymbolicLink()) { walk(join(d, e.name), depth + 1); continue; }
+      if (!e.isFile()) continue;
+      out.push(join(d, e.name).slice(dir.length + 1).split(/[\\/]/).join('/'));
+    }
+  };
+  walk(dir, 0);
+  return out;
 }
 
 // List skills under `root`, auto-detecting layout. `root` is a full path (the
@@ -133,4 +163,34 @@ export function readSkill(root, scope, skill, flat) {
     const parsed = parseSkill(readFileSync(p, 'utf8'));
     return { ok: true, path: p, name: parsed.name, description: parsed.description, triggers: parsed.triggers, body: parsed.body };
   } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Resolve a skill's base dir (the dir containing SKILL.md) — reused by
+// readSkillFile. Server-derived from validated bare names, same rules as readSkill.
+function skillBaseDir(root, scope, skill, flat) {
+  return flat ? join(root, skill) : join(root, scope, '.claude', 'skills', skill);
+}
+
+// Read a supporting file inside a skill dir. `file` is a relative POSIX path
+// (from listSkillFiles); each segment must pass NAME_RE so `..`/separators can't
+// traverse above the skill dir. `type` tells the client how to render:
+// 'markdown' (MarkdownBody), 'code' (raw <pre>), 'image' (preview note — binary
+// not shipped over JSON). ponytail: image rendering deferred, add <img> when needed.
+const EXT_TYPE = (ext) => (MD_EXT.has(ext) ? 'markdown' : IMG_EXT.has(ext) ? 'image' : 'code');
+
+export function readSkillFile(root, scope, skill, file, flat) {
+  root = root || (getSkillsRoots()[0] || '');
+  if (!root) return { ok: false, error: 'skills root not configured' };
+  if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
+  if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };
+  if (typeof file !== 'string' || !file) return { ok: false, error: 'bad file' };
+  const segs = file.split('/');
+  if (segs.some((s) => !s || !NAME_RE.test(s))) return { ok: false, error: 'bad file' };
+  const p = join(skillBaseDir(root, scope, skill, flat), ...segs);
+  if (!existsSync(p)) return { ok: false, error: 'not found' };
+  const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
+  const type = EXT_TYPE(ext);
+  if (type === 'image') return { ok: true, type, name: basename(p), path: p };
+  try { return { ok: true, type, name: basename(p), path: p, content: readFileSync(p, 'utf8') }; }
+  catch (e) { return { ok: false, error: e.message }; }
 }

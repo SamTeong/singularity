@@ -17,6 +17,10 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import SchoolIcon from '@mui/icons-material/School';
+import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
+import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
+import ImageIcon from '@mui/icons-material/Image';
+import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
 import DetailPane from '@/components/DetailPane.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
@@ -30,6 +34,16 @@ import { useRootList } from '@/components/panelkit/useRootList.js';
 // Skills viewer: tree of roots → scopes → skills (left), rendered SKILL.md
 // (right). Read-only — no write. Each root's layout (grouped vs flat) is
 // auto-detected server-side; the server derives paths from (root, scope, skill).
+const MD_EXTS = new Set(['md', 'markdown']);
+const IMG_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico']);
+const fileIcon = (rel) => {
+  const ext = (rel.slice(rel.lastIndexOf('.') + 1) || '').toLowerCase();
+  if (MD_EXTS.has(ext)) return <DescriptionOutlinedIcon fontSize="small" />;
+  if (IMG_EXTS.has(ext)) return <ImageIcon fontSize="small" />;
+  if (ext) return <CodeOutlinedIcon fontSize="small" />;
+  return <InsertDriveFileOutlinedIcon fontSize="small" />;
+};
+
 export default function SkillsPanel() {
   const { roots, shownRoots, remember, forget, loaded } = useRootList('/skills');
   const [picking, setPicking] = useState(false);
@@ -37,8 +51,10 @@ export default function SkillsPanel() {
   const [q, setQ] = useState('');
   const [expandedRoots, setExpandedRoots] = useState(() => new Set());
   const [expandedScopes, setExpandedScopes] = useState(() => new Set()); // keys: `${root}::${scope}`
+  const [expandedSkills, setExpandedSkills] = useState(() => new Set()); // keys: `${root}::${scope}::${skill}`
   const [sel, setSel] = useState(null); // { root, scope, skill, flat }
   const [skill, setSkill] = useState(null); // { name, description, triggers, body }
+  const [file, setFile] = useState(null); // { path, name, type, content, loading, error }
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
 
@@ -68,14 +84,33 @@ export default function SkillsPanel() {
     if (n.has(key)) n.delete(key); else n.add(key);
     return n;
   });
+  const toggleSkill = (key) => setExpandedSkills((s) => {
+    const n = new Set(s);
+    if (n.has(key)) n.delete(key); else n.add(key);
+    return n;
+  });
 
   const open = (rootPath, scopeName, skillName, flatVal) => {
-    if (sel?.root === rootPath && sel?.scope === scopeName && sel?.skill === skillName) return;
-    setSel({ root: rootPath, scope: scopeName, skill: skillName, flat: flatVal }); setErr(null); setLoading(true); setSkill(null);
+    setSel({ root: rootPath, scope: scopeName, skill: skillName, flat: flatVal });
+    setFile(null); setErr(null); setLoading(true); setSkill(null);
     fetch(`/skill?root=${encodeURIComponent(untildify(rootPath))}&scope=${encodeURIComponent(scopeName)}&skill=${encodeURIComponent(skillName)}&flat=${flatVal ? '1' : '0'}`).then((r) => r.json()).then((d) => {
       if (!d.ok) { setErr(d.error || 'failed to load skill'); setSkill(null); }
       else setSkill({ name: d.name, description: d.description, triggers: d.triggers || [], body: d.body });
     }).catch(() => setErr('failed to load skill')).finally(() => setLoading(false));
+  };
+
+  // Open a supporting file inside the currently-selected skill. Reuses the
+  // /skill endpoint with a `file` query (same prefix → already proxied).
+  const openFile = (relPath) => {
+    if (!sel) return;
+    setFile({ path: relPath, name: relPath.split('/').pop(), loading: true });
+    setLoading(true); setErr(null);
+    const u = `/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}&file=${encodeURIComponent(relPath)}`;
+    fetch(u).then((r) => r.json()).then((d) => {
+      if (!d.ok) { setFile({ path: relPath, name: relPath.split('/').pop(), error: d.error || 'failed to load file' }); }
+      else setFile({ path: relPath, name: d.name || relPath.split('/').pop(), type: d.type, content: d.content || '' });
+    }).catch(() => setFile({ path: relPath, name: relPath.split('/').pop(), error: 'failed to load file' }))
+      .finally(() => setLoading(false));
   };
 
   // Client-side filter — a root whose own path matches keeps all its scopes;
@@ -168,14 +203,41 @@ export default function SkillsPanel() {
                           <Collapse in={scOpen} timeout="auto" unmountOnExit>
                             <List dense disablePadding>
                               {sc.skills.map((sk) => {
+                                const skKey = `${r.root}::${sc.name}::${sk.name}`;
                                 const isSel = sel?.root === r.root && sel?.scope === sc.name && sel?.skill === sk.name;
+                                const skOpen = expandedSkills.has(skKey);
+                                const hasFiles = sk.files && sk.files.length > 0;
                                 return (
-                                  <ListItemButton key={sk.name} selected={isSel} onClick={() => open(r.root, sc.name, sk.name, r.flat)}
-                                    sx={{ pl: 7, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}
-                                    title={sk.description || sk.name}
-                                  >
-                                    <Typography variant="code" sx={{ fontSize: 12 }} noWrap>{sk.name}</Typography>
-                                  </ListItemButton>
+                                  <Box key={sk.name}>
+                                    <ListItemButton selected={isSel && !file}
+                                      onClick={() => { open(r.root, sc.name, sk.name, r.flat); if (hasFiles) toggleSkill(skKey); }}
+                                      sx={{ pl: 7, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}
+                                      title={sk.description || sk.name}
+                                    >
+                                      <ListItemIcon sx={{ minWidth: 20, '& .MuiSvgIcon-root': { fontSize: 16 }, color: 'text.secondary' }}>
+                                        {hasFiles ? (skOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />) : <Box sx={{ width: 16 }} />}
+                                      </ListItemIcon>
+                                      <Typography variant="code" sx={{ fontSize: 12 }} noWrap>{sk.name}</Typography>
+                                    </ListItemButton>
+                                    {hasFiles && (
+                                      <Collapse in={skOpen} timeout="auto" unmountOnExit>
+                                        <List dense disablePadding>
+                                          {sk.files.map((rel) => {
+                                            const isFileSel = isSel && file?.path === rel;
+                                            return (
+                                              <ListItemButton key={rel} selected={isFileSel} onClick={() => openFile(rel)}
+                                                sx={{ pl: 10, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}
+                                                title={rel}
+                                              >
+                                                <ListItemIcon sx={{ minWidth: 24, color: 'text.secondary' }}>{fileIcon(rel)}</ListItemIcon>
+                                                <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }} noWrap>{rel}</Typography>
+                                              </ListItemButton>
+                                            );
+                                          })}
+                                        </List>
+                                      </Collapse>
+                                    )}
+                                  </Box>
                                 );
                               })}
                               {sc.capped && <Typography sx={{ pl: 7, py: 0.5, color: 'text.secondary', fontSize: 11 }}>(capped at 200)</Typography>}
@@ -205,20 +267,54 @@ export default function SkillsPanel() {
           loading={loading}
           error={err}
         >
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.root)} / {sel?.flat ? '(flat)' : sel?.scope} / {sel?.skill}</Typography>
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>
+            {tildify(sel?.root)} / {sel?.flat ? '(flat)' : sel?.scope} / {sel?.skill}
+            {file && (
+              <>
+                {' · '}
+                <Box component="span" sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' }}}
+                  onClick={() => setFile(null)}>SKILL.md</Box>
+                {' / '}{file.name}
+              </>
+            )}
+          </Typography>
           <Box sx={(t) => ({
             flex: 1, minHeight: 0, overflow: 'auto',
             border: `1px solid ${getTokens(t).glass.stroke}`, borderRadius: `${getTokens(t).radius.sm}px`,
             p: 3, pb: 4,
           })}>
-            {skill?.name && <Typography variant="h1" sx={{ fontSize: 26, fontWeight: 800, mt: 0, mb: 1, letterSpacing: '-0.01em' }}>{skill.name}</Typography>}
-            {skill?.description && <Typography sx={{ color: 'text.secondary', fontSize: 14, lineHeight: 1.6, mb: 2 }}>{skill.description}</Typography>}
-            {skill?.triggers?.length > 0 && (
-              <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 2.5, alignItems: 'center' }}>
-                {skill.triggers.map((t2) => <StatusPill key={t2} status="review">{t2}</StatusPill>)}
-              </Stack>
+            {file ? (
+              <>
+                <Typography variant="h1" sx={{ fontSize: 20, fontWeight: 800, mt: 0, mb: 2, letterSpacing: '-0.01em' }}>{file.name}</Typography>
+                {file.error && <Typography sx={{ color: 'error.main', fontSize: 13 }}>{file.error}</Typography>}
+                {file.type === 'markdown' && <MarkdownBody>{file.content || ''}</MarkdownBody>}
+                {file.type === 'image' && (
+                  <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>
+                    Image preview unsupported in the viewer. Open the file directly:
+                    <Typography variant="code" sx={{ ml: 1, color: 'text.primary' }}>{file.path}</Typography>
+                  </Typography>
+                )}
+                {file.type === 'code' && (
+                  <Box component="pre" sx={(t) => ({
+                    fontFamily: 'var(--mui-font-CodeFont, monospace)', fontSize: 13, lineHeight: 1.6,
+                    p: 1.5, m: 0, overflow: 'auto', borderRadius: `${getTokens(t).radius.sm}px`,
+                    bgcolor: 'action.hover', border: `1px solid ${getTokens(t).glass.stroke}`,
+                    whiteSpace: 'pre',
+                  })}>{file.content}</Box>
+                )}
+              </>
+            ) : (
+              <>
+                {skill?.name && <Typography variant="h1" sx={{ fontSize: 26, fontWeight: 800, mt: 0, mb: 1, letterSpacing: '-0.01em' }}>{skill.name}</Typography>}
+                {skill?.description && <Typography sx={{ color: 'text.secondary', fontSize: 14, lineHeight: 1.6, mb: 2 }}>{skill.description}</Typography>}
+                {skill?.triggers?.length > 0 && (
+                  <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 2.5, alignItems: 'center' }}>
+                    {skill.triggers.map((t2) => <StatusPill key={t2} status="review">{t2}</StatusPill>)}
+                  </Stack>
+                )}
+                <MarkdownBody>{skill?.body || ''}</MarkdownBody>
+              </>
             )}
-            <MarkdownBody>{skill?.body || ''}</MarkdownBody>
           </Box>
         </DetailPane>
       </Stack>

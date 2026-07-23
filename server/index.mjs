@@ -16,10 +16,10 @@ import { scanClaude, killClaudePid } from './procs.mjs';
 import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
-import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile } from './rules.mjs';
+import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
-import { listSkills, readSkill, getSkillsRoots, setSkillsRoots } from './skills.mjs';
+import { listSkills, readSkill, readSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
@@ -464,6 +464,12 @@ app.put('/rules/file', async (req, reply) => {
   if (!r.ok) reply.code(400);
   return r;
 });
+// Companion <stem>-reference.md for a rule file (read-only, separate tree).
+app.get('/rules/reference', async (req, reply) => {
+  const r = findRuleReference(req.query.path);
+  if (!r.ok) reply.code(r.error === 'no reference' ? 404 : 400);
+  return r;
+});
 
 // Wiki: recursive .md browse + search + read-only file view under a client-
 // selected root (default ~/wiki). No write — wikis are LLM-authored.
@@ -487,7 +493,13 @@ app.get('/skills/roots', async () => ({ roots: getSkillsRoots() }));
 app.put('/skills/roots', async (req) => setSkillsRoots(req.body?.roots));
 app.get('/skills', async (req) => listSkills(req.query.root));
 app.get('/skill', async (req, reply) => {
-  const r = readSkill(req.query.root, req.query.scope, req.query.skill, req.query.flat === '1');
+  const flat = req.query.flat === '1';
+  if (req.query.file) {
+    const r = readSkillFile(req.query.root, req.query.scope, req.query.skill, req.query.file, flat);
+    if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
+    return r;
+  }
+  const r = readSkill(req.query.root, req.query.scope, req.query.skill, flat);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });

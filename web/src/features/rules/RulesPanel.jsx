@@ -15,6 +15,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ClearIcon from '@mui/icons-material/Clear';
 import GavelIcon from '@mui/icons-material/Gavel';
 import { markdown } from '@codemirror/lang-markdown';
+import { EditorView } from '@codemirror/view';
 import { EmptyState } from '@zapac/mui-theme';
 import CmEditor from '@/components/CmEditor.jsx';
 import DetailPane from '@/components/DetailPane.jsx';
@@ -37,6 +38,7 @@ export default function RulesPanel() {
   const [loadingFile, setLoadingFile] = useState(false);
   const [picking, setPicking] = useState(false);
   const [msg, setMsg] = useState(null);
+  const [ref, setRef] = useState(null); // {path, content} when viewing the companion reference (read-only)
 
   // Refresh the browse list whenever the root list changes.
   useEffect(() => {
@@ -63,11 +65,23 @@ export default function RulesPanel() {
   const open = (item) => {
     if (item.path === sel?.path) return;
     if (dirty && !window.confirm('Discard unsaved changes?')) return;
-    setSel(item); setMsg(null); setLoadingFile(true);
+    setSel(item); setMsg(null); setLoadingFile(true); setRef(null);
     fetch(`/rules/file?path=${encodeURIComponent(untildify(item.path))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : ''); setDirty(false);
       if (!d.ok) setMsg({ sev: 'error', text: d.error });
     }).finally(() => setLoadingFile(false));
+  };
+
+  // Open the companion <stem>-reference.md (read-only) in the editor pane.
+  // The rule's unsaved edits are preserved in `content`; closing the reference
+  // restores them.
+  const openRef = () => {
+    if (!sel) return;
+    setMsg(null);
+    fetch(`/rules/reference?path=${encodeURIComponent(untildify(sel.path))}`).then((r) => r.json()).then((d) => {
+      if (d.ok) setRef({ path: d.path, content: d.content });
+      else setMsg({ sev: 'error', text: d.error || 'no reference' });
+    }).catch(() => setMsg({ sev: 'error', text: 'failed to load reference' }));
   };
 
   const onChange = (v) => { setContent(v); setDirty(true); };
@@ -183,9 +197,26 @@ export default function RulesPanel() {
           empty={!sel && <EmptyState icon={<GavelIcon />} title="Select a rule" description="Browse on the left to view or edit here." />}
           loading={loadingFile}
         >
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.path)}</Typography>
-          <CmEditor value={content} onChange={onChange} extensions={[markdown()]} />
-          <SaveBar msg={msg} disabled={!dirty} onSave={save} />
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+            {ref ? (
+              <>
+                <Box component="span" sx={{ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: 'var(--mui-font-CodeFont, monospace)', '&:hover': { textDecoration: 'underline' } }} onClick={() => setRef(null)}>← rule</Box>
+                <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(ref.path)}</Typography>
+              </>
+            ) : (
+              <>
+                <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.path)}</Typography>
+                <Box component="span" onClick={openRef} sx={{ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: 'var(--mui-font-CodeFont, monospace)', '&:hover': { textDecoration: 'underline' } }}>rules-reference ↗</Box>
+              </>
+            )}
+          </Stack>
+          <CmEditor
+            value={ref ? ref.content : content}
+            onChange={ref ? () => {} : onChange}
+            extensions={ref ? [markdown(), EditorView.editable.of(false)] : [markdown()]}
+            deps={ref ? [ref.path] : []}
+          />
+          {!ref && <SaveBar msg={msg} disabled={!dirty} onSave={save} />}
         </DetailPane>
       </Stack>
     </Box>

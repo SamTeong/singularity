@@ -22,6 +22,10 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 mkdirSync(join(root, 'coding', '.claude', 'skills', 'freeze'), { recursive: true });
 writeFileSync(join(root, 'coding', '.claude', 'skills', 'freeze', 'SKILL.md'),
   '---\nname: freeze\ndescription: Lock edits to a directory.\ntriggers:\n  - freeze edits\n---\n\n# freeze\n\nbody');
+mkdirSync(join(root, 'coding', '.claude', 'skills', 'freeze', 'scripts'), { recursive: true });
+writeFileSync(join(root, 'coding', '.claude', 'skills', 'freeze', 'scripts', 'run.mjs'), "console.log('run')");
+mkdirSync(join(root, 'coding', '.claude', 'skills', 'freeze', 'references'), { recursive: true });
+writeFileSync(join(root, 'coding', '.claude', 'skills', 'freeze', 'references', 'notes.md'), '# notes\n\nref body');
 mkdirSync(join(root, 'coding', '.claude', 'skills', 'noisy'), { recursive: true });
 writeFileSync(join(root, 'coding', '.claude', 'skills', 'noisy', 'SKILL.md'), '# noisy\n\nno frontmatter');
 mkdirSync(join(root, 'common', '.claude', 'skills', 'x'), { recursive: true });
@@ -34,7 +38,7 @@ mkdirSync(join(flatRoot, 'declawed'), { recursive: true });
 writeFileSync(join(flatRoot, 'declawed', 'SKILL.md'), '---\nname: declawed\ndescription: De-slop text.\n---\n\n# declawed\n\nbody');
 mkdirSync(join(flatRoot, 'not-a-skill'), { recursive: true }); // no SKILL.md → skipped
 
-const { listSkills, readSkill, getSkillsRoots, setSkillsRoots } = await import('./skills.mjs');
+const { listSkills, readSkill, readSkillFile, getSkillsRoots, setSkillsRoots } = await import('./skills.mjs');
 const { STATE_DIR } = await import('./app-dir.mjs');
 
 test('listSkills: grouped — excludes common, skips scopes with no skills, carries description', () => {
@@ -45,6 +49,39 @@ test('listSkills: grouped — excludes common, skips scopes with no skills, carr
   assert.deepEqual(coding.skills.map((s) => s.name), ['freeze', 'noisy'], 'sorted');
   assert.equal(coding.skills.find((s) => s.name === 'freeze').description, 'Lock edits to a directory.');
   assert.equal(coding.skills.find((s) => s.name === 'noisy').description, '');
+});
+
+test('listSkills: carries supporting files (relative paths, SKILL.md excluded)', () => {
+  const { scopes } = listSkills(root);
+  const freeze = scopes[0].skills.find((s) => s.name === 'freeze');
+  assert.deepEqual(freeze.files, ['references/notes.md', 'scripts/run.mjs']);
+  const noisy = scopes[0].skills.find((s) => s.name === 'noisy');
+  assert.deepEqual(noisy.files, []);
+});
+
+test('readSkillFile: grouped reads a supporting file with type', () => {
+  const r = readSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs');
+  assert.ok(r.ok);
+  assert.equal(r.type, 'code');
+  assert.match(r.content, /console\.log/);
+  const md = readSkillFile(root, 'coding', 'freeze', 'references/notes.md');
+  assert.equal(md.type, 'markdown');
+  assert.match(md.content, /# notes/);
+});
+
+test('readSkillFile: rejects traversal and bad file paths', () => {
+  assert.equal(readSkillFile(root, 'coding', 'freeze', '../SKILL.md').ok, false, '.. segment rejected');
+  assert.equal(readSkillFile(root, 'coding', 'freeze', 'scripts/../run.mjs').ok, false, '.. segment in middle rejected');
+  assert.equal(readSkillFile(root, 'coding', 'freeze', 'nope.mjs').ok, false, 'missing file');
+  assert.equal(readSkillFile(root, 'coding', 'freeze', '').ok, false, 'empty file');
+});
+
+test('readSkillFile: flat resolves <root>/<skill>/<file>', () => {
+  // flat fixture has no supporting files; create one on the fly.
+  writeFileSync(join(flatRoot, 'declawed', 'scripts.js'), 'x');
+  const r = readSkillFile(flatRoot, null, 'declawed', 'scripts.js', true);
+  assert.ok(r.ok);
+  assert.equal(r.type, 'code');
 });
 
 test('listSkills: flat — root is a .claude/skills dir, one scope', () => {

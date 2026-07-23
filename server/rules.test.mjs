@@ -7,7 +7,10 @@ import { join } from 'node:path';
 // rules.mjs imports app-dir.mjs (STATE_DIR), which throws without SINGULARITY_HOME.
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
-const { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, isRulePath, readRuleFile, writeRuleFile } = await import('./rules.mjs');
+// Isolate RULES_REF_DIR from the real ~/.agents/rules-reference so tests can
+// plant reference files without touching the user's FS. Must precede the import.
+process.env.SING_RULES_REF = mkdtempSync(join(tmpdir(), 'sing-rules-ref-'));
+const { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, isRulePath, readRuleFile, writeRuleFile, findRuleReference } = await import('./rules.mjs');
 
 // A base root's rules live at <base>/.claude/rules — make + return that dir.
 const mkRoot = () => {
@@ -77,4 +80,25 @@ test('writeRuleFile then readRuleFile round-trips', () => {
   const r = readRuleFile(p);
   assert.equal(r.ok, true);
   assert.equal(r.content, '# hello');
+});
+
+test('findRuleReference pairs <stem>.md with <stem>-reference.md', () => {
+  const { dir } = mkRoot();
+  const rulePath = join(dir, 'skills.md');
+  writeFileSync(rulePath, 'rule body');
+  const refDir = process.env.SING_RULES_REF;
+  writeFileSync(join(refDir, 'skills-reference.md'), '# reference body');
+
+  const r = findRuleReference(rulePath);
+  assert.equal(r.ok, true);
+  assert.match(r.path, /skills-reference\.md$/);
+  assert.match(r.content, /reference body/);
+});
+
+test('findRuleReference: no companion → ok:false', () => {
+  const { dir } = mkRoot();
+  const rulePath = join(dir, 'lonely.md');
+  writeFileSync(rulePath, 'x');
+  assert.equal(findRuleReference(rulePath).ok, false);
+  assert.equal(findRuleReference('').ok, false);
 });

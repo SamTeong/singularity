@@ -5,7 +5,7 @@
 // (roots persistence) + memory.mjs (write guard).
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
-import { join, resolve, sep, normalize } from 'node:path';
+import { join, resolve, sep, normalize, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
 
@@ -140,5 +140,23 @@ export function readRuleFile(p) {
 export function writeRuleFile(p, content) {
   if (!isRulePath(p)) return { ok: false, error: 'path outside rule roots' };
   try { writeFileSync(p, content); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Companion reference for a rule file. Convention (see global CLAUDE.md): a rule
+// `<stem>.md` pairs with `<stem>-reference.md` under the rules-reference dir.
+// Reference is read-only and lives in a separate tree (not a rule root), so it
+// is NOT writable via /rules/file (isRulePath guards writes to rule roots only).
+// RULES_REF_DIR defaults to the global ~/.agents/rules-reference convention;
+// SING_RULES_REF overrides it (used by tests to isolate from real FS).
+const RULES_REF_DIR = process.env.SING_RULES_REF ? resolve(process.env.SING_RULES_REF)
+  : join(homedir(), '.agents', 'rules-reference');
+export function findRuleReference(rulePath) {
+  if (!rulePath) return { ok: false, error: 'no path' };
+  const stem = basename(rulePath).replace(/\.md$/i, '');
+  if (!stem) return { ok: false, error: 'no stem' };
+  const ref = join(RULES_REF_DIR, `${stem}-reference.md`);
+  if (!existsSync(ref)) return { ok: false, error: 'no reference' };
+  try { return { ok: true, path: ref, content: readFileSync(ref, 'utf8') }; }
   catch (e) { return { ok: false, error: e.message }; }
 }
