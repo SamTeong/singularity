@@ -2,6 +2,8 @@
 
 One control plane for your whole fleet of coding agents for spec-driven development.
 
+![Singularity overview](assets/screenshot-overview.png)
+
 ## Run
 
 ```
