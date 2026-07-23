@@ -171,6 +171,17 @@ export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
   // (impl=sonnet, reviewer=opus) or, for ollama, mirror the orchestrator model.
   const implModel = t.implModel || (ollama ? t.model : 'sonnet');
   const reviewerModel = t.reviewerModel || (ollama ? t.model : 'opus');
+  // Per-role max-turn caps from the dialog. Soft — the orchestrator runs as an
+  // interactive pty, so --max-turns/CLAUDE_CODE_MAX_TURNS (print-mode only) can't
+  // hard-kill it, and the Agent tool takes no inline maxTurns. The orchestrator
+  // self-limits and relays subagent caps in the spawn prompt.
+  const turnCaps = [];
+  if (t.orchestratorMaxTurns) turnCaps.push(`orchestrator ≤${t.orchestratorMaxTurns}`);
+  if (t.implMaxTurns) turnCaps.push(`implementor subagent ≤${t.implMaxTurns}`);
+  if (t.reviewerMaxTurns) turnCaps.push(`reviewer subagent ≤${t.reviewerMaxTurns}`);
+  const turnBudget = turnCaps.length
+    ? `\n- Turn budgets (soft — self-enforced, no hard kill): ${turnCaps.join(', ')}. Stay within your own cap; for subagents, include "stop after ≤N turns" in the spawn prompt and wrap up when reached.`
+    : '';
   // Project agent defs: if the task's cwd ships .claude/agents/<role>.md, route
   // subagents through that def (it carries the repo's stack + security rules)
   // instead of a generic Task-tool subagent. Discovery is deterministic here —
@@ -215,7 +226,7 @@ ${t.description}`;
 
 - You are working directly in \`${t.repo}\` (not a git repo). Make all changes in place.
 - Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (the requirements, already written for you) and \`Plan.md\` (you write it during planning). This is the stable source of truth — you and your subagents read from here, not the working directory.
-- You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.${turnEconomy}
+- You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.${turnEconomy}${turnBudget}
 
 ## Workflow
 
@@ -245,7 +256,7 @@ ${t.description}`;
 - You are in a dedicated git worktree (${t.worktree}) on branch ${t.branch}, branched from ${t.baseBranch} of the main repo at ${t.repo}. Do all work here.
 - Merge policy: ${t.mergeMode === 'auto' ? `after the review passes, merge ${t.branch} into ${t.baseBranch} in the main repo (git -C "${t.repo}" merge ${t.branch}). If the merge conflicts, abort it and park the task instead (see below).` : `leave the branch for the user to merge — do NOT merge or push.`}
 - Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (the requirements, already written for you) and \`Plan.md\` (you write it during planning). This is the stable source of truth — you and your subagents read from here, not the working directory.
-- You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.${turnEconomy}
+- You move your own task card by calling the board API with Bash (curl). Update the card at every phase change as instructed below. The "state" field is a short free-text phase label shown on the card.${turnEconomy}${turnBudget}
 
 ## Workflow
 
@@ -317,7 +328,10 @@ ${t.description}
 - ${lastStep}`;
 }
 
-export function createTask({ repo, title, description, model, implModel, reviewerModel, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, conclude }) {
+// Max-turn cap from the dialog: positive int or null (empty/0/invalid → no cap).
+const posInt = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n > 0 ? n : null; };
+
+export function createTask({ repo, title, description, model, implModel, reviewerModel, orchestratorMaxTurns, implMaxTurns, reviewerMaxTurns, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, conclude }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
   if (!existsSync(repo)) throw new Error('working directory does not exist');
   const kind = isGitWorkTree(repo) ? 'git' : 'plain';
@@ -345,7 +359,9 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     if (background) { reportDir = join(REPORTS_ROOT, short); mkdirSync(reportDir, { recursive: true }); }
     const t = {
       id, title: title.trim(), description: description.trim(), repo, kind, worktree, branch, baseBranch, ticketDir, reportDir,
-      model, implModel, reviewerModel, scopes, tags: normalizeTags(tags), requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
+      model, implModel, reviewerModel,
+      orchestratorMaxTurns: posInt(orchestratorMaxTurns), implMaxTurns: posInt(implMaxTurns), reviewerMaxTurns: posInt(reviewerMaxTurns),
+      scopes, tags: normalizeTags(tags), requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
       column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
       ...(background ? { conclude: conclude === 'done' ? 'done' : 'inreview' } : {}),
     };

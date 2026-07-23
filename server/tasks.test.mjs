@@ -110,6 +110,19 @@ test('claude model → no turn-economy bullet', () => {
   assert.doesNotMatch(p, /no prompt caching/);
 });
 
+test('max-turn caps injected when set', () => {
+  const p = buildTaskPrompt({ ...baseTask, orchestratorMaxTurns: 30, implMaxTurns: 20, reviewerMaxTurns: 10 }, false);
+  assert.match(p, /orchestrator ≤30/);
+  assert.match(p, /implementor subagent ≤20/);
+  assert.match(p, /reviewer subagent ≤10/);
+  assert.match(p, /soft — self-enforced/);
+});
+
+test('no turn-budget bullet when caps absent', () => {
+  const p = buildTaskPrompt(baseTask, false);
+  assert.doesNotMatch(p, /Turn budgets/);
+});
+
 test('claude model, no overrides → impl=sonnet, reviewer=opus', () => {
   const p = buildTaskPrompt(baseTask, false);
   assert.match(p, /model: sonnet\b/);

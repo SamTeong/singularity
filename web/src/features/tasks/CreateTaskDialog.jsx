@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
@@ -26,6 +27,9 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
   const [model, setModel] = useState('');
   const [implModel, setImplModel] = useState('sonnet');
   const [reviewerModel, setReviewerModel] = useState('opus');
+  const [orchTurns, setOrchTurns] = useState('');
+  const [implTurns, setImplTurns] = useState('');
+  const [revTurns, setRevTurns] = useState('');
   const [claudeSet, setClaudeSet] = useState(null);
   const [scopes, setScopes] = useState([]);
   const [requireApproval, setRequireApproval] = useState(false);
@@ -50,8 +54,12 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
   const reset = () => {
     setTitle(''); setDescription(''); setTags([]); setScopes([]); setModel('');
     setImplModel('sonnet'); setReviewerModel('opus');
+    setOrchTurns(''); setImplTurns(''); setRevTurns('');
     setRequireApproval(false); setMergeMode('manual');
   };
+
+  // Max-turn cap: positive int or undefined (empty/0 → no cap sent).
+  const posNum = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : undefined; };
 
   const create = async () => {
     if (busy || !cwd.trim() || !title.trim() || !description.trim()) return;
@@ -64,6 +72,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
         body: JSON.stringify({
           repo: untildify(cwd.trim()), title: title.trim(), description: description.trim(),
           model: model.trim(), implModel: implModel.trim(), reviewerModel: reviewerModel.trim(),
+          orchestratorMaxTurns: posNum(orchTurns), implMaxTurns: posNum(implTurns), reviewerMaxTurns: posNum(revTurns),
           scopes, tags, requirePlanApproval: requireApproval, mergeMode,
         }),
       });
@@ -89,10 +98,20 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
           <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
           <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} />
           <TextField size="small" label="requirements" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
-          <ModelSelect model={model} setModel={setModel} />
-          <Stack direction="row" spacing={1}>
-            <ModelSelect model={implModel} setModel={setImplModel} label="implementor model" placeholder="" />
-            <ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" placeholder="" />
+          <Stack spacing={1}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" /></Box>
+              <TextField size="small" type="number" label="turn cap" placeholder="—" value={orchTurns} onChange={(e) => setOrchTurns(e.target.value)} sx={{ width: 110 }} />
+            </Stack>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Box sx={{ flex: 1 }}><ModelSelect model={implModel} setModel={setImplModel} label="implementor model" placeholder="" /></Box>
+              <TextField size="small" type="number" label="turn cap" placeholder="—" value={implTurns} onChange={(e) => setImplTurns(e.target.value)} sx={{ width: 110 }} />
+            </Stack>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Box sx={{ flex: 1 }}><ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" placeholder="" /></Box>
+              <TextField size="small" type="number" label="turn cap" placeholder="—" value={revTurns} onChange={(e) => setRevTurns(e.target.value)} sx={{ width: 110 }} />
+            </Stack>
+            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>turn cap · soft limit, empty=none</Typography>
           </Stack>
           <ScopeSelect open={open} value={scopes} onChange={setScopes} />
           <Autocomplete
