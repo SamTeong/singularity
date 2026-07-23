@@ -16,12 +16,16 @@ import { setHome } from '@/lib/paths.js';
 
 const WS_URL = `ws://${location.host}/ws${window.__SING_TOKEN__ ? `?token=${encodeURIComponent(window.__SING_TOKEN__)}` : ''}`;
 
+// Selected session survives a reload (per-tab): null → fall back to first on
+// 'list', but remember the user's pick so a reload doesn't jump back to it.
+const ACTIVE_KEY = 'sing:active';
+
 /** @type {React.Context<any>} */
 const AgentsContext = createContext(null);
 
 export function AgentsProvider({ children }) {
   const [agents, setAgents] = useState([]);
-  const [active, setActive] = useState(null);
+  const [active, setActive] = useState(() => sessionStorage.getItem(ACTIVE_KEY));
   const [connected, setConnected] = useState(false);
   const [recent, setRecent] = useState([]);
   const [tasks, setTasks] = useState([]);
@@ -112,6 +116,12 @@ export function AgentsProvider({ children }) {
 
   // Home dir, for tildify() to collapse full paths to `~` on display.
   useEffect(() => { fetch('/env').then((r) => r.json()).then((d) => setHome(d.home)).catch(() => {}); }, []);
+
+  // Persist the selected session so a reload re-selects it, not agents[0].
+  useEffect(() => {
+    if (active) sessionStorage.setItem(ACTIVE_KEY, active);
+    else sessionStorage.removeItem(ACTIVE_KEY);
+  }, [active]);
 
   const sendMsg = useCallback((msg) => {
     const ws = wsRef.current;

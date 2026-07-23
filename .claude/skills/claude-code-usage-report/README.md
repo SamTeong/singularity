@@ -48,14 +48,8 @@ node <SKILL_DIR>/scripts/stats.mjs report
 
 Live cost/duration/context capture requires a statusline that writes its raw JSON payload to `~/.agents/.claude-code-usage-report/state/cost-state/<session_id>.json`; `--with-statusline` installs a cross-platform one. Without it, the report still renders from transcripts (cost/duration/rate-limit fields blank until a statusline is wired).
 
-Pre-op cost estimate:
-
-```sh
-node <SKILL_DIR>/scripts/stats.mjs estimate <planning|execution|verification|orchestration|other>
-```
-
 ## Scope
 
-This skill **collects, visualizes, and estimates**. Deciding *what new metrics to add* belongs to the sibling **`claude-code-usage-report-suggestions`** skill; the report's "Usage roadmap" section is sourced from it.
+This skill **collects and visualizes**. Deciding *what new metrics to add* belongs to the sibling **`claude-code-usage-report-suggestions`** skill; the report's "Usage roadmap" section is sourced from it.
 
 See `SKILL.md` for full mechanics and `INSTALL.md` for install details.

@@ -33,7 +33,7 @@ const USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage";
 const USAGE_API_BETA = "oauth-2025-04-20";
 const USAGE_API_TIMEOUT_MS = 10000;
 // Rate-limit forecast (Phase D). Empirical-Bayes fit persisted here; refit when
-// stale (same >7d-or-newer-data rule as priors). Pure math lives in forecast.mjs.
+// stale (>7d or a newer transcript landed). Pure math lives in forecast.mjs.
 const FORECAST_JSON = path.join(SKILL_STATE_DIR, "forecast.json");
 // Nominal window lengths, per claumon forecast.service.go durationFor. Used as
 // DurationHours in the rate prior (rho = uFinal / durationHours, percent/hour).
@@ -508,9 +508,6 @@ function _msg_tokens(msg) {
   return { i, o, cr, cc, model: msg.model };
 }
 
-// ---- priors (pre-execution cost estimation) ----
-
-const PRIORS_JSON = path.join(SKILL_STATE_DIR, "priors.json");
 
 const PRICE = {
   opus: [5.0, 25.0, 0.5, 6.25],
@@ -621,26 +618,6 @@ function _apply_price_overrides() {
 }
 _apply_price_overrides();
 
-// Strip the mcp__<server>__ prefix so namespaced and bare forms classify alike.
-const _canon_tool = (n) => n.replace(/^mcp__.*?__/, "");
-
-const ORCH_TOOLS = new Set([
-  "Agent", "Task", "TaskCreate", "TaskUpdate", "TaskStop", "TaskGet", "TaskList", "TaskOutput",
-]);
-const EDIT_TOOLS = new Set(["Edit", "Write", "MultiEdit", "NotebookEdit", "ctx_edit"]);
-const READ_TOOLS = new Set([
-  "Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch",
-  "ctx_read", "ctx_search", "ctx_tree", "ctx_overview",
-]);
-const PLAN_TOOLS = new Set(["EnterPlanMode", "ExitPlanMode"]);
-const TEST_RE = new RegExp(
-  "\\b(pytest|jest|vitest|mocha|go test|dotnet test|" +
-    "npm (run )?test|pnpm (run )?test|cargo test|rspec|" +
-    "phpunit|unittest|tox)\\b",
-  "i"
-);
-const VERIFY_SKILL_RE = /verify|review|test/i;
-
 function _price_key(model) {
   const m = (model || "").toLowerCase();
   for (const k of Object.keys(PRICE)) {
@@ -665,8 +642,7 @@ function _msg_cost(model, i, o, cr, cc) {
 }
 
 // Per-message cost with the long-context tier applied when this request's
-// input-side tokens exceed the threshold. Use for absolute cost estimation;
-// _seg_weight keeps the base-rate form since it only sets relative weights.
+// input-side tokens exceed the threshold. Use for absolute cost estimation.
 function _msg_cost_tiered(model, i, o, cr, cc) {
   const above = PRICE_ABOVE[_price_key(model)];
   if (above && i + cr + cc > LONG_CTX_THRESHOLD) {
@@ -699,7 +675,7 @@ function _transcript_msg_cost(p, includeSidechain = false) {
 // transcript, summed per assistant message so the long-context tier applies at
 // request granularity (Phase G: subagent tokens folded in so est_cost_usd isn't
 // a floor). Billed-cost sessions are unaffected — total_cost_usd wins in the
-// report and priors calibrate on billed only.
+// report.
 function computed_cost_from_transcript(p) {
   if (!p || !isFile(p)) return 0;
   let usd = _transcript_msg_cost(p, false);
@@ -710,517 +686,6 @@ function computed_cost_from_transcript(p) {
     }
   }
   return usd;
-}
-
-function _seg_weight(seg) {
-  const m = (seg.model || "").toLowerCase();
-  if (!Object.keys(PRICE).some((k) => m.includes(k))) return 0.0;
-  return _msg_cost(seg.model, seg.in, seg.out, seg.cr, seg.cc);
-}
-
-function _seg_new() {
-  return {
-    start: null, end: null, in: 0, out: 0, cr: 0, cc: 0,
-    tools: new Set(), verify: false, has_subagent: false, model: "", api_turns: 0,
-  };
-}
-
-function segment_transcript(p) {
-  const segs = [];
-  let cur = null;
-  if (!p || !isFile(p)) return segs;
-  for (const o of iter_jsonl(p)) {
-    if (o.isSidechain === true || o.isMeta === true) continue;
-    const typ = o.type;
-    const ts = epoch_from_iso(o.timestamp);
-    if (typ === "user") {
-      const c = (o.message || {}).content;
-      const human =
-        typeof c === "string" ||
-        (Array.isArray(c) && c.some((b) => b && typeof b === "object" && b.type === "text"));
-      if (human) {
-        cur = _seg_new();
-        cur.start = ts;
-        segs.push(cur);
-      }
-      continue;
-    }
-    if (typ !== "assistant") continue;
-    if (cur === null) {
-      cur = _seg_new();
-      cur.start = ts;
-      segs.push(cur);
-    }
-    if (ts) {
-      if (cur.start === null) cur.start = ts;
-      cur.end = ts;
-    }
-    const msg = o.message || {};
-    const content = msg.content;
-    if (Array.isArray(content)) {
-      for (const b of content) {
-        if (!(b && typeof b === "object" && b.type === "tool_use")) continue;
-        const name = b.name || "?";
-        cur.tools.add(_canon_tool(name));
-        const inp = b.input && typeof b.input === "object" && !Array.isArray(b.input) ? b.input : {};
-        if (name === "Skill") {
-          const sk = inp.command || inp.skill || "";
-          if (VERIFY_SKILL_RE.test(String(sk))) cur.verify = true;
-        } else if (name === "Bash" || name === "PowerShell") {
-          if (TEST_RE.test(String(inp.command || ""))) cur.verify = true;
-        }
-      }
-    }
-    const tk = _msg_tokens(msg);
-    if (!tk) continue;
-    cur.in += tk.i;
-    cur.out += tk.o;
-    cur.cr += tk.cr;
-    cur.cc += tk.cc;
-    cur.api_turns += 1;
-    if (tk.model) cur.model = tk.model;
-  }
-  return segs;
-}
-
-function _subagent_runs(sid) {
-  const runs = [];
-  for (const p of fs.globSync(`${PROJECTS_GLOB}/*/${sid}/**/*.jsonl`)) {
-    const s = parse_transcript(p);
-    runs.push({
-      start: s.start_epoch, model: s.last_model,
-      in: s.input_tokens, out: s.output_tokens,
-      cr: s.cache_read_tokens, cc: s.cache_creation_tokens,
-    });
-  }
-  return runs;
-}
-
-function classify_segment(seg) {
-  const t = seg.tools;
-  if (seg.has_subagent || setIntersects(t, ORCH_TOOLS)) return "orchestration";
-  if (setIntersects(t, EDIT_TOOLS)) return "execution";
-  if (seg.verify) return "verification";
-  if (setIntersects(t, PLAN_TOOLS) || (t.size && setIsSubset(t, READ_TOOLS))) return "planning";
-  return "other";
-}
-
-function setIntersects(a, b) {
-  for (const x of a) if (b.has(x)) return true;
-  return false;
-}
-
-function setIsSubset(a, b) {
-  for (const x of a) if (!b.has(x)) return false;
-  return true;
-}
-
-const _dist = (vals) => {
-  const sv = vals.slice().sort((a, b) => a - b);
-  return {
-    p50: round4(_percentile(sv, 0.5)),
-    p90: round4(_percentile(sv, 0.9)),
-    mean: sv.length ? round4(sv.reduce((a, b) => a + b, 0) / sv.length) : 0.0,
-  };
-};
-
-// Build a categories{} object (cost/token/turn dists + OOS calibration + EB
-// shrinkage) from a {category: records[]} map. Reused for the global priors and
-// for each per-model-family split.
-function _categories_from(catsMap) {
-  const categories = {};
-  const cal_by_cat = {};
-  for (const [cat, recs] of Object.entries(catsMap)) {
-    const cal = recs.filter((r) => r.calibrated);
-    const cal_costs = cal.map((r) => r.cost);
-    cal_by_cat[cat] = cal_costs;
-    categories[cat] = {
-      n: recs.length,
-      n_cost: cal_costs.length,
-      cost: _dist(cal_costs),
-      out_tok: _dist(recs.map((r) => r.out)),
-      total_tok: _dist(recs.map((r) => r.tot)),
-      api_turns: _dist(recs.map((r) => r.api_turns)),
-      calibration: _calibrate_oos(cal),
-    };
-  }
-  _shrink_categories(categories, cal_by_cat);
-  return categories;
-}
-
-function _build_priors(files) {
-  const cats = {};        // global — Anthropic-model ops only (default estimate)
-  const famCats = {};     // per price-family — includes third-party (glm/kimi)
-  const famSessions = {};
-  const existing_cost = {};
-  const existing_model = {};
-  if (isFile(STATS_CSV)) {
-    const text = fs.readFileSync(STATS_CSV, "utf-8");
-    for (const row of dictReader(text)) {
-      const sid = (row.session_id || "").trim();
-      if (!sid) continue;
-      existing_model[sid] = (row.last_model || "").trim();
-      const c = (row.total_cost_usd || "").trim();
-      if (c) {
-        const f = parseFloat(c);
-        if (!Number.isNaN(f)) existing_cost[sid] = f;
-      }
-    }
-  }
-  let n_sessions = 0;
-  for (const p of (files || fs.globSync(`${PROJECTS_GLOB}/*/*.jsonl`))) {
-    const sid = path.basename(p, ".jsonl");
-    if (sid === ZERO_UUID) continue;
-    const segs = segment_transcript(p);
-    if (!segs.length) continue;
-    n_sessions += 1;
-    for (const r of _subagent_runs(sid)) {
-      const st = r.start;
-      let tgt = null;
-      if (st !== null) {
-        for (const seg of segs) {
-          if (seg.start !== null && seg.end !== null && seg.start <= st && st <= seg.end) {
-            tgt = seg;
-            break;
-          }
-        }
-        if (tgt === null) {
-          const cand = segs.filter((s) => s.start !== null && s.start <= st);
-          if (cand.length) {
-            tgt = cand.reduce((a, b) => (b.start > a.start ? b : a));
-          }
-        }
-      }
-      if (tgt === null) tgt = segs[segs.length - 1];
-      tgt.has_subagent = true;
-      tgt.in += r.in;
-      tgt.out += r.out;
-      tgt.cr += r.cr;
-      tgt.cc += r.cc;
-    }
-    const weights = segs.map((s) => _seg_weight(s));
-    const sumw = weights.reduce((a, b) => a + b, 0);
-    // Session price-family. Third-party (glm/kimi via proxy) carries a wrong
-    // billed total_cost_usd, so use the token-priced cost (sumw) as the calibrated
-    // actual instead — the same PRICE table the report cost-override uses.
-    let fam = _price_key(existing_model[sid] || "");
-    if (_ANTHROPIC_PRICE_KEYS.has(fam)) {
-      // last_model can be blank in the CSV; fall back to the last seg with a model.
-      for (let k = segs.length - 1; k >= 0; k--) {
-        if (segs[k].model) { fam = _price_key(segs[k].model); break; }
-      }
-    }
-    const isTP = !_ANTHROPIC_PRICE_KEYS.has(fam);
-    const actual = isTP ? sumw : existing_cost[sid];
-    const calibrated = actual !== undefined && actual > 0 && sumw > 0;
-    famSessions[fam] = (famSessions[fam] || 0) + 1;
-    for (let idx = 0; idx < segs.length; idx++) {
-      const seg = segs[idx];
-      const w = weights[idx];
-      const cost = calibrated ? (actual * w) / sumw : w;
-      const cat = classify_segment(seg);
-      const rec = {
-        cost, calibrated, out: seg.out, api_turns: seg.api_turns,
-        tot: seg.in + seg.out + seg.cr + seg.cc,
-        t: seg.start, // epoch; for the OOS hold-out ordering (Phase E)
-      };
-      (famCats[fam] = famCats[fam] || {});
-      (famCats[fam][cat] = famCats[fam][cat] || []).push(rec);
-      if (!isTP) (cats[cat] = cats[cat] || []).push(rec); // global excludes third-party
-    }
-  }
-
-  const categories = _categories_from(cats);
-  const families = {};
-  for (const [fam, fc] of Object.entries(famCats)) {
-    families[fam] = { n_sessions: famSessions[fam] || 0, categories: _categories_from(fc) };
-  }
-  let n_cost = 0;
-  let n_ops = 0;
-  for (const recs of Object.values(cats)) {
-    n_ops += recs.length;
-    for (const r of recs) if (r.calibrated) n_cost += 1;
-  }
-  const price_per_mtok = {};
-  for (const [k, v] of Object.entries(PRICE)) {
-    price_per_mtok[k] = { input: v[0], output: v[1], cache_read: v[2], cache_write_5m: v[3] };
-  }
-  const priors = {
-    n_sessions,
-    n_ops,
-    n_ops_cost_calibrated: n_cost,
-    cost_basis:
-      "per-op USD = session cost redistributed across ops by token-price " +
-      "weight. Anthropic sessions use billed total_cost_usd; third-party " +
-      "(glm/kimi) use token-priced cost (their billed rate is wrong). Global " +
-      "`categories` = Anthropic only; `families` split by price-key incl. third-party.",
-    price_per_mtok,
-    categories,
-    families,
-  };
-  fs.writeFileSync(PRIORS_JSON, JSON.stringify(priors, null, 2), { encoding: "utf-8", mode: 0o600 });
-  return priors;
-}
-
-function round4(x) {
-  return Number.isFinite(x) ? Math.round(x * 1e4) / 1e4 : x;
-}
-
-// Phase E: out-of-sample calibration of the percentile cost priors. Hold out the
-// most recent N calibrated ops (by seg.start), fit p50/p90 on the rest, then score
-// coverage (% of held-out ≤ the predicted quantile), bias (mean(test)−mean(train)),
-// and pinball loss per quantile. Flags categories whose p90 coverage < 0.7 (the
-// estimate p90 is then unreliable). Returns null when too few calibrated ops to
-// split. No model change — this audits the existing priors so trust in `estimate`
-// is explicit.
-function _calibrate_oos(cal) {
-  const have = cal.filter((r) => r.t != null && Number.isFinite(r.cost));
-  if (have.length < 15) return null;
-  have.sort((a, b) => a.t - b.t);
-  const holdN = Math.min(30, Math.max(5, Math.round(have.length * 0.2)));
-  if (have.length - holdN < 10) return null;
-  const train = have.slice(0, have.length - holdN).map((r) => r.cost).sort((a, b) => a - b);
-  const test = have.slice(have.length - holdN).map((r) => r.cost);
-  const p50 = _percentile(train, 0.5), p90 = _percentile(train, 0.9);
-  const trainMean = train.reduce((a, b) => a + b, 0) / train.length;
-  const testMean = test.reduce((a, b) => a + b, 0) / test.length;
-  let cov50 = 0, cov90 = 0, pb50 = 0, pb90 = 0;
-  const pinball = (tau, y, q) => (y >= q) ? tau * (y - q) : (tau - 1) * (y - q);
-  for (const y of test) {
-    if (y <= p50) cov50++;
-    if (y <= p90) cov90++;
-    pb50 += pinball(0.5, y, p50);
-    pb90 += pinball(0.9, y, p90);
-  }
-  const n = test.length;
-  return {
-    n_test: n,
-    p50_coverage: round4(cov50 / n),
-    p90_coverage: round4(cov90 / n),
-    bias: round4(testMean - trainMean),
-    pinball_p50: round4(pb50 / n),
-    pinball_p90: round4(pb90 / n),
-    p90_reliable: cov90 / n >= 0.7,
-  };
-}
-
-// Phase H: empirical-Bayes shrinkage of small-n category cost priors toward a
-// cross-category mean. Reuses the forecast prior fit (FC.fitPrior) to get the
-// between-category variance tau0Sq + grand mean mu0 from each category's mean
-// cost; then normal-normal conjugacy per category:
-//   shrunkMean = tauPost*(mu0/tau0Sq + catMean/seSq), seSq = withinVar/n.
-// Small-n (noisy) categories pull toward mu0; large-n categories keep catMean.
-// The p50/p90 are shifted by (shrunkMean - catMean) — a location shift, since we
-// only reliably estimate the mean's shrinkage, not the full shape. Stored under
-// categories[cat].shrink; estimate prints raw+shrunk when n_cost < 20.
-function _shrink_categories(categories, cal_by_cat) {
-  const cats = Object.keys(categories);
-  // Cross-category prior: treat each category mean as one "session" observation
-  // (durationHours=1 → rho = mean). sigmaSessionSq=0 → no §5 correction.
-  const priorInput = [];
-  for (const cat of cats) {
-    const costs = cal_by_cat[cat] || [];
-    if (costs.length < 1) continue;
-    const m = costs.reduce((a, b) => a + b, 0) / costs.length;
-    priorInput.push({ uFinal: m, durationHours: 1 });
-  }
-  const prior = FC.fitPrior(priorInput, 0, 1e-9);
-  if (!prior.ok) return; // <2 categories with cost data; nothing to shrink toward
-  const mu0 = prior.mu0, tau0Sq = prior.tau0Sq;
-  for (const cat of cats) {
-    const costs = cal_by_cat[cat] || [];
-    const n = costs.length;
-    if (n < 1) continue;
-    const catMean = costs.reduce((a, b) => a + b, 0) / n;
-    let within = 0;
-    if (n >= 2) {
-      for (const c of costs) { const d = c - catMean; within += d * d; }
-      within /= n - 1;
-    }
-    const seSq = Math.max(within / n, 1e-9);
-    const precPrior = 1 / tau0Sq, precData = 1 / seSq;
-    const tauPostSq = 1 / (precPrior + precData);
-    const shrunkMean = tauPostSq * (mu0 * precPrior + catMean * precData);
-    const shift = shrunkMean - catMean;
-    const weight = precData / (precPrior + precData); // toward-data weight (1=raw)
-    const d = categories[cat];
-    d.shrink = {
-      n,
-      raw_mean: round4(catMean),
-      shrunk_mean: round4(shrunkMean),
-      raw_p50: round4(d.cost.p50),
-      shrunk_p50: round4(Math.max(0, d.cost.p50 + shift)),
-      raw_p90: round4(d.cost.p90),
-      shrunk_p90: round4(Math.max(0, d.cost.p90 + shift)),
-      weight: round4(weight),
-    };
-  }
-}
-
-function _print_priors(p) {
-  const cs = p.categories;
-  print(`priors -> ${PRIORS_JSON}`);
-  print(`sessions=${p.n_sessions} ops=${p.n_ops} cost-calibrated=${p.n_ops_cost_calibrated}`);
-  print(
-    "category".padEnd(14) + "n".padStart(6) + "$ p50".padStart(9) +
-      "$ p90".padStart(9) + "out p50".padStart(9) + "turns".padStart(7) +
-      "p90 cov".padStart(9) + "bias".padStart(9)
-  );
-  const cats = Object.keys(cs).sort((a, b) => cs[b].cost.p50 - cs[a].cost.p50);
-  for (const cat of cats) {
-    const d = cs[cat];
-    const cal = d.calibration;
-    const cov = cal ? fixed(cal.p90_coverage, 2) : "—";
-    const bias = cal ? fixed(cal.bias, 3) : "—";
-    print(
-      cat.padEnd(14) +
-        String(d.n).padStart(6) +
-        fixed(d.cost.p50, 4).padStart(9) +
-        fixed(d.cost.p90, 4).padStart(9) +
-        String(Math.trunc(d.out_tok.p50)).padStart(9) +
-        fixed(d.api_turns.p50, 1).padStart(7) +
-        cov.padStart(9) +
-        bias.padStart(9)
-    );
-  }
-  const flagged = cats.filter((c) => cs[c].calibration && !cs[c].calibration.p90_reliable);
-  if (flagged.length) {
-    printErr(`p90 coverage < 0.70 (estimate p90 unreliable) for: ${flagged.join(", ")}`);
-  }
-  const fams = Object.keys(p.families || {}).sort();
-  if (fams.length) {
-    print(`\nper-family priors (estimate --model <id>): ${fams.join(", ")}`);
-    for (const fam of fams) {
-      const fp = p.families[fam];
-      const tot = Object.values(fp.categories).reduce((a, c) => a + c.n, 0);
-      print(`  ${fam.padEnd(16)} sessions=${String(fp.n_sessions).padStart(4)}  ops=${String(tot).padStart(5)}`);
-    }
-  }
-}
-
-function cmd_priors() {
-  _print_priors(_build_priors());
-}
-
-// ---- estimate (pre-op cost lookup; no LLM) ----
-
-function _latest_context() {
-  const files = fs.globSync(`${STATE_GLOB}/*.json`);
-  if (!files.length) return null;
-  let newest = files[0];
-  let newestM = getmtime(newest);
-  for (const f of files) {
-    const m = getmtime(f);
-    if (m > newestM) {
-      newest = f;
-      newestM = m;
-    }
-  }
-  let d;
-  try {
-    d = JSON.parse(fs.readFileSync(newest, "utf-8"));
-  } catch {
-    return null;
-  }
-  const cu = _dig(d, "context_window", "current_usage") || {};
-  let tok = 0;
-  for (const k of ["input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"]) {
-    tok += _inum(cu[k]);
-  }
-  return { tokens: tok, model: _dig(d, "model", "id") || "" };
-}
-
-function _priors_stale(max_age_days = 7) {
-  const files = fs.globSync(`${PROJECTS_GLOB}/*/*.jsonl`);
-  if (!isFile(PRIORS_JSON)) return { stale: true, files };
-  const pj = getmtime(PRIORS_JSON);
-  if (Date.now() / 1000 - pj > max_age_days * 86400) return { stale: true, files };
-  const newest = files.reduce((mx, p) => Math.max(mx, getmtime(p)), 0);
-  return { stale: newest > pj, files };
-}
-
-function cmd_estimate(args) {
-  let p;
-  if (!args.no_refresh) {
-    const { stale, files } = _priors_stale();
-    if (stale) {
-      printErr("refreshing priors...");
-      p = _build_priors(files);
-    }
-  }
-  if (p === undefined) {
-    if (!isFile(PRIORS_JSON)) {
-      printErr("no priors.json — run: node stats.mjs priors");
-      process.exit(1);
-    }
-    p = JSON.parse(fs.readFileSync(PRIORS_JSON, "utf-8"));
-  }
-  // Resolve the model first so we can pick per-family priors (estimate --model).
-  let model = args.model;
-  let ctx_tok = args.context_tokens;
-  if (ctx_tok === null || ctx_tok === undefined) {
-    const live = _latest_context();
-    if (live) { ctx_tok = live.tokens; model = model || live.model; }
-  }
-  const fam = model ? _price_key(model) : null;
-  const famPriors = fam && p.families && p.families[fam];
-  const cats = (famPriors && famPriors.categories) || p.categories || {};
-  let cat = args.category;
-  if (!(cat in cats)) {
-    const hits = Object.keys(cats).filter((c) => c.startsWith(cat));
-    if (hits.length === 1) {
-      cat = hits[0];
-    } else if (famPriors) {
-      printErr(
-        `category '${args.category}' has no data for price-family ${fam} ` +
-        `(has: ${Object.keys(cats).sort().join(", ") || "none"}); omit --model for global priors.`
-      );
-      process.exit(1);
-    } else {
-      printErr(`unknown category '${args.category}'. choose: ${Object.keys(cats).sort().join(", ")}`);
-      process.exit(1);
-    }
-  }
-  const d = cats[cat];
-  const cost = d.cost;
-  const turns = d.api_turns.p50;
-  print(`category: ${cat}  (n=${d.n}, cost-calibrated n=${d.n_cost ?? 0})`);
-  if (famPriors) print(`model: ${model}  (price-family ${fam}) — using per-family priors`);
-  else if (model) print(`model: ${model}  (family ${fam}) — no per-family priors; using global`);
-  print(
-    `historical cost:  p50 $${fixed(cost.p50, 2)}   p90 $${fixed(cost.p90, 2)}   mean $${fixed(cost.mean, 2)}`
-  );
-  print(`typical turns: ${fixed(turns, 0)}   typical output: ${_abbr(d.out_tok.p50)} tok`);
-
-  const sh = d.shrink;
-  if (sh && (d.n_cost ?? 0) < 20) {
-    print(
-      `shrunk (EB, small-n): p50 $${fixed(sh.shrunk_p50, 2)}   p90 $${fixed(sh.shrunk_p90, 2)}   ` +
-      `(raw p50 $${fixed(sh.raw_p50, 2)} / p90 $${fixed(sh.raw_p90, 2)}; data-weight ${fixed(sh.weight, 2)})`
-    );
-  }
-
-  const cal = d.calibration;
-  if (cal) {
-    print(
-      `OOS calibration: p50 cov ${fixed(cal.p50_coverage, 2)}  p90 cov ${fixed(cal.p90_coverage, 2)}  ` +
-      `bias $${fixed(cal.bias, 3)}  pinball p50 $${fixed(cal.pinball_p50, 4)} p90 $${fixed(cal.pinball_p90, 4)}  (n_test ${cal.n_test})` +
-      (cal.p90_reliable ? "" : "  ⚠ p90 unreliable (<0.70)")
-    );
-  } else {
-    print("OOS calibration: — (need ≥15 cost-calibrated ops to hold out)");
-  }
-
-  if (ctx_tok) {
-    const crp = PRICE[_price_key(model)][2];
-    const floor = (ctx_tok * turns * crp) / 1e6;
-    print(
-      `input re-read floor: $${fixed(floor, 2)}  ` +
-        `(${_abbr(ctx_tok)} ctx x ${fixed(turns, 0)} turns @ $${crp}/MTok cache-read` +
-        `${model ? ", " + model : ""})`
-    );
-  }
-  print(`\nestimate: $${fixed(cost.p50, 2)}-$${fixed(cost.p90, 2)}`);
 }
 
 // ---- record (live SessionEnd hook) ----
@@ -1365,8 +830,8 @@ function _rebuild_stats_csv(excludeSid, files) {
     const cost = (ex.total_cost_usd || "").trim() || stCost;
     if (cost) with_cost += 1;
     // Token-estimated cost for sessions with no billed cost (no statusline).
-    // Kept in a separate column so billed cost — the basis for priors
-    // calibration — is never mixed with estimates. Recomputed each backfill for
+    // Kept in a separate column so billed cost is never mixed with estimates.
+    // Recomputed each backfill for
     // no-billed sessions (Phase G: subagent tokens folded in, so the estimate
     // stays current as the fold / pricing logic changes). Billed sessions skip
     // it entirely — total_cost_usd wins in the report.
@@ -1472,23 +937,6 @@ function _inum(v) {
   if (v === null || v === undefined || v === "") return 0;
   const f = parseFloat(v);
   return Number.isNaN(f) ? 0 : Math.trunc(f);
-}
-
-function _percentile(sorted_vals, p) {
-  if (!sorted_vals.length) return 0.0;
-  const k = (sorted_vals.length - 1) * p;
-  const f = Math.floor(k);
-  const c = Math.ceil(k);
-  if (f === c) return Number(sorted_vals[Math.trunc(k)]);
-  return sorted_vals[f] * (c - k) + sorted_vals[c] * (k - f);
-}
-
-function _abbr(n) {
-  n = Number(n || 0);
-  for (const [u, div] of [["b", 1e9], ["m", 1e6], ["k", 1e3]]) {
-    if (Math.abs(n) >= div) return fixed(n / div, 1) + u;
-  }
-  return fixed(n, 0);
 }
 
 // ---- report (HTML) ----
@@ -2303,7 +1751,7 @@ async function main() {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
   if (!cmd) {
-    printErr("usage: stats.mjs {record,backfill,report,priors,install,estimate,fetch-usage,fetch-pricing,forecast,pricing}");
+    printErr("usage: stats.mjs {record,backfill,report,install,fetch-usage,fetch-pricing,forecast,pricing}");
     process.exit(2);
   }
   if (cmd === "record") {
@@ -2312,8 +1760,6 @@ async function main() {
     cmd_backfill();
   } else if (cmd === "report") {
     cmd_report();
-  } else if (cmd === "priors") {
-    cmd_priors();
   } else if (cmd === "install") {
     const args = {
       dry_run: argv.includes("--dry-run"),
@@ -2332,23 +1778,6 @@ async function main() {
     await cmd_fetch_pricing({ oauth: argv.includes("--oauth") });
   } else if (cmd === "pricing") {
     cmd_pricing();
-  } else if (cmd === "estimate") {
-    const rest = argv.slice(1);
-    const args = { category: null, context_tokens: null, model: null, no_refresh: false };
-    for (let i = 0; i < rest.length; i++) {
-      const a = rest[i];
-      if (a === "--context-tokens") args.context_tokens = parseInt(rest[++i], 10);
-      else if (a.startsWith("--context-tokens=")) args.context_tokens = parseInt(a.split("=")[1], 10);
-      else if (a === "--model") args.model = rest[++i];
-      else if (a.startsWith("--model=")) args.model = a.split("=")[1];
-      else if (a === "--no-refresh") args.no_refresh = true;
-      else if (!a.startsWith("--") && args.category === null) args.category = a;
-    }
-    if (args.category === null) {
-      printErr("estimate: the following arguments are required: category");
-      process.exit(2);
-    }
-    cmd_estimate(args);
   } else {
     printErr(`unknown command: ${cmd}`);
     process.exit(2);

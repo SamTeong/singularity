@@ -14,6 +14,7 @@ import { getTokens } from '@/theme/contract.js';
 
 /** One selectable skin card — a radio in the theme radiogroup. */
 function SkinCard({ skin, active, onSelect }) {
+  const Preview = skin.Preview;
   return (
     <ButtonBase
       role="radio"
@@ -33,7 +34,7 @@ function SkinCard({ skin, active, onSelect }) {
         '&:hover': { bgcolor: 'action.hover' },
       })}
     >
-      <Stack spacing={0.75} sx={{ width: '100%' }}>
+      <Stack spacing={1} sx={{ width: '100%' }}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           {active
             ? <CheckCircleIcon fontSize="small" sx={{ color: 'primary.main' }} />
@@ -43,6 +44,7 @@ function SkinCard({ skin, active, onSelect }) {
         {skin.description && (
           <Typography variant="body2" sx={{ color: 'text.secondary' }}>{skin.description}</Typography>
         )}
+        {Preview && <Preview />}
       </Stack>
     </ButtonBase>
   );

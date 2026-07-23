@@ -21,6 +21,8 @@
 import { ThemeProvider } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import InitColorSchemeScript from '@mui/material/InitColorSchemeScript';
+import Box from '@mui/material/Box';
+import Stack from '@mui/material/Stack';
 import { theme as phosphorTheme } from 'phosphor-console-theme/theme';
 
 if (!phosphorTheme.tokens) {
@@ -63,11 +65,62 @@ function PhosphorProvider({ children }) {
   );
 }
 
+const PHOSPHOR_BG = '#0A0A0A';
+const PHOSPHOR_ORANGE = '#F26400';
+const PHOSPHOR_MINT = '#52F29A';
+const PHOSPHOR_AMBER = '#F49F09';
+const PHOSPHOR_CRT =
+  'repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 1px, transparent 1px 3px), ' +
+  'radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%)';
+
+/** Small representative preview of the Phosphor Console skin identity. */
+export function PhosphorPreview() {
+  return (
+    <Box
+      aria-hidden
+      sx={{
+        width: '100%',
+        height: 80,
+        borderRadius: 0,
+        background: PHOSPHOR_BG,
+        border: `1px solid ${PHOSPHOR_ORANGE}`,
+        p: 1.25,
+        position: 'relative',
+        overflow: 'hidden',
+        boxShadow: 'inset 0 0 8px rgba(242,100,0,.1)',
+        '&::before': {
+          content: '""',
+          position: 'absolute',
+          inset: 0,
+          pointerEvents: 'none',
+          background: PHOSPHOR_CRT,
+        },
+      }}
+    >
+      <Stack direction="row" spacing={0.75} sx={{ position: 'relative', zIndex: 1 }}>
+        <Box sx={{ width: 8, height: 8, background: PHOSPHOR_MINT }} />
+        <Box sx={{ width: 40, height: 8, background: PHOSPHOR_AMBER }} />
+      </Stack>
+      <Box
+        sx={{
+          mt: 1,
+          width: '70%',
+          height: 6,
+          background: 'rgba(82,242,154,.25)',
+          position: 'relative',
+          zIndex: 1,
+        }}
+      />
+    </Box>
+  );
+}
+
 /** @type {import('../registry.js').Skin} */
 export const phosphorSkin = {
   id: 'phosphor',
   label: 'Phosphor Console',
   description: 'NERV/MAGI tactical CRT command deck — colour is state.',
   Provider: PhosphorProvider,
+  Preview: PhosphorPreview,
   supportsColorMode: false, // dark-only
 };

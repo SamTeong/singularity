@@ -17,6 +17,9 @@
  *   Theme-boundary component that themes everything below it.
  * @property {React.ComponentType} [Background] Optional full-bleed background
  *   painted behind the shell (e.g. ZAPAC's ambient gradient). Omit for none.
+ * @property {React.ComponentType} [Preview] Optional thumbnail rendered in the
+ *   skin switcher to show the theme's identity. Should be self-contained and
+ *   avoid external assets.
  * @property {boolean} [supportsColorMode] Whether the skin honours light/dark
  *   toggling via `@zapac/mui-theme`'s `useColorMode`. Defaults to true.
  */
