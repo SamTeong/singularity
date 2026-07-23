@@ -19,7 +19,7 @@ import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
-import { listSkills, readSkill, readSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
+import { listSkills, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
@@ -501,6 +501,16 @@ app.get('/skill', async (req, reply) => {
   }
   const r = readSkill(req.query.root, req.query.scope, req.query.skill, flat);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
+  return r;
+});
+// Write a skill's SKILL.md (no file) or a supporting file (file present).
+app.put('/skill', async (req, reply) => {
+  const b = req.body || {};
+  const flat = b.flat === true || b.flat === '1';
+  const r = b.file
+    ? writeSkillFile(b.root, b.scope, b.skill, b.file, b.content, flat)
+    : writeSkill(b.root, b.scope, b.skill, b.content, flat);
+  if (!r.ok) reply.code(400);
   return r;
 });
 

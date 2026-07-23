@@ -160,8 +160,9 @@ export function readSkill(root, scope, skill, flat) {
     : join(root, scope, '.claude', 'skills', skill, 'SKILL.md');
   if (!existsSync(p)) return { ok: false, error: 'not found' };
   try {
-    const parsed = parseSkill(readFileSync(p, 'utf8'));
-    return { ok: true, path: p, name: parsed.name, description: parsed.description, triggers: parsed.triggers, body: parsed.body };
+    const src = readFileSync(p, 'utf8');
+    const parsed = parseSkill(src);
+    return { ok: true, path: p, name: parsed.name, description: parsed.description, triggers: parsed.triggers, body: parsed.body, raw: src };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
@@ -169,6 +170,18 @@ export function readSkill(root, scope, skill, flat) {
 // readSkillFile. Server-derived from validated bare names, same rules as readSkill.
 function skillBaseDir(root, scope, skill, flat) {
   return flat ? join(root, skill) : join(root, scope, '.claude', 'skills', skill);
+}
+
+// Write a skill's SKILL.md (raw content, frontmatter preserved as edited).
+export function writeSkill(root, scope, skill, content, flat) {
+  root = root || (getSkillsRoots()[0] || '');
+  if (!root) return { ok: false, error: 'skills root not configured' };
+  if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
+  if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };
+  if (typeof content !== 'string') return { ok: false, error: 'bad content' };
+  const p = flat ? join(root, skill, 'SKILL.md') : join(root, scope, '.claude', 'skills', skill, 'SKILL.md');
+  try { writeFileSync(p, content); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
 }
 
 // Read a supporting file inside a skill dir. `file` is a relative POSIX path
@@ -192,5 +205,23 @@ export function readSkillFile(root, scope, skill, file, flat) {
   const type = EXT_TYPE(ext);
   if (type === 'image') return { ok: true, type, name: basename(p), path: p };
   try { return { ok: true, type, name: basename(p), path: p, content: readFileSync(p, 'utf8') }; }
+  catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Write a supporting file inside a skill dir. Same validation as readSkillFile;
+// image type is not writable (binary). Server-derived path, segment-validated.
+export function writeSkillFile(root, scope, skill, file, content, flat) {
+  root = root || (getSkillsRoots()[0] || '');
+  if (!root) return { ok: false, error: 'skills root not configured' };
+  if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
+  if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };
+  if (typeof file !== 'string' || !file) return { ok: false, error: 'bad file' };
+  if (typeof content !== 'string') return { ok: false, error: 'bad content' };
+  const segs = file.split('/');
+  if (segs.some((s) => !s || !NAME_RE.test(s))) return { ok: false, error: 'bad file' };
+  const p = join(skillBaseDir(root, scope, skill, flat), ...segs);
+  const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
+  if (IMG_EXT.has(ext)) return { ok: false, error: 'cannot edit image' };
+  try { writeFileSync(p, content); return { ok: true }; }
   catch (e) { return { ok: false, error: e.message }; }
 }

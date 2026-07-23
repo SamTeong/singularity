@@ -21,19 +21,21 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import ImageIcon from '@mui/icons-material/Image';
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined';
-import { StatusPill, EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@zapac/mui-theme';
+import { markdown } from '@codemirror/lang-markdown';
 import DetailPane from '@/components/DetailPane.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
-import MarkdownBody from '@/components/MarkdownBody.jsx';
+import CmEditor from '@/components/CmEditor.jsx';
+import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailSearch from '@/components/panelkit/RailSearch.jsx';
 import RailGroupToggle from '@/components/panelkit/RailGroupToggle.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
 
-// Skills viewer: tree of roots → scopes → skills (left), rendered SKILL.md
-// (right). Read-only — no write. Each root's layout (grouped vs flat) is
-// auto-detected server-side; the server derives paths from (root, scope, skill).
+// Skills viewer: tree of roots → scopes → skills (left), editable SKILL.md +
+// supporting files (right) via CodeMirror. Each root's layout (grouped vs flat)
+// is auto-detected server-side; the server derives paths from (root, scope, skill).
 const MD_EXTS = new Set(['md', 'markdown']);
 const IMG_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico']);
 const fileIcon = (rel) => {
@@ -53,10 +55,14 @@ export default function SkillsPanel() {
   const [expandedScopes, setExpandedScopes] = useState(() => new Set()); // keys: `${root}::${scope}`
   const [expandedSkills, setExpandedSkills] = useState(() => new Set()); // keys: `${root}::${scope}::${skill}`
   const [sel, setSel] = useState(null); // { root, scope, skill, flat }
-  const [skill, setSkill] = useState(null); // { name, description, triggers, body }
-  const [file, setFile] = useState(null); // { path, name, type, content, loading, error }
+  const [file, setFile] = useState(null); // { path, name, type, error } — null = SKILL.md
+  const [content, setContent] = useState('');
+  const [dirty, setDirty] = useState(false);
+  const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
+
+  const discardIfDirty = () => !dirty || window.confirm('Discard unsaved changes?');
 
   // Fetch each root's skills independently — one root's slow/failed fetch
   // doesn't block the others.
@@ -91,11 +97,13 @@ export default function SkillsPanel() {
   });
 
   const open = (rootPath, scopeName, skillName, flatVal) => {
+    if (sel?.root === rootPath && sel?.scope === scopeName && sel?.skill === skillName && !file) return;
+    if (!discardIfDirty()) return;
     setSel({ root: rootPath, scope: scopeName, skill: skillName, flat: flatVal });
-    setFile(null); setErr(null); setLoading(true); setSkill(null);
+    setFile(null); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false);
     fetch(`/skill?root=${encodeURIComponent(untildify(rootPath))}&scope=${encodeURIComponent(scopeName)}&skill=${encodeURIComponent(skillName)}&flat=${flatVal ? '1' : '0'}`).then((r) => r.json()).then((d) => {
-      if (!d.ok) { setErr(d.error || 'failed to load skill'); setSkill(null); }
-      else setSkill({ name: d.name, description: d.description, triggers: d.triggers || [], body: d.body });
+      if (!d.ok) { setErr(d.error || 'failed to load skill'); }
+      else { setContent(d.raw || ''); setDirty(false); }
     }).catch(() => setErr('failed to load skill')).finally(() => setLoading(false));
   };
 
@@ -103,14 +111,30 @@ export default function SkillsPanel() {
   // /skill endpoint with a `file` query (same prefix → already proxied).
   const openFile = (relPath) => {
     if (!sel) return;
-    setFile({ path: relPath, name: relPath.split('/').pop(), loading: true });
-    setLoading(true); setErr(null);
+    if (file?.path === relPath) return;
+    if (!discardIfDirty()) return;
+    const name = relPath.split('/').pop();
+    setFile({ path: relPath, name }); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false);
     const u = `/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}&file=${encodeURIComponent(relPath)}`;
     fetch(u).then((r) => r.json()).then((d) => {
-      if (!d.ok) { setFile({ path: relPath, name: relPath.split('/').pop(), error: d.error || 'failed to load file' }); }
-      else setFile({ path: relPath, name: d.name || relPath.split('/').pop(), type: d.type, content: d.content || '' });
-    }).catch(() => setFile({ path: relPath, name: relPath.split('/').pop(), error: 'failed to load file' }))
+      if (!d.ok) { setFile({ path: relPath, name, error: d.error || 'failed to load file' }); setContent(''); }
+      else { setFile({ path: relPath, name: d.name || name, type: d.type }); setContent(d.content || ''); setDirty(false); }
+    }).catch(() => setFile({ path: relPath, name, error: 'failed to load file' }))
       .finally(() => setLoading(false));
+  };
+
+  const onChange = (v) => { setContent(v); setDirty(true); };
+
+  // Persist the current view (SKILL.md when no file selected, else the file).
+  const save = async () => {
+    if (!sel) return;
+    setMsg(null);
+    const r = await fetch('/skill', {
+      method: 'PUT', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ root: untildify(sel.root), scope: sel.scope, skill: sel.skill, flat: sel.flat ? '1' : '0', file: file?.path || null, content }),
+    }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    setMsg(r.ok ? { sev: 'success', text: 'Saved' } : { sev: 'error', text: r.error });
+    if (r.ok) setDirty(false);
   };
 
   // Client-side filter — a root whose own path matches keeps all its scopes;
@@ -260,10 +284,10 @@ export default function SkillsPanel() {
         )}
       </Rail>
 
-      {/* right: rendered SKILL.md */}
+      {/* right: editable SKILL.md / supporting files (CodeMirror) */}
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
         <DetailPane
-          empty={!sel && <EmptyState icon={<SchoolIcon />} title="Select a skill" description="Browse on the left to view here." />}
+          empty={!sel && <EmptyState icon={<SchoolIcon />} title="Select a skill" description="Browse on the left to view or edit here." />}
           loading={loading}
           error={err}
         >
@@ -272,50 +296,28 @@ export default function SkillsPanel() {
             {file && (
               <>
                 {' · '}
-                <Box component="span" sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' }}}
-                  onClick={() => setFile(null)}>SKILL.md</Box>
+                <Box component="span" sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                  onClick={() => { if (discardIfDirty()) setFile(null); }}>SKILL.md</Box>
                 {' / '}{file.name}
               </>
             )}
           </Typography>
-          <Box sx={(t) => ({
-            flex: 1, minHeight: 0, overflow: 'auto',
-            border: `1px solid ${getTokens(t).glass.stroke}`, borderRadius: `${getTokens(t).radius.sm}px`,
-            p: 3, pb: 4,
-          })}>
-            {file ? (
-              <>
-                <Typography variant="h1" sx={{ fontSize: 20, fontWeight: 800, mt: 0, mb: 2, letterSpacing: '-0.01em' }}>{file.name}</Typography>
-                {file.error && <Typography sx={{ color: 'error.main', fontSize: 13 }}>{file.error}</Typography>}
-                {file.type === 'markdown' && <MarkdownBody>{file.content || ''}</MarkdownBody>}
-                {file.type === 'image' && (
-                  <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>
-                    Image preview unsupported in the viewer. Open the file directly:
-                    <Typography variant="code" sx={{ ml: 1, color: 'text.primary' }}>{file.path}</Typography>
-                  </Typography>
-                )}
-                {file.type === 'code' && (
-                  <Box component="pre" sx={(t) => ({
-                    fontFamily: 'var(--mui-font-CodeFont, monospace)', fontSize: 13, lineHeight: 1.6,
-                    p: 1.5, m: 0, overflow: 'auto', borderRadius: `${getTokens(t).radius.sm}px`,
-                    bgcolor: 'action.hover', border: `1px solid ${getTokens(t).glass.stroke}`,
-                    whiteSpace: 'pre',
-                  })}>{file.content}</Box>
-                )}
-              </>
-            ) : (
-              <>
-                {skill?.name && <Typography variant="h1" sx={{ fontSize: 26, fontWeight: 800, mt: 0, mb: 1, letterSpacing: '-0.01em' }}>{skill.name}</Typography>}
-                {skill?.description && <Typography sx={{ color: 'text.secondary', fontSize: 14, lineHeight: 1.6, mb: 2 }}>{skill.description}</Typography>}
-                {skill?.triggers?.length > 0 && (
-                  <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 2.5, alignItems: 'center' }}>
-                    {skill.triggers.map((t2) => <StatusPill key={t2} status="review">{t2}</StatusPill>)}
-                  </Stack>
-                )}
-                <MarkdownBody>{skill?.body || ''}</MarkdownBody>
-              </>
-            )}
-          </Box>
+          {file?.error ? (
+            <Typography sx={{ color: 'error.main', fontSize: 13 }}>{file.error}</Typography>
+          ) : file?.type === 'image' ? (
+            <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>
+              Binary image — not editable. Open the file directly:
+              <Typography variant="code" component="span" sx={{ ml: 1, color: 'text.primary' }}>{file.path}</Typography>
+            </Typography>
+          ) : (
+            <CmEditor
+              value={content}
+              onChange={onChange}
+              extensions={(!file || file.type === 'markdown') ? [markdown()] : []}
+              deps={[file ? `f:${file.path}` : 'skill']}
+            />
+          )}
+          {(!file || file.type !== 'image') && !file?.error && <SaveBar msg={msg} disabled={!dirty} onSave={save} />}
         </DetailPane>
       </Stack>
 

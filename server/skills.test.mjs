@@ -38,7 +38,7 @@ mkdirSync(join(flatRoot, 'declawed'), { recursive: true });
 writeFileSync(join(flatRoot, 'declawed', 'SKILL.md'), '---\nname: declawed\ndescription: De-slop text.\n---\n\n# declawed\n\nbody');
 mkdirSync(join(flatRoot, 'not-a-skill'), { recursive: true }); // no SKILL.md → skipped
 
-const { listSkills, readSkill, readSkillFile, getSkillsRoots, setSkillsRoots } = await import('./skills.mjs');
+const { listSkills, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } = await import('./skills.mjs');
 const { STATE_DIR } = await import('./app-dir.mjs');
 
 test('listSkills: grouped — excludes common, skips scopes with no skills, carries description', () => {
@@ -82,6 +82,34 @@ test('readSkillFile: flat resolves <root>/<skill>/<file>', () => {
   const r = readSkillFile(flatRoot, null, 'declawed', 'scripts.js', true);
   assert.ok(r.ok);
   assert.equal(r.type, 'code');
+});
+
+test('writeSkill: round-trips raw content (frontmatter preserved)', () => {
+  const r = writeSkill(root, 'coding', 'noisy', '# rewritten\n\nnew body');
+  assert.equal(r.ok, true);
+  const back = readSkill(root, 'coding', 'noisy');
+  assert.equal(back.ok, true);
+  assert.equal(back.raw, '# rewritten\n\nnew body');
+});
+
+test('writeSkill: rejects bad names + non-string content', () => {
+  assert.equal(writeSkill(root, '..', 'x', 'y').ok, false);
+  assert.equal(writeSkill(root, 'coding', '..', 'y').ok, false);
+  assert.equal(writeSkill(root, 'coding', 'nope', null).ok, false, 'non-string content');
+});
+
+test('writeSkillFile: writes + round-trips a supporting file', () => {
+  const r = writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', "console.log('new')");
+  assert.equal(r.ok, true);
+  const back = readSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs');
+  assert.equal(back.content, "console.log('new')");
+});
+
+test('writeSkillFile: rejects traversal, image edit, bad content', () => {
+  assert.equal(writeSkillFile(root, 'coding', 'freeze', '../SKILL.md', 'x').ok, false, 'traversal');
+  assert.equal(writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 42).ok, false, 'non-string content');
+  // image ext → not editable
+  assert.equal(writeSkillFile(root, 'coding', 'freeze', 'a.png', 'x').ok, false, 'image not editable');
 });
 
 test('listSkills: flat — root is a .claude/skills dir, one scope', () => {
