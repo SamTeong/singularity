@@ -77,7 +77,7 @@ function parseSkill(src) {
 
 // Read a `.claude/skills`-style dir (subfolder-per-skill, each with SKILL.md).
 // Returns { skills, capped }.
-function readSkillsDir(dir) {
+export function readSkillsDir(dir) {
   let names;
   try { names = readdirSync(dir, { withFileTypes: true }).filter((d) => d.isDirectory() || d.isSymbolicLink()).map((d) => d.name); }
   catch { return null; } // not a readable dir

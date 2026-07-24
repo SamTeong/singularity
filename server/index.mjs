@@ -19,7 +19,7 @@ import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
-import { listSkills, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
+import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
@@ -268,15 +268,20 @@ app.get('/capabilities', async () => {
 // Skill-scope picker source: directories under SING_SCOPE_ROOT (excludes 'common').
 app.get('/skill-scopes', async () => {
   const root = reg.SCOPE_ROOT;
-  if (!root) return { scopes: [] };
+  if (!root) return { scopes: [], skillsByScope: {} };
   let scopes = [];
+  const skillsByScope = {};
   try {
     scopes = readdirSync(root, { withFileTypes: true })
       .filter((d) => { try { return d.isDirectory() && d.name !== 'common'; } catch { return false; } })
       .map((d) => d.name)
       .sort((a, b) => a.localeCompare(b));
   } catch {}
-  return { scopes };
+  for (const s of scopes) {
+    const r = readSkillsDir(join(root, s, '.claude', 'skills'));
+    skillsByScope[s] = r ? r.skills.map((k) => k.name) : [];
+  }
+  return { scopes, skillsByScope };
 });
 app.post('/procs/kill', async (req, reply) => {
   const pid = Number(req.body?.pid);
