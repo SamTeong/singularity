@@ -244,6 +244,7 @@ export function create({ cwd, name, model, scopes, sessionId, prompt, permission
     // rather than refusing. reattach keeps the original model + skill-scopes.
     return reattach(id);
   }
+  if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
   const displayName = name || id.slice(0, 8);
   const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
   ensureTrusted(cwd);
