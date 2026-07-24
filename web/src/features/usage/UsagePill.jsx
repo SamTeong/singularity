@@ -17,7 +17,7 @@ export function ProviderRow({ label, u }) {
       </Stack>
       {bad ? (
         <Typography variant="code" sx={{ fontSize: 10, color: u.needsAuth ? 'warning.main' : 'text.disabled' }}>
-          {u.needsAuth ? 'sign in →' : (u.error || 'unavailable')}
+          {u.needsAuth ? 'Sign in needed →' : (u.error || 'unavailable')}
         </Typography>
       ) : (
         <Stack spacing={0.4}>

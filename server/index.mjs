@@ -23,7 +23,7 @@ import { listSkills, readSkill, readSkillFile, writeSkill, writeSkillFile, getSk
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
-import { reportStatus, latestReportHtml, generateReport } from './spend.mjs';
+import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { initBackground, snapshotBackground, createDef, updateDef, deleteDef, reorderDefs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
@@ -47,8 +47,8 @@ function requireEnv() {
   // ollama-model spawns (clear buildSpawn error); absent SING_SCOPE_ROOT just
   // means no skill-scopes to pick/add-dir. The daemon boots fine without either.
   // SING_USAGE_SKILL + SING_USAGE_REPORTS are likewise optional (author-specific
-  // claude-code-usage-report skill): absent → spend/usage-report degrade silently
-  // (spend.mjs existsSync-guards its skill path; stats.mjs has an est-cost
+  // claude-code-usage-report skill): absent → usage-report degrade silently
+  // (usagereport.mjs existsSync-guards its skill path; stats.mjs has an est-cost
   // fallback). /capabilities reports all of these as available:false.
   if (process.env.SING_TOKEN && !/^[A-Za-z0-9_-]+$/.test(process.env.SING_TOKEN)) missing.push('SING_TOKEN (set but contains characters outside [A-Za-z0-9_-])');
   if (missing.length) {
@@ -200,15 +200,15 @@ app.get('/sysstats', async () => getSysStats());
 // Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
 app.get('/usage', async (req) => getUsage({ force: req.query.force === '1' }));
 
-// Spend report: newest self-contained HTML from the claude-code-usage-report
-// skill (rendered on demand by /spend/refresh, served whole to a sandboxed iframe).
-app.get('/spend/status', async () => reportStatus());
-app.get('/spend/report', async (req, reply) => {
+// Usage report: newest self-contained HTML from the claude-code-usage-report
+// skill (rendered on demand by /usagereport/refresh, served whole to a sandboxed iframe).
+app.get('/usagereport/status', async () => reportStatus());
+app.get('/usagereport/report', async (req, reply) => {
   const html = latestReportHtml();
   if (html == null) return reply.code(404).send({ ok: false, error: 'no report' });
   return reply.type('text/html').send(html);
 });
-app.post('/spend/refresh', async (req, reply) => {
+app.post('/usagereport/refresh', async (req, reply) => {
   const r = await generateReport();
   if (!r.ok) reply.code(400);
   return r;

@@ -25,7 +25,7 @@ export default function DirPicker({ start, onPick, onClose }) {
     fetch(`/fs/browse?path=${encodeURIComponent(p)}`)
       .then(async (r) => {
         const ct = r.headers.get('content-type') || '';
-        if (!ct.includes('application/json')) throw new Error(`daemon unreachable (HTTP ${r.status})`);
+        if (!ct.includes('application/json')) throw new Error(`Can't reach the app (error ${r.status})`);
         return r.json();
       })
       .then((d) => {

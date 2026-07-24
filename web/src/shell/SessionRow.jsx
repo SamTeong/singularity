@@ -45,23 +45,23 @@ export default function SessionRow({
         <Stack direction="row" sx={{ alignItems: 'center', minWidth: 0 }}>
           <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{a.name}</Typography>
           <Stack direction="row" className="row-act" sx={{ flexShrink: 0, transition: 'opacity .15s' }}>
-            <Tooltip title="Duplicate (config only)" disableInteractive>
+            <Tooltip title="Duplicate — start a new session with the same settings" disableInteractive>
               <IconButton size="small" onClick={(e) => { e.stopPropagation(); onDuplicate(); }}><ContentCopyIcon fontSize="small" /></IconButton>
             </Tooltip>
-            <Tooltip title="Fork (config + conversation)" disableInteractive>
+            <Tooltip title="Fork — start a new session that continues this conversation" disableInteractive>
               <IconButton size="small" onClick={(e) => { e.stopPropagation(); onFork(); }}><CallSplitIcon fontSize="small" /></IconButton>
             </Tooltip>
             {isLive(a.status) && (
-              <Tooltip title="Restart (kill + resume, keeps conversation)" disableInteractive>
+              <Tooltip title="Restart — stop and resume this session, keeping the conversation" disableInteractive>
                 <IconButton size="small" sx={{ color: 'error.main', '&:hover': { color: 'error.main' } }} onClick={(e) => { e.stopPropagation(); onRespawn(); }}><RestartAltIcon fontSize="small" /></IconButton>
               </Tooltip>
             )}
             {a.status === 'detached' && (
-              <Tooltip title="Reattach (claude --resume)" disableInteractive>
+              <Tooltip title="Resume — reconnect to this conversation" disableInteractive>
                 <IconButton size="small" onClick={(e) => { e.stopPropagation(); onReattach(); }}><LinkIcon fontSize="small" /></IconButton>
               </Tooltip>
             )}
-            <Tooltip title={a.status === 'running' || a.status === 'starting' ? 'Kill' : 'Remove'} disableInteractive>
+            <Tooltip title={a.status === 'running' || a.status === 'starting' ? 'Stop' : 'Remove'} disableInteractive>
               <IconButton size="small" sx={{ color: 'error.main', '&:hover': { color: 'error.main' } }} onClick={(e) => { e.stopPropagation(); onKill(); }}><CloseIcon fontSize="small" /></IconButton>
             </Tooltip>
           </Stack>

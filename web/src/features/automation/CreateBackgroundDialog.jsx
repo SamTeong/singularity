@@ -29,6 +29,7 @@ const DEFAULT_THRESHOLDS = {
 };
 const DEFAULT_MODELS = { claude: 'opus', ollama: 'glm-5.2:cloud' };
 const DEFAULT_TOKEN_CAPS = { claude: 15_000_000, ollama: 15_000_000 };
+const BACKEND_LABEL = { claude: 'Claude', ollama: 'Ollama' };
 
 // Add/edit-background-def dialog: title, description, cwd, cooldownHours,
 // enabled, plus the per-task window/thresholds/models/tokenCaps that used to
@@ -121,11 +122,11 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
           <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
           <CwdPicker value={cwd} onChange={setCwd} recent={recent} label="working directory" />
           <ScopeSelect open={open} value={scopes} onChange={setScopes} />
-          <TextField size="small" label="cooldown (hours)" type="number" value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
+          <TextField size="small" label="minimum hours between runs" type="number" value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
           <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled" />
           <FormControl size="small" fullWidth>
-            <InputLabel>on completion</InputLabel>
-            <Select label="on completion" value={conclude} onChange={(e) => setConclude(e.target.value)}>
+            <InputLabel>when finished</InputLabel>
+            <Select label="when finished" value={conclude} onChange={(e) => setConclude(e.target.value)}>
               <MenuItem value="inreview">In review (default)</MenuItem>
               <MenuItem value="done">Done</MenuItem>
             </Select>
@@ -133,10 +134,10 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
 
           {/* Window */}
           <Stack spacing={0.5}>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Window</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Daily time window</Typography>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
-              <TextField size="small" label="start hour" type="number" value={windowCfg.startHour} onChange={(e) => setWindowCfg((w) => ({ ...w, startHour: Number(e.target.value) }))} sx={{ width: 90 }} />
-              <TextField size="small" label="end hour" type="number" value={windowCfg.endHour} onChange={(e) => setWindowCfg((w) => ({ ...w, endHour: Number(e.target.value) }))} sx={{ width: 90 }} />
+              <TextField size="small" label="start hour (24h)" type="number" value={windowCfg.startHour} onChange={(e) => setWindowCfg((w) => ({ ...w, startHour: Number(e.target.value) }))} sx={{ width: 90 }} />
+              <TextField size="small" label="end hour (24h)" type="number" value={windowCfg.endHour} onChange={(e) => setWindowCfg((w) => ({ ...w, endHour: Number(e.target.value) }))} sx={{ width: 90 }} />
               <Stack direction="row" spacing={0.5}>
                 {DAYS.map(([lbl, d]) => (
                   <Chip key={d} size="small" label={lbl} variant={windowCfg.days.includes(d) ? 'filled' : 'outlined'} color={windowCfg.days.includes(d) ? 'primary' : 'default'} onClick={() => toggleDay(d)} sx={{ height: 24, fontSize: 11 }} />
@@ -147,27 +148,27 @@ export default function CreateBackgroundDialog({ open, onClose, def, recent = []
 
           {/* Thresholds */}
           <Stack spacing={0.5}>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Thresholds (% used)</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Usage thresholds (%), for when to start/stop</Typography>
             {['claude', 'ollama'].map((b) => (
               <Stack key={b} direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
-                <Typography variant="code" sx={{ fontSize: 11, width: 54 }}>{b}</Typography>
-                <TextField size="small" label="start <" type="number" value={thresholds[b].start} onChange={(e) => setThreshold(b, 'start', Number(e.target.value))} sx={{ width: 90 }} />
-                <TextField size="small" label="stop ≥" type="number" value={thresholds[b].stop} onChange={(e) => setThreshold(b, 'stop', Number(e.target.value))} sx={{ width: 90 }} />
-                <TextField size="small" label="weekly max" type="number" value={thresholds[b].weeklyMax} onChange={(e) => setThreshold(b, 'weeklyMax', Number(e.target.value))} sx={{ width: 110 }} />
+                <Typography variant="code" sx={{ fontSize: 11, width: 54 }}>{BACKEND_LABEL[b]}</Typography>
+                <TextField size="small" label="start below (%)" type="number" value={thresholds[b].start} onChange={(e) => setThreshold(b, 'start', Number(e.target.value))} sx={{ width: 90 }} />
+                <TextField size="small" label="stop above (%)" type="number" value={thresholds[b].stop} onChange={(e) => setThreshold(b, 'stop', Number(e.target.value))} sx={{ width: 90 }} />
+                <TextField size="small" label="weekly cap (%)" type="number" value={thresholds[b].weeklyMax} onChange={(e) => setThreshold(b, 'weeklyMax', Number(e.target.value))} sx={{ width: 110 }} />
               </Stack>
             ))}
           </Stack>
 
           {/* Models + token caps */}
           <Stack spacing={0.5}>
-            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Models & token caps</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>Models & spending limits</Typography>
             {['claude', 'ollama'].map((b) => (
               <Stack key={b} direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
-                <Typography variant="code" sx={{ fontSize: 11, width: 54 }}>{b}</Typography>
+                <Typography variant="code" sx={{ fontSize: 11, width: 54 }}>{BACKEND_LABEL[b]}</Typography>
                 <Box sx={{ minWidth: 160, flex: 1 }}>
                   <ModelSelect model={models[b]} setModel={(v) => setModel(b, v)} />
                 </Box>
-                <TextField size="small" label="token cap" type="number" value={tokenCaps[b]} onChange={(e) => setTokenCap(b, Number(e.target.value))} sx={{ width: 140 }} />
+                <TextField size="small" label="max tokens per run" type="number" value={tokenCaps[b]} onChange={(e) => setTokenCap(b, Number(e.target.value))} sx={{ width: 140 }} />
               </Stack>
             ))}
           </Stack>

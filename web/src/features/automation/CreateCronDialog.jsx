@@ -29,7 +29,7 @@ function describe(expr) {
     const nextIso = it.next().toISOString();
     let descr;
     try { descr = cronstrue.toString(expr); }
-    catch { descr = '(partial expr)'; }
+    catch { descr = '(valid, but no plain-English description)'; }
     return { descr, nextIso, ok: true };
   } catch (e) {
     return { descr: e.message, nextIso: null, ok: false };
@@ -85,14 +85,14 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
   if (!open) return null;
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>New cron job</DialogTitle>
+      <DialogTitle>New scheduled job</DialogTitle>
       <DialogContent sx={{ pb: 1.5 }}>
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
           <TextField size="small" label="name" value={name} onChange={(e) => setName(e.target.value)} />
           <Stack spacing={0.5}>
-            <TextField size="small" label="cron expr (UTC, 5-field)" value={cronExpr} onChange={(e) => setCronExpr(e.target.value)} spellCheck={false} error={!!cronExpr.trim() && !desc.ok} />
+            <TextField size="small" label="schedule (cron format, UTC)" placeholder="minute hour day month weekday — e.g. 0 * * * *" value={cronExpr} onChange={(e) => setCronExpr(e.target.value)} spellCheck={false} error={!!cronExpr.trim() && !desc.ok} />
             <Typography variant="caption" sx={{ color: desc.ok ? 'text.secondary' : 'error.main', display: 'block' }} noWrap>
-              {desc.ok ? `${desc.descr} · next ${new Date(desc.nextIso).toLocaleString()}` : `invalid: ${desc.descr}`}
+              {desc.ok ? `${desc.descr} · next ${new Date(desc.nextIso).toLocaleString()}` : `Not a valid schedule: ${desc.descr}`}
             </Typography>
           </Stack>
           <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="agent working dir" />
@@ -102,13 +102,13 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
           <FormControl size="small" fullWidth>
             <InputLabel>permission mode</InputLabel>
             <Select label="permission mode" value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>
-              <MenuItem value="default">default</MenuItem>
-              <MenuItem value="acceptEdits">acceptEdits</MenuItem>
-              <MenuItem value="plan">plan</MenuItem>
-              <MenuItem value="bypassPermissions">bypassPermissions</MenuItem>
+              <MenuItem value="default">Ask before risky actions (default)</MenuItem>
+              <MenuItem value="acceptEdits">Auto-accept file edits</MenuItem>
+              <MenuItem value="plan">Plan only, no changes</MenuItem>
+              <MenuItem value="bypassPermissions">Full access, no prompts</MenuItem>
             </Select>
           </FormControl>
-          <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled (start firing immediately)" />
+          <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled (starts running on schedule right away)" />
           {error && <Typography variant="body2" color="error">{error}</Typography>}
         </Stack>
       </DialogContent>

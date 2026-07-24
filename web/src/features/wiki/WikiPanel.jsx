@@ -169,7 +169,7 @@ export default function WikiPanel() {
                 <Tooltip title="Select wiki folder" placement="bottom" disableInteractive>
                   <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
                 </Tooltip>
-                <Tooltip title={graphWiki ? `Graph of ${graphWiki}` : 'Link graph'} placement="bottom" disableInteractive>
+                <Tooltip title={graphWiki ? `How ${graphWiki} pages link together` : 'How pages link together'} placement="bottom" disableInteractive>
                   <span><IconButton size="small" color={graphView ? 'primary' : 'default'} disabled={!graphWiki}
                     onClick={() => setGraphView((v) => (v ? null : 'dock'))}><HubIcon /></IconButton></span>
                 </Tooltip>
@@ -236,7 +236,7 @@ export default function WikiPanel() {
             {graphView === 'dock' && graphWiki && (
               <Stack sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${getTokens(t).glass.stroke}`, p: 1 })} spacing={0.5}>
                 <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                  <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · link graph</Typography>
+                  <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · how pages link together</Typography>
                   <Tooltip title="Expand to main pane" placement="bottom" disableInteractive>
                     <IconButton size="small" onClick={() => setGraphView('main')}><OpenInFullIcon sx={{ fontSize: 15 }} /></IconButton>
                   </Tooltip>
@@ -256,7 +256,7 @@ export default function WikiPanel() {
         {graphView === 'main' && graphWiki ? (
           <>
             <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-              <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · link graph</Typography>
+              <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · how pages link together</Typography>
               <Tooltip title="Dock to sidebar" placement="bottom" disableInteractive>
                 <IconButton size="small" onClick={() => setGraphView('dock')}><HorizontalSplitIcon sx={{ fontSize: 16 }} /></IconButton>
               </Tooltip>
@@ -268,7 +268,7 @@ export default function WikiPanel() {
           </>
         ) : (
           <DetailPane
-            empty={!sel && <EmptyState icon={<MenuBookIcon />} title={wikiUnavailable ? 'Wiki not configured' : 'Select a page'} description={wikiUnavailable ? wikiHint : 'Browse on the left to view here.'} />}
+            empty={!sel && <EmptyState icon={<MenuBookIcon />} title={wikiUnavailable ? 'Wiki not set up yet' : 'Select a page'} description={wikiUnavailable ? wikiHint : 'Browse on the left to view here.'} />}
             loading={loadingFile}
             error={err}
           >

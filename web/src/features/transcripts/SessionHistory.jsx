@@ -265,7 +265,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
                           <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{s.title || `${s.id.slice(0, 8)}…`}</Typography>
                           {s.running && <PulseDot />}
                           {hasSubs && !isExpanded && (
-                            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>⚡{s.subagents.length}</Typography>
+                            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>⚡{s.subagents.length} subagents</Typography>
                           )}
                         </Stack>
                         <Stack direction="row" spacing={1} sx={{ mt: 0.25, alignItems: 'center' }}>
@@ -325,7 +325,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
           </Tabs>
           {tab === 'chat' && (
             <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>
-              {effScope === 'one' && sel ? `context: ${sel.title || sel.id}` : 'context: all transcripts'}
+              {effScope === 'one' && sel ? `Referring to: ${sel.title || sel.id}` : 'Referring to all transcripts'}
             </Typography>
           )}
         </Stack>
@@ -334,7 +334,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
           <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
             {!sel ? (
               <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
-                <EmptyState icon={<HistoryIcon />} title="Select a transcript" description="Browse transcripts of every Claude Code session on this machine." />
+                <EmptyState icon={<HistoryIcon />} title="Select a transcript" description="Browse your past transcripts on this machine." />
               </Box>
             ) : loadingFile ? (
               <Typography color="text.secondary">Loading…</Typography>
@@ -349,9 +349,9 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
                 </Stack>
                 {sel && stats[sel.id] && (
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block', mb: 1.5 }}>
-                    {fmtTokens(stats[sel.id].inputTokens)} in · {fmtTokens(stats[sel.id].outputTokens)} out · {fmtTokens(stats[sel.id].cacheReadTokens)} cache read · {fmtTokens(stats[sel.id].cacheWriteTokens)} cache write
+                    {fmtTokens(stats[sel.id].inputTokens)} sent · {fmtTokens(stats[sel.id].outputTokens)} received · {fmtTokens(stats[sel.id].cacheReadTokens)} reused from cache · {fmtTokens(stats[sel.id].cacheWriteTokens)} saved to cache
                     {stats[sel.id].models?.length ? ` · ${stats[sel.id].models.map(shortModel).join(', ')}` : ''}
-                    {stats[sel.id].costUsd != null ? ` · ${fmtUsd(stats[sel.id].costUsd)} ${stats[sel.id].costSource === 'statusline' ? 'exact' : 'est'}` : ''}
+                    {stats[sel.id].costUsd != null ? ` · ${fmtUsd(stats[sel.id].costUsd)} ${stats[sel.id].costSource === 'statusline' ? 'measured' : 'estimated'}` : ''}
                   </Typography>
                 )}
                 {searching && effScope === 'one' && (
@@ -372,7 +372,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
                   <EmptyState
                     icon={<ChatBubbleOutlinedIcon />}
                     title={effScope === 'one' && sel ? `Ask about this transcript` : 'Ask across all transcripts'}
-                    description={effScope === 'one' && sel ? 'The transcript is sent as context.' : 'A directory of recent transcripts is sent as context. Switch to "This transcript" for full detail.'}
+                    description={effScope === 'one' && sel ? 'It can see this transcript.' : 'It can see a list of your recent transcripts. Switch to "This transcript" for full detail.'}
                   />
                 </Box>
               )}
@@ -394,7 +394,7 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
             <Stack direction="row" spacing={1} sx={{ p: 1.5, borderTop: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
               <TextField
                 size="small" multiline maxRows={4} fullWidth
-                placeholder={authNeeded ? 'Sign in via `claude` to chat…' : (streaming ? 'Generating…' : 'Ask about this transcript…')}
+                placeholder={authNeeded ? 'Sign in to chat…' : (streaming ? 'Generating…' : 'Ask about this transcript…')}
                 value={chatInput} disabled={streaming || authNeeded}
                 onChange={(e) => setChatInput(e.target.value)}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}

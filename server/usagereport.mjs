@@ -1,4 +1,4 @@
-// Spend report: reuse the claude-code-usage-report skill as a black-box CLI.
+// Usage report: reuse the claude-code-usage-report skill as a black-box CLI.
 // `stats.mjs report` renders a fully self-contained HTML report (zero external
 // requests) into the skill's reports dir and prints the path to stdout. We spawn
 // it on demand and serve the newest file to a sandboxed iframe — no render logic

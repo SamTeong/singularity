@@ -51,10 +51,10 @@ const fmtMs = (ms) => {
 function statsLine(s) {
   if (!s) return null;
   const parts = [
-    s.busyMs > 0 && `${fmtMs(s.busyMs)} busy`,
-    s.apiMs > 0 && `${fmtMs(s.apiMs)} api`,
+    s.busyMs > 0 && `${fmtMs(s.busyMs)} active`,
+    s.apiMs > 0 && `${fmtMs(s.apiMs)} API`,
     fmtUsd(s.costUsd),
-    s.tokens > 0 && `${fmtTokens(s.tokens)} tok`,
+    s.tokens > 0 && `${fmtTokens(s.tokens)} tokens`,
   ].filter(Boolean);
   return parts.length ? parts.join(' · ') : null;
 }
@@ -178,7 +178,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
     if (!t || t.column === col) return;
     if (col === 'done') {
       const agent = agents.find((a) => a.id === t.sessionId);
-      if (agent && LIVE_STATUS.has(agent.status) && !window.confirm(`Move "${t.title}" to Done? Its live agent session will be ended.`)) return;
+      if (agent && LIVE_STATUS.has(agent.status) && !window.confirm(`Move "${t.title}" to Done? This will stop the AI agent currently working on it.`)) return;
     }
     onMove(t.id, col);
   };
@@ -296,7 +296,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                   <TableCell sortDirection={sort.key === 'branch' ? sort.dir : false}><TableSortLabel active={sort.key === 'branch'} direction={sort.dir} onClick={() => changeSort('branch')}>Branch</TableSortLabel></TableCell>
                   <TableCell sortDirection={sort.key === 'outcome' ? sort.dir : false}><TableSortLabel active={sort.key === 'outcome'} direction={sort.dir} onClick={() => changeSort('outcome')}>Outcome</TableSortLabel></TableCell>
                   <TableCell sortDirection={sort.key === 'busyMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'busyMs'} direction={sort.dir} onClick={() => changeSort('busyMs')}>Busy</TableSortLabel></TableCell>
-                  <TableCell sortDirection={sort.key === 'apiMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'apiMs'} direction={sort.dir} onClick={() => changeSort('apiMs')}>API</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'apiMs' ? sort.dir : false}><Tooltip title="Time spent waiting for the AI model to respond" disableInteractive><TableSortLabel active={sort.key === 'apiMs'} direction={sort.dir} onClick={() => changeSort('apiMs')}>API time</TableSortLabel></Tooltip></TableCell>
                   <TableCell sortDirection={sort.key === 'costUsd' ? sort.dir : false}><TableSortLabel active={sort.key === 'costUsd'} direction={sort.dir} onClick={() => changeSort('costUsd')}>Cost</TableSortLabel></TableCell>
                   <TableCell sortDirection={sort.key === 'tokens' ? sort.dir : false}><TableSortLabel active={sort.key === 'tokens'} direction={sort.dir} onClick={() => changeSort('tokens')}>Tokens</TableSortLabel></TableCell>
                   <TableCell sortDirection={sort.key === 'concludedAt' ? sort.dir : false}><TableSortLabel active={sort.key === 'concludedAt'} direction={sort.dir} onClick={() => changeSort('concludedAt')}>Concluded</TableSortLabel></TableCell>
@@ -404,7 +404,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                           <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }} noWrap>{task.title}</Typography>
                           <Stack direction="row" className="card-act" sx={{ transition: 'opacity .15s' }}>
                             {col === 'done' && (
-                              <Tooltip title={task.branch ? 'Remove (worktree already gone; branch kept)' : 'Remove (moves to history)'} disableInteractive>
+                              <Tooltip title={task.branch ? 'Remove (temporary work folder already gone; your changes are saved)' : 'Remove (moves to history)'} disableInteractive>
                                 <IconButton
                                   size="small"
                                   sx={{ mt: -0.5 }}
@@ -417,13 +417,13 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                                 </IconButton>
                               </Tooltip>
                             )}
-                            <Tooltip title={task.branch ? 'Abandon task (removes worktree, keeps branch)' : 'Abandon task (working directory left untouched)'} disableInteractive>
+                            <Tooltip title={task.branch ? 'Abandon task (deletes the temporary work folder, keeps your saved changes)' : 'Abandon task (leaves the work folder untouched)'} disableInteractive>
                               <IconButton
                                 size="small"
                                 sx={{ mt: -0.5, mr: -0.5 }}
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  if (window.confirm(task.branch ? `Abandon task "${task.title}"? The worktree is removed; branch ${task.branch} is kept.` : `Abandon task "${task.title}"? The working directory is left untouched.`)) onConclude(task.id, 'abandoned');
+                                  if (window.confirm(task.branch ? `Abandon task "${task.title}"? Its temporary work folder is deleted; your saved changes (branch ${task.branch}) are kept.` : `Abandon task "${task.title}"? Its work folder is left untouched.`)) onConclude(task.id, 'abandoned');
                                 }}
                               >
                                 <OutlinedFlagOutlinedIcon fontSize="small" />
@@ -435,9 +435,11 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                           {repoName(task.repo)}{task.branch ? ` · ${task.branch}` : ''}
                         </Typography>
                         {line && (
-                          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }} noWrap>
-                            {line}
-                          </Typography>
+                          <Tooltip title="Active = time the agent spent working · API = time waiting on the AI model · tokens = amount of text processed" disableInteractive>
+                            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }} noWrap>
+                              {line}
+                            </Typography>
+                          </Tooltip>
                         )}
                         <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
                           {task.state && <Chip size="small" label={task.state} sx={{ height: 20, fontSize: 11 }} />}

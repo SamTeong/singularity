@@ -89,7 +89,7 @@ export default function ConfigEditor() {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ cwd: loadedCwd, content }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
-    if (r.ok) { setMsg({ sev: 'success', text: `Saved${r.backup ? ' (.bak written)' : ''}` }); setDirty(false); load(); }
+    if (r.ok) { setMsg({ sev: 'success', text: `Saved${r.backup ? ' (backup made)' : ''}` }); setDirty(false); load(); }
     else setMsg({ sev: 'error', text: r.error || 'save failed' });
   };
 
@@ -101,7 +101,7 @@ export default function ConfigEditor() {
     fetch(`/config/scan?root=${encodeURIComponent(untildify(p))}`).then((r) => r.json()).then((d) => {
       const found = d.roots || [];
       if (found.length) remember(found);
-      if (d.truncated) setMsg({ sev: 'info', text: 'Scan hit cap — some subfolders skipped.' });
+      if (d.truncated) setMsg({ sev: 'info', text: 'Reached the folder limit — some subfolders were skipped.' });
     }).catch(() => {});
   };
 
@@ -160,14 +160,14 @@ export default function ConfigEditor() {
         </Tabs>
 
         <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>
-          {tildify(info?.path)} {info && !info.exists && '· (does not exist — save creates it)'}
+          {tildify(info?.path)} {info && !info.exists && "· (doesn't exist yet — saving will create it)"}
         </Typography>
         {picking && <DirPicker start={untildify(cwd)} onPick={pick} onClose={() => setPicking(false)} />}
 
         <CmEditor value={content} onChange={onChange} extensions={[json()]} />
 
         <SaveBar msg={jsonError ? null : msg} disabled={!dirty || !!jsonError} onSave={save}>
-          {jsonError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>invalid JSON: {jsonError}</Typography>}
+          {jsonError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>This isn't valid JSON: {jsonError}</Typography>}
         </SaveBar>
       </Stack>
     </Box>

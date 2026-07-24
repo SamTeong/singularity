@@ -97,21 +97,24 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
           <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
           <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <TextField size="small" label="requirements" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
+          <TextField size="small" label="What should this task do?" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
           <Stack spacing={1}>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" /></Box>
-              <TextField size="small" type="number" label="turn cap" placeholder="—" value={orchTurns} onChange={(e) => setOrchTurns(e.target.value)} sx={{ width: 110 }} />
+              <TextField size="small" type="number" label="turn limit" placeholder="—" value={orchTurns} onChange={(e) => setOrchTurns(e.target.value)} sx={{ width: 110 }} />
             </Stack>
+            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>Orchestrator: plans the work and coordinates the other steps.</Typography>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <Box sx={{ flex: 1 }}><ModelSelect model={implModel} setModel={setImplModel} label="implementor model" placeholder="" /></Box>
-              <TextField size="small" type="number" label="turn cap" placeholder="—" value={implTurns} onChange={(e) => setImplTurns(e.target.value)} sx={{ width: 110 }} />
+              <TextField size="small" type="number" label="turn limit" placeholder="—" value={implTurns} onChange={(e) => setImplTurns(e.target.value)} sx={{ width: 110 }} />
             </Stack>
+            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>Implementor: writes the code changes.</Typography>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <Box sx={{ flex: 1 }}><ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" placeholder="" /></Box>
-              <TextField size="small" type="number" label="turn cap" placeholder="—" value={revTurns} onChange={(e) => setRevTurns(e.target.value)} sx={{ width: 110 }} />
+              <TextField size="small" type="number" label="turn limit" placeholder="—" value={revTurns} onChange={(e) => setRevTurns(e.target.value)} sx={{ width: 110 }} />
             </Stack>
-            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>turn cap · soft limit, empty=none</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>Reviewer: checks the changes before they're finalized.</Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>Turn limit: stops the agent automatically after this many steps. Leave blank for no limit.</Typography>
           </Stack>
           <ScopeSelect open={open} value={scopes} onChange={setScopes} />
           <Autocomplete
@@ -125,12 +128,12 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
           />
           <FormControlLabel
             control={<Checkbox size="small" sx={{ py: 0.25 }} checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} />}
-            label="require plan approval"
+            label="Have the agent draft a plan and wait for your approval before it starts coding"
           />
           <FormControlLabel
             sx={{ mt: -2 }}
             control={<Checkbox size="small" sx={{ py: 0.25 }} checked={mergeMode === 'auto'} onChange={(e) => setMergeMode(e.target.checked ? 'auto' : 'manual')} />}
-            label="auto-merge on pass (git repos only)"
+            label="Automatically merge the changes if everything passes (git projects only)"
           />
           {error && <Typography variant="body2" color="error">{error}</Typography>}
         </Stack>

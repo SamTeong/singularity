@@ -264,7 +264,7 @@ export default function SkillsPanel() {
                                   </Box>
                                 );
                               })}
-                              {sc.capped && <Typography sx={{ pl: 7, py: 0.5, color: 'text.secondary', fontSize: 11 }}>(capped at 200)</Typography>}
+                              {sc.capped && <Typography sx={{ pl: 7, py: 0.5, color: 'text.secondary', fontSize: 11 }}>(showing first 200)</Typography>}
                               {sc.skills.length === 0 && <Typography sx={{ pl: 7, py: 1, color: 'text.secondary', fontSize: 12 }}>(no skills)</Typography>}
                             </List>
                           </Collapse>
@@ -272,13 +272,13 @@ export default function SkillsPanel() {
                       );
                     })}
                     {r.error && <Typography sx={{ pl: 3, py: 1, color: 'text.secondary', fontSize: 12 }}>{r.error}</Typography>}
-                    {!r.error && r.scopes.length === 0 && <Typography sx={{ pl: 3, py: 1, color: 'text.secondary', fontSize: 12 }}>No scopes.</Typography>}
+                    {!r.error && r.scopes.length === 0 && <Typography sx={{ pl: 3, py: 1, color: 'text.secondary', fontSize: 12 }}>Nothing found here.</Typography>}
                   </List>
                 </Collapse>
               </Box>
             );
           })}
-          {view.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{query ? 'No matches.' : 'No roots — pick a folder.'}</Typography>}
+          {view.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{query ? 'No matches.' : 'No folders added yet — pick one.'}</Typography>}
         </List>
           </>
         )}
@@ -306,7 +306,7 @@ export default function SkillsPanel() {
             <Typography sx={{ color: 'error.main', fontSize: 13 }}>{file.error}</Typography>
           ) : file?.type === 'image' ? (
             <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>
-              Binary image — not editable. Open the file directly:
+              This image can't be edited here. Open the file directly:
               <Typography variant="code" component="span" sx={{ ml: 1, color: 'text.primary' }}>{file.path}</Typography>
             </Typography>
           ) : (

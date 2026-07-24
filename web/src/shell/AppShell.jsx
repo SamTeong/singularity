@@ -125,7 +125,7 @@ export default function AppShell() {
   const doRestart = async () => {
     setRestartOpen(false);
     setRestarting(true);
-    setToast('Restarting server…');
+    setToast('Restarting the app…');
     const before = await fetch('/health').then((r) => r.json()).then((d) => d.pid).catch(() => null);
     await fetch('/restart', { method: 'POST' }).catch(() => {}); // connection drops; ignore
     for (let i = 0; i < 30; i++) {
@@ -136,7 +136,7 @@ export default function AppShell() {
       } catch { /* expected while the daemon is down */ }
     }
     setRestarting(false);
-    setToast('Server did not come back — restart it manually.');
+    setToast("The app didn't come back — please restart it yourself.");
   };
 
   const liveCount = agents.filter((a) => isLive(a.status)).length;
@@ -229,13 +229,13 @@ export default function AppShell() {
       {/* After a theme toggle, offer to respawn live sessions so their claude TUI
           re-queries the terminal background and matches the new theme. */}
       <Dialog open={respawnCount > 0} onClose={() => setRespawnCount(0)} maxWidth="sm" fullWidth>
-        <DialogTitle>Restart sessions to match theme?</DialogTitle>
+        <DialogTitle>Restart sessions to match the new theme?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            Theme changed. {respawnCount} running session{respawnCount === 1 ? '' : 's'} still use the old theme. Restart them to match?
+            You changed the theme. {respawnCount} running session{respawnCount === 1 ? '' : 's'} still show the old theme. Restart them to match?
           </Typography>
           <Typography variant="body2" sx={{ mt: 1, color: 'text.secondary' }}>
-            This restarts each session — any in-flight turn is interrupted (conversation history is kept). Session order may change.
+            This restarts each session — anything in progress right now will be interrupted, but the conversation history is kept. The session order may change.
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
@@ -246,10 +246,10 @@ export default function AppShell() {
 
       {/* Restart the server — respawns itself detached, killing every live session. */}
       <Dialog open={restartOpen} onClose={() => setRestartOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Restart server?</DialogTitle>
+        <DialogTitle>Restart the app?</DialogTitle>
         <DialogContent>
           <Typography variant="body2">
-            Restarting the server kills all {liveCount} running session{liveCount === 1 ? '' : 's'} (conversations are lost). Continue?
+            Restarting the app will end all {liveCount} running session{liveCount === 1 ? '' : 's'} and their conversations will be lost. Continue?
           </Typography>
         </DialogContent>
         <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>

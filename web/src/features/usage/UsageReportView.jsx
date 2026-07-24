@@ -3,9 +3,11 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
+import IconButton from '@mui/material/IconButton';
 import CircularProgress from '@mui/material/CircularProgress';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { EmptyState, useColorMode } from '@zapac/mui-theme';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 
@@ -23,14 +25,15 @@ const REPORT_THEME_KEY = 'agents-report-theme';
 // origin allowlist keep the query-string token's exposure to loopback only, and
 // the server redacts token= from logs. So ?token= stays.
 const TOKEN = window.__SING_TOKEN__;
-const reportSrc = (t) => `/spend/report?t=${t}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}`;
+const reportSrc = (t) => `/usagereport/report?t=${t}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}`;
 
-// Spend report: renders the claude-code-usage-report skill's self-contained HTML
+// Usage report: renders the claude-code-usage-report skill's self-contained HTML
 // in a sandboxed iframe. Generate/Refresh spawns the skill server-side.
-export default function SpendView() {
+export default function UsageReportView() {
   const [status, setStatus] = useState(null); // { exists, at } | null while loading
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [open, setOpen] = useState(true);
   const { resolved } = useColorMode(); // 'light' | 'dark' — the app's active mode
   const iframeRef = useRef(null);
   const caps = useCapabilities();
@@ -51,13 +54,13 @@ export default function SpendView() {
   useEffect(syncTheme, [syncTheme, status?.at]);
 
   useEffect(() => {
-    fetch('/spend/status').then((r) => r.json()).then(setStatus)
+    fetch('/usagereport/status').then((r) => r.json()).then(setStatus)
       .catch(() => setStatus({ exists: false, at: null }));
   }, []);
 
   const refresh = useCallback(() => {
     setBusy(true); setError(null);
-    fetch('/spend/refresh', { method: 'POST' })
+    fetch('/usagereport/refresh', { method: 'POST' })
       .then((r) => r.json())
       .then((d) => { if (d.ok) setStatus({ exists: true, at: d.at }); else setError(d.error || 'refresh failed'); })
       .catch((e) => setError(e.message))
@@ -66,7 +69,15 @@ export default function SpendView() {
 
   return (
     <Stack sx={{ height: '100%' }}>
-      <Stack direction="row" spacing={1} sx={{ px: 2, py: 1.25, alignItems: 'center', flexShrink: 0 }}>
+      <Stack direction="row" spacing={1} sx={{ px: 3, py: 1.25, alignItems: 'center', flexShrink: 0 }}>
+        <IconButton
+          size="small"
+          onClick={() => setOpen((o) => !o)}
+          aria-label={open ? 'Collapse usage report' : 'Expand usage report'}
+          sx={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .2s' }}
+        >
+          <ExpandMoreIcon />
+        </IconButton>
         <ReceiptLongIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
         <Typography variant="subtitle2" sx={{ flex: 1 }}>Usage report</Typography>
         <Button
@@ -80,7 +91,7 @@ export default function SpendView() {
         </Button>
       </Stack>
       {error && <Typography sx={{ px: 2, pb: 1, color: 'error.main', fontSize: 13 }}>{error}</Typography>}
-      <Box sx={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      <Box sx={{ flex: 1, minHeight: 0, position: 'relative', display: open ? 'block' : 'none' }}>
         {status?.exists ? (
           // Reports are fully self-contained (zero external requests); allow-scripts
           // for the inlined charts, allow-same-origin so the report's theme toggle
@@ -90,7 +101,7 @@ export default function SpendView() {
             key={status.at}
             ref={iframeRef}
             onLoad={syncTheme}
-            title="Spend report"
+            title="Usage report"
             src={reportSrc(status.at)}
             sandbox="allow-scripts allow-same-origin"
             sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
@@ -99,8 +110,8 @@ export default function SpendView() {
           <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
             <EmptyState
               icon={<ReceiptLongIcon />}
-              title={spendUnavailable ? 'Spend report not configured' : (status ? 'No report yet' : 'Loading…')}
-              description={spendUnavailable ? spendHint : (status ? 'Generate a spend report from your Claude Code usage.' : '')}
+              title={spendUnavailable ? 'Usage report not set up yet' : (status ? 'No report yet' : 'Loading…')}
+              description={spendUnavailable ? spendHint : (status ? "Create a report showing how you've used Claude Code." : '')}
             />
           </Box>
         )}

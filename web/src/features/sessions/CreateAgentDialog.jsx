@@ -45,7 +45,7 @@ export default function CreateAgentDialog({ open, onClose, connected, cwd, setCw
           <TextField size="small" label="name (optional)" value={name} onChange={(e) => setName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') create(); }} />
           <ModelSelect model={model} setModel={setModel} />
           <ScopeSelect open={open} value={scopes} onChange={setScopes} />
-          <TextField size="small" label="session id (optional, resume)" value={sessionId} onChange={(e) => setSessionId(e.target.value)} spellCheck={false} error={sessionIdInvalid} helperText={sessionIdInvalid ? 'must be a UUID' : ''} />
+          <TextField size="small" label="session id (optional — resumes a past session)" value={sessionId} onChange={(e) => setSessionId(e.target.value)} spellCheck={false} error={sessionIdInvalid} helperText={sessionIdInvalid ? 'Not a valid session id' : ''} />
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>

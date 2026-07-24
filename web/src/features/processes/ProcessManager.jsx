@@ -19,9 +19,9 @@ import { StatusPill } from '@zapac/mui-theme';
 
 const KIND_PILL = { tracked: 'active', stale: 'error', external: 'review' };
 const KIND_HELP = {
-  tracked: 'Live agent this daemon owns',
-  stale: 'Orphaned — app-spawned but no longer tracked (kill me)',
-  external: 'Not app-spawned (your terminal / other tools)',
+  tracked: 'A live session this app is running',
+  stale: 'Leftover from this app — no longer tracked, safe to stop',
+  external: 'Not started by this app (your terminal or another tool)',
 };
 
 export default function ProcessManager({ onClose }) {
@@ -41,7 +41,7 @@ export default function ProcessManager({ onClose }) {
   };
 
   const confirmKill = (p) => {
-    if (p.kind !== 'stale' && !window.confirm(`Kill ${p.kind} ${p.name} (PID ${p.pid})? This ends a live session.`)) return;
+    if (p.kind !== 'stale' && !window.confirm(`Stop ${p.kind} ${p.name} (PID ${p.pid})? This ends a live session.`)) return;
     kill(p.pid);
   };
 
@@ -52,24 +52,24 @@ export default function ProcessManager({ onClose }) {
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1, lineHeight: '24px' }}>
-          Processes
+          Running Processes
           <Typography component="span" variant="code" sx={{ color: 'text.secondary', fontSize: 12, lineHeight: 'inherit' }}>
-            {procs ? `${procs.length} running` : 'scanning…'}
+            {procs ? `${procs.length} running` : 'checking…'}
           </Typography>
         </Stack>
         <span style={{ flex: 1 }} />
-        <Tooltip title="Rescan"><IconButton size="small" onClick={load}><RefreshIcon fontSize="small" /></IconButton></Tooltip>
+        <Tooltip title="Refresh list"><IconButton size="small" onClick={load}><RefreshIcon fontSize="small" /></IconButton></Tooltip>
       </DialogTitle>
       <DialogContent dividers sx={{ p: 0 }}>
         <Table size="small">
           <TableHead>
             <TableRow>
-              <TableCell>PID</TableCell>
+              <TableCell>Process ID</TableCell>
               <TableCell>Name</TableCell>
               <TableCell>Started</TableCell>
               <TableCell>Session</TableCell>
-              <TableCell>Kind</TableCell>
-              <TableCell align="right">Kill</TableCell>
+              <TableCell>Type</TableCell>
+              <TableCell align="right">Stop</TableCell>
             </TableRow>
           </TableHead>
           <TableBody>
@@ -95,7 +95,7 @@ export default function ProcessManager({ onClose }) {
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 2 }}>
         <Button size="small" color="error" sx={{ px: 2 }} disabled={busy || stale.length === 0} onClick={killAllStale}>
-          Kill all stale ({stale.length})
+          Stop all leftover ({stale.length})
         </Button>
         <span style={{ flex: 1 }} />
         <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={onClose}>Close</Button>

@@ -177,13 +177,13 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
         {/* Scheduled (cron) section */}
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Scheduled</Typography>
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>UTC</Typography>
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>times in UTC</Typography>
           <Box sx={{ flex: 1 }} />
-          <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Cron job</Button>
+          <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Scheduled job</Button>
         </Stack>
         {crons.length === 0 ? (
           <Box sx={{ py: 3, display: 'grid', placeItems: 'center' }}>
-            <EmptyState icon={<ScheduleIcon />} title="No cron jobs" description="Add one to run a prompt on a schedule." />
+            <EmptyState icon={<ScheduleIcon />} title="No scheduled jobs" description="Add one to run a prompt on a schedule." />
           </Box>
         ) : (
           <Table size="small" stickyHeader>
@@ -239,7 +239,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                           <IconButton size="small" onClick={() => run(j.id)}><PlayArrowIcon fontSize="small" /></IconButton>
                         </Tooltip>
                         <Tooltip title="Delete" disableInteractive>
-                          <IconButton size="small" onClick={() => { if (window.confirm(`Delete cron job "${j.name}"?`)) remove(j.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>
+                          <IconButton size="small" onClick={() => { if (window.confirm(`Delete scheduled job "${j.name}"?`)) remove(j.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>
                         </Tooltip>
                       </Stack>
                     </TableCell>
@@ -257,27 +257,27 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
             disableInteractive
             title={
               <Box component="div" sx={{ fontSize: 12 }}>
-                Uses spare AI usage quota.<br />
-                Every hour tasks to execute are identified by:
+                Runs jobs automatically using AI capacity you're not otherwise using.<br />
+                Every hour, it checks each job for two things:
                 <Box component="ol" sx={{ my: 0.5, pl: 2.5 }}>
-                  <li>Current time falls inside the task's day/hour window</li>
-                  <li>Current AI usage is below the start threshold</li>
+                  <li>The current time is within the job's allowed days and hours</li>
+                  <li>Your AI usage is below the job's start threshold</li>
                 </Box>
-                The oldest off-cooldown task would be spawned as a Tasks-board card.<br />
-                To start task immediately, trigger via 'Run now'.
+                If both are true, the job that's waited longest (and isn't on cooldown) starts as a new card on the Tasks board.<br />
+                To start a job right away instead of waiting, use "Run now".
               </Box>
             }
           >
             <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.secondary', cursor: 'help' }} />
           </Tooltip>
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>local time</Typography>
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>times in local time</Typography>
           <Box sx={{ flex: 1 }} />
           {bgView !== 'reports' && (
             <>
-              <Tooltip title="Run the scheduler now (picks a ready task)" disableInteractive>
+              <Tooltip title="Check now and start the next ready job" disableInteractive>
                 <Button size="small" startIcon={<PlayArrowIcon />} onClick={runBg} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Run now</Button>
               </Tooltip>
-              <Button size="small" startIcon={<AddIcon />} onClick={() => setDefOpen(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Add background task</Button>
+              <Button size="small" startIcon={<AddIcon />} onClick={() => setDefOpen(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Add background job</Button>
             </>
           )}
           {bgToggle}
@@ -288,7 +288,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
         ) : bgView === 'reports' ? (
           reports.length === 0 ? (
             <Box sx={{ py: 3, display: 'grid', placeItems: 'center' }}>
-              <EmptyState icon={<DescriptionOutlinedIcon />} title="No reports yet" description="Background runs write a Report.md when they finish — it will show up here." />
+              <EmptyState icon={<DescriptionOutlinedIcon />} title="No reports yet" description="Background runs write a report when they finish — it will show up here." />
             </Box>
           ) : (
             <Stack direction="row" sx={{ flex: 1, minHeight: 0, border: (t) => `1px solid ${getTokens(t).glass.stroke}`, borderRadius: (t) => `${getTokens(t).radius.sm}px` }}>
@@ -315,12 +315,12 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
               <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto', p: 2 }}>
                 {!selReport ? (
                   <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
-                    <EmptyState icon={<DescriptionOutlinedIcon />} title="Select a report" description="Pick a background run on the left to read its Report.md." />
+                    <EmptyState icon={<DescriptionOutlinedIcon />} title="Select a report" description="Pick a background run on the left to read its report." />
                   </Box>
                 ) : reportLoading ? (
                   <Typography color="text.secondary">Loading…</Typography>
                 ) : reportContent == null ? (
-                  <Typography color="text.secondary">No Report.md for this run.</Typography>
+                  <Typography color="text.secondary">No report for this run.</Typography>
                 ) : (
                   <MarkdownBody>{reportContent}</MarkdownBody>
                 )}
@@ -333,13 +333,13 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {lastTick
                 ? `${lastTick.action === 'ran' ? 'started' : 'skipped'} ${fmtHM(lastTick.at)}${lastTick.reason ? ` — ${lastTick.reason}` : ''}`
-                : `Waiting for first run in ${Math.max(0, Math.ceil((background.nextDueAt - Date.now()) / 60000))} minutes`}
+                : `First check in about ${Math.max(0, Math.ceil((background.nextDueAt - Date.now()) / 60000))} minutes`}
             </Typography>
 
             {/* Defs table */}
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>Jobs</Typography>
             {(config.defs || []).length === 0 ? (
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>No background tasks. Add one to soak spare quota during the window.</Typography>
+              <Typography variant="body2" sx={{ color: 'text.secondary' }}>No background jobs yet. Add one to run automatically during its scheduled hours, using spare AI capacity.</Typography>
             ) : (
               <Table size="small">
                 <TableHead>
@@ -363,7 +363,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                       sx={dragId === def.id ? { opacity: 0.4 } : undefined}
                     >
                       <TableCell padding="checkbox">
-                        <Tooltip title="Drag to reorder (display only)" disableInteractive>
+                        <Tooltip title="Drag to change the order shown here (doesn't change which job runs next)" disableInteractive>
                           <Box
                             draggable
                             onDragStart={() => setDragId(def.id)}
@@ -389,7 +389,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                             <IconButton size="small" onClick={() => setDefOpen(def)}><EditOutlinedIcon fontSize="small" /></IconButton>
                           </Tooltip>
                           <Tooltip title="Delete" disableInteractive>
-                            <IconButton size="small" onClick={() => { if (window.confirm(`Delete background task "${def.title}"?`)) removeDef(def.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>
+                            <IconButton size="small" onClick={() => { if (window.confirm(`Delete background job "${def.title}"?`)) removeDef(def.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>
                           </Tooltip>
                         </Stack>
                       </TableCell>

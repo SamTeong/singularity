@@ -126,7 +126,7 @@ export default function HooksEditor() {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path, content }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
-    if (r.ok) { setMsg({ sev: 'success', text: `Saved${r.backup ? ' (.bak written)' : ''}` }); setDirty(false); }
+    if (r.ok) { setMsg({ sev: 'success', text: `Saved${r.backup ? ' (backup made)' : ''}` }); setDirty(false); }
     else setMsg({ sev: 'error', text: r.error || 'save failed' });
   };
 
@@ -188,7 +188,7 @@ export default function HooksEditor() {
                 );
               })}
               {results && (results.length === 0) && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
-              {!results && shownGroups.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No hook roots.</Typography>}
+              {!results && shownGroups.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No folders configured.</Typography>}
             </List>
           </>
         )}
@@ -196,7 +196,7 @@ export default function HooksEditor() {
 
     <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
       {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
-      <DetailPane empty={!path && <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Browse on the left to view or edit here." />}>
+      <DetailPane empty={!path && <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Hooks are scripts that run automatically during a session. Browse on the left to view or edit one." />}>
         <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>{tildify(path)}</Typography>
         <CmEditor value={content} onChange={onChange} extensions={lang ? [lang] : []} deps={[path]} />
         <SaveBar msg={msg} disabled={!dirty} onSave={save} />

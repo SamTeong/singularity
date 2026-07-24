@@ -12,15 +12,15 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { visibleProviders, usd } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { Meter } from '@/components/Meter.jsx';
-import SpendView from '@/features/usage/SpendView.jsx';
+import UsageReportView from '@/features/usage/UsageReportView.jsx';
 
 function ProviderCard({ label, u }) {
   const authHelp = {
     // Browser mode (error 'no-login') vs manual-cookie mode need different fixes.
     ollama: u?.error === 'no-login'
-      ? 'Automation browser not signed in — run `npm run ollama-login` and complete the ollama.com login once.'
-      : 'Populate ~/.singularity/ollama.json with a fresh { cookie, userAgent } from a logged-in ollama.com session (cf_clearance expires — re-paste periodically). Or switch to browser mode: {"mode":"browser"} + `npm run ollama-login`.',
-    claude: 'OAuth token missing/expired — run `claude /login`.',
+      ? 'Sign-in expired. Run this once in a terminal: `npm run ollama-login`, then log in to ollama.com when the browser opens.'
+      : 'Sign-in expired. Open ~/.singularity/ollama.json and paste in a fresh cookie and browser ID from a logged-in ollama.com tab (these expire, so you may need to repeat this now and then) — or just run `npm run ollama-login` once to sign in automatically instead.',
+    claude: 'No usage data yet — start a new chat with a Claude model and it will show up here.',
   };
   return (
     <Box sx={(t) => ({ p: 2, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}>
@@ -49,7 +49,7 @@ function ProviderCard({ label, u }) {
         </Stack>
       ) : (
         <Alert severity={u.needsAuth ? 'warning' : 'info'} sx={{ py: 0.5 }}>
-          {u.needsAuth ? authHelp[label.toLowerCase()] : `Unavailable: ${u.error || 'unknown error'}`}
+          {u.needsAuth ? authHelp[label.toLowerCase()] : `Couldn't load this: ${u.error || 'unknown error'}`}
         </Alert>
       )}
     </Box>
@@ -79,7 +79,7 @@ export default function UsageView({ usage, onRefresh }) {
         <Collapse in={open}>
           <Stack spacing={2}>
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-              Account-wide 5-hour session and 7-day weekly limits. Cached ~60s; Refresh forces a live pull.
+              Shows the usage limits for your whole account: a 5-hour session limit and a 7-day weekly limit. This updates on its own about once a minute — press Refresh to check right now.
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
               {visibleProviders(caps).map((p) => <ProviderCard key={p.key} label={p.label} u={usage?.[p.key]} />)}
@@ -87,9 +87,9 @@ export default function UsageView({ usage, onRefresh }) {
           </Stack>
         </Collapse>
       </Stack>
-      {/* Spend report (claude-code-usage-report skill) fills the rest of the pane. */}
+      {/* Usage report (claude-code-usage-report skill) fills the rest of the pane. */}
       <Box sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${getTokens(t).glass.stroke}` })}>
-        <SpendView />
+        <UsageReportView />
       </Box>
     </Stack>
   );

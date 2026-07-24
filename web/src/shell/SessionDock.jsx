@@ -101,8 +101,8 @@ export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag,
             <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
               <EmptyState
                 icon={<TerminalIcon />}
-                title={activeAgent?.status === 'detached' ? 'Agent detached' : 'No agent selected'}
-                description={activeAgent?.status === 'detached' ? 'Click the reattach button to resume the conversation.' : 'Create an agent to begin.'}
+                title={activeAgent?.status === 'detached' ? 'Session paused' : 'No agent selected'}
+                description={activeAgent?.status === 'detached' ? 'Click Resume to continue this session.' : 'Create an agent to begin.'}
               />
             </Box>
           )}
