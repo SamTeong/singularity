@@ -17,9 +17,10 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
 import { StatusPill } from '@zapac/mui-theme';
 
-const KIND_PILL = { tracked: 'active', stale: 'error', external: 'review' };
+const KIND_PILL = { tracked: 'active', daemon: 'active', stale: 'error', external: 'review' };
 const KIND_HELP = {
   tracked: 'A live session this app is running',
+  daemon: 'Part of this running app (its server + build tooling) — cannot be stopped here',
   stale: 'Leftover from this app — no longer tracked, safe to stop',
   external: 'Not started by this app (your terminal or another tool)',
 };
@@ -41,7 +42,9 @@ export default function ProcessManager({ onClose }) {
   };
 
   const confirmKill = (p) => {
-    if (p.kind !== 'stale' && !window.confirm(`Stop ${p.kind} ${p.name} (PID ${p.pid})? This ends a live session.`)) return;
+    if (p.kind === 'daemon') return; // protected — button is disabled anyway
+    const warn = p.session ? ' This ends a live session.' : '';
+    if (p.kind !== 'stale' && !window.confirm(`Stop ${p.kind} ${p.name} (PID ${p.pid})?${warn}`)) return;
     kill(p.pid);
   };
 
@@ -49,7 +52,7 @@ export default function ProcessManager({ onClose }) {
   const killAllStale = async () => { for (const p of stale) await kill(p.pid); };
 
   return (
-    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog open onClose={onClose} maxWidth="md" fullWidth>
       <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
         <Stack direction="row" sx={{ alignItems: 'center', gap: 1, lineHeight: '24px' }}>
           Running Processes
@@ -83,7 +86,7 @@ export default function ProcessManager({ onClose }) {
                   <Tooltip title={KIND_HELP[p.kind]}><span><StatusPill status={KIND_PILL[p.kind]}>{p.kind}</StatusPill></span></Tooltip>
                 </TableCell>
                 <TableCell align="right">
-                  <IconButton size="small" disabled={busy} onClick={() => confirmKill(p)}><CloseIcon fontSize="small" /></IconButton>
+                  <IconButton size="small" disabled={busy || p.kind === 'daemon'} onClick={() => confirmKill(p)}><CloseIcon fontSize="small" /></IconButton>
                 </TableCell>
               </TableRow>
             ))}

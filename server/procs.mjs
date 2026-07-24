@@ -1,6 +1,8 @@
 // Claude process scanner + guarded killer — powers the in-app task manager.
 // Windows: query Win32_Process via built-in powershell.exe (CIM). Classifies
-// each claude.exe as tracked / stale / external so the UI can safely target orphans.
+// each claude.exe as tracked / stale / external so the UI can safely target
+// orphans. Repo dev tooling (node/esbuild) is 'daemon' (live stack, protected)
+// or 'stale' (orphan, killable) — never offered up as an unowned 'external'.
 // macOS: `ps -axo pid=,ppid=,comm=,command=` (no started-time column in that
 // format — the UI only shows it informatively, null is fine). Re-parented-to-
 // launchd (ppid 0/1) => orphaned for the dev-tooling liveness test.
@@ -18,6 +20,7 @@ import { livePids } from './agents.mjs';
 const execFileP = promisify(execFile);
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
 const IS_DARWIN = process.platform === 'darwin';
+const SELF_PID = process.pid; // this daemon — its own row is always 'daemon', never killable
 
 // PS projects only the fields we need; DateTime formatted to avoid /Date()/ JSON noise.
 // `alive` is the full running-pid set, used to tell a genuinely orphaned
@@ -80,8 +83,11 @@ async function scanClaudeWindows() {
     .filter((r) => r.name === 'claude.exe' || inRepo(r.cmd))
     .map((r) => {
       if (r.name === 'claude.exe') return classifyClaude(r, live);
-      // Repo dev tooling: stale only if its parent (pnpm dev/test) is gone.
-      const kind = alive.has(r.ppid) ? 'external' : 'stale';
+      // Repo dev tooling (already scoped to this clone by inRepo): part of the
+      // live dev stack while its parent (pnpm dev/test) is alive => 'daemon',
+      // protected. Orphaned (parent gone) => 'stale', safe to stop. The daemon's
+      // own row is always 'daemon' even if detached from its launcher.
+      const kind = r.pid === SELF_PID || alive.has(r.ppid) ? 'daemon' : 'stale';
       return { pid: r.pid, ppid: r.ppid, name: r.name, started: r.started, session: null, kind };
     });
 }
@@ -117,10 +123,11 @@ async function scanClaudeDarwin() {
     .filter((r) => r.name === 'claude' || (DARWIN_DEV_NAMES.has(r.name) && inRepo(r.cmd)))
     .map((r) => {
       if (r.name === 'claude') return classifyClaude(r, live);
-      // Repo dev tooling: stale only if its parent is gone. On darwin we have
-      // no Get-Process alive set, so liveness = ppid is a positive pid still in
-      // the ps rows; ppid 0/1 = re-parented to launchd => orphaned => stale.
-      const kind = r.ppid > 1 && allPids.has(r.ppid) ? 'external' : 'stale';
+      // Repo dev tooling (scoped to this clone by inRepo): live dev stack while
+      // its parent survives => 'daemon', protected; orphaned => 'stale'. On
+      // darwin liveness = ppid is a positive pid still in the ps rows; ppid 0/1
+      // = re-parented to launchd => orphaned. Own row is always 'daemon'.
+      const kind = r.pid === SELF_PID || (r.ppid > 1 && allPids.has(r.ppid)) ? 'daemon' : 'stale';
       return { pid: r.pid, ppid: r.ppid, name: r.name, started: r.started, session: null, kind };
     });
 }
@@ -135,6 +142,7 @@ export async function killClaudePid(pid) {
   const procs = await scanClaude();
   const target = procs.find((p) => p.pid === pid);
   if (!target) return { ok: false, error: 'not a tracked process' };
+  if (target.kind === 'daemon') return { ok: false, error: 'daemon process — cannot stop from here' };
   if (IS_DARWIN) {
     // Re-verify by re-scanning: the scan above found the pid only if it's
     // still a claude process. Skip the CIM re-query (Windows-only primitive);
