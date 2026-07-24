@@ -37,11 +37,11 @@ export default function UsageReportView() {
   const { resolved } = useColorMode(); // 'light' | 'dark' — the app's active mode
   const iframeRef = useRef(null);
   const caps = useCapabilities();
-  // spend.available gates this whole view (the skill path is configured via
+  // usageReport.available gates this whole view (the skill path is configured via
   // SING_USAGE_SKILL + SING_USAGE_REPORTS). null = still loading / fetch failed
   // → don't gate (avoids hiding a working feature on a transient glitch).
-  const spendUnavailable = caps && caps.spend?.available === false;
-  const spendHint = caps?.spend?.hint;
+  const usageReportUnavailable = caps && caps.usageReport?.available === false;
+  const usageReportHint = caps?.usageReport?.hint;
 
   // Seed the report's bootstrap key so a (re)load starts in the app's mode.
   try { localStorage.setItem(REPORT_THEME_KEY, resolved); } catch {}
@@ -84,7 +84,7 @@ export default function UsageReportView() {
           size="small"
           startIcon={busy ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon />}
           onClick={refresh}
-          disabled={busy || spendUnavailable}
+          disabled={busy || usageReportUnavailable}
           sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}
         >
           {busy ? 'Generating…' : (status?.exists ? 'Refresh' : 'Generate')}
@@ -110,8 +110,8 @@ export default function UsageReportView() {
           <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
             <EmptyState
               icon={<ReceiptLongIcon />}
-              title={spendUnavailable ? 'Usage report not set up yet' : (status ? 'No report yet' : 'Loading…')}
-              description={spendUnavailable ? spendHint : (status ? "Create a report showing how you've used Claude Code." : '')}
+              title={usageReportUnavailable ? 'Usage report not set up yet' : (status ? 'No report yet' : 'Loading…')}
+              description={usageReportUnavailable ? usageReportHint : (status ? "Create a report showing how you've used Claude Code." : '')}
             />
           </Box>
         )}

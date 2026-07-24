@@ -258,8 +258,7 @@ app.get('/capabilities', async () => {
   return {
     ollama:      { available: !!reg.OLLAMA_BIN, hint: 'Set OLLAMA_BIN in .env to enable Ollama model spawns.' },
     skillScopes: { available: !!(process.env.SING_SCOPE_ROOT && existsSync(process.env.SING_SCOPE_ROOT)), hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
-    usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable spend reports.' },
-    spend:       { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the spend view.' },
+    usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
     wiki:        { available: wikiAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
     leanCtx:     { available: detectMcp('lean-ctx'), hint: 'Install the lean-ctx MCP server to enable compressed reads in task subagents.' },
     token:       { available: !!process.env.SING_TOKEN, hint: 'Set SING_TOKEN in .env to require an auth token on data endpoints.' },
