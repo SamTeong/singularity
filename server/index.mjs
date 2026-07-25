@@ -23,6 +23,7 @@ import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeS
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, initUsageAutoRefresh } from './usage.mjs';
+import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
@@ -200,6 +201,9 @@ app.get('/sysstats', async () => getSysStats());
 // Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
 app.get('/usage', async (req) => getUsage({ force: req.query.force === '1' }));
 
+// Provider status (OpenAI + Claude Atlassian Statuspage). Cached ~20s; ?force=1 bypasses.
+app.get('/status', async (req) => getStatus({ force: req.query.force === '1' }));
+
 // Usage report: newest self-contained HTML from the claude-code-usage-report
 // skill (rendered on demand by /usagereport/refresh, served whole to a sandboxed iframe).
 app.get('/usagereport/status', async () => reportStatus());
@@ -300,6 +304,20 @@ app.post('/restart', async (req, reply) => {
     }).unref();
     shutdown();
   }, 100);
+});
+
+// Continue a session in an external terminal (Windows Terminal / macOS Terminal).
+// detached-spawn wt.exe / osascript with the same resume argv in-app reattach
+// uses (buildSpawn). Gated by the global token hook like the other action POSTs.
+app.post('/session/external', async (req, reply) => {
+  const id = req.body?.id;
+  if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
+  const r = reg.externalLaunch(id);
+  if (!r.ok) return reply.code(400).send(r);
+  try {
+    spawn(r.launcher, r.launcherArgs, { detached: true, stdio: 'ignore', cwd: r.cwd }).unref();
+    return { ok: true };
+  } catch (e) { return reply.code(500).send({ ok: false, error: e.message }); }
 });
 
 // Config editor: 3-scope resolver + backup-then-write.

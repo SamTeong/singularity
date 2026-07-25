@@ -11,6 +11,7 @@ import CallSplitIcon from '@mui/icons-material/CallSplit';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import LinkIcon from '@mui/icons-material/Link';
 import HistoryIcon from '@mui/icons-material/History';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import CloseIcon from '@mui/icons-material/Close';
 import { StatusPill } from '@zapac/mui-theme';
 import { KIND } from '@/lib/agentStatus.js';
@@ -27,7 +28,7 @@ const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
  */
 export default function SessionRow({
   agent, selected, onSelect, stats, subagents = [], dragging, dragHandlers,
-  onViewTranscript, onDuplicate, onFork, onRespawn, onReattach, onKill,
+  onViewTranscript, onDuplicate, onFork, onRespawn, onReattach, onOpenExternal, onKill,
 }) {
   const a = agent;
   return (
@@ -55,6 +56,11 @@ export default function SessionRow({
             <Tooltip title="Fork — start a new session that continues this conversation" disableInteractive>
               <IconButton size="small" onClick={(e) => { e.stopPropagation(); onFork(); }}><CallSplitIcon fontSize="small" /></IconButton>
             </Tooltip>
+            {!isLive(a.status) && (
+              <Tooltip title="Open in Windows Terminal — resume this session in an external terminal" disableInteractive>
+                <IconButton size="small" onClick={(e) => { e.stopPropagation(); onOpenExternal(); }}><OpenInNewIcon fontSize="small" /></IconButton>
+              </Tooltip>
+            )}
             {isLive(a.status) && (
               <Tooltip title="Restart — stop and resume this session, keeping the conversation" disableInteractive>
                 <IconButton size="small" sx={{ color: 'error.main', '&:hover': { color: 'error.main' } }} onClick={(e) => { e.stopPropagation(); onRespawn(); }}><RestartAltIcon fontSize="small" /></IconButton>

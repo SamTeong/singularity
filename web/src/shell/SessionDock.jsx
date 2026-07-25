@@ -79,6 +79,9 @@ export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag,
               onFork={() => sendMsg({ t: 'fork', id: a.id, name: nextSessionName(agents, a) })}
               onRespawn={() => sendMsg({ t: 'respawn', id: a.id })}
               onReattach={() => sendMsg({ t: 'reattach', id: a.id })}
+              onOpenExternal={() => fetch('/session/external', {
+                method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: a.id }),
+              }).then((r) => r.json()).then((d) => { if (!d.ok) console.warn('external open failed:', d.error); }).catch(() => {})}
               onKill={() => sendMsg({ t: 'kill', id: a.id })}
             />
           ))}

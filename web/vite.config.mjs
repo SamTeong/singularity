@@ -52,6 +52,7 @@ export default defineConfig({
       '/subagents': 'http://127.0.0.1:4317',
       '/session': 'http://127.0.0.1:4317',
       '/usage': 'http://127.0.0.1:4317',
+      '/status': 'http://127.0.0.1:4317',
       '/claude': 'http://127.0.0.1:4317',
       '/usagereport': 'http://127.0.0.1:4317',
       '/tasks': 'http://127.0.0.1:4317',

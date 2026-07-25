@@ -78,6 +78,10 @@ export function AgentsProvider({ children }) {
           if (!document.hidden) termHandlers.current[m.id]?.write(m.data);
         } else if (m.t === 'attached') {
           setActive(m.id);
+        } else if (m.t === 'txmeta') {
+          // Scroll-to-top probe reply: routes the daemon's written/ringMax to the
+          // terminal, which fires the "view full transcript" prompt if trimmed.
+          termHandlers.current[m.id]?.meta?.(m);
         } else if (m.t === 'usage') {
           setUsage(m.data);
         } else if (m.t === 'tasks') {

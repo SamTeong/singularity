@@ -21,6 +21,7 @@ import ChatBubbleOutlinedIcon from '@mui/icons-material/ChatBubbleOutlined';
 import SubjectIcon from '@mui/icons-material/Subject';
 import HistoryIcon from '@mui/icons-material/History';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { EmptyState } from '@zapac/mui-theme';
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
@@ -55,7 +56,7 @@ function PulseDot({ sx }) {
   );
 }
 
-export default function SessionHistory({ active, sendMsg, registerChat, openSession }) {
+export default function SessionHistory({ active, sendMsg, registerChat, openSession, onResume }) {
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
   const [q, setQ] = useState('');
@@ -283,7 +284,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                             <ListItemButton
                               key={sub.id}
                               selected={sel?.project === s.project && sel?.id === sub.id}
-                              onClick={() => open({ project: s.project, id: sub.id, title: sub.title || sub.agentId, cwd: s.cwd, mtime: sub.mtime })}
+                              onClick={() => open({ project: s.project, id: sub.id, title: sub.title || sub.agentId, cwd: s.cwd, mtime: sub.mtime, sub: true })}
                               sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25, pl: 3 }}
                             >
                               <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
@@ -344,7 +345,14 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
               <Typography color="text.secondary">{loadErr || 'Transcript not found.'}</Typography>
             ) : (
               <>
-                <Typography variant="subtitle2" noWrap>{transcript.meta?.title || sel?.title || sel?.id}</Typography>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
+                  <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{transcript.meta?.title || sel?.title || sel?.id}</Typography>
+                  {onResume && !sel?.sub && (transcript.meta?.cwd || sel?.cwd) && (
+                    <Tooltip title="Resume this session in a new agent — pick model + skill-scopes">
+                      <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} onClick={() => onResume(sel.id, transcript.meta?.cwd || sel.cwd)}>Resume</Button>
+                    </Tooltip>
+                  )}
+                </Stack>
                 <Stack direction="row" spacing={1.5} sx={{ mb: 0.5 }}>
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(transcript.meta?.cwd || sel?.cwd)}</Typography>
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{transcript.meta?.turns ?? 0} turns · {relTime(sel.mtime)}</Typography>

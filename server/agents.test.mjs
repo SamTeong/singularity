@@ -45,7 +45,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain } = await import('./agents.mjs');
+const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch } = await import('./agents.mjs');
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -290,6 +290,61 @@ test('ensureTrusted: creates projects map when missing, never throws on bad/miss
   assert.equal(JSON.parse(readFileSync(file, 'utf8')).projects['C:/y'].hasTrustDialogAccepted, true);
   // missing file + unparseable file both swallow silently
   assert.doesNotThrow(() => ensureTrusted('C:\\z', join(scratch, 'does-not-exist.json')));
+});
+
+// externalLaunch: pure builder for the "open in external terminal" route. Seeded
+// via init()+fake agents.json (no spawn) like the fork/remove tests. Random id
+// has no session log → buildSpawn yields --session-id. Platform param exercises
+// both branches on any host.
+test('externalLaunch: win32 wraps wt.exe with -d <cwd> + resume argv', () => {
+  const id = '60000000-eeee-ffff-0000-600000000006';
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id, name: 'extwin', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    recentRepos: [],
+  }));
+  init();
+  const r = externalLaunch(id, 'win32');
+  assert.equal(r.ok, true);
+  assert.equal(r.launcher, 'wt.exe');
+  assert.equal(r.launcherArgs[0], '-d');
+  assert.equal(r.launcherArgs[1], scratch);
+  assert.ok(r.launcherArgs.includes('--session-id'), 'resume argv present');
+  assert.equal(r.launcherArgs[r.launcherArgs.indexOf('--session-id') + 1], id);
+  assert.equal(r.cwd, scratch);
+});
+
+test('externalLaunch: darwin wraps osascript do-script with cd + exec', () => {
+  const id = '70000000-eeee-ffff-0000-700000000007';
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id, name: 'extmac', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    recentRepos: [],
+  }));
+  init();
+  const r = externalLaunch(id, 'darwin');
+  assert.equal(r.ok, true);
+  assert.equal(r.launcher, 'osascript');
+  const script = r.launcherArgs[r.launcherArgs.indexOf('-e') + 1];
+  assert.match(script, /tell application "Terminal" to do script/);
+  assert.match(script, new RegExp(`cd '.*'`));
+  assert.match(script, /exec '/);
+  assert.ok(script.includes(id), 'session id embedded in the shell string');
+});
+
+test('externalLaunch: unknown id + unsupported platform error cleanly', () => {
+  assert.equal(externalLaunch('no-such-id').ok, false);
+  // unsupported platform with a real agent still errors (use a seeded one)
+  const id = '80000000-eeee-ffff-0000-800000000008';
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id, name: 'extlinux', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    recentRepos: [],
+  }));
+  init();
+  const r = externalLaunch(id, 'linux');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /Windows\/macOS only/);
 });
 
 test('buildSpawn: ollama model on resume injects --model to override stripped transcript model', () => {

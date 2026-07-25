@@ -3,23 +3,50 @@ import React from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
+import { useColorMode } from '@zapac/mui-theme';
+import { TERM_THEME } from '@/features/sessions/term-theme.js';
 
-const ROLE_COLOR = { user: 'primary.main', assistant: 'text.primary', tool: 'text.secondary' };
+// Role/kind → xterm ANSI palette key (matches the live Terminal). Kept as a
+// palette-key lookup rather than raw hex so a theme tweak in term-theme.js
+// propagates here without an edit.
+const ROLE_KEY = {
+  user: 'brightBlue',
+  assistant: 'foreground',
+  tool: 'green',      // toolUse header
+  toolResult: 'yellow',
+  thinking: 'brightBlack',
+};
 
 // Read-only transcript message list — shared by SessionHistory's "View" tab
-// and the History dock panel on TasksBoard.
+// and the History dock panel on TasksBoard. Styled to mimic the live xterm
+// terminal: opaque machine-output bg + ANSI palette colors per role, monospace
+// via Typography variant="code" (same JetBrains Mono stack as Terminal.jsx).
 export default function TranscriptView({ messages, emptyText = 'No messages.' }) {
+  const mode = useColorMode().resolved === 'light' ? 'light' : 'dark';
+  const theme = useTheme();
+  const pal = TERM_THEME[mode] ?? TERM_THEME.dark;
+  const radius = getTokens(theme).radius?.sm ?? 6;
+  const labelOf = (m) => (m.kind === 'toolUse' ? `tool: ${m.name}` : m.kind === 'toolResult' ? 'tool result' : m.kind === 'thinking' ? 'thinking' : m.role);
+  const keyFor = (m) => ROLE_KEY[m.kind === 'toolUse' ? 'tool' : m.kind === 'toolResult' ? 'toolResult' : m.kind === 'thinking' ? 'thinking' : m.role] || 'foreground';
+
   return (
-    <Stack spacing={1.5}>
-      {messages.map((m, i) => (
-        <Box key={i} sx={(t) => ({ px: 1.5, py: 1, borderRadius: `${getTokens(t).radius.sm}px`, border: `1px solid ${getTokens(t).glass.stroke}`, bgcolor: m.role === 'user' ? 'action.hover' : 'transparent' })}>
-          <Typography variant="code" sx={{ color: ROLE_COLOR[m.kind === 'toolUse' || m.kind === 'toolResult' ? 'tool' : m.role], fontSize: 11, fontWeight: 700 }}>
-            {m.kind === 'toolUse' ? `tool: ${m.name}` : m.kind === 'toolResult' ? 'tool result' : m.kind === 'thinking' ? 'thinking' : m.role}
-          </Typography>
-          <Typography sx={{ fontSize: 13, whiteSpace: 'pre-wrap', wordBreak: 'break-word', mt: 0.25, opacity: m.kind === 'thinking' ? 0.7 : 1 }}>{m.text}</Typography>
-        </Box>
-      ))}
-      {messages.length === 0 && <Typography color="text.secondary">{emptyText}</Typography>}
+    <Stack spacing={1} sx={{ bgcolor: pal.background, color: pal.foreground, p: 1, borderRadius: `${radius}px` }}>
+      {messages.map((m, i) => {
+        const labelColor = pal[keyFor(m)] || pal.foreground;
+        const dim = m.kind === 'thinking';
+        return (
+          <Box key={i} sx={{ px: 1.5, py: 1, borderLeft: `2px solid ${labelColor}`, bgcolor: 'transparent' }}>
+            <Typography variant="code" sx={{ color: labelColor, fontSize: 11, fontWeight: 700, lineHeight: 1.2 }}>
+              {labelOf(m)}
+            </Typography>
+            <Typography variant="code" sx={{ display: 'block', whiteSpace: 'pre-wrap', wordBreak: 'break-word', mt: 0.25, opacity: dim ? 0.7 : 1, color: pal.foreground }}>
+              {m.text}
+            </Typography>
+          </Box>
+        );
+      })}
+      {messages.length === 0 && <Typography variant="code" sx={{ color: pal.brightBlack }}>{emptyText}</Typography>}
     </Stack>
   );
 }

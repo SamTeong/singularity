@@ -10,7 +10,7 @@ import { isClaudeModel } from './models.mjs';
 import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
 export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR };
 
-const RING_MAX = 256 * 1024; // per-agent in-mem scrollback cap (bytes). Disk ring = Phase 3.
+export const RING_MAX = 256 * 1024; // per-agent in-mem scrollback cap (bytes). Disk ring = Phase 3.
 const IDLE_MS = 2000; // no pty output for this long while running → 'idle' (waiting for input).
 const RECENT_MAX = 10;
 
@@ -84,7 +84,7 @@ export function init(log) {
       recentRepos = data.recentRepos || [];
       for (const a of data.agents || []) {
         // ptys are gone after a daemon restart → mark detached, no proc.
-        agents.set(a.id, { ...a, status: 'detached', proc: null, buf: [] });
+        agents.set(a.id, { ...a, status: 'detached', proc: null, buf: [], written: 0 });
       }
       log?.info({ agents: agents.size }, 'loaded agents.json (detached)');
     }
@@ -97,6 +97,9 @@ export function snapshot() {
 }
 export function getRecentRepos() { return recentRepos; }
 export function getBuf(id) { return agents.get(id)?.buf.join('') ?? ''; }
+// Cumulative pty output bytes since this spawn (0 on detached/never-run). Exceeding
+// RING_MAX means the ring trimmed early history the terminal can't reach.
+export function getWritten(id) { return agents.get(id)?.written ?? 0; }
 export function getStatus(id) { return agents.get(id)?.status; }
 export function isLive(id) { return !!agents.get(id)?.proc; }
 // PIDs of agents this daemon currently owns a live pty for (for process classification).
@@ -122,6 +125,7 @@ export function getActiveMs(id) {
 }
 function pushBuf(a, data) {
   a.buf.push(data);
+  a.written = (a.written || 0) + data.length; // cumulative pty bytes (never trimmed) — daemon-side ground truth for "is there history beyond the ring?"
   let total = a.buf.reduce((n, s) => n + s.length, 0);
   while (total > RING_MAX && a.buf.length > 1) total -= a.buf.shift().length;
 }
@@ -249,7 +253,7 @@ export function create({ cwd, name, model, scopes, sessionId, prompt, permission
   const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
   ensureTrusted(cwd);
   const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true });
-  const a = { id, name: displayName, cwd, model, scopes, permissionMode, extraArgs, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [] };
+  const a = { id, name: displayName, cwd, model, scopes, permissionMode, extraArgs, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -296,11 +300,33 @@ export function reattach(id) {
   const proc = spawnPty(bin, args, {
     cwd: a.cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true,
   });
-  a.proc = proc; a.pid = proc.pid; a.buf = []; a.status = 'starting';
+  a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting';
   wire(a);
   persist();
   emitList();
   return a;
+}
+
+// Launch a session in an external terminal (Windows Terminal / macOS Terminal)
+// so the user can continue it outside the dock without /exit + manual `claude
+// --resume`. Pure builder — returns the launcher + argv for the route to
+// detached-spawn (keeps node:child_process out of this module). Reuses
+// buildSpawn so the resume argv matches in-app reattach (scopes, model,
+// permission-mode, ollama wrapper). `platform` param only for testability.
+export function externalLaunch(id, platform = process.platform) {
+  const a = agents.get(id);
+  if (!a) return { ok: false, error: 'no such session' };
+  const { bin, args } = buildSpawn(a);
+  if (platform === 'win32')
+    return { ok: true, launcher: 'wt.exe', launcherArgs: ['-d', a.cwd, bin, ...args], cwd: a.cwd };
+  if (platform === 'darwin') {
+    const sq = (s) => `'${String(s).replace(/'/g, `'"'"'`)}'`;
+    const shell = `cd ${sq(a.cwd)} && exec ${sq(bin)} ${args.map(sq).join(' ')}`;
+    return { ok: true, launcher: 'osascript',
+      launcherArgs: ['-e', `tell application "Terminal" to do script ${JSON.stringify(shell)}`],
+      cwd: a.cwd };
+  }
+  return { ok: false, error: 'external terminal open is Windows/macOS only' };
 }
 
 // fork a session: copies the source's transcript (uuid rewritten to the new

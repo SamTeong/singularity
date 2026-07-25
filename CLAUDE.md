@@ -9,13 +9,15 @@ pnpm bootstrap       # first setup: generate .env (detects CLAUDE_BIN) + wire us
 pnpm install         # installs dependencies, runs postinstall hook. @zapac/mui-theme is vendored (file:vendor/zapac-mui-theme-*.tgz)
 pnpm postinstall     # mac: run if agents fail with "posix_spawnp failed"
 pnpm start           # build web + serve on http://127.0.0.1:4317
+pnpm build           # build web only (vite build → web/dist); run before serving with `pnpm server`
 pnpm dev             # daemon (:4317) + Vite (:5317) → browse UI at 127.0.0.1:5317; Vite proxies /ws + REST to daemon
 pnpm test            # node --test-force-exit "server/*.test.mjs"
+pnpm clean           # reap orphan esbuild/vite procs (fixes build hangs before a fresh build)
 ```
 
-Pieces separately: `pnpm server` / `pnpm web`. Shell: PowerShell primary; Bash tool POSIX only.
+Pieces separately: `pnpm server` (daemon) / `pnpm web` (Vite dev server only — no build). Shell: PowerShell primary; Bash tool POSIX only.
 
-`pnpm web`/`pnpm start` build takes ~2–3min — run with `run_in_background` (or `timeout: 300000`); the default 120s timeout always fires and auto-backgrounds it.
+`pnpm build`/`pnpm start` run the production build (~20s warm, longer cold) — run with `run_in_background` (or `timeout: 300000`); the default 120s timeout always fires and auto-backgrounds it.
 
 Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `PORT`, `CLAUDE_BIN` are REQUIRED; `OLLAMA_BIN` (absent → ollama models unavailable), `SING_SCOPE_ROOT` (absent → no skill-scopes; skills viewer auto-detects flat `~/.claude/skills` + `<project>/.claude/skills` vs grouped), `SING_TRUSTED_ROOT` (absent → default = this clone), `SING_USAGE_SKILL`/`SING_USAGE_REPORTS` (absent → usage-report degrade silently; `/capabilities` reports them), `SING_TOKEN` are OPTIONAL — daemon boots without any. MCP (lean-ctx) is auto-detected, not required. `pnpm bootstrap` generates a `.env` with these filled (detects `CLAUDE_BIN`) for first-time setup. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
 

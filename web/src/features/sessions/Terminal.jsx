@@ -3,33 +3,13 @@ import { useColorMode } from '@zapac/mui-theme';
 import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
+import { TERM_THEME } from './term-theme.js';
 
 // Machine-output layer — opaque, never glass — but themed light/dark with the
-// app. xterm's default 16-color ANSI palette is built for a dark background and
-// goes low-contrast on white, so each mode ships its own tuned palette on the
-// zapac field colors (purple-black / periwinkle-lilac).
+// app. Palette lives in ./term-theme.js (shared with TranscriptView).
 // Lines kept in each terminal's buffer. Bounded to cap browser-tab memory across
 // a fleet of mounted terminals; past that, history lives in the transcript.
 const SCROLLBACK = 5000;
-
-const TERM_THEME = {
-  dark: {
-    background: '#0b0813', foreground: '#d9d2ee',
-    cursor: '#985b9c', cursorAccent: '#0b0813', selectionBackground: '#985b9c55',
-    black: '#0b0813', red: '#ff6b81', green: '#2ec76f', yellow: '#f2a33c',
-    blue: '#5b8bff', magenta: '#c58cff', cyan: '#33b5e0', white: '#b6afd4',
-    brightBlack: '#7d7699', brightRed: '#ff8fa0', brightGreen: '#5fe0a0', brightYellow: '#ffc46b',
-    brightBlue: '#84a8ff', brightMagenta: '#d9b0ff', brightCyan: '#66cdf0', brightWhite: '#f3f0ff',
-  },
-  light: {
-    background: '#f3f0fb', foreground: '#181320',
-    cursor: '#834f88', cursorAccent: '#f3f0fb', selectionBackground: '#985b9c33',
-    black: '#181320', red: '#b00020', green: '#088043', yellow: '#8a6d00',
-    blue: '#3c69c8', magenta: '#834f88', cyan: '#007299', white: '#524b62',
-    brightBlack: '#736c88', brightRed: '#d32f2f', brightGreen: '#2e9e5b', brightYellow: '#a67c00',
-    brightBlue: '#4f7fd8', brightMagenta: '#985b9c', brightCyan: '#0090c0', brightWhite: '#181320',
-  },
-};
 
 export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOutput, onTopReached }) {
   // Terminal palette follows the app's color mode. Use useColorMode().resolved,
@@ -109,23 +89,35 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     };
     hostRef.current.addEventListener('wheel', onWheel, { passive: true });
 
-    // Offer the full transcript once per mount when the user scrolls to the top
-    // of the buffer. Must listen on the DOM viewport, not term.onScroll: xterm
-    // fires that with suppressScrollEvent for wheel/scrollbar scrolling, so it
-    // never sees a user scroll. baseY > 0 means real scrollback exists — filters
-    // the scroll-to-0 a re-attach reset emits on a near-empty buffer.
-    let asked = false;
+    // Offer the full transcript when the user scrolls to the top of the buffer.
+    // Must listen on the DOM viewport, not term.onScroll: xterm fires that with
+    // suppressScrollEvent for wheel/scrollbar scrolling, so it never sees a user
+    // scroll. The "is there history beyond the ring?" gate is the daemon's
+    // cumulative pty byte count (written) vs its ring cap — a deterministic
+    // server-side signal, not an xterm-buffer heuristic (the WebGL+trim desync
+    // makes the DOM scrollHeight unreliable). Queried on demand at scroll-top;
+    // the reply fires the prompt once per mount via `done`.
+    let pending = false, done = false;
     const onViewportScroll = () => {
-      if (asked || !viewport || viewport.scrollTop > 1) return;
-      if (term.buffer.active.baseY > 0) { asked = true; topRef.current?.(); }
+      if (done || pending || !viewport || viewport.scrollTop > 1) return;
+      pending = true;
+      sendMsg({ t: 'txmeta', id: agent.id });
     };
     viewport?.addEventListener('scroll', onViewportScroll, { passive: true });
 
     // keystrokes -> daemon
     term.onData((data) => sendMsg({ t: 'input', id: agent.id, data }));
 
-    // daemon output -> xterm; reset lets the app clear before a re-attach replay
-    registerOutput({ write: (data) => term.write(data), reset: () => term.reset() });
+    // daemon output -> xterm; reset lets the app clear before a re-attach replay.
+    // meta carries the txmeta reply (written/ringMax) — fires the transcript prompt.
+    registerOutput({
+      write: (data) => term.write(data),
+      reset: () => term.reset(),
+      meta: (m) => {
+        pending = false;
+        if (m.written > m.ringMax) { done = true; topRef.current?.(); }
+      },
+    });
 
     const doFit = () => {
       try {

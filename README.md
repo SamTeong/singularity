@@ -11,6 +11,9 @@ pnpm bootstrap       # run on first setup to generate .env (CLAUDE_BIN is detect
 pnpm install         # installs dependencies, runs postinstall hook
 pnpm postinstall     # mac: run if agents fail with "posix_spawnp failed"
 pnpm start           # build web + serve on http://127.0.0.1:4317
+pnpm build           # build web only (vite build → web/dist); serve separately with `pnpm server`
+pnpm test            # node --test-force-exit "server/*.test.mjs"
+pnpm clean           # reap orphan esbuild/vite procs (fixes build hangs before a fresh build)
 ```
 
 Dev (with live-reload web):

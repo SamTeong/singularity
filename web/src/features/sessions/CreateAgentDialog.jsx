@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Button from '@mui/material/Button';
@@ -16,12 +16,16 @@ import { untildify } from '@/lib/paths.js';
 // lifted to App (shared with the dir picker + config fallback). Emits `create`
 // over the WS via sendMsg, then resets its own fields and closes.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export default function CreateAgentDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg, onSessionCreated }) {
+export default function CreateAgentDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg, onSessionCreated, initialSessionId = '' }) {
   const [name, setName] = useState('');
   const [model, setModel] = useState('');
   const [scopes, setScopes] = useState([]);
   const [sessionId, setSessionId] = useState('');
   const sessionIdInvalid = sessionId.trim() !== '' && !UUID_RE.test(sessionId.trim());
+
+  // Prefill the session id when opened for a resume (e.g. from the Transcripts
+  // view). Runs only on open + when the caller changes the prefilled id.
+  useEffect(() => { if (open && initialSessionId) setSessionId(initialSessionId); }, [open, initialSessionId]);
 
   const reset = () => { setName(''); setScopes([]); setSessionId(''); setModel(''); };
 

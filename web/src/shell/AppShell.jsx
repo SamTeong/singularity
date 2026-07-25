@@ -38,6 +38,7 @@ const UsageView = lazy(() => import('@/features/usage/UsageView.jsx'));
 const TasksBoard = lazy(() => import('@/features/tasks/TasksBoard.jsx'));
 const CronJobs = lazy(() => import('@/features/automation/CronJobs.jsx'));
 const AppearanceView = lazy(() => import('@/features/appearance/AppearanceView.jsx'));
+const StatusView = lazy(() => import('@/features/status/StatusView.jsx'));
 
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
@@ -66,6 +67,7 @@ export default function AppShell() {
   const [procsOpen, setProcsOpen] = useState(false);
   const [menuAnchor, setMenuAnchor] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [createInitialSessionId, setCreateInitialSessionId] = useState('');
   const [taskOpen, setTaskOpen] = useState(false);
   const [cronOpen, setCronOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
@@ -150,6 +152,15 @@ export default function AppShell() {
     setTxPrompt(null);
   };
 
+  // Resume a past session from the Transcripts view: prefill the new-agent
+  // dialog with its id + cwd so the user can pick model + skill-scopes, then
+  // create. Backend switches to --resume when the session log exists at cwd.
+  const onResumeSession = (id, cwd) => {
+    setCwd(cwd);
+    setCreateInitialSessionId(id);
+    setCreateOpen(true);
+  };
+
   const liveCount = agents.filter((a) => isLive(a.status)).length;
 
   return (
@@ -188,11 +199,12 @@ export default function AppShell() {
             )}
             {visited.current.sessions && (
               <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>
-                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} openSession={openTx} />
+                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} openSession={openTx} onResume={onResumeSession} />
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} />}
+            {view === 'status' && <StatusView />}
             {view === 'skills' && <SkillsPanel />}
             {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} onAdd={() => setCronOpen(true)} onToast={setToast} />}
             {view === 'tasks' && (
@@ -273,7 +285,7 @@ export default function AppShell() {
 
       <CreateAgentDialog
         open={createOpen}
-        onClose={() => setCreateOpen(false)}
+        onClose={() => { setCreateOpen(false); setCreateInitialSessionId(''); }}
         connected={connected}
         cwd={cwd}
         setCwd={setCwd}
@@ -281,6 +293,7 @@ export default function AppShell() {
         onBrowse={() => setPicking(true)}
         sendMsg={sendMsg}
         onSessionCreated={expandDock}
+        initialSessionId={createInitialSessionId}
       />
 
       <CreateTaskDialog

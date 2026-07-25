@@ -15,6 +15,7 @@ import MenuBookIcon from '@mui/icons-material/MenuBook';
 import SchoolIcon from '@mui/icons-material/School';
 import HistoryIcon from '@mui/icons-material/History';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
+import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import PaletteIcon from '@mui/icons-material/Palette';
 import Sparkline from '@/components/Sparkline.jsx';
@@ -30,6 +31,7 @@ const NAV_ITEMS = [
   { v: 'sessions', icon: <HistoryIcon fontSize="small" />, label: 'Transcripts' },
   { v: 'wiki', icon: <MenuBookIcon fontSize="small" />, label: 'Wiki' },
   { v: 'appearance', icon: <PaletteIcon fontSize="small" />, label: 'Appearance' },
+  { v: 'status', icon: <CloudSyncIcon fontSize="small" />, label: 'Status' },
 ];
 
 const SPARK_WINDOWS = [[5, '5 min'], [30, '30 min'], [60, '1 hour']];
