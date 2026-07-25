@@ -73,6 +73,8 @@ export default function AppShell() {
   // whole shell) and page reloads — otherwise switching theme bounces to Tasks.
   const [view, setView] = useState(() => localStorage.getItem('sing-view') || 'tasks');
   const [toast, setToast] = useState(null);
+  const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
+  const [openTx, setOpenTx] = useState(null); // {project, id, cwd, mtime} handed to SessionHistory
   const [respawnCount, setRespawnCount] = useState(0); // >0 -> respawn-confirm dialog open, holds live-session count
   const [restartOpen, setRestartOpen] = useState(false); // restart-daemon confirm dialog
   const [restarting, setRestarting] = useState(false); // true while polling /health for the new daemon
@@ -139,6 +141,15 @@ export default function AppShell() {
     setToast("The app didn't come back — please restart it yourself.");
   };
 
+  // Open an agent's transcript in the Transcripts view — from the scrollback-top
+  // prompt or a session row's action. No title: the agent's display name is a
+  // truncated id, so let SessionHistory fall back to the full session id.
+  const viewTranscript = (a) => {
+    setOpenTx({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), id: a.id, cwd: a.cwd, mtime: Date.now() });
+    setView('sessions');
+    setTxPrompt(null);
+  };
+
   const liveCount = agents.filter((a) => isLive(a.status)).length;
 
   return (
@@ -177,7 +188,7 @@ export default function AppShell() {
             )}
             {visited.current.sessions && (
               <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>
-                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} />
+                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} openSession={openTx} />
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
@@ -212,6 +223,8 @@ export default function AppShell() {
         startDockDrag={startDockDrag}
         listW={listW}
         expandDock={expandDock}
+        onTopReached={setTxPrompt}
+        onViewTranscript={viewTranscript}
       />
 
       {picking && <DirPicker start={untildify(cwd)} onPick={(p) => { setCwd(p); setPicking(false); }} onClose={() => setPicking(false)} />}
@@ -290,6 +303,21 @@ export default function AppShell() {
       />
 
       <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} />
+
+      {/* Offered when a terminal scrolls to the top of its (capped) scrollback. */}
+      <Snackbar
+        open={!!txPrompt}
+        autoHideDuration={10000}
+        onClose={() => setTxPrompt(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+        message="That's the start of what this terminal keeps. View the full transcript?"
+        action={
+          <>
+            <Button size="small" variant="secondary" onClick={() => setTxPrompt(null)}>Dismiss</Button>
+            <Button size="small" variant="contained" onClick={() => viewTranscript(txPrompt)}>View transcript</Button>
+          </>
+        }
+      />
     </Box>
   );
 }

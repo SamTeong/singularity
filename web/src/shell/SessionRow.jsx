@@ -10,6 +10,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import CallSplitIcon from '@mui/icons-material/CallSplit';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import LinkIcon from '@mui/icons-material/Link';
+import HistoryIcon from '@mui/icons-material/History';
 import CloseIcon from '@mui/icons-material/Close';
 import { StatusPill } from '@zapac/mui-theme';
 import { KIND } from '@/lib/agentStatus.js';
@@ -19,14 +20,14 @@ import { fmtTokens } from '@/lib/format.js';
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
 
 /**
- * One session row in the dock list: name + row actions (duplicate/fork/restart/
- * reattach/kill), cwd, status pill + turn/token counts, and any live subagent
- * indicator rows nested beneath. Purely presentational — all behaviour arrives
- * as callbacks.
+ * One session row in the dock list: name + row actions (transcript/duplicate/
+ * fork/restart/reattach/kill), cwd, status pill + turn/token counts, and any live
+ * subagent indicator rows nested beneath. Purely presentational — all behaviour
+ * arrives as callbacks.
  */
 export default function SessionRow({
   agent, selected, onSelect, stats, subagents = [], dragging, dragHandlers,
-  onDuplicate, onFork, onRespawn, onReattach, onKill,
+  onViewTranscript, onDuplicate, onFork, onRespawn, onReattach, onKill,
 }) {
   const a = agent;
   return (
@@ -45,6 +46,9 @@ export default function SessionRow({
         <Stack direction="row" sx={{ alignItems: 'center', minWidth: 0 }}>
           <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{a.name}</Typography>
           <Stack direction="row" className="row-act" sx={{ flexShrink: 0, transition: 'opacity .15s' }}>
+            <Tooltip title="View transcript — the full conversation, beyond what the terminal keeps" disableInteractive>
+              <IconButton size="small" onClick={(e) => { e.stopPropagation(); onViewTranscript(); }}><HistoryIcon fontSize="small" /></IconButton>
+            </Tooltip>
             <Tooltip title="Duplicate — start a new session with the same settings" disableInteractive>
               <IconButton size="small" onClick={(e) => { e.stopPropagation(); onDuplicate(); }}><ContentCopyIcon fontSize="small" /></IconButton>
             </Tooltip>

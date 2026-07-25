@@ -55,7 +55,7 @@ function PulseDot({ sx }) {
   );
 }
 
-export default function SessionHistory({ active, sendMsg, registerChat }) {
+export default function SessionHistory({ active, sendMsg, registerChat, openSession }) {
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
   const [q, setQ] = useState('');
@@ -122,6 +122,8 @@ export default function SessionHistory({ active, sendMsg, registerChat }) {
       setTranscript(d.ok ? d : null);
     }).catch(() => { setTranscript(null); setLoadErr('Failed to load transcript.'); }).finally(() => setLoadingFile(false));
   };
+
+  useEffect(() => { if (openSession) open(openSession); /* eslint-disable-line */ }, [openSession]);
 
   const pickRoot = (p) => {
     setRoot(p); setPicking(false);

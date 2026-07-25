@@ -8,6 +8,10 @@ import { WebglAddon } from '@xterm/addon-webgl';
 // app. xterm's default 16-color ANSI palette is built for a dark background and
 // goes low-contrast on white, so each mode ships its own tuned palette on the
 // zapac field colors (purple-black / periwinkle-lilac).
+// Lines kept in each terminal's buffer. Bounded to cap browser-tab memory across
+// a fleet of mounted terminals; past that, history lives in the transcript.
+const SCROLLBACK = 5000;
+
 const TERM_THEME = {
   dark: {
     background: '#0b0813', foreground: '#d9d2ee',
@@ -27,7 +31,7 @@ const TERM_THEME = {
   },
 };
 
-export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOutput }) {
+export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOutput, onTopReached }) {
   // Terminal palette follows the app's color mode. Use useColorMode().resolved,
   // not theme.palette.mode — under cssVariables the latter is frozen at the
   // default scheme and won't switch with the .dark class.
@@ -38,6 +42,8 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
   const doFitRef = useRef(null);
   const switchRef = useRef(onSwitch);
   switchRef.current = onSwitch;
+  const topRef = useRef(onTopReached);
+  topRef.current = onTopReached;
 
   useEffect(() => {
     const term = new Xterm({
@@ -45,7 +51,7 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
       fontSize: 13,
       cursorBlink: true,
       theme: TERM_THEME[mode] ?? TERM_THEME.dark,
-      scrollback: 5000,
+      scrollback: SCROLLBACK,
     });
     const fit = new FitAddon();
     term.loadAddon(fit);
@@ -103,6 +109,18 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     };
     hostRef.current.addEventListener('wheel', onWheel, { passive: true });
 
+    // Offer the full transcript once per mount when the user scrolls to the top
+    // of the buffer. Must listen on the DOM viewport, not term.onScroll: xterm
+    // fires that with suppressScrollEvent for wheel/scrollbar scrolling, so it
+    // never sees a user scroll. baseY > 0 means real scrollback exists — filters
+    // the scroll-to-0 a re-attach reset emits on a near-empty buffer.
+    let asked = false;
+    const onViewportScroll = () => {
+      if (asked || !viewport || viewport.scrollTop > 1) return;
+      if (term.buffer.active.baseY > 0) { asked = true; topRef.current?.(); }
+    };
+    viewport?.addEventListener('scroll', onViewportScroll, { passive: true });
+
     // keystrokes -> daemon
     term.onData((data) => sendMsg({ t: 'input', id: agent.id, data }));
 
@@ -131,7 +149,7 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     setTimeout(doFit, 50);
 
     const host = hostRef.current;
-    return () => { clearTimeout(roTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); host.removeEventListener('wheel', onWheel); term.dispose(); registerOutput(null); };
+    return () => { clearTimeout(roTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); host.removeEventListener('wheel', onWheel); viewport?.removeEventListener('scroll', onViewportScroll); term.dispose(); registerOutput(null); };
   }, [agent.id]);
 
   // Apply the app theme live — no need to recreate the terminal.

@@ -29,7 +29,7 @@ const MOUNT_LRU = 4;
  * locally; fleet state + actions come from {@link useAgents}. Dock size/minimise
  * state is shell-owned and passed in (shared with the create dialogs).
  */
-export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag, listW, expandDock }) {
+export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag, listW, expandDock, onTopReached, onViewTranscript }) {
   const { agents, active, setActive, subagents, stats, sendMsg, reorderAgents, registerTerminal } = useAgents();
   const [dragId, setDragId] = useState(null);
 
@@ -74,6 +74,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag,
                 onDrop: () => { reorderAgents(dragId, a.id); setDragId(null); },
                 onDragEnd: () => setDragId(null),
               }}
+              onViewTranscript={() => onViewTranscript(a)}
               onDuplicate={() => { sendMsg({ t: 'create', cwd: a.cwd, name: nextSessionName(agents, a), model: a.model, scopes: a.scopes }); expandDock(); }}
               onFork={() => sendMsg({ t: 'fork', id: a.id, name: nextSessionName(agents, a) })}
               onRespawn={() => sendMsg({ t: 'respawn', id: a.id })}
@@ -93,7 +94,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag,
             const show = !dockMin && a.id === active;
             return (
               <Box key={a.id} sx={{ position: 'absolute', inset: 0, display: show ? 'block' : 'none' }}>
-                <Terminal agent={a} visible={show} sendMsg={sendMsg} onSwitch={cycleSession} registerOutput={(fn) => registerTerminal(a.id, fn)} />
+                <Terminal agent={a} visible={show} sendMsg={sendMsg} onSwitch={cycleSession} registerOutput={(fn) => registerTerminal(a.id, fn)} onTopReached={() => onTopReached(a)} />
               </Box>
             );
           })}
