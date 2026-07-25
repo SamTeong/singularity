@@ -19,6 +19,16 @@ import { tildify } from '@/lib/paths.js';
 import { fmtTokens } from '@/lib/format.js';
 
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
+// Actively mid-turn (would interrupt work to resume elsewhere). Idle is at the
+// prompt — safe to hand off, though the in-app pty still holds the session id.
+const isWorking = (s) => s === 'running' || s === 'starting';
+// Daemon is loopback on this same machine, so the browser's platform reflects
+// the OS the external terminal will open on (wt.exe vs Terminal.app). Unknown
+// platform → generic label (no assumption).
+const PLATFORM = (typeof navigator !== 'undefined'
+  && (navigator.userAgentData?.platform || navigator.platform) || '').toLowerCase();
+const TERMINAL_NAME = PLATFORM.includes('mac') ? 'Terminal'
+  : PLATFORM.includes('win') ? 'Windows Terminal' : null;
 
 /**
  * One session row in the dock list: name + row actions (transcript/duplicate/
@@ -56,8 +66,8 @@ export default function SessionRow({
             <Tooltip title="Fork — start a new session that continues this conversation" disableInteractive>
               <IconButton size="small" onClick={(e) => { e.stopPropagation(); onFork(); }}><CallSplitIcon fontSize="small" /></IconButton>
             </Tooltip>
-            {!isLive(a.status) && (
-              <Tooltip title="Open in Windows Terminal — resume this session in an external terminal" disableInteractive>
+            {!isWorking(a.status) && (
+              <Tooltip title={TERMINAL_NAME ? `Open in ${TERMINAL_NAME} — resume this session in an external terminal` : 'Open in external terminal — resume this session'} disableInteractive>
                 <IconButton size="small" onClick={(e) => { e.stopPropagation(); onOpenExternal(); }}><OpenInNewIcon fontSize="small" /></IconButton>
               </Tooltip>
             )}

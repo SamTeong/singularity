@@ -315,9 +315,19 @@ app.post('/session/external', async (req, reply) => {
   const r = reg.externalLaunch(id);
   if (!r.ok) return reply.code(400).send(r);
   try {
-    spawn(r.launcher, r.launcherArgs, { detached: true, stdio: 'ignore', cwd: r.cwd }).unref();
-    return { ok: true };
+    // wt.exe is a Windows App Execution Alias; spawning it directly is flaky
+    // (cold-start no-op). shell:true routes through cmd, which resolves the
+    // alias reliably. osascript on macOS needs no shell.
+    spawn(r.launcher, r.launcherArgs, {
+      detached: true, stdio: 'ignore', cwd: r.cwd,
+      shell: process.platform === 'win32',
+    }).unref();
   } catch (e) { return reply.code(500).send({ ok: false, error: e.message }); }
+  // Hand-off: drop the session from the dock (kills the in-app pty if live via
+  // removeOnExit, else drops the detached entry). The on-disk session log
+  // survives so the external `claude --resume <id>` continues the conversation.
+  reg.remove(id);
+  return { ok: true };
 });
 
 // Config editor: 3-scope resolver + backup-then-write.

@@ -237,6 +237,7 @@ export default function AppShell() {
         expandDock={expandDock}
         onTopReached={setTxPrompt}
         onViewTranscript={viewTranscript}
+        onToast={setToast}
       />
 
       {picking && <DirPicker start={untildify(cwd)} onPick={(p) => { setCwd(p); setPicking(false); }} onClose={() => setPicking(false)} />}

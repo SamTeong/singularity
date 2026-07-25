@@ -29,7 +29,7 @@ const MOUNT_LRU = 4;
  * locally; fleet state + actions come from {@link useAgents}. Dock size/minimise
  * state is shell-owned and passed in (shared with the create dialogs).
  */
-export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag, listW, expandDock, onTopReached, onViewTranscript }) {
+export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag, listW, expandDock, onTopReached, onViewTranscript, onToast }) {
   const { agents, active, setActive, subagents, stats, sendMsg, reorderAgents, registerTerminal } = useAgents();
   const [dragId, setDragId] = useState(null);
 
@@ -81,7 +81,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag,
               onReattach={() => sendMsg({ t: 'reattach', id: a.id })}
               onOpenExternal={() => fetch('/session/external', {
                 method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: a.id }),
-              }).then((r) => r.json()).then((d) => { if (!d.ok) console.warn('external open failed:', d.error); }).catch(() => {})}
+              }).then((r) => r.json()).then((d) => { if (!d.ok && onToast) onToast(`External terminal failed: ${d.error || 'unknown'}`); }).catch(() => { if (onToast) onToast('External terminal failed: network error'); })}
               onKill={() => sendMsg({ t: 'kill', id: a.id })}
             />
           ))}
