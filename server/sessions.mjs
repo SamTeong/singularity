@@ -341,6 +341,17 @@ export async function searchSessions(q, { project, id, root } = {}) {
   }
   const results = [];
   for (const t of targets) {
+    // Match the query against the session id (filename stem) itself — the id
+    // lives in event metadata (sessionId field), never in message text, so a
+    // pure-id search otherwise returns nothing.
+    if (t.id.toLowerCase().includes(ql)) {
+      // id lives in event metadata, not message text — synthesize one hit and
+      // skip the (always-empty) message-text scan for the same id.
+      const items = await sessionTextItems(t.path);
+      results.push({ project: t.project, id: t.id, cwd: items?.[0]?.cwd || null, lineIndex: 0, role: 'id', snippet: t.id });
+      if (results.length >= RESULT_CAP) return { results, capped: true };
+      continue;
+    }
     const items = await sessionTextItems(t.path);
     if (!items) continue;
     for (const it of items) {
