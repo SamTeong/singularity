@@ -10,6 +10,22 @@ import { useCapabilities } from '@/hooks/useCapabilities.js';
 // /model's list is baked into the claude binary and shifts over time, so the
 // suggestions are convenience defaults, not a closed set. Controlled via
 // inputValue/onInputChange (same pattern as the cwd picker in the dialogs).
+// Alias → friendly name. /model's menu shows names (Opus, Sonnet, …) while the
+// values the claude bin accepts are aliases, so the rows show both: name
+// first (what users recognise), alias second (what gets submitted). Unknown
+// aliases — a new server entry — render bare rather than guessing a name.
+const CLAUDE_NAMES = {
+  claude: 'Default',
+  best: 'Best available',
+  fable: 'Fable',
+  opus: 'Opus',
+  sonnet: 'Sonnet',
+  haiku: 'Haiku',
+  'opus[1m]': 'Opus (1M context)',
+  'sonnet[1m]': 'Sonnet (1M context)',
+  opusplan: 'Opus in plan mode, Sonnet after',
+};
+
 export default function ModelSelect({ model, setModel, label = 'model', placeholder = 'claude (default)' }) {
   const [options, setOptions] = useState([]);
   const caps = useCapabilities();
@@ -50,6 +66,14 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
           spellCheck={false}
           helperText={ollamaUnavailable ? ollamaHint : null}
         />
+      )}
+      renderOption={({ key, ...props }, o) => (
+        <Box component="li" key={key} {...props} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
+          <span>{CLAUDE_NAMES[o.label] || o.label}</span>
+          {CLAUDE_NAMES[o.label] ? (
+            <Box component="span" sx={{ fontFamily: 'monospace', fontSize: 12, color: 'text.secondary' }}>{o.label}</Box>
+          ) : null}
+        </Box>
       )}
       renderGroup={(props) => (
         <li key={props.key}>
