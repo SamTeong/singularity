@@ -348,8 +348,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
                   <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{transcript.meta?.title || sel?.title || sel?.id}</Typography>
                   {onResume && !sel?.sub && (transcript.meta?.cwd || sel?.cwd) && (
-                    <Tooltip title="Resume this session in a new agent — pick model + skill-scopes">
-                      <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} onClick={() => onResume(sel.id, transcript.meta?.cwd || sel.cwd)}>Resume</Button>
+                    <Tooltip title="Resume this session in a new agent — prefills last model + skill-scopes">
+                      <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} onClick={() => onResume(sel.id, transcript.meta?.cwd || sel.cwd, transcript.meta?.model, transcript.meta?.scopes)}>Resume</Button>
                     </Tooltip>
                   )}
                 </Stack>

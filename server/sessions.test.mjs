@@ -47,6 +47,22 @@ test('readSession: valid lines parse, a garbage/truncated line is skipped, no th
   }
 });
 
+test('readSession: meta.model is the last assistant message.model (a /model switch shows the latest)', async () => {
+  const project = 'sessions-test-model';
+  const id = 'fixture-model';
+  const dir = writeSession(project, id, [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'first' }], model: 'sonnet' }, timestamp: '2026-07-15T00:00:00Z' }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'second' }], model: 'opus' }, timestamp: '2026-07-15T00:00:01Z' }),
+  ]);
+  try {
+    const s = await readSession(project, id);
+    assert.equal(s.ok, true);
+    assert.equal(s.meta.model, 'opus');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('sessionText: head+tail truncation keeps the opening and latest text plus the marker', async () => {
   const project = 'sessions-test-trunc';
   const id = 'fixture-2';

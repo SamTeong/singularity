@@ -221,7 +221,7 @@ export async function readSession(project, id, root) {
   if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
   const events = parseEvents(await readFile(p, 'utf8'));
   const messages = [];
-  let cwd = null, title = null, turns = 0, firstTs = null, lastTs = null;
+  let cwd = null, title = null, turns = 0, firstTs = null, lastTs = null, lastModel = null;
   for (const e of events) {
     if (e.cwd && !cwd) cwd = e.cwd;
     if (e.type === 'ai-title' && e.aiTitle) title = e.aiTitle;
@@ -244,6 +244,10 @@ export async function readSession(project, id, root) {
       }
     } else if (e.type === 'assistant') {
       turns++;
+      // Last model used in the session — assistant events carry it on the
+      // message. A /model switch mid-session shows up here as a later event,
+      // so the last assistant turn wins (matches "last configuration").
+      if (msg.model) lastModel = msg.model;
       for (const b of (msg.content || [])) {
         if (b.type === 'text') messages.push({ ts, role: 'assistant', kind: 'text', text: b.text });
         else if (b.type === 'thinking') messages.push({ ts, role: 'assistant', kind: 'thinking', text: b.thinking });
@@ -251,7 +255,7 @@ export async function readSession(project, id, root) {
       }
     }
   }
-  return { ok: true, meta: { cwd, title, turns, firstTs, lastTs }, messages };
+  return { ok: true, meta: { cwd, title, turns, firstTs, lastTs, model: lastModel }, messages };
 }
 
 // sessionText: flatten a session into a compact transcript for LLM context.

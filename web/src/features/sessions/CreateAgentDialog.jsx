@@ -16,16 +16,23 @@ import { untildify } from '@/lib/paths.js';
 // lifted to App (shared with the dir picker + config fallback). Emits `create`
 // over the WS via sendMsg, then resets its own fields and closes.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export default function CreateAgentDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg, onSessionCreated, initialSessionId = '' }) {
+export default function CreateAgentDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg, onSessionCreated, initialSessionId = '', initialModel = '', initialScopes = [] }) {
   const [name, setName] = useState('');
   const [model, setModel] = useState('');
   const [scopes, setScopes] = useState([]);
   const [sessionId, setSessionId] = useState('');
   const sessionIdInvalid = sessionId.trim() !== '' && !UUID_RE.test(sessionId.trim());
 
-  // Prefill the session id when opened for a resume (e.g. from the Transcripts
-  // view). Runs only on open + when the caller changes the prefilled id.
-  useEffect(() => { if (open && initialSessionId) setSessionId(initialSessionId); }, [open, initialSessionId]);
+  // Prefill the session id + last model + last skill-scopes when opened for a
+  // resume (e.g. from the Transcripts view). Runs only on open + when the
+  // caller changes the prefilled id. Model is the transcript's last used;
+  // scopes come from the agent registry and may be empty for non-Singularity sessions.
+  useEffect(() => {
+    if (!open || !initialSessionId) return;
+    setSessionId(initialSessionId);
+    if (initialModel) setModel(initialModel);
+    if (initialScopes?.length) setScopes(initialScopes);
+  }, [open, initialSessionId, initialModel, initialScopes]);
 
   const reset = () => { setName(''); setScopes([]); setSessionId(''); setModel(''); };
 

@@ -102,6 +102,15 @@ export function getBuf(id) { return agents.get(id)?.buf.join('') ?? ''; }
 export function getWritten(id) { return agents.get(id)?.written ?? 0; }
 export function getStatus(id) { return agents.get(id)?.status; }
 export function isLive(id) { return !!agents.get(id)?.proc; }
+// Launch config for a registered agent (by id), for resuming a past session from
+// the Transcripts view: skill-scopes are NOT recorded in the transcript JSONL,
+// only in agents.json, so the registry is the sole source. Returns null for
+// sessions never launched via Singularity (e.g. plain `claude` CLI sessions).
+export function getLaunchConfig(id) {
+  const a = agents.get(id);
+  if (!a) return null;
+  return { model: a.model || null, scopes: Array.isArray(a.scopes) ? a.scopes : [] };
+}
 // PIDs of agents this daemon currently owns a live pty for (for process classification).
 export function livePids() {
   return new Set([...agents.values()].filter((a) => a.proc).map((a) => a.pid));

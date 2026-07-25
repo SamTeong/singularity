@@ -557,6 +557,12 @@ app.get('/session', async (req, reply) => {
   const { project, id, root } = req.query || {};
   if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
   const r = await readSession(project, id, root);
+  if (r.ok) {
+    // Skill-scopes live only in the agent registry (not the transcript), so
+    // merge them in here for the Resume prefill when the id is a known agent.
+    const lc = reg.getLaunchConfig(id);
+    if (lc?.scopes?.length) r.meta.scopes = lc.scopes;
+  }
   if (!r.ok) reply.code(404);
   return r;
 });
