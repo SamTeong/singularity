@@ -11,11 +11,11 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd, getActiveMs } from './agents.mjs';
 import { pathFor } from './sessions.mjs';
+import { USAGE_SKILL_STATE } from './app-dir.mjs';
 
 // Mirror of statusline.mjs's state root so the two never drift. Full payload
 // (cost.total_cost_usd / total_api_duration_ms / total_duration_ms) per session.
-const stateRoot = process.env.USAGE_REPORT_STATE || join(homedir(), '.agents', '.claude-code-usage-report', 'state');
-export const COST_STATE_DIR = join(stateRoot, 'cost-state');
+export const COST_STATE_DIR = join(USAGE_SKILL_STATE, 'cost-state');
 
 // $ per million tokens: [input, output]. Matched by longest prefix on the
 // transcript message model id. cache read = 0.1x input; cache write = 1.25x

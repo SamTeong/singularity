@@ -17,6 +17,12 @@ if (!home) {
 export const APP_DIR = home;
 export const STATE_DIR = join(APP_DIR, 'state');
 export const CACHE_DIR = join(APP_DIR, 'cache');
+// External, not owned: the claude-code-usage-report skill's state root — we read
+// cost-state/<id>.json from it (stats.mjs) and append ollama usage snapshots to
+// it (usage.mjs). USAGE_REPORT_STATE must resolve the same here, in the skill's
+// stats.mjs and in statusline.mjs, or writes and reads split.
+export const USAGE_SKILL_STATE = process.env.USAGE_REPORT_STATE
+  || join(homedir(), '.agents', '.claude-code-usage-report', 'state');
 // worktrees/ + tickets/ MUST live inside the trusted project root: Claude
 // honors repo-controllable permissions (allow-rules/hooks) only for paths
 // inside the trusted project root, and the --settings flag at task spawn is

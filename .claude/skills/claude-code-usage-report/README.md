@@ -33,7 +33,7 @@ node scripts/screenshot-example.mjs  # refresh the 3 screenshots (needs playwrig
 - **Spend** — total, $/hour, $/line, run-rate + 30-day projection, cumulative curve, daily calendar heatmap.
 - **Token economics** — input / output / cache-read / cache-creation composition per day; cache-hit ratio.
 - **Efficiency** — per-session cost, $/hour, $/line (gated at 5% line coverage).
-- **Rate-limit utilization** — 5h / 7d windows over time, weekends shaded (Claude Code v2.1.80+, Pro/Max oauth only).
+- **Rate-limit utilization** — 5h / 7d windows over time, weekends shaded (Claude Code v2.1.80+, Pro/Max oauth only). Ollama cloud runs its own 5h / 7d account quota, sampled independently and shown alongside as its own utilization, window-balance, token-yield, and forecast cards.
 - **Usage patterns** — when you work (day/hour heatmap), sessions table, by-project and by-model breakdowns.
 
 ## Quick start

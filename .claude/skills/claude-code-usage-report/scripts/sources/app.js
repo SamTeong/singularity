@@ -16,6 +16,8 @@ function pad2(n){return String(n).padStart(2,'0');}
 function el(id){return document.getElementById(id);}
 function isDate(s){return typeof s==='string'&&/^\d{4}-\d{2}-\d{2}$/.test(s);}
 function addDays(iso,n){var y=+iso.slice(0,4),m=+iso.slice(5,7),d=+iso.slice(8,10);var dt=new Date(y,m-1,d+n);return dt.getFullYear()+'-'+pad2(dt.getMonth()+1)+'-'+pad2(dt.getDate());}
+// Mon=0..Sun=6 (matches the server's jsWeekdayPy), derived from a "YYYY-MM-DD..." ts.
+function dowFromTs(ts){var y=+ts.slice(0,4),m=+ts.slice(5,7),d=+ts.slice(8,10);return (new Date(y,m-1,d).getDay()+6)%7;}
 // ---- StatValue count-up + TrendChip (zapac data-viz grammar) ----
 // Animates [data-cu] numeric tiles from 0→final once (CU_FIRST gate), honoring
 // prefers-reduced-motion. data-cu-k picks the formatter (int/money/money3/pct/abbr).
@@ -227,7 +229,9 @@ function colcards(cols){
   }).join('');
   return "<div class='colcards'>"+html+"</div>";
 }
-function svgRateTrend(sessions){
+function svgRateTrend(sessions,legLabels){
+  legLabels=legLabels||{r5:'5h window',r7:'7d window'};
+  var tip5=legLabels.tip5||'5h',tip7=legLabels.tip7||'7d'; // short forms for the per-point tooltip
   var rl=sessions.filter(function(s){return s.r5>0||s.r7>0;}).sort(function(a,b){return a.ts<b.ts?-1:a.ts>b.ts?1:0;});
   if(!rl.length)return '<p class="muted">No rate-limit data yet.</p>';
   var W=1000,H=220,P=38,n=rl.length;
@@ -272,11 +276,11 @@ function svgRateTrend(sessions){
   // <title> tooltip (date + both window values) — same pattern as svgScatter.
   var dots='';
   rl.forEach(function(s2,i){
-    var x=fx(i),tip=esc(s2.ts.slice(0,10)+' · 5h '+s2.r5.toFixed(1)+'% · 7d '+s2.r7.toFixed(1)+'%');
+    var x=fx(i),tip=esc(s2.ts.slice(0,10)+' · '+tip5+' '+s2.r5.toFixed(1)+'% · '+tip7+' '+s2.r7.toFixed(1)+'%');
     dots+="<circle cx='"+x.toFixed(1)+"' cy='"+fy(s2.r5).toFixed(1)+"' r='3' fill='var(--sage)' opacity='0.85'><title>"+tip+"</title></circle>";
     dots+="<circle cx='"+x.toFixed(1)+"' cy='"+fy(s2.r7).toFixed(1)+"' r='3' fill='var(--ac)' opacity='0.85'><title>"+tip+"</title></circle>";
   });
-  var leg="<div class='legend' style='margin:6px 0'><span class='lg-item'><span class='lg-swatch' style='background:var(--sage)'></span>5h window</span><span class='lg-item'><span class='lg-swatch' style='background:var(--ac)'></span>7d window</span><span class='lg-item'><span class='lg-swatch' style='background:var(--weekend);opacity:.5'></span>weekend</span></div>";
+  var leg="<div class='legend' style='margin:6px 0'><span class='lg-item'><span class='lg-swatch' style='background:var(--sage)'></span>"+legLabels.r5+"</span><span class='lg-item'><span class='lg-swatch' style='background:var(--ac)'></span>"+legLabels.r7+"</span><span class='lg-item'><span class='lg-swatch' style='background:var(--weekend);opacity:.5'></span>weekend</span></div>";
   return leg+svgWrap(W,H,axes+ceiling+th80+yticks+xlabels+wknd+d5+d7+dots,'chart');
 }
 function renderRateLimits(sessions){
@@ -296,6 +300,29 @@ function renderRateLimits(sessions){
     {title:'Headroom',stats:[["near-cap (>80%)",fmtInt(nearCap)],["capped (100%)",fmtInt(capped)],["$/7d%-pt at peak",fmtMoney($per7pt)]]}
   ]);
 }
+// Ollama Cloud's own account quota (session/weekly), sampled by the daemon into
+// ollama-usage.jsonl and carried here as FORECAST.ollama.series — account-wide
+// over wall-clock, NOT filtered by the session date-range picker (there are no
+// "sessions" here, just periodic scrapes). Reuses svgRateTrend + colcards the
+// same way the Claude 5h/7d card above does; no $ stat (ollama scrapes carry no
+// cost data).
+function renderOllamaTrend(series){
+  var rl=(series||[]).map(function(r){return {ts:r.ts,r5:r.session||0,r7:r.weekly||0,dow:dowFromTs(r.ts)};}).filter(function(s){return s.r5>0||s.r7>0;});
+  if(!rl.length)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No Ollama Cloud usage yet.</h4><p>Fills in as the app samples ollama account quota.</p></div>";
+  var r5s=rl.map(function(s){return s.r5;}),r7s=rl.map(function(s){return s.r7;});
+  var avg=function(a){return a.reduce(function(x,y){return x+y;},0)/a.length;};
+  var maxA=function(a){return Math.max.apply(null,a);};
+  var nearCap=rl.filter(function(s){return s.r5>=80||s.r7>=80;}).length;
+  var capped=rl.filter(function(s){return s.r5>=99.5||s.r7>=99.5;}).length;
+  // Labelled 5h/7d like the Claude card (and the app's own Usage meters) rather
+  // than the "Session"/"Weekly" wording ollama's settings page uses — same two
+  // window lengths, one vocabulary across the report.
+  return svgRateTrend(rl)+colcards([
+    {title:'5-hour window',stats:[["avg %",avg(r5s).toFixed(1)],["peak %",maxA(r5s).toFixed(1)]]},
+    {title:'7-day window',stats:[["avg %",avg(r7s).toFixed(1)],["peak %",maxA(r7s).toFixed(1)]]},
+    {title:'Headroom',stats:[["near-cap (>80%)",fmtInt(nearCap)],["capped (100%)",fmtInt(capped)]]}
+  ]);
+}
 // Empirical-Bayes rate-limit forecast (FORECAST, embedded by render.mjs). Projects
 // each gauge's utilization at its reset boundary with an 80% credible interval
 // + ETA-to-threshold, fit from OAuth usage-snapshots (or a prior-only statusline
@@ -308,20 +335,20 @@ function fmtEta(e){
   var s=med?(pad2(med.getMonth()+1)+'-'+pad2(med.getDate())+' '+pad2(med.getHours())+':'+pad2(med.getMinutes())):'—';
   return s+(e.upper?'':' · open-ended')+'  ·  P∞ '+Math.round(e.pInf*100)+'%';
 }
-function renderForecast(F){
+function renderForecast(F,gaugeKeys,gaugeLabels,emptyHtml){
   F=F||{};
   var g=F.gauges||{};
-  var labels={five_hour:'5-hour window',seven_day:'7-day window'};
-  var keys=['five_hour','seven_day'];
+  var labels=gaugeLabels||{five_hour:'5-hour window',seven_day:'7-day window'};
+  var keys=gaugeKeys||['five_hour','seven_day'];
   var anyOk=keys.some(function(k){return g[k]&&g[k].ok;});
   if(!anyOk){
-    return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M3 17l6-6 4 4 8-8'/><path d='M14 7h7v7'/></svg><h4>No forecast yet.</h4><p>Needs ≥2 completed rate-limit windows. Captured from the OAuth usage API (opt-in): run <code>node stats.mjs fetch-usage --oauth --save</code> with <code>USAGE_REPORT_OAUTH=1</code>. A prior-only view appears from statusline rl data once ≥2 sessions record it.</p></div>";
+    return emptyHtml||"<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M3 17l6-6 4 4 8-8'/><path d='M14 7h7v7'/></svg><h4>No forecast yet.</h4><p>Needs ≥2 completed rate-limit windows. Captured from the OAuth usage API (opt-in): run <code>node stats.mjs fetch-usage --oauth --save</code> with <code>USAGE_REPORT_OAUTH=1</code>. A prior-only view appears from statusline rl data once ≥2 sessions record it.</p></div>";
   }
   var colorFor=function(p){return p>=80?'var(--ac)':(p>=50?'var(--amber)':'var(--sage)');};
   var rows='';
   keys.forEach(function(k){
     var gg=g[k]; if(!gg||!gg.ok)return;
-    var lbl=labels[k], src=gg.source==='statusline'?'statusline rl':'OAuth';
+    var lbl=labels[k], src=gg.source==='statusline'?'statusline rl':(gg.source==='ollama'?'ollama':'OAuth');
     if(gg.result){
       var fc=gg.result.forecast,u=gg.result.uNow;
       var f=fc.f,lo=fc.lower,hi=fc.upper;
@@ -352,7 +379,8 @@ function renderForecast(F){
 // (a day carries too little delta-7d; a calendar week straddles the reset).
 // Both sums are lower bounds under sparse polling, so r reads low — `coverage`
 // says how much to trust each point, and only gated points feed the pooled ratio.
-function svgWindowBalance(wb){
+function svgWindowBalance(wb,chartOpts){
+  chartOpts=chartOpts||{axis:'rate = Δ5h% / Δ7d% ↑',src:'OAuth snapshots'};
   var pts=[];
   (wb.windows||[]).forEach(function(w){if(w.r!=null)pts.push({t:w.resetSec,r:w.r,cov:w.coverage,inc:w.included,src:'oauth',d5:w.d5,d7:w.d7});});
   (wb.statuslineWindows||[]).forEach(function(w){if(w.r!=null)pts.push({t:w.resetSec,r:w.r,cov:null,inc:false,src:'statusline',d5:w.d5,d7:w.d7});});
@@ -373,7 +401,7 @@ function svgWindowBalance(wb){
     if(seenT[p.t])return;seenT[p.t]=1;
     lbl+="<text x='"+fx(p.t).toFixed(1)+"' y='"+(H-P+16)+"' text-anchor='"+(p.t===xmin?'start':(p.t===xmax?'end':'middle'))+"' fill='var(--ink-faint)'>"+esc(new Date(p.t*1000).toISOString().slice(5,10))+"</text>";
   });
-  lbl+="<text x='"+(W-P)+"' y='"+(P-10)+"' text-anchor='end' fill='var(--ink-faint)'>r = Δ5h% / Δ7d% ↑</text>";
+  lbl+="<text x='"+(W-P)+"' y='"+(P-10)+"' text-anchor='end' fill='var(--ink-faint)'>"+chartOpts.axis+"</text>";
   var out='';
   ['statusline','oauth'].forEach(function(src){
     var g=pts.filter(function(p){return p.src===src;}).sort(function(a,b){return a.t-b.t;});
@@ -381,28 +409,32 @@ function svgWindowBalance(wb){
     var col=src==='oauth'?'var(--ac)':'var(--ink-faint)';
     if(g.length>1)out+=pathD(g.map(function(p){return [fx(p.t),fy(p.r)];}),col,src!=='oauth','none',src==='oauth'?2:1.5);
     g.forEach(function(p){
-      var tip=esc(new Date(p.t*1000).toISOString().slice(0,10)+' · r '+p.r.toFixed(2)+' · Δ5 '+p.d5.toFixed(0)+'% / Δ7 '+p.d7.toFixed(0)+'%'+
+      var tip=esc(new Date(p.t*1000).toISOString().slice(0,10)+' · rate '+p.r.toFixed(2)+' · Δ5 '+p.d5.toFixed(0)+'% / Δ7 '+p.d7.toFixed(0)+'%'+
         (p.cov==null?' · statusline lower bound':' · coverage '+Math.round(p.cov*100)+'%'+(p.inc?'':' (excluded from pooled)')));
       out+="<circle cx='"+fx(p.t).toFixed(1)+"' cy='"+fy(p.r).toFixed(1)+"' r='4' fill='"+(p.inc?col:'none')+"' stroke='"+col+"' stroke-width='1.6' opacity='"+(src==='oauth'?0.95:0.6)+"'><title>"+tip+"</title></circle>";
     });
   });
-  var leg="<div class='legend' style='margin:6px 0'><span class='lg-item'><span class='lg-swatch' style='background:var(--ac)'></span>OAuth snapshots</span>"+
+  var leg="<div class='legend' style='margin:6px 0'><span class='lg-item'><span class='lg-swatch' style='background:var(--ac)'></span>"+chartOpts.src+"</span>"+
     ((wb.statuslineWindows||[]).length?"<span class='lg-item'><span class='lg-swatch' style='background:var(--ink-faint)'></span>statusline (lower bound)</span>":'')+
     "<span class='lg-item'>hollow = excluded (low coverage)</span></div>";
   return leg+svgWrap(W,H,axes+yticks+pool+lbl+out,'chart');
 }
-function renderWindowBalance(F){
+function renderWindowBalance(F,opts){
+  // Claude and ollama run the same 5h/7d window lengths, so the labels are fixed;
+  // `opts` only overrides the text that would be wrong for ollama (its samples
+  // don't come from the OAuth CLI) plus the chart's legend source.
+  opts=opts||{};
   var wb=F&&F.windowBalance;
-  if(!wb||!wb.pooled)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16M8 8l-4 4 4 4M16 16l4-4-4-4'/></svg><h4>No window balance yet.</h4><p>Needs a weekly rate-limit window with measurable movement. Poll the OAuth usage API a few times per 5h window — <code>node stats.mjs fetch-usage --oauth --save</code> — and this fills in.</p></div>";
+  if(!wb||!wb.pooled)return opts.emptyHtml||("<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16M8 8l-4 4 4 4M16 16l4-4-4-4'/></svg><h4>No window balance yet.</h4><p>Needs a 7d window with measurable movement. Poll the OAuth usage API a few times per 5h window — <code>node stats.mjs fetch-usage --oauth --save</code> — and this fills in.</p></div>");
   var p=wb.pooled,nOk=(wb.windows||[]).filter(function(w){return w.included;}).length;
   var cards=colcards([
-    {title:'Exchange rate (all-time)',stats:[["r = Δ5h% / Δ7d%",p.r.toFixed(2)],["windows pooled",fmtInt(p.nWindows)],["source",p.source+(p.gated?'':' · ungated')]]},
-    {title:'1 day of weekly budget',stats:[["costs",p.hoursPer7dDay.toFixed(2)+"h of 5h capacity"],["= share of a 5h window",(p.hoursPer7dDay/5*100).toFixed(0)+"%"]]},
-    {title:'One full 5h window',stats:[["= days of weekly budget",p.daysPer5hWindow.toFixed(2)],["= share of weekly",(100/p.r).toFixed(0)+"%"]]}
+    {title:'All-time rate',stats:[["rate = Δ5h% / Δ7d%",p.r.toFixed(2)],["windows pooled",fmtInt(p.nWindows)],["source",p.source+(p.gated?'':' · ungated')]]},
+    {title:'1 day of 7d window',stats:[["hours of 5h window",p.hoursPer7dDay.toFixed(2)+"h"],["share of 5h window",(p.hoursPer7dDay/5*100).toFixed(0)+"%"]]},
+    {title:'5 hour of 5h window',stats:[["days of 7d window",p.daysPer5hWindow.toFixed(2)],["share of 7d window",(100/p.r).toFixed(0)+"%"]]}
   ]);
-  var note=nOk?'':"<p class='muted' style='margin-top:6px'><b>Lower bound.</b> No window cleared the coverage gate (a snapshot within 5h of "+Math.round(wb.minCoverage*100)+"% of the window, Δ7d ≥ "+wb.minD7+"%), so the figure comes from the single best-observed window rather than a pooled fit. An unobserved 5h window adds nothing to Σ Δ5h while its usage still lands in Δ7d, so sparse polling pushes r down — the true value is at or above this. Poll <code>fetch-usage --oauth --save</code> a few times per 5h window to close the gap.</p>";
-  return svgWindowBalance(wb)+cards+note+
-    "<p class='muted' style='margin-top:6px'>r is structurally L7/L5 — the ratio of the two budget sizes — so it is a plan constant, not a behaviour metric: a step in this line means the plan or Anthropic's limits changed. Bucketed per 7d reset window; a day carries too little Δ7d to divide by, and a calendar week straddles the reset boundary. Claude account quota only — local and third-party models draw none of it, so they have no 5h/7d ratio.</p>";
+  var note=nOk?'':"<p class='muted' style='margin-top:6px'><b>Lower bound.</b> No window cleared the coverage gate (a snapshot within 5h of "+Math.round(wb.minCoverage*100)+"% of the window, Δ7d ≥ "+wb.minD7+"%), so the figure comes from the single best-observed window rather than a pooled fit. An unobserved 5h window adds nothing to Σ Δ5h% while its usage still lands in Δ7d%, so sparse polling pushes the rate down — the true value is at or above this."+(opts.pollNote!=null?opts.pollNote:" Poll <code>fetch-usage --oauth --save</code> a few times per 5h window to close the gap.")+"</p>";
+  return svgWindowBalance(wb,opts.chart)+cards+note+
+    (opts.footnote!=null?opts.footnote:"<p class='muted' style='margin-top:6px'>rate is structurally L7/L5 — the ratio of the two window sizes — so it is a plan constant, not a behaviour metric: a step in this line means the plan or Anthropic's limits changed. Bucketed per 7d reset window; a day carries too little Δ7d% to divide by, and a calendar week straddles the reset boundary. Claude account quota only — local and third-party models draw none of it, so they have no 5h:7d rate.</p>");
 }
 function perModelEfficiency(rates,days,cmap,dispMap){
   var keys=Object.keys(rates);if(!keys.length)return '<p class="muted">No data.</p>';
@@ -555,6 +587,18 @@ function renderHero(agg,st,firstDate){
   return "<div class='supp-strip'>"+suppHtml+"</div>";
 }
 
+// Ollama cloud window-balance card opts (renderWindowBalance): Claude's 5h/7d
+// labels are kept (one vocabulary across the report) — only the text that would
+// be wrong for ollama is overridden: its snapshots come from the app's own
+// sampling, so there's no OAuth CLI step to point at.
+var OLLAMA_WB_OPTS={
+  chart:{src:'Ollama snapshots'},
+  emptyHtml:"<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16M8 8l-4 4 4 4M16 16l4-4-4-4'/></svg><h4>No ollama window balance yet.</h4><p>Needs a 7d window with measurable movement across at least one finished 5h window. Fills in as the app samples ollama account quota.</p></div>",
+  pollNote:" The app samples this on its own — nothing to run; the gap closes as more 5h windows finish.",
+  footnote:"<p class='muted' style='margin-top:6px'>Ollama's own account quota — separate from the Claude 5h:7d rate above, so nothing here draws on or competes with it. Bucketed per 7d reset window for the same reason: a day carries too little Δ7d% to divide by, and a calendar week straddles the reset boundary.</p>"
+};
+var OLLAMA_FORECAST_EMPTY_HTML="<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M3 17l6-6 4 4 8-8'/><path d='M14 7h7v7'/></svg><h4>No ollama forecast yet.</h4><p>Needs 2 finished windows. Fills in as the app samples ollama account quota — 5h windows within a day, 7d windows after about two weeks.</p></div>";
+
 // ---- render ----
 function render(range){
   var S=filterSessions(range);
@@ -562,6 +606,14 @@ function render(range){
   // 5h:7d exchange rate + per-window trend. Keyed to rate-limit reset windows, not
   // the date-range picker, so it renders before (and survives) the empty-range bail.
   el('sec-window-balance').innerHTML=renderWindowBalance(FORECAST);
+  // Ollama Cloud rate-limit cards: the daemon samples ollama.com's account quota
+  // independently of the session date picker (there's no ollama "session" in
+  // SESSIONS to filter), so — same reasoning as the Claude window-balance card
+  // above — these render unconditionally and stay out of the empty-range bail's
+  // id list below.
+  el('sec-ollama-util').innerHTML=renderOllamaTrend(FORECAST.ollama&&FORECAST.ollama.series);
+  el('sec-ollama-window-balance').innerHTML=renderWindowBalance(FORECAST.ollama,OLLAMA_WB_OPTS);
+  el('sec-ollama-forecast').innerHTML=renderForecast(FORECAST.ollama,['session','weekly'],{session:'5-hour window',weekly:'7-day window'},OLLAMA_FORECAST_EMPTY_HTML);
   if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','burn-cards','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-cadence','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
   var st=deriveStats(agg,range),t=agg.totals;
   var chartModels=agg.models.slice();
@@ -621,7 +673,11 @@ function render(range){
   el('sec-toptable').innerHTML=topTable(agg.sessions);
   // models
   el('sec-treemap').innerHTML=svgTreemap(agg.per_model,cmap,agg.model_disp);
-  var modelSessions={},modelCost={};Object.keys(agg.per_model).forEach(function(m){modelSessions[m]=agg.per_model[m].sessions;modelCost[m]=agg.per_model[m].cost;});
+  // barChart renders in key-insertion order, so build each map already sorted by
+  // its own value descending (biggest bar first) — the two charts rank differently.
+  var modelSessions={},modelCost={},byModel=Object.keys(agg.per_model);
+  byModel.slice().sort(function(a,b){return agg.per_model[b].sessions-agg.per_model[a].sessions;}).forEach(function(m){modelSessions[m]=agg.per_model[m].sessions;});
+  byModel.slice().sort(function(a,b){return agg.per_model[b].cost-agg.per_model[a].cost;}).forEach(function(m){modelCost[m]=agg.per_model[m].cost;});
   el('sec-model-sessions').innerHTML=barChart(modelSessions,'var(--ink-soft)',null,cmap,agg.model_disp);
   el('sec-model-cost').innerHTML=barChart(modelCost,'var(--ac)',function(v){return fmtMoney(v);},cmap,agg.model_disp);
   el('sec-share').innerHTML=shareBars(agg.months,cmap,agg.model_disp);
@@ -778,17 +834,20 @@ function svgTokenYield(data,cmap,vis){
   });
   return svgWrap(W,H,axes+yticks+xlabels+lines+dots,'chart');
 }
-var TY_ACTIVE=new Set(),TY_GAUGE='7d';
-function tyVisSet(data){return TY_ACTIVE.size?TY_ACTIVE:new Set(data.models);}
-function renderTYLegend(data){
-  var filtered=TY_ACTIVE.size>0,target=el('ty-legend');if(!target)return;
-  target.innerHTML=data.models.map(function(m){var off=filtered&&!TY_ACTIVE.has(m)?' off':'';var col=(CHART.colors&&CHART.colors[m])||'var(--ink-faint)';var lbl=(CHART.disp&&CHART.disp[m])||m;return '<button class="lg-item'+off+'" data-m="'+escAttr(m)+'" title="'+escAttr(m)+'"><span class="lg-swatch" style="background:'+col+'"></span>'+esc(lbl)+'</button>';}).join('')+'<button class="lg-all'+(filtered?'':' active')+'">all</button>';
-  target.querySelectorAll('button[data-m]').forEach(function(b){b.onclick=function(){_toggleTY(b.dataset.m);};});
-  target.querySelector('.lg-all').onclick=function(){TY_ACTIVE=new Set();renderTY();};
+var TY_ACTIVE=new Set(),TY_GAUGE='7d',OLLAMA_TY_ACTIVE=new Set();
+function tyVisSet(data,active){active=active||TY_ACTIVE;return active.size?active:new Set(data.models);}
+function renderTYLegend(data,cmap,dispMap,active,onToggle,onReset){
+  cmap=cmap||(CHART.colors||{});dispMap=dispMap||(CHART.disp||{});active=active||TY_ACTIVE;
+  var filtered=active.size>0,target=el('ty-legend');if(!target)return;
+  target.innerHTML=data.models.map(function(m){var off=filtered&&!active.has(m)?' off':'';var col=cmap[m]||'var(--ink-faint)';var lbl=dispMap[m]||m;return '<button class="lg-item'+off+'" data-m="'+escAttr(m)+'" title="'+escAttr(m)+'"><span class="lg-swatch" style="background:'+col+'"></span>'+esc(lbl)+'</button>';}).join('')+'<button class="lg-all'+(filtered?'':' active')+'">all</button>';
+  target.querySelectorAll('button[data-m]').forEach(function(b){b.onclick=function(){(onToggle||_toggleTY)(b.dataset.m);};});
+  target.querySelector('.lg-all').onclick=onReset||function(){TY_ACTIVE=new Set();renderTY();};
 }
 function _toggleTY(m){if(TY_ACTIVE.has(m))TY_ACTIVE.delete(m);else TY_ACTIVE.add(m);renderTY();}
-function showTY(v){TY_GAUGE=v;var b7=el('tybtn-7d'),b5=el('tybtn-5h');if(b7)b7.className=v==='7d'?'active':'';if(b5)b5.className=v==='5h'?'active':'';renderTY();}
+function _toggleTYOllama(m){if(OLLAMA_TY_ACTIVE.has(m))OLLAMA_TY_ACTIVE.delete(m);else OLLAMA_TY_ACTIVE.add(m);renderTYOllama();}
+function showTY(v){TY_GAUGE=v;var b7=el('tybtn-7d'),b5=el('tybtn-5h'),bo=el('tybtn-ollama-wk');if(b7)b7.className=v==='7d'?'active':'';if(b5)b5.className=v==='5h'?'active':'';if(bo)bo.className=v==='ollama-wk'?'active':'';renderTY();}
 function renderTY(){
+  if(TY_GAUGE==='ollama-wk'){renderTYOllama();return;}
   if(!CUR_AGG)return;
   var gk=TY_GAUGE==='5h'?'r5':'r7',data=tokenYield(CUR_AGG.sessions,gk),lg=el('ty-legend');
   if(!data.models.length){
@@ -802,6 +861,25 @@ function renderTY(){
   var order=data.models.slice().sort(function(a,b){return data.agg[b].e-data.agg[a].e;}),map={};
   order.forEach(function(m){map[m]=data.agg[m].e;});
   el('sec-token-yield-summary').innerHTML="<div class='subhead' style='margin-top:10px'>Overall Mtok per 1% ("+esc(TY_GAUGE)+")</div>"+barChart(map,'var(--ac)',function(v){return v.toFixed(2)+' Mtok/%';},cmap,(CHART&&CHART.disp)||{});
+}
+// Ollama Cloud token yield: precomputed server-side (FORECAST.ollama.tokenYield,
+// stats.mjs _ollama_token_yield) since the split needs the scrape's per-model
+// request deltas, not per-session gauge deltas — nothing here derives from
+// CUR_AGG/SESSIONS, so it renders the same regardless of the date-range picker.
+function renderTYOllama(){
+  var data=FORECAST.ollama&&FORECAST.ollama.tokenYield,lg=el('ty-legend');
+  if(!data||!data.models||!data.models.length){
+    if(lg)lg.innerHTML='';
+    el('sec-token-yield').innerHTML="<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No ollama token yield yet.</h4><p>Needs samples with per-model request counts spanning some 7d-window movement. Fills in as the app samples ollama account quota.</p></div>";
+    el('sec-token-yield-summary').innerHTML='';return;
+  }
+  var cmap=modelColorMap(data.models);
+  renderTYLegend(data,cmap,{},OLLAMA_TY_ACTIVE,_toggleTYOllama,function(){OLLAMA_TY_ACTIVE=new Set();renderTYOllama();});
+  var vis=tyVisSet(data,OLLAMA_TY_ACTIVE);
+  el('sec-token-yield').innerHTML=svgTokenYield(data,cmap,vis)+"<p class='muted' style='margin-top:6px'>Mtok consumed per 1% of the ollama 7d window burned — attributed by request-share, NOT per-session gauge deltas like the Claude series above: each sample interval's Δ7d% is split across models by their request-count deltas, so a model with more requests (not necessarily more tokens) claims a larger slice of that interval's %. A model with no matching sessions (e.g. \"web search\") still consumes its share but yields 0 Mtok.</p>";
+  var order=data.models.slice().sort(function(a,b){return data.agg[b].e-data.agg[a].e;}),map={};
+  order.forEach(function(m){map[m]=data.agg[m].e;});
+  el('sec-token-yield-summary').innerHTML="<div class='subhead' style='margin-top:10px'>Overall Mtok per 1% (7d, ollama)</div>"+barChart(map,'var(--ac)',function(v){return v.toFixed(2)+' Mtok/%';},cmap,{});
 }
 
 // ---- view + theme toggles ----

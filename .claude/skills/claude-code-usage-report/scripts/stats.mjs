@@ -29,6 +29,13 @@ const TOTALS_CACHE_VERSION = 1;
 // (claudeAiOauth.accessToken); OS keychain not handled in v1 (documented fallback).
 const CREDENTIALS_PATH = path.join(CLAUDE_DIR, ".credentials.json");
 const USAGE_SNAPSHOTS_JSONL = path.join(SKILL_STATE_DIR, "usage-snapshots.jsonl");
+// Ollama Cloud account-quota history (Phase 1, written by the daemon's own
+// scraper — no OAuth, no statusline). Same snapshot shape as usage-snapshots.jsonl
+// except gauge keys are session/weekly (ollama's own quota windows) and each
+// record carries per-model weekly request counts. Absent file → the ollama
+// rate-limit cards are omitted entirely (see _build_ollama_forecast).
+const OLLAMA_USAGE_JSONL = path.join(SKILL_STATE_DIR, "ollama-usage.jsonl");
+const OLLAMA_SERIES_CAP = 400; // max points in the report's trend series (strided, see _stride)
 const USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage";
 const USAGE_API_BETA = "oauth-2025-04-20";
 const USAGE_API_TIMEOUT_MS = 10000;
@@ -37,7 +44,9 @@ const USAGE_API_TIMEOUT_MS = 10000;
 const FORECAST_JSON = path.join(SKILL_STATE_DIR, "forecast.json");
 // Nominal window lengths, per claumon forecast.service.go durationFor. Used as
 // DurationHours in the rate prior (rho = uFinal / durationHours, percent/hour).
-const GAUGE_DUR_HOURS = { five_hour: 5, seven_day: 7 * 24 };
+// ollama Cloud runs the same two window lengths on its own account quota, keyed
+// session/weekly in ollama-usage.jsonl (what its settings page calls them).
+const GAUGE_DUR_HOURS = { five_hour: 5, seven_day: 7 * 24, session: 5, weekly: 7 * 24 };
 // Reports sit beside the state dir, so USAGE_REPORT_STATE relocates them too.
 const REPORTS_DIR = path.join(path.dirname(SKILL_STATE_DIR), "reports");
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -1174,10 +1183,10 @@ function _fetched_epoch(rec) {
 
 // Read usage-snapshots.jsonl into memory; skip malformed lines. Returns [] when
 // the file is absent (OAuth off / no fetch yet).
-function _load_usage_snapshots() {
-  if (!isFile(USAGE_SNAPSHOTS_JSONL)) return [];
+function _load_usage_snapshots(p = USAGE_SNAPSHOTS_JSONL) {
+  if (!isFile(p)) return [];
   const out = [];
-  for (const line of fs.readFileSync(USAGE_SNAPSHOTS_JSONL, "utf-8").split("\n")) {
+  for (const line of fs.readFileSync(p, "utf-8").split("\n")) {
     const t = line.trim();
     if (!t) continue;
     try { out.push(JSON.parse(t)); } catch { /* drop corrupt line */ }
@@ -1253,12 +1262,14 @@ function _wb_pool(windows, source) {
 }
 
 // OAuth path (accurate): weekly windows from usage-snapshots, 5h deltas from the
-// 5h windows that opened inside each weekly span.
-function _window_balance_oauth(snaps, nowSec) {
-  const w5 = _gauge_windows(snaps, "five_hour");
+// 5h windows that opened inside each weekly span. `shortGauge`/`longGauge` default
+// to Claude's five_hour/seven_day pair; the ollama path passes "session"/"weekly"
+// (same window lengths, its own account quota) so one delta-pairing serves both.
+function _window_balance_oauth(snaps, nowSec, shortGauge = "five_hour", longGauge = "seven_day") {
+  const w5 = _gauge_windows(snaps, shortGauge);
   const dur = (GAUGE_DUR_HOURS.seven_day || 168) * 3600;
   const windows = [];
-  for (const w of _gauge_windows(snaps, "seven_day")) {
+  for (const w of _gauge_windows(snaps, longGauge)) {
     if (w.snaps.length < 2) continue;
     const t0 = w.snaps[0].t, t1 = w.snaps[w.snaps.length - 1].t;
     // delta 7d over the OBSERVED span (7d is monotone inside a window). Pairing it
@@ -1370,9 +1381,162 @@ function _forecast_stale(max_age_days = 7) {
   if (Date.now() / 1000 - fj > max_age_days * 86400) return true;
   // New usage snapshots or new transcripts (statusline rl fallback) → refit.
   if (isFile(USAGE_SNAPSHOTS_JSONL) && getmtime(USAGE_SNAPSHOTS_JSONL) > fj) return true;
+  if (isFile(OLLAMA_USAGE_JSONL) && getmtime(OLLAMA_USAGE_JSONL) > fj) return true;
   const newestJsonl = fs.globSync(`${PROJECTS_GLOB}/*/*.jsonl`)
     .reduce((mx, p) => Math.max(mx, getmtime(p)), 0);
   return newestJsonl > fj;
+}
+
+// ---- ollama Cloud rate-limit forecast (own account quota, no OAuth) ----
+// Mirrors the Claude gauges/windowBalance/tokenYield path above, but reads
+// ollama-usage.jsonl (daemon-sampled, no OAuth/statusline) and keys off
+// session/weekly instead of five_hour/seven_day. Absent file or no usable
+// records → out.ollama is omitted entirely (_build_forecast), so every existing
+// card renders exactly as before.
+
+// Evenly-spaced downsample to at most `cap` items, always keeping the last one
+// (the newest reading is the one a reader looks for first).
+function _stride(arr, cap) {
+  if (arr.length <= cap) return arr;
+  const step = Math.ceil(arr.length / cap);
+  const out = arr.filter((_, i) => i % step === 0);
+  if (out[out.length - 1] !== arr[arr.length - 1]) out.push(arr[arr.length - 1]);
+  return out;
+}
+
+function _ollama_window_balance(snaps, nowSec) {
+  const windows = _window_balance_oauth(snaps, nowSec, "session", "weekly");
+  const pooled = _wb_pool(windows, "ollama");
+  if (!pooled) return null;
+  return { pooled, windows, statuslineWindows: [], minCoverage: WB_MIN_COVERAGE, minD7: WB_MIN_D7 };
+}
+
+// Per-model Mtok per 1% of the ollama WEEKLY window. r5/r7-style per-session
+// gauge deltas (the Claude client-side tokenYield) don't exist here — the scrape
+// is one global cumulative reading with per-model REQUEST counts, not per-model
+// tokens. So the split happens server-side: each consecutive snapshot pair's
+// Δweekly% is divided across models by their request-count deltas
+// (Δ%_model = Δ%_window × Δreq_model / Δreq_total), reset-aware like the
+// window-balance deltas above (a drop in weekly% OR in total requests starts a
+// fresh chain — delta = the current value/reading, not a negative). Aggregated
+// by day, then paired with that day's token totals from stats.csv sessions
+// (`:cloud` stripped — stats.csv routes ollama models through a proxy tag the
+// scrape doesn't carry). A scrape entry with no matching sessions (e.g. "web
+// search") still consumes its Δ% share but pairs with 0 tokens — it stays in
+// `models`/`agg` at e=0 rather than being dropped, since it's real quota draw.
+function _ollama_token_yield(snaps, sessions) {
+  const recs = snaps
+    .filter((r) => r.weekly && r.weekly.utilization != null && Array.isArray(r.models))
+    .map((r) => ({ t: _fetched_epoch(r), day: (r.fetched_at || "").slice(0, 10), u: Number(r.weekly.utilization), models: r.models }))
+    .filter((r) => r.t != null && r.day)
+    .sort((a, b) => a.t - b.t);
+  // Day -> stripped model_id -> token total, from the loaded stats.csv sessions.
+  const tokByDayModel = {};
+  for (const s of (sessions || [])) {
+    const day = (s.ts || "").slice(0, 10);
+    const m = (s.model || "").replace(/:cloud$/, "");
+    if (!day || !m) continue;
+    const dm = tokByDayModel[day] || (tokByDayModel[day] = {});
+    dm[m] = (dm[m] || 0) + s.tok;
+  }
+  const sumD = {};
+  let prevU = null, prevReq = {};
+  for (const r of recs) {
+    const curTotalReq = r.models.reduce((a, m) => a + _fnum(m && m.requests), 0);
+    const prevTotalReq = Object.values(prevReq).reduce((a, v) => a + v, 0);
+    const reset = prevU === null || r.u < prevU || curTotalReq < prevTotalReq;
+    const dPct = reset ? r.u : r.u - prevU;
+    prevU = r.u;
+    if (dPct > 0) {
+      const reqDelta = {};
+      let totalReq = 0;
+      for (const m of r.models) {
+        const name = m && m.model;
+        if (!name) continue;
+        const cur = _fnum(m.requests);
+        const prev = reset ? 0 : (prevReq[name] || 0);
+        const d = Math.max(0, cur - prev);
+        reqDelta[name] = d;
+        totalReq += d;
+      }
+      if (totalReq > 0) {
+        for (const [name, d] of Object.entries(reqDelta)) {
+          if (d <= 0) continue;
+          const share = dPct * (d / totalReq);
+          (sumD[name] = sumD[name] || {})[r.day] = (sumD[name][r.day] || 0) + share;
+        }
+      }
+    }
+    prevReq = {};
+    for (const m of r.models) { if (m && m.model) prevReq[m.model] = _fnum(m.requests); }
+  }
+  const series = {}, agg = {}, models = [], dayset = {};
+  for (const [name, byDay] of Object.entries(sumD)) {
+    let aggT = 0, aggD = 0;
+    series[name] = {};
+    for (const [day, d] of Object.entries(byDay)) {
+      if (d < 0.05) continue;
+      const t = (tokByDayModel[day] && tokByDayModel[day][name]) || 0;
+      series[name][day] = { e: (t / 1e6) / d, t, d };
+      dayset[day] = 1;
+      aggT += t; aggD += d;
+    }
+    if (aggD < 0.05) continue;
+    agg[name] = { e: (aggT / 1e6) / aggD, t: aggT, d: aggD };
+    models.push(name);
+  }
+  models.sort();
+  return { days: Object.keys(dayset).sort(), series, agg, models };
+}
+
+function _build_ollama_forecast(nowSec, cfg, fitAt, sessions) {
+  const snaps = _load_usage_snapshots(OLLAMA_USAGE_JSONL);
+  if (!snaps.length) return null;
+  const gauges = {};
+  for (const gauge of ["session", "weekly"]) {
+    const windows = _gauge_windows(snaps, gauge);
+    const fit = _fit_gauge(gauge, windows, nowSec, cfg);
+    if (!fit) { gauges[gauge] = { ok: false }; continue; }
+    // Open window = the future reset with the most snapshots. No statusline
+    // fallback exists for ollama, so a failed fit is simply {ok:false}.
+    const open = windows.filter((w) => w.resetSec > nowSec)
+      .sort((a, b) => b.snaps.length - a.snaps.length)[0];
+    let result = null;
+    if (open && open.snaps.length >= 1) {
+      const last = open.snaps[open.snaps.length - 1];
+      const r = FC.runForecast({
+        nowSec: last.t, resetSec: open.resetSec, uNow: last.u,
+        snapshots: open.snaps, prior: fit.prior, calibration: fit.calibration,
+        thresholds: [100, 80],
+      }, cfg);
+      if (r.ok) result = {
+        forecast: r.forecast, posterior: { rHat: r.posterior.rHat, usedOLS: r.posterior.usedOLS, n: r.posterior.n },
+        etas: r.etas, openResetSec: open.resetSec, uNow: last.u, nSnaps: open.snaps.length,
+      };
+    }
+    gauges[gauge] = {
+      ok: true, source: "ollama", nWindows: fit.nWindows,
+      prior: { mu0: fit.prior.mu0, tau0Sq: fit.prior.tau0Sq, nSessions: fit.prior.nSessions },
+      calibration: fit.calibration, result,
+    };
+  }
+  return {
+    modelVersion: FC.MODEL_VERSION, fitAt,
+    gauges,
+    windowBalance: _ollama_window_balance(snaps, nowSec),
+    tokenYield: _ollama_token_yield(snaps, sessions),
+    // Trend series for the utilization card. Evenly strided down to
+    // OLLAMA_SERIES_CAP points, keeping the full time span: forecast.json is
+    // embedded verbatim into every report HTML and svgRateTrend draws two dots
+    // (each with a <title>) per point, so the raw ~48 samples/day would add
+    // ~290 bytes of SVG per sample — a month of sampling is 400KB in one card.
+    // Striding (not last-N truncation) keeps the whole history readable.
+    series: _stride(snaps, OLLAMA_SERIES_CAP).map((rec) => ({
+      ts: rec.fetched_at,
+      session: rec.session && rec.session.utilization != null ? Number(rec.session.utilization) : null,
+      weekly: rec.weekly && rec.weekly.utilization != null ? Number(rec.weekly.utilization) : null,
+    })).filter((r) => r.session != null || r.weekly != null),
+  };
 }
 
 // Compute the forecast for both gauges and persist. Returns the payload that
@@ -1426,6 +1590,8 @@ function _build_forecast(sessions) {
     out.gauges[gauge] = { ok: false };
   }
   out.windowBalance = _window_balance(snaps, sessions, nowSec);
+  const ollama = _build_ollama_forecast(nowSec, cfg, out.fitAt, sessions);
+  if (ollama) out.ollama = ollama;
   fs.writeFileSync(FORECAST_JSON, JSON.stringify(out, null, 2), { encoding: "utf-8", mode: 0o600 });
   return out;
 }

@@ -52,6 +52,14 @@ function ProviderCard({ label, u }) {
           {u.needsAuth ? authHelp[label.toLowerCase()] : `Couldn't load this: ${u.error || 'unknown error'}`}
         </Alert>
       )}
+      {/* Outside the ok/error branches on purpose: the sampler stops precisely
+          when a scrape fails, so at that moment this card is rendering the error
+          Alert — a note nested in the ok branch would never be seen. */}
+      {u?.historyPaused && (
+        <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 1 }}>
+          History sampling stopped after {u.historyPaused.error} — press Refresh to resume.
+        </Typography>
+      )}
     </Box>
   );
 }

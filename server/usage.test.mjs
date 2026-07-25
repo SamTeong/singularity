@@ -1,19 +1,21 @@
 // Unit tests for usage normalization: the ollama HTML scraper parser and the
 // claude OAuth-response mapper. No network — both operate on captured fixtures.
-// usage.mjs pulls in app-dir.mjs (STATE_DIR/CACHE_DIR), which requires
-// SINGULARITY_HOME — point it at a scratch temp dir before the dynamic import.
+// usage.mjs pulls in app-dir.mjs (STATE_DIR/CACHE_DIR/USAGE_SKILL_STATE), which
+// requires SINGULARITY_HOME and reads USAGE_REPORT_STATE — point both at a
+// scratch temp dir before the dynamic import.
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-usage-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
+process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, normalizeClaude } = await import('./usage.mjs');
+const { parseOllamaHtml, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot } = await import('./usage.mjs');
 
 // Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
 // response: plan badge, Session then Weekly meter (aria-label + segment buttons),
@@ -107,4 +109,55 @@ test('normalizeClaude: missing windows/extra → nulls, no throw', () => {
   assert.equal(u.weekly, null);
   assert.equal(u.extra, null);
   assert.equal(u.plan, null);
+});
+
+// appendOllamaHistory writes the report skill's snapshot shape and de-dupes an
+// unchanged reading (idle-debounce refreshes call this often).
+const HISTORY_FILE = join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl');
+const READING = {
+  plan: 'pro',
+  session: { pctUsed: 27.4, resetsAt: '2026-07-14T08:00:00Z' },
+  weekly: {
+    pctUsed: 31.2, resetsAt: '2026-07-19T00:00:00Z',
+    models: [{ model: 'glm-5.2', requests: 218 }],
+  },
+};
+
+test('appendOllamaHistory: dedupes an unchanged reading, writes a changed one', () => {
+  appendOllamaHistory(READING);
+  appendOllamaHistory(READING); // identical → no second line
+  const changed = { ...READING, session: { ...READING.session, pctUsed: 28.1 } };
+  appendOllamaHistory(changed);
+
+  const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 2);
+  for (const line of lines) {
+    const row = JSON.parse(line);
+    assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    assert.equal(typeof row.session.utilization, 'number');
+    assert.ok('resets_at' in row.weekly);
+  }
+  assert.equal(JSON.parse(lines[0]).session.utilization, 27.4);
+  assert.equal(JSON.parse(lines[1]).session.utilization, 28.1);
+});
+
+// appendClaudeSnapshot must reproduce the record the skill's own
+// `fetch-usage --oauth --save` writes (stats.mjs _map_usage + fetched_at + raw),
+// since the same _gauge_windows/_fit_gauge code reads both writers' rows.
+test('appendClaudeSnapshot: skill snapshot shape, dedupes an unchanged reading', () => {
+  appendClaudeSnapshot(CLAUDE_RAW);
+  appendClaudeSnapshot(CLAUDE_RAW); // identical → no second line
+  appendClaudeSnapshot({ ...CLAUDE_RAW, five_hour: { utilization: 55, resets_at: '2026-07-14T13:00:00Z' } });
+
+  const lines = readFileSync(join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl'), 'utf8').trim().split('\n');
+  assert.equal(lines.length, 2);
+  const row = JSON.parse(lines[0]);
+  assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.deepEqual(row.five_hour, { utilization: 42, resets_at: '2026-07-14T13:00:00Z' });
+  assert.deepEqual(row.seven_day, { utilization: 63.5, resets_at: '2026-07-19T00:00:00Z' });
+  assert.equal(row.per_model.opus.utilization, 71);
+  assert.equal(row.per_model.design.utilization, 5); // seven_day_omelette → design
+  assert.equal(row.extra_usage.used_credits, 12);
+  assert.equal(row.raw.five_hour.utilization, 42); // full body kept, like the skill's writer
+  assert.equal(JSON.parse(lines[1]).five_hour.utilization, 55);
 });

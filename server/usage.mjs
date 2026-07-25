@@ -5,11 +5,11 @@
 // small in-memory cache per source is enough — no cross-session file needed.
 // SECURITY: reads full account creds (cookie / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
-import { STATE_DIR, CACHE_DIR } from './app-dir.mjs';
+import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
 
 const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
 export const OLLAMA_PROFILE_DIR = join(CACHE_DIR, 'pw-ollama-profile');
@@ -62,6 +62,93 @@ export function parseOllamaHtml(html) {
     weekly: windowAt(1),
     extra: null,
   };
+}
+
+// ---- Ollama usage history (feeds the claude-code-usage-report skill) ----------
+// Every successful ollama scrape is appended as one snapshot in the report
+// skill's own record shape ({fetched_at, session, weekly, plan, models}) — a hard
+// contract with that skill's stats.mjs, which already knows how to chart/forecast
+// records shaped this way, so the daemon just has to write them in the right
+// shape and no new maths lives here. `models` is the weekly window's per-model
+// requests (already parsed). fetched_at is LOCAL time (the skill parses it as
+// local), zero-padded YYYY-MM-DD HH:MM:SS, no timezone suffix.
+// ponytail: the file only ever grows (~10KB/day at 48 samples/day) — fine at
+// this scale; trim-to-last-N is the upgrade path if it ever matters.
+const OLLAMA_HISTORY = join(USAGE_SKILL_STATE, 'ollama-usage.jsonl');
+
+// Last row actually written, so a duplicate reading (idle-debounce refreshes hit
+// this often) doesn't spam the file. Simplest seed: null at daemon start, so the
+// first successful append after a restart always writes — even if it matches the
+// prior process's last line — rather than paying for a read-last-line probe.
+let lastOllamaReading = null;
+
+function pad2(n) { return String(n).padStart(2, '0'); }
+function localTimestamp(d) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
+}
+
+export function appendOllamaHistory(data) {
+  const reading = {
+    sessionUtil: data.session?.pctUsed ?? null, sessionResets: data.session?.resetsAt ?? null,
+    weeklyUtil: data.weekly?.pctUsed ?? null, weeklyResets: data.weekly?.resetsAt ?? null,
+  };
+  if (lastOllamaReading
+    && reading.sessionUtil === lastOllamaReading.sessionUtil && reading.sessionResets === lastOllamaReading.sessionResets
+    && reading.weeklyUtil === lastOllamaReading.weeklyUtil && reading.weeklyResets === lastOllamaReading.weeklyResets) return;
+  lastOllamaReading = reading;
+  const record = {
+    fetched_at: localTimestamp(new Date()),
+    session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt } : null,
+    weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt } : null,
+    plan: data.plan ?? null,
+    models: data.weekly?.models ?? [],
+  };
+  appendJsonl(OLLAMA_HISTORY, record);
+}
+
+function appendJsonl(file, record) {
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+  } catch {} // best-effort, same posture as persist() — never break /usage
+}
+
+// ---- Claude usage snapshots (same file the skill's fetch-usage --oauth --save writes)
+// The daemon already GETs api/oauth/usage for the Usage page, so the OAuth
+// snapshot the rate-limit forecast feeds on is a free by-product — no scheduled
+// agent needs to re-fetch it. Record shape mirrors stats.mjs _map_usage +
+// fetched_at + raw exactly (five_hour/seven_day/per_model/extra_usage), because
+// _gauge_windows/_fit_gauge read these keys. Same dedup + best-effort posture as
+// the ollama history above.
+const CLAUDE_HISTORY = join(USAGE_SKILL_STATE, 'usage-snapshots.jsonl');
+let lastClaudeReading = null;
+
+function pickWindow(w) {
+  return w && typeof w === 'object' ? { utilization: w.utilization ?? null, resets_at: w.resets_at ?? null } : null;
+}
+
+export function appendClaudeSnapshot(raw) {
+  const fiveHour = pickWindow(raw.five_hour);
+  const sevenDay = pickWindow(raw.seven_day);
+  const reading = JSON.stringify([fiveHour, sevenDay]);
+  if (reading === lastClaudeReading) return;
+  lastClaudeReading = reading;
+  const eu = raw.extra_usage;
+  appendJsonl(CLAUDE_HISTORY, {
+    fetched_at: localTimestamp(new Date()),
+    five_hour: fiveHour,
+    seven_day: sevenDay,
+    per_model: {
+      sonnet: pickWindow(raw.seven_day_sonnet),
+      opus: pickWindow(raw.seven_day_opus),
+      design: pickWindow(raw.seven_day_omelette), // API key omelette → "design" (stats.mjs _map_usage)
+    },
+    extra_usage: eu && typeof eu === 'object'
+      ? { is_enabled: eu.is_enabled ?? null, monthly_limit: eu.monthly_limit ?? null,
+          used_credits: eu.used_credits ?? null, utilization: eu.utilization ?? null }
+      : null,
+    raw,
+  });
 }
 
 async function fetchWithTimeout(url, opts) {
@@ -258,7 +345,9 @@ async function fetchClaude() {
   if (resp.status === 429) return { ok: false, source: 'claude', error: 'rate-limited' };
   if (resp.status !== 200) return { ok: false, source: 'claude', error: `HTTP ${resp.status}` };
   try {
-    return normalizeClaude(await resp.json(), oauth.subscriptionType);
+    const raw = await resp.json();
+    appendClaudeSnapshot(raw); // this fetch IS the snapshot the forecast needs
+    return normalizeClaude(raw, oauth.subscriptionType);
   } catch (e) {
     return { ok: false, source: 'claude', error: `parse error: ${e.message}` };
   }
@@ -292,6 +381,14 @@ async function pull(src, fetcher, force) {
   // Keep the last good payload on a transient failure so the UI doesn't flip to
   // "error" on one blip — but always surface a fresh needsAuth.
   if (data.ok || data.needsAuth || !slot.data) { slot.data = data; slot.at = Date.now(); persist(); }
+  if (src === 'ollama' && data.ok) {
+    appendOllamaHistory(data);
+    // A successful ollama read from ANY path (manual Refresh, idle debounce,
+    // reset timer, or the sampler itself) is the "re-enable" signal — clear a
+    // prior stop-on-fail and re-arm the clock sampler if it isn't running.
+    historyPaused = null;
+    startHistorySampler();
+  }
   return slot.data;
 }
 
@@ -300,7 +397,7 @@ export async function getUsage({ force = false } = {}) {
     pull('ollama', fetchOllama, force),
     pull('claude', fetchClaude, force),
   ]);
-  const result = { ollama, claude };
+  const result = { ollama: { ...ollama, historyPaused }, claude };
   usageBus?.emit('usage', result);
   scheduleResetRefreshes(result);
   return result;
@@ -346,4 +443,37 @@ export function initUsageAutoRefresh(bus) {
     clearTimeout(idleTimer);
     idleTimer = setTimeout(() => getUsage({ force: true }).catch(() => {}), DEBOUNCE_MS);
   });
+  startHistorySampler();
+}
+
+// ---- Usage history clock sampler -----------------------------------------------
+// Fills ollama-usage.jsonl + usage-snapshots.jsonl unattended (the weekly gauges
+// need ~2 weeks of samples, longer than anyone keeps the Usage page open) by
+// forcing a pull every 30m — this is what replaces a scheduled agent that did
+// nothing but re-fetch the same two sources. Never fires immediately: an eager
+// first call could hit the headful Edge fallback and pop a visible window right
+// as the daemon boots.
+const HISTORY_SAMPLE_MS = 30 * 60_000;
+let historyInterval = null;
+let historyPaused = null; // {at, error} while the sampler is stopped, else null
+
+function startHistorySampler() {
+  if (historyInterval) return;
+  historyInterval = setInterval(async () => {
+    const result = await getUsage({ force: true }).catch(() => null);
+    // Stop on the sampler's own first ollama failure — an unattended timer is the
+    // wrong place to keep retrying an expired cookie/profile every 30m. Re-arming
+    // is pull()'s job, on the next successful ollama read from any path.
+    // 'no-config' is not a failure: an ollama-less install still wants the timer
+    // running for the Claude snapshots it also collects.
+    if (result?.ollama && !result.ollama.ok && result.ollama.error !== 'no-config') {
+      clearInterval(historyInterval);
+      historyInterval = null;
+      historyPaused = { at: new Date().toISOString(), error: result.ollama.error || 'unknown error' };
+      // getUsage already emitted this result without the flag (it's set here,
+      // after the await) — re-emit so open tabs learn the sampler stopped
+      // without waiting for the user to hit Refresh first.
+      usageBus?.emit('usage', { ...result, ollama: { ...result.ollama, historyPaused } });
+    }
+  }, HISTORY_SAMPLE_MS).unref();
 }
