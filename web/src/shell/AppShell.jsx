@@ -71,6 +71,8 @@ export default function AppShell() {
   const [createInitialModel, setCreateInitialModel] = useState('');
   const [createInitialScopes, setCreateInitialScopes] = useState([]);
   const [taskOpen, setTaskOpen] = useState(false);
+  // false (closed) | true (create) | a cron job object (edit that row) — same
+  // tri-state the Automation view uses for background defs.
   const [cronOpen, setCronOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   // Persisted so the selected view survives a skin switch (which remounts the
@@ -212,7 +214,7 @@ export default function AppShell() {
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} />}
             {view === 'status' && <StatusView />}
             {view === 'skills' && <SkillsPanel />}
-            {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} onAdd={() => setCronOpen(true)} onToast={setToast} />}
+            {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} onAdd={() => setCronOpen(true)} onEdit={setCronOpen} onToast={setToast} />}
             {view === 'tasks' && (
               <TasksBoard
                 tasks={tasks}
@@ -316,7 +318,8 @@ export default function AppShell() {
       />
 
       <CreateCronDialog
-        open={cronOpen}
+        open={!!cronOpen}
+        job={typeof cronOpen === 'object' ? cronOpen : null}
         onClose={() => setCronOpen(false)}
         cwd={cwd}
         setCwd={setCwd}

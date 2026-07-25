@@ -42,6 +42,8 @@ const fmtRel = (ts) => (ts ? relTime(ts) : '—');
 const fmtNext = (iso) => {
   if (!iso) return '—';
   const s = Math.round((new Date(iso).getTime() - Date.now()) / 1000);
+  // A pushed snapshot can lag the boundary by a tick; never render "in -80s".
+  if (s <= 0) return 'due';
   if (s < 60) return `in ${s}s`;
   const m = Math.round(s / 60);
   if (m < 60) return `in ${m}m`;
@@ -54,7 +56,7 @@ const fmtHM = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', min
 // Automation view: the scheduled cron jobs (top section) plus the background
 // quota-soak scheduler (below). Cron rows fire on a cron expr; background defs are
 // picked round-robin during a working-hours window when spare quota is available.
-export default function CronJobs({ crons, agents, background, recent, onAdd, onToast }) {
+export default function CronJobs({ crons, agents, background, recent, onAdd, onEdit, onToast }) {
   // false (closed) | true (create) | a def object (edit that row)
   const [defOpen, setDefOpen] = useState(false);
   // Background section subview: 'tasks' (defs table, default) | 'reports'.
@@ -237,6 +239,9 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onT
                       <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
                         <Tooltip title="Run now" disableInteractive>
                           <IconButton size="small" onClick={() => run(j.id)}><PlayArrowIcon fontSize="small" /></IconButton>
+                        </Tooltip>
+                        <Tooltip title="Edit" disableInteractive>
+                          <IconButton size="small" onClick={() => onEdit?.(j)}><EditOutlinedIcon fontSize="small" /></IconButton>
                         </Tooltip>
                         <Tooltip title="Delete" disableInteractive>
                           <IconButton size="small" onClick={() => { if (window.confirm(`Delete scheduled job "${j.name}"?`)) remove(j.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>

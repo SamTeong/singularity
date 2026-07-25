@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
@@ -36,9 +36,11 @@ function describe(expr) {
   }
 }
 
-// New-cron dialog: name, cron expr (live descr + next-fire), prompt, cwd, model,
-// scopes, permission mode. POST /crons. Mirrors CreateTaskDialog layout.
-export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, onBrowse }) {
+// Add/edit-cron dialog: name, cron expr (live descr + next-fire), prompt, cwd,
+// model, scopes, permission mode. `job` set → edit mode (prefill + POST
+// /crons/:id), else create mode (POST /crons). Mirrors CreateBackgroundDialog.
+export default function CreateCronDialog({ open, onClose, job, cwd, setCwd, recent, onBrowse }) {
+  const editing = !!job;
   const [name, setName] = useState('');
   const [cronExpr, setCronExpr] = useState('0 * * * *');
   const [prompt, setPrompt] = useState('');
@@ -49,19 +51,36 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
+  // The dialog never unmounts (renders null while closed), so a plain useState
+  // initializer only runs once — resync on every open, either from `job` (edit)
+  // or back to blank/defaults (create). cwd is AppShell's shared picker state
+  // (the Browse button writes to it), so edit mode seeds that rather than a local copy.
+  useEffect(() => {
+    if (!open) return;
+    if (job) {
+      setName(job.name || '');
+      setCronExpr(job.cronExpr || '0 * * * *');
+      setPrompt(job.prompt || '');
+      setModel(job.model === 'claude' ? '' : (job.model || ''));
+      setScopes(job.scopes || []);
+      setPermissionMode(job.permissionMode || 'acceptEdits');
+      setEnabled(job.enabled !== false);
+      if (job.cwd) setCwd(job.cwd);
+    } else {
+      setName(''); setCronExpr('0 * * * *'); setPrompt(''); setModel(''); setScopes([]); setPermissionMode('acceptEdits'); setEnabled(true);
+    }
+    setError(null);
+  }, [open, job]);
+
   const desc = useMemo(() => describe(cronExpr.trim()), [cronExpr]);
-  const canCreate = !busy && !!name.trim() && desc.ok && !!prompt.trim() && !!cwd.trim();
+  const canSubmit = !busy && !!name.trim() && desc.ok && !!prompt.trim() && !!cwd.trim();
 
-  const reset = () => {
-    setName(''); setCronExpr('0 * * * *'); setPrompt(''); setScopes([]); setModel(''); setPermissionMode('acceptEdits'); setEnabled(true);
-  };
-
-  const create = async () => {
-    if (!canCreate) return;
+  const submit = async () => {
+    if (!canSubmit) return;
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch('/crons', {
+      const r = await fetch(editing ? `/crons/${job.id}` : '/crons', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -70,8 +89,7 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
         }),
       });
       const d = await r.json();
-      if (!d.ok) { setError(d.error || 'create failed'); return; }
-      reset();
+      if (!d.ok) { setError(d.error || `${editing ? 'save' : 'create'} failed`); return; }
       onClose();
     } catch (e) {
       setError(e.message);
@@ -80,12 +98,10 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
     }
   };
 
-  const cancel = () => { reset(); onClose(); };
-
   if (!open) return null;
   return (
     <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>New scheduled job</DialogTitle>
+      <DialogTitle>{editing ? 'Edit scheduled job' : 'New scheduled job'}</DialogTitle>
       <DialogContent sx={{ pb: 1.5 }}>
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>
           <TextField size="small" label="name" value={name} onChange={(e) => setName(e.target.value)} />
@@ -113,8 +129,9 @@ export default function CreateCronDialog({ open, onClose, cwd, setCwd, recent, o
         </Stack>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
-        <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={cancel}>Cancel</Button>
-        <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={!canCreate}>Create</Button>
+        <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={onClose}>Cancel</Button>
+        <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={!editing ? <AddIcon /> : undefined} onClick={submit} disabled={!canSubmit}>
+          {editing ? 'Save' : 'Create'}</Button>
       </DialogActions>
     </Dialog>
   );

@@ -115,19 +115,24 @@ function spawnForJob(job) {
   return agent;
 }
 
-// Scheduled fire: skip if previous run still alive, else spawn + advance nextFire.
+// Scheduled fire: skip if previous run still alive, else advance nextFire + spawn.
+// recomputeNext runs BEFORE spawnForJob so the snapshot spawnForJob emits already
+// carries the new nextFire. Clients learn nextFire only from a pushed snapshot (no
+// polling), so a push carrying the boundary that just fired leaves the row counting
+// down past zero ("in -80s") until the next fire. Every path emits exactly once.
 function fire(job) {
   if (reg.isLive(job.lastSessionId)) {
     logger?.info({ id: job.id }, 'cron skipped — previous run still active');
     recomputeNext(job);
+    emitCrons();
     return;
   }
+  recomputeNext(job);
   try { spawnForJob(job); }
   catch (e) {
     logger?.warn({ id: job.id, err: e.message }, 'cron spawn failed');
     job.lastError = e.message; job.updatedAt = Date.now(); persist(); emitCrons();
   }
-  recomputeNext(job);
 }
 
 export function snapshotCrons() {
