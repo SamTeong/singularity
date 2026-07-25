@@ -1212,6 +1212,126 @@ function _gauge_windows(snaps, gauge) {
   return windows;
 }
 
+// ---- window balance: the 5h:7d exchange rate (Phase H) ----
+// r = Sum(delta 5h%) / delta 7d%, measured INSIDE one weekly window: how much 5h
+// capacity a unit of weekly budget costs. Structurally r ~= L7/L5 (ratio of the two
+// budget sizes), so it STEPS on plan/limit changes rather than drifting — the trend
+// is a regime-change detector, not a daily metric. Bucketed per 7d reset window,
+// never per calendar day/week: a day carries too little delta-7d to divide by
+// (1%-granular gauge), and a calendar week straddles the reset boundary.
+//
+// Both sums are LOWER bounds under sparse polling — an unobserved 5h window adds 0
+// to Sum(delta 5h) while its usage still lands in delta 7d (7d is monotone inside a
+// window) — so r is biased low. `coverage` = share of the WHOLE weekly window (not
+// just the observed span) that sits within 5h of a snapshot; 1.0 means no 5h window
+// could have gone unseen. Measured against the nominal window so that two snapshots
+// a minute apart score ~0, not 1.
+const WB_MIN_COVERAGE = 0.5; // gate for the pooled all-time ratio
+const WB_MIN_D7 = 20;        // ...and enough weekly movement to divide by
+const WB_GAP_SEC = 5 * 3600;
+const _r2 = (x) => Math.round(x * 100) / 100;
+
+function _wb_pool(windows, source) {
+  const gated = windows.filter((w) => w.included);
+  // Nothing gated in → do NOT pool every window: a barely-observed window has a
+  // near-zero Sum(delta 5h) against a real delta 7d, which drags the ratio down
+  // harder than it informs it. Fall back to the single best-observed window and
+  // let `gated:false` label it.
+  const rest = windows.filter((w) => w.d7 > 0)
+    .sort((a, b) => (b.coverage || 0) - (a.coverage || 0) || b.d7 - a.d7);
+  const pool = gated.length ? gated : rest.slice(0, 1);
+  let S5 = 0, S7 = 0;
+  for (const w of pool) { S5 += w.d5; S7 += w.d7; }
+  if (S7 <= 0) return null;
+  const r = S5 / S7;
+  return {
+    source, r: _r2(r), d5: _r2(S5), d7: _r2(S7), nWindows: pool.length,
+    gated: gated.length > 0,
+    hoursPer7dDay: _r2((r * 5) / 7), // 1 day of weekly budget, in hours of 5h capacity
+    daysPer5hWindow: _r2(7 / r),     // one full 5h window, in days of weekly budget
+  };
+}
+
+// OAuth path (accurate): weekly windows from usage-snapshots, 5h deltas from the
+// 5h windows that opened inside each weekly span.
+function _window_balance_oauth(snaps, nowSec) {
+  const w5 = _gauge_windows(snaps, "five_hour");
+  const dur = (GAUGE_DUR_HOURS.seven_day || 168) * 3600;
+  const windows = [];
+  for (const w of _gauge_windows(snaps, "seven_day")) {
+    if (w.snaps.length < 2) continue;
+    const t0 = w.snaps[0].t, t1 = w.snaps[w.snaps.length - 1].t;
+    // delta 7d over the OBSERVED span (7d is monotone inside a window). Pairing it
+    // with the 5h windows that opened in the same span keeps both sides consistent;
+    // the unobserved head of the window is dropped from both, not from one.
+    const d7 = w.snaps[w.snaps.length - 1].u - w.snaps[0].u;
+    // Each 5h window rose from 0 to its peak, so its own uFinal IS its delta.
+    let d5 = 0, n5 = 0;
+    for (const f of w5) {
+      const ft = f.snaps[0].t;
+      if (ft >= t0 && ft <= t1) { d5 += f.uFinal; n5++; }
+    }
+    let seen = 0;
+    for (let i = 1; i < w.snaps.length; i++) {
+      seen += Math.min(w.snaps[i].t - w.snaps[i - 1].t, WB_GAP_SEC);
+    }
+    const nominal = Math.min(w.resetSec, nowSec) - (w.resetSec - dur);
+    const coverage = nominal > 0 ? Math.min(1, seen / nominal) : 0;
+    windows.push({
+      resetsAt: w.resetsAtCanon, resetSec: w.resetSec, d5: _r2(d5), d7: _r2(d7),
+      r: d7 > 0 ? _r2(d5 / d7) : null, coverage: _r2(coverage), n5,
+      nSnaps: w.snaps.length, included: coverage >= WB_MIN_COVERAGE && d7 >= WB_MIN_D7,
+    });
+  }
+  return windows;
+}
+
+// Statusline fallback (lower bound, shown alongside): reset-aware deltas over the
+// per-session rl gauges, bucketed into 7d bins anchored on `anchorSec`. Sessions
+// are ordered by `ts`, which is the session's END (last transcript entry) — the
+// order the gauges were actually read in. No coverage measure exists here (the
+// gauge is only sampled when a session ends), so these windows never gate in.
+function _window_balance_statusline(sessions, anchorSec) {
+  const rl = (sessions || [])
+    .filter((s) => /^claude/i.test(s.model || "") && s.rl5 > 0 && s.rl7 > 0)
+    .map((s) => ({ ...s, _t: (parseDateTime(s.ts) || 0) && Math.floor(parseDateTime(s.ts).getTime() / 1000) }))
+    .filter((s) => s._t)
+    .sort((a, b) => a._t - b._t);
+  if (rl.length < 2) return [];
+  const W = 7 * 86400;
+  const bins = new Map();
+  let p5 = null, p7 = null;
+  for (const s of rl) {
+    const d5 = p5 === null || s.rl5 < p5 ? s.rl5 : s.rl5 - p5;
+    const d7 = p7 === null || s.rl7 < p7 ? s.rl7 : s.rl7 - p7;
+    p5 = s.rl5; p7 = s.rl7;
+    const k = Math.ceil((s._t - anchorSec) / W);
+    const b = bins.get(k) || { d5: 0, d7: 0, n: 0 };
+    b.d5 += d5; b.d7 += d7; b.n++;
+    bins.set(k, b);
+  }
+  return [...bins.entries()].sort((a, b) => a[0] - b[0]).map(([k, b]) => ({
+    resetsAt: new Date((anchorSec + k * W) * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    resetSec: anchorSec + k * W, d5: _r2(b.d5), d7: _r2(b.d7),
+    r: b.d7 > 0 ? _r2(b.d5 / b.d7) : null, coverage: null, n5: null,
+    nSnaps: b.n, included: false,
+  }));
+}
+
+function _window_balance(snaps, sessions, nowSec) {
+  const oauth = _window_balance_oauth(snaps, nowSec);
+  const anchor = oauth.length
+    ? oauth[oauth.length - 1].resetSec
+    : Math.floor(Date.now() / 1000);
+  const statusline = _window_balance_statusline(sessions, anchor);
+  const pooled = _wb_pool(oauth, "oauth") || _wb_pool(statusline, "statusline");
+  if (!pooled) return null;
+  return {
+    pooled, windows: oauth, statuslineWindows: statusline,
+    minCoverage: WB_MIN_COVERAGE, minD7: WB_MIN_D7,
+  };
+}
+
 // Fit prior + calibration (two-pass, claumon service.Refit) from completed
 // windows. Returns {prior, calibration, nWindows} or null when <2 usable windows.
 function _fit_gauge(gauge, windows, nowSec, cfg) {
@@ -1305,6 +1425,7 @@ function _build_forecast(sessions) {
     }
     out.gauges[gauge] = { ok: false };
   }
+  out.windowBalance = _window_balance(snaps, sessions, nowSec);
   fs.writeFileSync(FORECAST_JSON, JSON.stringify(out, null, 2), { encoding: "utf-8", mode: 0o600 });
   return out;
 }
@@ -1348,6 +1469,17 @@ function cmd_forecast(args) {
     } else {
       print(`    no open window to project${g.source === "statusline" ? " (statusline fallback: enable OAuth polling for a projection)" : ""}`);
     }
+  }
+  const wb = f.windowBalance;
+  if (!wb) { print("  window balance: no data"); return; }
+  const p = wb.pooled;
+  print(`  window balance [${p.source}${p.gated ? "" : ", ungated"}]: r = ${fixed(p.r, 2)}  (n=${p.nWindows} window${p.nWindows === 1 ? "" : "s"}, Σ Δ5=${fixed(p.d5, 0)}% Σ Δ7=${fixed(p.d7, 0)}%)`);
+  print(`    1 day of 7d budget = ${fixed(p.hoursPer7dDay, 2)}h of 5h capacity  ·  one 5h window = ${fixed(p.daysPer5hWindow, 2)} days of 7d budget`);
+  for (const w of wb.windows) {
+    print(`    ${w.resetsAt.slice(0, 16)}  r=${w.r == null ? "—" : fixed(w.r, 2)}  Δ5=${fixed(w.d5, 0)}% Δ7=${fixed(w.d7, 0)}%  cov=${fixed(w.coverage * 100, 0)}%${w.included ? "" : "  (excluded)"}`);
+  }
+  if (wb.statuslineWindows.length) {
+    print(`    statusline lower bound: ${wb.statuslineWindows.map((w) => (w.r == null ? "—" : fixed(w.r, 2))).join(" ")}`);
   }
 }
 

@@ -344,6 +344,66 @@ function renderForecast(F){
   });
   return rows+"<p class='muted' style='margin-top:4px'>Model "+esc(F.modelVersion||'v2.1-js')+" · fit "+esc(F.fitAt||'—')+" · 80% CI from monotone Gamma-process MC</p>";
 }
+// Window balance: the 5h:7d exchange rate (FORECAST.windowBalance, computed in
+// stats.mjs _window_balance). r = Sum(delta 5h%)/delta 7d% inside one weekly window
+// — how much 5h capacity a unit of weekly budget costs. r ~= L7/L5 is a plan
+// constant, so this reads as a step detector: a shifted level means the plan or the
+// limits changed, not that you worked differently. Bucketed per 7d reset window
+// (a day carries too little delta-7d; a calendar week straddles the reset).
+// Both sums are lower bounds under sparse polling, so r reads low — `coverage`
+// says how much to trust each point, and only gated points feed the pooled ratio.
+function svgWindowBalance(wb){
+  var pts=[];
+  (wb.windows||[]).forEach(function(w){if(w.r!=null)pts.push({t:w.resetSec,r:w.r,cov:w.coverage,inc:w.included,src:'oauth',d5:w.d5,d7:w.d7});});
+  (wb.statuslineWindows||[]).forEach(function(w){if(w.r!=null)pts.push({t:w.resetSec,r:w.r,cov:null,inc:false,src:'statusline',d5:w.d5,d7:w.d7});});
+  if(!pts.length)return '';
+  var xs=pts.map(function(p){return p.t;}),xmin=Math.min.apply(null,xs),xmax=Math.max.apply(null,xs);
+  var pooled=wb.pooled?wb.pooled.r:0;
+  var ymax=Math.max(pooled,Math.max.apply(null,pts.map(function(p){return p.r;})))*1.15||1;
+  var W=1000,H=220,P=48,s=scaler(xmin,xmax,0,ymax,W,H,P),fx=s[0],fy=s[1];
+  var axes="<line class='axis' x1='"+P+"' y1='"+(H-P)+"' x2='"+(W-P)+"' y2='"+(H-P)+"'/>"+
+           "<line class='axis' x1='"+P+"' y1='"+P+"' x2='"+P+"' y2='"+(H-P)+"'/>";
+  var yticks=[0,0.5,1].map(function(f){var v=ymax*f;return "<text x='"+(P-6)+"' y='"+(fy(v)+4).toFixed(1)+"' text-anchor='end' fill='var(--ink-faint)'>"+v.toFixed(1)+"</text>";}).join('');
+  var pool=pooled>0?pathD([[P,fy(pooled)],[W-P,fy(pooled)]],'var(--ink-faint)',true,'none',1.5)+
+    "<text x='"+(W-P)+"' y='"+(fy(pooled)-6).toFixed(1)+"' text-anchor='end' fill='var(--ink-faint)'>pooled "+pooled.toFixed(2)+"</text>":'';
+  // one label per distinct reset date across BOTH series, so the axis matches its
+  // own extent (the statusline series usually reaches further back than OAuth).
+  var lbl='',seenT={};
+  pts.slice().sort(function(a,b){return a.t-b.t;}).forEach(function(p,i,a){
+    if(seenT[p.t])return;seenT[p.t]=1;
+    lbl+="<text x='"+fx(p.t).toFixed(1)+"' y='"+(H-P+16)+"' text-anchor='"+(p.t===xmin?'start':(p.t===xmax?'end':'middle'))+"' fill='var(--ink-faint)'>"+esc(new Date(p.t*1000).toISOString().slice(5,10))+"</text>";
+  });
+  lbl+="<text x='"+(W-P)+"' y='"+(P-10)+"' text-anchor='end' fill='var(--ink-faint)'>r = Δ5h% / Δ7d% ↑</text>";
+  var out='';
+  ['statusline','oauth'].forEach(function(src){
+    var g=pts.filter(function(p){return p.src===src;}).sort(function(a,b){return a.t-b.t;});
+    if(!g.length)return;
+    var col=src==='oauth'?'var(--ac)':'var(--ink-faint)';
+    if(g.length>1)out+=pathD(g.map(function(p){return [fx(p.t),fy(p.r)];}),col,src!=='oauth','none',src==='oauth'?2:1.5);
+    g.forEach(function(p){
+      var tip=esc(new Date(p.t*1000).toISOString().slice(0,10)+' · r '+p.r.toFixed(2)+' · Δ5 '+p.d5.toFixed(0)+'% / Δ7 '+p.d7.toFixed(0)+'%'+
+        (p.cov==null?' · statusline lower bound':' · coverage '+Math.round(p.cov*100)+'%'+(p.inc?'':' (excluded from pooled)')));
+      out+="<circle cx='"+fx(p.t).toFixed(1)+"' cy='"+fy(p.r).toFixed(1)+"' r='4' fill='"+(p.inc?col:'none')+"' stroke='"+col+"' stroke-width='1.6' opacity='"+(src==='oauth'?0.95:0.6)+"'><title>"+tip+"</title></circle>";
+    });
+  });
+  var leg="<div class='legend' style='margin:6px 0'><span class='lg-item'><span class='lg-swatch' style='background:var(--ac)'></span>OAuth snapshots</span>"+
+    ((wb.statuslineWindows||[]).length?"<span class='lg-item'><span class='lg-swatch' style='background:var(--ink-faint)'></span>statusline (lower bound)</span>":'')+
+    "<span class='lg-item'>hollow = excluded (low coverage)</span></div>";
+  return leg+svgWrap(W,H,axes+yticks+pool+lbl+out,'chart');
+}
+function renderWindowBalance(F){
+  var wb=F&&F.windowBalance;
+  if(!wb||!wb.pooled)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16M8 8l-4 4 4 4M16 16l4-4-4-4'/></svg><h4>No window balance yet.</h4><p>Needs a weekly rate-limit window with measurable movement. Poll the OAuth usage API a few times per 5h window — <code>node stats.mjs fetch-usage --oauth --save</code> — and this fills in.</p></div>";
+  var p=wb.pooled,nOk=(wb.windows||[]).filter(function(w){return w.included;}).length;
+  var cards=colcards([
+    {title:'Exchange rate (all-time)',stats:[["r = Δ5h% / Δ7d%",p.r.toFixed(2)],["windows pooled",fmtInt(p.nWindows)],["source",p.source+(p.gated?'':' · ungated')]]},
+    {title:'1 day of weekly budget',stats:[["costs",p.hoursPer7dDay.toFixed(2)+"h of 5h capacity"],["= share of a 5h window",(p.hoursPer7dDay/5*100).toFixed(0)+"%"]]},
+    {title:'One full 5h window',stats:[["= days of weekly budget",p.daysPer5hWindow.toFixed(2)],["= share of weekly",(100/p.r).toFixed(0)+"%"]]}
+  ]);
+  var note=nOk?'':"<p class='muted' style='margin-top:6px'><b>Lower bound.</b> No window cleared the coverage gate (a snapshot within 5h of "+Math.round(wb.minCoverage*100)+"% of the window, Δ7d ≥ "+wb.minD7+"%), so the figure comes from the single best-observed window rather than a pooled fit. An unobserved 5h window adds nothing to Σ Δ5h while its usage still lands in Δ7d, so sparse polling pushes r down — the true value is at or above this. Poll <code>fetch-usage --oauth --save</code> a few times per 5h window to close the gap.</p>";
+  return svgWindowBalance(wb)+cards+note+
+    "<p class='muted' style='margin-top:6px'>r is structurally L7/L5 — the ratio of the two budget sizes — so it is a plan constant, not a behaviour metric: a step in this line means the plan or Anthropic's limits changed. Bucketed per 7d reset window; a day carries too little Δ7d to divide by, and a calendar week straddles the reset boundary. Claude account quota only — local and third-party models draw none of it, so they have no 5h/7d ratio.</p>";
+}
 function perModelEfficiency(rates,days,cmap,dispMap){
   var keys=Object.keys(rates);if(!keys.length)return '<p class="muted">No data.</p>';
   var dkeys=Object.keys(days).filter(isDate).sort();
@@ -499,6 +559,9 @@ function renderHero(agg,st,firstDate){
 function render(range){
   var S=filterSessions(range);
   var agg=aggregate(S);
+  // 5h:7d exchange rate + per-window trend. Keyed to rate-limit reset windows, not
+  // the date-range picker, so it renders before (and survives) the empty-range bail.
+  el('sec-window-balance').innerHTML=renderWindowBalance(FORECAST);
   if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','burn-cards','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-cadence','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
   var st=deriveStats(agg,range),t=agg.totals;
   var chartModels=agg.models.slice();
