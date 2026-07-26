@@ -15,7 +15,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { livePids } from './agents.mjs';
+import { livePids, isLive } from './agents.mjs';
 
 const execFileP = promisify(execFile);
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
@@ -52,9 +52,15 @@ function inRepo(cmd) { return !!cmd && cmd.toLowerCase().includes(REPO_ROOT.toLo
 
 // Classify a claude row: tracked if livePids() has it, else stale if a session
 // id is recoverable from its cmdline, else external. Shared across platforms.
-function classifyClaude(row, live) {
+// The pid test alone misses wrapper launches (`ollama launch claude --model …`):
+// the daemon's pty child is ollama.exe and claude.exe is a grandchild with a
+// different pid — so also treat it as tracked when its --session-id names a
+// live agent (agent id IS the session id for daemon-spawned sessions).
+// sessionLive is injectable for tests.
+export function classifyClaude(row, live, sessionLive = isLive) {
   const session = extractSession(row.cmd);
-  const kind = live.has(row.pid) ? 'tracked' : session ? 'stale' : 'external';
+  const owned = live.has(row.pid) || (!!session && sessionLive(session));
+  const kind = owned ? 'tracked' : session ? 'stale' : 'external';
   return { pid: row.pid, ppid: row.ppid, name: row.name, started: row.started, session, kind };
 }
 
