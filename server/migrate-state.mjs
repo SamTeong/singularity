@@ -98,3 +98,35 @@ for (const [name, dir] of moves) {
     }
   }
 }
+
+// Field renames — align on-disk state with the UI labels:
+//   crons.json     name/prompt -> title/description
+//   background.json defs       -> jobs
+//   agents.json    name        -> title
+// Idempotent (writes only when a key actually moved) + best-effort. The in-memory
+// loaders (agents.mjs init, background.mjs migrateLegacyConfig) also tolerate the
+// old keys, so a skipped/failed migration never breaks the daemon — it just leaves
+// the file on the old shape until the next CRUD write re-persists the new one.
+function renameKey(obj, old, neu) {
+  if (obj && obj[old] !== undefined && obj[neu] === undefined) { obj[neu] = obj[old]; delete obj[old]; return true; }
+  return false;
+}
+function migrateFile(file, transform) {
+  if (!existsSync(file)) return;
+  let raw;
+  try { raw = JSON.parse(readFileSync(file, 'utf8')); } catch { return; }
+  let changed = false;
+  try { changed = transform(raw); } catch { return; }
+  if (changed) { try { writeFileSync(file, JSON.stringify(raw, null, 2)); } catch { /* best-effort */ } }
+}
+migrateFile(join(STATE_DIR, 'crons.json'), (d) => {
+  let c = false;
+  for (const j of d.crons || []) { if (renameKey(j, 'name', 'title')) c = true; if (renameKey(j, 'prompt', 'description')) c = true; }
+  return c;
+});
+migrateFile(join(STATE_DIR, 'background.json'), (d) => renameKey(d, 'defs', 'jobs'));
+migrateFile(join(STATE_DIR, 'agents.json'), (d) => {
+  let c = false;
+  for (const a of d.agents || []) { if (renameKey(a, 'name', 'title')) c = true; }
+  return c;
+});

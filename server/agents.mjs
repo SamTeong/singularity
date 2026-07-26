@@ -40,7 +40,7 @@ export { CLAUDE_BIN, OLLAMA_BIN, SCOPE_ROOT };
 
 export const bus = new EventEmitter();
 
-// id -> { id, name, cwd, status, pid, createdAt, proc, buf:string[] }
+// id -> { id, title, cwd, status, pid, createdAt, proc, buf:string[] }
 const agents = new Map();
 let recentRepos = [];
 // Set during daemon shutdown: killing live ptys then fires onExit, whose normal
@@ -57,8 +57,8 @@ export function beginDrain() { draining = true; try { persist(); } catch { /* be
 let logger = null;
 function persist() {
   const data = {
-    agents: [...agents.values()].map(({ id, name, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince }) => ({
-      id, name, cwd, createdAt, model, scopes, permissionMode, extraArgs,
+    agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince }) => ({
+      id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs,
       // fold the live running-span in so a daemon exit while 'running' doesn't lose it
       activeMs: status === 'running' && runningSince ? (activeMs || 0) + (Date.now() - runningSince) : activeMs,
       status: status === 'running' || status === 'starting' || status === 'idle' ? 'detached' : status,
@@ -84,6 +84,9 @@ export function init(log) {
       recentRepos = data.recentRepos || [];
       for (const a of data.agents || []) {
         // ptys are gone after a daemon restart → mark detached, no proc.
+        // Pre-rename records stored the display field as `name`; normalize so
+        // buildSpawn/reattach read `title` regardless of which shape is on disk.
+        if (a.title == null && a.name != null) { a.title = a.name; delete a.name; }
         agents.set(a.id, { ...a, status: 'detached', proc: null, buf: [], written: 0 });
       }
       log?.info({ agents: agents.size }, 'loaded agents.json (detached)');
@@ -93,7 +96,7 @@ export function init(log) {
 
 // --- snapshots ---
 export function snapshot() {
-  return [...agents.values()].map(({ id, name, cwd, status, pid, createdAt, model, scopes }) => ({ id, name, cwd, status, pid, createdAt, model, scopes }));
+  return [...agents.values()].map(({ id, title, cwd, status, pid, createdAt, model, scopes }) => ({ id, title, cwd, status, pid, createdAt, model, scopes }));
 }
 export function getRecentRepos() { return recentRepos; }
 export function getBuf(id) { return agents.get(id)?.buf.join('') ?? ''; }
@@ -202,7 +205,7 @@ function wire(a) {
 // Shared by create + reattach so reattach keeps the model + scopes.
 // `prompt` (initial user message) is only sent on a fresh spawn — passing it
 // with --resume would re-submit it as a new message on every reattach.
-export function buildSpawn({ id, name, cwd, model, scopes, permissionMode, extraArgs }, prompt) {
+export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs }, prompt) {
   const claudeArgs = [];
   for (const s of (scopes || [])) {
     if (!s) continue;
@@ -211,7 +214,8 @@ export function buildSpawn({ id, name, cwd, model, scopes, permissionMode, extra
   }
   const resuming = sessionLogExists(cwd, id);
   const sessionFlag = resuming ? ['--resume', id] : ['--session-id', id];
-  claudeArgs.push(...sessionFlag, '--name', name);
+  // '--name' is claude's CLI flag (contract); the session's display field is `title`.
+  claudeArgs.push(...sessionFlag, '--name', title);
   if (permissionMode) claudeArgs.push('--permission-mode', permissionMode);
   claudeArgs.push(...(extraArgs || []));
   if (prompt && !resuming) claudeArgs.push(prompt);
@@ -246,7 +250,7 @@ function spawnPty(bin, args, opts) {
 }
 
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, name, model, scopes, sessionId, prompt, permissionMode, extraArgs }) {
+export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs }) {
   const id = (sessionId && sessionId.trim()) || randomUUID();
   const existing = agents.get(id);
   if (existing) {
@@ -258,11 +262,11 @@ export function create({ cwd, name, model, scopes, sessionId, prompt, permission
     return reattach(id);
   }
   if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
-  const displayName = name || id.slice(0, 8);
-  const { bin, args } = buildSpawn({ id, name: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
+  const displayName = title || id.slice(0, 8);
+  const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
   ensureTrusted(cwd);
   const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true });
-  const a = { id, name: displayName, cwd, model, scopes, permissionMode, extraArgs, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [], written: 0 };
+  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -342,7 +346,7 @@ export function externalLaunch(id, platform = process.platform) {
 // id so claude's own history doesn't collide with the source) into a new
 // session log, then create()s a fresh agent over it — no log yet → create()
 // falls back to a fresh --session-id spawn, i.e. a config-only copy.
-export function fork(srcId, name) {
+export function fork(srcId, title) {
   const src = agents.get(srcId);
   if (!src) throw new Error('source not found');
   const newId = randomUUID();
@@ -353,7 +357,7 @@ export function fork(srcId, name) {
     writeFileSync(join(dir, `${newId}.jsonl`), content);
   }
   // no source log → nothing written → create() spawns fresh with --session-id (fallback = copy)
-  return create({ cwd: src.cwd, name, model: src.model, scopes: src.scopes, sessionId: newId });
+  return create({ cwd: src.cwd, title, model: src.model, scopes: src.scopes, sessionId: newId });
 }
 
 export function input(id, data) { agents.get(id)?.proc?.write(data); }
@@ -388,7 +392,7 @@ export function remove(id) {
 export function respawn(id) {
   const a = agents.get(id);
   if (!a?.proc) return false;
-  a.respawnAfterExit = { name: a.name, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs };
+  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs };
   a.proc.kill();
   return true;
 }

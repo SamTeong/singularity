@@ -1,28 +1,28 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { nextSessionName, nextCycledSession } from './sessionName.js';
+import { nextSessionTitle, nextCycledSession } from './sessionTitle.js';
 
-test('nextSessionName returns blank for an unnamed source (name == id prefix)', () => {
-  const a = { name: 'abcd1234', id: 'abcd1234ef' };
-  assert.equal(nextSessionName([a], a), '');
+test('nextSessionTitle returns blank for an unnamed source (title == id prefix)', () => {
+  const a = { title: 'abcd1234', id: 'abcd1234ef' };
+  assert.equal(nextSessionTitle([a], a), '');
 });
 
-test('nextSessionName suffixes _2 for a first copy', () => {
-  const a = { name: 'worker', id: 'ffffffffff' };
-  assert.equal(nextSessionName([a], a), 'worker_2');
+test('nextSessionTitle suffixes _2 for a first copy', () => {
+  const a = { title: 'worker', id: 'ffffffffff' };
+  assert.equal(nextSessionTitle([a], a), 'worker_2');
 });
 
-test('nextSessionName picks the lowest free _N', () => {
-  const src = { name: 'worker', id: 'ffffffffff' };
-  const agents = [src, { name: 'worker_2', id: 'x' }, { name: 'worker_4', id: 'y' }];
-  assert.equal(nextSessionName(agents, src), 'worker_3');
+test('nextSessionTitle picks the lowest free _N', () => {
+  const src = { title: 'worker', id: 'ffffffffff' };
+  const agents = [src, { title: 'worker_2', id: 'x' }, { title: 'worker_4', id: 'y' }];
+  assert.equal(nextSessionTitle(agents, src), 'worker_3');
 });
 
-test('nextSessionName strips an existing _N before re-numbering', () => {
+test('nextSessionTitle strips an existing _N before re-numbering', () => {
   // base = 'worker'; taken = {worker_2 (src), worker} → lowest free is worker_3
-  const src = { name: 'worker_2', id: 'ffffffffff' };
-  const agents = [src, { name: 'worker', id: 'a' }];
-  assert.equal(nextSessionName(agents, src), 'worker_3');
+  const src = { title: 'worker_2', id: 'ffffffffff' };
+  const agents = [src, { title: 'worker', id: 'a' }];
+  assert.equal(nextSessionTitle(agents, src), 'worker_3');
 });
 
 test('nextCycledSession returns null with fewer than two cyclable sessions', () => {

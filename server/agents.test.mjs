@@ -70,7 +70,7 @@ const freshId = '00000000-1111-2222-3333-444444444444';
 const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\xyz';
 
 test('buildSpawn: fresh claude session uses --session-id, --name, no --model', () => {
-  const { bin, args } = buildSpawn({ id: freshId, name: 'demo', cwd, model: 'claude', scopes: [] });
+  const { bin, args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude', scopes: [] });
   assert.equal(typeof bin, 'string');
   assert.ok(args.includes('--session-id'));
   assert.equal(args[args.indexOf('--session-id') + 1], freshId);
@@ -81,12 +81,12 @@ test('buildSpawn: fresh claude session uses --session-id, --name, no --model', (
 });
 
 test('buildSpawn: non-existent skill-scope is not added as --add-dir', () => {
-  const { args } = buildSpawn({ id: freshId, name: 'demo', cwd, model: 'claude', scopes: ['__no_such_scope__'] });
+  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude', scopes: ['__no_such_scope__'] });
   assert.ok(!args.includes('--add-dir'));
 });
 
 test('buildSpawn: claude alias (opus) runs via claude bin with --model', () => {
-  const { args } = buildSpawn({ id: freshId, name: 'demo', cwd, model: 'opus', scopes: [] });
+  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'opus', scopes: [] });
   assert.ok(!args.includes('launch'));
   assert.ok(args.includes('--model'));
   assert.equal(args[args.indexOf('--model') + 1], 'opus');
@@ -94,7 +94,7 @@ test('buildSpawn: claude alias (opus) runs via claude bin with --model', () => {
 });
 
 test('buildSpawn: typed full claude id runs via claude bin with --model', () => {
-  const { args } = buildSpawn({ id: freshId, name: 'demo', cwd, model: 'claude-opus-4-8', scopes: [] });
+  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude-opus-4-8', scopes: [] });
   assert.ok(!args.includes('launch'));
   assert.equal(args[args.indexOf('--model') + 1], 'claude-opus-4-8');
 });
@@ -105,7 +105,7 @@ test('buildSpawn: existing session log switches to --resume', () => {
   mkdirSync(dir, { recursive: true });
   writeFileSync(log, '{}\n');
   try {
-    const { args } = buildSpawn({ id: freshId, name: 'demo', cwd, model: 'claude', scopes: [] });
+    const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude', scopes: [] });
     assert.ok(args.includes('--resume'));
     assert.ok(!args.includes('--session-id'));
   } finally {
@@ -126,7 +126,7 @@ test('fork: copies+rewrites the source transcript into the new session log', asy
   writeFileSync(srcLog, `{"sessionId":"${srcId}","type":"user"}\n`);
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
-    agents: [{ id: srcId, name: 'srcname', cwd: forkCwd, createdAt: Date.now(), model: 'claude', scopes: ['x'] }],
+    agents: [{ id: srcId, title: 'srcname', cwd: forkCwd, createdAt: Date.now(), model: 'claude', scopes: ['x'] }],
     recentRepos: [],
   }));
   try {
@@ -156,7 +156,7 @@ test('create: dead (exited) dup id resumes via reattach instead of "already in u
   const deadCwd = scratch;
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
-    agents: [{ id: deadId, name: 'deadname', cwd: deadCwd, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    agents: [{ id: deadId, title: 'deadname', cwd: deadCwd, createdAt: Date.now(), model: 'claude', scopes: [] }],
     recentRepos: [],
   }));
   init(); // loads deadId as 'detached', proc: null
@@ -180,7 +180,7 @@ test('remove: dead (detached) agent is dropped from the registry', () => {
   const goneId = '30000000-cccc-dddd-eeee-300000000003';
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
-    agents: [{ id: goneId, name: 'gonename', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    agents: [{ id: goneId, title: 'gonename', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
     recentRepos: [],
   }));
   init(); // loads goneId as 'detached', proc: null
@@ -198,7 +198,7 @@ test('remove: dead (detached) agent is dropped from the registry', () => {
 test('respawnAll: kills a live agent and resumes it with the same id + new pid', async () => {
   const respawnCwd = scratch;
   const id = '40000000-dddd-eeee-ffff-400000000004';
-  const a = create({ cwd: respawnCwd, name: 'resp-test', model: 'glm-5.2:cloud', sessionId: id });
+  const a = create({ cwd: respawnCwd, title: 'resp-test', model: 'glm-5.2:cloud', sessionId: id });
   const firstPid = a.pid;
   assert.ok(firstPid, 'agent spawned with a real pid');
 
@@ -241,7 +241,7 @@ test('respawnAll: kills a live agent and resumes it with the same id + new pid',
 // tests above. Uses the ollama/cmd.exe live-pty trick (see file header).
 test('beginDrain: live session persists to agents.json and survives its pty exit', async () => {
   const id = '50000000-aaaa-bbbb-cccc-500000000005';
-  const a = create({ cwd: scratch, name: 'drain-test', model: 'glm-5.2:cloud', sessionId: id });
+  const a = create({ cwd: scratch, title: 'drain-test', model: 'glm-5.2:cloud', sessionId: id });
   assert.ok(a.pid, 'agent spawned live');
   const readAgents = () => JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'agents.json'), 'utf8')).agents;
 
@@ -300,7 +300,7 @@ test('externalLaunch: win32 wraps wt.exe with -d <cwd> + resume argv', () => {
   const id = '60000000-eeee-ffff-0000-600000000006';
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
-    agents: [{ id, name: 'extwin', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    agents: [{ id, title: 'extwin', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
     recentRepos: [],
   }));
   init();
@@ -318,7 +318,7 @@ test('externalLaunch: darwin wraps osascript do-script with cd + exec', () => {
   const id = '70000000-eeee-ffff-0000-700000000007';
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
-    agents: [{ id, name: 'extmac', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    agents: [{ id, title: 'extmac', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
     recentRepos: [],
   }));
   init();
@@ -338,7 +338,7 @@ test('externalLaunch: unknown id + unsupported platform error cleanly', () => {
   const id = '80000000-eeee-ffff-0000-800000000008';
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
-    agents: [{ id, name: 'extlinux', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
+    agents: [{ id, title: 'extlinux', cwd: scratch, createdAt: Date.now(), model: 'claude', scopes: [] }],
     recentRepos: [],
   }));
   init();
@@ -353,7 +353,7 @@ test('buildSpawn: ollama model on resume injects --model to override stripped tr
   mkdirSync(dir, { recursive: true });
   writeFileSync(log, '{}\n');
   try {
-    const { args } = buildSpawn({ id: freshId, name: 'demo', cwd, model: 'glm-5.2:cloud', scopes: [] });
+    const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'glm-5.2:cloud', scopes: [] });
     // ollama-wrapped: launch claude --model <m> -- ... --resume ... --model <m>
     assert.deepEqual(args.slice(0, 4), ['launch', 'claude', '--model', 'glm-5.2:cloud']);
     assert.ok(args.includes('--resume'));

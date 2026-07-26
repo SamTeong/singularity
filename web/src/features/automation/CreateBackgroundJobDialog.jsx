@@ -122,7 +122,7 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
       <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} slotProps={{ input: { endAdornment: clearAdornment(description !== '', () => setDescription('')) } }} />
       <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
       <ScopeSelect open={open} value={scopes} onChange={setScopes} />
-      <TextField size="small" label="minimum hours between runs" type="number" value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
+      <TextField size="small" label="Cooldown" type="number" value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
       <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled" />
       <FormControl size="small" fullWidth>
         <InputLabel>when finished</InputLabel>

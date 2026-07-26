@@ -4,18 +4,18 @@
  */
 
 /**
- * Copy/Fork target name: strip a trailing `_N` from the source, then pick the
- * lowest free `_N` across existing session names. An unnamed source (its name
- * still equals the id prefix) yields a blank name so the daemon auto-names it.
+ * Copy/Fork target title: strip a trailing `_N` from the source, then pick the
+ * lowest free `_N` across existing session titles. An unnamed source (its title
+ * still equals the id prefix) yields a blank title so the daemon auto-names it.
  *
- * @param {Array<{name: string}>} agents current sessions
- * @param {{name: string, id: string}} agent source session being copied/forked
- * @returns {string} the next free name, or '' for an unnamed source
+ * @param {Array<{title: string}>} agents current sessions
+ * @param {{title: string, id: string}} agent source session being copied/forked
+ * @returns {string} the next free title, or '' for an unnamed source
  */
-export function nextSessionName(agents, agent) {
-  if (agent.name === agent.id.slice(0, 8)) return '';
-  const base = agent.name.replace(/_\d+$/, '');
-  const taken = new Set(agents.map((x) => x.name));
+export function nextSessionTitle(agents, agent) {
+  if (agent.title === agent.id.slice(0, 8)) return '';
+  const base = agent.title.replace(/_\d+$/, '');
+  const taken = new Set(agents.map((x) => x.title));
   let n = 2;
   while (taken.has(`${base}_${n}`)) n++;
   return `${base}_${n}`;

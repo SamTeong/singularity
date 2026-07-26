@@ -30,6 +30,8 @@ import MarkdownBody from '@/components/MarkdownBody.jsx';
 import WikiGraph from '@/features/wiki/WikiGraph.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
+import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import EmptyListLine from '@/components/EmptyListLine.jsx';
 import RailSearch from '@/components/panelkit/RailSearch.jsx';
 import RailGroupToggle from '@/components/panelkit/RailGroupToggle.jsx';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
@@ -162,19 +164,22 @@ export default function WikiPanel() {
       <Rail storageKey="sing-wiki-w" defaultWidth={380} collapsedTitle="Show wiki pages">
         {({ collapse }) => (
           <>
-            <Box sx={{ p: 1.5, pb: 0.5 }}>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <RailSearch placeholder="Search wiki…" value={q} onChange={setQ} />
-                <RailGroupToggle allOpen={allOpen} onToggle={toggleAll} disabled={!!results} />
-                <Tooltip title="Select wiki folder" placement="bottom" disableInteractive>
-                  <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
-                </Tooltip>
+            <RailHeader
+              searchPlaceholder="Search wiki…"
+              searchValue={q}
+              onSearchChange={setQ}
+              allOpen={allOpen}
+              onToggleAll={toggleAll}
+              groupToggleDisabled={!!results}
+              onPickFolder={() => setPicking(true)}
+              extra={
                 <Tooltip title={graphWiki ? `How ${graphWiki} pages link together` : 'How pages link together'} placement="bottom" disableInteractive>
                   <span><IconButton size="small" color={graphView ? 'primary' : 'default'} disabled={!graphWiki}
                     onClick={() => setGraphView((v) => (v ? null : 'dock'))}><HubIcon /></IconButton></span>
                 </Tooltip>
-                <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
-              </Stack>
+              }
+              onCollapse={collapse}
+            >
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tildify(root)}</Typography>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
                 {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${viewWikis.length} wiki${viewWikis.length === 1 ? '' : 's'} · ${pageCount}${capped ? '+' : ''} page${pageCount === 1 ? '' : 's'}`}
@@ -184,7 +189,7 @@ export default function WikiPanel() {
                   disableCloseOnSelect slotProps={{ chip: { size: 'small' } }} sx={{ mt: 1, ml: 2, mr: 1 }}
                   renderInput={(params) => <TextField {...params} variant="standard" placeholder={cats.length ? '' : 'Filter categories…'} />} />
               )}
-            </Box>
+            </RailHeader>
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
               {results ? (
                 results.map((it, i) => (
@@ -230,7 +235,7 @@ export default function WikiPanel() {
                   );
                 })
               )}
-              {!results && viewWikis.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{err ? `${err}.` : (cats.length ? 'No pages in selected categories.' : 'No wikis.')}</Typography>}
+              {!results && viewWikis.length === 0 && <EmptyListLine>{err ? `${err}.` : (cats.length ? 'No pages in selected categories.' : 'No wikis.')}</EmptyListLine>}
               {results && results.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
             {graphView === 'dock' && graphWiki && (

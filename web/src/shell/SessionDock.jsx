@@ -11,7 +11,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import { EmptyState } from '@zapac/mui-theme';
 import Terminal from '@/features/sessions/Terminal.jsx';
 import { ResizeHandle } from '@/hooks/useResizable.jsx';
-import { nextSessionName, nextCycledSession } from '@/lib/sessionName.js';
+import { nextSessionTitle, nextCycledSession } from '@/lib/sessionTitle.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { glass } from '@/shell/shellStyles.js';
 import SessionRow from '@/shell/SessionRow.jsx';
@@ -75,8 +75,8 @@ export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag,
                 onDragEnd: () => setDragId(null),
               }}
               onViewTranscript={() => onViewTranscript(a)}
-              onDuplicate={() => { sendMsg({ t: 'create', cwd: a.cwd, name: nextSessionName(agents, a), model: a.model, scopes: a.scopes }); expandDock(); }}
-              onFork={() => sendMsg({ t: 'fork', id: a.id, name: nextSessionName(agents, a) })}
+              onDuplicate={() => { sendMsg({ t: 'create', cwd: a.cwd, title: nextSessionTitle(agents, a), model: a.model, scopes: a.scopes }); expandDock(); }}
+              onFork={() => sendMsg({ t: 'fork', id: a.id, title: nextSessionTitle(agents, a) })}
               onRespawn={() => sendMsg({ t: 'respawn', id: a.id })}
               onReattach={() => sendMsg({ t: 'reattach', id: a.id })}
               onOpenExternal={() => fetch('/session/external', {

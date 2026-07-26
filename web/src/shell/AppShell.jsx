@@ -14,9 +14,9 @@ import { getSkin } from '@/theme/registry.js';
 import DirPicker from '@/components/DirPicker.jsx';
 import { untildify } from '@/lib/paths.js';
 import ProcessManager from '@/features/processes/ProcessManager.jsx';
-import CreateAgentDialog from '@/features/sessions/CreateAgentDialog.jsx';
+import CreateSessionDialog from '@/features/sessions/CreateSessionDialog.jsx';
 import CreateTaskDialog from '@/features/tasks/CreateTaskDialog.jsx';
-import CreateCronDialog from '@/features/automation/CreateCronDialog.jsx';
+import CreateScheduledJobDialog from '@/features/automation/CreateScheduledJobDialog.jsx';
 import { useResizable } from '@/hooks/useResizable.jsx';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { useTaskActions } from '@/hooks/useTaskActions.js';
@@ -45,6 +45,10 @@ const StatusView = lazy(() => import('@/features/status/StatusView.jsx'));
 const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'sessions'];
 
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
+
+// Glass snackbar content — MUI v9 dropped `ContentProps`, so this must go through
+// slotProps.content or SnackbarContent keeps its default (mode-inverted) colours.
+const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur });
 
 /**
  * AppShell — orchestration + layout. Holds UI-only state (view, collapse, dock
@@ -148,7 +152,7 @@ export default function AppShell() {
   };
 
   // Open an agent's transcript in the Transcripts view — from the scrollback-top
-  // prompt or a session row's action. No title: the agent's display name is a
+  // prompt or a session row's action. No title: the agent's display title is a
   // truncated id, so let SessionHistory fall back to the full session id.
   const viewTranscript = (a) => {
     setOpenTx({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), id: a.id, cwd: a.cwd, mtime: Date.now() });
@@ -217,7 +221,7 @@ export default function AppShell() {
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} />}
             {view === 'status' && <StatusView />}
             {view === 'skills' && <SkillsPanel />}
-            {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} onAdd={() => setCronOpen(true)} onEdit={setCronOpen} onToast={setToast} />}
+            {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} cwd={cwd} setCwd={setCwd} onBrowse={() => setPicking(true)} onAdd={() => setCronOpen(true)} onEdit={setCronOpen} onToast={setToast} />}
             {view === 'tasks' && (
               <TasksBoard
                 tasks={tasks}
@@ -295,7 +299,7 @@ export default function AppShell() {
         </DialogActions>
       </Dialog>
 
-      <CreateAgentDialog
+      <CreateSessionDialog
         open={createOpen}
         onClose={() => { setCreateOpen(false); setCreateInitialSessionId(''); setCreateInitialModel(''); setCreateInitialScopes([]); }}
         connected={connected}
@@ -320,7 +324,7 @@ export default function AppShell() {
         tagOptions={tagOptions}
       />
 
-      <CreateCronDialog
+      <CreateScheduledJobDialog
         open={!!cronOpen}
         job={typeof cronOpen === 'object' ? cronOpen : null}
         onClose={() => setCronOpen(false)}
@@ -330,7 +334,7 @@ export default function AppShell() {
         onBrowse={() => setPicking(true)}
       />
 
-      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} ContentProps={{ sx: (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur }) }} />
+      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} slotProps={{ content: { sx: SNACK_GLASS } }} />
 
       {/* Offered when a terminal scrolls to the top of its (capped) scrollback. */}
       <Snackbar
@@ -339,7 +343,7 @@ export default function AppShell() {
         onClose={() => setTxPrompt(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         message="That's the start of what this terminal keeps. View the full transcript?"
-        ContentProps={{ sx: (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur }) }}
+        slotProps={{ content: { sx: SNACK_GLASS } }}
         action={
           <>
             <Button size="small" variant="secondary" onClick={() => setTxPrompt(null)}>Dismiss</Button>

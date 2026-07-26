@@ -19,6 +19,8 @@ import CmEditor from '@/components/CmEditor.jsx';
 import DetailPane from '@/components/DetailPane.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
+import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import EmptyListLine from '@/components/EmptyListLine.jsx';
 import RailSearch from '@/components/panelkit/RailSearch.jsx';
 import RailGroupToggle from '@/components/panelkit/RailGroupToggle.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
@@ -112,20 +114,20 @@ export default function MemoryPanel() {
       <Rail storageKey="sing-memory-w" defaultWidth={340} collapsedTitle="Show memory files">
         {({ collapse }) => (
           <>
-            <Box sx={{ p: 1.5, pb: 0.5 }}>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <RailSearch placeholder="Search memory…" value={q} onChange={setQ} />
-                <RailGroupToggle allOpen={allOpen} onToggle={toggleAll} />
-                <Tooltip title="Select memory folder" placement="bottom" disableInteractive>
-                  <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
-                </Tooltip>
-                <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
-              </Stack>
+            <RailHeader
+              searchPlaceholder="Search memory…"
+              searchValue={q}
+              onSearchChange={setQ}
+              allOpen={allOpen}
+              onToggleAll={toggleAll}
+              onPickFolder={() => setPicking(true)}
+              onCollapse={collapse}
+            >
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tildify(root)}</Typography>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
                 {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${files.length} file${files.length === 1 ? '' : 's'}`}
               </Typography>
-            </Box>
+            </RailHeader>
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
               {groups.map(([project, items]) => {
                 const isCol = collapsed.has(project);
@@ -150,7 +152,7 @@ export default function MemoryPanel() {
                   </Box>
                 );
               })}
-              {showing.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{results ? 'No matches.' : (err || 'No memory files.')}</Typography>}
+              {showing.length === 0 && <EmptyListLine>{results ? 'No matches.' : (err || 'No memory files.')}</EmptyListLine>}
             </List>
           </>
         )}

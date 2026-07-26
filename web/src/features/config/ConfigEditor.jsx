@@ -18,6 +18,8 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
+import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import EmptyListLine from '@/components/EmptyListLine.jsx';
 import RailSearch from '@/components/panelkit/RailSearch.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
@@ -112,15 +114,13 @@ export default function ConfigEditor() {
       <Rail storageKey="sing-config-w" defaultWidth={300} collapsedTitle="Show config paths">
         {({ collapse }) => (
           <>
-            <Box sx={{ p: 1.5, pb: 0.5 }}>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <RailSearch placeholder="Search config…" value={q} onChange={setQ} />
-                <Tooltip title="Select root folder" placement="bottom" disableInteractive>
-                  <IconButton size="small" onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}><FolderOpenIcon /></IconButton>
-                </Tooltip>
-                <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
-              </Stack>
-            </Box>
+            <RailHeader
+              searchPlaceholder="Search config…"
+              searchValue={q}
+              onSearchChange={setQ}
+              onPickFolder={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}
+              onCollapse={collapse}
+            />
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
               {results ? (
                 <>
@@ -146,7 +146,7 @@ export default function ConfigEditor() {
                       </IconButton>
                     </ListItemButton>
                   ))}
-                  {shownRoots.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No config paths.</Typography>}
+                  {shownRoots.length === 0 && <EmptyListLine>No config paths.</EmptyListLine>}
                 </>
               )}
             </List>

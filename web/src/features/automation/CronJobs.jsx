@@ -30,7 +30,7 @@ import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined';
 import FlagIcon from '@mui/icons-material/Flag';
 import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import { StatusPill, EmptyState } from '@zapac/mui-theme';
-import CreateBackgroundDialog from '@/features/automation/CreateBackgroundDialog.jsx';
+import CreateBackgroundJobDialog from '@/features/automation/CreateBackgroundJobDialog.jsx';
 import MarkdownBody from '@/components/MarkdownBody.jsx';
 import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
 import { repoName } from '@/lib/paths.js';
@@ -54,12 +54,12 @@ const fmtNext = (iso) => {
 const fmtHM = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
 // Automation view: the scheduled cron jobs (top section) plus the background
-// quota-soak scheduler (below). Cron rows fire on a cron expr; background defs are
+// quota-soak scheduler (below). Cron rows fire on a cron expr; background jobs are
 // picked round-robin during a working-hours window when spare quota is available.
-export default function CronJobs({ crons, agents, background, recent, onAdd, onEdit, onToast }) {
-  // false (closed) | true (create) | a def object (edit that row)
-  const [defOpen, setDefOpen] = useState(false);
-  // Background section subview: 'tasks' (defs table, default) | 'reports'.
+export default function CronJobs({ crons, agents, background, recent, cwd, setCwd, onBrowse, onAdd, onEdit, onToast }) {
+  // false (closed) | true (create) | a job object (edit that row)
+  const [jobOpen, setJobOpen] = useState(false);
+  // Background section subview: 'tasks' (jobs table, default) | 'reports'.
   const [bgView, setBgView] = useState('tasks');
   const [reports, setReports] = useState([]);
   const [selReport, setSelReport] = useState(null); // taskId
@@ -101,11 +101,11 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
   const runBg = () =>
     fetch('/background/run', { method: 'POST' })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.reason || d.error); }).catch((e) => onToast?.(e.message));
-  const toggleDef = (id, enabled) =>
-    fetch(`/background/defs/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) })
+  const toggleJob = (id, enabled) =>
+    fetch(`/background/jobs/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
-  const removeDef = (id) =>
-    fetch(`/background/defs/${id}`, { method: 'DELETE' })
+  const removeJob = (id) =>
+    fetch(`/background/jobs/${id}`, { method: 'DELETE' })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
   const saveOrder = (ids) =>
     fetch('/background/reorder', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) })
@@ -128,23 +128,23 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
   // Drag-to-reorder is cosmetic (scheduler still picks oldest-lastRunAt). During
   // a drag we render a local override; a fresh server snapshot (id order changed)
   // clears it. dragId = the row being dragged.
-  const defs = config?.defs || [];
+  const jobs = config?.jobs || [];
   const [dragId, setDragId] = useState(null);
-  const [localDefs, setLocalDefs] = useState(null);
-  const rows = localDefs ?? defs;
-  const idOrder = defs.map((d) => d.id).join(',');
-  useEffect(() => { setLocalDefs(null); }, [idOrder]);
+  const [localJobs, setLocalJobs] = useState(null);
+  const rows = localJobs ?? jobs;
+  const idOrder = jobs.map((d) => d.id).join(',');
+  useEffect(() => { setLocalJobs(null); }, [idOrder]);
 
-  // Background Jobs table sort: null = source order (defs/id order, the order
+  // Background Jobs table sort: null = source order (jobs/id order, the order
   // the scheduler iterates). Click a header to sort, click again to reverse.
   const [sort, setSort] = useState(null);
   const changeSort = (key) => setSort((p) => p?.key === key ? { key, dir: p.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
-  const sortValue = (def, key) => {
+  const sortValue = (job, key) => {
     switch (key) {
-      case 'title': return def.title;
-      case 'cwd': return repoName(def.cwd);
-      case 'cooldownHours': return def.cooldownHours;
-      case 'lastRunAt': return def.lastRunAt ? new Date(def.lastRunAt).getTime() : 0;
+      case 'title': return job.title;
+      case 'cwd': return repoName(job.cwd);
+      case 'cooldownHours': return job.cooldownHours;
+      case 'lastRunAt': return job.lastRunAt ? new Date(job.lastRunAt).getTime() : 0;
       default: return 0;
     }
   };
@@ -166,11 +166,11 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
     if (from < 0 || to < 0) return;
     const next = sortedRows.slice();
     next.splice(to, 0, next.splice(from, 1)[0]);
-    setLocalDefs(next);
+    setLocalJobs(next);
   };
   const onDrop = () => {
     setDragId(null);
-    if (localDefs) saveOrder(localDefs.map((d) => d.id));
+    if (localJobs) saveOrder(localJobs.map((d) => d.id));
   };
 
   return (
@@ -192,9 +192,9 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
             <TableHead>
               <TableRow>
                 <TableCell padding="checkbox" />
-                <TableCell>Name</TableCell>
+                <TableCell>Title</TableCell>
                 <TableCell>Schedule</TableCell>
-                <TableCell>Prompt</TableCell>
+                <TableCell>Description</TableCell>
                 <TableCell>Model</TableCell>
                 <TableCell>Repo</TableCell>
                 <TableCell>Last fired</TableCell>
@@ -214,14 +214,14 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
                       </Tooltip>
                     </TableCell>
                     <TableCell>
-                      <Typography variant="subtitle2" noWrap>{j.name}</Typography>
+                      <Typography variant="subtitle2" noWrap>{j.title}</Typography>
                     </TableCell>
                     <TableCell>
                       <Typography variant="code" sx={{ fontSize: 11 }} noWrap>{j.cronExpr}</Typography>
                       <Typography variant="caption" sx={{ color: 'text.secondary', display: 'block' }} noWrap>{j.nextFire ? fmtNext(j.nextFire) : (j.enabled ? '—' : 'paused')}</Typography>
                     </TableCell>
                     <TableCell sx={{ maxWidth: 220 }}>
-                      <Typography variant="body2" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{j.prompt}</Typography>
+                      <Typography variant="body2" sx={{ display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>{j.description}</Typography>
                     </TableCell>
                     <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{j.model}</Typography></TableCell>
                     <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{repoName(j.cwd)}</Typography></TableCell>
@@ -244,7 +244,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
                           <IconButton size="small" onClick={() => onEdit?.(j)}><EditOutlinedIcon fontSize="small" /></IconButton>
                         </Tooltip>
                         <Tooltip title="Delete" disableInteractive>
-                          <IconButton size="small" onClick={() => { if (window.confirm(`Delete scheduled job "${j.name}"?`)) remove(j.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>
+                          <IconButton size="small" onClick={() => { if (window.confirm(`Delete scheduled job "${j.title}"?`)) remove(j.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>
                         </Tooltip>
                       </Stack>
                     </TableCell>
@@ -282,7 +282,7 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
               <Tooltip title="Check now and start the next ready job" disableInteractive>
                 <Button size="small" startIcon={<PlayArrowIcon />} onClick={runBg} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Run now</Button>
               </Tooltip>
-              <Button size="small" startIcon={<AddIcon />} onClick={() => setDefOpen(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Add background job</Button>
+              <Button size="small" startIcon={<AddIcon />} onClick={() => setJobOpen(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Background job</Button>
             </>
           )}
           {bgToggle}
@@ -341,9 +341,9 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
                 : `First check in about ${Math.max(0, Math.ceil((background.nextDueAt - Date.now()) / 60000))} minutes`}
             </Typography>
 
-            {/* Defs table */}
+            {/* Jobs table */}
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>Jobs</Typography>
-            {(config.defs || []).length === 0 ? (
+            {(config.jobs || []).length === 0 ? (
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>No background jobs yet. Add one to run automatically during its scheduled hours, using spare AI capacity.</Typography>
             ) : (
               <Table size="small">
@@ -359,19 +359,19 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
                   </TableRow>
                 </TableHead>
                 <TableBody>
-                  {sortedRows.map((def) => (
+                  {sortedRows.map((job) => (
                     <TableRow
-                      key={def.id}
-                      selected={background?.liveTaskId && def.lastTaskId === background.liveTaskId}
-                      onDragOver={(e) => onDragOverRow(e, def.id)}
+                      key={job.id}
+                      selected={background?.liveTaskId && job.lastTaskId === background.liveTaskId}
+                      onDragOver={(e) => onDragOverRow(e, job.id)}
                       onDrop={onDrop}
-                      sx={dragId === def.id ? { opacity: 0.4 } : undefined}
+                      sx={dragId === job.id ? { opacity: 0.4 } : undefined}
                     >
                       <TableCell padding="checkbox">
                         <Tooltip title="Drag to change the order shown here (doesn't change which job runs next)" disableInteractive>
                           <Box
                             draggable
-                            onDragStart={() => setDragId(def.id)}
+                            onDragStart={() => setDragId(job.id)}
                             onDragEnd={() => setDragId(null)}
                             sx={{ display: 'grid', placeItems: 'center', cursor: 'grab', color: 'text.disabled', '&:active': { cursor: 'grabbing' } }}
                           >
@@ -380,21 +380,21 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
                         </Tooltip>
                       </TableCell>
                       <TableCell padding="checkbox">
-                        <Tooltip title={def.enabled ? 'Disable' : 'Enable'} disableInteractive>
-                          <Switch size="small" checked={!!def.enabled} onChange={() => toggleDef(def.id, def.enabled)} />
+                        <Tooltip title={job.enabled ? 'Disable' : 'Enable'} disableInteractive>
+                          <Switch size="small" checked={!!job.enabled} onChange={() => toggleJob(job.id, job.enabled)} />
                         </Tooltip>
                       </TableCell>
-                      <TableCell><Typography variant="subtitle2" noWrap>{def.title}</Typography></TableCell>
-                      <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{repoName(def.cwd)}</Typography></TableCell>
-                      <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{def.cooldownHours}h</Typography></TableCell>
-                      <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{fmtRel(def.lastRunAt)}</Typography></TableCell>
+                      <TableCell><Typography variant="subtitle2" noWrap>{job.title}</Typography></TableCell>
+                      <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{repoName(job.cwd)}</Typography></TableCell>
+                      <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{job.cooldownHours}h</Typography></TableCell>
+                      <TableCell><Typography variant="code" sx={{ fontSize: 11 }} noWrap>{fmtRel(job.lastRunAt)}</Typography></TableCell>
                       <TableCell align="right">
                         <Stack direction="row" sx={{ justifyContent: 'flex-end' }}>
                           <Tooltip title="Edit" disableInteractive>
-                            <IconButton size="small" onClick={() => setDefOpen(def)}><EditOutlinedIcon fontSize="small" /></IconButton>
+                            <IconButton size="small" onClick={() => setJobOpen(job)}><EditOutlinedIcon fontSize="small" /></IconButton>
                           </Tooltip>
                           <Tooltip title="Delete" disableInteractive>
-                            <IconButton size="small" onClick={() => { if (window.confirm(`Delete background job "${def.title}"?`)) removeDef(def.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>
+                            <IconButton size="small" onClick={() => { if (window.confirm(`Delete background job "${job.title}"?`)) removeJob(job.id); }}><DeleteOutlineIcon fontSize="small" /></IconButton>
                           </Tooltip>
                         </Stack>
                       </TableCell>
@@ -407,11 +407,14 @@ export default function CronJobs({ crons, agents, background, recent, onAdd, onE
         )}
       </Box>
 
-      <CreateBackgroundDialog
-        open={!!defOpen}
-        def={typeof defOpen === 'object' ? defOpen : null}
-        onClose={() => setDefOpen(false)}
+      <CreateBackgroundJobDialog
+        open={!!jobOpen}
+        job={typeof jobOpen === 'object' ? jobOpen : null}
+        onClose={() => setJobOpen(false)}
+        cwd={cwd}
+        setCwd={setCwd}
         recent={recent}
+        onBrowse={onBrowse}
         onToast={onToast}
       />
     </Stack>

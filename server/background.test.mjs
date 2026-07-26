@@ -1,9 +1,9 @@
 // Unit tests for the background-task pure functions (inWindow / evalGate /
-// pickDef / pickRunnableDef / watchdogDecision / migrateLegacyConfig) +
+// pickJob / pickRunnableJob / watchdogDecision / migrateLegacyConfig) +
 // createTask tag normalization. background.mjs pulls in agents.mjs ->
 // app-dir.mjs, which throws without SINGULARITY_HOME, so point it at a scratch
 // temp dir *before* the dynamic import (same pattern as crons.test.mjs). No
-// agent is ever spawned: the pure fns take a def argument, and the tags test
+// agent is ever spawned: the pure fns take a job argument, and the tags test
 // exercises the exported normalizeTags helper directly rather than createTask
 // (which would try to spawn a real claude). Run: npm test
 import { test, after } from 'node:test';
@@ -16,13 +16,13 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-background-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { inWindow, evalGate, pickDef, pickRunnableDef, watchdogDecision, migrateLegacyConfig, createDef, updateDef, reorderDefs, snapshotBackground, listReports, getReport, setReportFlag } = await import('./background.mjs');
+const { inWindow, evalGate, pickJob, pickRunnableJob, watchdogDecision, migrateLegacyConfig, createJob, updateJob, reorderJobs, snapshotBackground, listReports, getReport, setReportFlag } = await import('./background.mjs');
 const { normalizeTags, initTasks } = await import('./tasks.mjs');
 const { STATE_DIR } = await import('./agents.mjs');
 
-// Full per-def config shape (window/thresholds/tokenCaps) — same values the old
-// global DEFAULT_CONFIG shipped, now owned by each def.
-const def = (over = {}) => ({
+// Full per-job config shape (window/thresholds/tokenCaps) — same values the old
+// global DEFAULT_CONFIG shipped, now owned by each job.
+const job = (over = {}) => ({
   id: 'a', title: 'a', enabled: true, cooldownHours: 24, lastRunAt: null,
   window: { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] },
   thresholds: {
@@ -37,120 +37,120 @@ const src = (over = {}) => ({ ok: true, session: { pctUsed: 10 }, weekly: { pctU
 // ---- inWindow ------------------------------------------------------------------
 // 2026-07-15 = Wednesday (getDay 3), 2026-07-18 = Saturday (getDay 6).
 test('inWindow: weekday inside hours is true', () => {
-  assert.equal(inWindow(def(), new Date(2026, 6, 15, 10)), true);
+  assert.equal(inWindow(job(), new Date(2026, 6, 15, 10)), true);
 });
 test('inWindow: weekend is false', () => {
-  assert.equal(inWindow(def(), new Date(2026, 6, 18, 10)), false);
+  assert.equal(inWindow(job(), new Date(2026, 6, 18, 10)), false);
 });
 test('inWindow: startHour inclusive, endHour exclusive', () => {
-  assert.equal(inWindow(def(), new Date(2026, 6, 15, 9)), true);
-  assert.equal(inWindow(def(), new Date(2026, 6, 15, 18)), false);
-  assert.equal(inWindow(def(), new Date(2026, 6, 15, 8)), false);
+  assert.equal(inWindow(job(), new Date(2026, 6, 15, 9)), true);
+  assert.equal(inWindow(job(), new Date(2026, 6, 15, 18)), false);
+  assert.equal(inWindow(job(), new Date(2026, 6, 15, 8)), false);
 });
 
 // ---- evalGate ------------------------------------------------------------------
 test('evalGate: claude within budget → claude', () => {
-  const g = evalGate({ claude: src(), ollama: src() }, def());
+  const g = evalGate({ claude: src(), ollama: src() }, job());
   assert.equal(g.backend, 'claude');
 });
 test('evalGate: claude over start → ollama', () => {
-  const g = evalGate({ claude: src({ session: { pctUsed: 60 } }), ollama: src() }, def());
+  const g = evalGate({ claude: src({ session: { pctUsed: 60 } }), ollama: src() }, job());
   assert.equal(g.backend, 'ollama');
 });
 test('evalGate: both over → null with reason', () => {
   const g = evalGate({
     claude: src({ session: { pctUsed: 60 } }),
     ollama: src({ weekly: { pctUsed: 80 } }),
-  }, def());
+  }, job());
   assert.equal(g.backend, null);
   assert.equal(typeof g.reason, 'string');
   assert.ok(g.reason.length > 0);
 });
 test('evalGate: claude ok:false fails closed → ollama evaluated', () => {
-  const g = evalGate({ claude: { ok: false, error: 'auth' }, ollama: src() }, def());
+  const g = evalGate({ claude: { ok: false, error: 'auth' }, ollama: src() }, job());
   assert.equal(g.backend, 'ollama');
 });
 
-// ---- pickDef (forced-bypass: ignores window+gate) -------------------------------
+// ---- pickJob (forced-bypass: ignores window+gate) -------------------------------
 const now = 1_000_000_000_000;
 const hr = 3_600_000;
-test('pickDef: cooldown excludes a recently-run def', () => {
-  const defs = [def({ lastRunAt: now - hr })];
-  assert.equal(pickDef(defs, now), null);
+test('pickJob: cooldown excludes a recently-run job', () => {
+  const jobs = [job({ lastRunAt: now - hr })];
+  assert.equal(pickJob(jobs, now), null);
 });
-test('pickDef: round-robin picks the oldest lastRunAt', () => {
-  const defs = [
-    def({ id: 'new', cooldownHours: 1, lastRunAt: now - 2 * hr }),
-    def({ id: 'old', cooldownHours: 1, lastRunAt: now - 10 * hr }),
+test('pickJob: round-robin picks the oldest lastRunAt', () => {
+  const jobs = [
+    job({ id: 'new', cooldownHours: 1, lastRunAt: now - 2 * hr }),
+    job({ id: 'old', cooldownHours: 1, lastRunAt: now - 10 * hr }),
   ];
-  assert.equal(pickDef(defs, now).id, 'old');
+  assert.equal(pickJob(jobs, now).id, 'old');
 });
-test('pickDef: null lastRunAt wins (never run)', () => {
-  const defs = [
-    def({ id: 'ran', cooldownHours: 1, lastRunAt: now - 10 * hr }),
-    def({ id: 'fresh', cooldownHours: 1, lastRunAt: null }),
+test('pickJob: null lastRunAt wins (never run)', () => {
+  const jobs = [
+    job({ id: 'ran', cooldownHours: 1, lastRunAt: now - 10 * hr }),
+    job({ id: 'fresh', cooldownHours: 1, lastRunAt: null }),
   ];
-  assert.equal(pickDef(defs, now).id, 'fresh');
+  assert.equal(pickJob(jobs, now).id, 'fresh');
 });
-test('pickDef: disabled defs are skipped', () => {
-  const defs = [def({ enabled: false, cooldownHours: 1, lastRunAt: null })];
-  assert.equal(pickDef(defs, now), null);
+test('pickJob: disabled jobs are skipped', () => {
+  const jobs = [job({ enabled: false, cooldownHours: 1, lastRunAt: null })];
+  assert.equal(pickJob(jobs, now), null);
 });
 
-// ---- pickRunnableDef (normal path: window + per-def gate folded together) ------
+// ---- pickRunnableJob (normal path: window + per-job gate folded together) ------
 // Fixed instant inside the default window (Wed 2026-07-15 10:00 local).
 const inWin = new Date(2026, 6, 15, 10).getTime();
 const outWin = new Date(2026, 6, 18, 10).getTime(); // Saturday
 
-test('pickRunnableDef: out-of-window def is skipped → did not find eligible task to run', () => {
-  const defs = [def({ lastRunAt: null })];
-  const r = pickRunnableDef(defs, { claude: src(), ollama: src() }, outWin);
-  assert.equal(r.def, null);
+test('pickRunnableJob: out-of-window job is skipped → did not find eligible task to run', () => {
+  const jobs = [job({ lastRunAt: null })];
+  const r = pickRunnableJob(jobs, { claude: src(), ollama: src() }, outWin);
+  assert.equal(r.job, null);
   assert.equal(r.backend, null);
   assert.equal(r.reason, 'did not find eligible task to run');
 });
-test('pickRunnableDef: bypassWindow picks an out-of-window def if its gate passes', () => {
-  const defs = [def({ lastRunAt: null })];
-  const r = pickRunnableDef(defs, { claude: src(), ollama: src() }, outWin, { bypassWindow: true });
-  assert.equal(r.def.id, 'a');
+test('pickRunnableJob: bypassWindow picks an out-of-window job if its gate passes', () => {
+  const jobs = [job({ lastRunAt: null })];
+  const r = pickRunnableJob(jobs, { claude: src(), ollama: src() }, outWin, { bypassWindow: true });
+  assert.equal(r.job.id, 'a');
   assert.equal(r.backend, 'claude');
 });
-test('pickRunnableDef: all in-window candidates fail their own gate → joined reasons', () => {
-  const defs = [def({ id: 'x', title: 'x', lastRunAt: null })];
+test('pickRunnableJob: all in-window candidates fail their own gate → joined reasons', () => {
+  const jobs = [job({ id: 'x', title: 'x', lastRunAt: null })];
   const usage = { claude: src({ session: { pctUsed: 90 } }), ollama: src({ session: { pctUsed: 90 } }) };
-  const r = pickRunnableDef(defs, usage, inWin);
-  assert.equal(r.def, null);
-  assert.ok(r.reason.includes('x:'), 'reason names the failing def');
+  const r = pickRunnableJob(jobs, usage, inWin);
+  assert.equal(r.job, null);
+  assert.ok(r.reason.includes('x:'), 'reason names the failing job');
 });
-test('pickRunnableDef: oldest passing candidate wins, skipping a younger passer', () => {
-  const defs = [
-    def({ id: 'new', cooldownHours: 1, lastRunAt: inWin - 2 * hr }),
-    def({ id: 'old', cooldownHours: 1, lastRunAt: inWin - 10 * hr }),
+test('pickRunnableJob: oldest passing candidate wins, skipping a younger passer', () => {
+  const jobs = [
+    job({ id: 'new', cooldownHours: 1, lastRunAt: inWin - 2 * hr }),
+    job({ id: 'old', cooldownHours: 1, lastRunAt: inWin - 10 * hr }),
   ];
-  const r = pickRunnableDef(defs, { claude: src(), ollama: src() }, inWin);
-  assert.equal(r.def.id, 'old');
+  const r = pickRunnableJob(jobs, { claude: src(), ollama: src() }, inWin);
+  assert.equal(r.job.id, 'old');
   assert.equal(r.backend, 'claude');
 });
 
 // ---- watchdogDecision ----------------------------------------------------------
 test('watchdogDecision: session pct at/over stop → stop', () => {
-  assert.equal(watchdogDecision({ claude: src({ session: { pctUsed: 75 } }) }, 'claude', def(), 0), 'stop');
+  assert.equal(watchdogDecision({ claude: src({ session: { pctUsed: 75 } }) }, 'claude', job(), 0), 'stop');
 });
 test('watchdogDecision: weekly at/over weeklyMax → stop', () => {
-  assert.equal(watchdogDecision({ claude: src({ weekly: { pctUsed: 90 } }) }, 'claude', def(), 0), 'stop');
+  assert.equal(watchdogDecision({ claude: src({ weekly: { pctUsed: 90 } }) }, 'claude', job(), 0), 'stop');
 });
 test('watchdogDecision: token cap reached → stop', () => {
-  assert.equal(watchdogDecision({ claude: src() }, 'claude', def(), 15_000_000), 'stop');
+  assert.equal(watchdogDecision({ claude: src() }, 'claude', job(), 15_000_000), 'stop');
 });
 test('watchdogDecision: ok:false fails closed → stop', () => {
-  assert.equal(watchdogDecision({ claude: { ok: false } }, 'claude', def(), 0), 'stop');
+  assert.equal(watchdogDecision({ claude: { ok: false } }, 'claude', job(), 0), 'stop');
 });
 test('watchdogDecision: within budget → continue', () => {
-  assert.equal(watchdogDecision({ claude: src() }, 'claude', def(), 100), 'continue');
+  assert.equal(watchdogDecision({ claude: src() }, 'claude', job(), 100), 'continue');
 });
 
-// ---- migrateLegacyConfig (global → per-def seeding) ----------------------------
-test('migrateLegacyConfig: old flat shape seeds window/thresholds/models/tokenCaps onto every def', () => {
+// ---- migrateLegacyConfig (global → per-job seeding) ----------------------------
+test('migrateLegacyConfig: old flat shape seeds window/thresholds/models/tokenCaps onto every job', () => {
   const legacyWindow = { startHour: 8, endHour: 17, days: [1, 2, 3, 4, 5] };
   const legacyThresholds = { claude: { start: 40, stop: 70, weeklyMax: 70 }, ollama: { start: 40, stop: 70, weeklyMax: 70 } };
   const legacyModels = { claude: 'opus', ollama: 'glm-5.2:cloud' };
@@ -158,30 +158,30 @@ test('migrateLegacyConfig: old flat shape seeds window/thresholds/models/tokenCa
   const loaded = {
     enabled: true, tickMinutes: 60,
     window: legacyWindow, thresholds: legacyThresholds, models: legacyModels, tokenCaps: legacyTokenCaps,
-    defs: [{ id: 'a', title: 'A', enabled: true, cooldownHours: 24, lastRunAt: null }],
+    jobs: [{ id: 'a', title: 'A', enabled: true, cooldownHours: 24, lastRunAt: null }],
   };
-  const { defs, migrated } = migrateLegacyConfig(loaded);
+  const { jobs, migrated } = migrateLegacyConfig(loaded);
   assert.equal(migrated, true);
-  assert.deepEqual(defs[0].window, legacyWindow);
-  assert.deepEqual(defs[0].thresholds, legacyThresholds);
-  assert.deepEqual(defs[0].models, legacyModels);
-  assert.deepEqual(defs[0].tokenCaps, legacyTokenCaps);
+  assert.deepEqual(jobs[0].window, legacyWindow);
+  assert.deepEqual(jobs[0].thresholds, legacyThresholds);
+  assert.deepEqual(jobs[0].models, legacyModels);
+  assert.deepEqual(jobs[0].tokenCaps, legacyTokenCaps);
 });
-test('migrateLegacyConfig: a def with its own config is left untouched even when legacy keys are present', () => {
+test('migrateLegacyConfig: a job with its own config is left untouched even when legacy keys are present', () => {
   const ownWindow = { startHour: 7, endHour: 12, days: [6, 0] };
   const loaded = {
     window: { startHour: 8, endHour: 17, days: [1, 2, 3, 4, 5] },
-    defs: [{ id: 'a', window: ownWindow }],
+    jobs: [{ id: 'a', window: ownWindow }],
   };
-  const { defs, migrated } = migrateLegacyConfig(loaded);
+  const { jobs, migrated } = migrateLegacyConfig(loaded);
   assert.equal(migrated, true);
-  assert.deepEqual(defs[0].window, ownWindow, 'own window not clobbered by legacy top-level window');
+  assert.deepEqual(jobs[0].window, ownWindow, 'own window not clobbered by legacy top-level window');
 });
 test('migrateLegacyConfig: already-migrated shape (no legacy keys) is a no-op', () => {
-  const loaded = { defs: [{ id: 'a', window: { startHour: 9, endHour: 18, days: [1] } }] };
-  const { defs, migrated } = migrateLegacyConfig(loaded);
+  const loaded = { jobs: [{ id: 'a', window: { startHour: 9, endHour: 18, days: [1] } }] };
+  const { jobs, migrated } = migrateLegacyConfig(loaded);
   assert.equal(migrated, false);
-  assert.deepEqual(defs, loaded.defs);
+  assert.deepEqual(jobs, loaded.jobs);
 });
 
 // ---- normalizeTags (createTask tag handling) -----------------------------------
@@ -193,35 +193,35 @@ test('normalizeTags: undefined/empty → []', () => {
   assert.deepEqual(normalizeTags([]), []);
 });
 
-// ---- conclude field (createDef/updateDef) --------------------------------------
-test('createDef: conclude defaults to "inreview"', () => {
-  const d = createDef({ title: 'conclude-default', description: 'd', cwd: 'C:\\x' });
+// ---- conclude field (createJob/updateJob) --------------------------------------
+test('createJob: conclude defaults to "inreview"', () => {
+  const d = createJob({ title: 'conclude-default', description: 'd', cwd: 'C:\\x' });
   assert.equal(d.conclude, 'inreview');
 });
-test('createDef: rejects an invalid conclude value', () => {
-  assert.throws(() => createDef({ title: 'conclude-bad', description: 'd', cwd: 'C:\\x', conclude: 'garbage' }));
+test('createJob: rejects an invalid conclude value', () => {
+  assert.throws(() => createJob({ title: 'conclude-bad', description: 'd', cwd: 'C:\\x', conclude: 'garbage' }));
 });
-test('updateDef: accepts conclude "done"', () => {
-  const d = createDef({ title: 'conclude-update', description: 'd', cwd: 'C:\\x' });
-  assert.equal(updateDef(d.id, { conclude: 'done' }).conclude, 'done');
+test('updateJob: accepts conclude "done"', () => {
+  const d = createJob({ title: 'conclude-update', description: 'd', cwd: 'C:\\x' });
+  assert.equal(updateJob(d.id, { conclude: 'done' }).conclude, 'done');
 });
-test('updateDef: rejects a garbage conclude value', () => {
-  const d = createDef({ title: 'conclude-update-bad', description: 'd', cwd: 'C:\\x' });
-  assert.throws(() => updateDef(d.id, { conclude: 'garbage' }));
+test('updateJob: rejects a garbage conclude value', () => {
+  const d = createJob({ title: 'conclude-update-bad', description: 'd', cwd: 'C:\\x' });
+  assert.throws(() => updateJob(d.id, { conclude: 'garbage' }));
 });
 
-// ---- reorderDefs (cosmetic row order) ------------------------------------------
-test('reorderDefs: reorders config.defs by id list; omitted ids sink to the tail', () => {
-  const a = createDef({ title: 'ro-a', description: 'd', cwd: 'C:\\x' });
-  const b = createDef({ title: 'ro-b', description: 'd', cwd: 'C:\\x' });
-  const c = createDef({ title: 'ro-c', description: 'd', cwd: 'C:\\x' });
-  reorderDefs([c.id, b.id, a.id]);
-  const pos = (id) => snapshotBackground().config.defs.findIndex((x) => x.id === id);
+// ---- reorderJobs (cosmetic row order) ------------------------------------------
+test('reorderJobs: reorders config.jobs by id list; omitted ids sink to the tail', () => {
+  const a = createJob({ title: 'ro-a', description: 'd', cwd: 'C:\\x' });
+  const b = createJob({ title: 'ro-b', description: 'd', cwd: 'C:\\x' });
+  const c = createJob({ title: 'ro-c', description: 'd', cwd: 'C:\\x' });
+  reorderJobs([c.id, b.id, a.id]);
+  const pos = (id) => snapshotBackground().config.jobs.findIndex((x) => x.id === id);
   assert.ok(pos(c.id) < pos(b.id) && pos(b.id) < pos(a.id), 'listed ids follow the given order');
-  reorderDefs([a.id]); // b, c omitted → keep their relative order after a
+  reorderJobs([a.id]); // b, c omitted → keep their relative order after a
   assert.ok(pos(a.id) < pos(b.id) && pos(a.id) < pos(c.id) && pos(c.id) < pos(b.id), 'omitted ids sink to tail, relative order kept');
 });
-test('reorderDefs: rejects a non-array', () => assert.throws(() => reorderDefs('nope')));
+test('reorderJobs: rejects a non-array', () => assert.throws(() => reorderJobs('nope')));
 
 // ---- reports (listReports / getReport) -----------------------------------------
 test('listReports/getReport: background-tagged entries with correct hasReport, non-background excluded, content read/missing', () => {

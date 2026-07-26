@@ -50,7 +50,7 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
     <Autocomplete
       freeSolo
       fullWidth
-      disableClearable
+      clearOnEscape
       size="small"
       options={options}
       groupBy={(o) => o.group}

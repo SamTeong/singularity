@@ -87,8 +87,13 @@ export function readSkillsDir(dir) {
     const md = join(dir, name, 'SKILL.md');
     if (!existsSync(md)) continue;
     let description = '';
-    try { description = parseSkill(readFileSync(md, 'utf8')).description; } catch {}
-    skills.push({ name, description, files: listSkillFiles(join(dir, name)) });
+    let raw = '';
+    try { const src = readFileSync(md, 'utf8'); description = parseSkill(src).description; raw = src; } catch {}
+    // ponytail: ship full raw (frontmatter + body) so the client filter can
+    // match anywhere in SKILL.md — e.g. frontmatter flags like
+    // `disable-model-invocation`. Payload grows with skill count × SKILL.md
+    // size; if that bites, move search server-side with a query param.
+    skills.push({ name, description, raw, files: listSkillFiles(join(dir, name)) });
     if (skills.length >= SKILLS_CAP) { capped = true; break; }
   }
   return { skills, capped };

@@ -1,7 +1,6 @@
 ---
 name: claude-code-usage-report
 description: Generates interactive HTML report of Claude Code session cost, token usage, and efficiency from local data. Stdlib only, runs locally.
-disable-model-invocation: true
 metadata:
   version: 1.0.0
 ---

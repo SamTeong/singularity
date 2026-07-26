@@ -29,6 +29,8 @@ import CmEditor from '@/components/CmEditor.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
+import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import EmptyListLine from '@/components/EmptyListLine.jsx';
 import RailSearch from '@/components/panelkit/RailSearch.jsx';
 import RailGroupToggle from '@/components/panelkit/RailGroupToggle.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
@@ -147,7 +149,9 @@ export default function SkillsPanel() {
       .map((sc) => {
         if (sc.name.toLowerCase().includes(query)) return sc;
         const skills = sc.skills.filter((sk) =>
-          sk.name.toLowerCase().includes(query) || (sk.description || '').toLowerCase().includes(query));
+          sk.name.toLowerCase().includes(query)
+          || (sk.description || '').toLowerCase().includes(query)
+          || (sk.raw || '').toLowerCase().includes(query));
         return skills.length ? { ...sc, skills } : null;
       })
       .filter(Boolean);
@@ -179,19 +183,20 @@ export default function SkillsPanel() {
       <Rail storageKey="sing-skills-w" defaultWidth={300} collapsedTitle="Show skill paths">
         {({ collapse }) => (
           <>
-        <Box sx={{ p: 1.5, pb: 0.5 }}>
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-            <RailSearch placeholder="Search skills…" value={q} onChange={setQ} />
-            <RailGroupToggle allOpen={allOpen} onToggle={toggleAll} disabled={!!query} />
-            <Tooltip title="Select skills folder" placement="bottom" disableInteractive>
-              <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
-            </Tooltip>
-            <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
-          </Stack>
+        <RailHeader
+          searchPlaceholder="Search skills…"
+          searchValue={q}
+          onSearchChange={setQ}
+          allOpen={allOpen}
+          onToggleAll={toggleAll}
+          groupToggleDisabled={!!query}
+          onPickFolder={() => setPicking(true)}
+          onCollapse={collapse}
+        >
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
             {totalScopes} scope{totalScopes === 1 ? '' : 's'} · {totalSkills} skill{totalSkills === 1 ? '' : 's'}
           </Typography>
-        </Box>
+        </RailHeader>
         <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
           {view.map((r) => {
             const rOpen = isExpandedRoot(r.root);
@@ -278,7 +283,7 @@ export default function SkillsPanel() {
               </Box>
             );
           })}
-          {view.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{query ? 'No matches.' : 'No folders added yet — pick one.'}</Typography>}
+          {view.length === 0 && <EmptyListLine>{query ? 'No matches.' : 'No skills.'}</EmptyListLine>}
         </List>
           </>
         )}

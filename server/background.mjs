@@ -1,7 +1,7 @@
 // Background tasks: quota-soak agent runs during working hours. A minute-
-// resolution tick, when due by TICK_MINUTES and inside a def's own window,
-// gates on live 5h/7d usage (Claude first, else Ollama) against that def's own
-// thresholds, picks the oldest off-cooldown def round-robin, and spawns it as
+// resolution tick, when due by TICK_MINUTES and inside a job's own window,
+// gates on live 5h/7d usage (Claude first, else Ollama) against that job's own
+// thresholds, picks the oldest off-cooldown job round-robin, and spawns it as
 // a normal Tasks-board card
 // tagged 'background' with an unattended prompt. No write guard on the
 // checkout is in effect (deny array empty, prompt ban removed). A watchdog
@@ -39,9 +39,9 @@ const WRAPUP = 'Usage budget reached — stop working now, write Report.md with 
 // (Edit or Bash echo>file) — no settings block, no prompt ban. Accepted.
 const DENY = { permissions: { deny: [] } };
 
-// Per-task defaults — every def merges over this on create, and legacy flat
+// Per-task defaults — every job merges over this on create, and legacy flat
 // installs get seeded from their old top-level copy (see migrateLegacyConfig).
-const DEFAULT_DEF = {
+const DEFAULT_JOB = {
   window: { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] },
   thresholds: {
     claude: { start: 50, stop: 75, weeklyMax: 50 },
@@ -52,7 +52,7 @@ const DEFAULT_DEF = {
   scopes: [],
 };
 
-let config = { defs: [] };
+let config = { jobs: [] };
 let lastTick = null; // { at, action:'ran'|'skipped', reason }
 let logger = null;
 let lastDueAt = 0; // when the tick logic last ran (minute-resolution gating)
@@ -60,9 +60,9 @@ let injectedTaskId = null; // watchdog: wrap-up injected for this bg task (once)
 
 // ---- Pure functions (exported, unit-tested) ------------------------------------
 
-// Daemon-local: is `date` within this def's configured weekday+hour window?
-export function inWindow(def, date) {
-  const { startHour, endHour, days } = def.window;
+// Daemon-local: is `date` within this job's configured weekday+hour window?
+export function inWindow(job, date) {
+  const { startHour, endHour, days } = job.window;
   const h = date.getHours();
   return days.includes(date.getDay()) && h >= startHour && h < endHour;
 }
@@ -78,57 +78,57 @@ function gateReason(u, th, name) {
   return null;
 }
 
-// Claude first, then Ollama, against this def's own thresholds. Each source
+// Claude first, then Ollama, against this job's own thresholds. Each source
 // fails only its own gate (fail closed).
-export function evalGate(usage, def) {
+export function evalGate(usage, job) {
   const reasons = [];
   for (const backend of ['claude', 'ollama']) {
-    const r = gateReason(usage?.[backend], def.thresholds[backend], backend);
+    const r = gateReason(usage?.[backend], job.thresholds[backend], backend);
     if (r == null) return { backend, reason: `${backend} within budget` };
     reasons.push(r);
   }
   return { backend: null, reason: reasons.join('; ') };
 }
 
-// Oldest off-cooldown enabled def (null lastRunAt = oldest), ignoring window and
+// Oldest off-cooldown enabled job (null lastRunAt = oldest), ignoring window and
 // gate entirely — used only for a forced (bypassGate) manual run.
-export function pickDef(defs, now) {
-  const ready = (defs || []).filter((d) =>
+export function pickJob(jobs, now) {
+  const ready = (jobs || []).filter((d) =>
     d.enabled && (d.lastRunAt == null || now - d.lastRunAt > d.cooldownHours * 3_600_000));
   ready.sort((a, b) => (a.lastRunAt ?? -Infinity) - (b.lastRunAt ?? -Infinity));
   return ready[0] || null;
 }
 
-// Def-first pass for the normal (non-forced) run path: candidates are enabled +
+// Job-first pass for the normal (non-forced) run path: candidates are enabled +
 // off-cooldown + (in their own window, unless bypassWindow), oldest lastRunAt
-// first. Returns the first candidate whose own gate passes as { def, backend,
-// reason: null }, or { def: null, backend: null, reason } when none qualify —
+// first. Returns the first candidate whose own gate passes as { job, backend,
+// reason: null }, or { job: null, backend: null, reason } when none qualify —
 // 'did not find eligible task to run' when there were no candidates at all, else the joined
 // per-candidate gate reasons.
-export function pickRunnableDef(defs, usage, now, { bypassWindow = false } = {}) {
-  const ready = (defs || []).filter((d) =>
+export function pickRunnableJob(jobs, usage, now, { bypassWindow = false } = {}) {
+  const ready = (jobs || []).filter((d) =>
     d.enabled &&
     (d.lastRunAt == null || now - d.lastRunAt > d.cooldownHours * 3_600_000) &&
     (bypassWindow || inWindow(d, new Date(now))));
   ready.sort((a, b) => (a.lastRunAt ?? -Infinity) - (b.lastRunAt ?? -Infinity));
-  if (ready.length === 0) return { def: null, backend: null, reason: 'did not find eligible task to run' };
+  if (ready.length === 0) return { job: null, backend: null, reason: 'did not find eligible task to run' };
   const reasons = [];
-  for (const def of ready) {
-    const gate = evalGate(usage, def);
-    if (gate.backend) return { def, backend: gate.backend, reason: null };
-    reasons.push(`${def.title}: ${gate.reason}`);
+  for (const job of ready) {
+    const gate = evalGate(usage, job);
+    if (gate.backend) return { job, backend: gate.backend, reason: null };
+    reasons.push(`${job.title}: ${gate.reason}`);
   }
-  return { def: null, backend: null, reason: reasons.join('; ') };
+  return { job: null, backend: null, reason: reasons.join('; ') };
 }
 
 // Should a live run stop? Fail closed on unavailable usage.
-export function watchdogDecision(usage, backend, def, tokens) {
+export function watchdogDecision(usage, backend, job, tokens) {
   const u = usage?.[backend];
-  const th = def.thresholds[backend];
+  const th = job.thresholds[backend];
   if (!u || !u.ok) return 'stop';
   if ((u.session?.pctUsed ?? 0) >= th.stop) return 'stop';
   if ((u.weekly?.pctUsed ?? 0) >= th.weeklyMax) return 'stop';
-  if (tokens >= def.tokenCaps[backend]) return 'stop';
+  if (tokens >= job.tokenCaps[backend]) return 'stop';
   return 'continue';
 }
 
@@ -175,27 +175,27 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
   };
   if (liveBgTask()) return refuse('a background run is already live');
 
-  let def, backend;
+  let job, backend;
   if (bypassGate) { // forced run: no gate, default to claude budget/model
     backend = 'claude';
-    def = pickDef(config.defs, now);
-    if (!def) return refuse('did not find eligible task to run');
+    job = pickJob(config.jobs, now);
+    if (!job) return refuse('did not find eligible task to run');
   } else {
-    const picked = pickRunnableDef(config.defs, await getUsage(), now, { bypassWindow });
-    if (!picked.def) return refuse(picked.reason);
-    ({ def, backend } = picked);
+    const picked = pickRunnableJob(config.jobs, await getUsage(), now, { bypassWindow });
+    if (!picked.job) return refuse(picked.reason);
+    ({ job, backend } = picked);
   }
 
-  const model = def.models[backend];
+  const model = job.models[backend];
   const task = createTask({
-    repo: def.cwd, title: def.title, description: def.description, model,
-    scopes: def.scopes, tags: ['background'], background: true, permissionSettings: DENY,
-    conclude: def.conclude,
+    repo: job.cwd, title: job.title, description: job.description, model,
+    scopes: job.scopes, tags: ['background'], background: true, permissionSettings: DENY,
+    conclude: job.conclude,
   });
-  def.lastRunAt = now;
-  def.lastTaskId = task.id;
+  job.lastRunAt = now;
+  job.lastTaskId = task.id;
   persist();
-  lastTick = { at: Date.now(), action: 'ran', reason: `${def.title} → ${backend}/${model}` };
+  lastTick = { at: Date.now(), action: 'ran', reason: `${job.title} → ${backend}/${model}` };
   emit();
   return task;
 }
@@ -214,13 +214,13 @@ async function watchdog() {
   const task = liveBgTask();
   if (!task) { injectedTaskId = null; return; }
   if (injectedTaskId === task.id) return; // already wrapping up this run
-  let decision = 'stop'; // fail closed: a thrown poll (or a missing def) leaves the run unsupervised → stop
+  let decision = 'stop'; // fail closed: a thrown poll (or a missing job) leaves the run unsupervised → stop
   try {
-    const def = config.defs.find((d) => d.lastTaskId === task.id);
+    const job = config.jobs.find((d) => d.lastTaskId === task.id);
     const usage = await getUsage();
     const tokens = (await parseSession(task.worktree || task.repo, task.sessionId)).tokens;
     const backend = isClaudeModel(task.model) ? 'claude' : 'ollama';
-    decision = def ? watchdogDecision(usage, backend, def, tokens) : 'stop';
+    decision = job ? watchdogDecision(usage, backend, job, tokens) : 'stop';
   } catch (e) { logger?.warn({ err: e.message }, 'background watchdog poll failed — stopping run (fail closed)'); }
   if (decision !== 'stop') return;
 
@@ -236,18 +236,18 @@ async function watchdog() {
 }
 
 // Old flat shape stored window/thresholds/models/tokenCaps once at the top
-// level, shared by every def. Seed those onto any def missing them; a def that
+// level, shared by every job. Seed those onto any job missing them; a job that
 // already has its own copy (already migrated, or created post-refactor) is left
 // untouched. Pure — exported so the migration test doesn't touch the filesystem.
 export function migrateLegacyConfig(loaded) {
   const legacy = ['window', 'thresholds', 'models', 'tokenCaps'].filter((k) => loaded?.[k] != null);
-  const defs = (loaded?.defs || []).map((d) => {
+  const jobs = (loaded?.jobs || loaded?.defs || []).map((d) => {
     if (legacy.length === 0) return d;
     const seeded = { ...d };
     for (const k of legacy) if (seeded[k] === undefined) seeded[k] = loaded[k];
     return seeded;
   });
-  return { defs, migrated: legacy.length > 0 };
+  return { jobs, migrated: legacy.length > 0 };
 }
 
 export function initBackground(log) {
@@ -255,10 +255,10 @@ export function initBackground(log) {
   try {
     if (existsSync(BACKGROUND_FILE)) {
       const loaded = JSON.parse(readFileSync(BACKGROUND_FILE, 'utf8'));
-      const { defs, migrated } = migrateLegacyConfig(loaded);
-      config = { defs };
-      if (migrated) persist(); // rewrite state/background.json to the new {defs} shape
-      log?.info({ defs: config.defs.length, migrated }, 'loaded background.json');
+      const { jobs, migrated } = migrateLegacyConfig(loaded);
+      config = { jobs };
+      if (migrated) persist(); // rewrite state/background.json to the new {jobs} shape
+      log?.info({ jobs: config.jobs.length, migrated }, 'loaded background.json');
     } else {
       persist(); // materialize the shipped default so the file exists
     }
@@ -270,75 +270,75 @@ export function initBackground(log) {
 
 // ---- CRUD -----------------------------------------------------------------------
 
-// Per-def choice for how a run concludes: 'inreview' (default — a human reviews
+// Per-job choice for how a run concludes: 'inreview' (default — a human reviews
 // the report before the card reaches done) or 'done' (report is trusted enough
 // to auto-conclude). The watchdog's budget-kill path always forces 'inreview'
 // regardless of this setting (see watchdog() above).
 const CONCLUDE_VALUES = ['inreview', 'done'];
 
-export function createDef({ title, description, cwd, cooldownHours, enabled, window, thresholds, models, tokenCaps, scopes, conclude }) {
+export function createJob({ title, description, cwd, cooldownHours, enabled, window, thresholds, models, tokenCaps, scopes, conclude }) {
   if (!title?.trim() || !description?.trim() || !cwd?.trim()) throw new Error('title, description, cwd required');
   if (conclude !== undefined && !CONCLUDE_VALUES.includes(conclude)) throw new Error(`conclude must be one of ${CONCLUDE_VALUES.join('|')}`);
-  const def = {
+  const job = {
     id: randomUUID(), title: title.trim(), description: description.trim(), cwd: cwd.trim(),
     cooldownHours: cooldownHours ?? 24, enabled: enabled !== false,
-    window: { ...DEFAULT_DEF.window, ...window },
+    window: { ...DEFAULT_JOB.window, ...window },
     thresholds: {
-      claude: { ...DEFAULT_DEF.thresholds.claude, ...thresholds?.claude },
-      ollama: { ...DEFAULT_DEF.thresholds.ollama, ...thresholds?.ollama },
+      claude: { ...DEFAULT_JOB.thresholds.claude, ...thresholds?.claude },
+      ollama: { ...DEFAULT_JOB.thresholds.ollama, ...thresholds?.ollama },
     },
-    models: { ...DEFAULT_DEF.models, ...models },
-    tokenCaps: { ...DEFAULT_DEF.tokenCaps, ...tokenCaps },
+    models: { ...DEFAULT_JOB.models, ...models },
+    tokenCaps: { ...DEFAULT_JOB.tokenCaps, ...tokenCaps },
     scopes: Array.isArray(scopes) ? scopes : [],
     conclude: conclude ?? 'inreview',
     lastRunAt: null, lastTaskId: null,
   };
-  config.defs.push(def);
+  config.jobs.push(job);
   persist();
   emit();
-  return def;
+  return job;
 }
 
 // `thresholds` is two levels deep ({claude:{...}, ollama:{...}}) — merge
 // per-backend so editing one field (e.g. claude.start) doesn't wipe its
 // siblings (claude.stop/weeklyMax) and silently disable the gate. Same for
 // window/models/tokenCaps (single level, merge preserves untouched keys).
-export function updateDef(id, partial) {
-  const def = config.defs.find((d) => d.id === id);
-  if (!def) throw new Error('no such def');
+export function updateJob(id, partial) {
+  const job = config.jobs.find((d) => d.id === id);
+  if (!job) throw new Error('no such job');
   if (partial.conclude !== undefined && !CONCLUDE_VALUES.includes(partial.conclude)) throw new Error(`conclude must be one of ${CONCLUDE_VALUES.join('|')}`);
   for (const k of ['title', 'description', 'cwd', 'cooldownHours', 'enabled', 'lastRunAt', 'lastTaskId', 'conclude']) {
-    if (partial[k] !== undefined) def[k] = partial[k];
+    if (partial[k] !== undefined) job[k] = partial[k];
   }
-  if (partial.window) def.window = { ...def.window, ...partial.window };
+  if (partial.window) job.window = { ...job.window, ...partial.window };
   if (partial.thresholds) {
     for (const [backend, tv] of Object.entries(partial.thresholds)) {
-      if (tv && typeof tv === 'object') def.thresholds[backend] = { ...def.thresholds[backend], ...tv };
+      if (tv && typeof tv === 'object') job.thresholds[backend] = { ...job.thresholds[backend], ...tv };
     }
   }
-  if (partial.models) def.models = { ...def.models, ...partial.models };
-  if (partial.tokenCaps) def.tokenCaps = { ...def.tokenCaps, ...partial.tokenCaps };
-  if (Array.isArray(partial.scopes)) def.scopes = partial.scopes;
+  if (partial.models) job.models = { ...job.models, ...partial.models };
+  if (partial.tokenCaps) job.tokenCaps = { ...job.tokenCaps, ...partial.tokenCaps };
+  if (Array.isArray(partial.scopes)) job.scopes = partial.scopes;
   persist();
   emit();
-  return def;
+  return job;
 }
 
-export function deleteDef(id) {
-  const i = config.defs.findIndex((d) => d.id === id);
-  if (i === -1) throw new Error('no such def');
-  config.defs.splice(i, 1);
+export function deleteJob(id) {
+  const i = config.jobs.findIndex((d) => d.id === id);
+  if (i === -1) throw new Error('no such job');
+  config.jobs.splice(i, 1);
   persist();
   emit();
 }
 
 // Cosmetic row order (drag-to-reorder in the UI). Purely display — the
 // scheduler still picks oldest-lastRunAt round-robin, not this order. `ids` is
-// the full desired order; any def omitted keeps its relative tail position.
-export function reorderDefs(ids) {
+// the full desired order; any job omitted keeps its relative tail position.
+export function reorderJobs(ids) {
   if (!Array.isArray(ids)) throw new Error('ids array required');
   const rank = new Map(ids.map((id, i) => [id, i]));
-  config.defs.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
+  config.jobs.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
   persist();
   emit();
 }
@@ -347,7 +347,7 @@ export function reorderDefs(ids) {
 
 // Flag-state: a set of report taskIds the user has unflagged (dismissed).
 // Everything not in the set is flagged (= still needs attention), so new
-// reports default flagged. Persisted separately from background.json so def
+// reports default flagged. Persisted separately from background.json so job
 // CRUD never touches it; atomic tmp+rename like persist().
 function loadUnflagged() {
   try {

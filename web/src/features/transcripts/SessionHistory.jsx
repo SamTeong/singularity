@@ -28,6 +28,8 @@ import DirPicker from '@/components/DirPicker.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
 import { fmtUsd, fmtTokens, relTime } from '@/lib/format.js';
 import Rail from '@/components/panelkit/Rail.jsx';
+import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import EmptyListLine from '@/components/EmptyListLine.jsx';
 import RailSearch from '@/components/panelkit/RailSearch.jsx';
 
 // Transcripts root persists across sessions on the daemon FS. Default
@@ -213,14 +215,13 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
       <Rail storageKey="sing-sesshist-w" defaultWidth={340} collapsedTitle="Show transcripts">
         {({ collapse }) => (
           <>
-            <Box sx={{ p: 1.5, pb: 0.5 }}>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <RailSearch placeholder="Search transcripts…" value={q} onChange={setQ} />
-                <Tooltip title="Select transcripts folder" placement="bottom" disableInteractive>
-                  <IconButton size="small" onClick={() => setPicking(true)}><FolderOpenIcon /></IconButton>
-                </Tooltip>
-                <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
-              </Stack>
+            <RailHeader
+              searchPlaceholder="Search transcripts…"
+              searchValue={q}
+              onSearchChange={setQ}
+              onPickFolder={() => setPicking(true)}
+              onCollapse={collapse}
+            >
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tildify(root)}</Typography>
               <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
                 {['all', 'one'].map((s) => (
@@ -241,7 +242,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
                 {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${sessions.length} transcript${sessions.length === 1 ? '' : 's'}`}
               </Typography>
-            </Box>
+            </RailHeader>
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
               {leftResults ? (
                 pageItems.map((r, i) => (
@@ -311,7 +312,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                   );
                 })
               )}
-              {!leftResults && sessions.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>{sessErr || 'No transcripts.'}</Typography>}
+              {!leftResults && sessions.length === 0 && <EmptyListLine>{sessErr || 'No transcripts.'}</EmptyListLine>}
               {leftResults && leftResults.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
             <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${getTokens(t).glass.stroke}`, flexShrink: 0 })}>

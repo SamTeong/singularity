@@ -4,20 +4,15 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
 import Autocomplete from '@mui/material/Autocomplete';
-import Button from '@mui/material/Button';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
-import Dialog from '@mui/material/Dialog';
-import DialogTitle from '@mui/material/DialogTitle';
-import DialogContent from '@mui/material/DialogContent';
-import DialogActions from '@mui/material/DialogActions';
-import AddIcon from '@mui/icons-material/Add';
 import ModelSelect from '@/components/ModelSelect.jsx';
 import CwdPicker from '@/components/CwdPicker.jsx';
 import ScopeSelect from '@/components/ScopeSelect.jsx';
+import CreateDialog, { clearAdornment } from '@/components/CreateDialog.jsx';
 import { untildify } from '@/lib/paths.js';
 
-// New-task dialog: CreateAgentDialog minus session id, plus title/description
+// New-task dialog: CreateSessionDialog minus session id, plus title/description
 // (the requirements), plan-approval gate and merge policy. Submits POST /tasks
 // (REST, not WS — the create is request/response with a possible error).
 export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, onBrowse, tagOptions = [] }) {
@@ -89,59 +84,52 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
 
   const cancel = () => { reset(); onClose(); };
 
-  if (!open) return null;
   return (
-    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
-      <DialogTitle>New task</DialogTitle>
-      <DialogContent sx={{ pb: 1.5 }}>
-        <Stack spacing={1.5} sx={{ pt: 0.5 }}>
-          <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
-          <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <TextField size="small" label="What should this task do?" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} />
-          <Stack spacing={1}>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" /></Box>
-              <TextField size="small" type="number" label="turn limit" placeholder="—" value={orchTurns} onChange={(e) => setOrchTurns(e.target.value)} sx={{ width: 110 }} />
-            </Stack>
-            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>Orchestrator: plans the work and coordinates the other steps.</Typography>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Box sx={{ flex: 1 }}><ModelSelect model={implModel} setModel={setImplModel} label="implementor model" placeholder="" /></Box>
-              <TextField size="small" type="number" label="turn limit" placeholder="—" value={implTurns} onChange={(e) => setImplTurns(e.target.value)} sx={{ width: 110 }} />
-            </Stack>
-            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>Implementor: writes the code changes.</Typography>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Box sx={{ flex: 1 }}><ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" placeholder="" /></Box>
-              <TextField size="small" type="number" label="turn limit" placeholder="—" value={revTurns} onChange={(e) => setRevTurns(e.target.value)} sx={{ width: 110 }} />
-            </Stack>
-            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>Reviewer: checks the changes before they're finalized.</Typography>
-            <Typography variant="caption" sx={{ color: 'text.secondary', mt: -0.5 }}>Turn limit: stops the agent automatically after this many steps. Leave blank for no limit.</Typography>
-          </Stack>
-          <ScopeSelect open={open} value={scopes} onChange={setScopes} />
-          <Autocomplete
-            multiple
-            freeSolo
-            size="small"
-            options={tagOptions}
-            value={tags}
-            onChange={(_, v) => setTags(v)}
-            renderInput={(params) => <TextField {...params} label="tags (optional)" placeholder="" />}
-          />
-          <FormControlLabel
-            control={<Checkbox size="small" sx={{ py: 0.25 }} checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} />}
-            label="Have the agent draft a plan and wait for your approval before it starts coding"
-          />
-          <FormControlLabel
-            sx={{ mt: -2 }}
-            control={<Checkbox size="small" sx={{ py: 0.25 }} checked={mergeMode === 'auto'} onChange={(e) => setMergeMode(e.target.checked ? 'auto' : 'manual')} />}
-            label="Automatically merge the changes if everything passes (git projects only)"
-          />
-          {error && <Typography variant="body2" color="error">{error}</Typography>}
+    <CreateDialog
+      open={open}
+      onClose={onClose}
+      title="New task"
+      onCancel={cancel}
+      onCreate={create}
+      createDisabled={busy || !cwd.trim() || !title.trim() || !description.trim()}
+    >
+      <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
+      <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} slotProps={{ input: { endAdornment: clearAdornment(description !== '', () => setDescription('')) } }} />
+      <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
+      <Stack spacing={1}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" /></Box>
+          <TextField size="small" type="number" label="turn limit" placeholder="—" value={orchTurns} onChange={(e) => setOrchTurns(e.target.value)} sx={{ width: 110 }} />
         </Stack>
-      </DialogContent>
-      <DialogActions sx={{ px: 2, pb: 2, pt: 0.5 }}>
-        <Button size="small" variant="secondary" sx={{ px: 2 }} onClick={cancel}>Cancel</Button>
-        <Button size="small" sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} variant="contained" startIcon={<AddIcon />} onClick={create} disabled={busy || !cwd.trim() || !title.trim() || !description.trim()}>Create</Button>
-      </DialogActions>
-    </Dialog>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <Box sx={{ flex: 1 }}><ModelSelect model={implModel} setModel={setImplModel} label="implementor model" /></Box>
+          <TextField size="small" type="number" label="turn limit" placeholder="—" value={implTurns} onChange={(e) => setImplTurns(e.target.value)} sx={{ width: 110 }} />
+        </Stack>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+          <Box sx={{ flex: 1 }}><ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" /></Box>
+          <TextField size="small" type="number" label="turn limit" placeholder="—" value={revTurns} onChange={(e) => setRevTurns(e.target.value)} sx={{ width: 110 }} />
+        </Stack>
+      </Stack>
+      <ScopeSelect open={open} value={scopes} onChange={setScopes} />
+      <Autocomplete
+        multiple
+        freeSolo
+        size="small"
+        options={tagOptions}
+        value={tags}
+        onChange={(_, v) => setTags(v)}
+        renderInput={(params) => <TextField {...params} label="tags (optional)" placeholder="" />}
+      />
+      <FormControlLabel
+        control={<Checkbox size="small" sx={{ py: 0.25 }} checked={requireApproval} onChange={(e) => setRequireApproval(e.target.checked)} />}
+        label="Have the agent draft a plan and wait for your approval before it starts coding"
+      />
+      <FormControlLabel
+        sx={{ mt: -2 }}
+        control={<Checkbox size="small" sx={{ py: 0.25 }} checked={mergeMode === 'auto'} onChange={(e) => setMergeMode(e.target.checked ? 'auto' : 'manual')} />}
+        label="Automatically merge the changes if everything passes (git projects only)"
+      />
+      {error && <Typography variant="body2" color="error">{error}</Typography>}
+    </CreateDialog>
   );
 }

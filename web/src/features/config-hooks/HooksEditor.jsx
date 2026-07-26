@@ -22,6 +22,8 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemText from '@mui/material/ListItemText';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
+import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import EmptyListLine from '@/components/EmptyListLine.jsx';
 import RailSearch from '@/components/panelkit/RailSearch.jsx';
 import RailGroupToggle from '@/components/panelkit/RailGroupToggle.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
@@ -141,16 +143,15 @@ export default function HooksEditor() {
       <Rail storageKey="sing-hooks-w" defaultWidth={300} collapsedTitle="Show hook files">
         {({ collapse }) => (
           <>
-            <Box sx={{ p: 1.5, pb: 0.5 }}>
-              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <RailSearch placeholder="Search hooks…" value={q} onChange={setQ} />
-                <RailGroupToggle allOpen={allOpen} onToggle={toggleAll} />
-                <Tooltip title="Select root folder" placement="bottom" disableInteractive>
-                  <IconButton size="small" onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}><FolderOpenIcon /></IconButton>
-                </Tooltip>
-                <IconButton size="small" onClick={collapse}><ChevronLeftIcon /></IconButton>
-              </Stack>
-            </Box>
+            <RailHeader
+              searchPlaceholder="Search hooks…"
+              searchValue={q}
+              onSearchChange={setQ}
+              allOpen={allOpen}
+              onToggleAll={toggleAll}
+              onPickFolder={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}
+              onCollapse={collapse}
+            />
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
               {(results ? searchGroups : shownGroups.map((g) => ({ cwd: g.cwd, items: g.files }))).map((g) => {
                 const isCol = collapsed.has(normKey(g.cwd));
@@ -188,7 +189,7 @@ export default function HooksEditor() {
                 );
               })}
               {results && (results.length === 0) && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
-              {!results && shownGroups.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No folders configured.</Typography>}
+              {!results && shownGroups.length === 0 && <EmptyListLine>No hooks.</EmptyListLine>}
             </List>
           </>
         )}
@@ -196,7 +197,7 @@ export default function HooksEditor() {
 
     <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
       {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
-      <DetailPane empty={!path && <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Hooks are scripts that run automatically during a session. Browse on the left to view or edit one." />}>
+      <DetailPane empty={!path && <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Browse on the left to view or edit here." />}>
         <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>{tildify(path)}</Typography>
         <CmEditor value={content} onChange={onChange} extensions={lang ? [lang] : []} deps={[path]} />
         <SaveBar msg={msg} disabled={!dirty} onSave={save} />

@@ -57,6 +57,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
         flexDirection: 'column',
         overflow: 'hidden',
         transition: 'width .2s ease',
+        '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
       })}
     >
       {/* Header: logo (+ title when expanded) + more menu (nav overflow, processes, dark mode). */}

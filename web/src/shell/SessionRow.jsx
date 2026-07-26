@@ -55,7 +55,7 @@ export default function SessionRow({
       >
         {/* Row 1: name (left) + actions (right). */}
         <Stack direction="row" sx={{ alignItems: 'center', minWidth: 0 }}>
-          <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{a.name}</Typography>
+          <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{a.title}</Typography>
           <Stack direction="row" className="row-act" sx={{ flexShrink: 0, transition: 'opacity .15s' }}>
             <Tooltip title="View transcript — the full conversation, beyond what the terminal keeps" disableInteractive>
               <IconButton size="small" onClick={(e) => { e.stopPropagation(); onViewTranscript(); }}><HistoryIcon fontSize="small" /></IconButton>

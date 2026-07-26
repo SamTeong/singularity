@@ -3,6 +3,9 @@ import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import Checkbox from '@mui/material/Checkbox';
 import Tooltip from '@mui/material/Tooltip';
+import IconButton from '@mui/material/IconButton';
+import CloseIcon from '@mui/icons-material/Close';
+import InputAdornment from '@mui/material/InputAdornment';
 import { PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
 
 // Skill-scopes multiselect shared by every Create*Dialog. Owns the
@@ -14,6 +17,7 @@ import { PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
 export default function ScopeSelect({ open, value, onChange }) {
   const [scopeList, setScopeList] = useState([]);
   const [skillsByScope, setSkillsByScope] = useState({});
+  const [inputText, setInputText] = useState('');
 
   useEffect(() => {
     if (!open) return;
@@ -33,11 +37,13 @@ export default function ScopeSelect({ open, value, onChange }) {
       options={scopeList}
       value={value}
       onChange={(_, v) => onChange(v)}
-      renderOption={(props, option, { selected }) => {
+      inputValue={inputText}
+      onInputChange={(_, v) => setInputText(v || '')}
+      renderOption={({ key, ...props }, option, { selected }) => {
         const skills = (skillsByScope[option] || []).slice().sort((a, b) => a.localeCompare(b));
         return (
           <Tooltip
-            key={props.id}
+            key={key}
             placement="right"
             disableInteractive
             title={skills.length ? skills.map((s, i) => `${i + 1}. ${s}`).join('\n') : '(no skills)'}
@@ -47,7 +53,29 @@ export default function ScopeSelect({ open, value, onChange }) {
           </Tooltip>
         );
       }}
-      renderInput={(params) => <TextField {...params} label="skill-scopes" placeholder="" />}
+      renderInput={(params) => {
+        const endAdornment = inputText ? (
+          <InputAdornment position="end" sx={{ marginRight: '-4px' }}>
+            <IconButton size="small" aria-label="clear text" onClick={() => setInputText('')} edge="end" sx={{ p: 0.25 }}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </InputAdornment>
+        ) : null;
+        return (
+          <TextField
+            {...params}
+            label="skill-scopes"
+            placeholder=""
+            slotProps={{
+              ...params.slotProps,
+              input: {
+                ...params.slotProps?.input,
+                endAdornment: <>{endAdornment}{params.slotProps?.input?.endAdornment}</>,
+              },
+            }}
+          />
+        );
+      }}
     />
   );
 }

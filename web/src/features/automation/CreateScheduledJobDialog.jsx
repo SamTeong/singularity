@@ -125,7 +125,7 @@ export default function CreateScheduledJobDialog({ open, onClose, job, cwd, setC
           <MenuItem value="bypassPermissions">Full access, no prompts</MenuItem>
         </Select>
       </FormControl>
-      <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled (starts running on schedule right away)" />
+      <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled" />
       {error && <Typography variant="body2" color="error">{error}</Typography>}
     </CreateDialog>
   );

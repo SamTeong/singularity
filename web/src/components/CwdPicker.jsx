@@ -8,8 +8,7 @@ import { tildify } from '@/lib/paths.js';
 
 // The recent-repos cwd field shared by every Create*Dialog: a freeSolo
 // Autocomplete plus, when the caller wires a folder browser, a Browse button.
-// `label` varies per dialog — kept as-is, unifying label wording is a separate
-// copy batch.
+// All dialogs pass label="working directory".
 export default function CwdPicker({ value, onChange, recent, onBrowse, label }) {
   const field = (
     <Autocomplete
@@ -25,7 +24,7 @@ export default function CwdPicker({ value, onChange, recent, onBrowse, label }) 
   return (
     <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
       {field}
-      <Tooltip title="Browse…">
+      <Tooltip title="Browse">
         <IconButton onClick={onBrowse}><FolderOpenIcon /></IconButton>
       </Tooltip>
     </Stack>

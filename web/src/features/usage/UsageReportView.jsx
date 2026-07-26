@@ -93,9 +93,12 @@ export default function UsageReportView() {
       {error && <Typography sx={{ px: 2, pb: 1, color: 'error.main', fontSize: 13 }}>{error}</Typography>}
       <Box sx={{ flex: 1, minHeight: 0, position: 'relative', display: open ? 'block' : 'none' }}>
         {status?.exists ? (
-          // Reports are fully self-contained (zero external requests); allow-scripts
-          // for the inlined charts, allow-same-origin so the report's theme toggle
-          // can use its own localStorage. Content is user-owned local data.
+          // No sandbox attribute: allow-scripts + allow-same-origin together are
+          // equivalent to no sandbox (the browser warns the iframe can escape it),
+          // and we need both — allow-scripts for the inlined charts, allow-same-origin
+          // so the report's theme toggle uses its own localStorage and the parent can
+          // reach contentDocument for syncTheme. Report is trusted same-origin local
+          // content (127.0.0.1, token-gated, user-owned), so no sandbox is fine.
           <Box
             component="iframe"
             key={status.at}
@@ -103,7 +106,6 @@ export default function UsageReportView() {
             onLoad={syncTheme}
             title="Usage report"
             src={reportSrc(status.at)}
-            sandbox="allow-scripts allow-same-origin"
             sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
           />
         ) : (

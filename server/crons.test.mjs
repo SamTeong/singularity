@@ -21,18 +21,18 @@ function findJob(id) {
 }
 
 test('createCron: throws on missing required fields', () => {
-  assert.throws(() => createCron({ cronExpr: '* * * * *', prompt: 'p', cwd: 'C:\\x' })); // no name
-  assert.throws(() => createCron({ name: 'n', prompt: 'p', cwd: 'C:\\x' })); // no cronExpr
+  assert.throws(() => createCron({ cronExpr: '* * * * *', description: 'p', cwd: 'C:\\x' })); // no title
+  assert.throws(() => createCron({ title: 'n', description: 'p', cwd: 'C:\\x' })); // no cronExpr
 });
 
 test('createCron: throws on invalid cron expr and the job is NOT added', () => {
   const before = snapshotCrons().length;
-  assert.throws(() => createCron({ name: 'bad-expr', cronExpr: 'not a cron', prompt: 'p', cwd: 'C:\\x' }));
+  assert.throws(() => createCron({ title: 'bad-expr', cronExpr: 'not a cron', description: 'p', cwd: 'C:\\x' }));
   assert.equal(snapshotCrons().length, before);
 });
 
 test('updateCron: invalid cronExpr throws and leaves job.cronExpr unchanged', () => {
-  const job = createCron({ name: 'update-me', cronExpr: '0 0 * * *', prompt: 'p', cwd: 'C:\\x', enabled: false });
+  const job = createCron({ title: 'update-me', cronExpr: '0 0 * * *', description: 'p', cwd: 'C:\\x', enabled: false });
   assert.throws(() => updateCron(job.id, { cronExpr: 'nonsense' }));
   assert.equal(findJob(job.id).cronExpr, '0 0 * * *');
 });
@@ -42,7 +42,7 @@ test('deleteCron: throws on unknown id', () => {
 });
 
 test('snapshotCrons: ISO nextFire for an enabled job, null after disabling via updateCron', () => {
-  const job = createCron({ name: 'fires', cronExpr: '* * * * *', prompt: 'p', cwd: 'C:\\x', enabled: true });
+  const job = createCron({ title: 'fires', cronExpr: '* * * * *', description: 'p', cwd: 'C:\\x', enabled: true });
   const nextFire = findJob(job.id).nextFire;
   assert.equal(typeof nextFire, 'string');
   assert.equal(new Date(nextFire).toISOString(), nextFire);
