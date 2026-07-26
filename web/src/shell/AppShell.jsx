@@ -330,7 +330,7 @@ export default function AppShell() {
         onBrowse={() => setPicking(true)}
       />
 
-      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} />
+      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} ContentProps={{ sx: (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur }) }} />
 
       {/* Offered when a terminal scrolls to the top of its (capped) scrollback. */}
       <Snackbar
@@ -339,6 +339,7 @@ export default function AppShell() {
         onClose={() => setTxPrompt(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         message="That's the start of what this terminal keeps. View the full transcript?"
+        ContentProps={{ sx: (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur }) }}
         action={
           <>
             <Button size="small" variant="secondary" onClick={() => setTxPrompt(null)}>Dismiss</Button>

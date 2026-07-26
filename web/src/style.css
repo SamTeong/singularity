@@ -12,3 +12,14 @@ html.dark { --mui-palette-error-main: #ff6b81; }
    less the 4px (p:0.5) frame pad less this 16px inset = 6px corner. */
 .term { position: absolute; inset: 16px; border-radius: 6px; overflow: hidden; }
 .term .xterm { height: 100%; }
+
+/* The terminal keeps an opaque surface (not glass), but Zapac's CssBaseline
+   styles every scrollbar thumb with glass.strokeStrong — tuned for glass, it
+   vanishes against the opaque terminal bg, so the scrollbar reads as absent.
+   Give .xterm-viewport a visible, mode-scoped thumb. */
+.term .xterm-viewport::-webkit-scrollbar { width: 10px; }
+.term .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
+html.dark .term .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(160,130,255,.45); }
+html.light .term .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(83,54,120,.40); }
+.term .xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(160,130,255,.7); }
+html.light .term .xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(83,54,120,.65); }
