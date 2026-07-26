@@ -416,7 +416,7 @@ function svgWindowBalance(wb,chartOpts){
   });
   var leg="<div class='legend' style='margin:6px 0'><span class='lg-item'><span class='lg-swatch' style='background:var(--ac)'></span>"+chartOpts.src+"</span>"+
     ((wb.statuslineWindows||[]).length?"<span class='lg-item'><span class='lg-swatch' style='background:var(--ink-faint)'></span>statusline (lower bound)</span>":'')+
-    "<span class='lg-item'>hollow = excluded (low coverage)</span></div>";
+    "<span class='lg-item'>|</span><span class='lg-item'>hollow = excluded (low coverage)</span></div>";
   return leg+svgWrap(W,H,axes+yticks+pool+lbl+out,'chart');
 }
 function renderWindowBalance(F,opts){
@@ -429,8 +429,8 @@ function renderWindowBalance(F,opts){
   var p=wb.pooled,nOk=(wb.windows||[]).filter(function(w){return w.included;}).length;
   var cards=colcards([
     {title:'All-time rate',stats:[["rate = Δ5h% / Δ7d%",p.r.toFixed(2)],["windows pooled",fmtInt(p.nWindows)],["source",p.source+(p.gated?'':' · ungated')]]},
-    {title:'1 day of 7d window',stats:[["hours of 5h window",p.hoursPer7dDay.toFixed(2)+"h"],["share of 5h window",(p.hoursPer7dDay/5*100).toFixed(0)+"%"]]},
-    {title:'5 hour of 5h window',stats:[["days of 7d window",p.daysPer5hWindow.toFixed(2)],["share of 7d window",(100/p.r).toFixed(0)+"%"]]}
+    {title:'1d of 7d window',stats:[["hours of 5h window",p.hoursPer7dDay.toFixed(2)+"h"],["share of 5h window",(p.hoursPer7dDay/5*100).toFixed(0)+"%"]]},
+    {title:'5h of 5h window',stats:[["days of 7d window",p.daysPer5hWindow.toFixed(2)],["share of 7d window",(100/p.r).toFixed(0)+"%"]]}
   ]);
   var note=nOk?'':"<p class='muted' style='margin-top:6px'><b>Lower bound.</b> No window cleared the coverage gate (a snapshot within 5h of "+Math.round(wb.minCoverage*100)+"% of the window, Δ7d ≥ "+wb.minD7+"%), so the figure comes from the single best-observed window rather than a pooled fit. An unobserved 5h window adds nothing to Σ Δ5h% while its usage still lands in Δ7d%, so sparse polling pushes the rate down — the true value is at or above this."+(opts.pollNote!=null?opts.pollNote:" Poll <code>fetch-usage --oauth --save</code> a few times per 5h window to close the gap.")+"</p>";
   return svgWindowBalance(wb,opts.chart)+cards+note+
@@ -592,7 +592,7 @@ function renderHero(agg,st,firstDate){
 // be wrong for ollama is overridden: its snapshots come from the app's own
 // sampling, so there's no OAuth CLI step to point at.
 var OLLAMA_WB_OPTS={
-  chart:{src:'Ollama snapshots'},
+  chart:{src:'Ollama snapshots',axis:'rate = Δ5h% / Δ7d% ↑'},
   emptyHtml:"<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16M8 8l-4 4 4 4M16 16l4-4-4-4'/></svg><h4>No ollama window balance yet.</h4><p>Needs a 7d window with measurable movement across at least one finished 5h window. Fills in as the app samples ollama account quota.</p></div>",
   pollNote:" The app samples this on its own — nothing to run; the gap closes as more 5h windows finish.",
   footnote:"<p class='muted' style='margin-top:6px'>Ollama's own account quota — separate from the Claude 5h:7d rate above, so nothing here draws on or competes with it. Bucketed per 7d reset window for the same reason: a day carries too little Δ7d% to divide by, and a calendar week straddles the reset boundary.</p>"
@@ -901,16 +901,29 @@ var __moonPaths='<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>';
 function __lbl(t){var i=document.getElementById('thI');if(i)i.innerHTML=t==='dark'?__sunPaths:__moonPaths;}
 function __tgl(){var d=document.documentElement,n=d.dataset.theme==='dark'?'light':'dark';d.dataset.theme=n;try{localStorage.setItem('agents-report-theme',n);}catch(e){}__lbl(n);if(window.updateGlow)window.updateGlow();}
 
-// ---- roadmap filter (hide already-available features) ----
+// ---- roadmap filter (chip filter, mirrors breakdown model-filter) ----
+// empty ROAD_ACTIVE / "all" = no filter; each chip toggles its tag, multiple stack.
+var ROAD_ACTIVE=new Set();
+function _roadLegend(){
+  var bar=el('road-fbar');if(!bar)return;
+  var filtered=ROAD_ACTIVE.size>0;
+  bar.querySelectorAll('button[data-st]').forEach(function(b){
+    b.classList.toggle('off',filtered&&!ROAD_ACTIVE.has(b.dataset.st));
+  });
+  var all=bar.querySelector('.lg-all');if(all)all.classList.toggle('active',!filtered);
+}
+function _roadFilter(){
+  var grid=el('road-sgs');if(!grid)return;
+  var vis=ROAD_ACTIVE;
+  grid.querySelectorAll('.sg').forEach(function(s){
+    s.style.display=(vis.size&&!vis.has(s.dataset.st))?'none':'';
+  });
+}
+function _roadToggle(st){if(ROAD_ACTIVE.has(st))ROAD_ACTIVE.delete(st);else ROAD_ACTIVE.add(st);_roadLegend();_roadFilter();}
 function initRoadmapFilter(){
-  var btn=el('road-filter'),grid=el('road-sgs');if(!btn||!grid)return;
-  // default state: available cards hidden, button outlined + "Show available"
-  btn.onclick=function(){
-    var hidden=grid.classList.toggle('hide-avail');
-    btn.textContent=hidden?'Show available':'Hide available';
-    btn.classList.toggle('active',!hidden);  // filled only while everything is shown
-    btn.setAttribute('aria-pressed',hidden?'true':'false');
-  };
+  var bar=el('road-fbar');if(!bar)return;
+  bar.querySelectorAll('button[data-st]').forEach(function(b){b.onclick=function(){_roadToggle(b.dataset.st);};});
+  var all=bar.querySelector('.lg-all');if(all)all.onclick=function(){ROAD_ACTIVE=new Set();_roadLegend();_roadFilter();};
 }
 
 // ---- main ----

@@ -118,22 +118,36 @@ function _render_suggestions(sg) {
       "improvement roadmap (capture → schema → aggregation → visualization).</p>"
     );
   }
-  const badge = { available: "st-ok", partial: "st-part", idea: "st-idea" };
-  const rows = sg
+  const badge = { available: "st-ok", partial: "st-part", idea: "st-idea", done: "st-done" };
+  const swatch = { available: "var(--sage)", partial: "var(--amber)", idea: "var(--azure)", done: "var(--ink-faint)" };
+  const label = { available: "Available", partial: "Partial", idea: "Idea", done: "Done" };
+  // cards sorted by tag alphabetically (stable within a tag).
+  const order = sg
+    .map((s, i) => ({ s, i }))
+    .sort((a, b) => (a.s.status < b.s.status ? -1 : a.s.status > b.s.status ? 1 : a.i - b.i));
+  const rows = order
     .map(
-      (s) =>
+      ({ s }) =>
         `<div class='sg rv' data-st='${esc(s.status)}'><span class='sg-b ${badge[s.status] || "st-idea"}'>` +
         `${esc(s.status)}</span><span class='sg-a'>${esc(s.area)}</span>` +
         `<span class='sg-t'>${esc(s.text)}</span></div>`
     )
     .join("");
-  const hasAvail = sg.some((s) => s.status === "available");
-  const filter = hasAvail
-    ? "<div class='filter-bar'><span class='filter-lbl'>Roadmap</span>" +
-      "<button id='road-filter' class='lg-all' type='button' aria-pressed='true'>Show available</button></div>"
-    : "";
-  const gridCls = hasAvail ? "sgs hide-avail" : "sgs";
-  return `${filter}<div class='${gridCls}' id='road-sgs'>${rows}</div>`;
+  // chip filter mirrors the Breakdown model-filter: empty set / "all" = no filter;
+  // each chip toggles its tag, multiple tags stack.
+  const tags = [...new Set(sg.map((s) => s.status))].filter((t) => swatch[t]).sort();
+  const chips = tags
+    .map(
+      (t) =>
+        `<button class='lg-item' type='button' data-st='${esc(t)}'>` +
+        `<span class='lg-swatch' style='background:${swatch[t]}'></span>${esc(label[t] || t)}</button>`
+    )
+    .join("");
+  const filter =
+    chips &&
+    `<div class='filter-bar' id='road-fbar'><span class='filter-lbl'>Roadmap</span>${chips}` +
+    `<button class='lg-all active' type='button'>all</button></div>`;
+  return `${filter}<div class='sgs' id='road-sgs'>${rows}</div>`;
 }
 
 // ---- embedded SESSIONS payload ----
@@ -202,10 +216,10 @@ const RATE_LIMITS_HTML = `<header class='shead' id='sec-rate-limit-utilization-5
 <div class='card rv'><h3>5h / 7d utilization (Claude models only)</h3><div id='sec-ratelimits'></div></div>
 <div class='card rv'><h3>5h / 7d utilization (Ollama cloud models only)</h3><div id='sec-ollama-util'></div></div>
 <div class='card rv'><h3>Token yield per rate-limit %</h3><div class='ctl-row'><div id='ty-legend' class='legend'></div><div class='toggle'><button id='tybtn-7d' class='active' onclick="showTY('7d')">7d</button><button id='tybtn-5h' onclick="showTY('5h')">5h</button><button id='tybtn-ollama-wk' onclick="showTY('ollama-wk')">7d (ollama)</button></div></div><div id='sec-token-yield'></div><div id='sec-token-yield-summary'></div></div>
-<div class='card rv'><h3>Rate-limit forecast at reset</h3><div id='sec-forecast'></div></div>
+<div class='card rv'><h3>Rate-limit forecast at reset (Claude models only)</h3><div id='sec-forecast'></div></div>
 <div class='card rv'><h3>Rate-limit forecast at reset (Ollama cloud models only)</h3><div id='sec-ollama-forecast'></div></div>
-<div class='card rv'><h3>Window balance · 5h per 7d</h3><div id='sec-window-balance'></div></div>
-<div class='card rv'><h3>Window balance · 5h per 7d (Ollama cloud models only)</h3><div id='sec-ollama-window-balance'></div></div>`;
+<div class='card rv'><h3>5h-window to 7d-window rate (Claude models only)</h3><div id='sec-window-balance'></div></div>
+<div class='card rv'><h3>5h-window to 7d-window (Ollama cloud models only)</h3><div id='sec-ollama-window-balance'></div></div>`;
 
 const WHEN_YOU_WORK_HTML = `<header class='shead' id='sec-when-you-work'><div class='shead-title'><h2>When you work</h2><span class='sub'>spend by weekday and hour</span></div></header>
 <div class='card flush2 rv'><h3>Spend by day-of-week × hour</h3><div id='sec-dayhour'></div></div>`;
