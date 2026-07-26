@@ -12,7 +12,6 @@ import ListItemText from '@mui/material/ListItemText';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import Collapse from '@mui/material/Collapse';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
@@ -32,8 +31,6 @@ import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
-import RailSearch from '@/components/panelkit/RailSearch.jsx';
-import RailGroupToggle from '@/components/panelkit/RailGroupToggle.jsx';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 
 // Wiki root persists across sessions on the daemon FS (survives browser cache

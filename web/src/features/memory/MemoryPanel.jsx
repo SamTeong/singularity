@@ -3,15 +3,12 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
-import IconButton from '@mui/material/IconButton';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import BookIcon from '@mui/icons-material/Book';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
-import Tooltip from '@mui/material/Tooltip';
 import DirPicker from '@/components/DirPicker.jsx';
 import { markdown } from '@codemirror/lang-markdown';
 import { EmptyState } from '@zapac/mui-theme';
@@ -21,8 +18,6 @@ import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
-import RailSearch from '@/components/panelkit/RailSearch.jsx';
-import RailGroupToggle from '@/components/panelkit/RailGroupToggle.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 
 // Memory root persists across sessions on the daemon FS (survives browser cache

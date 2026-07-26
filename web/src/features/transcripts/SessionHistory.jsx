@@ -20,7 +20,6 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ChatBubbleOutlinedIcon from '@mui/icons-material/ChatBubbleOutlined';
 import SubjectIcon from '@mui/icons-material/Subject';
 import HistoryIcon from '@mui/icons-material/History';
-import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { EmptyState } from '@zapac/mui-theme';
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
@@ -30,7 +29,6 @@ import { fmtUsd, fmtTokens, relTime } from '@/lib/format.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
-import RailSearch from '@/components/panelkit/RailSearch.jsx';
 
 // Transcripts root persists across sessions on the daemon FS. Default
 // ~/.claude/projects; loaded from /sessions/root on mount.
