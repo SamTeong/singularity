@@ -56,7 +56,7 @@ function PulseDot({ sx }) {
   );
 }
 
-export default function SessionHistory({ active, sendMsg, registerChat, openSession, onResume }) {
+export default function SessionHistory({ active, sendMsg, registerChat, openSession, onResume, liveSessionIds }) {
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
   const [q, setQ] = useState('');
@@ -184,6 +184,17 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   const viewFiltered = searching && effScope === 'one'
     ? viewMsgs.filter((m) => (m.text || '').toLowerCase().includes(q.trim().toLowerCase()))
     : viewMsgs;
+
+  // True when the selected transcript's session is already a live dock agent —
+  // resuming it would hit backend "session id already in use", so disable.
+  const sessionLive = sel ? !!liveSessionIds?.has(sel.id) : false;
+  // Header: "<name> - <session-id>" when a name is present, else just the id.
+  // Use sel.title (the list row's title) — NOT transcript.meta.title: the list
+  // peeks the file head for ai-title while readSession scans the full file, and
+  // Claude Code rewrites ai-title mid-session, so the two can disagree. Matching
+  // the list source keeps the header name identical to the row the user clicked.
+  const sessName = sel?.title ?? null;
+  const headerLabel = sel ? (sessName && sessName !== sel.id ? `${sessName} - ${sel.id}` : sel.id) : '';
 
   // Pagination over whatever the left list shows (all sessions, or cross-session
   // search results). Scope 'one' search filters the right view, not this list.
@@ -346,10 +357,13 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
             ) : (
               <>
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
-                  <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{transcript.meta?.title || sel?.title || sel?.id}</Typography>
+                  <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{headerLabel}</Typography>
                   {onResume && !sel?.sub && (transcript.meta?.cwd || sel?.cwd) && (
-                    <Tooltip title="Resume this session in a new agent — prefills last model + skill-scopes">
-                      <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} onClick={() => onResume(sel.id, transcript.meta?.cwd || sel.cwd, transcript.meta?.model, transcript.meta?.scopes)}>Resume</Button>
+                    <Tooltip title={sessionLive ? 'Session already live in the dock — switch to it instead' : 'Resume this session in a new agent — prefills last model + skill-scopes'}>
+                      {/* span: Tooltip needs a live event target — a disabled button fires none. */}
+                      <span>
+                        <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} disabled={sessionLive} onClick={() => onResume(sel.id, transcript.meta?.cwd || sel.cwd, transcript.meta?.model, transcript.meta?.scopes)}>Resume</Button>
+                      </span>
                     </Tooltip>
                   )}
                 </Stack>

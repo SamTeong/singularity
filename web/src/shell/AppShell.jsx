@@ -170,6 +170,9 @@ export default function AppShell() {
   };
 
   const liveCount = agents.filter((a) => isLive(a.status)).length;
+  // Live (running/idle/starting) dock agents by id — passed to SessionHistory so its
+  // Resume button can disable when the transcript's session is already attached.
+  const liveSessionIds = useMemo(() => new Set(agents.filter((a) => isLive(a.status)).map((a) => a.id)), [agents]);
 
   return (
     <Box ref={mainRef} sx={{ position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -207,7 +210,7 @@ export default function AppShell() {
             )}
             {visited.current.sessions && (
               <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>
-                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} openSession={openTx} onResume={onResumeSession} />
+                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} openSession={openTx} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
