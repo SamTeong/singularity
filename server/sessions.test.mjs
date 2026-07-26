@@ -63,6 +63,36 @@ test('readSession: meta.model is the last assistant message.model (a /model swit
   }
 });
 
+test('readSession: ollama model logged with :tag stripped is restored to the full preset', async () => {
+  const project = 'sessions-test-ollama-tag';
+  const id = 'fixture-ollama-tag';
+  const dir = writeSession(project, id, [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], model: 'glm-5.2' }, timestamp: '2026-07-15T00:00:00Z' }),
+  ]);
+  try {
+    const s = await readSession(project, id);
+    assert.equal(s.ok, true);
+    assert.equal(s.meta.model, 'glm-5.2:cloud');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readSession: resolved claude-* id (from opus[1m]) maps back to the opus alias', async () => {
+  const project = 'sessions-test-claude-alias';
+  const id = 'fixture-claude-alias';
+  const dir = writeSession(project, id, [
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], model: 'claude-opus-5' }, timestamp: '2026-07-15T00:00:00Z' }),
+  ]);
+  try {
+    const s = await readSession(project, id);
+    assert.equal(s.ok, true);
+    assert.equal(s.meta.model, 'opus');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('sessionText: head+tail truncation keeps the opening and latest text plus the marker', async () => {
   const project = 'sessions-test-trunc';
   const id = 'fixture-2';

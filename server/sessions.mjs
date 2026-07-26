@@ -10,9 +10,22 @@ import { readdir, stat, readFile, open } from 'node:fs/promises';
 import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd } from './agents.mjs';
+import { OLLAMA_PRESETS, claudeIdToAlias } from './models.mjs';
 import { STATE_DIR } from './app-dir.mjs';
 
 const DEFAULT_ROOT = join(homedir(), '.claude', 'projects');
+
+// The claude bin logs an ollama model on assistant events with its `:tag`
+// stripped (glm-5.2:cloud -> glm-5.2). That stripped name is what readSession()
+// would otherwise return as meta.model, and what the Transcripts Resume button
+// prefills — but ollama rejects it at spawn. Restore the full preset when the
+// stripped base uniquely matches a known ollama preset. No match → pass through
+// (free-text model, a future preset, or a claude alias/id unchanged).
+function restoreOllamaTag(model) {
+  if (!model || model.includes(':')) return model;
+  const hits = OLLAMA_PRESETS.filter((p) => p.split(':')[0] === model);
+  return hits.length === 1 ? hits[0] : model;
+}
 const PEEK_BYTES = 65536;     // list only peeks the head — full MB reads are deferred to open
 const RESULT_CAP = 200;
 const TOOL_TRUNC = 300;       // tool_use inputs / tool_result bodies in the view payload
@@ -255,7 +268,7 @@ export async function readSession(project, id, root) {
       }
     }
   }
-  return { ok: true, meta: { cwd, title, turns, firstTs, lastTs, model: lastModel }, messages };
+  return { ok: true, meta: { cwd, title, turns, firstTs, lastTs, model: restoreOllamaTag(claudeIdToAlias(lastModel)) }, messages };
 }
 
 // sessionText: flatten a session into a compact transcript for LLM context.
