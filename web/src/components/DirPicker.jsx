@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Dialog from '@mui/material/Dialog';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
@@ -36,7 +36,7 @@ export default function DirPicker({ start, onPick, onClose }) {
   };
   // '/' is a real FS root on both POSIX and Windows (current drive root). The
   // /fs/browse handler doesn't untildify, so '~' can't be the fallback here.
-  useEffect(() => { load(start || '/'); }, []);
+  useEffect(() => { load(start || '/'); }, [start]);
 
   const sep = path.includes('/') && !path.includes('\\') ? '/' : '\\';
   const child = (name) => (path.endsWith(sep) ? path + name : path + sep + name);

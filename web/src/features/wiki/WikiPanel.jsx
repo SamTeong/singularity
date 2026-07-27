@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import React, { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -69,7 +69,6 @@ export default function WikiPanel() {
 
   useEffect(() => {
     let cancelled = false;
-    setSel(null); setContent(''); setErr(null);
     fetch(`/wiki/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       if (cancelled) return;
       if (d.error) { setWikis([]); setCapped(false); setErr(d.error); return; }
@@ -125,7 +124,7 @@ export default function WikiPanel() {
   });
 
   const pickRoot = (p) => {
-    setRoot(p); setPicking(false);
+    setRoot(p); setPicking(false); setSel(null); setContent(''); setErr(null);
     fetch('/wiki/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
   };
 

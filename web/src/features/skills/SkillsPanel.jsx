@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -312,6 +312,7 @@ export default function SkillsPanel() {
             </Typography>
           ) : (
             <CmEditor
+              key={file ? file.path : 'skill'}
               value={content}
               onChange={onChange}
               extensions={(!file || file.type === 'markdown') ? [markdown()] : []}

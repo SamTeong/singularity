@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -52,6 +52,7 @@ const fmtNext = (iso) => {
   return new Date(iso).toLocaleString();
 };
 const fmtHM = (ms) => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtWait = (nextDueAt) => `First check in about ${Math.max(0, Math.ceil((nextDueAt - Date.now()) / 60000))} minutes`;
 
 // Automation view: the scheduled cron jobs (top section) plus the background
 // quota-soak scheduler (below). Cron rows fire on a cron expr; background jobs are
@@ -69,9 +70,10 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
 
   // Fetch on mount + on every bgView change so the unread badge shows even from
   // the Jobs view, and the list refreshes when re-entering Reports.
-  const loadReports = () =>
-    fetch('/background/reports').then((r) => r.json()).then((d) => setReports(d.reports || [])).catch(() => onToast?.('Failed to load reports.'));
-  useEffect(() => { loadReports(); }, [bgView]);
+  const loadReports = useCallback(() =>
+    fetch('/background/reports').then((r) => r.json()).then((d) => setReports(d.reports || [])).catch(() => onToast?.('Failed to load reports.')),
+  [onToast]);
+  useEffect(() => { loadReports(); }, [bgView, loadReports]);
   const flaggedReports = reports.filter((r) => r.flagged).length;
 
   const setFlag = (taskId, flagged) =>
@@ -133,7 +135,13 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
   const [localJobs, setLocalJobs] = useState(null);
   const rows = localJobs ?? jobs;
   const idOrder = jobs.map((d) => d.id).join(',');
-  useEffect(() => { setLocalJobs(null); }, [idOrder]);
+  // A fresh server snapshot (id order changed) clears the local drag override.
+  // Compared against the previous idOrder during render rather than an effect.
+  const [prevIdOrder, setPrevIdOrder] = useState(idOrder);
+  if (idOrder !== prevIdOrder) {
+    setPrevIdOrder(idOrder);
+    setLocalJobs(null);
+  }
 
   // Background Jobs table sort: null = source order (jobs/id order, the order
   // the scheduler iterates). Click a header to sort, click again to reverse.
@@ -338,7 +346,7 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
               {lastTick
                 ? `${lastTick.action === 'ran' ? 'started' : 'skipped'} ${fmtHM(lastTick.at)}${lastTick.reason ? ` — ${lastTick.reason}` : ''}`
-                : `First check in about ${Math.max(0, Math.ceil((background.nextDueAt - Date.now()) / 60000))} minutes`}
+                : fmtWait(background.nextDueAt)}
             </Typography>
 
             {/* Jobs table */}

@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -29,7 +29,8 @@ export default function RulesPanel() {
   const { roots, shownRoots, remember, forget } = useRootList('/rules');
   const [files, setFiles] = useState([]);
   const [q, setQ] = useState('');
-  const [results, setResults] = useState(null); // search hits, null = browse
+  const [searchResults, setSearchResults] = useState(null); // search hits, raw
+  const results = q.trim() ? searchResults : null; // null = browse
   const [sel, setSel] = useState(null); // {root, path, rel, file}
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
@@ -38,24 +39,27 @@ export default function RulesPanel() {
   const [msg, setMsg] = useState(null);
   const [ref, setRef] = useState(null); // {path, content} when viewing the companion reference (read-only)
 
-  // Refresh the browse list whenever the root list changes.
+  // Refresh the browse list whenever the root list changes. shownRoots (derived
+  // from roots) is already empty when roots is, so files goes unused rather
+  // than needing an explicit reset here.
   useEffect(() => {
-    if (!roots.length) { setFiles([]); return; }
+    if (!roots.length) return;
     fetch('/rules/files', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ roots }),
     }).then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setFiles([]));
   }, [roots]);
 
-  // Debounced content search across rule roots (empty q → browse list).
+  // Debounced content search across rule roots (empty q → browse list, derived
+  // above rather than reset here).
   useEffect(() => {
     const term = q.trim();
-    if (!term) { setResults(null); return; }
+    if (!term) return;
     const id = setTimeout(() => {
       fetch('/rules/search', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ roots, q: term }),
-      }).then((r) => r.json()).then((d) => setResults(d.results || [])).catch(() => setResults([]));
+      }).then((r) => r.json()).then((d) => setSearchResults(d.results || [])).catch(() => setSearchResults([]));
     }, 250);
     return () => clearTimeout(id);
   }, [q, roots]);

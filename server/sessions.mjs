@@ -112,7 +112,7 @@ export async function listSessions({ cap = 5000, isLive = () => false, now = Dat
       const pk = await peek(p);
       if (!pk) continue;
       const { st } = pk;
-      let cwd = null, title = null;
+      let cwd, title;
       const hit = metaCache.get(p);
       if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
         cwd = hit.cwd; title = hit.title;

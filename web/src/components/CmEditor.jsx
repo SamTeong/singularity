@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import Box from '@mui/material/Box';
 import CodeMirror from '@uiw/react-codemirror';
 import { EditorView } from '@codemirror/view';
@@ -14,12 +14,20 @@ import { cmTheme } from '@/lib/cmTheme.js';
 // mount); pass e.g. [path] when the language extension depends on the selected file.
 export default function CmEditor({ value, onChange, extensions = [], deps = [], height = '100%' }) {
   const { resolved } = useColorMode(); // 'light' | 'dark' — system mode mapped through the OS
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- deps is caller-controlled, mirroring each panel's own useMemo before this was extracted
-  const cmExtensions = useMemo(() => [EditorView.lineWrapping, ...extensions, cmTheme], deps);
+  // Serialized so the dep list stays an array literal (react-hooks/use-memo);
+  // every caller passes plain strings — checked against all 5 call sites:
+  // HooksEditor (`[path]`), RulesPanel (`[ref.path]` or `[]`), SkillsPanel
+  // (`` [`f:${file.path}`] ``), ConfigEditor and MemoryPanel (both omit `deps`,
+  // so it's always `[]`). `extensions` is deliberately excluded — `deps` is
+  // caller-controlled, mirroring each panel's own useMemo before this was
+  // extracted.
+  const depKey = JSON.stringify(deps);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- see above
+  const cmExtensions = useMemo(() => [EditorView.lineWrapping, ...extensions, cmTheme], [depKey]);
   // Callers pass a fresh onChange each render; forward through a ref so
   // CodeMirror always sees the same function identity regardless.
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+  useEffect(() => { onChangeRef.current = onChange; });
   const stableOnChange = useCallback((v) => onChangeRef.current(v), []);
   return (
     <Box sx={(t) => ({ flex: 1, minHeight: 0, overflow: 'auto', border: `1px solid ${getTokens(t).glass.stroke}`, borderRadius: `${getTokens(t).radius.sm}px` })}>

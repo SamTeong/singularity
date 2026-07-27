@@ -8,7 +8,7 @@
 // no past occurrence is ever replayed. Daemon down / machine asleep = the
 // in-process tick loop simply stops; on wake it resumes from now.
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { CronExpressionParser } from 'cron-parser';
 import * as reg from './agents.mjs';
@@ -25,8 +25,7 @@ let logger = null;
 
 function persist() {
   try {
-    writeFileSync(CRONS_FILE + '.tmp', JSON.stringify({ crons: [...crons.values()] }, null, 2));
-    renameSync(CRONS_FILE + '.tmp', CRONS_FILE); // atomic swap — a crash mid-write never truncates CRONS_FILE
+    reg.writeAtomic(CRONS_FILE, JSON.stringify({ crons: [...crons.values()] }, null, 2)); // atomic swap — a crash mid-write never truncates CRONS_FILE
   } catch (e) {
     logger?.warn({ err: e.message }, 'crons.json write failed');
     const err = new Error(`crons.json write failed: ${e.message}`);

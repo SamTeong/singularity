@@ -8,3 +8,8 @@ web/dist/
 .tickets/
 .reports/
 .idea
+e2e/.tmp*/
+playwright-report/
+test-results/
+# scratch dumps from piping a suite run to a file at the repo root
+/test-output.txt

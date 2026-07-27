@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -21,16 +21,30 @@ export default function WikiGraph({ root, wiki, selected, onOpenPage }) {
   const ref = useRef(null);
   const cyRef = useRef(null);
   const openRef = useRef(onOpenPage); // tap handler binds once; keep it pointing at the latest callback
-  openRef.current = onOpenPage;
+  useEffect(() => { openRef.current = onOpenPage; }, [onOpenPage]);
   const theme = useTheme();
   const { mode, systemMode } = useColorScheme();
   const dark = (mode === 'system' ? systemMode : mode) === 'dark';
   const [state, setState] = useState({ loading: true, error: null, empty: false });
+  // Show the loading state as soon as the graph identity changes, not a tick
+  // later — compared as a derived string key during render rather than reset
+  // at the top of the effect below. `theme` is deliberately left out of the
+  // key: it's the vendored zapac module-level theme singleton (same object for
+  // every render, light and dark alike — see ZapacThemeProvider), so comparing
+  // it by identity would never fire; `dark` already covers every mode-driven
+  // color the effect below reads off `theme.palette.*`. A plain string
+  // comparison also sidesteps the object-identity hazard entirely (no more
+  // relying on MUI happening to memoize the theme).
+  const depKey = JSON.stringify([root, wiki, dark]);
+  const [prevDepKey, setPrevDepKey] = useState(depKey);
+  if (depKey !== prevDepKey) {
+    setPrevDepKey(depKey);
+    setState({ loading: true, error: null, empty: false });
+  }
 
   useEffect(() => {
     let cy;
     let cancelled = false;
-    setState({ loading: true, error: null, empty: false });
     fetch(`/wiki/graph?root=${encodeURIComponent(untildify(root))}&wiki=${encodeURIComponent(wiki)}`)
       .then((r) => r.json()).then((d) => {
         if (cancelled) return;

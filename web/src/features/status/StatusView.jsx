@@ -3,7 +3,6 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
-import IconButton from '@mui/material/IconButton';
 import Link from '@mui/material/Link';
 import Tooltip from '@mui/material/Tooltip';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -85,11 +84,13 @@ function ProviderCard({ p }) {
 
           {/* Per-component status grid. */}
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.25 }}>
-            {(p.components || []).map((c) => {
+            {(p.components || []).map((c, ci) => {
               const m = COMP[c.status] ?? COMP.operational;
               const Icon = m.Icon;
               return (
-                <Stack key={c.name} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                // ponytail: Statuspage can return duplicate component names (e.g.
+                // two "Login" leaves); name+index keeps keys unique without dropping rows.
+                <Stack key={`${c.name}-${ci}`} direction="row" spacing={1} sx={{ alignItems: 'center' }}>
                   <Icon fontSize="small" sx={{ color: m.color }} />
                   <Box sx={{ minWidth: 0 }}>
                     <Typography sx={{ fontSize: 12.5, fontWeight: 500, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{c.name}</Typography>

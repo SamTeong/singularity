@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -43,7 +43,9 @@ export default function HooksEditor() {
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState(null);
   const [q, setQ] = useState('');
-  const [results, setResults] = useState(null); // content-search hits, null = show file list
+  const [results, setResults] = useState(null); // content-search hits
+  // null when q is empty (browse the file list), the last fetched hits otherwise.
+  const showResults = q.trim() ? results : null;
 
   // Fetch grouped hook files whenever the root list changes.
   useEffect(() => {
@@ -78,13 +80,13 @@ export default function HooksEditor() {
   // Search hits grouped by cwd (flat list → [[cwd, items], …]), alpha by cwd.
   const searchGroups = useMemo(() => {
     const m = new Map();
-    for (const it of results || []) {
+    for (const it of showResults || []) {
       const k = normKey(it.cwd);
       if (!m.has(k)) m.set(k, { cwd: it.cwd, items: [] });
       m.get(k).items.push(it);
     }
     return [...m.values()].sort((a, b) => normKey(a.cwd).localeCompare(normKey(b.cwd)));
-  }, [results]);
+  }, [showResults]);
 
   const loadFile = (p) => {
     if (dirty && !window.confirm('Discard unsaved changes?')) return;
@@ -95,10 +97,12 @@ export default function HooksEditor() {
     }).catch((e) => setMsg({ sev: 'error', text: String(e) }));
   };
 
-  // Debounced content search across hook roots' files (empty q → file list).
+  // Debounced content search across hook roots' files. Empty q → no fetch;
+  // `showResults` below derives the empty-q "show file list" fallback during
+  // render instead of resetting `results` state here.
   useEffect(() => {
     const term = q.trim();
-    if (!term) { setResults(null); return; }
+    if (!term) return;
     const id = setTimeout(() => {
       fetch('/hooks/search', {
         method: 'POST', headers: { 'content-type': 'application/json' },
@@ -115,7 +119,7 @@ export default function HooksEditor() {
 
   // Keys for the groups currently displayed (browse or search) → drive the
   // expand/collapse-all toggle.
-  const groupKeys = (results ? searchGroups : shownGroups).map((g) => normKey(g.cwd));
+  const groupKeys = (showResults ? searchGroups : shownGroups).map((g) => normKey(g.cwd));
   const allOpen = groupKeys.length > 0 && groupKeys.every((k) => !collapsed.has(k));
   const toggleAll = () => setCollapsed(allOpen ? new Set(groupKeys) : new Set());
 
@@ -149,7 +153,7 @@ export default function HooksEditor() {
               onCollapse={collapse}
             />
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {(results ? searchGroups : shownGroups.map((g) => ({ cwd: g.cwd, items: g.files }))).map((g) => {
+              {(showResults ? searchGroups : shownGroups.map((g) => ({ cwd: g.cwd, items: g.files }))).map((g) => {
                 const isCol = collapsed.has(normKey(g.cwd));
                 const count = g.items.length;
                 return (
@@ -161,14 +165,14 @@ export default function HooksEditor() {
                         <Typography noWrap title={g.cwd} sx={{ flex: 1, minWidth: 0, fontFamily: 'monospace', fontSize: 11, color: 'text.secondary' }}>{tildify(g.cwd)}</Typography>
                         <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
                       </Stack>
-                      {!results && (
+                      {!showResults && (
                         <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
                           onClick={(e) => { e.stopPropagation(); forget(g.cwd); }} sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
                           <ClearIcon fontSize="small" />
                         </IconButton>
                       )}
                     </ListItemButton>
-                    {!isCol && g.items.map((it, i) => results ? (
+                    {!isCol && g.items.map((it, i) => showResults ? (
                       <ListItemButton key={`${it.path}:${i}`} selected={it.path === path} onClick={() => loadFile(it.path)}
                         sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, mb: 0.25, pl: 4 }}>
                         <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
@@ -184,8 +188,8 @@ export default function HooksEditor() {
                   </Box>
                 );
               })}
-              {results && (results.length === 0) && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
-              {!results && shownGroups.length === 0 && <EmptyListLine>No hooks.</EmptyListLine>}
+              {showResults && (showResults.length === 0) && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
+              {!showResults && shownGroups.length === 0 && <EmptyListLine>No hooks.</EmptyListLine>}
             </List>
           </>
         )}
@@ -195,7 +199,12 @@ export default function HooksEditor() {
       {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
       <DetailPane empty={!path && <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Browse on the left to view or edit here." />}>
         <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>{tildify(path)}</Typography>
-        <CmEditor value={content} onChange={onChange} extensions={lang ? [lang] : []} deps={[path]} />
+        {/* key={path}: @uiw's typing latch defers a `value` prop change that
+            lands while the user was just typing, and on a dirty "discard and
+            navigate" that deferred update is never applied — the editor keeps
+            showing the previous file plus the unsaved edit. Remounting on path
+            makes the new file's content the initial doc, sidestepping the latch. */}
+        <CmEditor key={path} value={content} onChange={onChange} extensions={lang ? [lang] : []} deps={[path]} />
         <SaveBar msg={msg} disabled={!dirty} onSave={save} />
       </DetailPane>
     </Stack>

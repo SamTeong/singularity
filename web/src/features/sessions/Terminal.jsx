@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useColorMode } from '@zapac/mui-theme';
 import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -16,21 +16,25 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
   // not theme.palette.mode — under cssVariables the latter is frozen at the
   // default scheme and won't switch with the .dark class.
   const mode = useColorMode().resolved === 'light' ? 'light' : 'dark';
+  // Seeds the initial palette only; live changes go through the theme effect
+  // below. Held in a ref so a mode flip can't re-enter the create-terminal
+  // effect and tear down a live xterm.
+  const modeRef = useRef(mode);
   const hostRef = useRef(null);
   const xtermRef = useRef(null);
   const fitRef = useRef(null);
   const doFitRef = useRef(null);
   const switchRef = useRef(onSwitch);
-  switchRef.current = onSwitch;
   const topRef = useRef(onTopReached);
-  topRef.current = onTopReached;
+  useEffect(() => { switchRef.current = onSwitch; }, [onSwitch]);
+  useEffect(() => { topRef.current = onTopReached; }, [onTopReached]);
 
   useEffect(() => {
     const term = new Xterm({
       fontFamily: 'JetBrains Mono, Cascadia Code, Consolas, monospace',
       fontSize: 13,
       cursorBlink: true,
-      theme: TERM_THEME[mode] ?? TERM_THEME.dark,
+      theme: TERM_THEME[modeRef.current] ?? TERM_THEME.dark,
       scrollback: SCROLLBACK,
     });
     const fit = new FitAddon();
@@ -124,7 +128,7 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
       clearTimeout(resyncTimer);
       resyncTimer = setTimeout(() => { try { term._core?.viewport?.syncScrollArea?.(); } catch {} }, 120);
     };
-    registerOutput({
+    registerOutput(agent.id, {
       write: (data) => { term.write(data); scheduleResync(); },
       reset: () => term.reset(),
       meta: (m) => {
@@ -155,11 +159,12 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     setTimeout(doFit, 50);
 
     const host = hostRef.current;
-    return () => { clearTimeout(roTimer); clearTimeout(resyncTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); host.removeEventListener('wheel', onWheel); viewport?.removeEventListener('scroll', onViewportScroll); term.dispose(); registerOutput(null); };
-  }, [agent.id]);
+    return () => { clearTimeout(roTimer); clearTimeout(resyncTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); host.removeEventListener('wheel', onWheel); viewport?.removeEventListener('scroll', onViewportScroll); term.dispose(); registerOutput(agent.id, null); };
+  }, [agent.id, sendMsg, registerOutput]);
 
   // Apply the app theme live — no need to recreate the terminal.
   useEffect(() => {
+    modeRef.current = mode;
     if (xtermRef.current) xtermRef.current.options.theme = TERM_THEME[mode] ?? TERM_THEME.dark;
   }, [mode]);
 

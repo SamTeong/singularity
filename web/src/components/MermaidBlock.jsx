@@ -10,24 +10,27 @@ export default function MermaidBlock({ chart }) {
   const rawId = useId();
   const id = `mmd-${rawId.replace(/[^A-Za-z0-9_-]/g, '')}`;
   const { resolved } = useColorMode(); // 'light' | 'dark' — system mode mapped through the OS
-  const [svg, setSvg] = useState('');
-  const [err, setErr] = useState(null);
+  // One state cell tagged with the input it was rendered for, so a stale
+  // diagram is discarded during render instead of via a reset-setState effect.
+  const tag = `${String(chart)}|${resolved}`;
+  const [res, setRes] = useState({ tag: null, svg: '', err: null });
 
   useEffect(() => {
     let cancelled = false;
-    setSvg(''); setErr(null);
     (async () => {
       try {
         const mermaid = (await import('mermaid')).default;
         mermaid.initialize({ startOnLoad: false, securityLevel: 'strict', theme: resolved === 'dark' ? 'dark' : 'default' });
         const { svg: out } = await mermaid.render(id, String(chart).replace(/\n$/, ''));
-        if (!cancelled) setSvg(out);
+        if (!cancelled) setRes({ tag, svg: out, err: null });
       } catch (e) {
-        if (!cancelled) setErr(String(e?.message ?? e));
+        if (!cancelled) setRes({ tag, svg: '', err: String(e?.message ?? e) });
       }
     })();
     return () => { cancelled = true; };
-  }, [chart, resolved, id]);
+  }, [chart, resolved, id, tag]);
+
+  const { svg, err } = res.tag === tag ? res : { svg: '', err: null };
 
   if (err) {
     return <Box component="pre" sx={{ m: 0, p: 1.5, fontSize: 12, color: 'error.main', bgcolor: 'action.hover', borderRadius: 1, overflow: 'auto' }}>{err}</Box>;

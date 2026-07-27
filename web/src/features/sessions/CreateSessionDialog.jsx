@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useState } from 'react';
 import TextField from '@mui/material/TextField';
 import ModelSelect from '@/components/ModelSelect.jsx';
 import CwdPicker from '@/components/CwdPicker.jsx';
@@ -18,15 +18,20 @@ export default function CreateSessionDialog({ open, onClose, connected, cwd, set
   const sessionIdInvalid = sessionId.trim() !== '' && !UUID_RE.test(sessionId.trim());
 
   // Prefill the session id + last model + last skill-scopes when opened for a
-  // resume (e.g. from the Transcripts view). Runs only on open + when the
-  // caller changes the prefilled id. Model is the transcript's last used;
-  // scopes come from the agent registry and may be empty for non-Singularity sessions.
-  useEffect(() => {
-    if (!open || !initialSessionId) return;
-    setSessionId(initialSessionId);
-    if (initialModel) setModel(initialModel);
-    if (initialScopes?.length) setScopes(initialScopes);
-  }, [open, initialSessionId, initialModel, initialScopes]);
+  // resume (e.g. from the Transcripts view). Fires only on the false→true open
+  // transition, so it's a render-time state adjustment (compared against the
+  // previous `open`) rather than an effect that would setState on every commit.
+  // AppShell always closes this dialog before starting another resume, so
+  // `initialSessionId` never changes while `open` stays true.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open && initialSessionId) {
+      setSessionId(initialSessionId);
+      if (initialModel) setModel(initialModel);
+      if (initialScopes?.length) setScopes(initialScopes);
+    }
+  }
 
   const reset = () => { setTitle(''); setScopes([]); setSessionId(''); setModel(''); };
 

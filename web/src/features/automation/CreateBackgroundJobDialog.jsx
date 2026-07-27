@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -46,30 +46,47 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // The dialog never unmounts (renders null while closed), so a plain useState
-  // initializer only runs once — resync on every open, either from `job` (edit)
-  // or back to blank/defaults (create). cwd is AppShell's shared picker state
-  // (the Browse button writes to it), so edit mode seeds that rather than a local copy.
-  useEffect(() => {
-    if (!open) return;
-    if (job) {
-      setTitle(job.title || '');
-      setDescription(job.description || '');
-      if (job.cwd) setCwd(job.cwd);
-      setCooldownHours(String(job.cooldownHours ?? 24));
-      setEnabled(job.enabled !== false);
-      setConclude(job.conclude || 'inreview');
-      setWindowCfg(job.window || DEFAULT_WINDOW);
-      setThresholds(job.thresholds || DEFAULT_THRESHOLDS);
-      setModels(job.models || DEFAULT_MODELS);
-      setTokenCaps(job.tokenCaps || DEFAULT_TOKEN_CAPS);
-      setScopes(job.scopes || []);
-    } else {
-      setTitle(''); setDescription(''); setCooldownHours('24'); setEnabled(true); setConclude('inreview');
-      setWindowCfg(DEFAULT_WINDOW); setThresholds(DEFAULT_THRESHOLDS); setModels(DEFAULT_MODELS); setTokenCaps(DEFAULT_TOKEN_CAPS); setScopes([]);
+  // The dialog never unmounts (renders null while closed) — resync on every
+  // open, either from `job` (edit) or back to blank/defaults (create). Fires
+  // only on the false→true open transition, so it's a render-time state
+  // adjustment (compared against the previous `open`) rather than an effect
+  // that would setState on every commit. Callers always close before switching
+  // to a different job (see CronJobs.jsx), so `job` changing identity while
+  // `open` stays true only ever means a fresh server push of the same record.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) {
+      if (job) {
+        setTitle(job.title || '');
+        setDescription(job.description || '');
+        setCooldownHours(String(job.cooldownHours ?? 24));
+        setEnabled(job.enabled !== false);
+        setConclude(job.conclude || 'inreview');
+        setWindowCfg(job.window || DEFAULT_WINDOW);
+        setThresholds(job.thresholds || DEFAULT_THRESHOLDS);
+        setModels(job.models || DEFAULT_MODELS);
+        setTokenCaps(job.tokenCaps || DEFAULT_TOKEN_CAPS);
+        setScopes(job.scopes || []);
+      } else {
+        setTitle(''); setDescription(''); setCooldownHours('24'); setEnabled(true); setConclude('inreview');
+        setWindowCfg(DEFAULT_WINDOW); setThresholds(DEFAULT_THRESHOLDS); setModels(DEFAULT_MODELS); setTokenCaps(DEFAULT_TOKEN_CAPS); setScopes([]);
+      }
+      setError(null);
     }
-    setError(null);
-  }, [open, job]);
+  }
+  // cwd is AppShell's shared picker state (the Browse button writes to it), not
+  // owned by this component — syncing it into a sibling still belongs in an
+  // effect. `job` is deliberately left out of the dep array (it's only read
+  // for its value here): the job list is websocket-fed and gets a new object
+  // identity on every server push, so keying on it would re-fire this effect
+  // on every push while the dialog is open and clobber a cwd the user just
+  // picked with Browse. Keying on `open` alone fires this only on the
+  // false→true transition, mirroring the render-time block above.
+  useEffect(() => {
+    if (open && job?.cwd) setCwd(job.cwd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+  }, [open, setCwd]);
 
   const canSubmit = !busy && !!title.trim() && !!description.trim() && !!cwd.trim();
 

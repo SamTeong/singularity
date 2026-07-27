@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import React, { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Tabs from '@mui/material/Tabs';
@@ -37,7 +37,8 @@ export default function ConfigEditor() {
   const [msg, setMsg] = useState(null);
   const { roots, shownRoots, remember, forget } = useRootList('/config', { initial: ['~'] });
   const [q, setQ] = useState('');
-  const [results, setResults] = useState(null); // content-search hits, null = show config list
+  const [searchResults, setSearchResults] = useState(null); // content-search hits, raw
+  const results = q.trim() ? searchResults : null; // null = show config list
 
   const load = () => {
     if (!cwd) return;
@@ -52,24 +53,31 @@ export default function ConfigEditor() {
     }).catch((e) => setMsg({ sev: 'error', text: String(e) })).finally(() => setLoading(false));
   };
   useEffect(() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; load(); /* eslint-disable-line */ }, [cwd]);
-  useEffect(() => { if (data) { setContent(data[scope]?.content ?? ''); setDirty(false); setMsg(null); } }, [scope, data]);
 
-  // Debounced content search across config roots' settings files (empty q → config list).
+  // Debounced content search across config roots' settings files (empty q → config list,
+  // derived above rather than reset here).
   useEffect(() => {
     const term = q.trim();
-    if (!term) { setResults(null); return; }
+    if (!term) return;
     const id = setTimeout(() => {
       fetch('/config/search', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ roots, q: term }),
-      }).then((r) => r.json()).then((d) => setResults(d.results || [])).catch(() => setResults([]));
+      }).then((r) => r.json()).then((d) => setSearchResults(d.results || [])).catch(() => setSearchResults([]));
     }, 250);
     return () => clearTimeout(id);
   }, [q, roots]);
 
+  // Switching tabs/scope is a direct user action — sync content here instead of
+  // an effect keyed on [scope, data].
+  const changeScope = (v) => {
+    setScope(v);
+    if (data) { setContent(data[v]?.content ?? ''); setDirty(false); setMsg(null); }
+  };
+
   const openResult = (it) => {
     if (dirty && !window.confirm('Discard unsaved changes?')) return;
-    setScope(it.scope);
+    changeScope(it.scope);
     setCwd(it.cwd);
   };
 
@@ -151,7 +159,7 @@ export default function ConfigEditor() {
       </Rail>
 
       <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
-        <Tabs value={scope} onChange={(_, v) => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setScope(v); }} variant="fullWidth">
+        <Tabs value={scope} onChange={(_, v) => { if (dirty && !window.confirm('Discard unsaved changes?')) return; changeScope(v); }} variant="fullWidth">
           {SCOPES.map((s) => <Tab key={s.key} value={s.key} label={s.label} />)}
         </Tabs>
 

@@ -1,4 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
+import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -23,12 +24,24 @@ const fmtWall = (iso) => {
 // below the track.
 export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
   const t = useTheme();
+  // "Now" marker position needs the current wall-clock time, which can't be read
+  // impurely during render — subscribe to the system clock instead (ticks are
+  // coarse; the marker only needs to be roughly right).
+  const [now, setNow] = useState(() => Date.now());
+  // Only tick the clock when a "now" marker will actually be rendered — most
+  // Meter instances (no windowMs/resetsAt) never read `now` at all.
+  const needsNow = !!(windowMs && win?.resetsAt);
+  useEffect(() => {
+    if (!needsNow) return;
+    const id = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, [needsNow]);
   if (size === 'lg' && !win) return null;
   const pct = win?.pctUsed;
   // "Now" marker: track spans the rolling window ending at resetsAt, so now
   // sits at (1 - remaining/windowMs) from the left. Clamp to keep it on track.
-  const nowPct = windowMs && win?.resetsAt
-    ? Math.min(100, Math.max(0, (1 - (new Date(win.resetsAt).getTime() - Date.now()) / windowMs) * 100))
+  const nowPct = needsNow
+    ? Math.min(100, Math.max(0, (1 - (new Date(win.resetsAt).getTime() - now) / windowMs) * 100))
     : null;
   const sm = size === 'sm';
 

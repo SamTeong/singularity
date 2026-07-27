@@ -12,7 +12,7 @@
 // 'background' on the shared agents bus; pty-ws fans it out. Pure gate/pick/
 // window/watchdog functions are exported for unit tests (no side effects).
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as reg from './agents.mjs';
 import { createTask, updateTask, snapshotTasks } from './tasks.mjs';
@@ -136,8 +136,7 @@ export function watchdogDecision(usage, backend, job, tokens) {
 
 function persist() {
   try {
-    writeFileSync(BACKGROUND_FILE + '.tmp', JSON.stringify(config, null, 2));
-    renameSync(BACKGROUND_FILE + '.tmp', BACKGROUND_FILE); // atomic swap
+    reg.writeAtomic(BACKGROUND_FILE, JSON.stringify(config, null, 2)); // atomic swap
   } catch (e) {
     logger?.warn({ err: e.message }, 'background.json write failed');
     const err = new Error(`background.json write failed: ${e.message}`);
@@ -357,8 +356,7 @@ function loadUnflagged() {
 }
 function saveUnflagged(set) {
   try {
-    writeFileSync(FLAGS_FILE + '.tmp', JSON.stringify([...set]));
-    renameSync(FLAGS_FILE + '.tmp', FLAGS_FILE);
+    reg.writeAtomic(FLAGS_FILE, JSON.stringify([...set]));
   } catch (e) { logger?.warn({ err: e.message }, 'report-flags.json write failed'); throw e; }
 }
 

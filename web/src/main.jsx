@@ -1,4 +1,3 @@
-import React from 'react';
 import { createRoot } from 'react-dom/client';
 import '@zapac/mui-theme/fonts';
 import { AppThemeProvider } from '@/theme/index.js';

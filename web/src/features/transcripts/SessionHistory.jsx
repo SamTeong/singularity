@@ -31,7 +31,7 @@ import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 
 // Transcripts root persists across sessions on the daemon FS. Default
-// ~/.claude/projects; loaded from /sessions/root on mount.
+// ~/.claude/projects; used only as a fallback if /sessions/root fails to load.
 const DEFAULT_ROOT = '~/.claude/projects';
 
 const shortModel = (id) => id.match(/opus|sonnet|haiku|fable|mythos/i)?.[0].toLowerCase() || id;
@@ -76,20 +76,28 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   const [loadErr, setLoadErr] = useState(null);
   const [sessErr, setSessErr] = useState(null);
   const [expanded, setExpanded] = useState(new Set()); // "project:id" -> subagent tree expanded
-  const [root, setRoot] = useState(DEFAULT_ROOT);
+  // null until /sessions/root resolves — see the mount effect below. Keeps the
+  // session list from ever being fetched against a guessed root (it used to
+  // default to DEFAULT_ROOT and list that first, which for a moment showed —
+  // and in the e2e sandbox, actually queried — the wrong root).
+  const [root, setRoot] = useState(null);
   const [picking, setPicking] = useState(false);
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
 
-  // Load the FS-persisted root once on mount (sessions load via the [root] effect).
+  // Load the FS-persisted root once on mount (sessions load via the [root]
+  // effect, which waits for this to resolve). Falls back to DEFAULT_ROOT once
+  // the request settles either way, so a failed fetch still ends in a usable
+  // (if possibly wrong-for-this-user) state rather than stalling forever.
   useEffect(() => {
-    fetch('/sessions/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
+    fetch('/sessions/root').then((r) => r.json()).then((d) => setRoot(d.root || DEFAULT_ROOT)).catch(() => setRoot(DEFAULT_ROOT));
   }, []);
 
   // Poll the session list only while the Sessions view is active — avoids
   // background fetches when the panel is mounted-but-hidden behind another view.
+  // Also waits for root to resolve (non-null) so this never lists against a guess.
   useEffect(() => {
-    if (!active) return;
+    if (!active || root == null) return;
     const load = () => fetch(`/sessions?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.'));
     load();
     const iv = setInterval(load, 5000);
@@ -100,6 +108,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // Memory. Scope 'one' filters the open transcript in the right view instead.
   const searchAll = useCallback((query) => {
     if (!query.trim()) { setMatches(null); setCapped(false); return; }
+    if (root == null) return; // root not resolved yet — don't guess
     fetch(`/sessions/search?q=${encodeURIComponent(query.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setMatches(d.results || []); setCapped(!!d.capped);
     });
@@ -109,7 +118,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // Batch-fetch cost + token breakdown; merge into the id-keyed stats map.
   const loadStats = useCallback((items) => {
     const list = (items || []).filter((it) => it?.project && it?.id).map((it) => ({ project: it.project, id: it.id }));
-    if (!list.length) return;
+    if (!list.length || root == null) return; // root not resolved yet — don't guess
     fetch('/sessions/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list, root: untildify(root) }) })
       .then((r) => r.json()).then((d) => setStats((prev) => ({ ...prev, ...(d.stats || {}) }))).catch(() => {});
   }, [root]);
@@ -202,7 +211,16 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   const pageCount = Math.max(1, Math.ceil(leftList.length / pageSize));
   const curPage = Math.min(page, pageCount);
   const pageItems = leftList.slice((curPage - 1) * pageSize, curPage * pageSize);
-  useEffect(() => { setPage(1); }, [q, scope, pageSize]);
+  // Jump back to page 1 whenever the search/scope/page-size changes the list
+  // being paginated. Compared against previous values during render rather
+  // than an effect (curPage's Math.min already clamps out-of-range pages, but
+  // a fresh query/scope should start back at page 1, not wherever it was).
+  const [prevPageKey, setPrevPageKey] = useState(`${q}:${scope}:${pageSize}`);
+  const pageKeyNow = `${q}:${scope}:${pageSize}`;
+  if (pageKeyNow !== prevPageKey) {
+    setPrevPageKey(pageKeyNow);
+    setPage(1);
+  }
   // Fetch cost/tokens for the visible session rows (not the per-match search rows).
   const pageKey = pageItems.map((s) => s.id).join(',');
   useEffect(() => { if (!leftResults) loadStats(pageItems); /* eslint-disable-line */ }, [pageKey, leftResults, loadStats]);

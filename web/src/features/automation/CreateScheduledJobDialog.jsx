@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
@@ -47,26 +47,43 @@ export default function CreateScheduledJobDialog({ open, onClose, job, cwd, setC
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
-  // The dialog never unmounts (renders null while closed), so a plain useState
-  // initializer only runs once — resync on every open, either from `job` (edit)
-  // or back to blank/defaults (create). cwd is AppShell's shared picker state
-  // (the Browse button writes to it), so edit mode seeds that rather than a local copy.
-  useEffect(() => {
-    if (!open) return;
-    if (job) {
-      setTitle(job.title || '');
-      setCronExpr(job.cronExpr || '0 * * * *');
-      setDescription(job.description || '');
-      setModel(job.model === 'claude' ? '' : (job.model || ''));
-      setScopes(job.scopes || []);
-      setPermissionMode(job.permissionMode || 'acceptEdits');
-      setEnabled(job.enabled !== false);
-      if (job.cwd) setCwd(job.cwd);
-    } else {
-      setTitle(''); setCronExpr('0 * * * *'); setDescription(''); setModel(''); setScopes([]); setPermissionMode('acceptEdits'); setEnabled(true);
+  // The dialog never unmounts (renders null while closed) — resync on every
+  // open, either from `job` (edit) or back to blank/defaults (create). Fires
+  // only on the false→true open transition, so it's a render-time state
+  // adjustment (compared against the previous `open`) rather than an effect
+  // that would setState on every commit. Callers always close before switching
+  // to a different job (see AppShell.jsx), so `job` changing identity while
+  // `open` stays true only ever means a fresh server push of the same record.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
+    if (open) {
+      if (job) {
+        setTitle(job.title || '');
+        setCronExpr(job.cronExpr || '0 * * * *');
+        setDescription(job.description || '');
+        setModel(job.model === 'claude' ? '' : (job.model || ''));
+        setScopes(job.scopes || []);
+        setPermissionMode(job.permissionMode || 'acceptEdits');
+        setEnabled(job.enabled !== false);
+      } else {
+        setTitle(''); setCronExpr('0 * * * *'); setDescription(''); setModel(''); setScopes([]); setPermissionMode('acceptEdits'); setEnabled(true);
+      }
+      setError(null);
     }
-    setError(null);
-  }, [open, job]);
+  }
+  // cwd is AppShell's shared picker state (the Browse button writes to it), not
+  // owned by this component — syncing it into a sibling still belongs in an
+  // effect. `job` is deliberately left out of the dep array (it's only read
+  // for its value here): the job list is websocket-fed and gets a new object
+  // identity on every server push, so keying on it would re-fire this effect
+  // on every push while the dialog is open and clobber a cwd the user just
+  // picked with Browse. Keying on `open` alone fires this only on the
+  // false→true transition, mirroring the render-time block above.
+  useEffect(() => {
+    if (open && job?.cwd) setCwd(job.cwd);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+  }, [open, setCwd]);
 
   const desc = useMemo(() => describe(cronExpr.trim()), [cronExpr]);
   const canSubmit = !busy && !!title.trim() && desc.ok && !!description.trim() && !!cwd.trim();

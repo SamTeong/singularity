@@ -1,5 +1,4 @@
 import { getTokens } from '@/theme/contract.js';
-import React from 'react';
 import Box from '@mui/material/Box';
 import Link from '@mui/material/Link';
 import ReactMarkdown, { defaultUrlTransform } from 'react-markdown';

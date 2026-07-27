@@ -11,7 +11,6 @@ let promise = null;
 export function useCapabilities() {
   const [caps, setCaps] = useState(cache);
   useEffect(() => {
-    if (cache) { setCaps(cache); return; }
     if (!promise) {
       promise = fetch('/capabilities')
         .then((r) => r.json())

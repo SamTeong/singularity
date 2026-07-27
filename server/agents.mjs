@@ -54,6 +54,34 @@ let draining = false;
 export function beginDrain() { draining = true; try { persist(); } catch { /* best-effort at shutdown */ } }
 
 // --- persistence ---
+// Shared write-temp-then-rename primitive for every state/*.json save (and
+// ensureTrusted's ~/.claude.json write below). On Windows, renaming over an
+// existing file can transiently EPERM/EACCES/EBUSY when AV/Search/a reader
+// briefly holds the target open — retry a few times with a short sync sleep
+// (Atomics.wait: the write path is sync, so the backoff must be too) before
+// giving up. Anything else, or the last attempt, rethrows raw — callers keep
+// their own catch/log/wrap untouched.
+const RETRY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+const retrySignal = new Int32Array(new SharedArrayBuffer(4));
+// `rename` param defaults to the real renameSync — overridable so tests can
+// inject a fake that fails N times without a mocking framework.
+export function writeAtomic(file, data, rename = renameSync) {
+  // pid-scoped tmp name: ~/.claude.json (ensureTrusted) is Claude Code's own
+  // machine-global file, written by every claude process on the box — a fixed
+  // `.tmp` lets two writers clobber each other's staged content and rename the
+  // wrong one into place. The state/*.json files are ours alone and wouldn't
+  // need it, but one naming rule is cheaper than two.
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, data);
+  for (let attempt = 1; ; attempt++) {
+    try { rename(tmp, file); return; }
+    catch (e) {
+      if (attempt >= 5 || !RETRY_CODES.has(e.code)) throw e;
+      Atomics.wait(retrySignal, 0, 0, 20 * attempt);
+    }
+  }
+}
+
 let logger = null;
 function persist() {
   const data = {
@@ -66,8 +94,7 @@ function persist() {
     recentRepos,
   };
   try {
-    writeFileSync(STATE_FILE + '.tmp', JSON.stringify(data, null, 2));
-    renameSync(STATE_FILE + '.tmp', STATE_FILE); // atomic swap — a crash mid-write never truncates STATE_FILE
+    writeAtomic(STATE_FILE, JSON.stringify(data, null, 2)); // atomic swap — a crash mid-write never truncates STATE_FILE
   } catch (e) {
     logger?.warn({ err: e.message }, 'agents.json write failed — registry not persisted');
     const err = new Error(`agents.json write failed: ${e.message}`);
@@ -245,7 +272,7 @@ function spawnPty(bin, args, opts) {
     let hint = '';
     try { accessSync(bin, constants.X_OK); }
     catch { hint = ' — not executable; `chmod +x` it or point CLAUDE_BIN/OLLAMA_BIN at the real binary'; }
-    throw new Error(`failed to launch ${bin}: ${e.message}${hint}`);
+    throw new Error(`failed to launch ${bin}: ${e.message}${hint}`, { cause: e });
   }
 }
 
@@ -292,9 +319,7 @@ export function ensureTrusted(cwd, file = join(homedir(), '.claude.json')) {
     const json = JSON.parse(readFileSync(file, 'utf8'));
     if (json.projects?.[key]?.hasTrustDialogAccepted === true) return;
     ((json.projects ??= {})[key] ??= {}).hasTrustDialogAccepted = true;
-    const tmp = `${file}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(json, null, 2));
-    renameSync(tmp, file);
+    writeAtomic(file, JSON.stringify(json, null, 2));
   } catch { /* unreadable/missing/parse-fail → let the prompt show once */ }
 }
 function sessionLogExists(cwd, id) {

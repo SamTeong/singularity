@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import { useRef, useState } from 'react';
+import { useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -29,17 +29,19 @@ const MOUNT_LRU = 4;
  * locally; fleet state + actions come from {@link useAgents}. Dock size/minimise
  * state is shell-owned and passed in (shared with the create dialogs).
  */
-export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag, listW, expandDock, onTopReached, onViewTranscript, onToast }) {
+export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandDock, onTopReached, onViewTranscript, onToast }) {
   const { agents, active, setActive, subagents, stats, sendMsg, reorderAgents, registerTerminal } = useAgents();
   const [dragId, setDragId] = useState(null);
 
-  // MRU of viewed agents → the set kept mounted. Updated during render so the
-  // active agent is always mounted first.
-  const mruRef = useRef([]);
-  if (active && mruRef.current[0] !== active) {
-    mruRef.current = [active, ...mruRef.current.filter((id) => id !== active)];
+  // MRU of viewed agents → the set kept mounted. Real state (not a ref) since
+  // it drives rendering below; updated during render (React's documented
+  // "adjust state on prop change" pattern) so the active agent is always
+  // mounted first in the same pass it becomes active.
+  const [mru, setMru] = useState(() => (active ? [active] : []));
+  if (active && mru[0] !== active) {
+    setMru((m) => [active, ...m.filter((id) => id !== active)]);
   }
-  const mountedSet = new Set(mruRef.current.slice(0, MOUNT_LRU));
+  const mountedSet = new Set(mru.slice(0, MOUNT_LRU));
 
   const activeAgent = agents.find((a) => a.id === active);
   const cycleSession = (dir) => {
@@ -97,7 +99,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, startDockDrag,
             const show = !dockMin && a.id === active;
             return (
               <Box key={a.id} sx={{ position: 'absolute', inset: 0, display: show ? 'block' : 'none' }}>
-                <Terminal agent={a} visible={show} sendMsg={sendMsg} onSwitch={cycleSession} registerOutput={(fn) => registerTerminal(a.id, fn)} onTopReached={() => onTopReached(a)} />
+                <Terminal agent={a} visible={show} sendMsg={sendMsg} onSwitch={cycleSession} registerOutput={registerTerminal} onTopReached={() => onTopReached(a)} />
               </Box>
             );
           })}

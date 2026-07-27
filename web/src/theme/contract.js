@@ -70,7 +70,6 @@ export function assertSkinContract(theme, skinId) {
     return !v || (typeof v === 'object' && Object.keys(v).length === 0);
   });
   if (missing.length) {
-    // eslint-disable-next-line no-console
     console.warn(
       `[theme] skin "${skinId}" is missing token group(s): ${missing.join(', ')}. ` +
         'Components reading getTokens() may fall back to empty values.',

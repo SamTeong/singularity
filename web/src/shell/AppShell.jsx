@@ -99,8 +99,12 @@ export default function AppShell() {
   const { width: dockH, startDrag: startDockDrag } = useResizable('sing-dock-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: mainRef });
 
   // Panels that mount once and stay mounted — track which have ever been shown.
-  const visited = useRef({});
-  if (PERSISTENT_VIEWS.includes(view)) visited.current[view] = true;
+  // Updated during render (React's documented "adjust state on prop change"
+  // pattern) rather than a ref, since this set genuinely drives what renders below.
+  const [visited, setVisited] = useState(() => new Set(PERSISTENT_VIEWS.includes(view) ? [view] : []));
+  if (PERSISTENT_VIEWS.includes(view) && !visited.has(view)) {
+    setVisited((s) => new Set(s).add(view));
+  }
 
   // Remember the selected view across skin remounts + reloads.
   useEffect(() => { localStorage.setItem('sing-view', view); }, [view]);
@@ -197,22 +201,22 @@ export default function AppShell() {
             (display:none when hidden); Tasks/Cron/Usage render on demand. */}
         <Box sx={(t) => ({ ...glass(t), position: 'relative', flex: 1, mt: 1.5, mx: 1.5, minWidth: 0, borderRadius: `${getTokens(t).radius.lg}px`, overflow: 'hidden', zIndex: getTokens(t).layers.content })}>
           <Suspense fallback={<Box sx={{ p: 3, color: 'text.secondary' }}>Loading…</Box>}>
-            {visited.current.config && (
+            {visited.has('config') && (
               <Box sx={{ display: view === 'config' ? 'block' : 'none', height: '100%' }}><ConfigEditor /></Box>
             )}
-            {visited.current.hooks && (
+            {visited.has('hooks') && (
               <Box sx={{ display: view === 'hooks' ? 'block' : 'none', height: '100%' }}><HooksEditor /></Box>
             )}
-            {visited.current.rules && (
+            {visited.has('rules') && (
               <Box sx={{ display: view === 'rules' ? 'block' : 'none', height: '100%' }}><RulesPanel /></Box>
             )}
-            {visited.current.memory && (
+            {visited.has('memory') && (
               <Box sx={{ display: view === 'memory' ? 'block' : 'none', height: '100%' }}><MemoryPanel /></Box>
             )}
-            {visited.current.wiki && (
+            {visited.has('wiki') && (
               <Box sx={{ display: view === 'wiki' ? 'block' : 'none', height: '100%' }}><WikiPanel /></Box>
             )}
-            {visited.current.sessions && (
+            {visited.has('sessions') && (
               <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>
                 <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} openSession={openTx} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
               </Box>
@@ -247,7 +251,6 @@ export default function AppShell() {
         dockMin={dockMin}
         toggleDock={toggleDock}
         dockH={dockH}
-        startDockDrag={startDockDrag}
         listW={listW}
         expandDock={expandDock}
         onTopReached={setTxPrompt}

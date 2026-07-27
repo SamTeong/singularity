@@ -115,7 +115,7 @@ function migrateFile(file, transform) {
   if (!existsSync(file)) return;
   let raw;
   try { raw = JSON.parse(readFileSync(file, 'utf8')); } catch { return; }
-  let changed = false;
+  let changed;
   try { changed = transform(raw); } catch { return; }
   if (changed) { try { writeFileSync(file, JSON.stringify(raw, null, 2)); } catch { /* best-effort */ } }
 }

@@ -16,7 +16,7 @@
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync, chmodSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
@@ -45,7 +45,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch } = await import('./agents.mjs');
+const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic } = await import('./agents.mjs');
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -365,4 +365,30 @@ test('buildSpawn: ollama model on resume injects --model to override stripped tr
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---- writeAtomic (server/background.test.mjs:214 flake regression) ------------
+// Windows rename-over-existing-file can transiently EPERM/EACCES/EBUSY (AV/
+// Search/a brief reader). Inject a fake `rename` that throws those codes N
+// times, then delegates to the real renameSync — writeAtomic must retry past
+// them and still land the file, but must not retry (or swallow) an unrelated
+// error code.
+test('writeAtomic: retries past transient EPERM, then succeeds', () => {
+  const file = join(scratch, 'retry-ok.json');
+  let calls = 0;
+  const fakeRename = (...args) => {
+    calls++;
+    if (calls < 3) { const e = new Error('busy'); e.code = 'EPERM'; throw e; }
+    return renameSync(...args);
+  };
+  writeAtomic(file, 'hello', fakeRename);
+  assert.equal(calls, 3);
+  assert.equal(readFileSync(file, 'utf8'), 'hello');
+});
+test('writeAtomic: non-retryable error rethrows immediately, no retry', () => {
+  const file = join(scratch, 'retry-fatal.json');
+  let calls = 0;
+  const fakeRename = () => { calls++; const e = new Error('gone'); e.code = 'ENOENT'; throw e; };
+  assert.throws(() => writeAtomic(file, 'x', fakeRename), /gone/);
+  assert.equal(calls, 1);
 });

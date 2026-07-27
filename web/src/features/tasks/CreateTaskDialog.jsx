@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -40,11 +40,18 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
   // Mirror of server isClaudeModel: empty/'claude'/known alias/claude-* id → claude.
   const isClaude = (m) => !m || (claudeSet ? claudeSet.has(m) : m === 'claude') || m.startsWith('claude-');
   // Pre-fill impl/reviewer from the orchestrator model: claude → sonnet/opus,
-  // ollama → mirror it. Re-derives whenever the orchestrator model changes.
-  useEffect(() => {
+  // ollama → mirror it. Re-derives whenever the orchestrator model changes (or
+  // claudeSet finishes loading, which can reclassify the same model). Compared
+  // against the previous values during render, not an effect, since impl/reviewer
+  // stay independently editable afterwards.
+  const [prevModel, setPrevModel] = useState(model);
+  const [prevClaudeSet, setPrevClaudeSet] = useState(claudeSet);
+  if (model !== prevModel || claudeSet !== prevClaudeSet) {
+    setPrevModel(model);
+    setPrevClaudeSet(claudeSet);
     if (isClaude(model)) { setImplModel('sonnet'); setReviewerModel('opus'); }
     else { setImplModel(model); setReviewerModel(model); }
-  }, [model, claudeSet]);
+  }
 
   const reset = () => {
     setTitle(''); setDescription(''); setTags([]); setScopes([]); setModel('');

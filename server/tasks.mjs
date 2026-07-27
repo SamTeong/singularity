@@ -4,7 +4,7 @@
 // 'tasks' on the shared agents bus; pty-ws fans it out.
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, renameSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import * as reg from './agents.mjs';
@@ -54,8 +54,7 @@ function isGitWorkTree(repo) {
 
 function persist() {
   try {
-    writeFileSync(TASKS_FILE + '.tmp', JSON.stringify({ tasks: [...tasks.values()], history }, null, 2));
-    renameSync(TASKS_FILE + '.tmp', TASKS_FILE); // atomic swap — a crash mid-write never truncates TASKS_FILE
+    reg.writeAtomic(TASKS_FILE, JSON.stringify({ tasks: [...tasks.values()], history }, null, 2)); // atomic swap — a crash mid-write never truncates TASKS_FILE
   } catch (e) {
     logger?.warn({ err: e.message }, 'tasks.json write failed');
     const err = new Error(`tasks.json write failed: ${e.message}`);
