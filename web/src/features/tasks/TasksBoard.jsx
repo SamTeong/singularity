@@ -1,4 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
+import { brandGrad, surface2, stroke2, chipBg, focusRing } from '@/shell/shellStyles.js';
 import { useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -17,8 +18,6 @@ import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import OutlinedFlagOutlinedIcon from '@mui/icons-material/OutlinedFlagOutlined';
-import HistoryIcon from '@mui/icons-material/History';
-import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
@@ -66,6 +65,57 @@ function statsLine(s) {
 // Header toggles to a History table (concluded tasks — completed or abandoned).
 const LIVE_STATUS = new Set(['starting', 'running', 'idle']);
 
+// layout-02 column-dot colours — a status-ish marker per column.
+const COL_DOT = { todo: 'text.disabled', inprogress: 'info.main', inreview: 'warning.main', done: 'success.main' };
+
+// Segmented-control (Board | History) button styling. `on` marks the active
+// segment: surface-solid fill, primary ink, and the card shadow per .seg .on.
+// Both buttons stay role=button with aria-pressed so the e2e (getByRole 'Board'
+// / 'History') keeps matching — NOT MUI ToggleButton/Tab.
+const segBtn = (t, on) => {
+  const g = getTokens(t);
+  return {
+    px: '14px', py: '6px', minWidth: 0, borderRadius: 999,
+    fontSize: 12, fontWeight: 700, lineHeight: 1.2, letterSpacing: 0,
+    color: 'text.disabled', textTransform: 'none',
+    border: 'none', boxShadow: 'none', background: 'transparent',
+    ...(on && {
+      background: t.vars.palette.background.paper,
+      color: 'text.primary',
+      boxShadow: g.glass.cardShadow,
+    }),
+    '&:hover': { background: on ? t.vars.palette.background.paper : 'transparent', boxShadow: on ? g.glass.cardShadow : 'none' },
+    '&.Mui-focusVisible': focusRing(t),
+  };
+};
+
+// Gradient primary action (.btn-primary) — brand-grad fill, white ink, soft
+// brand glow, hover lift + stronger glow, focus ring on keyboard focus.
+const primaryBtn = (t) => {
+  const glow = t?.palette?.mode === 'dark' ? 'rgba(170,65,175,.5)' : 'rgba(170,65,175,.3)';
+  return {
+    borderRadius: 999, px: '18px', py: '7px',
+    background: brandGrad(t), color: '#fff',
+    fontWeight: 700, fontSize: 13, textTransform: 'none', lineHeight: 1.2,
+    border: 'none',
+    boxShadow: `0 14px 34px -12px ${glow}`,
+    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 20px 44px -14px ${glow}`, background: brandGrad(t) },
+    '&.Mui-focusVisible': focusRing(t),
+    '&:active': { transform: 'translateY(0)' },
+  };
+};
+
+// Tag-filter chip (.tag) — mono, surface2/chip bg, stroke2 border, pill;
+// selected → brand border + stronger tint.
+const tagChip = (t, on) => ({
+  height: 22, fontSize: 11, fontWeight: 700, borderRadius: 999,
+  fontFamily: (tt) => tt.typography?.code?.fontFamily ?? 'ui-monospace, monospace',
+  background: on ? chipBg(t) : surface2(t),
+  border: `1px solid ${on ? t.vars.palette.primary.main : stroke2(t)}`,
+  color: 'text.secondary',
+  '&:hover': { background: chipBg(t) },
+});
+
 export default function TasksBoard({ tasks, history, agents, stats, activeId, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
   const [dragId, setDragId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
@@ -90,6 +140,10 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
     if (n.has(tag)) n.delete(tag); else n.add(tag);
     return n;
   });
+
+  // Live subtitle for the view topbar: task count + count of agents currently
+  // in a live state (starting/running/idle).
+  const runningCount = agents.filter((a) => LIVE_STATUS.has(a.status)).length;
 
   // Sort value per header key. Numeric fields fall back to 0; strings to ''.
   const sortValue = (h, key) => {
@@ -247,13 +301,23 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
 
   return (
     <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-        <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Tasks</Typography>
-        <Box sx={{ flex: 1 }} />
-        <Button size="small" startIcon={showHistory ? <ViewKanbanOutlinedIcon /> : <HistoryIcon />} onClick={() => setShowHistory((v) => !v)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>
-          {showHistory ? 'Board' : 'History'}
-        </Button>
-        <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Task</Button>
+      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1, px: 0.5 }}>
+        <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
+          <Typography sx={{ fontWeight: 700, fontSize: 20, letterSpacing: '-0.02em', lineHeight: 1 }}>Tasks</Typography>
+          <Typography sx={{ fontSize: 12, color: 'text.disabled', mt: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {tasks.length} tasks · {runningCount} running
+          </Typography>
+        </Box>
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1.25, flexShrink: 0 }}>
+          {/* Segmented Board|History control — two plain Buttons (role=button)
+              with aria-pressed, NOT ToggleButton/Tab, so the e2e role/name
+              matches stay exact. Both buttons always visible. */}
+          <Box sx={(t) => ({ display: 'flex', background: surface2(t), border: `1px solid ${stroke2(t)}`, borderRadius: 999, p: '3px' })}>
+            <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={!showHistory} onClick={() => setShowHistory(false)} sx={(t) => segBtn(t, !showHistory)}>Board</Button>
+            <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={showHistory} onClick={() => setShowHistory(true)} sx={(t) => segBtn(t, showHistory)}>History</Button>
+          </Box>
+          <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => primaryBtn(t)}>Task</Button>
+        </Box>
       </Stack>
       {allTags.length > 0 && (
         <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
@@ -264,11 +328,10 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                 key={tag}
                 size="small"
                 label={tag}
-                variant={on ? 'filled' : 'outlined'}
-                color={on ? 'primary' : 'default'}
+                variant="outlined"
                 onClick={() => toggleTag(tag)}
                 onDelete={on ? () => toggleTag(tag) : undefined}
-                sx={{ height: 22, fontSize: 11 }}
+                sx={(t) => tagChip(t, on)}
               />
             );
           })}
@@ -280,7 +343,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
               onClick={() => setActiveTags(new Set())}
               onDelete={() => setActiveTags(new Set())}
               deleteIcon={<CloseIcon />}
-              sx={{ height: 22, fontSize: 11, ml: 0.5, color: 'text.secondary' }}
+              sx={(t) => ({ height: 22, fontSize: 11, fontWeight: 700, borderRadius: 999, fontFamily: (tt) => tt.typography?.code?.fontFamily ?? 'ui-monospace, monospace', background: 'transparent', border: `1px solid ${stroke2(t)}`, color: 'text.disabled', ml: 0.5, '&:hover': { background: surface2(t) } })}
             />
           )}
         </Stack>
@@ -363,7 +426,8 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                   p: 0.75,
                 })}
               >
-                <Typography variant="overline" sx={{ px: 0.5, lineHeight: 1.6, color: 'text.secondary' }}>
+                <Typography variant="overline" sx={{ px: 0.5, display: 'flex', alignItems: 'center', gap: 0.75, lineHeight: 1.6, color: 'text.secondary' }}>
+                  <Box component="span" sx={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, bgcolor: COL_DOT[col] }} />
                   {label} ({cards.length})
                 </Typography>
                 {/* Card list scrolls inside the column when it outgrows the pane. */}
@@ -390,18 +454,34 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                         aria-label={task.title}
                         onClick={activate}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
-                        sx={(t) => ({
-                          p: 1, cursor: 'pointer', flexShrink: 0,
-                          borderRadius: `${getTokens(t).radius.sm}px`,
-                          border: `1px solid ${sel ? t.vars.palette.primary.main : getTokens(t).glass.stroke}`,
-                          background: getTokens(t).glass.surface,
-                          opacity: dragId === task.id ? 0.4 : 1,
-                          '& .card-act': { opacity: 0 },
-                          '&:hover .card-act': { opacity: 1 },
-                        })}
+                        sx={(t) => {
+                          const g = getTokens(t);
+                          return {
+                            p: 1.75, cursor: 'pointer', flexShrink: 0,
+                            borderRadius: `${g.radius.md ?? g.radius.sm}px`,
+                            border: `1px solid ${sel ? t.vars.palette.primary.main : g.glass.stroke}`,
+                            background: g.glass.surface,
+                            boxShadow: g.glass.cardShadow,
+                            opacity: dragId === task.id ? 0.4 : 1,
+                            transition: 'transform .18s ease, border-color .18s ease, box-shadow .18s ease',
+                            '&:hover': { transform: 'translateY(-2px)', borderColor: t.vars.palette.primary.main },
+                            '&:focus-visible': { ...focusRing(t), borderColor: t.vars.palette.primary.main },
+                            '& .card-act': { opacity: 0 },
+                            '&:hover .card-act': { opacity: 1 },
+                            ...(sel && { boxShadow: `${g.glass.cardShadow}, 0 0 0 2px ${chipBg(t)}`, borderColor: t.vars.palette.primary.main }),
+                          };
+                        }}
                       >
+                        {/* Top row: status pill (live agent → StatusPill, else a
+                            task.state chip) + mono task-id, mirroring .tcard-top. */}
+                        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', mb: 0.75 }}>
+                          {agent
+                            ? <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>
+                            : (task.state && <Chip size="small" label={task.state} sx={{ height: 20, fontSize: 11 }} />)}
+                          <Typography variant="code" sx={{ ml: 'auto', fontSize: 11, color: 'text.disabled' }}>#{task.id.slice(-4)}</Typography>
+                        </Stack>
                         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'flex-start' }}>
-                          <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }} noWrap>{task.title}</Typography>
+                          <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, lineHeight: 1.35 }} noWrap>{task.title}</Typography>
                           <Stack direction="row" className="card-act" sx={{ transition: 'opacity .15s' }}>
                             {col === 'done' && (
                               <Tooltip title={task.branch ? 'Remove (temporary work folder already gone; your changes are saved)' : 'Remove (moves to history)'} disableInteractive>
@@ -441,11 +521,11 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                             </Typography>
                           </Tooltip>
                         )}
-                        <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
-                          {task.state && <Chip size="small" label={task.state} sx={{ height: 20, fontSize: 11 }} />}
-                          {(task.tags || []).map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 20, fontSize: 11 }} />)}
-                          {agent && <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>}
-                        </Stack>
+                        {(task.tags || []).length > 0 && (
+                          <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
+                            {(task.tags || []).map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 20, fontSize: 11 }} />)}
+                          </Stack>
+                        )}
                       </Box>
                     );
                   })}

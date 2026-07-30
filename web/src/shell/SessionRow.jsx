@@ -1,4 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
+import { surface2, navActiveBg, brandGrad } from '@/shell/shellStyles.js';
 import React from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -57,7 +58,7 @@ export default function SessionRow({
         onDragOver={dragHandlers.onDragOver}
         onDrop={dragHandlers.onDrop}
         onDragEnd={dragHandlers.onDragEnd}
-        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.5, flexDirection: 'column', alignItems: 'stretch', gap: 0.5, opacity: dragging ? 0.4 : 1, '& .row-act': { opacity: a.status === 'detached' ? 1 : 0 }, '&:hover .row-act': { opacity: 1 } }}
+        sx={(t) => ({ borderRadius: `${getTokens(t).radius.sm}px`, mb: 0.5, flexDirection: 'column', alignItems: 'stretch', gap: 0.5, opacity: dragging ? 0.4 : 1, position: 'relative', '&:hover': { background: surface2(t) }, '&.Mui-selected': { background: navActiveBg(t), '&:hover': { background: navActiveBg(t) } }, '&.Mui-selected::before': { content: '""', position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, borderRadius: '0 3px 3px 0', background: brandGrad(t) }, '& .row-act': { opacity: a.status === 'detached' ? 1 : 0 }, '&:hover .row-act': { opacity: 1 } })}
       >
         {/* Row 1: name (left) + actions (right). */}
         <Stack direction="row" sx={{ alignItems: 'center', minWidth: 0 }}>

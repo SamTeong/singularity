@@ -15,20 +15,39 @@ import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import SpeedIcon from '@mui/icons-material/Speed';
 import Logo from '@/components/Logo.jsx';
-import { ProviderRow } from '@/features/usage/UsagePill.jsx';
 import { visibleProviders, usageSummary } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
-import { StatusPill } from '@zapac/mui-theme';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
-import { glass, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
+import {
+  glass,
+  PAPER_TOOLTIP_SLOTPROPS,
+  brandGrad,
+  trackColor,
+  navActiveBg,
+  chipBg,
+  surface2,
+  stroke2,
+  brandInk,
+  statusColor,
+  focusRing,
+} from '@/shell/shellStyles.js';
 
 // Vertical nav rail entries (icon + label). The rail is the sidebar's primary
-// navigation; the ＋ "New agent" row above it opens the create dialog.
+// navigation; the ＋ "New session" row above it opens the create dialog.
 const NAV = [
   { v: 'tasks', icon: <ViewKanbanIcon />, label: 'Tasks' },
   { v: 'cron', icon: <ScheduleIcon />, label: 'Automation' },
   { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
 ];
+
+// ink-2 / ink-3 from DESIGN.md map to MUI's scheme-switching text palette.
+const INK2 = 'text.secondary';
+const INK3 = 'text.disabled';
+const INK = 'text.primary';
+
+// Brand-ink for chrome that should read purple on light glass, full ink on dark
+// (layout-02: --brand-ink in light, --ink in dark).
+const brandOrInk = (t) => (t.palette.mode === 'dark' ? INK : brandInk(t));
 
 /**
  * App sidebar: brand mark + more-menu button, and the vertical nav rail
@@ -37,9 +56,10 @@ const NAV = [
  * menu-open callback are passed in.
  */
 export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewSession, onOpenMenu }) {
-  const { agents, connected, usage, refreshUsage } = useAgents();
+  const { agents, connected, usage, refreshUsage, tasks, crons } = useAgents();
   const caps = useCapabilities();
   const usageTip = usageSummary(usage, caps); // per-provider 5h/7d summary for the collapsed tooltip
+  const counts = { tasks: tasks.length, cron: crons.length };
 
   return (
     <Box
@@ -82,21 +102,44 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
         )}
       </Stack>
 
-      {/* Vertical nav rail: ＋ New agent, then Tasks / Cron / Usage. Icon-only when collapsed. */}
+      {/* Vertical nav rail: ＋ New session, then Tasks / Automation / Usage. Icon-only when collapsed. */}
       <List sx={{ px: 1, pb: 1 }}>
         {/* Tooltips only when collapsed — expanded rows show their label already. */}
         <Tooltip title={collapsed ? 'New session' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
           <ListItemButton
             onClick={onNewSession}
-            sx={{ justifyContent: collapsed ? 'center' : 'flex-start', minHeight: 44, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.5 }}
+            sx={(t) => ({
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              justifyContent: collapsed ? 'center' : 'flex-start',
+              minHeight: 44,
+              borderRadius: `${getTokens(t).radius.sm}px`,
+              mb: 0.5,
+              pl: collapsed ? 0 : '14px',
+              pr: collapsed ? 0 : '14px',
+              py: '11px',
+              background: chipBg(t),
+              border: `1px solid ${stroke2(t)}`,
+              color: INK,
+              fontWeight: 700,
+              fontSize: 14,
+              transition: 'border-color .18s ease, background .18s ease',
+              '&:hover': {
+                borderColor: t.vars.palette.primary.main,
+                background: `color-mix(in srgb, ${t.vars.palette.primary.main} 12%, ${chipBg(t)})`,
+              },
+              '&:focus-visible': focusRing(t),
+            })}
           >
-            <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center' }}><AddIcon /></ListItemIcon>
-            {!collapsed && <ListItemText primary="New session" />}
+            <ListItemIcon sx={(t) => ({ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: brandOrInk(t) })}><AddIcon /></ListItemIcon>
+            {!collapsed && <ListItemText primary="New session" slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 700 } } }} />}
           </ListItemButton>
         </Tooltip>
         {NAV.map((item) => {
           const isUsage = item.v === 'usage';
           const tooltipLabel = isUsage && usageTip ? usageTip : item.label;
+          const count = counts[item.v];
           return (
             <Tooltip key={item.v} title={collapsed ? tooltipLabel : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
               <ListItemButton
@@ -106,19 +149,64 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                   setView(item.v);
                   if (isUsage) refreshUsage(true);
                 }}
-                sx={{ justifyContent: collapsed ? 'center' : 'flex-start', alignItems: collapsed || !isUsage ? 'center' : 'flex-start', minHeight: 44, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.5 }}
+                sx={(t) => ({
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '13px',
+                  justifyContent: collapsed ? 'center' : 'flex-start',
+                  minHeight: 44,
+                  borderRadius: `${getTokens(t).radius.sm}px`,
+                  mb: 0.5,
+                  pl: collapsed ? 0 : '14px',
+                  pr: collapsed ? 0 : '14px',
+                  py: '11px',
+                  position: 'relative',
+                  color: INK2,
+                  fontWeight: 400,
+                  fontSize: 14,
+                  transition: 'background .18s ease, color .18s ease',
+                  '&:hover': { background: surface2(t), color: INK },
+                  '&.Mui-selected': {
+                    background: navActiveBg(t),
+                    color: INK,
+                    fontWeight: 700,
+                    boxShadow: getTokens(t).glass.cardShadow,
+                    '&:hover': { background: navActiveBg(t) },
+                  },
+                  // 4px gradient left-edge marker — the ONE sanctioned active indicator (DESIGN §6).
+                  '&.Mui-selected::before': {
+                    content: '""',
+                    position: 'absolute',
+                    left: 0,
+                    top: '9px',
+                    bottom: '9px',
+                    width: '4px',
+                    borderRadius: '0 4px 4px 0',
+                    background: brandGrad(t),
+                  },
+                  '&:focus-visible': focusRing(t),
+                })}
               >
-                <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', mt: collapsed || !isUsage ? 0 : '2px' }}>{item.icon}</ListItemIcon>
-                {!collapsed && (
-                  <ListItemText
-                    primary={item.label}
-                    secondary={isUsage ? (
-                      <Stack spacing={0.75} sx={{ mt: 0.75 }}>
-                        {visibleProviders(caps).map((p) => <ProviderRow key={p.key} label={p.label} u={usage?.[p.key]} />)}
-                      </Stack>
-                    ) : null}
-                    slotProps={isUsage ? { secondary: { component: 'div' } } : undefined}
-                  />
+                <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: 'inherit', opacity: 0.85 }}>{item.icon}</ListItemIcon>
+                {!collapsed && <ListItemText primary={item.label} slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 'inherit' } } }} />}
+                {!collapsed && count != null && (
+                  <Typography
+                    component="span"
+                    sx={(t) => ({
+                      ml: 'auto',
+                      fontSize: 11,
+                      fontWeight: 700,
+                      letterSpacing: '.02em',
+                      color: INK3,
+                      background: chipBg(t),
+                      px: '9px',
+                      py: '2px',
+                      borderRadius: `${getTokens(t).radius.pill ?? 999}px`,
+                      '.Mui-selected &': { color: brandOrInk(t) },
+                    })}
+                  >
+                    {count}
+                  </Typography>
                 )}
               </ListItemButton>
             </Tooltip>
@@ -126,13 +214,123 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
         })}
       </List>
 
-      {!collapsed && !connected && (
-        <Box sx={{ px: 2, pb: 1 }}>
-          <StatusPill status="error">disconnected</StatusPill>
-        </Box>
-      )}
-
       <Box sx={{ flex: 1 }} />
+
+      {/* "Usage · 5h window" mini-bar panel — only in the expanded rail. */}
+      {!collapsed && <UsagePanel usage={usage} caps={caps} />}
+
+      {/* Daemon-status footer — always visible (replaces the conditional StatusPill). */}
+      <DaemonFooter connected={connected} />
+    </Box>
+  );
+}
+
+/**
+ * Sidebar usage panel (layout-02 `.usage`): a recessed glass tile with a labelled
+ * mini-bar + percentage per provider, wired to the live `useAgents.usage` shape.
+ * Renders a muted placeholder row when no data has loaded yet.
+ */
+function UsagePanel({ usage, caps }) {
+  const rows = visibleProviders(caps).map((p) => {
+    const u = usage?.[p.key];
+    const pct = u?.ok && u.session?.pctUsed != null ? Math.round(u.session.pctUsed) : null;
+    return { key: p.key, label: p.label, pct };
+  });
+  const hasData = rows.some((r) => r.pct != null);
+  return (
+    <Box
+      sx={(t) => ({
+        mx: 1.5,
+        mb: 1.5,
+        p: '14px',
+        borderRadius: `${getTokens(t).radius.md}px`,
+        background: surface2(t),
+        border: `1px solid ${stroke2(t)}`,
+      })}
+    >
+      <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '.14em', textTransform: 'uppercase', color: INK3, mb: '11px' }}>
+        Usage · 5h window
+      </Typography>
+      {!hasData ? (
+        <Typography sx={{ fontSize: 12, color: INK3 }}>No usage yet</Typography>
+      ) : (
+        <Stack spacing="10px">
+          {rows.map((r) => (
+            <Stack key={r.key} direction="row" spacing="10px" sx={{ alignItems: 'center' }}>
+              <Typography sx={{ fontSize: 12, color: INK2, width: '52px', flex: 'none' }}>{r.label}</Typography>
+              <Box
+                sx={(t) => ({
+                  flex: 1,
+                  height: '6px',
+                  borderRadius: `${getTokens(t).radius.pill ?? 999}px`,
+                  background: trackColor(t),
+                  overflow: 'hidden',
+                })}
+              >
+                <Box
+                  sx={(t) => ({
+                    display: 'block',
+                    height: '100%',
+                    width: `${r.pct ?? 0}%`,
+                    borderRadius: `${getTokens(t).radius.pill ?? 999}px`,
+                    background: brandGrad(t),
+                  })}
+                />
+              </Box>
+              <Typography sx={{ fontSize: 11, fontWeight: 700, color: INK3, width: '34px', textAlign: 'right', flex: 'none' }}>
+                {r.pct == null ? '—' : `${r.pct}%`}
+              </Typography>
+            </Stack>
+          ))}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
+/**
+ * Daemon-status footer (layout-02 `.side-foot`): a connection dot + label + the
+ * loopback address the client reaches the daemon/WS through (`location.host`).
+ * Always visible — reflects the live `useAgents.connected` state.
+ */
+function DaemonFooter({ connected }) {
+  const host = typeof location !== 'undefined' ? location.host : '127.0.0.1:4317';
+  return (
+    <Box
+      component="footer"
+      sx={(t) => ({
+        display: 'flex',
+        alignItems: 'center',
+        gap: '10px',
+        pt: '13px',
+        pb: '13px',
+        px: '18px',
+        borderTop: `1px solid ${stroke2(t)}`,
+      })}
+    >
+      <Box
+        aria-hidden
+        sx={(t) => {
+          const kind = connected ? 'ok' : 'danger';
+          const c = statusColor(t, kind);
+          return {
+            width: '8px',
+            height: '8px',
+            borderRadius: '50%',
+            background: c,
+            flex: 'none',
+            boxShadow: `0 0 0 3px color-mix(in srgb, ${c} 22%, transparent)`,
+          };
+        }}
+      />
+      <Box sx={{ lineHeight: 1.25 }}>
+        <Typography component="div" sx={{ fontSize: 12, fontWeight: 700, color: INK2, lineHeight: 1.25 }}>
+          {connected ? 'Daemon connected' : 'Daemon disconnected'}
+        </Typography>
+        <Typography component="small" sx={{ display: 'block', fontFamily: 'monospace', fontSize: 11, fontWeight: 400, color: INK3, lineHeight: 1.25 }}>
+          {host}
+        </Typography>
+      </Box>
     </Box>
   );
 }
