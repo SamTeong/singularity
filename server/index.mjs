@@ -295,8 +295,13 @@ app.get('/procs', async () => ({ procs: await scanClaude() }));
 app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS, codex: CODEX_PRESETS }));
 
 // Home dir, for the client to collapse full paths to `~` on display (pure
-// presentation — the backend itself always deals in full paths).
-app.get('/env', async () => ({ home: homedir() }));
+// presentation — the backend itself always deals in full paths). SING_HOME_DISPLAY
+// optionally overrides it so a sandbox/hermetic env can keep the OS home for real
+// `~/.claude` reads while reporting a display home that doesn't abbreviate seeded
+// paths — keeps tildify() from racing the e2e rail assertions. Falsy falls back to
+// the real home: the client's untildify() no-ops without one, which would send a
+// literal '~' to path-taking routes.
+app.get('/env', async () => ({ home: process.env.SING_HOME_DISPLAY || homedir() }));
 
 // Optional-feature flags for the shell: which features are wired up on this
 // machine so the UI can show inline "set X to enable" hints instead of failing

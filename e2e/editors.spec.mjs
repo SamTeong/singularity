@@ -22,9 +22,13 @@ const uniq = (label) => `${label}-${Date.now()}-${Math.floor(Math.random() * 1e6
 // .type, which sends real per-character key events and is both slow and
 // subject to CodeMirror's default closeBrackets auto-pairing) inserts the
 // whole string as one op, landing byte-for-byte as given.
+//
+// ControlOrMeta, not Control: end-of-document is CodeMirror's `Mod-End`, and Mod
+// is Cmd on macOS (a literal Ctrl-End falls through to plain End there, i.e.
+// end-of-LINE) — see the same note in config.spec.mjs.
 async function appendMarker(page, marker) {
   await cm(page).click();
-  await page.keyboard.press('Control+End');
+  await page.keyboard.press('ControlOrMeta+End');
   await page.keyboard.insertText(marker);
 }
 
