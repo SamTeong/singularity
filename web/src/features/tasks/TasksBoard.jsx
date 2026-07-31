@@ -1,6 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
 import { brandGrad, surface2, stroke2, chipBg, focusRing } from '@/shell/shellStyles.js';
-import { useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -25,6 +25,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
 import VerticalSplitIcon from '@mui/icons-material/VerticalSplit';
 import { StatusPill } from '@zapac/mui-theme';
+import TaskDetailPanel from '@/features/tasks/TaskDetailPanel.jsx';
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import { repoName } from '@/lib/paths.js';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
@@ -99,9 +100,14 @@ const primaryBtn = (t) => {
     fontWeight: 700, fontSize: 13, textTransform: 'none', lineHeight: 1.2,
     border: 'none',
     boxShadow: `0 14px 34px -12px ${glow}`,
+    transition: 'transform .18s ease, box-shadow .18s ease',
     '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 20px 44px -14px ${glow}`, background: brandGrad(t) },
     '&.Mui-focusVisible': focusRing(t),
     '&:active': { transform: 'translateY(0)' },
+    // The hover lift + glow intensify are motion — suppress the transform under
+    // reduced motion (DESIGN §6 "give every animation a prefers-reduced-motion
+    // end-state fallback"); keep the shadow/bg colour change, which isn't motion.
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none', '&:hover': { transform: 'none' }, '&:active': { transform: 'none' } },
   };
 };
 
@@ -120,6 +126,18 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   const [dragId, setDragId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [activeTags, setActiveTags] = useState(() => new Set());
+  // Detail panel: a card click opens the right-sliding sheet instead of the
+  // transcript dock / terminal select. `detailTask` holds the id of the open
+  // task; the live task object is re-derived from `tasks` each render so the
+  // panel reflects live stat/status updates and a different card swaps content
+  // (one panel, not two). When the open task leaves the board (concluded, moved
+  // to history, or removed), it's no longer in `tasks` — close the panel.
+  const [detailTask, setDetailTask] = useState(null);
+  const liveDetailTask = useMemo(
+    () => (detailTask ? tasks.find((t) => t.id === detailTask.id) ?? null : null),
+    [tasks, detailTask],
+  );
+  useEffect(() => { if (detailTask && !liveDetailTask) setDetailTask(null); }, [detailTask, liveDetailTask]);
   // History table sort: click a header to sort, click again to reverse. Numeric
   // fields compare by value, strings by localeCompare. Default = newest first.
   const [sort, setSort] = useState({ key: 'concludedAt', dir: 'desc' });
@@ -434,15 +452,15 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                 <Stack spacing={0.75} sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
                   {cards.map((task) => {
                     const agent = agents.find((a) => a.id === task.sessionId);
-                    // Done cards open the transcript dock; a live session selects the
-                    // terminal; a card whose session already exited (nothing to attach)
-                    // also falls back to the transcript so it's still viewable.
-                    const usesTx = col === 'done' || !(agent && LIVE_STATUS.has(agent.status));
-                    const sel = usesTx ? tx?.id === task.id : task.sessionId === activeId;
+                    // Board card click now opens the right-sliding detail panel
+                    // (the panel's "Open session"/"View transcript" actions re-home
+                    // what the card click used to do directly). Done cards and
+                    // dead-session cards that previously fell back to the
+                    // transcript dock all open the panel too — "View transcript"
+                    // there reaches the same dock.
+                    const sel = detailTask?.id === task.id;
                     const line = statsLine(stats?.[task.sessionId]);
-                    const activate = () => (usesTx
-                      ? openTranscript({ id: task.id, title: task.title, sessionId: task.sessionId, worktree: task.worktree, repo: task.repo })
-                      : onSelect(task.sessionId));
+                    const activate = () => setDetailTask(task);
                     return (
                       <Box
                         key={task.id}
@@ -465,7 +483,11 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                             opacity: dragId === task.id ? 0.4 : 1,
                             transition: 'transform .18s ease, border-color .18s ease, box-shadow .18s ease',
                             '&:hover': { transform: 'translateY(-2px)', borderColor: t.vars.palette.primary.main },
-                            '&:focus-visible': { ...focusRing(t), borderColor: t.vars.palette.primary.main },
+                            // Compose the focus ring ON TOP of the card's elevation — spreading
+                            // focusRing alone would replace cardShadow and flatten the card on
+                            // keyboard focus. Keep the lift, add the ring.
+                            '&:focus-visible': { boxShadow: `${g.glass.cardShadow}, 0 0 0 3px ${chipBg(t)}`, borderColor: t.vars.palette.primary.main },
+                            '@media (prefers-reduced-motion: reduce)': { transition: 'none', '&:hover': { transform: 'none' } },
                             '& .card-act': { opacity: 0 },
                             '&:hover .card-act': { opacity: 1 },
                             ...(sel && { boxShadow: `${g.glass.cardShadow}, 0 0 0 2px ${chipBg(t)}`, borderColor: t.vars.palette.primary.main }),
@@ -536,6 +558,20 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
           </Stack>
           {dock}
         </Stack>
+      )}
+      {/* Right-sliding detail panel — one at a time, driven by the live task
+          (liveDetailTask is null when the open task leaves the board, which the
+          effect above turns into a close). Rendered last so it overlays above
+          the board columns + the transcript dock regardless of dock side. */}
+      {liveDetailTask && (
+        <TaskDetailPanel
+          task={liveDetailTask}
+          agent={agents.find((a) => a.id === liveDetailTask.sessionId)}
+          stats={stats}
+          onSelect={onSelect}
+          onViewTranscript={openTranscript}
+          onClose={() => setDetailTask(null)}
+        />
       )}
     </Stack>
   );

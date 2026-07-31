@@ -88,29 +88,52 @@ test('tag filter chips toggle and "Clear all" resets the selection', async ({ pa
   await expect(fixtureChip).toBeVisible(); // chip row itself stays
 });
 
-test('clicking a card opens the transcript dock; dock-right/dock-bottom toggle works', async ({ page }) => {
+test('clicking a card opens the right detail panel (not the dock); view-transcript, dock toggle, and close all work', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Tasks');
 
-  // exact:true — once the dock is open its header's accessible name ("Collapse
+  // exact:true — once the dock opens its header's accessible name ("Collapse
   // Seeded review card transcript") contains "Seeded review card" as a
-  // substring, so a non-exact match on the card would become ambiguous the
-  // moment the dock renders.
+  // substring, so a non-exact match on the card would become ambiguous then.
   const card = page.getByRole('button', { name: 'Seeded review card', exact: true });
   await card.click();
 
-  // Header is role=button, aria-label swaps Expand|Collapse with the panelMin
-  // toggle; freshly opened it is not minimized, so "Collapse ...". Bind both
-  // names up front rather than reusing one locator across the toggle — the
-  // accessible name itself flips with the state, so a locator built from the
-  // pre-toggle name resolves to nothing once the label has moved to the other one.
+  // Card click now opens a right-sliding detail panel — a dialog named "Task
+  // detail" — instead of the transcript dock directly. (MUI Drawer renders its
+  // Paper with role=dialog + aria-label="Task detail" via slotProps.paper, so
+  // the role/name query resolves to the sheet, not the board behind it.)
+  const dialog = page.getByRole('dialog', { name: 'Task detail', exact: true });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('Seeded review card')).toBeVisible();
+  // Stats grid + meta dl render with graceful "—" placeholders — the seeded
+  // card has no session, so stats?.[undefined] is undefined.
+  await expect(dialog.getByText('Cost', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Tokens', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Turns', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Details', { exact: true })).toBeVisible();
+
+  // "Open session" only fires for a card with a LIVE agent session. The seeded
+  // card has no sessionId, so the action is disabled (the seed data can't
+  // exercise the enabled/selects-terminal path — that needs a live agent).
+  await expect(dialog.getByRole('button', { name: 'Open session' })).toBeDisabled();
+
+  // "View transcript" hands off to the shared dockable transcript panel and
+  // closes this panel. No sessionId on the seeded card → the dock shows the
+  // not-found message — the same surface the card click used to open directly.
+  await dialog.getByRole('button', { name: 'View transcript' }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByText('No transcript found for this task.')).toBeVisible();
+
+  // The dock the card click used to open directly is now reached via the
+  // panel's "View transcript" — exercise its collapse + dock-side toggle so
+  // that behaviour stays covered after the card→panel change. Header is
+  // role=button, aria-label swaps Expand|Collapse with the panelMin toggle;
+  // freshly opened it is not minimized, so "Collapse ...". Bind both names up
+  // front — the accessible name flips with the state, so a locator built from
+  // the pre-toggle name resolves to nothing once the label has moved.
   const collapseHeader = page.getByRole('button', { name: 'Collapse Seeded review card transcript' });
   const expandHeader = page.getByRole('button', { name: 'Expand Seeded review card transcript' });
   await expect(collapseHeader).toBeVisible();
-  // No sessionId on the seeded card -> TasksBoard's openTranscript shows this
-  // in place of an actual transcript.
-  await expect(page.getByText('No transcript found for this task.')).toBeVisible();
-
   await collapseHeader.click();
   await expect(expandHeader).toBeVisible();
   await expandHeader.click(); // back to expanded for the dock-side toggle below
@@ -121,9 +144,13 @@ test('clicking a card opens the transcript dock; dock-right/dock-bottom toggle w
   await dockRight.click();
   await expect(page.getByRole('button', { name: 'Dock bottom' })).toBeVisible();
 
-  // Clicking the same card again closes the dock (tx toggles off).
+  // Re-open the panel and dismiss it with Escape (a scrim click routes to the
+  // same onClose, but Escape is coordinate-independent and robust to the
+  // right-docked transcript panel sharing the right edge).
   await card.click();
-  await expect(page.getByRole('button', { name: /Seeded review card transcript/ })).not.toBeVisible();
+  await expect(dialog).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog).not.toBeVisible();
 });
 
 test('drag a card into Done (HTML5 dnd) moves it via POST /tasks/:id/status', async ({ page }) => {
