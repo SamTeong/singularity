@@ -61,7 +61,7 @@ const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.
  */
 export default function AppShell() {
   const {
-    agents, active, setActive, connected, tasks, taskHistory, crons, background, recent,
+    agents, setActive, connected, tasks, taskHistory, crons, background, recent,
     usage, stats, sendMsg, refreshUsage, registerChat, registerError,
   } = useAgents();
   const { toggle: toggleColorMode } = useColorMode();
@@ -254,7 +254,6 @@ export default function AppShell() {
                 history={taskHistory}
                 agents={agents}
                 stats={stats}
-                activeId={active}
                 onSelect={(sid) => sid && setActive(sid)}
                 onAdd={() => setTaskOpen(true)}
                 onMove={moveTask}

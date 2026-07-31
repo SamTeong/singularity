@@ -94,6 +94,14 @@ export const brandGrad = (t) =>
   'linear-gradient(45deg, #aa41af 5%, #3c69c8 60%, #00a5e6 100%)';
 
 /**
+ * Brand glow (layout-02 `--glow-1`) — the purple bloom under the gradient brand
+ * mark and the primary action. Mode-aware: stronger in dark, softer on light glass.
+ * @param {object} t MUI theme
+ * @returns {string} CSS color
+ */
+export const brandGlow = (t) => (isDark(t) ? 'rgba(170,65,175,.5)' : 'rgba(170,65,175,.30)');
+
+/**
  * Meter / progress-bar track colour (DESIGN.md `surfaces.track`).
  * @param {object} t MUI theme
  * @returns {string|undefined} CSS color (CSS-var ref or mode-aware literal fallback)
@@ -170,6 +178,47 @@ export const statusColor = (t, kind) => {
     ''
   );
 };
+
+// ── layout-02 chip primitives ─────────────────────────────────────────────────
+// `.pill` and `.tag` from the mockup, as `sx` fragments for MUI Chip. Shared by
+// the board cards and the task detail sheet so one task reads the same in both.
+
+/**
+ * `.pill` — a state badge: 10px uppercase letterspaced label on a chip fill.
+ * @param {object} t MUI theme
+ * @returns {object} an `sx` object for MUI Chip
+ */
+export const statePill = (t) => ({
+  height: 'auto', borderRadius: 999,
+  background: chipBg(t), color: 'text.secondary',
+  '& .MuiChip-label': {
+    px: '9px', py: '3px',
+    fontSize: 10, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', lineHeight: 1.3,
+  },
+});
+
+/**
+ * `.tag` — a read-only tag chip: quieter and smaller than an interactive filter
+ * chip (recessed surface, hairline border, no hover).
+ * @param {object} t MUI theme
+ * @returns {object} an `sx` object for MUI Chip
+ */
+export const cardTag = (t) => ({
+  height: 19, fontSize: 10, borderRadius: 999,
+  background: surface2(t),
+  border: `1px solid ${stroke2(t)}`,
+  color: 'text.disabled',
+  '& .MuiChip-label': { px: '8px' },
+});
+
+/**
+ * `.detail-sec h4` / `.usage h4` — the small uppercase section label.
+ * @returns {object} an `sx` object
+ */
+export const sectionLabel = () => ({
+  fontSize: 11, fontWeight: 700, letterSpacing: '.14em',
+  textTransform: 'uppercase', color: 'text.disabled',
+});
 
 /**
  * Visible keyboard-focus indicator — the soft purple ring from DESIGN §5 /

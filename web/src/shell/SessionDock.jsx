@@ -12,8 +12,9 @@ import { EmptyState } from '@zapac/mui-theme';
 import Terminal from '@/features/sessions/Terminal.jsx';
 import { ResizeHandle } from '@/hooks/useResizable.jsx';
 import { nextSessionTitle, nextCycledSession } from '@/lib/sessionTitle.js';
+import { tildify } from '@/lib/paths.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
-import { glass, surface2, stroke2, chipBg, focusRing } from '@/shell/shellStyles.js';
+import { glass, surface2, stroke2, chipBg, statusColor, focusRing } from '@/shell/shellStyles.js';
 import SessionRow from '@/shell/SessionRow.jsx';
 
 // Cap live terminals: each mounted xterm holds a full scrollback buffer, so
@@ -22,6 +23,21 @@ import SessionRow from '@/shell/SessionRow.jsx';
 // replays scrollback on re-attach for the rest.
 // ponytail: MRU list, bump the cap if switching to an evicted agent feels slow.
 const MOUNT_LRU = 4;
+
+// layout-02 `.sess-led` — the 8px status dot in the terminal bar. Mid-turn gets
+// the info hue plus its halo (`.run`); at-the-prompt is calm ok (`.done`);
+// anything detached/exited is inert ink-3 (`.idle`).
+const LED = { starting: 'info', running: 'info', idle: 'ok' };
+const sessionLed = (t, status) => {
+  const kind = LED[status];
+  const c = kind ? statusColor(t, kind) : t.vars.palette.text.disabled;
+  return {
+    width: 8, height: 8, borderRadius: '50%', flexShrink: 0, background: c,
+    ...(status === 'running' || status === 'starting'
+      ? { boxShadow: `0 0 0 3px color-mix(in srgb, ${c} 24%, transparent)` }
+      : null),
+  };
+};
 
 /**
  * Terminal dock — full width, below sidebar + view: session list (left) +
@@ -53,8 +69,11 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
     <Box sx={(t) => ({ ...glass(t), position: 'relative', zIndex: getTokens(t).layers.content, flexShrink: 0, height: dockMin ? 'auto' : dockH, mx: 1.5, mb: 1.5, mt: dockMin ? 1.5 : 0, borderRadius: `${getTokens(t).radius.lg}px`, overflow: 'hidden', display: 'flex', flexDirection: 'column' })}>
       <Stack direction="row" spacing={1} role="button" tabIndex={0} onClick={toggleDock} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDock(); } }} title={dockMin ? 'Restore' : 'Minimize'} sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none', borderBottom: dockMin ? 'none' : `1px solid ${stroke2(t)}`, '&:focus-visible': focusRing(t) })}>
         <SmartToyIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-        <Typography sx={{ flex: 1, fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'text.secondary' }} noWrap>Sessions</Typography>
+        {/* Label + count stay grouped (`.dock-list-head`), so the count reads as
+            "how many sessions" rather than floating at the far edge of the dock. */}
+        <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'text.secondary' }} noWrap>Sessions</Typography>
         <Box sx={(t) => ({ fontSize: 11, fontWeight: 700, color: 'text.disabled', background: chipBg(t), px: '8px', py: '2px', borderRadius: 999, lineHeight: 1.4 })}>{agents.length}</Box>
+        <Box sx={{ flex: 1 }} />
         {dockMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />}
       </Stack>
 
@@ -94,12 +113,29 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
         <ResizeHandle onMouseDown={listW.startDrag} />
 
         {/* Terminal pane: a glass term-bar header (display-only chrome showing
-            the active session title) over the mounted terminals. */}
-        <Box sx={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
-          <Stack direction="row" sx={(t) => ({ alignItems: 'center', gap: 1, px: 1.5, py: 0.75, flexShrink: 0, borderBottom: `1px solid ${stroke2(t)}` })}>
-            <TerminalIcon sx={{ fontSize: 14, color: 'text.secondary' }} />
+            the active session title) over the mounted terminals. `.term` sits a
+            step deeper than the dock glass — recessed on light, near-black on
+            dark — so the terminal reads as a well, not another panel. */}
+        <Box
+          sx={(t) => ({
+            flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column',
+            background: t.palette.mode === 'dark' ? 'rgba(0,0,0,.34)' : surface2(t),
+          })}
+        >
+          {/* layout-02 `.term-bar`: status LED, then mono "<b>title</b> · model
+              · cwd" — the active session's identity at a glance. */}
+          <Stack direction="row" sx={(t) => ({ alignItems: 'center', gap: '10px', px: '16px', py: '10px', flexShrink: 0, borderBottom: `1px solid ${stroke2(t)}` })}>
+            {activeAgent
+              ? <Box aria-hidden sx={(t) => sessionLed(t, activeAgent.status)} />
+              : <TerminalIcon sx={{ fontSize: 14, color: 'text.secondary' }} />}
             <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', minWidth: 0 }} noWrap>
-              {activeAgent?.title ?? (activeAgent?.status === 'detached' ? 'Session paused' : 'No session')}
+              {activeAgent ? (
+                <>
+                  <Box component="b" sx={{ color: 'text.primary', fontWeight: 700 }}>{activeAgent.title}</Box>
+                  {activeAgent.model ? ` · ${activeAgent.model}` : ''}
+                  {activeAgent.cwd ? ` · ${tildify(activeAgent.cwd)}` : ''}
+                </>
+              ) : 'No session'}
             </Typography>
           </Stack>
           {/* Selected terminal. All non-detached terminals stay mounted

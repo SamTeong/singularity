@@ -104,13 +104,22 @@ test('clicking a card opens the right detail panel (not the dock); view-transcri
   // the role/name query resolves to the sheet, not the board behind it.)
   const dialog = page.getByRole('dialog', { name: 'Task detail', exact: true });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText('Seeded review card')).toBeVisible();
+  // By role, not by text: the panel's "Task" section renders the seeded
+  // description ("Seeded review card — seeded fixture card."), which contains the
+  // title as a substring — an unscoped getByText would match both.
+  await expect(dialog.getByRole('heading', { name: 'Seeded review card' })).toBeVisible();
   // Stats grid + meta dl render with graceful "—" placeholders — the seeded
   // card has no session, so stats?.[undefined] is undefined.
   await expect(dialog.getByText('Cost', { exact: true })).toBeVisible();
   await expect(dialog.getByText('Tokens', { exact: true })).toBeVisible();
   await expect(dialog.getByText('Turns', { exact: true })).toBeVisible();
   await expect(dialog.getByText('Details', { exact: true })).toBeVisible();
+  // The layout-02 sections added alongside the stats grid: the task brief and the
+  // board-pipeline activity list, whose current stage is the card's own column.
+  await expect(dialog.getByText('Task', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Seeded review card — seeded fixture card.')).toBeVisible();
+  await expect(dialog.getByText('Activity', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('In Review', { exact: true })).toBeVisible();
 
   // "Open session" only fires for a card with a LIVE agent session. The seeded
   // card has no sessionId, so the action is disabled (the seed data can't

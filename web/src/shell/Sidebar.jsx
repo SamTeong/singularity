@@ -22,6 +22,7 @@ import {
   glass,
   PAPER_TOOLTIP_SLOTPROPS,
   brandGrad,
+  brandGlow,
   trackColor,
   navActiveBg,
   chipBg,
@@ -68,7 +69,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
         ...glass(t),
         position: 'relative',
         zIndex: getTokens(t).layers.nav,
-        width: collapsed ? 64 : 320,
+        width: collapsed ? 64 : 300, // layout-02 `.side` width
         flexShrink: 0,
         mt: 1.5,
         ml: 1.5,
@@ -81,10 +82,25 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
       })}
     >
       {/* Header: logo (+ title when expanded) + more menu (nav overflow, processes, dark mode). */}
-      <Stack direction={collapsed ? 'column' : 'row'} spacing={1.25} sx={{ p: 2, pb: 1.5, alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}>
+      <Stack direction={collapsed ? 'column' : 'row'} spacing={1.5} sx={{ p: '18px', pb: '14px', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}>
         <Tooltip title={connected ? '' : 'disconnected'} placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
           <Badge variant="dot" color="error" overlap="circular" anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} invisible={connected}>
-            <Logo active={agents.some((a) => a.status === 'running' || a.status === 'starting')} />
+            {/* layout-02 `.brand-mark`: the identity gradient as a rounded tile with
+                a soft bloom, glyph flattened to white on top of it. */}
+            <Box
+              sx={(t) => ({
+                width: 36,
+                height: 36,
+                flexShrink: 0,
+                borderRadius: '10px',
+                background: brandGrad(t),
+                display: 'grid',
+                placeItems: 'center',
+                boxShadow: `0 8px 22px -8px ${brandGlow(t)}`,
+              })}
+            >
+              <Logo onBrand active={agents.some((a) => a.status === 'running' || a.status === 'starting')} />
+            </Box>
           </Badge>
         </Tooltip>
         {!collapsed && (
@@ -103,7 +119,8 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
       </Stack>
 
       {/* Vertical nav rail: ＋ New session, then Tasks / Automation / Usage. Icon-only when collapsed. */}
-      <List sx={{ px: 1, pb: 1 }}>
+      {/* layout-02 `.nav`: 6px/10px padding, 3px between rows. */}
+      <List sx={{ px: '10px', py: '6px' }}>
         {/* Tooltips only when collapsed — expanded rows show their label already. */}
         <Tooltip title={collapsed ? 'New session' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
           <ListItemButton
@@ -115,7 +132,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
               justifyContent: collapsed ? 'center' : 'flex-start',
               minHeight: 44,
               borderRadius: `${getTokens(t).radius.sm}px`,
-              mb: 0.5,
+              mb: '5px', // `.nav-new` sits 5px clear of the nav items below it
               pl: collapsed ? 0 : '14px',
               pr: collapsed ? 0 : '14px',
               py: '11px',
@@ -156,7 +173,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                   justifyContent: collapsed ? 'center' : 'flex-start',
                   minHeight: 44,
                   borderRadius: `${getTokens(t).radius.sm}px`,
-                  mb: 0.5,
+                  mb: '3px', // `.nav` row gap
                   pl: collapsed ? 0 : '14px',
                   pr: collapsed ? 0 : '14px',
                   py: '11px',

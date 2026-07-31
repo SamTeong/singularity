@@ -94,7 +94,7 @@ test('New task dialog: Create stays disabled until title + description are fille
   test.slow();
   await page.goto('/');
   await goto(page, 'Tasks');
-  await page.getByRole('button', { name: 'Task', exact: true }).click();
+  await page.getByRole('button', { name: 'New task', exact: true }).click();
   const dialog = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'New task' }) });
   const create = dialog.getByRole('button', { name: 'Create', exact: true });
 
@@ -117,7 +117,7 @@ test('New task dialog: three ModelSelects derive from the orchestrator model, pl
   test.slow();
   await page.goto('/');
   await goto(page, 'Tasks');
-  await page.getByRole('button', { name: 'Task', exact: true }).click();
+  await page.getByRole('button', { name: 'New task', exact: true }).click();
   const dialog = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'New task' }) });
 
   const orch = dialog.getByLabel('orchestrator model');
@@ -146,7 +146,7 @@ test('New task dialog: tags Autocomplete adds a free-solo tag; both checkboxes t
   test.slow();
   await page.goto('/');
   await goto(page, 'Tasks');
-  await page.getByRole('button', { name: 'Task', exact: true }).click();
+  await page.getByRole('button', { name: 'New task', exact: true }).click();
   const dialog = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'New task' }) });
 
   const tagsInput = dialog.getByLabel('tags (optional)');
@@ -172,7 +172,7 @@ test('New task dialog: Escape and Cancel close it without POST /tasks, even subm
   test.slow();
   await page.goto('/');
   await goto(page, 'Tasks');
-  await page.getByRole('button', { name: 'Task', exact: true }).click();
+  await page.getByRole('button', { name: 'New task', exact: true }).click();
   const dialog = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'New task' }) });
 
   await dialog.getByLabel('title', { exact: true }).fill('Escape/Cancel guard');
@@ -188,7 +188,7 @@ test('New task dialog: Escape and Cancel close it without POST /tasks, even subm
 
   // Reopening keeps the filled fields (Escape doesn't reset local state) —
   // still submit-ready, so Cancel is the real test here, not an empty form.
-  await page.getByRole('button', { name: 'Task', exact: true }).click();
+  await page.getByRole('button', { name: 'New task', exact: true }).click();
   await expect(dialog.getByRole('button', { name: 'Create', exact: true })).toBeEnabled();
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);

@@ -1,6 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
-import { brandGrad, surface2, stroke2, chipBg, focusRing } from '@/shell/shellStyles.js';
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { brandGrad, brandGlow, surface2, stroke2, chipBg, trackColor, statusColor, focusRing, statePill, cardTag, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
+import { useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -23,6 +23,7 @@ import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
+import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import VerticalSplitIcon from '@mui/icons-material/VerticalSplit';
 import { StatusPill } from '@zapac/mui-theme';
 import TaskDetailPanel from '@/features/tasks/TaskDetailPanel.jsx';
@@ -66,8 +67,9 @@ function statsLine(s) {
 // Header toggles to a History table (concluded tasks — completed or abandoned).
 const LIVE_STATUS = new Set(['starting', 'running', 'idle']);
 
-// layout-02 column-dot colours — a status-ish marker per column.
-const COL_DOT = { todo: 'text.disabled', inprogress: 'info.main', inreview: 'warning.main', done: 'success.main' };
+// layout-02 column-dot colours — a status-ish marker per column (`.col-dot`:
+// ink-3 queued · info in-progress · brand review · ok done).
+const COL_DOT = { todo: 'text.disabled', inprogress: 'info.main', inreview: 'primary.main', done: 'success.main' };
 
 // Segmented-control (Board | History) button styling. `on` marks the active
 // segment: surface-solid fill, primary ink, and the card shadow per .seg .on.
@@ -93,7 +95,7 @@ const segBtn = (t, on) => {
 // Gradient primary action (.btn-primary) — brand-grad fill, white ink, soft
 // brand glow, hover lift + stronger glow, focus ring on keyboard focus.
 const primaryBtn = (t) => {
-  const glow = t?.palette?.mode === 'dark' ? 'rgba(170,65,175,.5)' : 'rgba(170,65,175,.3)';
+  const glow = brandGlow(t);
   return {
     borderRadius: 999, px: '18px', py: '7px',
     background: brandGrad(t), color: '#fff',
@@ -122,22 +124,30 @@ const tagChip = (t, on) => ({
   '&:hover': { background: chipBg(t) },
 });
 
-export default function TasksBoard({ tasks, history, agents, stats, activeId, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
+// Count chip at the right of a column header (`.col-count`).
+const countChip = (t) => ({
+  ml: 'auto', flexShrink: 0,
+  fontSize: 11, fontWeight: 700, lineHeight: 1.45,
+  color: 'text.disabled', background: chipBg(t),
+  px: '9px', py: '2px', borderRadius: 999,
+});
+
+export default function TasksBoard({ tasks, history, agents, stats, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
   const [dragId, setDragId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [activeTags, setActiveTags] = useState(() => new Set());
   // Detail panel: a card click opens the right-sliding sheet instead of the
-  // transcript dock / terminal select. `detailTask` holds the id of the open
-  // task; the live task object is re-derived from `tasks` each render so the
-  // panel reflects live stat/status updates and a different card swaps content
-  // (one panel, not two). When the open task leaves the board (concluded, moved
-  // to history, or removed), it's no longer in `tasks` — close the panel.
-  const [detailTask, setDetailTask] = useState(null);
+  // transcript dock / terminal select. State is the open task's ID only — the
+  // task object is re-derived from `tasks` each render, so the panel reflects
+  // live stat/status updates and a different card swaps content (one panel, not
+  // two). When the open task leaves the board (concluded, moved to history, or
+  // removed) it drops out of `tasks`, so the lookup goes null and the panel
+  // unmounts on its own — no closing effect, no stale snapshot to sync.
+  const [detailId, setDetailId] = useState(null);
   const liveDetailTask = useMemo(
-    () => (detailTask ? tasks.find((t) => t.id === detailTask.id) ?? null : null),
-    [tasks, detailTask],
+    () => (detailId ? tasks.find((t) => t.id === detailId) ?? null : null),
+    [tasks, detailId],
   );
-  useEffect(() => { if (detailTask && !liveDetailTask) setDetailTask(null); }, [detailTask, liveDetailTask]);
   // History table sort: click a header to sort, click again to reverse. Numeric
   // fields compare by value, strings by localeCompare. Default = newest first.
   const [sort, setSort] = useState({ key: 'concludedAt', dir: 'desc' });
@@ -318,8 +328,16 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   );
 
   return (
-    <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1}>
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1, px: 0.5 }}>
+    <Stack sx={{ height: '100%' }}>
+      {/* layout-02 `.topbar`: 16px/22px, hairline rule under it, actions right. */}
+      <Stack
+        direction="row"
+        spacing={2}
+        sx={(t) => ({
+          alignItems: 'center', flexWrap: 'wrap', rowGap: 1.5, flexShrink: 0,
+          px: '22px', py: '16px', borderBottom: `1px solid ${stroke2(t)}`,
+        })}
+      >
         <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
           <Typography sx={{ fontWeight: 700, fontSize: 20, letterSpacing: '-0.02em', lineHeight: 1 }}>Tasks</Typography>
           <Typography sx={{ fontSize: 12, color: 'text.disabled', mt: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
@@ -334,11 +352,11 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
             <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={!showHistory} onClick={() => setShowHistory(false)} sx={(t) => segBtn(t, !showHistory)}>Board</Button>
             <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={showHistory} onClick={() => setShowHistory(true)} sx={(t) => segBtn(t, showHistory)}>History</Button>
           </Box>
-          <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => primaryBtn(t)}>Task</Button>
+          <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => primaryBtn(t)}>New task</Button>
         </Box>
       </Stack>
       {allTags.length > 0 && (
-        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
+        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center', flexShrink: 0, px: '22px', pt: '14px' }}>
           {allTags.map((tag) => {
             const on = activeTags.has(tag);
             return (
@@ -367,7 +385,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
         </Stack>
       )}
       {showHistory ? (
-        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0 }}>
+        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0, px: '10px', pt: '6px', pb: '12px' }}>
           <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
             <Table size="small" stickyHeader>
               <TableHead>
@@ -427,29 +445,46 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
           {dock}
         </Stack>
       ) : (
-        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0 }}>
-          <Stack direction="row" spacing={1} sx={{ flex: 1, minHeight: 0 }}>
+        // layout-02 `.board`: 18px/22px padding, 16px between columns.
+        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0, px: '22px', py: '18px' }}>
+          <Stack direction="row" spacing={2} sx={{ flex: 1, minHeight: 0 }}>
           {COLUMNS.map(([col, label]) => {
             const cards = tasks.filter((t) => t.column === col && matchesTags(t));
             return (
+              // No column chrome — `.col` is a bare flex column; the containment
+              // comes from the view's glass pane, not a per-column border. Width
+              // tracks the mockup's 270px lane rather than stretching: past ~340px
+              // the head's dot and its right-aligned count drift apart and the
+              // column stops reading as a lane.
               <Stack
                 key={col}
-                spacing={0.75}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => drop(col)}
-                sx={(t) => ({
-                  flex: 1, minWidth: 0, minHeight: 0,
-                  borderRadius: `${getTokens(t).radius.sm}px`,
-                  border: `1px solid ${getTokens(t).glass.stroke}`,
-                  p: 0.75,
-                })}
+                sx={{ flex: '1 1 0', minWidth: 0, maxWidth: 340, minHeight: 0 }}
               >
-                <Typography variant="overline" sx={{ px: 0.5, display: 'flex', alignItems: 'center', gap: 0.75, lineHeight: 1.6, color: 'text.secondary' }}>
-                  <Box component="span" sx={{ width: 8, height: 8, borderRadius: '50%', flexShrink: 0, bgcolor: COL_DOT[col] }} />
-                  {label} ({cards.length})
+                {/* `.col-head` — dot + uppercase label, count chip pushed right.
+                    The count keeps its parens INSIDE the chip so the header's text
+                    content stays exactly "<Label> (<n>)" for tasks.spec.mjs. */}
+                <Typography
+                  component="div"
+                  sx={{
+                    display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0,
+                    pt: '2px', px: '6px', pb: '12px',
+                    fontSize: 12, fontWeight: 700, letterSpacing: '.1em',
+                    textTransform: 'uppercase', color: 'text.secondary',
+                  }}
+                >
+                  <Box component="span" sx={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, bgcolor: COL_DOT[col] }} />
+                  {label}{' '}
+                  <Box component="span" sx={(t) => countChip(t)}>({cards.length})</Box>
                 </Typography>
                 {/* Card list scrolls inside the column when it outgrows the pane. */}
-                <Stack spacing={0.75} sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                <Stack spacing="11px" sx={(t) => ({
+                  flex: 1, minHeight: 0, overflowY: 'auto',
+                  pt: '2px', px: '4px', pb: '8px',
+                  '&::-webkit-scrollbar': { width: 8 },
+                  '&::-webkit-scrollbar-thumb': { background: trackColor(t), borderRadius: 8 },
+                })}>
                   {cards.map((task) => {
                     const agent = agents.find((a) => a.id === task.sessionId);
                     // Board card click now opens the right-sliding detail panel
@@ -458,9 +493,13 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                     // dead-session cards that previously fell back to the
                     // transcript dock all open the panel too — "View transcript"
                     // there reaches the same dock.
-                    const sel = detailTask?.id === task.id;
-                    const line = statsLine(stats?.[task.sessionId]);
-                    const activate = () => setDetailTask(task);
+                    const sel = detailId === task.id;
+                    const s = stats?.[task.sessionId];
+                    const line = statsLine(s);
+                    const cost = fmtUsd(s?.costUsd);
+                    // `.tcard.live` — a live session tints the card's edge toward info.
+                    const live = agent && LIVE_STATUS.has(agent.status);
+                    const activate = () => setDetailId(task.id);
                     return (
                       <Box
                         key={task.id}
@@ -474,10 +513,15 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
                         sx={(t) => {
                           const g = getTokens(t);
+                          const edge = sel
+                            ? t.vars.palette.primary.main
+                            : live
+                              ? `color-mix(in srgb, ${statusColor(t, 'info')} 55%, ${g.glass.stroke})`
+                              : g.glass.stroke;
                           return {
-                            p: 1.75, cursor: 'pointer', flexShrink: 0,
+                            p: '14px', cursor: 'grab', flexShrink: 0,
                             borderRadius: `${g.radius.md ?? g.radius.sm}px`,
-                            border: `1px solid ${sel ? t.vars.palette.primary.main : g.glass.stroke}`,
+                            border: `1px solid ${edge}`,
                             background: g.glass.surface,
                             boxShadow: g.glass.cardShadow,
                             opacity: dragId === task.id ? 0.4 : 1,
@@ -496,14 +540,16 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                       >
                         {/* Top row: status pill (live agent → StatusPill, else a
                             task.state chip) + mono task-id, mirroring .tcard-top. */}
-                        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', mb: 0.75 }}>
+                        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', mb: '9px' }}>
                           {agent
                             ? <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>
-                            : (task.state && <Chip size="small" label={task.state} sx={{ height: 20, fontSize: 11 }} />)}
+                            : (task.state && <Chip size="small" label={task.state} sx={(t) => statePill(t)} />)}
                           <Typography variant="code" sx={{ ml: 'auto', fontSize: 11, color: 'text.disabled' }}>#{task.id.slice(-4)}</Typography>
                         </Stack>
                         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'flex-start' }}>
-                          <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, lineHeight: 1.35 }} noWrap>{task.title}</Typography>
+                          {/* `.tcard-title` wraps rather than truncating — a task title
+                              is the card's payload, and two lines beat an ellipsis. */}
+                          <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, lineHeight: 1.35, letterSpacing: '-.01em' }}>{task.title}</Typography>
                           <Stack direction="row" className="card-act" sx={{ transition: 'opacity .15s' }}>
                             {col === 'done' && (
                               <Tooltip title={task.branch ? 'Remove (temporary work folder already gone; your changes are saved)' : 'Remove (moves to history)'} disableInteractive>
@@ -533,19 +579,28 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                             </Tooltip>
                           </Stack>
                         </Stack>
-                        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }} noWrap>
-                          {repoName(task.repo)}{task.branch ? ` · ${task.branch}` : ''}
-                        </Typography>
-                        {line && (
-                          <Tooltip title="Active = time the agent spent working · API = time waiting on the AI model · tokens = amount of text processed" disableInteractive>
-                            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }} noWrap>
-                              {line}
-                            </Typography>
-                          </Tooltip>
-                        )}
-                        {(task.tags || []).length > 0 && (
-                          <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
-                            {(task.tags || []).map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 20, fontSize: 11 }} />)}
+                        {/* `.tcard-repo` — repo icon + mono "<repo> · <branch>". */}
+                        <Stack direction="row" spacing="6px" sx={{ alignItems: 'center', mt: '10px', minWidth: 0 }}>
+                          <StorageOutlinedIcon sx={{ fontSize: 13, opacity: 0.8, color: 'text.secondary', flexShrink: 0 }} />
+                          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, minWidth: 0 }} noWrap>
+                            {repoName(task.repo)}{task.branch ? ` · ${task.branch}` : ''}
+                          </Typography>
+                        </Stack>
+                        {/* `.tcard-foot` — tags left, spend right. The fuller
+                            active/API/token breakdown rides along in the tooltip
+                            rather than crowding a 270px card. */}
+                        {((task.tags || []).length > 0 || cost) && (
+                          <Stack direction="row" spacing="8px" sx={{ mt: '11px', alignItems: 'center' }}>
+                            <Stack direction="row" spacing="6px" sx={{ flexWrap: 'wrap', rowGap: '6px', alignItems: 'center', minWidth: 0 }}>
+                              {(task.tags || []).map((tag) => <Chip key={tag} size="small" label={tag} sx={(t) => cardTag(t)} />)}
+                            </Stack>
+                            {cost && (
+                              <Tooltip title={`${line || cost}\nActive = time the agent spent working · API = time waiting on the AI model · tokens = amount of text processed`} disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+                                <Typography variant="code" sx={{ ml: 'auto', flexShrink: 0, fontSize: 11, fontWeight: 500, color: 'text.secondary' }}>
+                                  {cost}
+                                </Typography>
+                              </Tooltip>
+                            )}
                           </Stack>
                         )}
                       </Box>
@@ -570,7 +625,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
           stats={stats}
           onSelect={onSelect}
           onViewTranscript={openTranscript}
-          onClose={() => setDetailTask(null)}
+          onClose={() => setDetailId(null)}
         />
       )}
     </Stack>
