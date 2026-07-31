@@ -100,7 +100,7 @@ export default function AppShell() {
   const listW = useResizable('sing-list-w', 260, { min: 160, max: 640 });
   // Terminal dock height (px, drag-resizable), persisted — resizes up from the
   // main pane's bottom, clamped so neither the dock nor the top view can vanish.
-  const { width: dockH, startDrag: startDockDrag, onKeyDown: onDockKeyDown, dragging: dockDragging } = useResizable('sing-dock-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: mainRef });
+  const { width: dockH, startDrag: startDockDrag, onKeyDown: onDockKeyDown, dragging: dockDragging, max: dockHMax } = useResizable('sing-dock-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: mainRef });
 
   // Panels that mount once and stay mounted — track which have ever been shown.
   // Updated during render (React's documented "adjust state on prop change"
@@ -271,9 +271,12 @@ export default function AppShell() {
       {!dockMin && (
         <ResizeHandle
           axis="y"
-          onMouseDown={startDockDrag}
+          onPointerDown={startDockDrag}
           onKeyDown={onDockKeyDown}
           dragging={dockDragging}
+          value={dockH}
+          min={140}
+          max={dockHMax}
           label="Resize terminal dock"
           sx={{ mx: 1.5 }}
         />

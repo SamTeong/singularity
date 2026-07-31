@@ -1,5 +1,17 @@
 html, body, #root { height: 100%; margin: 0; }
 
+/* Numeric values use tabular-nums so animated/polled figures don't jitter
+   width (DESIGN.md §3 `.tnum` convention) — CPU/RAM readouts, cost/token
+   figures, percentages. */
+.tnum { font-variant-numeric: tabular-nums; font-feature-settings: "tnum" 1; }
+
+/* While a ResizeHandle drag is in flight (useResizable.jsx): suppress text
+   selection and hover states across the shell so dragging a thin handle strip
+   doesn't select surrounding text or fire hover chrome (layout-02
+   `body.resizing`). */
+body.resizing { cursor: inherit; user-select: none; }
+body.resizing * { pointer-events: none; }
+
 /* Dark scheme: theme's error red (#b00020) is too dark/saturated on the dark
    surface — low contrast + red-on-dark chromostereopsis make it read blurry.
    Lift to the brighter red xterm already uses (Terminal.jsx). Covers StatusPill

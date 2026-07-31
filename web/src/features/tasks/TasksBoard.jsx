@@ -1,6 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
 import { brandGrad, brandGlow, surface2, stroke2, chipBg, trackColor, statusColor, focusRing, statePill, cardTag, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
-import { useRef, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -212,8 +212,14 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   const [panelW, setPanelW] = useState(() => { const v = Number(localStorage.getItem('sing-hist-w')); return v >= 200 && v <= 1600 ? v : 420; });
   const dockRef = useRef(null);
   // Panel height (bottom-docked) is a drag-resizable axis:'y' — mirrors App.jsx's dock.
-  const { width: panelH, startDrag: startPanelHeightDrag, onKeyDown: onPanelHeightKeyDown, dragging: panelHeightDragging } = useResizable('sing-hist-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: dockRef });
+  const { width: panelH, startDrag: startPanelHeightDrag, onKeyDown: onPanelHeightKeyDown, dragging: panelHeightDragging, max: panelHMax } = useResizable('sing-hist-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: dockRef });
   const [panelWidthDragging, setPanelWidthDragging] = useState(false); // width-drag is bespoke (see below), so it tracks its own dragging flag
+  const panelWidthUpRef = useRef(null); // active pointerup cleanup for the bespoke width-drag, so an unmount mid-drag can cancel it
+  const PANEL_W_MAX = 1600; // static ceiling — matches the panelW state initializer's clamp
+  // Dynamic ceiling (dockRef's own width, minus the 200px floor) for the drag
+  // clamp — reads `dockRef.current`, so it's only called from an event handler
+  // (react-hooks/refs forbids a ref read during render).
+  const panelWidthMax = () => { const rect = dockRef.current?.getBoundingClientRect(); return rect ? rect.width - 200 : PANEL_W_MAX; };
   const histReqRef = useRef(0); // guards against a slower stale fetch overwriting a newer selection
 
   const openTranscript = (item) => {
@@ -245,33 +251,45 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     const rect = dockRef.current?.getBoundingClientRect();
     if (!rect) return;
     setPanelWidthDragging(true);
+    document.body.classList.add('resizing');
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     const move = (ev) => {
       const w = Math.min(rect.width - 200, Math.max(200, rect.right - ev.clientX));
       setPanelW(w);
       localStorage.setItem('sing-hist-w', String(Math.round(w)));
     };
-    const up = () => { setPanelWidthDragging(false); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+    const up = () => {
+      setPanelWidthDragging(false);
+      document.body.classList.remove('resizing');
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      panelWidthUpRef.current = null;
+    };
+    panelWidthUpRef.current = up;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
   };
+  // Cancel an in-flight width-drag if the handle unmounts mid-drag (side/panelMin toggle).
+  useEffect(() => () => panelWidthUpRef.current?.(), []);
   // Keyboard mirror of the drag above — ArrowLeft widens (dragging the handle
-  // away from the panel's right edge always grows it), ArrowRight narrows.
+  // away from the panel's right edge always grows it), ArrowRight narrows. Reads
+  // `panelW` from the closure (like useResizable's own onKeyDown) rather than a
+  // setState updater, which must stay pure under StrictMode's double-invoke.
   const onPanelWidthKeyDown = (e) => {
     let d = 0;
     if (e.key === 'ArrowLeft') d = 16; else if (e.key === 'ArrowRight') d = -16;
     if (!d) return;
     e.preventDefault();
-    const rect = dockRef.current?.getBoundingClientRect();
-    const hi = rect ? rect.width - 200 : 1600;
-    setPanelW((w) => {
-      const next = Math.min(hi, Math.max(200, w + d));
-      localStorage.setItem('sing-hist-w', String(Math.round(next)));
-      return next;
-    });
+    const next = Math.min(panelWidthMax(), Math.max(200, panelW + d));
+    localStorage.setItem('sing-hist-w', String(Math.round(next)));
+    setPanelW(next);
   };
   const startPanelDrag = side === 'bottom' ? startPanelHeightDrag : startPanelWidthDrag;
   const onPanelKeyDown = side === 'bottom' ? onPanelHeightKeyDown : onPanelWidthKeyDown;
   const panelDragging = side === 'bottom' ? panelHeightDragging : panelWidthDragging;
+  const panelDragValue = side === 'bottom' ? panelH : panelW;
+  const panelDragMin = side === 'bottom' ? 140 : 200;
+  const panelDragMax = side === 'bottom' ? panelHMax : PANEL_W_MAX;
 
   const drop = (col) => {
     const t = tasks.find((x) => x.id === dragId);
@@ -294,9 +312,12 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
       {!panelMin && (
         <ResizeHandle
           axis={side === 'bottom' ? 'y' : 'x'}
-          onMouseDown={startPanelDrag}
+          onPointerDown={startPanelDrag}
           onKeyDown={onPanelKeyDown}
           dragging={panelDragging}
+          value={panelDragValue}
+          min={panelDragMin}
+          max={panelDragMax}
           label="Resize transcript panel"
           sx={side === 'bottom' ? { mx: 1 } : { my: 1 }}
         />

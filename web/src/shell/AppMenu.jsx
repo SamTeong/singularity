@@ -19,7 +19,7 @@ import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import PaletteIcon from '@mui/icons-material/Palette';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import { getTokens } from '@/theme/contract.js';
-import { chipBg, stroke2 } from '@/shell/shellStyles.js';
+import { chipBg, stroke2, surface2, brandOrInk } from '@/shell/shellStyles.js';
 import Sparkline from '@/components/Sparkline.jsx';
 import { useSysStats } from '@/hooks/useSysStats.js';
 
@@ -73,7 +73,7 @@ export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses
       onClose={onClose}
       keepMounted
       slotProps={{
-        paper: { sx: { minWidth: 248 } },
+        paper: { sx: { width: 248 } },
         // layout-02 `.menu`: 6px padding around the whole item stack.
         list: { sx: { p: '6px' } },
       }}
@@ -98,29 +98,33 @@ export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses
             {sysStats?.cpu == null ? '—' : `${sysStats.cpu}%`}
           </Box>
         </Stack>
-        <Sparkline values={(sysStats?.history?.cpu || []).slice(-sparkWin * 30)} capacity={sparkWin * 30} color="var(--mui-palette-primary-main)" width={224} height={26} />
+        <Sparkline values={(sysStats?.history?.cpu || []).slice(-sparkWin * 30)} capacity={sparkWin * 30} color="var(--mui-palette-primary-main)" width={220} height={26} compact />
         <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'baseline', fontSize: 11, color: 'text.disabled', mt: '9px', mb: '6px' }}>
           <span>RAM</span>
           <Box component="b" className="tnum" sx={{ color: 'text.secondary', fontWeight: 700 }}>
             {sysStats ? `${sysStats.mem.pct}% · ${(sysStats.mem.used / 1024 ** 3).toFixed(1)} / ${(sysStats.mem.total / 1024 ** 3).toFixed(1)} GB` : '—'}
           </Box>
         </Stack>
-        <Sparkline values={(sysStats?.history?.mem || []).slice(-sparkWin * 30)} capacity={sparkWin * 30} color="var(--mui-palette-info-main)" width={224} height={26} />
-        {/* Window pills — slice the tail of the 1 h ring (samples = minutes * 30 @ 2s). */}
-        <Stack direction="row" spacing="5px" role="tablist" aria-label="Sparkline window" sx={{ mt: '9px' }}>
+        <Sparkline values={(sysStats?.history?.mem || []).slice(-sparkWin * 30)} capacity={sparkWin * 30} color="var(--mui-palette-info-main)" width={220} height={26} compact />
+        {/* Window pills — slice the tail of the 1 h ring (samples = minutes * 30 @ 2s).
+            `menu` only permits menuitem/menuitemradio/menuitemcheckbox/group/separator
+            as children, so this is a `group` of `menuitemradio`s (one-of-three), not
+            a tablist/tab pair — MUI's MenuList manages focus/typeahead for them. */}
+        <Stack direction="row" spacing="5px" role="group" aria-label="Sparkline window" sx={{ mt: '9px' }}>
           {SPARK_WINDOWS.map(([m, label]) => (
             <Box
               key={m}
-              role="tab"
-              aria-selected={sparkWin === m}
+              role="menuitemradio"
+              aria-checked={sparkWin === m}
               tabIndex={0}
               onClick={() => setSparkWin(m)}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSparkWin(m); } }}
               sx={(t) => ({
                 px: '10px', py: '3px', borderRadius: 999, fontSize: 10, cursor: 'pointer', userSelect: 'none',
-                color: sparkWin === m ? 'text.primary' : 'text.disabled',
+                transition: 'background .14s ease',
+                color: sparkWin === m ? brandOrInk(t) : 'text.disabled',
                 bgcolor: sparkWin === m ? chipBg(t) : 'transparent',
-                '&:hover': { bgcolor: sparkWin === m ? chipBg(t) : 'action.hover' },
+                '&:hover': { bgcolor: sparkWin === m ? chipBg(t) : surface2(t) },
               })}
             >
               {label}
@@ -131,10 +135,13 @@ export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses
       {/* Self-respawn only works when the daemon serves the built UI (npm start).
           In dev, concurrently -k kills Vite too, so the shell can't reconnect. */}
       {import.meta.env.PROD && (
-        <MenuItem disabled={restarting} onClick={() => { onOpenRestart(); onClose(); }} sx={(t) => ({ ...menuItemSx(t), color: 'warning.main' })}>
-          <ListItemIcon sx={{ ...menuIconSx, color: 'warning.main' }}><RestartAltIcon /></ListItemIcon>
-          <ListItemText>Restart server</ListItemText>
-        </MenuItem>
+        <>
+          <Divider sx={(t) => ({ borderColor: stroke2(t), my: '6px', mx: '8px' })} />
+          <MenuItem disabled={restarting} onClick={() => { onOpenRestart(); onClose(); }} sx={(t) => ({ ...menuItemSx(t), color: 'warning.main' })}>
+            <ListItemIcon sx={{ ...menuIconSx, color: 'warning.main' }}><RestartAltIcon /></ListItemIcon>
+            <ListItemText>Restart server</ListItemText>
+          </MenuItem>
+        </>
       )}
     </Menu>
   );

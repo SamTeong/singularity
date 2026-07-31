@@ -52,7 +52,7 @@ export function getTokens(theme) {
 }
 
 /** Keys a conforming skin's tokens must expose (used by the dev-time assertion). */
-const REQUIRED_TOKEN_GROUPS = ['radius', 'layers', 'glass'];
+const REQUIRED_TOKEN_GROUPS = ['radius', 'layers', 'glass', 'fonts'];
 
 /**
  * Dev-only sanity check that a skin's theme satisfies the token contract.

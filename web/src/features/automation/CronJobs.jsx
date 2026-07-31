@@ -324,7 +324,15 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
                   </ListItemButton>
                 ))}
               </List>
-              <ResizeHandle onMouseDown={railW.startDrag} />
+              <ResizeHandle
+                onPointerDown={railW.startDrag}
+                onKeyDown={railW.onKeyDown}
+                dragging={railW.dragging}
+                value={railW.width}
+                min={railW.min}
+                max={railW.max}
+                label="Resize report list"
+              />
               <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto', p: 2 }}>
                 {!selReport ? (
                   <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>

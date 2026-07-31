@@ -153,6 +153,15 @@ export const stroke2 = (t) =>
 export const brandInk = (t) =>
   t?.vars?.palette?.brand?.ink ?? (isDark(t) ? '#cba3ea' : '#834f88');
 
+/**
+ * Brand-ink for chrome that should read purple on light glass, full ink on
+ * dark (layout-02: `--brand-ink` in light, `--ink` in dark) — the active
+ * nav-item count chip, the More-menu's selected sparkline-window pill.
+ * @param {object} t MUI theme
+ * @returns {string} CSS color
+ */
+export const brandOrInk = (t) => (t.palette.mode === 'dark' ? 'text.primary' : brandInk(t));
+
 const STATUS_TO_MUI = { ok: 'success', info: 'info', warn: 'warning', danger: 'error' };
 const STATUS_FALLBACK = {
   ok: { light: '#088043', dark: '#2ec76f' },

@@ -113,9 +113,12 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
             8px hit strip, grip fades in on hover/drag/focus. */}
         <ResizeHandle
           axis="x"
-          onMouseDown={listW.startDrag}
+          onPointerDown={listW.startDrag}
           onKeyDown={listW.onKeyDown}
           dragging={listW.dragging}
+          value={listW.width}
+          min={listW.min}
+          max={listW.max}
           label="Resize session list"
         />
 

@@ -28,7 +28,7 @@ import {
   chipBg,
   surface2,
   stroke2,
-  brandInk,
+  brandOrInk,
   statusColor,
   focusRing,
 } from '@/shell/shellStyles.js';
@@ -45,10 +45,6 @@ const NAV = [
 const INK2 = 'text.secondary';
 const INK3 = 'text.disabled';
 const INK = 'text.primary';
-
-// Brand-ink for chrome that should read purple on light glass, full ink on dark
-// (layout-02: --brand-ink in light, --ink in dark).
-const brandOrInk = (t) => (t.palette.mode === 'dark' ? INK : brandInk(t));
 
 /**
  * App sidebar: brand mark + more-menu button, and the vertical nav rail
