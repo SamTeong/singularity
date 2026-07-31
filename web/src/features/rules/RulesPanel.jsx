@@ -159,7 +159,7 @@ export default function RulesPanel() {
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.root)}>
                         {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
                         <FolderOpenIcon fontSize="small" color="action" />
-                        <ListItemText primary={tildify(g.root)} slotProps={{ primary: { noWrap: true, title: g.root, sx: { fontFamily: 'monospace', fontSize: 12 } } }} />
+                        <ListItemText primary={tildify(g.root)} slotProps={{ primary: { noWrap: true, title: g.root, variant: 'code', sx: { fontSize: 12 } } }} />
                         <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
                       </Stack>
                       {!results && (
@@ -174,7 +174,7 @@ export default function RulesPanel() {
                       <ListItemButton key={`${it.path}:${it.line}:${i}`} selected={sel?.path === it.path} onClick={() => open(it)}
                         sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, pl: 4, mb: 0.25 }}>
                         <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                        <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
+                        <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
                       </ListItemButton>
                     ) : (
                       <ListItemButton key={it.path} selected={sel?.path === it.path} onClick={() => open(it)}
@@ -201,13 +201,13 @@ export default function RulesPanel() {
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
             {ref ? (
               <>
-                <Box component="span" sx={{ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: 'var(--mui-font-CodeFont, monospace)', '&:hover': { textDecoration: 'underline' } }} onClick={() => setRef(null)}>← rule</Box>
+                <Box component="span" sx={(t) => ({ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: getTokens(t).fonts.mono, '&:hover': { textDecoration: 'underline' } })} onClick={() => setRef(null)}>← rule</Box>
                 <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(ref.path)}</Typography>
               </>
             ) : (
               <>
                 <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.path)}</Typography>
-                <Box component="span" onClick={openRef} sx={{ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: 'var(--mui-font-CodeFont, monospace)', '&:hover': { textDecoration: 'underline' } }}>rules-reference ↗</Box>
+                <Box component="span" onClick={openRef} sx={(t) => ({ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: getTokens(t).fonts.mono, '&:hover': { textDecoration: 'underline' } })}>rules-reference ↗</Box>
               </>
             )}
           </Stack>

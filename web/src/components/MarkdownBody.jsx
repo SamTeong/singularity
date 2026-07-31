@@ -45,7 +45,7 @@ export default function MarkdownBody({ children, onWikiLink }) {
       '& :is(ul,ol) :is(ul,ol)': { my: 0.4 },
       '& blockquote': { ml: 0, pl: 2, my: 1.5, borderLeft: `3px solid ${getTokens(t).glass.stroke}`, color: 'text.secondary' },
       '& a': { color: 'primary.main' },
-      '& :is(code,pre)': { fontFamily: 'var(--mui-font-CodeFont, monospace)', fontSize: 13 },
+      '& :is(code,pre)': { fontFamily: getTokens(t).fonts.mono, fontSize: 13 },
       '& :not(pre) > code': { px: 0.5, py: 0.15, borderRadius: '4px', bgcolor: 'action.hover', fontSize: '0.9em' },
       '& pre': { p: 1.5, my: 1.5, overflow: 'auto', borderRadius: `${getTokens(t).radius.sm}px`, bgcolor: 'action.hover', border: `1px solid ${getTokens(t).glass.stroke}` },
       '& hr': { border: 'none', borderTop: `1px solid ${getTokens(t).glass.stroke}`, my: 2.5 },

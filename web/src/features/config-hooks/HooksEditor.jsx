@@ -162,7 +162,7 @@ export default function HooksEditor() {
                       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.cwd)}>
                         {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
                         <FolderOpenIcon fontSize="small" color="action" />
-                        <Typography noWrap title={g.cwd} sx={{ flex: 1, minWidth: 0, fontFamily: 'monospace', fontSize: 11, color: 'text.secondary' }}>{tildify(g.cwd)}</Typography>
+                        <Typography variant="code" noWrap title={g.cwd} sx={{ flex: 1, minWidth: 0, fontSize: 11, color: 'text.secondary' }}>{tildify(g.cwd)}</Typography>
                         <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
                       </Stack>
                       {!showResults && (
@@ -176,12 +176,12 @@ export default function HooksEditor() {
                       <ListItemButton key={`${it.path}:${i}`} selected={it.path === path} onClick={() => loadFile(it.path)}
                         sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, mb: 0.25, pl: 4 }}>
                         <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                        <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
+                        <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
                       </ListItemButton>
                     ) : (
                       <ListItemButton key={it.path} selected={it.path === path} onClick={() => loadFile(it.path)}
                         sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, mb: 0.25, pl: 4 }}>
-                        <ListItemText primary={it.rel} slotProps={{ primary: { noWrap: true, title: it.path, sx: { fontFamily: 'monospace', fontSize: 12 } } }} />
+                        <ListItemText primary={it.rel} slotProps={{ primary: { noWrap: true, title: it.path, variant: 'code', sx: { fontSize: 12 } } }} />
                       </ListItemButton>
                     ))}
                     {!isCol && count === 0 && <Typography color="text.secondary" sx={{ fontSize: 11, px: 2, py: 0.5 }}>No hooks.</Typography>}

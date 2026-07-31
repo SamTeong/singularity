@@ -31,7 +31,7 @@ import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import { repoName } from '@/lib/paths.js';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
 import { KIND } from '@/lib/agentStatus.js';
-import { useResizable } from '@/hooks/useResizable.jsx';
+import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
 
 const COLUMNS = [
   ['todo', 'To-Do'],
@@ -212,7 +212,8 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   const [panelW, setPanelW] = useState(() => { const v = Number(localStorage.getItem('sing-hist-w')); return v >= 200 && v <= 1600 ? v : 420; });
   const dockRef = useRef(null);
   // Panel height (bottom-docked) is a drag-resizable axis:'y' — mirrors App.jsx's dock.
-  const { width: panelH, startDrag: startPanelHeightDrag } = useResizable('sing-hist-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: dockRef });
+  const { width: panelH, startDrag: startPanelHeightDrag, onKeyDown: onPanelHeightKeyDown, dragging: panelHeightDragging } = useResizable('sing-hist-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: dockRef });
+  const [panelWidthDragging, setPanelWidthDragging] = useState(false); // width-drag is bespoke (see below), so it tracks its own dragging flag
   const histReqRef = useRef(0); // guards against a slower stale fetch overwriting a newer selection
 
   const openTranscript = (item) => {
@@ -243,16 +244,34 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     e.preventDefault();
     const rect = dockRef.current?.getBoundingClientRect();
     if (!rect) return;
+    setPanelWidthDragging(true);
     const move = (ev) => {
       const w = Math.min(rect.width - 200, Math.max(200, rect.right - ev.clientX));
       setPanelW(w);
       localStorage.setItem('sing-hist-w', String(Math.round(w)));
     };
-    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
+    const up = () => { setPanelWidthDragging(false); window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
   };
+  // Keyboard mirror of the drag above — ArrowLeft widens (dragging the handle
+  // away from the panel's right edge always grows it), ArrowRight narrows.
+  const onPanelWidthKeyDown = (e) => {
+    let d = 0;
+    if (e.key === 'ArrowLeft') d = 16; else if (e.key === 'ArrowRight') d = -16;
+    if (!d) return;
+    e.preventDefault();
+    const rect = dockRef.current?.getBoundingClientRect();
+    const hi = rect ? rect.width - 200 : 1600;
+    setPanelW((w) => {
+      const next = Math.min(hi, Math.max(200, w + d));
+      localStorage.setItem('sing-hist-w', String(Math.round(next)));
+      return next;
+    });
+  };
   const startPanelDrag = side === 'bottom' ? startPanelHeightDrag : startPanelWidthDrag;
+  const onPanelKeyDown = side === 'bottom' ? onPanelHeightKeyDown : onPanelWidthKeyDown;
+  const panelDragging = side === 'bottom' ? panelHeightDragging : panelWidthDragging;
 
   const drop = (col) => {
     const t = tasks.find((x) => x.id === dragId);
@@ -269,15 +288,17 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   // and the board view (for a selected Done card). Reads the generic `tx` item.
   const dock = tx && (
     <>
-      {/* Drag handle — resize the panel (hidden while minimized). */}
+      {/* Drag handle — resize the panel (hidden while minimized). Same grip +
+          a11y + keyboard treatment as the dock/list handles (layout-02
+          `.dock-handle`/`.list-handle`). */}
       {!panelMin && (
-        <Box
+        <ResizeHandle
+          axis={side === 'bottom' ? 'y' : 'x'}
           onMouseDown={startPanelDrag}
-          sx={{
-            flexShrink: 0,
-            cursor: side === 'bottom' ? 'row-resize' : 'col-resize',
-            ...(side === 'bottom' ? { height: 8, mx: 1 } : { width: 8, my: 1 }),
-          }}
+          onKeyDown={onPanelKeyDown}
+          dragging={panelDragging}
+          label="Resize transcript panel"
+          sx={side === 'bottom' ? { mx: 1 } : { my: 1 }}
         />
       )}
       <Box

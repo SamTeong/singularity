@@ -56,7 +56,7 @@ const brandOrInk = (t) => (t.palette.mode === 'dark' ? INK : brandInk(t));
  * Domain state comes from {@link useAgents}; only view/collapse UI state and the
  * menu-open callback are passed in.
  */
-export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewSession, onOpenMenu }) {
+export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewSession, onOpenMenu, menuOpen }) {
   const { agents, connected, usage, refreshUsage, tasks, crons } = useAgents();
   const caps = useCapabilities();
   const usageTip = usageSummary(usage, caps); // per-provider 5h/7d summary for the collapsed tooltip
@@ -105,15 +105,17 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
         </Tooltip>
         {!collapsed && (
           <>
-            <Typography component="span" sx={{ flex: 1, fontSize: 16, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.01em' }}>Singularity</Typography>
+            {/* layout-02 `.brand-name`: font-family: var(--font-display) — h4 is the
+                theme's "brand name / section heading" variant (16px/700/-.01em). */}
+            <Typography component="span" variant="h4" sx={{ flex: 1, lineHeight: 1 }}>Singularity</Typography>
             <Tooltip title="More" placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-              <IconButton onClick={onOpenMenu} size="small"><MoreVertIcon /></IconButton>
+              <IconButton onClick={onOpenMenu} size="small" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen}><MoreVertIcon /></IconButton>
             </Tooltip>
           </>
         )}
         {collapsed && (
           <Tooltip title="More" placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-            <IconButton onClick={onOpenMenu} size="small"><MoreVertIcon /></IconButton>
+            <IconButton onClick={onOpenMenu} size="small" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen}><MoreVertIcon /></IconButton>
           </Tooltip>
         )}
       </Stack>
@@ -344,7 +346,7 @@ function DaemonFooter({ connected }) {
         <Typography component="div" sx={{ fontSize: 12, fontWeight: 700, color: INK2, lineHeight: 1.25 }}>
           {connected ? 'Daemon connected' : 'Daemon disconnected'}
         </Typography>
-        <Typography component="small" sx={{ display: 'block', fontFamily: 'monospace', fontSize: 11, fontWeight: 400, color: INK3, lineHeight: 1.25 }}>
+        <Typography component="small" variant="code" sx={{ display: 'block', fontSize: 11, fontWeight: 400, color: INK3, lineHeight: 1.25 }}>
           {host}
         </Typography>
       </Box>

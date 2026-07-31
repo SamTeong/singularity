@@ -109,8 +109,15 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
           ))}
         </List>
 
-        {/* Drag handle — resize the session-list width. */}
-        <ResizeHandle onMouseDown={listW.startDrag} />
+        {/* Drag handle — resize the session-list width. layout-02 `.list-handle`:
+            8px hit strip, grip fades in on hover/drag/focus. */}
+        <ResizeHandle
+          axis="x"
+          onMouseDown={listW.startDrag}
+          onKeyDown={listW.onKeyDown}
+          dragging={listW.dragging}
+          label="Resize session list"
+        />
 
         {/* Terminal pane: a glass term-bar header (display-only chrome showing
             the active session title) over the mounted terminals. `.term` sits a

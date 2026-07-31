@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import Box from '@mui/material/Box';
+import { getTokens } from '@/theme/contract.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 
 // Shared model picker for the create dialogs. Free-text-with-suggestions: lists
@@ -79,7 +80,7 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
         <Box component="li" key={key} {...props} sx={{ display: 'flex', justifyContent: 'space-between', gap: 2 }}>
           <span>{CLAUDE_NAMES[o.label] || o.label}</span>
           {CLAUDE_NAMES[o.label] ? (
-            <Box component="span" sx={{ fontFamily: 'monospace', fontSize: 12, color: 'text.secondary' }}>{o.label}</Box>
+            <Box component="span" sx={(t) => ({ fontFamily: getTokens(t).fonts.mono, fontSize: 12, color: 'text.secondary' })}>{o.label}</Box>
           ) : null}
         </Box>
       )}

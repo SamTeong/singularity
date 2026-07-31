@@ -17,7 +17,7 @@ import ProcessManager from '@/features/processes/ProcessManager.jsx';
 import CreateSessionDialog from '@/features/sessions/CreateSessionDialog.jsx';
 import CreateTaskDialog from '@/features/tasks/CreateTaskDialog.jsx';
 import CreateScheduledJobDialog from '@/features/automation/CreateScheduledJobDialog.jsx';
-import { useResizable } from '@/hooks/useResizable.jsx';
+import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { useTaskActions } from '@/hooks/useTaskActions.js';
 import Sidebar from '@/shell/Sidebar.jsx';
@@ -100,7 +100,7 @@ export default function AppShell() {
   const listW = useResizable('sing-list-w', 260, { min: 160, max: 640 });
   // Terminal dock height (px, drag-resizable), persisted — resizes up from the
   // main pane's bottom, clamped so neither the dock nor the top view can vanish.
-  const { width: dockH, startDrag: startDockDrag } = useResizable('sing-dock-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: mainRef });
+  const { width: dockH, startDrag: startDockDrag, onKeyDown: onDockKeyDown, dragging: dockDragging } = useResizable('sing-dock-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: mainRef });
 
   // Panels that mount once and stay mounted — track which have ever been shown.
   // Updated during render (React's documented "adjust state on prop change"
@@ -214,6 +214,7 @@ export default function AppShell() {
           setView={setView}
           onNewSession={() => setCreateOpen(true)}
           onOpenMenu={(e) => setMenuAnchor(e.currentTarget)}
+          menuOpen={!!menuAnchor}
         />
 
         {/* Selected view. Persistent views mount once (visited) and stay mounted
@@ -265,8 +266,18 @@ export default function AppShell() {
         </Box>
       </Box>
 
-      {/* Drag handle — resize the dock (hidden while minimized). */}
-      {!dockMin && <Box onMouseDown={startDockDrag} sx={{ height: 12, flexShrink: 0, mx: 1.5, cursor: 'row-resize' }} />}
+      {/* Drag handle — resize the dock (hidden while minimized). layout-02
+          `.dock-handle`: 12px hit strip, grip fades in on hover/drag/focus. */}
+      {!dockMin && (
+        <ResizeHandle
+          axis="y"
+          onMouseDown={startDockDrag}
+          onKeyDown={onDockKeyDown}
+          dragging={dockDragging}
+          label="Resize terminal dock"
+          sx={{ mx: 1.5 }}
+        />
+      )}
 
       <SessionDock
         dockMin={dockMin}
