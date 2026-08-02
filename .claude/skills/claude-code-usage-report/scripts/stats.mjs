@@ -552,6 +552,21 @@ const PRICE = {
   // (mid GPT-5.6 tier) per user decision. Distinct key, no substring overlap
   // with any key above, so _price_key's ordered scan can't shadow or be shadowed.
   "codex-auto-review": [2.0, 12.0, 0.20, 2.50],
+  // GPT-5.6 bare id and the GPT-5.4 family (openai.com/api/pricing, cross-checked
+  // against ~/wiki/claude-code/sources/openai-api-pricing.md 2026-07-31). Bare
+  // "gpt-5.6" MUST stay below the three suffixed gpt-5.6-* keys above — a model
+  // string like "gpt-5.6-sol" includes "gpt-5.6" too, so listing the bare key
+  // first would have it win the ordered scan and shadow all three (see their
+  // comment). Within the 5.4 family the suffixed keys (mini/nano/pro) must
+  // likewise precede the bare "gpt-5.4" — "gpt-5.4-mini".includes("gpt-5.4")
+  // is true, so a bare key listed first would shadow all three.
+  "gpt-5.6": [2.0, 12.0, 0.20, 2.50], // bare id → Terra rate, per user decision
+  "gpt-5.4-mini": [0.75, 4.50, 0.075, 0.0],
+  "gpt-5.4-nano": [0.20, 1.25, 0.02, 0.0],
+  "gpt-5.4-pro": [30.0, 180.0, 0.0, 0.0], // no cached-input rate published
+  // cache_create=0 for the whole 5.4 family: unlike GPT-5.6 (cache writes =
+  // 1.25x input), the 5.4 rows publish no cache-write fee.
+  "gpt-5.4": [2.50, 15.0, 0.25, 0.0], // keep BELOW the three 5.4 keys above
 };
 const DEFAULT_PRICE_KEY = "opus";
 
@@ -575,6 +590,17 @@ const PRICE_ABOVE = {
   // codex-auto-review aliases gpt-5.6-terra here too — same no-public-rate
   // reasoning as PRICE above.
   "codex-auto-review": [4.0, 18.0, 0.40, 5.0],
+  // Bare gpt-5.6 = Terra long-ctx rate (mirrors its PRICE alias above). 5.4-mini
+  // and 5.4-nano have no published long-context row, so they're absent here and
+  // correctly fall back to their standard PRICE rate. gpt-5.4/gpt-5.4-pro's own
+  // long-context cutoff isn't published (GPT-5.4 has a 272k window, wider than
+  // GPT-5.6's) — reusing the single global LONG_CTX_THRESHOLD (200k) is the lazy
+  // default rather than adding a per-key threshold mechanism; costs nothing
+  // today since no gpt-5.4 rows exist on disk yet. ponytail: revisit the
+  // threshold if/when real gpt-5.4 usage shows up and OpenAI publishes its cutoff.
+  "gpt-5.6": [4.0, 18.0, 0.40, 5.0],
+  "gpt-5.4-pro": [30.0, 135.0, 0.0, 0.0],
+  "gpt-5.4": [5.0, 22.50, 0.50, 0.0],
 };
 
 // Optional pricing override so rates can be bumped without editing this file:
@@ -657,7 +683,7 @@ function _apply_price_overrides() {
 }
 _apply_price_overrides();
 
-function _price_key(model) {
+export function _price_key(model) {
   const m = (model || "").toLowerCase();
   for (const k of Object.keys(PRICE)) {
     if (m.includes(k)) return k;

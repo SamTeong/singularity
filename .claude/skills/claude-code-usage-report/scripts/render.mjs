@@ -216,7 +216,7 @@ const RATE_LIMITS_HTML = `<header class='shead' id='sec-rate-limit-utilization-5
 <div class='card rv'><h3>5h / 7d utilization (Claude models only)</h3><div id='sec-ratelimits'></div></div>
 <div class='card rv'><h3>5h / 7d utilization (Ollama cloud models only)</h3><div id='sec-ollama-util'></div></div>
 <div class='card rv'><h3>Weekly quota utilization (Codex models only)</h3><div id='sec-codex-util'></div></div>
-<div class='card rv'><h3>Token yield per rate-limit %</h3><div class='ctl-row'><div id='ty-legend' class='legend'></div><div class='toggle'><button id='tybtn-7d' class='active' onclick="showTY('7d')">7d</button><button id='tybtn-5h' onclick="showTY('5h')">5h</button><button id='tybtn-ollama-wk' onclick="showTY('ollama-wk')">7d (ollama)</button></div></div><div id='sec-token-yield'></div><div id='sec-token-yield-summary'></div></div>
+<div class='card rv'><h3>Token yield per rate-limit %</h3><div class='ctl-row'><div id='ty-legend' class='legend'></div><div class='toggle'><button id='tybtn-7d' class='active' onclick="showTY('7d')">7d</button><button id='tybtn-5h' onclick="showTY('5h')">5h</button><button id='tybtn-ollama-wk' onclick="showTY('ollama-wk')">7d (ollama)</button><button id='tybtn-codex-wk' onclick="showTY('codex-wk')">7d (codex)</button></div></div><div id='sec-token-yield'></div><div id='sec-token-yield-summary'></div></div>
 <div class='card rv'><h3>Rate-limit forecast at reset (Claude models only)</h3><div id='sec-forecast'></div></div>
 <div class='card rv'><h3>Rate-limit forecast at reset (Ollama cloud models only)</h3><div id='sec-ollama-forecast'></div></div>
 <div class='card rv'><h3>Weekly quota forecast at reset (Codex models only)</h3><div id='sec-codex-forecast'></div></div>
@@ -245,7 +245,8 @@ const MODELS_HTML = `<header class='shead' id='sec-models'><div class='shead-tit
 <div class='card rv'><h3>Cost share by model (area ∝ cost)</h3><div id='sec-treemap'></div></div>
 <div class='grid2'><div class='card rv'><h3>Sessions by model</h3><div id='sec-model-sessions'></div></div>
 <div class='card rv'><h3>Cost by model</h3><div id='sec-model-cost'></div></div></div>
-<div class='card rv'><h3>Model adoption — cost share by month</h3><div id='sec-share'></div></div>`;
+<div class='card rv'><h3>Model adoption — cost share by month</h3><div id='sec-share'></div></div>
+<div class='card rv'><h3>Cost by harness — share by month</h3><div id='sec-harness-share'></div></div>`;
 
 const ROADMAP_HTML = `<header class='shead' id='sec-insights-roadmap-what-could-come-next'><div class='shead-title'><h2>Usage roadmap</h2><span class='sub'>what could come next</span></div></header>
 {{ROADMAP_BODY}}`;

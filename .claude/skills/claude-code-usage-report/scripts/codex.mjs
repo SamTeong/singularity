@@ -25,6 +25,17 @@ export const CODEX_ROW_KEYS = [
 const AUTO_REVIEW_MODEL = "codex-auto-review";
 const UNKNOWN_MODEL_RE = /^(gpt-|codex)/i;
 
+// Friendly names for the Codex CLI ids that actually appear in rollouts —
+// mirrors the client's `disp` plumbing (model_display_name -> disp,
+// stats.mjs/render.mjs) with no client change needed. Unknown ids fall
+// through to "" (current behaviour: raw id shown as-is).
+const MODEL_DISPLAY_NAMES = {
+  "gpt-5.6-sol": "GPT-5.6 Sol",
+  "gpt-5.6-terra": "GPT-5.6 Terra",
+  "gpt-5.6-luna": "GPT-5.6 Luna",
+  [AUTO_REVIEW_MODEL]: "Codex auto-review",
+};
+
 function _default_codex_home() {
   return process.env.CODEX_HOME || path.join(os.homedir(), ".codex");
 }
@@ -380,16 +391,23 @@ export function codexIngest(deps = {}) {
     const lastModel = (latestNonReview || latestAny || {}).model || "";
     _maybe_warn_unknown_model(lastModel, priceKey, warned);
 
+    // codex-auto-review's usage is real spend but not the session's own work
+    // (see AUTO_REVIEW_MODEL above) — split its tokens/cost into their own
+    // running total here rather than letting them inflate last_model's row.
     let inputSum = 0, outputSum = 0, crSum = 0, ccSum = 0, estCost = 0;
+    let arInputSum = 0, arOutputSum = 0, arCrSum = 0, arCcSum = 0, arCost = 0;
     for (const r of acc.tokenReadings) {
-      inputSum += r.i;
-      outputSum += r.o;
-      crSum += r.cr;
-      ccSum += r.cc;
       const model = r.model || lastModel;
+      const isAutoReview = model === AUTO_REVIEW_MODEL;
+      if (isAutoReview) {
+        arInputSum += r.i; arOutputSum += r.o; arCrSum += r.cr; arCcSum += r.cc;
+      } else {
+        inputSum += r.i; outputSum += r.o; crSum += r.cr; ccSum += r.cc;
+      }
       if (model) {
         _maybe_warn_unknown_model(model, priceKey, warned);
-        estCost += msgCostTiered(model, r.i, r.o, r.cr, r.cc);
+        const cost = msgCostTiered(model, r.i, r.o, r.cr, r.cc);
+        if (isAutoReview) arCost += cost; else estCost += cost;
       }
     }
 
@@ -406,7 +424,7 @@ export function codexIngest(deps = {}) {
       cache_read_tokens: crSum,
       cache_creation_tokens: ccSum,
       model_id: lastModel,
-      model_display_name: "",
+      model_display_name: MODEL_DISPLAY_NAMES[lastModel] || "",
       duration_ms: hasDuration ? Math.trunc((acc.endEpoch - acc.startEpoch) * 1000) : "",
       api_duration_ms: "",
       lines_added: "",
@@ -424,6 +442,42 @@ export function codexIngest(deps = {}) {
       }),
       est_cost_usd: estCost > 0 ? estCost.toFixed(4) : "",
     });
+
+    // Second row for the auto-review spend split above: its own session_id so
+    // it renders as its own pill/slice, no tool-use facets (it isn't user tool
+    // use), but cwd kept so By-project stays correct. Session-level fields that
+    // aren't meaningfully "auto-review's own" (duration/rl/turns/context) are
+    // left blank rather than duplicated off the primary row's values.
+    if (arInputSum || arOutputSum || arCrSum || arCcSum || arCost > 0) {
+      rows.push({
+        timestamp: acc.endEpoch !== null ? localFmt(acc.endEpoch) : "",
+        session_id: `${rootId}:auto-review`,
+        total_cost_usd: "",
+        last_model: AUTO_REVIEW_MODEL,
+        input_tokens: arInputSum,
+        output_tokens: arOutputSum,
+        cache_read_tokens: arCrSum,
+        cache_creation_tokens: arCcSum,
+        model_id: AUTO_REVIEW_MODEL,
+        model_display_name: MODEL_DISPLAY_NAMES[AUTO_REVIEW_MODEL] || "",
+        duration_ms: "",
+        api_duration_ms: "",
+        lines_added: "",
+        lines_removed: "",
+        rl_5h_pct: "",
+        rl_7d_pct: "",
+        context_pct: "",
+        context_window_size: "",
+        turns: 0,
+        tool_calls: 0,
+        start_epoch: acc.startEpoch !== null ? Math.trunc(acc.startEpoch) : "",
+        facets_json: JSON.stringify({
+          tools: {}, tool_errors: 0, agents: {}, skills: {}, compactions: 0,
+          cwd: acc.cwd, branch: "",
+        }),
+        est_cost_usd: arCost > 0 ? arCost.toFixed(4) : "",
+      });
+    }
   }
 
   freshReadings.sort((a, b) => (a.epoch ?? 0) - (b.epoch ?? 0));
@@ -493,6 +547,16 @@ function _selftest() {
     { timestamp: iso(5000), type: "response_item", payload: { type: "custom_tool_call", name: "exec" } },
     { timestamp: iso(6000), type: "response_item", payload: { type: "function_call", name: "wait" } },
     { timestamp: iso(7000), type: "event_msg", payload: { type: "mcp_tool_call_end", invocation: { server: "lean-ctx", tool: "ctx_read" } } },
+    // An interleaved auto-review call (§G): its tokens/cost must land in a
+    // split "<sid>:auto-review" row, not get folded into the primary row's
+    // last_model spend. Occurs well before the sub-thread's later readings so
+    // it doesn't disturb the latestRate/context_window_size assertions below.
+    { timestamp: iso(8000), type: "turn_context", payload: { model: AUTO_REVIEW_MODEL } },
+    { timestamp: iso(9000), type: "event_msg", payload: {
+      type: "token_count",
+      info: { last_token_usage: { input_tokens: 200, cached_input_tokens: 50, cache_write_input_tokens: 10, output_tokens: 30 }, total_token_usage: { input_tokens: 200, output_tokens: 30 }, model_context_window: 200000 },
+      rate_limits: { primary: { used_percent: 20, window_minutes: 10080, resets_at: 2000000000 }, secondary: null },
+    } },
   ];
   fs.writeFileSync(
     path.join(sessionsDir, `rollout-2026-01-01T00-00-00-${ROOT_ID}.jsonl`),
@@ -531,9 +595,12 @@ function _selftest() {
   const result1 = codexIngest(deps);
   assert(result1.skipped === 1, `expected 1 skipped (the fake directory), got ${result1.skipped}`);
   assert(result1.threads === 2, `expected 2 parsed threads, got ${result1.threads}`);
-  assert(result1.sessions === 1, `expected threads folded into 1 root session, got ${result1.sessions}`);
+  // `sessions` is rows.length, not root-session count: the 1 root session here
+  // now emits 2 rows (primary + the auto-review split, §G).
+  assert(result1.sessions === 2, `expected 2 rows (primary + auto-review split), got ${result1.sessions}`);
+  assert(result1.rows.length === 2, `expected 2 rows, got ${result1.rows.length}`);
 
-  const row = result1.rows[0];
+  const row = result1.rows.find((rr) => rr.session_id === ROOT_ID);
   assert(Object.keys(row).sort().join(",") === CODEX_ROW_KEYS.slice().sort().join(","), "row keyset mismatch");
   assert(row.session_id === ROOT_ID, `expected root session_id ${ROOT_ID}, got ${row.session_id}`);
   // input_tokens excludes cache: (1000-200) + (500-100) + 300 = 1500
@@ -551,10 +618,45 @@ function _selftest() {
   assert(row.total_cost_usd === "", "total_cost_usd must be blank (Codex is subscription-billed)");
   const expectCost = ((800 + 100 + 200 + 0) + (400 + 50 + 100 + 0) + (300 + 20 + 0 + 50)) * 0.000001;
   assert(row.est_cost_usd === expectCost.toFixed(4), `expected est_cost_usd ${expectCost.toFixed(4)}, got ${row.est_cost_usd}`);
+  assert(row.model_display_name === "", `expected primary row display name blank for unmapped stub model, got "${row.model_display_name}"`);
   const facets = JSON.parse(row.facets_json);
   assert(facets.tools["codex:exec"] === 1, "expected facets.tools codex:exec=1");
   assert(facets.tools["codex:ctx_read"] === 1, "expected facets.tools codex:ctx_read=1");
   assert(facets.cwd === "C:\\proj", `expected facets.cwd from the root thread, got ${facets.cwd}`);
+
+  // §G: the interleaved auto-review reading must split into its own row,
+  // carrying its own tokens/cost and NOT double-counted into the primary row.
+  const arRow = result1.rows.find((rr) => rr.session_id === `${ROOT_ID}:auto-review`);
+  assert(arRow, "expected an auto-review split row");
+  assert(Object.keys(arRow).sort().join(",") === CODEX_ROW_KEYS.slice().sort().join(","), "auto-review row keyset mismatch");
+  assert(arRow.last_model === AUTO_REVIEW_MODEL, `expected auto-review row last_model ${AUTO_REVIEW_MODEL}, got ${arRow.last_model}`);
+  assert(arRow.model_id === AUTO_REVIEW_MODEL, `expected auto-review row model_id ${AUTO_REVIEW_MODEL}, got ${arRow.model_id}`);
+  // §D: the real (non-stub) AUTO_REVIEW_MODEL id must resolve through the real
+  // MODEL_DISPLAY_NAMES map at ingest.
+  assert(arRow.model_display_name === "Codex auto-review", `expected auto-review display name "Codex auto-review", got "${arRow.model_display_name}"`);
+  assert(arRow.input_tokens === 150, `expected auto-review input_tokens 150 (200-50 cache), got ${arRow.input_tokens}`);
+  assert(arRow.output_tokens === 30, `expected auto-review output_tokens 30, got ${arRow.output_tokens}`);
+  assert(arRow.cache_read_tokens === 50, `expected auto-review cache_read_tokens 50, got ${arRow.cache_read_tokens}`);
+  assert(arRow.cache_creation_tokens === 10, `expected auto-review cache_creation_tokens 10, got ${arRow.cache_creation_tokens}`);
+  const expectArCost = (150 + 30 + 50 + 10) * 0.000001;
+  assert(arRow.est_cost_usd === expectArCost.toFixed(4), `expected auto-review est_cost_usd ${expectArCost.toFixed(4)}, got ${arRow.est_cost_usd}`);
+  const arFacets = JSON.parse(arRow.facets_json);
+  assert(Object.keys(arFacets.tools).length === 0, "expected auto-review row to carry no tool-use facets");
+  assert(arFacets.cwd === "C:\\proj", `expected auto-review row to keep the root cwd for By-project, got ${arFacets.cwd}`);
+  // No double-count, no loss: primary + split must equal the true grand total
+  // over every reading (3 primary + 1 auto-review), computed independently.
+  // Tolerance accounts for each row rounding its own est_cost_usd to 4 decimals
+  // (.toFixed(4)) independently, not the split logic itself.
+  const trueTotal = ((800 + 100 + 200 + 0) + (400 + 50 + 100 + 0) + (300 + 20 + 0 + 50) + (150 + 30 + 50 + 10)) * 0.000001;
+  const splitTotal = parseFloat(row.est_cost_usd) + parseFloat(arRow.est_cost_usd);
+  assert(Math.abs(splitTotal - trueTotal) < 2e-4, `expected primary+auto-review cost to equal true total ${trueTotal}, got ${splitTotal}`);
+
+  // §D: direct map sanity — known ids resolve, unknown ids stay blank.
+  assert(MODEL_DISPLAY_NAMES["gpt-5.6-sol"] === "GPT-5.6 Sol", "expected gpt-5.6-sol display name");
+  assert(MODEL_DISPLAY_NAMES["gpt-5.6-terra"] === "GPT-5.6 Terra", "expected gpt-5.6-terra display name");
+  assert(MODEL_DISPLAY_NAMES["gpt-5.6-luna"] === "GPT-5.6 Luna", "expected gpt-5.6-luna display name");
+  assert(MODEL_DISPLAY_NAMES["codex-auto-review"] === "Codex auto-review", "expected codex-auto-review display name");
+  assert(MODEL_DISPLAY_NAMES["gpt-5.4"] === undefined, "expected an unmapped id to have no display name entry");
 
   const usagePath = path.join(stateDir, "codex-usage.jsonl");
   const linesAfterFirst = fs.readFileSync(usagePath, "utf-8").split(/\r?\n/).filter((l) => l.trim()).length;
@@ -563,7 +665,7 @@ function _selftest() {
   // Second run over unchanged data: cache hits everywhere, zero new readings
   // gathered, usage.jsonl must not grow.
   const result2 = codexIngest(deps);
-  assert(result2.skipped === 1 && result2.sessions === 1, "second run should reproduce the same shape");
+  assert(result2.skipped === 1 && result2.sessions === 2, "second run should reproduce the same shape");
   const linesAfterSecond = fs.readFileSync(usagePath, "utf-8").split(/\r?\n/).filter((l) => l.trim()).length;
   assert(linesAfterSecond === linesAfterFirst, `codex-usage.jsonl grew on an unchanged rerun: ${linesAfterFirst} -> ${linesAfterSecond}`);
 

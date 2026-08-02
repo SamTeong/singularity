@@ -47,6 +47,23 @@ function perModelRates(pm){var out={};for(var m in pm){var v=pm[m];var inp=v.in,
 function bucketer(vals){var sv=vals.filter(function(v){return v>0;}).sort(function(a,b){return a-b;});if(!sv.length)return function(){return 0;};var q1=percentile(sv,0.25),q2=percentile(sv,0.5),q3=percentile(sv,0.75);return function(c){if(c<=0)return 0;if(c<=q1)return 1;if(c<=q2)return 2;if(c<=q3)return 3;return 4;};}
 function spendSeries(days,lastDate){if(!lastDate)return [];var y=+lastDate.slice(0,4),m=+lastDate.slice(5,7),d=+lastDate.slice(8,10);var out=[];for(var i=29;i>=0;i--){var dt=new Date(y,m-1,d-i);var iso=dt.getFullYear()+'-'+pad2(dt.getMonth()+1)+'-'+pad2(dt.getDate());out.push((days[iso]||{}).cost||0);}return out;}
 function modelColorMap(models){var cm={},i=0;models.forEach(function(m){if(m==='others')cm[m]='var(--ink-faint)';else{cm[m]=CFG.PALETTE[i%CFG.PALETTE.length];i++;}});return cm;}
+// ---- harness (Claude / Codex / Ollama-or-proxied) — derived from the model id, no CSV column ----
+// Load-bearing default: renderOllamaTrend synthesizes model-less {ts,r5,r7,dow}
+// rows and feeds them to svgRateTrend, which now guards on harness==='claude'.
+// Blank -> 'claude' is what keeps that gauge rendering; don't change it without
+// giving svgRateTrend an explicit opt-out.
+function harness(m){
+  if(!m) return 'claude';                        // blank last_model only occurs in CC transcripts
+  if(/^claude/i.test(m)) return 'claude';
+  if(/^(gpt-|codex)/i.test(m)) return 'codex';    // same test as codex.mjs UNKNOWN_MODEL_RE
+  return 'ollama';
+}
+var HARNESS=[
+  {id:'claude',label:'Claude Code',col:'var(--ac)'},
+  {id:'codex', label:'Codex CLI', col:'var(--azure)'},
+  {id:'ollama',label:'Proxied / Ollama',col:'var(--sage)'}
+];
+var HARNESS_CMAP={},HARNESS_DISP={};HARNESS.forEach(function(h){HARNESS_CMAP[h.id]=h.col;HARNESS_DISP[h.id]=h.label;});
 function costByModel(bucket){var o={};Object.keys(bucket).forEach(function(k){var m=bucket[k].cost_by_model;var inner={};Object.keys(m).forEach(function(mm){inner[mm]=Math.round(m[mm]*1e6)/1e6;});o[k]=inner;});return o;}
 function topn(d,n){n=n||12;var arr=Object.keys(d).map(function(k){return [k,d[k]];}).sort(function(a,b){return b[1]-a[1];}).slice(0,n);var o={};arr.forEach(function(x){o[x[0]]=x[1];});return o;}
 function projLabel(p){if(!p||p==='unknown')return 'unknown';var parts=p.replace(/[\\/]+$/,'').split(/[\\/]/).filter(Boolean);return parts.length?parts.slice(-2).join('/'):p;}
@@ -180,6 +197,15 @@ function shareBars(months,cmap,dispMap){
   var rows='';keys.forEach(function(k){var cbm=months[k].cost_by_model;var tot=Object.keys(cbm).reduce(function(a,m){return a+cbm[m];},0)||1;var segs='';Object.keys(cbm).sort(function(a,b){return cbm[b]-cbm[a];}).forEach(function(m){var w=cbm[m]/tot*100;if(w<=0)return;var tipM=(dispMap&&dispMap[m])?dispMap[m]+" ("+m+")":m;segs+="<div class='seg' style='width:"+w.toFixed(3)+"%;background:"+(cmap[m]||'var(--ink-faint)')+"' data-tip='"+escAttr(tipM+" · "+w.toFixed(1)+"%")+"'></div>";});rows+="<div class='bar-row'><div class='bar-label'>"+esc(k)+"</div><div class='sbar-track'>"+segs+"</div><div class='bar-val'>$"+Math.round(tot)+"</div></div>";});
   return rows;
 }
+// months-shaped cost_by_model bucket, keyed by harness instead of model — built
+// straight off sessions (not off costByModel's bucket) so the blank-model->claude
+// edge case in harness() still applies (costByModel's bucket already collapsed
+// blank models to the 'others' key, which would misclassify as ollama).
+function harnessShareBucket(S){
+  var o={};
+  S.forEach(function(s){var mk=s.ts.slice(0,7);if(!mk)return;var mo=o[mk]||(o[mk]={cost_by_model:{}});var h=harness(s.model);mo.cost_by_model[h]=(mo.cost_by_model[h]||0)+s.cost;});
+  return o;
+}
 function periodTable(bucket,label,active){
   var keys=Object.keys(bucket).sort().reverse();if(!keys.length)return '<p class="muted">No data.</p>';
   var filt=active&&active.size;
@@ -232,7 +258,7 @@ function colcards(cols){
 function svgRateTrend(sessions,legLabels){
   legLabels=legLabels||{r5:'5h window',r7:'7d window'};
   var tip5=legLabels.tip5||'5h',tip7=legLabels.tip7||'7d'; // short forms for the per-point tooltip
-  var rl=sessions.filter(function(s){return s.r5>0||s.r7>0;}).sort(function(a,b){return a.ts<b.ts?-1:a.ts>b.ts?1:0;});
+  var rl=sessions.filter(function(s){return (s.r5>0||s.r7>0)&&harness(s.model)==='claude';}).sort(function(a,b){return a.ts<b.ts?-1:a.ts>b.ts?1:0;});
   if(!rl.length)return '<p class="muted">No rate-limit data yet.</p>';
   var W=1000,H=220,P=38,n=rl.length;
   var s=scaler(0,Math.max(n-1,1),0,100,W,H,P);
@@ -284,7 +310,7 @@ function svgRateTrend(sessions,legLabels){
   return leg+svgWrap(W,H,axes+ceiling+th80+yticks+xlabels+wknd+d5+d7+dots,'chart');
 }
 function renderRateLimits(sessions){
-  var rl=sessions.filter(function(s){return s.r5>0||s.r7>0;});
+  var rl=sessions.filter(function(s){return (s.r5>0||s.r7>0)&&harness(s.model)==='claude';});
   if(!rl.length)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No rate-limit data yet.</h4><p>Tracking fills as sessions record — forward-only, Claude.ai Pro/Max only (absent for API-key/Bedrock/Vertex and some Max 20x oauth users).</p></div>";
   var r5s=rl.map(function(s){return s.r5;}),r7s=rl.map(function(s){return s.r7;});
   var avg=function(a){return a.reduce(function(x,y){return x+y;},0)/a.length;};
@@ -542,11 +568,14 @@ function aggregate(S){
 }
 function deriveStats(agg,range){
   var t=agg.totals,costs=agg.sessions.map(function(s){return s.cost;});
-  var loc=0,lineSessions=0,locCost=0,activeDurMs=0,activeCost=0;
-  agg.sessions.forEach(function(s){loc+=s.la+s.lr;if(s.la+s.lr>0){lineSessions++;locCost+=s.cost;}if(s.cost>0){activeDurMs+=s.dur;activeCost+=s.cost;}});
-  return {dist:costDist(costs),run:runRate(agg.days),pareto:pareto(costs),rates:perModelRates(agg.per_model),series:spendSeries(agg.days,range.to),cacheHit:(t.cr+t.in)?t.cr/(t.cr+t.in):0,loc:loc,lineSessions:lineSessions,locCost:locCost,lineCov:agg.n?lineSessions/agg.n:0,activeDurHr:activeDurMs/3.6e6,activeCost:activeCost};
+  var loc=0,lineSessions=0,locCost=0,lineDurMs=0,activeDurMs=0,activeCost=0;
+  // ponytail: $/hour needs BOTH cost and duration — the codex-auto-review split
+  // rows (codex.mjs) carry real cost with a blank duration_ms, so gating on cost
+  // alone put their $ in the numerator against zero hours.
+  agg.sessions.forEach(function(s){loc+=s.la+s.lr;if(s.la+s.lr>0){lineSessions++;locCost+=s.cost;lineDurMs+=s.dur;}if(s.cost>0&&s.dur>0){activeDurMs+=s.dur;activeCost+=s.cost;}});
+  return {dist:costDist(costs),run:runRate(agg.days),pareto:pareto(costs),rates:perModelRates(agg.per_model),series:spendSeries(agg.days,range.to),cacheHit:(t.cr+t.in)?t.cr/(t.cr+t.in):0,loc:loc,lineSessions:lineSessions,locCost:locCost,lineDurHr:lineDurMs/3.6e6,lineCov:agg.n?lineSessions/agg.n:0,activeDurHr:activeDurMs/3.6e6,activeCost:activeCost};
 }
-function filterSessions(range){return SESSIONS.filter(function(s){var d=s.ts.slice(0,10);return d>=range.from && d<=range.to;});}
+function filterSessions(range){return SESSIONS.filter(function(s){var d=s.ts.slice(0,10);return d>=range.from && d<=range.to && (!H_ACTIVE.size||H_ACTIVE.has(harness(s.model)));});}
 
 // ---- burn highlights ----
 // 4 candidate "why did tokens burn" drivers over the current range, scored
@@ -667,6 +696,7 @@ var CODEX_FORECAST_EMPTY_HTML="<div class='empty-state'><svg viewBox='0 0 24 24'
 
 // ---- render ----
 function render(range){
+  renderHarnessBar(range);
   var S=filterSessions(range);
   var agg=aggregate(S);
   // 5h:7d exchange rate + per-window trend. Keyed to rate-limit reset windows, not
@@ -685,7 +715,7 @@ function render(range){
   // stays out of the empty-range bail's id list below. Only one gauge exists.
   el('sec-codex-util').innerHTML=renderCodexTrend(FORECAST.codex&&FORECAST.codex.series);
   el('sec-codex-forecast').innerHTML=renderForecast(FORECAST.codex,['weekly'],{weekly:'weekly quota'},CODEX_FORECAST_EMPTY_HTML);
-  if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','burn-cards','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-cadence','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
+  if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','burn-cards','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-cadence','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-harness-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
   var st=deriveStats(agg,range),t=agg.totals;
   var chartModels=agg.models.slice();
   var hasOthers=Object.keys(agg.days).some(function(k){return 'others' in agg.days[k].cost_by_model;})||Object.keys(agg.months).some(function(k){return 'others' in agg.months[k].cost_by_model;});
@@ -716,13 +746,17 @@ function render(range){
   el('cc-ratio').innerHTML=barChart(ccWaste,'var(--ink-soft)',function(v){return v.toFixed(2);});
   // efficiency
   el('sec-eff-models').innerHTML=perModelEfficiency(st.rates,agg.days,cmap,agg.model_disp);
+  // ponytail: lines/session & lines/hour divide by line-reporting sessions only
+  // (st.lineSessions / st.lineDurHr) — Codex rows carry blank la/lr/dur-for-loc
+  // and would silently dilute both averages against all sessions otherwise.
+  // churn is a ratio-of-sums (immune) and $/line already uses locCost/loc — left as-is.
   el('sec-cadence').innerHTML=colcards([
     {title:'Cadence',stats:[
       ["turns / session",agg.n?(t.turns/agg.n).toFixed(1):'—'],
       ["tools / session",agg.n?(t.tools/agg.n).toFixed(1):'—']]},
     {title:'Delivery',stats:[
-      ["lines / session",(st.loc&&agg.n)?(st.loc/agg.n).toFixed(0):'—'],
-      ["lines / hour",(st.loc&&st.activeDurHr)?(st.loc/st.activeDurHr).toFixed(0):'—'],
+      ["lines / session",(st.loc&&st.lineSessions)?(st.loc/st.lineSessions).toFixed(0):'—'],
+      ["lines / hour",(st.loc&&st.lineDurHr)?(st.loc/st.lineDurHr).toFixed(0):'—'],
       ["churn (del/add)",t.la?(t.lr/t.la).toFixed(2):'—']]},
     {title:'Cost spread',stats:[
       ["median $/session",fmtMoney(st.dist.median)],
@@ -752,6 +786,7 @@ function render(range){
   el('sec-model-sessions').innerHTML=barChart(modelSessions,'var(--ink-soft)',null,cmap,agg.model_disp);
   el('sec-model-cost').innerHTML=barChart(modelCost,'var(--ac)',function(v){return fmtMoney(v);},cmap,agg.model_disp);
   el('sec-share').innerHTML=shareBars(agg.months,cmap,agg.model_disp);
+  el('sec-harness-share').innerHTML=shareBars(harnessShareBucket(agg.sessions),HARNESS_CMAP,HARNESS_DISP);
   // usage patterns
   var totTool=0;Object.keys(agg.usage.tools).forEach(function(k){totTool+=agg.usage.tools[k];});
   var errRate=totTool?(agg.usage.tool_errors/totTool*100):0;
@@ -798,6 +833,7 @@ function initControls(range){
   var bar=el('rangeBar'),html='';
   CFG.PRESETS.forEach(function(p){html+="<button class='range-preset"+(p.id===range.preset?' active':'')+"' data-p='"+p.id+"'>"+p.label+"</button>";});
   bar.innerHTML=html;
+  if(!el('harnessBar'))bar.insertAdjacentHTML('afterend',"<div id='harnessBar' class='filter-bar'></div>");
   // date pickers live in their own (currently hidden) container; presets still drive them
   var dp=el('datePickers');
   if(dp)dp.innerHTML="<input type='date' id='from' min='"+FIRST_DATE+"' max='"+LAST_DATE+"' value='"+range.from+"'><span class='sep'>→</span><input type='date' id='to' min='"+FIRST_DATE+"' max='"+LAST_DATE+"' value='"+range.to+"'>";
@@ -805,6 +841,23 @@ function initControls(range){
   if(el('from'))el('from').onchange=onDateChange;
   if(el('to'))el('to').onchange=onDateChange;
 }
+
+// ---- harness filter (global — feeds filterSessions, so it drives every section) ----
+var H_ACTIVE=new Set();
+function renderHarnessBar(range){
+  var bar=el('harnessBar');if(!bar)return;
+  var byDate=SESSIONS.filter(function(s){var d=s.ts.slice(0,10);return d>=range.from&&d<=range.to;});
+  var counts={};HARNESS.forEach(function(h){counts[h.id]=0;});
+  byDate.forEach(function(s){counts[harness(s.model)]++;});
+  var filtered=H_ACTIVE.size>0;
+  bar.innerHTML="<span class='filter-lbl'>Harness</span>"+HARNESS.map(function(h){
+    var off=filtered&&!H_ACTIVE.has(h.id)?' off':'';
+    return "<button class='lg-item"+off+"' data-h='"+h.id+"' title='"+counts[h.id]+" session"+(counts[h.id]===1?'':'s')+"'><span class='lg-swatch' style='background:"+h.col+"'></span>"+esc(h.label)+"</button>";
+  }).join('')+"<button class='lg-all"+(filtered?'':' active')+"'>all</button>";
+  bar.querySelectorAll('button[data-h]').forEach(function(b){b.onclick=function(){_toggleH(b.dataset.h,range);};});
+  bar.querySelector('.lg-all').onclick=function(){H_ACTIVE=new Set();render(range);};
+}
+function _toggleH(id,range){if(H_ACTIVE.has(id))H_ACTIVE.delete(id);else H_ACTIVE.add(id);render(range);}
 
 // ---- model-filter (breakdown bars only) ----
 var CHART={},ACTIVE=new Set();
@@ -859,12 +912,12 @@ function renderTok(){
 // (drop => window reset, delta = current pct), attribute each delta to that
 // session's own model, then efficiency = Sum(tokens)/Sum(delta%) = Mtok per 1%.
 // Aggregate ratio (not per-session) avoids divide-by-zero; skip when Sum(delta)<0.05.
-function tokenYield(S,gk){
-  // Claude models only: r5/r7 is the shared Claude account 5h/7d quota. Non-Claude models
-  // (glm/ollama/etc.) don't draw from it — their gauge reading is just the ambient Claude
-  // value, so their tokens/delta would be meaningless. Excluding them also keeps the delta
-  // chain coherent: a Claude session after a non-Claude gap compares to the prior Claude reading.
-  var rl=S.filter(function(s){return s[gk]>0&&/^claude/i.test(s.model||'');}).slice().sort(function(a,b){return a.ts<b.ts?-1:a.ts>b.ts?1:0;});
+function tokenYield(S,gk,hn){
+  // Single-harness only: r5/r7 is that harness's own account 5h/7d (or weekly) quota.
+  // Other harnesses' gauge readings are unrelated draws, so their tokens/delta would be
+  // meaningless. Excluding them also keeps the delta chain coherent: a same-harness
+  // session after a gap compares to the prior same-harness reading.
+  var rl=S.filter(function(s){return s[gk]>0&&harness(s.model)===hn;}).slice().sort(function(a,b){return a.ts<b.ts?-1:a.ts>b.ts?1:0;});
   var sumT={},sumD={},aggT={},aggD={},prev=null;
   rl.forEach(function(s){
     var pct=s[gk],d=(prev==null)?pct:(pct>=prev?pct-prev:pct);prev=pct;
@@ -919,19 +972,20 @@ function renderTYLegend(data,cmap,dispMap,active,onToggle,onReset){
 }
 function _toggleTY(m){if(TY_ACTIVE.has(m))TY_ACTIVE.delete(m);else TY_ACTIVE.add(m);renderTY();}
 function _toggleTYOllama(m){if(OLLAMA_TY_ACTIVE.has(m))OLLAMA_TY_ACTIVE.delete(m);else OLLAMA_TY_ACTIVE.add(m);renderTYOllama();}
-function showTY(v){TY_GAUGE=v;var b7=el('tybtn-7d'),b5=el('tybtn-5h'),bo=el('tybtn-ollama-wk');if(b7)b7.className=v==='7d'?'active':'';if(b5)b5.className=v==='5h'?'active':'';if(bo)bo.className=v==='ollama-wk'?'active':'';renderTY();}
+function showTY(v){TY_GAUGE=v;var b7=el('tybtn-7d'),b5=el('tybtn-5h'),bo=el('tybtn-ollama-wk'),bc=el('tybtn-codex-wk');if(b7)b7.className=v==='7d'?'active':'';if(b5)b5.className=v==='5h'?'active':'';if(bo)bo.className=v==='ollama-wk'?'active':'';if(bc)bc.className=v==='codex-wk'?'active':'';renderTY();}
 function renderTY(){
   if(TY_GAUGE==='ollama-wk'){renderTYOllama();return;}
   if(!CUR_AGG)return;
-  var gk=TY_GAUGE==='5h'?'r5':'r7',data=tokenYield(CUR_AGG.sessions,gk),lg=el('ty-legend');
+  var hn=TY_GAUGE==='codex-wk'?'codex':'claude',hnLbl=hn==='codex'?'Codex':'Claude';
+  var gk=TY_GAUGE==='codex-wk'?'r7':(TY_GAUGE==='5h'?'r5':'r7'),data=tokenYield(CUR_AGG.sessions,gk,hn),lg=el('ty-legend');
   if(!data.models.length){
     if(lg)lg.innerHTML='';
-    el('sec-token-yield').innerHTML="<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No rate-limit data in range.</h4><p>Token yield needs Claude sessions carrying "+esc(TY_GAUGE)+" rate-limit % (forward-only, Claude.ai Pro/Max only). Non-Claude models draw separate quotas and are excluded.</p></div>";
+    el('sec-token-yield').innerHTML="<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No rate-limit data in range.</h4><p>Token yield needs "+esc(hnLbl)+" sessions carrying "+esc(TY_GAUGE)+" rate-limit % (forward-only"+(hn==='claude'?', Claude.ai Pro/Max only':'')+"). Other harnesses draw separate quotas and are excluded.</p></div>";
     el('sec-token-yield-summary').innerHTML='';return;
   }
   renderTYLegend(data);
   var vis=tyVisSet(data),cmap=(CHART&&CHART.colors)||{};
-  el('sec-token-yield').innerHTML=svgTokenYield(data,cmap,vis)+"<p class='muted' style='margin-top:6px'>Mtok consumed per 1% of the "+esc(TY_GAUGE)+" window burned — per-session gauge deltas, reset-aware. Claude models only — they share the account 5h/7d quota, so lines compare each model's token density per quota point (higher = more tokens per 1%). Non-Claude models (separate quotas) are excluded; non-Pro/pre-statusline sessions carry no gauge.</p>";
+  el('sec-token-yield').innerHTML=svgTokenYield(data,cmap,vis)+"<p class='muted' style='margin-top:6px'>Mtok consumed per 1% of the "+esc(TY_GAUGE)+" window burned — per-session gauge deltas, reset-aware. "+esc(hnLbl)+" models only — they share that harness's own quota, so lines compare each model's token density per quota point (higher = more tokens per 1%). Other harnesses (separate quotas) are excluded; sessions without a gauge reading carry none.</p>";
   var order=data.models.slice().sort(function(a,b){return data.agg[b].e-data.agg[a].e;}),map={};
   order.forEach(function(m){map[m]=data.agg[m].e;});
   el('sec-token-yield-summary').innerHTML="<div class='subhead' style='margin-top:10px'>Overall Mtok per 1% ("+esc(TY_GAUGE)+")</div>"+barChart(map,'var(--ac)',function(v){return v.toFixed(2)+' Mtok/%';},cmap,(CHART&&CHART.disp)||{});
