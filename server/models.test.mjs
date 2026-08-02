@@ -23,7 +23,7 @@ test('isClaudeModel: every ollama preset routes to the ollama wrapper', () => {
 
 test('isClaudeModel: unrecognized ollama-style ids → false', () => {
   assert.equal(isClaudeModel('glm-5.2:cloud'), false);
-  assert.equal(isClaudeModel('kimi-k2.7-code:cloud'), false);
+  assert.equal(isClaudeModel('kimi-k3:cloud'), false);
 });
 
 test('claudeIdToAlias: resolved claude-* ids map back to the family alias', () => {

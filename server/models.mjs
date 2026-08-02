@@ -4,7 +4,7 @@
 // aliases are convenience defaults, not a closed set. Any typed string is passed
 // through; isClaudeModel() routes it to the claude bin or the ollama wrapper.
 export const CLAUDE_ALIASES = ['claude', 'best', 'fable', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]', 'opusplan'];
-export const OLLAMA_PRESETS = ['glm-5.2:cloud', 'kimi-k2.7-code:cloud'];
+export const OLLAMA_PRESETS = ['glm-5.2:cloud', 'kimi-k3:cloud'];
 const ALIAS_SET = new Set(CLAUDE_ALIASES);
 
 // true → run via the `claude` bin (optional --model); false → ollama wrapper.
