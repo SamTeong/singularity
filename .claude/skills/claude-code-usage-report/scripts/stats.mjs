@@ -7,6 +7,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { render } from "./render.mjs";
 import * as FC from "./forecast.mjs";
+import { codexIngest, codexMtimes } from "./codex.mjs";
 
 const HOME = os.homedir();
 const CLAUDE_DIR = path.join(HOME, ".claude");
@@ -36,6 +37,10 @@ const USAGE_SNAPSHOTS_JSONL = path.join(SKILL_STATE_DIR, "usage-snapshots.jsonl"
 // rate-limit cards are omitted entirely (see _build_ollama_forecast).
 const OLLAMA_USAGE_JSONL = path.join(SKILL_STATE_DIR, "ollama-usage.jsonl");
 const OLLAMA_SERIES_CAP = 400; // max points in the report's trend series (strided, see _stride)
+// Codex CLI weekly-quota history (written by codexIngest, see codex.mjs). Same
+// snapshot shape as ollama-usage.jsonl but ONE gauge only ("weekly") — Codex
+// Plus exposes a single 7-day rate-limit window, no five_hour/session pairing.
+const CODEX_USAGE_JSONL = path.join(SKILL_STATE_DIR, "codex-usage.jsonl");
 const USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage";
 const USAGE_API_BETA = "oauth-2025-04-20";
 const USAGE_API_TIMEOUT_MS = 10000;
@@ -527,12 +532,26 @@ const PRICE = {
   // provider docs so their sessions (no billed total_cost_usd → est-only) attribute
   // correctly. _price_key does substring match in insertion order — keep the more
   // specific glm-5.2/glm-5.1 ABOVE glm-5 so "glm-5.2:cloud" matches 5.2, not 5.
-  // cache_create=0: GLM cache-write "limited-time free" (docs.z.ai), Kimi has no
-  // cache-write fee. Bump if those promos end.
+  // cache_create=0: GLM cache-write "limited-time free" (docs.z.ai); Kimi K3 has
+  // no cache-write fee (cache_read=0.30 is the 90% cache-hit discount). Kimi K2.7
+  // Code DOES charge cache_write=0.19 with no cache-read discount. Bump if promos end.
   "glm-5.2": [1.4, 4.4, 0.26, 0.0], // docs.z.ai/guides/overview/pricing
   "glm-5.1": [1.4, 4.4, 0.26, 0.0], // docs.z.ai
   "glm-5": [1.0, 3.2, 0.2, 0.0], // docs.z.ai
+  "kimi-k3": [3.0, 15.0, 0.0, 0.30], // kimi.com/resources/kimi-k3-pricing
   "kimi-k2.7-code": [0.95, 4.0, 0.19, 0.0], // kimi.com/resources/kimi-k2-7-code-pricing
+  // GPT-5.6 (openai.com/api/pricing; via claude-code wiki sources/openai-api-pricing
+  // #flagship-models). 3 tiers only — no pro/mini/nano. cache_read=0.1×in,
+  // cache_create=1.25×in. Substring match: keep the 3 specific keys here; a
+  // generic "gpt-5.6" key added later must go BELOW these or it shadows them.
+  "gpt-5.6-sol": [5.0, 30.0, 0.50, 6.25],
+  "gpt-5.6-terra": [2.0, 12.0, 0.20, 2.50],
+  "gpt-5.6-luna": [0.20, 1.20, 0.02, 0.25],
+  // codex-auto-review is Codex CLI's internal reviewer thread (see codex.mjs) —
+  // no public rate exists for it, so it's priced as an alias of gpt-5.6-terra
+  // (mid GPT-5.6 tier) per user decision. Distinct key, no substring overlap
+  // with any key above, so _price_key's ordered scan can't shadow or be shadowed.
+  "codex-auto-review": [2.0, 12.0, 0.20, 2.50],
 };
 const DEFAULT_PRICE_KEY = "opus";
 
@@ -545,7 +564,18 @@ const DEFAULT_PRICE_KEY = "opus";
 // rates (per claude.com/pricing#api). Kept as a mechanism so a tier can be
 // re-added via pricing.json `above_200k` if Anthropic reintroduces one.
 let LONG_CTX_THRESHOLD = 200000;
-const PRICE_ABOVE = {};
+// GPT-5.6 long-context tier (>200k input-side tokens), same source as PRICE
+// above (openai.com/api/pricing #flagship-models long-context). 2× short-ctx
+// input/output, cache_read=0.1×in, cache_create=1.25×in. Applied per request in
+// _msg_cost_tiered when i+cr+cc > LONG_CTX_THRESHOLD (200k, OpenAI's cutoff).
+const PRICE_ABOVE = {
+  "gpt-5.6-sol": [10.0, 45.0, 1.0, 12.5],
+  "gpt-5.6-terra": [4.0, 18.0, 0.40, 5.0],
+  "gpt-5.6-luna": [0.40, 1.80, 0.04, 0.50],
+  // codex-auto-review aliases gpt-5.6-terra here too — same no-public-rate
+  // reasoning as PRICE above.
+  "codex-auto-review": [4.0, 18.0, 0.40, 5.0],
+};
 
 // Optional pricing override so rates can be bumped without editing this file:
 // ~/.agents/.claude-code-usage-report/state/pricing.json. Shape (all optional):
@@ -889,6 +919,24 @@ function _rebuild_stats_csv(excludeSid, files) {
       est_cost_usd: estCost,
     });
   }
+  // Fold in Codex CLI rollouts (own ingest path — no statusline/hook drives
+  // this, so `report`/`backfill` are the only trigger). Never let a Codex
+  // failure block stats.csv for a user who may not even use Codex: on error
+  // the pre-existing Codex rows (already in `existing`) simply fall through to
+  // the carry-forward loop below and are re-emitted verbatim.
+  try {
+    const { rows: codexRows } = codexIngest({
+      stateDir: SKILL_STATE_DIR, localFmt: local_fmt, epochFromIso: epoch_from_iso,
+      msgCostTiered: _msg_cost_tiered, priceKey: _price_key,
+    });
+    for (const r of codexRows) {
+      rows.push(r);
+      seen.add(r.session_id);
+      if ((r.total_cost_usd || "").trim()) with_cost += 1;
+    }
+  } catch (e) {
+    console.error(`stats.mjs: Codex ingest failed: ${e && e.message}`);
+  }
   for (const [sid, ex] of Object.entries(existing)) {
     if (seen.has(sid) || sid === excludeSid) continue;
     if ((ex.total_cost_usd || "").trim()) with_cost += 1;
@@ -982,8 +1030,11 @@ export function _load_stats(csvPath = STATS_CSV) {
     sessions.push({
       ts,
       sid: (row.session_id || "").trim(),
+      // Third-party rows: prefer est_cost_usd (per-call, per-model, tiered —
+      // codexIngest folds up to 19 threads mixing models into one session row)
+      // over recomputing from summed tokens at last_model's rate alone.
       cost: _is_third_party(row.last_model)
-        ? _msg_cost(row.last_model, i, o, cr, cc)
+        ? (_fnum(row.est_cost_usd) || _msg_cost(row.last_model, i, o, cr, cc))
         : (_fnum(row.total_cost_usd) || _fnum(row.est_cost_usd)),
       model: (row.last_model || "").trim(),
       disp: (row.model_display_name || "").trim(),
@@ -1064,6 +1115,17 @@ function _ensure_fresh() {
     for (const [sid, m] of scan) {
       if (sid === active) continue;
       if (m > csvMtime) { need = true; break; }
+    }
+    // Codex rollouts carry no session id here (mtime-only scan, see
+    // codexMtimes) — compare max-mtime instead of per-sid. Exclude anything
+    // within TX_WIN like the transcript fallback above: an open Codex session's
+    // rollout keeps getting touched, and without this exclusion it would force
+    // a full rebuild on every single `report` for as long as it stays open.
+    if (!need) {
+      for (const m of codexMtimes()) {
+        if (now - m < TX_WIN) continue;
+        if (m > csvMtime) { need = true; break; }
+      }
     }
   }
   if (need) _rebuild_stats_csv(active, jsonl);
@@ -1539,6 +1601,51 @@ function _build_ollama_forecast(nowSec, cfg, fitAt, sessions) {
   };
 }
 
+// ---- Codex weekly rate-limit forecast (own account quota, no OAuth/statusline) ----
+// Mirrors _build_ollama_forecast, but Codex Plus exposes only ONE rate-limit
+// window: rate_limits.primary.window_minutes is always 10080 (weekly),
+// secondary is always null — so there's no five_hour/session pairing and no
+// window-balance ratio to compute. Absent/empty codex-usage.jsonl → null, so
+// out.codex is omitted entirely on a machine with no Codex.
+function _build_codex_forecast(nowSec, cfg, fitAt) {
+  const snaps = _load_usage_snapshots(CODEX_USAGE_JSONL);
+  if (!snaps.length) return null;
+  const windows = _gauge_windows(snaps, "weekly");
+  const fit = _fit_gauge("weekly", windows, nowSec, cfg);
+  let gauge = { ok: false };
+  if (fit) {
+    const open = windows.filter((w) => w.resetSec > nowSec)
+      .sort((a, b) => b.snaps.length - a.snaps.length)[0];
+    let result = null;
+    if (open && open.snaps.length >= 1) {
+      const last = open.snaps[open.snaps.length - 1];
+      const r = FC.runForecast({
+        nowSec: last.t, resetSec: open.resetSec, uNow: last.u,
+        snapshots: open.snaps, prior: fit.prior, calibration: fit.calibration,
+        thresholds: [100, 80],
+      }, cfg);
+      if (r.ok) result = {
+        forecast: r.forecast, posterior: { rHat: r.posterior.rHat, usedOLS: r.posterior.usedOLS, n: r.posterior.n },
+        etas: r.etas, openResetSec: open.resetSec, uNow: last.u, nSnaps: open.snaps.length,
+      };
+    }
+    gauge = {
+      ok: true, source: "codex", nWindows: fit.nWindows,
+      prior: { mu0: fit.prior.mu0, tau0Sq: fit.prior.tau0Sq, nSessions: fit.prior.nSessions },
+      calibration: fit.calibration, result,
+    };
+  }
+  return {
+    modelVersion: FC.MODEL_VERSION, fitAt,
+    gauges: { weekly: gauge },
+    // Trend series for the utilization card, strided like the ollama one.
+    series: _stride(snaps, OLLAMA_SERIES_CAP).map((rec) => ({
+      ts: rec.fetched_at,
+      weekly: rec.weekly && rec.weekly.utilization != null ? Number(rec.weekly.utilization) : null,
+    })).filter((r) => r.weekly != null),
+  };
+}
+
 // Compute the forecast for both gauges and persist. Returns the payload that
 // render.mjs embeds. `sessions` is the _load_stats() session list (for the
 // statusline fallback); pass null to skip that fallback.
@@ -1592,6 +1699,8 @@ function _build_forecast(sessions) {
   out.windowBalance = _window_balance(snaps, sessions, nowSec);
   const ollama = _build_ollama_forecast(nowSec, cfg, out.fitAt, sessions);
   if (ollama) out.ollama = ollama;
+  const codex = _build_codex_forecast(nowSec, cfg, out.fitAt);
+  if (codex) out.codex = codex;
   fs.writeFileSync(FORECAST_JSON, JSON.stringify(out, null, 2), { encoding: "utf-8", mode: 0o600 });
   return out;
 }

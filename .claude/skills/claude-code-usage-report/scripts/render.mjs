@@ -215,9 +215,11 @@ const EFFICIENCY_HTML = `<header class='shead' id='sec-efficiency'><div class='s
 const RATE_LIMITS_HTML = `<header class='shead' id='sec-rate-limit-utilization-5h-7d'><div class='shead-title'><h2>Rate-limit utilization · 5h &amp; 7d</h2><span class='sub'>how close you run to the usage caps</span></div></header>
 <div class='card rv'><h3>5h / 7d utilization (Claude models only)</h3><div id='sec-ratelimits'></div></div>
 <div class='card rv'><h3>5h / 7d utilization (Ollama cloud models only)</h3><div id='sec-ollama-util'></div></div>
+<div class='card rv'><h3>Weekly quota utilization (Codex models only)</h3><div id='sec-codex-util'></div></div>
 <div class='card rv'><h3>Token yield per rate-limit %</h3><div class='ctl-row'><div id='ty-legend' class='legend'></div><div class='toggle'><button id='tybtn-7d' class='active' onclick="showTY('7d')">7d</button><button id='tybtn-5h' onclick="showTY('5h')">5h</button><button id='tybtn-ollama-wk' onclick="showTY('ollama-wk')">7d (ollama)</button></div></div><div id='sec-token-yield'></div><div id='sec-token-yield-summary'></div></div>
 <div class='card rv'><h3>Rate-limit forecast at reset (Claude models only)</h3><div id='sec-forecast'></div></div>
 <div class='card rv'><h3>Rate-limit forecast at reset (Ollama cloud models only)</h3><div id='sec-ollama-forecast'></div></div>
+<div class='card rv'><h3>Weekly quota forecast at reset (Codex models only)</h3><div id='sec-codex-forecast'></div></div>
 <div class='card rv'><h3>5h-window to 7d-window rate (Claude models only)</h3><div id='sec-window-balance'></div></div>
 <div class='card rv'><h3>5h-window to 7d-window (Ollama cloud models only)</h3><div id='sec-ollama-window-balance'></div></div>`;
 
