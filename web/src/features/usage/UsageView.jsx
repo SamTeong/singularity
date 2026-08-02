@@ -95,7 +95,7 @@ export default function UsageView({ usage, onRefresh }) {
           </Stack>
         </Collapse>
       </Stack>
-      {/* Usage report (claude-code-usage-report skill) fills the rest of the pane. */}
+      {/* Usage report (harness-usage-report skill) fills the rest of the pane. */}
       <Box sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${getTokens(t).glass.stroke}` })}>
         <UsageReportView />
       </Box>

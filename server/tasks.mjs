@@ -364,7 +364,7 @@ export function createTask({ repo, title, description, model, implModel, reviewe
       column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
       ...(background ? { conclude: conclude === 'done' ? 'done' : 'inreview' } : {}),
     };
-    // Cost is captured by the global statusline (claude-code-usage-report skill,
+    // Cost is captured by the global statusline (harness-usage-report skill,
     // from ~/.claude/settings.json) writing the full payload to cost-state/<id>.json,
     // read by stats.mjs — no per-task statusline override. permissionSettings
     // (e.g. background-run deny rules) still ride --settings as a sibling key.

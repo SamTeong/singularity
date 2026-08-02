@@ -1,9 +1,9 @@
-// Cross-platform statusline for the claude-code-usage-report capture pipeline.
+// Cross-platform statusline for the harness-usage-report capture pipeline.
 //
 // Contract (the only hard requirement): write the raw statusline JSON payload
 // — read verbatim from stdin — to
-//     ~/.agents/.claude-code-usage-report/state/cost-state/<session_id>.json
-// (last write per session wins ≈ final snapshot). The claude-code-usage-report SessionEnd
+//     ~/.agents/.harness-usage-report/state/cost-state/<session_id>.json
+// (last write per session wins ≈ final snapshot). The harness-usage-report SessionEnd
 // hook then projects that JSON into stats.csv and archives it to sessions.jsonl.
 //
 // Everything below the contract renders the two-line status display: model,
@@ -23,7 +23,7 @@ const raw = Buffer.concat(chunks).toString("utf8");
 let d;
 try { d = JSON.parse(raw); } catch { process.exit(0); }
 
-const stateRoot = process.env.USAGE_REPORT_STATE || join(homedir(), ".agents", ".claude-code-usage-report", "state");
+const stateRoot = process.env.USAGE_REPORT_STATE || join(homedir(), ".agents", ".harness-usage-report", "state");
 const stateDir = join(stateRoot, "cost-state");
 
 // --- Contract: persist the raw payload ---

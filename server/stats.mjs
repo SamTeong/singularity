@@ -1,6 +1,6 @@
 // Per-agent stats from the session .jsonl (turns + tokens) plus cost, both from
 // a pricing-table estimate (per-model token buckets) and, when present, the
-// exact statusline value written by the global statusline (claude-code-usage-report
+// exact statusline value written by the global statusline (harness-usage-report
 // skill) to cost-state/<id>.json — the single source of truth for all sessions,
 // foreground and task/background. Prices drift with Anthropic's rate card — treat
 // estCostUsd as a fallback/cross-check; the statusline value (costSource:

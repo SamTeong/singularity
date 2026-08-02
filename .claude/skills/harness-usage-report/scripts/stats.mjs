@@ -14,7 +14,7 @@ const CLAUDE_DIR = path.join(HOME, ".claude");
 const PROJECTS_DIR = path.join(CLAUDE_DIR, "projects");
 // State root; USAGE_REPORT_STATE overrides it (must match statusline.mjs, which
 // honors the same env var — otherwise capture writes and record/report reads split).
-const SKILL_STATE_DIR = process.env.USAGE_REPORT_STATE || path.join(HOME, ".agents", ".claude-code-usage-report", "state");
+const SKILL_STATE_DIR = process.env.USAGE_REPORT_STATE || path.join(HOME, ".agents", ".harness-usage-report", "state");
 const STATE_DIR = path.join(SKILL_STATE_DIR, "cost-state");
 export const STATS_CSV = path.join(SKILL_STATE_DIR, "stats.csv");
 const SESSIONS_JSONL = path.join(SKILL_STATE_DIR, "sessions.jsonl");
@@ -604,7 +604,7 @@ const PRICE_ABOVE = {
 };
 
 // Optional pricing override so rates can be bumped without editing this file:
-// ~/.agents/.claude-code-usage-report/state/pricing.json. Shape (all optional):
+// ~/.agents/.harness-usage-report/state/pricing.json. Shape (all optional):
 //   { "base": { "opus": [in, out, cache_read, cache_create], ... },
 //     "above_200k": { "sonnet": [in, out, cache_read, cache_create], ... },
 //     "long_context_threshold": 200000 }
@@ -2068,7 +2068,7 @@ function cmd_install(args) {
   const already = existing.some((c) => _record_hook_kind(c, stats_abs) === "ours");
   const foreign = existing.filter((c) => _record_hook_kind(c, stats_abs) === "foreign");
 
-  print("=== claude-code-usage-report install ===");
+  print("=== harness-usage-report install ===");
   print(`platform: ${process.platform}   interpreter: node`);
   print(`stats.mjs: ${stats_abs}`);
   print(`settings: ${s_path}`);

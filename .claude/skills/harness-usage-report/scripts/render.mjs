@@ -1,4 +1,4 @@
-// HTML report renderer for claude-code-usage-report: render(c) -> full self-contained document,
+// HTML report renderer for harness-usage-report: render(c) -> full self-contained document,
 // in the "paper-and-clay" design language.
 // The page layout lives in sources/base.html ({{PLACEHOLDER}} slots) and the larger
 // hero/header block in sources/hero.html; short section markup is inlined as
@@ -18,7 +18,7 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_DIR = path.dirname(SCRIPT_DIR);
 const SOURCES_DIR = path.join(SCRIPT_DIR, "sources");
 // State root must match stats.mjs / statusline.mjs (USAGE_REPORT_STATE overrides).
-const STATE_ROOT = process.env.USAGE_REPORT_STATE || path.join(HOME, ".agents", ".claude-code-usage-report", "state");
+const STATE_ROOT = process.env.USAGE_REPORT_STATE || path.join(HOME, ".agents", ".harness-usage-report", "state");
 const FORECAST_JSON = path.join(STATE_ROOT, "forecast.json");
 
 function _source(name) {
@@ -78,7 +78,7 @@ function _inum(v) {
   return Number.isNaN(f) ? 0 : Math.trunc(f);
 }
 
-// ---- roadmap (claude-code-usage-report-suggestions integration) ----
+// ---- roadmap (harness-usage-report-suggestions integration) ----
 
 function _sibling_skill(name, file) {
   // Resolve a sibling skill's script path without hardcoding the install root.
@@ -94,7 +94,7 @@ function _sibling_skill(name, file) {
   return anchor;
 }
 
-const IMPROVE_MJS = _sibling_skill("claude-code-usage-report-suggestions", "improve.mjs");
+const IMPROVE_MJS = _sibling_skill("harness-usage-report-suggestions", "improve.mjs");
 
 function _fetch_roadmap() {
   if (!isFile(IMPROVE_MJS)) return null;
@@ -114,7 +114,7 @@ function _fetch_roadmap() {
 function _render_suggestions(sg) {
   if (!sg) {
     return (
-      "<p class='muted'>Run <code>/claude-code-usage-report-suggestions</code> for the pipeline " +
+      "<p class='muted'>Run <code>/harness-usage-report-suggestions</code> for the pipeline " +
       "improvement roadmap (capture → schema → aggregation → visualization).</p>"
     );
   }
@@ -255,7 +255,7 @@ function render_roadmap() {
   return _fill(ROADMAP_HTML, { ROADMAP_BODY: _render_suggestions(_fetch_roadmap()) });
 }
 
-const FOOTER_HTML = `<footer>Generated locally from ~/.agents/.claude-code-usage-report/state/stats.csv. All session data stays on this machine. Line counts, API time and rate-limit data are captured from the statusline going forward; older sessions show them as 0/—. Tool usage, projects, subagents, skills and compactions are derived from transcripts (retroactive). Run <code>/claude-code-usage-report-suggestions</code> for the roadmap as text.</footer>`;
+const FOOTER_HTML = `<footer>Generated locally from ~/.agents/.harness-usage-report/state/stats.csv. All session data stays on this machine. Line counts, API time and rate-limit data are captured from the statusline going forward; older sessions show them as 0/—. Tool usage, projects, subagents, skills and compactions are derived from transcripts (retroactive). Run <code>/harness-usage-report-suggestions</code> for the roadmap as text.</footer>`;
 
 // Floating section sidebar (replaces the old "Go to section" fan-out). The shell
 // is static; the menu items, ticks, order and hidden-state are all derived at

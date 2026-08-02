@@ -48,7 +48,7 @@ function requireEnv() {
   // ollama-model spawns (clear buildSpawn error); absent SING_SCOPE_ROOT just
   // means no skill-scopes to pick/add-dir. The daemon boots fine without either.
   // SING_USAGE_SKILL + SING_USAGE_REPORTS are likewise optional (author-specific
-  // claude-code-usage-report skill): absent → usage-report degrade silently
+  // harness-usage-report skill): absent → usage-report degrade silently
   // (usagereport.mjs existsSync-guards its skill path; stats.mjs has an est-cost
   // fallback). /capabilities reports all of these as available:false.
   if (process.env.SING_TOKEN && !/^[A-Za-z0-9_-]+$/.test(process.env.SING_TOKEN)) missing.push('SING_TOKEN (set but contains characters outside [A-Za-z0-9_-])');
@@ -204,7 +204,7 @@ app.get('/usage', async (req) => getUsage({ force: req.query.force === '1' }));
 // Provider status (OpenAI + Claude Atlassian Statuspage). Cached ~20s; ?force=1 bypasses.
 app.get('/status', async (req) => getStatus({ force: req.query.force === '1' }));
 
-// Usage report: newest self-contained HTML from the claude-code-usage-report
+// Usage report: newest self-contained HTML from the harness-usage-report
 // skill (rendered on demand by /usagereport/refresh, served whole to a sandboxed iframe).
 app.get('/usagereport/status', async () => reportStatus());
 app.get('/usagereport/report', async (req, reply) => {

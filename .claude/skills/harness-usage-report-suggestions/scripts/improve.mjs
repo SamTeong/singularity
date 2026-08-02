@@ -1,6 +1,6 @@
-// claude-code-usage-report-suggestions: audit the claude-code-usage-report pipeline end-to-end (capture -> schema ->
+// harness-usage-report-suggestions: audit the harness-usage-report pipeline end-to-end (capture -> schema ->
 // aggregation -> visualization) and emit a prioritized improvement roadmap.
-// Read-only, stdlib only. Imports claude-code-usage-report's stats.mjs as the data layer.
+// Read-only, stdlib only. Imports harness-usage-report's stats.mjs as the data layer.
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
@@ -13,7 +13,7 @@ const PROJECTS_DIR = path.join(CLAUDE_DIR, "projects");
 // Forward-slash base for fs.globSync (a backslash is a glob escape on Windows).
 const PROJECTS_GLOB = PROJECTS_DIR.replace(/\\/g, "/");
 // State root; USAGE_REPORT_STATE overrides it (must match stats.mjs/statusline.mjs).
-const SKILL_STATE_DIR = process.env.USAGE_REPORT_STATE || path.join(HOME, ".agents", ".claude-code-usage-report", "state");
+const SKILL_STATE_DIR = process.env.USAGE_REPORT_STATE || path.join(HOME, ".agents", ".harness-usage-report", "state");
 const SESSIONS_JSONL = path.join(SKILL_STATE_DIR, "sessions.jsonl");
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const SKILL_DIR = path.dirname(SCRIPT_DIR);
@@ -42,10 +42,10 @@ function _sibling_skill(name, file) {
   return anchor;
 }
 
-const STATS_MJS = _sibling_skill("claude-code-usage-report", "stats.mjs");
+const STATS_MJS = _sibling_skill("harness-usage-report", "stats.mjs");
 
 async function _load_stats_module() {
-  // Import claude-code-usage-report's stats.mjs so we reuse its single-pass CSV loader (DRY).
+  // Import harness-usage-report's stats.mjs so we reuse its single-pass CSV loader (DRY).
   try {
     return await import(pathToFileURL(STATS_MJS).href);
   } catch {
@@ -204,7 +204,7 @@ async function cmd_roadmap(args) {
     console.log(JSON.stringify(sg));
     return;
   }
-  console.log("=== claude-code-usage-report-suggestions · pipeline audit ===");
+  console.log("=== harness-usage-report-suggestions · pipeline audit ===");
   console.log(`stats.mjs found: ${stats_found}   sessions in stats.csv: ${totals.sessions || 0}`);
   console.log(`transcripts=${inv.transcripts}  history.jsonl=${inv.history}  tasks=${inv.tasks}  ` +
     `file-history=${inv.file_history}  sessions.jsonl=${inv.archive}`);

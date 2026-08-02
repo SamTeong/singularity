@@ -27,7 +27,7 @@ const REPORT_THEME_KEY = 'agents-report-theme';
 const TOKEN = window.__SING_TOKEN__;
 const reportSrc = (t) => `/usagereport/report?t=${t}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}`;
 
-// Usage report: renders the claude-code-usage-report skill's self-contained HTML
+// Usage report: renders the harness-usage-report skill's self-contained HTML
 // in a sandboxed iframe. Generate/Refresh spawns the skill server-side.
 export default function UsageReportView() {
   const [status, setStatus] = useState(null); // { exists, at } | null while loading

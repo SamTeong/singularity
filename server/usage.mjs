@@ -64,7 +64,7 @@ export function parseOllamaHtml(html) {
   };
 }
 
-// ---- Ollama usage history (feeds the claude-code-usage-report skill) ----------
+// ---- Ollama usage history (feeds the harness-usage-report skill) ----------
 // Every successful ollama scrape is appended as one snapshot in the report
 // skill's own record shape ({fetched_at, session, weekly, plan, models}) — a hard
 // contract with that skill's stats.mjs, which already knows how to chart/forecast
