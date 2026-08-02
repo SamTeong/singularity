@@ -14,6 +14,9 @@ import MenuItem from '@mui/material/MenuItem';
 import Button from '@mui/material/Button';
 import Tooltip from '@mui/material/Tooltip';
 import Collapse from '@mui/material/Collapse';
+import Chip from '@mui/material/Chip';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -82,6 +85,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // and in the e2e sandbox, actually queried — the wrong root).
   const [root, setRoot] = useState(null);
   const [picking, setPicking] = useState(false);
+  const [tool, setTool] = useState('all'); // 'all' | 'claude' | 'codex' — filter the merged list
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
 
@@ -117,7 +121,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
 
   // Batch-fetch cost + token breakdown; merge into the id-keyed stats map.
   const loadStats = useCallback((items) => {
-    const list = (items || []).filter((it) => it?.project && it?.id).map((it) => ({ project: it.project, id: it.id }));
+    // ponytail: codex cost notional, wire stats when needed
+    const list = (items || []).filter((it) => it?.project && it?.id && it.source !== 'codex').map((it) => ({ project: it.project, id: it.id }));
     if (!list.length || root == null) return; // root not resolved yet — don't guess
     fetch('/sessions/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list, root: untildify(root) }) })
       .then((r) => r.json()).then((d) => setStats((prev) => ({ ...prev, ...(d.stats || {}) }))).catch(() => {});
@@ -128,7 +133,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
     setSel(item); setMatches(null); setQ(''); setLoadErr(null);
     loadStats([item]); // ensure detail-header stats even when opened from search
     setLoadingFile(true);
-    fetch(`/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    const src = item.source === 'codex' ? `&source=codex${item.file ? `&file=${encodeURIComponent(item.file)}` : ''}` : '';
+    fetch(`/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}&root=${encodeURIComponent(untildify(root))}${src}`).then((r) => r.json()).then((d) => {
       setTranscript(d.ok ? d : null);
     }).catch(() => { setTranscript(null); setLoadErr('Failed to load transcript.'); }).finally(() => setLoadingFile(false));
   };
@@ -188,7 +194,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // scope 'one' needs a selected session; fall back to 'all' when none.
   const effScope = scope === 'one' && !sel ? 'all' : scope;
   const searching = !!q.trim();
-  const leftResults = searching && effScope === 'all' ? (matches || []) : null;
+  const leftResults = searching && effScope === 'all' ? (matches || []).filter((m) => tool === 'all' || (m.source || 'claude') === tool) : null;
   const viewMsgs = transcript?.messages || [];
   const viewFiltered = searching && effScope === 'one'
     ? viewMsgs.filter((m) => (m.text || '').toLowerCase().includes(q.trim().toLowerCase()))
@@ -207,7 +213,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
 
   // Pagination over whatever the left list shows (all sessions, or cross-session
   // search results). Scope 'one' search filters the right view, not this list.
-  const leftList = leftResults ?? sessions;
+  const filteredSessions = sessions.filter((s) => tool === 'all' || (s.source || 'claude') === tool);
+  const leftList = leftResults ?? filteredSessions;
   const pageCount = Math.max(1, Math.ceil(leftList.length / pageSize));
   const curPage = Math.min(page, pageCount);
   const pageItems = leftList.slice((curPage - 1) * pageSize, curPage * pageSize);
@@ -215,8 +222,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // being paginated. Compared against previous values during render rather
   // than an effect (curPage's Math.min already clamps out-of-range pages, but
   // a fresh query/scope should start back at page 1, not wherever it was).
-  const [prevPageKey, setPrevPageKey] = useState(`${q}:${scope}:${pageSize}`);
-  const pageKeyNow = `${q}:${scope}:${pageSize}`;
+  const [prevPageKey, setPrevPageKey] = useState(`${q}:${scope}:${pageSize}:${tool}`);
+  const pageKeyNow = `${q}:${scope}:${pageSize}:${tool}`;
   if (pageKeyNow !== prevPageKey) {
     setPrevPageKey(pageKeyNow);
     setPage(1);
@@ -238,7 +245,12 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
               onPickFolder={() => setPicking(true)}
               onCollapse={collapse}
             >
-              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tildify(root)}</Typography>
+              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tool === 'codex' ? '~/.codex (Codex home)' : tildify(root)}</Typography>
+              <ToggleButtonGroup value={tool} exclusive size="small" color="primary" onChange={(_, v) => v && setTool(v)} sx={{ mt: 1, ml: 2, alignSelf: 'flex-start' }}>
+                <ToggleButton value="all" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>All</ToggleButton>
+                <ToggleButton value="claude" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>Claude</ToggleButton>
+                <ToggleButton value="codex" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>Codex</ToggleButton>
+              </ToggleButtonGroup>
               <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
                 {['all', 'one'].map((s) => (
                   <Tooltip key={s} title={s === 'one' ? 'Search + chat about the selected transcript' : 'Search + chat across all transcripts'}>
@@ -256,13 +268,13 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                 ))}
               </Stack>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
-                {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${sessions.length} transcript${sessions.length === 1 ? '' : 's'}`}
+                {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${filteredSessions.length} transcript${filteredSessions.length === 1 ? '' : 's'}`}
               </Typography>
             </RailHeader>
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
               {leftResults ? (
                 pageItems.map((r, i) => (
-                  <ListItemButton key={`${r.project}:${r.id}:${r.lineIndex}:${i}`} onClick={() => open({ project: r.project, id: r.id, title: r.id, cwd: r.cwd })} sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
+                  <ListItemButton key={`${r.project}:${r.id}:${r.lineIndex}:${i}`} onClick={() => open({ project: r.project, id: r.id, title: r.id, cwd: r.cwd, source: r.source })} sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
                     <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(r.cwd) || r.project}</Typography>
                     <Typography sx={{ fontSize: 12, color: 'text.secondary' }} noWrap>[{r.role}] {r.snippet}</Typography>
                   </ListItemButton>
@@ -294,6 +306,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                             </IconButton>
                           )}
                           <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{s.title || `${s.id.slice(0, 8)}…`}</Typography>
+                          {s.source === 'codex' && <Chip label="Codex" size="small" sx={{ height: 16, '& .MuiChip-label': { px: 0.5, fontSize: 10 } }} />}
                           {s.running && <PulseDot />}
                           {hasSubs && !isExpanded && (
                             <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>⚡{s.subagents.length} subagents</Typography>
@@ -328,7 +341,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                   );
                 })
               )}
-              {!leftResults && sessions.length === 0 && <EmptyListLine>{sessErr || 'No transcripts.'}</EmptyListLine>}
+              {!leftResults && filteredSessions.length === 0 && <EmptyListLine>{sessErr || 'No transcripts.'}</EmptyListLine>}
               {leftResults && leftResults.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
             <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${getTokens(t).glass.stroke}`, flexShrink: 0 })}>
@@ -375,7 +388,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
               <>
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
                   <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{headerLabel}</Typography>
-                  {onResume && !sel?.sub && (transcript.meta?.cwd || sel?.cwd) && (
+                  {onResume && !sel?.sub && sel?.source !== 'codex' && (transcript.meta?.cwd || sel?.cwd) && (
                     <Tooltip title={sessionLive ? 'Session already live in the dock — switch to it instead' : 'Resume this session in a new agent — prefills last model + skill-scopes'}>
                       {/* span: Tooltip needs a live event target — a disabled button fires none. */}
                       <span>

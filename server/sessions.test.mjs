@@ -15,6 +15,7 @@ import { mkdtempSync } from 'node:fs';
 // SINGULARITY_HOME. Point it at a scratch temp dir before a dynamic import
 // (static imports hoist above the env assignment).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
+process.env.CODEX_HOME = join(tmpdir(), 'codex-nonexistent-' + Date.now());
 const { readSession, sessionText, searchSessions, listSessions, getSessionsRoot, setSessionsRoot, resolveRoot } = await import('./sessions.mjs');
 
 const PROJECTS = join(homedir(), '.claude', 'projects');

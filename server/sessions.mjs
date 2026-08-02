@@ -7,7 +7,7 @@
 // context.
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { readdir, stat, readFile, open } from 'node:fs/promises';
-import { join, resolve, sep, normalize } from 'node:path';
+import { join, resolve, sep, normalize, basename, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd } from './agents.mjs';
 import { OLLAMA_PRESETS, claudeIdToAlias } from './models.mjs';
@@ -31,6 +31,199 @@ const RESULT_CAP = 200;
 const TOOL_TRUNC = 300;       // tool_use inputs / tool_result bodies in the view payload
 const TEXT_CAP = 80000;       // sessionText head+tail cap (chars)
 const RUNNING_MS = 30000;     // external-session recency heuristic: mtime within this window counts as running
+
+// ---- Codex CLI transcripts (~/.codex/sessions/**/rollout-*.jsonl) ----
+// Codex stores one JSONL per thread under CODEX_HOME/sessions/ (and
+// archived_sessions/). The filename embeds the thread uuid (rollout-<ts>-<uuid>.jsonl);
+// we use it as the row id. session_meta carries the root session_id + cwd.
+const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
+const CODEX_FILE_CAP = 5000;
+const CODEX_THREAD_RE = /-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
+
+function codexThreadId(filename) {
+  const base = filename.slice(0, -6); // strip .jsonl
+  const m = CODEX_THREAD_RE.exec(base);
+  return m ? m[1] : base;
+}
+
+// Reduce a peek's events to {cwd, sessionId, title}. session_meta gives cwd +
+// session_id; the first user_message gives the title (fallback: Codex <uuid>).
+function peekCodexMeta(events) {
+  let cwd = null, sessionId = null, title = null;
+  for (const e of events) {
+    if (e.type === 'session_meta' && e.payload) {
+      if (!sessionId) sessionId = e.payload.session_id || e.payload.id || null;
+      if (!cwd && e.payload.cwd) cwd = e.payload.cwd;
+    }
+    if (!title && e.type === 'event_msg' && e.payload?.type === 'user_message' && e.payload.message) {
+      title = e.payload.message;
+    }
+  }
+  return { cwd, sessionId, title };
+}
+
+// Bounded recursive walk collecting rollout-*.jsonl under base. Stops at
+// CODEX_FILE_CAP files (logs once) — guards against an exploded sessions tree.
+async function listCodexRollouts(base, acc) {
+  if (acc.length >= CODEX_FILE_CAP) return;
+  let entries;
+  try { entries = await readdir(base, { withFileTypes: true }); } catch { return; }
+  for (const ent of entries) {
+    if (acc.length >= CODEX_FILE_CAP) return;
+    const p = join(base, ent.name);
+    if (ent.isDirectory()) await listCodexRollouts(p, acc);
+    else if (ent.name.startsWith('rollout-') && ent.name.endsWith('.jsonl')) acc.push(p);
+  }
+}
+
+const codexMetaCache = new Map(); // path -> { mtimeMs, size, cwd, sessionId, title }
+async function listCodexSessions({ cap, isLive = () => false, now = Date.now() } = {}) {
+  if (!existsSync(CODEX_HOME)) return [];
+  const files = [];
+  for (const sub of ['sessions', 'archived_sessions']) await listCodexRollouts(join(CODEX_HOME, sub), files);
+  if (files.length >= CODEX_FILE_CAP) console.error('[codex] hit file cap, truncating');
+  const out = [];
+  for (const p of files) {
+    const pk = await peek(p);
+    if (!pk) continue;
+    const { st } = pk;
+    const id = codexThreadId(basename(p));
+    let cwd, sessionId, title;
+    const hit = codexMetaCache.get(p);
+    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
+      ({ cwd, sessionId, title } = hit);
+    } else {
+      ({ cwd, sessionId, title } = peekCodexMeta(parseEvents(pk.head)));
+      if (!title) title = `Codex ${id.slice(0, 8)}`;
+      codexMetaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, sessionId, title });
+    }
+    out.push({
+      id, project: '<codex>', cwd, title, mtime: st.mtimeMs, size: st.size,
+      running: isLive(id) || (now - st.mtimeMs) < RUNNING_MS,
+      source: 'codex', sessionId,
+      file: relative(CODEX_HOME, p),
+    });
+  }
+  return out;
+}
+
+// Resolve a codex rollout relpath (stored in the row) to an absolute path,
+// guarded to stay under CODEX_HOME — mirrors pathFor's claude guard.
+export function pathForCodex(file) {
+  if (!file) return null;
+  const base = resolve(CODEX_HOME);
+  const abs = resolve(CODEX_HOME, file);
+  if (abs !== base && !abs.startsWith(base + sep)) return null;
+  return abs;
+}
+
+// Locate a codex rollout by thread uuid (filename trailing UUID). Bounded walk
+// of CODEX_HOME — used as a fallback when the caller has no stored relpath.
+async function findCodexById(id) {
+  if (!id || !existsSync(CODEX_HOME)) return null;
+  const files = [];
+  for (const sub of ['sessions', 'archived_sessions']) await listCodexRollouts(join(CODEX_HOME, sub), files);
+  for (const p of files) if (codexThreadId(basename(p)) === id) return p;
+  return null;
+}
+
+// Parse a codex rollout into the same {ok, meta, messages} shape as readSession.
+// session_meta → meta only; event_msg user_message → user text; response_item
+// message/reasoning/function_call/custom_tool_call → assistant entries.
+// ponytail: codex cost notional, wire stats when needed
+async function readCodexSession(p) {
+  const events = parseEvents(await readFile(p, 'utf8'));
+  const messages = [];
+  let cwd = null, sessionId = null, title = null, turns = 0, firstTs = null, lastTs = null, lastModel = null;
+  for (const e of events) {
+    if (!e || typeof e !== 'object') continue;
+    const ts = e.timestamp ?? null;
+    if (ts) { if (!firstTs) firstTs = ts; lastTs = ts; }
+    const typ = e.type;
+    const payload = e.payload || {};
+    if (typ === 'session_meta') {
+      if (!sessionId) sessionId = payload.session_id || payload.id || null;
+      if (!cwd && payload.cwd) cwd = payload.cwd;
+      continue;
+    }
+    if (typ === 'turn_context') { if (payload.model) lastModel = payload.model; continue; }
+    if (typ === 'response_item') {
+      if (payload.type === 'message') {
+        if (payload.role === 'assistant') {
+          turns++;
+          const text = (payload.content || []).map((c) => c.text || '').join('');
+          if (text) messages.push({ ts, role: 'assistant', kind: 'text', text });
+        }
+      } else if (payload.type === 'reasoning') {
+        const text = [...(payload.summary || []), ...(payload.content || [])].map((c) => c.text || '').join('');
+        if (text) messages.push({ ts, role: 'assistant', kind: 'thinking', text });
+      } else if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
+        const name = payload.name || '?';
+        const args = payload.arguments || payload.input || '';
+        messages.push({ ts, role: 'assistant', kind: 'toolUse', name, text: trunc(args, TOOL_TRUNC) });
+      }
+      continue;
+    }
+    if (typ === 'event_msg') {
+      if (payload.type === 'user_message') {
+        const text = payload.message || payload.text || '';
+        if (text) {
+          messages.push({ ts, role: 'user', kind: 'text', text });
+          if (!title) title = text.slice(0, 120);
+        }
+      } else if (payload.type === 'mcp_tool_call_end') {
+        const name = payload.invocation?.tool || '?';
+        messages.push({ ts, role: 'assistant', kind: 'toolUse', name, text: name });
+      }
+      // token_count and other event_msg types skipped
+    }
+  }
+  return { ok: true, meta: { cwd, title, turns, firstTs, lastTs, model: lastModel, source: 'codex', sessionId }, messages };
+}
+
+// Codex search: text items from a rollout, cached by (mtime,size) like the
+// claude textCache. Lighter than readCodexSession — text only, no meta.
+const codexTextCache = new Map();
+async function codexTextItems(p) {
+  let st;
+  try { st = await stat(p); } catch { return null; }
+  const hit = codexTextCache.get(p);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.items;
+  let s;
+  try { s = await readCodexForSearch(p); } catch { return null; }
+  codexTextCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, items: s });
+  if (codexTextCache.size > 200) codexTextCache.delete(codexTextCache.keys().next().value);
+  return s;
+}
+async function readCodexForSearch(p) {
+  const events = parseEvents(await readFile(p, 'utf8'));
+  const items = [];
+  let cwd = null;
+  for (const e of events) {
+    if (!e || typeof e !== 'object') continue;
+    if (e.type === 'session_meta' && e.payload && !cwd) cwd = e.payload.cwd || null;
+    const payload = e.payload || {};
+    if (e.type === 'event_msg' && payload.type === 'user_message') {
+      const text = payload.message || payload.text || '';
+      if (text) items.push({ idx: items.length, role: 'user', text, cwd });
+    } else if (e.type === 'response_item') {
+      if (payload.type === 'message' && payload.role === 'assistant') {
+        const text = (payload.content || []).map((c) => c.text || '').join('');
+        if (text) items.push({ idx: items.length, role: 'assistant', text, cwd });
+      } else if (payload.type === 'reasoning') {
+        const text = [...(payload.summary || []), ...(payload.content || [])].map((c) => c.text || '').join('');
+        if (text) items.push({ idx: items.length, role: 'assistant', text, cwd });
+      } else if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
+        const name = payload.name || '?';
+        items.push({ idx: items.length, role: 'assistant', text: `[tool: ${name}] ${trunc(payload.arguments || payload.input || '', 500)}`, cwd });
+      }
+    } else if (e.type === 'event_msg' && payload.type === 'mcp_tool_call_end') {
+      const name = payload.invocation?.tool || '?';
+      items.push({ idx: items.length, role: 'assistant', text: `[tool: ${name}]`, cwd });
+    }
+  }
+  return items;
+}
 
 // Sessions root choice, FS-persisted (survives browser cache clear). Defaults
 // to ~/.claude/projects.
@@ -99,7 +292,11 @@ function peekMeta(events) {
 const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title }
 export async function listSessions({ cap = 5000, isLive = () => false, now = Date.now(), root } = {}) {
   const PROJECTS = resolveRoot(root);
-  if (!existsSync(PROJECTS)) return [];
+  if (!existsSync(PROJECTS)) {
+    const codexOnly = await listCodexSessions({ cap, isLive, now });
+    codexOnly.sort((a, b) => b.mtime - a.mtime);
+    return codexOnly.slice(0, cap);
+  }
   const out = [];
   for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {
     if (!proj.isDirectory()) continue;
@@ -132,8 +329,11 @@ export async function listSessions({ cap = 5000, isLive = () => false, now = Dat
       out.push(row);
     }
   }
-  out.sort((a, b) => b.mtime - a.mtime);
-  return out.slice(0, cap);
+  for (const r of out) r.source = 'claude';
+  const codex = await listCodexSessions({ cap, isLive, now });
+  const all = out.concat(codex);
+  all.sort((a, b) => b.mtime - a.mtime);
+  return all.slice(0, cap);
 }
 
 // Scan <parentDir>/<parentId>/subagents/agent-*.jsonl and reduce each to a row.
@@ -212,12 +412,14 @@ export function pathFor(project, id, root) {
 // subagent ids — their project dir is authoritative. Miss-path only.
 async function findById(id, root) {
   const PROJECTS = resolveRoot(root);
-  if (/[\\/]/.test(id) || !existsSync(PROJECTS)) return null;
-  for (const proj of await readdir(PROJECTS)) {
-    const p = join(PROJECTS, proj, `${id}.jsonl`);
-    if (existsSync(p)) return p;
+  if (/[\\/]/.test(id)) return null;
+  if (existsSync(PROJECTS)) {
+    for (const proj of await readdir(PROJECTS)) {
+      const p = join(PROJECTS, proj, `${id}.jsonl`);
+      if (existsSync(p)) return p;
+    }
   }
-  return null;
+  return await findCodexById(id);
 }
 
 function trunc(s, n) {
@@ -228,7 +430,12 @@ function trunc(s, n) {
 // readSession: full parse into a renderable message list + meta. tool_use inputs
 // and tool_result bodies are truncated in the payload (the raw file is the
 // source of truth); text/thinking are kept whole for the chat context.
-export async function readSession(project, id, root) {
+export async function readSession(project, id, root, source = 'claude', file) {
+  if (source === 'codex') {
+    let p = file ? pathForCodex(file) : await findCodexById(id);
+    if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
+    return readCodexSession(p);
+  }
   let p = pathFor(project, id, root);
   if (!p || !existsSync(p)) p = await findById(id, root); // stale project slug → locate by unique id
   if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
@@ -345,15 +552,27 @@ export async function searchSessions(q, { project, id, root } = {}) {
   const PROJECTS = resolveRoot(root);
   const targets = [];
   if (project && id) {
-    const p = pathFor(project, id, root);
-    if (p && existsSync(p)) targets.push({ project, id, path: p });
-  } else if (existsSync(PROJECTS)) {
-    for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {
-      if (!proj.isDirectory()) continue;
-      const dir = join(PROJECTS, proj.name);
-      let files;
-      try { files = await readdir(dir); } catch { continue; }
-      for (const f of files) if (f.endsWith('.jsonl')) targets.push({ project: proj.name, id: f.slice(0, -6), path: join(dir, f) });
+    if (project === '<codex>') {
+      const p = await findCodexById(id);
+      if (p) targets.push({ project, id, path: p, source: 'codex' });
+    } else {
+      const p = pathFor(project, id, root);
+      if (p && existsSync(p)) targets.push({ project, id, path: p, source: 'claude' });
+    }
+  } else {
+    if (existsSync(PROJECTS)) {
+      for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {
+        if (!proj.isDirectory()) continue;
+        const dir = join(PROJECTS, proj.name);
+        let files;
+        try { files = await readdir(dir); } catch { continue; }
+        for (const f of files) if (f.endsWith('.jsonl')) targets.push({ project: proj.name, id: f.slice(0, -6), path: join(dir, f), source: 'claude' });
+      }
+    }
+    if (existsSync(CODEX_HOME)) {
+      const codexFiles = [];
+      for (const sub of ['sessions', 'archived_sessions']) await listCodexRollouts(join(CODEX_HOME, sub), codexFiles);
+      for (const p of codexFiles) targets.push({ project: '<codex>', id: codexThreadId(basename(p)), path: p, source: 'codex' });
     }
   }
   const results = [];
@@ -364,17 +583,17 @@ export async function searchSessions(q, { project, id, root } = {}) {
     if (t.id.toLowerCase().includes(ql)) {
       // id lives in event metadata, not message text — synthesize one hit and
       // skip the (always-empty) message-text scan for the same id.
-      const items = await sessionTextItems(t.path);
-      results.push({ project: t.project, id: t.id, cwd: items?.[0]?.cwd || null, lineIndex: 0, role: 'id', snippet: t.id });
+      const items = t.source === 'codex' ? await codexTextItems(t.path) : await sessionTextItems(t.path);
+      results.push({ project: t.project, id: t.id, cwd: items?.[0]?.cwd || null, lineIndex: 0, role: 'id', snippet: t.id, source: t.source });
       if (results.length >= RESULT_CAP) return { results, capped: true };
       continue;
     }
-    const items = await sessionTextItems(t.path);
+    const items = t.source === 'codex' ? await codexTextItems(t.path) : await sessionTextItems(t.path);
     if (!items) continue;
     for (const it of items) {
       const at = it.text.toLowerCase().indexOf(ql);
       if (at < 0) continue;
-      results.push({ project: t.project, id: t.id, cwd: it.cwd, lineIndex: it.idx, role: it.role, snippet: snippet(it.text, at, ql) });
+      results.push({ project: t.project, id: t.id, cwd: it.cwd, lineIndex: it.idx, role: it.role, snippet: snippet(it.text, at, ql), source: t.source });
       if (results.length >= RESULT_CAP) return { results, capped: true };
     }
   }

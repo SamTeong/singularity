@@ -14,6 +14,7 @@ import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid } from './procs.mjs';
 import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
+import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, getConfigRoots as getCodexConfigRoots, setConfigRoots as setCodexConfigRoots } from './codex-config.mjs';
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
@@ -22,7 +23,7 @@ import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoo
 import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
-import { getUsage, initUsageAutoRefresh } from './usage.mjs';
+import { getUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
 import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
@@ -261,6 +262,7 @@ app.get('/capabilities', async () => {
   const usageReportAvailable = !!(process.env.SING_USAGE_SKILL && existsSync(process.env.SING_USAGE_SKILL));
   return {
     ollama:      { available: !!reg.OLLAMA_BIN, hint: 'Set OLLAMA_BIN in .env to enable Ollama model spawns.' },
+    codex:       { available: existsSync(join(CODEX_HOME, 'sessions')), hint: 'Run Codex CLI once to enable the Codex usage card.' },
     skillScopes: { available: !!(process.env.SING_SCOPE_ROOT && existsSync(process.env.SING_SCOPE_ROOT)), hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
     usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
     wiki:        { available: wikiAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
@@ -354,6 +356,33 @@ app.put('/config/:scope', async (req, reply) => {
   const { cwd, content } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
   const r = writeConfig(cwd, req.params.scope, content);
+  if (!r.ok) reply.code(400);
+  return r;
+});
+
+// Codex config.toml editor: 2-scope resolver + backup-then-write (mirrors /config).
+app.get('/codex-config', async (req, reply) => {
+  const cwd = req.query.cwd;
+  if (!cwd) return reply.code(400).send({ error: 'cwd required' });
+  return readCodexConfig(cwd);
+});
+// Recursively find dirs under `root` that hold a .codex/config.toml.
+app.get('/codex-config/scan', async (req, reply) => {
+  const root = req.query.root;
+  if (!root || !existsSync(root)) return reply.code(400).send({ error: 'bad root' });
+  return findCodexConfigRoots(root);
+});
+// FS-persisted codex config root list (survives browser cache clear).
+app.get('/codex-config/roots', async () => ({ roots: getCodexConfigRoots() }));
+app.put('/codex-config/roots', async (req) => setCodexConfigRoots(req.body?.roots));
+app.post('/codex-config/search', async (req) => {
+  const { roots, q } = req.body || {};
+  return { results: searchCodexConfig(roots, q) };
+});
+app.put('/codex-config/:scope', async (req, reply) => {
+  const { cwd, content } = req.body || {};
+  if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
+  const r = writeCodexConfig(cwd, req.params.scope, content);
   if (!r.ok) reply.code(400);
   return r;
 });
@@ -554,10 +583,10 @@ app.get('/sessions/root', async () => ({ root: getSessionsRoot() }));
 app.put('/sessions/root', async (req) => setSessionsRoot(req.body?.root));
 app.get('/sessions', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive, root: req.query.root }) }));
 app.get('/session', async (req, reply) => {
-  const { project, id, root } = req.query || {};
+  const { project, id, root, source, file } = req.query || {};
   if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
-  const r = await readSession(project, id, root);
-  if (r.ok) {
+  const r = await readSession(project, id, root, source, file);
+  if (r.ok && source !== 'codex') {
     // Skill-scopes live only in the agent registry (not the transcript), so
     // merge them in here for the Resume prefill when the id is a known agent.
     const lc = reg.getLaunchConfig(id);
