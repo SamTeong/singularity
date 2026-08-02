@@ -4,6 +4,8 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
+import ToggleButton from '@mui/material/ToggleButton';
+import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import { json } from '@codemirror/lang-json';
 import IconButton from '@mui/material/IconButton';
@@ -20,7 +22,7 @@ import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
 
-const SCOPES = [
+const CLAUDE_SCOPES = [
   { key: 'project', label: 'settings.json' },
   { key: 'local', label: 'settings.local.json' },
 ];
@@ -35,24 +37,36 @@ export default function ConfigEditor() {
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
   const [msg, setMsg] = useState(null);
-  const { roots, shownRoots, remember, forget } = useRootList('/config', { initial: ['~'] });
+  const [tool, setTool] = useState('claude'); // 'claude' | 'codex'
+  const claudeRoots = useRootList('/config', { initial: ['~'] });
+  const codexRoots = useRootList('/codex-config', { initial: ['~'] });
+  const { roots, shownRoots, remember, forget } = tool === 'codex' ? codexRoots : claudeRoots;
   const [q, setQ] = useState('');
   const [searchResults, setSearchResults] = useState(null); // content-search hits, raw
   const results = q.trim() ? searchResults : null; // null = show config list
+
+  const base = tool === 'codex' ? '/codex-config' : '/config';
+  // Codex has no scope tabs: one config.toml per root. `~` (home) → user-level
+  // (~/.codex/config.toml); any project root → project-level (.codex/config.toml).
+  const effScope = tool === 'codex' ? (untildify(cwd) === untildify('~') ? 'user' : 'project') : scope;
 
   const load = () => {
     if (!cwd) return;
     const full = untildify(cwd);
     setLoading(true);
-    fetch(`/config?cwd=${encodeURIComponent(full)}`).then((r) => r.json()).then((d) => {
+    fetch(`${base}?cwd=${encodeURIComponent(full)}`).then((r) => r.json()).then((d) => {
       setData(d);
       setLoadedCwd(full);
-      setContent(d[scope]?.content ?? '');
+      setContent(d[effScope]?.content ?? '');
       setDirty(false); setMsg(null);
       remember([full]);
     }).catch((e) => setMsg({ sev: 'error', text: String(e) })).finally(() => setLoading(false));
   };
   useEffect(() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; load(); /* eslint-disable-line */ }, [cwd]);
+  // Tool switch: reload for the current cwd/scope under the new tool's backend.
+  // load() reads `base`/`scope` from closure; an effect keyed on [tool] runs
+  // after those state updates settle, so it sees the fresh values.
+  useEffect(() => { load(); /* eslint-disable-line */ }, [tool]);
 
   // Debounced content search across config roots' settings files (empty q → config list,
   // derived above rather than reset here).
@@ -60,13 +74,13 @@ export default function ConfigEditor() {
     const term = q.trim();
     if (!term) return;
     const id = setTimeout(() => {
-      fetch('/config/search', {
+      fetch(`${base}/search`, {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ roots, q: term }),
       }).then((r) => r.json()).then((d) => setSearchResults(d.results || [])).catch(() => setSearchResults([]));
     }, 250);
     return () => clearTimeout(id);
-  }, [q, roots]);
+  }, [q, roots, base]);
 
   // Switching tabs/scope is a direct user action — sync content here instead of
   // an effect keyed on [scope, data].
@@ -81,17 +95,30 @@ export default function ConfigEditor() {
     setCwd(it.cwd);
   };
 
-  const jsonError = useMemo(() => {
+  const changeTool = (next) => {
+    if (next === tool) return;
+    if (dirty && !window.confirm('Discard unsaved changes?')) return;
+    setTool(next);
+    setScope('project');
+    setData(null);
+    setLoadedCwd(null);
+    setContent('');
+    setDirty(false);
+    setMsg(null);
+  };
+
+  const validationError = useMemo(() => {
+    if (tool !== 'claude') return null;
     if (!content.trim()) return null;
     try { JSON.parse(content); return null; } catch (e) { return e.message; }
-  }, [content]);
+  }, [content, tool]);
 
-  const info = data?.[scope];
+  const info = data?.[effScope];
 
   const onChange = (v) => { setContent(v); setDirty(true); };
 
   const save = async () => {
-    const r = await fetch(`/config/${scope}`, {
+    const r = await fetch(`${base}/${effScope}`, {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ cwd: loadedCwd, content }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
@@ -104,7 +131,7 @@ export default function ConfigEditor() {
     setCwd(p); setPicking(false);
     // Recursively find nested roots (e.g. ~/wiki/sub/.claude/settings.json) and
     // fold them into the config list so they become pickable.
-    fetch(`/config/scan?root=${encodeURIComponent(untildify(p))}`).then((r) => r.json()).then((d) => {
+    fetch(`${base}/scan?root=${encodeURIComponent(untildify(p))}`).then((r) => r.json()).then((d) => {
       const found = d.roots || [];
       if (found.length) remember(found);
       if (d.truncated) setMsg({ sev: 'info', text: 'Reached the folder limit — some subfolders were skipped.' });
@@ -129,7 +156,7 @@ export default function ConfigEditor() {
               {results ? (
                 <>
                   {results.map((it, i) => (
-                    <ListItemButton key={`${it.path}:${i}`} selected={it.cwd === loadedCwd && it.scope === scope} onClick={() => openResult(it)}
+                    <ListItemButton key={`${it.path}:${i}`} selected={it.cwd === loadedCwd && it.scope === effScope} onClick={() => openResult(it)}
                       sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, mb: 0.25 }}>
                       <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
                       <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
@@ -159,19 +186,25 @@ export default function ConfigEditor() {
       </Rail>
 
       <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
-        <Tabs value={scope} onChange={(_, v) => { if (dirty && !window.confirm('Discard unsaved changes?')) return; changeScope(v); }} variant="fullWidth">
-          {SCOPES.map((s) => <Tab key={s.key} value={s.key} label={s.label} />)}
-        </Tabs>
+        <ToggleButtonGroup value={tool} exclusive size="small" color="primary" onChange={(_, v) => v && changeTool(v)} sx={{ alignSelf: 'flex-start' }}>
+          <ToggleButton value="claude">Claude Code</ToggleButton>
+          <ToggleButton value="codex">Codex</ToggleButton>
+        </ToggleButtonGroup>
+        {tool === 'claude' && (
+          <Tabs value={scope} onChange={(_, v) => { if (dirty && !window.confirm('Discard unsaved changes?')) return; changeScope(v); }} variant="fullWidth">
+            {CLAUDE_SCOPES.map((s) => <Tab key={s.key} value={s.key} label={s.label} />)}
+          </Tabs>
+        )}
 
         <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>
           {tildify(info?.path)} {info && !info.exists && "· (doesn't exist yet — saving will create it)"}
         </Typography>
         {picking && <DirPicker start={untildify(cwd)} onPick={pick} onClose={() => setPicking(false)} />}
 
-        <CmEditor value={content} onChange={onChange} extensions={[json()]} />
+        <CmEditor value={content} onChange={onChange} extensions={tool === 'codex' ? [] : [json()]} />
 
-        <SaveBar msg={jsonError ? null : msg} disabled={!dirty || !!jsonError} onSave={save}>
-          {jsonError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>This isn't valid JSON: {jsonError}</Typography>}
+        <SaveBar msg={validationError ? null : msg} disabled={!dirty || !!validationError} onSave={save}>
+          {validationError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>This isn't valid JSON: {validationError}</Typography>}
         </SaveBar>
       </Stack>
     </Box>

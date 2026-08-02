@@ -43,6 +43,7 @@ export default defineConfig({
       '/skills': 'http://127.0.0.1:4317',
       '/skill': 'http://127.0.0.1:4317',
       '/config': 'http://127.0.0.1:4317',
+      '/codex-config': 'http://127.0.0.1:4317',
       '/capabilities': 'http://127.0.0.1:4317',
       '/hooks': 'http://127.0.0.1:4317',
       '/rules': 'http://127.0.0.1:4317',
