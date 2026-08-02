@@ -987,10 +987,30 @@ function _rebuild_stats_csv(excludeSid, files) {
   // (so a snapshot with no transcript and no row isn't dropped unmerged), and
   // never touch the excluded active session's file (its data was skipped).
   const written = new Set(rows.map((r) => r.session_id));
+  const REAP_MS = 7 * 24 * 60 * 60 * 1000; // ponytail: fixed 7-day window, no config knob
   let removed = 0;
+  let reaped = 0;
   for (const p of fs.globSync(`${STATE_GLOB}/*.json`)) {
     const sid = path.basename(p, ".json");
-    if (sid === excludeSid || !written.has(sid)) continue;
+    if (sid === excludeSid) continue;
+    if (!written.has(sid)) {
+      // Orphan reaper: a snapshot can never land a CSV row once its transcript
+      // is gone (e.g. a deleted throwaway sandbox session) — without this it
+      // lingers in cost-state forever. Only reap once well past any live/paused
+      // session's timeframe.
+      const st = read_cost_state(sid);
+      const tp = st && st.raw && st.raw.transcript_path;
+      if (!isFile(tp) && Date.now() - getmtime(p) * 1000 > REAP_MS) {
+        if (st && st.raw !== null && st.raw !== undefined) _archive(sid, st.raw);
+        try {
+          fs.unlinkSync(p);
+          reaped += 1;
+        } catch {
+          /* ignore */
+        }
+      }
+      continue;
+    }
     const st = read_cost_state(sid);
     if (st && st.raw !== null && st.raw !== undefined) _archive(sid, st.raw);
     try {
@@ -1001,7 +1021,7 @@ function _rebuild_stats_csv(excludeSid, files) {
     }
   }
   _save_totals_cache(cache);
-  return { sessions: rows.length, with_cost, no_cost: rows.length - with_cost, cleared: removed };
+  return { sessions: rows.length, with_cost, no_cost: rows.length - with_cost, cleared: removed, reaped };
 }
 
 function cmd_backfill() {

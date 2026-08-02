@@ -45,7 +45,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic } = await import('./agents.mjs');
+const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic, spawnEnv, CACHE_DIR } = await import('./agents.mjs');
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -97,6 +97,15 @@ test('buildSpawn: typed full claude id runs via claude bin with --model', () => 
   const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude-opus-4-8', scopes: [] });
   assert.ok(!args.includes('launch'));
   assert.equal(args[args.indexOf('--model') + 1], 'claude-opus-4-8');
+});
+
+// mock demo sessions (tasks.mjs's mock:true) must not write cost-state into the
+// user's real ~/.agents/.harness-usage-report store — spawnEnv redirects
+// USAGE_REPORT_STATE into the disposable CACHE_DIR for mock spawns only.
+test('spawnEnv: mock spawn gets USAGE_REPORT_STATE under CACHE_DIR; normal spawn is untouched', () => {
+  const mockEnv = spawnEnv(true);
+  assert.equal(mockEnv.USAGE_REPORT_STATE, join(CACHE_DIR, 'mock-usage-state'));
+  assert.equal(spawnEnv(false), process.env);
 });
 
 test('buildSpawn: existing session log switches to --resume', () => {

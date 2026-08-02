@@ -373,7 +373,7 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     // session for the status pill, but no turn ever starts, so zero tokens. The
     // demo driver moves the card itself. Real tasks always get the prompt.
     const prompt = mock ? undefined : (promptOverride ?? (background ? buildBackgroundPrompt(t) : buildTaskPrompt(t)));
-    const agent = reg.create({ cwd, title: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs });
+    const agent = reg.create({ cwd, title: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs, mock });
     t.sessionId = agent.id;
     tasks.set(id, t);
     persist();

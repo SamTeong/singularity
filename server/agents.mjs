@@ -85,8 +85,8 @@ export function writeAtomic(file, data, rename = renameSync) {
 let logger = null;
 function persist() {
   const data = {
-    agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince }) => ({
-      id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs,
+    agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince, mock }) => ({
+      id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs, mock,
       // fold the live running-span in so a daemon exit while 'running' doesn't lose it
       activeMs: status === 'running' && runningSince ? (activeMs || 0) + (Date.now() - runningSince) : activeMs,
       status: status === 'running' || status === 'starting' || status === 'idle' ? 'detached' : status,
@@ -261,6 +261,15 @@ export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extr
   return { bin: OLLAMA_BIN, args: ['launch', 'claude', '--model', model, '--', ...claudeArgs] };
 }
 
+// ponytail: mock demo sessions (idle claude, see tasks.mjs) are spawned+killed
+// in throwaway repos, but they still load the user's real ~/.claude/settings.json
+// statusline, which would otherwise write a permanent-orphan cost-state file
+// under the user's real USAGE_REPORT_STATE. Point mock spawns at a disposable
+// dir under the existing CACHE_DIR instead of inventing a new state root.
+export function spawnEnv(mock) {
+  return mock ? { ...process.env, USAGE_REPORT_STATE: join(CACHE_DIR, 'mock-usage-state') } : process.env;
+}
+
 // node-pty's raw spawn failure ("posix_spawnp failed." on macOS/Linux) names
 // neither the binary nor the cause. Wrap so the surfaced error is actionable —
 // the usual culprit is CLAUDE_BIN/OLLAMA_BIN pointing at a non-executable file
@@ -277,7 +286,7 @@ function spawnPty(bin, args, opts) {
 }
 
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs }) {
+export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock }) {
   const id = (sessionId && sessionId.trim()) || randomUUID();
   const existing = agents.get(id);
   if (existing) {
@@ -292,8 +301,8 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
   const displayName = title || id.slice(0, 8);
   const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
   ensureTrusted(cwd);
-  const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true });
-  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [], written: 0 };
+  const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: spawnEnv(mock), useConptyDll: true });
+  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -336,7 +345,7 @@ export function reattach(id) {
   const { bin, args } = buildSpawn(a);
   ensureTrusted(a.cwd);
   const proc = spawnPty(bin, args, {
-    cwd: a.cwd, cols: 80, rows: 24, env: process.env, useConptyDll: true,
+    cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock), useConptyDll: true,
   });
   a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting';
   wire(a);
