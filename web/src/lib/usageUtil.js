@@ -1,15 +1,17 @@
 // Shared helpers for the usage pill + view. Both render the same normalized
-// {ollama, claude} payload from GET /usage.
+// {ollama, claude, codex} payload from GET /usage.
 export const PROVIDERS = [
   { key: 'claude', label: 'Claude' },
+  { key: 'codex', label: 'Codex' },
   { key: 'ollama', label: 'Ollama' },
 ];
 
-// Providers to render given /capabilities. Ollama surfaces (meter card, rail
-// tooltip) hide when OLLAMA_BIN is absent. caps null (loading/fetch fail) → show
-// all, matching useCapabilities' "null means available" convention.
+// Providers to render given /capabilities. A provider hides when its
+// capability flag is explicitly available:false (e.g. OLLAMA_BIN absent, no
+// Codex sessions found). caps null (loading/fetch fail) → show all, matching
+// useCapabilities' "null means available" convention.
 export function visibleProviders(caps) {
-  return caps?.ollama?.available === false ? PROVIDERS.filter((p) => p.key !== 'ollama') : PROVIDERS;
+  return PROVIDERS.filter((p) => caps?.[p.key]?.available !== false);
 }
 
 // Relative countdown to an ISO reset instant: "40m" / "3h" / "5d" / "now".

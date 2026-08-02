@@ -6,16 +6,31 @@
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-usage-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
 process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
+
+// Codex fixture: one rollout jsonl under the newest date dir, a couple of
+// non-matching lines plus two token_count lines — the backwards scan must
+// pick the LAST one (used_percent 87, not the earlier 40).
+const codexDay = join(scratch, 'codex-home', 'sessions', '2026', '07', '20');
+mkdirSync(codexDay, { recursive: true });
+const rolloutLines = [
+  '{"timestamp":"2026-07-20T00:00:00.000Z","type":"session_meta","payload":{}}',
+  '{"timestamp":"2026-07-20T00:05:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":40.0,"window_minutes":10080,"resets_at":1786000000},"secondary":null,"plan_type":"plus"}}}',
+  '{"timestamp":"2026-07-20T00:10:00.000Z","type":"other","payload":{}}',
+  '{"timestamp":"2026-07-20T00:15:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":87.0,"window_minutes":10080,"resets_at":1786172475},"secondary":null,"plan_type":"plus"}}}',
+];
+writeFileSync(join(codexDay, 'rollout-2026-07-20T00-00-00-abc123.jsonl'), `${rolloutLines.join('\n')}\n`);
+process.env.CODEX_HOME = join(scratch, 'codex-home');
+
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot } = await import('./usage.mjs');
+const { parseOllamaHtml, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, fetchCodex } = await import('./usage.mjs');
 
 // Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
 // response: plan badge, Session then Weekly meter (aria-label + segment buttons),
@@ -160,4 +175,16 @@ test('appendClaudeSnapshot: skill snapshot shape, dedupes an unchanged reading',
   assert.equal(row.extra_usage.used_credits, 12);
   assert.equal(row.raw.five_hour.utilization, 42); // full body kept, like the skill's writer
   assert.equal(JSON.parse(lines[1]).five_hour.utilization, 55);
+});
+
+// fetchCodex scans a rollout jsonl backwards for the last token_count line's
+// rate_limits, mapping the 10080-minute (7d) window to `weekly` only.
+test('fetchCodex: backwards-scans to the last token_count line', async () => {
+  const u = await fetchCodex();
+  assert.equal(u.ok, true);
+  assert.equal(u.source, 'codex');
+  assert.equal(u.plan, 'plus');
+  assert.equal(u.session, null);
+  assert.equal(u.weekly.pctUsed, 87);
+  assert.equal(u.weekly.resetsAt, new Date(1786172475 * 1000).toISOString());
 });

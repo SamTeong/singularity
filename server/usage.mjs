@@ -5,7 +5,7 @@
 // small in-memory cache per source is enough — no cross-session file needed.
 // SECURITY: reads full account creds (cookie / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -353,15 +353,81 @@ async function fetchClaude() {
   }
 }
 
+// ---- Codex: parse local session rollout logs ----------------------------
+// Codex CLI has no 5h-window data and no limits API/cache file — the only
+// source is its own session rollout logs (~/.codex/sessions/YYYY/MM/DD/
+// rollout-*.jsonl, CODEX_HOME overrides ~/.codex), which record a
+// "token_count" event carrying the server's rate_limits payload as a side
+// effect of normal use. Push-only: fetchedAt below is that record's own
+// timestamp (can be a day stale), not "now".
+export const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
+const CODEX_SESSIONS_DIR = join(CODEX_HOME, 'sessions');
+
+// Newest rollout file, bounded to the newest date dir (sessions/YYYY/MM/DD) —
+// never walks the whole tree. Zero-padded names sort correctly as strings.
+function newestCodexRollout() {
+  let dir = CODEX_SESSIONS_DIR;
+  for (let i = 0; i < 3; i++) { // YYYY -> MM -> DD
+    let names;
+    try { names = readdirSync(dir).sort(); } catch { return null; }
+    if (!names.length) return null;
+    dir = join(dir, names.at(-1));
+  }
+  let files;
+  try { files = readdirSync(dir).filter((f) => f.startsWith('rollout-') && f.endsWith('.jsonl')); }
+  catch { return null; }
+  if (!files.length) return null;
+  return files
+    .map((f) => join(dir, f))
+    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+}
+
+export async function fetchCodex() {
+  try {
+    const file = newestCodexRollout();
+    if (!file) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
+
+    const lines = readFileSync(file, 'utf8').split('\n');
+    let record = null;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (!lines[i].includes('rate_limits')) continue;
+      let parsed;
+      try { parsed = JSON.parse(lines[i]); } catch { continue; }
+      if (parsed?.payload?.rate_limits) { record = parsed; break; }
+    }
+    if (!record) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
+
+    const rl = record.payload.rate_limits;
+    const mapWindow = (w) => (w ? {
+      pctUsed: w.used_percent,
+      resetsAt: w.resets_at ? new Date(w.resets_at * 1000).toISOString() : null,
+      models: [],
+    } : null);
+    // window_minutes >= 1 day → weekly slot, else session slot. Codex only
+    // reports the 7d window today; this keeps a future 5h window landing in
+    // the right slot for free.
+    let session = null;
+    let weekly = null;
+    for (const w of [rl.primary, rl.secondary]) {
+      if (!w) continue;
+      if (w.window_minutes >= 1440) weekly = mapWindow(w);
+      else session = mapWindow(w);
+    }
+    return { ok: true, source: 'codex', plan: rl.plan_type ?? null, fetchedAt: record.timestamp, session, weekly };
+  } catch (e) {
+    return { ok: false, source: 'codex', error: e.message, fetchedAt: new Date().toISOString() };
+  }
+}
+
 // ---- Cache + public API -------------------------------------------------------
-const cache = { ollama: { data: null, at: 0 }, claude: { data: null, at: 0 } };
+const cache = { ollama: { data: null, at: 0 }, claude: { data: null, at: 0 }, codex: { data: null, at: 0 } };
 
 // Warm-start from disk so a freshly-restarted daemon serves last-known values
 // before the first live fetch. Best-effort; a corrupt/absent file is ignored.
 try {
   if (existsSync(CACHE_FILE)) {
     const saved = JSON.parse(readFileSync(CACHE_FILE, 'utf8'));
-    for (const src of ['ollama', 'claude']) {
+    for (const src of ['ollama', 'claude', 'codex']) {
       if (saved[src]?.data) cache[src] = { data: saved[src].data, at: 0 }; // at:0 → stale, refetched on first pull
     }
   }
@@ -377,7 +443,10 @@ function persist() {
 async function pull(src, fetcher, force) {
   const slot = cache[src];
   if (!force && slot.data && Date.now() - slot.at < TTL) return slot.data;
-  const data = { ...(await fetcher()), fetchedAt: new Date().toISOString() };
+  const fetched = await fetcher();
+  // codex's fetchedAt is the record's own (possibly stale) timestamp — keep it;
+  // ollama/claude never set one, so they still default to "now".
+  const data = { fetchedAt: new Date().toISOString(), ...fetched };
   // Keep the last good payload on a transient failure so the UI doesn't flip to
   // "error" on one blip — but always surface a fresh needsAuth.
   if (data.ok || data.needsAuth || !slot.data) { slot.data = data; slot.at = Date.now(); persist(); }
@@ -393,11 +462,12 @@ async function pull(src, fetcher, force) {
 }
 
 export async function getUsage({ force = false } = {}) {
-  const [ollama, claude] = await Promise.all([
+  const [ollama, claude, codex] = await Promise.all([
     pull('ollama', fetchOllama, force),
     pull('claude', fetchClaude, force),
+    pull('codex', fetchCodex, force),
   ]);
-  const result = { ollama: { ...ollama, historyPaused }, claude };
+  const result = { ollama: { ...ollama, historyPaused }, claude, codex };
   usageBus?.emit('usage', result);
   scheduleResetRefreshes(result);
   return result;
@@ -425,7 +495,7 @@ function resetDelay(iso, capMs = 7.75 * 24 * 3.6e6) {
 function scheduleResetRefreshes(result) {
   resetTimers.forEach(clearTimeout);
   resetTimers = [];
-  for (const src of ['ollama', 'claude']) {
+  for (const src of ['ollama', 'claude', 'codex']) {
     for (const win of ['session', 'weekly']) {
       const delay = resetDelay(result[src]?.[win]?.resetsAt);
       if (delay != null) resetTimers.push(setTimeout(() => getUsage({ force: true }).catch(() => {}), delay + 2000));

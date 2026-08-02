@@ -21,6 +21,7 @@ function ProviderCard({ label, u }) {
       ? 'Sign-in expired. Run this once in a terminal: `npm run ollama-login`, then log in to ollama.com when the browser opens.'
       : 'Sign-in expired. Open ~/.singularity/ollama.json and paste in a fresh cookie and browser ID from a logged-in ollama.com tab (these expire, so you may need to repeat this now and then) — or just run `npm run ollama-login` once to sign in automatically instead.',
     claude: 'No usage data yet — start a new chat with a Claude model and it will show up here.',
+    codex: 'No Codex usage data yet — run Codex once and its weekly limit will show up here.',
   };
   return (
     <Box sx={(t) => ({ p: 2, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}>
@@ -45,6 +46,14 @@ function ProviderCard({ label, u }) {
                 {usd(u.extra.used)} / {usd(u.extra.monthlyLimit)}
               </Typography>
             </Box>
+          )}
+          {/* Codex data is push-only (last rollout log write) and can be a day
+              stale — show when it's from, unlike the other two live-fetched
+              providers. */}
+          {label.toLowerCase() === 'codex' && (
+            <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+              As of {new Date(u.fetchedAt).toLocaleString()}
+            </Typography>
           )}
         </Stack>
       ) : (
@@ -89,7 +98,7 @@ export default function UsageView({ usage, onRefresh }) {
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
               Shows the usage limits for your whole account: a 5-hour session limit and a 7-day weekly limit. This updates on its own about once a minute — press Refresh to check right now.
             </Typography>
-            <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
               {visibleProviders(caps).map((p) => <ProviderCard key={p.key} label={p.label} u={usage?.[p.key]} />)}
             </Box>
           </Stack>

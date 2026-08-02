@@ -922,7 +922,9 @@ function tokenYield(S,gk,hn){
   rl.forEach(function(s){
     var pct=s[gk],d=(prev==null)?pct:(pct>=prev?pct-prev:pct);prev=pct;
     if(d<=0)return;
-    var m=s.model,day=s.ts.slice(0,10);
+    // blank last_model (CC transcripts) buckets as 'others' — same key the
+    // cost-by-model bars use; keying on '' produced an unlabeled legend pill.
+    var m=s.model||'others',day=s.ts.slice(0,10);
     (sumT[m]=sumT[m]||{})[day]=(sumT[m][day]||0)+s.tok;
     (sumD[m]=sumD[m]||{})[day]=(sumD[m][day]||0)+d;
     aggT[m]=(aggT[m]||0)+s.tok;aggD[m]=(aggD[m]||0)+d;
