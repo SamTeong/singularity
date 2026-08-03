@@ -74,7 +74,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic, spawnEnv, CACHE_DIR } = await import('./agents.mjs');
+const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread } = await import('./agents.mjs');
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -569,6 +569,71 @@ test('buildSpawn: codex scopes → -c skills.config=[...] disables non-chosen sk
   assert.ok(cfg.includes(`{path="${harnessMd}",enabled=false}`), 'harness-skill disabled');
   assert.ok(!cfg.includes(codingMd), 'coding-skill not in disable list');
   assert.ok(!args.includes('--add-dir'), 'codex never uses --add-dir');
+});
+
+// ---- getLaunchConfigForCodexThread ----
+// Inverts findCodexThread's forward relation (cwd+createdAt -> codex thread
+// uuid) so the Transcripts view can recover a codex agent's registry-only
+// scopes from just the thread uuid + cwd — the registry key (agent id) is a
+// randomUUID create() minted, unrelated to the codex-minted thread uuid, so a
+// direct agents.get(threadId) could never work. Seeded via init()+fake
+// agents.json, same pattern as fork/remove/externalLaunch above (no spawn
+// needed — the lookup only reads cwd/createdAt/scopes/tool off the entry).
+test('getLaunchConfigForCodexThread: registered codex agent + matching rollout → scopes + tool "codex"', () => {
+  const agentId = '90000000-aaaa-bbbb-cccc-900000000001';
+  const threadId = 'dddddddd-eeee-ffff-0000-111111111111';
+  const lookupCwd = join(scratch, 'codex-lookup-a');
+  const createdAt = Date.now();
+  writeCodexRollout(lookupCwd, new Date(createdAt + 1000).toISOString(), threadId);
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: agentId, title: 'codex-agent', cwd: lookupCwd, createdAt, model: 'gpt-5.3-codex-spark', scopes: ['coding', 'harness'], tool: 'codex' }],
+    recentRepos: [],
+  }));
+  init();
+  const cfg = getLaunchConfigForCodexThread(threadId, lookupCwd);
+  assert.deepEqual(cfg?.scopes, ['coding', 'harness']);
+  assert.equal(cfg?.tool, 'codex');
+});
+
+test('getLaunchConfigForCodexThread: same thread, queried with a different cwd → null', () => {
+  const agentId = '90000000-aaaa-bbbb-cccc-900000000002';
+  const threadId = 'dddddddd-eeee-ffff-0000-222222222222';
+  const lookupCwd = join(scratch, 'codex-lookup-b');
+  const createdAt = Date.now();
+  writeCodexRollout(lookupCwd, new Date(createdAt + 1000).toISOString(), threadId);
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: agentId, title: 'codex-agent-b', cwd: lookupCwd, createdAt, model: 'gpt-5.3-codex-spark', scopes: ['coding'], tool: 'codex' }],
+    recentRepos: [],
+  }));
+  init();
+  assert.equal(getLaunchConfigForCodexThread(threadId, join(scratch, 'codex-lookup-other')), null);
+});
+
+test('getLaunchConfigForCodexThread: unknown thread uuid → null', () => {
+  // Reuses the codex agent seeded by the first test above (cwd 'codex-lookup-a',
+  // still in the registry) — proves a real candidate surviving the cwd/tool
+  // prefilter still yields null when its actual thread doesn't match.
+  assert.equal(getLaunchConfigForCodexThread('99999999-9999-9999-9999-999999999999', join(scratch, 'codex-lookup-a')), null);
+});
+
+test('getLaunchConfigForCodexThread: registered claude agent in the same cwd, queried by its own id → null (codex-agent filter holds)', () => {
+  const claudeId = '90000000-aaaa-bbbb-cccc-900000000003';
+  const lookupCwd = join(scratch, 'codex-lookup-c');
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: claudeId, title: 'claude-agent', cwd: lookupCwd, createdAt: Date.now(), model: 'claude', scopes: ['coding'], tool: 'claude' }],
+    recentRepos: [],
+  }));
+  init();
+  assert.equal(getLaunchConfigForCodexThread(claudeId, lookupCwd), null);
+});
+
+test('getLaunchConfigForCodexThread: falsy args → null, no throw', () => {
+  assert.equal(getLaunchConfigForCodexThread(null, scratch), null);
+  assert.equal(getLaunchConfigForCodexThread('some-id', null), null);
+  assert.equal(getLaunchConfigForCodexThread('', ''), null);
 });
 
 // ---- writeAtomic (server/background.test.mjs:214 flake regression) ------------

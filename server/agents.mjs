@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessS
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { isClaudeModel, isCodexModel, validateToolModel } from './models.mjs';
-import { findCodexThread, codexThreadExists } from './codex-thread.mjs';
+import { findCodexThread, codexThreadExists, normPath } from './codex-thread.mjs';
 import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
 export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR };
 
@@ -142,6 +142,26 @@ export function getLaunchConfig(id) {
   const a = agents.get(id);
   if (!a) return null;
   return { model: a.model || null, scopes: Array.isArray(a.scopes) ? a.scopes : [], tool: a.tool || 'claude' };
+}
+// getLaunchConfig's codex sibling: a codex agent's registry key (id) is the
+// randomUUID create() minted, unrelated to the codex-minted thread uuid the
+// Transcripts view actually has (codex has no --session-id flag — see
+// codex-thread.mjs). So resuming this lookup by id can't work; instead invert
+// findCodexThread's forward relation (cwd+createdAt -> thread uuid) by
+// scanning codex agents in `cwd` for the one whose rollout produced
+// `threadId`. normPath keeps the cwd compare aligned with findCodexThread's
+// own Windows case/separator handling. Same ceiling as getLaunchConfig: wire()'s
+// onExit deletes an exited agent's registry entry, so scopes are only
+// recoverable while the entry still exists (live or detached).
+export function getLaunchConfigForCodexThread(threadId, cwd) {
+  if (!threadId || !cwd) return null;
+  const wantCwd = normPath(cwd);
+  for (const a of agents.values()) {
+    if (!(a.tool === 'codex' || isCodexModel(a.model))) continue;
+    if (!a.cwd || normPath(a.cwd) !== wantCwd) continue; // normPath resolve()s — a cwd-less record on disk would throw
+    if (findCodexThread(a.cwd, a.createdAt) === threadId) return getLaunchConfig(a.id);
+  }
+  return null;
 }
 // PIDs of agents this daemon currently owns a live pty for (for process classification).
 export function livePids() {

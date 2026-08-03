@@ -587,10 +587,13 @@ app.get('/session', async (req, reply) => {
   const { project, id, root, source, file } = req.query || {};
   if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
   const r = await readSession(project, id, root, source, file);
-  if (r.ok && source !== 'codex') {
+  if (r.ok) {
     // Skill-scopes live only in the agent registry (not the transcript), so
     // merge them in here for the Resume prefill when the id is a known agent.
-    const lc = reg.getLaunchConfig(id);
+    // For codex threads, the registry lookup is by (thread uuid + cwd), not agent id.
+    const lc = source === 'codex'
+      ? reg.getLaunchConfigForCodexThread(id, r.meta?.cwd)
+      : reg.getLaunchConfig(id);
     if (lc?.scopes?.length) r.meta.scopes = lc.scopes;
   }
   if (!r.ok) reply.code(404);

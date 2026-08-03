@@ -10,7 +10,7 @@ import { CODEX_HOME } from './usage.mjs';
 
 const HEAD_BYTES = 256 * 1024; // covers line 1's base_instructions blob
 
-function normPath(p) {
+export function normPath(p) {
   const r = resolve(p).replace(/\\/g, '/');
   return process.platform === 'win32' ? r.toLowerCase() : r;
 }
