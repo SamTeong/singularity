@@ -7,7 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessS
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { isClaudeModel, isCodexModel, validateToolModel } from './models.mjs';
-import { findCodexThread } from './codex-thread.mjs';
+import { findCodexThread, codexThreadExists } from './codex-thread.mjs';
 import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
 export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR };
 
@@ -275,7 +275,13 @@ export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extr
   // (codex's own default via config.toml).
   if (tool === 'codex' || isCodexModel(model)) {
     if (!CODEX_BIN) throw new Error('codex not found (CODEX_BIN not set in .env)');
-    const threadId = createdAt ? findCodexThread(cwd, createdAt) : null;
+    // Prefer time-based discovery (reattach/respawn, createdAt set); else fall
+    // back to the caller-supplied id when it's itself a known codex thread for
+    // this cwd — covers create({ sessionId: <codex uuid> }) from the
+    // Transcripts view or a uuid typed into the New-session dialog, where
+    // createdAt is deliberately absent (see create()'s comment above).
+    const threadId = (createdAt && findCodexThread(cwd, createdAt))
+      || (codexThreadExists(id, cwd) ? id : null);
     const args = [];
     if (threadId) args.push('resume', threadId);
     const cfg = codexScopeConfig(scopes);

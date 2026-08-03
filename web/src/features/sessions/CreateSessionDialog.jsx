@@ -13,7 +13,7 @@ import { untildify } from '@/lib/paths.js';
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 // Mirror of server isCodexModel: gpt-* id → codex-only model.
 const isCodexModel = (m) => !!m && m.startsWith('gpt-');
-export default function CreateSessionDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg, onSessionCreated, initialSessionId = '', initialModel = '', initialScopes = [] }) {
+export default function CreateSessionDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg, onSessionCreated, initialSessionId = '', initialModel = '', initialScopes = [], initialTool = 'claude' }) {
   const [title, setTitle] = useState('');
   const [model, setModel] = useState('');
   const [tool, setTool] = useState('claude');
@@ -32,6 +32,7 @@ export default function CreateSessionDialog({ open, onClose, connected, cwd, set
     setPrevOpen(open);
     if (open && initialSessionId) {
       setSessionId(initialSessionId);
+      if (initialTool) setTool(initialTool);
       if (initialModel) setModel(initialModel);
       if (initialScopes?.length) setScopes(initialScopes);
     }

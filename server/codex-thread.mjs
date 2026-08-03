@@ -5,7 +5,7 @@
 // thread_source:"subagent" rollouts share the parent's session_id and often
 // have the newest mtime in a cwd — must exclude, or a subagent fork wins.
 import { existsSync, statSync, readdirSync, openSync, readSync, closeSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { join, resolve, basename } from 'node:path';
 import { CODEX_HOME } from './usage.mjs';
 
 const HEAD_BYTES = 256 * 1024; // covers line 1's base_instructions blob
@@ -77,5 +77,38 @@ export function findCodexThread(cwd, spawnedAt, { home = CODEX_HOME, skewMs = 50
     return best?.id || null;
   } catch {
     return null;
+  }
+}
+
+// Confirms a caller-supplied uuid (Transcripts-view resume, or one typed into
+// the New-session dialog) is a real codex user thread for `cwd`, so buildSpawn
+// can resume it without a spawnedAt to discover it by cwd+time. Filename
+// prefilter (rollout-<localts>-<uuid>.jsonl) before opening anything, then the
+// same cwd + thread_source:"user" confirmation findCodexThread uses — mirrors
+// sessionLogExists(cwd, id) on the claude side: an id that IS a codex thread
+// but for a DIFFERENT cwd must not be resumed into this one.
+// ponytail: archived_sessions is not scanned (walk skips it), so resuming an
+// archived transcript falls back to a fresh spawn.
+export function codexThreadExists(id, cwd, { home = CODEX_HOME, cap = 2000 } = {}) {
+  try {
+    if (!id || !cwd) return false;
+    const sessionsDir = join(home, 'sessions');
+    if (!existsSync(sessionsDir)) return false;
+    const files = [];
+    walk(sessionsDir, files, cap);
+
+    const wantCwd = normPath(cwd);
+    const suffix = `-${id}`.toLowerCase();
+    for (const p of files) {
+      if (!basename(p, '.jsonl').toLowerCase().endsWith(suffix)) continue;
+      const meta = readFirstLine(p);
+      const payload = meta?.payload;
+      if (meta?.type !== 'session_meta' || payload?.thread_source !== 'user') continue;
+      if (!payload.cwd || normPath(payload.cwd) !== wantCwd) continue;
+      return true;
+    }
+    return false;
+  } catch {
+    return false;
   }
 }

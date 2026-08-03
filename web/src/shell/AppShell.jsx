@@ -74,6 +74,7 @@ export default function AppShell() {
   const [createInitialSessionId, setCreateInitialSessionId] = useState('');
   const [createInitialModel, setCreateInitialModel] = useState('');
   const [createInitialScopes, setCreateInitialScopes] = useState([]);
+  const [createInitialTool, setCreateInitialTool] = useState('');
   const [taskOpen, setTaskOpen] = useState(false);
   // false (closed) | true (create) | a cron job object (edit that row) — same
   // tri-state the Automation view uses for background defs.
@@ -165,15 +166,16 @@ export default function AppShell() {
   };
 
   // Resume a past session from the Transcripts view: prefill the new-agent
-  // dialog with its id + cwd + last model + last skill-scopes, then create.
+  // dialog with its id + cwd + last model + last skill-scopes + tool, then create.
   // Backend switches to --resume when the session log exists at cwd. Model is
   // the last used (from the transcript); skill-scopes come from the agent
   // registry (the transcript doesn't record them) — absent for non-Singularity sessions.
-  const onResumeSession = (id, cwd, model, scopes) => {
+  const onResumeSession = (id, cwd, model, scopes, tool) => {
     setCwd(cwd);
     setCreateInitialSessionId(id);
     setCreateInitialModel(model || '');
     setCreateInitialScopes(Array.isArray(scopes) ? scopes : []);
+    setCreateInitialTool(tool || 'claude');
     setCreateOpen(true);
   };
 
@@ -304,7 +306,7 @@ export default function AppShell() {
 
       <CreateSessionDialog
         open={createOpen}
-        onClose={() => { setCreateOpen(false); setCreateInitialSessionId(''); setCreateInitialModel(''); setCreateInitialScopes([]); }}
+        onClose={() => { setCreateOpen(false); setCreateInitialSessionId(''); setCreateInitialModel(''); setCreateInitialScopes([]); setCreateInitialTool(''); }}
         connected={connected}
         cwd={cwd}
         setCwd={setCwd}
@@ -315,6 +317,7 @@ export default function AppShell() {
         initialSessionId={createInitialSessionId}
         initialModel={createInitialModel}
         initialScopes={createInitialScopes}
+        initialTool={createInitialTool}
       />
 
       <CreateTaskDialog

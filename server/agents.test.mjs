@@ -511,6 +511,32 @@ test('buildSpawn: codex — no matching rollout (different cwd, or no createdAt)
   assert.ok(noCreatedAt.includes('work'));
 });
 
+// ---- buildSpawn: codex resume by caller-supplied id (no createdAt) ----
+// create({ sessionId: <codex thread uuid>, tool:'codex' }) from the
+// Transcripts view (or a uuid typed into the New-session dialog) passes no
+// createdAt — findCodexThread has nothing to discover by, so buildSpawn must
+// fall back to confirming `id` is itself a known codex thread for this cwd.
+test('buildSpawn: codex resume by caller id, no createdAt — matching rollout for this cwd → argv starts with resume <uuid>', () => {
+  const threadId = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
+  writeCodexRollout(cwd, new Date().toISOString(), threadId);
+  const { args } = buildSpawn({ id: threadId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' });
+  assert.deepEqual(args.slice(0, 2), ['resume', threadId]);
+});
+
+test('buildSpawn: codex resume by caller id, no createdAt — rollout is for a different cwd → no resume', () => {
+  const threadId = 'cccccccc-dddd-eeee-ffff-000000000000';
+  const otherCwd = 'C:\\some\\unrelated\\cwd\\for-this-thread';
+  writeCodexRollout(otherCwd, new Date().toISOString(), threadId);
+  const { args } = buildSpawn({ id: threadId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' });
+  assert.ok(!args.includes('resume'));
+});
+
+test('buildSpawn: codex resume by caller id, no createdAt — random id with no rollout → no resume, prompt still passed', () => {
+  const { args } = buildSpawn({ id: '11111111-2222-3333-4444-555555555555', title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'do the work');
+  assert.ok(!args.includes('resume'));
+  assert.ok(args.includes('do the work'));
+});
+
 test('buildSpawn: codex with !CODEX_BIN → throws /codex not found/', async () => {
   const saved = process.env.CODEX_BIN;
   process.env.CODEX_BIN = join(scratch, 'no-such-codex-bin');

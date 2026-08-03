@@ -378,11 +378,11 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
               <>
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
                   <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{headerLabel}</Typography>
-                  {onResume && !sel?.sub && sel?.source !== 'codex' && (transcript.meta?.cwd || sel?.cwd) && (
+                  {onResume && !sel?.sub && (sel?.source !== 'codex' || transcript.meta?.sessionId === sel.id) && (transcript.meta?.cwd || sel?.cwd) && (
                     <Tooltip title={sessionLive ? 'Session already live in the dock — switch to it instead' : 'Resume this session in a new agent — prefills last model + skill-scopes'}>
                       {/* span: Tooltip needs a live event target — a disabled button fires none. */}
                       <span>
-                        <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} disabled={sessionLive} onClick={() => onResume(sel.id, transcript.meta?.cwd || sel.cwd, transcript.meta?.model, transcript.meta?.scopes)}>Resume</Button>
+                        <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} disabled={sessionLive} onClick={() => onResume(sel.id, transcript.meta?.cwd || sel.cwd, transcript.meta?.model, transcript.meta?.scopes, sel.source === 'codex' ? 'codex' : 'claude')}>Resume</Button>
                       </span>
                     </Tooltip>
                   )}
