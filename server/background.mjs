@@ -73,9 +73,9 @@ export function inWindow(job, date) {
 function gateReason(u, th, name) {
   if (!u || !u.ok) return `${name} usage unavailable`;
   const sess = u.session?.pctUsed, wk = u.weekly?.pctUsed;
-  if (sess == null || wk == null) return `${name} usage incomplete`;
-  if (sess >= th.start) return `${name} 5h ${sess}% >= ${th.start}%`;
-  if (wk >= th.weeklyMax) return `${name} 7d ${wk}% >= ${th.weeklyMax}%`;
+  if (sess == null && wk == null) return `${name} usage incomplete`;
+  if (sess != null && sess >= th.start) return `${name} 5h ${sess}% >= ${th.start}%`;
+  if (wk != null && wk >= th.weeklyMax) return `${name} 7d ${wk}% >= ${th.weeklyMax}%`;
   return null;
 }
 
@@ -219,8 +219,8 @@ async function watchdog() {
   try {
     const job = config.jobs.find((d) => d.lastTaskId === task.id);
     const usage = await getUsage();
-    const tokens = (await parseSession(task.worktree || task.repo, task.sessionId, backend)).tokens;
     const backend = isClaudeModel(task.model) ? 'claude' : isCodexModel(task.model) ? 'codex' : 'ollama';
+    const tokens = (await parseSession(task.worktree || task.repo, task.sessionId, backend)).tokens;
     decision = job ? watchdogDecision(usage, backend, job, tokens) : 'stop';
   } catch (e) { logger?.warn({ err: e.message }, 'background watchdog poll failed — stopping run (fail closed)'); }
   if (decision !== 'stop') return;

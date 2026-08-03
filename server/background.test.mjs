@@ -71,14 +71,6 @@ test('evalGate: claude ok:false fails closed → ollama evaluated', () => {
   const g = evalGate({ claude: { ok: false, error: 'auth' }, ollama: src() }, job());
   assert.equal(g.backend, 'ollama');
 });
-test('evalGate: claude over start, codex within → codex (paid quotas before free ollama)', () => {
-  const g = evalGate({
-    claude: src({ session: { pctUsed: 60 } }),
-    codex: src(),
-    ollama: src(),
-  }, job());
-  assert.equal(g.backend, 'codex');
-});
 test('evalGate: codex usage unavailable fails closed → falls through to ollama', () => {
   const g = evalGate({
     claude: src({ session: { pctUsed: 60 } }),
@@ -86,6 +78,31 @@ test('evalGate: codex usage unavailable fails closed → falls through to ollama
     ollama: src(),
   }, job());
   assert.equal(g.backend, 'ollama');
+});
+test('evalGate: realistic codex shape (session:null, weekly under weeklyMax) passes its gate → codex', () => {
+  const g = evalGate({
+    claude: src({ session: { pctUsed: 60 } }),
+    codex: { ok: true, source: 'codex', session: null, weekly: { pctUsed: 10 } },
+    ollama: src(),
+  }, job());
+  assert.equal(g.backend, 'codex');
+});
+test('evalGate: realistic codex shape (session:null, weekly over weeklyMax) fails its gate → falls through to ollama', () => {
+  const g = evalGate({
+    claude: src({ session: { pctUsed: 60 } }),
+    codex: { ok: true, source: 'codex', session: null, weekly: { pctUsed: 90 } },
+    ollama: src(),
+  }, job());
+  assert.equal(g.backend, 'ollama');
+});
+test('evalGate: both windows null still fails closed with "usage incomplete"', () => {
+  const g = evalGate({
+    claude: { ok: true, session: null, weekly: null },
+    codex: { ok: false, error: 'no Codex sessions found' },
+    ollama: src({ session: { pctUsed: 90 } }),
+  }, job());
+  assert.equal(g.backend, null);
+  assert.ok(g.reason.includes('claude usage incomplete'), 'reason names the incomplete backend');
 });
 
 // ---- pickJob (forced-bypass: ignores window+gate) -------------------------------
