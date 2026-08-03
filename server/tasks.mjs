@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import * as reg from './agents.mjs';
-import { isClaudeModel } from './models.mjs';
+import { isClaudeModel, isCodexModel } from './models.mjs';
 import { statsFor } from './stats.mjs';
 
 const TASKS_FILE = join(reg.STATE_DIR, 'tasks.json');
@@ -154,9 +154,81 @@ export function initTasks(log) {
 
 export function snapshotTasks() { return { tasks: [...tasks.values()], history }; }
 
+// Codex tasks are single-agent (codex has no Task tool / subagents): a minimal
+// prompt that skips the orchestrator/subagent/reviewer dance entirely. Same
+// board-status curl contract so the card still moves through columns + the
+// daemon reclaims the worktree on Done.
+export function buildCodexTaskPrompt(t) {
+  const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
+  const status = (column, state) =>
+    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+  const cwd = t.worktree || t.repo;
+  const gitLine = t.kind === 'git'
+    ? `\n- You are in a git worktree on branch ${t.branch}. ${t.mergeMode === 'auto' ? `After review, merge ${t.branch} into ${t.baseBranch} (git -C "${t.repo}" merge ${t.branch}); abort if it conflicts.` : `Leave the branch for the user to merge — do NOT merge or push.`}`
+    : '';
+  return `You are working on the task "${t.title}".
+
+## Requirements
+
+${t.description}
+
+## Environment
+
+- You are working in \`${cwd}\`.${gitLine}
+- Ticket artifacts live in \`${t.ticketDir}\`: read \`Requirements.md\` for the requirements; write \`Plan.md\` before implementing if helpful.
+- Write your \`Report.md\` to \`${t.reportDir}\` when done.
+
+## Workflow
+
+1. Read \`Requirements.md\` in \`${t.ticketDir}\`. If anything is ambiguous, ask the user here and wait.
+2. Plan the implementation, write it to \`${t.ticketDir}/Plan.md\`.
+3. Implement: run
+   ${status('inprogress', 'implementing')}
+   then do the work. Keep changes minimal — no speculative abstractions or features.
+4. Review your own work against the requirements.
+5. Write \`Report.md\` to \`${t.reportDir}\` summarizing what you did, then run
+   ${status('done', 'complete')}
+   as your very last action — the daemon ends this session when the card reaches Done.`;
+}
+
+// Codex background variant: same unattended contract as buildBackgroundPrompt
+// but without the subagent references (codex has no Task tool).
+export function buildCodexBackgroundPrompt(t) {
+  const cwd = t.worktree || t.repo;
+  const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
+  const status = (column, state) =>
+    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+  const lastStep = t.conclude === 'done'
+    ? `As your LAST action, move the card to Done:
+  ${status('done', 'report ready')}`
+    : `As your LAST action, move the card to In Review:
+  ${status('inreview', 'awaiting human review')}
+  Do NOT move the card to done — a human concludes the run.`;
+  return `You are an unattended background agent working on "${t.title}".
+
+## Requirements
+
+${t.description}
+
+## Environment
+
+- You are working directly in \`${cwd}\`. Do the work described above in place.
+- Ticket artifacts live in \`${t.ticketDir}\`: \`Requirements.md\` (already written for you).
+- Write your \`Report.md\` to \`${t.reportDir}\` — a persistent store kept across cleanups.
+
+## Rules
+
+- NO clarifying questions, NO plan-approval step — just do the work directly and efficiently. Nobody is watching this terminal.
+- At the START, run:
+  ${status('inprogress', 'working')}
+- When the work is done, write \`Report.md\` to \`${t.reportDir}\` summarizing what you did / found / proposed, and print a short summary in this terminal.
+- ${lastStep}`;
+}
+
 // The whole autonomous workflow lives in this prompt — the daemon only stores
 // column/state and kills the session on 'done'. Transitions are prompt-driven.
 export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
+  if (t.tool === 'codex' || isCodexModel(t.model)) return buildCodexTaskPrompt(t);
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
     `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
@@ -293,6 +365,7 @@ export function normalizeTags(tags) {
 // do the work, write a report, and hand the card to a human for review. The
 // daemon's watchdog (background.mjs) stops the run when the budget is spent.
 export function buildBackgroundPrompt(t) {
+  if (t.tool === 'codex' || isCodexModel(t.model)) return buildCodexBackgroundPrompt(t);
   const cwd = t.worktree || t.repo;
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
@@ -330,7 +403,7 @@ ${t.description}
 // Max-turn cap from the dialog: positive int or null (empty/0/invalid → no cap).
 const posInt = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n > 0 ? n : null; };
 
-export function createTask({ repo, title, description, model, implModel, reviewerModel, orchestratorMaxTurns, implMaxTurns, reviewerMaxTurns, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, conclude }) {
+export function createTask({ repo, title, description, model, implModel, reviewerModel, orchestratorMaxTurns, implMaxTurns, reviewerMaxTurns, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, conclude, tool }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
   if (!existsSync(repo)) throw new Error('working directory does not exist');
   const kind = isGitWorkTree(repo) ? 'git' : 'plain';
@@ -363,6 +436,7 @@ export function createTask({ repo, title, description, model, implModel, reviewe
       scopes, tags: normalizeTags(tags), requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
       column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
       ...(background ? { conclude: conclude === 'done' ? 'done' : 'inreview' } : {}),
+      ...(tool ? { tool } : {}),
     };
     // Cost is captured by the global statusline (harness-usage-report skill,
     // from ~/.claude/settings.json) writing the full payload to cost-state/<id>.json,
@@ -373,7 +447,7 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     // session for the status pill, but no turn ever starts, so zero tokens. The
     // demo driver moves the card itself. Real tasks always get the prompt.
     const prompt = mock ? undefined : (promptOverride ?? (background ? buildBackgroundPrompt(t) : buildTaskPrompt(t)));
-    const agent = reg.create({ cwd, title: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs, mock });
+    const agent = reg.create({ cwd, title: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs, mock, tool });
     t.sessionId = agent.id;
     tasks.set(id, t);
     persist();

@@ -42,7 +42,31 @@ function detectClaudeBin() {
   return null
 }
 
+// --- CODEX_BIN detection (best-effort, cross-platform, optional) ---
+// Mirrors detectClaudeBin but never fails bootstrap — codex spawns are optional.
+function detectCodexBin() {
+  const isWin = platform() === 'win32'
+  const candidates = []
+  const lookup = isWin ? 'where' : 'which'
+  try {
+    const out = execFileSync(lookup, ['codex'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] })
+    const first = out.split(/\r?\n/).find(l => l.trim())
+    if (first) candidates.push(first.trim())
+  } catch { /* lookup binary absent or codex not on PATH */ }
+  const home = homedir()
+  if (isWin) {
+    candidates.push(join(home, '.codex', 'local', 'codex.exe'))
+  } else {
+    candidates.push(join(home, '.codex', 'local', 'codex'))
+    candidates.push('/usr/local/bin/codex')
+    candidates.push('/opt/homebrew/bin/codex')
+  }
+  for (const c of candidates) if (c && existsSync(c)) return toFwd(c)
+  return null
+}
+
 const claudeBin = detectClaudeBin()
+const codexBin = detectCodexBin()
 const singHome = toFwd(join(homedir(), '.singularity'))
 const claudeLine = claudeBin || '/absolute/path/claude.exe'
 
@@ -67,6 +91,9 @@ CLAUDE_BIN=${claudeLine}
 # OPTIONAL — absolute path to the ollama binary. Absent → ollama models unavailable.
 #OLLAMA_BIN=
 
+# OPTIONAL — absolute path to the codex binary. Absent → codex agent/task spawns unavailable.
+#CODEX_BIN=${codexBin || ''}
+
 # OPTIONAL — trusted root for .worktrees/ + .tickets/ (default = this clone).
 # Set for a global/npx install where the clone isn't writable.
 #SING_TRUSTED_ROOT=
@@ -89,6 +116,7 @@ console.log(`Generated .env at ${envPath}`)
 console.log(`  SINGULARITY_HOME=${singHome}`)
 console.log(`  PORT=4317`)
 console.log(`  CLAUDE_BIN=${claudeLine}`)
+if (codexBin) console.log(`  CODEX_BIN=${codexBin} (detected — uncomment in .env to enable)`)
 if (!claudeBin) {
   console.warn('\nWARNING: could not detect claude binary. Edit CLAUDE_BIN in .env to an absolute path before `pnpm start`.')
 }

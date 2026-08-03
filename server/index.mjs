@@ -29,7 +29,7 @@ import { reportStatus, latestReportHtml, generateReport } from './usagereport.mj
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
-import { CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
+import { CLAUDE_ALIASES, OLLAMA_PRESETS, CODEX_PRESETS } from './models.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -241,7 +241,7 @@ app.get('/procs', async () => ({ procs: await scanClaude() }));
 
 // Model picker source: claude aliases (mirror /model) + ollama presets. Free-text
 // in the UI — these are suggestions; any typed value is passed through verbatim.
-app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS }));
+app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS, codex: CODEX_PRESETS }));
 
 // Home dir, for the client to collapse full paths to `~` on display (pure
 // presentation — the backend itself always deals in full paths).
@@ -263,6 +263,7 @@ app.get('/capabilities', async () => {
   return {
     ollama:      { available: !!reg.OLLAMA_BIN, hint: 'Set OLLAMA_BIN in .env to enable Ollama model spawns.' },
     codex:       { available: existsSync(join(CODEX_HOME, 'sessions')), hint: 'Run Codex CLI once to enable the Codex usage card.' },
+    codexSpawn:  { available: !!reg.CODEX_BIN, hint: 'Set CODEX_BIN in .env to enable Codex agent/task spawns.' },
     skillScopes: { available: !!(process.env.SING_SCOPE_ROOT && existsSync(process.env.SING_SCOPE_ROOT)), hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
     usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
     wiki:        { available: wikiAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },

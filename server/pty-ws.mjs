@@ -76,7 +76,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
       switch (m.t) {
         case 'create': {
           try {
-            const na = reg.create({ cwd: m.cwd, title: m.title, model: m.model, scopes: m.scopes, sessionId: m.sessionId });
+            const na = reg.create({ cwd: m.cwd, title: m.title, model: m.model, scopes: m.scopes, sessionId: m.sessionId, tool: m.tool });
             ws.attached.add(na.id);
             send(ws, { t: 'attached', id: na.id });
           } catch (e) {

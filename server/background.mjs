@@ -18,7 +18,7 @@ import * as reg from './agents.mjs';
 import { createTask, updateTask, snapshotTasks } from './tasks.mjs';
 import { getUsage } from './usage.mjs';
 import { parseSession } from './stats.mjs';
-import { isClaudeModel } from './models.mjs';
+import { isClaudeModel, isCodexModel } from './models.mjs';
 
 const BACKGROUND_FILE = join(reg.STATE_DIR, 'background.json');
 const FLAGS_FILE = join(reg.STATE_DIR, 'report-flags.json'); // Set of unflagged (dismissed) taskIds; absent = all flagged (need attention)
@@ -45,10 +45,11 @@ const DEFAULT_JOB = {
   window: { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] },
   thresholds: {
     claude: { start: 50, stop: 75, weeklyMax: 50 },
+    codex: { start: 50, stop: 75, weeklyMax: 50 },
     ollama: { start: 50, stop: 75, weeklyMax: 50 },
   },
-  models: { claude: 'opus', ollama: 'glm-5.2:cloud' },
-  tokenCaps: { claude: 15_000_000, ollama: 15_000_000 },
+  models: { claude: 'opus', codex: 'gpt-5.4-mini', ollama: 'glm-5.2:cloud' },
+  tokenCaps: { claude: 15_000_000, codex: 15_000_000, ollama: 15_000_000 },
   scopes: [],
 };
 
@@ -78,11 +79,12 @@ function gateReason(u, th, name) {
   return null;
 }
 
-// Claude first, then Ollama, against this job's own thresholds. Each source
-// fails only its own gate (fail closed).
+// Claude first, then Codex (both paid subscription quotas — soak them before
+// the free local fallback), then Ollama, against this job's own thresholds.
+// Each source fails only its own gate (fail closed).
 export function evalGate(usage, job) {
   const reasons = [];
-  for (const backend of ['claude', 'ollama']) {
+  for (const backend of ['claude', 'codex', 'ollama']) {
     const r = gateReason(usage?.[backend], job.thresholds[backend], backend);
     if (r == null) return { backend, reason: `${backend} within budget` };
     reasons.push(r);
@@ -217,8 +219,8 @@ async function watchdog() {
   try {
     const job = config.jobs.find((d) => d.lastTaskId === task.id);
     const usage = await getUsage();
-    const tokens = (await parseSession(task.worktree || task.repo, task.sessionId)).tokens;
-    const backend = isClaudeModel(task.model) ? 'claude' : 'ollama';
+    const tokens = (await parseSession(task.worktree || task.repo, task.sessionId, backend)).tokens;
+    const backend = isClaudeModel(task.model) ? 'claude' : isCodexModel(task.model) ? 'codex' : 'ollama';
     decision = job ? watchdogDecision(usage, backend, job, tokens) : 'stop';
   } catch (e) { logger?.warn({ err: e.message }, 'background watchdog poll failed — stopping run (fail closed)'); }
   if (decision !== 'stop') return;
@@ -284,6 +286,7 @@ export function createJob({ title, description, cwd, cooldownHours, enabled, win
     window: { ...DEFAULT_JOB.window, ...window },
     thresholds: {
       claude: { ...DEFAULT_JOB.thresholds.claude, ...thresholds?.claude },
+      codex: { ...DEFAULT_JOB.thresholds.codex, ...thresholds?.codex },
       ollama: { ...DEFAULT_JOB.thresholds.ollama, ...thresholds?.ollama },
     },
     models: { ...DEFAULT_JOB.models, ...models },

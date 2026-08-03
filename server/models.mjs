@@ -5,13 +5,24 @@
 // through; isClaudeModel() routes it to the claude bin or the ollama wrapper.
 export const CLAUDE_ALIASES = ['claude', 'best', 'fable', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]', 'opusplan'];
 export const OLLAMA_PRESETS = ['glm-5.2:cloud', 'kimi-k3:cloud'];
+// Codex presets (gpt-* family). Convenience defaults like the claude aliases —
+// free-text still passes any gpt-* id through to the codex bin.
+export const CODEX_PRESETS = ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-pro'];
 const ALIAS_SET = new Set(CLAUDE_ALIASES);
+const CODEX_SET = new Set(CODEX_PRESETS);
 
 // true → run via the `claude` bin (optional --model); false → ollama wrapper.
 // 'claude' is the default alias (no --model). Known aliases and full claude-*
 // ids resolve to the claude bin; everything else is treated as an ollama model.
 export function isClaudeModel(model) {
   return !model || model === 'claude' || ALIAS_SET.has(model) || model.startsWith('claude-');
+}
+
+// true → run via the `codex` bin. Known codex presets and any gpt-* id route to
+// codex. Checked after isClaudeModel (claude ids never start with gpt-), so a
+// model is claude | codex | ollama in that order.
+export function isCodexModel(model) {
+  return !!model && (CODEX_SET.has(model) || model.startsWith('gpt-'));
 }
 
 // The transcript logs an assistant event's model as the resolved full id

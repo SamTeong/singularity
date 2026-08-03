@@ -20,11 +20,12 @@ const DAYS = [['Su', 0], ['Mo', 1], ['Tu', 2], ['We', 3], ['Th', 4], ['Fr', 5], 
 const DEFAULT_WINDOW = { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] };
 const DEFAULT_THRESHOLDS = {
   claude: { start: 50, stop: 75, weeklyMax: 50 },
+  codex: { start: 50, stop: 75, weeklyMax: 50 },
   ollama: { start: 50, stop: 75, weeklyMax: 50 },
 };
-const DEFAULT_MODELS = { claude: 'opus', ollama: 'glm-5.2:cloud' };
-const DEFAULT_TOKEN_CAPS = { claude: 15_000_000, ollama: 15_000_000 };
-const BACKEND_LABEL = { claude: 'Claude', ollama: 'Ollama' };
+const DEFAULT_MODELS = { claude: 'opus', codex: 'gpt-5.4-mini', ollama: 'glm-5.2:cloud' };
+const DEFAULT_TOKEN_CAPS = { claude: 15_000_000, codex: 15_000_000, ollama: 15_000_000 };
+const BACKEND_LABEL = { claude: 'Claude', codex: 'Codex', ollama: 'Ollama' };
 
 // Add/edit-background-job dialog: title, description, cwd, cooldownHours,
 // enabled, plus the per-task window/thresholds/models/tokenCaps that used to
@@ -166,7 +167,7 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
       {/* Thresholds */}
       <Stack spacing={0.5}>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>Usage thresholds (%), for when to start/stop</Typography>
-        {['claude', 'ollama'].map((b) => (
+        {['claude', 'codex', 'ollama'].map((b) => (
           <Stack key={b} direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
             <Typography variant="code" sx={{ fontSize: 11, width: 54 }}>{BACKEND_LABEL[b]}</Typography>
             <TextField size="small" label="start below (%)" type="number" value={thresholds[b].start} onChange={(e) => setThreshold(b, 'start', Number(e.target.value))} sx={{ width: 90 }} />
@@ -179,7 +180,7 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
       {/* Models + token caps */}
       <Stack spacing={0.5}>
         <Typography variant="caption" sx={{ color: 'text.secondary' }}>Models & spending limits</Typography>
-        {['claude', 'ollama'].map((b) => (
+        {['claude', 'codex', 'ollama'].map((b) => (
           <Stack key={b} direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
             <Typography variant="code" sx={{ fontSize: 11, width: 54 }}>{BACKEND_LABEL[b]}</Typography>
             <Box sx={{ minWidth: 160, flex: 1 }}>

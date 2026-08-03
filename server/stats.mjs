@@ -5,7 +5,7 @@
 // foreground and task/background. Prices drift with Anthropic's rate card — treat
 // estCostUsd as a fallback/cross-check; the statusline value (costSource:
 // 'statusline') is authoritative when present.
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -55,7 +55,18 @@ function cacheSet(path, st, result) {
   if (cache.size > CACHE_MAX) cache.delete(cache.keys().next().value);
 }
 
-export function parseSession(cwd, id) {
+export async function parseSession(cwd, id, tool) {
+  // Codex sessions live under ~/.codex/sessions/**/rollout-*.jsonl, keyed by
+  // their own thread uuid — NOT the singularity agent id (codex has no
+  // --session-id flag). So for a codex session, locate the rollout by cwd
+  // (a background task's worktree is unique, so the newest rollout at that
+  // cwd is the live run) and parse its token_count events. Claude/ollama
+  // sessions write a claude .jsonl keyed by the agent id (ollama runs through
+  // the claude wrapper), so they take the by-id path.
+  if (tool === 'codex') {
+    const p = findCodexRolloutForCwd(cwd);
+    return p ? parseCodexRollout(p) : { turns: 0, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, models: [], exists: false, estCostUsd: null };
+  }
   return parseByPath(join(homedir(), '.claude', 'projects', encodeCwd(cwd), `${id}.jsonl`));
 }
 
@@ -110,6 +121,96 @@ async function parseByPath(p) {
 // session list already has it), merging the exact statusline cost when present.
 const EMPTY_SESSION = { turns: 0, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, models: [], exists: false, estCostUsd: null };
 
+// ---- Codex CLI rollout parsing (~/.codex/sessions/**/rollout-*.jsonl) --------
+const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
+const CODEX_SESSIONS_DIR = join(CODEX_HOME, 'sessions');
+const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+const normCwd = (c) => (c || '').toLowerCase().replace(/\\/g, '/');
+
+// Read just the first few KB of a rollout for its session_meta cwd — a codex
+// rollout's first event is session_meta, so we never need the whole file to
+// decide whether this rollout belongs to `cwd`.
+function readHead(p, bytes = 4096) {
+  let fd = null;
+  try {
+    fd = openSync(p, 'r');
+    const buf = Buffer.alloc(bytes);
+    const n = readSync(fd, buf, 0, bytes, 0);
+    return buf.subarray(0, n).toString('utf8');
+  } catch { return ''; }
+  finally { if (fd != null) try { closeSync(fd); } catch {} }
+}
+
+function codexRolloutCwd(p, want) {
+  for (const line of readHead(p).split(/\r?\n/)) {
+    if (!line) continue;
+    let o; try { o = JSON.parse(line); } catch { continue; }
+    if (o.type === 'session_meta' && o.payload?.cwd) return normCwd(o.payload.cwd) === want;
+  }
+  return false;
+}
+
+// Bounded: only the newest year/month/day dirs (a live run writes today), and
+// the newest few rollouts by mtime within each. Returns the rollout path whose
+// session_meta.cwd matches, or null.
+function findCodexRolloutForCwd(cwd) {
+  const want = normCwd(cwd);
+  let years; try { years = readdirSync(CODEX_SESSIONS_DIR).sort(); } catch { return null; }
+  for (const year of [...years].reverse().slice(0, 1)) {
+    const months = listDirs(join(CODEX_SESSIONS_DIR, year)).slice(-2);
+    for (const month of [...months].reverse()) {
+      const days = listDirs(join(CODEX_SESSIONS_DIR, year, month)).slice(-3);
+      for (const day of [...days].reverse()) {
+        const dir = join(CODEX_SESSIONS_DIR, year, month, day);
+        let files; try { files = readdirSync(dir).filter((f) => f.startsWith('rollout-') && f.endsWith('.jsonl')); } catch { continue; }
+        const sorted = files
+          .map((f) => { const fp = join(dir, f); return [fp, statSync(fp).mtimeMs]; })
+          .sort((a, b) => b[1] - a[1]);
+        for (const [fp] of sorted.slice(0, 10)) if (codexRolloutCwd(fp, want)) return fp;
+      }
+    }
+  }
+  return null;
+}
+
+function listDirs(p) { try { return readdirSync(p, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name).sort(); } catch { return []; } }
+
+// Full parse of one codex rollout into the same shape as parseByPath. Codex
+// emits a token_count event per turn carrying last_token_usage; input_tokens
+// INCLUDES cached_input_tokens, so strip the cache-read count to avoid double
+// counting (mirrors the harness-usage-report codex parser). estCostUsd stays
+// null — the server PRICES table has no gpt-* entries, and codex cost is not
+// tracked by the claude statusline. Cached by (mtime,size) like claude paths.
+async function parseCodexRollout(p) {
+  let st; try { st = await stat(p); } catch { return { ...EMPTY_SESSION }; }
+  const hit = cache.get(p);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.result;
+  let turns = 0, tokens = 0, inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0;
+  const models = new Set();
+  try {
+    const content = await readFile(p, 'utf8');
+    for (const line of content.split(/\r?\n/)) {
+      if (!line) continue;
+      let o; try { o = JSON.parse(line); } catch { continue; }
+      if (o.type === 'turn_context' && o.payload?.model) models.add(o.payload.model);
+      if (o.type === 'response_item' && o.payload?.type === 'message' && o.payload?.role === 'assistant') turns++;
+      if (o.type === 'event_msg' && o.payload?.type === 'token_count') {
+        const last = o.payload.info?.last_token_usage || {};
+        const cacheRead = num(last.cached_input_tokens);
+        const cacheWrite = num(last.cache_write_input_tokens);
+        const input = Math.max(0, num(last.input_tokens) - cacheRead);
+        const output = num(last.output_tokens);
+        inputTokens += input; outputTokens += output;
+        cacheReadTokens += cacheRead; cacheWriteTokens += cacheWrite;
+        tokens += input + output + cacheRead + cacheWrite;
+      }
+    }
+  } catch { /* partial/locked file — return what we have */ }
+  const result = { turns, tokens, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, models: [...models], exists: true, estCostUsd: null };
+  cacheSet(p, st, result);
+  return result;
+}
+
 export async function sessionStats(project, id, root) {
   const p = pathFor(project, id, root);
   const session = p ? await parseByPath(p) : EMPTY_SESSION;
@@ -141,7 +242,7 @@ export function readCostFile(id) {
 export async function statsFor(agents) {
   const out = {};
   for (const a of agents) {
-    const session = await parseSession(a.cwd, a.id);
+    const session = await parseSession(a.cwd, a.id, a.tool);
     const cost = readCostFile(a.id);
     const costUsd = cost.costUsd ?? session.estCostUsd ?? null;
     const costSource = cost.costUsd != null ? 'statusline' : session.estCostUsd != null ? 'estimate' : null;

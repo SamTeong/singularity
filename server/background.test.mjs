@@ -27,9 +27,10 @@ const job = (over = {}) => ({
   window: { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] },
   thresholds: {
     claude: { start: 50, stop: 75, weeklyMax: 75 },
+    codex: { start: 50, stop: 75, weeklyMax: 75 },
     ollama: { start: 50, stop: 75, weeklyMax: 75 },
   },
-  tokenCaps: { claude: 15_000_000, ollama: 2_000_000 },
+  tokenCaps: { claude: 15_000_000, codex: 2_000_000, ollama: 2_000_000 },
   ...over,
 });
 const src = (over = {}) => ({ ok: true, session: { pctUsed: 10 }, weekly: { pctUsed: 10 }, ...over });
@@ -68,6 +69,22 @@ test('evalGate: both over → null with reason', () => {
 });
 test('evalGate: claude ok:false fails closed → ollama evaluated', () => {
   const g = evalGate({ claude: { ok: false, error: 'auth' }, ollama: src() }, job());
+  assert.equal(g.backend, 'ollama');
+});
+test('evalGate: claude over start, codex within → codex (paid quotas before free ollama)', () => {
+  const g = evalGate({
+    claude: src({ session: { pctUsed: 60 } }),
+    codex: src(),
+    ollama: src(),
+  }, job());
+  assert.equal(g.backend, 'codex');
+});
+test('evalGate: codex usage unavailable fails closed → falls through to ollama', () => {
+  const g = evalGate({
+    claude: src({ session: { pctUsed: 60 } }),
+    codex: { ok: false, error: 'no Codex sessions found' },
+    ollama: src(),
+  }, job());
   assert.equal(g.backend, 'ollama');
 });
 
@@ -197,6 +214,12 @@ test('normalizeTags: undefined/empty → []', () => {
 test('createJob: conclude defaults to "inreview"', () => {
   const d = createJob({ title: 'conclude-default', description: 'd', cwd: 'C:\\x' });
   assert.equal(d.conclude, 'inreview');
+});
+test('createJob: seeds codex thresholds/model/tokenCap defaults', () => {
+  const d = createJob({ title: 'codex-defaults', description: 'd', cwd: 'C:\\x' });
+  assert.deepEqual(d.thresholds.codex, { start: 50, stop: 75, weeklyMax: 50 });
+  assert.equal(d.models.codex, 'gpt-5.4-mini');
+  assert.equal(d.tokenCaps.codex, 15_000_000);
 });
 test('createJob: rejects an invalid conclude value', () => {
   assert.throws(() => createJob({ title: 'conclude-bad', description: 'd', cwd: 'C:\\x', conclude: 'garbage' }));

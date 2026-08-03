@@ -2,7 +2,7 @@
 // vs. ollama wrapper. Run: npm test  (node --test server/)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isClaudeModel, claudeIdToAlias, CLAUDE_ALIASES, OLLAMA_PRESETS } from './models.mjs';
+import { isClaudeModel, isCodexModel, claudeIdToAlias, CLAUDE_ALIASES, OLLAMA_PRESETS, CODEX_PRESETS } from './models.mjs';
 
 test('isClaudeModel: no model / literal "claude" → true (default alias)', () => {
   assert.equal(isClaudeModel(undefined), true);
@@ -24,6 +24,26 @@ test('isClaudeModel: every ollama preset routes to the ollama wrapper', () => {
 test('isClaudeModel: unrecognized ollama-style ids → false', () => {
   assert.equal(isClaudeModel('glm-5.2:cloud'), false);
   assert.equal(isClaudeModel('kimi-k3:cloud'), false);
+});
+
+test('isCodexModel: every codex preset routes to the codex bin', () => {
+  for (const preset of CODEX_PRESETS) assert.equal(isCodexModel(preset), true, preset);
+});
+
+test('isCodexModel: gpt-* prefix routes to the codex bin', () => {
+  assert.equal(isCodexModel('gpt-5.6-luna'), true);
+  assert.equal(isCodexModel('gpt-5.4'), true);
+  assert.equal(isCodexModel('gpt-5.4-mini'), true);
+  assert.equal(isCodexModel('gpt-5.3-codex-spark'), true); // free-text codex id
+});
+
+test('isCodexModel: empty / claude / ollama ids → false', () => {
+  assert.equal(isCodexModel(undefined), false);
+  assert.equal(isCodexModel(''), false);
+  assert.equal(isCodexModel('claude'), false);
+  assert.equal(isCodexModel('opus'), false);
+  assert.equal(isCodexModel('claude-opus-4-8'), false);
+  assert.equal(isCodexModel('glm-5.2:cloud'), false);
 });
 
 test('claudeIdToAlias: resolved claude-* ids map back to the family alias', () => {

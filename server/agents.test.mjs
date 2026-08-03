@@ -17,7 +17,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, renameSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-agents-test-'));
@@ -35,7 +35,31 @@ if (process.platform === 'win32') {
 }
 process.env.CLAUDE_BIN = keepalive;
 process.env.OLLAMA_BIN = keepalive;
+process.env.CODEX_BIN = keepalive;
+// SING_SCOPE_ROOT + skill-manifest.json fixture for the codex scope-config
+// test: resolveSkillManifest() derives the path as dirname(SCOPE_ROOT)/skills/
+// skill-manifest.json. So SCOPE_ROOT must be a SUBDIR of a parent, and the
+// manifest lives at <parent>/skills/skill-manifest.json. Two skills — one
+// 'coding', one 'harness' — so the test can assert the 'harness'-scoped skill
+// is disabled while 'coding' is kept.
+const scopeParent = mkdtempSync(join(tmpdir(), 'sing-scope-parent-'));
+const scopeRoot = join(scopeParent, 'skill-scopes');
+mkdirSync(scopeRoot, { recursive: true });
+mkdirSync(join(scopeParent, 'skills'), { recursive: true });
+const manifestDir = join(scopeParent, 'skills');
+const codingSkillDir = join(scratch, 'skills', 'coding-skill');
+const harnessSkillDir = join(scratch, 'skills', 'harness-skill');
+mkdirSync(codingSkillDir, { recursive: true });
+mkdirSync(harnessSkillDir, { recursive: true });
+writeFileSync(join(codingSkillDir, 'SKILL.md'), '# coding skill');
+writeFileSync(join(harnessSkillDir, 'SKILL.md'), '# harness skill');
+writeFileSync(join(manifestDir, 'skill-manifest.json'), JSON.stringify([
+  { skillName: 'coding-skill', refs: [{ path: codingSkillDir, version: '1.0.0' }], scopes: ['coding'] },
+  { skillName: 'harness-skill', refs: [{ path: harnessSkillDir, version: '1.0.0' }], scopes: ['harness'] },
+]));
+process.env.SING_SCOPE_ROOT = scopeRoot;
 after(() => {
+  rmSync(scopeParent, { recursive: true, force: true });
   rmSync(scratch, { recursive: true, force: true });
   // node-pty's spawn() (even the failed attempt inside the fork test below)
   // leaves a ConPTY handle that never releases on its own — force this file's
@@ -374,6 +398,77 @@ test('buildSpawn: ollama model on resume injects --model to override stripped tr
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// ---- buildSpawn: codex branch ----
+// Codex CLI has no --session-id/--name/--resume; buildSpawn returns a fresh
+// invocation with -C/-s/-a/-m + positional prompt. permissionMode set (tasks)
+// → -a never (auto-run); unset (foreground) → -a on-request (TUI prompts).
+test('buildSpawn: codex fresh spawn uses -C, -s workspace-write, -a on-request, -m, prompt; no --resume/--session-id/launch', () => {
+  const { bin, args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'do the work');
+  assert.equal(bin, process.env.CODEX_BIN);
+  assert.equal(args[args.indexOf('-C') + 1], cwd);
+  assert.equal(args[args.indexOf('-s') + 1], 'workspace-write');
+  assert.equal(args[args.indexOf('-a') + 1], 'on-request');
+  assert.equal(args[args.indexOf('-m') + 1], 'gpt-5.3-codex-spark');
+  assert.ok(args.includes('do the work'));
+  assert.ok(!args.includes('--resume'));
+  assert.ok(!args.includes('--session-id'));
+  assert.ok(!args.includes('launch'));
+  assert.ok(!args.includes('--name'));
+});
+
+test('buildSpawn: codex with permissionMode set → -a never', () => {
+  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', permissionMode: 'acceptEdits' }, 'do the work');
+  assert.equal(args[args.indexOf('-a') + 1], 'never');
+});
+
+test('buildSpawn: codex with no model → no -m flag', () => {
+  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: '', scopes: [], tool: 'codex' }, 'work');
+  assert.ok(!args.includes('-m'));
+});
+
+test('buildSpawn: gpt-* model with tool="claude" routes to codex bin (model-driven)', () => {
+  const { bin, args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.6-luna', scopes: [], tool: 'claude' }, 'do the work');
+  assert.equal(bin, process.env.CODEX_BIN);
+  assert.equal(args[args.indexOf('-m') + 1], 'gpt-5.6-luna');
+  assert.ok(args.includes('do the work'));
+  assert.ok(!args.includes('--session-id'));
+  assert.ok(!args.includes('launch'));
+});
+
+test('buildSpawn: codex with !CODEX_BIN → throws /codex not found/', async () => {
+  const saved = process.env.CODEX_BIN;
+  process.env.CODEX_BIN = join(scratch, 'no-such-codex-bin');
+  try {
+    // Bust the ES module cache so the fresh import re-resolves CODEX_BIN from
+    // the (now non-existent) env path → resolveBin returns null → buildSpawn
+    // throws. buildSpawn is a pure function — the fresh module's own Map/bus
+    // are never touched.
+    const fresh = await import('./agents.mjs?test=nocodex');
+    assert.throws(
+      () => fresh.buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'do the work'),
+      /codex not found/,
+    );
+  } finally {
+    process.env.CODEX_BIN = saved;
+  }
+});
+
+test('buildSpawn: codex scopes → -c skills.config=[...] disables non-chosen skills, no --add-dir', () => {
+  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: ['coding'], tool: 'codex' }, 'work');
+  const cfgIdx = args.indexOf('-c');
+  assert.ok(cfgIdx !== -1, '-c flag present');
+  const cfg = args[cfgIdx + 1];
+  assert.ok(cfg.startsWith('skills.config=['), 'config value starts with skills.config=[');
+  assert.ok(cfg.endsWith(']'), 'config value ends with ]');
+  // harness-skill is disabled (its scope 'harness' is not in the chosen ['coding']);
+  // coding-skill is NOT disabled (its scope 'coding' is chosen).
+  const harnessMd = join(harnessSkillDir, 'SKILL.md').replace(/\\/g, '/');
+  const codingMd = join(codingSkillDir, 'SKILL.md').replace(/\\/g, '/');
+  assert.ok(cfg.includes(`{path="${harnessMd}",enabled=false}`), 'harness-skill disabled');
+  assert.ok(!cfg.includes(codingMd), 'coding-skill not in disable list');
+  assert.ok(!args.includes('--add-dir'), 'codex never uses --add-dir');
 });
 
 // ---- writeAtomic (server/background.test.mjs:214 flake regression) ------------

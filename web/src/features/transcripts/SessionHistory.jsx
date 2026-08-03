@@ -243,30 +243,20 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
               searchValue={q}
               onSearchChange={setQ}
               onPickFolder={() => setPicking(true)}
+              extra={
+                <ToggleButtonGroup exclusive size="small" value={effScope} onChange={(_, v) => v && setScope(v)} sx={{ flexShrink: 0 }}>
+                  <ToggleButton value="all" title="Search + chat across all transcripts" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>All</ToggleButton>
+                  <ToggleButton value="one" disabled={!sel} aria-label="This transcript" title="Search + chat about the selected transcript" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>This</ToggleButton>
+                </ToggleButtonGroup>
+              }
               onCollapse={collapse}
             >
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tool === 'codex' ? '~/.codex (Codex home)' : tildify(root)}</Typography>
               <ToggleButtonGroup value={tool} exclusive size="small" color="primary" onChange={(_, v) => v && setTool(v)} sx={{ mt: 1, ml: 2, alignSelf: 'flex-start' }}>
-                <ToggleButton value="all" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>All</ToggleButton>
+                <ToggleButton value="all" aria-label="All sources" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>All</ToggleButton>
                 <ToggleButton value="claude" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>Claude</ToggleButton>
                 <ToggleButton value="codex" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>Codex</ToggleButton>
               </ToggleButtonGroup>
-              <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
-                {['all', 'one'].map((s) => (
-                  <Tooltip key={s} title={s === 'one' ? 'Search + chat about the selected transcript' : 'Search + chat across all transcripts'}>
-                    {/* span: Tooltip needs a live event target — a disabled button fires none. */}
-                    <span>
-                      <Button
-                        size="small"
-                        variant={effScope === s ? 'contained' : 'outlined'}
-                        disabled={s === 'one' && !sel}
-                        onClick={() => setScope(s)}
-                        sx={{ px: 1.5, minWidth: 0, fontSize: 12, textTransform: 'none' }}
-                      >{s === 'all' ? 'All' : 'This transcript'}</Button>
-                    </span>
-                  </Tooltip>
-                ))}
-              </Stack>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
                 {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${filteredSessions.length} transcript${filteredSessions.length === 1 ? '' : 's'}`}
               </Typography>

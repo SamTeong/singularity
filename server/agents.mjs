@@ -4,9 +4,9 @@ import { spawn } from 'node-pty';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants } from 'node:fs';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { isClaudeModel } from './models.mjs';
+import { isClaudeModel, isCodexModel } from './models.mjs';
 import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
 export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR };
 
@@ -36,7 +36,8 @@ function resolveBin(envOverride) {
 }
 const CLAUDE_BIN = resolveBin(process.env.CLAUDE_BIN);
 const OLLAMA_BIN = resolveBin(process.env.OLLAMA_BIN);
-export { CLAUDE_BIN, OLLAMA_BIN, SCOPE_ROOT };
+const CODEX_BIN = resolveBin(process.env.CODEX_BIN);
+export { CLAUDE_BIN, OLLAMA_BIN, CODEX_BIN, SCOPE_ROOT };
 
 export const bus = new EventEmitter();
 
@@ -85,8 +86,8 @@ export function writeAtomic(file, data, rename = renameSync) {
 let logger = null;
 function persist() {
   const data = {
-    agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince, mock }) => ({
-      id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs, mock,
+    agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince, mock, tool }) => ({
+      id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs, mock, tool,
       // fold the live running-span in so a daemon exit while 'running' doesn't lose it
       activeMs: status === 'running' && runningSince ? (activeMs || 0) + (Date.now() - runningSince) : activeMs,
       status: status === 'running' || status === 'starting' || status === 'idle' ? 'detached' : status,
@@ -123,7 +124,7 @@ export function init(log) {
 
 // --- snapshots ---
 export function snapshot() {
-  return [...agents.values()].map(({ id, title, cwd, status, pid, createdAt, model, scopes }) => ({ id, title, cwd, status, pid, createdAt, model, scopes }));
+  return [...agents.values()].map(({ id, title, cwd, status, pid, createdAt, model, scopes, tool }) => ({ id, title, cwd, status, pid, createdAt, model, scopes, tool }));
 }
 export function getRecentRepos() { return recentRepos; }
 export function getBuf(id) { return agents.get(id)?.buf.join('') ?? ''; }
@@ -139,7 +140,7 @@ export function isLive(id) { return !!agents.get(id)?.proc; }
 export function getLaunchConfig(id) {
   const a = agents.get(id);
   if (!a) return null;
-  return { model: a.model || null, scopes: Array.isArray(a.scopes) ? a.scopes : [] };
+  return { model: a.model || null, scopes: Array.isArray(a.scopes) ? a.scopes : [], tool: a.tool || 'claude' };
 }
 // PIDs of agents this daemon currently owns a live pty for (for process classification).
 export function livePids() {
@@ -214,9 +215,11 @@ function wire(a) {
       return;
     }
     setStatus(a, 'exited'); // status event for crons auto-kill; tracks activeMs
-    const resumeCmd = isClaudeModel(a.model)
-      ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
-      : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
+    const resumeCmd = a.tool === 'codex' || isCodexModel(a.model)
+      ? 'codex'
+      : isClaudeModel(a.model)
+        ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
+        : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
     bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume: ${resumeCmd}\x1b[0m\r\n` });
     // Drop the session from the list rather than leaving a dead 'exited' row;
     // resume still works off the on-disk session log (new session, same id).
@@ -226,13 +229,55 @@ function wire(a) {
   });
 }
 
+// --- codex skill-scoping ---
+// Codex has no --add-dir; instead it scopes skills via a TOML override on the
+// config file. resolveSkillManifest() finds the skill-manifest.json (derived
+// from SCOPE_ROOT: dirname(SCOPE_ROOT)/skills/skill-manifest.json, falling back
+// to ~/.agents/skills/skill-manifest.json). codexScopeConfig() builds the
+// `skills.config=[{path="...",enabled=false},...]` string — every skill whose
+// scopes have NO intersection with the chosen scopes (+ 'common') is disabled.
+function resolveSkillManifest() {
+  const cands = [];
+  if (SCOPE_ROOT) cands.push(join(dirname(SCOPE_ROOT), 'skills', 'skill-manifest.json'));
+  cands.push(join(homedir(), '.agents', 'skills', 'skill-manifest.json'));
+  return cands.find((p) => existsSync(p)) || null;
+}
+function codexScopeConfig(scopes) {
+  const manifestPath = resolveSkillManifest();
+  if (!manifestPath) return null; // no manifest → no disable (codex default: all skills on)
+  let manifest;
+  try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch { return null; }
+  const keep = new Set([...(scopes || []), 'common']);
+  const disable = (Array.isArray(manifest) ? manifest : [])
+    .filter((sk) => !(sk.scopes || []).some((s) => keep.has(s)))
+    .map((sk) => {
+      const skillMd = join(sk.refs?.[0]?.path || '', 'SKILL.md');
+      return `{path="${skillMd.replace(/\\/g, '/')}",enabled=false}`;
+    });
+  return disable.length ? `skills.config=[${disable.join(',')}]` : null;
+}
+
 // Build (bin, args) for an agent's pty: skill-scopes → --add-dir <abs> (only
 // existing dirs under the scope root), resume if a session log already exists
 // for this id at this cwd (else fresh --session-id), optional ollama wrapper.
 // Shared by create + reattach so reattach keeps the model + scopes.
 // `prompt` (initial user message) is only sent on a fresh spawn — passing it
 // with --resume would re-submit it as a new message on every reattach.
-export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs }, prompt) {
+export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs, tool }, prompt) {
+  // ponytail: codex has no --session-id/--name pinning and no Task tool —
+  // reattach = fresh spawn, tasks are single-agent with a minimal prompt.
+  // Model-driven: a gpt-* model routes here even with tool='claude'. The tool
+  // toggle still covers the empty-model case (codex's own default via config.toml).
+  if (tool === 'codex' || isCodexModel(model)) {
+    if (!CODEX_BIN) throw new Error('codex not found (CODEX_BIN not set in .env)');
+    const args = [];
+    const cfg = codexScopeConfig(scopes);
+    if (cfg) args.push('-c', cfg);
+    args.push('-C', cwd, '-s', 'workspace-write', '-a', permissionMode ? 'never' : 'on-request');
+    if (model) args.push('-m', model);
+    if (prompt) args.push(prompt);
+    return { bin: CODEX_BIN, args };
+  }
   const claudeArgs = [];
   for (const s of (scopes || [])) {
     if (!s) continue;
@@ -286,7 +331,7 @@ function spawnPty(bin, args, opts) {
 }
 
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock }) {
+export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool }) {
   const id = (sessionId && sessionId.trim()) || randomUUID();
   const existing = agents.get(id);
   if (existing) {
@@ -299,10 +344,10 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
   }
   if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
   const displayName = title || id.slice(0, 8);
-  const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs }, prompt);
+  const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool }, prompt);
   ensureTrusted(cwd);
   const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: spawnEnv(mock), useConptyDll: true });
-  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [], written: 0 };
+  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -391,7 +436,7 @@ export function fork(srcId, title) {
     writeFileSync(join(dir, `${newId}.jsonl`), content);
   }
   // no source log → nothing written → create() spawns fresh with --session-id (fallback = copy)
-  return create({ cwd: src.cwd, title, model: src.model, scopes: src.scopes, sessionId: newId });
+  return create({ cwd: src.cwd, title, model: src.model, scopes: src.scopes, sessionId: newId, tool: src.tool });
 }
 
 export function input(id, data) { agents.get(id)?.proc?.write(data); }
@@ -426,7 +471,7 @@ export function remove(id) {
 export function respawn(id) {
   const a = agents.get(id);
   if (!a?.proc) return false;
-  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs };
+  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool };
   a.proc.kill();
   return true;
 }

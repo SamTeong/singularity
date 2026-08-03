@@ -34,6 +34,10 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
   // that would fail at spawn. Free-text still lets a user type an ollama name.
   const ollamaUnavailable = caps && caps.ollama?.available === false;
   const ollamaHint = caps?.ollama?.hint;
+  // Codex group gates on CODEX_BIN (codexSpawn capability), same convention as
+  // ollama — the static CODEX_PRESETS list is always returned by /models.
+  const codexUnavailable = caps && caps.codexSpawn?.available === false;
+  const codexHint = caps?.codexSpawn?.hint;
 
   useEffect(() => {
     let alive = true;
@@ -41,10 +45,11 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
       if (!alive) return;
       const claude = (d.claude || []).map((m) => ({ label: m, group: 'claude' }));
       const ollama = ollamaUnavailable ? [] : (d.ollama || []).map((m) => ({ label: m, group: 'ollama' }));
-      setOptions([...claude, ...ollama]);
+      const codex = codexUnavailable ? [] : (d.codex || []).map((m) => ({ label: m, group: 'codex' }));
+      setOptions([...claude, ...ollama, ...codex]);
     }).catch(() => {});
     return () => { alive = false; };
-  }, [ollamaUnavailable]);
+  }, [ollamaUnavailable, codexUnavailable]);
 
   return (
     <Autocomplete
@@ -64,7 +69,7 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
           label={label}
           placeholder={placeholder}
           spellCheck={false}
-          helperText={ollamaUnavailable ? ollamaHint : null}
+          helperText={ollamaUnavailable ? ollamaHint : codexUnavailable ? codexHint : null}
         />
       )}
       renderOption={({ key, ...props }, o) => (

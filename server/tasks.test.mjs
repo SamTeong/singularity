@@ -14,12 +14,14 @@ import { tmpdir } from 'node:os';
 // hoisted above this assignment, so a dynamic import is required.
 const scratch = mkdtempSync(join(tmpdir(), 'sing-tasks-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
-// agents.mjs captures OLLAMA_BIN once at load. Clear it here (before import) so
-// the "failed spawn cleans up" test gets a deterministic buildSpawn throw
-// regardless of whether ollama is installed on the machine running the suite.
+// agents.mjs captures OLLAMA_BIN/CODEX_BIN once at load. Clear them here (before
+// import) so the "failed spawn cleans up" tests get a deterministic buildSpawn
+// throw regardless of whether ollama/codex is installed on the machine running
+// the suite.
 delete process.env.OLLAMA_BIN;
+delete process.env.CODEX_BIN;
 
-const { buildTaskPrompt, buildBackgroundPrompt, createTask, updateTask, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree } = await import('./tasks.mjs');
+const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, createTask, updateTask, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree } = await import('./tasks.mjs');
 
 function initRepo() {
   const repo = mkdtempSync(join(tmpdir(), 'sing-repo-'));
@@ -222,6 +224,51 @@ test('createTask: failed spawn cleans up the worktree it just created', () => {
     assert.throws(
       () => createTask({ repo, title: 'T', description: 'D', model: 'not-a-claude-model', scopes: [] }),
       /ollama not found/,
+    );
+    const list = execFileSync('git', ['-C', repo, 'worktree', 'list'], { encoding: 'utf8' }).trim().split('\n');
+    assert.equal(list.length, 1, 'only the main worktree should remain — task worktree was cleaned up');
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+// ---- codex task prompt ----
+// Codex tasks are single-agent (no Task tool / subagents): the prompt must
+// contain the title + description and never reference subagents or the Task
+// tool. buildTaskPrompt routes to buildCodexTaskPrompt via the early return.
+test('buildCodexTaskPrompt: contains title/description, no Task tool/subagent references', () => {
+  const p = buildCodexTaskPrompt({ ...baseTask, title: 'My Codex Task', description: 'Do the thing', tool: 'codex' });
+  assert.match(p, /My Codex Task/);
+  assert.match(p, /Do the thing/);
+  assert.doesNotMatch(p, /Task tool/);
+  assert.doesNotMatch(p, /subagent/);
+});
+
+test('buildTaskPrompt: codex tool returns codex prompt (early return, no subagent refs)', () => {
+  const p = buildTaskPrompt({ ...baseTask, title: 'C Task', description: 'C Desc', tool: 'codex' }, false);
+  assert.match(p, /C Task/);
+  assert.match(p, /C Desc/);
+  assert.doesNotMatch(p, /subagent/);
+  assert.doesNotMatch(p, /Task tool/);
+});
+
+test('buildBackgroundPrompt: codex tool returns codex background prompt (no subagent refs)', () => {
+  const p = buildBackgroundPrompt({ ...baseTask, title: 'C Bg', description: 'C Bg Desc', tool: 'codex' });
+  assert.match(p, /C Bg/);
+  assert.match(p, /C Bg Desc/);
+  assert.doesNotMatch(p, /subagent/);
+});
+
+// createTask with tool:'codex' but no CODEX_BIN (cleared at file top via the
+// optional-env convention) → buildSpawn throws "codex not found" synchronously,
+// and the worktree created just above is cleaned up. Mirrors the existing
+// "not-a-claude-model" → ollama throw test.
+test('createTask: codex tool with no CODEX_BIN throws /codex not found/ and cleans up the worktree', () => {
+  const repo = initRepo();
+  try {
+    assert.throws(
+      () => createTask({ repo, title: 'T', description: 'D', model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }),
+      /codex not found/,
     );
     const list = execFileSync('git', ['-C', repo, 'worktree', 'list'], { encoding: 'utf8' }).trim().split('\n');
     assert.equal(list.length, 1, 'only the main worktree should remain — task worktree was cleaned up');

@@ -7,6 +7,7 @@ import Autocomplete from '@mui/material/Autocomplete';
 import FormControlLabel from '@mui/material/FormControlLabel';
 import Checkbox from '@mui/material/Checkbox';
 import ModelSelect from '@/components/ModelSelect.jsx';
+import ToolSelect from '@/components/ToolSelect.jsx';
 import CwdPicker from '@/components/CwdPicker.jsx';
 import ScopeSelect from '@/components/ScopeSelect.jsx';
 import CreateDialog, { clearAdornment } from '@/components/CreateDialog.jsx';
@@ -20,6 +21,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
   const [description, setDescription] = useState('');
   const [tags, setTags] = useState([]);
   const [model, setModel] = useState('');
+  const [tool, setTool] = useState('claude');
   const [implModel, setImplModel] = useState('sonnet');
   const [reviewerModel, setReviewerModel] = useState('opus');
   const [orchTurns, setOrchTurns] = useState('');
@@ -39,6 +41,8 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
 
   // Mirror of server isClaudeModel: empty/'claude'/known alias/claude-* id → claude.
   const isClaude = (m) => !m || (claudeSet ? claudeSet.has(m) : m === 'claude') || m.startsWith('claude-');
+  // Mirror of server isCodexModel: gpt-* id → codex (single-agent; no Task tool).
+  const isCodex = (m) => !!m && m.startsWith('gpt-');
   // Pre-fill impl/reviewer from the orchestrator model: claude → sonnet/opus,
   // ollama → mirror it. Re-derives whenever the orchestrator model changes (or
   // claudeSet finishes loading, which can reclassify the same model). Compared
@@ -50,12 +54,13 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
     setPrevModel(model);
     setPrevClaudeSet(claudeSet);
     if (isClaude(model)) { setImplModel('sonnet'); setReviewerModel('opus'); }
+    else if (isCodex(model)) { /* codex is single-agent — impl/reviewer hidden, leave as-is */ }
     else { setImplModel(model); setReviewerModel(model); }
   }
 
   const reset = () => {
     setTitle(''); setDescription(''); setTags([]); setScopes([]); setModel('');
-    setImplModel('sonnet'); setReviewerModel('opus');
+    setTool('claude'); setImplModel('sonnet'); setReviewerModel('opus');
     setOrchTurns(''); setImplTurns(''); setRevTurns('');
     setRequireApproval(false); setMergeMode('manual');
   };
@@ -75,7 +80,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
           repo: untildify(cwd.trim()), title: title.trim(), description: description.trim(),
           model: model.trim(), implModel: implModel.trim(), reviewerModel: reviewerModel.trim(),
           orchestratorMaxTurns: posNum(orchTurns), implMaxTurns: posNum(implTurns), reviewerMaxTurns: posNum(revTurns),
-          scopes, tags, requirePlanApproval: requireApproval, mergeMode,
+          scopes, tags, requirePlanApproval: requireApproval, mergeMode, tool,
         }),
       });
       const d = await r.json();
@@ -103,19 +108,24 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
       <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
       <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} slotProps={{ input: { endAdornment: clearAdornment(description !== '', () => setDescription('')) } }} />
       <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
+      <ToolSelect tool={tool} setTool={setTool} />
       <Stack spacing={1}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" /></Box>
           <TextField size="small" type="number" label="turn limit" placeholder="—" value={orchTurns} onChange={(e) => setOrchTurns(e.target.value)} sx={{ width: 110 }} />
         </Stack>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <Box sx={{ flex: 1 }}><ModelSelect model={implModel} setModel={setImplModel} label="implementor model" /></Box>
-          <TextField size="small" type="number" label="turn limit" placeholder="—" value={implTurns} onChange={(e) => setImplTurns(e.target.value)} sx={{ width: 110 }} />
-        </Stack>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <Box sx={{ flex: 1 }}><ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" /></Box>
-          <TextField size="small" type="number" label="turn limit" placeholder="—" value={revTurns} onChange={(e) => setRevTurns(e.target.value)} sx={{ width: 110 }} />
-        </Stack>
+        {tool !== 'codex' && !isCodex(model) && (
+          <>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Box sx={{ flex: 1 }}><ModelSelect model={implModel} setModel={setImplModel} label="implementor model" /></Box>
+              <TextField size="small" type="number" label="turn limit" placeholder="—" value={implTurns} onChange={(e) => setImplTurns(e.target.value)} sx={{ width: 110 }} />
+            </Stack>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Box sx={{ flex: 1 }}><ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" /></Box>
+              <TextField size="small" type="number" label="turn limit" placeholder="—" value={revTurns} onChange={(e) => setRevTurns(e.target.value)} sx={{ width: 110 }} />
+            </Stack>
+          </>
+        )}
       </Stack>
       <ScopeSelect open={open} value={scopes} onChange={setScopes} />
       <Autocomplete
