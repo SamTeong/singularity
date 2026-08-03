@@ -35,17 +35,17 @@ test('searchHooks returns matching line + snippet', () => {
   assert.deepEqual(searchHooks([cwd], ''), []); // empty query → nothing
 });
 
-test('writeHook writes a .bak on second write; guard rejects non-hooks path', () => {
+test('writeHook writes a backup on second write; guard rejects non-hooks path', () => {
   const cwd = makeRoot({ 'w.mjs': 'v1' });
   setHookRoots(['~', cwd]); // register cwd so guard's root-containment check allows it
   try {
     const p = join(cwd, '.claude', 'hooks', 'w.mjs');
     const first = writeHook(p, 'v2');
     assert.equal(first.ok, true);
-    assert.equal(existsSync(`${p}.bak`), true);
+    assert.equal(existsSync(first.backup), true);
     const second = writeHook(p, 'v3');
     assert.equal(second.ok, true);
-    assert.equal(second.backup, true);
+    assert.equal(existsSync(second.backup), true);
     // Guard: a path outside .claude/hooks is rejected.
     const bad = writeHook(join(cwd, 'evil.txt'), 'x');
     assert.equal(bad.ok, false);

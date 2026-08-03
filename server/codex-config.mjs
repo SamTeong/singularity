@@ -3,12 +3,13 @@
 // so only the project (.codex/config.toml) and user (~/.codex/config.toml)
 // scopes are exposed. Paths are derived server-side from (cwd, scope) — the
 // client never supplies a path. Writes validate TOML (via @iarna/toml) and back
-// up the existing file to .bak before overwriting.
-import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from 'node:fs';
+// up the existing file (backups.mjs) before overwriting.
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as tomlParse } from '@iarna/toml';
 import { STATE_DIR } from './app-dir.mjs';
+import { backupFile } from './backups.mjs';
 
 const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
 
@@ -143,10 +144,10 @@ export function writeConfig(cwd, scope, content) {
   const p = paths[scope];
   try { tomlParse(content); } catch (e) { return { ok: false, error: `invalid TOML: ${e.message}` }; }
   try {
-    if (existsSync(p)) copyFileSync(p, `${p}.bak`);
-    else mkdirSync(dirname(p), { recursive: true }); // first write of a project scope
+    const backup = backupFile(p);
+    if (!backup) mkdirSync(dirname(p), { recursive: true }); // first write of a project scope
     writeFileSync(p, content);
-    return { ok: true, backup: existsSync(`${p}.bak`), path: p };
+    return { ok: true, backup, path: p };
   } catch (e) {
     return { ok: false, error: e.message };
   }

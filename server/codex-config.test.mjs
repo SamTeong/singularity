@@ -67,15 +67,14 @@ test('codex config roots persist to FS: default ~, dedup, roundtrip', () => {
   assert.deepEqual(getConfigRoots(), ['~', '/a', '/b']); // read back from disk
 });
 
-test('writeConfig valid TOML writes + .bak', () => {
+test('writeConfig valid TOML writes + backup', () => {
   const cwd = makeRoot('model = "x"\n');
   setConfigRoots([cwd]); // writeConfig requires isKnownConfigRoot(cwd)
   const r = writeConfig(cwd, 'project', 'model = "y"\n');
   assert.equal(r.ok, true);
-  assert.equal(r.backup, true);
   assert.equal(r.path, join(cwd, '.codex', 'config.toml'));
   assert.equal(readFileSync(join(cwd, '.codex', 'config.toml'), 'utf8'), 'model = "y"\n');
-  assert.equal(existsSync(`${join(cwd, '.codex', 'config.toml')}.bak`), true);
+  assert.equal(existsSync(r.backup), true);
 });
 
 test('writeConfig invalid TOML returns ok:false and does not write', () => {

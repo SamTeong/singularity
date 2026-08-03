@@ -1,10 +1,11 @@
 // Config editor backend: resolve the 3 settings.json scopes for a cwd,
-// read them, and write with a .bak backup + JSON validation. Paths are derived
-// server-side from (cwd, scope) — the client never supplies a path.
-import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from 'node:fs';
+// read them, and write with a backup (backups.mjs) + JSON validation. Paths
+// are derived server-side from (cwd, scope) — the client never supplies a path.
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, dirname, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
+import { backupFile } from './backups.mjs';
 
 function scopePaths(cwd) {
   return {
@@ -138,10 +139,10 @@ export function writeConfig(cwd, scope, content) {
   const p = paths[scope];
   try { JSON.parse(content); } catch (e) { return { ok: false, error: `invalid JSON: ${e.message}` }; }
   try {
-    if (existsSync(p)) copyFileSync(p, `${p}.bak`);
-    else mkdirSync(dirname(p), { recursive: true }); // first write of a project scope
+    const backup = backupFile(p);
+    if (!backup) mkdirSync(dirname(p), { recursive: true }); // first write of a project scope
     writeFileSync(p, content);
-    return { ok: true, backup: existsSync(`${p}.bak`), path: p };
+    return { ok: true, backup, path: p };
   } catch (e) {
     return { ok: false, error: e.message };
   }

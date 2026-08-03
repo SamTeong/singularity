@@ -5,10 +5,11 @@
 // (resolve-then-containment against known roots), not a bare path-segment check
 // (which can't stop a write to ANY */.claude/hooks/ on the machine — hooks are
 // auto-executed by Claude). Roots are an independent FS-persisted list under STATE_DIR.
-import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
 import { join, sep, resolve, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
+import { backupFile } from './backups.mjs';
 
 // Resolve a ~-prefixed client path to an absolute one (mirror rules.mjs resolveRoot).
 function resolveRoot(raw) {
@@ -87,15 +88,15 @@ export function readHook(path) {
   return { path: abs, exists, content: exists ? readFileSync(abs, 'utf8') : '' };
 }
 
-// Write raw content back with a .bak backup (mirror writeConfig). No JSON
+// Write raw content back with a backup (mirror writeConfig). No JSON
 // validation — hook files are scripts, not JSON.
 export function writeHook(path, content) {
   const abs = guard(path);
   if (!abs) return { ok: false, error: 'bad path' };
   try {
-    if (existsSync(abs)) copyFileSync(abs, `${abs}.bak`);
+    const backup = backupFile(abs);
     writeFileSync(abs, content);
-    return { ok: true, backup: existsSync(`${abs}.bak`), path: abs };
+    return { ok: true, backup, path: abs };
   } catch (e) {
     return { ok: false, error: e.message };
   }

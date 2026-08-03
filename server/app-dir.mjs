@@ -17,6 +17,10 @@ if (!home) {
 export const APP_DIR = home;
 export const STATE_DIR = join(APP_DIR, 'state');
 export const CACHE_DIR = join(APP_DIR, 'cache');
+// Sibling .bak files collide with other tools that write write-once backups to
+// the same path (e.g. ~/.harness/app/generate.mjs) and get silently clobbered.
+// Config/hooks editors back up here instead — keyed by source path, retained.
+export const BACKUPS_DIR = join(CACHE_DIR, 'backups');
 // External, not owned: the harness-usage-report skill's state root — we read
 // cost-state/<id>.json from it (stats.mjs) and append ollama usage snapshots to
 // it (usage.mjs). USAGE_REPORT_STATE must resolve the same here, in the skill's

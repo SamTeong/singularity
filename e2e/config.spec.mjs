@@ -52,7 +52,7 @@ test('typing invalid JSON shows the inline error and disables Save', async ({ pa
   await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
 });
 
-test('a valid Save writes settings.json and leaves a .bak backup on disk', async ({ page }) => {
+test('a valid Save writes settings.json and leaves a backup on disk', async ({ page }) => {
   await pickWorkspaceRoot(page);
   const marker = uniq('e2e-config-project');
   await replaceContent(page, JSON.stringify({ e2eMarker: marker }));
@@ -64,7 +64,7 @@ test('a valid Save writes settings.json and leaves a .bak backup on disk', async
   ]);
   const body = await resp.json();
   expect(body.ok).toBe(true);
-  expect(body.backup).toBe(true);
+  expect(body.backup).toBeTruthy();
   // Not asserting the "Saved" message here: ConfigEditor's save() immediately
   // re-triggers load(), whose own .then() unconditionally does setMsg(null) —
   // so the success text is a same-tick flash, not a stable state. The Save
@@ -73,7 +73,7 @@ test('a valid Save writes settings.json and leaves a .bak backup on disk', async
   await expect(page.getByRole('button', { name: 'Save' })).toBeDisabled();
 
   expect(readFileSync(SETTINGS_PATH, 'utf8')).toContain(marker);
-  expect(existsSync(`${SETTINGS_PATH}.bak`)).toBe(true);
+  expect(existsSync(body.backup)).toBe(true);
 });
 
 test('POST /config/search surfaces a hit via the rail search box', async ({ page }) => {
