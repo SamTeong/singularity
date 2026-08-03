@@ -156,7 +156,7 @@ function codexRolloutCwd(p, want) {
 function findCodexRolloutForCwd(cwd) {
   const want = normCwd(cwd);
   let years; try { years = readdirSync(CODEX_SESSIONS_DIR).sort(); } catch { return null; }
-  for (const year of [...years].reverse().slice(0, 1)) {
+  for (const year of [...years].reverse().slice(0, 2)) {
     const months = listDirs(join(CODEX_SESSIONS_DIR, year)).slice(-2);
     for (const month of [...months].reverse()) {
       const days = listDirs(join(CODEX_SESSIONS_DIR, year, month)).slice(-3);

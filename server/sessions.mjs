@@ -12,6 +12,7 @@ import { homedir } from 'node:os';
 import { encodeCwd } from './agents.mjs';
 import { OLLAMA_PRESETS, claudeIdToAlias } from './models.mjs';
 import { STATE_DIR } from './app-dir.mjs';
+import { CODEX_HOME } from './usage.mjs';
 
 const DEFAULT_ROOT = join(homedir(), '.claude', 'projects');
 
@@ -36,7 +37,6 @@ const RUNNING_MS = 30000;     // external-session recency heuristic: mtime withi
 // Codex stores one JSONL per thread under CODEX_HOME/sessions/ (and
 // archived_sessions/). The filename embeds the thread uuid (rollout-<ts>-<uuid>.jsonl);
 // we use it as the row id. session_meta carries the root session_id + cwd.
-const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
 const CODEX_FILE_CAP = 5000;
 const CODEX_THREAD_RE = /-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
 
@@ -96,6 +96,7 @@ async function listCodexSessions({ cap, isLive = () => false, now = Date.now() }
       ({ cwd, sessionId, title } = peekCodexMeta(parseEvents(pk.head)));
       if (!title) title = `Codex ${id.slice(0, 8)}`;
       codexMetaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, sessionId, title });
+      if (codexMetaCache.size > 200) codexMetaCache.delete(codexMetaCache.keys().next().value);
     }
     out.push({
       id, project: '<codex>', cwd, title, mtime: st.mtimeMs, size: st.size,
@@ -419,7 +420,7 @@ async function findById(id, root) {
       if (existsSync(p)) return p;
     }
   }
-  return await findCodexById(id);
+  return null;
 }
 
 function trunc(s, n) {
@@ -481,8 +482,8 @@ export async function readSession(project, id, root, source = 'claude', file) {
 // sessionText: flatten a session into a compact transcript for LLM context.
 // [user]/[assistant] turns + [tool: name] calls; head+tail cap keeps both the
 // opening problem statement and the most recent turns when the log is long.
-export async function sessionText(project, id, cap = TEXT_CAP, root) {
-  const s = await readSession(project, id, root);
+export async function sessionText(project, id, cap = TEXT_CAP, root, source, file) {
+  const s = await readSession(project, id, root, source, file);
   if (!s.ok) return '';
   const lines = [];
   for (const m of s.messages) {

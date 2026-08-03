@@ -62,11 +62,7 @@ export default function ConfigEditor() {
       remember([full]);
     }).catch((e) => setMsg({ sev: 'error', text: String(e) })).finally(() => setLoading(false));
   };
-  useEffect(() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; load(); /* eslint-disable-line */ }, [cwd]);
-  // Tool switch: reload for the current cwd/scope under the new tool's backend.
-  // load() reads `base`/`scope` from closure; an effect keyed on [tool] runs
-  // after those state updates settle, so it sees the fresh values.
-  useEffect(() => { load(); /* eslint-disable-line */ }, [tool]);
+  useEffect(() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; load(); /* eslint-disable-line */ }, [cwd, tool]);
 
   // Debounced content search across config roots' settings files (empty q → config list,
   // derived above rather than reset here).

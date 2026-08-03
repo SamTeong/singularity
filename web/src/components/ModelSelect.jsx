@@ -26,7 +26,7 @@ const CLAUDE_NAMES = {
   opusplan: 'Opus in plan mode, Sonnet after',
 };
 
-export default function ModelSelect({ model, setModel, label = 'model', placeholder = 'claude (default)' }) {
+export default function ModelSelect({ model, setModel, label = 'model', placeholder = 'claude (default)', tool = 'claude' }) {
   const [options, setOptions] = useState([]);
   const caps = useCapabilities();
   // OLLAMA_PRESETS is a static list the server always returns — gate the ollama
@@ -38,18 +38,22 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
   // ollama — the static CODEX_PRESETS list is always returned by /models.
   const codexUnavailable = caps && caps.codexSpawn?.available === false;
   const codexHint = caps?.codexSpawn?.hint;
+  // Only offer models the current tool can actually spawn (server rejects the
+  // rest — see validateToolModel) — claude+ollama for tool 'claude', codex-only
+  // for tool 'codex'.
+  const isCodexTool = tool === 'codex';
 
   useEffect(() => {
     let alive = true;
     fetch('/models').then((r) => r.json()).then((d) => {
       if (!alive) return;
-      const claude = (d.claude || []).map((m) => ({ label: m, group: 'claude' }));
-      const ollama = ollamaUnavailable ? [] : (d.ollama || []).map((m) => ({ label: m, group: 'ollama' }));
-      const codex = codexUnavailable ? [] : (d.codex || []).map((m) => ({ label: m, group: 'codex' }));
+      const claude = isCodexTool ? [] : (d.claude || []).map((m) => ({ label: m, group: 'claude' }));
+      const ollama = isCodexTool || ollamaUnavailable ? [] : (d.ollama || []).map((m) => ({ label: m, group: 'ollama' }));
+      const codex = !isCodexTool || codexUnavailable ? [] : (d.codex || []).map((m) => ({ label: m, group: 'codex' }));
       setOptions([...claude, ...ollama, ...codex]);
     }).catch(() => {});
     return () => { alive = false; };
-  }, [ollamaUnavailable, codexUnavailable]);
+  }, [ollamaUnavailable, codexUnavailable, isCodexTool]);
 
   return (
     <Autocomplete

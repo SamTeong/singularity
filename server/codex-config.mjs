@@ -23,6 +23,15 @@ function scopePaths(cwd) {
 const EDIT_SCOPES = ['project', 'user'];
 
 export function readConfig(cwd) {
+  if (!isKnownConfigRoot(cwd)) {
+    // cwd is outside known roots; return empty configs to prevent information disclosure
+    const paths = scopePaths(cwd);
+    const out = {};
+    for (const scope of EDIT_SCOPES) {
+      out[scope] = { path: paths[scope], exists: false, content: '' };
+    }
+    return out;
+  }
   const paths = scopePaths(cwd);
   const out = {};
   for (const scope of EDIT_SCOPES) {
@@ -124,6 +133,12 @@ function isKnownConfigRoot(cwd) {
 export function writeConfig(cwd, scope, content) {
   if (!EDIT_SCOPES.includes(scope)) return { ok: false, error: 'bad scope' };
   if (!isKnownConfigRoot(cwd)) return { ok: false, error: 'cwd outside config roots' };
+  // Enforce the client's cwd→scope mapping: 'user' only for cwd ~ (home),
+  // 'project' only for a non-home cwd. Otherwise a project-scope write with
+  // cwd ~ would target ~/.codex/config.toml (the user file) and vice versa.
+  const isHome = resolve(cwd) === resolve(homedir());
+  if (scope === 'user' && !isHome) return { ok: false, error: 'user scope requires cwd ~' };
+  if (scope === 'project' && isHome) return { ok: false, error: 'project scope requires a non-home cwd' };
   const paths = scopePaths(cwd);
   const p = paths[scope];
   try { tomlParse(content); } catch (e) { return { ok: false, error: `invalid TOML: ${e.message}` }; }

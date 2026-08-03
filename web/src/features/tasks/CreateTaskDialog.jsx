@@ -65,6 +65,14 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
     setRequireApproval(false); setMergeMode('manual');
   };
 
+  // Flipping the toggle while an incompatible orchestrator model is selected
+  // must not leave it in place — clear it so the mismatch never reaches the
+  // server's validateToolModel.
+  const changeTool = (t) => {
+    setTool(t);
+    if (t === 'codex' ? (model && !isCodex(model)) : isCodex(model)) setModel('');
+  };
+
   // Max-turn cap: positive int or undefined (empty/0 → no cap sent).
   const posNum = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) && n > 0 ? n : undefined; };
 
@@ -108,10 +116,10 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
       <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
       <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} slotProps={{ input: { endAdornment: clearAdornment(description !== '', () => setDescription('')) } }} />
       <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
-      <ToolSelect tool={tool} setTool={setTool} />
+      <ToolSelect tool={tool} setTool={changeTool} />
       <Stack spacing={1}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" /></Box>
+          <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" tool={tool} /></Box>
           <TextField size="small" type="number" label="turn limit" placeholder="—" value={orchTurns} onChange={(e) => setOrchTurns(e.target.value)} sx={{ width: 110 }} />
         </Stack>
         {tool !== 'codex' && !isCodex(model) && (

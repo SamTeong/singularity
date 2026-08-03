@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { isClaudeModel, isCodexModel } from './models.mjs';
+import { isClaudeModel, isCodexModel, validateToolModel } from './models.mjs';
 import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
 export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR };
 
@@ -343,6 +343,7 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
     return reattach(id);
   }
   if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
+  validateToolModel(tool, model);
   const displayName = title || id.slice(0, 8);
   const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool }, prompt);
   ensureTrusted(cwd);

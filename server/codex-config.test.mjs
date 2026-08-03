@@ -1,14 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
 // codex-config.mjs imports app-dir.mjs (STATE_DIR), which throws without
 // SINGULARITY_HOME. Point it at a scratch temp dir before a dynamic import
 // (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
-const { searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, writeConfig } = await import('./codex-config.mjs');
+const { readConfig, searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, writeConfig } = await import('./codex-config.mjs');
 
 function makeRoot(toml) {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-cdx-'));
@@ -86,4 +86,37 @@ test('writeConfig invalid TOML returns ok:false and does not write', () => {
   assert.equal(r.ok, false);
   assert.match(r.error, /TOML/);
   assert.equal(readFileSync(join(cwd, '.codex', 'config.toml'), 'utf8'), orig);
+});
+
+test('writeConfig rejects cwd outside config roots', () => {
+  const cwd = makeRoot('model = "x"\n');
+  setConfigRoots([mkdtempSync(join(tmpdir(), 'sing-other-'))]); // a different root
+  const r = writeConfig(cwd, 'project', 'model = "y"\n');
+  assert.equal(r.ok, false);
+  assert.match(r.error, /outside config roots/);
+});
+
+test('writeConfig enforces cwd<->scope invariant', () => {
+  const cwd = makeRoot('model = "x"\n');
+  setConfigRoots([cwd]);
+  // user scope requires cwd ~ (home); a project cwd is not home.
+  assert.equal(writeConfig(cwd, 'user', 'model = "y"\n').ok, false);
+  // project scope requires a non-home cwd; home (untildified ~) is home.
+  setConfigRoots(['~']);
+  const rp = writeConfig(homedir(), 'project', 'model = "y"\n');
+  assert.equal(rp.ok, false);
+  assert.match(rp.error, /non-home/);
+});
+
+test('readConfig rejects cwd outside config roots', () => {
+  const cwd = makeRoot('model = "x"\n');
+  setConfigRoots([mkdtempSync(join(tmpdir(), 'sing-other-'))]); // a different root
+  const result = readConfig(cwd);
+  assert.equal(result.project.exists, false);
+  assert.equal(result.project.content, '');
+  assert.equal(result.user.exists, false);
+  assert.equal(result.user.content, '');
+  // Path should still be present but file is marked non-existent
+  assert.ok(result.project.path);
+  assert.ok(result.user.path);
 });

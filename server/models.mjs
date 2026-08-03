@@ -25,6 +25,19 @@ export function isCodexModel(model) {
   return !!model && (CODEX_SET.has(model) || model.startsWith('gpt-'));
 }
 
+// Trust-boundary check: reject a tool/model pairing that can't reach a valid
+// spawn (e.g. tool 'codex' + a claude alias, or tool 'claude' + a gpt-* id).
+// Empty/absent model always passes (means "CLI default"); an absent/unknown
+// tool is left to buildSpawn's own isCodexModel-driven routing. ollama models
+// have no tool of their own — they only spawn under tool 'claude', so a gpt-*
+// model under 'claude' or a non-gpt model under 'codex' both reject here.
+export function validateToolModel(tool, model) {
+  if (!tool || !model) return;
+  if (isCodexModel(model) !== (tool === 'codex')) {
+    throw new Error(`model '${model}' is not valid for tool '${tool}'`);
+  }
+}
+
 // The transcript logs an assistant event's model as the resolved full id
 // (opus[1m] -> claude-opus-5; opus -> claude-opus-4-8), never the alias the
 // user picked. That id is a valid claude arg but not a dropdown entry, so the

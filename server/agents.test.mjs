@@ -204,6 +204,19 @@ test('create: dead (exited) dup id resumes via reattach instead of "already in u
   }
 });
 
+// create() is the choke point both the WS 'create' route and tasks.mjs's
+// createTask() spawn through — a mismatched tool/model pairing (e.g. tool
+// 'codex' with a claude alias) must be rejected here before a pty is ever
+// spawned, rather than reaching `codex -m sonnet`.
+test('create: rejects tool "codex" paired with a claude model alias', () => {
+  const id = '25000000-bbbb-cccc-dddd-250000000002';
+  assert.throws(
+    () => create({ sessionId: id, cwd: scratch, model: 'sonnet', tool: 'codex' }),
+    /sonnet.*codex/,
+  );
+  assert.ok(!snapshot().some((a) => a.id === id), 'rejected pairing never entered the registry');
+});
+
 // remove() on a dead/detached entry drops it from the registry immediately
 // (the task-done path: a completed session leaves the session list rather than
 // lingering as 'exited'). Seeded via init()+fake agents.json (no spawn); the

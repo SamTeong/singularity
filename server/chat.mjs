@@ -21,9 +21,9 @@ const ALL_CAP = 60000;   // scope 'all' context cap (chars)
 // Build the context block prepended to the identity string. `root` is the
 // client-selected sessions root (optional — defaults to the FS-persisted
 // choice, see sessions.mjs).
-async function contextFor({ scope, project, id, root }) {
+async function contextFor({ scope, project, id, source, file, root }) {
   if (scope === 'one' && project && id) {
-    const text = await sessionText(project, id, undefined, root);
+    const text = await sessionText(project, id, undefined, root, source, file);
     if (!text) return '\n\nThe selected session transcript is empty.';
     return `\n\nYou are answering questions about ONE Claude Code session. Below is its transcript. Cite turns by role when useful.\n\n<session>\n${text}\n</session>`;
   }
@@ -78,13 +78,13 @@ export async function consumeStream(body, send, chatId, signal) {
   }
 }
 
-export async function streamChat({ chatId, question, scope = 'one', project, id, history = [], root }, send, signal) {
+export async function streamChat({ chatId, question, scope = 'one', project, id, source, file, history = [], root }, send, signal) {
   const oauth = claudeOauthToken();
   if (!oauth) {
     send({ t: 'chat:error', chatId, needsAuth: true, msg: 'Claude not signed in — run `claude` to log in' });
     return;
   }
-  const system = IDENTITY + await contextFor({ scope, project, id, root });
+  const system = IDENTITY + await contextFor({ scope, project, id, source, file, root });
   const messages = [...history, { role: 'user', content: question }];
 
   let resp;

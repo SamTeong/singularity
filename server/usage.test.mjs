@@ -188,3 +188,20 @@ test('fetchCodex: backwards-scans to the last token_count line', async () => {
   assert.equal(u.weekly.pctUsed, 87);
   assert.equal(u.weekly.resetsAt, new Date(1786172475 * 1000).toISOString());
 });
+
+// A freshly-started Codex session's rollout has session_meta but no
+// token_count yet (no turn completed) — it's now the newest file, but
+// fetchCodex must fall back to the older rollout's reading instead of
+// reporting "no Codex sessions found".
+test('fetchCodex: newest rollout has no rate_limits yet → falls back to older rollout', async () => {
+  const freshDay = join(scratch, 'codex-home', 'sessions', '2026', '07', '21');
+  mkdirSync(freshDay, { recursive: true });
+  writeFileSync(
+    join(freshDay, 'rollout-2026-07-21T00-00-00-fresh01.jsonl'),
+    '{"timestamp":"2026-07-21T00:00:00.000Z","type":"session_meta","payload":{}}\n',
+  );
+
+  const u = await fetchCodex();
+  assert.equal(u.ok, true);
+  assert.equal(u.weekly.pctUsed, 87);
+});

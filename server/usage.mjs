@@ -363,37 +363,68 @@ async function fetchClaude() {
 export const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
 const CODEX_SESSIONS_DIR = join(CODEX_HOME, 'sessions');
 
-// Newest rollout file, bounded to the newest date dir (sessions/YYYY/MM/DD) —
-// never walks the whole tree. Zero-padded names sort correctly as strings.
-function newestCodexRollout() {
-  let dir = CODEX_SESSIONS_DIR;
-  for (let i = 0; i < 3; i++) { // YYYY -> MM -> DD
-    let names;
-    try { names = readdirSync(dir).sort(); } catch { return null; }
-    if (!names.length) return null;
-    dir = join(dir, names.at(-1));
+// Newest date dirs (sessions/YYYY/MM/DD), newest first, capped at `maxDirs` —
+// bounded backward walk like findCodexRolloutForCwd in stats.mjs, never walks
+// the whole tree. Zero-padded names sort correctly as strings.
+function newestCodexDateDirs(maxDirs) {
+  const dirs = [];
+  let years;
+  try { years = readdirSync(CODEX_SESSIONS_DIR).sort(); } catch { return dirs; }
+  for (const year of [...years].reverse()) {
+    if (dirs.length >= maxDirs) break;
+    let months;
+    try { months = readdirSync(join(CODEX_SESSIONS_DIR, year)).sort(); } catch { continue; }
+    for (const month of [...months].reverse()) {
+      if (dirs.length >= maxDirs) break;
+      let days;
+      try { days = readdirSync(join(CODEX_SESSIONS_DIR, year, month)).sort(); } catch { continue; }
+      for (const day of [...days].reverse()) {
+        if (dirs.length >= maxDirs) break;
+        dirs.push(join(CODEX_SESSIONS_DIR, year, month, day));
+      }
+    }
   }
-  let files;
-  try { files = readdirSync(dir).filter((f) => f.startsWith('rollout-') && f.endsWith('.jsonl')); }
-  catch { return null; }
-  if (!files.length) return null;
-  return files
-    .map((f) => join(dir, f))
-    .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs)[0];
+  return dirs;
 }
+
+// Newest rollout files across the newest `maxDateDirs` date dirs, newest-mtime
+// first, capped at `maxFiles` total — the bounded fallback list fetchCodex
+// scans for a usable rate_limits reading (a brand-new session's rollout has
+// none yet; older ones still hold a usable, if slightly stale, reading).
+function newestCodexRollouts(maxFiles, maxDateDirs) {
+  const files = [];
+  for (const dir of newestCodexDateDirs(maxDateDirs)) {
+    let names;
+    try { names = readdirSync(dir).filter((f) => f.startsWith('rollout-') && f.endsWith('.jsonl')); }
+    catch { continue; }
+    for (const f of names) files.push(join(dir, f));
+  }
+  return files
+    .map((f) => [f, statSync(f).mtimeMs])
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, maxFiles)
+    .map(([f]) => f);
+}
+
+// Bounded fallback scan: newest 5 rollout files across the newest 2 date dirs.
+const CODEX_ROLLOUT_SCAN_CAP = 5;
+const CODEX_DATE_DIR_SCAN_CAP = 2;
 
 export async function fetchCodex() {
   try {
-    const file = newestCodexRollout();
-    if (!file) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
+    const files = newestCodexRollouts(CODEX_ROLLOUT_SCAN_CAP, CODEX_DATE_DIR_SCAN_CAP);
+    if (!files.length) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
 
-    const lines = readFileSync(file, 'utf8').split('\n');
     let record = null;
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (!lines[i].includes('rate_limits')) continue;
-      let parsed;
-      try { parsed = JSON.parse(lines[i]); } catch { continue; }
-      if (parsed?.payload?.rate_limits) { record = parsed; break; }
+    for (const file of files) {
+      const lines = readFileSync(file, 'utf8').split('\n');
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('rate_limits')) continue;
+        let parsed;
+        try { parsed = JSON.parse(lines[i]); } catch { continue; }
+        if (parsed?.payload?.rate_limits) { record = parsed; break; }
+      }
+      if (record) break;
     }
     if (!record) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
 

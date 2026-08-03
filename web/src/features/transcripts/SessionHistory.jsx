@@ -188,7 +188,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
     setChatMsgs((prev) => [...prev, { role: 'user', content: text }, { role: 'assistant', content: '', streaming: true }]);
     setStreaming(true); setAuthNeeded(false); setChatInput('');
     const one = scope === 'one' && sel;
-    sendMsg({ t: 'chat', chatId, scope: one ? 'one' : 'all', project: one ? sel.project : null, id: one ? sel.id : null, question: text, history, root: untildify(root) });
+    sendMsg({ t: 'chat', chatId, scope: one ? 'one' : 'all', project: one ? sel.project : null, id: one ? sel.id : null, source: one ? sel.source : null, file: one ? sel.file : null, question: text, history, root: untildify(root) });
   };
 
   // scope 'one' needs a selected session; fall back to 'all' when none.
