@@ -1365,7 +1365,10 @@ function _wb_pool(windows, source) {
     source, r: _r2(r), d5: _r2(S5), d7: _r2(S7), nWindows: pool.length,
     gated: gated.length > 0,
     hoursPer7dDay: _r2((r * 5) / 7), // 1 day of weekly budget, in hours of 5h capacity
-    daysPer5hWindow: _r2(7 / r),     // one full 5h window, in days of weekly budget
+    // r === 0 (a pooled window with delta 7d but no measurable delta 5h) makes 7/r
+    // Infinity, which JSON.stringify writes as null — the client then crashes on
+    // null.toFixed(). Undefined ratio → null on purpose, rendered as "—".
+    daysPer5hWindow: r > 0 ? _r2(7 / r) : null, // one full 5h window, in days of weekly budget
   };
 }
 

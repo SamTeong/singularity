@@ -11,6 +11,10 @@ function escAttr(s){return esc(s).replace(/'/g,'&#39;').replace(/"/g,'&#34;');}
 function fmtMoney(n){return '$'+(n||0).toFixed(2);}
 function fmtMoney3(n){return '$'+(n||0).toFixed(3);}
 function fmtInt(n){return Math.round(n||0).toLocaleString('en-US');}
+// Guarded toFixed: an undefined ratio arrives as null (JSON has no Infinity/NaN),
+// and an unguarded .toFixed() on it throws inside render() — which blanks the
+// whole report, not just the one stat. null/non-finite → em dash.
+function fxNum(n,d,suf){return (n==null||!isFinite(n))?'—':n.toFixed(d)+(suf||'');}
 function fmtAbbr(n){n=+n||0;var u=[['b',1e9],['m',1e6],['k',1e3]];for(var i=0;i<u.length;i++){if(Math.abs(n)>=u[i][1])return (n/u[i][1]).toFixed(1)+u[i][0];}return (n).toFixed(0);}
 function pad2(n){return String(n).padStart(2,'0');}
 function el(id){return document.getElementById(id);}
@@ -500,7 +504,7 @@ function svgWindowBalance(wb,chartOpts){
     var col=src==='oauth'?'var(--ac)':'var(--ink-faint)';
     if(g.length>1)out+=pathD(g.map(function(p){return [fx(p.t),fy(p.r)];}),col,src!=='oauth','none',src==='oauth'?2:1.5);
     g.forEach(function(p){
-      var tip=esc(new Date(p.t*1000).toISOString().slice(0,10)+' · rate '+p.r.toFixed(2)+' · Δ5 '+p.d5.toFixed(0)+'% / Δ7 '+p.d7.toFixed(0)+'%'+
+      var tip=esc(new Date(p.t*1000).toISOString().slice(0,10)+' · rate '+fxNum(p.r,2)+' · Δ5 '+fxNum(p.d5,0,'%')+' / Δ7 '+fxNum(p.d7,0,'%')+
         (p.cov==null?' · statusline lower bound':' · coverage '+Math.round(p.cov*100)+'%'+(p.inc?'':' (excluded from pooled)')));
       out+="<circle cx='"+fx(p.t).toFixed(1)+"' cy='"+fy(p.r).toFixed(1)+"' r='4' fill='"+(p.inc?col:'none')+"' stroke='"+col+"' stroke-width='1.6' opacity='"+(src==='oauth'?0.95:0.6)+"'><title>"+tip+"</title></circle>";
     });
@@ -519,9 +523,9 @@ function renderWindowBalance(F,opts){
   if(!wb||!wb.pooled)return opts.emptyHtml||("<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16M8 8l-4 4 4 4M16 16l4-4-4-4'/></svg><h4>No window balance yet.</h4><p>Needs a 7d window with measurable movement. Poll the OAuth usage API a few times per 5h window — <code>node stats.mjs fetch-usage --oauth --save</code> — and this fills in.</p></div>");
   var p=wb.pooled,nOk=(wb.windows||[]).filter(function(w){return w.included;}).length;
   var cards=colcards([
-    {title:'All-time rate',stats:[["rate = Δ5h% / Δ7d%",p.r.toFixed(2)],["windows pooled",fmtInt(p.nWindows)],["source",p.source+(p.gated?'':' · ungated')]]},
-    {title:'1d of 7d window',stats:[["hours of 5h window",p.hoursPer7dDay.toFixed(2)+"h"],["share of 5h window",(p.hoursPer7dDay/5*100).toFixed(0)+"%"]]},
-    {title:'5h of 5h window',stats:[["days of 7d window",p.daysPer5hWindow.toFixed(2)],["share of 7d window",(100/p.r).toFixed(0)+"%"]]}
+    {title:'All-time rate',stats:[["rate = Δ5h% / Δ7d%",fxNum(p.r,2)],["windows pooled",fmtInt(p.nWindows)],["source",p.source+(p.gated?'':' · ungated')]]},
+    {title:'1d of 7d window',stats:[["hours of 5h window",fxNum(p.hoursPer7dDay,2,'h')],["share of 5h window",fxNum(p.hoursPer7dDay!=null?p.hoursPer7dDay/5*100:null,0,'%')]]},
+    {title:'5h of 5h window',stats:[["days of 7d window",fxNum(p.daysPer5hWindow,2)],["share of 7d window",fxNum(p.r>0?100/p.r:null,0,'%')]]}
   ]);
   var note=nOk?'':"<p class='muted' style='margin-top:6px'><b>Lower bound.</b> No window cleared the coverage gate (a snapshot within 5h of "+Math.round(wb.minCoverage*100)+"% of the window, Δ7d ≥ "+wb.minD7+"%), so the figure comes from the single best-observed window rather than a pooled fit. An unobserved 5h window adds nothing to Σ Δ5h% while its usage still lands in Δ7d%, so sparse polling pushes the rate down — the true value is at or above this."+(opts.pollNote!=null?opts.pollNote:" Poll <code>fetch-usage --oauth --save</code> a few times per 5h window to close the gap.")+"</p>";
   return svgWindowBalance(wb,opts.chart)+cards+note+
@@ -814,10 +818,10 @@ function presetRange(id){
   return {from:from,to:LAST_DATE,preset:id};
 }
 function loadRange(){
-  try{var r=JSON.parse(localStorage.getItem('claude-code-usage-report.range')||'null');if(r&&isDate(r.from)&&isDate(r.to)&&r.from<=r.to){if(r.preset)return presetRange(r.preset);r.preset=null;return r;}}catch(e){}
+  try{var r=JSON.parse(localStorage.getItem('harness-usage-report.range')||'null');if(r&&isDate(r.from)&&isDate(r.to)&&r.from<=r.to){if(r.preset)return presetRange(r.preset);r.preset=null;return r;}}catch(e){}
   return presetRange('all');
 }
-function persistRange(r){try{localStorage.setItem('claude-code-usage-report.range',JSON.stringify(r));}catch(e){}}
+function persistRange(r){try{localStorage.setItem('harness-usage-report.range',JSON.stringify(r));}catch(e){}}
 function setActivePreset(id){document.querySelectorAll('.range-preset').forEach(function(b){b.className=b.dataset.p===id?'range-preset active':'range-preset';});}
 function applyPreset(id){
   var range=presetRange(id);
@@ -1018,7 +1022,7 @@ function show(v){
   el('month-view').style.display=v==='month'?'':'none';
   el('btn-day').className=v==='day'?'active':'';
   el('btn-month').className=v==='month'?'active':'';
-  try{localStorage['claude-code-usage-report.view']=v;}catch(e){}
+  try{localStorage['harness-usage-report.view']=v;}catch(e){}
 }
 function showTok(v){
   el('tok-day').style.display=v==='day'?'':'none';
@@ -1066,6 +1070,6 @@ function main(){
   render(range);
   initRoadmapFilter();
   __lbl(document.documentElement.dataset.theme);
-  try{if(localStorage['claude-code-usage-report.view']==='month')show('month');}catch(e){}
+  try{if(localStorage['harness-usage-report.view']==='month')show('month');}catch(e){}
 }
 document.addEventListener('DOMContentLoaded',main);
