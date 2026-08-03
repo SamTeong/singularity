@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessS
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { isClaudeModel, isCodexModel, validateToolModel } from './models.mjs';
+import { findCodexThread } from './codex-thread.mjs';
 import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
 export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR };
 
@@ -215,8 +216,10 @@ function wire(a) {
       return;
     }
     setStatus(a, 'exited'); // status event for crons auto-kill; tracks activeMs
-    const resumeCmd = a.tool === 'codex' || isCodexModel(a.model)
-      ? 'codex'
+    const isCodex = a.tool === 'codex' || isCodexModel(a.model);
+    const codexThreadId = isCodex ? findCodexThread(a.cwd, a.createdAt) : null;
+    const resumeCmd = isCodex
+      ? (codexThreadId ? `codex resume ${codexThreadId}` : 'codex')
       : isClaudeModel(a.model)
         ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
         : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
@@ -263,19 +266,23 @@ function codexScopeConfig(scopes) {
 // Shared by create + reattach so reattach keeps the model + scopes.
 // `prompt` (initial user message) is only sent on a fresh spawn — passing it
 // with --resume would re-submit it as a new message on every reattach.
-export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs, tool }, prompt) {
-  // ponytail: codex has no --session-id/--name pinning and no Task tool —
-  // reattach = fresh spawn, tasks are single-agent with a minimal prompt.
-  // Model-driven: a gpt-* model routes here even with tool='claude'. The tool
-  // toggle still covers the empty-model case (codex's own default via config.toml).
+export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt }, prompt) {
+  // ponytail: codex has no --session-id/--name flag to pin an id at spawn (it
+  // mints its own uuid) and no Task tool. The uuid is recovered after the fact
+  // from its rollout file (findCodexThread) so reattach can `codex resume
+  // <uuid>` instead of losing history. Model-driven: a gpt-* model routes here
+  // even with tool='claude'. The tool toggle still covers the empty-model case
+  // (codex's own default via config.toml).
   if (tool === 'codex' || isCodexModel(model)) {
     if (!CODEX_BIN) throw new Error('codex not found (CODEX_BIN not set in .env)');
+    const threadId = createdAt ? findCodexThread(cwd, createdAt) : null;
     const args = [];
+    if (threadId) args.push('resume', threadId);
     const cfg = codexScopeConfig(scopes);
     if (cfg) args.push('-c', cfg);
     args.push('-C', cwd, '-s', 'workspace-write', '-a', permissionMode ? 'never' : 'on-request');
     if (model) args.push('-m', model);
-    if (prompt) args.push(prompt);
+    if (prompt && !threadId) args.push(prompt);
     return { bin: CODEX_BIN, args };
   }
   const claudeArgs = [];
@@ -331,7 +338,7 @@ function spawnPty(bin, args, opts) {
 }
 
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool }) {
+export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt }) {
   const id = (sessionId && sessionId.trim()) || randomUUID();
   const existing = agents.get(id);
   if (existing) {
@@ -345,10 +352,16 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
   if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
   validateToolModel(tool, model);
   const displayName = title || id.slice(0, 8);
-  const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool }, prompt);
+  // `createdAt` is only set by respawn() (theme toggle), where the codex thread
+  // must be recovered so history survives. A genuinely fresh create must NOT
+  // pass one: findCodexThread matches on cwd+time, not id, so within its skew
+  // window it would resume an unrelated codex session the user started in the
+  // same cwd by hand.
+  const spawnedAt = createdAt || Date.now();
+  const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt }, prompt);
   ensureTrusted(cwd);
   const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: spawnEnv(mock), useConptyDll: true });
-  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: Date.now(), proc, buf: [], written: 0 };
+  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -472,7 +485,7 @@ export function remove(id) {
 export function respawn(id) {
   const a = agents.get(id);
   if (!a?.proc) return false;
-  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool };
+  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool, createdAt: a.createdAt };
   a.proc.kill();
   return true;
 }

@@ -58,6 +58,11 @@ writeFileSync(join(manifestDir, 'skill-manifest.json'), JSON.stringify([
   { skillName: 'harness-skill', refs: [{ path: harnessSkillDir, version: '1.0.0' }], scopes: ['harness'] },
 ]));
 process.env.SING_SCOPE_ROOT = scopeRoot;
+// codex-thread.mjs's CODEX_HOME (via usage.mjs) is a load-time const too —
+// point it at a scratch dir before the dynamic import below, same reason
+// SINGULARITY_HOME is set up front.
+const codexHome = join(scratch, 'codex-home');
+process.env.CODEX_HOME = codexHome;
 after(() => {
   rmSync(scopeParent, { recursive: true, force: true });
   rmSync(scratch, { recursive: true, force: true });
@@ -448,6 +453,62 @@ test('buildSpawn: gpt-* model with tool="claude" routes to codex bin (model-driv
   assert.ok(args.includes('do the work'));
   assert.ok(!args.includes('--session-id'));
   assert.ok(!args.includes('launch'));
+});
+
+// ---- buildSpawn: codex resume ----
+// Codex has no --session-id pinning, so a reattach resumes by uuid recovered
+// from its rollout file (findCodexThread, see codex-thread.mjs) rather than
+// spawning fresh. A rollout's first line is a session_meta event; cwd + a
+// payload.timestamp at/after createdAt (minus 5s skew) is what makes it match.
+function writeCodexRollout(rolloutCwd, timestamp, threadId) {
+  const dir = join(codexHome, 'sessions', '2026', '08', '03');
+  mkdirSync(dir, { recursive: true });
+  const meta = {
+    timestamp,
+    type: 'session_meta',
+    payload: {
+      session_id: threadId, id: threadId, timestamp, cwd: rolloutCwd,
+      originator: 'codex-tui', source: 'cli', thread_source: 'user', model_provider: 'openai',
+    },
+  };
+  writeFileSync(join(dir, `rollout-${Date.now()}-${threadId}.jsonl`), JSON.stringify(meta) + '\n');
+}
+
+test('buildSpawn: codex resume — matching rollout found → argv starts with resume <uuid>, keeps -C/-s/-m', () => {
+  const createdAt = Date.now();
+  const threadId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+  writeCodexRollout(cwd, new Date(createdAt + 1000).toISOString(), threadId);
+  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', createdAt });
+  assert.deepEqual(args.slice(0, 2), ['resume', threadId]);
+  assert.equal(args[args.indexOf('-C') + 1], cwd);
+  assert.equal(args[args.indexOf('-s') + 1], 'workspace-write');
+  assert.equal(args[args.indexOf('-m') + 1], 'gpt-5.3-codex-spark');
+});
+
+test('buildSpawn: codex resume suppresses the initial prompt (would re-submit as a new turn)', () => {
+  const createdAt = Date.now();
+  const threadId = 'aaaaaaaa-bbbb-cccc-dddd-ffffffffffff';
+  writeCodexRollout(cwd, new Date(createdAt + 1000).toISOString(), threadId);
+  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', createdAt }, 'do the work');
+  assert.ok(args.includes('resume'));
+  assert.ok(!args.includes('do the work'), 'prompt not resent on resume');
+});
+
+test('buildSpawn: codex — no matching rollout (different cwd, or no createdAt) → today\'s fresh-spawn argv, unchanged', () => {
+  const createdAt = Date.now();
+  // A fixture exists, but for a cwd that's neither this call's cwd nor any
+  // other test's — the rollout is on disk yet must not match.
+  const rolloutCwd = 'C:\\some\\other\\cwd\\not-matching';
+  const callCwd = 'C:\\yet\\another\\cwd\\never-fixtured';
+  writeCodexRollout(rolloutCwd, new Date(createdAt + 1000).toISOString(), 'zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz');
+
+  const { args: mismatchedCwd } = buildSpawn({ id: freshId, title: 'demo', cwd: callCwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', createdAt }, 'work');
+  assert.ok(!mismatchedCwd.includes('resume'));
+  assert.ok(mismatchedCwd.includes('work'));
+
+  const { args: noCreatedAt } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'work');
+  assert.ok(!noCreatedAt.includes('resume'));
+  assert.ok(noCreatedAt.includes('work'));
 });
 
 test('buildSpawn: codex with !CODEX_BIN → throws /codex not found/', async () => {
