@@ -163,14 +163,15 @@ export default function AppShell() {
   // truncated id, so let SessionHistory fall back to the full session id.
   // Codex agents: the registry id isn't the codex-minted thread uuid the
   // transcript is filed under, so resolve it server-side first (mirrors
-  // buildSpawn's own discovery) — a failed lookup toasts instead of landing on
-  // a "Transcript not found" screen.
+  // buildSpawn's own discovery). That resolver only answers for agents still in
+  // the registry, so fall back to the id itself — for a session resumed from
+  // this view it already IS the thread uuid, and /session's own by-id lookup
+  // covers it. Only a genuinely unknown id lands on "Transcript not found".
   const viewTranscript = async (a) => {
     if (a.tool === 'codex' || isCodexModel(a.model)) {
       const threadId = await fetch(`/session/codex-thread?id=${encodeURIComponent(a.id)}`)
         .then((r) => r.json()).then((d) => (d.ok ? d.threadId : null)).catch(() => null);
-      if (!threadId) { setToast("Couldn't find this session's transcript."); return; }
-      setOpenTx({ project: '<codex>', id: threadId, cwd: a.cwd, source: 'codex', mtime: Date.now() });
+      setOpenTx({ project: '<codex>', id: threadId || a.id, cwd: a.cwd, source: 'codex', mtime: Date.now() });
       setView('sessions');
       setTxPrompt(null);
       return;
