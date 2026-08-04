@@ -12,7 +12,7 @@ import { mkdirSync, writeFileSync, rmSync, chmodSync, utimesSync } from 'node:fs
 import { join } from 'node:path';
 import {
   TMP, HOME_DIR, STATE_DIR, TRUSTED_DIR, USAGE_STATE_DIR, BIN_DIR,
-  PROJECTS_DIR, WIKI_DIR, SKILLS_DIR, WORKSPACE_DIR, SCRATCH_DIR,
+  PROJECTS_DIR, WIKI_DIR, SKILLS_DIR, WORKSPACE_DIR, EXPLORER_DIR, SCRATCH_DIR,
   PROJECT_A, PROJECT_B, WIKI_NAME, SESSION_COUNT_A, RICH_SESSION, sessionId,
 } from './paths.mjs';
 
@@ -96,6 +96,22 @@ function seedSkills() {
   skill('design', 'color-audit', 'Checks palette contrast against WCAG AA.', '# Color audit\n\nContrast first, hue second.');
 }
 
+// -------------------------------------------------------------------- explorer
+
+function seedExplorer() {
+  const root = dir(EXPLORER_DIR);
+  file(join(root, 'notes.md'), '# Notes\n\nExplorer fixture markdown.\n');
+  file(join(root, 'script.mjs'), 'export const explorerFixture = true;\n');
+  file(join(root, '.hidden'), 'hidden fixture\n');
+  file(join(root, 'subdir', 'nested.txt'), 'Nested file content.\n');
+  // 1x1 transparent PNG — decoded from the canonical "smallest PNG" fixture
+  // bytes, not a binary asset checked into the repo.
+  writeFileSync(join(root, 'pixel.png'), Buffer.from(
+    '89504e470d0a1a0a0000000d4948445200000001000000010100000000a09767900000000b49444154789c636000020000050001e9fadcd80000000049454e44ae426082',
+    'hex',
+  ));
+}
+
 // -------------------------------------------------- workspace: config/hooks/rules
 
 function seedWorkspace() {
@@ -135,6 +151,9 @@ function seedState() {
   json(join(STATE_DIR, 'config-roots.json'), [WORKSPACE_DIR]);
   json(join(STATE_DIR, 'hook-roots.json'), [WORKSPACE_DIR]);
   json(join(STATE_DIR, 'rules-roots.json'), [WORKSPACE_DIR]);
+  // Explorer's persisted root otherwise defaults to '~' — point it at the
+  // corpus dir up front so specs don't have to drive DirPicker.
+  json(join(STATE_DIR, 'explorer-state.json'), { root: EXPLORER_DIR });
 
   // No agents: an empty registry keeps the dock in its empty state and
   // guarantees no reattach path is reachable.
@@ -207,6 +226,7 @@ export function seed() {
   seedProjects();
   seedWiki();
   seedSkills();
+  seedExplorer();
   seedWorkspace();
   seedState();
   return { claudeBin: stubClaudeBin() };

@@ -21,6 +21,7 @@ import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile,
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
+import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, getState as getExplorerState, setState as setExplorerState } from './explorer.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
@@ -235,6 +236,56 @@ app.get('/fs/browse', async (req, reply) => {
     return reply.code(400).send({ error: e.message });
   }
 });
+
+// Explorer: full-FS browse/edit — no containment guard (see explorer.mjs).
+app.get('/fs/list', async (req, reply) => {
+  const r = listEntries(req.query.path);
+  if (!r.ok) reply.code(400);
+  return r;
+});
+app.get('/fs/search', async (req, reply) => {
+  const r = await searchEntries(req.query.root, req.query.q);
+  if (!r.ok) reply.code(400);
+  return r;
+});
+app.get('/fs/read', async (req, reply) => {
+  const r = readEntry(req.query.path);
+  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
+  return r;
+});
+app.get('/fs/raw', async (req, reply) => {
+  const r = rawEntry(req.query.path);
+  if (!r.ok) return reply.code(r.error === 'not found' ? 404 : 400).send(r);
+  return reply.type(r.mime).send(r.buf);
+});
+// bodyLimit: readEntry serves text up to 2 MB, so the save of one must fit —
+// Fastify's 1 MB default would 413 it. JSON escaping needs the headroom.
+app.put('/fs/write', { bodyLimit: 4 * 1024 * 1024 }, async (req, reply) => {
+  const { path, content, mtime, force } = req.body || {};
+  if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
+  const r = writeEntry(path, content, mtime, force);
+  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
+  return r;
+});
+app.post('/fs/entry', async (req, reply) => {
+  const { path, kind } = req.body || {};
+  const r = createEntry(path, kind);
+  if (!r.ok) reply.code(400);
+  return r;
+});
+app.delete('/fs/entry', async (req, reply) => {
+  const r = deleteEntry(req.query.path);
+  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
+  return r;
+});
+app.patch('/fs/rename', async (req, reply) => {
+  const { from, to } = req.body || {};
+  const r = renameEntry(from, to);
+  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
+  return r;
+});
+app.get('/fs/state', async () => ({ state: getExplorerState() }));
+app.put('/fs/state', async (req) => setExplorerState(req.body));
 
 // Task manager: list claude.exe + this repo's dev-tooling processes, kill a stale/orphaned one by PID.
 app.get('/procs', async () => ({ procs: await scanClaude() }));

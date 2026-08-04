@@ -18,6 +18,7 @@ import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import PaletteIcon from '@mui/icons-material/Palette';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import Sparkline from '@/components/Sparkline.jsx';
 import { useSysStats } from '@/hooks/useSysStats.js';
 
@@ -28,6 +29,7 @@ const NAV_ITEMS = [
   { v: 'skills', icon: <SchoolIcon fontSize="small" />, label: 'Skills' },
   { v: 'rules', icon: <GavelIcon fontSize="small" />, label: 'Rules' },
   { v: 'memory', icon: <BookIcon fontSize="small" />, label: 'Memory' },
+  { v: 'explorer', icon: <FolderOpenIcon fontSize="small" />, label: 'Explorer' },
   { v: 'sessions', icon: <HistoryIcon fontSize="small" />, label: 'Transcripts' },
   { v: 'wiki', icon: <MenuBookIcon fontSize="small" />, label: 'Wiki' },
   { v: 'appearance', icon: <PaletteIcon fontSize="small" />, label: 'Appearance' },

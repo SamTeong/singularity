@@ -34,6 +34,7 @@ const MemoryPanel = lazy(() => import('@/features/memory/MemoryPanel.jsx'));
 const SessionHistory = lazy(() => import('@/features/transcripts/SessionHistory.jsx'));
 const WikiPanel = lazy(() => import('@/features/wiki/WikiPanel.jsx'));
 const SkillsPanel = lazy(() => import('@/features/skills/SkillsPanel.jsx'));
+const ExplorerPanel = lazy(() => import('@/features/explorer/ExplorerPanel.jsx'));
 const UsageView = lazy(() => import('@/features/usage/UsageView.jsx'));
 const TasksBoard = lazy(() => import('@/features/tasks/TasksBoard.jsx'));
 const CronJobs = lazy(() => import('@/features/automation/CronJobs.jsx'));
@@ -42,7 +43,7 @@ const StatusView = lazy(() => import('@/features/status/StatusView.jsx'));
 
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
-const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'sessions'];
+const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'sessions', 'explorer'];
 
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
 // Mirror of server isCodexModel: gpt-* id → codex-only model.
@@ -233,6 +234,9 @@ export default function AppShell() {
             )}
             {visited.has('wiki') && (
               <Box sx={{ display: view === 'wiki' ? 'block' : 'none', height: '100%' }}><WikiPanel /></Box>
+            )}
+            {visited.has('explorer') && (
+              <Box sx={{ display: view === 'explorer' ? 'block' : 'none', height: '100%' }}><ExplorerPanel /></Box>
             )}
             {visited.has('sessions') && (
               <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>

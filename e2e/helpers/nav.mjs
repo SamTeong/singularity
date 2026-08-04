@@ -13,13 +13,13 @@
 // how the icon-only buttons are reachable at all).
 
 export const RAIL_VIEWS = ['Tasks', 'Automation', 'Usage'];
-export const MENU_VIEWS = ['Config', 'Hooks', 'Skills', 'Rules', 'Memory', 'Transcripts', 'Wiki', 'Appearance', 'Status'];
+export const MENU_VIEWS = ['Config', 'Hooks', 'Skills', 'Rules', 'Memory', 'Explorer', 'Transcripts', 'Wiki', 'Appearance', 'Status'];
 export const SKINS = ['ZAPAC', 'Phosphor Console'];
 
 // view ids as stored in localStorage, keyed by the label the user clicks.
 export const VIEW_IDS = {
   Tasks: 'tasks', Automation: 'cron', Usage: 'usage', Config: 'config', Hooks: 'hooks',
-  Skills: 'skills', Rules: 'rules', Memory: 'memory', Transcripts: 'sessions', Wiki: 'wiki',
+  Skills: 'skills', Rules: 'rules', Memory: 'memory', Explorer: 'explorer', Transcripts: 'sessions', Wiki: 'wiki',
   Appearance: 'appearance', Status: 'status',
 };
 
@@ -42,6 +42,7 @@ const VIEW_LANDMARK = {
   skills: (page) => page.getByPlaceholder('Search skills…'),
   rules: (page) => page.getByPlaceholder('Search rules…'),
   memory: (page) => page.getByPlaceholder('Search memory…'),
+  explorer: (page) => page.getByPlaceholder('Search files…'),
   sessions: (page) => page.getByPlaceholder('Search transcripts…'),
   wiki: (page) => page.getByPlaceholder('Search wiki…'),
   appearance: (page) => page.getByRole('heading', { name: 'Appearance' }),

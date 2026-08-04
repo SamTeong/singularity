@@ -33,6 +33,7 @@ export const PROJECTS_DIR = join(CORPUS, 'projects');
 export const WIKI_DIR = join(CORPUS, 'wiki');
 export const SKILLS_DIR = join(CORPUS, 'skills');
 export const WORKSPACE_DIR = join(CORPUS, 'workspace'); // config + hooks + rules root
+export const EXPLORER_DIR = join(CORPUS, 'explorer');   // explorer.mjs browse/edit root
 export const SCRATCH_DIR = join(CORPUS, 'scratch');     // non-git cwd: task create → kind 'plain', no worktree
 
 // Fixture identifiers specs assert against.
