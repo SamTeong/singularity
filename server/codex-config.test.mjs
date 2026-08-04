@@ -14,8 +14,19 @@ function makeRoot(toml) {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-cdx-'));
   mkdirSync(join(cwd, '.codex'), { recursive: true });
   if (toml != null) writeFileSync(join(cwd, '.codex', 'config.toml'), toml);
+  setConfigRoots([cwd]); // reads/writes are gated by isKnownConfigRoot
   return cwd;
 }
+
+// Runs first: asserts the seeded default before any makeRoot/setConfigRoots
+// writes the roots file.
+test('codex config roots persist to FS: default ~, dedup, roundtrip', () => {
+  assert.deepEqual(getConfigRoots(), ['~']); // seeded default when file absent
+  const r = setConfigRoots(['~', '/a', '/a', '/b', 123, '']);
+  assert.equal(r.ok, true);
+  assert.deepEqual(r.roots, ['~', '/a', '/b']); // deduped, non-strings dropped
+  assert.deepEqual(getConfigRoots(), ['~', '/a', '/b']); // read back from disk
+});
 
 test('searchConfig matches content and reports scope + line', () => {
   const cwd = makeRoot('model = "gpt-5"\ntheme = "dark"\n');
@@ -57,14 +68,6 @@ test('findConfigRoots finds nested dirs holding .codex/config.toml, skips others
   const { roots, truncated } = findConfigRoots(root);
   assert.equal(truncated, false);
   assert.deepEqual(roots, [join(root, 'nested', 'a'), join(root, 'nested', 'b', 'deep')]);
-});
-
-test('codex config roots persist to FS: default ~, dedup, roundtrip', () => {
-  assert.deepEqual(getConfigRoots(), ['~']); // seeded default when file absent
-  const r = setConfigRoots(['~', '/a', '/a', '/b', 123, '']);
-  assert.equal(r.ok, true);
-  assert.deepEqual(r.roots, ['~', '/a', '/b']); // deduped, non-strings dropped
-  assert.deepEqual(getConfigRoots(), ['~', '/a', '/b']); // read back from disk
 });
 
 test('writeConfig valid TOML writes + backup', () => {
