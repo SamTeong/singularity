@@ -5,11 +5,14 @@ import Box from '@mui/material/Box';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 
 // Shared model picker for the create dialogs. Free-text-with-suggestions: lists
-// the claude aliases (mirror /model) + ollama presets, but accepts any typed
-// string — a new claude alias, a full id (claude-opus-4-8), or any ollama name.
-// /model's list is baked into the claude binary and shifts over time, so the
-// suggestions are convenience defaults, not a closed set. Controlled via
-// inputValue/onInputChange (same pattern as the cwd picker in the dialogs).
+// the claude aliases (mirror /model) + ollama presets + codex presets, but
+// accepts any typed string — a new claude alias, a full id (claude-opus-4-8),
+// any ollama name, or a gpt-* id. /model's list is baked into the claude
+// binary and shifts over time, so the suggestions are convenience defaults,
+// not a closed set. Controlled via inputValue/onInputChange (same pattern as
+// the cwd picker in the dialogs). The session type (tool) is derived from
+// which group the chosen model belongs to (see lib/models.js) — this picker
+// always offers all three groups rather than filtering by a tool choice.
 // Alias → friendly name. /model's menu shows names (Opus, Sonnet, …) while the
 // values the claude bin accepts are aliases, so the rows show both: name
 // first (what users recognise), alias second (what gets submitted). Unknown
@@ -26,7 +29,7 @@ const CLAUDE_NAMES = {
   opusplan: 'Opus in plan mode, Sonnet after',
 };
 
-export default function ModelSelect({ model, setModel, label = 'model', placeholder = 'claude (default)', tool = 'claude' }) {
+export default function ModelSelect({ model, setModel, label = 'model', placeholder = 'claude (default)' }) {
   const [options, setOptions] = useState([]);
   const caps = useCapabilities();
   // OLLAMA_PRESETS is a static list the server always returns — gate the ollama
@@ -38,22 +41,18 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
   // ollama — the static CODEX_PRESETS list is always returned by /models.
   const codexUnavailable = caps && caps.codexSpawn?.available === false;
   const codexHint = caps?.codexSpawn?.hint;
-  // Only offer models the current tool can actually spawn (server rejects the
-  // rest — see validateToolModel) — claude+ollama for tool 'claude', codex-only
-  // for tool 'codex'.
-  const isCodexTool = tool === 'codex';
 
   useEffect(() => {
     let alive = true;
     fetch('/models').then((r) => r.json()).then((d) => {
       if (!alive) return;
-      const claude = isCodexTool ? [] : (d.claude || []).map((m) => ({ label: m, group: 'claude' }));
-      const ollama = isCodexTool || ollamaUnavailable ? [] : (d.ollama || []).map((m) => ({ label: m, group: 'ollama' }));
-      const codex = !isCodexTool || codexUnavailable ? [] : (d.codex || []).map((m) => ({ label: m, group: 'codex' }));
+      const claude = (d.claude || []).map((m) => ({ label: m, group: 'claude' }));
+      const ollama = ollamaUnavailable ? [] : (d.ollama || []).map((m) => ({ label: m, group: 'ollama' }));
+      const codex = codexUnavailable ? [] : (d.codex || []).map((m) => ({ label: m, group: 'codex' }));
       setOptions([...claude, ...ollama, ...codex]);
     }).catch(() => {});
     return () => { alive = false; };
-  }, [ollamaUnavailable, codexUnavailable, isCodexTool]);
+  }, [ollamaUnavailable, codexUnavailable]);
 
   return (
     <Autocomplete

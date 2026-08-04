@@ -48,7 +48,7 @@ const DEFAULT_JOB = {
     codex: { start: 50, stop: 75, weeklyMax: 50 },
     ollama: { start: 50, stop: 75, weeklyMax: 50 },
   },
-  models: { claude: 'opus', codex: 'gpt-5.4-mini', ollama: 'glm-5.2:cloud' },
+  models: { claude: 'opus', codex: 'gpt-5.6-luna', ollama: 'glm-5.2:cloud' },
   tokenCaps: { claude: 15_000_000, codex: 15_000_000, ollama: 15_000_000 },
   scopes: [],
 };

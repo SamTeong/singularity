@@ -583,6 +583,16 @@ app.put('/skill', async (req, reply) => {
 app.get('/sessions/root', async () => ({ root: getSessionsRoot() }));
 app.put('/sessions/root', async (req) => setSessionsRoot(req.body?.root));
 app.get('/sessions', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive, root: req.query.root }) }));
+// Resolve a registered agent's id to its codex-minted thread uuid — the Sessions
+// dock's "View transcript" button needs this before it can open a codex agent's
+// transcript (its registry id is unrelated to the rollout's thread uuid).
+app.get('/session/codex-thread', async (req, reply) => {
+  const id = req.query?.id;
+  if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
+  const threadId = reg.codexThreadFor(id);
+  if (!threadId) return reply.code(404).send({ ok: false, error: 'not found' });
+  return { ok: true, threadId };
+});
 app.get('/session', async (req, reply) => {
   const { project, id, root, source, file } = req.query || {};
   if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });

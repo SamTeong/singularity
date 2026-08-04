@@ -9,6 +9,28 @@ function send(ws, msg) {
   if (ws.readyState === ws.OPEN) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
 }
 
+// Terminal *query* escape sequences: xterm.js answers these by writing a reply
+// back through term.onData — the same channel Terminal.jsx uses for keystrokes
+// (see web/src/features/sessions/Terminal.jsx). That's correct for live output
+// (it's how xterm reports the terminal's colors, e.g. after respawnAll's theme
+// change), but replayed scrollback on attach is stale: codex already read the
+// terminal's first answer at startup and moved on, so a second, late reply
+// lands as literal text wherever the app's input line happens to be focused.
+// Strip queries from the replay only — never from the live 'output' path.
+// Covers: DA1 (CSI c / CSI 0c), DA2 (CSI > c), DA3 (CSI = c), DSR status/cursor
+// (CSI 5n / CSI 6n), OSC 10/11/12 color queries (BEL or ST terminated),
+// XTGETTCAP (DCS + q ... ST), kitty keyboard protocol query (CSI ? u).
+const QUERY_RE = new RegExp([
+  '\\x1b\\[0?c',
+  '\\x1b\\[>\\d*c',
+  '\\x1b\\[=c',
+  '\\x1b\\[[56]n',
+  '\\x1b\\]1[012];\\?(?:\\x07|\\x1b\\\\)',
+  '\\x1bP\\+q[0-9a-fA-F;]*\\x1b\\\\',
+  '\\x1b\\[\\?u',
+].join('|'), 'g');
+export function stripQueries(s) { return s.replace(QUERY_RE, ''); }
+
 export function attachPtyWs(wss, log, token = null, originAllowed = () => true) {
   const sockets = new Set();
 
@@ -108,7 +130,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
         case 'attach': {
           if (!reg.getStatus(m.id)) return;
           ws.attached.add(m.id);
-          send(ws, { t: 'output', id: m.id, data: reg.getBuf(m.id) }); // replay scrollback
+          send(ws, { t: 'output', id: m.id, data: stripQueries(reg.getBuf(m.id)) }); // replay scrollback, minus stale terminal queries
           send(ws, { t: 'status', id: m.id, status: reg.getStatus(m.id) });
           break;
         }

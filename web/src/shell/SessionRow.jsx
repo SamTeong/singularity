@@ -15,6 +15,7 @@ import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import CloseIcon from '@mui/icons-material/Close';
 import { StatusPill } from '@zapac/mui-theme';
 import { KIND } from '@/lib/agentStatus.js';
+import { isCodexModel } from '@/lib/models.js';
 import { tildify } from '@/lib/paths.js';
 import { fmtTokens } from '@/lib/format.js';
 
@@ -41,6 +42,11 @@ export default function SessionRow({
   onViewTranscript, onDuplicate, onFork, onRespawn, onReattach, onOpenExternal, onKill,
 }) {
   const a = agent;
+  // Fork clones the source's claude transcript into a new session log (see
+  // reg.fork). Codex writes its own rollout and mints its own thread uuid — no
+  // log to clone, no id to pin — so forking one silently degrades to Duplicate.
+  // Hide the action rather than offer one that doesn't fork.
+  const codex = a.tool === 'codex' || isCodexModel(a.model);
   return (
     <React.Fragment>
       <ListItemButton
@@ -63,9 +69,11 @@ export default function SessionRow({
             <Tooltip title="Duplicate — start a new session with the same settings" disableInteractive>
               <IconButton size="small" onClick={(e) => { e.stopPropagation(); onDuplicate(); }}><ContentCopyIcon fontSize="small" /></IconButton>
             </Tooltip>
-            <Tooltip title="Fork — start a new session that continues this conversation" disableInteractive>
-              <IconButton size="small" onClick={(e) => { e.stopPropagation(); onFork(); }}><CallSplitIcon fontSize="small" /></IconButton>
-            </Tooltip>
+            {!codex && (
+              <Tooltip title="Fork — start a new session that continues this conversation" disableInteractive>
+                <IconButton size="small" onClick={(e) => { e.stopPropagation(); onFork(); }}><CallSplitIcon fontSize="small" /></IconButton>
+              </Tooltip>
+            )}
             {!isWorking(a.status) && (
               <Tooltip title={TERMINAL_NAME ? `Open in ${TERMINAL_NAME} — resume this session in an external terminal` : 'Open in external terminal — resume this session'} disableInteractive>
                 <IconButton size="small" onClick={(e) => { e.stopPropagation(); onOpenExternal(); }}><OpenInNewIcon fontSize="small" /></IconButton>

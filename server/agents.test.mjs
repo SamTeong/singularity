@@ -74,7 +74,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread } = await import('./agents.mjs');
+const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor } = await import('./agents.mjs');
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -566,7 +566,9 @@ test('buildSpawn: codex scopes → -c skills.config=[...] disables non-chosen sk
   // coding-skill is NOT disabled (its scope 'coding' is chosen).
   const harnessMd = join(harnessSkillDir, 'SKILL.md').replace(/\\/g, '/');
   const codingMd = join(codingSkillDir, 'SKILL.md').replace(/\\/g, '/');
-  assert.ok(cfg.includes(`{path="${harnessMd}",enabled=false}`), 'harness-skill disabled');
+  // Single-quoted TOML literal strings: a double-quoted path is destroyed by the
+  // cmd.exe pass in externalLaunch's spawn({shell:true}) — see codexScopeConfig.
+  assert.ok(cfg.includes(`{path='${harnessMd}',enabled=false}`), 'harness-skill disabled');
   assert.ok(!cfg.includes(codingMd), 'coding-skill not in disable list');
   assert.ok(!args.includes('--add-dir'), 'codex never uses --add-dir');
 });
@@ -634,6 +636,26 @@ test('getLaunchConfigForCodexThread: falsy args → null, no throw', () => {
   assert.equal(getLaunchConfigForCodexThread(null, scratch), null);
   assert.equal(getLaunchConfigForCodexThread('some-id', null), null);
   assert.equal(getLaunchConfigForCodexThread('', ''), null);
+});
+
+// ---- codexThreadFor ----
+// getLaunchConfigForCodexThread's inverse: resolves a registered codex agent's
+// id (a randomUUID create() minted) to the codex-minted thread uuid its
+// transcript is actually filed under — same discovery buildSpawn uses to
+// resume it (time-based cwd+createdAt match against the rollout).
+test('codexThreadFor: registered codex agent + matching rollout → thread uuid', () => {
+  const agentId = '90000000-aaaa-bbbb-cccc-900000000004';
+  const threadId = 'dddddddd-eeee-ffff-0000-333333333333';
+  const lookupCwd = join(scratch, 'codex-lookup-d');
+  const createdAt = Date.now();
+  writeCodexRollout(lookupCwd, new Date(createdAt + 1000).toISOString(), threadId);
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: agentId, title: 'codex-agent-d', cwd: lookupCwd, createdAt, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }],
+    recentRepos: [],
+  }));
+  init();
+  assert.equal(codexThreadFor(agentId), threadId);
 });
 
 // ---- writeAtomic (server/background.test.mjs:214 flake regression) ------------

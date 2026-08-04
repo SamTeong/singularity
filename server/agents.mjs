@@ -87,8 +87,8 @@ export function writeAtomic(file, data, rename = renameSync) {
 let logger = null;
 function persist() {
   const data = {
-    agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince, mock, tool }) => ({
-      id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs, mock, tool,
+    agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince, mock, tool, threadId }) => ({
+      id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs, mock, tool, threadId,
       // fold the live running-span in so a daemon exit while 'running' doesn't lose it
       activeMs: status === 'running' && runningSince ? (activeMs || 0) + (Date.now() - runningSince) : activeMs,
       status: status === 'running' || status === 'starting' || status === 'idle' ? 'detached' : status,
@@ -162,6 +162,31 @@ export function getLaunchConfigForCodexThread(threadId, cwd) {
     if (findCodexThread(a.cwd, a.createdAt) === threadId) return getLaunchConfig(a.id);
   }
   return null;
+}
+
+// getLaunchConfigForCodexThread's inverse: given a registered agent's id (the
+// randomUUID create() minted), resolve the codex-minted thread uuid its
+// transcript is actually filed under — the Transcripts view needs this uuid,
+// not the registry id, to open a codex session. Same discovery order buildSpawn
+// uses: time-based (cwd+createdAt) else the id itself when it's already a known
+// codex thread for this cwd (agents created from the Transcripts view).
+export function codexThreadFor(id) {
+  const a = agents.get(id);
+  if (!a) return null;
+  return rememberCodexThread(a);
+}
+// Discovery is by cwd + start-time window (codex has no --session-id to pin an
+// id at spawn), so it can drift to an unrelated codex thread the user started
+// in the same cwd later on — see findCodexThread's ceiling. Pin the first
+// answer onto the agent (persisted) and reuse it from then on: restart/reattach
+// resume the SAME thread they were live on, and repeat lookups skip the walk.
+function rememberCodexThread(a) {
+  if (!(a.tool === 'codex' || isCodexModel(a.model)) || !a.cwd) return null;
+  if (a.threadId) return a.threadId;
+  const found = (a.createdAt && findCodexThread(a.cwd, a.createdAt))
+    || (codexThreadExists(a.id, a.cwd) ? a.id : null);
+  if (found) { a.threadId = found; try { persist(); } catch { /* pin is a cache — a write failure must not fail the caller */ } }
+  return found;
 }
 // PIDs of agents this daemon currently owns a live pty for (for process classification).
 export function livePids() {
@@ -237,7 +262,7 @@ function wire(a) {
     }
     setStatus(a, 'exited'); // status event for crons auto-kill; tracks activeMs
     const isCodex = a.tool === 'codex' || isCodexModel(a.model);
-    const codexThreadId = isCodex ? findCodexThread(a.cwd, a.createdAt) : null;
+    const codexThreadId = isCodex ? rememberCodexThread(a) : null;
     const resumeCmd = isCodex
       ? (codexThreadId ? `codex resume ${codexThreadId}` : 'codex')
       : isClaudeModel(a.model)
@@ -274,8 +299,14 @@ function codexScopeConfig(scopes) {
   const disable = (Array.isArray(manifest) ? manifest : [])
     .filter((sk) => !(sk.scopes || []).some((s) => keep.has(s)))
     .map((sk) => {
+      // TOML *literal* strings (single quotes): externalLaunch's argv goes
+      // through `spawn(..., {shell:true})` on Windows, whose cmd.exe pass
+      // swallows every literal `"` (node concatenates, it doesn't escape) —
+      // double-quoted paths reached codex as unquoted, invalid TOML. `'` is not
+      // a cmd metacharacter, and a literal string needs no escapes for the
+      // forward-slashed paths below.
       const skillMd = join(sk.refs?.[0]?.path || '', 'SKILL.md');
-      return `{path="${skillMd.replace(/\\/g, '/')}",enabled=false}`;
+      return `{path='${skillMd.replace(/\\/g, '/')}',enabled=false}`;
     });
   return disable.length ? `skills.config=[${disable.join(',')}]` : null;
 }
@@ -286,7 +317,7 @@ function codexScopeConfig(scopes) {
 // Shared by create + reattach so reattach keeps the model + scopes.
 // `prompt` (initial user message) is only sent on a fresh spawn — passing it
 // with --resume would re-submit it as a new message on every reattach.
-export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt }, prompt) {
+export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId: pinned }, prompt) {
   // ponytail: codex has no --session-id/--name flag to pin an id at spawn (it
   // mints its own uuid) and no Task tool. The uuid is recovered after the fact
   // from its rollout file (findCodexThread) so reattach can `codex resume
@@ -300,7 +331,10 @@ export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extr
     // this cwd — covers create({ sessionId: <codex uuid> }) from the
     // Transcripts view or a uuid typed into the New-session dialog, where
     // createdAt is deliberately absent (see create()'s comment above).
-    const threadId = (createdAt && findCodexThread(cwd, createdAt))
+    // A pinned thread (rememberCodexThread, carried through respawn/reattach)
+    // wins over re-discovery — same thread every time, no time-window drift.
+    const threadId = pinned
+      || (createdAt && findCodexThread(cwd, createdAt))
       || (codexThreadExists(id, cwd) ? id : null);
     const args = [];
     if (threadId) args.push('resume', threadId);
@@ -364,7 +398,7 @@ function spawnPty(bin, args, opts) {
 }
 
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt }) {
+export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt, threadId }) {
   const id = (sessionId && sessionId.trim()) || randomUUID();
   const existing = agents.get(id);
   if (existing) {
@@ -384,10 +418,10 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
   // window it would resume an unrelated codex session the user started in the
   // same cwd by hand.
   const spawnedAt = createdAt || Date.now();
-  const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt }, prompt);
+  const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId }, prompt);
   ensureTrusted(cwd);
   const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: spawnEnv(mock), useConptyDll: true });
-  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
+  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -511,7 +545,9 @@ export function remove(id) {
 export function respawn(id) {
   const a = agents.get(id);
   if (!a?.proc) return false;
-  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool, createdAt: a.createdAt };
+  // Pin the codex thread while the agent is still live: discovery after the kill
+  // can drift to a newer codex thread in the same cwd (see rememberCodexThread).
+  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool, createdAt: a.createdAt, threadId: rememberCodexThread(a) || undefined };
   a.proc.kill();
   return true;
 }

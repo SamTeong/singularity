@@ -235,7 +235,7 @@ test('createJob: conclude defaults to "inreview"', () => {
 test('createJob: seeds codex thresholds/model/tokenCap defaults', () => {
   const d = createJob({ title: 'codex-defaults', description: 'd', cwd: 'C:\\x' });
   assert.deepEqual(d.thresholds.codex, { start: 50, stop: 75, weeklyMax: 50 });
-  assert.equal(d.models.codex, 'gpt-5.4-mini');
+  assert.equal(d.models.codex, 'gpt-5.6-luna');
   assert.equal(d.tokenCaps.codex, 15_000_000);
 });
 test('createJob: rejects an invalid conclude value', () => {

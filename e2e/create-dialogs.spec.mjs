@@ -104,6 +104,9 @@ test('New task dialog: Create stays disabled until title + description are fille
   await expect(create).toBeDisabled(); // description still empty
 
   await dialog.getByLabel('description', { exact: true }).fill('Never actually submitted.');
+  await expect(create).toBeDisabled(); // orchestrator model still empty — now required
+
+  await dialog.getByLabel('orchestrator model').fill('sonnet');
   await expect(create).toBeEnabled();
 
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -174,6 +177,7 @@ test('New task dialog: Escape and Cancel close it without POST /tasks, even subm
 
   await dialog.getByLabel('title', { exact: true }).fill('Escape/Cancel guard');
   await dialog.getByLabel('description', { exact: true }).fill('Should never reach the server.');
+  await dialog.getByLabel('orchestrator model').fill('sonnet');
   await expect(dialog.getByRole('button', { name: 'Create', exact: true })).toBeEnabled();
 
   let posted = false;

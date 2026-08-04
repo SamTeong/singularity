@@ -45,6 +45,8 @@ const StatusView = lazy(() => import('@/features/status/StatusView.jsx'));
 const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'sessions'];
 
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
+// Mirror of server isCodexModel: gpt-* id → codex-only model.
+const isCodexModel = (m) => !!m && m.startsWith('gpt-');
 
 // Glass snackbar content — MUI v9 dropped `ContentProps`, so this must go through
 // slotProps.content or SnackbarContent keeps its default (mode-inverted) colours.
@@ -159,7 +161,20 @@ export default function AppShell() {
   // Open an agent's transcript in the Transcripts view — from the scrollback-top
   // prompt or a session row's action. No title: the agent's display title is a
   // truncated id, so let SessionHistory fall back to the full session id.
-  const viewTranscript = (a) => {
+  // Codex agents: the registry id isn't the codex-minted thread uuid the
+  // transcript is filed under, so resolve it server-side first (mirrors
+  // buildSpawn's own discovery) — a failed lookup toasts instead of landing on
+  // a "Transcript not found" screen.
+  const viewTranscript = async (a) => {
+    if (a.tool === 'codex' || isCodexModel(a.model)) {
+      const threadId = await fetch(`/session/codex-thread?id=${encodeURIComponent(a.id)}`)
+        .then((r) => r.json()).then((d) => (d.ok ? d.threadId : null)).catch(() => null);
+      if (!threadId) { setToast("Couldn't find this session's transcript."); return; }
+      setOpenTx({ project: '<codex>', id: threadId, cwd: a.cwd, source: 'codex', mtime: Date.now() });
+      setView('sessions');
+      setTxPrompt(null);
+      return;
+    }
     setOpenTx({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), id: a.id, cwd: a.cwd, mtime: Date.now() });
     setView('sessions');
     setTxPrompt(null);
