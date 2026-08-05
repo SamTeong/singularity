@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, utimesSync } from 'node:fs';
 
 // explorer.mjs imports app-dir.mjs (STATE_DIR), which throws without
 // SINGULARITY_HOME. Point it at a scratch temp dir before a dynamic import
@@ -93,6 +93,7 @@ test('writeEntry: refuses a stale mtime, accepts force and a matching mtime', ()
   assert.equal(readFileSync(p('cond.txt'), 'utf8'), 'v2');
 
   writeFileSync(p('cond.txt'), 'notepad wrote this', { flush: true });
+  utimesSync(p('cond.txt'), new Date(), new Date(opened.mtime + 5000)); // CI clock granularity can leave mtime unmoved
   const stale = writeEntry(p('cond.txt'), 'v3', opened.mtime);
   assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
   assert.equal(readFileSync(p('cond.txt'), 'utf8'), 'notepad wrote this'); // untouched
