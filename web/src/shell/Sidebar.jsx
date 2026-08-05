@@ -61,21 +61,29 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
   return (
     <Box
       component="aside"
-      sx={(t) => ({
-        ...glass(t),
-        position: 'relative',
-        zIndex: getTokens(t).layers.nav,
-        width: collapsed ? 64 : 300, // layout-02 `.side` width
-        flexShrink: 0,
-        mt: 1.5,
-        ml: 1.5,
-        borderRadius: `${getTokens(t).radius.lg}px`,
-        display: 'flex',
-        flexDirection: 'column',
-        overflow: 'hidden',
-        transition: 'width .2s ease',
-        '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
-      })}
+      sx={(t) => {
+        const g = glass(t);
+        return {
+          ...g,
+          // layout-02 `.bg-fallback`'s glow-1 (16% 8%), scoped to the rail itself
+          // rather than the global AmbientBackground: strongest behind the brand
+          // mark / "New session" pill, fading to the flat glass surface by the
+          // nav rows below (mock's warm top bloom on `.side`).
+          background: `radial-gradient(120% 46% at 26% 0%, ${brandGlow(t)}, transparent 68%), ${g.background}`,
+          position: 'relative',
+          zIndex: getTokens(t).layers.nav,
+          width: collapsed ? 64 : 300, // layout-02 `.side` width
+          flexShrink: 0,
+          mt: 1.5,
+          ml: 1.5,
+          borderRadius: `${getTokens(t).radius.lg}px`,
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+          transition: 'width .2s ease',
+          '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+        };
+      }}
     >
       {/* Header: logo (+ title when expanded) + more menu (nav overflow, processes, dark mode). */}
       <Stack direction={collapsed ? 'column' : 'row'} spacing={1.5} sx={{ p: '18px', pb: '14px', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}>

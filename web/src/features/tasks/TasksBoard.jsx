@@ -124,11 +124,18 @@ const tagChip = (t, on) => ({
   '&:hover': { background: chipBg(t) },
 });
 
-// Count chip at the right of a column header (`.col-count`).
+// Count chip at the right of a column header (`.col-count` — ink-3 on `--chip`).
+// The mock's chip fill composites over its ambient glow, which sits behind the
+// main panel there; ours has no glow behind that corner, so bare chipBg(t)
+// lands ~12 RGB units darker than the mockup. chipBg is shared broadly (focus
+// rings, hover fills, tag chips) so we don't bump that token — we tint just
+// this fill with a little primary, the same color-mix idiom Sidebar.jsx uses
+// for its active nav-item fill. Ink stays ink-3 per `.col-count`.
 const countChip = (t) => ({
   ml: 'auto', flexShrink: 0,
   fontSize: 11, fontWeight: 700, lineHeight: 1.45,
-  color: 'text.disabled', background: chipBg(t),
+  color: 'text.disabled',
+  background: `color-mix(in srgb, ${t.vars.palette.primary.main} 12%, ${chipBg(t)})`,
   px: '9px', py: '2px', borderRadius: 999,
 });
 
