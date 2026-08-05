@@ -1,6 +1,6 @@
 # History page — daily work timeline
 
-> Status: **planned, not started.** No code written. See "Next session" at the bottom.
+> Status: **P1 (backend) done** — commit `8ffc85b`, suite 281 pass / 0 fail. **P2 (frontend) is next.** See "Next session" at the bottom for the copy-paste kick-off.
 
 ## Context
 
@@ -88,7 +88,22 @@ Guards: skip the LLM entirely for a day under **3 assistant turns** (determinist
 
 ### Routes (`server/index.mjs`)
 - `GET /history?from&to` (or `?days=7`, default) → `{ok, entries:[…newest first], pending:[dates], today}`; kicks off backfill for gaps, returns immediately.
-- `POST /history/regenerate` `{date}` → re-summarizes one day, atomic rewrite, emits `history`.
+- `POST /history/regenerate` `{date}` → `{ok, entry}` (400 when `date` missing); re-summarizes one day, atomic rewrite, emits `history`.
+
+### As-built — P1 (read this before writing the frontend)
+
+`server/history.mjs` exports: `localDay(ts)`, `readHistory()`, `scanDays(windowStart, root?)`, `buildDigest(sessions)`, `summarizeDay(digestText, sessions, {callAnthropic, callOllama}?)`, `ensureHistory({days, callAnthropic, callOllama, root}?)`, `regenerateDay(date, opts?)`, `liveToday(root?)`.
+
+Entry shape on the wire is the JSON above, plus:
+- `llm.reason` is `'trivial'` (day under 3 assistant turns, no LLM call), `'unavailable'` (every rung failed), or `'empty'` (**gap day** — no sessions at all: `summary:''`, `topics:[]`, `sessions:[]`, `metrics.sessions:0`). Render `'empty'` as the compressed gap segment, not as a card and not as an error.
+- `llm.dropped` — array of session titles cut by the 48k digest cap, present only when something was dropped.
+- `today` (from `liveToday()`) has `{date, live:true, repos, sessions, metrics}` and **no** `summary`/`topics`/`llm`.
+- `sessions[]` rows are `{id, project, cwd, source, title, turns}` — exactly the fields `setOpenTx` needs, except `mtime` (pass `Date.now()` or omit).
+- `pending` drains to `[]` once backfill finishes; gap days leave it (they get an `'empty'` entry). A date can be pending on first load and resolve over the WS `history` event, which carries `{entries, pending}` — full replacement, not a delta.
+
+Deviations from this plan, deliberate:
+- Optional `root` param threaded through `scanDays`/`ensureHistory`/`regenerateDay`/`liveToday` (default `undefined`, production call shapes unchanged). Tests need it or they scan the machine's real `~/.claude/projects` and the trivial-day gate goes flaky.
+- Gap days **are** persisted (as `'empty'`) so they drain out of `pending` instead of shimmering forever, and stay re-checkable — rescanned on later calls, never re-appended while still empty, upgraded if the day turns out to have work.
 
 ### WS
 `reg.bus.emit('history', {entries, pending})` → new forwarder in `pty-ws.mjs` alongside the `crons` one → `{t:'history', …}` → new branch in `AgentsProvider.jsx` `onmessage`. No initial `send` on connection (the page fetches).
@@ -179,21 +194,23 @@ No table. No gradient-text headings. No `border-radius: 16px` glass card with a 
 
 # Next session — how to continue
 
-## Kick-off prompt
+## Kick-off prompt (copy-paste)
 
-> Read `plan.md` in the repo root. Implement Phase 1 (backend) exactly as specified. Do not re-litigate the locked decisions in the table — they were settled in a clarification round. Do not touch the frontend yet.
+> Read `plan.md` in the repo root. P1 (backend) is done and committed (`8ffc85b`) — read the "As-built — P1" section for the real route/entry shapes and don't change the backend. Implement **P2 (frontend)** exactly as specified: `web/src/features/history/HistoryView.jsx` (+ co-located children if needed), `pnpm add framer-motion`, and the two wiring edits in `web/src/shell/AppMenu.jsx` / `AppShell.jsx`. Do not re-litigate the locked decisions table or the motion inventory — both were settled. Delegate the implementation to a `senior-software-engineer` subagent on sonnet to keep main-thread context small; that agent must load the `emil-design-eng`, `frontend-design`, and `impeccable` skills **before** writing any JSX. Before it starts, re-derive the motion inventory once with an agent that loads `emil-design-eng` + `animation-vocabulary` and reconcile it against the table in the plan. Then run P3: `review-animations` on the frontend diff, `reviewer` (or `cavecrew-reviewer`) on the whole diff. Commit P2 and any P3 fixes separately.
 
 ## Phase order
 
-**P1 — backend.** `server/history.mjs`, the additive `callMessages` export in `server/chat.mjs`, the two routes in `server/index.mjs`, the `history` forwarder in `server/pty-ws.mjs`, the `history` branch in `web/src/providers/AgentsProvider.jsx`, `/history` in `web/vite.config.mjs` proxy, and `server/history.test.mjs`. Stop and run `pnpm test` before moving on.
+**P1 — backend. DONE** (`8ffc85b`): `server/history.mjs`, `callMessages` in `server/chat.mjs`, two routes in `server/index.mjs`, `history` forwarder in `server/pty-ws.mjs`, `history` branch in `web/src/providers/AgentsProvider.jsx`, `/history` in the Vite proxy, `server/history.test.mjs` (9 tests). Suite: 281 pass / 0 fail.
 
 **P2 — frontend.** `web/src/features/history/HistoryView.jsx` (+ any co-located child components), `framer-motion` added via `pnpm add framer-motion`, and the two wiring edits in `AppMenu.jsx` / `AppShell.jsx`. The implementing agent must load `emil-design-eng`, `frontend-design`, and `impeccable` **before** writing any JSX, and self-check against the motion inventory table with `review-animations`.
+
+Consume from P1, do not rebuild: `GET /history?days=7` for the initial fetch, `history` from `useAgents()` (`{entries, pending}`, full replacement on each WS push — merge by preferring the WS payload over the fetched one), `POST /history/regenerate {date}` for the regenerate control. Verification steps 2–7 below are P2's acceptance test.
 
 **P3 — review.** `review-animations` on the frontend diff, `cavecrew-reviewer` (or `reviewer`) on the whole diff. Commit per phase.
 
 ## Delegation
 
-Delegate P1 and P2 to `senior-software-engineer` subagents (one per phase, sequential — P2 needs P1's route shape). Keep the main thread as triage/review only, per the review+fix orchestration pattern. Subagents were unavailable at planning time (safety classifier down); if the `Agent` tool still errors with *"claude-sonnet-5[1m] is temporarily unavailable"*, run the phases in the main thread instead.
+Delegate P2 to a `senior-software-engineer` subagent on **sonnet** (`model: sonnet`), main thread stays triage/review only, per the review+fix orchestration pattern. That worked for P1: the subagent built it, the main thread caught two real bugs (gap days stuck in `pending` forever; a duplicated local-day string in the route) and fixed them before committing. Give the subagent explicit file scope and tell it not to commit.
 
 ## Traps found during recon — do not rediscover
 
@@ -203,4 +220,6 @@ Delegate P1 and P2 to `senior-software-engineer` subagents (one per phase, seque
 - The OAuth Messages endpoint requires the `system` field to begin with the exact Claude Code identity string. `chat.mjs` already handles this — reuse its constant, do not retype it.
 - Ollama in this repo is a **launcher wrapper** (`ollama launch claude --model X -- …`), not a text-generation call. The fallback rung needs `ollama run <model> <prompt>` via `execFile`, which is new.
 - `pnpm build` / `pnpm start` take ~20s warm and blow the default 120s tool timeout — run with `run_in_background`.
-- Do not restart the daemon on :4317 if sessions are running inside it; probe with an isolated `SINGULARITY_HOME` + `PORT` daemon instead.
+- Do not restart the daemon on :4317 if sessions are running inside it; probe with an isolated `SINGULARITY_HOME` + `PORT` daemon instead. **The running daemon predates P1** — it has no `/history` route until someone restarts it, so P2's fetch 404s against the live one; verify against a fresh isolated daemon.
+- `history.test.mjs` cases share one `history.jsonl` and one fixture tree, so they are order-coupled by date (each case picks a distinct `-N days` offset on purpose). Adding a case? Pick an unused offset.
+- `scanDays` is unscoped by default (`listSessions({cap:5000})` over the real root). Any new test touching it must pass `root`, or it sweeps in this machine's live sessions.
