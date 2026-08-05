@@ -85,8 +85,14 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
       <Box sx={{ display: dockMin ? 'none' : 'flex', flex: 1, minHeight: 0 }}>
         <Box sx={(t) => ({ width: listW.width, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: `1px solid ${stroke2(t)}`, background: surface2(t) })}>
           {/* layout-02 `.dock-list-head`: plain label + count, no icon, no click
-              handler — scoped to the session-list column's width, not the dock. */}
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', gap: '8px', px: '16px', pt: '14px', pb: '10px', flexShrink: 0 }}>
+              handler — scoped to the session-list column's width, not the dock.
+              No `spacing` prop: MUI Stack's `spacing` emulates gap via a
+              `margin-left` rule on every non-first child, which outranks the
+              count's own `ml: 'auto'` below and pins it next to the label
+              instead of the column's right edge. Plain `gap` (true flexbox
+              gap, matching the mock's own `gap:8px`) doesn't have that
+              conflict. */}
+          <Stack direction="row" sx={{ alignItems: 'center', gap: '8px', px: '16px', pt: '14px', pb: '10px', flexShrink: 0 }}>
             <Typography component="h4" sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'text.disabled', m: 0 }} noWrap>Sessions</Typography>
             <Box sx={(t) => ({ ml: 'auto', fontSize: 11, fontWeight: 700, color: 'text.disabled', background: chipBg(t), px: '8px', py: '2px', borderRadius: 999, lineHeight: 1.4 })}>{agents.length}</Box>
           </Stack>
