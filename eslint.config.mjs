@@ -8,7 +8,9 @@ export default [
   // best-effort `try { ... } catch {}` is a deliberate idiom throughout the daemon
   { rules: { 'no-empty': ['error', { allowEmptyCatch: true }] } },
   {
-    files: ['server/**/*.mjs', 'scripts/**/*.mjs', '*.mjs', 'web/*.mjs'],
+    // `web/src/**/*.test.mjs` runs under `node --test` (see vite.config.mjs's
+    // `@/`-alias note), not the Vite/browser bundle its sibling sources build for.
+    files: ['server/**/*.mjs', 'scripts/**/*.mjs', '*.mjs', 'web/*.mjs', 'web/src/**/*.test.mjs'],
     languageOptions: { globals: globals.node },
   },
   {
