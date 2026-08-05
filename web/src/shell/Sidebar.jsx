@@ -1,4 +1,4 @@
-import { getTokens } from '@/theme/contract.js';
+import { getTokens, getRoles } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -14,10 +14,13 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import SpeedIcon from '@mui/icons-material/Speed';
+import { Stamp, SegmentBar, ZoneTitle } from 'phosphor-console-theme/components';
 import Logo from '@/components/Logo.jsx';
 import { visibleProviders, usageSummary } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
+import { useThemeSkin } from '@/theme/index.js';
+import { getDomainState } from '@/lib/domainState.js';
 import {
   glass,
   PAPER_TOOLTIP_SLOTPROPS,
@@ -33,18 +36,43 @@ import {
   focusRing,
 } from '@/shell/shellStyles.js';
 
-// Vertical nav rail entries (icon + label). The rail is the sidebar's primary
+// Vertical nav rail entries (icon + label + bilingual jp/en pair — the jp glyph
+// is Phosphor-only chrome, rendered `aria-hidden` so the accessible name stays
+// the English label under every skin). The rail is the sidebar's primary
 // navigation; the ＋ "New session" row above it opens the create dialog.
 const NAV = [
-  { v: 'tasks', icon: <ViewKanbanIcon />, label: 'Tasks' },
-  { v: 'cron', icon: <ScheduleIcon />, label: 'Automation' },
-  { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
+  { v: 'tasks', icon: <ViewKanbanIcon />, label: 'Tasks', jp: '任務' },
+  { v: 'cron', icon: <ScheduleIcon />, label: 'Automation', jp: '自動' },
+  { v: 'usage', icon: <SpeedIcon />, label: 'Usage', jp: '消費' },
 ];
+
+const NEW_SESSION_JP = '新規';
 
 // ink-2 / ink-3 from DESIGN.md map to MUI's scheme-switching text palette.
 const INK2 = 'text.secondary';
 const INK3 = 'text.disabled';
 const INK = 'text.primary';
+
+/**
+ * Bilingual nav-row label (task 4.1): a large-ish Mincho jp term beside its
+ * English caption. The jp glyph is decorative chrome only — `aria-hidden` so
+ * the row's accessible name (and e2e `getByRole` lookups) stay the plain
+ * English label, matching design.md's "accessible names are English only"
+ * rule. Phosphor-only; ZAPAC never renders this (its rows pass the plain
+ * `label` string straight to `ListItemText`).
+ */
+function NavLabel({ jp, en }) {
+  return (
+    <Box component="span" sx={{ display: 'inline-flex', alignItems: 'baseline', gap: '8px', minWidth: 0 }}>
+      <Box component="span" aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.jp, fontWeight: 800, fontSize: 15, lineHeight: 1, letterSpacing: '.08em', flex: 'none' })}>
+        {jp}
+      </Box>
+      <Box component="span" sx={(t) => ({ fontFamily: getTokens(t).fonts.display, fontWeight: 700, fontSize: 11, letterSpacing: '.12em', textTransform: 'uppercase' })}>
+        {en}
+      </Box>
+    </Box>
+  );
+}
 
 /**
  * App sidebar: brand mark + more-menu button, and the vertical nav rail
@@ -55,8 +83,25 @@ const INK = 'text.primary';
 export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewSession, onOpenMenu, menuOpen }) {
   const { agents, connected, usage, refreshUsage, tasks, crons } = useAgents();
   const caps = useCapabilities();
+  const { skinId } = useThemeSkin();
+  const isPhosphor = skinId === 'phosphor';
   const usageTip = usageSummary(usage, caps); // per-provider 5h/7d summary for the collapsed tooltip
   const counts = { tasks: tasks.length, cron: crons.length };
+
+  // Phosphor's "More" trigger reads as a hard-edged orange chrome box (mockup's
+  // `.nav-more`) instead of a plain circular icon button — same element/props,
+  // presentation only. `aria-expanded="true"` (menuOpen) gets the same fill
+  // inversion as hover.
+  const moreBtnSx = (t) =>
+    isPhosphor
+      ? {
+          borderRadius: getTokens(t).radius.none,
+          border: `1px solid ${getRoles(t).chrome.stroke}`,
+          color: getRoles(t).chrome.stroke,
+          '&:hover': { backgroundColor: getRoles(t).chrome.stroke, color: getRoles(t).shell.surface },
+          '&[aria-expanded="true"]': { backgroundColor: getRoles(t).chrome.stroke, color: getRoles(t).shell.surface },
+        }
+      : {};
 
   return (
     <Box
@@ -68,15 +113,18 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
           // layout-02 `.bg-fallback`'s glow-1 (16% 8%), scoped to the rail itself
           // rather than the global AmbientBackground: strongest behind the brand
           // mark / "New session" pill, fading to the flat glass surface by the
-          // nav rows below (mock's warm top bloom on `.side`).
-          background: `radial-gradient(120% 55% at 20% 8%, ${brandGlow(t)}, transparent 68%), ${g.background}`,
+          // nav rows below (mock's warm top bloom on `.side`). ZAPAC-only — the
+          // purple bloom has no Phosphor mapping, so Phosphor keeps the flat
+          // void/orange surface `glass(t)` already resolves to.
+          background: isPhosphor ? g.background : `radial-gradient(120% 55% at 20% 8%, ${brandGlow(t)}, transparent 68%), ${g.background}`,
           position: 'relative',
           zIndex: getTokens(t).layers.nav,
           width: collapsed ? 64 : 300, // layout-02 `.side` width
           flexShrink: 0,
           mt: 1.5,
           ml: 1.5,
-          borderRadius: `${getTokens(t).radius.lg}px`,
+          // Hard edge under Phosphor (no pill/rounded-full ZAPAC radius).
+          borderRadius: isPhosphor ? 0 : `${getTokens(t).radius.lg}px`,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -113,13 +161,13 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                 theme's "brand name / section heading" variant (16px/700/-.01em). */}
             <Typography component="span" variant="h4" sx={{ flex: 1, lineHeight: 1 }}>Singularity</Typography>
             <Tooltip title="More" placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-              <IconButton onClick={onOpenMenu} size="small" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen}><MoreVertIcon /></IconButton>
+              <IconButton onClick={onOpenMenu} size="small" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen} sx={moreBtnSx}><MoreVertIcon /></IconButton>
             </Tooltip>
           </>
         )}
         {collapsed && (
           <Tooltip title="More" placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-            <IconButton onClick={onOpenMenu} size="small" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen}><MoreVertIcon /></IconButton>
+            <IconButton onClick={onOpenMenu} size="small" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen} sx={moreBtnSx}><MoreVertIcon /></IconButton>
           </Tooltip>
         )}
       </Stack>
@@ -131,34 +179,69 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
         <Tooltip title={collapsed ? 'New session' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
           <ListItemButton
             onClick={onNewSession}
-            sx={(t) => ({
-              display: 'flex',
-              alignItems: 'center',
-              gap: '12px',
-              justifyContent: collapsed ? 'center' : 'flex-start',
-              minHeight: 40,
-              borderRadius: `${getTokens(t).radius.sm}px`,
-              mb: '5px', // `.nav-new` sits 5px clear of the nav items below it
-              pl: collapsed ? 0 : '14px',
-              pr: collapsed ? 0 : '14px',
-              py: '8px', // `.nav-new` is 42px total; icon (24px) drives content height once ListItemText's own 4px/4px margin is zeroed below
-              background: chipBg(t),
-              border: `1px solid ${stroke2(t)}`,
-              color: INK,
-              fontWeight: 700,
-              fontSize: 14,
-              transition: 'border-color .18s ease, background .18s ease',
-              '&:hover': {
-                borderColor: t.vars.palette.primary.main,
-                background: `color-mix(in srgb, ${t.vars.palette.primary.main} 12%, ${chipBg(t)})`,
-              },
-              '&:focus-visible': focusRing(t),
-            })}
+            sx={(t) => {
+              if (isPhosphor) {
+                // Layout only — border/text/hover/focus-visible come from the
+                // vendored theme's MuiListItemButton override, except the CTA
+                // emphasis (thicker mint border + fill-on-hover) added below,
+                // matching layout-02's `.newsess` (mint outline that fills on
+                // hover — the one row that acts like a primary action, not a
+                // toggle, so it doesn't wait for a `.Mui-selected` state).
+                const mint = getRoles(t).status.nominal;
+                const punchedOut = getRoles(t).shell.surface;
+                return {
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  justifyContent: collapsed ? 'center' : 'flex-start',
+                  minHeight: 40,
+                  pl: collapsed ? 0 : '14px',
+                  pr: collapsed ? 0 : '14px',
+                  py: '8px',
+                  border: `2px solid ${mint}`,
+                  boxShadow: `0 0 8px color-mix(in srgb, ${mint} 20%, transparent)`,
+                  '&:hover': {
+                    background: mint,
+                    color: punchedOut,
+                    boxShadow: `0 0 12px color-mix(in srgb, ${mint} 45%, transparent)`,
+                  },
+                };
+              }
+              return {
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                minHeight: 40,
+                borderRadius: `${getTokens(t).radius.sm}px`,
+                mb: '5px', // `.nav-new` sits 5px clear of the nav items below it
+                pl: collapsed ? 0 : '14px',
+                pr: collapsed ? 0 : '14px',
+                py: '8px', // `.nav-new` is 42px total; icon (24px) drives content height once ListItemText's own 4px/4px margin is zeroed below
+                background: chipBg(t),
+                border: `1px solid ${stroke2(t)}`,
+                color: INK,
+                fontWeight: 700,
+                fontSize: 14,
+                transition: 'border-color .18s ease, background .18s ease',
+                '&:hover': {
+                  borderColor: t.vars.palette.primary.main,
+                  background: `color-mix(in srgb, ${t.vars.palette.primary.main} 12%, ${chipBg(t)})`,
+                },
+                '&:focus-visible': focusRing(t),
+              };
+            }}
           >
-            <ListItemIcon sx={(t) => ({ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: brandOrInk(t) })}><AddIcon /></ListItemIcon>
+            <ListItemIcon sx={(t) => ({ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: isPhosphor ? 'inherit' : brandOrInk(t) })}><AddIcon /></ListItemIcon>
             {/* my: 0 kills MUI's default ListItemText 4px/4px vertical margin — left in
                 place, it stacks with the icon's 24px to blow the row past 42px. */}
-            {!collapsed && <ListItemText primary="New session" sx={{ my: 0 }} slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 700 } } }} />}
+            {!collapsed && (
+              <ListItemText
+                primary={isPhosphor ? <NavLabel jp={NEW_SESSION_JP} en="New session" /> : 'New session'}
+                sx={{ my: 0 }}
+                slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 700 } } }}
+              />
+            )}
           </ListItemButton>
         </Tooltip>
         {NAV.map((item) => {
@@ -174,72 +257,109 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                   setView(item.v);
                   if (isUsage) refreshUsage(true);
                 }}
-                sx={(t) => ({
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '13px',
-                  justifyContent: collapsed ? 'center' : 'flex-start',
-                  minHeight: 40,
-                  borderRadius: `${getTokens(t).radius.sm}px`,
-                  mb: '3px', // `.nav` row gap
-                  pl: collapsed ? 0 : '14px',
-                  pr: collapsed ? 0 : '14px',
-                  py: '8px', // `.nav-item` is 40px total; icon (24px) drives content height once ListItemText's own 4px/4px margin is zeroed below
-                  position: 'relative',
-                  color: INK2,
-                  fontWeight: 400,
-                  fontSize: 14,
-                  transition: 'background .18s ease, color .18s ease',
-                  '&:hover': { background: surface2(t), color: INK },
-                  '&.Mui-selected': {
-                    background: navActiveBg(t),
-                    color: INK,
-                    fontWeight: 700,
-                    boxShadow: getTokens(t).glass.cardShadow,
-                    '&:hover': { background: navActiveBg(t) },
-                  },
-                  // 4px gradient left-edge marker — the ONE sanctioned active indicator (DESIGN §6).
-                  // `transform: 'none'` cancels the vendored theme's own
-                  // `.Mui-selected::before` rule (top:50%/translateY(-50%), for
-                  // its own top:50%-based centering scheme) — left uncancelled,
-                  // that leftover translateY(-50%) stacks with our top/bottom
-                  // offsets and drags the whole bar up out of the row, leaving
-                  // only a sliver clipped against the top edge.
-                  '&.Mui-selected::before': {
-                    content: '""',
-                    position: 'absolute',
-                    left: 0,
-                    top: '9px',
-                    bottom: '9px',
-                    width: '4px',
-                    borderRadius: '0 4px 4px 0',
-                    background: brandGrad(t),
-                    transform: 'none',
-                  },
-                  '&:focus-visible': focusRing(t),
-                })}
+                sx={(t) => {
+                  if (isPhosphor) {
+                    // Layout only — idle/hover/selected border+fill, the
+                    // figure-ground inversion, and the focus-visible outline
+                    // all come from the vendored theme's MuiListItemButton
+                    // override (dim-green idle border · mint hover outline ·
+                    // mint fill + void content when selected · amber dashed
+                    // focus ring). No ZAPAC gradient bar, no chip-tint hover.
+                    return {
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '13px',
+                      justifyContent: collapsed ? 'center' : 'flex-start',
+                      minHeight: 40,
+                      pl: collapsed ? 0 : '14px',
+                      pr: collapsed ? 0 : '14px',
+                      py: '8px',
+                      position: 'relative',
+                    };
+                  }
+                  return {
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '13px',
+                    justifyContent: collapsed ? 'center' : 'flex-start',
+                    minHeight: 40,
+                    borderRadius: `${getTokens(t).radius.sm}px`,
+                    mb: '3px', // `.nav` row gap
+                    pl: collapsed ? 0 : '14px',
+                    pr: collapsed ? 0 : '14px',
+                    py: '8px', // `.nav-item` is 40px total; icon (24px) drives content height once ListItemText's own 4px/4px margin is zeroed below
+                    position: 'relative',
+                    color: INK2,
+                    fontWeight: 400,
+                    fontSize: 14,
+                    transition: 'background .18s ease, color .18s ease',
+                    '&:hover': { background: surface2(t), color: INK },
+                    '&.Mui-selected': {
+                      background: navActiveBg(t),
+                      color: INK,
+                      fontWeight: 700,
+                      boxShadow: getTokens(t).glass.cardShadow,
+                      '&:hover': { background: navActiveBg(t) },
+                    },
+                    // 4px gradient left-edge marker — the ONE sanctioned active indicator (DESIGN §6).
+                    // `transform: 'none'` cancels the vendored theme's own
+                    // `.Mui-selected::before` rule (top:50%/translateY(-50%), for
+                    // its own top:50%-based centering scheme) — left uncancelled,
+                    // that leftover translateY(-50%) stacks with our top/bottom
+                    // offsets and drags the whole bar up out of the row, leaving
+                    // only a sliver clipped against the top edge.
+                    '&.Mui-selected::before': {
+                      content: '""',
+                      position: 'absolute',
+                      left: 0,
+                      top: '9px',
+                      bottom: '9px',
+                      width: '4px',
+                      borderRadius: '0 4px 4px 0',
+                      background: brandGrad(t),
+                      transform: 'none',
+                    },
+                    '&:focus-visible': focusRing(t),
+                  };
+                }}
               >
                 <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: 'inherit', opacity: 0.85 }}>{item.icon}</ListItemIcon>
                 {/* my: 0 — see "New session" row above for why this matters. */}
-                {!collapsed && <ListItemText primary={item.label} sx={{ my: 0 }} slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 'inherit' } } }} />}
+                {!collapsed && (
+                  <ListItemText
+                    primary={isPhosphor ? <NavLabel jp={item.jp} en={item.label} /> : item.label}
+                    sx={{ my: 0 }}
+                    slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 'inherit' } } }}
+                  />
+                )}
                 {!collapsed && count != null && (
-                  <Typography
-                    component="span"
-                    sx={(t) => ({
-                      ml: 'auto',
-                      fontSize: 11,
-                      fontWeight: 700,
-                      letterSpacing: '.02em',
-                      color: INK3,
-                      background: chipBg(t),
-                      px: '9px',
-                      py: '2px',
-                      borderRadius: `${getTokens(t).radius.pill ?? 999}px`,
-                      '.Mui-selected &': { color: brandOrInk(t) },
-                    })}
-                  >
-                    {count}
-                  </Typography>
+                  isPhosphor ? (
+                    <Stamp
+                      size="sm"
+                      tone="mint"
+                      sx={{ ml: 'auto', border: '1px solid currentColor', color: 'inherit', background: 'transparent' }}
+                    >
+                      {count}
+                    </Stamp>
+                  ) : (
+                    <Typography
+                      component="span"
+                      sx={(t) => ({
+                        ml: 'auto',
+                        fontSize: 11,
+                        fontWeight: 700,
+                        letterSpacing: '.02em',
+                        color: INK3,
+                        background: chipBg(t),
+                        px: '9px',
+                        py: '2px',
+                        borderRadius: `${getTokens(t).radius.pill ?? 999}px`,
+                        '.Mui-selected &': { color: brandOrInk(t) },
+                      })}
+                    >
+                      {count}
+                    </Typography>
+                  )
                 )}
               </ListItemButton>
             </Tooltip>
@@ -262,14 +382,49 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
  * Sidebar usage panel (layout-02 `.usage`): a recessed glass tile with a labelled
  * mini-bar + percentage per provider, wired to the live `useAgents.usage` shape.
  * Renders a muted placeholder row when no data has loaded yet.
+ *
+ * Phosphor renders the same rows (task 4.3) as discrete LED segments via the
+ * vendored `SegmentBar` instead of the continuous glass gradient fill — real
+ * percentages/placeholders only, no fabricated provider or telemetry.
  */
 function UsagePanel({ usage, caps }) {
+  const { skinId } = useThemeSkin();
+  const isPhosphor = skinId === 'phosphor';
   const rows = visibleProviders(caps).map((p) => {
     const u = usage?.[p.key];
     const pct = u?.ok && u.session?.pctUsed != null ? Math.round(u.session.pctUsed) : null;
     return { key: p.key, label: p.label, pct };
   });
   const hasData = rows.some((r) => r.pct != null);
+
+  if (isPhosphor) {
+    return (
+      <Box sx={{ mx: 1.5, mb: 1.5 }}>
+        <ZoneTitle aside="5H WINDOW">
+          <Box component="span">USAGE</Box>
+          <Box component="span" aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.jp, ml: '8px' })}>消費</Box>
+        </ZoneTitle>
+        {!hasData ? (
+          <Typography sx={(t) => ({ fontSize: 11, fontFamily: getTokens(t).fonts.mono, textTransform: 'uppercase', color: getRoles(t).status.idle })}>No usage yet</Typography>
+        ) : (
+          <Stack spacing="9px">
+            {rows.map((r) => (
+              <Stack key={r.key} direction="row" spacing="9px" sx={{ alignItems: 'center' }}>
+                <Typography sx={(t) => ({ fontSize: 10, fontFamily: getTokens(t).fonts.mono, letterSpacing: '.1em', textTransform: 'uppercase', color: getRoles(t).status.idle, width: '50px', flex: 'none' })}>
+                  {r.label}
+                </Typography>
+                <SegmentBar value={r.pct ?? 0} segments={20} tone="mint" height={8} sx={{ flex: 1 }} />
+                <Typography sx={(t) => ({ fontSize: 10, fontFamily: getTokens(t).fonts.mono, fontWeight: 700, color: getRoles(t).status.nominal, width: '32px', textAlign: 'right', flex: 'none' })}>
+                  {r.pct == null ? '—' : `${r.pct}%`}
+                </Typography>
+              </Stack>
+            ))}
+          </Stack>
+        )}
+      </Box>
+    );
+  }
+
   return (
     <Box
       sx={(t) => ({
@@ -325,9 +480,49 @@ function UsagePanel({ usage, caps }) {
  * Daemon-status footer (layout-02 `.side-foot`): a connection dot + label + the
  * loopback address the client reaches the daemon/WS through (`location.host`).
  * Always visible — reflects the live `useAgents.connected` state.
+ *
+ * Phosphor renders the same live `connected` boolean as a domain-state-driven
+ * `Stamp` (task 4.4) — `running`/`failed` from the shared `lib/domainState.js`
+ * mapping, so a lost connection gets the red critical/filled inversion — with
+ * the connection state spelled out in visible English text (never color-only).
  */
 function DaemonFooter({ connected }) {
+  const { skinId } = useThemeSkin();
+  const isPhosphor = skinId === 'phosphor';
   const host = typeof location !== 'undefined' ? location.host : '127.0.0.1:4317';
+
+  if (isPhosphor) {
+    const { tone, filled } = getDomainState(connected ? 'running' : 'failed');
+    return (
+      <Box
+        component="footer"
+        sx={(t) => ({
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          pt: '13px',
+          pb: '13px',
+          px: '18px',
+          borderTop: `1px solid ${getRoles(t).chrome.stroke}`,
+        })}
+      >
+        <Stack direction="row" spacing="7px" sx={{ alignItems: 'center' }}>
+          {/* Decorative bilingual pairing (layout-02 `接続 CONNECTED`) — aria-hidden
+              so the Stamp's own English text remains the sole accessible name. */}
+          <Box component="span" aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.jp, fontSize: 13, color: getRoles(t).status[tone === 'red' ? 'critical' : 'nominal'] })}>
+            {connected ? '接続' : '切断'}
+          </Box>
+          <Stamp tone={tone} filled={filled} size="sm">
+            {connected ? 'DAEMON CONNECTED' : 'DAEMON DISCONNECTED'}
+          </Stamp>
+        </Stack>
+        <Typography component="small" sx={(t) => ({ fontFamily: getTokens(t).fonts.mono, fontSize: 10, letterSpacing: '.08em', color: getRoles(t).status.caution })}>
+          {host}
+        </Typography>
+      </Box>
+    );
+  }
+
   return (
     <Box
       component="footer"

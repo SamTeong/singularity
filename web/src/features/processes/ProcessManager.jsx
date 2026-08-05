@@ -15,7 +15,7 @@ import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
-import { StatusPill } from '@zapac/mui-theme';
+import { StatusPill } from '@/components/StatusPill.jsx';
 
 const KIND_PILL = { tracked: 'active', daemon: 'active', stale: 'error', external: 'review' };
 const KIND_HELP = {

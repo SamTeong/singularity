@@ -3,23 +3,29 @@ import { useColorMode } from '@zapac/mui-theme';
 import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
-import { TERM_THEME } from './term-theme.js';
+import { useThemeSkin } from '@/theme/index.js';
+import { getTerminalTheme } from './term-theme.js';
 
-// Machine-output layer — opaque, never glass — but themed light/dark with the
-// app. Palette lives in ./term-theme.js (shared with TranscriptView).
+// Machine-output layer — opaque, never glass — but themed with the app's skin
+// (+ color mode for ZAPAC). Palette lives in ./term-theme.js (shared with
+// TranscriptView) via getTerminalTheme(skinId, resolvedMode).
 // Lines kept in each terminal's buffer. Bounded to cap browser-tab memory across
 // a fleet of mounted terminals; past that, history lives in the transcript.
 const SCROLLBACK = 5000;
 
 export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOutput, onTopReached }) {
-  // Terminal palette follows the app's color mode. Use useColorMode().resolved,
-  // not theme.palette.mode — under cssVariables the latter is frozen at the
-  // default scheme and won't switch with the .dark class.
+  // Terminal palette follows the app's skin + color mode. Use
+  // useColorMode().resolved, not theme.palette.mode — under cssVariables the
+  // latter is frozen at the default scheme and won't switch with the .dark
+  // class. Phosphor is dark-only, so its palette ignores mode (see
+  // getTerminalTheme).
+  const { skinId } = useThemeSkin();
   const mode = useColorMode().resolved === 'light' ? 'light' : 'dark';
+  const theme = getTerminalTheme(skinId, mode);
   // Seeds the initial palette only; live changes go through the theme effect
-  // below. Held in a ref so a mode flip can't re-enter the create-terminal
+  // below. Held in a ref so a skin/mode flip can't re-enter the create-terminal
   // effect and tear down a live xterm.
-  const modeRef = useRef(mode);
+  const themeRef = useRef(theme);
   const hostRef = useRef(null);
   const xtermRef = useRef(null);
   const fitRef = useRef(null);
@@ -34,7 +40,7 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
       fontFamily: 'JetBrains Mono, Cascadia Code, Consolas, monospace',
       fontSize: 13,
       cursorBlink: true,
-      theme: TERM_THEME[modeRef.current] ?? TERM_THEME.dark,
+      theme: themeRef.current,
       scrollback: SCROLLBACK,
     });
     const fit = new FitAddon();
@@ -162,11 +168,13 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     return () => { clearTimeout(roTimer); clearTimeout(resyncTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); host.removeEventListener('wheel', onWheel); viewport?.removeEventListener('scroll', onViewportScroll); term.dispose(); registerOutput(agent.id, null); };
   }, [agent.id, sendMsg, registerOutput]);
 
-  // Apply the app theme live — no need to recreate the terminal.
+  // Apply the app theme (skin + color mode) live — no need to recreate the
+  // terminal, so buffered output, attach state, WebGL fallback, selection,
+  // scrollback, and keyboard handling are all untouched by a palette swap.
   useEffect(() => {
-    modeRef.current = mode;
-    if (xtermRef.current) xtermRef.current.options.theme = TERM_THEME[mode] ?? TERM_THEME.dark;
-  }, [mode]);
+    themeRef.current = theme;
+    if (xtermRef.current) xtermRef.current.options.theme = theme;
+  }, [theme]);
 
   useEffect(() => {
     if (visible) {

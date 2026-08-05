@@ -13,7 +13,8 @@
  * a remount, mirroring how a colour-mode change already prompts session respawn.
  */
 import { createContext, use, useCallback, useMemo, useState } from 'react';
-import { DEFAULT_SKIN_ID, getSkin, listSkins } from '@/theme/registry.js';
+import { getSkin, listSkins } from '@/theme/registry.js';
+import { resolveSkin } from '@/theme/resolveSkin.js';
 
 const STORAGE_KEY = 'sing-skin';
 
@@ -23,11 +24,11 @@ const ThemeSkinContext = createContext(null);
 function readInitialSkinId() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && getSkin(saved)) return saved;
+    return resolveSkin(saved)?.id;
   } catch {
     // localStorage unavailable (private mode / SSR) — fall through to default.
+    return resolveSkin(null)?.id;
   }
-  return DEFAULT_SKIN_ID;
 }
 
 export function AppThemeProvider({ children, defaultMode = 'dark' }) {
@@ -44,7 +45,7 @@ export function AppThemeProvider({ children, defaultMode = 'dark' }) {
   }, []);
 
   // Resolve defensively: a persisted id whose skin was unregistered falls back.
-  const skin = getSkin(skinId) ?? getSkin(DEFAULT_SKIN_ID) ?? listSkins()[0];
+  const skin = resolveSkin(skinId);
 
   const ctx = useMemo(
     () => ({ skinId: skin?.id, setSkin, skins: listSkins() }),

@@ -14,7 +14,7 @@ import ClearIcon from '@mui/icons-material/Clear';
 import GavelIcon from '@mui/icons-material/Gavel';
 import { markdown } from '@codemirror/lang-markdown';
 import { EditorView } from '@codemirror/view';
-import { EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import CmEditor from '@/components/CmEditor.jsx';
 import DetailPane from '@/components/DetailPane.jsx';
 import DirPicker from '@/components/DirPicker.jsx';

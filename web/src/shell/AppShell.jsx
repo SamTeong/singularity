@@ -23,6 +23,8 @@ import { useTaskActions } from '@/hooks/useTaskActions.js';
 import Sidebar from '@/shell/Sidebar.jsx';
 import SessionDock from '@/shell/SessionDock.jsx';
 import AppMenu from '@/shell/AppMenu.jsx';
+import PhosphorFrame from '@/shell/PhosphorFrame.jsx';
+import PhosphorMasthead from '@/shell/PhosphorMasthead.jsx';
 import { glass } from '@/shell/shellStyles.js';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
@@ -45,6 +47,14 @@ const StatusView = lazy(() => import('@/features/status/StatusView.jsx'));
 // hidden) so live CodeMirror + unsaved edits survive view switches.
 const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'sessions', 'explorer'];
 
+// A skin change remounts this entire component — `AppThemeProvider` keys its
+// skin subtree by `skin.id` (see theme/AppThemeProvider.jsx), so any React
+// state set before calling `setSkin` (e.g. `respawnCount`) is gone by the time
+// the new skin's AppShell instance mounts. Stash the live-session count here
+// across that remount (task 6.6) so the fresh instance can still show the
+// same respawn-confirmation dialog a color-mode toggle shows in place.
+const PENDING_RESPAWN_KEY = 'sing-pending-respawn';
+
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
 // Mirror of server isCodexModel: gpt-* id → codex-only model.
 const isCodexModel = (m) => !!m && m.startsWith('gpt-');
@@ -66,8 +76,12 @@ export default function AppShell() {
   } = useAgents();
   const { toggle: toggleColorMode } = useColorMode();
   // The active skin optionally paints a full-bleed background behind the shell.
-  const { skinId } = useThemeSkin();
+  const { skinId, setSkin } = useThemeSkin();
   const SkinBackground = getSkin(skinId)?.Background;
+  // Phosphor is the only skin with a command-console frame/masthead (task 3.1/
+  // 3.2, design.md D1/D5) — everything below this still renders unconditionally;
+  // only the root wrapper and the `mainRef` Box's own sizing branch on it.
+  const isPhosphor = skinId === 'phosphor';
 
   const [cwd, setCwd] = useState('~');
   const [picking, setPicking] = useState(false);
@@ -89,7 +103,18 @@ export default function AppShell() {
   const [toast, setToast] = useState(null);
   const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
   const [openTx, setOpenTx] = useState(null); // {project, id, cwd, mtime} handed to SessionHistory
-  const [respawnCount, setRespawnCount] = useState(0); // >0 -> respawn-confirm dialog open, holds live-session count
+  // >0 -> respawn-confirm dialog open, holds live-session count. Initialized
+  // from `PENDING_RESPAWN_KEY` so a skin change (which remounts this whole
+  // component — see theme/AppThemeProvider.jsx's `key={skin.id}`) can still
+  // surface the respawn confirmation for the live sessions it affected
+  // (task 6.6). Color-mode toggles set this directly mid-session.
+  const [respawnCount, setRespawnCount] = useState(() => {
+    try {
+      const v = localStorage.getItem(PENDING_RESPAWN_KEY);
+      if (v) { localStorage.removeItem(PENDING_RESPAWN_KEY); return parseInt(v, 10) || 0; }
+    } catch { /* localStorage unavailable */ }
+    return 0;
+  });
   const [restartOpen, setRestartOpen] = useState(false); // restart-daemon confirm dialog
   const [restarting, setRestarting] = useState(false); // true while polling /health for the new daemon
   // Terminal dock minimized state, persisted (height is a useResizable below).
@@ -138,6 +163,25 @@ export default function AppShell() {
     toggleColorMode();
     const live = agents.filter((a) => isLive(a.status)).length;
     if (live) setRespawnCount(live);
+  };
+
+  // Skin selection routes through the same live-session respawn confirmation
+  // (task 6.6, design.md D6): a running child TUI picks its theme at spawn, so
+  // a skin change prompts to respawn live sessions so their TUI matches. The
+  // skin applies immediately (xterm palette flips live via Terminal.jsx's
+  // theme effect); the prompt only offers to respawn the live children. A
+  // skin change remounts this whole component (`AppThemeProvider` keys its
+  // subtree by `skin.id`), so `respawnCount` state set here is gone by the
+  // time the new skin's AppShell mounts — stash the live count in
+  // `PENDING_RESPAWN_KEY` first, and the fresh mount reads it back to open
+  // the same dialog. Never auto-respawn; skip the prompt when no live sessions.
+  const onSelectSkin = (id) => {
+    if (id === skinId) return;
+    const live = agents.filter((a) => isLive(a.status)).length;
+    if (live) {
+      try { localStorage.setItem(PENDING_RESPAWN_KEY, String(live)); } catch { /* localStorage unavailable */ }
+    }
+    setSkin(id);
   };
 
   // Restart the daemon: it respawns itself detached and exits, so the socket
@@ -201,8 +245,24 @@ export default function AppShell() {
   // Resume button can disable when the transcript's session is already attached.
   const liveSessionIds = useMemo(() => new Set(agents.filter((a) => isLive(a.status)).map((a) => a.id)), [agents]);
 
-  return (
-    <Box ref={mainRef} sx={{ position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+  // The app's real interaction tree — identical JSX regardless of skin. Under
+  // Phosphor it is wrapped (below) by an additive outer frame + masthead; the
+  // ZAPAC branch returns this exact element with no wrapper at all, so ZAPAC's
+  // rendered output stays byte-for-byte what it is today (design.md D1/D5).
+  // Only this Box's own `sx` branches on `isPhosphor`, to fill the frame's
+  // remaining height (`flex: 1, minHeight: 0`) instead of the viewport
+  // (`height: '100dvh'`) once a masthead sits above it — `useResizable`'s
+  // `containerRef: mainRef` dock-height clamp measures this element's live
+  // `getBoundingClientRect()`, so it stays correct either way.
+  const shell = (
+    <Box
+      ref={mainRef}
+      sx={
+        isPhosphor
+          ? { position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+          : { position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+      }
+    >
       {SkinBackground && <SkinBackground />}
 
       {/* Top row: sidebar + selected view. The terminal dock spans full width below. */}
@@ -245,7 +305,7 @@ export default function AppShell() {
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
-            {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} />}
+            {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} onSelectSkin={onSelectSkin} />}
             {view === 'status' && <StatusView />}
             {view === 'skills' && <SkillsPanel />}
             {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} cwd={cwd} setCwd={setCwd} onBrowse={() => setPicking(true)} onAdd={() => setCronOpen(true)} onEdit={setCronOpen} onToast={setToast} />}
@@ -391,5 +451,13 @@ export default function AppShell() {
         }
       />
     </Box>
+  );
+
+  if (!isPhosphor) return shell;
+
+  return (
+    <PhosphorFrame masthead={<PhosphorMasthead connected={connected} liveCount={liveCount} agentCount={agents.length} />}>
+      {shell}
+    </PhosphorFrame>
   );
 }

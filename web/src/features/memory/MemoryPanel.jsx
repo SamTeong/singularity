@@ -11,7 +11,7 @@ import BookIcon from '@mui/icons-material/Book';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import DirPicker from '@/components/DirPicker.jsx';
 import { markdown } from '@codemirror/lang-markdown';
-import { EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import CmEditor from '@/components/CmEditor.jsx';
 import DetailPane from '@/components/DetailPane.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
