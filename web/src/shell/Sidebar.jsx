@@ -69,7 +69,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
           // rather than the global AmbientBackground: strongest behind the brand
           // mark / "New session" pill, fading to the flat glass surface by the
           // nav rows below (mock's warm top bloom on `.side`).
-          background: `radial-gradient(120% 46% at 26% 0%, ${brandGlow(t)}, transparent 68%), ${g.background}`,
+          background: `radial-gradient(120% 55% at 20% 8%, ${brandGlow(t)}, transparent 68%), ${g.background}`,
           position: 'relative',
           zIndex: getTokens(t).layers.nav,
           width: collapsed ? 64 : 300, // layout-02 `.side` width
@@ -136,12 +136,12 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
               alignItems: 'center',
               gap: '12px',
               justifyContent: collapsed ? 'center' : 'flex-start',
-              minHeight: 44,
+              minHeight: 40,
               borderRadius: `${getTokens(t).radius.sm}px`,
               mb: '5px', // `.nav-new` sits 5px clear of the nav items below it
               pl: collapsed ? 0 : '14px',
               pr: collapsed ? 0 : '14px',
-              py: '11px',
+              py: '8px', // `.nav-new` is 42px total; icon (24px) drives content height once ListItemText's own 4px/4px margin is zeroed below
               background: chipBg(t),
               border: `1px solid ${stroke2(t)}`,
               color: INK,
@@ -156,7 +156,9 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
             })}
           >
             <ListItemIcon sx={(t) => ({ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: brandOrInk(t) })}><AddIcon /></ListItemIcon>
-            {!collapsed && <ListItemText primary="New session" slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 700 } } }} />}
+            {/* my: 0 kills MUI's default ListItemText 4px/4px vertical margin — left in
+                place, it stacks with the icon's 24px to blow the row past 42px. */}
+            {!collapsed && <ListItemText primary="New session" sx={{ my: 0 }} slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 700 } } }} />}
           </ListItemButton>
         </Tooltip>
         {NAV.map((item) => {
@@ -177,12 +179,12 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                   alignItems: 'center',
                   gap: '13px',
                   justifyContent: collapsed ? 'center' : 'flex-start',
-                  minHeight: 44,
+                  minHeight: 40,
                   borderRadius: `${getTokens(t).radius.sm}px`,
                   mb: '3px', // `.nav` row gap
                   pl: collapsed ? 0 : '14px',
                   pr: collapsed ? 0 : '14px',
-                  py: '11px',
+                  py: '8px', // `.nav-item` is 40px total; icon (24px) drives content height once ListItemText's own 4px/4px margin is zeroed below
                   position: 'relative',
                   color: INK2,
                   fontWeight: 400,
@@ -197,6 +199,12 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                     '&:hover': { background: navActiveBg(t) },
                   },
                   // 4px gradient left-edge marker — the ONE sanctioned active indicator (DESIGN §6).
+                  // `transform: 'none'` cancels the vendored theme's own
+                  // `.Mui-selected::before` rule (top:50%/translateY(-50%), for
+                  // its own top:50%-based centering scheme) — left uncancelled,
+                  // that leftover translateY(-50%) stacks with our top/bottom
+                  // offsets and drags the whole bar up out of the row, leaving
+                  // only a sliver clipped against the top edge.
                   '&.Mui-selected::before': {
                     content: '""',
                     position: 'absolute',
@@ -206,12 +214,14 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                     width: '4px',
                     borderRadius: '0 4px 4px 0',
                     background: brandGrad(t),
+                    transform: 'none',
                   },
                   '&:focus-visible': focusRing(t),
                 })}
               >
                 <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: 'inherit', opacity: 0.85 }}>{item.icon}</ListItemIcon>
-                {!collapsed && <ListItemText primary={item.label} slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 'inherit' } } }} />}
+                {/* my: 0 — see "New session" row above for why this matters. */}
+                {!collapsed && <ListItemText primary={item.label} sx={{ my: 0 }} slotProps={{ primary: { sx: { fontSize: 14, fontWeight: 'inherit' } } }} />}
                 {!collapsed && count != null && (
                   <Typography
                     component="span"

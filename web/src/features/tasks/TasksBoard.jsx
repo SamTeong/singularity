@@ -78,7 +78,7 @@ const COL_DOT = { todo: 'text.disabled', inprogress: 'info.main', inreview: 'pri
 const segBtn = (t, on) => {
   const g = getTokens(t);
   return {
-    px: '14px', py: '6px', minWidth: 0, borderRadius: 999,
+    px: '14px', py: '6px', minWidth: 0, minHeight: 27, borderRadius: 999,
     fontSize: 12, fontWeight: 700, lineHeight: 1.2, letterSpacing: 0,
     color: 'text.disabled', textTransform: 'none',
     border: 'none', boxShadow: 'none', background: 'transparent',
@@ -97,7 +97,7 @@ const segBtn = (t, on) => {
 const primaryBtn = (t) => {
   const glow = brandGlow(t);
   return {
-    borderRadius: 999, px: '18px', py: '7px',
+    borderRadius: 999, px: '18px', py: '7px', minHeight: 38,
     background: brandGrad(t), color: '#fff',
     fontWeight: 700, fontSize: 13, textTransform: 'none', lineHeight: 1.2,
     border: 'none',
@@ -388,7 +388,9 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
         })}
       >
         <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
-          <Typography sx={{ fontWeight: 700, fontSize: 20, letterSpacing: '-0.02em', lineHeight: 1 }}>Tasks</Typography>
+          {/* h3 for the display face; `.view-title` tracks/leads tighter than the
+              variant's -0.01em/1.2, so those two stay explicit. */}
+          <Typography variant="h3" sx={{ letterSpacing: '-0.02em', lineHeight: 1 }}>Tasks</Typography>
           <Typography sx={{ fontSize: 12, color: 'text.disabled', mt: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
             {tasks.length} tasks · {runningCount} running
           </Typography>

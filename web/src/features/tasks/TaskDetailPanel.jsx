@@ -189,7 +189,8 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
       {/* `.detail-title` wraps — a truncated task title defeats the panel's point. */}
       <Typography
         component="h2"
-        sx={{ px: '18px', pt: '12px', flexShrink: 0, fontWeight: 700, fontSize: 20, letterSpacing: '-0.02em', lineHeight: 1.15, textWrap: 'balance' }}
+        variant="h3"
+        sx={{ px: '18px', pt: '12px', flexShrink: 0, letterSpacing: '-0.02em', lineHeight: 1.15, textWrap: 'balance' }}
       >
         {task.title}
       </Typography>

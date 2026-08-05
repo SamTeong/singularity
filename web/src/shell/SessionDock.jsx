@@ -4,7 +4,7 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import List from '@mui/material/List';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
+import IconButton from '@mui/material/IconButton';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -67,47 +67,58 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
 
   return (
     <Box sx={(t) => ({ ...glass(t), position: 'relative', zIndex: getTokens(t).layers.content, flexShrink: 0, height: dockMin ? 'auto' : dockH, mx: 1.5, mb: 1.5, mt: dockMin ? 1.5 : 0, borderRadius: `${getTokens(t).radius.lg}px`, overflow: 'hidden', display: 'flex', flexDirection: 'column' })}>
-      <Stack direction="row" spacing={1} role="button" tabIndex={0} onClick={toggleDock} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDock(); } }} title={dockMin ? 'Restore' : 'Minimize'} sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none', borderBottom: dockMin ? 'none' : `1px solid ${stroke2(t)}`, '&:focus-visible': focusRing(t) })}>
-        <SmartToyIcon sx={{ fontSize: 16, color: 'text.secondary' }} />
-        {/* Label + count stay grouped (`.dock-list-head`), so the count reads as
-            "how many sessions" rather than floating at the far edge of the dock. */}
-        <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'text.secondary' }} noWrap>Sessions</Typography>
-        <Box sx={(t) => ({ fontSize: 11, fontWeight: 700, color: 'text.disabled', background: chipBg(t), px: '8px', py: '2px', borderRadius: 999, lineHeight: 1.4 })}>{agents.length}</Box>
-        <Box sx={{ flex: 1 }} />
-        {dockMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />}
-      </Stack>
+      {/* Minimized-state affordance only — layout-02 has no "collapsed dock" state
+          to crib from (its `.dock-list-head` only ever appears expanded), so when
+          collapsed the whole dock shrinks to this one clickable strip. Unmounted
+          (not just hidden) once expanded so it never overlaps the real header below. */}
+      {dockMin && (
+        <Stack direction="row" spacing={1} role="button" tabIndex={0} onClick={toggleDock} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDock(); } }} title="Restore" sx={(t) => ({ px: 1.5, height: 36, flexShrink: 0, display: 'flex', alignItems: 'center', cursor: 'pointer', userSelect: 'none', '&:focus-visible': focusRing(t) })}>
+          <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'text.disabled' }} noWrap>Sessions</Typography>
+          <Box sx={(t) => ({ fontSize: 11, fontWeight: 700, color: 'text.disabled', background: chipBg(t), px: '8px', py: '2px', borderRadius: 999, lineHeight: 1.4 })}>{agents.length}</Box>
+          <Box sx={{ flex: 1 }} />
+          <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+        </Stack>
+      )}
 
       {/* Body kept mounted while minimized (display:none) so terminals keep
           their live xterm + scrollback. */}
       <Box sx={{ display: dockMin ? 'none' : 'flex', flex: 1, minHeight: 0 }}>
-        <List sx={(t) => ({ width: listW.width, flexShrink: 0, overflow: 'auto', px: 1, py: 0.5, borderRight: `1px solid ${stroke2(t)}`, background: surface2(t) })}>
-          {agents.map((a) => (
-            <SessionRow
-              key={a.id}
-              agent={a}
-              selected={a.id === active}
-              onSelect={() => setActive(a.id)}
-              stats={stats[a.id]}
-              subagents={subagents[a.id] || []}
-              dragging={dragId === a.id}
-              dragHandlers={{
-                onDragStart: () => setDragId(a.id),
-                onDragOver: (e) => e.preventDefault(),
-                onDrop: () => { reorderAgents(dragId, a.id); setDragId(null); },
-                onDragEnd: () => setDragId(null),
-              }}
-              onViewTranscript={() => onViewTranscript(a)}
-              onDuplicate={() => { sendMsg({ t: 'create', cwd: a.cwd, title: nextSessionTitle(agents, a), model: a.model, scopes: a.scopes }); expandDock(); }}
-              onFork={() => sendMsg({ t: 'fork', id: a.id, title: nextSessionTitle(agents, a) })}
-              onRespawn={() => sendMsg({ t: 'respawn', id: a.id })}
-              onReattach={() => sendMsg({ t: 'reattach', id: a.id })}
-              onOpenExternal={() => fetch('/session/external', {
-                method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: a.id }),
-              }).then((r) => r.json()).then((d) => { if (!d.ok && onToast) onToast(`External terminal failed: ${d.error || 'unknown'}`); }).catch(() => { if (onToast) onToast('External terminal failed: network error'); })}
-              onKill={() => sendMsg({ t: 'kill', id: a.id })}
-            />
-          ))}
-        </List>
+        <Box sx={(t) => ({ width: listW.width, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: `1px solid ${stroke2(t)}`, background: surface2(t) })}>
+          {/* layout-02 `.dock-list-head`: plain label + count, no icon, no click
+              handler — scoped to the session-list column's width, not the dock. */}
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', gap: '8px', px: '16px', pt: '14px', pb: '10px', flexShrink: 0 }}>
+            <Typography component="h4" sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: 'text.disabled', m: 0 }} noWrap>Sessions</Typography>
+            <Box sx={(t) => ({ ml: 'auto', fontSize: 11, fontWeight: 700, color: 'text.disabled', background: chipBg(t), px: '8px', py: '2px', borderRadius: 999, lineHeight: 1.4 })}>{agents.length}</Box>
+          </Stack>
+          <List sx={{ flex: 1, overflow: 'auto', px: 1, py: 0.5 }}>
+            {agents.map((a) => (
+              <SessionRow
+                key={a.id}
+                agent={a}
+                selected={a.id === active}
+                onSelect={() => setActive(a.id)}
+                stats={stats[a.id]}
+                subagents={subagents[a.id] || []}
+                dragging={dragId === a.id}
+                dragHandlers={{
+                  onDragStart: () => setDragId(a.id),
+                  onDragOver: (e) => e.preventDefault(),
+                  onDrop: () => { reorderAgents(dragId, a.id); setDragId(null); },
+                  onDragEnd: () => setDragId(null),
+                }}
+                onViewTranscript={() => onViewTranscript(a)}
+                onDuplicate={() => { sendMsg({ t: 'create', cwd: a.cwd, title: nextSessionTitle(agents, a), model: a.model, scopes: a.scopes }); expandDock(); }}
+                onFork={() => sendMsg({ t: 'fork', id: a.id, title: nextSessionTitle(agents, a) })}
+                onRespawn={() => sendMsg({ t: 'respawn', id: a.id })}
+                onReattach={() => sendMsg({ t: 'reattach', id: a.id })}
+                onOpenExternal={() => fetch('/session/external', {
+                  method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: a.id }),
+                }).then((r) => r.json()).then((d) => { if (!d.ok && onToast) onToast(`External terminal failed: ${d.error || 'unknown'}`); }).catch(() => { if (onToast) onToast('External terminal failed: network error'); })}
+                onKill={() => sendMsg({ t: 'kill', id: a.id })}
+              />
+            ))}
+          </List>
+        </Box>
 
         {/* Drag handle — resize the session-list width. layout-02 `.list-handle`:
             8px hit strip, grip fades in on hover/drag/focus. */}
@@ -147,6 +158,12 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
                 </>
               ) : 'No session'}
             </Typography>
+            <Box sx={{ flex: 1 }} />
+            {/* `.term-tools` — the dock's minimize control lives here (mock's right-side
+                icon-btn row), not glued to the Sessions label anymore. */}
+            <IconButton onClick={toggleDock} size="small" title="Minimize" aria-label="Minimize dock" sx={(t) => ({ '&:focus-visible': focusRing(t) })}>
+              <ExpandLessIcon sx={{ fontSize: 18 }} />
+            </IconButton>
           </Stack>
           {/* Selected terminal. All non-detached terminals stay mounted
               (display:none when hidden) so scrollback + WS attach survive. */}
