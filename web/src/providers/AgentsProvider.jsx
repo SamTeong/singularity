@@ -32,6 +32,7 @@ export function AgentsProvider({ children }) {
   const [taskHistory, setTaskHistory] = useState([]);
   const [crons, setCrons] = useState([]);
   const [background, setBackground] = useState(null); // { config, lastTick, liveTaskId }
+  const [history, setHistory] = useState(null); // { entries, pending } — pushed as backfill days resolve; the page does its own initial fetch
   const [usage, setUsage] = useState(null); // { ollama, claude } from /usage
   const [stats, setStats] = useState({}); // id -> {turns, tokens}
   const [subagents, setSubagents] = useState({}); // agentId -> [{agentId, title, running, mtime}]
@@ -91,6 +92,8 @@ export function AgentsProvider({ children }) {
           setCrons(m.crons);
         } else if (m.t === 'background') {
           setBackground({ config: m.config, lastTick: m.lastTick, liveTaskId: m.liveTaskId });
+        } else if (m.t === 'history') {
+          setHistory({ entries: m.entries, pending: m.pending });
         } else if (m.t === 'chat:delta' || m.t === 'chat:done' || m.t === 'chat:error') {
           chatHandler.current?.(m);
         } else if (m.t === 'error') {
@@ -197,7 +200,7 @@ export function AgentsProvider({ children }) {
 
   const value = {
     agents, active, setActive, connected, recent,
-    tasks, taskHistory, crons, background, usage,
+    tasks, taskHistory, crons, background, usage, history,
     stats, subagents,
     sendMsg, reorderAgents, refreshUsage,
     registerTerminal, registerChat, registerError,

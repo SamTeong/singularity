@@ -20,6 +20,7 @@ import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
+import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
 import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, getState as getExplorerState, setState as setExplorerState } from './explorer.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
@@ -682,11 +683,42 @@ app.post('/sessions/stats', async (req) => {
   return { stats };
 });
 
+// History: one entry per calendar day, LLM-summarized from that day's claude +
+// codex transcripts. Today is always computed live (never persisted).
+// GET kicks off backfill for any gap in the requested window and returns
+// immediately — the WS 'history' event streams resolved days in as they land.
+app.get('/history', async (req) => {
+  const days = Number(req.query.days) || 7;
+  const { from, to } = req.query || {};
+  ensureHistory({ days }).catch((e) => app.log.warn({ err: e.message }, 'history backfill failed'));
+  const today = await liveToday();
+  let entries = readHistory();
+  if (from) entries = entries.filter((e) => e.date >= from);
+  if (to) entries = entries.filter((e) => e.date <= to);
+  if (!from && !to) entries = entries.slice(-days);
+  const have = new Set(entries.map((e) => e.date));
+  const pending = [];
+  for (let i = 1; i <= days; i++) {
+    const d = localDay(Date.now() - i * 86_400_000);
+    if (!have.has(d) && (!from || d >= from) && (!to || d <= to)) pending.push(d);
+  }
+  return { ok: true, entries: entries.slice().reverse(), pending, today };
+});
+app.post('/history/regenerate', async (req, reply) => {
+  const date = req.body?.date;
+  if (!date) return reply.code(400).send({ ok: false, error: 'date required' });
+  try { return { ok: true, entry: await regenerateDay(date) }; }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
+});
+
 reg.init(app.log);
 initTasks(app.log);
 initCrons(app.log);
 initBackground(app.log);
 initUsageAutoRefresh(reg.bus);
+// Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors
+// are logged (route-level failures still degrade to a live-only "today").
+ensureHistory().catch((e) => app.log.warn({ err: e.message }, 'history backfill failed'));
 
 let server;
 // ponytail: retry bind — a /restart child waits for the old daemon to free the port

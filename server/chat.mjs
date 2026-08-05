@@ -18,6 +18,19 @@ const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 2048;
 const ALL_CAP = 60000;   // scope 'all' context cap (chars)
 
+// Shared between the streaming session-chat path (streamChat) and the plain
+// batched path (callMessages, used by history.mjs's day summarizer).
+function messagesHeaders(accessToken) {
+  return {
+    authorization: `Bearer ${accessToken}`,
+    'content-type': 'application/json',
+    'anthropic-version': '2023-06-01',
+    'anthropic-beta': 'oauth-2025-04-20,claude-code-20250219',
+    'user-agent': 'claude-cli/1.0',
+    'x-app': 'cli',
+  };
+}
+
 // Build the context block prepended to the identity string. `root` is the
 // client-selected sessions root (optional — defaults to the FS-persisted
 // choice, see sessions.mjs).
@@ -92,14 +105,7 @@ export async function streamChat({ chatId, question, scope = 'one', project, id,
     resp = await fetch(MESSAGES_URL, {
       method: 'POST',
       signal,
-      headers: {
-        authorization: `Bearer ${oauth.accessToken}`,
-        'content-type': 'application/json',
-        'anthropic-version': '2023-06-01',
-        'anthropic-beta': 'oauth-2025-04-20,claude-code-20250219',
-        'user-agent': 'claude-cli/1.0',
-        'x-app': 'cli',
-      },
+      headers: messagesHeaders(oauth.accessToken),
       body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system, messages, stream: true }),
     });
   } catch (e) {
@@ -125,4 +131,35 @@ export async function streamChat({ chatId, question, scope = 'one', project, id,
   }
   // Non-abort exit without an explicit message_stop (e.g. network end) → done.
   if (!sentTerminal && !signal?.aborted) send({ t: 'chat:done', chatId });
+}
+
+// Non-streaming Messages API call — same OAuth token, identity prefix, and
+// model as streamChat, but stream:false and returns the full text instead of
+// pushing deltas over a WS. Used by history.mjs's day summarizer, where a
+// plain batched call fits better than a stream. Never throws — HTTP/network
+// failures come back as {ok:false, error, status?} so callers can fall
+// through to their own next rung.
+export async function callMessages({ system, messages, maxTokens = 1024 }) {
+  const oauth = claudeOauthToken();
+  if (!oauth) return { ok: false, error: 'not signed in' };
+  let resp;
+  try {
+    resp = await fetch(MESSAGES_URL, {
+      method: 'POST',
+      headers: messagesHeaders(oauth.accessToken),
+      body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system: `${IDENTITY}\n\n${system}`, messages, stream: false }),
+    });
+  } catch (e) {
+    return { ok: false, error: `request failed: ${e.message}` };
+  }
+  if (resp.status === 401) return { ok: false, error: 'auth expired', status: 401 };
+  if (resp.status === 429) return { ok: false, error: 'rate-limited', status: 429 };
+  if (!resp.ok) {
+    let msg = `HTTP ${resp.status}`;
+    try { const j = await resp.json(); msg = j.error?.message || msg; } catch {}
+    return { ok: false, error: msg, status: resp.status };
+  }
+  const data = await resp.json();
+  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
+  return { ok: true, text, model: data.model || MODEL, inputTokens: data.usage?.input_tokens ?? null, outputTokens: data.usage?.output_tokens ?? null };
 }

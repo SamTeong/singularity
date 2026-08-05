@@ -59,6 +59,10 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     const msg = JSON.stringify({ t: 'crons', crons });
     for (const ws of sockets) send(ws, msg);
   });
+  reg.bus.on('history', (data) => {
+    const msg = JSON.stringify({ t: 'history', ...data });
+    for (const ws of sockets) send(ws, msg);
+  });
   reg.bus.on('background', (data) => {
     const msg = JSON.stringify({ t: 'background', ...data });
     for (const ws of sockets) send(ws, msg);
