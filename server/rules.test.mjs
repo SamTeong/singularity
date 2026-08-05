@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -77,9 +77,43 @@ test('writeRuleFile then readRuleFile round-trips', () => {
 
   const w = writeRuleFile(p, '# hello');
   assert.equal(w.ok, true);
+  assert.equal(typeof w.mtime, 'number');
   const r = readRuleFile(p);
   assert.equal(r.ok, true);
   assert.equal(r.content, '# hello');
+  assert.equal(typeof r.mtime, 'number');
+});
+
+test('readRuleFile reports mtime on success', () => {
+  const { root, dir } = mkRoot();
+  setRulesRoots([root]);
+  const p = join(dir, 'mt.md');
+  writeFileSync(p, 'body');
+  const r = readRuleFile(p);
+  assert.equal(r.ok, true);
+  assert.equal(typeof r.mtime, 'number');
+  assert.ok(r.mtime > 0);
+});
+
+test('writeRuleFile rejects a stale mtime with "changed on disk"; force overrides', () => {
+  const { root, dir } = mkRoot();
+  setRulesRoots([root]);
+  const p = join(dir, 'g.md');
+  writeRuleFile(p, 'v1');
+  const stale = readRuleFile(p).mtime;
+  // Externally rewrite + bump mtime past the 1ms guard window.
+  writeFileSync(p, 'v-external');
+  const future = (Date.now() + 5000) / 1000;
+  utimesSync(p, future, future);
+  const rejected = writeRuleFile(p, 'v2', stale);
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error, 'changed on disk');
+  assert.equal(readFileSync(p, 'utf8'), 'v-external');
+  // force overrides the drift.
+  const forced = writeRuleFile(p, 'v-forced', stale, true);
+  assert.equal(forced.ok, true);
+  assert.equal(typeof forced.mtime, 'number');
+  assert.equal(readFileSync(p, 'utf8'), 'v-forced');
 });
 
 test('findRuleReference pairs <stem>.md with <stem>-reference.md', () => {

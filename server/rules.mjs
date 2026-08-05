@@ -3,7 +3,7 @@
 // project (or home) dir; its .claude/rules tree is browsable/searchable/editable.
 // Model on wiki.mjs (recursive walk, resolveRoot, mtime line cache) + config.mjs
 // (roots persistence) + memory.mjs (write guard).
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, resolve, sep, normalize, basename } from 'node:path';
 import { homedir } from 'node:os';
@@ -133,13 +133,19 @@ export function isRulePath(p) {
 export function readRuleFile(p) {
   if (!isRulePath(p)) return { ok: false, error: 'path outside rule roots' };
   if (!existsSync(p)) return { ok: false, error: 'not found' };
-  try { return { ok: true, content: readFileSync(p, 'utf8') }; }
+  try { return { ok: true, content: readFileSync(p, 'utf8'), mtime: statSync(p).mtimeMs }; }
   catch (e) { return { ok: false, error: e.message }; }
 }
 
-export function writeRuleFile(p, content) {
+export function writeRuleFile(p, content, mtime, force) {
   if (!isRulePath(p)) return { ok: false, error: 'path outside rule roots' };
-  try { writeFileSync(p, content); return { ok: true }; }
+  try {
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    writeFileSync(p, content);
+    return { ok: true, mtime: statSync(p).mtimeMs };
+  }
   catch (e) { return { ok: false, error: e.message }; }
 }
 

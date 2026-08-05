@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 
@@ -111,4 +111,52 @@ test('hook roots persist to FS: default ~, dedup, roundtrip', () => {
   assert.equal(r.ok, true);
   assert.deepEqual(r.roots, ['~', '/a', '/b']); // deduped, non-strings dropped
   assert.deepEqual(getHookRoots(), ['~', '/a', '/b']); // read back from disk
+});
+
+// mtime + 409 guard: readHook reports mtime; writeHook rejects stale mtime,
+// force overrides. Mirror explorer.mjs writeEntry contract.
+test('readHook returns mtime as a number', () => {
+  const cwd = makeRoot({ 'm.mjs': 'v1' });
+  setHookRoots(['~', cwd]);
+  try {
+    const p = join(cwd, '.claude', 'hooks', 'm.mjs');
+    const r = readHook(p);
+    assert.equal(r.exists, true);
+    assert.equal(typeof r.mtime, 'number');
+    assert.ok(r.mtime > 0);
+    // Missing file → mtime 0.
+    const miss = readHook(join(cwd, '.claude', 'hooks', 'nope.mjs'));
+    assert.equal(miss.exists, false);
+    assert.equal(miss.mtime, 0);
+  } finally {
+    setHookRoots(['~']);
+  }
+});
+
+test('writeHook rejects a stale mtime with "changed on disk"; force overrides', () => {
+  const cwd = makeRoot({ 'g.mjs': 'v1' });
+  setHookRoots(['~', cwd]);
+  try {
+    const p = join(cwd, '.claude', 'hooks', 'g.mjs');
+    // First write establishes a baseline mtime.
+    writeHook(p, 'v2');
+    const r = readHook(p);
+    const stale = r.mtime;
+    // Externally rewrite the file + bump mtime well past the 1ms guard window.
+    writeFileSync(p, 'v-external');
+    const future = (Date.now() + 5000) / 1000;
+    utimesSync(p, future, future);
+    // Stale mtime → refused, file untouched, no backup made.
+    const rejected = writeHook(p, 'v3', stale);
+    assert.equal(rejected.ok, false);
+    assert.equal(rejected.error, 'changed on disk');
+    assert.equal(readFileSync(p, 'utf8'), 'v-external');
+    // force:true overwrites despite the drift.
+    const forced = writeHook(p, 'v-forced', stale, true);
+    assert.equal(forced.ok, true);
+    assert.equal(typeof forced.mtime, 'number');
+    assert.equal(readFileSync(p, 'utf8'), 'v-forced');
+  } finally {
+    setHookRoots(['~']);
+  }
 });

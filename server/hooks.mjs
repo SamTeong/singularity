@@ -5,7 +5,7 @@
 // (resolve-then-containment against known roots), not a bare path-segment check
 // (which can't stop a write to ANY */.claude/hooks/ on the machine — hooks are
 // auto-executed by Claude). Roots are an independent FS-persisted list under STATE_DIR.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, sep, resolve, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
@@ -85,18 +85,21 @@ export function readHook(path) {
   const abs = guard(path);
   if (!abs) return { path, exists: false, error: 'bad path' };
   const exists = existsSync(abs);
-  return { path: abs, exists, content: exists ? readFileSync(abs, 'utf8') : '' };
+  return { path: abs, exists, content: exists ? readFileSync(abs, 'utf8') : '', mtime: exists ? statSync(abs).mtimeMs : 0 };
 }
 
 // Write raw content back with a backup (mirror writeConfig). No JSON
 // validation — hook files are scripts, not JSON.
-export function writeHook(path, content) {
+export function writeHook(path, content, mtime, force) {
   const abs = guard(path);
   if (!abs) return { ok: false, error: 'bad path' };
   try {
+    if (mtime != null && !force && existsSync(abs) && Math.abs(statSync(abs).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
     const backup = backupFile(abs);
     writeFileSync(abs, content);
-    return { ok: true, backup, path: abs };
+    return { ok: true, backup, path: abs, mtime: statSync(abs).mtimeMs };
   } catch (e) {
     return { ok: false, error: e.message };
   }

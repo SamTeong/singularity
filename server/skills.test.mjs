@@ -6,7 +6,7 @@
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
@@ -182,4 +182,53 @@ test('setSkillsRoots: dedups and caps at 50', () => {
 test('setSkillsRoots: bad input (non-array) reports ok:false', () => {
   assert.equal(setSkillsRoots('not-an-array').ok, false);
   assert.equal(setSkillsRoots(null).ok, false);
+});
+
+test('readSkill + readSkillFile report mtime as a number', () => {
+  const r = readSkill(root, 'coding', 'freeze');
+  assert.ok(r.ok);
+  assert.equal(typeof r.mtime, 'number');
+  assert.ok(r.mtime > 0);
+  const f = readSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs');
+  assert.ok(f.ok);
+  assert.equal(typeof f.mtime, 'number');
+  assert.ok(f.mtime > 0);
+});
+
+test('writeSkill rejects a stale mtime with "changed on disk"; force overrides', () => {
+  const skillPath = join(root, 'coding', '.claude', 'skills', 'noisy', 'SKILL.md');
+  writeSkill(root, 'coding', 'noisy', 'v1');
+  const stale = readSkill(root, 'coding', 'noisy').mtime;
+  // Externally rewrite + bump mtime past the 1ms guard window.
+  writeFileSync(skillPath, 'v-external');
+  const future = (Date.now() + 5000) / 1000;
+  utimesSync(skillPath, future, future);
+  const rejected = writeSkill(root, 'coding', 'noisy', 'v2', false, stale);
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error, 'changed on disk');
+  assert.equal(readFileSync(skillPath, 'utf8'), 'v-external');
+  // force overrides the drift.
+  const forced = writeSkill(root, 'coding', 'noisy', 'v-forced', false, stale, true);
+  assert.equal(forced.ok, true);
+  assert.equal(typeof forced.mtime, 'number');
+  assert.equal(readFileSync(skillPath, 'utf8'), 'v-forced');
+});
+
+test('writeSkillFile rejects a stale mtime with "changed on disk"; force overrides', () => {
+  const fp = join(root, 'coding', '.claude', 'skills', 'freeze', 'scripts', 'run.mjs');
+  writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v1');
+  const stale = readSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs').mtime;
+  // Externally rewrite + bump mtime past the 1ms guard window.
+  writeFileSync(fp, 'v-external');
+  const future = (Date.now() + 5000) / 1000;
+  utimesSync(fp, future, future);
+  const rejected = writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v2', false, stale);
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error, 'changed on disk');
+  assert.equal(readFileSync(fp, 'utf8'), 'v-external');
+  // force overrides the drift.
+  const forced = writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v-forced', false, stale, true);
+  assert.equal(forced.ok, true);
+  assert.equal(typeof forced.mtime, 'number');
+  assert.equal(readFileSync(fp, 'utf8'), 'v-forced');
 });

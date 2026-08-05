@@ -30,6 +30,8 @@ import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
+import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 
 // Skills viewer: tree of roots → scopes → skills (left), editable SKILL.md +
 // supporting files (right) via CodeMirror. Each root's layout (grouped vs flat)
@@ -56,11 +58,12 @@ export default function SkillsPanel() {
   const [file, setFile] = useState(null); // { path, name, type, error } — null = SKILL.md
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [mtime, setMtime] = useState(null);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState(null);
 
-  const discardIfDirty = () => !dirty || window.confirm('Discard unsaved changes?');
+  const { ensureSaved, dialogEl } = useDirtyGuard();
 
   // Fetch each root's skills independently — one root's slow/failed fetch
   // doesn't block the others.
@@ -94,29 +97,29 @@ export default function SkillsPanel() {
     return n;
   });
 
-  const open = (rootPath, scopeName, skillName, flatVal) => {
+  const open = async (rootPath, scopeName, skillName, flatVal) => {
     if (sel?.root === rootPath && sel?.scope === scopeName && sel?.skill === skillName && !file) return;
-    if (!discardIfDirty()) return;
+    if (!await ensureSaved({ dirty, save })) return;
     setSel({ root: rootPath, scope: scopeName, skill: skillName, flat: flatVal });
-    setFile(null); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false);
+    setFile(null); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false); setMtime(null);
     fetch(`/skill?root=${encodeURIComponent(untildify(rootPath))}&scope=${encodeURIComponent(scopeName)}&skill=${encodeURIComponent(skillName)}&flat=${flatVal ? '1' : '0'}`).then((r) => r.json()).then((d) => {
       if (!d.ok) { setErr(d.error || 'failed to load skill'); }
-      else { setContent(d.raw || ''); setDirty(false); }
+      else { setContent(d.raw || ''); setDirty(false); setMtime(d.mtime ?? null); }
     }).catch(() => setErr('failed to load skill')).finally(() => setLoading(false));
   };
 
   // Open a supporting file inside the currently-selected skill. Reuses the
   // /skill endpoint with a `file` query (same prefix → already proxied).
-  const openFile = (relPath) => {
+  const openFile = async (relPath) => {
     if (!sel) return;
     if (file?.path === relPath) return;
-    if (!discardIfDirty()) return;
+    if (!await ensureSaved({ dirty, save })) return;
     const name = relPath.split('/').pop();
-    setFile({ path: relPath, name }); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false);
+    setFile({ path: relPath, name }); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false); setMtime(null);
     const u = `/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}&file=${encodeURIComponent(relPath)}`;
     fetch(u).then((r) => r.json()).then((d) => {
       if (!d.ok) { setFile({ path: relPath, name, error: d.error || 'failed to load file' }); setContent(''); }
-      else { setFile({ path: relPath, name: d.name || name, type: d.type }); setContent(d.content || ''); setDirty(false); }
+      else { setFile({ path: relPath, name: d.name || name, type: d.type }); setContent(d.content || ''); setDirty(false); setMtime(d.mtime ?? null); }
     }).catch(() => setFile({ path: relPath, name, error: 'failed to load file' }))
       .finally(() => setLoading(false));
   };
@@ -124,16 +127,37 @@ export default function SkillsPanel() {
   const onChange = (v) => { setContent(v); setDirty(true); };
 
   // Persist the current view (SKILL.md when no file selected, else the file).
-  const save = async () => {
+  const save = async (force = false) => {
     if (!sel) return;
     setMsg(null);
     const r = await fetch('/skill', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ root: untildify(sel.root), scope: sel.scope, skill: sel.skill, flat: sel.flat ? '1' : '0', file: file?.path || null, content }),
+      body: JSON.stringify({ root: untildify(sel.root), scope: sel.scope, skill: sel.skill, flat: sel.flat ? '1' : '0', file: file?.path || null, content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    if (r.error === 'changed on disk') {
+      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
+      return;
+    }
     setMsg(r.ok ? { sev: 'success', text: 'Saved' } : { sev: 'error', text: r.error });
-    if (r.ok) setDirty(false);
+    if (r.ok) { setDirty(false); if (r.mtime != null) setMtime(r.mtime); }
   };
+
+  // Replay the current selection: SKILL.md (no file) or a supporting file.
+  useRefreshOnFocus({
+    enabled: !!sel,
+    mtime,
+    dirty,
+    refetch: async () => {
+      let u = `/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}`;
+      if (file?.path) u += `&file=${encodeURIComponent(file.path)}`;
+      const d = await fetch(u).then((r) => r.json()).catch(() => ({ ok: false }));
+      const c = file?.path ? (d.content ?? '') : (d.raw ?? '');
+      return { ok: !!d.ok, mtime: d.mtime ?? null, content: c };
+    },
+    onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },
+    onWarn: () => setMsg({ sev: 'error', text: 'Changed on disk — saving will ask before overwriting' }),
+  });
 
   // Client-side filter — a root whose own path matches keeps all its scopes;
   // otherwise only scopes/skills (name + description) that match.
@@ -298,7 +322,7 @@ export default function SkillsPanel() {
               <>
                 {' · '}
                 <Box component="span" sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
-                  onClick={() => { if (discardIfDirty()) setFile(null); }}>SKILL.md</Box>
+                  onClick={async () => { if (await ensureSaved({ dirty, save })) { setFile(null); setMtime(null); } }}>SKILL.md</Box>
                 {' / '}{file.name}
               </>
             )}
@@ -324,6 +348,7 @@ export default function SkillsPanel() {
       </Stack>
 
       {picking && <DirPicker start={untildify(roots[roots.length - 1] || '~')} onPick={pickRoot} onClose={() => setPicking(false)} />}
+      {dialogEl}
     </Box>
   );
 }

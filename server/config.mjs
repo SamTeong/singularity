@@ -1,7 +1,7 @@
 // Config editor backend: resolve the 3 settings.json scopes for a cwd,
 // read them, and write with a backup (backups.mjs) + JSON validation. Paths
 // are derived server-side from (cwd, scope) — the client never supplies a path.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
@@ -37,7 +37,7 @@ export function readConfig(cwd) {
   for (const scope of EDIT_SCOPES) {
     const p = paths[scope];
     const exists = existsSync(p);
-    out[scope] = { path: p, exists, content: exists ? readFileSync(p, 'utf8') : '' };
+    out[scope] = { path: p, exists, content: exists ? readFileSync(p, 'utf8') : '', mtime: exists ? statSync(p).mtimeMs : 0 };
   }
   return out;
 }
@@ -132,17 +132,20 @@ function isKnownConfigRoot(cwd) {
   });
 }
 
-export function writeConfig(cwd, scope, content) {
+export function writeConfig(cwd, scope, content, mtime, force) {
   if (!EDIT_SCOPES.includes(scope)) return { ok: false, error: 'bad scope' };
   if (!isKnownConfigRoot(cwd)) return { ok: false, error: 'cwd outside config roots' };
   const paths = scopePaths(cwd);
   const p = paths[scope];
   try { JSON.parse(content); } catch (e) { return { ok: false, error: `invalid JSON: ${e.message}` }; }
   try {
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
     const backup = backupFile(p);
     if (!backup) mkdirSync(dirname(p), { recursive: true }); // first write of a project scope
     writeFileSync(p, content);
-    return { ok: true, backup, path: p };
+    return { ok: true, backup, path: p, mtime: statSync(p).mtimeMs };
   } catch (e) {
     return { ok: false, error: e.message };
   }

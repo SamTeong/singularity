@@ -98,12 +98,18 @@ export function searchMemory(q, rootRaw) {
 export function readMemoryFile(p, rootRaw) {
   if (!isMemoryPath(p, rootRaw)) return { ok: false, error: 'path outside memory dirs' };
   if (!existsSync(p)) return { ok: false, error: 'not found' };
-  try { return { ok: true, content: readFileSync(p, 'utf8') }; }
+  try { return { ok: true, content: readFileSync(p, 'utf8'), mtime: statSync(p).mtimeMs }; }
   catch (e) { return { ok: false, error: e.message }; }
 }
 
-export function writeMemoryFile(p, content, rootRaw) {
+export function writeMemoryFile(p, content, rootRaw, mtime, force) {
   if (!isMemoryPath(p, rootRaw)) return { ok: false, error: 'path outside memory dirs' };
-  try { writeFileSync(p, content); return { ok: true }; }
+  try {
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    writeFileSync(p, content);
+    return { ok: true, mtime: statSync(p).mtimeMs };
+  }
   catch (e) { return { ok: false, error: e.message }; }
 }

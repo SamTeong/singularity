@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -121,4 +121,35 @@ test('readConfig rejects cwd outside config roots', () => {
   // Path should still be present but file is marked non-existent
   assert.ok(result.project.path);
   assert.ok(result.user.path);
+  // mtime: 0 for non-existent/outside scopes
+  assert.equal(result.project.mtime, 0);
+  assert.equal(result.user.mtime, 0);
+});
+
+test('readConfig reports mtime on existing scopes', () => {
+  const cwd = makeRoot('model = "x"\n');
+  setConfigRoots([cwd]);
+  const cfg = readConfig(cwd);
+  assert.equal(typeof cfg.project.mtime, 'number');
+  assert.ok(cfg.project.mtime > 0);
+});
+
+test('writeConfig rejects a stale mtime with "changed on disk"; force overrides', () => {
+  const cwd = makeRoot('model = "x"\n');
+  setConfigRoots([cwd]);
+  const p = join(cwd, '.codex', 'config.toml');
+  const stale = readConfig(cwd).project.mtime;
+  // Externally rewrite + bump mtime past the 1ms guard window.
+  writeFileSync(p, 'model = "ext"\n');
+  const future = (Date.now() + 5000) / 1000;
+  utimesSync(p, future, future);
+  const rejected = writeConfig(cwd, 'project', 'model = "y"\n', stale);
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error, 'changed on disk');
+  assert.equal(readFileSync(p, 'utf8'), 'model = "ext"\n'); // untouched
+  // force overrides the drift.
+  const forced = writeConfig(cwd, 'project', 'model = "forced"\n', stale, true);
+  assert.equal(forced.ok, true);
+  assert.equal(typeof forced.mtime, 'number');
+  assert.equal(readFileSync(p, 'utf8'), 'model = "forced"\n');
 });

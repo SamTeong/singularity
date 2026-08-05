@@ -4,7 +4,7 @@
 //   flat    — <root>/<skill>/SKILL.md                        (a .claude/skills dir)
 // All paths server-derived from (root, scope, skill) + layout flag; the client
 // never supplies a path. Roots persist on the daemon FS (survives cache clear).
-import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
@@ -167,7 +167,7 @@ export function readSkill(root, scope, skill, flat) {
   try {
     const src = readFileSync(p, 'utf8');
     const parsed = parseSkill(src);
-    return { ok: true, path: p, name: parsed.name, description: parsed.description, triggers: parsed.triggers, body: parsed.body, raw: src };
+    return { ok: true, path: p, name: parsed.name, description: parsed.description, triggers: parsed.triggers, body: parsed.body, raw: src, mtime: statSync(p).mtimeMs };
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
@@ -178,14 +178,20 @@ function skillBaseDir(root, scope, skill, flat) {
 }
 
 // Write a skill's SKILL.md (raw content, frontmatter preserved as edited).
-export function writeSkill(root, scope, skill, content, flat) {
+export function writeSkill(root, scope, skill, content, flat, mtime, force) {
   root = root || (getSkillsRoots()[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
   if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };
   if (typeof content !== 'string') return { ok: false, error: 'bad content' };
   const p = flat ? join(root, skill, 'SKILL.md') : join(root, scope, '.claude', 'skills', skill, 'SKILL.md');
-  try { writeFileSync(p, content); return { ok: true }; }
+  try {
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    writeFileSync(p, content);
+    return { ok: true, mtime: statSync(p).mtimeMs };
+  }
   catch (e) { return { ok: false, error: e.message }; }
 }
 
@@ -208,14 +214,14 @@ export function readSkillFile(root, scope, skill, file, flat) {
   if (!existsSync(p)) return { ok: false, error: 'not found' };
   const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
   const type = EXT_TYPE(ext);
-  if (type === 'image') return { ok: true, type, name: basename(p), path: p };
-  try { return { ok: true, type, name: basename(p), path: p, content: readFileSync(p, 'utf8') }; }
+  if (type === 'image') return { ok: true, type, name: basename(p), path: p, mtime: statSync(p).mtimeMs };
+  try { return { ok: true, type, name: basename(p), path: p, content: readFileSync(p, 'utf8'), mtime: statSync(p).mtimeMs }; }
   catch (e) { return { ok: false, error: e.message }; }
 }
 
 // Write a supporting file inside a skill dir. Same validation as readSkillFile;
 // image type is not writable (binary). Server-derived path, segment-validated.
-export function writeSkillFile(root, scope, skill, file, content, flat) {
+export function writeSkillFile(root, scope, skill, file, content, flat, mtime, force) {
   root = root || (getSkillsRoots()[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
@@ -227,6 +233,12 @@ export function writeSkillFile(root, scope, skill, file, content, flat) {
   const p = join(skillBaseDir(root, scope, skill, flat), ...segs);
   const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
   if (IMG_EXT.has(ext)) return { ok: false, error: 'cannot edit image' };
-  try { writeFileSync(p, content); return { ok: true }; }
+  try {
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    writeFileSync(p, content);
+    return { ok: true, mtime: statSync(p).mtimeMs };
+  }
   catch (e) { return { ok: false, error: e.message }; }
 }

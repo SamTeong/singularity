@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 
 // memory.mjs imports app-dir.mjs (STATE_DIR), which throws without SINGULARITY_HOME.
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
@@ -66,9 +66,38 @@ test('readMemoryFile reads a file within the root, rejects outside it', () => {
 
 test('writeMemoryFile writes within the root, rejects outside it', () => {
   const p = mem('proj', 'memory', 'a-fact.md');
-  assert.deepEqual(writeMemoryFile(p, 'updated content', ROOT), { ok: true });
+  const w = writeMemoryFile(p, 'updated content', ROOT);
+  assert.equal(w.ok, true);
+  assert.equal(typeof w.mtime, 'number');
   assert.equal(readMemoryFile(p, ROOT).content, 'updated content');
 
   const outside = writeMemoryFile(join(homedir(), 'evil.md'), 'x', ROOT);
   assert.equal(outside.ok, false);
+});
+
+test('readMemoryFile reports mtime on success', () => {
+  const p = mem('proj', 'memory', 'a-fact.md');
+  const r = readMemoryFile(p, ROOT);
+  assert.equal(r.ok, true);
+  assert.equal(typeof r.mtime, 'number');
+  assert.ok(r.mtime > 0);
+});
+
+test('writeMemoryFile rejects a stale mtime with "changed on disk"; force overrides', () => {
+  const p = mem('proj', 'memory', 'g-fact.md');
+  writeFileSync(p, 'v1');
+  const stale = readMemoryFile(p, ROOT).mtime;
+  // Externally rewrite + bump mtime past the 1ms guard window.
+  writeFileSync(p, 'v-external');
+  const future = (Date.now() + 5000) / 1000;
+  utimesSync(p, future, future);
+  const rejected = writeMemoryFile(p, 'v2', ROOT, stale);
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.error, 'changed on disk');
+  assert.equal(readFileSync(p, 'utf8'), 'v-external');
+  // force overrides the drift.
+  const forced = writeMemoryFile(p, 'v-forced', ROOT, stale, true);
+  assert.equal(forced.ok, true);
+  assert.equal(typeof forced.mtime, 'number');
+  assert.equal(readFileSync(p, 'utf8'), 'v-forced');
 });

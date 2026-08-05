@@ -21,6 +21,8 @@ import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
+import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 
 const CLAUDE_SCOPES = [
   { key: 'project', label: 'settings.json' },
@@ -36,6 +38,7 @@ export default function ConfigEditor() {
   const [scope, setScope] = useState('project');
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [mtime, setMtime] = useState(null);
   const [msg, setMsg] = useState(null);
   const [tool, setTool] = useState('claude'); // 'claude' | 'codex'
   const claudeRoots = useRootList('/config', { initial: ['~'] });
@@ -44,6 +47,7 @@ export default function ConfigEditor() {
   const [q, setQ] = useState('');
   const [searchResults, setSearchResults] = useState(null); // content-search hits, raw
   const results = q.trim() ? searchResults : null; // null = show config list
+  const { ensureSaved, dialogEl } = useDirtyGuard();
 
   const base = tool === 'codex' ? '/codex-config' : '/config';
   // Codex has no scope tabs: one config.toml per root. `~` (home) → user-level
@@ -58,11 +62,15 @@ export default function ConfigEditor() {
       setData(d);
       setLoadedCwd(full);
       setContent(d[effScope]?.content ?? '');
+      setMtime(d[effScope]?.mtime ?? null);
       setDirty(false); setMsg(null);
       remember([full]);
     }).catch((e) => setMsg({ sev: 'error', text: String(e) })).finally(() => setLoading(false));
   };
-  useEffect(() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; load(); /* eslint-disable-line */ }, [cwd, tool]);
+  useEffect(() => {
+    (async () => { if (!await ensureSaved({ dirty, save })) return; load(); })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- guard + load close over cwd/tool state
+  }, [cwd, tool]);
 
   // Debounced content search across config roots' settings files (empty q → config list,
   // derived above rather than reset here).
@@ -82,23 +90,24 @@ export default function ConfigEditor() {
   // an effect keyed on [scope, data].
   const changeScope = (v) => {
     setScope(v);
-    if (data) { setContent(data[v]?.content ?? ''); setDirty(false); setMsg(null); }
+    if (data) { setContent(data[v]?.content ?? ''); setMtime(data[v]?.mtime ?? null); setDirty(false); setMsg(null); }
   };
 
-  const openResult = (it) => {
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
+  const openResult = async (it) => {
+    if (!await ensureSaved({ dirty, save })) return;
     changeScope(it.scope);
     setCwd(it.cwd);
   };
 
-  const changeTool = (next) => {
+  const changeTool = async (next) => {
     if (next === tool) return;
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
+    if (!await ensureSaved({ dirty, save })) return;
     setTool(next);
     setScope('project');
     setData(null);
     setLoadedCwd(null);
     setContent('');
+    setMtime(null);
     setDirty(false);
     setMsg(null);
   };
@@ -113,17 +122,51 @@ export default function ConfigEditor() {
 
   const onChange = (v) => { setContent(v); setDirty(true); };
 
-  const save = async () => {
+  const save = async (force = false) => {
     const r = await fetch(`${base}/${effScope}`, {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ cwd: loadedCwd, content }),
+      body: JSON.stringify({ cwd: loadedCwd, content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
-    if (r.ok) { setMsg({ sev: 'success', text: `Saved${r.backup ? ' (backup made)' : ''}` }); setDirty(false); load(); }
+    if (r.error === 'changed on disk') {
+      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
+      return;
+    }
+    if (r.ok) {
+      setMsg({ sev: 'success', text: `Saved${r.backup ? ' (backup made)' : ''}` });
+      setDirty(false);
+      if (r.mtime != null) setMtime(r.mtime);
+      // In-place refresh of the saved scope's entry — NOT load(). load() fires a
+      // fetch whose .then runs setContent(d[effScope].content) with effScope from
+      // THIS render (pre-scope-change). On a save-then-switch-scope flow that
+      // resolves AFTER changeScope set the new scope's content, clobbering it
+      // back to the saved scope. The race leaves the editor showing the saved
+      // file's content under the new scope's tab. Update data[effScope] directly
+      // so later scope switches read fresh content without a racing fetch.
+      setData((d) => d ? { ...d, [effScope]: { ...d[effScope], content, mtime: r.mtime ?? d[effScope]?.mtime, exists: true } } : d);
+    }
     else setMsg({ sev: 'error', text: r.error || 'save failed' });
   };
 
-  const pick = (p) => {
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
+  // mtime tracks the currently visible scope (effScope). Re-read the whole
+  // config response and pull the effScope entry — a tool/scope switch re-runs
+  // load() which resets mtime, so the refetched mtime lines up.
+  useRefreshOnFocus({
+    enabled: !!loadedCwd,
+    mtime,
+    dirty,
+    refetch: async () => {
+      const d = await fetch(`${base}?cwd=${encodeURIComponent(loadedCwd)}`).then((r) => r.json()).catch(() => ({ ok: false }));
+      const s = d?.[effScope];
+      return { ok: !!s, mtime: s?.mtime ?? null, content: s?.content ?? '' };
+    },
+    onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },
+    onWarn: () => setMsg({ sev: 'error', text: 'Changed on disk — saving will ask before overwriting' }),
+  });
+
+  const pick = async (p) => {
+    if (!await ensureSaved({ dirty, save })) return;
+    setDirty(false);
     setCwd(p); setPicking(false);
     // Recursively find nested roots (e.g. ~/wiki/sub/.claude/settings.json) and
     // fold them into the config list so they become pickable.
@@ -145,7 +188,7 @@ export default function ConfigEditor() {
               searchPlaceholder="Search config…"
               searchValue={q}
               onSearchChange={setQ}
-              onPickFolder={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}
+              onPickFolder={async () => { if (!await ensureSaved({ dirty, save })) return; setPicking(true); }}
               onCollapse={collapse}
             />
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
@@ -163,7 +206,7 @@ export default function ConfigEditor() {
               ) : (
                 <>
                   {shownRoots.map((p) => (
-                    <ListItemButton key={p} selected={p === loadedCwd} onClick={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setCwd(p); }}
+                    <ListItemButton key={p} selected={p === loadedCwd} onClick={async () => { if (!await ensureSaved({ dirty, save })) return; setDirty(false); setCwd(p); }}
                       sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
                       <ListItemText primary={tildify(p)} slotProps={{ primary: { noWrap: true, title: p, sx: { fontFamily: 'monospace', fontSize: 12 } } }} />
                       <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
@@ -187,7 +230,7 @@ export default function ConfigEditor() {
           <ToggleButton value="codex">Codex</ToggleButton>
         </ToggleButtonGroup>
         {tool === 'claude' && (
-          <Tabs value={scope} onChange={(_, v) => { if (dirty && !window.confirm('Discard unsaved changes?')) return; changeScope(v); }} variant="fullWidth">
+          <Tabs value={scope} onChange={async (_, v) => { if (!await ensureSaved({ dirty, save })) return; changeScope(v); }} variant="fullWidth">
             {CLAUDE_SCOPES.map((s) => <Tab key={s.key} value={s.key} label={s.label} />)}
           </Tabs>
         )}
@@ -197,12 +240,19 @@ export default function ConfigEditor() {
         </Typography>
         {picking && <DirPicker start={untildify(cwd)} onPick={pick} onClose={() => setPicking(false)} />}
 
-        <CmEditor value={content} onChange={onChange} extensions={tool === 'codex' ? [] : [json()]} />
+        {/* key={loadedCwd:effScope}: @uiw's typing latch defers a `value` change
+            that lands right after the user was typing — on a dirty "save then
+            switch scope" the deferred local-scope content never applies, so the
+            editor keeps showing the prior scope. Remount on the visible file
+            so the new content becomes the initial doc, sidestepping the latch
+            (same fix as HooksEditor's key={path}). */}
+        <CmEditor key={`${loadedCwd}:${effScope}`} value={content} onChange={onChange} extensions={tool === 'codex' ? [] : [json()]} />
 
         <SaveBar msg={validationError ? null : msg} disabled={!dirty || !!validationError} onSave={save}>
           {validationError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>This isn't valid JSON: {validationError}</Typography>}
         </SaveBar>
       </Stack>
+      {dialogEl}
     </Box>
   );
 }

@@ -24,6 +24,8 @@ import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
+import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 
 // Language extension per file extension: JS family → javascript(), .json → json(),
 // everything else (.ps1/.sh/…) → plain (no lang extension).
@@ -41,11 +43,13 @@ export default function HooksEditor() {
   const [path, setPath] = useState(null); // selected file path
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [mtime, setMtime] = useState(null);
   const [msg, setMsg] = useState(null);
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null); // content-search hits
   // null when q is empty (browse the file list), the last fetched hits otherwise.
   const showResults = q.trim() ? results : null;
+  const { ensureSaved, dialogEl } = useDirtyGuard();
 
   // Fetch grouped hook files whenever the root list changes.
   useEffect(() => {
@@ -88,11 +92,12 @@ export default function HooksEditor() {
     return [...m.values()].sort((a, b) => normKey(a.cwd).localeCompare(normKey(b.cwd)));
   }, [showResults]);
 
-  const loadFile = (p) => {
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
+  const loadFile = async (p) => {
+    if (!await ensureSaved({ dirty, save })) return;
     fetch(`/hooks/file?path=${encodeURIComponent(p)}`).then((r) => r.json()).then((d) => {
       setPath(p);
       setContent(d.content ?? '');
+      setMtime(d.mtime ?? null);
       setDirty(false); setMsg(null);
     }).catch((e) => setMsg({ sev: 'error', text: String(e) }));
   };
@@ -123,17 +128,34 @@ export default function HooksEditor() {
   const allOpen = groupKeys.length > 0 && groupKeys.every((k) => !collapsed.has(k));
   const toggleAll = () => setCollapsed(allOpen ? new Set(groupKeys) : new Set());
 
-  const save = async () => {
+  const save = async (force = false) => {
     const r = await fetch('/hooks/file', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path, content }),
+      body: JSON.stringify({ path, content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
-    if (r.ok) { setMsg({ sev: 'success', text: `Saved${r.backup ? ' (backup made)' : ''}` }); setDirty(false); }
+    if (r.error === 'changed on disk') {
+      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
+      return;
+    }
+    if (r.ok) { setMsg({ sev: 'success', text: `Saved${r.backup ? ' (backup made)' : ''}` }); setDirty(false); if (r.mtime != null) setMtime(r.mtime); }
     else setMsg({ sev: 'error', text: r.error || 'save failed' });
   };
 
-  const pick = (p) => {
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
+  useRefreshOnFocus({
+    enabled: !!path,
+    mtime,
+    dirty,
+    refetch: async () => {
+      const d = await fetch(`/hooks/file?path=${encodeURIComponent(path)}`).then((r) => r.json()).catch(() => ({ ok: false }));
+      return { ok: !!d.ok, mtime: d.mtime ?? null, content: d.content ?? '' };
+    },
+    onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },
+    onWarn: () => setMsg({ sev: 'error', text: 'Changed on disk — saving will ask before overwriting' }),
+  });
+
+  const pick = async (p) => {
+    if (!await ensureSaved({ dirty, save })) return;
     setPicking(false);
     remember([p]);
   };
@@ -149,7 +171,7 @@ export default function HooksEditor() {
               onSearchChange={setQ}
               allOpen={allOpen}
               onToggleAll={toggleAll}
-              onPickFolder={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}
+              onPickFolder={async () => { if (!await ensureSaved({ dirty, save })) return; setPicking(true); }}
               onCollapse={collapse}
             />
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
@@ -208,6 +230,7 @@ export default function HooksEditor() {
         <SaveBar msg={msg} disabled={!dirty} onSave={save} />
       </DetailPane>
     </Stack>
+    {dialogEl}
     </Box>
   );
 }

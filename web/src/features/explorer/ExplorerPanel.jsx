@@ -24,6 +24,7 @@ import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
+import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
 import FileTree from './FileTree.jsx';
 import TabStrip from './TabStrip.jsx';
@@ -74,6 +75,7 @@ export default function ExplorerPanel() {
 
   const clearAutosaveTimer = () => { if (autosaveTimer.current) { clearTimeout(autosaveTimer.current.id); autosaveTimer.current = null; } };
   const rootAbs = untildify(root);
+  const { ensureSaved, dialogEl } = useDirtyGuard();
 
   const relist = (dir) => {
     fetch(`/fs/list?path=${encodeURIComponent(dir)}`).then((r) => r.json()).then((d) => {
@@ -224,11 +226,11 @@ export default function ExplorerPanel() {
     if (autosaveTimer.current?.path === path) clearAutosaveTimer();
   };
 
-  const closeTab = (path) => {
+  const closeTab = async (path) => {
     const tab = tabs.find((t) => t.path === path);
     if (tab?.dirty) {
       if (autosave) save(path); // flush instead of prompting
-      else if (!window.confirm('Discard unsaved changes?')) return;
+      else if (!await ensureSaved({ dirty: true, save: () => save(path) })) return;
     }
     removeTab(path);
   };
@@ -419,6 +421,8 @@ export default function ExplorerPanel() {
         {!menu?.node.isRoot && <MenuItem onClick={() => { const n = menu.node; setMenu(null); renameEntry(n); }}>Rename</MenuItem>}
         {!menu?.node.isRoot && <MenuItem onClick={() => { const n = menu.node; setMenu(null); deleteEntry(n); }}>Delete</MenuItem>}
       </Menu>
+
+      {dialogEl}
     </Box>
   );
 }

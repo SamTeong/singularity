@@ -19,6 +19,8 @@ import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
+import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 
 // Memory root persists across sessions on the daemon FS (survives browser cache
 // clear). Default ~/.claude/projects; loaded from /memory/root on mount.
@@ -34,10 +36,12 @@ export default function MemoryPanel() {
   const [sel, setSel] = useState(null); // {path, project, file}
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [mtime, setMtime] = useState(null);
   const [loadingFile, setLoadingFile] = useState(false);
   const [msg, setMsg] = useState(null);
   const onChange = (v) => { setContent(v); setDirty(true); };
   const [err, setErr] = useState(null);
+  const { ensureSaved, dialogEl } = useDirtyGuard();
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
   useEffect(() => {
@@ -58,24 +62,41 @@ export default function MemoryPanel() {
   // Debounced search-as-you-type (search() clears results when q is empty).
   useEffect(() => { const id = setTimeout(search, 250); return () => clearTimeout(id); }, [q, search]);
 
-  const open = (item) => {
+  const open = async (item) => {
     if (item.path === sel?.path) return;
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
-    setSel(item); setMsg(null); setLoadingFile(true);
+    if (!await ensureSaved({ dirty, save })) return;
+    setSel(item); setMsg(null); setLoadingFile(true); setMtime(null);
     fetch(`/memory/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
-      setContent(d.ok ? d.content : ''); setDirty(false);
+      setContent(d.ok ? d.content : ''); setDirty(false); setMtime(d.ok ? (d.mtime ?? null) : null);
       if (!d.ok) setMsg({ sev: 'error', text: d.error });
     }).finally(() => setLoadingFile(false));
   };
 
-  const save = async () => {
+  const save = async (force = false) => {
     const r = await fetch('/memory/file', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path: untildify(sel.path), content, root: untildify(root) }),
+      body: JSON.stringify({ path: untildify(sel.path), content, root: untildify(root), mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    if (r.error === 'changed on disk') {
+      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
+      return;
+    }
     setMsg(r.ok ? { sev: 'success', text: 'Saved' } : { sev: 'error', text: r.error });
-    if (r.ok) setDirty(false);
+    if (r.ok) { setDirty(false); if (r.mtime != null) setMtime(r.mtime); }
   };
+
+  useRefreshOnFocus({
+    enabled: !!sel,
+    mtime,
+    dirty,
+    refetch: async () => {
+      const d = await fetch(`/memory/file?path=${encodeURIComponent(untildify(sel.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).catch(() => ({ ok: false }));
+      return { ok: !!d.ok, mtime: d.mtime ?? null, content: d.content ?? '' };
+    },
+    onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },
+    onWarn: () => setMsg({ sev: 'error', text: 'Changed on disk — saving will ask before overwriting' }),
+  });
 
   const pickRoot = (p) => {
     setRoot(p); setPicking(false);
@@ -160,12 +181,13 @@ export default function MemoryPanel() {
           loading={loadingFile}
         >
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.path)}</Typography>
-          <CmEditor value={content} onChange={onChange} extensions={[markdown()]} />
+          <CmEditor key={sel?.path} value={content} onChange={onChange} extensions={[markdown()]} />
           <SaveBar msg={msg} disabled={!dirty} onSave={save} />
         </DetailPane>
       </Stack>
 
       {picking && <DirPicker start={untildify(root)} onPick={pickRoot} onClose={() => setPicking(false)} />}
+      {dialogEl}
     </Box>
   );
 }

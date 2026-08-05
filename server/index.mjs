@@ -405,10 +405,10 @@ app.post('/config/search', async (req) => {
   return { results: searchConfig(roots, q) };
 });
 app.put('/config/:scope', async (req, reply) => {
-  const { cwd, content } = req.body || {};
+  const { cwd, content, mtime, force } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
-  const r = writeConfig(cwd, req.params.scope, content);
-  if (!r.ok) reply.code(400);
+  const r = writeConfig(cwd, req.params.scope, content, mtime, force);
+  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
 
@@ -432,10 +432,10 @@ app.post('/codex-config/search', async (req) => {
   return { results: searchCodexConfig(roots, q) };
 });
 app.put('/codex-config/:scope', async (req, reply) => {
-  const { cwd, content } = req.body || {};
+  const { cwd, content, mtime, force } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
-  const r = writeCodexConfig(cwd, req.params.scope, content);
-  if (!r.ok) reply.code(400);
+  const r = writeCodexConfig(cwd, req.params.scope, content, mtime, force);
+  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
 
@@ -456,10 +456,10 @@ app.get('/hooks/file', async (req, reply) => {
   return r;
 });
 app.put('/hooks/file', async (req, reply) => {
-  const { path, content } = req.body || {};
+  const { path, content, mtime, force } = req.body || {};
   if (!path || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = writeHook(path, content);
-  if (!r.ok) reply.code(400);
+  const r = writeHook(path, content, mtime, force);
+  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
 
@@ -549,10 +549,10 @@ app.get('/memory/file', async (req, reply) => {
   return r;
 });
 app.put('/memory/file', async (req, reply) => {
-  const { path, content, root } = req.body || {};
+  const { path, content, root, mtime, force } = req.body || {};
   if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = writeMemoryFile(path, content, root);
-  if (!r.ok) reply.code(400);
+  const r = writeMemoryFile(path, content, root, mtime, force);
+  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
 
@@ -571,10 +571,10 @@ app.get('/rules/file', async (req, reply) => {
   return r;
 });
 app.put('/rules/file', async (req, reply) => {
-  const { path, content } = req.body || {};
+  const { path, content, mtime, force } = req.body || {};
   if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = writeRuleFile(path, content);
-  if (!r.ok) reply.code(400);
+  const r = writeRuleFile(path, content, mtime, force);
+  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
 // Companion <stem>-reference.md for a rule file (read-only, separate tree).
@@ -621,9 +621,9 @@ app.put('/skill', async (req, reply) => {
   const b = req.body || {};
   const flat = b.flat === true || b.flat === '1';
   const r = b.file
-    ? writeSkillFile(b.root, b.scope, b.skill, b.file, b.content, flat)
-    : writeSkill(b.root, b.scope, b.skill, b.content, flat);
-  if (!r.ok) reply.code(400);
+    ? writeSkillFile(b.root, b.scope, b.skill, b.file, b.content, flat, b.mtime, b.force)
+    : writeSkill(b.root, b.scope, b.skill, b.content, flat, b.mtime, b.force);
+  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
 

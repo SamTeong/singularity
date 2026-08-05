@@ -24,6 +24,8 @@ import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
+import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 
 export default function RulesPanel() {
   const { roots, shownRoots, remember, forget } = useRootList('/rules');
@@ -34,10 +36,12 @@ export default function RulesPanel() {
   const [sel, setSel] = useState(null); // {root, path, rel, file}
   const [content, setContent] = useState('');
   const [dirty, setDirty] = useState(false);
+  const [mtime, setMtime] = useState(null);
   const [loadingFile, setLoadingFile] = useState(false);
   const [picking, setPicking] = useState(false);
   const [msg, setMsg] = useState(null);
   const [ref, setRef] = useState(null); // {path, content} when viewing the companion reference (read-only)
+  const { ensureSaved, dialogEl } = useDirtyGuard();
 
   // Refresh the browse list whenever the root list changes. shownRoots (derived
   // from roots) is already empty when roots is, so files goes unused rather
@@ -64,12 +68,12 @@ export default function RulesPanel() {
     return () => clearTimeout(id);
   }, [q, roots]);
 
-  const open = (item) => {
+  const open = async (item) => {
     if (item.path === sel?.path) return;
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
-    setSel(item); setMsg(null); setLoadingFile(true); setRef(null);
+    if (!await ensureSaved({ dirty, save })) return;
+    setSel(item); setMsg(null); setLoadingFile(true); setRef(null); setMtime(null);
     fetch(`/rules/file?path=${encodeURIComponent(untildify(item.path))}`).then((r) => r.json()).then((d) => {
-      setContent(d.ok ? d.content : ''); setDirty(false);
+      setContent(d.ok ? d.content : ''); setDirty(false); setMtime(d.ok ? (d.mtime ?? null) : null);
       if (!d.ok) setMsg({ sev: 'error', text: d.error });
     }).finally(() => setLoadingFile(false));
   };
@@ -88,18 +92,37 @@ export default function RulesPanel() {
 
   const onChange = (v) => { setContent(v); setDirty(true); };
 
-  const save = async () => {
+  const save = async (force = false) => {
     const r = await fetch('/rules/file', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ path: untildify(sel.path), content }),
+      body: JSON.stringify({ path: untildify(sel.path), content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    if (r.error === 'changed on disk') {
+      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
+      return;
+    }
     setMsg(r.ok ? { sev: 'success', text: 'Saved' } : { sev: 'error', text: r.error });
-    if (r.ok) setDirty(false);
+    if (r.ok) { setDirty(false); if (r.mtime != null) setMtime(r.mtime); }
   };
 
+  // Only arm refresh-on-focus for the editable rule view — the companion
+  // reference (ref) is read-only and has no mtime/save path.
+  useRefreshOnFocus({
+    enabled: !!sel && !ref,
+    mtime,
+    dirty,
+    refetch: async () => {
+      const d = await fetch(`/rules/file?path=${encodeURIComponent(untildify(sel.path))}`).then((r) => r.json()).catch(() => ({ ok: false }));
+      return { ok: !!d.ok, mtime: d.mtime ?? null, content: d.content ?? '' };
+    },
+    onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },
+    onWarn: () => setMsg({ sev: 'error', text: 'Changed on disk — saving will ask before overwriting' }),
+  });
+
   // No /config/scan equivalent — a picked folder is added directly as a rule root.
-  const pick = (p) => {
-    if (dirty && !window.confirm('Discard unsaved changes?')) return;
+  const pick = async (p) => {
+    if (!await ensureSaved({ dirty, save })) return;
     setPicking(false);
     remember([untildify(p)]);
   };
@@ -146,7 +169,7 @@ export default function RulesPanel() {
               onSearchChange={setQ}
               allOpen={allOpen}
               onToggleAll={toggleAll}
-              onPickFolder={() => { if (dirty && !window.confirm('Discard unsaved changes?')) return; setPicking(true); }}
+              onPickFolder={async () => { if (!await ensureSaved({ dirty, save })) return; setPicking(true); }}
               onCollapse={collapse}
             />
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
@@ -212,6 +235,7 @@ export default function RulesPanel() {
             )}
           </Stack>
           <CmEditor
+            key={ref ? ref.path : sel?.path}
             value={ref ? ref.content : content}
             onChange={ref ? () => {} : onChange}
             extensions={ref ? [markdown(), EditorView.editable.of(false)] : [markdown()]}
@@ -220,6 +244,7 @@ export default function RulesPanel() {
           {!ref && <SaveBar msg={msg} disabled={!dirty} onSave={save} />}
         </DetailPane>
       </Stack>
+      {dialogEl}
     </Box>
   );
 }
