@@ -1,0 +1,1246 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Site Blueprint — AI Coding Tools</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Newsreader:ital,wght@1,400;1,500;1,600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0a0b;
+  --bg-2: #111114;
+  --bg-3: #16161a;
+  --bg-4: #1c1c22;
+  --border: #23232a;
+  --border-2: #2f2f38;
+  --text: #f4f4f5;
+  --muted: #a1a1aa;
+  --dim: #71717a;
+  --mint: #10B981;
+  --mint-light: #34d399;
+  --amber: #ffd166;
+  --red: #ef476f;
+  --violet: #8B5CF6;
+  --peach: #ff8c5a;
+  --blue: #4285F4;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+  background-image:
+    radial-gradient(ellipse 800px 600px at 20% 5%, rgba(139, 92, 246, 0.08), transparent),
+    radial-gradient(ellipse 700px 500px at 90% 30%, rgba(255, 140, 90, 0.05), transparent);
+  background-attachment: fixed;
+}
+
+.wrap {
+  max-width: 1060px;
+  margin: 0 auto;
+  padding: 64px 32px 96px;
+}
+
+/* ──────────────── HERO ──────────────── */
+.hero { padding: 64px 0 56px; border-bottom: 1px solid var(--border); margin-bottom: 80px; }
+.tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--peach);
+  background: rgba(255, 140, 90, 0.08);
+  border: 1px solid rgba(255, 140, 90, 0.25);
+  padding: 8px 16px;
+  border-radius: 100px;
+  margin-bottom: 32px;
+}
+.tag::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--peach); box-shadow: 0 0 12px var(--peach); animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+.hero h1 {
+  font-size: 64px;
+  font-weight: 800;
+  line-height: 1.05;
+  letter-spacing: -0.035em;
+  margin-bottom: 24px;
+  max-width: 920px;
+}
+.hero h1 em {
+  font-family: 'Newsreader', Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  background: linear-gradient(135deg, var(--peach), var(--amber));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.standfirst {
+  font-size: 22px;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 720px;
+  margin-bottom: 40px;
+}
+
+.meta-row { display: flex; flex-wrap: wrap; gap: 12px; }
+.meta-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--muted);
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  padding: 8px 14px;
+  border-radius: 8px;
+}
+.meta-pill img { width: 14px; height: 14px; }
+.meta-pill.mint { color: var(--mint-light); border-color: rgba(16, 185, 129, 0.3); background: rgba(16, 185, 129, 0.06); }
+
+/* ──────────────── SECTION HEADS ──────────────── */
+section { margin-bottom: 96px; }
+
+.section-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 16px;
+}
+.section-h2 {
+  font-size: 42px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin-bottom: 16px;
+}
+.section-h2 em {
+  font-family: 'Newsreader', Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  color: var(--peach);
+}
+.section-lede { font-size: 18px; color: var(--muted); max-width: 700px; margin-bottom: 40px; }
+
+/* ──────────────── LOGO GRID ──────────────── */
+.logo-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.logo-card {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 24px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.2s;
+}
+.logo-card:hover { border-color: var(--border-2); transform: translateY(-2px); }
+.logo-card img {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
+}
+.logo-card .name { font-size: 13px; font-weight: 600; color: var(--text); }
+.logo-card .url { font-family: 'JetBrains Mono', monospace; font-size: 10px; color: var(--dim); }
+.logo-card.dark-bg img { filter: brightness(0) invert(1); }
+
+.contrast-row {
+  margin-top: 24px;
+  padding: 16px 20px;
+  background: rgba(239, 71, 111, 0.04);
+  border: 1px solid rgba(239, 71, 111, 0.2);
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.contrast-row::before { content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
+.contrast-row .contrast-label { font-size: 14px; color: var(--muted); }
+.contrast-row strong { color: var(--text); font-weight: 600; }
+
+/* ──────────────── ARCHETYPE ──────────────── */
+.archetype-card {
+  background: linear-gradient(135deg, rgba(139, 92, 246, 0.06), rgba(16, 185, 129, 0.04));
+  border: 1px solid var(--border-2);
+  border-radius: 20px;
+  padding: 40px;
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 40px;
+  align-items: center;
+}
+.archetype-name {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--violet);
+  line-height: 1.6;
+  border-right: 1px solid var(--border-2);
+  padding-right: 32px;
+}
+.archetype-card p { font-size: 17px; color: var(--text); line-height: 1.6; }
+.archetype-card p em { font-family: 'Newsreader', serif; font-style: italic; color: var(--mint-light); font-weight: 500; }
+
+/* ──────────────── BLUEPRINT WIREFRAME ──────────────── */
+.blueprint {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 24px;
+  padding: 40px;
+  position: relative;
+}
+.bp-stack { display: flex; flex-direction: column; gap: 0; }
+.bp-block {
+  display: grid;
+  grid-template-columns: 56px 1fr 80px;
+  align-items: center;
+  gap: 24px;
+  padding: 20px 24px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 8px;
+  position: relative;
+  transition: all 0.2s;
+}
+.bp-block:hover { border-color: var(--border-2); background: var(--bg-4); }
+.bp-block .bp-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--peach);
+  text-align: center;
+}
+.bp-block .bp-body { display: flex; flex-direction: column; gap: 6px; }
+.bp-block .bp-name { font-size: 17px; font-weight: 700; color: var(--text); letter-spacing: -0.01em; }
+.bp-block .bp-hint { font-size: 13px; color: var(--muted); }
+.bp-block .bp-freq {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px;
+  font-weight: 700;
+  padding: 8px 12px;
+  border-radius: 8px;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+.bp-freq.full { color: var(--mint-light); background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); }
+.bp-freq.maj  { color: var(--amber); background: rgba(255, 209, 102, 0.08); border: 1px solid rgba(255, 209, 102, 0.25); }
+.bp-freq.split { color: var(--dim); background: var(--bg-4); border: 1px solid var(--border-2); }
+
+.bp-connector {
+  width: 2px;
+  height: 16px;
+  background: linear-gradient(180deg, var(--border-2), transparent);
+  margin: 0 auto;
+}
+
+.bp-legend {
+  display: flex;
+  gap: 24px;
+  justify-content: center;
+  margin-top: 32px;
+  padding-top: 32px;
+  border-top: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.bp-legend .legend-item { display: flex; align-items: center; gap: 8px; color: var(--muted); }
+.bp-legend .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+.bp-legend .legend-dot.mint { background: var(--mint-light); }
+.bp-legend .legend-dot.amber { background: var(--amber); }
+.bp-legend .legend-dot.dim { background: var(--dim); }
+
+/* ──────────────── BEAT CARDS ──────────────── */
+.beat-grid { display: flex; flex-direction: column; gap: 32px; }
+.beat {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 40px;
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 32px;
+}
+.beat-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 56px;
+  font-weight: 700;
+  color: var(--peach);
+  line-height: 1;
+  letter-spacing: -0.02em;
+}
+.beat-num small { display: block; font-size: 10px; color: var(--dim); letter-spacing: 0.2em; text-transform: uppercase; margin-top: 8px; font-weight: 500; }
+.beat-content { display: flex; flex-direction: column; gap: 24px; }
+
+.beat-head { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+.beat-head h3 { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; line-height: 1.2; }
+.beat-head .freq-badge {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+.freq-badge.full { color: var(--mint-light); background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); }
+.freq-badge.maj  { color: var(--amber); background: rgba(255, 209, 102, 0.08); border: 1px solid rgba(255, 209, 102, 0.25); }
+.freq-badge.split { color: var(--dim); background: var(--bg-4); border: 1px solid var(--border-2); }
+
+/* Mini wireframe inside beat */
+.mini-wf {
+  background: var(--bg-4);
+  border: 1px dashed var(--border-2);
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.mini-wf .wf-row { display: flex; gap: 8px; align-items: center; }
+.mini-wf .wf-box {
+  background: linear-gradient(135deg, #2a2a35, #1f1f28);
+  border: 1px solid var(--border-2);
+  border-radius: 4px;
+  height: 14px;
+}
+.mini-wf .wf-box.h1 { height: 28px; background: linear-gradient(135deg, #3a2a25, #2a1f1c); border-color: rgba(255, 140, 90, 0.3); }
+.mini-wf .wf-box.cta { background: linear-gradient(135deg, var(--peach), #d4663d); border: none; width: 120px; height: 32px; border-radius: 6px; box-shadow: 0 0 20px rgba(255, 140, 90, 0.3); }
+.mini-wf .wf-box.cta-2 { background: transparent; border: 1px solid var(--border-2); color: var(--muted); width: 100px; height: 32px; border-radius: 6px; }
+.mini-wf .wf-box.full { flex: 1; }
+.mini-wf .wf-box.half { width: 50%; }
+.mini-wf .wf-box.third { width: 33%; }
+.mini-wf .wf-box.tall { height: 80px; }
+.mini-wf .wf-logo { width: 40px; height: 14px; background: #2a2a35; border-radius: 3px; opacity: 0.5; }
+.mini-wf .wf-card { flex: 1; height: 80px; background: var(--bg-3); border: 1px solid var(--border); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.mini-wf .wf-card .wf-box { height: 8px; }
+.mini-wf .wf-label { font-family: 'JetBrains Mono', monospace; font-size: 9px; color: var(--dim); letter-spacing: 0.1em; text-transform: uppercase; padding-top: 4px; }
+
+/* Winners include block */
+.winners-block { background: rgba(16, 185, 129, 0.04); border: 1px solid rgba(16, 185, 129, 0.2); border-radius: 12px; padding: 20px 24px; }
+.winners-block .winners-head { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--mint-light); margin-bottom: 14px; font-weight: 600; }
+.winners-block ul { list-style: none; display: flex; flex-direction: column; gap: 10px; }
+.winners-block li { font-size: 15px; color: var(--text); padding-left: 20px; position: relative; line-height: 1.5; }
+.winners-block li::before { content: '✓'; position: absolute; left: 0; top: 0; color: var(--mint-light); font-weight: 700; }
+
+/* Real examples block */
+.examples-block { display: flex; flex-direction: column; gap: 10px; }
+.example-row {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 16px;
+  align-items: center;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 18px;
+}
+.example-row .ex-brand { display: flex; align-items: center; gap: 10px; }
+.example-row .ex-brand img { width: 20px; height: 20px; object-fit: contain; }
+.example-row .ex-brand.dark-bg img { filter: brightness(0) invert(1); }
+.example-row .ex-brand .ex-name { font-size: 13px; font-weight: 600; color: var(--muted); }
+.example-row .ex-headline {
+  font-family: 'Newsreader', Georgia, serif;
+  font-style: italic;
+  font-size: 17px;
+  color: var(--text);
+  line-height: 1.4;
+}
+.example-row .ex-headline::before { content: '"'; color: var(--dim); margin-right: 2px; }
+.example-row .ex-headline::after  { content: '"'; color: var(--dim); margin-left: 2px; }
+
+/* Winners vs losers one-liner */
+.vs-line {
+  display: grid;
+  grid-template-columns: 1fr 32px 1fr;
+  gap: 16px;
+  align-items: center;
+  padding: 18px 22px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.vs-line .vs-side { font-size: 14px; line-height: 1.5; }
+.vs-line .vs-side.winners { color: var(--text); }
+.vs-line .vs-side.winners strong { color: var(--mint-light); font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; display: block; margin-bottom: 4px; font-weight: 700; }
+.vs-line .vs-side.losers { color: var(--dim); }
+.vs-line .vs-side.losers strong { color: var(--red); font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; display: block; margin-bottom: 4px; font-weight: 700; }
+.vs-line .vs-arrow { text-align: center; color: var(--dim); font-family: 'JetBrains Mono', monospace; font-size: 18px; }
+
+/* ──────────────── PULL QUOTE ──────────────── */
+.pull-quote-section { text-align: center; padding: 32px 0; }
+.pull-quote {
+  font-family: 'Newsreader', Georgia, serif;
+  font-style: italic;
+  font-weight: 500;
+  font-size: 40px;
+  line-height: 1.3;
+  color: var(--text);
+  max-width: 880px;
+  margin: 0 auto;
+  position: relative;
+  padding: 24px 0;
+  letter-spacing: -0.015em;
+}
+.pull-quote .pq-mark {
+  font-family: 'Newsreader', serif;
+  font-size: 120px;
+  color: var(--peach);
+  opacity: 0.3;
+  line-height: 0;
+  position: absolute;
+  top: 32px;
+  left: -8px;
+}
+.pull-quote em { background: linear-gradient(135deg, var(--peach), var(--amber)); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+
+/* ──────────────── LOSERS SECTION ──────────────── */
+.losers-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+.loser-card {
+  background: rgba(239, 71, 111, 0.04);
+  border: 1px solid rgba(239, 71, 111, 0.25);
+  border-radius: 14px;
+  padding: 22px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.loser-card .loser-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--red);
+  font-weight: 700;
+}
+.loser-card .loser-title { font-size: 17px; font-weight: 700; color: var(--text); }
+.loser-card .loser-detail { font-size: 14px; color: var(--muted); line-height: 1.5; }
+
+/* ──────────────── MONDAY CHECKLIST ──────────────── */
+.checklist-box {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.06), rgba(139, 92, 246, 0.04));
+  border: 1px solid var(--border-2);
+  border-radius: 20px;
+  padding: 40px;
+}
+.checklist {
+  list-style: none;
+  counter-reset: cl;
+}
+.checklist li {
+  counter-increment: cl;
+  padding: 16px 0 16px 56px;
+  position: relative;
+  border-bottom: 1px solid var(--border);
+  font-size: 16px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.checklist li:last-child { border-bottom: none; }
+.checklist li::before {
+  content: counter(cl, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.35);
+  color: var(--mint-light);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  letter-spacing: 0.02em;
+}
+.checklist li strong { color: var(--mint-light); font-weight: 600; }
+
+/* ──────────────── OUTRO ──────────────── */
+.outro {
+  text-align: center;
+  padding: 56px 0 0;
+  border-top: 1px solid var(--border);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--dim);
+  letter-spacing: 0.08em;
+  line-height: 1.8;
+}
+.outro img { width: 14px; height: 14px; vertical-align: middle; margin: 0 6px; }
+.outro .disclaimer { display: block; margin-top: 16px; color: var(--dim); font-size: 11px; font-style: italic; letter-spacing: 0.04em; max-width: 720px; margin-left: auto; margin-right: auto; }
+
+/* ──────────────── RESPONSIVE ──────────────── */
+@media (max-width: 860px) {
+  .wrap { padding: 32px 20px 64px; }
+  .hero h1 { font-size: 44px; }
+  .section-h2 { font-size: 32px; }
+  .pull-quote { font-size: 28px; }
+  .archetype-card { grid-template-columns: 1fr; gap: 20px; }
+  .archetype-name { border-right: none; border-bottom: 1px solid var(--border-2); padding-right: 0; padding-bottom: 16px; }
+  .logo-grid { grid-template-columns: repeat(3, 1fr); }
+  .beat { grid-template-columns: 1fr; gap: 20px; }
+  .beat-num { font-size: 40px; }
+  .losers-grid { grid-template-columns: 1fr; }
+  .vs-line { grid-template-columns: 1fr; }
+  .vs-line .vs-arrow { display: none; }
+  .bp-block { grid-template-columns: 40px 1fr 64px; gap: 14px; padding: 14px 16px; }
+}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+<!-- ════════ HERO ════════ -->
+<section class="hero">
+  <div class="tag">SITE BLUEPRINT · AI CODING TOOLS</div>
+  <h1>The winning <em>anatomy</em> of an AI coding tool homepage.</h1>
+  <p class="standfirst">Reverse-engineered from the 10 leaders. Real section order, real headlines, real conversion patterns — not generic landing-page advice.</p>
+  <div class="meta-row">
+    <span class="meta-pill">10 sites scraped</span>
+    <span class="meta-pill">92 sections counted</span>
+    <span class="meta-pill mint">9 universal beats</span>
+    <span class="meta-pill">
+      <img src="brand-kit/logos/firecrawl.svg" alt="Firecrawl">
+      Powered by Firecrawl
+    </span>
+    <span class="meta-pill">2026-05-23</span>
+  </div>
+</section>
+
+<!-- ════════ THE CONTENDERS ════════ -->
+<section>
+  <div class="section-eyebrow">The contenders</div>
+  <h2 class="section-h2">The 10 sites we pulled apart</h2>
+  <p class="section-lede">Triangulated from G2 leaders, ProductHunt top of 2026, "best AI coding tool" search rankings, and funded-since-2024 challengers.</p>
+
+  <div class="logo-grid">
+    <div class="logo-card">
+      <img src="brand-kit/logos/cursor.svg" alt="Cursor">
+      <div class="name">Cursor</div>
+      <div class="url">cursor.com</div>
+    </div>
+    <div class="logo-card dark-bg">
+      <img src="brand-kit/logos/github.svg" alt="GitHub Copilot">
+      <div class="name">GitHub Copilot</div>
+      <div class="url">github.com/copilot</div>
+    </div>
+    <div class="logo-card">
+      <img src="brand-kit/logos/claude.svg" alt="Claude Code">
+      <div class="name">Claude Code</div>
+      <div class="url">claude.com/claude-code</div>
+    </div>
+    <div class="logo-card">
+      <img src="brand-kit/logos/codex.png" alt="OpenAI Codex">
+      <div class="name">OpenAI Codex</div>
+      <div class="url">openai.com/codex</div>
+    </div>
+    <div class="logo-card">
+      <img src="https://www.google.com/s2/favicons?domain=windsurf.com&sz=128" alt="Windsurf">
+      <div class="name">Windsurf</div>
+      <div class="url">windsurf.com</div>
+    </div>
+    <div class="logo-card">
+      <img src="https://www.google.com/s2/favicons?domain=lovable.dev&sz=128" alt="Lovable">
+      <div class="name">Lovable</div>
+      <div class="url">lovable.dev</div>
+    </div>
+    <div class="logo-card">
+      <img src="https://www.google.com/s2/favicons?domain=bolt.new&sz=128" alt="Bolt">
+      <div class="name">Bolt</div>
+      <div class="url">bolt.new</div>
+    </div>
+    <div class="logo-card">
+      <img src="https://www.google.com/s2/favicons?domain=v0.app&sz=128" alt="v0">
+      <div class="name">v0</div>
+      <div class="url">v0.app</div>
+    </div>
+    <div class="logo-card">
+      <img src="https://www.google.com/s2/favicons?domain=replit.com&sz=128" alt="Replit">
+      <div class="name">Replit</div>
+      <div class="url">replit.com</div>
+    </div>
+    <div class="logo-card">
+      <img src="https://www.google.com/s2/favicons?domain=tabnine.com&sz=128" alt="Tabnine">
+      <div class="name">Tabnine</div>
+      <div class="url">tabnine.com</div>
+    </div>
+  </div>
+
+  <div class="contrast-row">
+    <span class="contrast-label">Plus <strong>3 contrast underperformers</strong> kept anonymous — dated template sites that ranked page-3+ for the same queries.</span>
+  </div>
+</section>
+
+<!-- ════════ ARCHETYPE ════════ -->
+<section>
+  <div class="section-eyebrow">The archetype</div>
+  <h2 class="section-h2">Why <em>this</em> structure, not a generic one</h2>
+  <div class="archetype-card">
+    <div class="archetype-name">B2B SaaS<br>Developer Tools<br>Product-Led Growth</div>
+    <p>Conversion is <em>free trial</em> or <em>install</em>, not "request demo". Visitors are technical and skeptical — they came from a tweet, a coworker, or a Hacker News thread, and they will close the tab in 8 seconds if you don't show them the product working. <em>Demo beats description.</em> Speed of credibility beats charm.</p>
+  </div>
+</section>
+
+<!-- ════════ THE BLUEPRINT ════════ -->
+<section>
+  <div class="section-eyebrow">The blueprint</div>
+  <h2 class="section-h2">The 9-beat structure top performers share</h2>
+  <p class="section-lede">Scroll the column. Each block = one section in the order they appear on the page. Frequency = how many of the 10 sites use it in roughly that position.</p>
+
+  <div class="blueprint">
+    <div class="bp-stack">
+
+      <div class="bp-block">
+        <div class="bp-num">01</div>
+        <div class="bp-body">
+          <div class="bp-name">Hero — outcome H1 + primary CTA + product visual</div>
+          <div class="bp-hint">Bold outcome headline. Single high-contrast CTA. A GIF, screenshot, or live demo you can see working.</div>
+        </div>
+        <div class="bp-freq full">10/10</div>
+      </div>
+      <div class="bp-connector"></div>
+
+      <div class="bp-block">
+        <div class="bp-num">02</div>
+        <div class="bp-body">
+          <div class="bp-name">Social-proof logo strip — "trusted by"</div>
+          <div class="bp-hint">6–10 customer or investor logos. Often appears within the hero block, before first scroll.</div>
+        </div>
+        <div class="bp-freq full">9/10</div>
+      </div>
+      <div class="bp-connector"></div>
+
+      <div class="bp-block">
+        <div class="bp-num">03</div>
+        <div class="bp-body">
+          <div class="bp-name">Live demo strip — GIF, video, or interactive snippet</div>
+          <div class="bp-hint">Show the product working in 8 seconds or less. Auto-playing, no audio. The shorter the loop, the better.</div>
+        </div>
+        <div class="bp-freq maj">7/10</div>
+      </div>
+      <div class="bp-connector"></div>
+
+      <div class="bp-block">
+        <div class="bp-num">04</div>
+        <div class="bp-body">
+          <div class="bp-name">Feature trio — three outcome-led benefits</div>
+          <div class="bp-hint">Three cards. Each one is one verb + one outcome. Stated as what the user gets, not what the model does.</div>
+        </div>
+        <div class="bp-freq full">9/10</div>
+      </div>
+      <div class="bp-connector"></div>
+
+      <div class="bp-block">
+        <div class="bp-num">05</div>
+        <div class="bp-body">
+          <div class="bp-name">Deep-dive feature blocks — alternating left/right</div>
+          <div class="bp-hint">3–6 zoomed-in capability sections, each with one screenshot. Long-scroll territory.</div>
+        </div>
+        <div class="bp-freq maj">8/10</div>
+      </div>
+      <div class="bp-connector"></div>
+
+      <div class="bp-block">
+        <div class="bp-num">06</div>
+        <div class="bp-body">
+          <div class="bp-name">Testimonials / G2 quotes / X-style tweets</div>
+          <div class="bp-hint">Mix of named devs (with photo + company logo) and embedded tweets. Anonymous quotes look fake; skip them.</div>
+        </div>
+        <div class="bp-freq maj">8/10</div>
+      </div>
+      <div class="bp-connector"></div>
+
+      <div class="bp-block">
+        <div class="bp-num">07</div>
+        <div class="bp-body">
+          <div class="bp-name">Pricing teaser → full pricing page</div>
+          <div class="bp-hint">Free tier first. Tier names like "Hobby / Pro / Business / Enterprise" — never product-themed names.</div>
+        </div>
+        <div class="bp-freq maj">6/10</div>
+      </div>
+      <div class="bp-connector"></div>
+
+      <div class="bp-block">
+        <div class="bp-num">08</div>
+        <div class="bp-body">
+          <div class="bp-name">FAQ — answers the top objections</div>
+          <div class="bp-hint">5–10 questions. The first one is always "is my code private?" — every leader addresses it explicitly.</div>
+        </div>
+        <div class="bp-freq maj">7/10</div>
+      </div>
+      <div class="bp-connector"></div>
+
+      <div class="bp-block">
+        <div class="bp-num">09</div>
+        <div class="bp-body">
+          <div class="bp-name">Final CTA — same primary action as the hero</div>
+          <div class="bp-hint">Identical CTA label as the hero. Big serif headline restating the outcome. Footer follows.</div>
+        </div>
+        <div class="bp-freq full">10/10</div>
+      </div>
+
+    </div>
+
+    <div class="bp-legend">
+      <div class="legend-item"><span class="legend-dot mint"></span> 9–10 / 10 universal</div>
+      <div class="legend-item"><span class="legend-dot amber"></span> 6–8 / 10 strong consensus</div>
+      <div class="legend-item"><span class="legend-dot dim"></span> 5 / 10 split</div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ PULL QUOTE 1 ════════ -->
+<section class="pull-quote-section">
+  <blockquote class="pull-quote">
+    <span class="pq-mark">"</span>The order isn't aesthetic. It's a <em>conversion path</em>. Move the testimonials to position 3 and the trial signups drop.
+  </blockquote>
+</section>
+
+<!-- ════════ BEAT BY BEAT ════════ -->
+<section>
+  <div class="section-eyebrow">Beat by beat</div>
+  <h2 class="section-h2">What each section actually <em>contains</em></h2>
+  <p class="section-lede">For each beat: the mini-wireframe, the must-have ingredients, real headlines from the winners, and the one-line "do this not that".</p>
+
+  <div class="beat-grid">
+
+    <!-- BEAT 01 — HERO -->
+    <article class="beat">
+      <div class="beat-num">01<small>Hero</small></div>
+      <div class="beat-content">
+        <div class="beat-head">
+          <h3>Outcome H1 + primary CTA + product visual</h3>
+          <div class="freq-badge full">10/10</div>
+        </div>
+
+        <div class="mini-wf">
+          <div class="wf-row"><div class="wf-box full h1"></div></div>
+          <div class="wf-row"><div class="wf-box half"></div></div>
+          <div class="wf-row"><div class="wf-box cta"></div><div class="wf-box cta-2"></div></div>
+          <div class="wf-row"><div class="wf-box full tall"></div></div>
+          <div class="wf-label">hero block · ~1 viewport tall</div>
+        </div>
+
+        <div class="winners-block">
+          <div class="winners-head">Winners include</div>
+          <ul>
+            <li>A bold H1 that states the <strong>outcome</strong>, not the feature ("Ship faster" beats "AI-powered code completion")</li>
+            <li>One <strong>standfirst line</strong> with a quantified benefit or a "for whom"</li>
+            <li>One <strong>high-contrast primary CTA</strong> + one secondary low-contrast link (never two primaries)</li>
+            <li>A <strong>product visual</strong> — auto-playing GIF, looped video, or a real screenshot. Never a stock illustration.</li>
+          </ul>
+        </div>
+
+        <div class="examples-block">
+          <div class="example-row">
+            <div class="ex-brand"><img src="brand-kit/logos/cursor.svg" alt=""><span class="ex-name">Cursor</span></div>
+            <div class="ex-headline">The AI Code Editor</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand dark-bg"><img src="brand-kit/logos/github.svg" alt=""><span class="ex-name">GitHub Copilot</span></div>
+            <div class="ex-headline">The world's most widely adopted AI developer tool</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand"><img src="https://www.google.com/s2/favicons?domain=lovable.dev&sz=64" alt=""><span class="ex-name">Lovable</span></div>
+            <div class="ex-headline">Build software products, using only a chat interface</div>
+          </div>
+        </div>
+
+        <div class="vs-line">
+          <div class="vs-side winners"><strong>Winners</strong>Pair the H1 with a product visual you can <em>see</em> working in &lt;8 seconds.</div>
+          <div class="vs-arrow">→</div>
+          <div class="vs-side losers"><strong>Losers</strong>Stack 4 paragraphs of feature copy and a stock photo of a laptop on a desk.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- BEAT 02 — SOCIAL PROOF -->
+    <article class="beat">
+      <div class="beat-num">02<small>Social proof</small></div>
+      <div class="beat-content">
+        <div class="beat-head">
+          <h3>"Trusted by" logo strip</h3>
+          <div class="freq-badge full">9/10</div>
+        </div>
+
+        <div class="mini-wf">
+          <div class="wf-row"><div class="wf-box half"></div></div>
+          <div class="wf-row" style="gap:14px;">
+            <div class="wf-logo"></div><div class="wf-logo"></div><div class="wf-logo"></div>
+            <div class="wf-logo"></div><div class="wf-logo"></div><div class="wf-logo"></div>
+          </div>
+          <div class="wf-label">logo strip · 6–10 marks · grayscale</div>
+        </div>
+
+        <div class="winners-block">
+          <div class="winners-head">Winners include</div>
+          <ul>
+            <li><strong>6–10 customer logos</strong>, grayscale or low-opacity so they don't fight the hero</li>
+            <li>A short eyebrow line above: "Used by 2M+ developers" or "From the teams at..."</li>
+            <li>Often <strong>inside the hero block</strong> rather than its own section — keeps it above the fold</li>
+            <li>If you don't have customer logos yet, <strong>investor logos</strong> work (Sequoia, a16z carry the signal)</li>
+          </ul>
+        </div>
+
+        <div class="examples-block">
+          <div class="example-row">
+            <div class="ex-brand"><img src="brand-kit/logos/cursor.svg" alt=""><span class="ex-name">Cursor</span></div>
+            <div class="ex-headline">Trusted by engineers at OpenAI, Stripe, Shopify, Vercel, Instacart, Replicate</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand dark-bg"><img src="brand-kit/logos/github.svg" alt=""><span class="ex-name">GitHub Copilot</span></div>
+            <div class="ex-headline">Used by 77,000+ organizations worldwide</div>
+          </div>
+        </div>
+
+        <div class="vs-line">
+          <div class="vs-side winners"><strong>Winners</strong>Show the logos. Make them grayscale. Put them above the fold.</div>
+          <div class="vs-arrow">→</div>
+          <div class="vs-side losers"><strong>Losers</strong>Just say "trusted by industry leaders" with no logos to back it up.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- BEAT 03 — LIVE DEMO -->
+    <article class="beat">
+      <div class="beat-num">03<small>Live demo</small></div>
+      <div class="beat-content">
+        <div class="beat-head">
+          <h3>GIF / video / interactive product loop</h3>
+          <div class="freq-badge maj">7/10</div>
+        </div>
+
+        <div class="mini-wf">
+          <div class="wf-row"><div class="wf-box half"></div></div>
+          <div class="wf-row"><div class="wf-box third"></div></div>
+          <div class="wf-row"><div class="wf-box full tall" style="height:140px;"></div></div>
+          <div class="wf-label">demo block · auto-play · 6–12s loop</div>
+        </div>
+
+        <div class="winners-block">
+          <div class="winners-head">Winners include</div>
+          <ul>
+            <li>One <strong>tight loop</strong> showing the magic moment — not a 2-minute walkthrough video</li>
+            <li><strong>Auto-play, no audio</strong>, muted by default — never a "play" button blocking the demo</li>
+            <li>If interactive: a <strong>fake-terminal or fake-editor</strong> the visitor can poke (Bolt, Lovable, v0 all do this)</li>
+            <li>Caption the demo in one short line — "Generate a Next.js app in 30 seconds"</li>
+          </ul>
+        </div>
+
+        <div class="examples-block">
+          <div class="example-row">
+            <div class="ex-brand"><img src="https://www.google.com/s2/favicons?domain=bolt.new&sz=64" alt=""><span class="ex-name">Bolt</span></div>
+            <div class="ex-headline">Interactive prompt box you can type into above the fold — instant demo</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand"><img src="https://www.google.com/s2/favicons?domain=v0.app&sz=64" alt=""><span class="ex-name">v0</span></div>
+            <div class="ex-headline">Live chat input that generates a UI — fully working inline demo</div>
+          </div>
+        </div>
+
+        <div class="vs-line">
+          <div class="vs-side winners"><strong>Winners</strong>Let visitors <em>use</em> the product in the demo, not just watch it.</div>
+          <div class="vs-arrow">→</div>
+          <div class="vs-side losers"><strong>Losers</strong>Embed a 90-second YouTube tutorial with a CEO talking to camera.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- BEAT 04 — FEATURE TRIO -->
+    <article class="beat">
+      <div class="beat-num">04<small>Feature trio</small></div>
+      <div class="beat-content">
+        <div class="beat-head">
+          <h3>Three outcome-led benefits, one row</h3>
+          <div class="freq-badge full">9/10</div>
+        </div>
+
+        <div class="mini-wf">
+          <div class="wf-row"><div class="wf-box half"></div></div>
+          <div class="wf-row" style="gap:12px;">
+            <div class="wf-card"><div class="wf-box half"></div><div class="wf-box full"></div><div class="wf-box full"></div></div>
+            <div class="wf-card"><div class="wf-box half"></div><div class="wf-box full"></div><div class="wf-box full"></div></div>
+            <div class="wf-card"><div class="wf-box half"></div><div class="wf-box full"></div><div class="wf-box full"></div></div>
+          </div>
+          <div class="wf-label">three-card row · one verb + one outcome each</div>
+        </div>
+
+        <div class="winners-block">
+          <div class="winners-head">Winners include</div>
+          <ul>
+            <li>Exactly <strong>three cards</strong> (four feels cramped, two feels light)</li>
+            <li>Each card: <strong>one verb + one outcome</strong>, not a feature spec</li>
+            <li>An <strong>inline icon or screenshot tile</strong> in each card — never plain text</li>
+            <li>Stated from the <strong>user's perspective</strong> ("ship faster") not the product's ("inference-optimized model")</li>
+          </ul>
+        </div>
+
+        <div class="examples-block">
+          <div class="example-row">
+            <div class="ex-brand"><img src="brand-kit/logos/cursor.svg" alt=""><span class="ex-name">Cursor</span></div>
+            <div class="ex-headline">Tab, Chat, Agent — three modes, three cards, three sentences each</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand"><img src="brand-kit/logos/claude.svg" alt=""><span class="ex-name">Claude Code</span></div>
+            <div class="ex-headline">Build features faster · Debug with context · Automate your workflow</div>
+          </div>
+        </div>
+
+        <div class="vs-line">
+          <div class="vs-side winners"><strong>Winners</strong>Three cards. Three verbs. Three outcomes a non-engineer can grasp.</div>
+          <div class="vs-arrow">→</div>
+          <div class="vs-side losers"><strong>Losers</strong>A 12-feature comparison grid with checkmarks and "Yes/Limited" badges.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- BEAT 05 — DEEP-DIVE FEATURES -->
+    <article class="beat">
+      <div class="beat-num">05<small>Deep dives</small></div>
+      <div class="beat-content">
+        <div class="beat-head">
+          <h3>Alternating feature blocks, one screenshot each</h3>
+          <div class="freq-badge maj">8/10</div>
+        </div>
+
+        <div class="mini-wf">
+          <div class="wf-row" style="gap:14px;"><div class="wf-card" style="height:90px;"><div class="wf-box full"></div><div class="wf-box full"></div></div><div class="wf-box tall" style="flex:1; height:90px;"></div></div>
+          <div class="wf-row" style="gap:14px;"><div class="wf-box tall" style="flex:1; height:90px;"></div><div class="wf-card" style="height:90px;"><div class="wf-box full"></div><div class="wf-box full"></div></div></div>
+          <div class="wf-label">alternating L/R · text + screenshot · 3–6 blocks</div>
+        </div>
+
+        <div class="winners-block">
+          <div class="winners-head">Winners include</div>
+          <ul>
+            <li><strong>3 to 6 deep-dive blocks</strong>, each one feature, each alternating left/right</li>
+            <li>One real <strong>product screenshot or short GIF</strong> per block — annotated if it isn't self-explanatory</li>
+            <li>Short paragraph (3–4 lines max) + a "Learn more" link to docs or a deeper page</li>
+            <li>Block headlines are <strong>capability sentences</strong>: "Refactor across 10 files in one command"</li>
+          </ul>
+        </div>
+
+        <div class="examples-block">
+          <div class="example-row">
+            <div class="ex-brand"><img src="https://www.google.com/s2/favicons?domain=windsurf.com&sz=64" alt=""><span class="ex-name">Windsurf</span></div>
+            <div class="ex-headline">Cascade · Supercomplete · Tab · Memories — each gets its own block with a GIF</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand"><img src="https://www.google.com/s2/favicons?domain=replit.com&sz=64" alt=""><span class="ex-name">Replit</span></div>
+            <div class="ex-headline">Idea → app · Real deployment · No setup — three blocks with live previews</div>
+          </div>
+        </div>
+
+        <div class="vs-line">
+          <div class="vs-side winners"><strong>Winners</strong>Show the feature working in a screenshot. One block = one capability.</div>
+          <div class="vs-arrow">→</div>
+          <div class="vs-side losers"><strong>Losers</strong>Tab-style accordion that hides 10 features behind icons you have to click.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- BEAT 06 — TESTIMONIALS -->
+    <article class="beat">
+      <div class="beat-num">06<small>Testimonials</small></div>
+      <div class="beat-content">
+        <div class="beat-head">
+          <h3>Named-dev quotes + embedded tweets</h3>
+          <div class="freq-badge maj">8/10</div>
+        </div>
+
+        <div class="mini-wf">
+          <div class="wf-row"><div class="wf-box third"></div></div>
+          <div class="wf-row" style="gap:12px;">
+            <div class="wf-card"><div class="wf-box full"></div><div class="wf-box full"></div><div class="wf-box half"></div></div>
+            <div class="wf-card"><div class="wf-box full"></div><div class="wf-box full"></div><div class="wf-box half"></div></div>
+            <div class="wf-card"><div class="wf-box full"></div><div class="wf-box full"></div><div class="wf-box half"></div></div>
+          </div>
+          <div class="wf-label">3-up grid · quote + name + photo + company logo</div>
+        </div>
+
+        <div class="winners-block">
+          <div class="winners-head">Winners include</div>
+          <ul>
+            <li>Mix of <strong>named developers</strong> (photo + role + company logo) and <strong>real embedded tweets</strong></li>
+            <li>The quotes are <strong>specific, not generic</strong> — "saved me 2 hours on a Redis migration" beats "great product"</li>
+            <li>Include <strong>company logos</strong> visitors recognize — that's where the trust transfer happens</li>
+            <li>The bigger AI tools use a <strong>masonry tweet wall</strong> (Cursor, Windsurf) — feels native to the audience</li>
+          </ul>
+        </div>
+
+        <div class="examples-block">
+          <div class="example-row">
+            <div class="ex-brand"><img src="brand-kit/logos/cursor.svg" alt=""><span class="ex-name">Cursor</span></div>
+            <div class="ex-headline">Tweet wall from Andrej Karpathy, Guillermo Rauch, Lex Fridman — verbatim, with avatars</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand"><img src="https://www.google.com/s2/favicons?domain=tabnine.com&sz=64" alt=""><span class="ex-name">Tabnine</span></div>
+            <div class="ex-headline">G2 Leader badges + 3 case-study cards with named CTOs and revenue impact</div>
+          </div>
+        </div>
+
+        <div class="vs-line">
+          <div class="vs-side winners"><strong>Winners</strong>Real people, real tweets, recognizable logos. Specific outcomes.</div>
+          <div class="vs-arrow">→</div>
+          <div class="vs-side losers"><strong>Losers</strong>Stock-photo headshots, "Sarah J. — Software Engineer", no company.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- BEAT 07 — PRICING TEASER -->
+    <article class="beat">
+      <div class="beat-num">07<small>Pricing</small></div>
+      <div class="beat-content">
+        <div class="beat-head">
+          <h3>Free tier first → "see all plans"</h3>
+          <div class="freq-badge maj">6/10</div>
+        </div>
+
+        <div class="mini-wf">
+          <div class="wf-row"><div class="wf-box third"></div></div>
+          <div class="wf-row" style="gap:12px;">
+            <div class="wf-card"><div class="wf-box half"></div><div class="wf-box full"></div><div class="wf-box full"></div></div>
+            <div class="wf-card" style="border-color: rgba(255,140,90,0.4);"><div class="wf-box half"></div><div class="wf-box full"></div><div class="wf-box full"></div></div>
+            <div class="wf-card"><div class="wf-box half"></div><div class="wf-box full"></div><div class="wf-box full"></div></div>
+          </div>
+          <div class="wf-label">3 tiers · middle tier highlighted · pricing in mono font</div>
+        </div>
+
+        <div class="winners-block">
+          <div class="winners-head">Winners include</div>
+          <ul>
+            <li><strong>Free tier first</strong> on the left — never hidden behind "Contact us"</li>
+            <li><strong>Pro tier highlighted</strong> in the middle (the anchor) with a "most popular" tag</li>
+            <li><strong>Enterprise on the right</strong> with "Contact sales" (the only non-self-serve CTA)</li>
+            <li>Prices in <strong>monospace numerals</strong> — feels honest, technical, deliberate</li>
+            <li>If the homepage is the pricing page (rare), the comparison table goes immediately below</li>
+          </ul>
+        </div>
+
+        <div class="examples-block">
+          <div class="example-row">
+            <div class="ex-brand"><img src="brand-kit/logos/cursor.svg" alt=""><span class="ex-name">Cursor</span></div>
+            <div class="ex-headline">Hobby (free) · Pro ($20/mo) · Business ($40/seat) — Pro highlighted</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand"><img src="https://www.google.com/s2/favicons?domain=tabnine.com&sz=64" alt=""><span class="ex-name">Tabnine</span></div>
+            <div class="ex-headline">Dev · Enterprise — split-tier with a quote-driven anchor</div>
+          </div>
+        </div>
+
+        <div class="vs-line">
+          <div class="vs-side winners"><strong>Winners</strong>Pricing on the homepage. Free tier in the leftmost card. No "request quote" tax.</div>
+          <div class="vs-arrow">→</div>
+          <div class="vs-side losers"><strong>Losers</strong>"Contact us for pricing" with no number anywhere. Instant trust loss for devs.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- BEAT 08 — FAQ -->
+    <article class="beat">
+      <div class="beat-num">08<small>FAQ</small></div>
+      <div class="beat-content">
+        <div class="beat-head">
+          <h3>5–10 objection-answering Q&amp;As</h3>
+          <div class="freq-badge maj">7/10</div>
+        </div>
+
+        <div class="mini-wf">
+          <div class="wf-row"><div class="wf-box third"></div></div>
+          <div class="wf-row"><div class="wf-box full"></div></div>
+          <div class="wf-row"><div class="wf-box full"></div></div>
+          <div class="wf-row"><div class="wf-box full"></div></div>
+          <div class="wf-row"><div class="wf-box full"></div></div>
+          <div class="wf-row"><div class="wf-box full"></div></div>
+          <div class="wf-label">accordion · ~7 questions · 1 answer = 2–4 lines</div>
+        </div>
+
+        <div class="winners-block">
+          <div class="winners-head">Winners include</div>
+          <ul>
+            <li><strong>Question 1 is always "is my code private?"</strong> — every leader addresses the trust question first</li>
+            <li>Other recurring questions: <strong>which models</strong>, <strong>which languages/IDEs</strong>, <strong>how it differs from Copilot</strong>, <strong>self-hosting</strong>, <strong>SOC 2 / security</strong></li>
+            <li>Answers are <strong>2–4 lines</strong>. If you need more, link to docs.</li>
+            <li>Often paired with a <strong>"More questions?" link to docs or Discord</strong></li>
+          </ul>
+        </div>
+
+        <div class="examples-block">
+          <div class="example-row">
+            <div class="ex-brand"><img src="https://www.google.com/s2/favicons?domain=windsurf.com&sz=64" alt=""><span class="ex-name">Windsurf</span></div>
+            <div class="ex-headline">Privacy first, then models, then enterprise — exact order on the page</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand"><img src="brand-kit/logos/codex.png" alt=""><span class="ex-name">OpenAI Codex</span></div>
+            <div class="ex-headline">"How is my data used?" is the #1 question — answered in plain English</div>
+          </div>
+        </div>
+
+        <div class="vs-line">
+          <div class="vs-side winners"><strong>Winners</strong>Lead with the privacy/security question. Keep answers short. Link to docs.</div>
+          <div class="vs-arrow">→</div>
+          <div class="vs-side losers"><strong>Losers</strong>Skip FAQ entirely, or stuff it with marketing fluff nobody Googles.</div>
+        </div>
+      </div>
+    </article>
+
+    <!-- BEAT 09 — FINAL CTA -->
+    <article class="beat">
+      <div class="beat-num">09<small>Final CTA</small></div>
+      <div class="beat-content">
+        <div class="beat-head">
+          <h3>Same primary action as the hero, restated</h3>
+          <div class="freq-badge full">10/10</div>
+        </div>
+
+        <div class="mini-wf">
+          <div class="wf-row"><div class="wf-box full h1"></div></div>
+          <div class="wf-row"><div class="wf-box cta" style="margin: 0 auto;"></div></div>
+          <div class="wf-label">final CTA · giant headline · single button · centered</div>
+        </div>
+
+        <div class="winners-block">
+          <div class="winners-head">Winners include</div>
+          <ul>
+            <li><strong>Identical CTA label</strong> as the hero — same words, same color. Repetition cements the action.</li>
+            <li>A <strong>giant centered headline</strong> restating the outcome from the hero, often in italic serif for visual breath</li>
+            <li>One button. <strong>Never two competing CTAs</strong> at the close.</li>
+            <li>Footer follows immediately — links, social, status page, docs, careers</li>
+          </ul>
+        </div>
+
+        <div class="examples-block">
+          <div class="example-row">
+            <div class="ex-brand"><img src="brand-kit/logos/cursor.svg" alt=""><span class="ex-name">Cursor</span></div>
+            <div class="ex-headline">"Try Cursor Now" — identical to the hero CTA, centered, oversize</div>
+          </div>
+          <div class="example-row">
+            <div class="ex-brand"><img src="https://www.google.com/s2/favicons?domain=v0.app&sz=64" alt=""><span class="ex-name">v0</span></div>
+            <div class="ex-headline">"Get Started Free" with an oversize input box restating the demo</div>
+          </div>
+        </div>
+
+        <div class="vs-line">
+          <div class="vs-side winners"><strong>Winners</strong>Same CTA as the hero. Restated, bigger, centered. Footer underneath.</div>
+          <div class="vs-arrow">→</div>
+          <div class="vs-side losers"><strong>Losers</strong>"Schedule a demo" at the bottom when the hero said "Start free trial".</div>
+        </div>
+      </div>
+    </article>
+
+  </div>
+</section>
+
+<!-- ════════ PULL QUOTE 2 ════════ -->
+<section class="pull-quote-section">
+  <blockquote class="pull-quote">
+    <span class="pq-mark">"</span>The losers all skipped beat 03. They told you the product was good. The winners <em>showed you</em>.
+  </blockquote>
+</section>
+
+<!-- ════════ LOSERS ════════ -->
+<section>
+  <div class="section-eyebrow">Anti-patterns</div>
+  <h2 class="section-h2">What the bottom performers do</h2>
+  <p class="section-lede">Five patterns that appeared in 2+ of the underperformer set and zero of the leaders.</p>
+
+  <div class="losers-grid">
+    <div class="loser-card">
+      <div class="loser-num">Anti-pattern 01</div>
+      <div class="loser-title">Hero copy that describes the model, not the outcome</div>
+      <div class="loser-detail">"Powered by a 70B parameter mixture-of-experts model" tells visitors nothing they can act on. Lead with what they get, not what's under the hood.</div>
+    </div>
+    <div class="loser-card">
+      <div class="loser-num">Anti-pattern 02</div>
+      <div class="loser-title">Two competing CTAs above the fold</div>
+      <div class="loser-detail">"Start free trial" and "Book demo" side by side both in primary color. Forces a choice the visitor wasn't ready to make. Pick one. Make the other a quiet link.</div>
+    </div>
+    <div class="loser-card">
+      <div class="loser-num">Anti-pattern 03</div>
+      <div class="loser-title">Stock illustration instead of a product visual</div>
+      <div class="loser-detail">A friendly cartoon developer at a laptop. Tells the visitor you don't have a product worth showing. Even a static screenshot beats a stock vector.</div>
+    </div>
+    <div class="loser-card">
+      <div class="loser-num">Anti-pattern 04</div>
+      <div class="loser-title">"Contact us for pricing" with no number</div>
+      <div class="loser-detail">For dev tools this is fatal. Engineers will not enter a sales cycle to evaluate a $20/mo subscription. Free tier or quit.</div>
+    </div>
+    <div class="loser-card">
+      <div class="loser-num">Anti-pattern 05</div>
+      <div class="loser-title">No privacy answer anywhere on the page</div>
+      <div class="loser-detail">"Does this train on my code?" is the loudest unspoken question for every AI coding tool. Answer it explicitly in the FAQ. If you can't, you've lost the enterprise sale before it started.</div>
+    </div>
+    <div class="loser-card">
+      <div class="loser-num">Anti-pattern 06</div>
+      <div class="loser-title">Generic testimonials without logos</div>
+      <div class="loser-detail">"Game changer!" — Mike, Developer. No photo, no company, no Twitter handle. Reads as fake and burns trust harder than no testimonials at all.</div>
+    </div>
+  </div>
+</section>
+
+<!-- ════════ MONDAY CHECKLIST ════════ -->
+<section>
+  <div class="section-eyebrow">Monday checklist</div>
+  <h2 class="section-h2">Run this against your own homepage <em>today</em></h2>
+  <p class="section-lede">Twelve binary checks. If you can't answer "yes" to a row, fix that row first.</p>
+
+  <div class="checklist-box">
+    <ol class="checklist">
+      <li>Does your <strong>H1 state the outcome</strong>, not the feature or the model?</li>
+      <li>Is your <strong>primary CTA above the fold</strong>, in a single high-contrast color, with no second primary CTA competing with it?</li>
+      <li>Is there a <strong>social-proof logo strip</strong> (6+ logos) before the first scroll?</li>
+      <li>Have you <strong>shown the product working</strong> via GIF, video, or interactive demo in the first viewport or in section 3?</li>
+      <li>Are your <strong>3 feature cards stated as user outcomes</strong>, not technical specs?</li>
+      <li>Do the <strong>deep-dive blocks alternate left/right</strong>, each with one real product screenshot?</li>
+      <li>Do your <strong>testimonials include real photos + company logos</strong> the visitor recognizes?</li>
+      <li>Are <strong>tweets / G2 quotes</strong> mixed in alongside named developers?</li>
+      <li>Is your <strong>pricing visible on the homepage</strong> (or one click away with a free tier on the left)?</li>
+      <li>Does <strong>FAQ question #1 address privacy / data use</strong> explicitly?</li>
+      <li>Does your <strong>final CTA repeat the hero CTA verbatim</strong> — same label, same color?</li>
+      <li>Is the <strong>footer functional</strong> (docs, status, careers, social) and does it include an email capture form that actually sends?</li>
+    </ol>
+  </div>
+</section>
+
+<!-- ════════ OUTRO ════════ -->
+<footer class="outro">
+  Generated by the <strong>site-blueprint</strong> skill
+  · 10 Firecrawl scrapes
+  · 92 sections parsed
+  · 2026-05-23
+  <span class="disclaimer">Mock build — example headlines are illustrative for this demo. When the skill runs live, every quoted headline is the verbatim string Firecrawl pulled from the live page at scrape time.</span>
+</footer>
+
+</main>
+</body>
+</html>
