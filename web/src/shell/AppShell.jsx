@@ -231,8 +231,13 @@ export default function AppShell() {
   // Resume button can disable when the transcript's session is already attached.
   const liveSessionIds = useMemo(() => new Set(agents.filter((a) => isLive(a.status)).map((a) => a.id)), [agents]);
 
-  // Command palette (Phase 0): Views group only. ctx carries setView + view.
-  const paletteCtx = useMemo(() => ({ setView, view }), [setView, view]);
+  // Command palette: Views (Phase 0) + Sessions (Phase 1) groups. ctx carries
+  // everything a session op needs — mirrors what SessionDock/SessionRow use.
+  const paletteCtx = useMemo(() => ({
+    setView, view, agents, setActive, sendMsg,
+    onNewSession: () => setCreateOpen(true),
+    viewTranscript, expandDock,
+  }), [setView, view, agents, setActive, sendMsg, viewTranscript, expandDock]);
   const commands = useMemo(() => buildCommands(paletteCtx), [paletteCtx]);
   useShiftShift(() => setPaletteOpen(true));
 
