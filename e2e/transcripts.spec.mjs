@@ -9,7 +9,7 @@
 // e2e/README.md) and submitting the Resume dialog (real claude spawn + writes
 // the user's real ~/.claude.json) — Resume is opened and only ever Cancelled.
 import { test, expect } from './fixtures/test.mjs';
-import { gotoView, visible } from './helpers/nav.mjs';
+import { gotoView, gotoMenu, visible, setSkin } from './helpers/nav.mjs';
 import { RICH_SESSION, SESSION_COUNT_A } from './fixtures/paths.mjs';
 
 const TOTAL_SESSIONS = SESSION_COUNT_A + 2; // 30 alpha + the rich session + "Fixture session 901"
@@ -143,4 +143,55 @@ test('Resume opens the New-session dialog prefilled with the session id, then Ca
   // Never submit — this would spawn a real claude process (e2e/README.md).
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+// ---------------------------------------------------------------------------
+// Phosphor Console (openspec/changes/implement-phosphor-theme, task 8.4):
+// transcript ANSI palette parity — TranscriptView.jsx resolves the same
+// `getTerminalTheme(skinId, resolvedMode)` used by the live xterm Terminal, so
+// this is the one reachable half of "live terminal and transcript colors
+// agree" (the other half — a real xterm buffer — needs a live pty, which the
+// sandbox may never spawn; see e2e/README.md's "Never drive these" and this
+// file's own header note. That resolver itself is unit-tested directly:
+// web/src/features/sessions/term-theme.test.mjs).
+//
+// Deliberately does NOT use this file's `openTranscripts()` helper. Every
+// test using it already fails at HEAD (this ticket's known-failing
+// baseline) because the sandbox's merged Claude+Codex session list leaks a
+// handful of real Codex sessions from this machine's actual ~/.codex home —
+// an unrelated, pre-existing defect: the rail reads "36 transcripts", not
+// the fixture-only "32". That leak is real machine content, not fixture
+// content, and has nothing to do with Phosphor — but the fixture's own rich
+// transcript ("Retry backoff cap") is still IN that (leaky) list and still
+// opens normally, so clicking it directly (skipping the broken aggregate-
+// count assertion) still reaches real TranscriptView output.
+test.describe('Transcript view — Phosphor Console', () => {
+  test("the read-only transcript mimics the live terminal's void/amber/mint/blue/rust ANSI palette", async ({ page }) => {
+    await page.goto('/');
+    await setSkin(page, 'Phosphor Console');
+    await gotoMenu(page, 'Transcripts');
+    await page.getByRole('button', { name: /Retry backoff cap/ }).click();
+
+    // Role/kind label header colors — term-theme.js's ROLE_KEY lookup table
+    // (PHOSPHOR_TERM_THEME hex values, converted to the browser's rgb() form).
+    await expect(page.getByText('user', { exact: true })).toHaveCSS('color', 'rgb(80, 144, 208)'); // brightBlue
+    await expect(page.getByText('thinking', { exact: true })).toHaveCSS('color', 'rgb(198, 122, 90)'); // brightBlack (dim rust)
+    await expect(page.getByText('tool: Grep', { exact: true })).toHaveCSS('color', 'rgb(82, 242, 154)'); // green -> mint
+    await expect(page.getByText('tool result', { exact: true })).toHaveCSS('color', 'rgb(244, 159, 9)'); // yellow -> amber
+
+    // Message BODY text is always `pal.foreground` regardless of role/kind
+    // (TranscriptView.jsx) — the console's primary amber, on the void background.
+    const body = page.getByText('Trace the retry path and tell me where the backoff is capped.');
+    await expect(body).toBeVisible();
+    await expect(body).toHaveCSS('color', 'rgb(244, 159, 9)');
+
+    // Container background is the console void — walk up from the message
+    // until a non-transparent background is found (the Stack TranscriptView paints).
+    const bg = await body.evaluate((el) => {
+      let n = el;
+      while (n && getComputedStyle(n).backgroundColor === 'rgba(0, 0, 0, 0)') n = n.parentElement;
+      return n ? getComputedStyle(n).backgroundColor : null;
+    });
+    expect(bg).toBe('rgb(10, 10, 10)');
+  });
 });

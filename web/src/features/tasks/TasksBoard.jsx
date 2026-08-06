@@ -169,8 +169,13 @@ const countChip = (t) => ({
 // ZAPAC branch keeps calling the original helper unchanged, so its rendered
 // output stays byte-for-byte identical. These read `t.nerv.*` directly, which
 // is only safe inside that phosphor-gated branch (ZAPAC's theme has no `nerv`).
+// `height` (not `minHeight`) — box-sizing:border-box (CssBaseline) means an
+// explicit height lands at the same rendered box regardless of border width,
+// which minHeight can't guarantee against the New Task button's own 2px
+// `contained`-variant border (fix 1: shared control height under Phosphor).
+const PHOSPHOR_CONTROL_H = 32;
 const segBtnPhosphor = (t, on) => ({
-  px: '14px', py: '6px', minWidth: 0, minHeight: 27, borderRadius: 0,
+  px: '14px', py: '6px', minWidth: 0, height: PHOSPHOR_CONTROL_H, borderRadius: 0,
   fontSize: 11, fontWeight: 700, letterSpacing: '.06em', lineHeight: 1.2,
   fontFamily: t.nerv.fonts.mono,
   border: `1px solid ${t.nerv.hue.mint}`,
@@ -183,12 +188,26 @@ const segBtnPhosphor = (t, on) => ({
 
 // Tag *filter* chip (topbar row) — the vendored FilterChips grammar: orange
 // scope chip, solid inversion when active.
+//
+// Fixed defect (design.md D4 — active/selected controls invert to void
+// content on their fill): this Chip never sets a `color` prop, so it falls
+// back to the vendored theme's `MuiChip.defaultProps.color = 'success'`,
+// which stamps a `.MuiChip-colorSuccess` class carrying its own
+// `{ color: hue.mint }` rule (phosphor-console-theme/theme/components/
+// dataDisplay.ts). That selector chains the chip's root class with
+// `.MuiChip-colorSuccess` (two classes) against this sx's single emotion
+// class, so it always wins on specificity regardless of source order — the
+// active chip rendered mint text on its orange fill instead of the required
+// void inversion. Re-declaring the same two-class selector here (plus
+// `!important`, since equal-specificity ordering isn't guaranteed) restores
+// the intended void/orange text without touching the vendored theme.
 const tagChipPhosphor = (t, on) => ({
   height: 22, fontSize: 10, fontWeight: on ? 700 : 400, borderRadius: 0,
   letterSpacing: '.04em', fontFamily: t.nerv.fonts.mono,
   background: on ? t.nerv.hue.orange : 'transparent',
   color: on ? t.nerv.hue.void : t.nerv.hue.orange,
   border: `1px solid ${t.nerv.hue.orange}`,
+  '&.MuiChip-colorSuccess': { color: `${on ? t.nerv.hue.void : t.nerv.hue.orange} !important` },
   '& .MuiChip-deleteIcon': { color: on ? t.nerv.hue.void : t.nerv.hue.orange },
   '&:hover': { background: on ? t.nerv.hue.orange : 'rgba(242,100,0,.12)' },
 });
@@ -487,7 +506,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
               vendored theme's own `contained` Button override (mint outline,
               fills mint on hover, hard corners, uppercase) carry the button —
               design.md D2 prefers the stock MUI override over a hand-rolled one. */}
-          <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => (phosphor ? {} : primaryBtn(t))}>New task</Button>
+          <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => (phosphor ? { height: PHOSPHOR_CONTROL_H } : primaryBtn(t))}>New task</Button>
         </Box>
       </Stack>
       {/* Phosphor-only bilingual status legend (task 5.1) — the centralized
@@ -614,34 +633,59 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                 onDrop={() => drop(col)}
                 sx={{ flex: '1 1 0', minWidth: 0, maxWidth: 340, minHeight: 0 }}
               >
-                {/* `.col-head` — dot + uppercase label, count chip pushed right.
-                    The count keeps its parens INSIDE the chip so the header's text
-                    content stays exactly "<Label> (<n>)" for tasks.spec.mjs. The
-                    count element itself swaps to a vendored Stamp under Phosphor
-                    (still rendering exactly "(<n>)", so the enclosing Typography's
-                    accessible text is unchanged either way) — task 5.2. */}
-                <Typography
-                  component="div"
-                  sx={{
-                    display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0,
-                    pt: '2px', px: '6px', pb: '12px',
-                    fontSize: 12, fontWeight: 700, letterSpacing: '.1em',
-                    textTransform: 'uppercase', color: 'text.secondary',
-                  }}
-                >
-                  {!phosphor && <Box component="span" sx={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, bgcolor: COL_DOT[col] }} />}
-                  {label}{' '}
-                  {phosphor
-                    ? <Stamp tone={colDom.tone} filled={colDom.filled} size="sm">({cards.length})</Stamp>
-                    : <Box component="span" sx={(t) => countChip(t)}>({cards.length})</Box>}
-                </Typography>
-                {/* Bilingual column caption (task 5.2) — a separate line below the
-                    accessible header above, so it never touches that element's
-                    exact "<Label> (<n>)" text. */}
-                {phosphor && (
-                  <Typography sx={(t) => ({ px: '6px', mt: '-8px', pb: '10px', display: 'flex', alignItems: 'baseline', gap: '6px', color: toneHue(t, colDom.tone) })}>
-                    <Box component="span" sx={(t) => ({ fontFamily: t.nerv.fonts.jp, fontWeight: 800, fontSize: 13 })}>{colDom.jp}</Box>
-                    <Box component="span" sx={(t) => ({ fontFamily: t.nerv.fonts.mono, fontSize: 9, letterSpacing: '.1em', color: t.nerv.hue.greenMap })}>{colDom.en}</Box>
+                {/* `.col-head` (peg lines 275-279, fix 2) — under Phosphor this is
+                    now ONE flex row: the English label (`.ct`, orange) + the
+                    kanji caption (`.cjp`, tone-coloured) on the left, the
+                    stamped count pushed right, a green-dim rule beneath. The
+                    accessible name lock ("<Label> (<n>)" — tasks.spec.mjs) can
+                    no longer come from plain text content once the kanji sits
+                    inline in the same element (it would read "To-Do待機(2)"),
+                    so this row carries `role="group"` + an explicit
+                    `aria-label` instead — a proper ARIA name computation
+                    rather than incidental textContent parsing, but still the
+                    exact same locked string. ZAPAC keeps the original
+                    dot+label+count Typography untouched (task 5.2). */}
+                {phosphor ? (
+                  <Box
+                    role="group"
+                    aria-label={`${label} (${cards.length})`}
+                    sx={(t) => ({
+                      display: 'flex', alignItems: 'baseline', gap: '8px', flexShrink: 0,
+                      pb: '5px', px: '6px', mb: '9px',
+                      borderBottom: `1px solid ${t.nerv.hue.greenDim}`,
+                    })}
+                  >
+                    <Box component="span" sx={(t) => ({
+                      fontFamily: t.nerv.fonts.display, fontWeight: 700, fontSize: 12,
+                      letterSpacing: '.13em', color: t.nerv.hue.orange, textTransform: 'uppercase',
+                    })}
+                    >
+                      {label}
+                    </Box>
+                    <Box component="span" sx={(t) => ({
+                      fontFamily: t.nerv.fonts.jp, fontWeight: 800, fontSize: 12,
+                      textTransform: 'none', letterSpacing: '.14em', color: toneHue(t, colDom.tone),
+                    })}
+                    >
+                      {colDom.jp}
+                    </Box>
+                    <Stamp tone={colDom.tone} filled={colDom.filled} size="sm" sx={{ ml: 'auto' }}>
+                      ({cards.length})
+                    </Stamp>
+                  </Box>
+                ) : (
+                  <Typography
+                    component="div"
+                    sx={{
+                      display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0,
+                      pt: '2px', px: '6px', pb: '12px',
+                      fontSize: 12, fontWeight: 700, letterSpacing: '.1em',
+                      textTransform: 'uppercase', color: 'text.secondary',
+                    }}
+                  >
+                    <Box component="span" sx={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, bgcolor: COL_DOT[col] }} />
+                    {label}{' '}
+                    <Box component="span" sx={(t) => countChip(t)}>({cards.length})</Box>
                   </Typography>
                 )}
                 {/* Card list scrolls inside the column when it outgrows the pane. */}
@@ -710,23 +754,41 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                         }}
                       >
                         {/* Top row: status pill (live agent → StatusPill, else a
-                            task.state chip) + mono task-id, mirroring .tcard-top. */}
+                            task.state chip) + mono task-id, mirroring .tcard-top.
+                            Fix 3 (peg lines 654-676): under Phosphor the pill's
+                            label is the shared domain-state bilingual pair
+                            (e.g. "審査 REVIEW"), not the task's own free-text
+                            `state`/`agent.status` string — sourced from
+                            `lib/domainState.js` (already resolved above as
+                            `dom`), never a second hardcoded copy. ZAPAC keeps
+                            the original literal status word untouched. */}
                         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', mb: '9px' }}>
                           {agent
-                            ? <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>
+                            ? <StatusPill status={KIND[agent.status] ?? 'review'}>{phosphor ? `${dom.jp} ${dom.en}` : agent.status}</StatusPill>
                             : (task.state && (phosphor
-                              ? <Stamp tone={dom.tone} filled={dom.filled} size="sm">{task.state}</Stamp>
+                              ? <Stamp tone={dom.tone} filled={dom.filled} size="sm">{`${dom.jp} ${dom.en}`}</Stamp>
                               : <Chip size="small" label={task.state} sx={(t) => statePill(t)} />))}
                           <Typography variant="code" sx={(t) => (phosphor
-                            ? { ml: 'auto', fontSize: 10, color: t.nerv.hue.amber, fontFamily: t.nerv.fonts.mono, letterSpacing: '.06em' }
+                            ? { ml: 'auto', fontSize: 10, color: t.nerv.hue.amber, fontFamily: t.nerv.fonts.mono, letterSpacing: '.08em', whiteSpace: 'nowrap' }
                             : { ml: 'auto', fontSize: 11, color: 'text.disabled' })}>
                             #{task.id.slice(-4)}
                           </Typography>
                         </Stack>
                         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'flex-start' }}>
                           {/* `.tcard-title` wraps rather than truncating — a task title
-                              is the card's payload, and two lines beat an ellipsis. */}
-                          <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, lineHeight: 1.35, letterSpacing: '-.01em' }}>{task.title}</Typography>
+                              is the card's payload, and two lines beat an ellipsis.
+                              Fix 3: under Phosphor the title is the bright paper
+                              ink in the condensed display face (peg line 292-293),
+                              not the ZAPAC subtitle2 default — ZAPAC's own size/
+                              weight/leading/tracking stay untouched. */}
+                          <Typography
+                            variant="subtitle2"
+                            sx={(t) => (phosphor
+                              ? { flex: 1, minWidth: 0, fontFamily: t.nerv.fonts.display, fontWeight: 700, fontSize: 14, lineHeight: 1.22, letterSpacing: '.02em', color: t.nerv.hue.paper }
+                              : { flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, lineHeight: 1.35, letterSpacing: '-.01em' })}
+                          >
+                            {task.title}
+                          </Typography>
                           <Stack direction="row" className="card-act" sx={{ transition: 'opacity .15s' }}>
                             {col === 'done' && (
                               <Tooltip title={task.branch ? 'Remove (temporary work folder already gone; your changes are saved)' : 'Remove (moves to history)'} disableInteractive>
@@ -756,15 +818,38 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                             </Tooltip>
                           </Stack>
                         </Stack>
-                        {/* `.tcard-repo` — repo icon + mono "<repo> · <branch>". */}
-                        <Stack direction="row" spacing="6px" sx={{ alignItems: 'center', mt: '10px', minWidth: 0 }}>
-                          <StorageOutlinedIcon sx={{ fontSize: 13, opacity: 0.8, color: 'text.secondary', flexShrink: 0 }} />
-                          <Typography variant="code" sx={(t) => (phosphor
-                            ? { color: t.nerv.hue.greenMap, fontSize: 10, minWidth: 0, fontFamily: t.nerv.fonts.mono, letterSpacing: '.04em' }
-                            : { color: 'text.secondary', fontSize: 11, minWidth: 0 })} noWrap>
-                            {repoName(task.repo)}{task.branch ? ` · ${task.branch}` : ''}
+                        {/* `.tcard-repo` — ZAPAC: repo icon + mono "<repo> · <branch>".
+                            Phosphor (fix 3, peg line 294-295/641): repo/branch
+                            render as plain "REPO:<value>"/"BRANCH:<value>" TEXT,
+                            not an icon+chip line — label in green-map, value in
+                            amber at font-weight 400. `textTransform: uppercase`
+                            is CSS-only (the underlying repoName()/branch text is
+                            untouched, so e2e text matches on the real value keep
+                            working). */}
+                        {phosphor ? (
+                          <Typography
+                            component="div"
+                            sx={(t) => ({
+                              mt: '10px', fontSize: 9, letterSpacing: '.06em', lineHeight: 1.4,
+                              color: t.nerv.hue.greenMap, fontFamily: t.nerv.fonts.mono, textTransform: 'uppercase',
+                            })}
+                          >
+                            REPO:<Box component="b" sx={(t) => ({ color: t.nerv.hue.amber, fontWeight: 400 })}>{repoName(task.repo)}</Box>
+                            {task.branch && (
+                              <>
+                                <br />
+                                BRANCH:<Box component="b" sx={(t) => ({ color: t.nerv.hue.amber, fontWeight: 400 })}>{task.branch}</Box>
+                              </>
+                            )}
                           </Typography>
-                        </Stack>
+                        ) : (
+                          <Stack direction="row" spacing="6px" sx={{ alignItems: 'center', mt: '10px', minWidth: 0 }}>
+                            <StorageOutlinedIcon sx={{ fontSize: 13, opacity: 0.8, color: 'text.secondary', flexShrink: 0 }} />
+                            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, minWidth: 0 }} noWrap>
+                              {repoName(task.repo)}{task.branch ? ` · ${task.branch}` : ''}
+                            </Typography>
+                          </Stack>
+                        )}
                         {/* `.tcard-foot` — tags left, spend right. The fuller
                             active/API/token breakdown rides along in the tooltip
                             rather than crowding a 270px card. */}

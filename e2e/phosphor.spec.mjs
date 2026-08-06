@@ -144,13 +144,26 @@ test('masthead and sidebar reflect live counts and connection state from real da
 
   const masthead = page.getByRole('banner');
   // The sandbox WS connects to the sandbox daemon — real `connected` state.
-  await expect(masthead.getByText('DAEMON:CONNECTED', { exact: true })).toBeVisible();
-  // Seeded agents.json is an empty registry (e2e/fixtures/seed.mjs) — real
-  // `liveCount`/`agentCount` from AppShell's own `agents.filter(isLive)`.
-  await expect(masthead.getByText('0/0', { exact: true })).toBeVisible();
+  // Not `exact` and not a plain getByText: after the 8.6 review the loopback
+  // address moved INSIDE this stamp, so the element now owns two text nodes
+  // ("DAEMON:CONNECTED" + the host). Matching the stamp itself and asserting
+  // both parts keeps this honest about the merged readout rather than
+  // loosening it to a substring anywhere on the page.
+  const daemonStamp = masthead.getByText(/DAEMON:CONNECTED/);
+  await expect(daemonStamp).toBeVisible();
+  // Real loopback address from `location.host`, not a fabricated one — the
+  // sandbox serves the app on 127.0.0.1, so assert the shape rather than a
+  // hardcoded port (serve.mjs picks a free one per run).
+  await expect(daemonStamp).toHaveText(/DAEMON:CONNECTED\s*127\.0\.0\.1:\d+/);
+  // The AGENTS n/n stat was removed in the 8.6 visual pass (it isn't in the
+  // peg's masthead); its absence is asserted below alongside the other
+  // non-fabricated-telemetry checks.
+  await expect(masthead.getByText(/AGENTS/)).toHaveCount(0);
   // Nothing in PhosphorMasthead.jsx fabricates an aggregate health score —
   // the one-shot mockup's "SYS:NOMINAL" demo telemetry must not appear.
   await expect(page.getByText('SYS:NOMINAL')).toHaveCount(0);
+  // Nor the peg's other demo-only readouts (DAEMON LOAD / EX_MODE / PRIORITY).
+  await expect(page.getByText(/DAEMON LOAD|EX_MODE|PRIORITY:/)).toHaveCount(0);
 
   // Sidebar's DaemonFooter renders the same live `connected` flag as its own
   // domain-state-driven stamp + explicit English text (never colour-only).
@@ -228,11 +241,77 @@ test('no ZAPAC glass identifiers appear in Phosphor chrome', async ({ page }) =>
   const frameBackdrop = await page.getByRole('banner').locator('xpath=..').evaluate((el) => getComputedStyle(el).backdropFilter);
   expect(frameBackdrop).toBe('none');
 
-  // Sidebar brand-mark tile: must not render the ZAPAC purple→cyan identity
-  // gradient (`linear-gradient(45deg,#aa41af...,#3c69c8...,#00a5e6...)`,
-  // shellStyles.js's `brandGrad()` literal fallback) — the spec's "No ZAPAC
-  // surface leaks into Phosphor" scenario explicitly names this gradient.
-  const brandTile = page.getByRole('img', { name: 'Singularity' }).locator('xpath=..');
-  const brandBg = await brandTile.evaluate((el) => getComputedStyle(el).backgroundImage);
-  expect(brandBg).not.toMatch(/aa41af|3c69c8|00a5e6/i);
+  // The rail carries no brand tile at all under Phosphor — the peg's `.side`
+  // has no logo (the `特異点 SINGULARITY` monogram lives only in the masthead),
+  // so the 8.6 visual pass removed it. This subsumes the earlier, weaker check
+  // that the tile merely wasn't painted with ZAPAC's purple→cyan identity
+  // gradient: an element that doesn't exist can't leak it.
+  await expect(sidebar.getByRole('img', { name: 'Singularity' })).toHaveCount(0);
+  // ...but the identity itself is still present, in the masthead where the peg
+  // puts it — so this asserts relocation, not deletion.
+  await expect(page.getByRole('banner').getByText('SINGULARITY')).toBeVisible();
+
+  // Belt-and-braces on the gradient itself: ZAPAC's `brandGrad()` literal
+  // fallback (`linear-gradient(45deg,#aa41af…,#3c69c8…,#00a5e6…)`) must not
+  // appear on ANY element in the Phosphor shell. This is the assertion that
+  // actually caught the real leak — `brandGrad()`/`brandGlow()` fall through
+  // to those hardcoded ZAPAC hexes for any skin lacking `palette.gradient.brand`.
+  const zapacGradientCount = await page.evaluate(() => {
+    let n = 0;
+    for (const el of document.querySelectorAll('*')) {
+      const bg = getComputedStyle(el).backgroundImage;
+      if (/aa41af|3c69c8|00a5e6/i.test(bg)) n++;
+    }
+    return n;
+  });
+  expect(zapacGradientCount).toBe(0);
+});
+
+// ── task 8.6: fixes from the manual visual review against the peg ───────────
+// Each assertion below corresponds to a specific finding, so a regression names
+// the finding it undid rather than just "layout changed".
+
+test('masthead matches the peg: seven-segment clock, AUG 06 2026 dateline, no orphaned chrome', async ({ page }) => {
+  await goto(page, 'Tasks');
+  const masthead = page.getByRole('banner');
+
+  // The peg's `.timechip` is a seven-segment SVG readout, not text digits —
+  // six digits, each an <svg> of lit/unlit polygons (the previous DigitalClock
+  // rendered plain characters and had none).
+  const clock = masthead.getByRole('img', { name: 'Local time' });
+  await expect(clock).toBeVisible();
+  await expect(clock.locator('svg')).toHaveCount(6);
+
+  // Dateline: `MMM DD YYYY`, e.g. AUG 06 2026 (peg's own MONTHS + pad2 recipe).
+  await expect(masthead.getByText(/^[A-Z]{3} \d{2} \d{4}$/)).toBeVisible();
+
+  // `COMMAND CONSOLE` was removed. Its Japanese half must have gone with it —
+  // a bare 統制卓 would violate the never-orphan-a-bilingual-pair rule.
+  await expect(page.getByText('COMMAND CONSOLE')).toHaveCount(0);
+  await expect(page.getByText('統制卓')).toHaveCount(0);
+});
+
+test('sidebar matches the peg: no nav icons, and More sits below the last nav item', async ({ page }) => {
+  await goto(page, 'Tasks');
+  const sidebar = page.locator('aside');
+
+  // In this theme the kanji IS the icon — the peg's nav buttons are jp+en+count
+  // with no icon glyph, so the expanded rows carry no MUI SvgIcon.
+  for (const name of ['Tasks', 'Automation', 'Usage']) {
+    await expect(sidebar.getByRole('button', { name }).locator('svg')).toHaveCount(0);
+  }
+
+  // `.nav-more` is the final child of the nav in the peg, not a header-row
+  // button. Assert by geometry — it must sit BELOW the last nav item — which is
+  // what "move the 3 dots to another button below the last item" actually means.
+  const more = sidebar.getByRole('button', { name: 'More', exact: true });
+  await expect(more).toBeVisible();
+  const usageBox = await sidebar.getByRole('button', { name: 'Usage' }).boundingBox();
+  const moreBox = await more.boundingBox();
+  expect(moreBox.y).toBeGreaterThan(usageBox.y);
+
+  // It must still open the menu — position moved, behaviour did not.
+  await more.click();
+  await expect(page.getByRole('menu')).toBeVisible();
+  await page.keyboard.press('Escape');
 });

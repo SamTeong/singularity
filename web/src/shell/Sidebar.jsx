@@ -14,8 +14,9 @@ import MoreVertIcon from '@mui/icons-material/MoreVert';
 import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import SpeedIcon from '@mui/icons-material/Speed';
-import { Stamp, SegmentBar, ZoneTitle } from 'phosphor-console-theme/components';
+import { Stamp, ZoneTitle } from 'phosphor-console-theme/components';
 import Logo from '@/components/Logo.jsx';
+import { Meter } from '@/components/Meter.jsx';
 import { visibleProviders, usageSummary } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
@@ -75,10 +76,19 @@ function NavLabel({ jp, en }) {
 }
 
 /**
- * App sidebar: brand mark + more-menu button, and the vertical nav rail
- * (New session · Tasks · Automation · Usage). Collapsible to an icon rail.
- * Domain state comes from {@link useAgents}; only view/collapse UI state and the
- * menu-open callback are passed in.
+ * App sidebar: the vertical nav rail (New session · Tasks · Automation · Usage),
+ * collapsible to an icon rail. Domain state comes from {@link useAgents}; only
+ * view/collapse UI state and the menu-open callback are passed in.
+ *
+ * ZAPAC keeps its own header row (brand mark + "More" icon button) above the
+ * rail, unchanged. Phosphor has neither — the peg's sidebar (`docs/one-shot/
+ * phosphor-layout-02.html`'s `.side`) has no logo tile at all (the `特異点`/
+ * `SINGULARITY` monogram lives only in the masthead) and no header-row "More"
+ * control; its `.nav-more` is the last child of `nav.nav` instead. So under
+ * Phosphor: no header Stack renders (the connection state it also carried is
+ * not lost — `DaemonFooter` below already renders the same live `connected`
+ * flag, unconditionally, every render), and the "More" trigger is the final
+ * row inside the nav `<List>` (see the `isPhosphor` branch after `NAV.map`).
  */
 export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewSession, onOpenMenu, menuOpen }) {
   const { agents, connected, usage, refreshUsage, tasks, crons } = useAgents();
@@ -133,59 +143,52 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
         };
       }}
     >
-      {/* Header: logo (+ title when expanded) + more menu (nav overflow, processes, dark mode). */}
-      <Stack direction={collapsed ? 'column' : 'row'} spacing={1.5} sx={{ p: '18px', pb: '14px', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}>
-        <Tooltip title={connected ? '' : 'disconnected'} placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-          <Badge variant="dot" color="error" overlap="circular" anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} invisible={connected}>
-            {/* ZAPAC — layout-02 `.brand-mark`: the identity gradient as a rounded
-                tile with a soft bloom, glyph flattened to white on top of it.
-                Phosphor — a hard-edged chrome-ruled plate. This branch is load-
-                bearing, not cosmetic: Phosphor's palette has no `gradient.brand`
-                or brand glow, so brandGrad()/brandGlow() would fall through to
-                their hardcoded ZAPAC literals and paint the purple→cyan identity
-                gradient (plus a purple cast shadow, plus a 10px radius) into the
-                black console — the exact leak the appearance spec forbids. */}
-            <Box
-              sx={(t) => ({
-                width: 36,
-                height: 36,
-                flexShrink: 0,
-                display: 'grid',
-                placeItems: 'center',
-                ...(isPhosphor
-                  ? {
-                    borderRadius: 0,
-                    background: 'transparent',
-                    border: `1px solid ${getRoles(t).chrome.stroke}`,
-                    boxShadow: getRoles(t).shell.glow,
-                  }
-                  : {
-                    borderRadius: '10px',
-                    background: brandGrad(t),
-                    boxShadow: `0 8px 22px -8px ${brandGlow(t)}`,
-                  }),
-              })}
-            >
-              <Logo onBrand active={agents.some((a) => a.status === 'running' || a.status === 'starting')} />
-            </Box>
-          </Badge>
-        </Tooltip>
-        {!collapsed && (
-          <>
-            {/* layout-02 `.brand-name`: font-family: var(--font-display) — h4 is the
-                theme's "brand name / section heading" variant (16px/700/-.01em). */}
-            <Typography component="span" variant="h4" sx={{ flex: 1, lineHeight: 1 }}>Singularity</Typography>
-            <Tooltip title="More" placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+      {/* Header: logo (+ title when expanded) + more menu (nav overflow, processes,
+          dark mode). ZAPAC only — Phosphor's peg sidebar has no logo tile (the
+          monogram lives in the masthead) and moves "More" into the nav rail
+          below (see the isPhosphor branch after NAV.map). Dropping this cluster
+          under Phosphor doesn't lose the connection state the Badge also
+          carried — DaemonFooter renders the same live `connected` flag,
+          unconditionally, further down this component. */}
+      {!isPhosphor && (
+        <Stack direction={collapsed ? 'column' : 'row'} spacing={1.5} sx={{ p: '18px', pb: '14px', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}>
+          <Tooltip title={connected ? '' : 'disconnected'} placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+            <Badge variant="dot" color="error" overlap="circular" anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} invisible={connected}>
+              {/* layout-02 `.brand-mark`: the identity gradient as a rounded tile
+                  with a soft bloom, glyph flattened to white on top of it. */}
+              <Box
+                sx={(t) => ({
+                  width: 36,
+                  height: 36,
+                  flexShrink: 0,
+                  display: 'grid',
+                  placeItems: 'center',
+                  borderRadius: '10px',
+                  background: brandGrad(t),
+                  boxShadow: `0 8px 22px -8px ${brandGlow(t)}`,
+                })}
+              >
+                <Logo onBrand active={agents.some((a) => a.status === 'running' || a.status === 'starting')} />
+              </Box>
+            </Badge>
+          </Tooltip>
+          {!collapsed && (
+            <>
+              {/* layout-02 `.brand-name`: font-family: var(--font-display) — h4 is the
+                  theme's "brand name / section heading" variant (16px/700/-.01em). */}
+              <Typography component="span" variant="h4" sx={{ flex: 1, lineHeight: 1 }}>Singularity</Typography>
+              <Tooltip title="More" placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+                <IconButton onClick={onOpenMenu} size="small" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen} sx={moreBtnSx}><MoreVertIcon /></IconButton>
+              </Tooltip>
+            </>
+          )}
+          {collapsed && (
+            <Tooltip title="More" placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
               <IconButton onClick={onOpenMenu} size="small" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen} sx={moreBtnSx}><MoreVertIcon /></IconButton>
             </Tooltip>
-          </>
-        )}
-        {collapsed && (
-          <Tooltip title="More" placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-            <IconButton onClick={onOpenMenu} size="small" aria-label="More" aria-haspopup="menu" aria-expanded={menuOpen} sx={moreBtnSx}><MoreVertIcon /></IconButton>
-          </Tooltip>
-        )}
-      </Stack>
+          )}
+        </Stack>
+      )}
 
       {/* Vertical nav rail: ＋ New session, then Tasks / Automation / Usage. Icon-only when collapsed. */}
       {/* layout-02 `.nav`: 6px/10px padding, 3px between rows. */}
@@ -346,7 +349,21 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                   };
                 }}
               >
-                <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: 'inherit', opacity: 0.85 }}>{item.icon}</ListItemIcon>
+                {/* Icon slot: ZAPAC keeps its MUI icon in both states. Phosphor has
+                    none — the kanji IS the icon (peg nav buttons are jp+en+count,
+                    no icon glyph) — so it only fills this slot when collapsed
+                    (the sole remaining visible content); when expanded the jp
+                    already renders paired with its caption inside NavLabel below,
+                    so rendering it twice would be redundant. */}
+                {isPhosphor ? (
+                  collapsed && (
+                    <ListItemIcon sx={{ minWidth: 0, justifyContent: 'center', color: 'inherit' }}>
+                      <Box aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.jp, fontWeight: 800, fontSize: 17, lineHeight: 1 })}>{item.jp}</Box>
+                    </ListItemIcon>
+                  )
+                ) : (
+                  <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: 'inherit', opacity: 0.85 }}>{item.icon}</ListItemIcon>
+                )}
                 {/* my: 0 — see "New session" row above for why this matters. */}
                 {!collapsed && (
                   <ListItemText
@@ -388,6 +405,46 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
             </Tooltip>
           );
         })}
+        {/* Phosphor's "More" trigger: layout-02's `.nav-more` is the final child
+            of `nav.nav`, not a header-row icon button (see the file-header note
+            and the `!isPhosphor` header Stack above). Same handler/behaviour as
+            ZAPAC's header IconButton — only the position and presentation move.
+            `aria-label` pins the accessible name to exactly "More" (the e2e
+            suite's `getByRole('button', { name: 'More', exact: true })`) even
+            though the visible caption reads "MORE" (this theme's chrome is
+            never lowercase). */}
+        {isPhosphor && (
+          <Tooltip title={collapsed ? 'More' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+            <ListItemButton
+              onClick={onOpenMenu}
+              aria-label="More"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              sx={(t) => ({
+                ...moreBtnSx(t),
+                display: 'flex',
+                alignItems: 'center',
+                gap: '13px',
+                justifyContent: collapsed ? 'center' : 'flex-start',
+                minHeight: 40,
+                pl: collapsed ? 0 : '14px',
+                pr: collapsed ? 0 : '14px',
+                py: '8px',
+                mt: '3px',
+              })}
+            >
+              <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: 'inherit' }}>
+                <Box aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.mono, fontSize: 15, letterSpacing: '.2em' })}>···</Box>
+              </ListItemIcon>
+              {!collapsed && (
+                <ListItemText
+                  primary={<Box aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.display, fontWeight: 700, fontSize: 11, letterSpacing: '.12em' })}>MORE</Box>}
+                  sx={{ my: 0 }}
+                />
+              )}
+            </ListItemButton>
+          </Tooltip>
+        )}
       </List>
 
       <Box sx={{ flex: 1 }} />
@@ -406,17 +463,20 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
  * mini-bar + percentage per provider, wired to the live `useAgents.usage` shape.
  * Renders a muted placeholder row when no data has loaded yet.
  *
- * Phosphor renders the same rows (task 4.3) as discrete LED segments via the
- * vendored `SegmentBar` instead of the continuous glass gradient fill — real
- * percentages/placeholders only, no fabricated provider or telemetry.
+ * Phosphor renders the same rows (task 4.3, revised 8.6) through `@/components/
+ * Meter.jsx` — the same themed bar the Usage view's main pane uses (`size="lg"`
+ * there, `size="sm"` here) — instead of a bespoke bar, so both surfaces share
+ * one implementation. Real percentages/placeholders only, no fabricated
+ * provider or telemetry.
  */
 function UsagePanel({ usage, caps }) {
   const { skinId } = useThemeSkin();
   const isPhosphor = skinId === 'phosphor';
   const rows = visibleProviders(caps).map((p) => {
     const u = usage?.[p.key];
-    const pct = u?.ok && u.session?.pctUsed != null ? Math.round(u.session.pctUsed) : null;
-    return { key: p.key, label: p.label, pct };
+    const win = u?.ok ? u.session : null; // the same "5h session" window shape Meter/UsageView already consume
+    const pct = win?.pctUsed != null ? Math.round(win.pctUsed) : null;
+    return { key: p.key, label: p.label, pct, win };
   });
   const hasData = rows.some((r) => r.pct != null);
 
@@ -430,17 +490,13 @@ function UsagePanel({ usage, caps }) {
         {!hasData ? (
           <Typography sx={(t) => ({ fontSize: 11, fontFamily: getTokens(t).fonts.mono, textTransform: 'uppercase', color: getRoles(t).status.idle })}>No usage yet</Typography>
         ) : (
+          // Same themed `Meter` the Usage view's main pane renders (size="lg"),
+          // at its documented compact size — one bar component, two surfaces.
+          // `win`/`segments`/`windowMs` mirror UsageView.jsx's own "Session (5h)"
+          // Meter exactly, so both readings of the same 5h window match.
           <Stack spacing="9px">
             {rows.map((r) => (
-              <Stack key={r.key} direction="row" spacing="9px" sx={{ alignItems: 'center' }}>
-                <Typography sx={(t) => ({ fontSize: 10, fontFamily: getTokens(t).fonts.mono, letterSpacing: '.1em', textTransform: 'uppercase', color: getRoles(t).status.idle, width: '50px', flex: 'none' })}>
-                  {r.label}
-                </Typography>
-                <SegmentBar value={r.pct ?? 0} segments={20} tone="mint" height={8} sx={{ flex: 1 }} />
-                <Typography sx={(t) => ({ fontSize: 10, fontFamily: getTokens(t).fonts.mono, fontWeight: 700, color: getRoles(t).status.nominal, width: '32px', textAlign: 'right', flex: 'none' })}>
-                  {r.pct == null ? '—' : `${r.pct}%`}
-                </Typography>
-              </Stack>
+              <Meter key={r.key} size="sm" label={r.label.toUpperCase()} win={r.win} segments={5} windowMs={5 * 3.6e6} />
             ))}
           </Stack>
         )}

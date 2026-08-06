@@ -12,7 +12,7 @@
 // list. So this file only reads/moves/concludes/deletes the seeded cards —
 // see the tag-filter test below for how that limits what can be proven.
 import { test, expect, onceConfirm } from './fixtures/test.mjs';
-import { goto } from './helpers/nav.mjs';
+import { goto, setSkin } from './helpers/nav.mjs';
 import { sessionId } from './fixtures/paths.mjs';
 
 // Playwright's dragTo()/mouse.down+move+up did not reliably fire React's
@@ -30,6 +30,7 @@ async function html5Drag(page, source, target) {
 
 const TODO_ID = sessionId(1001);
 const INPROGRESS_ID = sessionId(1002);
+const INREVIEW_ID = sessionId(1003);
 
 // This machine regularly runs several agent sessions (and their own Playwright
 // suites) concurrently, so the default 30s/test budget (playwright.config.mjs)
@@ -263,4 +264,309 @@ test('history view: toggle, every sortable column header, and delete a row', asy
 
   await expect(abandonedRow).not.toBeVisible();
   await expect(concludedRow).toBeVisible();
+});
+
+// ---------------------------------------------------------------------------
+// Phosphor Console (openspec/changes/implement-phosphor-theme, task 8.3):
+// status legend/columns/cards, card-to-dossier behavior, dossier dismissal/
+// actions, drag/filter/history regressions, and narrow-viewport overlay
+// containment.
+//
+// Runs AFTER the ZAPAC tests above, which permanently mutate the seeded board
+// (drag moves "Seeded todo card" into Done; the abandon flow removes "Seeded
+// in-progress card"; the history test deletes "Abandoned fixture run"). So
+// these tests deliberately avoid the exact cards/counts those mutations
+// touched and instead anchor on:
+//  - "Seeded review card" (In Review) and "Seeded done card" (Done) — never
+//    touched by any test above — for card/dossier assertions,
+//  - column-count REGEXES (`/^To-Do \(\d+\)$/`) rather than the original
+//    literal counts, to prove the locked "<Label> (<n>)" format survives
+//    Phosphor regardless of which count is live at this point in the file,
+//  - "Concluded fixture run", which no test in this file ever deletes, as a
+//    stable history-row anchor.
+// Exact hex→rgb values below trace to the vendored package's own tokens
+// (`phosphor-console-theme/theme/tokens.ts`'s `hue` map) and
+// `lib/domainState.js`'s tone table — not invented numbers — mirroring
+// e2e/phosphor.spec.mjs's own header note.
+test.describe('Tasks board — Phosphor Console', () => {
+  test.describe.configure({ timeout: 60_000 });
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/');
+    await setSkin(page, 'Phosphor Console');
+    await goto(page, 'Tasks');
+  });
+
+  test('bilingual status legend renders every domain state with its shared tone and fill', async ({ page }) => {
+    const pairs = [
+      ['待機', 'QUEUED'], ['立案', 'PLANNING'], ['稼働', 'RUNNING'],
+      ['審査', 'REVIEW'], ['完了', 'MERGED'], ['異常', 'FAILED'],
+    ];
+    for (const [jp, en] of pairs) {
+      await expect(page.getByText(jp, { exact: true }).first()).toBeVisible();
+      await expect(page.getByText(en, { exact: true }).first()).toBeVisible();
+    }
+
+    // 'planning'/'failed' are legend-only (no board column maps to either —
+    // TasksBoard's COLUMN_DOMAIN only covers queued/running/review/done), so
+    // these two never collide with a column's own bilingual caption checked
+    // below — proving the shared outline-vs-filled grammar unambiguously.
+    const planning = page.getByText('立案', { exact: true }).locator('xpath=..');
+    const planningStyle = await planning.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, color: cs.color, border: cs.borderTopColor };
+    });
+    expect(planningStyle.bg).toBe('rgba(0, 0, 0, 0)'); // outline (not filled) — idle
+    expect(planningStyle.color).toBe('rgb(80, 144, 208)'); // blue
+    expect(planningStyle.border).toBe('rgb(80, 144, 208)');
+
+    const failed = page.getByText('異常', { exact: true }).locator('xpath=..');
+    const failedStyle = await failed.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, color: cs.color };
+    });
+    expect(failedStyle.bg).toBe('rgb(226, 40, 15)'); // filled inversion — recorded/terminal state
+    expect(failedStyle.color).toBe('rgb(10, 10, 10)'); // void content, never a glow on punched-out text
+  });
+
+  // Fix 2 (docs/one-shot/phosphor-layout-02.html:275-279): the column head is
+  // now ONE flex row — English label + kanji caption on the left, stamped
+  // count on the right, a rule beneath — instead of the label+count line with
+  // a separate bilingual caption line below it. Once the kanji sits inline in
+  // the SAME element as the label/count, that element's own text content is
+  // no longer "<Label> (<n>)" verbatim (it'd read "To-Do待機(2)"), so the
+  // locked accessible name (tasks.spec.mjs's `/^To-Do \(\d+\)$/` etc.) now
+  // lives on that row's `role="group"` + explicit `aria-label`
+  // (TasksBoard.jsx) — a proper ARIA name computation instead of incidental
+  // textContent parsing, but still asserting the exact same locked string.
+  test('columns keep their locked accessible name and gain an inline bilingual caption + stamped count', async ({ page }) => {
+    const checks = [
+      [/^To-Do \(\d+\)$/, '待機', 'rgb(60, 156, 108)', false], // queued -> green (greenMap)
+      [/^In Progress \(\d+\)$/, '稼働', 'rgb(82, 242, 154)', false], // running -> mint
+      [/^In Review \(\d+\)$/, '審査', 'rgb(244, 159, 9)', false], // review -> amber
+      [/^Done \(\d+\)$/, '完了', 'rgb(82, 242, 154)', true], // done -> mint, filled
+    ];
+    for (const [nameRe, jp, colorRgb, filled] of checks) {
+      // The locked "<Label> (<n>)" name now comes from `role="group"` +
+      // `aria-label`, not raw text content.
+      const header = page.getByRole('group', { name: nameRe });
+      await expect(header).toBeVisible();
+
+      // The kanji caption renders inline, inside this same header row (its
+      // English pairing is already covered by the legend test above, so it's
+      // not re-asserted here).
+      await expect(header).toContainText(jp);
+
+      // The count Stamp's own text is exactly "(<n>)".
+      const stamp = header.getByText(/^\(\d+\)$/);
+      const style = await stamp.evaluate((el) => {
+        const cs = getComputedStyle(el);
+        return { bg: cs.backgroundColor, color: cs.color };
+      });
+      if (filled) {
+        expect(style.bg).toBe(colorRgb);
+        expect(style.color).toBe('rgb(10, 10, 10)');
+      } else {
+        expect(style.bg).toBe('rgba(0, 0, 0, 0)');
+        expect(style.color).toBe(colorRgb);
+      }
+    }
+  });
+
+  test('a card renders as a void hard-edged console record with its state stamp', async ({ page }) => {
+    const card = page.getByRole('button', { name: 'Seeded review card', exact: true });
+    // goto()/beforeEach's card-independent clicks leave the pointer wherever it
+    // last was — park it before reading resting-state (non-hover) CSS.
+    await page.mouse.move(0, 0);
+
+    const cardStyle = await card.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { radius: cs.borderTopLeftRadius, bg: cs.backgroundColor, border: cs.borderTopColor };
+    });
+    expect(cardStyle.radius).toBe('0px'); // hard edge, no ZAPAC card radius
+    expect(cardStyle.bg).toBe('rgb(10, 10, 10)'); // void surface
+    expect(cardStyle.border).toBe('rgb(244, 159, 9)'); // review tone (amber), resting — not selected/live
+
+    // Card-top state stamp — fix 3 (peg lines 654-676): the shared domain-state
+    // bilingual pair (`lib/domainState.js`'s jp+en), not the task's own free-text
+    // `state` string ("awaiting human review") — colored/outlined by the same
+    // domain tone as the column (no live agent on this seeded card).
+    const stateStamp = card.getByText('審査 REVIEW', { exact: true });
+    await expect(stateStamp).toBeVisible();
+    const stampStyle = await stateStamp.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, color: cs.color };
+    });
+    expect(stampStyle.bg).toBe('rgba(0, 0, 0, 0)');
+    expect(stampStyle.color).toBe('rgb(244, 159, 9)');
+
+    // Task id — amber mono, every card regardless of its own tone.
+    const idText = card.getByText(/^#[0-9a-f]{4}$/i);
+    await expect(idText).toHaveCSS('color', 'rgb(244, 159, 9)');
+
+    // Repo line — fix 3 (peg lines 294-295/641): "REPO:<value>" plain text, the
+    // green-map label stays chrome-only; the value itself is amber (never a
+    // status color, but distinct from the dim-green label per the peg).
+    const repoLine = card.getByText('scratch', { exact: true });
+    await expect(repoLine).toHaveCSS('color', 'rgb(244, 159, 9)');
+  });
+
+  test('activating a card opens the Phosphor dossier, preserving modal/close/handoff/focus-restore behavior', async ({ page }) => {
+    const card = page.getByRole('button', { name: 'Seeded review card', exact: true });
+    await card.click();
+
+    // Same role/name contract as ZAPAC (locked) — the Drawer paper itself
+    // carries role="dialog" + aria-label="Task detail" via slotProps.paper.
+    const dialog = page.getByRole('dialog', { name: 'Task detail', exact: true });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('heading', { name: 'Seeded review card' })).toBeVisible();
+
+    // The chamfered void dossier sheet — orange inner edge, no elevation shadow.
+    const paperStyle = await dialog.evaluate((el) => {
+      const cs = getComputedStyle(el);
+      return { bg: cs.backgroundColor, borderLeftColor: cs.borderLeftColor, clipPath: cs.clipPath };
+    });
+    expect(paperStyle.bg).toBe('rgb(10, 10, 10)');
+    expect(paperStyle.borderLeftColor).toBe('rgb(242, 100, 0)'); // orange — chrome, not a status color
+    expect(paperStyle.clipPath).not.toBe('none'); // nerv.chamfer()
+
+    await expect(dialog.getByText('指令 · DIRECTIVE')).toBeVisible();
+    await expect(dialog.getByText('Cost', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Tokens', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Turns', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Task', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Seeded review card — seeded fixture card.')).toBeVisible();
+    await expect(dialog.getByText('Details', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('Activity', { exact: true })).toBeVisible();
+    await expect(dialog.getByText('In Review', { exact: true })).toBeVisible(); // current pipeline stage
+
+    // "Open session" only fires for a card with a LIVE agent session — same
+    // rule as ZAPAC; the seeded card has no sessionId.
+    await expect(dialog.getByRole('button', { name: 'Open session' })).toBeDisabled();
+
+    // Dismiss with Escape — MUI Drawer's focus trap/restore is shared with
+    // ZAPAC, so focus returns to the card that opened it. Checked BEFORE the
+    // "View transcript" handoff below (not after re-opening the card a second
+    // time): once that handoff opens the bottom-docked transcript panel, its
+    // expanded body overlaps the board's own layout region enough that
+    // Playwright can no longer land a click on the card underneath — a
+    // dock/board-layout interaction that's orthogonal to this test's
+    // dossier-dismissal assertion, so it's avoided here rather than chased.
+    await page.keyboard.press('Escape');
+    await expect(dialog).not.toBeVisible();
+    await expect(card).toBeFocused();
+
+    // Reopen and hand off to the shared dockable transcript panel — identical
+    // handoff to the ZAPAC behavior.
+    await card.click();
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'View transcript' }).click();
+    await expect(dialog).not.toBeVisible();
+    await expect(page.getByText('No transcript found for this task.')).toBeVisible();
+  });
+
+  test('tag filter chips and the Board/History toggle keep working under Phosphor', async ({ page }) => {
+    const fixtureChip = page.getByRole('button', { name: 'fixture', exact: true });
+    await expect(fixtureChip).toBeVisible();
+    await fixtureChip.click();
+    await page.mouse.move(0, 0); // resting state — click() leaves the pointer parked on the chip (:hover)
+
+    // Hard-edged orange fill when active (tagChipPhosphor's `on` branch) — same
+    // OR-match guarantee as the ZAPAC version of this test: every seeded
+    // card/history row carries 'fixture', so selecting it alone must never
+    // hide any of them. `toHaveCSS` polls until the chip's 120ms
+    // background-color transition (MUI ButtonBase) settles, unlike a single
+    // `getComputedStyle` read right after `.click()`.
+    await expect(fixtureChip).toHaveCSS('border-top-left-radius', '0px');
+    await expect(fixtureChip).toHaveCSS('background-color', 'rgb(242, 100, 0)');
+
+    const clearAll = page.getByRole('button', { name: 'Clear all' });
+    await expect(clearAll).toBeVisible();
+    await clearAll.click();
+    await expect(clearAll).not.toBeVisible();
+
+    // Board/History segmented control — same accessible names/aria-pressed
+    // contract as ZAPAC (segBtnPhosphor only changes the CSS, not the markup).
+    const boardBtn = page.getByRole('button', { name: 'Board', exact: true });
+    const historyBtn = page.getByRole('button', { name: 'History', exact: true });
+    await historyBtn.click();
+    await expect(boardBtn).toBeVisible();
+    await expect(historyBtn).toHaveAttribute('aria-pressed', 'true');
+
+    // Never deleted by any test in this file (only "Abandoned fixture run"
+    // is) — a stable anchor regardless of how the earlier ZAPAC tests left
+    // history.
+    await expect(page.locator('tr').filter({ hasText: 'Concluded fixture run' })).toBeVisible();
+
+    await boardBtn.click();
+    await expect(page.getByRole('button', { name: 'History', exact: true })).toBeVisible();
+  });
+
+  // FIXED (manual visual review, task 8.6): `tagChipPhosphor`'s active-state
+  // text color (web/src/features/tasks/TasksBoard.jsx, `color: on ?
+  // t.nerv.hue.void : t.nerv.hue.orange`) never used to paint. The vendored
+  // Phosphor MUI theme defaults every `Chip` to `color="success"`, which
+  // stamps a `.MuiChip-colorSuccess` class carrying its own `{ color: <mint>
+  // }` rule. That selector chains two classes (`.css-x.MuiChip-colorSuccess`)
+  // against our sx's single emotion class, so it won on specificity
+  // regardless of source order and permanently overrode the intended void
+  // text — the active filter chip rendered MINT text on an ORANGE fill
+  // instead of the solid "near-black content" figure/ground inversion
+  // design.md D4 requires for every recorded/active Phosphor control. Fixed
+  // by re-declaring the same `&.MuiChip-colorSuccess` selector (plus
+  // `!important`, since equal-specificity cascade order isn't guaranteed) in
+  // `tagChipPhosphor` — no vendored-theme edit required.
+  test('active tag filter chip inverts to void text on its orange fill', async ({ page }) => {
+    const fixtureChip = page.getByRole('button', { name: 'fixture', exact: true });
+    await fixtureChip.click();
+    await page.mouse.move(0, 0); // resting state — click() leaves the pointer parked on the chip (:hover)
+    await expect(fixtureChip).toHaveCSS('background-color', 'rgb(242, 100, 0)'); // fill is correct
+    await expect(fixtureChip).toHaveCSS('color', 'rgb(10, 10, 10)'); // text is not — see comment above
+  });
+
+  test('drag-and-drop still moves a card via POST /tasks/:id/status under Phosphor', async ({ page }) => {
+    // Same override as the ZAPAC drag test above — sends this route straight
+    // to the daemon instead of stubNetwork's status-page stub.
+    await page.route('**/tasks/*/status', (route) => route.continue());
+
+    const card = page.getByRole('button', { name: 'Seeded review card', exact: true });
+    // The column head is now a `role="group"` (fix 2), still a direct child of
+    // the drop-target column Stack — `xpath=..` still resolves to that Stack.
+    const todoColumn = page.getByRole('group', { name: /^To-Do \(\d+\)$/ }).locator('xpath=..');
+
+    const [statusResp] = await Promise.all([
+      page.waitForResponse((r) => r.url().endsWith(`/tasks/${INREVIEW_ID}/status`) && r.request().method() === 'POST'),
+      html5Drag(page, card, todoColumn),
+    ]);
+    const body = await statusResp.json();
+    expect(body.ok).toBe(true);
+    expect(body.task.column).toBe('todo');
+
+    await expect(todoColumn.getByRole('button', { name: 'Seeded review card' })).toBeVisible();
+    await expect(page.getByRole('group', { name: /^In Review \(0\)$/ })).toBeVisible();
+  });
+
+  test('the task dossier stays fully within a narrow viewport, sticky actions included', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 800 });
+
+    // "Seeded done card" is never touched by any test in this file (including
+    // the Phosphor drag test above, which moves "Seeded review card" instead).
+    const card = page.getByRole('button', { name: 'Seeded done card', exact: true });
+    await card.scrollIntoViewIfNeeded();
+    await card.click();
+
+    const dialog = page.getByRole('dialog', { name: 'Task detail', exact: true });
+    await expect(dialog).toBeVisible();
+
+    const box = await dialog.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(box.y + box.height).toBeLessThanOrEqual(viewport.height + 1);
+
+    // Sticky footer actions remain reachable — not clipped by the frame's own chamfer.
+    await expect(dialog.getByRole('button', { name: 'View transcript' })).toBeVisible();
+    await expect(dialog.getByRole('button', { name: 'Open session' })).toBeVisible();
+  });
 });

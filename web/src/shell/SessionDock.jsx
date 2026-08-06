@@ -114,8 +114,12 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
               conflict. */}
           {/* `baseline` sits Phosphor's mono "N TOTAL" readout on the label's
               baseline; ZAPAC's pill-shaped count chip is a box, not text, and
-              must stay optically centred as it always was. */}
-          <Stack direction="row" sx={(t) => ({ alignItems: phosphor ? 'baseline' : 'center', gap: '8px', px: '16px', pt: '14px', pb: '10px', flexShrink: 0, borderBottom: phosphor ? `1px solid ${stroke2(t)}` : 'none' })}>
+              must stay optically centred as it always was.
+              Fix 5: under Phosphor, `pt` matches the term-bar's own `py:'10px'`
+              (was `14px`, 4px taller than the term-bar) so the two side-by-side
+              header bands land at the same height/baseline and read as one
+              continuous band across the dock — ZAPAC's own padding is untouched. */}
+          <Stack direction="row" sx={(t) => ({ alignItems: phosphor ? 'baseline' : 'center', gap: '8px', px: '16px', pt: phosphor ? '10px' : '14px', pb: '10px', flexShrink: 0, borderBottom: phosphor ? `1px solid ${stroke2(t)}` : 'none' })}>
             <Typography component="h4" sx={(t) => ({ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: phosphor ? t.nerv.hue.orange : 'text.disabled', m: 0 })} noWrap>
               Sessions
               {phosphor && <Box component="span" sx={(t) => ({ ml: 0.75, fontFamily: t.nerv.fonts.jp, fontWeight: 800, letterSpacing: '0.14em' })}>部隊</Box>}

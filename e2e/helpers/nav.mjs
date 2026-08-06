@@ -34,7 +34,13 @@ export const VIEW_IDS = {
 //  - tasks/cron/usage/appearance/status aren't RailHeader panels; each gets its
 //    own always-present heading/button/label instead.
 const VIEW_LANDMARK = {
-  tasks: (page) => page.getByText(/To-Do \(\d+\)/),
+  // Skin-dependent. ZAPAC's column head is one Typography whose text content is
+  // literally "To-Do (7)", so a text matcher finds it. Phosphor's is a flex row
+  // of three siblings — label, kanji, count — so its text content reads
+  // "To-Do待機(7)" and the same matcher never fires; there the locked
+  // "<Label> (<n>)" name is carried by `role="group"` + `aria-label` instead.
+  // Match either, or every Phosphor `goto(page,'Tasks')` hangs on this landmark.
+  tasks: (page) => page.getByText(/To-Do \(\d+\)/).or(page.getByRole('group', { name: /To-Do \(\d+\)/ })).first(),
   cron: (page) => page.getByRole('button', { name: 'Scheduled job' }),
   usage: (page) => page.getByRole('button', { name: /collapse usage|expand usage/i }).first(),
   config: (page) => page.getByPlaceholder('Search config…'),
