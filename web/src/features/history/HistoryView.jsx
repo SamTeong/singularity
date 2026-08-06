@@ -355,6 +355,16 @@ export default function HistoryView({ onOpenSession }) {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
         <Typography sx={{ fontSize: 20, fontWeight: 600 }}>History</Typography>
+        <Tooltip title="Each card's left edge splits by harness in proportion to that project's turns; its opacity tracks the day's token volume." disableInteractive>
+          <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', ml: 1, cursor: 'help' }}>
+            {[['claude', 'primary.main'], ['codex', 'secondary.main']].map(([label, color]) => (
+              <Stack key={label} direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                <Box sx={{ width: 4, height: 12, bgcolor: color }} />
+                <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{label}</Typography>
+              </Stack>
+            ))}
+          </Stack>
+        </Tooltip>
         <Box sx={{ flex: 1 }} />
         {[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([p, label]) => (
           <Chip key={p} label={label} size="small" clickable onClick={() => setPresetChip(p)} color={preset === p ? 'primary' : 'default'} variant={preset === p ? 'filled' : 'outlined'} />
