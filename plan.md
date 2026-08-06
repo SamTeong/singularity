@@ -1,6 +1,6 @@
 # History page — daily work timeline
 
-> Status: **P1 (backend) done** (`8ffc85b`), **P2 (frontend) done** (`d227619`), **P3 (review) done** (`d109733`), plus a blocking backend guard (`fe16ea3`). Suite 281 pass / 0 fail. **P4 is next — one open bug: concurrent backfill double-summarizes every day.** See "P4" at the bottom for the copy-paste kick-off.
+> Status: **P1 (backend) done** (`8ffc85b`), **P2 (frontend) done** (`d227619`), **P3 (review) done** (`d109733`), **P4 (concurrent-backfill spend bug) done** (`1f910d5`), plus a blocking backend guard (`fe16ea3`). Suite 282 pass / 0 fail. Feature is code-complete. **P5 is next — live verification against the real daemon on :4317, which still predates P1 and has no `/history` route.** See "P5" at the bottom for the copy-paste kick-off.
 
 ## Context
 
@@ -214,7 +214,7 @@ Motion fixes: added the spec'd 60ms reveal stagger (absent entirely, capped at 8
 
 One finding **rejected**, ranked first by the animation reviewer: that framer's `y` shorthand is a GPU violation needing `useMotionTemplate`. Both write `style.transform` from JS in the same rAF batch — the distinction doesn't exist. Do not re-apply it.
 
-**P4 — the concurrent-backfill spend bug.** Open. See below.
+**P4 — the concurrent-backfill spend bug.** Done (`1f910d5`). Shared in-flight promise in `ensureHistory`; body renamed `_ensureHistory`, otherwise untouched. One concurrency test added at the `-9 days` offset. Verified on a fresh isolated daemon: one `curl /history?days=7` → 7 lines / 7 unique dates, was 14.
 
 ## Delegation
 
@@ -238,7 +238,7 @@ Delegate P2 to a `senior-software-engineer` subagent on **sonnet** (`model: sonn
 
 # P4 — concurrent backfill double-summarizes every day
 
-**Status: open.** Found during P2 verification. Not blocking — the page renders correctly — but it doubles LLM spend on every cold start, which the plan's own "spend guards" decision exists to prevent.
+**Status: DONE (`1f910d5`).** Found during P2 verification. Not blocking — the page renders correctly — but it doubles LLM spend on every cold start, which the plan's own "spend guards" decision exists to prevent.
 
 ## Symptom
 
@@ -293,6 +293,43 @@ Add to `server/history.test.mjs`, respecting its existing conventions — pick a
 1. `pnpm test` — expect 282 pass / 0 fail.
 2. Fresh isolated daemon (`SING_TOKEN=` empty, scratch `SINGULARITY_HOME`, `PORT=4399` — **do not restart :4317**), then `curl /history?days=7` once and wait for backfill to finish. `wc -l` on `history.jsonl` must equal the number of closed days in the window, not twice it.
 
-## Kick-off prompt (copy-paste)
+## As built
+
+- `server/history.mjs`: body renamed `_ensureHistory` (logic untouched); new exported `ensureHistory` wrapper holds one module-level `inFlight` promise, cleared in `.finally`. The `ponytail:` comment names the ceiling — a wider `days` arriving second gets the narrower result, picked up by the next call because `GET /history` re-checks gaps on every load. No request-merging queue.
+- `server/history.test.mjs`: one case at the `-9 days` offset (everything through `-7` is already on disk once the gap-day test's `days: 7` run finishes), `root: SESSIONS_ROOT`, 3 assistant turns so it clears the trivial gate. Asserts the `callAnthropic` stub fired once **and** the raw line count for the date is 1 — `readHistory().length` alone passes either way because the reader is last-wins.
+- Verified: `pnpm test` 282 pass / 0 fail; isolated daemon (scratch `SINGULARITY_HOME`, `PORT=4399`, `SING_TOKEN=` empty, :4317 untouched) → one `curl /history?days=7` → `history.jsonl` 7 lines / 7 unique dates.
+
+## Kick-off prompt (used — kept for the record)
 
 > Read the **P4** section of `plan.md` in the repo root. Implement exactly that: the shared in-flight promise in `server/history.mjs`, plus the one concurrency test in `server/history.test.mjs`. Backend only — do not touch `web/`. P1/P2/P3 are done and committed; do not revisit them, and do not re-apply the rejected `useMotionTemplate` finding noted under P3. This is a small, well-specified change: do it inline, no subagent. Verify with the two steps in P4's Verify list, then commit. Note the traps list above — especially that the isolated probe daemon needs `SING_TOKEN=` empty, and that `history.test.mjs` cases are order-coupled by date offset.
+
+---
+
+# P5 — live verification + e2e coverage
+
+**Status: open.** The feature is code-complete (P1–P4 committed, 282 pass / 0 fail) but the page has **never been driven against a daemon that serves `/history`**. Every check so far was a unit test or a `curl` at an isolated probe daemon. Two gaps:
+
+1. **The daemon on :4317 predates P1.** It has no `/history` route, so the History page 404s against the live instance. It needs a restart — but sessions run inside it, so that restart is the user's call, not an agent's. Do not restart it unattended.
+2. **No e2e spec.** `e2e/` covers every other page (`nav`, `transcripts`, `usage`, `tasks`, …); there is no `history.spec.mjs`. The suite drives a throwaway sandbox daemon, so a History spec needs a seeded `history.jsonl` rather than live LLM calls.
+
+## Work
+
+- Get :4317 restarted (ask the user), then load the History page and confirm end-to-end: entries render newest-first, gap days render absence instead of shimmering forever, unresolved days stream in over WS, expand → session list → deep-link into Transcripts, Regenerate rewrites one day in place, range switch animates without a blank frame.
+- Add `e2e/history.spec.mjs` in the shape of the existing specs. Seed `history.jsonl` into the sandbox `SINGULARITY_HOME` via `e2e/fixtures/seed.mjs` — the sandbox daemon must **never** backfill for real; an unseeded run fires live haiku calls per missing day. Cover: seeded days render, expand → sessions, deep-link out, gap-day copy.
+
+## Traps that still apply
+
+The "Traps found during recon" list above is all still live. The two that bite here: the sandbox/probe daemon needs `SING_TOKEN=` empty or every request 401s, and `SINGULARITY_HOME` has no default — unset means `app-dir.mjs` throws.
+
+## Kick-off prompt (copy-paste)
+
+> Read the **P5** section at the bottom of `plan.md` in the repo root (`c:\git\singularity`), plus the "Traps found during recon" list above it. Implement exactly that, nothing else.
+>
+> Two halves, in this order:
+>
+> 1. **Live verification.** The daemon on :4317 predates P1 and has no `/history` route, so the page 404s against it. Sessions run inside that daemon — **do not restart it yourself**. Ask me first and say what you need. Once it serves `/history`, walk the page: newest-first order, gap days rendering absence instead of shimmering forever, unresolved days streaming in over WS, expand → session list → deep-link into Transcripts, Regenerate rewriting one day in place, range switch with no blank frame. Report what you actually observed, per item — do not report a step as verified if you could not run it.
+> 2. **`e2e/history.spec.mjs`.** Follow the existing specs (`e2e/transcripts.spec.mjs` is the closest analogue). Seed `history.jsonl` into the sandbox `SINGULARITY_HOME` through `e2e/fixtures/seed.mjs`; the sandbox daemon must **never** backfill for real, since an unseeded run fires live haiku calls per missing day. Cover: seeded days render, expand → sessions, deep-link out, gap-day copy.
+>
+> P1–P4 are done and committed (`8ffc85b`, `d227619`, `d109733`, `1f910d5`, plus the guard `fe16ea3`). Do not revisit them. In particular do not re-apply the P3 finding that framer's `y` shorthand needs `useMotionTemplate` — it was reviewed and rejected, and the reason is recorded under P3.
+>
+> Verify: `pnpm test` (needs `--test-force-exit`; the suite does not self-exit) stays at 282 pass / 0 fail, and the new e2e spec passes. Then commit.
