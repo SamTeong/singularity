@@ -180,7 +180,6 @@ export default function ConfigEditor() {
     return () => window.removeEventListener('focus', onFocus);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- readRoot closure is fine; re-bind only on active
   }, [active]);
-
   // Content search across both tools' roots (fire both, tag hits with tool).
   useEffect(() => {
     const term = q.trim();
@@ -234,6 +233,28 @@ export default function ConfigEditor() {
     setActive(path);
     setMsg(null);
   };
+
+  // Alt+Up/Down cycles editor tabs when this panel's CodeMirror has focus.
+  // key={active} remounts CmEditor on switch, so refocus the new cm-content
+  // one frame after switchActive (remount lands on next render).
+  const editorHostRef = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const ae = document.activeElement;
+      if (!ae?.closest?.('.cm-editor')) return;
+      if (tabs.length < 2) return;
+      e.preventDefault();
+      const idx = tabs.findIndex((t) => t.path === active);
+      if (idx < 0) return;
+      const dir = e.key === 'ArrowUp' ? -1 : 1;
+      const next = tabs[(idx + dir + tabs.length) % tabs.length];
+      switchActive(next.path);
+      requestAnimationFrame(() => editorHostRef.current?.querySelector('.cm-content')?.focus());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tabs, active, switchActive]);
 
   const openFile = async (cwd, tool, scope) => {
     const d = await readRoot(tool, cwd);
@@ -385,7 +406,7 @@ export default function ConfigEditor() {
         )}
       </Rail>
 
-      <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, pt: 1, minHeight: 0 }} spacing={1}>
+      <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, pt: 1, minHeight: 0 }} spacing={1}>
         {picking && <DirPicker start={untildify(activeTab?.cwd ?? shownRoots[0] ?? '~')} onPick={pick} onClose={() => setPicking(false)} />}
         <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
           <Tooltip title={autosave ? 'Autosave on (5s)' : 'Autosave off'} placement="bottom" disableInteractive>

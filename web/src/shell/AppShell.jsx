@@ -22,8 +22,11 @@ import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { useTaskActions } from '@/hooks/useTaskActions.js';
 import Sidebar from '@/shell/Sidebar.jsx';
 import SessionDock from '@/shell/SessionDock.jsx';
-import AppMenu from '@/shell/AppMenu.jsx';
+import AppMenu, { NAV_ITEMS } from '@/shell/AppMenu.jsx';
 import { glass } from '@/shell/shellStyles.js';
+import { useShiftShift } from '@/features/palette/useShiftShift.js';
+import CommandPalette from '@/features/palette/CommandPalette.jsx';
+import { buildCommands } from '@/features/palette/commands.mjs';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
@@ -87,6 +90,7 @@ export default function AppShell() {
   // Persisted so the selected view survives a skin switch (which remounts the
   // whole shell) and page reloads — otherwise switching theme bounces to Tasks.
   const [view, setView] = useState(() => localStorage.getItem('sing-view') || 'tasks');
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
   const [openTx, setOpenTx] = useState(null); // {project, id, cwd, mtime} handed to SessionHistory
@@ -113,6 +117,22 @@ export default function AppShell() {
 
   // Remember the selected view across skin remounts + reloads.
   useEffect(() => { localStorage.setItem('sing-view', view); }, [view]);
+  // Alt+Up/Down cycles More-menu views (xterm + cm-editor handle own focus cases).
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const ae = document.activeElement;
+      if (ae?.closest?.('.xterm') || ae?.closest?.('.cm-editor')) return; // xterm/cm handle own
+      const idx = NAV_ITEMS.findIndex((n) => n.v === view);
+      if (idx < 0) return;
+      e.preventDefault();
+      const dir = e.key === 'ArrowUp' ? -1 : 1;
+      const next = NAV_ITEMS[(idx + dir + NAV_ITEMS.length) % NAV_ITEMS.length];
+      setView(next.v);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [view, setView]);
 
   // Surface daemon 'error' frames as a toast (the provider owns no UI state).
   useEffect(() => registerError(setToast), [registerError]);
@@ -210,6 +230,11 @@ export default function AppShell() {
   // Live (running/idle/starting) dock agents by id — passed to SessionHistory so its
   // Resume button can disable when the transcript's session is already attached.
   const liveSessionIds = useMemo(() => new Set(agents.filter((a) => isLive(a.status)).map((a) => a.id)), [agents]);
+
+  // Command palette (Phase 0): Views group only. ctx carries setView + view.
+  const paletteCtx = useMemo(() => ({ setView, view }), [setView, view]);
+  const commands = useMemo(() => buildCommands(paletteCtx), [paletteCtx]);
+  useShiftShift(() => setPaletteOpen(true));
 
   return (
     <Box ref={mainRef} sx={{ position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -388,6 +413,14 @@ export default function AppShell() {
           </>
         }
       />
+
+      {paletteOpen && (
+        <CommandPalette
+          commands={commands}
+          onRun={(cmd) => { cmd.run?.(); setPaletteOpen(false); }}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
     </Box>
   );
 }

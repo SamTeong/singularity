@@ -205,6 +205,28 @@ export default function ExplorerPanel() {
     setMsg(null);
   };
 
+  // Alt+Up/Down cycles editor tabs when this panel's CodeMirror has focus.
+  // key={active} remounts CmEditor on switch, so refocus the new cm-content
+  // one frame after switchActive (remount lands on next render).
+  const editorHostRef = useRef(null);
+  useEffect(() => {
+    const onKey = (e) => {
+      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const ae = document.activeElement;
+      if (!ae?.closest?.('.cm-editor')) return;
+      if (tabs.length < 2) return;
+      e.preventDefault();
+      const idx = tabs.findIndex((t) => t.path === active);
+      if (idx < 0) return;
+      const dir = e.key === 'ArrowUp' ? -1 : 1;
+      const next = tabs[(idx + dir + tabs.length) % tabs.length];
+      switchActive(next.path);
+      requestAnimationFrame(() => editorHostRef.current?.querySelector('.cm-content')?.focus());
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [tabs, active, switchActive]);
+
   const openFile = (path) => {
     if (path === active) return;
     if (tabs.some((t) => t.path === path)) { switchActive(path); return; }
@@ -388,7 +410,7 @@ export default function ExplorerPanel() {
         )}
       </Rail>
 
-      <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}
+      <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}
         onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (active) save(active); } }}>
         {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={openFile} onClose={closeTab} />}
         <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 2 }} spacing={1.5}>

@@ -24,7 +24,7 @@ import Sparkline from '@/components/Sparkline.jsx';
 import { useSysStats } from '@/hooks/useSysStats.js';
 
 // Overflow-nav entries surfaced from the More menu (view id + icon + label).
-const NAV_ITEMS = [
+export const NAV_ITEMS = [
   { v: 'config', icon: <SettingsIcon fontSize="small" />, label: 'Config' },
   { v: 'hooks', icon: <WebhookIcon fontSize="small" />, label: 'Hooks' },
   { v: 'skills', icon: <SchoolIcon fontSize="small" />, label: 'Skills' },

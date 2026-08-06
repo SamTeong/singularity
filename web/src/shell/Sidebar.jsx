@@ -24,7 +24,7 @@ import { glass, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
 
 // Vertical nav rail entries (icon + label). The rail is the sidebar's primary
 // navigation; the ＋ "New agent" row above it opens the create dialog.
-const NAV = [
+export const NAV = [
   { v: 'tasks', icon: <ViewKanbanIcon />, label: 'Tasks' },
   { v: 'cron', icon: <ScheduleIcon />, label: 'Automation' },
   { v: 'usage', icon: <SpeedIcon />, label: 'Usage' },
