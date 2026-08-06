@@ -307,7 +307,7 @@ Add to `server/history.test.mjs`, respecting its existing conventions — pick a
 
 # P5 — live verification + e2e coverage
 
-**Status: open.** The feature is code-complete (P1–P4 committed, 282 pass / 0 fail) but the page has **never been driven against a daemon that serves `/history`**. Every check so far was a unit test or a `curl` at an isolated probe daemon. Two gaps:
+**Status: DONE (`1270d7e`).** Both gaps closed — the page was driven against a live :4317 daemon that serves `/history`, and the e2e spec was added. (Was: the feature was code-complete after P1–P4, 282 pass / 0 fail, but the page had never been driven against a daemon that serves `/history` — every prior check was a unit test or a `curl` at an isolated probe daemon.)
 
 1. **The daemon on :4317 predates P1.** It has no `/history` route, so the History page 404s against the live instance. It needs a restart — but sessions run inside it, so that restart is the user's call, not an agent's. Do not restart it unattended.
 2. **No e2e spec.** `e2e/` covers every other page (`nav`, `transcripts`, `usage`, `tasks`, …); there is no `history.spec.mjs`. The suite drives a throwaway sandbox daemon, so a History spec needs a seeded `history.jsonl` rather than live LLM calls.
@@ -333,3 +333,11 @@ The "Traps found during recon" list above is all still live. The two that bite h
 > P1–P4 are done and committed (`8ffc85b`, `d227619`, `d109733`, `1f910d5`, plus the guard `fe16ea3`). Do not revisit them. In particular do not re-apply the P3 finding that framer's `y` shorthand needs `useMotionTemplate` — it was reviewed and rejected, and the reason is recorded under P3.
 >
 > Verify: `pnpm test` (needs `--test-force-exit`; the suite does not self-exit) stays at 282 pass / 0 fail, and the new e2e spec passes. Then commit.
+
+## As built
+
+- `e2e/history.spec.mjs` (new, 4 tests): seeded days render newest-first; expand → session list (`role="region"` "Sessions"); deep-link into Transcripts (asserts the transcript content rendered, not just the view switch — `openHistorySession` carries no `title`, so the header shows the raw id); gap day renders the absence hairline (`[aria-label*="no work"]`), zero `[aria-busy="true"]` shimmers.
+- `e2e/fixtures/seed.mjs`: `seedHistory()` writes 7-day `state/history.jsonl` (6 non-empty + 1 `llm.reason:'empty'` gap at day-2). Fixture transcripts backdated to 2025-06-01, outside any 7-day window, so `scanDays` finds nothing even if `ensureHistory` runs.
+- `e2e/serve.mjs`: sandboxed `CODEX_HOME` (nonexistent path). Unset, `listCodexSessions()` scanned the real `~/.codex` and leaked 130+ live Codex transcripts into the sandbox; `scanDays` found them in the backfill window and would have upgraded the seeded gap day and fired real haiku via the real OAuth token. Also fixed the Transcripts view showing 162 sessions (32 fixture + 130 real) instead of 32. This trap is NOT in the "Traps found during recon" list above — `listSessions` calling `listCodexSessions` with no root and no sandbox isolation was undiscovered until P5.
+- Live verification on :4317 (user restarted; agent never restarted it): all six checklist items confirmed — newest-first (6 Aug → 30 Jul); gap day 2026-07-11 renders the absence hairline `aria-label="…, no work"` (not observable in 7d, confirmed in the authorized one-time 30d switch); WS `history` frames on Regenerate (1) and 30d backfill (23); expand 2026-08-05 → 43 session rows → deep-link mounts Transcripts + transcript content; Regenerate on 2026-07-30 rewrote the summary in place (spinner → new text, same DOM position, no blank frame); 7d→30d range switch crossfaded via `popLayout` with the card count never dropping to 0. The 30d switch fired 22 real haiku calls (one-time, user-authorized).
+- Verified: `pnpm test` 282 pass / 0 fail; `e2e/history.spec.mjs` 4 pass. A full `pnpm test:e2e` run had 13 failures in unrelated specs (editors/config/explorer/create-dialogs) — all UI timeouts from live-session contention on the shared machine, not caused by the P5 diff; the new history spec passed in that same run.
