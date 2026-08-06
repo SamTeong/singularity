@@ -193,6 +193,54 @@ function seedState() {
   json(join(STATE_DIR, 'background.json'), { jobs: [bgJob(1, 'Fixture backlog groomer'), bgJob(2, 'Fixture dependency check')] });
 }
 
+// --------------------------------------------------------------------- history
+
+// Seed history.jsonl so the sandbox daemon NEVER backfills for real. Both boot
+// and GET /history fire ensureHistory(), which diffs wanted days against the
+// file and calls haiku for each missing one — an unseeded file means live LLM
+// calls per day. Every day in the 7-day default window is seeded here, so
+// `missing` is empty (or just the gap day, which scanDays finds nothing for
+// and skips via `!agg && prior.has(date)`). The fixture corpus is backdated
+// to 2025-06-01, well outside any 7-day window from now, so scanDays never
+// finds sessions to summarize even if ensureHistory runs.
+//
+// One day (day-2) is seeded as an empty gap (llm.reason:'empty') so the page
+// renders a GapSegment; the rest are non-empty with sessions drawn from the
+// fixture transcript corpus, so the deep-link test can open a real transcript.
+function seedHistory() {
+  const dayStr = (offset) => { const d = new Date(); d.setDate(d.getDate() - offset); return d.toLocaleDateString('en-CA'); };
+  const sess = (id, project, cwd, title, turns) => ({ id, project, cwd, source: 'claude', title, turns });
+  const ok = { ok: true, provider: 'anthropic-oauth', model: 'claude-haiku-4-5-20251001', inputTokens: 5000, outputTokens: 80 };
+  const empty = { ok: false, provider: null, model: null, reason: 'empty' };
+  const m = (sessions, turns, tokens, cost) => ({
+    sessions, turns, tokens, costUsd: cost,
+    byHarness: sessions > 0 ? { claude: { sessions, turns } } : {},
+  });
+  const e = (date, summary, topics, repos, sessions, metrics, llm) => ({
+    date, summary, topics, repos, sessions, metrics, llm, builtAt: new Date().toISOString(),
+  });
+
+  // Oldest→newest (append order matches readHistory's sort).
+  const lines = [
+    e(dayStr(7), 'Refactored the config editor backup path.', ['config', 'backups'], ['alpha'],
+      [sess(sessionId(4), PROJECT_A, '/fixture/alpha', 'Fixture session 4', 3)], m(1, 3, 8000, 0.15), ok),
+    e(dayStr(6), 'Hardened the explorer fixture against path traversal.', ['explorer', 'security'], ['alpha'],
+      [sess(sessionId(3), PROJECT_A, '/fixture/alpha', 'Fixture session 3', 4)], m(1, 4, 10000, 0.22), ok),
+    e(dayStr(5), 'Added pagination to the skills viewer.', ['skills', 'pagination'], ['alpha'],
+      [sess(sessionId(2), PROJECT_A, '/fixture/alpha', 'Fixture session 2', 5)], m(1, 5, 12000, 0.31), ok),
+    e(dayStr(4), 'Wired the wiki category filter to folder segments.', ['wiki', 'categories'], ['alpha'],
+      [sess(sessionId(1), PROJECT_A, '/fixture/alpha', 'Fixture session 1', 6)], m(1, 6, 14000, 0.38), ok),
+    e(dayStr(3), 'Built the e2e sandbox seed corpus for the history spec.', ['e2e', 'fixtures'], ['alpha'],
+      [sess(sessionId(0), PROJECT_A, '/fixture/alpha', 'Fixture session 0', 3)], m(1, 3, 12000, 0.42), ok),
+    e(dayStr(2), '', [], [], [], m(0, 0, 0, 0), empty),
+    e(dayStr(1), 'Shipped the history timeline and fixed a concurrent backfill bug.', ['history', 'backfill'], ['beta'],
+      [sess(RICH_SESSION, PROJECT_B, '/fixture/beta', 'Retry backoff cap', 5),
+       sess(sessionId(901), PROJECT_B, '/fixture/beta', 'Fixture session 901', 2)],
+      m(2, 7, 45000, 1.23), ok),
+  ];
+  jsonl(join(STATE_DIR, 'history.jsonl'), lines);
+}
+
 // ------------------------------------------------------------ claude stub bin
 
 // Keepalive stub, same shape as server/agents.test.mjs. CLAUDE_BIN must exist
@@ -229,5 +277,6 @@ export function seed() {
   seedExplorer();
   seedWorkspace();
   seedState();
+  seedHistory();
   return { claudeBin: stubClaudeBin() };
 }

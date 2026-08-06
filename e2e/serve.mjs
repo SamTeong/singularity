@@ -20,7 +20,8 @@ const env = { ...process.env };
 // Anything the daemon reads for state placement is set explicitly below or must
 // be absent — never inherited.
 for (const k of ['SINGULARITY_HOME', 'PORT', 'CLAUDE_BIN', 'OLLAMA_BIN', 'SING_SCOPE_ROOT',
-  'SING_TRUSTED_ROOT', 'SING_USAGE_SKILL', 'SING_USAGE_REPORTS', 'SING_TOKEN', 'USAGE_REPORT_STATE']) delete env[k];
+  'SING_TRUSTED_ROOT', 'SING_USAGE_SKILL', 'SING_USAGE_REPORTS', 'SING_TOKEN', 'USAGE_REPORT_STATE',
+  'CODEX_HOME']) delete env[k];
 Object.assign(env, {
   SINGULARITY_HOME: HOME_DIR,
   SING_TRUSTED_ROOT: TRUSTED_DIR,
@@ -34,6 +35,12 @@ Object.assign(env, {
   // short-circuits to {needsAuth, error:'no-config'} before launching a browser.
   OLLAMA_BIN: claudeBin,
   SING_TOKEN: TOKEN,
+  // Sandbox the Codex sessions root: listCodexSessions() scans CODEX_HOME/sessions
+  // — without this, the real ~/.codex leaks live Codex transcripts into the
+  // sandbox (162 real sessions showed up in a side-run), and scanDays() finds
+  // them in the backfill window, upgrading the seeded gap day and firing a real
+  // LLM call. Point at a nonexistent path so listCodexSessions returns [] early.
+  CODEX_HOME: join(HOME_DIR, 'no-codex'),
   // SING_SCOPE_ROOT / SING_USAGE_SKILL / SING_USAGE_REPORTS stay unset on
   // purpose — those degraded empty states are part of what we test.
 });
