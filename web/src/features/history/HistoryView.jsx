@@ -10,7 +10,7 @@ import Snackbar from '@mui/material/Snackbar';
 import { EmptyState } from '@zapac/mui-theme';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
-import DayCard, { GapSegment, ShimmerCard } from '@/features/history/DayCard.jsx';
+import DayCard, { GapSegment, ShimmerCard, EASE_OUT } from '@/features/history/DayCard.jsx';
 
 // Machine-local calendar day, same convention the daemon buckets by (see
 // server/history.mjs) — this runs on the same machine (loopback app).
@@ -23,7 +23,7 @@ const WINDOW_THRESHOLD = 60;
 const AVG_ROW_PX = 190; // rough card height + gap, for windowing math only
 
 /** One archive row: a real entry, a still-summarizing placeholder, or both absent (never rendered). */
-function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef, reduceMotion }) {
+function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef, reduceMotion, revealIndex }) {
   const isGap = row.entry?.llm?.reason === 'empty';
   const showShimmer = row.pending && !row.entry;
   // Crossfade text + height-settle on placeholder -> resolved: the outer
@@ -31,7 +31,9 @@ function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regeneratin
   const fade = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: reduceMotion ? 0 : 0.2 } };
   return (
     <motion.div layout={!reduceMotion} transition={{ layout: { type: 'spring', stiffness: 260, damping: 30 } }}>
-      <AnimatePresence mode="wait" initial={false}>
+      {/* popLayout, not "wait": "wait" exits fully before entering, which turns
+          a crossfade into a sequential swap with a blank frame between. */}
+      <AnimatePresence mode="popLayout" initial={false}>
         {showShimmer ? (
           <motion.div key="pending" {...fade}><ShimmerCard /></motion.div>
         ) : isGap ? (
@@ -49,6 +51,7 @@ function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regeneratin
               skipEntranceAnim={skipEntranceAnim}
               onArrowNav={onArrowNav}
               headerRef={headerRef}
+              revealIndex={revealIndex}
             />
           </motion.div>
         )}
@@ -67,13 +70,15 @@ function Spine({ scrollRef, rows, activeDate, reduceMotion }) {
 
   return (
     <Box sx={{ width: 56, flexShrink: 0, position: 'sticky', top: 0, alignSelf: 'flex-start', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', pt: 1 }}>
-      <AnimatePresence mode="wait" initial={false}>
+      {/* popLayout, not "wait": "wait" exits fully before entering, which turns
+          a crossfade into a sequential swap with a blank frame between. */}
+      <AnimatePresence mode="popLayout" initial={false}>
         <motion.div
           key={activeDate || 'none'}
           initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -6 }}
           animate={{ opacity: 1, y: 0 }}
           exit={reduceMotion ? { opacity: 1 } : { opacity: 0, y: 6 }}
-          transition={{ duration: reduceMotion ? 0 : 0.18, ease: 'easeOut' }}
+          transition={{ duration: reduceMotion ? 0 : 0.18, ease: EASE_OUT }}
         >
           <Stack sx={{ alignItems: 'center', minHeight: 34 }}>
             <Typography sx={{ fontSize: 9, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'text.secondary' }}>{weekday}</Typography>
@@ -122,6 +127,7 @@ export default function HistoryView({ onOpenSession }) {
   const reduceMotion = useReducedMotion();
   const scrollRef = useRef(null);
   const headerRefs = useRef({});
+  const fetchSeq = useRef(0);
   // State, not a ref: DayCard reads this via props, and a ref flip alone
   // wouldn't re-render before the browser's focus()-triggered scroll fires
   // the IntersectionObserver whileInView relies on — the skip would never
@@ -154,13 +160,16 @@ export default function HistoryView({ onOpenSession }) {
       if (customRange.from) params.set('from', customRange.from);
       if (customRange.to) params.set('to', customRange.to);
     }
+    // Staleness guard, not an AbortController: flipping presets quickly can
+    // land an older response after a newer one and stomp the right range.
+    const mine = ++fetchSeq.current;
     fetch(`/history?${params}`).then((r) => r.json()).then((d) => {
-      if (!d.ok) return;
+      if (!d.ok || mine !== fetchSeq.current) return;
       setToday(d.today);
       setFetchedEntries(d.entries);
       setFetchedPending(d.pending);
       setLoaded(true);
-    }).catch(() => setError('Could not load history.'));
+    }).catch(() => { if (mine === fetchSeq.current) setError('Could not load history.'); });
     setRenderKey((k) => k + 1);
   }, [preset, customRange.from, customRange.to]);
 
@@ -229,7 +238,10 @@ export default function HistoryView({ onOpenSession }) {
     for (const [, el] of targets) obs.observe(el);
     if (!activeDate && targets.length) setActiveDate(targets[0][0]);
     return () => obs.disconnect();
-  }, [visibleRows.map((r) => r.date).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+    // Re-arm on resolution too, not just on the date set: a day that was a
+    // shimmer had no header to observe, and mounting one doesn't change the
+    // date list — so without this it would never become the active date.
+  }, [visibleRows.map((r) => `${r.date}:${r.entry ? 1 : 0}`).join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Keyboard-nav retry: once the windowed-out target re-mounts, focus it.
   useEffect(() => {
@@ -240,7 +252,12 @@ export default function HistoryView({ onOpenSession }) {
 
   const moveFocus = useCallback((fromDate, delta) => {
     const idx = rows.findIndex((r) => r.date === fromDate);
-    const next = rows[idx + delta];
+    // Skip past gap days and unresolved placeholders: neither renders a
+    // focusable header, so landing on one strands focus on nothing.
+    const focusable = (r) => r.entry && r.entry.llm?.reason !== 'empty';
+    let j = idx + delta;
+    while (rows[j] && !focusable(rows[j])) j += delta;
+    const next = rows[j];
     if (!next) return;
     setKeyboardNav(true);
     setTimeout(() => setKeyboardNav(false), 400);
@@ -306,15 +323,16 @@ export default function HistoryView({ onOpenSession }) {
                 <motion.div
                   key={renderKey}
                   initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={reduceMotion ? { opacity: 0 } : { opacity: 0, y: -8 }}
-                  transition={{ duration: reduceMotion ? 0.05 : 0.2, ease: 'easeOut' }}
+                  animate={{ opacity: 1, y: 0, transition: { duration: reduceMotion ? 0.05 : 0.29, ease: EASE_OUT } }}
+                  // Asymmetric on purpose: leave fast, settle in slower.
+                  exit={{ opacity: 0, y: reduceMotion ? 0 : -8, transition: { duration: reduceMotion ? 0.05 : 0.2, ease: EASE_OUT } }}
                 >
                   <Stack spacing={3} sx={{ pb: 2 }}>
                     {windowed && winRange[0] > 0 && <Box sx={{ height: winRange[0] * AVG_ROW_PX }} />}
-                    {visibleRows.map((row) => (
+                    {visibleRows.map((row, i) => (
                       <Row
                         key={row.date}
+                        revealIndex={i}
                         row={row}
                         expanded={expanded.has(row.date)}
                         onToggle={() => toggle(row.date)}

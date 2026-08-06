@@ -15,8 +15,9 @@ import { repoName } from '@/lib/paths.js';
 // motion() over a plain motion.article: the card needs `sx` (MUI's styling
 // prop, unsupported on bare motion.<tag> primitives) alongside layout/reveal.
 const MotionArticle = motion(Box);
+const MotionBox = motion(Box);
 
-const EASE_OUT = [0.16, 1, 0.3, 1];
+export const EASE_OUT = [0.16, 1, 0.3, 1];
 const SPRING_EXPAND = { type: 'spring', stiffness: 320, damping: 34, mass: 0.9 };
 
 // Card min-height scales with turns, sqrt-damped so a 10x day isn't 10x tall.
@@ -97,7 +98,7 @@ export function ShimmerCard() {
  * expands in place to the day's sessions. `entry.live` (today) drops the
  * summary/topics/llm entirely in favor of a live-metrics-only treatment.
  */
-export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef }) {
+export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef, revealIndex = 0 }) {
   const reduceMotion = useReducedMotion();
   const bandRef = useRef(null);
 
@@ -138,7 +139,14 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
       layout={!reduceMotion}
       variants={variants}
       {...revealProps}
-      transition={{ duration: reduceMotion ? 0.01 : 0.29, ease: EASE_OUT, layout: reduceMotion ? { duration: 0 } : SPRING_EXPAND }}
+      transition={{
+        duration: reduceMotion ? 0.01 : 0.29,
+        ease: EASE_OUT,
+        // 60ms stagger, capped at 8 so a card deep in the list doesn't sit
+        // behind a half-second delay before it reveals.
+        delay: reduceMotion || skipEntranceAnim ? 0 : Math.min(revealIndex, 7) * 0.06,
+        layout: reduceMotion ? { duration: 0 } : SPRING_EXPAND,
+      }}
       aria-label={ariaLabel}
       aria-busy={regenerating || undefined}
       sx={{ maxWidth: 720 }}
@@ -162,7 +170,10 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
         </Box>
       </motion.div>
 
-      <Box
+      {/* layout="position" so the parent's FLIP height animation translates this
+          block instead of scale-stretching its text and chips. */}
+      <MotionBox
+        layout={reduceMotion ? false : 'position'}
         ref={headerRef}
         role="button"
         tabIndex={0}
@@ -201,7 +212,7 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
         {!!entry.repos?.length && (
           <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }} noWrap>{entry.repos.join(' · ')}</Typography>
         )}
-      </Box>
+      </MotionBox>
 
       <AnimatePresence initial={false}>
         {expanded && (
@@ -242,7 +253,11 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
                     <IconButton size="small" disabled={regenerating} onClick={(e) => { e.stopPropagation(); onRegenerate(entry.date); }}>
                       <RefreshIcon
                         fontSize="small"
-                        sx={regenerating ? { animation: 'sing-history-spin 1s linear infinite', '@keyframes sing-history-spin': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } } } : undefined}
+                        sx={regenerating ? {
+                          animation: 'sing-history-spin 1s linear infinite',
+                          '@keyframes sing-history-spin': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } },
+                          '@media (prefers-reduced-motion: reduce)': { animation: 'none', opacity: 0.5 },
+                        } : undefined}
                       />
                     </IconButton>
                   </Tooltip>
