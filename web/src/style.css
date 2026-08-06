@@ -15,14 +15,35 @@ body.resizing * { pointer-events: none; }
 /* Dark scheme: theme's error red (#b00020) is too dark/saturated on the dark
    surface — low contrast + red-on-dark chromostereopsis make it read blurry.
    Lift to the brighter red xterm already uses (Terminal.jsx). Covers StatusPill
-   ("Exited"), the disconnected pill, and any color="error" text. */
-html.dark { --mui-palette-error-main: #ff6b81; }
+   ("Exited"), the disconnected pill, and any color="error" text.
+
+   ZAPAC ONLY. Phosphor also sets `html.dark` (it's a dark-only cssVariables
+   theme with `colorSchemeSelector: 'class'`), so unscoped this painted ZAPAC's
+   #ff6b81 over Phosphor's own error red at the CSS-variable level — outranking
+   the adapter's AA correction in `theme/skins/phosphor.jsx` and putting a ZAPAC
+   identity colour in the console (design.md D2/D4). The `:not()` form keeps
+   ZAPAC as the default so no skin regresses if the attribute is ever absent. */
+html.dark:not([data-skin='phosphor']) { --mui-palette-error-main: #ff6b81; }
+
+/* Phosphor's WCAG-AA error red (task 7.4). The adapter in
+   `theme/skins/phosphor.jsx` mutates `nerv.hue.redHi`, which fixes everything
+   reading the token at render (`toneHue`, every red Stamp/StatusPill). It
+   cannot fix the CSS-variable path: MUI emits `--mui-palette-error-main` from
+   a map computed inside `createTheme()`, so a post-hoc palette write is never
+   serialised. Consumers of `theme.vars.palette.error.main` / `color:'error.main'`
+   (AppMenu restart, SessionRow kill, UsageReportView, SkillsPanel, CronJobs,
+   SaveBar, MermaidBlock) therefore resolve the variable, and it has to be
+   corrected here. Vendored `redHi` #E2280F is 4.28:1 on the void surface —
+   below AA in BOTH directions, filled or not; #F04438 is 5.27:1 either way. */
+html[data-skin='phosphor'] { --mui-palette-error-main: #F04438; }
 
 /* xterm fills its glass frame; the terminal keeps an opaque surface
    (the "machine output" layer — never glass), themed light/dark with the app. */
 /* Radius stays concentric with the outer glass frame: frame is radius.lg (26px)
-   less the 4px (p:0.5) frame pad less this 16px inset = 6px corner. */
+   less the 4px (p:0.5) frame pad less this 16px inset = 6px corner. Phosphor is
+   hard-edged (no glass frame to be concentric with), so it keeps square corners. */
 .term { position: absolute; inset: 16px; border-radius: 6px; overflow: hidden; }
+html[data-skin='phosphor'] .term { border-radius: 0; }
 .term .xterm { height: 100%; }
 
 /* The terminal keeps an opaque surface (not glass), but Zapac's CssBaseline
@@ -31,7 +52,15 @@ html.dark { --mui-palette-error-main: #ff6b81; }
    Give .xterm-viewport a visible, mode-scoped thumb. */
 .term .xterm-viewport::-webkit-scrollbar { width: 10px; }
 .term .xterm-viewport::-webkit-scrollbar-track { background: transparent; }
-html.dark .term .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(160,130,255,.45); }
+html.dark:not([data-skin='phosphor']) .term .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(160,130,255,.45); }
 html.light .term .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(83,54,120,.40); }
 .term .xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(160,130,255,.7); }
 html.light .term .xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(83,54,120,.65); }
+
+/* Phosphor's terminal well is amber-on-black — the ZAPAC purple thumb above is
+   a foreign identity colour there. Use the console's own chrome stroke (the
+   `nerv.stroke2` dim green) and its peak mint on hover. Kept in CSS rather than
+   `Terminal.jsx`'s `sx` because `::-webkit-scrollbar-thumb` is a non-standard
+   pseudo-element that Emotion can't target reliably. */
+html[data-skin='phosphor'] .term .xterm-viewport::-webkit-scrollbar-thumb { background: rgba(36,108,60,.85); }
+html[data-skin='phosphor'] .term .xterm-viewport::-webkit-scrollbar-thumb:hover { background: rgba(82,242,154,.7); }

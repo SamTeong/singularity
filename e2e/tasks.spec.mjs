@@ -325,7 +325,13 @@ test.describe('Tasks board — Phosphor Console', () => {
       const cs = getComputedStyle(el);
       return { bg: cs.backgroundColor, color: cs.color };
     });
-    expect(failedStyle.bg).toBe('rgb(226, 40, 15)'); // filled inversion — recorded/terminal state
+    // Filled inversion — recorded/terminal state. #F04438, NOT the vendored
+    // `hue.redHi` #E2280F this originally asserted: that value is 4.28:1 on the
+    // void surface, below AA in both directions (filling doesn't rescue it —
+    // black-on-#E2280F is the same ratio), so the adapter in
+    // `theme/skins/phosphor.jsx` repoints it. Asserting the old value locked in
+    // the contrast bug; this now guards against regressing back to it.
+    expect(failedStyle.bg).toBe('rgb(240, 68, 56)');
     expect(failedStyle.color).toBe('rgb(10, 10, 10)'); // void content, never a glow on punched-out text
   });
 

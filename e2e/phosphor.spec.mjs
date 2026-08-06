@@ -291,6 +291,45 @@ test('masthead matches the peg: seven-segment clock, AUG 06 2026 dateline, no or
   await expect(page.getByText('統制卓')).toHaveCount(0);
 });
 
+test('no ZAPAC identity colour reaches Phosphor via plain CSS, and the AA error red is the one that renders', async ({ page }) => {
+  await goto(page, 'Tasks');
+
+  // `web/src/style.css` predates multi-skin support and holds rules keyed on
+  // `html.dark` / `.term` — which Phosphor also matches. Unscoped, they painted
+  // ZAPAC's #ff6b81 error red and a purple xterm scrollbar into the console.
+  // The skin is published as `data-skin` so those rules can be scoped; assert
+  // the mechanism itself, since everything below depends on it.
+  await expect(page.locator('html')).toHaveAttribute('data-skin', 'phosphor');
+
+  // Vendored `redHi` #E2280F is 4.28:1 on the void surface — below AA in BOTH
+  // directions (filling it doesn't help; contrast is a property of the pair).
+  // #F04438 is 5.27:1 either way. Two independent paths have to land on it:
+  // the CSS variable (color:'error.main' consumers) and `nerv.hue.redHi`
+  // (everything going through the vendored `toneHue`).
+  const errVar = await page.evaluate(() =>
+    getComputedStyle(document.documentElement).getPropertyValue('--mui-palette-error-main').trim());
+  expect(errVar.toUpperCase()).toBe('#F04438');
+  expect(errVar.toLowerCase()).not.toBe('#ff6b81'); // ZAPAC's red must not win here
+
+  // Nothing anywhere may still render the failing red. This catches the
+  // toneHue/Stamp path, which the CSS variable alone does not fix.
+  const failingRed = await page.evaluate(() =>
+    [...document.querySelectorAll('*')].filter((e) => getComputedStyle(e).color === 'rgb(226, 40, 15)').length);
+  expect(failingRed).toBe(0);
+});
+
+test('form helper text keeps its original casing — it is content, not chrome', async ({ page }) => {
+  await goto(page, 'Tasks');
+  // The vendored MuiFormHelperText uppercases, but helper text is full English
+  // prose and carries literal identifiers whose casing is meaningful — this one
+  // names `CODEX_BIN` and `.env`, which must not render as `.ENV`.
+  await page.getByRole('button', { name: 'New session', exact: true }).click();
+  const helper = page.locator('.MuiFormHelperText-root').first();
+  await expect(helper).toBeVisible();
+  await expect(helper).toHaveCSS('text-transform', 'none');
+  await page.keyboard.press('Escape');
+});
+
 test('sidebar matches the peg: no nav icons, and More sits below the last nav item', async ({ page }) => {
   await goto(page, 'Tasks');
   const sidebar = page.locator('aside');

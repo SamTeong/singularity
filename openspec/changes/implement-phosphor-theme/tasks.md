@@ -17,53 +17,53 @@
 
 ## 3. Phosphor application frame and masthead
 
-- [ ] 3.1 Add a Phosphor-only root frame around the existing `AppShell` interaction tree: void surface, orange double border, deliberate chamfers, semantic z-layers, and no glass blur or cast elevation.
-- [ ] 3.2 Add the Phosphor masthead using real product, connection, agent/load, loopback-address, and local-time data; pair every Mincho label with English and omit unsupported demo telemetry.
-- [ ] 3.3 Ensure the vendored CRT scanline/vignette pass covers the shell exactly once, remains pointer-transparent, and does not obscure or stack above menus, dialogs, tooltips, or the task dossier.
-- [ ] 3.4 Implement progressive masthead/frame behavior at desktop, intermediate, narrow, zoomed-text, and short-height layouts so secondary metadata collapses first and no bilingual pair or primary control is orphaned.
-- [ ] 3.5 Confirm the existing persistent view state, dialog orchestration, terminal LRU, sidebar row, and dock resize band remain the same behavior/state tree inside the Phosphor frame.
+- [x] 3.1 Add a Phosphor-only root frame around the existing `AppShell` interaction tree: void surface, orange double border, deliberate chamfers, semantic z-layers, and no glass blur or cast elevation.
+- [x] 3.2 Add the Phosphor masthead using real product, connection, agent/load, loopback-address, and local-time data; pair every Mincho label with English and omit unsupported demo telemetry.
+- [x] 3.3 Ensure the vendored CRT scanline/vignette pass covers the shell exactly once, remains pointer-transparent, and does not obscure or stack above menus, dialogs, tooltips, or the task dossier.
+- [x] 3.4 Implement progressive masthead/frame behavior at desktop, intermediate, narrow, zoomed-text, and short-height layouts so secondary metadata collapses first and no bilingual pair or primary control is orphaned.
+- [x] 3.5 Confirm the existing persistent view state, dialog orchestration, terminal LRU, sidebar row, and dock resize band remain the same behavior/state tree inside the Phosphor frame.
 
 ## 4. Sidebar and overflow navigation
 
-- [ ] 4.1 Add bilingual metadata to primary and overflow navigation definitions, then render Phosphor New Session, Tasks, Automation, Usage, and More controls as hard-edged boxed console controls while preserving ZAPAC markup and styling.
-- [ ] 4.2 Replace the ZAPAC active gradient treatment with Phosphor semantic inversion and stamped live counts only under Phosphor; keep click, repeated-click collapse, tooltip, and keyboard behavior unchanged.
-- [ ] 4.3 Render Phosphor usage from the existing provider data as segmented or theme-native meter readouts with real percentages/placeholders and no fabricated providers or telemetry.
-- [ ] 4.4 Render daemon connectivity and address as a semantic Phosphor stamp/readout, including an explicit red disconnected state and accessible non-color label.
-- [ ] 4.5 Restyle `AppMenu` as an orange-framed Phosphor console menu with bilingual items, real system readings, visible focus, portaled unclipped placement, and red destructive restart treatment while preserving all destinations/actions.
+- [x] 4.1 Add bilingual metadata to primary and overflow navigation definitions, then render Phosphor New Session, Tasks, Automation, Usage, and More controls as hard-edged boxed console controls while preserving ZAPAC markup and styling.
+- [x] 4.2 Replace the ZAPAC active gradient treatment with Phosphor semantic inversion and stamped live counts only under Phosphor; keep click, repeated-click collapse, tooltip, and keyboard behavior unchanged.
+- [x] 4.3 Render Phosphor usage from the existing provider data as segmented or theme-native meter readouts with real percentages/placeholders and no fabricated providers or telemetry.
+- [x] 4.4 Render daemon connectivity and address as a semantic Phosphor stamp/readout, including an explicit red disconnected state and accessible non-color label.
+- [x] 4.5 Restyle `AppMenu` as an orange-framed Phosphor console menu with bilingual items, real system readings, visible focus, portaled unclipped placement, and red destructive restart treatment while preserving all destinations/actions.
 
 ## 5. Tasks board and task dossier
 
-- [ ] 5.1 Add the Phosphor Tasks viewbar and bilingual status legend using the centralized lifecycle mapping, existing Board/History segmented interaction, live task stats, and New Task action.
-- [ ] 5.2 Restyle Phosphor board columns with bilingual headers and stamped counts while preserving the existing accessible column names, drag targets, filters, history switch, and data ordering.
-- [ ] 5.3 Restyle task cards as void, hard-edged, state-bordered console records with stamps, repo/branch metadata, tags, actual stats, and segmented progress; keep activation, drag, hover actions, and screen-reader names unchanged.
-- [ ] 5.4 Restyle `TaskDetailPanel` as the Phosphor dossier with chamfered fixed sheet, semantic status/id, tabular stats, directive/details, ordered activity, optional segmented progress/gate, and sticky Transcript/Open Session actions.
-- [ ] 5.5 Verify the dossier continues to trap/restore focus, close by button/scrim/Escape, reflect live task updates, handle removal gracefully, and render outside the clipped frame at narrow widths and reduced motion.
-- [ ] 5.6 Verify create/edit task dialogs, tag/filter controls, task History, empty/loading/error states, and all task operations inherit coherent Phosphor MUI presentation without changing API calls or task data.
+- [x] 5.1 Add the Phosphor Tasks viewbar and bilingual status legend using the centralized lifecycle mapping, existing Board/History segmented interaction, live task stats, and New Task action.
+- [x] 5.2 Restyle Phosphor board columns with bilingual headers and stamped counts while preserving the existing accessible column names, drag targets, filters, history switch, and data ordering.
+- [x] 5.3 Restyle task cards as void, hard-edged, state-bordered console records with stamps, repo/branch metadata, tags, actual stats, and segmented progress; keep activation, drag, hover actions, and screen-reader names unchanged.
+- [x] 5.4 Restyle `TaskDetailPanel` as the Phosphor dossier with chamfered fixed sheet, semantic status/id, tabular stats, directive/details, ordered activity, optional segmented progress/gate, and sticky Transcript/Open Session actions.
+- [x] 5.5 Verify the dossier continues to trap/restore focus, close by button/scrim/Escape, reflect live task updates, handle removal gracefully, and render outside the clipped frame at narrow widths and reduced motion.
+- [x] 5.6 Verify create/edit task dialogs, tag/filter controls, task History, empty/loading/error states, and all task operations inherit coherent Phosphor MUI presentation without changing API calls or task data.
 
 ## 6. Session dock, terminal, and transcripts
 
-- [ ] 6.1 Replace the mode-only terminal palette table with a tested `skinId + resolvedMode` resolver that preserves both existing ZAPAC palettes and adds the Phosphor void/amber/mint/blue/red palette with an AA-safe dim foreground.
-- [ ] 6.2 Update `Terminal.jsx` to consume the active skin palette and apply palette changes without clearing xterm buffers or changing attach, WebGL fallback, input, selection, copy/paste, keyboard cycling, resize, or scrollback behavior.
-- [ ] 6.3 Update transcript terminal/ANSI rendering to use the same palette resolver while preserving normal user/assistant prose casing and message hierarchy.
-- [ ] 6.4 Restyle `SessionDock` under Phosphor as a flat orange-ruled dock with bilingual zone header, amber terminal bar, semantic connection state, hard-edged controls, and unchanged minimize/resize mechanics.
-- [ ] 6.5 Restyle `SessionRow` and subagent indicators from the centralized status mapping, including filled selected state, accessible status text, and unchanged session action availability/reorder behavior.
-- [ ] 6.6 Route skin selection through the existing live-session respawn confirmation: prompt with the live count, never respawn automatically, and skip the prompt when no live sessions exist.
-- [ ] 6.7 Verify minimized dock, persisted dock/list sizes, active session selection, terminal remount/reattach, transcript prompt, and all duplicate/fork/resume/restart/external/remove actions under both skins.
+- [x] 6.1 Replace the mode-only terminal palette table with a tested `skinId + resolvedMode` resolver that preserves both existing ZAPAC palettes and adds the Phosphor void/amber/mint/blue/red palette with an AA-safe dim foreground.
+- [x] 6.2 Update `Terminal.jsx` to consume the active skin palette and apply palette changes without clearing xterm buffers or changing attach, WebGL fallback, input, selection, copy/paste, keyboard cycling, resize, or scrollback behavior.
+- [x] 6.3 Update transcript terminal/ANSI rendering to use the same palette resolver while preserving normal user/assistant prose casing and message hierarchy.
+- [x] 6.4 Restyle `SessionDock` under Phosphor as a flat orange-ruled dock with bilingual zone header, amber terminal bar, semantic connection state, hard-edged controls, and unchanged minimize/resize mechanics.
+- [x] 6.5 Restyle `SessionRow` and subagent indicators from the centralized status mapping, including filled selected state, accessible status text, and unchanged session action availability/reorder behavior.
+- [x] 6.6 Route skin selection through the existing live-session respawn confirmation: prompt with the live count, never respawn automatically, and skip the prompt when no live sessions exist.
+- [x] 6.7 Verify minimized dock, persisted dock/list sizes, active session selection, terminal remount/reattach, transcript prompt, and all duplicate/fork/resume/restart/external/remove actions under both skins.
 
 ## 7. Cross-view quality audit
 
-- [ ] 7.1 Visit every primary and overflow view under Phosphor and fix any remaining ZAPAC gradient, glass, large-radius, drop-shadow, or missing-token presentation using theme overrides or semantic app roles.
-- [ ] 7.2 Audit dialogs, drawers, menus, tooltips, snackbars, tables, inputs, editors, CodeMirror, Mermaid, markdown, search, empty/loading/error states, and destructive confirmations for complete Phosphor interaction states.
-- [ ] 7.3 Audit typography so chrome uses the condensed/mono/bilingual system but user prose, paths, source code, terminal output, and long-form content retain original case and readable line length.
-- [ ] 7.4 Measure foreground/background contrast for body, secondary, placeholder, status, error, terminal normal, and terminal dim text; adjust semantic tokens rather than one-off component colors until WCAG AA is met.
-- [ ] 7.5 Keyboard-test nav, menus, dialogs, task cards/dossier, session actions, segmented controls, and both resize separators; ensure visible focus, accurate names, and no focus hidden beneath the CRT layer.
-- [ ] 7.6 Test `prefers-reduced-motion: reduce` and ensure blink, strobe, flicker, stepped fill, drawer/menu motion, and animated CRT effects stop while every final state remains visible.
+- [x] 7.1 Visit every primary and overflow view under Phosphor and fix any remaining ZAPAC gradient, glass, large-radius, drop-shadow, or missing-token presentation using theme overrides or semantic app roles.
+- [x] 7.2 Audit dialogs, drawers, menus, tooltips, snackbars, tables, inputs, editors, CodeMirror, Mermaid, markdown, search, empty/loading/error states, and destructive confirmations for complete Phosphor interaction states.
+- [x] 7.3 Audit typography so chrome uses the condensed/mono/bilingual system but user prose, paths, source code, terminal output, and long-form content retain original case and readable line length.
+- [x] 7.4 Measure foreground/background contrast for body, secondary, placeholder, status, error, terminal normal, and terminal dim text; adjust semantic tokens rather than one-off component colors until WCAG AA is met.
+- [x] 7.5 Keyboard-test nav, menus, dialogs, task cards/dossier, session actions, segmented controls, and both resize separators; ensure visible focus, accurate names, and no focus hidden beneath the CRT layer.
+- [x] 7.6 Test `prefers-reduced-motion: reduce` and ensure blink, strobe, flicker, stepped fill, drawer/menu motion, and animated CRT effects stop while every final state remains visible.
 
 ## 8. Automated and visual verification
 
-- [ ] 8.1 Extend Appearance e2e coverage for selecting/persisting dark-only Phosphor, live-session respawn confirmation, no-live-session switching, and switching back to unchanged ZAPAC light/dark controls.
-- [ ] 8.2 Add focused Phosphor shell e2e assertions for the frame/masthead, bilingual navigation, semantic current state, live counts/connection, portaled menu, and absence of ZAPAC glass identifiers.
-- [ ] 8.3 Extend Tasks e2e coverage under Phosphor for status legend/columns/cards, card-to-dossier behavior, dossier dismissal/actions, drag/filter/history regressions, and narrow-viewport overlay containment.
-- [ ] 8.4 Extend dock/terminal tests for persisted resize/minimize, semantic session state, skin-aware palette resolution, transcript palette parity, and unchanged terminal/session operations.
-- [ ] 8.5 Run `pnpm lint`, `pnpm test`, `pnpm build`, and the full `pnpm test:e2e` suite; resolve all failures without weakening existing ZAPAC assertions.
-- [ ] 8.6 Perform and record a manual side-by-side visual review against `docs/one-shot/phosphor-layout-02.html` at desktop, intermediate, narrow, short-height, 200% zoom, and reduced motion, then repeat a ZAPAC light/dark regression pass.
+- [x] 8.1 Extend Appearance e2e coverage for selecting/persisting dark-only Phosphor, live-session respawn confirmation, no-live-session switching, and switching back to unchanged ZAPAC light/dark controls.
+- [x] 8.2 Add focused Phosphor shell e2e assertions for the frame/masthead, bilingual navigation, semantic current state, live counts/connection, portaled menu, and absence of ZAPAC glass identifiers.
+- [x] 8.3 Extend Tasks e2e coverage under Phosphor for status legend/columns/cards, card-to-dossier behavior, dossier dismissal/actions, drag/filter/history regressions, and narrow-viewport overlay containment.
+- [x] 8.4 Extend dock/terminal tests for persisted resize/minimize, semantic session state, skin-aware palette resolution, transcript palette parity, and unchanged terminal/session operations.
+- [x] 8.5 Run `pnpm lint`, `pnpm test`, `pnpm build`, and the full `pnpm test:e2e` suite; resolve all failures without weakening existing ZAPAC assertions.
+- [x] 8.6 Perform and record a manual side-by-side visual review against `docs/one-shot/phosphor-layout-02.html` at desktop, intermediate, narrow, short-height, 200% zoom, and reduced motion, then repeat a ZAPAC light/dark regression pass.

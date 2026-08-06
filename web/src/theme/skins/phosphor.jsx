@@ -64,12 +64,20 @@ if (!phosphorTheme.tokens) {
 
   phosphorTheme.tokens = { radius, space: n.space, layers: n.layers, motion, fonts, glass };
 
-  // AA override (see PHOSPHOR_ERROR_AA above): repoint the MUI `error` palette
-  // main + its CSS-var reference to the AA-legible red. `contrastText` stays
-  // `hue.void` (black) — still high contrast on the lighter red (5.27:1).
-  // This runs BEFORE buildPhosphorRoles() below, which sources
-  // `roles.status.critical` from `vars.palette.error.main` so every red stamp,
-  // status pill and readout inherits the same AA-corrected red.
+  // AA override (see PHOSPHOR_ERROR_AA above). The authoritative assignment is
+  // `nerv.hue.redHi`: it is read AT RENDER by the vendored `toneHue(t,'red')`
+  // (components/util.ts) and by every vendored `.Mui-error` override, so this
+  // single line is what actually reaches the pixels — every red `Stamp`,
+  // `StatusPill`, disconnected daemon readout, failed task card and dossier
+  // head. Mutating the palette alone does NOT work: MUI's `CssVarsProvider`
+  // rebuilds `theme.vars` from a map computed at `createTheme()` time, so a
+  // post-hoc `vars.palette.error.main` write is discarded and reads resolve to
+  // the string `var(--mui-palette-error-main)` instead. (`style.css` then has
+  // to keep its ZAPAC `--mui-palette-error-main` override off this skin, or it
+  // wins at the variable level regardless — see the `:not([data-skin=...])`
+  // there.) The `palette.error.main` write below is still worth keeping for the
+  // non-var read path; it is not sufficient on its own.
+  phosphorTheme.nerv.hue.redHi = PHOSPHOR_ERROR_AA;
   if (phosphorTheme.palette?.error) phosphorTheme.palette.error.main = PHOSPHOR_ERROR_AA;
   if (phosphorTheme.vars?.palette?.error) phosphorTheme.vars.palette.error.main = PHOSPHOR_ERROR_AA;
 
@@ -112,6 +120,15 @@ if (!phosphorTheme.tokens) {
   }
   const lo = phosphorTheme.components?.MuiListItemText?.styleOverrides;
   if (lo) lo.primary = uncased(lo.primary);
+  // Helper text under form fields is full English prose AND often carries
+  // literal identifiers whose casing is meaningful — e.g. "Set CODEX_BIN in
+  // .env to enable Codex agent/task spawns." was rendering as "SET CODEX_BIN
+  // IN .ENV …". Uppercasing it is a content-integrity bug, not a style choice.
+  const fh = phosphorTheme.components?.MuiFormHelperText?.styleOverrides;
+  if (fh) fh.root = uncased(fh.root);
+  // Select values are content too (model ids, scopes, directory paths).
+  const so = phosphorTheme.components?.MuiSelect?.styleOverrides;
+  if (so) so.select = uncased(so.select);
   if (phosphorTheme.typography?.subtitle2) phosphorTheme.typography.subtitle2.textTransform = 'none';
 
   // ── Presentation roles (see theme/contract.js's "Presentation roles" doc
