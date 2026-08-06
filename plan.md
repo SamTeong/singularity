@@ -1,6 +1,6 @@
 # History page — daily work timeline
 
-> Status: **P1 (backend) done** — commit `8ffc85b`, suite 281 pass / 0 fail. **P2 (frontend) is next.** See "Next session" at the bottom for the copy-paste kick-off.
+> Status: **P1 (backend) done** (`8ffc85b`), **P2 (frontend) done** (`d227619`), **P3 (review) done** (`d109733`), plus a blocking backend guard (`fe16ea3`). Suite 281 pass / 0 fail. **P4 is next — one open bug: concurrent backfill double-summarizes every day.** See "P4" at the bottom for the copy-paste kick-off.
 
 ## Context
 
@@ -206,7 +206,15 @@ No table. No gradient-text headings. No `border-radius: 16px` glass card with a 
 
 Consume from P1, do not rebuild: `GET /history?days=7` for the initial fetch, `history` from `useAgents()` (`{entries, pending}`, full replacement on each WS push — merge by preferring the WS payload over the fetched one), `POST /history/regenerate {date}` for the regenerate control. Verification steps 2–7 below are P2's acceptance test.
 
-**P3 — review.** `review-animations` on the frontend diff, `cavecrew-reviewer` (or `reviewer`) on the whole diff. Commit per phase.
+**P3 — review. DONE** (`d109733`): `review-animations` + `cavecrew-reviewer` in parallel on sonnet. Eight of nine findings taken.
+
+Correctness fixes: arrow-key nav stranded focus on gap days and unresolved placeholders (neither renders a focusable header, so `moveFocus` queued a `focusDate` that never resolved) — now walks past them; the range-change fetch had no staleness guard, so a slow response for an older range could stomp a newer one; the scrollspy never observed a day that resolved shimmer→card, because its effect key was the date list, which doesn't change on resolution.
+
+Motion fixes: added the spec'd 60ms reveal stagger (absent entirely, capped at 8 cards); `popLayout` instead of `mode="wait"` on both `AnimatePresence` blocks, since "wait" fully exits before entering and turns a crossfade into a sequential swap with a blank frame; range-change split to the spec's asymmetric 200ms out / 290ms in; `layout="position"` on the card header so the parent's FLIP height animation translates its text instead of scale-stretching it; reduced-motion guard on the regenerate spinner; the feature's own `EASE_OUT` bezier in place of framer's weaker built-in `'easeOut'` string.
+
+One finding **rejected**, ranked first by the animation reviewer: that framer's `y` shorthand is a GPU violation needing `useMotionTemplate`. Both write `style.transform` from JS in the same rAF batch — the distinction doesn't exist. Do not re-apply it.
+
+**P4 — the concurrent-backfill spend bug.** Open. See below.
 
 ## Delegation
 
@@ -223,3 +231,68 @@ Delegate P2 to a `senior-software-engineer` subagent on **sonnet** (`model: sonn
 - Do not restart the daemon on :4317 if sessions are running inside it; probe with an isolated `SINGULARITY_HOME` + `PORT` daemon instead. **The running daemon predates P1** — it has no `/history` route until someone restarts it, so P2's fetch 404s against the live one; verify against a fresh isolated daemon.
 - `history.test.mjs` cases share one `history.jsonl` and one fixture tree, so they are order-coupled by date (each case picks a distinct `-N days` offset on purpose). Adding a case? Pick an unused offset.
 - `scanDays` is unscoped by default (`listSessions({cap:5000})` over the real root). Any new test touching it must pass `root`, or it sweeps in this machine's live sessions.
+- The daemon requires a token when `.env` sets `SING_TOKEN` — an isolated probe daemon needs `SING_TOKEN=` (empty) in its env, or every request 401s.
+- Two more traps found during P2, both fixed, both worth not re-introducing: session rows with `cwd: null` crash `parseSession` (see `fe16ea3`), and framer writes `transform` inline, so a CSS `:hover`/`:active` transform on a `motion` element never fires — put it on an inner element.
+
+---
+
+# P4 — concurrent backfill double-summarizes every day
+
+**Status: open.** Found during P2 verification. Not blocking — the page renders correctly — but it doubles LLM spend on every cold start, which the plan's own "spend guards" decision exists to prevent.
+
+## Symptom
+
+After one cold start of a fresh daemon, `STATE_DIR/history.jsonl` held **14 lines for 7 dates** — every date twice, with visibly *different* summary wording in each copy. Different wording is the proof: these are two independent LLM calls per day, not a duplicated write.
+
+## Mechanism
+
+`ensureHistory` is invoked twice on a cold start, and the two runs overlap:
+
+1. `server/index.mjs:721` — boot, fire-and-forget (`ensureHistory().catch(…)`).
+2. `server/index.mjs:693` — the first `GET /history`, which the page issues on mount (`ensureHistory({ days }).catch(…)`).
+
+`ensureHistory` (`server/history.mjs:256`) computes its work set up front:
+
+```js
+const prior = new Map(readHistory().map((e) => [e.date, e]));
+const missing = wanted.filter((d) => d !== today && (!prior.has(d) || prior.get(d).llm?.reason === 'empty'));
+```
+
+Both callers reach that `readHistory()` before either has appended anything, so both derive the **same** `missing` set and both summarize it end to end.
+
+`enqueueWrite` / `writeChain` (`server/history.mjs:68-76`) does not help. It serializes the *writes* so they cannot interleave and corrupt each other — which is all it was built for and all its comment claims. The unprotected critical section is wider than one write: it is read-diff → summarize → append.
+
+Why it looks fine anyway: `readHistory` is last-wins per date, so the UI shows the second summary and never sees the duplication. The file just grows at 2× and the haiku bill doubles.
+
+## Fix
+
+Dedupe *callers*, don't widen the write lock. One shared in-flight promise, so a second concurrent `ensureHistory` joins the first instead of starting its own pass:
+
+```js
+let inFlight = null;
+export async function ensureHistory(opts = {}) {
+  if (inFlight) return inFlight;              // ponytail: joins the running pass; a
+  inFlight = _ensureHistory(opts)             // wider `days` arriving second is picked
+    .finally(() => { inFlight = null; });     // up by the next call, which is fine —
+  return inFlight;                            // the route re-checks gaps on every load.
+}
+```
+
+Rename the existing body to `_ensureHistory` and leave it otherwise untouched.
+
+Known ceiling, name it in the comment: a second caller asking for a **wider** `days` window than the pass already running gets the narrower result. Harmless here because `GET /history` re-checks gaps on every load, so the wider window backfills on the next request. Do not build a request-merging queue for this.
+
+## Test
+
+Add to `server/history.test.mjs`, respecting its existing conventions — pick an **unused** `-N days` offset (the cases are order-coupled by date on purpose) and pass `root` so `scanDays` doesn't sweep the machine's real `~/.claude/projects`:
+
+> Two `ensureHistory` calls fired concurrently (`await Promise.all([ensureHistory(o), ensureHistory(o)])`) make **one** LLM call per missing date and append **one** line per date. Assert on a call-counting `callAnthropic` stub, and on the line count of `history.jsonl` — not just on `readHistory()` length, which last-wins would make pass either way.
+
+## Verify
+
+1. `pnpm test` — expect 282 pass / 0 fail.
+2. Fresh isolated daemon (`SING_TOKEN=` empty, scratch `SINGULARITY_HOME`, `PORT=4399` — **do not restart :4317**), then `curl /history?days=7` once and wait for backfill to finish. `wc -l` on `history.jsonl` must equal the number of closed days in the window, not twice it.
+
+## Kick-off prompt (copy-paste)
+
+> Read the **P4** section of `plan.md` in the repo root. Implement exactly that: the shared in-flight promise in `server/history.mjs`, plus the one concurrency test in `server/history.test.mjs`. Backend only — do not touch `web/`. P1/P2/P3 are done and committed; do not revisit them, and do not re-apply the rejected `useMotionTemplate` finding noted under P3. This is a small, well-specified change: do it inline, no subagent. Verify with the two steps in P4's Verify list, then commit. Note the traps list above — especially that the isolated probe daemon needs `SING_TOKEN=` empty, and that `history.test.mjs` cases are order-coupled by date offset.
