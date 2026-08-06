@@ -107,7 +107,12 @@ export async function scanDays(windowStart, root) {
     if (byDay.size === 0) continue; // no user/assistant text at all
 
     const cost = readCostFile(row.id).costUsd;
-    const parsed = await parseSession(row.cwd, row.id, row.source === 'codex' ? 'codex' : undefined);
+    // Some transcript rows carry no cwd; parseSession would hand null to
+    // encodeCwd (or findCodexRolloutForCwd) and throw, 500ing the whole route.
+    // No cwd means no path to a token log — count the day, skip the tokens.
+    const parsed = row.cwd
+      ? await parseSession(row.cwd, row.id, row.source === 'codex' ? 'codex' : undefined)
+      : { exists: false, tokens: 0 };
     const tokens = parsed.exists ? parsed.tokens : 0;
 
     for (const [date, b] of byDay) {
