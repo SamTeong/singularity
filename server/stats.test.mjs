@@ -147,3 +147,23 @@ test('readStatsCsvCosts: max cumulative cost per session wins (rows are not file
     rmSync(STATS_CSV, { force: true });
   }
 });
+
+test('readStatsCsvCosts: empty total_cost_usd falls back to trailing est_cost_usd', () => {
+  mkdirSync(join(USAGE_REPORT_STATE, 'cost-state'), { recursive: true });
+  const third = randomUUID(), billed = randomUUID();
+  // Real header, i.e. est_cost_usd last. A third-party session logs no
+  // total_cost_usd; a billed one logs both and total must still win.
+  const lines = [
+    'timestamp,session_id,total_cost_usd,last_model,input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,model_id,model_display_name,duration_ms,api_duration_ms,lines_added,lines_removed,rl_5h_pct,rl_7d_pct,context_pct,context_window_size,turns,tool_calls,start_epoch,facets_json,est_cost_usd',
+    `2026-08-01 10:00:00,${third},,glm-5.2,100,10,0,0,glm-5.2:cloud,glm-5.2:cloud,1000,500,1,0,,,25,200000,1,2,1786000000,"{""tools"":{""Bash"":1,""Edit"":1}}",4.25`,
+    `2026-08-01 11:00:00,${billed},7.50,claude-opus-5,100,10,0,0,opus,Opus,1000,500,1,0,,,25,200000,1,2,1786000000,"{}",0.99`,
+  ];
+  writeFileSync(STATS_CSV, `${lines.join('\n')}\n`);
+  try {
+    const map = readStatsCsvCosts();
+    assert.equal(map.get(third), 4.25, `est_cost_usd used when total is empty; got ${map.get(third)}`);
+    assert.equal(map.get(billed), 7.5, `total_cost_usd wins over est; got ${map.get(billed)}`);
+  } finally {
+    rmSync(STATS_CSV, { force: true });
+  }
+});

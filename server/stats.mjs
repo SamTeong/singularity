@@ -241,10 +241,16 @@ export function readCostFile(id) {
 // state and can be absent for finished/old sessions, so this log is the more
 // complete source. Rows are NOT strictly file-ordered by timestamp (batched
 // flushes), but cumulative cost is monotonic non-decreasing per session — so
-// the max total_cost_usd across that session's rows is its final cost.
-// Columns we need (session_id, total_cost_usd) are the 2nd/3rd and never
-// quoted (UUID + number), so we stop after 3 fields and never touch the
-// trailing quoted facets_json column.
+// the max cost across that session's rows is its final cost.
+// total_cost_usd is Anthropic-billed spend only: third-party sessions (glm,
+// codex, ollama) and any row the statusline never captured a cost for leave it
+// empty, and the skill's own report falls back to the trailing est_cost_usd
+// column for those. Without that fallback a day of mostly-third-party work
+// reads as a fraction of its real cost.
+// session_id + total_cost_usd are the 2nd/3rd fields and never quoted (UUID +
+// number); est_cost_usd is the last field and also never quoted, so it's
+// everything after the final comma — the one quoted column (facets_json) sits
+// between them and is never touched.
 export const STATS_CSV = join(USAGE_SKILL_STATE, 'stats.csv');
 const statsCsvCache = { mtimeMs: 0, size: 0, map: new Map() };
 export function readStatsCsvCosts() {
@@ -257,10 +263,13 @@ export function readStatsCsvCosts() {
       const parts = line.split(',', 3);
       if (parts.length < 3) continue;
       const id = parts[1];
-      const raw = parts[2];
-      if (!id || id === 'session_id' || raw === '') continue; // Number('') === 0 would slip past isFinite
-      const c = Number(raw);
-      if (!Number.isFinite(c)) continue;
+      if (!id || id === 'session_id') continue;
+      const total = Number(parts[2]);
+      // Number('') === 0 would slip past isFinite, so empty must fail explicitly.
+      const c = parts[2] !== '' && Number.isFinite(total) && total > 0
+        ? total
+        : Number(line.slice(line.lastIndexOf(',') + 1));
+      if (!Number.isFinite(c) || c <= 0) continue;
       const prev = map.get(id);
       if (prev === undefined || c > prev) map.set(id, c); // max cumulative = final
     }
