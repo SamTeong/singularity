@@ -1,7 +1,7 @@
 // Appearance settings spec: validates the theme skin selector and colour mode
 // toggle, and ensures the respawn dialog appears only when sessions are live.
 import { test, expect } from './fixtures/test.mjs';
-import { gotoMenu, SKINS } from './helpers/nav.mjs';
+import { gotoMenu, setSkin, SKINS } from './helpers/nav.mjs';
 
 // Appearance navigation can be slow. Raise the timeout.
 test.setTimeout(60000);
@@ -64,4 +64,88 @@ test('respawn dialog does not appear with no live sessions', async ({ page }) =>
   // not be visible because there are no live sessions.
   const dialog = page.getByRole('heading', { name: 'Restart sessions to match the new theme?' });
   await expect(dialog).not.toBeVisible();
+});
+
+// ── task 8.1: Phosphor-specific Appearance coverage ─────────────────────────
+//
+// NOT COVERED (and not coverable in this sandbox): the "live-session respawn
+// confirmation" half of task 8.1 — accepting/inspecting the dialog while a
+// session is genuinely live. `e2e/fixtures/seed.mjs` seeds an EMPTY agents
+// registry on purpose (its own header comment: nothing here may spawn a pty,
+// because that would reach the user's real `~/.claude.json` via
+// `reg.create`/`ensureTrusted`). `onSelectSkin`'s live check in
+// `web/src/shell/AppShell.jsx` (`agents.filter(isLive).length`, `isLive` =
+// running/idle/starting) reads that same registry through `useAgents()`, and
+// no spec is allowed to drive New session/Resume to a live state (see
+// `e2e/README.md`'s "Never drive these"). There is also no exported pure-logic
+// seam for `isLive`/`onSelectSkin` to unit-test in isolation from the
+// component, and this task's scope is `e2e/` only. The negative case — no
+// live sessions, no prompt — is covered below (and already existed above for
+// the colour-mode toggle); the positive "N running sessions, confirm/dismiss"
+// case needs either a seeded-live-agent sandbox fixture or a component-level
+// test, both out of scope here.
+
+test('selecting Phosphor Console applies the dark-only console and persists across reload', async ({ page }) => {
+  await page.goto('/');
+  await setSkin(page, 'Phosphor Console');
+
+  const radio = page.getByRole('radio').filter({ hasText: 'Phosphor Console' });
+  await expect(radio).toHaveAttribute('aria-checked', 'true');
+
+  // Phosphor is dark-only (`PHOSPHOR_META.supportsColorMode: false`) — no
+  // Light/Dark toggle is offered, only the "is dark-only" caption.
+  await expect(page.getByRole('button', { name: 'Light mode' })).not.toBeVisible();
+  await expect(page.getByRole('button', { name: 'Dark mode' })).not.toBeVisible();
+  await expect(page.getByText('Phosphor Console is dark-only.')).toBeVisible();
+
+  // Reload: the skin is persisted under a different key ('sing-skin') than the
+  // view ('sing-view'), and both survive a reload independently — the shell
+  // should land back on Appearance still showing the Phosphor console.
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+
+  const radioAfterReload = page.getByRole('radio').filter({ hasText: 'Phosphor Console' });
+  await expect(radioAfterReload).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('button', { name: 'Light mode' })).not.toBeVisible();
+  await expect(page.getByText('Phosphor Console is dark-only.')).toBeVisible();
+});
+
+test('switching skin with no live sessions applies immediately without a respawn prompt', async ({ page }) => {
+  // Mirrors the existing colour-mode version of this assertion above, but
+  // drives the actual skin switch (`onSelectSkin`) rather than the colour-mode
+  // toggle (`onToggleTheme`) — both gate the same respawn dialog independently
+  // in AppShell.jsx, so both need their own "no live sessions" coverage.
+  await page.goto('/');
+  await gotoMenu(page, 'Appearance');
+
+  await setSkin(page, 'Phosphor Console');
+  await page.waitForTimeout(400); // give a buggy delayed open a chance to appear
+
+  const dialog = page.getByRole('heading', { name: 'Restart sessions to match the new theme?' });
+  await expect(dialog).not.toBeVisible();
+});
+
+test('switching from Phosphor back to ZAPAC restores unchanged light/dark controls', async ({ page }) => {
+  await page.goto('/');
+  await setSkin(page, 'Phosphor Console');
+  await expect(page.getByText('Phosphor Console is dark-only.')).toBeVisible();
+
+  await setSkin(page, 'ZAPAC');
+
+  const zapacRadio = page.getByRole('radio').filter({ hasText: 'ZAPAC' });
+  await expect(zapacRadio).toHaveAttribute('aria-checked', 'true');
+
+  // The dark-only caption is gone; the light/dark toggle group is back and
+  // works exactly as it does under a clean ZAPAC session (same assertions as
+  // the "colour mode toggle switches between light and dark" test above).
+  await expect(page.getByText('Phosphor Console is dark-only.')).not.toBeVisible();
+  const lightBtn = page.getByRole('button', { name: 'Light mode' });
+  const darkBtn = page.getByRole('button', { name: 'Dark mode' });
+  await expect(lightBtn).toBeVisible();
+  await expect(darkBtn).toBeVisible();
+
+  await lightBtn.click();
+  await expect(lightBtn).toHaveAttribute('aria-pressed', 'true');
+  await darkBtn.click();
+  await expect(darkBtn).toHaveAttribute('aria-pressed', 'true');
 });

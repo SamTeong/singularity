@@ -249,8 +249,9 @@ export default function AppShell() {
   // Phosphor it is wrapped (below) by an additive outer frame + masthead; the
   // ZAPAC branch returns this exact element with no wrapper at all, so ZAPAC's
   // rendered output stays byte-for-byte what it is today (design.md D1/D5).
-  // Only this Box's own `sx` branches on `isPhosphor`, to fill the frame's
-  // remaining height (`flex: 1, minHeight: 0`) instead of the viewport
+  // Two `sx` values inside branch on `isPhosphor`: this Box's height model, and
+  // the selected-view panel's corner radius. The height model fills the frame's
+  // remaining space (`flex: 1, minHeight: 0`) instead of the viewport
   // (`height: '100dvh'`) once a masthead sits above it — `useResizable`'s
   // `containerRef: mainRef` dock-height clamp measures this element's live
   // `getBoundingClientRect()`, so it stays correct either way.
@@ -279,7 +280,7 @@ export default function AppShell() {
 
         {/* Selected view. Persistent views mount once (visited) and stay mounted
             (display:none when hidden); Tasks/Cron/Usage render on demand. */}
-        <Box sx={(t) => ({ ...glass(t), position: 'relative', flex: 1, mt: 1.5, mx: 1.5, minWidth: 0, borderRadius: `${getTokens(t).radius.lg}px`, overflow: 'hidden', zIndex: getTokens(t).layers.content })}>
+        <Box sx={(t) => ({ ...glass(t), position: 'relative', flex: 1, mt: 1.5, mx: 1.5, minWidth: 0, borderRadius: isPhosphor ? 0 : `${getTokens(t).radius.lg}px`, overflow: 'hidden', zIndex: getTokens(t).layers.content })}>
           <Suspense fallback={<Box sx={{ p: 3, color: 'text.secondary' }}>Loading…</Box>}>
             {visited.has('config') && (
               <Box sx={{ display: view === 'config' ? 'block' : 'none', height: '100%' }}><ConfigEditor /></Box>

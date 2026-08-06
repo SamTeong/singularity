@@ -282,6 +282,14 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
               border: 'none',
               borderLeft: `1px solid ${t.nerv.hue.orange}`,
               borderRadius: 0,
+              // The chamfer this sheet is named for. `nerv.chamfer()` cuts the
+              // top-right and bottom-left corners — for a right-anchored sheet
+              // that puts one cut on the outer top edge and one on the inner
+              // bottom edge, the hero-panel signature from the one-shot. Only a
+              // 16px corner triangle is removed and all content is inset well
+              // past it, so the sticky footer actions and their focus rings are
+              // untouched.
+              clipPath: t.nerv.chamfer(),
               boxShadow: 'none',
             }
             : {

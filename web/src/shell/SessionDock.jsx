@@ -75,8 +75,11 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
     if (next) setActive(next);
   };
 
+  // Hard edge under Phosphor: its `radius.lg` aliases to the 4px segment radius,
+  // which reads as a softened ZAPAC panel rather than a console module. Matches
+  // the rail's own `borderRadius: isPhosphor ? 0` in Sidebar.jsx.
   return (
-    <Box sx={(t) => ({ ...glass(t), position: 'relative', zIndex: getTokens(t).layers.content, flexShrink: 0, height: dockMin ? 'auto' : dockH, mx: 1.5, mb: 1.5, mt: dockMin ? 1.5 : 0, borderRadius: `${getTokens(t).radius.lg}px`, overflow: 'hidden', display: 'flex', flexDirection: 'column' })}>
+    <Box sx={(t) => ({ ...glass(t), position: 'relative', zIndex: getTokens(t).layers.content, flexShrink: 0, height: dockMin ? 'auto' : dockH, mx: 1.5, mb: 1.5, mt: dockMin ? 1.5 : 0, borderRadius: phosphor ? 0 : `${getTokens(t).radius.lg}px`, overflow: 'hidden', display: 'flex', flexDirection: 'column' })}>
       {/* Minimized-state affordance only — layout-02 has no "collapsed dock" state
           to crib from (its `.dock-list-head` only ever appears expanded), so when
           collapsed the whole dock shrinks to this one clickable strip. Unmounted
@@ -109,7 +112,10 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
               instead of the column's right edge. Plain `gap` (true flexbox
               gap, matching the mock's own `gap:8px`) doesn't have that
               conflict. */}
-          <Stack direction="row" sx={(t) => ({ alignItems: 'baseline', gap: '8px', px: '16px', pt: '14px', pb: '10px', flexShrink: 0, borderBottom: phosphor ? `1px solid ${stroke2(t)}` : 'none' })}>
+          {/* `baseline` sits Phosphor's mono "N TOTAL" readout on the label's
+              baseline; ZAPAC's pill-shaped count chip is a box, not text, and
+              must stay optically centred as it always was. */}
+          <Stack direction="row" sx={(t) => ({ alignItems: phosphor ? 'baseline' : 'center', gap: '8px', px: '16px', pt: '14px', pb: '10px', flexShrink: 0, borderBottom: phosphor ? `1px solid ${stroke2(t)}` : 'none' })}>
             <Typography component="h4" sx={(t) => ({ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: phosphor ? t.nerv.hue.orange : 'text.disabled', m: 0 })} noWrap>
               Sessions
               {phosphor && <Box component="span" sx={(t) => ({ ml: 0.75, fontFamily: t.nerv.fonts.jp, fontWeight: 800, letterSpacing: '0.14em' })}>部隊</Box>}

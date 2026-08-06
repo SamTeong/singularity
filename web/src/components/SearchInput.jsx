@@ -51,11 +51,15 @@ const phosphorShortcutHint = (shortcut, roles) => (
  * purely through tokens/roles, because the ZAPAC pill is a glass recipe
  * (`backdropFilter: blur(...)`, `var(--mui-palette-glass-*)`, brand focus
  * ring) with no Phosphor equivalent — Phosphor has no glass at all. Under
- * Phosphor this renders as a native hard-edged MUI `InputBase` (its
- * uppercase/mono/placeholder styling already comes free from the theme's
- * `MuiInputBase` override — see the `phosphor-console` skill's "Stock MUI
- * just works") inside a chrome-stroked box with no blur, resolving its
- * border/focus/idle colors through `getRoles(theme)`.
+ * Phosphor this renders as a native hard-edged MUI `InputBase` (its mono and
+ * placeholder styling comes free from the theme's `MuiInputBase` override —
+ * see the `phosphor-console` skill's "Stock MUI just works") inside a
+ * chrome-stroked box with no blur, resolving its border/focus/idle colors
+ * through `getRoles(theme)`. What it deliberately does NOT inherit is that
+ * override's `text-transform: uppercase`: the query here is user-typed
+ * content, and the adapter in `theme/skins/phosphor.jsx` resets casing on
+ * `MuiInputBase.input` for exactly that reason (design.md's chrome-only
+ * casing non-goal).
  *
  * @param {Object} props
  * @param {string} [props.placeholder='Search…']
@@ -99,7 +103,14 @@ export function SearchInput({ placeholder = 'Search…', value, onChange, onClic
           font: 'inherit',
           color: 'inherit',
           '&:hover': { borderColor: roles.chrome.stroke },
-          '&:focus-visible': { outline: 'none', borderColor: roles.status.nominal },
+          // A border-hue swap alone is a weak focus indicator (and invisible to
+          // anyone who can't distinguish the idle/mint pair), so keep the hue
+          // change AND draw the skin's real focus ring on top of it.
+          '&:focus-visible': {
+            borderColor: roles.status.nominal,
+            outline: `${roles.focus.width}px ${roles.focus.style} ${roles.focus.color}`,
+            outlineOffset: roles.focus.offset,
+          },
         }}
       >
         <SearchRoundedIcon sx={iconSx} />

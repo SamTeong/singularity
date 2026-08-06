@@ -96,14 +96,21 @@ import { getRoles, getTokens } from '../theme/contract.js';
 // under cssVariables, not theme.palette.
 export const glass = (t) => {
   const { glass: g } = getTokens(t);
+  // A framed skin (Phosphor) is not a glass skin: its depth model is border +
+  // glow + hue only. Emitting the sheen and a `blur(0px)` filter there put an
+  // 18%-white hairline on a pure-black console and created a pointless
+  // compositing layer. `frameBorderWidth === 0` is the same ZAPAC/Phosphor
+  // discriminator `frameSx` uses, so callers still spread this unbranched.
+  const framed = !!getRoles(t).shell.frameBorderWidth;
   return {
     background: g.surface,
-    backdropFilter: `blur(${g.blur})`,
+    // A zero blur is not a blur — omit the property rather than declare it.
+    ...(g.blur === '0px' ? null : { backdropFilter: `blur(${g.blur})` }),
     border: `1px solid ${g.stroke}`,
     // cardShadow + a crisp 1px top-edge sheen — the canonical glass recipe's
     // highlight (DESIGN §4), as an inset shadow so it clips to the radius and
     // never fights child stacking.
-    boxShadow: `${g.cardShadow}, inset 0 1px 0 rgba(255,255,255,0.18)`,
+    boxShadow: framed ? g.cardShadow : `${g.cardShadow}, inset 0 1px 0 rgba(255,255,255,0.18)`,
   };
 };
 

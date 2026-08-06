@@ -29,17 +29,16 @@ import { buildPhosphorRoles } from '@/theme/skins/phosphor.roles.js';
 import { PHOSPHOR_META } from '@/theme/skins/phosphor.meta.js';
 
 // WCAG-AA adjustment (task 7.4): the vendored `error.main` is `hue.redHi`
-// (#E2280F), which the design system intends for fills/strobes with black
-// `contrastText` (the inversion signature — high contrast) but which only
-// reaches 4.28:1 as text on the void surface, just under AA's 4.5:1 for normal
-// text. Several app surfaces render error messages as plain body text via
-// `color: 'error.main'` (UsageReportView, SkillsPanel, CronJobs, SaveBar,
-// MermaidBlock) — those fail AA under Phosphor. `#F04438` is the nearest
-// in-hue red that clears AA in both directions (5.27:1 on void; black
-// contrastText on it is the same 5.27:1), so the filled-control grammar is
-// unchanged and error text becomes legible. The vendored tarball is not
-// modified (design.md D2); this is an adapter-level semantic-token
-// adjustment, sourced from the same red family rather than a new ad-hoc color.
+// (#E2280F), which reaches only 4.28:1 on the void surface — under AA's 4.5:1
+// for normal text. Filling does NOT rescue it: contrast is a property of the
+// pair, so black-on-`#E2280F` is the same 4.28:1 as `#E2280F`-on-black. Both
+// the plain-text uses (`color: 'error.main'` in UsageReportView, SkillsPanel,
+// CronJobs, SaveBar, MermaidBlock) and the filled red Stamp/StatusPill
+// inversion therefore failed. `#F04438` is the nearest in-hue red clearing AA
+// in both directions (5.27:1 either way), so the filled-control grammar is
+// unchanged and red text becomes legible. The vendored tarball is not modified
+// (design.md D2); this is an adapter-level semantic-token adjustment sourced
+// from the same red family rather than a new ad-hoc color.
 const PHOSPHOR_ERROR_AA = '#F04438';
 
 if (!phosphorTheme.tokens) {
@@ -68,8 +67,52 @@ if (!phosphorTheme.tokens) {
   // AA override (see PHOSPHOR_ERROR_AA above): repoint the MUI `error` palette
   // main + its CSS-var reference to the AA-legible red. `contrastText` stays
   // `hue.void` (black) — still high contrast on the lighter red (5.27:1).
+  // This runs BEFORE buildPhosphorRoles() below, which sources
+  // `roles.status.critical` from `vars.palette.error.main` so every red stamp,
+  // status pill and readout inherits the same AA-corrected red.
   if (phosphorTheme.palette?.error) phosphorTheme.palette.error.main = PHOSPHOR_ERROR_AA;
   if (phosphorTheme.vars?.palette?.error) phosphorTheme.vars.palette.error.main = PHOSPHOR_ERROR_AA;
+
+  // ── Content-vs-chrome casing (task 7.3) ───────────────────────────────────
+  // design.md's non-goals are explicit that the all-caps grammar applies to UI
+  // chrome only — user prose, paths and source keep their original case. Three
+  // vendored overrides break that because, in THIS app, they land on content:
+  //   · MuiInputBase.input  — every text field shows the user's own typed value
+  //     (task titles/descriptions, cwd paths, all search boxes) in caps.
+  //   · MuiListItemText.primary — filesystem paths in the Config, Rules, Hooks,
+  //     Skills, Wiki and DirPicker panels.
+  //   · typography.subtitle2 — task-card, session and cron-job titles (9 of its
+  //     10 call sites are content, not chrome).
+  // Reset casing on those three only; genuinely-chrome surfaces (labels,
+  // headers, stamps, buttons, nav) are untouched and stay uppercase.
+  // `textTransform` is presentation-only, so DOM text — and therefore every
+  // accessible name the e2e suite matches on — is unchanged.
+  const uncased = (prev) => (props) => ({
+    ...(typeof prev === 'function' ? prev(props) : prev),
+    textTransform: 'none',
+  });
+  const io = phosphorTheme.components?.MuiInputBase?.styleOverrides;
+  if (io) {
+    const prev = io.input;
+    io.input = (props) => {
+      const base = typeof prev === 'function' ? prev(props) : prev;
+      return {
+        ...base,
+        textTransform: 'none',
+        '&::placeholder': {
+          ...base?.['&::placeholder'],
+          // AA (task 7.4): the vendored placeholder is `hue.greenDim` (#246C3C),
+          // 3.10:1 on void — below AA. `hue.greenMap` is the theme's own
+          // secondary-text hue at 5.81:1.
+          color: n.hue.greenMap,
+          textTransform: 'none',
+        },
+      };
+    };
+  }
+  const lo = phosphorTheme.components?.MuiListItemText?.styleOverrides;
+  if (lo) lo.primary = uncased(lo.primary);
+  if (phosphorTheme.typography?.subtitle2) phosphorTheme.typography.subtitle2.textTransform = 'none';
 
   // ── Presentation roles (see theme/contract.js's "Presentation roles" doc
   // comment / phosphor.roles.js for the full shape and value provenance). ──

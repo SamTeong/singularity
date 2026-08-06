@@ -137,18 +137,33 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
       <Stack direction={collapsed ? 'column' : 'row'} spacing={1.5} sx={{ p: '18px', pb: '14px', alignItems: 'center', justifyContent: collapsed ? 'center' : 'flex-start' }}>
         <Tooltip title={connected ? '' : 'disconnected'} placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
           <Badge variant="dot" color="error" overlap="circular" anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }} invisible={connected}>
-            {/* layout-02 `.brand-mark`: the identity gradient as a rounded tile with
-                a soft bloom, glyph flattened to white on top of it. */}
+            {/* ZAPAC — layout-02 `.brand-mark`: the identity gradient as a rounded
+                tile with a soft bloom, glyph flattened to white on top of it.
+                Phosphor — a hard-edged chrome-ruled plate. This branch is load-
+                bearing, not cosmetic: Phosphor's palette has no `gradient.brand`
+                or brand glow, so brandGrad()/brandGlow() would fall through to
+                their hardcoded ZAPAC literals and paint the purple→cyan identity
+                gradient (plus a purple cast shadow, plus a 10px radius) into the
+                black console — the exact leak the appearance spec forbids. */}
             <Box
               sx={(t) => ({
                 width: 36,
                 height: 36,
                 flexShrink: 0,
-                borderRadius: '10px',
-                background: brandGrad(t),
                 display: 'grid',
                 placeItems: 'center',
-                boxShadow: `0 8px 22px -8px ${brandGlow(t)}`,
+                ...(isPhosphor
+                  ? {
+                    borderRadius: 0,
+                    background: 'transparent',
+                    border: `1px solid ${getRoles(t).chrome.stroke}`,
+                    boxShadow: getRoles(t).shell.glow,
+                  }
+                  : {
+                    borderRadius: '10px',
+                    background: brandGrad(t),
+                    boxShadow: `0 8px 22px -8px ${brandGlow(t)}`,
+                  }),
               })}
             >
               <Logo onBrand active={agents.some((a) => a.status === 'running' || a.status === 'starting')} />
@@ -275,6 +290,14 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                       pr: collapsed ? 0 : '14px',
                       py: '8px',
                       position: 'relative',
+                      // Hovering the CURRENT row must not dissolve its
+                      // inversion. MUI's built-in hover overlay outranks the
+                      // vendored `&.Mui-selected:hover` rule and replaces the
+                      // solid mint fill with a ~7%-alpha tint, so the active
+                      // item visually stops being active exactly while the
+                      // pointer is on it. Restated from `sx` (applied last, so
+                      // it wins) using the theme's own peak hue.
+                      '&.Mui-selected:hover': { background: t.nerv.hue.mintHi },
                     };
                   }
                   return {

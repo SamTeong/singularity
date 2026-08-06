@@ -31,11 +31,21 @@
  * option), which is already above the CRT's z-index of 1 — so menus,
  * dialogs, tooltips, and the task dossier (a `Drawer`, also portaled) stack
  * above both this frame and its CRT pass automatically. The one exception,
- * MUI's `Snackbar`, is not portaled but is `position: fixed` itself; since
- * this frame sets no `transform`/`filter`/`perspective`/`contain`/
- * `will-change` (only `position: relative` for the inset-rule pseudo), it
- * never becomes a containing block for fixed descendants, so the toast still
- * positions against the real viewport, not this frame.
+ * MUI's `Snackbar`, is not portaled but is `position: fixed` itself. Two
+ * separate questions apply to it, and the answers differ:
+ *
+ *  - *Positioning* is safe. This frame sets no `transform`/`filter`/
+ *    `perspective`/`contain`/`will-change` (only `position: relative`, for the
+ *    inset-rule pseudo), none of which `clip-path` joins, so the frame never
+ *    becomes a containing block for fixed descendants — the toast still
+ *    resolves its offsets against the real viewport.
+ *  - *Clipping* is not. `clip-path` clips the whole descendant subtree,
+ *    fixed-position children included, so a toast that strayed outside the
+ *    chamfered polygon would be visually cut. In practice both toasts anchor
+ *    `top`/`center` (AppShell.jsx) while the chamfer removes only a 16px
+ *    triangle at the top-*right* and bottom-*left*, so they land well inside
+ *    the clip region. Anchoring a future toast to a cut corner would need it
+ *    portaled out of this frame.
  */
 import Box from '@mui/material/Box';
 import { frameSx } from '@/shell/shellStyles.js';

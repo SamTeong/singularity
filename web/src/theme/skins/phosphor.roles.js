@@ -42,7 +42,12 @@ export function buildPhosphorRoles(phosphorTheme) {
       nominal: n.hue.mint,
       pending: n.hue.blue,
       caution: n.hue.amber,
-      critical: n.hue.redHi,
+      // Sourced from the palette rather than `hue.redHi` directly so it picks
+      // up the adapter's AA correction (see PHOSPHOR_ERROR_AA in phosphor.jsx,
+      // applied before this runs): raw `redHi` is 4.28:1 on void, which fails
+      // AA both as text and as a black-on-red fill. Falls back to the raw hue
+      // for a test double whose palette omits `error`.
+      critical: v.error?.main ?? n.hue.redHi,
       idle: n.hue.greenMap, // AA-legible; `greenDim` is chrome-only (below AA for text)
     },
     // The global `:focus-visible` rule (DESIGN.md nav focus / layout-02):
