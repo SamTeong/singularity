@@ -11,7 +11,7 @@ pnpm postinstall     # mac: run if agents fail with "posix_spawnp failed"
 pnpm start           # build web + serve on http://127.0.0.1:4317
 pnpm build           # build web only (vite build → web/dist); run before serving with `pnpm server`
 pnpm dev             # daemon (:4317) + Vite (:5317) → browse UI at 127.0.0.1:5317; Vite proxies /ws + REST to daemon
-pnpm test            # node --test-force-exit "server/*.test.mjs"
+pnpm test            # node --test-force-exit "server/*.test.mjs" "web/src/**/*.test.mjs"
 pnpm clean           # reap orphan esbuild/vite procs (fixes build hangs before a fresh build)
 ```
 
