@@ -1,0 +1,10 @@
+{
+  "version": 2,
+  "name": "animation-libraries",
+  "owner": "itsimonfredlingjack",
+  "repo": "codex-dev-plugin",
+  "path": ".agents/skills/animation-libraries",
+  "branch": "main",
+  "sha": "c9190839c45cab38e2deb5c218ed1dd4d9f65c6a",
+  "source": "manual"
+}

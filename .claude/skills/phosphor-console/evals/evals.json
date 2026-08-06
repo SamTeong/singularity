@@ -1,0 +1,47 @@
+{
+  "skill_name": "phosphor-console",
+  "evals": [
+    {
+      "id": 0,
+      "name": "status-header-bar",
+      "prompt": "I'm working in the evangelion-mui-theme repo (a React + Material UI v7 app dressed in our Phosphor Console theme; components import from @components, tokens from @theme). Build a console header bar component: on the left a system-integrity status chip that reads 'SYS:NOMINAL' in mint (or 'SYS:CAUTION' in amber when a `caution` prop is true), and on the right three agent readouts — AGENT·01 / AGENT·02 nominal and AGENT·03 busy. It must match our design system. Write it as a single self-contained StatusHeaderBar.tsx.",
+      "expected_output": "Uses the Stamp component for the status chip (tone mint/amber, not a restyled MUI Chip or bordered <span>) and AgentDot for the agent readouts; colors from tone/theme.nerv tokens, no hardcoded hex.",
+      "assertions": [
+        "Imports and uses the Stamp component from @components for the status chip",
+        "Imports and uses AgentDot from @components for the agent readouts",
+        "Switches the status chip mint -> amber on a `caution` prop",
+        "No hardcoded hex colors — colors come from tone/theme.nerv tokens",
+        "Does NOT restyle a raw MUI Chip or hand-roll a bordered span for the status/agents"
+      ],
+      "files": []
+    },
+    {
+      "id": 1,
+      "name": "telemetry-card",
+      "prompt": "In the evangelion-mui-theme repo (React + MUI v7, our Phosphor Console design system): create a 'Vault Retention' telemetry card for a dashboard — a titled panel with a radial gauge showing 98% retention, a threshold-90% / STABLE footer, and a caption 'MEMORY HELD ACROSS 2,482 NODES'. Match the theme. Single self-contained VaultRetentionCard.tsx.",
+      "expected_output": "Uses TelemetryCard (or GaugeCard) framing a RadialGauge from @components rather than a hand-built bordered Box + custom SVG; border/colors via tokens, no hardcoded hex, no elevation.",
+      "assertions": [
+        "Uses TelemetryCard or GaugeCard from @components as the panel (not a hand-built bordered Box)",
+        "Uses RadialGauge from @components for the gauge (not a from-scratch SVG arc)",
+        "No hardcoded hex colors; border/colors via tokens",
+        "No elevation — no drop shadow / MUI elevation prop / glass backdrop-filter",
+        "Renders the THRESHOLD 90% / STABLE footer and the 2,482 NODES caption"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "live-agent-console",
+      "prompt": "For the evangelion-mui-theme repo (React + MUI v7 themed by our Phosphor Console system): build a live agent console panel — a streaming stdout log of timestamped rows for 'AGENT·ORION', with a human approval bar underneath to approve or deny merging PR-442 (once decided it shows the verdict). Write it as a single self-contained AgentConsole.tsx that accepts a `rows` prop.",
+      "expected_output": "Uses LogConsole for the streaming log and ApprovalBar (or GateDecisionDialog) for the gate — not a hand-composed MUI Dialog or from-scratch log list.",
+      "assertions": [
+        "Uses LogConsole (or Terminal) from @components for the streaming log (not a from-scratch list)",
+        "Uses ApprovalBar or GateDecisionDialog from @components for the gate (not a hand-composed MUI Dialog)",
+        "Accepts a `rows` prop for the log rows",
+        "Shows the verdict (approved/denied) after a decision is made",
+        "No hardcoded hex; relies on the library components' theming"
+      ],
+      "files": []
+    }
+  ]
+}

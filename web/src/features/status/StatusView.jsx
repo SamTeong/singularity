@@ -11,7 +11,7 @@ import ErrorIcon from '@mui/icons-material/Error';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import BuildCircleIcon from '@mui/icons-material/BuildCircle';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
-import { StatusPill } from '@zapac/mui-theme';
+import { StatusPill } from '@/components/StatusPill.jsx';
 import { getTokens } from '@/theme/contract.js';
 
 const POLL_MS = 30_000; // poll provider status while this page is active

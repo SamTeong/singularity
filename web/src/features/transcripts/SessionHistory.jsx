@@ -24,7 +24,7 @@ import ChatBubbleOutlinedIcon from '@mui/icons-material/ChatBubbleOutlined';
 import SubjectIcon from '@mui/icons-material/Subject';
 import HistoryIcon from '@mui/icons-material/History';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
-import { EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
 import { tildify, untildify } from '@/lib/paths.js';

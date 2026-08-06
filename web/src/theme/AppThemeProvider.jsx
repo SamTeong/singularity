@@ -12,8 +12,9 @@
  * rare — and callers that hold volatile UI (e.g. live terminals) should expect
  * a remount, mirroring how a colour-mode change already prompts session respawn.
  */
-import { createContext, use, useCallback, useMemo, useState } from 'react';
-import { DEFAULT_SKIN_ID, getSkin, listSkins } from '@/theme/registry.js';
+import { createContext, use, useCallback, useLayoutEffect, useMemo, useState } from 'react';
+import { getSkin, listSkins } from '@/theme/registry.js';
+import { resolveSkin } from '@/theme/resolveSkin.js';
 
 const STORAGE_KEY = 'sing-skin';
 
@@ -23,11 +24,11 @@ const ThemeSkinContext = createContext(null);
 function readInitialSkinId() {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved && getSkin(saved)) return saved;
+    return resolveSkin(saved)?.id;
   } catch {
     // localStorage unavailable (private mode / SSR) — fall through to default.
+    return resolveSkin(null)?.id;
   }
-  return DEFAULT_SKIN_ID;
 }
 
 export function AppThemeProvider({ children, defaultMode = 'dark' }) {
@@ -44,7 +45,19 @@ export function AppThemeProvider({ children, defaultMode = 'dark' }) {
   }, []);
 
   // Resolve defensively: a persisted id whose skin was unregistered falls back.
-  const skin = getSkin(skinId) ?? getSkin(DEFAULT_SKIN_ID) ?? listSkins()[0];
+  const skin = resolveSkin(skinId);
+
+  // Publish the active skin to the document so PLAIN CSS can scope by skin.
+  // `web/src/style.css` holds a few rules that predate multi-skin support and
+  // are ZAPAC-specific (the lifted error red, the purple xterm scrollbar, the
+  // terminal's 6px radius). They aren't reachable from `sx`/`getRoles()`, so
+  // without a selector here they applied to every skin and painted ZAPAC
+  // identity colours into the Phosphor console. `useLayoutEffect` runs before
+  // paint; the CSS is written as `:not([data-skin="phosphor"])` so the ZAPAC
+  // rules are the default even for the one frame before this lands.
+  useLayoutEffect(() => {
+    if (skin?.id) document.documentElement.dataset.skin = skin.id;
+  }, [skin?.id]);
 
   const ctx = useMemo(
     () => ({ skinId: skin?.id, setSkin, skins: listSkins() }),

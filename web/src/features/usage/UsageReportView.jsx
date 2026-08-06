@@ -8,7 +8,8 @@ import CircularProgress from '@mui/material/CircularProgress';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { EmptyState, useColorMode } from '@zapac/mui-theme';
+import { useColorMode } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 
 // The report bootstraps its theme from documentElement.dataset.theme, seeded by

@@ -198,7 +198,7 @@ export default function ConfigEditor() {
                     <ListItemButton key={`${it.path}:${i}`} selected={it.cwd === loadedCwd && it.scope === effScope} onClick={() => openResult(it)}
                       sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, mb: 0.25 }}>
                       <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                      <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
+                      <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
                     </ListItemButton>
                   ))}
                   {results.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
@@ -208,7 +208,7 @@ export default function ConfigEditor() {
                   {shownRoots.map((p) => (
                     <ListItemButton key={p} selected={p === loadedCwd} onClick={async () => { if (!await ensureSaved({ dirty, save })) return; setDirty(false); setCwd(p); }}
                       sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
-                      <ListItemText primary={tildify(p)} slotProps={{ primary: { noWrap: true, title: p, sx: { fontFamily: 'monospace', fontSize: 12 } } }} />
+                      <ListItemText primary={tildify(p)} slotProps={{ primary: { noWrap: true, title: p, variant: 'code', sx: { fontSize: 12 } } }} />
                       <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
                         onClick={(e) => { e.stopPropagation(); forget(p); }}
                         sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>

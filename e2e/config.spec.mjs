@@ -24,9 +24,15 @@ async function pickWorkspaceRoot(page) {
 // CodeMirror's default closeBrackets (basicSetup, on by default for
 // @uiw/react-codemirror): closeBrackets only auto-pairs single-character
 // keystrokes, so a whole-string insert lands byte-for-byte as given.
+//
+// ControlOrMeta, not Control: select-all is CodeMirror's `Mod-a`, and Mod is Cmd
+// on macOS — where a literal Ctrl-A is instead bound to cursorLineStart
+// (standardKeymap's emacs-style mac bindings). With plain Control+A this
+// prepended to the loaded settings instead of replacing them, so the result was
+// invalid JSON and Save stayed disabled.
 async function replaceContent(page, text) {
   await cm(page).click();
-  await page.keyboard.press('Control+A');
+  await page.keyboard.press('ControlOrMeta+A');
   await page.keyboard.insertText(text);
 }
 
