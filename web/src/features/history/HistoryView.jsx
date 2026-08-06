@@ -10,6 +10,8 @@ import Snackbar from '@mui/material/Snackbar';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
+import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
 import { EmptyState } from '@zapac/mui-theme';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
@@ -62,7 +64,7 @@ const WINDOW_THRESHOLD = 60;
 const AVG_ROW_PX = 220; // rough header + card row height + gap, for windowing math only
 
 /** One archive row: a real entry, a still-summarizing placeholder, or both absent (never rendered). */
-function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef, reduceMotion, revealIndex }) {
+function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef, reduceMotion, revealIndex, compact }) {
   const isGap = row.entry?.llm?.reason === 'empty';
   const showShimmer = row.pending && !row.entry;
   const groups = useMemo(() => (row.entry && !showShimmer && !isGap ? groupByProject(row.entry) : []), [row.entry, showShimmer, isGap]);
@@ -103,6 +105,7 @@ function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regeneratin
                       scrollRef={scrollRef}
                       skipEntranceAnim={skipEntranceAnim}
                       revealIndex={revealIndex}
+                      compact={compact}
                     />
                   ))}
                 </Stack>
@@ -188,6 +191,7 @@ export default function HistoryView({ onOpenSession }) {
   // the IntersectionObserver whileInView relies on — the skip would never
   // actually land in time.
   const [keyboardNav, setKeyboardNav] = useState(false);
+  const [compact, setCompact] = useState(false); // cards stripped to header + metrics
 
   const [today, setToday] = useState(null);
   const [fetchedEntries, setFetchedEntries] = useState([]);
@@ -351,6 +355,10 @@ export default function HistoryView({ onOpenSession }) {
 
   const setPresetChip = (p) => { setPreset(p); setCustomRange({ from: '', to: '' }); };
 
+  // Collapsing to headers closes the open session panels too — a card cut back
+  // to its metrics row shouldn't still have a session list hanging off it.
+  const toggleCompact = () => setCompact((c) => { if (!c) setExpanded(new Set()); return !c; });
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
@@ -366,6 +374,11 @@ export default function HistoryView({ onOpenSession }) {
           </Stack>
         </Tooltip>
         <Box sx={{ flex: 1 }} />
+        <Tooltip title={compact ? 'Expand cards' : 'Collapse cards to turns, tokens and cost'} disableInteractive>
+          <IconButton size="small" aria-pressed={compact} onClick={toggleCompact}>
+            {compact ? <UnfoldMoreIcon fontSize="small" /> : <UnfoldLessIcon fontSize="small" />}
+          </IconButton>
+        </Tooltip>
         {[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([p, label]) => (
           <Chip key={p} label={label} size="small" clickable onClick={() => setPresetChip(p)} color={preset === p ? 'primary' : 'default'} variant={preset === p ? 'filled' : 'outlined'} />
         ))}
@@ -438,6 +451,7 @@ export default function HistoryView({ onOpenSession }) {
                         onArrowNav={(delta) => moveFocus(row.date, delta)}
                         headerRef={(el) => { headerRefs.current[row.date] = el; }}
                         reduceMotion={reduceMotion}
+                        compact={compact}
                       />
                     ))}
                     {windowed && winRange[1] < rows.length && <Box sx={{ height: (rows.length - winRange[1]) * AVG_ROW_PX }} />}

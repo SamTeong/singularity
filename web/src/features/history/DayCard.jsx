@@ -21,6 +21,9 @@ const SPRING_EXPAND = { type: 'spring', stiffness: 320, damping: 34, mass: 0.9 }
 
 // Fixed per-project card width — the day row is a horizontal stack of these.
 export const CARD_WIDTH = 300;
+// Collapsed cards carry a label and one metrics line — narrower, so more of
+// the day's projects fit before the row starts scrolling.
+const COMPACT_WIDTH = 210;
 
 // Card min-height scales with turns, sqrt-damped so a 10x day isn't 10x tall.
 const cardHeight = (turns) => Math.round(Math.min(220, Math.max(88, 88 + 16 * Math.sqrt(turns || 0))));
@@ -184,7 +187,7 @@ export function DayHeader({ entry, expanded, onToggle, onRegenerate, regeneratin
  * density-band opacity (tokens) encode volume at a glance. Collapses to just
  * the header row; expands in place to that project's sessions for the day.
  */
-export default function DayCard({ card, date, expanded, onToggle, onOpenSession, scrollRef, skipEntranceAnim, revealIndex = 0 }) {
+export default function DayCard({ card, date, expanded, onToggle, onOpenSession, scrollRef, skipEntranceAnim, revealIndex = 0, compact = false }) {
   const reduceMotion = useReducedMotion();
   const bandRef = useRef(null);
 
@@ -198,7 +201,9 @@ export default function DayCard({ card, date, expanded, onToggle, onOpenSession,
   const codexTurns = m.byHarness?.codex?.turns || 0;
   const harnessTotal = claudeTurns + codexTurns || 1;
   const claudePct = (claudeTurns / harnessTotal) * 100;
-  const height = cardHeight(m.turns);
+  // Compact strips the bullets, so the turns-scaled min-height would leave a
+  // tall empty box — let the header row size the card instead.
+  const height = compact ? 0 : cardHeight(m.turns);
   const density = densityOpacity(m.tokens);
   const panelId = `history-day-${date}-${card.key}`;
   const sessionsLabel = `${m.sessions || 0} session${m.sessions === 1 ? '' : 's'}`;
@@ -232,7 +237,7 @@ export default function DayCard({ card, date, expanded, onToggle, onOpenSession,
         layout: reduceMotion ? { duration: 0 } : SPRING_EXPAND,
       }}
       aria-label={ariaLabel}
-      sx={{ width: CARD_WIDTH, flexShrink: 0, alignSelf: 'stretch' }}
+      sx={{ width: compact ? COMPACT_WIDTH : CARD_WIDTH, flexShrink: 0, alignSelf: 'stretch' }}
     >
       {/* Hover/press live on an inner element, not the motion one: framer writes
           transform inline for the reveal + layout animations, and an inline
@@ -263,22 +268,30 @@ export default function DayCard({ card, date, expanded, onToggle, onOpenSession,
         aria-controls={panelId}
         onClick={onToggle}
         onKeyDown={onHeaderKeyDown}
-        sx={{ p: 2, pl: 2.5, display: 'flex', flexDirection: 'column', gap: 1, cursor: 'pointer', '&:focus-visible': { outline: (t) => `2px solid ${t.palette.primary.main}`, outlineOffset: -2 } }}
+        sx={{ p: compact ? 1 : 2, pl: compact ? 1.5 : 2.5, display: 'flex', flexDirection: 'column', gap: compact ? 0.25 : 1, cursor: 'pointer', '&:focus-visible': { outline: (t) => `2px solid ${t.palette.primary.main}`, outlineOffset: -2 } }}
       >
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
-          <Typography sx={{ fontWeight: 700, fontSize: 14 }} noWrap title={card.key}>{card.label}</Typography>
+          <Typography sx={{ fontWeight: 700, fontSize: compact ? 13 : 14 }} noWrap title={card.key}>{card.label}</Typography>
           <Box sx={{ flex: 1 }} />
-          <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{sessionsLabel}</Typography>
+          <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{compact ? `${m.sessions || 0}s` : sessionsLabel}</Typography>
         </Stack>
 
-        <Stack direction="row" spacing={2.5} sx={{ mt: 0.5 }}>
-          <Metric label="Turns" value={m.turns} />
-          <Metric label="Tokens" value={fmtTokens(m.tokens || 0)} />
-          <Metric label="Cost" value={fmtUsd(m.costUsd) ?? '—'} />
-        </Stack>
+        {compact ? (
+          // One tabular line instead of three labelled metrics — the labels are
+          // the same on every card, so at this density they're just noise.
+          <Typography variant="code" title="turns · tokens · cost" noWrap sx={{ fontSize: 11.5, color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>
+            {`${m.turns || 0}t · ${fmtTokens(m.tokens || 0)} · ${fmtUsd(m.costUsd) ?? '—'}`}
+          </Typography>
+        ) : (
+          <Stack direction="row" spacing={2.5} sx={{ mt: 0.5 }}>
+            <Metric label="Turns" value={m.turns} />
+            <Metric label="Tokens" value={fmtTokens(m.tokens || 0)} />
+            <Metric label="Cost" value={fmtUsd(m.costUsd) ?? '—'} />
+          </Stack>
+        )}
 
         {/* 0.7em ≈ half a 1.45 line — bullets read as separate points, not a block */}
-        {!!bullets.length && (
+        {!compact && !!bullets.length && (
           <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2, '& li + li': { mt: '0.7em' } }}>
             {bullets.map((b) => (
               <Typography key={b} component="li" sx={{ fontSize: 13, lineHeight: 1.45, color: 'text.secondary', '&::marker': { color: 'text.disabled' } }}>{b}</Typography>
