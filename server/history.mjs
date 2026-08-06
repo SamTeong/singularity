@@ -12,7 +12,7 @@ import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { STATE_DIR, bus, writeAtomic, OLLAMA_BIN } from './agents.mjs';
 import { listSessions, readSession } from './sessions.mjs';
-import { parseSession, readCostFile } from './stats.mjs';
+import { parseSession, readCostFile, readStatsCsvCosts } from './stats.mjs';
 import { callMessages } from './chat.mjs';
 import { OLLAMA_PRESETS } from './models.mjs';
 
@@ -110,6 +110,7 @@ function enqueueWrite(fn) {
 // of the real one; production callers never pass it.
 export async function scanDays(windowStart, root) {
   const rows = (await listSessions({ cap: 5000, root })).filter((r) => r.mtime >= windowStart);
+  const statsCsvCosts = readStatsCsvCosts(); // one read per scan (cached on mtime/size)
   const days = new Map();
 
   for (const row of rows) {
@@ -143,10 +144,10 @@ export async function scanDays(windowStart, root) {
       ? await parseSession(row.cwd, row.id, row.source === 'codex' ? 'codex' : undefined)
       : { exists: false, tokens: 0 };
     const tokens = parsed.exists ? parsed.tokens : 0;
-    // Statusline cost-state is exact; fall back to the pricing-table estimate
-    // when no cost-state file exists (store reset, or session predates the
-    // usage-report wiring). Mirrors statsFor's cost resolution in stats.mjs.
-    const cost = readCostFile(row.id).costUsd ?? parsed.estCostUsd ?? null;
+    // Cost resolution (most → least authoritative): the stats.csv append log
+    // (complete, survives cost-state resets), the live cost-state file, then
+    // the pricing-table estimate. Mirrors statsFor in stats.mjs.
+    const cost = statsCsvCosts.get(row.id) ?? readCostFile(row.id).costUsd ?? parsed.estCostUsd ?? null;
 
     for (const [date, b] of byDay) {
       let day = days.get(date);

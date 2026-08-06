@@ -12,11 +12,12 @@ import { randomUUID } from 'node:crypto';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-stats-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
-process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
+const USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
+process.env.USAGE_REPORT_STATE = USAGE_REPORT_STATE;
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
 const { encodeCwd } = await import('./agents.mjs');
-const { parseSession, statsFor, sessionStats, COST_STATE_DIR } = await import('./stats.mjs');
+const { parseSession, statsFor, sessionStats, COST_STATE_DIR, STATS_CSV, readStatsCsvCosts } = await import('./stats.mjs');
 
 function writeTranscript(cwd, id, lines) {
   const dir = join(homedir(), '.claude', 'projects', encodeCwd(cwd));
@@ -120,5 +121,29 @@ test('statsFor: no cost-state file → costSource "estimate" (falls back to the 
     assert.ok(out[id].costUsd > 0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('readStatsCsvCosts: max cumulative cost per session wins (rows are not file-ordered), skips header/blank/NaN', () => {
+  mkdirSync(join(USAGE_REPORT_STATE, 'cost-state'), { recursive: true }); // ensure state dir exists
+  const a = randomUUID(), b = randomUUID();
+  // header + a-rows out of timestamp order in the file (later/higher cost row
+  // appears FIRST), + a quoted facets_json column with commas, + a blank cost.
+  const lines = [
+    'timestamp,session_id,total_cost_usd,last_model,input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,model_id,model_display_name,duration_ms,api_duration_ms,lines_added,lines_removed,rl_5h_pct,rl_7d_pct,context_pct,context_window_size,turns,tool_calls,start_epoch,facets_json',
+    `2026-08-06 00:17:12,${a},16.87,glm-5.2,200,20,0,0,glm-5.2:cloud,glm-5.2:cloud,2000,1000,2,0,,,25,200000,2,4,1786001000,"{""tools"":{""Bash"":1,""Edit"":1},""cwd"":""C:\\\\x""}"`,
+    `2026-08-06 00:13:33,${a},11.05,glm-5.2,100,10,0,0,glm-5.2:cloud,glm-5.2:cloud,1000,500,1,0,,,25,200000,1,2,1786000000,"{""tools"":{""Bash"":2}}"`,
+    `2026-08-07 01:30:00,${b},,glm-5.2,0,0,0,0,glm-5.2:cloud,glm-5.2:cloud,0,0,0,0,,,0,200000,0,0,0,"{}"`,
+  ];
+  writeFileSync(STATS_CSV, `${lines.join('\n')}\n`);
+  try {
+    const map = readStatsCsvCosts();
+    assert.equal(map.get(a), 16.87, `max cumulative wins regardless of file order; got ${map.get(a)}`);
+    assert.ok(!map.has(b), 'blank cost skipped');
+    assert.ok(!map.has('session_id'), 'header skipped');
+    const cached = readStatsCsvCosts(); // second call hits the mtime/size cache
+    assert.equal(cached, map, 'cached map returned by reference');
+  } finally {
+    rmSync(STATS_CSV, { force: true });
   }
 });

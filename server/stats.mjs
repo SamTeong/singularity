@@ -236,6 +236,39 @@ export function readCostFile(id) {
   } catch { return { costUsd: null, apiMs: null, wallMs: null }; }
 }
 
+// stats.csv: the statusline logs one row per write event with the cumulative
+// total_cost_usd for that session at that point. cost-state/<id>.json is live
+// state and can be absent for finished/old sessions, so this log is the more
+// complete source. Rows are NOT strictly file-ordered by timestamp (batched
+// flushes), but cumulative cost is monotonic non-decreasing per session — so
+// the max total_cost_usd across that session's rows is its final cost.
+// Columns we need (session_id, total_cost_usd) are the 2nd/3rd and never
+// quoted (UUID + number), so we stop after 3 fields and never touch the
+// trailing quoted facets_json column.
+export const STATS_CSV = join(USAGE_SKILL_STATE, 'stats.csv');
+const statsCsvCache = { mtimeMs: 0, size: 0, map: new Map() };
+export function readStatsCsvCosts() {
+  try {
+    const st = statSync(STATS_CSV);
+    if (st.mtimeMs === statsCsvCache.mtimeMs && st.size === statsCsvCache.size) return statsCsvCache.map;
+    const map = new Map();
+    for (const line of readFileSync(STATS_CSV, 'utf8').split('\n')) {
+      if (!line) continue;
+      const parts = line.split(',', 3);
+      if (parts.length < 3) continue;
+      const id = parts[1];
+      const raw = parts[2];
+      if (!id || id === 'session_id' || raw === '') continue; // Number('') === 0 would slip past isFinite
+      const c = Number(raw);
+      if (!Number.isFinite(c)) continue;
+      const prev = map.get(id);
+      if (prev === undefined || c > prev) map.set(id, c); // max cumulative = final
+    }
+    statsCsvCache.mtimeMs = st.mtimeMs; statsCsvCache.size = st.size; statsCsvCache.map = map;
+    return map;
+  } catch { return new Map(); }
+}
+
 // { id: {turns, tokens, exists, estCostUsd, costUsd, costSource, apiMs, wallMs, busyMs} }
 // for a list of {id, cwd}. costUsd = the global statusline cost-state value when
 // present, else the pricing-table estimate; costSource labels which ('statusline'|'estimate'|null).

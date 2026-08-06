@@ -7,6 +7,9 @@ import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
 import TextField from '@mui/material/TextField';
 import Snackbar from '@mui/material/Snackbar';
+import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import RefreshIcon from '@mui/icons-material/Refresh';
 import { EmptyState } from '@zapac/mui-theme';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
@@ -335,6 +338,17 @@ export default function HistoryView({ onOpenSession }) {
       .finally(() => setRegenerating((s) => { const n = new Set(s); n.delete(date); return n; }));
   }, []);
 
+  // Eligible for a header-level bulk regenerate: real entries with a summary
+  // (skip today — still live — and gap days).
+  const regenerableRows = useMemo(
+    () => rows.filter((r) => r.entry && !r.entry.live && r.entry.llm?.reason !== 'empty'),
+    [rows],
+  );
+  const anyRegenerating = regenerableRows.some((r) => regenerating.has(r.date));
+  const regenerateAll = useCallback(() => {
+    for (const r of regenerableRows) regenerate(r.date);
+  }, [regenerableRows, regenerate]);
+
   const setPresetChip = (p) => { setPreset(p); setCustomRange({ from: '', to: '' }); };
 
   return (
@@ -345,6 +359,24 @@ export default function HistoryView({ onOpenSession }) {
         {[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([p, label]) => (
           <Chip key={p} label={label} size="small" clickable onClick={() => setPresetChip(p)} color={preset === p ? 'primary' : 'default'} variant={preset === p ? 'filled' : 'outlined'} />
         ))}
+        <Tooltip title={regenerableRows.length ? `Regenerate summaries (${regenerableRows.length} day${regenerableRows.length === 1 ? '' : 's'} in range)` : 'No summaries to regenerate'} disableInteractive>
+          <span>
+            <IconButton
+              size="small"
+              disabled={!regenerableRows.length || anyRegenerating}
+              onClick={regenerateAll}
+            >
+              <RefreshIcon
+                fontSize="small"
+                sx={anyRegenerating ? {
+                  animation: 'sing-history-spin 1s linear infinite',
+                  '@keyframes sing-history-spin': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } },
+                  '@media (prefers-reduced-motion: reduce)': { animation: 'none', opacity: 0.5 },
+                } : undefined}
+              />
+            </IconButton>
+          </span>
+        </Tooltip>
         <TextField
           type="date" size="small" label="From" value={customRange.from}
           slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: archiveMin, max: archiveMax } }}
