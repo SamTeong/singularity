@@ -253,7 +253,7 @@ async function buildDayEntry(date, dayAgg, deps) {
 // resolves out of `pending` instead of shimmering forever; an empty entry stays
 // re-checkable (rescanned, never re-appended while still empty) so a day that
 // does turn out to have work gets upgraded on a later call.
-export async function ensureHistory({ days = BACKFILL_DAYS, callAnthropic, callOllama, root } = {}) {
+async function _ensureHistory({ days = BACKFILL_DAYS, callAnthropic, callOllama, root } = {}) {
   const today = localDay();
   const wanted = [];
   for (let i = 1; i <= days; i++) wanted.push(localDay(Date.now() - i * 86_400_000));
@@ -277,6 +277,19 @@ export async function ensureHistory({ days = BACKFILL_DAYS, callAnthropic, callO
     bus.emit('history', { entries: readHistory(), pending });
   }
   return { built };
+}
+
+// Boot fires ensureHistory() fire-and-forget and the page's first GET /history
+// fires it again; both read the file before either appends, derive the same
+// `missing` set, and summarize every day twice. enqueueWrite only serializes
+// the writes — the critical section is read-diff -> summarize -> append. So
+// dedupe callers: a second concurrent call joins the running pass.
+let inFlight = null;
+export async function ensureHistory(opts = {}) {
+  if (inFlight) return inFlight;              // ponytail: joins the running pass; a
+  inFlight = _ensureHistory(opts)             // wider `days` arriving second is picked
+    .finally(() => { inFlight = null; });     // up by the next call, which is fine —
+  return inFlight;                            // the route re-checks gaps on every load.
 }
 
 // ---- Regenerate: atomic rewrite of the whole file --------------------------

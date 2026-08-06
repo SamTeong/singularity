@@ -250,3 +250,35 @@ test('ensureHistory: a gap day is written once as an empty entry, not re-appende
   await ensureHistory({ days: 7, root: SESSIONS_ROOT });
   assert.equal(readHistory().find((e) => e.date === date).llm.reason, 'trivial', 'empty entry upgrades once work exists');
 });
+
+test('ensureHistory: two concurrent calls share one pass — one LLM call and one line per date', async () => {
+  const { STATE_DIR } = await import('./app-dir.mjs');
+  const rawDateLines = (d) => readFileSync(join(STATE_DIR, 'history.jsonl'), 'utf8')
+    .split(/\r?\n/).filter(Boolean).filter((l) => JSON.parse(l).date === d);
+  const cwd = 'C:\\fake\\history-concurrent-test';
+  const now = new Date();
+  // -9 days: every offset through -7 is already on disk (the gap-day test's
+  // days:7 run wrote all of -1..-7), so a fresh date must sit outside that.
+  const d1 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 9, 9, 0, 0);
+  const date = localDay(d1.toISOString());
+  writeClaudeSession(cwd, 'history-concurrent-fixture', [
+    textMsg(cwd, 'user', 'concurrent work', d1.toISOString()),
+    textMsg(cwd, 'assistant', 'c1', new Date(d1.getTime() + 1000).toISOString()),
+    textMsg(cwd, 'assistant', 'c2', new Date(d1.getTime() + 2000).toISOString()),
+    textMsg(cwd, 'assistant', 'c3', new Date(d1.getTime() + 3000).toISOString()),
+  ]); // 3 assistant turns — above the trivial gate, so it does reach the LLM
+
+  let calls = 0;
+  const opts = {
+    days: 9,
+    root: SESSIONS_ROOT,
+    callAnthropic: async () => { calls++; return { ok: true, text: JSON.stringify({ summary: 'concurrent day', topics: ['t'] }) }; },
+  };
+  await Promise.all([ensureHistory(opts), ensureHistory(opts)]);
+
+  assert.equal(calls, 1, 'the non-trivial day is summarized exactly once, not once per caller');
+  // Line count, not readHistory().length — the reader is last-wins, so a
+  // duplicated append would pass a readHistory-only assertion either way.
+  assert.equal(rawDateLines(date).length, 1, 'exactly one line appended for the date');
+  assert.equal(readHistory().find((e) => e.date === date).summary, 'concurrent day');
+});
