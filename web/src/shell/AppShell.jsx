@@ -32,6 +32,7 @@ const HooksEditor = lazy(() => import('@/features/config-hooks/HooksEditor.jsx')
 const RulesPanel = lazy(() => import('@/features/rules/RulesPanel.jsx'));
 const MemoryPanel = lazy(() => import('@/features/memory/MemoryPanel.jsx'));
 const SessionHistory = lazy(() => import('@/features/transcripts/SessionHistory.jsx'));
+const HistoryView = lazy(() => import('@/features/history/HistoryView.jsx'));
 const WikiPanel = lazy(() => import('@/features/wiki/WikiPanel.jsx'));
 const SkillsPanel = lazy(() => import('@/features/skills/SkillsPanel.jsx'));
 const ExplorerPanel = lazy(() => import('@/features/explorer/ExplorerPanel.jsx'));
@@ -182,6 +183,15 @@ export default function AppShell() {
     setTxPrompt(null);
   };
 
+  // Deep-link from a History day's session row into Transcripts. Unlike
+  // viewTranscript, these rows already carry the transcript-file id/project
+  // straight from listSessions()/readSession() (not a live registry id), so
+  // no codex-thread resolution is needed — a direct passthrough opens it.
+  const openHistorySession = (s) => {
+    setOpenTx({ project: s.project, id: s.id, cwd: s.cwd, source: s.source, mtime: s.mtime });
+    setView('sessions');
+  };
+
   // Resume a past session from the Transcripts view: prefill the new-agent
   // dialog with its id + cwd + last model + last skill-scopes + tool, then create.
   // Backend switches to --resume when the session log exists at cwd. Model is
@@ -244,6 +254,7 @@ export default function AppShell() {
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
+            {view === 'history' && <HistoryView onOpenSession={openHistorySession} />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} />}
             {view === 'status' && <StatusView />}
             {view === 'skills' && <SkillsPanel />}

@@ -14,6 +14,7 @@ import BookIcon from '@mui/icons-material/Book';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
 import SchoolIcon from '@mui/icons-material/School';
 import HistoryIcon from '@mui/icons-material/History';
+import TimelineIcon from '@mui/icons-material/Timeline';
 import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
@@ -31,6 +32,7 @@ const NAV_ITEMS = [
   { v: 'memory', icon: <BookIcon fontSize="small" />, label: 'Memory' },
   { v: 'explorer', icon: <FolderOpenIcon fontSize="small" />, label: 'Explorer' },
   { v: 'sessions', icon: <HistoryIcon fontSize="small" />, label: 'Transcripts' },
+  { v: 'history', icon: <TimelineIcon fontSize="small" />, label: 'History' },
   { v: 'wiki', icon: <MenuBookIcon fontSize="small" />, label: 'Wiki' },
   { v: 'appearance', icon: <PaletteIcon fontSize="small" />, label: 'Appearance' },
   { v: 'status', icon: <CloudSyncIcon fontSize="small" />, label: 'Status' },
