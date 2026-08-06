@@ -29,7 +29,19 @@ const OLLAMA_MODEL = OLLAMA_PRESETS[0]; // 'glm-5.2:cloud'
 const OLLAMA_TIMEOUT_MS = 120_000;
 const OLLAMA_MAX_BUFFER = 8 * 1024 * 1024;
 
-const SUMMARY_SYSTEM = 'Summarize one day of coding-agent transcripts into strict JSON {"projects":[{"path":string,"bullets":string[]}],"topics":string[]}. One projects entry per distinct "## <path>" header in the input, path copied verbatim (several blocks may share a path — merge them). bullets: 1-3 short fragments per project, past tense, concrete (what shipped/fixed), no meta-commentary, no trailing period. Order each project\'s bullets by how much work went into them: the input blocks arrive highest-effort first (each header carries its turn and token count), so keep that order. topics: 2-5 short lowercase kebab-case tags for the whole day. Output JSON only — no prose, no markdown fence.';
+// Bullets are read at a glance by someone who is not in the code — so the
+// prompt bans the jargon and comma-stacked clauses an agent transcript is full
+// of, and caps each bullet well under BULLET_TRUNC so nothing ships truncated.
+const SUMMARY_SYSTEM = 'Summarize one day of coding-agent transcripts into strict JSON {"projects":[{"path":string,"bullets":string[]}],"topics":string[]}. One projects entry per distinct "## <path>" header in the input, path copied verbatim (several blocks may share a path — merge them). Order each project\'s bullets by how much work went into them: the input blocks arrive highest-effort first (each header carries its turn and token count), so keep that order. topics: 2-5 short lowercase kebab-case tags for the whole day. Output JSON only — no prose, no markdown fence.\n'
+  + 'bullets: 1-3 per project, written for a clever reader who has never seen this codebase. Every bullet follows all of these:\n'
+  + '1. Under 12 words. One idea. A second idea becomes its own bullet or gets dropped.\n'
+  + '2. Plain past tense, active voice, no trailing period.\n'
+  + '3. Say what changed and what it now does for the person using it. Leave out how it was built: no file names, class or function names, flags, library names, test counts, error codes.\n'
+  + '4. Use the everyday word: "page" over "view component", "saves as you type" over "implemented autosave handler", "loads faster" over "reduced latency".\n'
+  + '5. No comma-stacked lists, no semicolons, no "and also".\n'
+  + '6. No hype: drop "leveraged", "robust", "comprehensive", "seamless", "streamlined", "significantly". No sentence built on a contrast with what it is not.\n'
+  + '7. Nothing about the session, the agent, the transcript, or this summary.\n'
+  + 'Good: "history page now opens without a wait". Bad: "implemented concurrent ensureHistory deduplication via shared in-flight promise".';
 
 // Machine-local YYYY-MM-DD — no manual TZ math (per plan). Defaults to now.
 export function localDay(ts) {

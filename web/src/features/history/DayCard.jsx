@@ -277,8 +277,9 @@ export default function DayCard({ card, date, expanded, onToggle, onOpenSession,
           <Metric label="Cost" value={fmtUsd(m.costUsd) ?? '—'} />
         </Stack>
 
+        {/* 0.7em ≈ half a 1.45 line — bullets read as separate points, not a block */}
         {!!bullets.length && (
-          <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2 }}>
+          <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2, '& li + li': { mt: '0.7em' } }}>
             {bullets.map((b) => (
               <Typography key={b} component="li" sx={{ fontSize: 13, lineHeight: 1.45, color: 'text.secondary', '&::marker': { color: 'text.disabled' } }}>{b}</Typography>
             ))}
