@@ -11,7 +11,7 @@
 // with node:fs. Each save uses a fresh marker so tests don't depend on order.
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { test, expect, onceConfirm } from './fixtures/test.mjs';
+import { test, expect } from './fixtures/test.mjs';
 import { gotoView } from './helpers/nav.mjs';
 import { WORKSPACE_DIR, PROJECTS_DIR, SKILLS_DIR, PROJECT_A, PROJECT_B } from './fixtures/paths.mjs';
 
@@ -79,20 +79,20 @@ test.describe('Hooks editor', () => {
     expect(readFileSync(PRECOMMIT_PATH, 'utf8')).toContain(marker);
   });
 
-  test('dirty-nav guard: dismiss keeps the unsaved hook open, accept discards it', async ({ page }) => {
+  test('dirty-nav guard: cancel keeps the unsaved hook open, discard drops it', async ({ page }) => {
     await gotoView(page, 'Hooks');
     await page.getByRole('button', { name: 'format.ps1', exact: true }).click();
     await expect(cm(page)).toContainText('format fixture');
     await appendMarker(page, 'unsaved-hook-edit');
 
-    let msg = onceConfirm(page, false);
+    // Cancel aborts the navigation — the unsaved edit stays on format.ps1.
     await page.getByRole('button', { name: 'pre-commit.sh', exact: true }).click();
-    expect(await msg).toMatch(/discard/i);
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
     await expect(cm(page)).toContainText('unsaved-hook-edit'); // stayed on format.ps1
 
-    msg = onceConfirm(page, true);
+    // Discard proceeds without saving — navigates to pre-commit.sh, edit gone.
     await page.getByRole('button', { name: 'pre-commit.sh', exact: true }).click();
-    expect(await msg).toMatch(/discard/i);
+    await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
     await expect(cm(page)).toContainText('pre-commit fixture'); // navigated away, edit discarded
   });
 });
@@ -140,20 +140,18 @@ test.describe('Rules editor', () => {
     expect(readFileSync(TESTING_PATH, 'utf8')).toContain(marker);
   });
 
-  test('dirty-nav guard: dismiss keeps the unsaved rule open, accept discards it', async ({ page }) => {
+  test('dirty-nav guard: cancel keeps the unsaved rule open, discard drops it', async ({ page }) => {
     await gotoView(page, 'Rules');
     await page.getByRole('button', { name: 'style.md', exact: true }).click();
     await expect(cm(page)).toContainText('Two-space indent');
     await appendMarker(page, 'unsaved-rule-edit');
 
-    let msg = onceConfirm(page, false);
     await page.getByRole('button', { name: 'testing.md', exact: true }).click();
-    expect(await msg).toMatch(/discard/i);
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
     await expect(cm(page)).toContainText('unsaved-rule-edit'); // stayed on style.md
 
-    msg = onceConfirm(page, true);
     await page.getByRole('button', { name: 'testing.md', exact: true }).click();
-    expect(await msg).toMatch(/discard/i);
+    await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
     await expect(cm(page)).toContainText('One runnable check'); // navigated away, edit discarded
   });
 });
@@ -206,20 +204,18 @@ test.describe('Memory panel', () => {
     expect(readFileSync(DEPLOY_NOTES_PATH, 'utf8')).toContain(marker);
   });
 
-  test('dirty-nav guard: dismiss keeps the unsaved memory file open, accept discards it', async ({ page }) => {
+  test('dirty-nav guard: cancel keeps the unsaved memory file open, discard drops it', async ({ page }) => {
     await gotoView(page, 'Memory');
     await page.getByRole('button', { name: 'retry-cap.md', exact: true }).click();
     await expect(cm(page)).toContainText('Backoff caps at 30s');
     await appendMarker(page, 'unsaved-memory-edit');
 
-    let msg = onceConfirm(page, false);
     await page.getByRole('button', { name: 'MEMORY.md', exact: true }).click();
-    expect(await msg).toMatch(/discard/i);
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
     await expect(cm(page)).toContainText('unsaved-memory-edit'); // stayed on retry-cap.md
 
-    msg = onceConfirm(page, true);
     await page.getByRole('button', { name: 'MEMORY.md', exact: true }).click();
-    expect(await msg).toMatch(/discard/i);
+    await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
     await expect(cm(page)).toContainText('Retry cap'); // navigated away, edit discarded
   });
 });
@@ -293,7 +289,7 @@ test.describe('Skills panel', () => {
     expect(readFileSync(COLOR_AUDIT_PATH, 'utf8')).toContain(marker);
   });
 
-  test('dirty-nav guard: dismiss keeps the unsaved skill open, accept discards it', async ({ page }) => {
+  test('dirty-nav guard: cancel keeps the unsaved skill open, discard drops it', async ({ page }) => {
     await gotoView(page, 'Skills');
     await expandRoot(page);
     await openSkill(page, 'coding', 'lint-guard'); // expands the coding scope + opens lint-guard
@@ -301,14 +297,12 @@ test.describe('Skills panel', () => {
     await expect(cm(page)).toContainText('Run the linter before staging.');
     await appendMarker(page, 'unsaved-skill-edit');
 
-    let msg = onceConfirm(page, false);
     await page.getByRole('button', { name: 'color-audit', exact: false }).click();
-    expect(await msg).toMatch(/discard/i);
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel' }).click();
     await expect(cm(page)).toContainText('unsaved-skill-edit'); // stayed on lint-guard
 
-    msg = onceConfirm(page, true);
     await page.getByRole('button', { name: 'color-audit', exact: false }).click();
-    expect(await msg).toMatch(/discard/i);
+    await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
     await expect(cm(page)).toContainText('Contrast first, hue second.'); // navigated away, edit discarded
   });
 });

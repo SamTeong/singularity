@@ -23,12 +23,13 @@ const BACKFILL_DAYS = 7;
 const TRIVIAL_TURNS = 3;            // day total below this: skip the LLM, deterministic one-liner
 const USER_TRUNC = 400;
 const ASSISTANT_TRUNC = 800;
+const BULLET_TRUNC = 120;           // one card line — longer just wraps into a wall of text
 const DIGEST_CAP = 48_000;          // assembled per-day digest hard cap (chars)
 const OLLAMA_MODEL = OLLAMA_PRESETS[0]; // 'glm-5.2:cloud'
 const OLLAMA_TIMEOUT_MS = 120_000;
 const OLLAMA_MAX_BUFFER = 8 * 1024 * 1024;
 
-const SUMMARY_SYSTEM = 'Summarize one day of coding-agent transcripts into strict JSON {"summary":string,"topics":string[]}. summary: 1-2 sentences, past tense, concrete (what shipped/fixed), no meta-commentary. topics: 2-5 short lowercase kebab-case tags. Output JSON only — no prose, no markdown fence.';
+const SUMMARY_SYSTEM = 'Summarize one day of coding-agent transcripts into strict JSON {"projects":[{"path":string,"bullets":string[]}],"topics":string[]}. One projects entry per distinct "## <path>" header in the input, path copied verbatim (several blocks may share a path — merge them). bullets: 1-3 short fragments per project, past tense, concrete (what shipped/fixed), no meta-commentary, no trailing period. Order each project\'s bullets by how much work went into them: the input blocks arrive highest-effort first (each header carries its turn and token count), so keep that order. topics: 2-5 short lowercase kebab-case tags for the whole day. Output JSON only — no prose, no markdown fence.';
 
 // Machine-local YYYY-MM-DD — no manual TZ math (per plan). Defaults to now.
 export function localDay(ts) {
@@ -41,6 +42,30 @@ function repoName(cwd) {
   const parts = String(cwd).split(/[\\/]/).filter(Boolean);
   return parts[parts.length - 1] || null;
 }
+// One-line stand-in when a session has no ai-title: its first prompt, flattened.
+const blurbOf = (texts) => { const t = (texts || []).find((x) => x && x.trim()); return t ? t.replace(/\s+/g, ' ').trim().slice(0, 140) : null; };
+
+// A bullet is one line on a card: flattened and capped, so a session whose
+// "title" is an entire injected prompt can't blow the card open.
+const bullet = (s) => trunc(String(s).replace(/\s+/g, ' ').trim(), BULLET_TRUNC);
+
+// Effort proxy for ordering: tokens burned on the day's share of the session,
+// turns as the tiebreak when no token log exists.
+const effortOf = (s) => (s.dayTokens || 0) * 1000 + (s.dayTurns ?? s.turns ?? 0);
+
+// Rows whose opening message is machinery, not work: a spawned subagent's own
+// system prompt, or a harness-injected caveat block. Dropped from the digest,
+// the bullets and the session list — metrics still count them, since their
+// turns and spend were real.
+const NOISE_PREFIXES = [
+  /^you are an adversarial code reviewer/i,
+  /^<local-command-caveat>/i,
+  /^the following is the codex agent history/i, // codex approval-gate judge runs
+];
+const isNoiseSession = (s) => {
+  const text = (s.title || blurbOf(s.userTexts) || '').trim();
+  return NOISE_PREFIXES.some((re) => re.test(text));
+};
 
 // ---- Reader / writer -------------------------------------------------------
 
@@ -95,18 +120,22 @@ export async function scanDays(windowStart, root) {
     // user-visible output of a turn. Thinking/toolUse blocks aren't turns.
     // One consistent definition feeds the trivial-day gate, the cost/token
     // proration share below, and the digest's per-day turn count.
-    const byDay = new Map(); // date -> { userTexts, lastAssistantText, turns }
+    const byDay = new Map(); // date -> { userTexts, lastAssistantText, recapText, turns }
     let sessionTurns = 0;
     for (const m of s.messages) {
       const date = localDay(m.ts ?? row.mtime);
       let b = byDay.get(date);
-      if (!b) byDay.set(date, (b = { userTexts: [], lastAssistantText: null, turns: 0 }));
-      if (m.role === 'user' && m.kind === 'text') b.userTexts.push(m.text);
+      if (!b) byDay.set(date, (b = { userTexts: [], lastAssistantText: null, recapText: null, turns: 0 }));
+      if (m.role === 'user' && m.kind === 'text') {
+        // Recap (compaction summary) is kept separate from real prompts so the
+        // digest can compress long sessions to [recap] + last assistant; a
+        // session compacted multiple times keeps the latest recap (last wins).
+        if (m.recap) b.recapText = m.text; else b.userTexts.push(m.text);
+      }
       else if (m.role === 'assistant' && m.kind === 'text') { b.lastAssistantText = m.text; b.turns++; sessionTurns++; }
     }
     if (byDay.size === 0) continue; // no user/assistant text at all
 
-    const cost = readCostFile(row.id).costUsd;
     // Some transcript rows carry no cwd; parseSession would hand null to
     // encodeCwd (or findCodexRolloutForCwd) and throw, 500ing the whole route.
     // No cwd means no path to a token log — count the day, skip the tokens.
@@ -114,6 +143,10 @@ export async function scanDays(windowStart, root) {
       ? await parseSession(row.cwd, row.id, row.source === 'codex' ? 'codex' : undefined)
       : { exists: false, tokens: 0 };
     const tokens = parsed.exists ? parsed.tokens : 0;
+    // Statusline cost-state is exact; fall back to the pricing-table estimate
+    // when no cost-state file exists (store reset, or session predates the
+    // usage-report wiring). Mirrors statsFor's cost resolution in stats.mjs.
+    const cost = readCostFile(row.id).costUsd ?? parsed.estCostUsd ?? null;
 
     for (const [date, b] of byDay) {
       let day = days.get(date);
@@ -124,8 +157,8 @@ export async function scanDays(windowStart, root) {
       const share = sessionTurns > 0 ? b.turns / sessionTurns : 0;
       day.sessions.push({
         id: row.id, project: row.project, cwd: row.cwd, source: row.source || 'claude',
-        title: row.title, turns: sessionTurns, dayTurns: b.turns,
-        userTexts: b.userTexts, lastAssistantText: b.lastAssistantText,
+        title: row.title, turns: sessionTurns, dayTurns: b.turns, dayTokens: Math.round(tokens * share),
+        userTexts: b.userTexts, lastAssistantText: b.lastAssistantText, recapText: b.recapText,
       });
       day.metrics.sessions++;
       day.metrics.turns += b.turns;
@@ -144,24 +177,54 @@ function emptyDayAgg() { return { sessions: [], metrics: { sessions: 0, turns: 0
 // sessionText() (sessions.mjs) is NOT reusable here — it emits everything
 // including tool traffic; the LLM only wants the human-readable narrative.
 function sessionDigest(sess) {
-  const lines = [`## ${sess.cwd || sess.project} (${sess.source}, ${sess.dayTurns} turns)`];
+  const lines = [`## ${sess.cwd || sess.project} (${sess.source}, ${sess.dayTurns} turns, ${sess.dayTokens || 0} tokens)`];
+  if (sess.recapText) lines.push(`[recap] ${trunc(sess.recapText, USER_TRUNC)}`);
   for (const t of sess.userTexts) lines.push(`[user] ${trunc(t, USER_TRUNC)}`);
   if (sess.lastAssistantText) lines.push(`[assistant] ${trunc(sess.lastAssistantText, ASSISTANT_TRUNC)}`);
   return lines.join('\n');
 }
 
-// Assembles the full day's digest, hard-capped at DIGEST_CAP chars — drops the
-// lowest-turn sessions first when over, recording what got dropped.
+// Compressed form for long sessions that would otherwise be dropped: recap
+// (covers everything before the last compaction) + last assistant only. The
+// intermediate [user] prompts are the part the recap already summarizes, so
+// dropping them loses the least information per char saved.
+function compressedDigest(sess) {
+  const lines = [`## ${sess.cwd || sess.project} (${sess.source}, ${sess.dayTurns} turns, ${sess.dayTokens || 0} tokens — compressed)`];
+  lines.push(`[recap] ${trunc(sess.recapText, USER_TRUNC)}`);
+  if (sess.lastAssistantText) lines.push(`[assistant] ${trunc(sess.lastAssistantText, ASSISTANT_TRUNC)}`);
+  return lines.join('\n');
+}
+
+// Assembles the full day's digest, hard-capped at DIGEST_CAP chars.
+//
+// Two-pass: if the day's full digest fits the cap, keep every session in full
+// detail (no compression, no drops). If it doesn't, sessions with a recap (i.e.
+// long, compacted sessions — the recap already summarizes their early prompts)
+// are emitted in compressed [recap] + last-assistant form to free cap for more
+// of the other sessions; non-recap sessions stay full until the cap, and the
+// lowest-turn tail drops. First session is always represented (never an empty
+// digest). Records dropped titles.
 export function buildDigest(sessions) {
-  const ordered = [...sessions].sort((a, b) => b.dayTurns - a.dayTurns);
+  const ordered = [...sessions].sort((a, b) => effortOf(b) - effortOf(a));
+  const fullBlocks = ordered.map(sessionDigest);
+  const fullTotal = fullBlocks.reduce((s, b) => s + b.length, 0);
+  if (fullTotal <= DIGEST_CAP) {
+    return { text: fullBlocks.join('\n\n'), dropped: [] };
+  }
+  // Over cap: trade recap-session detail for breadth — compress the compacted
+  // (long) sessions so more of the day's other sessions fit.
   const kept = [];
   const dropped = [];
   let total = 0;
-  for (const sess of ordered) {
-    const block = sessionDigest(sess);
-    if (total + block.length > DIGEST_CAP && kept.length > 0) { dropped.push(sess.title || sess.id); continue; }
-    kept.push(block);
-    total += block.length;
+  for (let i = 0; i < ordered.length; i++) {
+    const sess = ordered[i];
+    const block = sess.recapText ? compressedDigest(sess) : fullBlocks[i];
+    if (total + block.length <= DIGEST_CAP || kept.length === 0) {
+      kept.push(block);
+      total += block.length;
+      continue;
+    }
+    dropped.push(sess.title || sess.id);
   }
   return { text: kept.join('\n\n'), dropped };
 }
@@ -173,21 +236,36 @@ function parseJsonSummary(text) {
   if (!m) return null;
   try {
     const o = JSON.parse(m[0]);
-    return typeof o.summary === 'string'
-      ? { summary: o.summary, topics: Array.isArray(o.topics) ? o.topics.slice(0, 5).map(String) : [] }
-      : null;
+    const projects = (Array.isArray(o.projects) ? o.projects : [])
+      .filter((p) => p?.path && Array.isArray(p.bullets))
+      .map((p) => ({ path: String(p.path), bullets: p.bullets.filter((b) => b && String(b).trim()).slice(0, 3).map((b) => bullet(String(b))) }))
+      .filter((p) => p.bullets.length);
+    if (!projects.length) return null;
+    return { projects, topics: Array.isArray(o.topics) ? o.topics.slice(0, 5).map(String) : [] };
   } catch { return null; }
 }
 
+// Bottom rung: no LLM, so a project's bullets are its own session titles —
+// same shape as the LLM path so the client never branches on provenance.
 function deterministicSummary(sessions) {
-  const repos = [...new Set(sessions.map((s) => repoName(s.cwd || s.project)).filter(Boolean))];
-  const titled = [...sessions].sort((a, b) => b.turns - a.turns).slice(0, 3).map((s) => s.title || s.id).filter(Boolean);
-  const summary = `${sessions.length} session${sessions.length === 1 ? '' : 's'} across ${repos.join(', ') || 'unknown repos'}${titled.length ? `: ${titled.join('; ')}` : ''}`;
-  return { summary, topics: [] };
+  const byPath = new Map();
+  for (const s of sessions) {
+    const key = s.cwd || s.project || 'unknown';
+    if (!byPath.has(key)) byPath.set(key, []);
+    byPath.get(key).push(s);
+  }
+  const projects = [...byPath].map(([path, list]) => ({
+    path,
+    bullets: [...list].sort((a, b) => effortOf(b) - effortOf(a)).slice(0, 3).map((s) => bullet(s.title || blurbOf(s.userTexts) || s.id)),
+  }));
+  return { projects, topics: [] };
 }
 
 async function defaultCallAnthropic(digestText) {
-  return callMessages({ system: SUMMARY_SYSTEM, messages: [{ role: 'user', content: digestText }], maxTokens: 400 });
+  // Per-project bullets need far more room than the old one-paragraph summary:
+  // a day spanning 7 repos is ~7x3 bullets, and a truncated reply is invalid
+  // JSON — which silently drops the whole day to the deterministic rung.
+  return callMessages({ system: SUMMARY_SYSTEM, messages: [{ role: 'user', content: digestText }], maxTokens: 1500 });
 }
 async function defaultCallOllama(digestText) {
   const { stdout } = await execFileP(OLLAMA_BIN, ['run', OLLAMA_MODEL, `${SUMMARY_SYSTEM}\n\n${digestText}`], { maxBuffer: OLLAMA_MAX_BUFFER, timeout: OLLAMA_TIMEOUT_MS });
@@ -214,16 +292,17 @@ export async function summarizeDay(digestText, sessions, { callAnthropic = defau
 // ---- Entry assembly ---------------------------------------------------------
 
 async function buildDayEntry(date, dayAgg, deps) {
-  const sessions = dayAgg.sessions;
+  const sessions = dayAgg.sessions.filter((s) => !isNoiseSession(s));
   const metrics = { ...dayAgg.metrics, costUsd: Math.round(dayAgg.metrics.costUsd * 100) / 100 };
   const repos = [...new Set(sessions.map((s) => repoName(s.cwd || s.project)).filter(Boolean))];
 
   let result;
-  if (sessions.length === 0) {
+  if (dayAgg.sessions.length === 0) {
     // Gap day: no work at all. Still written as an entry so it stops showing as
     // pending forever and the page can render absence explicitly.
-    result = { summary: '', topics: [], llm: { ok: false, provider: null, model: null, reason: 'empty' } };
-  } else if (metrics.turns < TRIVIAL_TURNS) {
+    result = { projects: [], topics: [], llm: { ok: false, provider: null, model: null, reason: 'empty' } };
+  } else if (metrics.turns < TRIVIAL_TURNS || sessions.length === 0) {
+    // Nothing worth an LLM call: a tiny day, or a day of nothing but noise rows.
     result = { ...deterministicSummary(sessions), llm: { ok: false, provider: null, model: null, reason: 'trivial' } };
   } else {
     const { text: digestText, dropped } = buildDigest(sessions);
@@ -233,10 +312,10 @@ async function buildDayEntry(date, dayAgg, deps) {
 
   return {
     date,
-    summary: result.summary,
+    projects: result.projects || [],
     topics: result.topics || [],
     repos,
-    sessions: sessions.map((s) => ({ id: s.id, project: s.project, cwd: s.cwd, source: s.source, title: s.title, turns: s.turns })),
+    sessions: sessions.map((s) => ({ id: s.id, project: s.project, cwd: s.cwd, source: s.source, title: s.title, turns: s.turns, dayTurns: s.dayTurns, blurb: blurbOf(s.userTexts) })),
     metrics,
     llm: result.llm,
     builtAt: new Date().toISOString(),
@@ -260,7 +339,9 @@ async function _ensureHistory({ days = BACKFILL_DAYS, callAnthropic, callOllama,
   wanted.sort();
 
   const prior = new Map(readHistory().map((e) => [e.date, e]));
-  const missing = wanted.filter((d) => d !== today && (!prior.has(d) || prior.get(d).llm?.reason === 'empty'));
+  // Entries predating the per-project bullets carry a prose `summary` and no
+  // `projects` — treat them as missing so one boot pass re-summarizes them.
+  const missing = wanted.filter((d) => d !== today && (!prior.has(d) || prior.get(d).llm?.reason === 'empty' || !Array.isArray(prior.get(d).projects)));
   if (!missing.length) return { built: [] };
 
   const windowStart = startOfLocalDay(new Date(Date.now() - days * 86_400_000)).getTime();
@@ -317,7 +398,7 @@ export async function liveToday(root) {
   return {
     date, live: true,
     repos,
-    sessions: agg.sessions.map((s) => ({ id: s.id, project: s.project, cwd: s.cwd, source: s.source, title: s.title, turns: s.turns })),
+    sessions: agg.sessions.map((s) => ({ id: s.id, project: s.project, cwd: s.cwd, source: s.source, title: s.title, turns: s.turns, dayTurns: s.dayTurns, blurb: blurbOf(s.userTexts) })),
     metrics: { ...agg.metrics, costUsd: Math.round(agg.metrics.costUsd * 100) / 100 },
   };
 }

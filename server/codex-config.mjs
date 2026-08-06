@@ -124,7 +124,8 @@ function resolveRoot(raw) {
 // be pointed at an arbitrary directory to plant a config.toml.
 function isKnownConfigRoot(cwd) {
   if (!cwd) return false;
-  const abs = resolve(cwd);
+  const abs = resolveRoot(cwd); // untildify '~' → home (resolve(cwd) would leave '~' literal)
+  if (!abs) return false;
   return getConfigRoots().some((raw) => {
     const root = resolveRoot(raw);
     return root && (abs === root || abs.startsWith(root + sep));
@@ -137,7 +138,7 @@ export function writeConfig(cwd, scope, content, mtime, force) {
   // Enforce the client's cwd→scope mapping: 'user' only for cwd ~ (home),
   // 'project' only for a non-home cwd. Otherwise a project-scope write with
   // cwd ~ would target ~/.codex/config.toml (the user file) and vice versa.
-  const isHome = resolve(cwd) === resolve(homedir());
+  const isHome = resolveRoot(cwd) === resolve(homedir()); // untildify so cwd '~' reads as home
   if (scope === 'user' && !isHome) return { ok: false, error: 'user scope requires cwd ~' };
   if (scope === 'project' && isHome) return { ok: false, error: 'project scope requires a non-home cwd' };
   const paths = scopePaths(cwd);

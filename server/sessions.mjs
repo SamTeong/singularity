@@ -275,16 +275,44 @@ async function peek(p) {
   return { st, head };
 }
 
-// Reduce a peek's events to {cwd, title}. cwd = first event carrying one;
-// title = last `ai-title` seen (Claude Code refines it across the session).
+// First text out of a user event's content — mirrors readSession's own
+// string-vs-array handling (tool_result blocks are never text).
+function firstUserText(content) {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    const b = content.find((x) => x.type === 'text');
+    return b ? b.text : null;
+  }
+  return null;
+}
+// Slash-command echoes (`/exit`, etc.) surface as ordinary user events —
+// `<command-name>`/`<local-command...>` wrappers, not isMeta-flagged — so a
+// text-prefix check is needed alongside the isMeta/isCompactSummary flags.
+function isCommandWrapper(text) {
+  const t = text.trimStart();
+  return t.startsWith('<command-name') || t.startsWith('<local-command');
+}
+
+// Reduce a peek's events to {cwd, title, blurb}. cwd = first event carrying
+// one; title = last `ai-title` seen (Claude Code refines it across the
+// session); blurb = the first real user prompt, flattened to one line —
+// title fallback for sessions that never got an ai-title.
 function peekMeta(events) {
   let cwd = null;
   let title = null;
+  let blurb = null;
   for (const e of events) {
     if (!cwd && e.cwd) cwd = e.cwd;
     if (e.type === 'ai-title' && e.aiTitle) title = e.aiTitle;
+    if (!blurb && e.type === 'user' && !e.isMeta && !e.isCompactSummary) {
+      const text = firstUserText(e.message?.content);
+      if (text && !isCommandWrapper(text)) {
+        const flat = text.replace(/\s+/g, ' ').trim();
+        if (flat) blurb = flat.slice(0, 140);
+      }
+    }
   }
-  return { cwd, title };
+  return { cwd, title, blurb };
 }
 
 // listSessions: every *.jsonl under the resolved root, reverse-chrono by
@@ -310,16 +338,16 @@ export async function listSessions({ cap = 5000, isLive = () => false, now = Dat
       const pk = await peek(p);
       if (!pk) continue;
       const { st } = pk;
-      let cwd, title;
+      let cwd, title, blurb;
       const hit = metaCache.get(p);
-      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
-        cwd = hit.cwd; title = hit.title;
+      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.blurb !== undefined) {
+        cwd = hit.cwd; title = hit.title; blurb = hit.blurb;
       } else {
-        ({ cwd, title } = peekMeta(parseEvents(pk.head)));
-        metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, title });
+        ({ cwd, title, blurb } = peekMeta(parseEvents(pk.head)));
+        metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, title, blurb });
       }
       const id = f.slice(0, -6);
-      const row = { id, project: proj.name, cwd, title, mtime: st.mtimeMs, size: st.size };
+      const row = { id, project: proj.name, cwd, title, blurb, mtime: st.mtimeMs, size: st.size };
       row.running = isLive(id) || (now - st.mtimeMs) < RUNNING_MS;
       // Subagents are separate transcripts under <parent-id>/subagents/agent-*.jsonl,
       // full-session shape. Their tool_result bodies are inline in the jsonl (the
@@ -351,25 +379,27 @@ async function listSubagents(parentDir, parentId, isLive, now) {
     if (!pk) continue;
     const { st } = pk;
     const agentId = f.slice(0, -6);
-    let title = null;
+    let metaTitle = null;
     try {
       const meta = JSON.parse(await readFile(join(subDir, `${agentId}.meta.json`), 'utf8'));
-      if (meta.agentType) title = meta.description ? `${meta.agentType}: ${meta.description}` : meta.agentType;
+      if (meta.agentType) metaTitle = meta.description ? `${meta.agentType}: ${meta.description}` : meta.agentType;
     } catch {}
-    if (!title) {
-      const hit = metaCache.get(p);
-      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
-        title = hit.title;
-      } else {
-        const peeked = peekMeta(parseEvents(pk.head));
-        title = peeked.title;
-        metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd: peeked.cwd, title: peeked.title });
-      }
+    // blurb always comes from the peek (meta.json never carries one), so peek
+    // unconditionally even when meta.json already supplied a title.
+    let peekTitle, blurb;
+    const hit = metaCache.get(p);
+    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.blurb !== undefined) {
+      peekTitle = hit.title; blurb = hit.blurb;
+    } else {
+      const peeked = peekMeta(parseEvents(pk.head));
+      peekTitle = peeked.title; blurb = peeked.blurb;
+      metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd: peeked.cwd, title: peeked.title, blurb: peeked.blurb });
     }
     out.push({
       id: `${parentId}/subagents/${agentId}`,
       agentId,
-      title,
+      title: metaTitle || peekTitle,
+      blurb,
       mtime: st.mtimeMs,
       size: st.size,
       running: isLive(agentId) || (now - st.mtimeMs) < RUNNING_MS,
@@ -455,12 +485,17 @@ export async function readSession(project, id, root, source = 'claude', file) {
     const ts = e.timestamp ?? null;
     if (e.type === 'user') {
       const c = msg.content;
+      // Recap (context-compaction summary) events are flagged isCompactSummary;
+      // tag them so the history digest can compress long sessions to recap +
+      // last assistant instead of dropping them. Conditional spread keeps the
+      // message shape identical for non-recap events (deepEqual tests rely on it).
+      const extra = e.isCompactSummary ? { recap: true } : {};
       if (typeof c === 'string') {
-        messages.push({ ts, role: 'user', kind: 'text', text: c });
+        messages.push({ ts, role: 'user', kind: 'text', text: c, ...extra });
       } else if (Array.isArray(c)) {
         for (const b of c) {
           if (b.type === 'tool_result') messages.push({ ts, role: 'user', kind: 'toolResult', text: trunc(b.content, TOOL_TRUNC) });
-          else if (b.type === 'text') messages.push({ ts, role: 'user', kind: 'text', text: b.text });
+          else if (b.type === 'text') messages.push({ ts, role: 'user', kind: 'text', text: b.text, ...extra });
         }
       }
     } else if (e.type === 'assistant') {

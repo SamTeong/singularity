@@ -12,7 +12,7 @@ export default function SaveBar({ msg, disabled, onSave, children }) {
       {children}
       {msg && <Typography color={msg.sev === 'error' ? 'error' : 'success.main'} sx={{ fontSize: 13 }}>{msg.text}</Typography>}
       <Box sx={{ flex: 1 }} />
-      <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={onSave} disabled={disabled}>Save</Button>
+      <Button size="small" variant="contained" startIcon={<SaveIcon />} sx={{ px: 2, '& .MuiButton-startIcon': { marginRight: 0.5 } }} onClick={() => onSave()} disabled={disabled}>Save</Button>
     </Stack>
   );
 }

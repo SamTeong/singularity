@@ -10,7 +10,6 @@ import Tooltip from '@mui/material/Tooltip';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
-import { repoName } from '@/lib/paths.js';
 
 // motion() over a plain motion.article: the card needs `sx` (MUI's styling
 // prop, unsupported on bare motion.<tag> primitives) alongside layout/reveal.
@@ -19,6 +18,9 @@ const MotionBox = motion(Box);
 
 export const EASE_OUT = [0.16, 1, 0.3, 1];
 const SPRING_EXPAND = { type: 'spring', stiffness: 320, damping: 34, mass: 0.9 };
+
+// Fixed per-project card width — the day row is a horizontal stack of these.
+export const CARD_WIDTH = 300;
 
 // Card min-height scales with turns, sqrt-damped so a 10x day isn't 10x tall.
 const cardHeight = (turns) => Math.round(Math.min(220, Math.max(88, 88 + 16 * Math.sqrt(turns || 0))));
@@ -57,9 +59,8 @@ function SessionRow({ s, onOpen }) {
       })}
     >
       <Box sx={{ width: 6, height: 6, flexShrink: 0, bgcolor: isCodex ? 'secondary.main' : 'primary.main', transform: 'rotate(45deg)' }} aria-hidden="true" />
-      <Typography variant="body2" noWrap sx={{ flex: 1, minWidth: 0 }}>{s.title || s.id}</Typography>
-      <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }} noWrap>{repoName(s.cwd || s.project)}</Typography>
-      <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>{s.turns}t</Typography>
+      <Typography variant="body2" noWrap title={s.title || s.blurb || s.id} sx={{ flex: 1, minWidth: 0 }}>{s.title || s.blurb || s.id}</Typography>
+      <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary', fontVariantNumeric: 'tabular-nums' }}>{s.dayTurns ?? s.turns}t</Typography>
       <PlayArrowIcon sx={{ fontSize: 14, color: 'text.disabled' }} />
     </Box>
   );
@@ -93,12 +94,97 @@ export function ShimmerCard() {
 }
 
 /**
- * One day's card: a stratum whose height (turns) and density-band opacity
- * (tokens) encode volume at a glance. Collapses to a two-line summary;
- * expands in place to the day's sessions. `entry.live` (today) drops the
- * summary/topics/llm entirely in favor of a live-metrics-only treatment.
+ * Day-level row header: date, live status, the day's aggregate metrics, and
+ * (once summarized) the digest text, topics and provenance/regenerate
+ * controls. Sits above the horizontal stack of per-project `DayCard`s and
+ * owns the row's single expand/collapse toggle + keyboard nav.
  */
-export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef, revealIndex = 0 }) {
+export function DayHeader({ entry, expanded, onToggle, onRegenerate, regenerating, onArrowNav, headerRef }) {
+  const reduceMotion = useReducedMotion();
+  const m = entry.metrics || {};
+  const isToday = !!entry.live;
+  const panelId = `history-day-${entry.date}`;
+  const sessionsLabel = `${m.sessions || 0} session${m.sessions === 1 ? '' : 's'}`;
+  const ariaLabel = `${fmtDateLabel(entry.date)}, ${sessionsLabel}`;
+
+  const onHeaderKeyDown = (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); onArrowNav(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); onArrowNav(-1); }
+  };
+
+  return (
+    <MotionBox
+      layout={reduceMotion ? false : 'position'}
+      ref={headerRef}
+      role="button"
+      tabIndex={0}
+      aria-expanded={expanded}
+      aria-controls={panelId}
+      aria-label={ariaLabel}
+      onClick={onToggle}
+      onKeyDown={onHeaderKeyDown}
+      sx={{ display: 'flex', flexDirection: 'column', gap: 0.5, px: 0.5, pb: 1, cursor: 'pointer', '&:focus-visible': { outline: (t) => `2px solid ${t.palette.primary.main}`, outlineOffset: -2 } }}
+    >
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+        <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{fmtDateShort(entry.date)}</Typography>
+        {isToday && <Chip label="Live" size="small" color="success" sx={{ height: 18, fontSize: 10 }} />}
+        <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{sessionsLabel}</Typography>
+        <Stack direction="row" spacing={2.5} sx={{ ml: 1 }}>
+          <Metric label="Turns" value={m.turns} />
+          <Metric label="Tokens" value={fmtTokens(m.tokens || 0)} />
+          <Metric label="Cost" value={fmtUsd(m.costUsd) ?? '—'} />
+        </Stack>
+        <Box sx={{ flex: 1 }} />
+        {!isToday && (
+          <>
+            <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>
+              {entry.llm?.ok
+                ? `summarized by: ${entry.llm.provider === 'anthropic-oauth' ? 'claude' : entry.llm.provider ?? 'auto'}`
+                : entry.llm?.reason === 'trivial' ? 'summarized by: auto — trivial day' : 'summary unavailable'}
+            </Typography>
+            {!!entry.llm?.dropped?.length && (
+              <Tooltip title={`Dropped from digest: ${entry.llm.dropped.join(', ')}`} disableInteractive>
+                <Typography variant="code" sx={{ fontSize: 11, color: 'warning.main', cursor: 'help' }}>{entry.llm.dropped.length} dropped</Typography>
+              </Tooltip>
+            )}
+            <Tooltip title="Regenerate summary" disableInteractive>
+              <IconButton size="small" disabled={regenerating} onClick={(e) => { e.stopPropagation(); onRegenerate(entry.date); }}>
+                <RefreshIcon
+                  fontSize="small"
+                  sx={regenerating ? {
+                    animation: 'sing-history-spin 1s linear infinite',
+                    '@keyframes sing-history-spin': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } },
+                    '@media (prefers-reduced-motion: reduce)': { animation: 'none', opacity: 0.5 },
+                  } : undefined}
+                />
+              </IconButton>
+            </Tooltip>
+          </>
+        )}
+      </Stack>
+
+      {/* The day's narrative lives in each project card's bullets — the header
+          carries only date, status, metrics and topics. */}
+      {isToday && (
+        <Typography sx={{ fontSize: 13, color: 'text.secondary', fontStyle: 'italic' }}>In progress — updates as you work.</Typography>
+      )}
+
+      {!!entry.topics?.length && (
+        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', mt: 0.5 }}>
+          {entry.topics.map((topic) => <Chip key={topic} label={topic} size="small" variant="outlined" sx={{ height: 20, fontSize: 11 }} />)}
+        </Stack>
+      )}
+    </MotionBox>
+  );
+}
+
+/**
+ * One project's card within a day: a stratum whose height (turns) and
+ * density-band opacity (tokens) encode volume at a glance. Collapses to just
+ * the header row; expands in place to that project's sessions for the day.
+ */
+export default function DayCard({ card, date, expanded, onToggle, onOpenSession, scrollRef, skipEntranceAnim, revealIndex = 0 }) {
   const reduceMotion = useReducedMotion();
   const bandRef = useRef(null);
 
@@ -106,17 +192,17 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
   const rawParallax = useTransform(scrollYProgress, [0, 1], ['-3%', '3%']);
   const parallaxY = useSpring(rawParallax, { stiffness: 180, damping: 30 });
 
-  const m = entry.metrics || {};
-  const isToday = !!entry.live;
+  const m = card.metrics || {};
+  const bullets = (card.bullets || []).slice(0, 3);
   const claudeTurns = m.byHarness?.claude?.turns || 0;
   const codexTurns = m.byHarness?.codex?.turns || 0;
   const harnessTotal = claudeTurns + codexTurns || 1;
   const claudePct = (claudeTurns / harnessTotal) * 100;
   const height = cardHeight(m.turns);
   const density = densityOpacity(m.tokens);
-  const panelId = `history-day-${entry.date}`;
+  const panelId = `history-day-${date}-${card.key}`;
   const sessionsLabel = `${m.sessions || 0} session${m.sessions === 1 ? '' : 's'}`;
-  const ariaLabel = `${fmtDateLabel(entry.date)}, ${sessionsLabel}${m.costUsd != null ? `, ${fmtUsd(m.costUsd) || '$0.00'}` : ''}`;
+  const ariaLabel = `${card.label}, ${fmtDateShort(date)}, ${sessionsLabel}${m.costUsd != null ? `, ${fmtUsd(m.costUsd) || '$0.00'}` : ''}`;
 
   const noTransform = reduceMotion;
   const variants = {
@@ -129,8 +215,6 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
 
   const onHeaderKeyDown = (e) => {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); onArrowNav(1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); onArrowNav(-1); }
   };
 
   return (
@@ -148,14 +232,13 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
         layout: reduceMotion ? { duration: 0 } : SPRING_EXPAND,
       }}
       aria-label={ariaLabel}
-      aria-busy={regenerating || undefined}
-      sx={{ maxWidth: 720 }}
+      sx={{ width: CARD_WIDTH, flexShrink: 0, alignSelf: 'stretch' }}
     >
       {/* Hover/press live on an inner element, not the motion one: framer writes
           transform inline for the reveal + layout animations, and an inline
           style beats any stylesheet rule — the lift would never fire. */}
       <Box sx={(t) => ({
-        position: 'relative', minHeight: height, borderRadius: `${getTokens(t).radius.md}px`,
+        position: 'relative', height: '100%', minHeight: height, borderRadius: `${getTokens(t).radius.md}px`,
         border: `1px solid ${getTokens(t).glass.stroke}`, overflow: 'hidden',
         transition: 'transform 160ms ease-out, box-shadow 160ms ease-out',
         '@media (hover: hover) and (pointer: fine)': { '&:hover': { transform: 'translateY(-2px)', boxShadow: '0 8px 24px rgba(0,0,0,.18)' } },
@@ -174,7 +257,6 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
           block instead of scale-stretching its text and chips. */}
       <MotionBox
         layout={reduceMotion ? false : 'position'}
-        ref={headerRef}
         role="button"
         tabIndex={0}
         aria-expanded={expanded}
@@ -184,19 +266,10 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
         sx={{ p: 2, pl: 2.5, display: 'flex', flexDirection: 'column', gap: 1, cursor: 'pointer', '&:focus-visible': { outline: (t) => `2px solid ${t.palette.primary.main}`, outlineOffset: -2 } }}
       >
         <Stack direction="row" spacing={1} sx={{ alignItems: 'baseline' }}>
-          <Typography sx={{ fontWeight: 700, fontSize: 14 }}>{fmtDateShort(entry.date)}</Typography>
-          {isToday && <Chip label="Live" size="small" color="success" sx={{ height: 18, fontSize: 10 }} />}
+          <Typography sx={{ fontWeight: 700, fontSize: 14 }} noWrap title={card.key}>{card.label}</Typography>
           <Box sx={{ flex: 1 }} />
           <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{sessionsLabel}</Typography>
         </Stack>
-
-        {isToday ? (
-          <Typography sx={{ fontSize: 13, color: 'text.secondary', fontStyle: 'italic' }}>In progress — updates as you work.</Typography>
-        ) : (
-          <Typography sx={{ fontSize: 15, lineHeight: 1.55, display: '-webkit-box', WebkitLineClamp: expanded ? 'unset' : 2, WebkitBoxOrient: 'vertical', overflow: expanded ? 'visible' : 'hidden' }}>
-            {entry.summary || '—'}
-          </Typography>
-        )}
 
         <Stack direction="row" spacing={2.5} sx={{ mt: 0.5 }}>
           <Metric label="Turns" value={m.turns} />
@@ -204,13 +277,12 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
           <Metric label="Cost" value={fmtUsd(m.costUsd) ?? '—'} />
         </Stack>
 
-        {!!entry.topics?.length && (
-          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', mt: 0.5 }}>
-            {entry.topics.map((topic) => <Chip key={topic} label={topic} size="small" variant="outlined" sx={{ height: 20, fontSize: 11 }} />)}
-          </Stack>
-        )}
-        {!!entry.repos?.length && (
-          <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }} noWrap>{entry.repos.join(' · ')}</Typography>
+        {!!bullets.length && (
+          <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2 }}>
+            {bullets.map((b) => (
+              <Typography key={b} component="li" sx={{ fontSize: 13, lineHeight: 1.45, color: 'text.secondary', '&::marker': { color: 'text.disabled' } }}>{b}</Typography>
+            ))}
+          </Box>
         )}
       </MotionBox>
 
@@ -219,7 +291,7 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
           <motion.div
             id={panelId}
             role="region"
-            aria-label="Sessions"
+            aria-label={`Sessions — ${card.label}`}
             initial={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={reduceMotion ? { opacity: 1 } : { opacity: 0 }}
@@ -231,38 +303,12 @@ export default function DayCard({ entry, expanded, onToggle, onOpenSession, onRe
                 animate="visible"
                 variants={{ hidden: {}, visible: { transition: { staggerChildren: reduceMotion ? 0 : 0.04 } } }}
               >
-                {(entry.sessions || []).map((s) => (
+                {(card.sessions || []).map((s) => (
                   <motion.div key={s.id} variants={{ hidden: noTransform ? { opacity: 0 } : { opacity: 0, y: 8 }, visible: { opacity: 1, y: 0 } }}>
                     <SessionRow s={s} onOpen={(sess) => onOpenSession({ project: sess.project, id: sess.id, cwd: sess.cwd, source: sess.source, mtime: Date.now() })} />
                   </motion.div>
                 ))}
               </motion.div>
-
-              {!isToday && (
-                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 1, pt: 1, borderTop: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
-                  <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>
-                    {entry.llm?.ok ? entry.llm.provider : entry.llm?.reason === 'trivial' ? 'auto-summarized — trivial day' : 'summary unavailable'}
-                  </Typography>
-                  {!!entry.llm?.dropped?.length && (
-                    <Tooltip title={`Dropped from digest: ${entry.llm.dropped.join(', ')}`} disableInteractive>
-                      <Typography variant="code" sx={{ fontSize: 11, color: 'warning.main', cursor: 'help' }}>{entry.llm.dropped.length} dropped</Typography>
-                    </Tooltip>
-                  )}
-                  <Box sx={{ flex: 1 }} />
-                  <Tooltip title="Regenerate summary" disableInteractive>
-                    <IconButton size="small" disabled={regenerating} onClick={(e) => { e.stopPropagation(); onRegenerate(entry.date); }}>
-                      <RefreshIcon
-                        fontSize="small"
-                        sx={regenerating ? {
-                          animation: 'sing-history-spin 1s linear infinite',
-                          '@keyframes sing-history-spin': { from: { transform: 'rotate(0deg)' }, to: { transform: 'rotate(360deg)' } },
-                          '@media (prefers-reduced-motion: reduce)': { animation: 'none', opacity: 0.5 },
-                        } : undefined}
-                      />
-                    </IconButton>
-                  </Tooltip>
-                </Stack>
-              )}
             </Box>
           </motion.div>
         )}

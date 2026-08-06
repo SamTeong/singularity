@@ -25,24 +25,25 @@ test('seeded days render in newest-first order', async ({ page }) => {
   const cards = page.getByRole('article');
   await expect(cards).toHaveCount(7, { timeout: 15000 });
 
-  // Index 0 is today ("In progress"), index 1 is yesterday, index 2 is day-3
-  // (the gap at day-2 is not an article). Asserting their relative positions
-  // proves descending-date order, not just "row exists".
-  await expect(cards.nth(1)).toContainText('Shipped the history timeline');
-  await expect(cards.nth(2)).toContainText('Built the e2e sandbox seed corpus');
+  // The day's narrative is per-project bullets inside the cards, so the cards
+  // carry the seeded text. Comparing their vertical positions proves
+  // descending-date order, not just "row exists".
+  const yOf = async (text) => (await cards.filter({ hasText: text }).first().boundingBox()).y;
+  expect(await yOf('Shipped the history timeline')).toBeLessThan(await yOf('Built the e2e sandbox seed corpus'));
+  // Second bullet of the same day's project renders too (up to 3 per project).
+  await expect(cards.filter({ hasText: 'Shipped the history timeline' }).first()).toContainText('Fixed a concurrent backfill bug');
 });
 
 test('expand a day reveals its session list', async ({ page }) => {
   await openHistory(page);
 
-  // Click the day-1 card's header — the summary text sits inside the clickable
-  // MotionBox (role="button", onClick=onToggle).
-  const card = page.getByRole('article').nth(1);
-  await expect(card).toContainText('Shipped the history timeline');
-  await card.getByText('Shipped the history timeline').click();
+  // Click day-1's project card — its header block is the toggle (role="button",
+  // onClick=onToggle) and expands the whole row.
+  const card = page.getByRole('article').filter({ hasText: 'Shipped the history timeline' }).first();
+  await card.getByRole('button').first().click();
 
   // The session list region appears with both seeded sessions.
-  const sessions = page.getByRole('region', { name: 'Sessions' });
+  const sessions = page.getByRole('region', { name: /^Sessions/ });
   await expect(sessions).toBeVisible();
   await expect(sessions.getByText('Retry backoff cap')).toBeVisible();
   await expect(sessions.getByText('Fixture session 901')).toBeVisible();
@@ -52,9 +53,9 @@ test('deep-link from a session row into Transcripts', async ({ page }) => {
   await openHistory(page);
 
   // Expand day-1, then click the rich session's row.
-  const card = page.getByRole('article').nth(1);
-  await card.getByText('Shipped the history timeline').click();
-  const sessions = page.getByRole('region', { name: 'Sessions' });
+  const card = page.getByRole('article').filter({ hasText: 'Shipped the history timeline' }).first();
+  await card.getByRole('button').first().click();
+  const sessions = page.getByRole('region', { name: /^Sessions/ });
   await expect(sessions).toBeVisible();
   await sessions.getByText('Retry backoff cap').click();
 
@@ -76,6 +77,7 @@ test('a gap day renders absence, not a shimmer placeholder', async ({ page }) =>
   await expect(page.locator('[aria-label*="no work"]')).toBeVisible({ timeout: 15000 });
 
   // No shimmer placeholders: every day is seeded, so `pending` is empty and
-  // no ShimmerCard (aria-busy="true") should be present.
+  // no ShimmerCard (aria-busy="true") should be present. Sessions region name
+  // matches the new format with project label.
   await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
 });

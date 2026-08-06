@@ -1,183 +1,302 @@
-import { getTokens } from '@/theme/contract.js';
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
-import Tabs from '@mui/material/Tabs';
-import Tab from '@mui/material/Tab';
-import ToggleButton from '@mui/material/ToggleButton';
-import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
-import { json } from '@codemirror/lang-json';
-import IconButton from '@mui/material/IconButton';
-import CmEditor from '@/components/CmEditor.jsx';
-import DirPicker from '@/components/DirPicker.jsx';
-import ClearIcon from '@mui/icons-material/Clear';
 import List from '@mui/material/List';
 import ListItemButton from '@mui/material/ListItemButton';
-import ListItemText from '@mui/material/ListItemText';
-import { tildify, untildify } from '@/lib/paths.js';
+import IconButton from '@mui/material/IconButton';
+import Collapse from '@mui/material/Collapse';
+import Tooltip from '@mui/material/Tooltip';
+import FolderIcon from '@mui/icons-material/Folder';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined';
+import ClearIcon from '@mui/icons-material/Clear';
+import TimerIcon from '@mui/icons-material/Timer';
+import TimerOffIcon from '@mui/icons-material/TimerOff';
+import { EmptyState } from '@zapac/mui-theme';
+import { json } from '@codemirror/lang-json';
+import CmEditor from '@/components/CmEditor.jsx';
+import DirPicker from '@/components/DirPicker.jsx';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
-import { useRootList } from '@/components/panelkit/useRootList.js';
-import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import TabStrip from '@/features/explorer/TabStrip.jsx';
+import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { tildify, untildify } from '@/lib/paths.js';
 
-const CLAUDE_SCOPES = [
-  { key: 'project', label: 'settings.json' },
-  { key: 'local', label: 'settings.local.json' },
+// Config files under a root. Claude: project + local settings JSON. Codex: a
+// single config.toml — `user` scope when the root is home (~/.codex/config.toml),
+// `project` otherwise (<root>/.codex/config.toml) — mirrors writeConfig's home
+// check so the leaf we show is the one save writes.
+const CLAUDE_LEAVES = [
+  { scope: 'project', name: 'settings.json' },
+  { scope: 'local', name: 'settings.local.json' },
 ];
+const CODEX_LEAF_NAME = 'config.toml';
+const codexScope = (cwd) => (untildify(cwd) === untildify('~') ? 'user' : 'project');
+const toolBase = (tool) => (tool === 'codex' ? '/codex-config' : '/config');
 
 export default function ConfigEditor() {
-  const [cwd, setCwd] = useState('~');
-  const [picking, setPicking] = useState(false);
-  const [data, setData] = useState(null);
-  const [loadedCwd, setLoadedCwd] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [scope, setScope] = useState('project');
-  const [content, setContent] = useState('');
-  const [dirty, setDirty] = useState(false);
-  const [mtime, setMtime] = useState(null);
-  const [msg, setMsg] = useState(null);
-  const [tool, setTool] = useState('claude'); // 'claude' | 'codex'
+  // Roots stay separate server-side (the isKnownConfigRoot security gate is
+  // per-tool), but the rail shows the union and pick/remember touch both so
+  // the user curates one set.
   const claudeRoots = useRootList('/config', { initial: ['~'] });
   const codexRoots = useRootList('/codex-config', { initial: ['~'] });
-  const { roots, shownRoots, remember, forget } = tool === 'codex' ? codexRoots : claudeRoots;
-  const [q, setQ] = useState('');
-  const [searchResults, setSearchResults] = useState(null); // content-search hits, raw
-  const results = q.trim() ? searchResults : null; // null = show config list
   const { ensureSaved, dialogEl } = useDirtyGuard();
 
-  const base = tool === 'codex' ? '/codex-config' : '/config';
-  // Codex has no scope tabs: one config.toml per root. `~` (home) → user-level
-  // (~/.codex/config.toml); any project root → project-level (.codex/config.toml).
-  const effScope = tool === 'codex' ? (untildify(cwd) === untildify('~') ? 'user' : 'project') : scope;
+  const [tabs, setTabs] = useState([]); // [{path, cwd, tool, scope, dirty, mtime}]
+  const [content, setContent] = useState(new Map()); // path -> string
+  const [active, setActive] = useState(null);
+  const [autosave, setAutosave] = useState(false);
+  const [msg, setMsg] = useState(null);
+  const [expanded, setExpanded] = useState(new Set()); // root strings (raw)
+  const [byRoot, setByRoot] = useState(new Map()); // `${tool}:${cwd}` -> readConfig result
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState(null); // null = tree; else { term, list:[{cwd,tool,scope,path,line,text}] }
+  const [picking, setPicking] = useState(false);
 
-  const load = () => {
-    if (!cwd) return;
-    const full = untildify(cwd);
-    setLoading(true);
-    fetch(`${base}?cwd=${encodeURIComponent(full)}`).then((r) => r.json()).then((d) => {
-      setData(d);
-      setLoadedCwd(full);
-      setContent(d[effScope]?.content ?? '');
-      setMtime(d[effScope]?.mtime ?? null);
-      setDirty(false); setMsg(null);
-      remember([full]);
-    }).catch((e) => setMsg({ sev: 'error', text: String(e) })).finally(() => setLoading(false));
+  // Autosave's 5s timer + the focus listener outlive their render, so save
+  // reads the latest content/tabs through these refs instead of a stale closure
+  // (same pattern as ExplorerPanel).
+  const contentRef = useRef(content);
+  useEffect(() => { contentRef.current = content; }, [content]);
+  const tabsRef = useRef(tabs);
+  useEffect(() => { tabsRef.current = tabs; }, [tabs]);
+  const autosaveTimer = useRef(null); // {id, path} — one pending timer, always for the active tab
+  const loadedRef = useRef(false); // guards the debounced PUT until restore settles
+
+  const clearTimer = () => { if (autosaveTimer.current) { clearTimeout(autosaveTimer.current.id); autosaveTimer.current = null; } };
+
+  const shownRoots = useMemo(() => {
+    const map = new Map();
+    for (const p of [...claudeRoots.roots, ...codexRoots.roots]) map.set(normKey(p), p);
+    return [...map.values()].sort((a, b) => normKey(a).localeCompare(normKey(b)));
+  }, [claudeRoots.roots, codexRoots.roots]);
+  const inClaude = (p) => claudeRoots.roots.some((r) => normKey(r) === normKey(p));
+  const inCodex = (p) => codexRoots.roots.some((r) => normKey(r) === normKey(p));
+
+  const activeTab = tabs.find((t) => t.path === active) || null;
+
+  const validationError = useMemo(() => {
+    if (!activeTab || activeTab.tool !== 'claude') return null;
+    const v = content.get(activeTab.path) || '';
+    if (!v.trim()) return null;
+    try { JSON.parse(v); return null; } catch (e) { return e.message; }
+  }, [activeTab, content]);
+
+  // readConfig for a (tool, cwd), cached in byRoot. `force` bypasses the cache
+  // (focus-reload wants a fresh mtime, not the cached one it just compared).
+  const readRoot = async (tool, cwd, opts = {}) => {
+    const key = `${tool}:${cwd}`;
+    if (!opts.force) {
+      const cached = byRoot.get(key);
+      if (cached) return cached;
+    }
+    const d = await fetch(`${toolBase(tool)}?cwd=${encodeURIComponent(cwd)}`).then((r) => r.json()).catch(() => null);
+    if (!d) return byRoot.get(key) || null;
+    setByRoot((m) => { const n = new Map(m); n.set(key, d); return n; });
+    return d;
   };
-  useEffect(() => {
-    (async () => { if (!await ensureSaved({ dirty, save })) return; load(); })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- guard + load close over cwd/tool state
-  }, [cwd, tool]);
 
-  // Debounced content search across config roots' settings files (empty q → config list,
-  // derived above rather than reset here).
+  // Fetch any expanded root not yet cached. Runs on expand, after roots load
+  // (restore may set `expanded` before useRootList settles), and after a pick.
+  useEffect(() => {
+    expanded.forEach((cwd) => {
+      if (inClaude(cwd) && !byRoot.has(`claude:${cwd}`)) readRoot('claude', cwd);
+      if (inCodex(cwd) && !byRoot.has(`codex:${cwd}`)) readRoot('codex', cwd);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- inClaude/inCodex derive from the roots deps
+  }, [expanded, shownRoots, byRoot]);
+
+  // Restore open tabs / autosave / expanded roots from /config/state.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/config/state').then((r) => r.json()).then(async ({ state }) => {
+      const st = state || {};
+      setAutosave(!!st.autosave);
+      const exp = Array.isArray(st.expanded) ? st.expanded : [];
+      setExpanded(new Set(exp));
+      const tabDefs = (st.tabs || []).filter((t) => t && t.cwd && t.tool && t.scope);
+      const loads = tabDefs.map(async (t) => {
+        const d = await readRoot(t.tool, t.cwd);
+        if (!d || !d[t.scope]) return null;
+        const e = d[t.scope];
+        return { path: e.path, cwd: t.cwd, tool: t.tool, scope: t.scope, dirty: false, mtime: e.mtime || 0, text: e.content || '' };
+      });
+      const okTabs = (await Promise.all(loads)).filter(Boolean);
+      if (cancelled) return;
+      setTabs(okTabs.map(({ text, ...meta }) => meta));
+      setContent(new Map(okTabs.map((t) => [t.path, t.text])));
+      setActive(okTabs.some((t) => t.path === st.active) ? st.active : (okTabs[0]?.path ?? null));
+      loadedRef.current = true;
+    }).catch(() => { loadedRef.current = true; });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot restore
+  }, []);
+
+  // Debounced persist — keyed off derived primitives so a dirty-flag toggle
+  // (which recreates `tabs`) doesn't reset the debounce on every keystroke.
+  const expandedKey = [...expanded].join('|');
+  const tabKey = tabs.map((t) => `${t.tool}:${t.cwd}:${t.scope}`).join('|');
+  useEffect(() => {
+    if (!loadedRef.current) return;
+    const id = setTimeout(() => {
+      fetch('/config/state', {
+        method: 'PUT', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          tabs: tabs.map((t) => ({ cwd: t.cwd, tool: t.tool, scope: t.scope, path: t.path })),
+          active, autosave, expanded: [...expanded],
+        }),
+      });
+    }, 400);
+    return () => clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- expandedKey/tabKey stand in for expanded/tabs
+  }, [expandedKey, tabKey, active, autosave]);
+
+  useEffect(() => () => clearTimer(), []);
+
+  // Re-read the active tab when the window regains focus: refresh if clean,
+  // warn if dirty (an external editor/agent changed it underneath us).
+  useEffect(() => {
+    if (!active) return undefined;
+    const onFocus = () => {
+      const tab = tabsRef.current.find((t) => t.path === active);
+      if (!tab) return;
+      readRoot(tab.tool, tab.cwd, { force: true }).then((d) => {
+        if (!d || !d[tab.scope]) return;
+        const e = d[tab.scope];
+        if (e.mtime === tab.mtime) return;
+        if (tab.dirty) { setMsg({ sev: 'error', text: 'Changed on disk — saving will ask before overwriting' }); return; }
+        setTabs((ts) => ts.map((t) => (t.path === active ? { ...t, mtime: e.mtime } : t)));
+        setContent((m) => { const n = new Map(m); n.set(active, e.content || ''); return n; });
+        setMsg({ sev: 'success', text: 'Reloaded from disk' });
+      });
+    };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- readRoot closure is fine; re-bind only on active
+  }, [active]);
+
+  // Content search across both tools' roots (fire both, tag hits with tool).
   useEffect(() => {
     const term = q.trim();
     if (!term) return;
     const id = setTimeout(() => {
-      fetch(`${base}/search`, {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ roots, q: term }),
-      }).then((r) => r.json()).then((d) => setSearchResults(d.results || [])).catch(() => setSearchResults([]));
+      Promise.all([
+        fetch('/config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: claudeRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
+        fetch('/codex-config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: codexRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
+      ]).then(([c, x]) => {
+        const list = [...(c.results || []).map((h) => ({ ...h, tool: 'claude' })), ...(x.results || []).map((h) => ({ ...h, tool: 'codex' }))];
+        setResults({ term, list });
+      });
     }, 250);
     return () => clearTimeout(id);
-  }, [q, roots, base]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- roots derive from the listed deps
+  }, [q, claudeRoots.roots, codexRoots.roots]);
 
-  // Switching tabs/scope is a direct user action — sync content here instead of
-  // an effect keyed on [scope, data].
-  const changeScope = (v) => {
-    setScope(v);
-    if (data) { setContent(data[v]?.content ?? ''); setMtime(data[v]?.mtime ?? null); setDirty(false); setMsg(null); }
-  };
-
-  const openResult = async (it) => {
-    if (!await ensureSaved({ dirty, save })) return;
-    changeScope(it.scope);
-    setCwd(it.cwd);
-  };
-
-  const changeTool = async (next) => {
-    if (next === tool) return;
-    if (!await ensureSaved({ dirty, save })) return;
-    setTool(next);
-    setScope('project');
-    setData(null);
-    setLoadedCwd(null);
-    setContent('');
-    setMtime(null);
-    setDirty(false);
-    setMsg(null);
-  };
-
-  const validationError = useMemo(() => {
-    if (tool !== 'claude') return null;
-    if (!content.trim()) return null;
-    try { JSON.parse(content); return null; } catch (e) { return e.message; }
-  }, [content, tool]);
-
-  const info = data?.[effScope];
-
-  const onChange = (v) => { setContent(v); setDirty(true); };
-
-  const save = async (force = false) => {
-    const r = await fetch(`${base}/${effScope}`, {
+  const save = async (path, force = false) => {
+    const tab = tabsRef.current.find((t) => t.path === path);
+    if (!tab) return;
+    if (autosaveTimer.current?.path === path) clearTimer();
+    const r = await fetch(`${toolBase(tab.tool)}/${tab.scope}`, {
       method: 'PUT', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ cwd: loadedCwd, content, mtime, force }),
+      body: JSON.stringify({ cwd: tab.cwd, content: contentRef.current.get(path) ?? '', mtime: tab.mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(path, true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }
     if (r.ok) {
+      setTabs((ts) => ts.map((t) => (t.path === path ? { ...t, dirty: false, mtime: r.mtime } : t)));
       setMsg({ sev: 'success', text: `Saved${r.backup ? ' (backup made)' : ''}` });
-      setDirty(false);
-      if (r.mtime != null) setMtime(r.mtime);
-      // In-place refresh of the saved scope's entry — NOT load(). load() fires a
-      // fetch whose .then runs setContent(d[effScope].content) with effScope from
-      // THIS render (pre-scope-change). On a save-then-switch-scope flow that
-      // resolves AFTER changeScope set the new scope's content, clobbering it
-      // back to the saved scope. The race leaves the editor showing the saved
-      // file's content under the new scope's tab. Update data[effScope] directly
-      // so later scope switches read fresh content without a racing fetch.
-      setData((d) => d ? { ...d, [effScope]: { ...d[effScope], content, mtime: r.mtime ?? d[effScope]?.mtime, exists: true } } : d);
-    }
-    else setMsg({ sev: 'error', text: r.error || 'save failed' });
+      // Keep the byRoot cache in step so a later scope switch / focus-reload
+      // reads the just-written content+mtime, not the pre-save snapshot.
+      setByRoot((m) => {
+        const key = `${tab.tool}:${tab.cwd}`;
+        const cur = m.get(key);
+        if (!cur || !cur[tab.scope]) return m;
+        const next = new Map(m);
+        next.set(key, { ...cur, [tab.scope]: { ...cur[tab.scope], content: contentRef.current.get(path) ?? '', mtime: r.mtime ?? cur[tab.scope].mtime, exists: true } });
+        return next;
+      });
+    } else setMsg({ sev: 'error', text: r.error || 'save failed' });
   };
 
-  // mtime tracks the currently visible scope (effScope). Re-read the whole
-  // config response and pull the effScope entry — a tool/scope switch re-runs
-  // load() which resets mtime, so the refetched mtime lines up.
-  useRefreshOnFocus({
-    enabled: !!loadedCwd,
-    mtime,
-    dirty,
-    refetch: async () => {
-      const d = await fetch(`${base}?cwd=${encodeURIComponent(loadedCwd)}`).then((r) => r.json()).catch(() => ({ ok: false }));
-      const s = d?.[effScope];
-      return { ok: !!s, mtime: s?.mtime ?? null, content: s?.content ?? '' };
-    },
-    onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },
-    onWarn: () => setMsg({ sev: 'error', text: 'Changed on disk — saving will ask before overwriting' }),
-  });
+  // Flush the outgoing tab's pending autosave before moving focus — only the
+  // active tab ever has a live timer.
+  const switchActive = (path) => {
+    if (autosaveTimer.current) save(autosaveTimer.current.path);
+    setActive(path);
+    setMsg(null);
+  };
+
+  const openFile = async (cwd, tool, scope) => {
+    const d = await readRoot(tool, cwd);
+    if (!d || !d[scope]) return;
+    const entry = d[scope];
+    const path = entry.path;
+    if (path === active) return;
+    if (tabs.some((t) => t.path === path)) { switchActive(path); return; }
+    setTabs((ts) => [...ts, { path, cwd, tool, scope, dirty: false, mtime: entry.mtime || 0 }]);
+    setContent((m) => { const n = new Map(m); n.set(path, entry.content || ''); return n; });
+    switchActive(path);
+  };
+
+  const removeTab = (path) => {
+    const idx = tabs.findIndex((t) => t.path === path);
+    if (idx === -1) return;
+    const next = tabs.filter((t) => t.path !== path);
+    setTabs(next);
+    setContent((m) => { const n = new Map(m); n.delete(path); return n; });
+    if (active === path) setActive(next[idx]?.path ?? next[idx - 1]?.path ?? null);
+    if (autosaveTimer.current?.path === path) clearTimer();
+  };
+
+  const closeTab = async (path) => {
+    const tab = tabs.find((t) => t.path === path);
+    if (tab?.dirty) {
+      if (autosave) save(path); // flush instead of prompting
+      else if (!await ensureSaved({ dirty: true, save: () => save(path) })) return;
+    }
+    removeTab(path);
+  };
+
+  const onChange = (value) => {
+    if (!active) return;
+    setContent((m) => { const n = new Map(m); n.set(active, value); return n; });
+    setTabs((ts) => ts.map((t) => (t.path === active && !t.dirty ? { ...t, dirty: true } : t)));
+    setMsg(null);
+    if (autosave) { clearTimer(); autosaveTimer.current = { path: active, id: setTimeout(() => save(active), 5000) }; }
+  };
+
+  const toggleRoot = (cwd) => {
+    setExpanded((s) => { const n = new Set(s); if (n.has(cwd)) n.delete(cwd); else n.add(cwd); return n; });
+  };
 
   const pick = async (p) => {
-    if (!await ensureSaved({ dirty, save })) return;
-    setDirty(false);
-    setCwd(p); setPicking(false);
-    // Recursively find nested roots (e.g. ~/wiki/sub/.claude/settings.json) and
-    // fold them into the config list so they become pickable.
-    fetch(`${base}/scan?root=${encodeURIComponent(untildify(p))}`).then((r) => r.json()).then((d) => {
-      const found = d.roots || [];
-      if (found.length) remember(found);
-      if (d.truncated) setMsg({ sev: 'info', text: 'Reached the folder limit — some subfolders were skipped.' });
-    }).catch(() => {});
+    if (!await ensureSaved({ dirty: !!activeTab?.dirty, save: () => active && save(active) })) return;
+    claudeRoots.remember([p]);
+    codexRoots.remember([p]);
+    setPicking(false);
+    setExpanded((s) => new Set(s).add(p));
   };
 
-  if (loading && !data) return <Box sx={{ p: 3 }}><Typography color="text.secondary">Loading config…</Typography></Box>;
+  const forget = (p) => { claudeRoots.forget(p); codexRoots.forget(p); };
+
+  const openResult = async (it) => {
+    if (!await ensureSaved({ dirty: !!activeTab?.dirty, save: () => active && save(active) })) return;
+    openFile(it.cwd, it.tool, it.scope);
+  };
+
+  const toggleAutosave = () => { setAutosave((v) => !v); clearTimer(); };
+
+  const searching = q.trim() && results;
+  const rowSx = { borderRadius: 4, pl: 1, py: 0.25, mb: 0.25 };
 
   return (
     <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>
@@ -188,34 +307,76 @@ export default function ConfigEditor() {
               searchPlaceholder="Search config…"
               searchValue={q}
               onSearchChange={setQ}
-              onPickFolder={async () => { if (!await ensureSaved({ dirty, save })) return; setPicking(true); }}
+              onPickFolder={async () => { if (!await ensureSaved({ dirty: !!activeTab?.dirty, save: () => active && save(active) })) return; setPicking(true); }}
               onCollapse={collapse}
             />
             <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {results ? (
+              {searching ? (
                 <>
-                  {results.map((it, i) => (
-                    <ListItemButton key={`${it.path}:${i}`} selected={it.cwd === loadedCwd && it.scope === effScope} onClick={() => openResult(it)}
-                      sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, mb: 0.25 }}>
+                  {results.list.map((it, i) => (
+                    <ListItemButton key={`${it.path}:${i}`} onClick={() => openResult(it)}
+                      sx={{ ...rowSx, display: 'block' }}>
                       <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
                       <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
                     </ListItemButton>
                   ))}
-                  {results.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
+                  {results.list.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
                 </>
               ) : (
                 <>
-                  {shownRoots.map((p) => (
-                    <ListItemButton key={p} selected={p === loadedCwd} onClick={async () => { if (!await ensureSaved({ dirty, save })) return; setDirty(false); setCwd(p); }}
-                      sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
-                      <ListItemText primary={tildify(p)} slotProps={{ primary: { noWrap: true, title: p, sx: { fontFamily: 'monospace', fontSize: 12 } } }} />
-                      <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
-                        onClick={(e) => { e.stopPropagation(); forget(p); }}
-                        sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
-                        <ClearIcon fontSize="small" />
-                      </IconButton>
-                    </ListItemButton>
-                  ))}
+                  {shownRoots.map((p) => {
+                    const open = expanded.has(p);
+                    const claudeCfg = byRoot.get(`claude:${p}`);
+                    const codexCfg = byRoot.get(`codex:${p}`);
+                    const showClaude = inClaude(p);
+                    const showCodex = inCodex(p);
+                    return (
+                      <Box key={p} sx={{ mb: 0.25 }}>
+                        <ListItemButton onClick={() => toggleRoot(p)} sx={{ ...rowSx, '&:hover .del': { opacity: 1 } }}>
+                          {open ? <ExpandMoreIcon fontSize="small" sx={{ mr: 0.5 }} /> : <ChevronRightIcon fontSize="small" sx={{ mr: 0.5 }} />}
+                          {open ? <FolderOpenIcon fontSize="small" color="primary" /> : <FolderIcon fontSize="small" color="primary" />}
+                          <Typography noWrap sx={{ fontSize: 12, fontFamily: 'monospace', ml: 0.5, flex: 1 }} title={p}>{tildify(p)}</Typography>
+                          <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
+                            onClick={(e) => { e.stopPropagation(); forget(p); }} sx={{ opacity: 0, p: 0.25 }}>
+                            <ClearIcon fontSize="small" />
+                          </IconButton>
+                        </ListItemButton>
+                        <Collapse in={open} timeout="auto" unmountOnExit>
+                          {showClaude && (
+                            <Group label=".claude">
+                              {CLAUDE_LEAVES.map((leaf) => {
+                                const entry = claudeCfg?.[leaf.scope];
+                                const exists = !!entry?.exists;
+                                const sel = entry?.path === active;
+                                return (
+                                  <ListItemButton key={leaf.scope} selected={sel} onClick={() => openFile(p, 'claude', leaf.scope)}
+                                    sx={{ ...rowSx, pl: 3 + 2, opacity: entry && !exists ? 0.5 : 1 }}>
+                                    <InsertDriveFileOutlinedIcon fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                                    <Typography noWrap variant="code" sx={{ fontSize: 12 }}>{leaf.name}{entry && !exists ? ' (new)' : ''}</Typography>
+                                  </ListItemButton>
+                                );
+                              })}
+                            </Group>
+                          )}
+                          {showCodex && (() => {
+                            const scope = codexScope(p);
+                            const entry = codexCfg?.[scope];
+                            const exists = !!entry?.exists;
+                            const sel = entry?.path === active;
+                            return (
+                              <Group label=".codex">
+                                <ListItemButton selected={sel} onClick={() => openFile(p, 'codex', scope)}
+                                  sx={{ ...rowSx, pl: 3 + 2, opacity: entry && !exists ? 0.5 : 1 }}>
+                                  <InsertDriveFileOutlinedIcon fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                                  <Typography noWrap variant="code" sx={{ fontSize: 12 }}>{CODEX_LEAF_NAME}{entry && !exists ? ' (new)' : ''}</Typography>
+                                </ListItemButton>
+                              </Group>
+                            );
+                          })()}
+                        </Collapse>
+                      </Box>
+                    );
+                  })}
                   {shownRoots.length === 0 && <EmptyListLine>No config paths.</EmptyListLine>}
                 </>
               )}
@@ -224,35 +385,48 @@ export default function ConfigEditor() {
         )}
       </Rail>
 
-      <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
-        <ToggleButtonGroup value={tool} exclusive size="small" color="primary" onChange={(_, v) => v && changeTool(v)} sx={{ alignSelf: 'flex-start' }}>
-          <ToggleButton value="claude">Claude Code</ToggleButton>
-          <ToggleButton value="codex">Codex</ToggleButton>
-        </ToggleButtonGroup>
-        {tool === 'claude' && (
-          <Tabs value={scope} onChange={async (_, v) => { if (!await ensureSaved({ dirty, save })) return; changeScope(v); }} variant="fullWidth">
-            {CLAUDE_SCOPES.map((s) => <Tab key={s.key} value={s.key} label={s.label} />)}
-          </Tabs>
+      <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, pt: 1, minHeight: 0 }} spacing={1}>
+        {picking && <DirPicker start={untildify(activeTab?.cwd ?? shownRoots[0] ?? '~')} onPick={pick} onClose={() => setPicking(false)} />}
+        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
+          <Tooltip title={autosave ? 'Autosave on (5s)' : 'Autosave off'} placement="bottom" disableInteractive>
+            <IconButton size="small" onClick={toggleAutosave} color={autosave ? 'primary' : 'default'}>
+              {autosave ? <TimerIcon /> : <TimerOffIcon />}
+            </IconButton>
+          </Tooltip>
+        </Stack>
+        {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} />}
+        {activeTab ? (
+          <>
+            <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>
+              {tildify(activeTab.path)} {!byRoot.get(`${activeTab.tool}:${activeTab.cwd}`)?.[activeTab.scope]?.exists && "· (doesn't exist yet — saving will create it)"}
+            </Typography>
+            {/* key={active}: @uiw's typing latch defers a `value` change landing
+                right after a keystroke — remount per tab so the new file's
+                content becomes the initial doc (same fix as HooksEditor). */}
+            <CmEditor key={active} value={content.get(active) ?? ''} onChange={onChange} extensions={activeTab.tool === 'codex' ? [] : [json()]} />
+            <SaveBar msg={validationError ? null : msg} disabled={!activeTab.dirty || !!validationError} onSave={() => active && save(active)}>
+              {validationError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>This isn't valid JSON: {validationError}</Typography>}
+            </SaveBar>
+          </>
+        ) : (
+          <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <EmptyState icon={<InsertDriveFileOutlinedIcon />} title="Select a config" description="Browse on the left to view or edit here." />
+          </Box>
         )}
-
-        <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>
-          {tildify(info?.path)} {info && !info.exists && "· (doesn't exist yet — saving will create it)"}
-        </Typography>
-        {picking && <DirPicker start={untildify(cwd)} onPick={pick} onClose={() => setPicking(false)} />}
-
-        {/* key={loadedCwd:effScope}: @uiw's typing latch defers a `value` change
-            that lands right after the user was typing — on a dirty "save then
-            switch scope" the deferred local-scope content never applies, so the
-            editor keeps showing the prior scope. Remount on the visible file
-            so the new content becomes the initial doc, sidestepping the latch
-            (same fix as HooksEditor's key={path}). */}
-        <CmEditor key={`${loadedCwd}:${effScope}`} value={content} onChange={onChange} extensions={tool === 'codex' ? [] : [json()]} />
-
-        <SaveBar msg={validationError ? null : msg} disabled={!dirty || !!validationError} onSave={save}>
-          {validationError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>This isn't valid JSON: {validationError}</Typography>}
-        </SaveBar>
       </Stack>
       {dialogEl}
+    </Box>
+  );
+}
+
+// A 2-level tree group: a dimmed label row + indented leaf children. Inlined
+// here (not shared) because the config tree is a fixed named set, not a
+// recursive FS — FileTree's fetch-on-expand model doesn't fit.
+function Group({ label, children }) {
+  return (
+    <Box>
+      <Typography sx={{ pl: 3, pt: 0.5, pb: 0.25, fontSize: 11, color: 'text.secondary', fontFamily: 'monospace' }}>{label}</Typography>
+      {children}
     </Box>
   );
 }

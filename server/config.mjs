@@ -8,10 +8,15 @@ import { STATE_DIR } from './app-dir.mjs';
 import { backupFile } from './backups.mjs';
 
 function scopePaths(cwd) {
+  // The ~ root is stored as the literal string '~' (useRootList initial), so
+  // expand it before joining — otherwise project/local resolve to a literal
+  // '~/.claude/...' path that existsSync can never find (mirrors resolveRoot).
+  let c = cwd;
+  if (c === '~' || c.startsWith('~/') || c.startsWith('~\\')) c = normalize(homedir() + c.slice(1));
   return {
     user: join(homedir(), '.claude', 'settings.json'),
-    project: join(cwd, '.claude', 'settings.json'),
-    local: join(cwd, '.claude', 'settings.local.json'),
+    project: join(c, '.claude', 'settings.json'),
+    local: join(c, '.claude', 'settings.local.json'),
   };
 }
 
@@ -125,7 +130,8 @@ function resolveRoot(raw) {
 // settings.json Claude will auto-execute (hooks/permissions) on next run there.
 function isKnownConfigRoot(cwd) {
   if (!cwd) return false;
-  const abs = resolve(cwd);
+  const abs = resolveRoot(cwd); // untildify '~' → home (resolve(cwd) would leave '~' literal)
+  if (!abs) return false;
   return getConfigRoots().some((raw) => {
     const root = resolveRoot(raw);
     return root && (abs === root || abs.startsWith(root + sep));

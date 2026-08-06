@@ -92,9 +92,10 @@ test.describe('Explorer', () => {
     await page.keyboard.press('Control+End');
     await page.keyboard.insertText('unsaved edit');
 
-    const msg = onceConfirm(page, true);
+    // The dirty guard is an MUI Dialog (useDirtyGuard), not a native confirm —
+    // click Discard to drop the edit and proceed with the close.
     await tab(page, NOTES).locator('button').click();
-    expect(await msg).toMatch(/discard/i);
+    await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
     await expect(tab(page, NOTES)).toHaveCount(0);
   });
 
@@ -142,8 +143,13 @@ test.describe('Explorer', () => {
   // depend on whichever expand state an earlier test left behind.
   test('search finds a nested file by name from a collapsed tree', async ({ page }) => {
     await gotoView(page, 'Explorer');
-    await page.getByRole('button', { name: /Collapse all|Expand all/ }).click();
-    await expect(page.getByRole('button', { name: 'nested.txt', exact: true })).toHaveCount(0);
+    // Explorer has no global collapse-all toggle; collapse the folder directly
+    // (idempotent — only toggle if the lazy-loaded nested leaf is in the DOM).
+    const nested = page.getByRole('button', { name: 'nested.txt', exact: true });
+    if ((await nested.count()) > 0) {
+      await page.getByRole('button', { name: 'subdir', exact: true }).click();
+    }
+    await expect(nested).toHaveCount(0);
 
     await page.getByPlaceholder('Search files…').fill('nested');
     const hit = page.getByRole('button', { name: /nested\.txt/ });

@@ -23,6 +23,7 @@ import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoo
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
 import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, getState as getExplorerState, setState as setExplorerState } from './explorer.mjs';
+import { getConfigState, setConfigState } from './config-state.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
@@ -412,6 +413,10 @@ app.put('/config/:scope', async (req, reply) => {
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
+
+// Config editor UI state (open tabs/active/autosave/expanded roots) — FS-persisted.
+app.get('/config/state', async () => ({ state: getConfigState() }));
+app.put('/config/state', async (req) => setConfigState(req.body));
 
 // Codex config.toml editor: 2-scope resolver + backup-then-write (mirrors /config).
 app.get('/codex-config', async (req, reply) => {

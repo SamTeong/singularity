@@ -39,11 +39,11 @@ export function useDirtyGuard() {
 
   const dialogEl = (
     <Dialog open={open} onClose={(_, reason) => { if (reason === 'backdropClick' || reason === 'escapeKeyDown') onCancel(); }}>
-      <DialogTitle>Discard unsaved changes?</DialogTitle>
+      <DialogTitle>Save changes?</DialogTitle>
       <DialogActions>
-        <Button onClick={onCancel}>Cancel</Button>
-        <Button onClick={onDiscard}>Discard</Button>
-        <Button onClick={onSave} variant="contained">Save</Button>
+        <Button size="small" onClick={onCancel}>Cancel</Button>
+        <Button size="small" onClick={onDiscard}>Discard</Button>
+        <Button size="small" variant="contained" onClick={onSave}>Save</Button>
       </DialogActions>
     </Dialog>
   );

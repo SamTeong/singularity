@@ -208,7 +208,10 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // peeks the file head for ai-title while readSession scans the full file, and
   // Claude Code rewrites ai-title mid-session, so the two can disagree. Matching
   // the list source keeps the header name identical to the row the user clicked.
-  const sessName = sel?.title ?? null;
+  // Sessions that never got an ai-title have title: null — sel.blurb (the
+  // session's first user prompt) fills in as the name instead of falling
+  // through to the bare id.
+  const sessName = sel?.title ?? sel?.blurb ?? null;
   const headerLabel = sel ? (sessName && sessName !== sel.id ? `${sessName} - ${sel.id}` : sel.id) : '';
 
   // Pagination over whatever the left list shows (all sessions, or cross-session
@@ -264,7 +267,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
               {leftResults ? (
                 pageItems.map((r, i) => (
-                  <ListItemButton key={`${r.project}:${r.id}:${r.lineIndex}:${i}`} onClick={() => open({ project: r.project, id: r.id, title: r.id, cwd: r.cwd, source: r.source })} sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
+                  <ListItemButton key={`${r.project}:${r.id}:${r.lineIndex}:${i}`} onClick={() => open({ project: r.project, id: r.id, title: r.title || null, blurb: r.blurb || null, cwd: r.cwd, source: r.source })} sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
                     <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(r.cwd) || r.project}</Typography>
                     <Typography sx={{ fontSize: 12, color: 'text.secondary' }} noWrap>[{r.role}] {r.snippet}</Typography>
                   </ListItemButton>
@@ -295,7 +298,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                               {isExpanded ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}
                             </IconButton>
                           )}
-                          <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{s.title || `${s.id.slice(0, 8)}…`}</Typography>
+                          <Typography variant="subtitle2" noWrap title={s.title || s.blurb || s.id} sx={{ flex: 1, minWidth: 0 }}>{s.title || s.blurb || `${s.id.slice(0, 8)}…`}</Typography>
                           {s.source === 'codex' && <Chip label="Codex" size="small" sx={{ height: 16, '& .MuiChip-label': { px: 0.5, fontSize: 10 } }} />}
                           {s.running && <PulseDot />}
                           {hasSubs && !isExpanded && (
@@ -315,11 +318,11 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                             <ListItemButton
                               key={sub.id}
                               selected={sel?.project === s.project && sel?.id === sub.id}
-                              onClick={() => open({ project: s.project, id: sub.id, title: sub.title || sub.agentId, cwd: s.cwd, mtime: sub.mtime, sub: true })}
+                              onClick={() => open({ project: s.project, id: sub.id, title: sub.title, blurb: sub.blurb, cwd: s.cwd, mtime: sub.mtime, sub: true })}
                               sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25, pl: 3 }}
                             >
                               <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                                <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0, fontSize: 12 }}>{sub.title || sub.agentId}</Typography>
+                                <Typography variant="subtitle2" noWrap title={sub.title || sub.blurb || sub.agentId} sx={{ flex: 1, minWidth: 0, fontSize: 12 }}>{sub.title || sub.blurb || sub.agentId}</Typography>
                                 {sub.running && <PulseDot />}
                               </Stack>
                               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>{relTime(sub.mtime)}</Typography>
@@ -359,7 +362,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
           </Tabs>
           {tab === 'chat' && (
             <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>
-              {effScope === 'one' && sel ? `Referring to: ${sel.title || sel.id}` : 'Referring to all transcripts'}
+              {effScope === 'one' && sel ? `Referring to: ${sel.title || sel.blurb || sel.id}` : 'Referring to all transcripts'}
             </Typography>
           )}
         </Stack>

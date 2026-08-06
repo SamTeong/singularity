@@ -118,6 +118,8 @@ function seedWorkspace() {
   const c = dir(join(WORKSPACE_DIR, '.claude'));
   json(join(c, 'settings.json'), { permissions: { allow: ['Bash(git status)'] }, env: { FIXTURE: 'project' } });
   json(join(c, 'settings.local.json'), { env: { FIXTURE: 'local' } });
+  // Codex project config — exercises the .codex tree group + TOML save path.
+  file(join(WORKSPACE_DIR, '.codex', 'config.toml'), 'model = "gpt-5.2"\n');
   file(join(c, 'hooks', 'pre-commit.sh'), '#!/bin/sh\n# fixture hook\necho "pre-commit fixture"\n');
   file(join(c, 'hooks', 'format.ps1'), '# fixture hook\nWrite-Output "format fixture"\n');
   file(join(c, 'rules', 'style.md'), '# Style\n\nTwo-space indent. No trailing whitespace.\n');
@@ -149,6 +151,7 @@ function seedState() {
   json(join(STATE_DIR, 'wiki-root.json'), { root: WIKI_DIR });
   json(join(STATE_DIR, 'skills-roots.json'), { roots: [SKILLS_DIR] });
   json(join(STATE_DIR, 'config-roots.json'), [WORKSPACE_DIR]);
+  json(join(STATE_DIR, 'codex-config-roots.json'), [WORKSPACE_DIR]);
   json(join(STATE_DIR, 'hook-roots.json'), [WORKSPACE_DIR]);
   json(join(STATE_DIR, 'rules-roots.json'), [WORKSPACE_DIR]);
   // Explorer's persisted root otherwise defaults to '~' — point it at the
@@ -209,31 +212,34 @@ function seedState() {
 // fixture transcript corpus, so the deep-link test can open a real transcript.
 function seedHistory() {
   const dayStr = (offset) => { const d = new Date(); d.setDate(d.getDate() - offset); return d.toLocaleDateString('en-CA'); };
-  const sess = (id, project, cwd, title, turns) => ({ id, project, cwd, source: 'claude', title, turns });
+  const sess = (id, project, cwd, title, turns) => ({ id, project, cwd, source: 'claude', title, turns, dayTurns: turns });
   const ok = { ok: true, provider: 'anthropic-oauth', model: 'claude-haiku-4-5-20251001', inputTokens: 5000, outputTokens: 80 };
   const empty = { ok: false, provider: null, model: null, reason: 'empty' };
   const m = (sessions, turns, tokens, cost) => ({
     sessions, turns, tokens, costUsd: cost,
     byHarness: sessions > 0 ? { claude: { sessions, turns } } : {},
   });
-  const e = (date, summary, topics, repos, sessions, metrics, llm) => ({
-    date, summary, topics, repos, sessions, metrics, llm, builtAt: new Date().toISOString(),
+  // bullets are per-project (entry.projects[].path matches the sessions' cwd —
+  // that's how the card looks its own bullets up).
+  const e = (date, projects, topics, repos, sessions, metrics, llm) => ({
+    date, projects, topics, repos, sessions, metrics, llm, builtAt: new Date().toISOString(),
   });
+  const p = (path, ...bullets) => [{ path, bullets }];
 
   // Oldest→newest (append order matches readHistory's sort).
   const lines = [
-    e(dayStr(7), 'Refactored the config editor backup path.', ['config', 'backups'], ['alpha'],
+    e(dayStr(7), p('/fixture/alpha', 'Refactored the config editor backup path'), ['config', 'backups'], ['alpha'],
       [sess(sessionId(4), PROJECT_A, '/fixture/alpha', 'Fixture session 4', 3)], m(1, 3, 8000, 0.15), ok),
-    e(dayStr(6), 'Hardened the explorer fixture against path traversal.', ['explorer', 'security'], ['alpha'],
+    e(dayStr(6), p('/fixture/alpha', 'Hardened the explorer fixture against path traversal'), ['explorer', 'security'], ['alpha'],
       [sess(sessionId(3), PROJECT_A, '/fixture/alpha', 'Fixture session 3', 4)], m(1, 4, 10000, 0.22), ok),
-    e(dayStr(5), 'Added pagination to the skills viewer.', ['skills', 'pagination'], ['alpha'],
+    e(dayStr(5), p('/fixture/alpha', 'Added pagination to the skills viewer'), ['skills', 'pagination'], ['alpha'],
       [sess(sessionId(2), PROJECT_A, '/fixture/alpha', 'Fixture session 2', 5)], m(1, 5, 12000, 0.31), ok),
-    e(dayStr(4), 'Wired the wiki category filter to folder segments.', ['wiki', 'categories'], ['alpha'],
+    e(dayStr(4), p('/fixture/alpha', 'Wired the wiki category filter to folder segments'), ['wiki', 'categories'], ['alpha'],
       [sess(sessionId(1), PROJECT_A, '/fixture/alpha', 'Fixture session 1', 6)], m(1, 6, 14000, 0.38), ok),
-    e(dayStr(3), 'Built the e2e sandbox seed corpus for the history spec.', ['e2e', 'fixtures'], ['alpha'],
+    e(dayStr(3), p('/fixture/alpha', 'Built the e2e sandbox seed corpus for the history spec'), ['e2e', 'fixtures'], ['alpha'],
       [sess(sessionId(0), PROJECT_A, '/fixture/alpha', 'Fixture session 0', 3)], m(1, 3, 12000, 0.42), ok),
-    e(dayStr(2), '', [], [], [], m(0, 0, 0, 0), empty),
-    e(dayStr(1), 'Shipped the history timeline and fixed a concurrent backfill bug.', ['history', 'backfill'], ['beta'],
+    e(dayStr(2), [], [], [], [], m(0, 0, 0, 0), empty),
+    e(dayStr(1), p('/fixture/beta', 'Shipped the history timeline', 'Fixed a concurrent backfill bug'), ['history', 'backfill'], ['beta'],
       [sess(RICH_SESSION, PROJECT_B, '/fixture/beta', 'Retry backoff cap', 5),
        sess(sessionId(901), PROJECT_B, '/fixture/beta', 'Fixture session 901', 2)],
       m(2, 7, 45000, 1.23), ok),

@@ -31,7 +31,10 @@ test('Config view is reachable and renders', async ({ page }) => {
   await goto(page, 'Config');
   const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
   expect(storedView).toBe('config');
-  await expect(visible(page.getByText('settings.json')).first()).toBeVisible();
+  // The tree rail only renders a file leaf after a root is expanded, so assert
+  // the view mounted via its stable landmark (the rail search box) rather than
+  // a file name that may not be in the DOM yet.
+  await expect(page.getByPlaceholder('Search config…')).toBeVisible();
 });
 
 test('Hooks view is reachable and renders', async ({ page }) => {
@@ -126,7 +129,7 @@ test('deep-link via gotoView lands on the correct view', async ({ page }) => {
 
   const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
   expect(storedView).toBe('config');
-  await expect(visible(page.getByText('settings.json')).first()).toBeVisible();
+  await expect(page.getByPlaceholder('Search config…')).toBeVisible();
 });
 
 test('view persists across page reload via localStorage', async ({ page }) => {

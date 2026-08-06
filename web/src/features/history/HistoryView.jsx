@@ -10,7 +10,43 @@ import Snackbar from '@mui/material/Snackbar';
 import { EmptyState } from '@zapac/mui-theme';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
-import DayCard, { GapSegment, ShimmerCard, EASE_OUT } from '@/features/history/DayCard.jsx';
+import { repoName } from '@/lib/paths.js';
+import DayCard, { DayHeader, GapSegment, ShimmerCard, EASE_OUT } from '@/features/history/DayCard.jsx';
+
+// The summarizer echoes each project's path back, but an LLM can normalize
+// slashes or drop a drive letter — fall back to matching on the repo name.
+function bulletsFor(entry, key) {
+  const list = entry.projects || [];
+  const exact = list.find((p) => p.path === key);
+  const byName = exact || list.find((p) => repoName(p.path) === repoName(key));
+  return byName?.bullets || [];
+}
+
+// Per-cwd split of a day. The server has no per-session token/cost breakdown
+// (both are whole-session values already prorated into the day), so a
+// project's share of the day's tokens/cost is its share of the day's turns.
+function groupByProject(entry) {
+  const total = entry.metrics?.turns || 0;
+  const map = new Map();
+  for (const s of entry.sessions || []) {
+    const key = s.cwd || s.project || 'unknown';
+    let g = map.get(key);
+    if (!g) map.set(key, (g = { key, label: repoName(key) || key, bullets: bulletsFor(entry, key), sessions: [], metrics: { sessions: 0, turns: 0, tokens: 0, costUsd: 0, byHarness: {} } }));
+    const turns = s.dayTurns ?? s.turns ?? 0;
+    const harness = s.source || 'claude';
+    const hs = g.metrics.byHarness[harness] || (g.metrics.byHarness[harness] = { sessions: 0, turns: 0 });
+    g.sessions.push(s);
+    g.metrics.sessions++; g.metrics.turns += turns;
+    hs.sessions++; hs.turns += turns;
+  }
+  const groups = [...map.values()];
+  for (const g of groups) {
+    const share = total > 0 ? Math.min(1, g.metrics.turns / total) : 1 / (groups.length || 1);
+    g.metrics.tokens = Math.round((entry.metrics?.tokens || 0) * share);
+    g.metrics.costUsd = Math.round((entry.metrics?.costUsd || 0) * share * 100) / 100;
+  }
+  return groups.sort((a, b) => b.metrics.turns - a.metrics.turns);
+}
 
 // Machine-local calendar day, same convention the daemon buckets by (see
 // server/history.mjs) — this runs on the same machine (loopback app).
@@ -20,12 +56,13 @@ const daysAgoLocal = (n) => { const d = new Date(); d.setDate(d.getDate() - n); 
 // Rows above this count switch from a plain render to a hand-rolled windowed
 // slice (estimated uniform row height, no virtualization dependency).
 const WINDOW_THRESHOLD = 60;
-const AVG_ROW_PX = 190; // rough card height + gap, for windowing math only
+const AVG_ROW_PX = 220; // rough header + card row height + gap, for windowing math only
 
 /** One archive row: a real entry, a still-summarizing placeholder, or both absent (never rendered). */
 function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef, reduceMotion, revealIndex }) {
   const isGap = row.entry?.llm?.reason === 'empty';
   const showShimmer = row.pending && !row.entry;
+  const groups = useMemo(() => (row.entry && !showShimmer && !isGap ? groupByProject(row.entry) : []), [row.entry, showShimmer, isGap]);
   // Crossfade text + height-settle on placeholder -> resolved: the outer
   // `layout` spring handles height, this inner fade handles the swap.
   const fade = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: reduceMotion ? 0 : 0.2 } };
@@ -40,19 +77,34 @@ function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regeneratin
           <motion.div key="gap" {...fade}><GapSegment date={row.date} /></motion.div>
         ) : (
           <motion.div key="card" {...fade}>
-            <DayCard
-              entry={row.entry}
-              expanded={expanded}
-              onToggle={onToggle}
-              onOpenSession={onOpenSession}
-              onRegenerate={onRegenerate}
-              regenerating={regenerating}
-              scrollRef={scrollRef}
-              skipEntranceAnim={skipEntranceAnim}
-              onArrowNav={onArrowNav}
-              headerRef={headerRef}
-              revealIndex={revealIndex}
-            />
+            <Stack spacing={1}>
+              <DayHeader
+                entry={row.entry}
+                expanded={expanded}
+                onToggle={onToggle}
+                onRegenerate={onRegenerate}
+                regenerating={regenerating}
+                onArrowNav={onArrowNav}
+                headerRef={headerRef}
+              />
+              {!!groups.length && (
+                <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 1, alignItems: 'stretch' }}>
+                  {groups.map((g) => (
+                    <DayCard
+                      key={g.key}
+                      card={g}
+                      date={row.date}
+                      expanded={expanded}
+                      onToggle={onToggle}
+                      onOpenSession={onOpenSession}
+                      scrollRef={scrollRef}
+                      skipEntranceAnim={skipEntranceAnim}
+                      revealIndex={revealIndex}
+                    />
+                  ))}
+                </Stack>
+              )}
+            </Stack>
           </motion.div>
         )}
       </AnimatePresence>

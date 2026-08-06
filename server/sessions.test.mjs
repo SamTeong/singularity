@@ -180,6 +180,27 @@ test('readSession: nested subagent id opens via the pathFor relaxation; escapes 
   }
 });
 
+test('listSessions: no ai-title falls back to a blurb built from the first real user message, whitespace-collapsed and capped at 140 chars', async () => {
+  const project = 'sessions-test-blurb';
+  const id = 'fixture-blurb';
+  const longText = 'first   prompt\nwith   messy   whitespace ' + 'x'.repeat(200);
+  const dir = writeSession(project, id, [
+    JSON.stringify({ type: 'user', isMeta: true, message: { content: '<local-command-caveat>ignore me</local-command-caveat>' } }),
+    JSON.stringify({ type: 'user', message: { content: longText } }),
+  ]);
+  try {
+    const sessions = await listSessions();
+    const row = sessions.find((s) => s.project === project && s.id === id);
+    assert.ok(row, 'row found');
+    assert.equal(row.title, null);
+    assert.equal(row.blurb.length, 140);
+    assert.ok(!row.blurb.includes('\n'));
+    assert.ok(row.blurb.startsWith('first prompt with messy whitespace'), row.blurb);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('listSessions: running merges isLive with the mtime recency heuristic', async () => {
   const project = 'sessions-test-running';
   const liveId = 'parent-live';
