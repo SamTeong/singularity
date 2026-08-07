@@ -701,6 +701,8 @@ var CODEX_FORECAST_EMPTY_HTML="<div class='empty-state'><svg viewBox='0 0 24 24'
 // ---- render ----
 function render(range){
   renderHarnessBar(range);
+  syncHarnessPanels();
+  syncFilterBadge(range);
   var S=filterSessions(range);
   var agg=aggregate(S);
   // 5h:7d exchange rate + per-window trend. Keyed to rate-limit reset windows, not
@@ -822,7 +824,7 @@ function loadRange(){
   return presetRange('all');
 }
 function persistRange(r){try{localStorage.setItem('harness-usage-report.range',JSON.stringify(r));}catch(e){}}
-function setActivePreset(id){document.querySelectorAll('.range-preset').forEach(function(b){b.className=b.dataset.p===id?'range-preset active':'range-preset';});}
+function setActivePreset(id){document.querySelectorAll('.range-preset').forEach(function(b){var on=b.dataset.p===id;b.className=on?'range-preset active':'range-preset';b.setAttribute('aria-pressed',on?'true':'false');});}
 function applyPreset(id){
   var range=presetRange(id);
   el('from').value=range.from;el('to').value=range.to;persistRange(range);setActivePreset(id);render(range);
@@ -835,7 +837,7 @@ function onDateChange(){
 }
 function initControls(range){
   var bar=el('rangeBar'),html='';
-  CFG.PRESETS.forEach(function(p){html+="<button class='range-preset"+(p.id===range.preset?' active':'')+"' data-p='"+p.id+"'>"+p.label+"</button>";});
+  CFG.PRESETS.forEach(function(p){var on=p.id===range.preset;html+="<button class='range-preset"+(on?' active':'')+"' data-p='"+p.id+"' aria-pressed='"+(on?'true':'false')+"'>"+p.label+"</button>";});
   bar.innerHTML=html;
   if(!el('harnessBar'))bar.insertAdjacentHTML('afterend',"<div id='harnessBar' class='filter-bar'></div>");
   // date pickers live in their own (currently hidden) container; presets still drive them
@@ -856,12 +858,46 @@ function renderHarnessBar(range){
   var filtered=H_ACTIVE.size>0;
   bar.innerHTML="<span class='filter-lbl'>Harness</span>"+HARNESS.map(function(h){
     var off=filtered&&!H_ACTIVE.has(h.id)?' off':'';
-    return "<button class='lg-item"+off+"' data-h='"+h.id+"' title='"+counts[h.id]+" session"+(counts[h.id]===1?'':'s')+"'><span class='lg-swatch' style='background:"+h.col+"'></span>"+esc(h.label)+"</button>";
-  }).join('')+"<button class='lg-all"+(filtered?'':' active')+"'>all</button>";
+    return "<button class='lg-item"+off+"' data-h='"+h.id+"' aria-pressed='"+(off?'false':'true')+"' title='"+counts[h.id]+" session"+(counts[h.id]===1?'':'s')+"'><span class='lg-swatch' style='background:"+h.col+"'></span>"+esc(h.label)+"</button>";
+  }).join('')+"<button class='lg-all"+(filtered?'':' active')+"' aria-pressed='"+(filtered?'false':'true')+"'>all</button>";
   bar.querySelectorAll('button[data-h]').forEach(function(b){b.onclick=function(){_toggleH(b.dataset.h,range);};});
   bar.querySelector('.lg-all').onclick=function(){H_ACTIVE=new Set();render(range);};
 }
 function _toggleH(id,range){if(H_ACTIVE.has(id))H_ACTIVE.delete(id);else H_ACTIVE.add(id);render(range);}
+
+// ---- left filter rail (harness gating for rate-limit cards + at-rest badge) ----
+// Hides/shows the harness-specific rate-limit cards (data-harness on the .card.rv
+// wrapper, never the .rsec -- the secnav eye-toggle owns .rsec.is-hidden, this owns
+// the same class name on .card so the two never fight over one element) and the
+// 4 token-yield toggle buttons that carry the same attribute.
+function syncHarnessPanels(){
+  var hidden=function(hn){return H_ACTIVE.size>0&&!H_ACTIVE.has(hn);};
+  document.querySelectorAll('[data-harness]').forEach(function(node){
+    node.classList.toggle('is-hidden',hidden(node.dataset.harness));
+  });
+  // if the active token-yield view belongs to a now-hidden harness, fall through
+  // to the first still-visible toggle rather than leaving a hidden view active.
+  var tyBtns=document.querySelectorAll('.toggle button[data-harness]'),activeBtn=null;
+  tyBtns.forEach(function(b){if(b.classList.contains('active'))activeBtn=b;});
+  if(activeBtn&&hidden(activeBtn.dataset.harness)){
+    var fallback=null;
+    tyBtns.forEach(function(b){if(!fallback&&!hidden(b.dataset.harness))fallback=b;});
+    if(fallback)fallback.click();
+  }
+}
+var FR_PRESET_LBL={'7d':'7 days','30d':'30 days','all':'all time'},FR_PRESET_SHORT={'7d':'7D','30d':'30D','all':'ALL'};
+function syncFilterBadge(range){
+  var badge=el('fr-badge'),dots=el('fr-dots'),rail=el('filterrail-rail');
+  if(!badge||!dots)return;
+  badge.textContent=range.preset?(FR_PRESET_SHORT[range.preset]||range.preset.toUpperCase()):'●●';
+  var allOn=!H_ACTIVE.size;
+  dots.innerHTML=HARNESS.map(function(h){var on=allOn||H_ACTIVE.has(h.id);return "<span style='background:"+(on?h.col:'var(--line)')+"'></span>";}).join('');
+  if(rail){
+    var rangeTxt=range.preset?(FR_PRESET_LBL[range.preset]||range.preset):'custom range';
+    var harnessTxt=allOn?'all harnesses':HARNESS.filter(function(h){return H_ACTIVE.has(h.id);}).map(function(h){return h.label;}).join(', ');
+    rail.setAttribute('aria-label','Filters: '+rangeTxt+', '+harnessTxt);
+  }
+}
 
 // ---- model-filter (breakdown bars only) ----
 var CHART={},ACTIVE=new Set();

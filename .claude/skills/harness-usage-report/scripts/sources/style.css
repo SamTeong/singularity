@@ -373,14 +373,65 @@ footer code{background:color-mix(in srgb,var(--paper-2) 70%,transparent);padding
 .secnav-item.hidden .secnav-eye .eye-on{display:none}
 .secnav-item.hidden .secnav-eye .eye-off{display:block}
 /* a hidden section is collapsed from view, never removed */
-.rsec.is-hidden{display:none}
+.rsec.is-hidden,.card.is-hidden{display:none}
 @media (max-width:640px){.secnav{right:.6rem}.secnav-panel{min-width:210px}}
 @media (prefers-reduced-motion:reduce){.secnav-panel,.secnav-rail,.secnav-ticks .tick{transition:none}}
-.range-bar{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin:14px 0 4px;font-family:var(--mono);font-size:12px}
-.range-bar .filter-lbl{color:var(--ink-faint);letter-spacing:.1em;text-transform:uppercase;font-size:10.5px;margin-right:2px}
-/* .range-preset chrome is provided by the shared .fpill rule near the top */
-.range-bar input[type=date]{font-family:var(--mono);font-size:12px;color:var(--ink);background:color-mix(in srgb,var(--paper-2) 60%,transparent);border:1px solid var(--line);border-radius:8px;padding:4px 8px}
-.range-bar .sep{color:var(--ink-faint);padding:0 2px}
+/* ---------- left filter rail (global range + harness filters, always reachable) ---------- */
+/* Mirrors .secnav's chrome/localStorage pattern (mechanics in FILTERRAIL_JS,
+   render.mjs), left-anchored. #rangeBar/#harnessBar/#datePickers keep their ids
+   and are still filled/wired by app.js -- only their container moved here. */
+.filterrail{position:fixed;top:50%;left:1.1rem;transform:translateY(-50%);z-index:50;font-family:var(--mono);opacity:.35;transition:opacity .2s cubic-bezier(.23,1,.32,1)}
+/* ponytail: :hover is not gated behind (hover:hover) -- this report is a local desktop
+   HTML file, so the sticky-hover-after-tap case has no user. */
+.filterrail:hover,.filterrail:focus-within,.filterrail.open,.filterrail.pinned{opacity:1}
+.filterrail-hit{position:absolute;top:0;bottom:0;left:-1.1rem;width:24px}
+/* The at-rest pill is static chrome on the rail itself, and the panel is a fixed-size
+   popover that scales out of the rail's left edge. The panel used to morph out of its
+   own 44px footprint by transitioning width/max-height/padding -- three layout
+   properties, so every frame relaid out the panel and re-wrapped every pill in it. */
+.filterrail-rail{position:relative;z-index:2;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;width:44px;min-height:44px;padding:10px 6px;cursor:pointer;
+  background:color-mix(in srgb,var(--surface) 16%,transparent);border-radius:var(--r-pill);box-shadow:var(--card-shadow);
+  backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  transition:opacity .18s cubic-bezier(.23,1,.32,1) .06s,transform .12s cubic-bezier(.23,1,.32,1)}
+.filterrail-rail:active{transform:scale(.97)}
+.filterrail-rail:focus-visible{outline:2px solid var(--clay);outline-offset:3px;border-radius:var(--r-pill)}
+.fr-badge{font-size:11px;font-weight:700;letter-spacing:.04em;color:var(--ink-soft)}
+.fr-dots{display:flex;gap:4px}
+.fr-dots span{width:6px;height:6px;border-radius:50%;background:var(--line);flex:none}
+/* the rail sits above the panel, so it hands over: fades out (quicker than it returns)
+   and stops taking clicks, or it would print over the filter pills underneath. */
+.filterrail:hover .filterrail-rail,.filterrail:focus-within .filterrail-rail,.filterrail.open .filterrail-rail,.filterrail.pinned .filterrail-rail{
+  opacity:0;pointer-events:none;transition:opacity .1s cubic-bezier(.23,1,.32,1)}
+.filterrail-panel{position:absolute;top:50%;left:0;z-index:1;width:216px;
+  max-height:min(calc(100vh - 3rem),480px);overflow-y:auto;padding:8px;
+  background:var(--surface);border:1px solid var(--card-brd);border-radius:var(--r-lg);
+  box-shadow:var(--card-shadow);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
+  transform-origin:left center;transform:translateY(-50%) translateX(-6px) scale(.97);opacity:0;pointer-events:none;
+  transition:opacity .12s ease,transform .12s cubic-bezier(.23,1,.32,1)}
+.filterrail:hover .filterrail-panel,.filterrail:focus-within .filterrail-panel,.filterrail.open .filterrail-panel,.filterrail.pinned .filterrail-panel{
+  transform:translateY(-50%) translateX(0) scale(1);opacity:1;pointer-events:auto;
+  transition:opacity .18s ease,transform .22s cubic-bezier(.23,1,.32,1)}
+.filterrail-pin{position:absolute;top:0;right:0;width:44px;height:44px;display:grid;place-items:center;padding:0;border:none;background:none;color:var(--ink-faint);cursor:pointer;border-radius:0 var(--r-lg) 0 var(--r-md);opacity:0;transition:color .15s,background .15s,opacity .12s ease,transform .12s cubic-bezier(.23,1,.32,1)}
+.filterrail-pin:hover{color:var(--clay);background:color-mix(in srgb,var(--clay) 12%,transparent)}
+.filterrail-pin:active{transform:scale(.94)}
+.filterrail-pin[aria-pressed="true"]{color:var(--clay)}
+.filterrail-pin svg{width:14px;height:14px}
+.fr-body{opacity:0;display:flex;flex-direction:column;gap:14px;padding:40px 0 0;transition:opacity .12s ease}
+/* contents trail the panel by one stagger beat so the surface lands first */
+.filterrail:hover .fr-body,.filterrail:focus-within .fr-body,.filterrail.open .fr-body,.filterrail.pinned .fr-body,
+.filterrail:hover .filterrail-pin,.filterrail:focus-within .filterrail-pin,.filterrail.open .filterrail-pin,.filterrail.pinned .filterrail-pin{opacity:1;transition:opacity .2s ease .06s}
+.fr-body #rangeBar,.fr-body #harnessBar{display:flex;flex-direction:column;align-items:stretch;gap:6px}
+.fr-body #rangeBar .range-preset,.fr-body #harnessBar .lg-item,.fr-body #harnessBar .lg-all{width:100%;justify-content:flex-start}
+.fr-body #datePickers{display:flex;flex-direction:column;gap:6px}
+#datePickers input[type=date]{font-family:var(--mono);font-size:12px;color:var(--ink);background:color-mix(in srgb,var(--paper-2) 60%,transparent);border:1px solid var(--line);border-radius:8px;padding:4px 8px}
+#datePickers .sep{color:var(--ink-faint);padding:0 2px}
+@media(max-width:640px){.filterrail{left:.6rem}}
+/* reduced motion = gentler, not zero: the fade stays (it explains the state change),
+   the travel and the scale go. Must sit after the block above -- a media query adds
+   no specificity, so an earlier rule would just lose to the base transform. */
+@media (prefers-reduced-motion:reduce){
+  .filterrail-panel,.filterrail:hover .filterrail-panel,.filterrail:focus-within .filterrail-panel,.filterrail.open .filterrail-panel,.filterrail.pinned .filterrail-panel{transform:translateY(-50%)}
+  .filterrail-rail:active,.filterrail-pin:active{transform:none}}
 /* ---------- zapac data-viz: trend chip, swatch legend, empty state ---------- */
 .trend-chip{display:inline-flex;align-items:center;gap:3px;font-family:var(--mono);font-size:11px;font-weight:600;padding:2px 7px;border-radius:var(--r-pill);letter-spacing:.01em;vertical-align:middle}
 .trend-chip[data-dir="up"]{color:var(--ok);background:color-mix(in srgb,var(--ok) 14%,transparent)}

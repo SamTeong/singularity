@@ -213,15 +213,15 @@ const EFFICIENCY_HTML = `<header class='shead' id='sec-efficiency'><div class='s
 <div class='card rv'><div id='sec-cadence'></div></div>`;
 
 const RATE_LIMITS_HTML = `<header class='shead' id='sec-rate-limit-utilization-5h-7d'><div class='shead-title'><h2>Rate-limit utilization · 5h &amp; 7d</h2><span class='sub'>how close you run to the usage caps</span></div></header>
-<div class='card rv'><h3>5h / 7d utilization (Claude models only)</h3><div id='sec-ratelimits'></div></div>
-<div class='card rv'><h3>5h / 7d utilization (Ollama cloud models only)</h3><div id='sec-ollama-util'></div></div>
-<div class='card rv'><h3>Weekly quota utilization (Codex models only)</h3><div id='sec-codex-util'></div></div>
-<div class='card rv'><h3>Token yield per rate-limit %</h3><div class='ctl-row'><div id='ty-legend' class='legend'></div><div class='toggle'><button id='tybtn-7d' class='active' onclick="showTY('7d')">7d</button><button id='tybtn-5h' onclick="showTY('5h')">5h</button><button id='tybtn-ollama-wk' onclick="showTY('ollama-wk')">7d (ollama)</button><button id='tybtn-codex-wk' onclick="showTY('codex-wk')">7d (codex)</button></div></div><div id='sec-token-yield'></div><div id='sec-token-yield-summary'></div></div>
-<div class='card rv'><h3>Rate-limit forecast at reset (Claude models only)</h3><div id='sec-forecast'></div></div>
-<div class='card rv'><h3>Rate-limit forecast at reset (Ollama cloud models only)</h3><div id='sec-ollama-forecast'></div></div>
-<div class='card rv'><h3>Weekly quota forecast at reset (Codex models only)</h3><div id='sec-codex-forecast'></div></div>
-<div class='card rv'><h3>5h-window to 7d-window rate (Claude models only)</h3><div id='sec-window-balance'></div></div>
-<div class='card rv'><h3>5h-window to 7d-window (Ollama cloud models only)</h3><div id='sec-ollama-window-balance'></div></div>`;
+<div class='card rv' data-harness='claude'><h3>5h / 7d utilization (Claude models only)</h3><div id='sec-ratelimits'></div></div>
+<div class='card rv' data-harness='ollama'><h3>5h / 7d utilization (Ollama cloud models only)</h3><div id='sec-ollama-util'></div></div>
+<div class='card rv' data-harness='codex'><h3>Weekly quota utilization (Codex models only)</h3><div id='sec-codex-util'></div></div>
+<div class='card rv'><h3>Token yield per rate-limit %</h3><div class='ctl-row'><div id='ty-legend' class='legend'></div><div class='toggle'><button id='tybtn-7d' class='active' data-harness='claude' onclick="showTY('7d')">7d</button><button id='tybtn-5h' data-harness='claude' onclick="showTY('5h')">5h</button><button id='tybtn-ollama-wk' data-harness='ollama' onclick="showTY('ollama-wk')">7d (ollama)</button><button id='tybtn-codex-wk' data-harness='codex' onclick="showTY('codex-wk')">7d (codex)</button></div></div><div id='sec-token-yield'></div><div id='sec-token-yield-summary'></div></div>
+<div class='card rv' data-harness='claude'><h3>Rate-limit forecast at reset (Claude models only)</h3><div id='sec-forecast'></div></div>
+<div class='card rv' data-harness='ollama'><h3>Rate-limit forecast at reset (Ollama cloud models only)</h3><div id='sec-ollama-forecast'></div></div>
+<div class='card rv' data-harness='codex'><h3>Weekly quota forecast at reset (Codex models only)</h3><div id='sec-codex-forecast'></div></div>
+<div class='card rv' data-harness='claude'><h3>5h-window to 7d-window rate (Claude models only)</h3><div id='sec-window-balance'></div></div>
+<div class='card rv' data-harness='ollama'><h3>5h-window to 7d-window (Ollama cloud models only)</h3><div id='sec-ollama-window-balance'></div></div>`;
 
 const WHEN_YOU_WORK_HTML = `<header class='shead' id='sec-when-you-work'><div class='shead-title'><h2>When you work</h2><span class='sub'>spend by weekday and hour</span></div></header>
 <div class='card flush2 rv'><h3>Spend by day-of-week × hour</h3><div id='sec-dayhour'></div></div>`;
@@ -315,6 +315,45 @@ const SIDEBAR_JS = `
 })();
 `;
 
+// Left filter rail: global range + harness filters, permanently reachable (mirrors
+// .secnav's chrome/localStorage pattern above but left-anchored). Owns only
+// open/pin mechanics -- filter state and #rangeBar/#harnessBar/#datePickers content
+// are still owned by app.js (H_ACTIVE, applyPreset, renderHarnessBar); those
+// elements are the same ones app.js already wires via getElementById, just
+// relocated here from hero.html.
+const FILTERRAIL_HTML = `<div class='filterrail' id='filterrail'>
+<div class='filterrail-hit'></div>
+<div class='filterrail-rail' id='filterrail-rail' role='button' tabindex='0' aria-expanded='false' aria-controls='filterrail-panel' aria-label='Filters'>
+<span class='fr-badge' id='fr-badge'></span>
+<span class='fr-dots' id='fr-dots'></span>
+</div>
+<div class='filterrail-panel' id='filterrail-panel' role='region' aria-label='Filters'>
+<button class='filterrail-pin' id='filterrail-pin' type='button' aria-pressed='false' aria-label='Pin filters open'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8'><path d='M12 3v7m-4 0h8l1 4H7l1-4Z'/><path d='M12 14v7'/></svg></button>
+<div class='fr-body'>
+<div id='rangeBar'></div>
+<div id='datePickers'></div>
+</div>
+</div>
+</div>`;
+
+const FILTERRAIL_JS = `
+(function(){
+  var KEY='insights-filterrail-v1';
+  var rail=document.getElementById('filterrail');if(!rail)return;
+  var trigger=document.getElementById('filterrail-rail'),pin=document.getElementById('filterrail-pin');
+  function setOpen(o){rail.classList.toggle('open',o);if(trigger)trigger.setAttribute('aria-expanded',o?'true':'false');}
+  function setPinned(p){rail.classList.toggle('pinned',p);if(pin)pin.setAttribute('aria-pressed',p?'true':'false');try{localStorage.setItem(KEY,p?'1':'0');}catch(e){}}
+  var pinned=false;try{pinned=localStorage.getItem(KEY)==='1';}catch(e){}
+  setPinned(pinned);
+  if(trigger){
+    trigger.addEventListener('click',function(){setOpen(!rail.classList.contains('open'));});
+    trigger.addEventListener('keydown',function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();setOpen(!rail.classList.contains('open'));}});
+  }
+  if(pin)pin.addEventListener('click',function(e){e.stopPropagation();setPinned(!rail.classList.contains('pinned'));});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!rail.classList.contains('pinned'))setOpen(false);});
+  document.addEventListener('click',function(e){if(!rail.contains(e.target))setOpen(false);});
+})();
+`;
 
 function _load_forecast() {
   // Empirical-Bayes rate-limit forecast (Phase D). Built lazily by stats.mjs
@@ -344,7 +383,7 @@ function render_scripts(sessions) {
   return (
     "<script>\nvar SESSIONS=" + sessions_json + ";\n" +
     "var FORECAST=" + forecast_json + ";\n" + _source("app.js") +
-    "\n" + SIDEBAR_JS + "</script>"
+    "\n" + SIDEBAR_JS + "\n" + FILTERRAIL_JS + "</script>"
   );
 }
 
@@ -360,6 +399,7 @@ export function render(c) {
   return _fill(_source("base.html"), {
     STYLE: render_style(),
     HERO: render_hero(),
+    FILTERRAIL: FILTERRAIL_HTML,
     BURN: BURN_HTML,
     BREAKDOWN: BREAKDOWN_HTML,
     TOKEN_ECONOMICS: TOKEN_ECONOMICS_HTML,
