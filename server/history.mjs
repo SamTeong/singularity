@@ -293,7 +293,7 @@ export async function summarizeDay(digestText, sessions, { callAnthropic = defau
   if (parsedA) return { ...parsedA, llm: { ok: true, provider: 'anthropic-oauth', model: a.model || null, inputTokens: a.inputTokens ?? null, outputTokens: a.outputTokens ?? null } };
 
   if (OLLAMA_BIN) {
-    let stdout = null;
+    let stdout;
     try { stdout = await callOllama(digestText); } catch { stdout = null; }
     const parsedO = parseJsonSummary(stdout);
     if (parsedO) return { ...parsedO, llm: { ok: true, provider: 'ollama', model: OLLAMA_MODEL, inputTokens: null, outputTokens: null } };

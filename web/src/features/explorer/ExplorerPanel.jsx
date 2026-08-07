@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -73,7 +73,7 @@ export default function ExplorerPanel() {
   const loadedRef = useRef(false); // guards the debounced PUT until restore finishes
   const autosaveTimer = useRef(null); // {id, path} — one pending timer, always for the active tab
 
-  const clearAutosaveTimer = () => { if (autosaveTimer.current) { clearTimeout(autosaveTimer.current.id); autosaveTimer.current = null; } };
+  const clearAutosaveTimer = useCallback(() => { if (autosaveTimer.current) { clearTimeout(autosaveTimer.current.id); autosaveTimer.current = null; } }, []);
   const rootAbs = untildify(root);
   const { ensureSaved, dialogEl } = useDirtyGuard();
 
@@ -132,7 +132,7 @@ export default function ExplorerPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- expandedKey/tabPathsKey stand in for expanded/tabs (see above)
   }, [root, expandedKey, tabPathsKey, active, autosave]);
 
-  useEffect(() => () => clearAutosaveTimer(), []);
+  useEffect(() => () => clearAutosaveTimer(), [clearAutosaveTimer]);
 
   // Nothing watches the FS, so an edit made outside the app (notepad, an agent
   // run) leaves the open tab stale. Re-read the active tab when the window
@@ -180,7 +180,10 @@ export default function ExplorerPanel() {
   const allOpen = expanded.size > 0;
   const toggleAll = () => setExpanded(new Set()); // "expand all" would mean recursive prefetch — not done here
 
-  const save = async (path, force = false) => {
+  // Named function expression, not the outer `save` const: the retry below
+  // recurses via the function's own name binding, so it doesn't reference
+  // `save` before its useCallback assignment completes.
+  const save = useCallback(async function saveImpl(path, force = false) {
     if (autosaveTimer.current?.path === path) clearAutosaveTimer();
     const r = await fetch('/fs/write', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
@@ -189,21 +192,21 @@ export default function ExplorerPanel() {
     // 409: the file changed underneath us (an external editor). Ask once, then
     // re-save with force — never overwrite someone else's edit silently.
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(path, true);
+      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return saveImpl(path, true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }
     if (r.ok) { setTabs((ts) => ts.map((t) => (t.path === path ? { ...t, dirty: false, mtime: r.mtime } : t))); setMsg({ sev: 'success', text: 'Saved' }); }
     else setMsg({ sev: 'error', text: r.error || 'save failed' });
-  };
+  }, [clearAutosaveTimer]);
 
   // Flushes the outgoing tab's pending autosave (if any) before moving focus —
   // only the active tab ever has a live timer, so this always targets it.
-  const switchActive = (path) => {
+  const switchActive = useCallback((path) => {
     if (autosaveTimer.current) save(autosaveTimer.current.path);
     setActive(path);
     setMsg(null);
-  };
+  }, [save]);
 
   // Alt+Up/Down cycles editor tabs when this panel's CodeMirror has focus.
   // key={active} remounts CmEditor on switch, so refocus the new cm-content

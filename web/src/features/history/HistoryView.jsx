@@ -205,7 +205,9 @@ export default function HistoryView({ onOpenSession }) {
   const [activeDate, setActiveDate] = useState(null);
   const [focusDate, setFocusDate] = useState(null); // pending keyboard-nav focus target while windowed-out
   const [winRange, setWinRange] = useState([0, Infinity]);
-  const [renderKey, setRenderKey] = useState(0); // bumped on range change → page-level exit/enter
+  // Page-level exit/enter is keyed off the range itself (below) rather than a
+  // counter bumped from an effect — same remount trigger, no extra render pass.
+  const rangeKey = `${preset}:${customRange.from}:${customRange.to}`;
 
   // Initial + range-change fetch. The WS push (below) supersedes this once it
   // arrives, but each range change still needs a fresh server round-trip
@@ -229,7 +231,6 @@ export default function HistoryView({ onOpenSession }) {
       setFetchedPending(d.pending);
       setLoaded(true);
     }).catch(() => { if (mine === fetchSeq.current) setError('Could not load history.'); });
-    setRenderKey((k) => k + 1);
   }, [preset, customRange.from, customRange.to]);
 
   // Merge: prefer the WS payload (full archive, ascending) over the initial
@@ -428,7 +429,7 @@ export default function HistoryView({ onOpenSession }) {
             <LayoutGroup>
               <AnimatePresence mode="popLayout" initial={false}>
                 <motion.div
-                  key={renderKey}
+                  key={rangeKey}
                   initial={reduceMotion ? { opacity: 1 } : { opacity: 0, y: -8 }}
                   animate={{ opacity: 1, y: 0, transition: { duration: reduceMotion ? 0.05 : 0.29, ease: EASE_OUT } }}
                   // Asymmetric on purpose: leave fast, settle in slower.

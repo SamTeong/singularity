@@ -15,7 +15,7 @@ import { useEffect, useRef } from 'react';
 // `null === null` short-circuits the reload, so the hook no-ops safely.
 export function useRefreshOnFocus({ enabled, mtime, dirty, refetch, onChanged, onWarn }) {
   const ref = useRef({ enabled, mtime, dirty, refetch, onChanged, onWarn });
-  ref.current = { enabled, mtime, dirty, refetch, onChanged, onWarn };
+  useEffect(() => { ref.current = { enabled, mtime, dirty, refetch, onChanged, onWarn }; });
   useEffect(() => {
     if (!enabled) return undefined;
     const onFocus = async () => {

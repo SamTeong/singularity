@@ -11,9 +11,7 @@ import { toolForModel } from '@/lib/models.js';
 // lifted to App (shared with the dir picker + config fallback). Emits `create`
 // over the WS via sendMsg, then resets its own fields and closes.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// `initialTool` is still accepted so AppShell's resume prefill keeps compiling,
-// but it's unused — the session type is derived from initialModel instead.
-export default function CreateSessionDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg, onSessionCreated, initialSessionId = '', initialModel = '', initialScopes = [], initialTool = 'claude' }) {
+export default function CreateSessionDialog({ open, onClose, connected, cwd, setCwd, recent, onBrowse, sendMsg, onSessionCreated, initialSessionId = '', initialModel = '', initialScopes = [] }) {
   const [title, setTitle] = useState('');
   const [model, setModel] = useState('');
   const [scopes, setScopes] = useState([]);

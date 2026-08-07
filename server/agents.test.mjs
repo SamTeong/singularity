@@ -17,7 +17,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, renameSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-agents-test-'));

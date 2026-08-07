@@ -1,5 +1,5 @@
 import { getTokens } from '@/theme/contract.js';
-import { useEffect, useMemo, useRef, useState, Suspense, lazy } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, Suspense, lazy } from 'react';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Snackbar from '@mui/material/Snackbar';
@@ -150,7 +150,7 @@ export default function AppShell() {
   const toggleDock = () => setDockMin((m) => { const n = !m; localStorage.setItem('sing-dock-min', n ? '1' : '0'); return n; });
   // Starting a new session should reveal the Sessions dock even if the user had
   // it minimized — no-op if already expanded.
-  const expandDock = () => setDockMin((m) => { if (!m) return m; localStorage.setItem('sing-dock-min', '0'); return false; });
+  const expandDock = useCallback(() => setDockMin((m) => { if (!m) return m; localStorage.setItem('sing-dock-min', '0'); return false; }), []);
 
   // A running claude process picks its TUI theme once at spawn (queried from the
   // terminal background) — xterm's palette flips live but a live session's colors
@@ -189,7 +189,7 @@ export default function AppShell() {
   // the registry, so fall back to the id itself — for a session resumed from
   // this view it already IS the thread uuid, and /session's own by-id lookup
   // covers it. Only a genuinely unknown id lands on "Transcript not found".
-  const viewTranscript = async (a) => {
+  const viewTranscript = useCallback(async (a) => {
     if (a.tool === 'codex' || isCodexModel(a.model)) {
       const threadId = await fetch(`/session/codex-thread?id=${encodeURIComponent(a.id)}`)
         .then((r) => r.json()).then((d) => (d.ok ? d.threadId : null)).catch(() => null);
@@ -201,7 +201,7 @@ export default function AppShell() {
     setOpenTx({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), id: a.id, cwd: a.cwd, mtime: Date.now() });
     setView('sessions');
     setTxPrompt(null);
-  };
+  }, []);
 
   // Deep-link from a History day's session row into Transcripts. Unlike
   // viewTranscript, these rows already carry the transcript-file id/project

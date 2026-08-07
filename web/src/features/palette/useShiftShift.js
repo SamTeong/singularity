@@ -9,7 +9,7 @@ import { useEffect, useRef } from 'react';
 export function useShiftShift(onOpen) {
   const lastShift = useRef(0);
   const cb = useRef(onOpen);
-  cb.current = onOpen;
+  useEffect(() => { cb.current = onOpen; });
   useEffect(() => {
     const onKeyDown = (e) => {
       if (e.key === 'Shift') {

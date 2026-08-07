@@ -20,8 +20,7 @@ export function backupFile(absPath) {
     const sourceFile = join(dir, 'source.txt');
     if (!existsSync(sourceFile)) writeFileSync(sourceFile, absPath);
     let stamp = Date.now();
-    // eslint-disable-next-line no-constant-condition -- guard against successive
-    // calls landing in the same millisecond (real on Windows).
+    // Guard against successive calls landing in the same millisecond (real on Windows).
     while (existsSync(join(dir, `${stamp}.bak`))) stamp++;
     const dest = join(dir, `${stamp}.bak`);
     copyFileSync(absPath, dest);

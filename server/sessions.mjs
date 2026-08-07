@@ -77,7 +77,10 @@ async function listCodexRollouts(base, acc) {
 }
 
 const codexMetaCache = new Map(); // path -> { mtimeMs, size, cwd, sessionId, title }
-async function listCodexSessions({ cap, isLive = () => false, now = Date.now() } = {}) {
+// Callers pass `cap`, but codex rollouts have never been capped — the param was
+// accepted and ignored. Dropped from the signature rather than left as dead
+// weight; wire it up here if the rollout count ever needs bounding.
+async function listCodexSessions({ isLive = () => false, now = Date.now() } = {}) {
   if (!existsSync(CODEX_HOME)) return [];
   const files = [];
   for (const sub of ['sessions', 'archived_sessions']) await listCodexRollouts(join(CODEX_HOME, sub), files);

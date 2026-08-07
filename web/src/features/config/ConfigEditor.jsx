@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -69,7 +69,7 @@ export default function ConfigEditor() {
   const autosaveTimer = useRef(null); // {id, path} — one pending timer, always for the active tab
   const loadedRef = useRef(false); // guards the debounced PUT until restore settles
 
-  const clearTimer = () => { if (autosaveTimer.current) { clearTimeout(autosaveTimer.current.id); autosaveTimer.current = null; } };
+  const clearTimer = useCallback(() => { if (autosaveTimer.current) { clearTimeout(autosaveTimer.current.id); autosaveTimer.current = null; } }, []);
 
   const shownRoots = useMemo(() => {
     const map = new Map();
@@ -157,7 +157,7 @@ export default function ConfigEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- expandedKey/tabKey stand in for expanded/tabs
   }, [expandedKey, tabKey, active, autosave]);
 
-  useEffect(() => () => clearTimer(), []);
+  useEffect(() => () => clearTimer(), [clearTimer]);
 
   // Re-read the active tab when the window regains focus: refresh if clean,
   // warn if dirty (an external editor/agent changed it underneath us).
@@ -194,10 +194,12 @@ export default function ConfigEditor() {
       });
     }, 250);
     return () => clearTimeout(id);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- roots derive from the listed deps
   }, [q, claudeRoots.roots, codexRoots.roots]);
 
-  const save = async (path, force = false) => {
+  // Named function expression, not the outer `save` const: the retry below
+  // recurses via the function's own name binding, so it doesn't reference
+  // `save` before its useCallback assignment completes.
+  const save = useCallback(async function saveImpl(path, force = false) {
     const tab = tabsRef.current.find((t) => t.path === path);
     if (!tab) return;
     if (autosaveTimer.current?.path === path) clearTimer();
@@ -206,7 +208,7 @@ export default function ConfigEditor() {
       body: JSON.stringify({ cwd: tab.cwd, content: contentRef.current.get(path) ?? '', mtime: tab.mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(path, true);
+      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return saveImpl(path, true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }
@@ -224,15 +226,15 @@ export default function ConfigEditor() {
         return next;
       });
     } else setMsg({ sev: 'error', text: r.error || 'save failed' });
-  };
+  }, [clearTimer]);
 
   // Flush the outgoing tab's pending autosave before moving focus — only the
   // active tab ever has a live timer.
-  const switchActive = (path) => {
+  const switchActive = useCallback((path) => {
     if (autosaveTimer.current) save(autosaveTimer.current.path);
     setActive(path);
     setMsg(null);
-  };
+  }, [save]);
 
   // Alt+Up/Down cycles editor tabs when this panel's CodeMirror has focus.
   // key={active} remounts CmEditor on switch, so refocus the new cm-content

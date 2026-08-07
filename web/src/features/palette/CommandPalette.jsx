@@ -18,6 +18,15 @@ export default function CommandPalette({ commands, onRun, onClose }) {
   const [sel, setSel] = useState(0);
   const prevFocus = useRef(null);
 
+  // Reset selection to top whenever the query changes — a render-time state
+  // adjustment (compared against the previous query) instead of an effect, so
+  // there's no extra render/paint between the query change and the reset.
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (query !== prevQuery) {
+    setPrevQuery(query);
+    setSel(0);
+  }
+
   // Capture focus on mount, restore to the element focused before open on unmount.
   useEffect(() => {
     prevFocus.current = document.activeElement;
@@ -34,9 +43,6 @@ export default function CommandPalette({ commands, onRun, onClose }) {
     out.sort((a, b) => b.s - a.s || a.c.label.localeCompare(b.c.label));
     return out.map((x) => x.c).slice(0, 50); // ponytail: cap; virtualize if >500
   }, [query, commands]);
-
-  // Reset selection to top whenever the query changes.
-  useEffect(() => { setSel(0); }, [query]);
 
   // Group preserving filtered order; carry the filtered index for selection.
   const groups = useMemo(() => {
