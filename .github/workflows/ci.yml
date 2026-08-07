@@ -18,8 +18,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # node-pty ships prebuilds for linux + windows. macos omitted unless
-        # prebuild availability is confirmed.
+        # node-pty prebuilds cover win32 + darwin only; linux has none and
+        # compiles from source via node-gyp (its install script falls back).
+        # Both paths work here. macos would too — prebuild availability is
+        # not what's keeping it off this list.
         os: [ubuntu-latest, windows-latest]
     defaults:
       run:
@@ -28,13 +30,15 @@ jobs:
         shell: bash
 
     steps:
-      - uses: actions/checkout@v4
+      # v5+ runs the action itself on node24; v4 is force-shimmed and warns.
+      - uses: actions/checkout@v5
 
-      - uses: pnpm/action-setup@v4
+      # v6 is the first major supporting pnpm 11 (see packageManager pin).
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 22
+          node-version: 24
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
