@@ -8,8 +8,8 @@ import Typography from '@mui/material/Typography';
 import InputBase from '@mui/material/InputBase';
 import { getTokens } from '@/theme/contract.js';
 import { score } from './fuzzy.mjs';
-
-const HINT = '↑↓ select · ↵ run · esc close';
+import { matches, formatBinding } from '@/lib/keys.js';
+import { useKeys } from '@/providers/KeysProvider.jsx';
 
 // Presentational palette: props { commands, onRun, onClose }. Owns query + sel
 // state, fuzzy filter, keyboard nav. No domain logic. Parent closes on every run.
@@ -17,6 +17,7 @@ export default function CommandPalette({ commands, onRun, onClose }) {
   const [query, setQuery] = useState('');
   const [sel, setSel] = useState(0);
   const prevFocus = useRef(null);
+  const { keys } = useKeys();
 
   // Reset selection to top whenever the query changes — a render-time state
   // adjustment (compared against the previous query) instead of an effect, so
@@ -55,12 +56,15 @@ export default function CommandPalette({ commands, onRun, onClose }) {
     return [...m.entries()];
   }, [filtered]);
 
+  // Footer hint follows the live bindings — a rebind must not leave it lying.
+  const hint = `${formatBinding(keys.palettePrev)}${formatBinding(keys.paletteNext)} select · ${formatBinding(keys.paletteRun)} run · ${formatBinding(keys.paletteClose)} close`;
+
   // Keyboard nav on the input — stopPropagation so ALT+Up/Down + xterm don't fire.
   const onKeyDown = (e) => {
-    if (e.key === 'ArrowDown') { e.preventDefault(); e.stopPropagation(); setSel((s) => (s + 1) % filtered.length); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); setSel((s) => (s - 1 + filtered.length) % filtered.length); }
-    else if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); if (filtered[sel]) onRun(filtered[sel]); }
-    else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); onClose(); }
+    if (matches(keys.paletteNext, e)) { e.preventDefault(); e.stopPropagation(); setSel((s) => (s + 1) % filtered.length); }
+    else if (matches(keys.palettePrev, e)) { e.preventDefault(); e.stopPropagation(); setSel((s) => (s - 1 + filtered.length) % filtered.length); }
+    else if (matches(keys.paletteRun, e)) { e.preventDefault(); e.stopPropagation(); if (filtered[sel]) onRun(filtered[sel]); }
+    else if (matches(keys.paletteClose, e)) { e.preventDefault(); e.stopPropagation(); onClose(); }
   };
 
   return (
@@ -100,7 +104,7 @@ export default function CommandPalette({ commands, onRun, onClose }) {
             <Typography sx={{ px: 2, py: 3, color: 'text.secondary', fontSize: 13 }}>No matches</Typography>
           )}
         </Box>
-        <Typography sx={{ px: 2, py: 0.75, fontSize: 11, color: 'text.secondary', borderTop: '1px solid', borderColor: 'divider' }}>{HINT}</Typography>
+        <Typography sx={{ px: 2, py: 0.75, fontSize: 11, color: 'text.secondary', borderTop: '1px solid', borderColor: 'divider' }}>{hint}</Typography>
       </Paper>
     </Box>
   );

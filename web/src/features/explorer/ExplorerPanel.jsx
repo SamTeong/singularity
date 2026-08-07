@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { matches } from '@/lib/keys.js';
+import { useKeys } from '@/providers/KeysProvider.jsx';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -48,6 +50,7 @@ const joinPath = (dir, name) => (dir.endsWith(sepOf(dir)) ? dir + name : dir + s
 const baseOf = (p) => { const s = sepOf(p); const i = p.lastIndexOf(s); return i < 0 ? p : p.slice(i + 1); };
 
 export default function ExplorerPanel() {
+  const { keys } = useKeys();
   const [root, setRoot] = useState('~'); // tildified
   const [picking, setPicking] = useState(false);
   const [childrenByPath, setChildrenByPath] = useState(new Map()); // absPath -> {entries, capped}
@@ -208,27 +211,27 @@ export default function ExplorerPanel() {
     setMsg(null);
   }, [save]);
 
-  // Alt+Up/Down cycles editor tabs when this panel's CodeMirror has focus.
+  // Cycles editor tabs when this panel's CodeMirror has focus.
   // key={active} remounts CmEditor on switch, so refocus the new cm-content
   // one frame after switchActive (remount lands on next render).
   const editorHostRef = useRef(null);
   useEffect(() => {
     const onKey = (e) => {
-      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const dir = matches(keys.editorTabPrev, e) ? -1 : matches(keys.editorTabNext, e) ? 1 : 0;
+      if (!dir) return;
       const ae = document.activeElement;
       if (!ae?.closest?.('.cm-editor')) return;
       if (tabs.length < 2) return;
       e.preventDefault();
       const idx = tabs.findIndex((t) => t.path === active);
       if (idx < 0) return;
-      const dir = e.key === 'ArrowUp' ? -1 : 1;
       const next = tabs[(idx + dir + tabs.length) % tabs.length];
       switchActive(next.path);
       requestAnimationFrame(() => editorHostRef.current?.querySelector('.cm-content')?.focus());
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [tabs, active, switchActive]);
+  }, [tabs, active, switchActive, keys]);
 
   const openFile = (path) => {
     if (path === active) return;
@@ -414,7 +417,7 @@ export default function ExplorerPanel() {
       </Rail>
 
       <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}
-        onKeyDown={(e) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (active) save(active); } }}>
+        onKeyDown={(e) => { if (matches(keys.editorSave, e)) { e.preventDefault(); if (active) save(active); } }}>
         {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={openFile} onClose={closeTab} />}
         <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 2 }} spacing={1.5}>
           <DetailPane empty={!activeTab && <EmptyState icon={<InsertDriveFileOutlinedIcon />} title="Select a file" description="Browse the tree on the left to open a file here." />}>

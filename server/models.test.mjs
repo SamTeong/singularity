@@ -37,6 +37,10 @@ test('isCodexModel: gpt-* prefix routes to the codex bin', () => {
   assert.equal(isCodexModel('gpt-5.3-codex-spark'), true); // free-text codex id
 });
 
+test('CODEX_PRESETS invariant: every preset is a gpt-* id (web/src/lib/models.js mirrors isCodexModel with a bare prefix check and relies on this)', () => {
+  for (const preset of CODEX_PRESETS) assert.ok(preset.startsWith('gpt-'), preset);
+});
+
 test('isCodexModel: empty / claude / ollama ids → false', () => {
   assert.equal(isCodexModel(undefined), false);
   assert.equal(isCodexModel(''), false);

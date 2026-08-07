@@ -4,6 +4,8 @@ import { Terminal as Xterm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { TERM_THEME } from './term-theme.js';
+import { matches } from '@/lib/keys.js';
+import { useKeys } from '@/providers/KeysProvider.jsx';
 
 // Machine-output layer — opaque, never glass — but themed light/dark with the
 // app. Palette lives in ./term-theme.js (shared with TranscriptView).
@@ -26,8 +28,11 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
   const doFitRef = useRef(null);
   const switchRef = useRef(onSwitch);
   const topRef = useRef(onTopReached);
+  const { keys } = useKeys();
+  const keysRef = useRef(keys);
   useEffect(() => { switchRef.current = onSwitch; }, [onSwitch]);
   useEffect(() => { topRef.current = onTopReached; }, [onTopReached]);
+  useEffect(() => { keysRef.current = keys; }, [keys]);
 
   useEffect(() => {
     const term = new Xterm({
@@ -52,13 +57,14 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
 
     // Ctrl+C copies when there's a selection, else falls through to SIGINT.
     term.attachCustomKeyEventHandler((e) => {
-      if (e.type === 'keydown' && e.ctrlKey && e.key === 'c' && term.hasSelection()) {
+      if (e.type === 'keydown' && matches(keysRef.current.terminalCopy, e) && term.hasSelection()) {
         navigator.clipboard?.writeText(term.getSelection());
         return false;
       }
       // Alt+Up/Down cycles sessions even while the terminal has focus.
-      if (e.type === 'keydown' && e.altKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
-        switchRef.current?.(e.key === 'ArrowUp' ? -1 : 1);
+      const dir = matches(keysRef.current.sessionPrev, e) ? -1 : matches(keysRef.current.sessionNext, e) ? 1 : 0;
+      if (e.type === 'keydown' && dir) {
+        switchRef.current?.(dir);
         return false;
       }
       return true;

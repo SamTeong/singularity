@@ -24,6 +24,7 @@ import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from '
 import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, getState as getExplorerState, setState as setExplorerState } from './explorer.mjs';
 import { getConfigState, setConfigState } from './config-state.mjs';
+import { getKeys, setKeys } from './keys.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
@@ -288,6 +289,8 @@ app.patch('/fs/rename', async (req, reply) => {
 });
 app.get('/fs/state', async () => ({ state: getExplorerState() }));
 app.put('/fs/state', async (req) => setExplorerState(req.body));
+app.get('/keys', async () => ({ keys: getKeys() }));
+app.put('/keys', async (req) => setKeys(req.body));
 
 // Task manager: list claude.exe + this repo's dev-tooling processes, kill a stale/orphaned one by PID.
 app.get('/procs', async () => ({ procs: await scanClaude() }));

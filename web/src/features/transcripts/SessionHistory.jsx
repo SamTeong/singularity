@@ -1,5 +1,7 @@
 import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { matches as matchesKey } from '@/lib/keys.js';
+import { useKeys } from '@/providers/KeysProvider.jsx';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -60,6 +62,7 @@ function PulseDot({ sx }) {
 }
 
 export default function SessionHistory({ active, sendMsg, registerChat, openSession, onResume, liveSessionIds }) {
+  const { keys } = useKeys();
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
   const [q, setQ] = useState('');
@@ -385,7 +388,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                     <Tooltip title={sessionLive ? 'Session already live in the dock — switch to it instead' : 'Resume this session in a new agent — prefills last model + skill-scopes'}>
                       {/* span: Tooltip needs a live event target — a disabled button fires none. */}
                       <span>
-                        <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} disabled={sessionLive} onClick={() => onResume(sel.id, transcript.meta?.cwd || sel.cwd, transcript.meta?.model, transcript.meta?.scopes, sel.source === 'codex' ? 'codex' : 'claude')}>Resume</Button>
+                        <Button size="small" variant="outlined" startIcon={<PlayArrowIcon />} disabled={sessionLive} onClick={() => onResume(sel.id, transcript.meta?.cwd || sel.cwd, transcript.meta?.model, transcript.meta?.scopes)}>Resume</Button>
                       </span>
                     </Tooltip>
                   )}
@@ -444,7 +447,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
                 placeholder={authNeeded ? 'Sign in to chat…' : (streaming ? 'Generating…' : 'Ask about this transcript…')}
                 value={chatInput} disabled={streaming || authNeeded}
                 onChange={(e) => setChatInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); } }}
+                onKeyDown={(e) => { if (matchesKey(keys.chatSend, e)) { e.preventDefault(); sendChat(); } }}
               />
               <Button size="small" variant="contained" onClick={sendChat} disabled={streaming || authNeeded || !chatInput.trim()}>Send</Button>
             </Stack>

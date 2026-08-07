@@ -20,6 +20,7 @@ import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import PaletteIcon from '@mui/icons-material/Palette';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import KeyboardIcon from '@mui/icons-material/Keyboard';
 import Sparkline from '@/components/Sparkline.jsx';
 import { useSysStats } from '@/hooks/useSysStats.js';
 
@@ -36,6 +37,7 @@ export const NAV_ITEMS = [
   { v: 'wiki', icon: <MenuBookIcon fontSize="small" />, label: 'Wiki' },
   { v: 'appearance', icon: <PaletteIcon fontSize="small" />, label: 'Appearance' },
   { v: 'status', icon: <CloudSyncIcon fontSize="small" />, label: 'Status' },
+  { v: 'settings', icon: <KeyboardIcon fontSize="small" />, label: 'Settings' },
 ];
 
 const SPARK_WINDOWS = [[5, '5 min'], [30, '30 min'], [60, '1 hour']];

@@ -6,10 +6,12 @@
 export const CLAUDE_ALIASES = ['claude', 'best', 'fable', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]', 'opusplan'];
 export const OLLAMA_PRESETS = ['glm-5.2:cloud', 'kimi-k3:cloud'];
 // Codex presets (gpt-* family). Convenience defaults like the claude aliases —
-// free-text still passes any gpt-* id through to the codex bin.
+// free-text still passes any gpt-* id through to the codex bin. Every entry must
+// be a gpt-* id: web/src/lib/models.js mirrors isCodexModel() with a bare prefix
+// check (it can't fetch this list — it runs before /models resolves), so a
+// non-gpt preset would route wrong client-side. models.test.mjs enforces it.
 export const CODEX_PRESETS = ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-pro'];
 const ALIAS_SET = new Set(CLAUDE_ALIASES);
-const CODEX_SET = new Set(CODEX_PRESETS);
 
 // true → run via the `claude` bin (optional --model); false → ollama wrapper.
 // 'claude' is the default alias (no --model). Known aliases and full claude-*
@@ -18,11 +20,12 @@ export function isClaudeModel(model) {
   return !model || model === 'claude' || ALIAS_SET.has(model) || model.startsWith('claude-');
 }
 
-// true → run via the `codex` bin. Known codex presets and any gpt-* id route to
-// codex. Checked after isClaudeModel (claude ids never start with gpt-), so a
-// model is claude | codex | ollama in that order.
+// true → run via the `codex` bin. Every codex preset is a gpt-* id, so this is
+// just the prefix check. Checked after isClaudeModel
+// (claude ids never start with gpt-), so a model is claude | codex | ollama
+// in that order.
 export function isCodexModel(model) {
-  return !!model && (CODEX_SET.has(model) || model.startsWith('gpt-'));
+  return !!model && model.startsWith('gpt-');
 }
 
 // Trust-boundary check: reject a tool/model pairing that can't reach a valid

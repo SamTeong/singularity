@@ -1,5 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
 import { useCallback, useEffect, useMemo, useRef, useState, Suspense, lazy } from 'react';
+import { matches } from '@/lib/keys.js';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
 import Snackbar from '@mui/material/Snackbar';
@@ -24,9 +25,11 @@ import Sidebar from '@/shell/Sidebar.jsx';
 import SessionDock from '@/shell/SessionDock.jsx';
 import AppMenu, { NAV_ITEMS } from '@/shell/AppMenu.jsx';
 import { glass } from '@/shell/shellStyles.js';
-import { useShiftShift } from '@/features/palette/useShiftShift.js';
+import { useDoubleTap } from '@/features/palette/useDoubleTap.js';
 import CommandPalette from '@/features/palette/CommandPalette.jsx';
 import { buildCommands } from '@/features/palette/commands.mjs';
+import { isCodexModel } from '@/lib/models.js';
+import { useKeys } from '@/providers/KeysProvider.jsx';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
@@ -44,14 +47,13 @@ const TasksBoard = lazy(() => import('@/features/tasks/TasksBoard.jsx'));
 const CronJobs = lazy(() => import('@/features/automation/CronJobs.jsx'));
 const AppearanceView = lazy(() => import('@/features/appearance/AppearanceView.jsx'));
 const StatusView = lazy(() => import('@/features/status/StatusView.jsx'));
+const SettingsView = lazy(() => import('@/features/settings/SettingsView.jsx'));
 
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
 const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'sessions', 'explorer'];
 
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
-// Mirror of server isCodexModel: gpt-* id → codex-only model.
-const isCodexModel = (m) => !!m && m.startsWith('gpt-');
 
 // Glass snackbar content — MUI v9 dropped `ContentProps`, so this must go through
 // slotProps.content or SnackbarContent keeps its default (mode-inverted) colours.
@@ -68,6 +70,7 @@ export default function AppShell() {
     agents, active, setActive, connected, tasks, taskHistory, crons, background, recent,
     usage, stats, sendMsg, refreshUsage, registerChat, registerError,
   } = useAgents();
+  const { keys } = useKeys();
   const { toggle: toggleColorMode } = useColorMode();
   // The active skin optionally paints a full-bleed background behind the shell.
   const { skinId } = useThemeSkin();
@@ -81,7 +84,6 @@ export default function AppShell() {
   const [createInitialSessionId, setCreateInitialSessionId] = useState('');
   const [createInitialModel, setCreateInitialModel] = useState('');
   const [createInitialScopes, setCreateInitialScopes] = useState([]);
-  const [createInitialTool, setCreateInitialTool] = useState('');
   const [taskOpen, setTaskOpen] = useState(false);
   // false (closed) | true (create) | a cron job object (edit that row) — same
   // tri-state the Automation view uses for background defs.
@@ -117,22 +119,22 @@ export default function AppShell() {
 
   // Remember the selected view across skin remounts + reloads.
   useEffect(() => { localStorage.setItem('sing-view', view); }, [view]);
-  // Alt+Up/Down cycles More-menu views (xterm + cm-editor handle own focus cases).
+  // Cycles More-menu views (xterm + cm-editor handle own focus cases).
   useEffect(() => {
     const onKey = (e) => {
-      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const dir = matches(keys.pagePrev, e) ? -1 : matches(keys.pageNext, e) ? 1 : 0;
+      if (!dir) return;
       const ae = document.activeElement;
       if (ae?.closest?.('.xterm') || ae?.closest?.('.cm-editor')) return; // xterm/cm handle own
       const idx = NAV_ITEMS.findIndex((n) => n.v === view);
       if (idx < 0) return;
       e.preventDefault();
-      const dir = e.key === 'ArrowUp' ? -1 : 1;
       const next = NAV_ITEMS[(idx + dir + NAV_ITEMS.length) % NAV_ITEMS.length];
       setView(next.v);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [view, setView]);
+  }, [view, setView, keys]);
 
   // Surface daemon 'error' frames as a toast (the provider owns no UI state).
   useEffect(() => registerError(setToast), [registerError]);
@@ -213,16 +215,17 @@ export default function AppShell() {
   };
 
   // Resume a past session from the Transcripts view: prefill the new-agent
-  // dialog with its id + cwd + last model + last skill-scopes + tool, then create.
+  // dialog with its id + cwd + last model + last skill-scopes, then create.
   // Backend switches to --resume when the session log exists at cwd. Model is
   // the last used (from the transcript); skill-scopes come from the agent
   // registry (the transcript doesn't record them) — absent for non-Singularity sessions.
-  const onResumeSession = (id, cwd, model, scopes, tool) => {
+  // No tool is threaded through: the dialog requires a model before it will
+  // submit, and the model alone determines the tool.
+  const onResumeSession = (id, cwd, model, scopes) => {
     setCwd(cwd);
     setCreateInitialSessionId(id);
     setCreateInitialModel(model || '');
     setCreateInitialScopes(Array.isArray(scopes) ? scopes : []);
-    setCreateInitialTool(tool || 'claude');
     setCreateOpen(true);
   };
 
@@ -239,7 +242,7 @@ export default function AppShell() {
     viewTranscript, expandDock,
   }), [setView, view, agents, setActive, sendMsg, viewTranscript, expandDock]);
   const commands = useMemo(() => buildCommands(paletteCtx), [paletteCtx]);
-  useShiftShift(() => setPaletteOpen(true));
+  useDoubleTap(keys.paletteOpen, () => setPaletteOpen(true));
 
   return (
     <Box ref={mainRef} sx={{ position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -287,6 +290,7 @@ export default function AppShell() {
             {view === 'history' && <HistoryView onOpenSession={openHistorySession} />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} />}
             {view === 'status' && <StatusView />}
+            {view === 'settings' && <SettingsView />}
             {view === 'skills' && <SkillsPanel />}
             {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} cwd={cwd} setCwd={setCwd} onBrowse={() => setPicking(true)} onAdd={() => setCronOpen(true)} onEdit={setCronOpen} onToast={setToast} />}
             {view === 'tasks' && (
@@ -367,7 +371,7 @@ export default function AppShell() {
 
       <CreateSessionDialog
         open={createOpen}
-        onClose={() => { setCreateOpen(false); setCreateInitialSessionId(''); setCreateInitialModel(''); setCreateInitialScopes([]); setCreateInitialTool(''); }}
+        onClose={() => { setCreateOpen(false); setCreateInitialSessionId(''); setCreateInitialModel(''); setCreateInitialScopes([]); }}
         connected={connected}
         cwd={cwd}
         setCwd={setCwd}
@@ -378,7 +382,6 @@ export default function AppShell() {
         initialSessionId={createInitialSessionId}
         initialModel={createInitialModel}
         initialScopes={createInitialScopes}
-        initialTool={createInitialTool}
       />
 
       <CreateTaskDialog

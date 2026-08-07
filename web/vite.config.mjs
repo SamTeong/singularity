@@ -60,6 +60,7 @@ export default defineConfig({
       '/crons': 'http://127.0.0.1:4317',
       '/background': 'http://127.0.0.1:4317',
       '/history': 'http://127.0.0.1:4317',
+      '/keys': 'http://127.0.0.1:4317',
     },
   },
   build: {

@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { matches } from '@/lib/keys.js';
+import { useKeys } from '@/providers/KeysProvider.jsx';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -46,6 +48,7 @@ export default function ConfigEditor() {
   // the user curates one set.
   const claudeRoots = useRootList('/config', { initial: ['~'] });
   const codexRoots = useRootList('/codex-config', { initial: ['~'] });
+  const { keys } = useKeys();
   const { ensureSaved, dialogEl } = useDirtyGuard();
 
   const [tabs, setTabs] = useState([]); // [{path, cwd, tool, scope, dirty, mtime}]
@@ -236,27 +239,27 @@ export default function ConfigEditor() {
     setMsg(null);
   }, [save]);
 
-  // Alt+Up/Down cycles editor tabs when this panel's CodeMirror has focus.
+  // Cycles editor tabs when this panel's CodeMirror has focus.
   // key={active} remounts CmEditor on switch, so refocus the new cm-content
   // one frame after switchActive (remount lands on next render).
   const editorHostRef = useRef(null);
   useEffect(() => {
     const onKey = (e) => {
-      if (!e.altKey || (e.key !== 'ArrowUp' && e.key !== 'ArrowDown')) return;
+      const dir = matches(keys.editorTabPrev, e) ? -1 : matches(keys.editorTabNext, e) ? 1 : 0;
+      if (!dir) return;
       const ae = document.activeElement;
       if (!ae?.closest?.('.cm-editor')) return;
       if (tabs.length < 2) return;
       e.preventDefault();
       const idx = tabs.findIndex((t) => t.path === active);
       if (idx < 0) return;
-      const dir = e.key === 'ArrowUp' ? -1 : 1;
       const next = tabs[(idx + dir + tabs.length) % tabs.length];
       switchActive(next.path);
       requestAnimationFrame(() => editorHostRef.current?.querySelector('.cm-content')?.focus());
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [tabs, active, switchActive]);
+  }, [tabs, active, switchActive, keys]);
 
   const openFile = async (cwd, tool, scope) => {
     const d = await readRoot(tool, cwd);

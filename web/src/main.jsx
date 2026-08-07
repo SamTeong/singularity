@@ -1,6 +1,7 @@
 import { createRoot } from 'react-dom/client';
 import '@zapac/mui-theme/fonts';
 import { AppThemeProvider } from '@/theme/index.js';
+import { KeysProvider } from '@/providers/KeysProvider.jsx';
 import App from '@/App.jsx';
 import '@xterm/xterm/css/xterm.css';
 import '@/style.css';
@@ -29,6 +30,8 @@ if (window.__SING_TOKEN__) {
 
 createRoot(document.getElementById('root')).render(
   <AppThemeProvider defaultMode="dark">
-    <App />
+    <KeysProvider>
+      <App />
+    </KeysProvider>
   </AppThemeProvider>,
 );

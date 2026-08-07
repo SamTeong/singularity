@@ -1,6 +1,8 @@
 import { getTokens } from '@/theme/contract.js';
 import { useRef } from 'react';
 import { motion, AnimatePresence, useScroll, useTransform, useSpring, useReducedMotion } from 'framer-motion';
+import { matches } from '@/lib/keys.js';
+import { useKeys } from '@/providers/KeysProvider.jsx';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -104,6 +106,7 @@ export function ShimmerCard() {
  */
 export function DayHeader({ entry, expanded, onToggle, onRegenerate, regenerating, onArrowNav, headerRef }) {
   const reduceMotion = useReducedMotion();
+  const { keys } = useKeys();
   const m = entry.metrics || {};
   const isToday = !!entry.live;
   const panelId = `history-day-${entry.date}`;
@@ -111,9 +114,10 @@ export function DayHeader({ entry, expanded, onToggle, onRegenerate, regeneratin
   const ariaLabel = `${fmtDateLabel(entry.date)}, ${sessionsLabel}`;
 
   const onHeaderKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
-    else if (e.key === 'ArrowDown') { e.preventDefault(); onArrowNav(1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); onArrowNav(-1); }
+    // a11y: role="button" must always activate on Enter/Space (WCAG) — the custom dayToggle binding is additive, never a replacement.
+    if (matches(keys.dayToggle, e) || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
+    else if (matches(keys.dayNext, e)) { e.preventDefault(); onArrowNav(1); }
+    else if (matches(keys.dayPrev, e)) { e.preventDefault(); onArrowNav(-1); }
   };
 
   return (
@@ -189,6 +193,7 @@ export function DayHeader({ entry, expanded, onToggle, onRegenerate, regeneratin
  */
 export default function DayCard({ card, date, expanded, onToggle, onOpenSession, scrollRef, skipEntranceAnim, revealIndex = 0, compact = false }) {
   const reduceMotion = useReducedMotion();
+  const { keys } = useKeys();
   const bandRef = useRef(null);
 
   const { scrollYProgress } = useScroll({ target: bandRef, container: scrollRef, offset: ['start end', 'end start'] });
@@ -219,7 +224,8 @@ export default function DayCard({ card, date, expanded, onToggle, onOpenSession,
     : { initial: 'hidden', whileInView: 'visible', viewport: { once: true, margin: '-10% 0px' } };
 
   const onHeaderKeyDown = (e) => {
-    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
+    // a11y: role="button" must always activate on Enter/Space (WCAG) — the custom dayToggle binding is additive, never a replacement.
+    if (matches(keys.dayToggle, e) || e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); }
   };
 
   return (
