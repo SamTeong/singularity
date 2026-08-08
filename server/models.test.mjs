@@ -23,7 +23,8 @@ test('isClaudeModel: every ollama preset routes to the ollama wrapper', () => {
 
 test('isClaudeModel: unrecognized ollama-style ids → false', () => {
   assert.equal(isClaudeModel('glm-5.2:cloud'), false);
-  assert.equal(isClaudeModel('kimi-k3:cloud'), false);
+  assert.equal(isClaudeModel('deepseek-v4-flash:cloud'), false);
+  assert.equal(isClaudeModel('kimi-k2.7-code:cloud'), false);
 });
 
 test('isCodexModel: every codex preset routes to the codex bin', () => {
