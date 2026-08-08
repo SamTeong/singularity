@@ -406,8 +406,11 @@ function newestCodexRollouts(maxFiles, maxDateDirs) {
     .map(([f]) => f);
 }
 
-// Bounded fallback scan: newest 5 rollout files across the newest 2 date dirs.
-const CODEX_ROLLOUT_SCAN_CAP = 5;
+// Bounded fallback scan: newest 20 rollout files across the newest 2 date dirs.
+// Launching Codex without taking a turn leaves a session_meta-only stub rollout
+// with no rate_limits — a handful of those would exhaust a tighter cap and hide
+// the newest real reading behind a "no Codex sessions found" error.
+const CODEX_ROLLOUT_SCAN_CAP = 20;
 const CODEX_DATE_DIR_SCAN_CAP = 2;
 
 export async function fetchCodex() {
