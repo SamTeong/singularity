@@ -63,13 +63,18 @@ export default function AppearanceView({ onToggleColorMode }) {
   const supportsColorMode = activeSkin?.supportsColorMode !== false;
 
   return (
-    <Box sx={{ height: '100%', overflow: 'auto', p: 3 }}>
-      <Typography variant="h6" sx={{ fontWeight: 700 }}>Appearance</Typography>
-      <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5, mb: 3 }}>
-        Choose a visual theme for the interface.
-      </Typography>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* minHeight matches the small-button header bars (button 42 + padding 28 + 1px border)
+          so the title centers level with pages carrying a top-right control. */}
+      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', minHeight: 71, borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
+        <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Appearance</Typography>
+      </Stack>
+      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+          Choose a visual theme for the interface.
+        </Typography>
 
-      {/* Theme skin */}
+        {/* Theme skin */}
       <Typography component="h2" sx={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'text.secondary', mb: 1 }}>
         Theme
       </Typography>
@@ -108,6 +113,7 @@ export default function AppearanceView({ onToggleColorMode }) {
           {activeSkin?.label ?? 'This theme'} is dark-only.
         </Typography>
       )}
+      </Box>
     </Box>
   );
 }

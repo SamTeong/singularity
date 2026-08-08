@@ -413,7 +413,9 @@ export default function HistoryView({ onOpenSession }) {
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
+      {/* minHeight matches the small-button header bars (button 42 + padding 28 + 1px border)
+          so the title centers level with pages carrying a top-right control. */}
+      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', minHeight: 71, borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
         <Typography sx={{ fontSize: 20, fontWeight: 600 }}>History</Typography>
         <Tooltip title="Each card's left edge splits by harness in proportion to that project's turns; its opacity tracks the day's token volume." disableInteractive>
           <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', ml: 1, cursor: 'help' }}>

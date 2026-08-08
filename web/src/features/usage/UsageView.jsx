@@ -85,20 +85,20 @@ export default function UsageView({ usage, onRefresh }) {
   const caps = useCapabilities();
   return (
     <Stack sx={{ height: '100%', minHeight: 0 }}>
-      <Stack sx={{ p: 3, pb: 2, flexShrink: 0 }} spacing={2}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <IconButton
-            size="small"
-            onClick={() => setOpen((o) => !o)}
-            aria-label={open ? 'Collapse usage' : 'Expand usage'}
-            sx={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .2s' }}
-          >
-            <ExpandMoreIcon />
-          </IconButton>
-          <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Usage</Typography>
-          <Box sx={{ flex: 1 }} />
-          <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
-        </Stack>
+      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
+        <IconButton
+          size="small"
+          onClick={() => setOpen((o) => !o)}
+          aria-label={open ? 'Collapse usage' : 'Expand usage'}
+          sx={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .2s' }}
+        >
+          <ExpandMoreIcon />
+        </IconButton>
+        <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Usage</Typography>
+        <Box sx={{ flex: 1 }} />
+        <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
+      </Stack>
+      <Box sx={{ flexShrink: 0, p: 2 }}>
         <Collapse in={open}>
           <Stack spacing={2}>
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
@@ -109,9 +109,9 @@ export default function UsageView({ usage, onRefresh }) {
             </Box>
           </Stack>
         </Collapse>
-      </Stack>
+      </Box>
       {/* Usage report (harness-usage-report skill) fills the rest of the pane. */}
-      <Box sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${getTokens(t).glass.stroke}` })}>
+      <Box sx={{ flex: 1, minHeight: 0 }}>
         <UsageReportView />
       </Box>
     </Stack>

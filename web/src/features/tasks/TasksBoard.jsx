@@ -246,16 +246,17 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   );
 
   return (
-    <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-        <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Tasks</Typography>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
+        <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Tasks</Typography>
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={showHistory ? <ViewKanbanOutlinedIcon /> : <HistoryIcon />} onClick={() => setShowHistory((v) => !v)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>
           {showHistory ? 'Board' : 'History'}
         </Button>
         <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Task</Button>
       </Stack>
-      {allTags.length > 0 && (
+      <Stack sx={{ flex: 1, minHeight: 0, p: 2 }} spacing={1}>
+        {allTags.length > 0 && (
         <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
           {allTags.map((tag) => {
             const on = activeTags.has(tag);
@@ -457,6 +458,7 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
           {dock}
         </Stack>
       )}
-    </Stack>
+      </Stack>
+    </Box>
   );
 }

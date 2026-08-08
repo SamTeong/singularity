@@ -14,6 +14,7 @@ import MenuItem from '@mui/material/MenuItem';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { ACTIONS, DEFAULTS, formatBinding, bindingFromEvent } from '@/lib/keys.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
+import { getTokens } from '@/theme/contract.js';
 
 const GROUPS = [...new Set(ACTIONS.map((a) => a.group))];
 const DOUBLE_TAP_KEYS = ['Shift', 'Control', 'Alt', 'Meta'];
@@ -110,17 +111,18 @@ export default function SettingsView() {
   }, [keys]);
 
   return (
-    <Box sx={{ height: '100%', overflow: 'auto', p: 3 }}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
-        <Typography variant="h6" sx={{ fontWeight: 700 }}>Keyboard shortcuts</Typography>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
+        <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Keyboard shortcuts</Typography>
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={<RestartAltIcon />} onClick={resetAll}>Reset all</Button>
       </Stack>
-      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
-        Customize the shortcuts used across the app. Changes apply immediately.
-      </Typography>
+      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
+        <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>
+          Customize the shortcuts used across the app. Changes apply immediately.
+        </Typography>
 
-      {GROUPS.map((group) => (
+        {GROUPS.map((group) => (
         <Box key={group} sx={{ mb: 3 }}>
           <Typography component="h2" sx={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'text.secondary', mb: 1 }}>
             {group}
@@ -148,6 +150,7 @@ export default function SettingsView() {
           </List>
         </Box>
       ))}
+      </Box>
     </Box>
   );
 }
