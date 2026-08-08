@@ -250,15 +250,22 @@ export default function ConfigEditor() {
       const ae = document.activeElement;
       if (!ae?.closest?.('.cm-editor')) return;
       if (tabs.length < 2) return;
+      // Capture phase + stopPropagation: CodeMirror's defaultKeymap binds
+      // Alt-ArrowUp/Down to moveLineUp/moveLineDown, which fire on cm-content
+      // before a bubble-phase window listener — they'd mutate the outgoing
+      // tab's doc (e.g. drag the opening { off line 1 → invalid JSON) before
+      // the switch. Capture runs first; stopPropagation keeps cm-content from
+      // ever seeing the tab-cycle keys.
       e.preventDefault();
+      e.stopPropagation();
       const idx = tabs.findIndex((t) => t.path === active);
       if (idx < 0) return;
       const next = tabs[(idx + dir + tabs.length) % tabs.length];
       switchActive(next.path);
       requestAnimationFrame(() => editorHostRef.current?.querySelector('.cm-content')?.focus());
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [tabs, active, switchActive, keys]);
 
   const openFile = async (cwd, tool, scope) => {

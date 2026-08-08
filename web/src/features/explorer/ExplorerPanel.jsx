@@ -222,15 +222,20 @@ export default function ExplorerPanel() {
       const ae = document.activeElement;
       if (!ae?.closest?.('.cm-editor')) return;
       if (tabs.length < 2) return;
+      // Capture phase + stopPropagation: keeps CodeMirror's defaultKeymap
+      // (Alt-ArrowUp/Down → moveLineUp/moveLineDown on cm-content, fires
+      // before a bubble-phase window listener) from mutating the outgoing
+      // tab's doc before the switch.
       e.preventDefault();
+      e.stopPropagation();
       const idx = tabs.findIndex((t) => t.path === active);
       if (idx < 0) return;
       const next = tabs[(idx + dir + tabs.length) % tabs.length];
       switchActive(next.path);
       requestAnimationFrame(() => editorHostRef.current?.querySelector('.cm-content')?.focus());
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, [tabs, active, switchActive, keys]);
 
   const openFile = (path) => {
