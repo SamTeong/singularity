@@ -21,12 +21,26 @@ Pieces separately: `pnpm server` (daemon) / `pnpm web` (Vite dev server only —
 
 Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `PORT`, `CLAUDE_BIN` are REQUIRED; `OLLAMA_BIN` (absent → ollama models unavailable), `SING_SCOPE_ROOT` (absent → no skill-scopes; skills viewer auto-detects flat `~/.claude/skills` + `<project>/.claude/skills` vs grouped), `SING_TRUSTED_ROOT` (absent → default = this clone), `SING_USAGE_SKILL`/`SING_USAGE_REPORTS` (absent → usage-report degrade silently; `/capabilities` reports them), `SING_TOKEN` are OPTIONAL — daemon boots without any. MCP (lean-ctx) is auto-detected, not required. `pnpm bootstrap` generates a `.env` with these filled (detects `CLAUDE_BIN`) for first-time setup. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
 
-## Repo structure
+## File structure
 
 ```
 server/    daemon — Fastify routes (index.mjs) + feature modules, one *.mjs per concern, *.test.mjs co-located
 web/       React + MUI + xterm shell (src/), vite.config.mjs (dev proxy :5317 → :4317), dist/ (gitignored build)
-scripts/   ollama-login.mjs helper
+  src/
+    features/     one dir per surface — appearance, automation, config, config-hooks,
+                   explorer, history, memory, palette, processes, rules, sessions,
+                   settings, skills, status, tasks, transcripts, usage, wiki
+    components/   shared widgets (panelkit, Sparkline, CmEditor, …)
+    shell/        AppShell + AppMenu (lazy-loads each feature)
+    hooks/        React data hooks (useAgents, useSysStats, …)
+    lib/          small utilities
+    providers/    context providers
+    theme/        MUI theme
+e2e/       Playwright suite driving every UI flow against a throwaway sandbox daemon
+scripts/   bootstrap.mjs (first setup), demo-tasks.mjs, fix-pty-helper.mjs (postinstall +x),
+           ollama-login.mjs, reap-build-orphans.mjs (pnpm clean)
+vendor/    vendored tgz deps (@zapac/mui-theme) so install works offline
+assets/    screenshots
 ```
 
 Backend modules → routes in `server/index.mjs`. Add a concern = new module + route + co-located test.
