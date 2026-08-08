@@ -18,10 +18,10 @@ function ProviderCard({ label, u }) {
   const authHelp = {
     // Browser mode (error 'no-login') vs manual-cookie mode need different fixes.
     ollama: u?.error === 'no-login'
-      ? 'Sign-in expired. Run this once in a terminal: `npm run ollama-login`, then log in to ollama.com when the browser opens.'
-      : 'Sign-in expired. Open ~/.singularity/ollama.json and paste in a fresh cookie and browser ID from a logged-in ollama.com tab (these expire, so you may need to repeat this now and then) — or just run `npm run ollama-login` once to sign in automatically instead.',
-    claude: 'No usage data yet — start a new chat with a Claude model and it will show up here.',
-    codex: 'No Codex usage data yet — run Codex once and its weekly limit will show up here.',
+      ? 'Fresh auth required. Run "npm run ollama-login" in a terminal, then log in to ollama.com when the browser opens.'
+      : 'Fresh auth required. Run "npm run ollama-login" in a terminal, or paste a fresh cookie and browser ID from a logged-in ollama.com tab into state/ollama.json.',
+    claude: 'No usage data yet — run Claude Code to update.',
+    codex: 'No usage data yet — run Codex to update.',
   };
   return (
     <Box sx={(t) => ({ p: 2, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}>
@@ -52,7 +52,13 @@ function ProviderCard({ label, u }) {
               providers. */}
           {label.toLowerCase() === 'codex' && (
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-              As of {new Date(u.fetchedAt).toLocaleString()}
+              Last updated on {new Date(u.fetchedAt).toLocaleString()}
+              {/* Reading outlives its own window: Codex logs limits only on a real
+                  turn, so after a reset with no turns since, these bars show a
+                  window that already rolled over — otherwise Refresh looks broken
+                  when it faithfully returns the same old record. */}
+              {u.weekly?.resetsAt && new Date(u.weekly.resetsAt) < new Date() &&
+                ', window has since reset, run Codex to update.'}
             </Typography>
           )}
         </Stack>
