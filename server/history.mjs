@@ -407,11 +407,14 @@ export async function liveToday(root) {
   const windowStart = startOfLocalDay(new Date()).getTime();
   const scanned = await scanDays(windowStart, root);
   const agg = scanned.get(date) || emptyDayAgg();
-  const repos = [...new Set(agg.sessions.map((s) => repoName(s.cwd || s.project)).filter(Boolean))];
+  // Same noise filter as buildDayEntry: dropped from the session list + repos,
+  // but metrics still count their turns/spend (buildDayEntry keeps dayAgg.metrics).
+  const sessions = agg.sessions.filter((s) => !isNoiseSession(s));
+  const repos = [...new Set(sessions.map((s) => repoName(s.cwd || s.project)).filter(Boolean))];
   return {
     date, live: true,
     repos,
-    sessions: agg.sessions.map((s) => ({ id: s.id, project: s.project, cwd: s.cwd, source: s.source, title: s.title, turns: s.turns, dayTurns: s.dayTurns, blurb: blurbOf(s.userTexts) })),
+    sessions: sessions.map((s) => ({ id: s.id, project: s.project, cwd: s.cwd, source: s.source, title: s.title, turns: s.turns, dayTurns: s.dayTurns, blurb: blurbOf(s.userTexts) })),
     metrics: { ...agg.metrics, costUsd: Math.round(agg.metrics.costUsd * 100) / 100 },
   };
 }
