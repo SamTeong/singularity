@@ -180,6 +180,11 @@ if (existsSync(webDist)) {
   // Serve the shell via a route so the token can be injected for the client.
   app.get('/', async (req, reply) => {
     let html = readFileSync(join(webDist, 'index.html'), 'utf8');
+    // Home dir goes in with the token: tildify/untildify (web/src/lib/paths.js)
+    // used to learn it from an async GET /env, so a tab that raced or missed
+    // that one fetch kept `~` unresolved for its whole lifetime — it then sent
+    // a literal '~' cwd on session create. Synchronous, no fetch, no race.
+    html = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(homedir())};</script></head>`);
     if (TOKEN) html = html.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(TOKEN)};</script></head>`);
     reply.type('text/html').send(html);
   });

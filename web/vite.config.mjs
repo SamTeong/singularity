@@ -1,4 +1,5 @@
 import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
@@ -8,16 +9,19 @@ import react from '@vitejs/plugin-react';
 const srcDir = fileURLToPath(new URL('./src', import.meta.url));
 
 // Phase 1: Vite dev server proxies WS to the daemon on 4317.
-// Dev-only mirror of the daemon's serve-time SING_TOKEN injection (index.mjs) —
-// without it the Vite-served shell has no window.__SING_TOKEN__ and every data
-// call 401s. apply:'serve' keeps the token out of the built dist/index.html
-// (the daemon injects at serve time there; baking it into dist would persist it).
+// Dev-only mirror of the daemon's serve-time SING_TOKEN + home injection
+// (index.mjs) — without it the Vite-served shell has no window.__SING_TOKEN__
+// (every data call 401s) and no window.__SING_HOME__ (`~` never resolves).
+// apply:'serve' keeps both out of the built dist/index.html (the daemon injects
+// at serve time there; baking the token into dist would persist it).
 const singTokenInject = {
   name: 'sing-token-inject',
   apply: 'serve',
   transformIndexHtml(html) {
     const t = process.env.SING_TOKEN;
-    return t ? html.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(t)};</script></head>`) : html;
+    let out = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(homedir())};</script></head>`);
+    if (t) out = out.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(t)};</script></head>`);
+    return out;
   },
 };
 
