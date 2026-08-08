@@ -48,6 +48,9 @@
   --grain:0.05;
 }
 *{box-sizing:border-box}
+/* ponytail: standard scrollbar-* only (Chrome 121+/FF/Safari 18.4+) -- no ::-webkit-scrollbar
+   twin. Older engines just get the default bar, which is the pre-existing look anyway. */
+*{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
 html{background:var(--paper);scroll-behavior:smooth}
 body{font-family:var(--sans);margin:0;background:transparent;color:var(--ink);font-size:14px;line-height:1.55;-webkit-font-smoothing:antialiased;overflow-x:hidden;transition:color .5s ease}
 body::before{ /* ambient glow */
@@ -403,7 +406,7 @@ footer code{background:color-mix(in srgb,var(--paper-2) 70%,transparent);padding
 .filterrail:hover .filterrail-rail,.filterrail:focus-within .filterrail-rail,.filterrail.open .filterrail-rail,.filterrail.pinned .filterrail-rail{
   opacity:0;pointer-events:none;transition:opacity .1s cubic-bezier(.23,1,.32,1)}
 .filterrail-panel{position:absolute;top:50%;left:0;z-index:1;width:216px;
-  max-height:min(calc(100vh - 3rem),480px);overflow-y:auto;padding:8px;
+  max-height:calc(100vh - 3rem);overflow-y:auto;padding:8px;
   background:var(--surface);border:1px solid var(--card-brd);border-radius:var(--r-lg);
   box-shadow:var(--card-shadow);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);
   transform-origin:left center;transform:translateY(-50%) translateX(-6px) scale(.97);opacity:0;pointer-events:none;
