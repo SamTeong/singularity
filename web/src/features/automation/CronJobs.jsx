@@ -182,8 +182,13 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
   };
 
   return (
-    <Stack sx={{ height: '100%', p: 1.5, pb: 1 }} spacing={1.5}>
-      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      {/* minHeight matches the small-button header bars (button 42 + padding 28 + 1px border)
+          so the title centers level with pages carrying a top-right control. */}
+      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', minHeight: 71, borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
+        <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Automation</Typography>
+      </Stack>
+      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', p: 2 }}>
         {/* Scheduled (cron) section */}
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Scheduled</Typography>
@@ -425,6 +430,6 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
         onBrowse={onBrowse}
         onToast={onToast}
       />
-    </Stack>
+    </Box>
   );
 }

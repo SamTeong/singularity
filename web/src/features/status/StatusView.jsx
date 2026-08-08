@@ -135,21 +135,23 @@ export default function StatusView() {
     : null;
 
   return (
-    <Stack sx={{ height: '100%', overflow: 'auto', p: 3 }} spacing={2}>
-      <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
         <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Provider status</Typography>
         <Box sx={{ flex: 1 }} />
         {freshest && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>updated {ago(freshest)}</Typography>}
         <Button size="small" startIcon={<RefreshIcon />} disabled={loading && !status} onClick={() => pull(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
       </Stack>
-      <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-        Live availability of upstream provider status pages. Polls every 30 seconds while this page is open.
-      </Typography>
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
-        {loading && !status
-          ? [0, 1].map((i) => <Box key={i} sx={(t) => ({ p: 2.5, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography></Box>)
-          : Object.values(status || {}).map((p) => <ProviderCard key={p.key} p={p} />)}
+      <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
+        <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>
+          Live availability of upstream provider status pages. Polls every 30 seconds while this page is open.
+        </Typography>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+          {loading && !status
+            ? [0, 1].map((i) => <Box key={i} sx={(t) => ({ p: 2.5, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography></Box>)
+            : Object.values(status || {}).map((p) => <ProviderCard key={p.key} p={p} />)}
+        </Box>
       </Box>
-    </Stack>
+    </Box>
   );
 }
