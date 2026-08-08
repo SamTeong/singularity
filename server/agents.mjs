@@ -397,8 +397,17 @@ function spawnPty(bin, args, opts) {
   }
 }
 
+// `~` is a shell-ism node never expands — a client that sends it raw (or whose
+// home dir hasn't loaded yet) would spawn into a literal '~' directory. Same
+// 2-liner config.mjs/hooks.mjs/rules.mjs/memory.mjs use on their own inputs.
+export function untildify(p) {
+  if (p === '~' || p?.startsWith('~/') || p?.startsWith('~\\')) return join(homedir(), p.slice(1));
+  return p;
+}
+
 // create new agent (id IS the claude --session-id)
 export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt, threadId }) {
+  cwd = untildify(cwd);
   const id = (sessionId && sessionId.trim()) || randomUUID();
   const existing = agents.get(id);
   if (existing) {

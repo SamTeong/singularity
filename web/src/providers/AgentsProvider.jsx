@@ -12,7 +12,6 @@
  * stays in the shell, not here.
  */
 import { createContext, use, useCallback, useEffect, useRef, useState } from 'react';
-import { setHome } from '@/lib/paths.js';
 
 const WS_URL = `ws://${location.host}/ws${window.__SING_TOKEN__ ? `?token=${encodeURIComponent(window.__SING_TOKEN__)}` : ''}`;
 
@@ -120,9 +119,6 @@ export function AgentsProvider({ children }) {
     document.addEventListener('visibilitychange', onVis);
     return () => document.removeEventListener('visibilitychange', onVis);
   }, []);
-
-  // Home dir, for tildify() to collapse full paths to `~` on display.
-  useEffect(() => { fetch('/env').then((r) => r.json()).then((d) => setHome(d.home)).catch(() => {}); }, []);
 
   // Persist the selected session so a reload re-selects it, not agents[0].
   useEffect(() => {

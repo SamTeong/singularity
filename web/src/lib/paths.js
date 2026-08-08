@@ -1,6 +1,9 @@
 // ~-collapse presentation layer. Pure frontend — the backend only ever sees
 // full paths. tildify() for display, untildify() before any fetch/WS send.
-let HOME = '';
+// Seeded synchronously from the shell (daemon + Vite both inject
+// window.__SING_HOME__ into index.html) — an async fetch here meant one dropped
+// request left `~` unresolved for the tab's lifetime. setHome stays for tests.
+let HOME = (typeof window !== 'undefined' && window.__SING_HOME__) || '';
 export const setHome = (h) => { HOME = h || ''; };
 
 const escSeg = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

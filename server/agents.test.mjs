@@ -74,7 +74,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor } = await import('./agents.mjs');
+const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor } = await import('./agents.mjs');
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -92,6 +92,13 @@ test('encodeCwd replaces every non-alphanumeric (incl. dots) with "-"', () => {
   assert.equal(encodeCwd('C:\\git\\singularity'), 'C--git-singularity');
   assert.equal(encodeCwd('C:\\Users\\x\\.claude'), 'C--Users-x--claude');
   assert.equal(encodeCwd('/home/u/proj'), '-home-u-proj');
+});
+
+test('untildify expands `~` and `~/x` (a raw client cwd must not spawn into a literal "~")', () => {
+  assert.equal(untildify('~'), homedir());
+  assert.equal(untildify('~/proj'), join(homedir(), 'proj'));
+  assert.equal(untildify('C:\\git\\x'), 'C:\\git\\x'); // no leading ~ → untouched
+  assert.equal(untildify('~notahome'), '~notahome');
 });
 
 // A random id has no session log on disk → fresh --session-id branch.
