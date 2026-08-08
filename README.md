@@ -24,6 +24,8 @@ pnpm dev             # daemon (127.0.0.1:4317) + Vite (127.0.0.1:5317) → brows
 
 Vite proxies `/ws` and all REST requests to daemon. Run components separately with `pnpm server` / `pnpm web`.
 
+Backend modules → routes in `server/index.mjs`. Add a concern = new module + route + co-located test. New server route → also add its prefix to the Vite dev proxy (`web/vite.config.mjs`), or dev falls through to the SPA shell.
+
 ## License
 
 MIT
@@ -39,10 +41,14 @@ MIT
 - **Skills** — view skills (grouped or ungrouped).
 - **Rules** — view and edit rules.
 - **Memory** — view and edit project memory.
+- **Explorer** — file-tree panel: browse and edit files with tabs, create/rename/delete.
 - **Transcripts** — view transcripts.
+- **History** — core-sample view of daily work, drilled down per session (live WS push).
 - **Wiki** — view wiki with linked pages.
+- **Appearance** — theme skin + light/dark mode.
+- **Status** — live availability of upstream provider status pages (polled).
+- **Settings** — view and customize keyboard shortcut bindings.
 - **Processes** — task manager for Claude processes.
-- **Light/Dark mode** — supports light and dark mode.
 
 ## Security
 

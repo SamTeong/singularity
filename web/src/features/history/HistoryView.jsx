@@ -9,20 +9,33 @@ import TextField from '@mui/material/TextField';
 import Snackbar from '@mui/material/Snackbar';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import Popover from '@mui/material/Popover';
+import Tabs from '@mui/material/Tabs';
+import Tab from '@mui/material/Tab';
+import Autocomplete from '@mui/material/Autocomplete';
+import Checkbox from '@mui/material/Checkbox';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
+import FilterAltIcon from '@mui/icons-material/FilterAlt';
 import { EmptyState } from '@zapac/mui-theme';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { repoName } from '@/lib/paths.js';
 import DayCard, { DayHeader, GapSegment, ShimmerCard, EASE_OUT } from '@/features/history/DayCard.jsx';
 
+// Normalize a cwd for keying: lowercase + forward slashes + stripped tail.
+// The agent records the same repo under different spellings across sessions
+// (e.g. "C:\\git\\singularity" vs "c:\\git\\singularity" — 380 vs 61 sessions
+// in the real archive), so keying on the raw string double-lists one repo.
+// Mirrors server/stats.mjs `normCwd`.
+const normCwd = (c) => (c || '').toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
+
 // The summarizer echoes each project's path back, but an LLM can normalize
 // slashes or drop a drive letter — fall back to matching on the repo name.
 function bulletsFor(entry, key) {
   const list = entry.projects || [];
-  const exact = list.find((p) => p.path === key);
+  const exact = list.find((p) => normCwd(p.path) === key);
   const byName = exact || list.find((p) => repoName(p.path) === repoName(key));
   return byName?.bullets || [];
 }
@@ -34,7 +47,7 @@ function groupByProject(entry) {
   const total = entry.metrics?.turns || 0;
   const map = new Map();
   for (const s of entry.sessions || []) {
-    const key = s.cwd || s.project || 'unknown';
+    const key = normCwd(s.cwd || s.project || 'unknown');
     let g = map.get(key);
     if (!g) map.set(key, (g = { key, label: repoName(key) || key, bullets: bulletsFor(entry, key), sessions: [], metrics: { sessions: 0, turns: 0, tokens: 0, costUsd: 0, byHarness: {} } }));
     const turns = s.dayTurns ?? s.turns ?? 0;
@@ -64,10 +77,13 @@ const WINDOW_THRESHOLD = 60;
 const AVG_ROW_PX = 220; // rough header + card row height + gap, for windowing math only
 
 /** One archive row: a real entry, a still-summarizing placeholder, or both absent (never rendered). */
-function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef, reduceMotion, revealIndex, compact }) {
+function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regenerating, scrollRef, skipEntranceAnim, onArrowNav, headerRef, reduceMotion, revealIndex, compact, projectFilter }) {
   const isGap = row.entry?.llm?.reason === 'empty';
   const showShimmer = row.pending && !row.entry;
-  const groups = useMemo(() => (row.entry && !showShimmer && !isGap ? groupByProject(row.entry) : []), [row.entry, showShimmer, isGap]);
+  const allGroups = useMemo(() => (row.entry && !showShimmer && !isGap ? groupByProject(row.entry) : []), [row.entry, showShimmer, isGap]);
+  // ponytail: project filter is a client-side superset of the server range —
+  // a day still renders, only its non-matching cards drop out.
+  const groups = useMemo(() => (projectFilter.size ? allGroups.filter((g) => projectFilter.has(g.key)) : allGroups), [allGroups, projectFilter]);
   // Crossfade text + height-settle on placeholder -> resolved: the outer
   // `layout` spring handles height, this inner fade handles the swap.
   const fade = { initial: { opacity: 0 }, animate: { opacity: 1 }, exit: { opacity: 0 }, transition: { duration: reduceMotion ? 0 : 0.2 } };
@@ -205,6 +221,9 @@ export default function HistoryView({ onOpenSession }) {
   const [activeDate, setActiveDate] = useState(null);
   const [focusDate, setFocusDate] = useState(null); // pending keyboard-nav focus target while windowed-out
   const [winRange, setWinRange] = useState([0, Infinity]);
+  const [filterAnchor, setFilterAnchor] = useState(null);
+  const [filterTab, setFilterTab] = useState('timeframe'); // 'timeframe' | 'projects'
+  const [projectFilter, setProjectFilter] = useState(() => new Set()); // cwd keys; empty = all
   // Page-level exit/enter is keyed off the range itself (below) rather than a
   // counter bumped from an effect — same remount trigger, no extra render pass.
   const rangeKey = `${preset}:${customRange.from}:${customRange.to}`;
@@ -265,24 +284,56 @@ export default function HistoryView({ onOpenSession }) {
   const archiveMin = rows.length ? rows[rows.length - 1].date : todayLocal();
   const archiveMax = todayLocal();
 
+  // Distinct projects across the in-range days — the Projects tab's source.
+  // Keys are normalized cwds, so spelling variants of one repo collapse; if
+  // two genuinely-distinct repos still share a repoName, disambiguate with
+  // the parent dir so the dropdown never shows two identical labels.
+  const projects = useMemo(() => {
+    const byKey = new Map();
+    for (const r of rows) {
+      if (!r.entry || r.entry.llm?.reason === 'empty') continue;
+      for (const g of groupByProject(r.entry)) if (!byKey.has(g.key)) byKey.set(g.key, g.label);
+    }
+    const entries = [...byKey.entries()].map(([key, label]) => ({ key, label }));
+    const nameCount = new Map();
+    for (const e of entries) nameCount.set(e.label, (nameCount.get(e.label) || 0) + 1);
+    for (const e of entries) {
+      if (nameCount.get(e.label) > 1) {
+        const parts = e.key.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean);
+        e.label = `${e.label} · ${parts[parts.length - 2] || e.key}`;
+      }
+    }
+    return entries.sort((a, b) => a.label.localeCompare(b.label));
+  }, [rows]);
+
+  // Client-side project filter: empty set passes everything through, so the
+  // unfiltered path stays a plain identity (no per-row alloc).
+  const viewRows = useMemo(() => {
+    if (!projectFilter.size) return rows;
+    return rows.filter((r) => r.entry && (r.entry.sessions || []).some((s) => projectFilter.has(normCwd(s.cwd || s.project || 'unknown'))));
+  }, [rows, projectFilter]);
+
+  // The funnel tint: any deviation from the plain 7-day default reads as "on".
+  const filtersActive = projectFilter.size > 0 || preset !== '7';
+
   // Windowed render past the threshold — estimated uniform row height, no
   // virtualization dependency. Keyboard nav below can still jump outside the
   // current window; it retries focus once the target re-mounts.
-  const windowed = rows.length > WINDOW_THRESHOLD;
+  const windowed = viewRows.length > WINDOW_THRESHOLD;
   useEffect(() => {
     const el = scrollRef.current;
-    if (!el || !windowed) { setWinRange([0, rows.length]); return undefined; }
+    if (!el || !windowed) { setWinRange([0, viewRows.length]); return undefined; }
     let raf = 0;
     const update = () => {
       const top = el.scrollTop, vh = el.clientHeight;
-      setWinRange([Math.max(0, Math.floor((top - 800) / AVG_ROW_PX)), Math.min(rows.length, Math.ceil((top + vh + 800) / AVG_ROW_PX))]);
+      setWinRange([Math.max(0, Math.floor((top - 800) / AVG_ROW_PX)), Math.min(viewRows.length, Math.ceil((top + vh + 800) / AVG_ROW_PX))]);
     };
     update();
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(() => { raf = 0; update(); }); };
     el.addEventListener('scroll', onScroll);
     return () => el.removeEventListener('scroll', onScroll);
-  }, [windowed, rows.length]);
-  const visibleRows = windowed ? rows.slice(winRange[0], winRange[1]) : rows;
+  }, [windowed, viewRows.length]);
+  const visibleRows = windowed ? viewRows.slice(winRange[0], winRange[1]) : viewRows;
 
   // Scrollspy for the spine's sticky-label handoff: the topmost day currently
   // crossing the "active" band (top 30% of the viewport) wins.
@@ -311,13 +362,13 @@ export default function HistoryView({ onOpenSession }) {
   }, [focusDate, visibleRows]);
 
   const moveFocus = useCallback((fromDate, delta) => {
-    const idx = rows.findIndex((r) => r.date === fromDate);
+    const idx = viewRows.findIndex((r) => r.date === fromDate);
     // Skip past gap days and unresolved placeholders: neither renders a
     // focusable header, so landing on one strands focus on nothing.
     const focusable = (r) => r.entry && r.entry.llm?.reason !== 'empty';
     let j = idx + delta;
-    while (rows[j] && !focusable(rows[j])) j += delta;
-    const next = rows[j];
+    while (viewRows[j] && !focusable(viewRows[j])) j += delta;
+    const next = viewRows[j];
     if (!next) return;
     setKeyboardNav(true);
     setTimeout(() => setKeyboardNav(false), 400);
@@ -326,7 +377,7 @@ export default function HistoryView({ onOpenSession }) {
     const el2 = scrollRef.current;
     if (el2) el2.scrollTop = (idx + delta) * AVG_ROW_PX;
     setFocusDate(next.date);
-  }, [rows]);
+  }, [viewRows]);
 
   const toggle = useCallback((date) => setExpanded((s) => {
     const n = new Set(s);
@@ -380,9 +431,17 @@ export default function HistoryView({ onOpenSession }) {
             {compact ? <UnfoldMoreIcon fontSize="small" /> : <UnfoldLessIcon fontSize="small" />}
           </IconButton>
         </Tooltip>
-        {[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([p, label]) => (
-          <Chip key={p} label={label} size="small" clickable onClick={() => setPresetChip(p)} color={preset === p ? 'primary' : 'default'} variant={preset === p ? 'filled' : 'outlined'} />
-        ))}
+        <Tooltip title="Filter" disableInteractive>
+          <IconButton
+            size="small"
+            aria-label="Filter history"
+            aria-pressed={filtersActive}
+            onClick={(e) => setFilterAnchor(e.currentTarget)}
+            color={filtersActive ? 'primary' : 'default'}
+          >
+            <FilterAltIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
         <Tooltip title={regenerableRows.length ? `Regenerate summaries (${regenerableRows.length} day${regenerableRows.length === 1 ? '' : 's'} in range)` : 'No summaries to regenerate'} disableInteractive>
           <span>
             <IconButton
@@ -401,29 +460,21 @@ export default function HistoryView({ onOpenSession }) {
             </IconButton>
           </span>
         </Tooltip>
-        <TextField
-          type="date" size="small" label="From" value={customRange.from}
-          slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: archiveMin, max: archiveMax } }}
-          onChange={(e) => { setPreset('custom'); setCustomRange((r) => ({ ...r, from: e.target.value })); }}
-          sx={{ width: 150 }}
-        />
-        <TextField
-          type="date" size="small" label="To" value={customRange.to}
-          slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: archiveMin, max: archiveMax } }}
-          onChange={(e) => { setPreset('custom'); setCustomRange((r) => ({ ...r, to: e.target.value })); }}
-          sx={{ width: 150 }}
-        />
       </Stack>
 
       <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex' }}>
-        <Spine scrollRef={scrollRef} rows={rows} activeDate={activeDate} reduceMotion={reduceMotion} />
+        <Spine scrollRef={scrollRef} rows={viewRows} activeDate={activeDate} reduceMotion={reduceMotion} />
 
         <Box sx={{ flex: 1, minWidth: 0, p: 2, pl: 1 }}>
           {!loaded ? (
             <Typography sx={{ color: 'text.secondary' }}>Loading…</Typography>
-          ) : rows.length === 0 ? (
+          ) : viewRows.length === 0 ? (
             <Box sx={{ py: 4, display: 'grid', placeItems: 'center' }}>
-              <EmptyState icon={<TimelineIcon />} title="No history in this range" description="Pick a wider range, or wait for the daily archive to catch up." />
+              <EmptyState
+                icon={<TimelineIcon />}
+                title={rows.length ? 'No days match the selected projects' : 'No history in this range'}
+                description={rows.length ? 'Clear the project filter, or widen it to more projects.' : 'Pick a wider range, or wait for the daily archive to catch up.'}
+              />
             </Box>
           ) : (
             <LayoutGroup>
@@ -453,9 +504,10 @@ export default function HistoryView({ onOpenSession }) {
                         headerRef={(el) => { headerRefs.current[row.date] = el; }}
                         reduceMotion={reduceMotion}
                         compact={compact}
+                        projectFilter={projectFilter}
                       />
                     ))}
-                    {windowed && winRange[1] < rows.length && <Box sx={{ height: (rows.length - winRange[1]) * AVG_ROW_PX }} />}
+                    {windowed && winRange[1] < viewRows.length && <Box sx={{ height: (viewRows.length - winRange[1]) * AVG_ROW_PX }} />}
                   </Stack>
                 </motion.div>
               </AnimatePresence>
@@ -463,6 +515,67 @@ export default function HistoryView({ onOpenSession }) {
           )}
         </Box>
       </Box>
+
+      <Popover
+        open={!!filterAnchor}
+        anchorEl={filterAnchor}
+        onClose={() => setFilterAnchor(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+        slotProps={{ paper: { sx: { width: 300, display: 'flex', flexDirection: 'column' } } }}
+      >
+        <Tabs value={filterTab} onChange={(_, v) => setFilterTab(v)} sx={{ minHeight: 40, px: 1 }}>
+          <Tab value="timeframe" label="Timeframe" sx={{ minHeight: 40, textTransform: 'none' }} />
+          <Tab value="projects" label="Projects" sx={{ minHeight: 40, textTransform: 'none' }} />
+        </Tabs>
+        {filterTab === 'timeframe' ? (
+          <Stack spacing={1.5} sx={{ p: 2, pt: 1.5 }}>
+            <Stack direction="row" spacing={1}>
+              {[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([p, label]) => (
+                <Chip key={p} label={label} size="small" clickable onClick={() => setPresetChip(p)} color={preset === p ? 'primary' : 'default'} variant={preset === p ? 'filled' : 'outlined'} />
+              ))}
+            </Stack>
+            <TextField
+              type="date" size="small" label="From" value={customRange.from}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: archiveMin, max: archiveMax } }}
+              onChange={(e) => { setPreset('custom'); setCustomRange((r) => ({ ...r, from: e.target.value })); }}
+              sx={{ width: '100%' }}
+            />
+            <TextField
+              type="date" size="small" label="To" value={customRange.to}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: archiveMin, max: archiveMax } }}
+              onChange={(e) => { setPreset('custom'); setCustomRange((r) => ({ ...r, to: e.target.value })); }}
+              sx={{ width: '100%' }}
+            />
+          </Stack>
+        ) : (
+          <Box sx={{ p: 2, pt: 1.5 }}>
+            {projects.length === 0 ? (
+              <Typography sx={{ color: 'text.secondary', py: 1, fontSize: 13 }}>No projects in this range.</Typography>
+            ) : (
+              <Autocomplete
+                multiple
+                size="small"
+                disableCloseOnSelect
+                options={projects}
+                value={projects.filter((p) => projectFilter.has(p.key))}
+                onChange={(_, v) => setProjectFilter(new Set(v.map((p) => p.key)))}
+                getOptionLabel={(p) => p.label}
+                isOptionEqualToValue={(a, b) => a.key === b.key}
+                renderOption={({ key, ...props }, option, { selected }) => (
+                  <li {...props} key={key}>
+                    <Checkbox size="small" checked={selected} style={{ marginRight: 8 }} />
+                    {option.label}
+                  </li>
+                )}
+                renderInput={(params) => (
+                  <TextField {...params} label="Projects" placeholder="" />
+                )}
+              />
+            )}
+          </Box>
+        )}
+      </Popover>
 
       <Snackbar open={!!error} autoHideDuration={5000} onClose={() => setError(null)} message={error} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
     </Box>
