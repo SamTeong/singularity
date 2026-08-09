@@ -532,14 +532,24 @@ const PRICE = {
   // provider docs so their sessions (no billed total_cost_usd → est-only) attribute
   // correctly. _price_key does substring match in insertion order — keep the more
   // specific glm-5.2/glm-5.1 ABOVE glm-5 so "glm-5.2:cloud" matches 5.2, not 5.
-  // cache_create=0: GLM cache-write "limited-time free" (docs.z.ai); Kimi K3 has
-  // no cache-write fee (cache_read=0.30 is the 90% cache-hit discount). Kimi K2.7
-  // Code DOES charge cache_write=0.19 with no cache-read discount. Bump if promos end.
+  // cache_create=0: GLM cache-write "limited-time free" (docs.z.ai); Kimi K3 and
+  // K2.7 Code both bill cache_read = the cache-hit discount, no separate
+  // cache-write fee. K3 cache_read=0.30 (90% off $3.00); K2.7 cache_read=0.19
+  // (80% off $0.95). Bump if promos end.
   "glm-5.2": [1.4, 4.4, 0.26, 0.0], // docs.z.ai/guides/overview/pricing
   "glm-5.1": [1.4, 4.4, 0.26, 0.0], // docs.z.ai
   "glm-5": [1.0, 3.2, 0.2, 0.0], // docs.z.ai
-  "kimi-k3": [3.0, 15.0, 0.0, 0.30], // kimi.com/resources/kimi-k3-pricing
+  "kimi-k3": [3.0, 15.0, 0.30, 0.0], // kimi.com/resources/kimi-k3-pricing
   "kimi-k2.7-code": [0.95, 4.0, 0.19, 0.0], // kimi.com/resources/kimi-k2-7-code-pricing
+  // DeepSeek V4 (api-docs.deepseek.com/quick_start/pricing; via agentic-coding
+  // wiki sources/deepseek-pricing-src, fetched 2026-08-09). Routed through CC via
+  // proxy or :cloud tag. cache_read = cache-HIT rate (~98% discount, steepest in
+  // the table); cache_create=0 (no separate cache-write fee). 1M ctx bills flat
+  // USD — the page shows no >200k tier, so NO PRICE_ABOVE entry. Substring keys:
+  // neither overlaps an existing key; a bare "deepseek" key added later must go
+  // BELOW these.
+  "deepseek-v4-flash": [0.14, 0.28, 0.0028, 0.0], // DeepSeek-V4-Flash-0731
+  "deepseek-v4-pro": [0.435, 0.87, 0.003625, 0.0],
   // GPT-5.6 (openai.com/api/pricing; via claude-code wiki sources/openai-api-pricing
   // #flagship-models). 3 tiers only — no pro/mini/nano. cache_read=0.1×in,
   // cache_create=1.25×in. Substring match: keep the 3 specific keys here; a
