@@ -11,22 +11,13 @@ import { score } from './fuzzy.mjs';
 import { matches, formatBinding } from '@/lib/keys.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 
-// Presentational palette: props { commands, onRun, onClose }. Owns query + sel
+// Presentational palette: props { commands, onRun, onClose }. Owns query + selId
 // state, fuzzy filter, keyboard nav. No domain logic. Parent closes on every run.
 export default function CommandPalette({ commands, onRun, onClose }) {
   const [query, setQuery] = useState('');
-  const [sel, setSel] = useState(0);
+  const [selId, setSelId] = useState(null);
   const prevFocus = useRef(null);
   const { keys } = useKeys();
-
-  // Reset selection to top whenever the query changes — a render-time state
-  // adjustment (compared against the previous query) instead of an effect, so
-  // there's no extra render/paint between the query change and the reset.
-  const [prevQuery, setPrevQuery] = useState(query);
-  if (query !== prevQuery) {
-    setPrevQuery(query);
-    setSel(0);
-  }
 
   // Capture focus on mount, restore to the element focused before open on unmount.
   useEffect(() => {
@@ -45,13 +36,27 @@ export default function CommandPalette({ commands, onRun, onClose }) {
     return out.map((x) => x.c).slice(0, 50); // ponytail: cap; virtualize if >500
   }, [query, commands]);
 
-  // Group preserving filtered order; carry the filtered index for selection.
+  // Selection follows the command id, not the index — agents updates rebuild the
+  // command list (session:external appears/disappears on status flips), shifting
+  // indices under an index-based selection. Reset to the top on query change;
+  // fall back to the top if the selected command vanished.
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (query !== prevQuery) {
+    setPrevQuery(query);
+    setSelId(filtered[0]?.id ?? null);
+  }
+  const firstId = filtered[0]?.id ?? null;
+  if (selId !== firstId && !filtered.some((c) => c.id === selId)) {
+    setSelId(firstId);
+  }
+
+  // Group preserving filtered order.
   const groups = useMemo(() => {
     const m = new Map();
-    filtered.forEach((c, i) => {
+    filtered.forEach((c) => {
       const g = c.group || 'Commands';
       if (!m.has(g)) m.set(g, []);
-      m.get(g).push({ c, i });
+      m.get(g).push(c);
     });
     return [...m.entries()];
   }, [filtered]);
@@ -61,10 +66,23 @@ export default function CommandPalette({ commands, onRun, onClose }) {
 
   // Keyboard nav on the input — stopPropagation so ALT+Up/Down + xterm don't fire.
   const onKeyDown = (e) => {
-    if (matches(keys.paletteNext, e)) { e.preventDefault(); e.stopPropagation(); setSel((s) => (s + 1) % filtered.length); }
-    else if (matches(keys.palettePrev, e)) { e.preventDefault(); e.stopPropagation(); setSel((s) => (s - 1 + filtered.length) % filtered.length); }
-    else if (matches(keys.paletteRun, e)) { e.preventDefault(); e.stopPropagation(); if (filtered[sel]) onRun(filtered[sel]); }
-    else if (matches(keys.paletteClose, e)) { e.preventDefault(); e.stopPropagation(); onClose(); }
+    if (matches(keys.paletteNext, e)) {
+      e.preventDefault(); e.stopPropagation();
+      if (!filtered.length) return;
+      const cur = filtered.findIndex((c) => c.id === selId);
+      setSelId(filtered[(cur + 1) % filtered.length].id);
+    } else if (matches(keys.palettePrev, e)) {
+      e.preventDefault(); e.stopPropagation();
+      if (!filtered.length) return;
+      const cur = filtered.findIndex((c) => c.id === selId);
+      setSelId(filtered[(cur - 1 + filtered.length) % filtered.length].id);
+    } else if (matches(keys.paletteRun, e)) {
+      e.preventDefault(); e.stopPropagation();
+      const c = filtered.find((x) => x.id === selId) ?? filtered[0];
+      if (c) onRun(c);
+    } else if (matches(keys.paletteClose, e)) {
+      e.preventDefault(); e.stopPropagation(); onClose();
+    }
   };
 
   return (
@@ -92,8 +110,8 @@ export default function CommandPalette({ commands, onRun, onClose }) {
           {groups.map(([g, items]) => (
             <List key={g} dense disablePadding>
               <Typography component="div" sx={{ px: 2, py: 0.5, fontSize: 11, color: 'text.secondary', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{g}</Typography>
-              {items.map(({ c, i }) => (
-                <ListItemButton key={c.id} role="option" selected={i === sel} onClick={() => onRun(c)} sx={{ px: 2 }}>
+              {items.map((c) => (
+                <ListItemButton key={c.id} role="option" selected={c.id === selId} onClick={() => onRun(c)} sx={{ px: 2 }}>
                   <ListItemText primary={c.label} />
                   {c.hint && <Typography sx={{ fontSize: 11, color: 'text.secondary', ml: 1 }}>{c.hint}</Typography>}
                 </ListItemButton>

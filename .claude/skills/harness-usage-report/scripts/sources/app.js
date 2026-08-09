@@ -836,13 +836,14 @@ function onDateChange(){
   persistRange(range);setActivePreset(null);render(range);
 }
 function initControls(range){
-  var bar=el('rangeBar'),html='';
+  var bar=el('rangeBar'),html="<span class='filter-lbl'>Timeframe</span>";
   CFG.PRESETS.forEach(function(p){var on=p.id===range.preset;html+="<button class='range-preset"+(on?' active':'')+"' data-p='"+p.id+"' aria-pressed='"+(on?'true':'false')+"'>"+p.label+"</button>";});
   bar.innerHTML=html;
-  if(!el('harnessBar'))bar.insertAdjacentHTML('afterend',"<div id='harnessBar' class='filter-bar'></div>");
   // date pickers live in their own (currently hidden) container; presets still drive them
   var dp=el('datePickers');
   if(dp)dp.innerHTML="<input type='date' id='from' min='"+FIRST_DATE+"' max='"+LAST_DATE+"' value='"+range.from+"'><span class='sep'>→</span><input type='date' id='to' min='"+FIRST_DATE+"' max='"+LAST_DATE+"' value='"+range.to+"'>";
+  // harness filter sits below the date pickers — presets, then custom range, then harness
+  if(!el('harnessBar'))(dp||bar).insertAdjacentHTML('afterend',"<div id='harnessBar' class='filter-bar'></div>");
   bar.querySelectorAll('.range-preset').forEach(function(b){b.onclick=function(){applyPreset(b.dataset.p);};});
   if(el('from'))el('from').onchange=onDateChange;
   if(el('to'))el('to').onchange=onDateChange;
