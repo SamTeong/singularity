@@ -42,6 +42,10 @@ export const NAV_ITEMS = [
 
 const SPARK_WINDOWS = [[5, '5 min'], [30, '30 min'], [60, '1 hour']];
 
+// Views grouped after the divider, above Processes — still part of NAV_ITEMS so
+// the palette + page-prev/next cycle keep them.
+const SECONDARY_VIEWS = new Set(['appearance', 'status', 'settings']);
+
 /**
  * The "More" overflow menu: secondary nav (Config/Hooks/…/Wiki), the process
  * manager, a live machine CPU/RAM readout (polled only while the menu is open),
@@ -55,13 +59,19 @@ export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses
 
   return (
     <Menu anchorEl={anchorEl} open={open} onClose={onClose} keepMounted>
-      {NAV_ITEMS.map((item) => (
+      {NAV_ITEMS.filter((n) => !SECONDARY_VIEWS.has(n.v)).map((item) => (
         <MenuItem key={item.v} onClick={() => { onNavigate(item.v); onClose(); }}>
           <ListItemIcon>{item.icon}</ListItemIcon>
           <ListItemText>{item.label}</ListItemText>
         </MenuItem>
       ))}
       <Divider />
+      {NAV_ITEMS.filter((n) => SECONDARY_VIEWS.has(n.v)).map((item) => (
+        <MenuItem key={item.v} onClick={() => { onNavigate(item.v); onClose(); }}>
+          <ListItemIcon>{item.icon}</ListItemIcon>
+          <ListItemText>{item.label}</ListItemText>
+        </MenuItem>
+      ))}
       <MenuItem onClick={() => { onOpenProcesses(); onClose(); }}>
         <ListItemIcon><MonitorHeartIcon fontSize="small" /></ListItemIcon>
         <ListItemText>Processes</ListItemText>

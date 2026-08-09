@@ -11,6 +11,7 @@ import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import AddIcon from '@mui/icons-material/Add';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
 import ScheduleIcon from '@mui/icons-material/Schedule';
 import SpeedIcon from '@mui/icons-material/Speed';
@@ -70,6 +71,9 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
         {!collapsed && (
           <>
             <Typography component="span" sx={{ flex: 1, fontSize: 16, fontWeight: 700, lineHeight: 1, letterSpacing: '-0.01em' }}>Singularity</Typography>
+            <Tooltip title="Collapse rail" placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+              <IconButton onClick={() => setCollapsed(true)} size="small"><ChevronLeftIcon /></IconButton>
+            </Tooltip>
             <Tooltip title="More" placement="bottom" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
               <IconButton onClick={onOpenMenu} size="small"><MoreVertIcon /></IconButton>
             </Tooltip>
