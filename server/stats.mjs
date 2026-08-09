@@ -242,11 +242,14 @@ export function readCostFile(id) {
 // complete source. Rows are NOT strictly file-ordered by timestamp (batched
 // flushes), but cumulative cost is monotonic non-decreasing per session — so
 // the max cost across that session's rows is its final cost.
-// total_cost_usd is Anthropic-billed spend only: third-party sessions (glm,
-// codex, ollama) and any row the statusline never captured a cost for leave it
-// empty, and the skill's own report falls back to the trailing est_cost_usd
-// column for those. Without that fallback a day of mostly-third-party work
-// reads as a fraction of its real cost.
+// total_cost_usd is whatever Claude Code billed, and for third-party proxy
+// models (glm, codex, ollama) that figure is computed at Anthropic rates, so
+// it is simply wrong for those sessions — not absent, just inflated. The
+// skill owns the pricing table and populates the trailing est_cost_usd column
+// for exactly the rows whose billed figure is unusable: no captured cost at
+// all, or a third-party model. So est_cost_usd, when present, wins over
+// total_cost_usd here; Singularity keeps no pricing knowledge of its own for
+// this path.
 // session_id + total_cost_usd are the 2nd/3rd fields and never quoted (UUID +
 // number); est_cost_usd is the last field and also never quoted, so it's
 // everything after the final comma — the one quoted column (facets_json) sits
@@ -257,21 +260,37 @@ export function readStatsCsvCosts() {
   try {
     const st = statSync(STATS_CSV);
     if (st.mtimeMs === statsCsvCache.mtimeMs && st.size === statsCsvCache.size) return statsCsvCache.map;
-    const map = new Map();
+    const acc = new Map(); // id -> { est, billed, corrected }, each cost the max across that session's rows
     for (const line of readFileSync(STATS_CSV, 'utf8').split('\n')) {
       if (!line) continue;
       const parts = line.split(',', 3);
       if (parts.length < 3) continue;
       const id = parts[1];
       if (!id || id === 'session_id') continue;
-      const total = Number(parts[2]);
+      const estField = line.slice(line.lastIndexOf(',') + 1);
       // Number('') === 0 would slip past isFinite, so empty must fail explicitly.
-      const c = parts[2] !== '' && Number.isFinite(total) && total > 0
-        ? total
-        : Number(line.slice(line.lastIndexOf(',') + 1));
-      if (!Number.isFinite(c) || c <= 0) continue;
-      const prev = map.get(id);
-      if (prev === undefined || c > prev) map.set(id, c); // max cumulative = final
+      const est = estField !== '' ? Number(estField) : NaN;
+      const billed = Number(parts[2]);
+      const hasEst = Number.isFinite(est) && est > 0;
+      const hasBilled = Number.isFinite(billed) && billed > 0;
+      let a = acc.get(id);
+      if (!a) acc.set(id, (a = { est: 0, billed: 0, corrected: false }));
+      // Both columns on ONE row is the skill's third-party override — it writes
+      // an estimate next to a billed figure only when that billed figure is
+      // Anthropic-rate nonsense. An estimate on a row with no billed cost is
+      // just the ordinary no-statusline fallback and must not outrank a real
+      // billed total logged for the same session later.
+      if (hasEst && hasBilled) a.corrected = true;
+      if (hasEst && est > a.est) a.est = est;
+      if (hasBilled && billed > a.billed) a.billed = billed;
+    }
+    // Resolve per session, not per row: a third-party session still running
+    // after a rebuild also has statusline-appended billed-only rows, so picking
+    // the max across rows would resurrect the inflated Anthropic-rate figure.
+    const map = new Map();
+    for (const [id, a] of acc) {
+      const c = a.corrected ? a.est : Math.max(a.est, a.billed); // max cumulative = final
+      if (c > 0) map.set(id, c);
     }
     statsCsvCache.mtimeMs = st.mtimeMs; statsCsvCache.size = st.size; statsCsvCache.map = map;
     return map;

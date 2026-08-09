@@ -904,14 +904,14 @@ function _rebuild_stats_csv(excludeSid, files) {
     const stCost = st && st.cost !== null && st.cost !== undefined && st.cost !== "" ? String(st.cost) : "";
     const cost = (ex.total_cost_usd || "").trim() || stCost;
     if (cost) with_cost += 1;
-    // Token-estimated cost for sessions with no billed cost (no statusline).
+    // Token-estimated cost for sessions with no billed cost (no statusline) or
+    // third-party models (billed total_cost_usd uses wrong Anthropic rates).
     // Kept in a separate column so billed cost is never mixed with estimates.
-    // Recomputed each backfill for
-    // no-billed sessions (Phase G: subagent tokens folded in, so the estimate
-    // stays current as the fold / pricing logic changes). Billed sessions skip
-    // it entirely — total_cost_usd wins in the report.
+    // Recomputed each backfill for no-billed sessions (Phase G: subagent tokens
+    // folded in, so the estimate stays current). Anthropic-billed sessions skip it
+    // entirely — total_cost_usd wins in the report.
     let estCost = "";
-    if (!cost) {
+    if (!cost || _is_third_party(t.last_model)) {
       const c = computed_cost_from_transcript(p);
       if (c > 0) estCost = c.toFixed(4);
     }

@@ -150,19 +150,76 @@ test('readStatsCsvCosts: max cumulative cost per session wins (rows are not file
 
 test('readStatsCsvCosts: empty total_cost_usd falls back to trailing est_cost_usd', () => {
   mkdirSync(join(USAGE_REPORT_STATE, 'cost-state'), { recursive: true });
-  const third = randomUUID(), billed = randomUUID();
+  const third = randomUUID();
   // Real header, i.e. est_cost_usd last. A third-party session logs no
-  // total_cost_usd; a billed one logs both and total must still win.
+  // total_cost_usd, so the trailing estimate is the only usable figure.
   const lines = [
     'timestamp,session_id,total_cost_usd,last_model,input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,model_id,model_display_name,duration_ms,api_duration_ms,lines_added,lines_removed,rl_5h_pct,rl_7d_pct,context_pct,context_window_size,turns,tool_calls,start_epoch,facets_json,est_cost_usd',
     `2026-08-01 10:00:00,${third},,glm-5.2,100,10,0,0,glm-5.2:cloud,glm-5.2:cloud,1000,500,1,0,,,25,200000,1,2,1786000000,"{""tools"":{""Bash"":1,""Edit"":1}}",4.25`,
-    `2026-08-01 11:00:00,${billed},7.50,claude-opus-5,100,10,0,0,opus,Opus,1000,500,1,0,,,25,200000,1,2,1786000000,"{}",0.99`,
   ];
   writeFileSync(STATS_CSV, `${lines.join('\n')}\n`);
   try {
     const map = readStatsCsvCosts();
     assert.equal(map.get(third), 4.25, `est_cost_usd used when total is empty; got ${map.get(third)}`);
-    assert.equal(map.get(billed), 7.5, `total_cost_usd wins over est; got ${map.get(billed)}`);
+  } finally {
+    rmSync(STATS_CSV, { force: true });
+  }
+});
+
+test('readStatsCsvCosts: a row with both total_cost_usd and est_cost_usd resolves to the estimate, not the billed figure', () => {
+  mkdirSync(join(USAGE_REPORT_STATE, 'cost-state'), { recursive: true });
+  const id = randomUUID();
+  // Anthropic-rate billed figure for a glm session (306.76) vs. the skill's
+  // glm-priced estimate (128.72) — the estimate must win now that the skill
+  // owns the pricing decision.
+  const lines = [
+    'timestamp,session_id,total_cost_usd,last_model,input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,model_id,model_display_name,duration_ms,api_duration_ms,lines_added,lines_removed,rl_5h_pct,rl_7d_pct,context_pct,context_window_size,turns,tool_calls,start_epoch,facets_json,est_cost_usd',
+    `2026-08-01 12:00:00,${id},306.76,glm-5.2,100,10,0,0,glm-5.2:cloud,glm-5.2:cloud,1000,500,1,0,,,25,200000,1,2,1786000000,"{""tools"":{""Bash"":1,""Edit"":1}}",128.72`,
+  ];
+  writeFileSync(STATS_CSV, `${lines.join('\n')}\n`);
+  try {
+    const map = readStatsCsvCosts();
+    assert.equal(map.get(id), 128.72, `est_cost_usd should win over the inflated billed figure; got ${map.get(id)}`);
+  } finally {
+    rmSync(STATS_CSV, { force: true });
+  }
+});
+
+test('readStatsCsvCosts: est wins per session, not per row — a billed-only row appended after a rebuild cannot resurrect the inflated figure', () => {
+  mkdirSync(join(USAGE_REPORT_STATE, 'cost-state'), { recursive: true });
+  const id = randomUUID();
+  // A still-running glm session: the rebuild collapsed it to one est row, then
+  // the statusline appended another billed-only row for the same session.
+  const lines = [
+    'timestamp,session_id,total_cost_usd,last_model,input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,model_id,model_display_name,duration_ms,api_duration_ms,lines_added,lines_removed,rl_5h_pct,rl_7d_pct,context_pct,context_window_size,turns,tool_calls,start_epoch,facets_json,est_cost_usd',
+    `2026-08-01 12:00:00,${id},306.76,glm-5.2,100,10,0,0,glm-5.2:cloud,glm-5.2:cloud,1000,500,1,0,,,25,200000,1,2,1786000000,"{""tools"":{""Bash"":1}}",128.72`,
+    `2026-08-01 12:05:00,${id},311.40,glm-5.2,120,12,0,0,glm-5.2:cloud,glm-5.2:cloud,1200,600,1,0,,,26,200000,2,3,1786000300,"{""tools"":{""Bash"":2}}",`,
+  ];
+  writeFileSync(STATS_CSV, `${lines.join('\n')}\n`);
+  try {
+    const map = readStatsCsvCosts();
+    assert.equal(map.get(id), 128.72, `billed-only row must not outrank the estimate; got ${map.get(id)}`);
+  } finally {
+    rmSync(STATS_CSV, { force: true });
+  }
+});
+
+test('readStatsCsvCosts: an est-only row is the no-statusline fallback, not a third-party override — a later billed row still wins', () => {
+  mkdirSync(join(USAGE_REPORT_STATE, 'cost-state'), { recursive: true });
+  const id = randomUUID();
+  // Anthropic session backfilled before its statusline captured anything (est
+  // written on a row with NO billed cost), then the statusline logged the real
+  // cumulative total. Neither row carries both columns, so nothing was
+  // overridden and the larger billed figure is the truth.
+  const lines = [
+    'timestamp,session_id,total_cost_usd,last_model,input_tokens,output_tokens,cache_read_tokens,cache_creation_tokens,model_id,model_display_name,duration_ms,api_duration_ms,lines_added,lines_removed,rl_5h_pct,rl_7d_pct,context_pct,context_window_size,turns,tool_calls,start_epoch,facets_json,est_cost_usd',
+    `2026-08-01 09:00:00,${id},,claude-opus-5,100,10,0,0,claude-opus-5,Opus,1000,500,1,0,,,25,200000,1,2,1786000000,"{""tools"":{""Bash"":1}}",3.50`,
+    `2026-08-01 09:30:00,${id},12.00,claude-opus-5,900,90,0,0,claude-opus-5,Opus,9000,4500,4,1,,,40,200000,6,9,1786001800,"{""tools"":{""Bash"":4}}",`,
+  ];
+  writeFileSync(STATS_CSV, `${lines.join('\n')}\n`);
+  try {
+    const map = readStatsCsvCosts();
+    assert.equal(map.get(id), 12.00, `billed total must win over a stale est-only fallback; got ${map.get(id)}`);
   } finally {
     rmSync(STATS_CSV, { force: true });
   }
