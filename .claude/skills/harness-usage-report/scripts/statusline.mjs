@@ -6,8 +6,8 @@
 // (last write per session wins ≈ final snapshot). The harness-usage-report SessionEnd
 // hook then projects that JSON into stats.csv and archives it to sessions.jsonl.
 //
-// Everything below the contract renders the two-line status display: model,
-// context usage bar, cost, rate limits (5h/7d), dir, worktree, git status.
+// Everything below the contract renders the three-line status display: model,
+// context usage bar, cost / rate limits (5h/7d) / dir, worktree, git status.
 // Invoke explicitly: `node statusline.mjs` (Node is guaranteed on PATH; shebang
 // is not honoured on Windows).
 import { mkdirSync, writeFileSync, statSync } from "node:fs";
@@ -63,13 +63,6 @@ const fmtTokens = (n) => {
   if (n >= 1000) return roundHalfUp(n / 1000) + "k";
   return String(Math.trunc(n));
 };
-const makeBar = (pct) => {
-  const width = 10;
-  let filled = Math.floor((pct * width) / 100);
-  if (filled < 0) filled = 0;
-  if (filled > width) filled = width;
-  return "█".repeat(filled) + "░".repeat(width - filled);
-};
 
 // --- Fields ---
 const model = g("model", "display_name") || "Unknown Model";
@@ -82,15 +75,14 @@ const used = ["input_tokens", "output_tokens", "cache_creation_input_tokens", "c
   .reduce((s, k) => s + (cu[k] || 0), 0);
 const windowSize = g("context_window", "context_window_size");
 
-// --- Usage string + bar ---
+// --- Usage string ---
 let usedDisplay = 0, usageStr = "0%";
 if (used && windowSize) {
   usedDisplay = roundHalfUp((used / Number(windowSize)) * 100);
   if (usedDisplay < 0) usedDisplay = 0;
   usageStr = `${usedDisplay}% [${fmtTokens(used)}/${fmtTokens(windowSize)}]`;
 }
-const barPct = Math.min(usedDisplay, 100);
-const usageSeg = `${colorFor(usedDisplay)}${makeBar(barPct)} ${usageStr}${RESET}`;
+const usageSeg = `${colorFor(usedDisplay)}${usageStr}${RESET}`;
 
 // --- Cost ---
 const costStr = (totalCost !== null && totalCost !== undefined && totalCost !== "")
@@ -98,17 +90,8 @@ const costStr = (totalCost !== null && totalCost !== undefined && totalCost !== 
   : "$0.00";
 
 // --- Rate limits ---
-const nowSec = () => Math.floor(Date.now() / 1000);
-const fmtRelative = (resetTs) => {
-  const diff = Math.trunc(resetTs) - nowSec();
-  if (diff <= 0) return "now";
-  const hours = Math.floor(diff / 3600);
-  const mins = Math.floor((diff % 3600) / 60);
-  if (hours && mins) return `in ${hours}h ${mins}m`;
-  if (hours) return `in ${hours}h`;
-  return `in ${mins}m`;
-};
-const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const fmtClock = (dt) => {
   // 12-hour, no leading zero, uppercase AM/PM (e.g. 3:45PM)
   const h = dt.getHours(), m = dt.getMinutes();
@@ -116,25 +99,12 @@ const fmtClock = (dt) => {
   const h12 = h % 12 || 12;
   return `${h12}:${String(m).padStart(2, "0")}${ampm}`;
 };
-const dayStart = (dt) => new Date(dt.getFullYear(), dt.getMonth(), dt.getDate()).getTime();
 const fmtRl = (pct, resetTs, label, showDate) => {
   if (pct === null || pct === undefined || pct === "" || resetTs === null || resetTs === undefined || resetTs === "") return "";
-  const color = colorFor(pct);
   const local = new Date(Math.trunc(resetTs) * 1000);
-  const resetTime = fmtClock(local);
-  const relative = fmtRelative(resetTs);
-  const bar = makeBar(pct);
-  if (showDate) {
-    const diffDays = Math.round((dayStart(local) - dayStart(new Date())) / 86400000);
-    const diffSecs = Math.trunc(resetTs) - nowSec();
-    let dateStr;
-    if (diffDays <= 0) dateStr = " today";
-    else if (diffDays === 1) dateStr = " tomorrow";
-    else dateStr = ` in ${diffDays} days (${WEEKDAYS[local.getDay()]})`;
-    if (diffSecs <= 86400) dateStr = `${dateStr} (${relative})`;
-    return `${color}${label} ${bar} ${pct}% resets ${resetTime}${dateStr}${RESET}`;
-  }
-  return `${color}${label} ${bar} ${pct}% resets ${resetTime} (${relative})${RESET}`;
+  let s = `${label} ${pct}% resets ${fmtClock(local)}`;
+  if (showDate) s += ` ${local.getDate()} ${MONTHS[local.getMonth()]} (${WEEKDAYS[local.getDay()]})`;
+  return `${colorFor(pct)}${s}${RESET}`;
 };
 
 const rlParts = [];
@@ -190,14 +160,19 @@ const scopes = (g("workspace", "added_dirs") || [])
   .filter(Boolean);
 
 // --- Output (two lines); only include segments that have data ---
-const p1 = [`🤖 ${model}`, `🧠 ${usageSeg}`, `💰 ${costStr}`];
-if (rateLimitStr) p1.push(`⏱️ ${rateLimitStr}`);
+// ASCII only, deliberately. Every emoji here (🤖 🧠 💰 ⏳ 📁 🌳 🌿 🧩) is a
+// width-ambiguous glyph: the renderer's cell count disagrees with what the
+// terminal actually draws, so the in-place redraw skips cells it thinks are
+// unchanged and leaves stale characters from the previous frame wedged into
+// the new one. Keep this line 7-bit — no emoji, no box-drawing bars.
+const p1 = [model, usageSeg, costStr];
+if (rateLimitStr) p1.push(rateLimitStr);
 const line1 = p1.join(" | ");
 
-const p2 = [`📁 ${dirDisplay}`];
-if (worktree) p2.push(`🌳 ${worktree}`);
-p2.push(`🌿 ${gitStr}`);
-if (scopes.length) p2.push(`🧩 ${scopes.join(",")}`);
+const p2 = [dirDisplay];
+if (worktree) p2.push(worktree);
+p2.push(gitStr);
+if (scopes.length) p2.push(scopes.join(","));
 const line2 = p2.join(" | ");
 
 process.stdout.write(line1 + "\n" + line2);
