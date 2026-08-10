@@ -1301,7 +1301,7 @@ function _fetched_epoch(rec) {
 
 // Read usage-snapshots.jsonl into memory; skip malformed lines. Returns [] when
 // the file is absent (OAuth off / no fetch yet).
-function _load_usage_snapshots(p = USAGE_SNAPSHOTS_JSONL) {
+export function _load_usage_snapshots(p = USAGE_SNAPSHOTS_JSONL) {
   if (!isFile(p)) return [];
   const out = [];
   for (const line of fs.readFileSync(p, "utf-8").split("\n")) {
@@ -1309,7 +1309,7 @@ function _load_usage_snapshots(p = USAGE_SNAPSHOTS_JSONL) {
     if (!t) continue;
     try { out.push(JSON.parse(t)); } catch { /* drop corrupt line */ }
   }
-  return out;
+  return out.sort((a, b) => (_fetched_epoch(a) ?? Infinity) - (_fetched_epoch(b) ?? Infinity));
 }
 
 // Group snapshots into per-gauge windows keyed by normalized resets_at. Each
@@ -1496,13 +1496,17 @@ function _fit_gauge_statusline(sessions, gauge) {
     nWindows: fcSessions.length, source: "statusline" };
 }
 
+export function _has_newer_input(forecastPath, inputPaths) {
+  const forecastMtime = getmtime(forecastPath);
+  return inputPaths.some((p) => isFile(p) && getmtime(p) > forecastMtime);
+}
+
 function _forecast_stale(max_age_days = 7) {
   if (!isFile(FORECAST_JSON)) return true;
   const fj = getmtime(FORECAST_JSON);
   if (Date.now() / 1000 - fj > max_age_days * 86400) return true;
-  // New usage snapshots or new transcripts (statusline rl fallback) → refit.
-  if (isFile(USAGE_SNAPSHOTS_JSONL) && getmtime(USAGE_SNAPSHOTS_JSONL) > fj) return true;
-  if (isFile(OLLAMA_USAGE_JSONL) && getmtime(OLLAMA_USAGE_JSONL) > fj) return true;
+  // New quota snapshots or transcripts (statusline rl fallback) → refit.
+  if (_has_newer_input(FORECAST_JSON, [USAGE_SNAPSHOTS_JSONL, OLLAMA_USAGE_JSONL, CODEX_USAGE_JSONL])) return true;
   const newestJsonl = fs.globSync(`${PROJECTS_GLOB}/*/*.jsonl`)
     .reduce((mx, p) => Math.max(mx, getmtime(p)), 0);
   return newestJsonl > fj;
