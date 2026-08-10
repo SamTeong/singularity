@@ -296,17 +296,22 @@ function codexScopeConfig(scopes) {
   let manifest;
   try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); } catch { return null; }
   const keep = new Set([...(scopes || []), 'common']);
-  const disable = (Array.isArray(manifest) ? manifest : [])
+  const skills = Array.isArray(manifest)
+    ? manifest
+    : Object.entries(manifest.scopes || {}).reduce((all, [scope, names]) => {
+      for (const name of Array.isArray(names) ? names : []) {
+        if (typeof name !== 'string') continue;
+        const skill = all.get(name) || { refs: [{ path: manifest.external?.[name] || join(dirname(manifestPath), name) }], scopes: [] };
+        skill.scopes.push(scope);
+        all.set(name, skill);
+      }
+      return all;
+    }, new Map()).values();
+  const disable = [...skills]
     .filter((sk) => !(sk.scopes || []).some((s) => keep.has(s)))
     .map((sk) => {
-      // TOML *literal* strings (single quotes): externalLaunch's argv goes
-      // through `spawn(..., {shell:true})` on Windows, whose cmd.exe pass
-      // swallows every literal `"` (node concatenates, it doesn't escape) —
-      // double-quoted paths reached codex as unquoted, invalid TOML. `'` is not
-      // a cmd metacharacter, and a literal string needs no escapes for the
-      // forward-slashed paths below.
       const skillMd = join(sk.refs?.[0]?.path || '', 'SKILL.md');
-      return `{path='${skillMd.replace(/\\/g, '/')}',enabled=false}`;
+      return `{path=\"${skillMd.replace(/\\/g, '/')}\",enabled=false}`;
     });
   return disable.length ? `skills.config=[${disable.join(',')}]` : null;
 }

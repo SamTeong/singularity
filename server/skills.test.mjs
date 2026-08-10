@@ -17,8 +17,8 @@ process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 process.env.SING_SCOPE_ROOT = root;
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-// Shared tree: coding (freeze with desc, noisy without frontmatter), common
-// (must be excluded), empty (scope with no skills dir).
+// Shared tree: coding (freeze with desc, noisy without frontmatter), common,
+// and empty (scope with no skills dir).
 mkdirSync(join(root, 'coding', '.claude', 'skills', 'freeze'), { recursive: true });
 writeFileSync(join(root, 'coding', '.claude', 'skills', 'freeze', 'SKILL.md'),
   '---\nname: freeze\ndescription: Lock edits to a directory.\ntriggers:\n  - freeze edits\n---\n\n# freeze\n\nbody');
@@ -41,10 +41,10 @@ mkdirSync(join(flatRoot, 'not-a-skill'), { recursive: true }); // no SKILL.md �
 const { listSkills, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } = await import('./skills.mjs');
 const { STATE_DIR } = await import('./app-dir.mjs');
 
-test('listSkills: grouped — excludes common, skips scopes with no skills, carries description', () => {
+test('listSkills: grouped — includes common, skips scopes with no skills, carries description', () => {
   const { scopes, flat } = listSkills(root);
   assert.equal(flat, false);
-  assert.deepEqual(scopes.map((s) => s.name), ['coding'], 'common excluded, empty skipped');
+  assert.deepEqual(scopes.map((s) => s.name), ['coding', 'common'], 'common included, empty skipped');
   const coding = scopes[0];
   assert.deepEqual(coding.skills.map((s) => s.name), ['freeze', 'noisy'], 'sorted');
   assert.equal(coding.skills.find((s) => s.name === 'freeze').description, 'Lock edits to a directory.');
