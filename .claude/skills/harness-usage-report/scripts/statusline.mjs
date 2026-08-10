@@ -6,8 +6,8 @@
 // (last write per session wins ≈ final snapshot). The harness-usage-report SessionEnd
 // hook then projects that JSON into stats.csv and archives it to sessions.jsonl.
 //
-// Everything below the contract renders the three-line status display: model,
-// context usage bar, cost / rate limits (5h/7d) / dir, worktree, git status.
+// Everything below the contract renders the two-line status display: model,
+// context usage, cost, rate limits (5h/7d), dir, worktree, git status.
 // Invoke explicitly: `node statusline.mjs` (Node is guaranteed on PATH; shebang
 // is not honoured on Windows).
 import { mkdirSync, writeFileSync, statSync } from "node:fs";
@@ -160,11 +160,11 @@ const scopes = (g("workspace", "added_dirs") || [])
   .filter(Boolean);
 
 // --- Output (two lines); only include segments that have data ---
-// ASCII only, deliberately. Every emoji here (🤖 🧠 💰 ⏳ 📁 🌳 🌿 🧩) is a
-// width-ambiguous glyph: the renderer's cell count disagrees with what the
-// terminal actually draws, so the in-place redraw skips cells it thinks are
-// unchanged and leaves stale characters from the previous frame wedged into
-// the new one. Keep this line 7-bit — no emoji, no box-drawing bars.
+// Both lines are 7-bit ASCII, deliberately (ANSI colour codes are zero-width).
+// Emoji and box-drawing glyphs are width-ambiguous: the renderer's cell count
+// disagrees with what the terminal actually draws, so the in-place redraw skips
+// cells it thinks are unchanged and leaves stale characters from the previous
+// frame wedged into the new one. Don't reintroduce them.
 const p1 = [model, usageSeg, costStr];
 if (rateLimitStr) p1.push(rateLimitStr);
 const line1 = p1.join(" | ");
