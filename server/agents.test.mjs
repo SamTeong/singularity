@@ -53,10 +53,10 @@ mkdirSync(codingSkillDir, { recursive: true });
 mkdirSync(harnessSkillDir, { recursive: true });
 writeFileSync(join(codingSkillDir, 'SKILL.md'), '# coding skill');
 writeFileSync(join(harnessSkillDir, 'SKILL.md'), '# harness skill');
-writeFileSync(join(manifestDir, 'skill-manifest.json'), JSON.stringify([
-  { skillName: 'coding-skill', refs: [{ path: codingSkillDir, version: '1.0.0' }], scopes: ['coding'] },
-  { skillName: 'harness-skill', refs: [{ path: harnessSkillDir, version: '1.0.0' }], scopes: ['harness'] },
-]));
+writeFileSync(join(manifestDir, 'skill-manifest.json'), JSON.stringify({
+  scopes: { coding: ['coding-skill'], harness: ['harness-skill'] },
+  external: { 'coding-skill': codingSkillDir, 'harness-skill': harnessSkillDir },
+}));
 process.env.SING_SCOPE_ROOT = scopeRoot;
 // codex-thread.mjs's CODEX_HOME (via usage.mjs) is a load-time const too —
 // point it at a scratch dir before the dynamic import below, same reason
@@ -443,6 +443,13 @@ test('buildSpawn: codex fresh spawn uses -C, -s workspace-write, -a on-request, 
   assert.ok(!args.includes('--name'));
 });
 
+test('buildSpawn: codex disables skills outside selected scopes from the current manifest shape', () => {
+  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: ['coding'], tool: 'codex' });
+  const config = args[args.indexOf('-c') + 1];
+  assert.ok(config.includes(`path=\"${join(harnessSkillDir, 'SKILL.md').replaceAll('\\', '/')}\"`));
+  assert.doesNotMatch(config, /coding-skill/);
+});
+
 test('buildSpawn: codex with permissionMode set → -a never', () => {
   const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', permissionMode: 'acceptEdits' }, 'do the work');
   assert.equal(args[args.indexOf('-a') + 1], 'never');
@@ -573,9 +580,7 @@ test('buildSpawn: codex scopes → -c skills.config=[...] disables non-chosen sk
   // coding-skill is NOT disabled (its scope 'coding' is chosen).
   const harnessMd = join(harnessSkillDir, 'SKILL.md').replace(/\\/g, '/');
   const codingMd = join(codingSkillDir, 'SKILL.md').replace(/\\/g, '/');
-  // Single-quoted TOML literal strings: a double-quoted path is destroyed by the
-  // cmd.exe pass in externalLaunch's spawn({shell:true}) — see codexScopeConfig.
-  assert.ok(cfg.includes(`{path='${harnessMd}',enabled=false}`), 'harness-skill disabled');
+  assert.ok(cfg.includes(`{path=\"${harnessMd}\",enabled=false}`), 'harness-skill disabled');
   assert.ok(!cfg.includes(codingMd), 'coding-skill not in disable list');
   assert.ok(!args.includes('--add-dir'), 'codex never uses --add-dir');
 });

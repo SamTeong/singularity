@@ -132,7 +132,7 @@ export function listSkills(root) {
   let subdirs;
   try {
     subdirs = readdirSync(root, { withFileTypes: true })
-      .filter((d) => { try { return (d.isDirectory() || d.isSymbolicLink()) && d.name !== 'common'; } catch { return false; } })
+      .filter((d) => { try { return d.isDirectory() || d.isSymbolicLink(); } catch { return false; } })
       .map((d) => d.name)
       .sort((a, b) => a.localeCompare(b));
   } catch { return { scopes: [], flat: false, error: 'skills root unreadable' }; }
