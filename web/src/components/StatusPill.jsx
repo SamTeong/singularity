@@ -21,9 +21,12 @@ import { KIND_TO_DOMAIN } from '@/lib/agentStatus.js';
  * via `color-mix` off that same ink, not a flat semantic color. Delegating
  * straight to the vendored ZAPAC component keeps that branch byte-for-byte
  * identical instead of approximating the ink with a nearby semantic color.
- * Under Phosphor, `status` maps to a `DomainStateId` (`lib/agentStatus.js`'s
- * `KIND_TO_DOMAIN`, shared with TasksBoard/TaskDetailPanel so every surface
- * agrees) and renders through the vendored `Stamp`'s `tone`/`filled` grammar.
+ * Under Phosphor, `status` maps to a `DomainStateId` via `lib/agentStatus.js`'s
+ * `KIND_TO_DOMAIN` and renders through the vendored `Stamp`'s `tone`/`filled`
+ * grammar. `KIND_TO_DOMAIN` is the same table TasksBoard/TaskDetailPanel read
+ * — not imported directly there, but transitively through
+ * `features/tasks/taskDomain.js`'s `cardDomainId`, which is built on it — so
+ * every surface agrees on one source of truth.
  *
  * Accessible-label state: `children` is always the visible label text (every
  * call site passes a real status word, e.g. `agent.status`), and `Stamp`

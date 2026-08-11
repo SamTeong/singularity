@@ -215,10 +215,18 @@ const primaryBtnPhosphor = (t) => ({
 
 // Card/detail tag chip under Phosphor — dim green outline (a category label is
 // not chrome-level scope), matching TasksBoard's `cardTagPhosphor`.
+//
+// `.MuiChip-colorSuccess` override (see TasksBoard.jsx's `tagChipPhosphor` for
+// the full explanation): no `color` prop is passed, so the vendored theme's
+// `MuiChip.defaultProps.color = 'success'` stamps a `.MuiChip-colorSuccess`
+// class that outranks this single-class `sx` on specificity — without
+// re-declaring it here (with `!important`), the chip renders mint instead of
+// dim green.
 const cardTagPhosphor = (t) => ({
   height: 18, fontSize: 9, borderRadius: 0, letterSpacing: '.04em',
   fontFamily: t.nerv.fonts.mono,
   border: `1px solid ${t.nerv.hue.greenDim}`, color: t.nerv.hue.greenMap, background: 'transparent',
+  '&.MuiChip-colorSuccess': { color: `${t.nerv.hue.greenMap} !important` },
 });
 
 export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTranscript, onClose }) {

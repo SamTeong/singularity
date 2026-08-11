@@ -198,10 +198,18 @@ const tagChipPhosphor = (t, on) => ({
 
 // Read-only card/detail *tag* chip (`.tag` — dim green outline, never orange:
 // a category label isn't a chrome-level scope control).
+//
+// Same `.MuiChip-colorSuccess` specificity defect as `tagChipPhosphor` above
+// (see its comment): no `color` prop is passed, so the vendored theme's
+// `MuiChip.defaultProps.color = 'success'` applies and its two-class
+// `.MuiChip-colorSuccess` rule (mint) beats this single-class `sx` override
+// regardless of source order. Without the same `!important` re-declaration,
+// this chip renders mint instead of the intended dim green.
 const cardTagPhosphor = (t) => ({
   height: 18, fontSize: 9, borderRadius: 0, letterSpacing: '.04em',
   fontFamily: t.nerv.fonts.mono,
   border: `1px solid ${t.nerv.hue.greenDim}`, color: t.nerv.hue.greenMap, background: 'transparent',
+  '&.MuiChip-colorSuccess': { color: `${t.nerv.hue.greenMap} !important` },
 });
 
 export default function TasksBoard({ tasks, history, agents, stats, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
@@ -681,7 +689,11 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                 })}>
                   {cards.map((task) => {
                     const agent = agents.find((a) => a.id === task.sessionId);
-                    const dom = getDomainState(cardDomainId(task, agent));
+                    // Every read of `dom` below is gated behind `phosphor` — skip
+                    // the cardDomainId/getDomainState lookups entirely under ZAPAC
+                    // (the default skin), where the result is never used but this
+                    // ran on every card on every render (agents/stats poll tick).
+                    const dom = phosphor ? getDomainState(cardDomainId(task, agent)) : null;
                     // Board card click now opens the right-sliding detail panel
                     // (the panel's "Open session"/"View transcript" actions re-home
                     // what the card click used to do directly). Done cards and

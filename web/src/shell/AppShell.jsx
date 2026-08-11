@@ -58,16 +58,11 @@ const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'session
 // A skin change remounts this entire component — `AppThemeProvider` keys its
 // skin subtree by `skin.id` (see theme/AppThemeProvider.jsx), so any React
 // state set before calling `setSkin` (e.g. `respawnCount`) is gone by the time
-// the new skin's AppShell instance mounts. Stash the live-session count here
-// across that remount (task 6.6) so the fresh instance can still show the
-// same respawn-confirmation dialog a color-mode toggle shows in place.
-//
-// `sessionStorage`, not `localStorage`: the handoff only needs to survive an
-// in-page remount within the current tab, and `sessionStorage` is scoped per
-// tab (unlike `localStorage`, which is shared across every tab on this
-// origin) — with `localStorage` a second open tab's next unrelated mount
-// would consume the first tab's pending flag and pop the wrong confirmation.
-const PENDING_RESPAWN_KEY = 'sing-pending-respawn';
+// the new skin's AppShell instance mounts. The live-session count crosses that
+// remount via `AppThemeProvider`'s own `pendingRespawn` context field (task
+// 6.6) — that state lives above the remount boundary, so it survives without
+// this component needing its own Web Storage handoff (see `useThemeSkin()`'s
+// `pendingRespawn`/`clearPendingRespawn` below).
 
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
 
@@ -89,7 +84,7 @@ export default function AppShell() {
   const { keys } = useKeys();
   const { toggle: toggleColorMode } = useColorMode();
   // The active skin optionally paints a full-bleed background behind the shell.
-  const { skinId, setSkin } = useThemeSkin();
+  const { skinId, setSkin, pendingRespawn, clearPendingRespawn } = useThemeSkin();
   const SkinBackground = getSkin(skinId)?.Background;
   // Phosphor is the only skin with a command-console frame/masthead (task 3.1/
   // 3.2, design.md D1/D5) — everything below this still renders unconditionally;
@@ -117,17 +112,18 @@ export default function AppShell() {
   const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
   const [openTx, setOpenTx] = useState(null); // {project, id, cwd, mtime} handed to SessionHistory
   // >0 -> respawn-confirm dialog open, holds live-session count. Initialized
-  // from `PENDING_RESPAWN_KEY` so a skin change (which remounts this whole
-  // component — see theme/AppThemeProvider.jsx's `key={skin.id}`) can still
-  // surface the respawn confirmation for the live sessions it affected
-  // (task 6.6). Color-mode toggles set this directly mid-session.
-  const [respawnCount, setRespawnCount] = useState(() => {
-    try {
-      const v = sessionStorage.getItem(PENDING_RESPAWN_KEY);
-      if (v) { sessionStorage.removeItem(PENDING_RESPAWN_KEY); return parseInt(v, 10) || 0; }
-    } catch { /* sessionStorage unavailable */ }
-    return 0;
-  });
+  // from `useThemeSkin()`'s `pendingRespawn` so a skin change (which remounts
+  // this whole component — see theme/AppThemeProvider.jsx's `key={skin.id}`)
+  // can still surface the respawn confirmation for the live sessions it
+  // affected (task 6.6). Color-mode toggles set this directly mid-session.
+  const [respawnCount, setRespawnCount] = useState(() => pendingRespawn || 0);
+  // Consume the one-shot pending-respawn signal once this instance has read
+  // it into local state above — done in an effect, not during render, since
+  // clearing it calls a state setter that belongs to `AppThemeProvider` (a
+  // different, un-remounted component sitting above this one).
+  useEffect(() => {
+    if (pendingRespawn) clearPendingRespawn();
+  }, [pendingRespawn, clearPendingRespawn]);
   const [restartOpen, setRestartOpen] = useState(false); // restart-daemon confirm dialog
   const [restarting, setRestarting] = useState(false); // true while polling /health for the new daemon
   // Terminal dock minimized state, persisted (height is a useResizable below).
@@ -201,16 +197,15 @@ export default function AppShell() {
   // theme effect); the prompt only offers to respawn the live children. A
   // skin change remounts this whole component (`AppThemeProvider` keys its
   // subtree by `skin.id`), so `respawnCount` state set here is gone by the
-  // time the new skin's AppShell mounts — stash the live count in
-  // `PENDING_RESPAWN_KEY` first, and the fresh mount reads it back to open
-  // the same dialog. Never auto-respawn; skip the prompt when no live sessions.
+  // time the new skin's AppShell mounts — pass the live count as `setSkin`'s
+  // second argument, which `AppThemeProvider` stashes above the remount
+  // boundary, and the fresh mount reads it back (via `pendingRespawn` above)
+  // to open the same dialog. Never auto-respawn; skip the prompt when no live
+  // sessions.
   const onSelectSkin = (id) => {
     if (id === skinId) return;
     const live = agents.filter((a) => isLive(a.status)).length;
-    if (live) {
-      try { sessionStorage.setItem(PENDING_RESPAWN_KEY, String(live)); } catch { /* sessionStorage unavailable */ }
-    }
-    setSkin(id);
+    setSkin(id, live);
   };
 
   // Restart the daemon: it respawns itself detached and exits, so the socket

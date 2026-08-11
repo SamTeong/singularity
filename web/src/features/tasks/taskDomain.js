@@ -4,20 +4,31 @@
 // arrays, own COLUMN_DOMAIN/STAGE_DOMAIN tables, own domain-precedence logic)
 // with nothing enforcing the copies stayed in sync. Centralized here so a task
 // reads the same tone/stage on the board and in its dossier by construction.
-import { KIND, KIND_TO_DOMAIN } from '@/lib/agentStatus.js';
+// Relative, not the `@/` alias — Node's test runner doesn't resolve it (see
+// theme/resolveSkin.js's doc comment for the same note), and this module now
+// has a co-located *.test.mjs that imports it directly.
+import { KIND, KIND_TO_DOMAIN } from '../../lib/agentStatus.js';
 
-/** The board's four columns as an ordered pipeline: [id, display label]. */
-export const COLUMNS = [
-  ['todo', 'To-Do'],
-  ['inprogress', 'In Progress'],
-  ['inreview', 'In Review'],
-  ['done', 'Done'],
+// Single source of column metadata — id, display label, and its shared
+// domain-state id (design.md D4: todo≈queued/idle, inprogress≈running/nominal,
+// inreview≈review/caution, done≈done/merged) — so `COLUMNS` and
+// `COLUMN_DOMAIN` below are DERIVED from one record per column instead of
+// being two hand-synced tables that happen to share the same four ids. A
+// column added here without a `domain` would need one before `COLUMN_DOMAIN`
+// could resolve it, rather than silently missing an entry the way two
+// separately-maintained tables could.
+const COLUMN_DEFS = [
+  { id: 'todo', label: 'To-Do', domain: 'queued' },
+  { id: 'inprogress', label: 'In Progress', domain: 'running' },
+  { id: 'inreview', label: 'In Review', domain: 'review' },
+  { id: 'done', label: 'Done', domain: 'done' },
 ];
 
-// Column id -> shared domain-state id (design.md D4) for the Phosphor
-// tone/bilingual mapping: todo≈queued/idle, inprogress≈running/nominal,
-// inreview≈review/caution, done≈done/merged.
-export const COLUMN_DOMAIN = { todo: 'queued', inprogress: 'running', inreview: 'review', done: 'done' };
+/** The board's four columns as an ordered pipeline: [id, display label]. */
+export const COLUMNS = COLUMN_DEFS.map((c) => [c.id, c.label]);
+
+/** Column id -> shared domain-state id (see `COLUMN_DEFS` above). */
+export const COLUMN_DOMAIN = Object.fromEntries(COLUMN_DEFS.map((c) => [c.id, c.domain]));
 
 /**
  * A task's resting domain-state id: a live agent's own state takes priority
