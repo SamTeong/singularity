@@ -61,6 +61,12 @@ const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'session
 // the new skin's AppShell instance mounts. Stash the live-session count here
 // across that remount (task 6.6) so the fresh instance can still show the
 // same respawn-confirmation dialog a color-mode toggle shows in place.
+//
+// `sessionStorage`, not `localStorage`: the handoff only needs to survive an
+// in-page remount within the current tab, and `sessionStorage` is scoped per
+// tab (unlike `localStorage`, which is shared across every tab on this
+// origin) — with `localStorage` a second open tab's next unrelated mount
+// would consume the first tab's pending flag and pop the wrong confirmation.
 const PENDING_RESPAWN_KEY = 'sing-pending-respawn';
 
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
@@ -117,9 +123,9 @@ export default function AppShell() {
   // (task 6.6). Color-mode toggles set this directly mid-session.
   const [respawnCount, setRespawnCount] = useState(() => {
     try {
-      const v = localStorage.getItem(PENDING_RESPAWN_KEY);
-      if (v) { localStorage.removeItem(PENDING_RESPAWN_KEY); return parseInt(v, 10) || 0; }
-    } catch { /* localStorage unavailable */ }
+      const v = sessionStorage.getItem(PENDING_RESPAWN_KEY);
+      if (v) { sessionStorage.removeItem(PENDING_RESPAWN_KEY); return parseInt(v, 10) || 0; }
+    } catch { /* sessionStorage unavailable */ }
     return 0;
   });
   const [restartOpen, setRestartOpen] = useState(false); // restart-daemon confirm dialog
@@ -202,7 +208,7 @@ export default function AppShell() {
     if (id === skinId) return;
     const live = agents.filter((a) => isLive(a.status)).length;
     if (live) {
-      try { localStorage.setItem(PENDING_RESPAWN_KEY, String(live)); } catch { /* localStorage unavailable */ }
+      try { sessionStorage.setItem(PENDING_RESPAWN_KEY, String(live)); } catch { /* sessionStorage unavailable */ }
     }
     setSkin(id);
   };

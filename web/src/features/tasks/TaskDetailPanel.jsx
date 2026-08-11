@@ -47,19 +47,17 @@ import { KIND } from '@/lib/agentStatus.js';
 import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState } from '@/lib/domainState.js';
+import { COLUMNS as STAGES, COLUMN_DOMAIN as STAGE_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
 
 // Live agent states — an "Open session" action only makes sense while a real
 // claude process is attached (mirrors TasksBoard's LIVE_STATUS).
 const LIVE_STATUS = new Set(['starting', 'running', 'idle']);
 
-// The board's four columns as an ordered pipeline, for the Activity list.
-// Mirrors TasksBoard's COLUMNS exactly (todo/inprogress/inreview/done) so a
-// task's stage reads identically on the board and in its dossier. The
-// per-column DomainStateId is the same mapping TasksBoard's COLUMN_DOMAIN uses
-// (todo≈queued, inprogress≈running, inreview≈review, done≈done) — kept local
-// rather than exporting it from the board so the panel stays standalone.
-const STAGES = [['todo', 'To-Do'], ['inprogress', 'In Progress'], ['inreview', 'In Review'], ['done', 'Done']];
-const STAGE_DOMAIN = { todo: 'queued', inprogress: 'running', inreview: 'review', done: 'done' };
+// STAGES/STAGE_DOMAIN are TasksBoard's COLUMNS/COLUMN_DOMAIN, aliased for this
+// file's Activity-list vocabulary — imported from the shared
+// `taskDomain.js` (not re-derived here) so a task's stage/tone reads
+// identically on the board and in its dossier by construction, not by two
+// files staying manually in sync.
 
 // Read the reduced-motion preference once at mount; the panel is short-lived so
 // a stale read across a session is fine and avoids a listener + re-render.
@@ -235,18 +233,12 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
   const canOpenSession = !!(agent && LIVE_STATUS.has(agent.status) && task.sessionId);
   const reduced = prefersReducedMotion();
 
-  // The task's resting domain-state — same precedence as the board's
-  // `cardDomainId`: a live agent's own state takes priority over the column's
-  // resting tone. Mirrors TasksBoard's AGENT_KIND_TO_DOMAIN so a task reads the
-  // same tone on the board and in its dossier (design.md D4 "one stable hue").
-  const dom = getDomainState(
-    agent
-      ? (KIND[agent.status] === 'done' ? 'done'
-        : KIND[agent.status] === 'active' ? 'running'
-        : KIND[agent.status] === 'error' ? 'failed'
-        : 'review')
-      : (STAGE_DOMAIN[task.column] ?? 'queued'),
-  );
+  // The task's resting domain-state — same precedence as the board's own
+  // card edge (a live agent's own state takes priority over the column's
+  // resting tone), via the shared `cardDomainId` so a task reads the same
+  // tone on the board and in its dossier by construction (design.md D4 "one
+  // stable hue"), not by two independently-written mappings staying in sync.
+  const dom = getDomainState(cardDomainId(task, agent));
 
   // "View transcript" hands off to the existing dockable transcript panel, then
   // closes this detail panel so the transcript dock becomes the focus — cleaner

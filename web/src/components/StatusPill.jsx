@@ -2,16 +2,7 @@ import { StatusPill as ZapacStatusPill } from '@zapac/mui-theme';
 import { Stamp } from 'phosphor-console-theme/components';
 import { useThemeSkin } from '@/theme/index.js';
 import { getDomainState } from '@/lib/domainState.js';
-
-/**
- * `status`'s legacy four-value vocabulary (`done|active|review|error` — see
- * `lib/agentStatus.js`'s `KIND` map and every call site below) mapped onto the
- * shared six-value `DomainStateId` (`lib/domainState.js`) each one reads its
- * Phosphor `tone`/`filled` from. `active` means "currently executing", the
- * same meaning as `domainState`'s `running`; `error` covers both a hard
- * failure and a lost connection, the same meaning as `domainState`'s `failed`.
- */
-const STATUS_TO_DOMAIN = { done: 'done', active: 'running', review: 'review', error: 'failed' };
+import { KIND_TO_DOMAIN } from '@/lib/agentStatus.js';
 
 /**
  * StatusPill — skin-neutral status/lifecycle pill (task 2.1, design.md D3).
@@ -30,8 +21,9 @@ const STATUS_TO_DOMAIN = { done: 'done', active: 'running', review: 'review', er
  * via `color-mix` off that same ink, not a flat semantic color. Delegating
  * straight to the vendored ZAPAC component keeps that branch byte-for-byte
  * identical instead of approximating the ink with a nearby semantic color.
- * Under Phosphor, `status` maps to a `DomainStateId` (`STATUS_TO_DOMAIN`
- * above) and renders through the vendored `Stamp`'s `tone`/`filled` grammar.
+ * Under Phosphor, `status` maps to a `DomainStateId` (`lib/agentStatus.js`'s
+ * `KIND_TO_DOMAIN`, shared with TasksBoard/TaskDetailPanel so every surface
+ * agrees) and renders through the vendored `Stamp`'s `tone`/`filled` grammar.
  *
  * Accessible-label state: `children` is always the visible label text (every
  * call site passes a real status word, e.g. `agent.status`), and `Stamp`
@@ -49,7 +41,7 @@ export function StatusPill({ status, children, sx, blink = false }) {
   const { skinId } = useThemeSkin();
 
   if (skinId === 'phosphor') {
-    const { tone, filled } = getDomainState(STATUS_TO_DOMAIN[status] ?? 'review');
+    const { tone, filled } = getDomainState(KIND_TO_DOMAIN[status] ?? 'review');
     return (
       <Stamp tone={tone} filled={filled} blink={blink} sx={sx}>
         {children}

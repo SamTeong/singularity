@@ -35,32 +35,7 @@ import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
 import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, StatusLegend, SegmentBar, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState, DOMAIN_STATE_ORDER } from '@/lib/domainState.js';
-
-const COLUMNS = [
-  ['todo', 'To-Do'],
-  ['inprogress', 'In Progress'],
-  ['inreview', 'In Review'],
-  ['done', 'Done'],
-];
-
-// Column → shared domain-state id (design.md D4) for the Phosphor tone/bilingual
-// mapping: todo≈queued/idle, inprogress≈running/nominal, inreview≈review/caution,
-// done≈done/merged. TaskDetailPanel's STAGES mirrors this exact correspondence so
-// a task's tone reads identically on the board and in its dossier.
-const COLUMN_DOMAIN = { todo: 'queued', inprogress: 'running', inreview: 'review', done: 'done' };
-
-// The card-top status pill's legacy 4-value vocabulary (`lib/agentStatus.js`'s
-// KIND map, which StatusPill also consumes) mapped onto a DomainStateId for the
-// Phosphor card-edge/stamp tone — mirrors StatusPill.jsx's own (private,
-// unexported) STATUS_TO_DOMAIN. Kept local rather than duplicating the shared
-// domain table itself (`lib/domainState.js`), which this only reads from.
-const AGENT_KIND_TO_DOMAIN = { done: 'done', active: 'running', review: 'review', error: 'failed' };
-
-// A card's resting domain-state id: a live agent's own state takes priority
-// over the column's resting tone — the same precedence the top-row StatusPill
-// (agent status vs. task.state chip) already uses.
-const cardDomainId = (task, agent) =>
-  agent ? (AGENT_KIND_TO_DOMAIN[KIND[agent.status]] ?? 'review') : (COLUMN_DOMAIN[task.column] ?? 'queued');
+import { COLUMNS, COLUMN_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
 
 // Duration formatter — cost/token formatters live in format.js.
 const fmtMs = (ms) => {
@@ -201,6 +176,15 @@ const segBtnPhosphor = (t, on) => ({
 // void inversion. Re-declaring the same two-class selector here (plus
 // `!important`, since equal-specificity ordering isn't guaranteed) restores
 // the intended void/orange text without touching the vendored theme.
+//
+// Fragility note: this is pinned against `phosphor-console-theme@0.1.0`
+// (vendor/phosphor-console-theme-0.1.0.tgz — see package.json). If that
+// package is ever upgraded and the active tag chip goes back to mint-on-
+// orange, check `theme/components/dataDisplay.ts`'s `MuiChip` override first
+// — either `defaultProps.color` changed away from `'success'`, or the
+// `.MuiChip-colorSuccess` rule's own selector/specificity changed, and this
+// override needs updating (or dropping, if MUI's `color` prop is set
+// explicitly instead — see whether that's now viable).
 const tagChipPhosphor = (t, on) => ({
   height: 22, fontSize: 10, fontWeight: on ? 700 : 400, borderRadius: 0,
   letterSpacing: '.04em', fontFamily: t.nerv.fonts.mono,
