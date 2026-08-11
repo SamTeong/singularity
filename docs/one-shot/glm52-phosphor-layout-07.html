@@ -1,0 +1,1492 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GLM52-PHOSPHOR-LAYOUT-07 · SINGULARITY — TERMINAL-CENTRIC CONSOLE</title>
+<style>
+/* ============================================================================
+   GLM52-PHOSPHOR-LAYOUT-07 — TERMINAL-CENTRIC VARIANT
+   Source: docs/one-shot/phosphor-layout-02.html (same CSS/JS grammar, reused
+   verbatim where structural needs match; adapted where the layout direction
+   diverges).
+
+   LAYOUT DIRECTION — terminal-centric:
+   · The TERMINAL DOCK expands to dominate the LEFT ~58% of the viewport, full
+     height under the masthead. The session roster becomes a HORIZONTAL TAB
+     STRIP across the top of the terminal region (tabs = sessions, with LED
+     dots); the teletype log fills the rest. A col-resize handle lives on the
+     terminal region's right edge.
+   · The kanban board collapses into a compact TASK SHELF on the RIGHT ~42%:
+     a single vertical scrolling column of condensed task cards (not 5
+     columns), grouped by state with small kanji+EN dividers. Cards are one
+     line: title + stamps + segbar.
+   · The left sidebar is GONE. Its work moves into a thin top status bar
+     inside the masthead row: nav as a horizontal segmented control, usage as
+     a tiny inline segbar, connected stamp, sys/health/clock all condensed.
+   · Task dossier slides from the RIGHT edge (body-level, chamfered, mint
+     border — same as source). Overflow menu stays body-level.
+
+   DESIGN RULES honored (non-negotiable, from DESIGN.md / phosphor-console):
+   1. Black-only surface; hierarchy via border+glow+hue. Color IS state:
+      mint=running, orange=chrome/frame, amber=review, blue=planning/idle,
+      green-map=secondary, green-dim/amber-dim=CHROME ONLY (never body text),
+      red-hi=fail (>=14px/700 only), paper=bright text.
+   2. Dark-only; CRT scanline+vignette UNCONDITIONAL. No theme/CRT toggle.
+   3. Active = figure/ground inversion.
+   4. Motion MECHANICAL ONLY: steps()+setInterval, NO transitions/cubic-bezier.
+      60ms flicker for fades. Blink="in progress" ONLY (stamps, current node,
+      cursor — NOT primary buttons). prefers-reduced-motion final-state path.
+   5. Discrete segmented meters, never continuous fills.
+   6. Bilingual pairing: kanji (Mincho) + English (condensed); never alone at
+      narrow widths.
+   7. Chamfered clip-path corners on frame, dossier, menu. Frame double-shell.
+   8. Body-level overlays for dossier/menu (outside .frame).
+   9. This top-of-file CSS comment documents tokens, contrast math, deltas.
+   10. No blinking primary buttons. 7 tasks + 4 sessions kept from source.
+       Teletype still plays on session switch.
+
+   Contrast notes (WCAG AA, all against #0A0A0A) — unchanged from source:
+   · mint 14.0:1 · paper 17.9:1 · amber 9.3:1 · orange 6.3:1
+   · blue 5.8:1 · green-map 5.8:1   → all cleared for body text
+   · green-dim 3.1:1 and amber-dim 3.0:1 are CHROME ONLY — borders, tracks,
+     dot-leaders, rules. Never readable text.
+   · red-hi 4.3:1 is used only at >=14px/700 or as a border/fill, never as the
+     sole carrier of meaning (always symbol + word).
+
+   Deliberate deltas from source (spec-driven, not taste):
+   · .side rail removed entirely; nav + usage + connected stamp migrate into
+     the masthead as a thin status bar (horizontal segmented nav, inline
+     usage segbars, condensed health/clock).
+   · .dock grows from a bottom band into a full-height LEFT region; its
+     session roster becomes a horizontal TAB STRIP (.tabstrip) instead of a
+     vertical list. .list-handle (roster width) is gone; a .col-handle on the
+     terminal region's right edge replaces the .dock-handle (dock height).
+   · .board (5 horizontal columns) becomes .shelf (one vertical sorted list,
+     grouped by state with kanji+EN dividers); .tcard collapses to a dense
+     one-line form (.tcard-shelf).
+   · View bar actions (BOARD/HISTORY seg, + NEW TASK) move into the shelf
+     header; the legend compresses to a single inline row.
+   · Dossier + overflow menu unchanged (body-level, chamfered, mint/orange).
+
+   Polish pass deltas (execution refinement, design language unchanged):
+   · Masthead tightened (gap 14→12, padding 9/22→8/18) so nav + inline usage +
+     connected + sys/health/clock fit one row at ≥1280px; meta (CODE/EX/PRI)
+     now collapses below 1280px instead of 1080 (least-essential chrome first).
+     SYS + CONNECTED stamps drop to .stamp.sm to free status-bar width.
+   · Session tabs migrated to the ARIA tab pattern: role="tab", aria-selected,
+     aria-controls="term", roving tabindex, Arrow/Home/End activation; the
+     terminal log becomes role="tabpanel". Selected tab loses the top inset
+     "clip" shadow and keeps a 3px bg bottom connector; hover gains a 6% mint
+     tint (mechanical, no transition).
+   · Col-resize handle widened 9→11px, indicator 3×46→4×52 at 0.6 opacity,
+     hover brightens the hatch; aria-valuemin/now/max synced on drag/key/expand.
+   · Shelf: group-divider kanja gains a 4px currentColor glow + 13px size;
+     group spacing 14→16. Card padding 7→6 and foot/prog/live margins 6/5→4
+     for density; selected-card padding rebalanced (5px) to keep height stable.
+   · Contrast: .btn.danger red-hi 13→14px (honors the >=14px/700 rule).
+   · Focus-visible: .tcard joins .btn/.seg with a solid paper outline.
+   ========================================================================== */
+
+:root{
+  /* --- palette (DESIGN.md frontmatter, verbatim) --- */
+  --bg:#0A0A0A;
+  --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6;
+  --orange:#F26400; --amber:#F49F09; --amber-dim:#9C3C24;
+  --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225;
+  --teal:#0C6C80; --blue:#5090D0;
+
+  /* --- type --- */
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+
+  /* --- shape --- */
+  --r-chip:2px; --r-seg:4px;
+
+  /* --- semantic z-scale (no arbitrary 999s) --- */
+  --z-base:0; --z-content:1; --z-menu:60; --z-modal:80; --z-crt:99; --z-alert:200;
+}
+
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:#000}
+body{
+  font-family:var(--mono);font-size:13px;line-height:1.5;letter-spacing:.03em;
+  color:var(--mint);text-transform:uppercase;overflow:hidden;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+button{font:inherit;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;
+  color:inherit;background:none;border:none;cursor:pointer}
+svg{display:block}
+.tnum{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+.prose,.msg,.path{text-transform:none}
+
+/* ---------- CRT pass (scanline + vignette) — on every screen, always ---------- */
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:var(--z-crt);
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)}
+
+/* ---------- focus: amber dashed, per DESIGN.md nav focus ---------- */
+:focus-visible{outline:2px dashed var(--amber);outline-offset:2px}
+.btn:focus-visible,.seg button:focus-visible,.tcard:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
+
+/* ============================================================================
+   FRAME — double shell: 3px orange border, 1px inset line, two chamfered
+   corners. Holds head + body (term-region | col-handle | shelf).
+   ========================================================================== */
+.frame{
+  position:relative;margin:12px;height:calc(100vh - 24px);background:var(--bg);
+  border:3px solid var(--orange);
+  clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));
+  box-shadow:0 0 10px rgba(242,100,0,.4),inset 0 0 12px rgba(242,100,0,.14);
+  display:flex;flex-direction:column;overflow:hidden;
+  --term-w:980px;                 /* terminal region width, col-resized */
+}
+.frame::before{content:"";position:absolute;inset:6px;border:1px solid var(--orange);
+  opacity:.4;pointer-events:none;z-index:var(--z-base)}
+
+/* ---------- shared atoms ---------- */
+.zone-title{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--orange);
+  letter-spacing:.12em;border-bottom:1px solid var(--green-dim);padding-bottom:4px;margin-bottom:9px;
+  display:flex;align-items:baseline;gap:8px;flex-wrap:nowrap;white-space:nowrap}
+.zone-title .zt-jp{font-family:var(--jp);font-weight:800;font-size:12px;text-transform:none;
+  letter-spacing:.14em;flex:none}
+.zone-title{overflow:hidden}
+.zone-title .zt-end{margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+  color:var(--green-map);flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+.stamp{display:inline-block;border:1px solid currentColor;border-radius:var(--r-chip);
+  padding:2px 9px;font-size:11px;line-height:1.4;white-space:nowrap;flex:none}
+.stamp.sm{font-size:9px;padding:1px 6px;letter-spacing:.08em}
+.stamp.fill{background:currentColor;border-color:currentColor}
+.stamp.fill > span{color:var(--bg)}
+.stamp.glow{text-shadow:0 0 4px currentColor}
+.blink{animation:blink 1s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+.t-mint{color:var(--mint)} .t-blue{color:var(--blue)} .t-amber{color:var(--amber)}
+.t-red{color:var(--red-hi)} .t-map{color:var(--green-map)} .t-orange{color:var(--orange)}
+.t-paper{color:var(--paper)}
+
+.meta{font-size:10px;line-height:1.35;letter-spacing:.06em;color:var(--amber)}
+.meta b{color:var(--orange);font-weight:400}
+
+/* buttons: mint = primary, orange outline = chrome-level alt, green-dim = ghost */
+.btn{border:1px solid var(--orange);background:var(--bg);color:var(--orange);
+  padding:8px 15px;font-size:11px;letter-spacing:.12em;font-family:var(--cond);font-weight:700}
+.btn:hover{background:var(--orange);color:var(--bg)}
+.btn.primary{border:2px solid var(--mint);color:var(--mint);
+  box-shadow:0 0 8px rgba(82,242,154,.22),inset 0 0 8px rgba(82,242,154,.08)}
+.btn.primary:hover{background:var(--mint);color:var(--bg);box-shadow:0 0 12px rgba(82,242,154,.45)}
+.btn.primary[aria-pressed="true"],.btn.primary.on{background:var(--mint);color:var(--bg)}
+.btn.ghost{border-color:var(--green-dim);color:var(--green-map);font-family:var(--mono);font-weight:400;letter-spacing:.1em}
+.btn.ghost:hover{border-color:var(--mint);background:var(--bg);color:var(--mint)}
+.btn.danger{border-color:var(--red-hi);color:var(--red-hi);font-size:14px}
+.btn.danger:hover{background:var(--red-hi);color:var(--bg)}
+.btn:disabled{opacity:.4;cursor:default}
+.iconbtn{width:26px;height:26px;border:1px solid var(--green-dim);color:var(--green-map);
+  display:grid;place-items:center;flex:none}
+.iconbtn:hover{border-color:var(--mint);color:var(--mint)}
+.iconbtn svg{width:13px;height:13px}
+
+/* segmented meters — discrete LEDs, never a continuous fill */
+.segbar{display:flex;gap:2px;height:8px;flex:1;min-width:0}
+.segbar i{flex:1;border-radius:1px;background:var(--green-dim);opacity:.3}
+.segbar i.on{opacity:1;background:currentColor;box-shadow:0 0 4px currentColor}
+.segbar.tall{height:14px;gap:3px}
+.segbar.tall i{border-radius:var(--r-chip)}
+.segbar.mini{height:5px;gap:1px}
+.meterwrap{position:relative}
+.gate-line{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--amber);
+  box-shadow:0 0 6px rgba(244,159,9,.6);pointer-events:none}
+.gate-line .stamp{position:absolute;top:-9px;left:50%;transform:translate(-50%,-100%);
+  color:var(--amber);background:var(--bg);font-size:9px;padding:1px 6px}
+
+/* themed scrollbars */
+.scroll{scrollbar-width:thin;scrollbar-color:var(--amber-dim) rgba(242,100,0,.05)}
+.scroll::-webkit-scrollbar{width:9px;height:9px}
+.scroll::-webkit-scrollbar-track{background:rgba(242,100,0,.05)}
+.scroll::-webkit-scrollbar-thumb{background:var(--amber-dim);border:1px solid var(--green-dim)}
+.scroll::-webkit-scrollbar-thumb:hover{background:var(--amber)}
+
+/* ============================================================================
+   HEAD — masthead doubles as the thin top status bar (no left rail).
+   monogram · wordmark · nav (horizontal segmented) · usage (inline segbars)
+   · connected stamp · sys stamp · health · clock
+   ========================================================================== */
+.head{flex:none;display:flex;align-items:center;gap:12px;padding:8px 18px 8px 14px;
+  border-bottom:1px solid var(--orange);position:relative;z-index:var(--z-content);
+  flex-wrap:wrap;row-gap:6px}
+.mono-stamp{border:1px solid var(--orange);color:var(--orange);font-family:var(--jp);font-weight:800;
+  font-size:20px;line-height:1;padding:5px 7px;text-align:center;flex:none;text-transform:none;
+  letter-spacing:.1em;text-indent:.1em;text-shadow:0 0 4px currentColor}
+.mono-stamp small{display:block;font-family:var(--cond);font-weight:700;font-size:7px;
+  letter-spacing:.16em;margin-top:3px;text-transform:uppercase;text-indent:0}
+.ttl{flex:none}
+.ttl h1{font-family:var(--cond);font-weight:700;font-size:20px;line-height:1;color:var(--paper);
+  letter-spacing:.02em;text-shadow:0 0 4px currentColor,0 0 12px rgba(82,242,154,.3)}
+.ttl .eyebrow{font-size:9px;letter-spacing:.2em;color:var(--amber);margin-top:3px}
+.ttl .eyebrow .jp{font-family:var(--jp);font-weight:800;text-transform:none;letter-spacing:.14em}
+
+/* --- horizontal segmented nav (replaces the vertical .nav rail) --- */
+.topnav{display:flex;border:1px solid var(--orange);flex:none}
+.topnav button{padding:5px 10px;font-family:var(--cond);font-weight:700;font-size:11px;
+  letter-spacing:.12em;color:var(--orange);background:var(--bg);
+  display:flex;align-items:center;gap:5px}
+.topnav button + button{border-left:1px solid var(--orange)}
+.topnav button .jp{font-family:var(--jp);font-weight:800;font-size:13px;line-height:1;
+  text-transform:none;letter-spacing:.08em}
+.topnav button .cnt{font-size:9px;border:1px solid currentColor;border-radius:var(--r-chip);
+  padding:0 4px;line-height:1.5}
+.topnav button:hover:not([aria-current="true"]){color:var(--mint)}
+.topnav button[aria-current="true"]{background:var(--mint);color:var(--bg);border-color:var(--mint)}
+.topnav button.nav-more{padding:6px 10px}
+.topnav button.nav-more .dots3{letter-spacing:.2em;font-family:var(--mono)}
+.topnav button.nav-more[aria-expanded="true"]{background:var(--orange);color:var(--bg);border-color:var(--orange)}
+
+/* --- inline usage (3 tiny segbars) — moved in from the rail --- */
+.usage-inline{display:flex;flex-direction:column;gap:3px;flex:none;padding:2px 0}
+.u-row-i{display:flex;align-items:center;gap:6px}
+.u-row-i .u-name{font-size:8px;letter-spacing:.08em;color:var(--green-map);width:38px;flex:none}
+.u-row-i .segbar{height:5px;gap:1px;width:72px;flex:none}
+.u-row-i .u-pct{font-size:8px;width:26px;text-align:right;flex:none;color:currentColor}
+.u-claude{color:var(--mint)} .u-api{color:var(--mint)} .u-ollama{color:var(--green-map)}
+
+.head .meta{flex:none;text-align:right}
+.head .push{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+
+/* health + clock condensed to fit the bar */
+.health{display:flex;gap:4px;align-items:flex-end;height:26px;flex:none}
+.hcol{width:6px;display:flex;flex-direction:column-reverse;gap:2px}
+.hcol i{height:3px;border-radius:1px;background:var(--green-dim);opacity:.35}
+.hcol i.on{opacity:1;background:var(--mint);box-shadow:0 0 4px rgba(82,242,154,.5)}
+.hcol i.on.hot{background:var(--amber);box-shadow:0 0 4px rgba(244,159,9,.5)}
+.healthcap{font-size:8px;color:var(--green-map);letter-spacing:.1em;flex:none;text-align:right}
+.healthcap b{display:block;color:var(--mint);font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.06em}
+.clockstack{display:flex;flex-direction:column;align-items:flex-end;gap:2px;flex:none}
+.timechip{display:flex;align-items:center;gap:2px}
+.timechip svg{filter:drop-shadow(0 0 3px rgba(242,100,0,.85)) drop-shadow(0 0 8px rgba(242,100,0,.4))}
+.timechip .tc-colon{display:flex;flex-direction:column;gap:4px;margin:0 1px}
+.timechip .tc-colon i{width:3px;height:3px;background:var(--orange);display:block;box-shadow:0 0 4px var(--orange)}
+.dateline{font-size:9px;color:var(--amber);letter-spacing:.14em}
+
+/* ============================================================================
+   BODY — term-region (left ~58%) | col-handle | shelf (right ~42%)
+   ========================================================================== */
+.body{flex:1;min-height:0;display:flex;position:relative;z-index:var(--z-content)}
+
+/* ============================================================================
+   TERM REGION — full height under the masthead; dominates the left.
+   tabstrip (horizontal session tabs) + termbar + teletype log.
+   ========================================================================== */
+.term-region{width:var(--term-w);flex:none;min-width:0;display:flex;flex-direction:column;
+  min-height:0;position:relative}
+
+/* --- tab strip: horizontal session roster with LED dots --- */
+.tabstrip{flex:none;display:flex;align-items:stretch;gap:0;border-bottom:1px solid var(--orange);
+  overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
+.tabstrip::-webkit-scrollbar{height:5px}
+.tabstrip::-webkit-scrollbar-track{background:rgba(242,100,0,.05)}
+.tabstrip::-webkit-scrollbar-thumb{background:var(--amber-dim)}
+.tabstrip .ts-head{flex:none;display:flex;align-items:center;padding:0 12px;font-family:var(--cond);
+  font-weight:700;font-size:11px;letter-spacing:.14em;color:var(--orange);white-space:nowrap;
+  border-right:1px solid var(--orange);background:var(--bg)}
+.tabstrip .ts-head .jp{font-family:var(--jp);font-weight:800;font-size:12px;
+  text-transform:none;letter-spacing:.12em;margin-right:6px}
+.tabstrip .ts-head .ct{font-family:var(--mono);font-size:9px;color:var(--green-map);
+  letter-spacing:.1em;margin-left:8px}
+.tab{flex:none;display:flex;align-items:center;gap:8px;border-right:1px solid var(--green-dim);
+  padding:8px 14px;background:var(--bg);color:var(--mint);text-align:left;white-space:nowrap}
+.tab:hover{border-right-color:var(--mint);background:rgba(82,242,154,.06)}
+.tab[aria-selected="true"]{background:var(--mint);color:var(--bg);
+  box-shadow:inset 0 -3px 0 var(--bg)}
+.tab[aria-selected="true"] .sname{color:var(--bg)}
+.tab[aria-selected="true"] .smeta{color:rgba(10,10,10,.75)}
+.tab[aria-selected="true"] .smeta b{color:var(--bg)}
+.tab .led{width:8px;height:8px;flex:none;border-radius:50%;background:currentColor;
+  box-shadow:0 0 5px currentColor}
+.tab .led.idle{box-shadow:none;opacity:.7}
+.tab .sbody{min-width:0;display:flex;flex-direction:column;gap:1px}
+.tab .sname{display:block;font-family:var(--cond);font-weight:700;font-size:12px;line-height:1.15;
+  letter-spacing:.04em;color:var(--paper)}
+.tab .smeta{display:block;font-size:8px;line-height:1.3;letter-spacing:.06em;color:var(--green-map)}
+.tab .smeta b{color:var(--amber);font-weight:400}
+.tab .ts-new{margin-left:auto;border:1px dashed var(--mint);color:var(--mint);padding:8px 12px;
+  font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.12em;background:var(--bg)}
+.tab .ts-new:hover{background:var(--mint);color:var(--bg)}
+.tab .ts-new .plus{margin-right:5px}
+
+.term-wrap{flex:1;min-height:0;display:flex;flex-direction:column}
+.termbar{flex:none;display:flex;align-items:center;gap:10px;padding:6px 13px;
+  border-bottom:1px solid var(--amber-dim);font-size:10px;letter-spacing:.12em;color:var(--amber)}
+.termbar .tt{color:var(--amber)}
+.termbar .tt b{color:var(--paper);font-weight:400}
+.termbar .path{color:var(--green-map);letter-spacing:.04em}
+.termbar .tools{margin-left:auto;display:flex;gap:5px}
+.termbar .conn{color:var(--mint);flex:none}
+
+/* the log: amber-on-black, two brightness levels (bright=data, dim=chrome) */
+.term{flex:1;min-height:0;overflow-y:auto;padding:10px 14px 12px;
+  background:rgba(244,159,9,.02);font-size:12px;line-height:1.55;color:var(--amber)}
+.trow{display:flex;gap:9px;align-items:flex-start}
+.trow + .trow{margin-top:2px}
+.trow .g{flex:none;width:1.4ch;text-align:center;color:var(--amber)}
+.trow .g.assistant{color:var(--mint);text-shadow:0 0 4px rgba(82,242,154,.4)}
+.trow .g.branch{color:var(--amber-dim)}
+.trow .body{min-width:0;flex:1;word-break:break-word}
+.trow.indent{padding-left:calc(1.4ch + 9px)}
+.trule{display:flex;align-items:center;gap:9px;margin:12px 0 8px;font-size:9px;
+  letter-spacing:.18em;color:var(--orange)}
+.trule:first-child{margin-top:0}
+.trule .jp{font-family:var(--jp);font-weight:800;font-size:11px;text-transform:none;letter-spacing:.14em;color:var(--amber)}
+.trule .line{flex:1;height:1px;background:var(--amber-dim)}
+.tk{color:var(--paper)}
+.targ{color:var(--orange)}
+.tdim{color:var(--green-map)}
+.tok{color:var(--mint)}
+.tfail{color:var(--red-hi);font-weight:700;font-size:14px}
+.tprose{color:var(--amber);text-transform:none}
+.dotrow{display:flex;gap:8px;align-items:baseline;font-size:11px}
+.dotrow .l{flex:none;color:var(--amber)}
+.dotrow .d{flex:1;overflow:hidden;white-space:nowrap;color:var(--amber-dim);letter-spacing:2px}
+.dotrow .d::after{content:"........................................................................"}
+.dotrow .v{flex:none}
+.term .stamp{margin:5px 0}
+.tspin{display:flex;gap:8px;align-items:baseline;margin-top:9px;color:var(--amber);font-size:11px}
+.tspin .star{display:inline-block;color:var(--mint);animation:spin 1.1s steps(8) infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tinput{display:flex;align-items:center;gap:8px;margin-top:11px;padding:7px 10px;
+  border:1px solid var(--green-dim);font-size:11px}
+.tinput .caret{color:var(--mint);flex:none}
+.tinput .ph{color:var(--green-map);text-transform:none}
+.cursor{display:inline-block;width:7px;height:12px;background:var(--amber);vertical-align:-1px;
+  flex:none;box-shadow:0 0 5px var(--amber);animation:blink 1s steps(1) infinite}
+.thints{display:flex;flex-wrap:wrap;gap:5px 16px;margin-top:7px;font-size:9px;
+  letter-spacing:.1em;color:var(--green-map)}
+.thints .r{margin-left:auto}
+.thints b{color:var(--mint);font-weight:400}
+
+/* ============================================================================
+   COL-RESIZE HANDLE — on the terminal region's right edge.
+   Replaces the source's dock-height row handle.
+   ========================================================================== */
+.col-handle{flex:none;width:11px;cursor:col-resize;position:relative;touch-action:none;
+  border-left:1px solid var(--orange);border-right:1px solid var(--orange);
+  background:repeating-linear-gradient(-45deg,rgba(242,100,0,.16) 0 5px,transparent 5px 10px);
+  z-index:var(--z-content)}
+.col-handle:hover{background:repeating-linear-gradient(-45deg,rgba(242,100,0,.28) 0 5px,transparent 5px 10px)}
+.col-handle::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:4px;height:52px;background:var(--orange);opacity:.6}
+.col-handle:hover::after,.col-handle.dragging::after,.col-handle:focus-visible::after{
+  opacity:1;box-shadow:0 0 10px var(--orange)}
+body.resizing *{pointer-events:none}
+body.resizing .col-handle{pointer-events:auto}
+
+/* ============================================================================
+   SHELF — compact task list on the right. One vertical scrolling column,
+   grouped by state with small kanji+EN dividers; dense one-line cards.
+   ========================================================================== */
+.shelf{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+
+.shelf-head{flex:none;display:flex;align-items:center;gap:12px;padding:10px 14px 9px;
+  border-bottom:1px solid var(--orange);flex-wrap:wrap;row-gap:8px}
+.shelf-head .vb-title{min-width:0;flex:1 1 auto}
+.shelf-head h2{font-family:var(--cond);font-weight:700;font-size:18px;line-height:1;color:var(--paper);
+  letter-spacing:.03em;text-shadow:0 0 4px rgba(237,248,214,.35);display:flex;align-items:baseline;gap:8px}
+.shelf-head h2 .jp{font-family:var(--jp);font-weight:800;font-size:16px;color:var(--mint);
+  text-transform:none;letter-spacing:.14em;text-shadow:0 0 6px rgba(82,242,154,.45)}
+.shelf-head .vb-sub{font-size:9px;letter-spacing:.08em;color:var(--amber);margin-top:4px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.shelf-head .vb-sub b{color:var(--orange);font-weight:400}
+.shelf-head .vb-actions{margin-left:auto;display:flex;align-items:center;gap:8px;flex:none}
+.seg{display:flex;border:1px solid var(--orange)}
+.seg button{padding:6px 11px;font-family:var(--cond);font-weight:700;font-size:10px;
+  letter-spacing:.12em;color:var(--orange);background:var(--bg)}
+.seg button + button{border-left:1px solid var(--orange)}
+.seg button:hover:not([aria-selected="true"]){color:var(--mint)}
+.seg button[aria-selected="true"]{background:var(--mint);color:var(--bg);border-color:var(--mint)}
+.shelf-head .btn.primary{padding:6px 12px;font-size:10px}
+
+/* compact legend — single inline row */
+.legend{flex:none;display:flex;gap:6px;flex-wrap:wrap;padding:8px 14px 0;align-items:center}
+.lg{border:1px solid currentColor;border-radius:var(--r-chip);padding:1px 7px;
+  display:flex;align-items:center;gap:5px;min-width:0}
+.lg .jp{font-family:var(--jp);font-weight:800;font-size:11px;line-height:1.2;
+  text-transform:none;letter-spacing:.16em;text-indent:.16em}
+.lg .cap{font-size:7px;letter-spacing:.1em}
+.lg.fill{background:currentColor}
+.lg.fill .jp,.lg.fill .cap{color:var(--bg)}
+.legend-note{margin-left:auto;align-self:center;font-size:8px;letter-spacing:.12em;color:var(--green-map)}
+
+/* the list itself */
+.shelf-list{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:0;
+  padding:10px 12px 12px}
+
+/* group divider — small kanji+EN + count, rule fills the rest */
+.group{display:flex;flex-direction:column;gap:7px}
+.group + .group{margin-top:16px}
+.group-head{flex:none;display:flex;align-items:baseline;gap:8px;padding-bottom:4px;
+  border-bottom:1px solid var(--green-dim)}
+.group-head .ct{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.14em;color:var(--orange)}
+.group-head .cjp{font-family:var(--jp);font-weight:800;font-size:13px;text-transform:none;
+  letter-spacing:.14em;text-shadow:0 0 4px currentColor}
+.group-head .stamp{margin-left:auto}
+
+/* dense one-line task card */
+.tcard{background:var(--bg);border:1px solid var(--green-dim);padding:6px 10px;
+  text-align:left;width:100%;display:block;color:var(--mint);cursor:pointer}
+.tcard:hover{border-color:var(--mint)}
+.tcard[data-state="planning"]{border-color:rgba(80,144,208,.55)}
+.tcard[data-state="running"]{border-color:rgba(82,242,154,.55)}
+.tcard[data-state="review"]{border-color:rgba(244,159,9,.55)}
+.tcard[aria-pressed="true"]{border:2px solid var(--mint);padding:5px 9px;
+  box-shadow:0 0 8px rgba(82,242,154,.25),inset 0 0 12px rgba(82,242,154,.1)}
+.tc-line1{display:flex;align-items:center;gap:7px;min-width:0}
+.tc-id{margin-left:auto;font-size:9px;color:var(--amber);letter-spacing:.08em;white-space:nowrap;flex:none}
+.tc-title{font-family:var(--cond);font-weight:700;font-size:12px;line-height:1.2;
+  letter-spacing:.02em;color:var(--paper);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  flex:1 1 auto;min-width:0}
+.tc-foot{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:4px}
+.tag{border:1px solid var(--green-dim);color:var(--green-map);border-radius:var(--r-chip);
+  padding:1px 5px;font-size:8px;letter-spacing:.08em}
+.tc-cost{font-size:9px;color:var(--amber);letter-spacing:.06em;white-space:nowrap}
+.tc-prog{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:8px;color:var(--green-map)}
+.tc-prog .segbar{height:5px;gap:1px}
+.tc-prog b{color:var(--mint);font-weight:400;flex:none}
+.tc-live{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:8px;letter-spacing:.06em}
+
+/* ---------- task dossier: body-level modal slideout off the right edge ---------- */
+.scrim{position:fixed;inset:0;z-index:var(--z-modal);background:rgba(10,10,10,.82)}
+.scrim[hidden]{display:none}
+.detail{position:fixed;top:0;right:0;bottom:0;width:min(560px,94vw);
+  z-index:calc(var(--z-modal) + 1);
+  background:var(--bg);border-left:2px solid var(--mint);overflow-y:auto;
+  box-shadow:0 0 18px rgba(82,242,154,.32),inset 0 0 22px rgba(82,242,154,.07);
+  display:flex;flex-direction:column;
+  clip-path:polygon(28px 0,100% 0,100% 100%,0 100%,0 28px)}
+.detail[hidden]{display:none}
+.detail.flicker{visibility:hidden}
+.d-head{flex:none;display:flex;align-items:center;gap:10px;padding:20px 22px 0}
+.d-id{font-size:11px;color:var(--amber);letter-spacing:.08em}
+.d-head .iconbtn{margin-left:auto;width:30px;height:30px}
+.d-title{font-family:var(--cond);font-weight:700;font-size:27px;line-height:1.1;
+  letter-spacing:.02em;color:var(--paper);padding:13px 22px 0;text-wrap:balance;
+  text-shadow:0 0 4px rgba(237,248,214,.3)}
+.d-meta{padding:14px 22px 0;font-size:11px;line-height:1.6;letter-spacing:.06em;color:var(--amber)}
+.d-meta b{color:var(--orange);font-weight:400}
+.d-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:18px 22px 0}
+.st{border:1px solid var(--green-dim);padding:10px 12px 11px}
+.st .k{font-size:9px;letter-spacing:.12em;color:var(--green-map)}
+.st .v{font-family:var(--cond);font-weight:700;font-size:34px;line-height:1;letter-spacing:.02em;
+  color:var(--mint);margin-top:6px;text-shadow:0 0 6px rgba(82,242,154,.4)}
+.st .f{font-size:8px;letter-spacing:.1em;color:var(--green-map);margin-top:6px}
+.d-sec{padding:20px 22px 0}
+.d-sec:last-of-type{padding-bottom:20px}
+.d-prog-read{display:flex;justify-content:space-between;font-size:10px;color:var(--green-map);margin-top:7px}
+.d-prog-read b{color:var(--mint);font-weight:400}
+.d-copy{font-size:12px;line-height:1.7;color:var(--green-map);max-width:68ch;text-wrap:pretty}
+.d-copy b{color:var(--mint);font-weight:400}
+.flow{list-style:none;display:flex;flex-direction:column}
+.fl{display:flex;align-items:center;gap:10px;position:relative;padding:5px 0}
+.fl .node{width:24px;height:24px;flex:none;border:2px solid var(--green-dim);color:var(--green-map);
+  display:grid;place-items:center;font-size:9px;background:var(--bg);z-index:1;
+  clip-path:polygon(0 0,calc(100% - 6px) 0,100% 6px,100% 100%,6px 100%,0 calc(100% - 6px))}
+.fl::before{content:"";position:absolute;left:11px;top:26px;height:calc(100% - 22px);width:2px;
+  background:var(--green-dim)}
+.fl:last-child::before{display:none}
+.fl.done::before{background:var(--mint)}
+.fl.done .node{background:var(--mint);border-color:var(--mint);color:var(--bg)}
+.fl.now .node{background:var(--blue);border-color:var(--blue);color:var(--bg)}
+.fl .lbl{font-size:11px;letter-spacing:.08em;color:var(--green-map)}
+.fl .lbl .jp{font-family:var(--jp);font-weight:800;text-transform:none;letter-spacing:.14em;margin-right:6px}
+.fl.done .lbl{color:var(--mint)}
+.fl.now .lbl{color:var(--blue)}
+.fl .when{margin-left:auto;font-size:10px;color:var(--amber);letter-spacing:.06em;flex:none}
+.d-actions{margin-top:auto;flex:none;position:sticky;bottom:0;display:flex;gap:10px;
+  padding:16px 22px;background:var(--bg);border-top:1px solid var(--orange)}
+.d-actions .btn{flex:1;text-align:center}
+
+/* ============================================================================
+   OVERFLOW MENU — outside .frame so the chamfer clip can't cut it
+   ========================================================================== */
+.menu-backdrop{position:fixed;inset:0;z-index:var(--z-menu);display:none}
+.menu-backdrop.open{display:block}
+.menu{position:fixed;z-index:calc(var(--z-menu) + 1);width:250px;max-height:min(72vh,600px);
+  overflow-y:auto;background:var(--bg);border:2px solid var(--orange);padding:8px;
+  box-shadow:0 0 10px rgba(242,100,0,.4),inset 0 0 12px rgba(242,100,0,.1);
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%)}
+.menu[hidden]{display:none}
+.menu.flicker{visibility:hidden}
+.mi{display:flex;align-items:center;gap:9px;width:100%;padding:6px 8px;
+  border:1px solid transparent;background:var(--bg);color:var(--mint);text-align:left}
+.mi .jp{font-family:var(--jp);font-weight:800;font-size:15px;line-height:1;
+  text-transform:none;letter-spacing:.1em;flex:none;width:2.4em}
+.mi .en{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.13em}
+.mi:hover{border-color:var(--mint)}
+.msep{height:1px;background:var(--green-dim);margin:8px 2px}
+.msys{padding:2px 8px 6px}
+.msys .row{display:flex;justify-content:space-between;align-items:baseline;
+  font-size:10px;letter-spacing:.08em;color:var(--green-map);margin-bottom:4px}
+.msys .row b{color:var(--mint);font-weight:400}
+.spark{display:block;width:100%;height:30px;margin-bottom:9px}
+.spark .area{stroke:none;opacity:.16}
+.spark .line{fill:none;stroke-width:1.6;filter:drop-shadow(0 0 3px currentColor)}
+.spark .dot{stroke:none}
+.spark .base{fill:currentColor;opacity:.3}
+.spark .thresh{stroke:var(--amber);stroke-width:1;stroke-dasharray:3 3;opacity:.8}
+.mpills{display:flex;gap:5px;margin-top:2px}
+.mpill{border:1px solid var(--orange);color:var(--orange);border-radius:var(--r-chip);
+  padding:2px 8px;font-size:9px;letter-spacing:.1em;background:var(--bg)}
+.mpill[aria-selected="true"]{background:var(--orange);color:var(--bg)}
+.mpill:hover:not([aria-selected="true"]){color:var(--mint);border-color:var(--mint)}
+.mi.danger{color:var(--red-hi)}
+.mi.danger .en{font-size:14px}
+.mi.danger:hover{border-color:var(--red-hi)}
+
+/* ============================================================================
+   REDUCED MOTION — render the final state, kill every blink / strobe / tick
+   ========================================================================== */
+@media (prefers-reduced-motion:reduce){
+  .blink,.cursor,.tspin .star,.fl.now .node{animation:none}
+  .detail.flicker,.menu.flicker{visibility:visible}
+}
+
+/* ---------- narrow shell: structural collapse, not fluid type ---------- */
+@media (max-width:1280px){
+  .frame{--term-w:760px}
+  .head .meta{display:none}
+}
+@media (max-width:860px){
+  .health,.healthcap{display:none}
+  .usage-inline{display:none}
+  .frame{--term-w:520px}
+  .mono-stamp{font-size:16px}
+  .ttl h1{font-size:16px}
+}
+@media (max-width:680px){
+  /* stack the body vertically: terminal on top, shelf below; col-handle becomes
+     a horizontal row handle in spirit but we simply hide it and let flex wrap */
+  .body{flex-direction:column}
+  .term-region{width:100%;flex:1 1 60%;min-height:200px}
+  .col-handle{display:none}
+  .shelf{flex:1 1 40%;min-height:160px}
+  .topnav button .cnt{display:none}
+}
+</style>
+</head>
+<body>
+
+<div class="frame" id="frame">
+
+  <!-- ===================== HEAD (thin top status bar) ===================== -->
+  <header class="head">
+    <div class="mono-stamp">特異点<small>SINGULARITY</small></div>
+    <div class="ttl">
+      <h1>FLEET CONTROL PLANE</h1>
+      <div class="eyebrow">LOOPBACK DAEMON · <span class="jp">統制卓</span></div>
+    </div>
+
+    <!-- horizontal segmented nav (rail collapsed into the masthead) -->
+    <nav class="topnav" aria-label="Views">
+      <button aria-current="true"><span class="jp">任務</span>TASKS<span class="cnt tnum">7</span></button>
+      <button aria-current="false"><span class="jp">自動</span>AUTOMATION<span class="cnt tnum">3</span></button>
+      <button aria-current="false"><span class="jp">消費</span>USAGE</button>
+      <button class="nav-more" id="moreBtn" aria-haspopup="menu" aria-expanded="false">
+        <span class="dots3">···</span>MORE
+      </button>
+    </nav>
+
+    <!-- inline usage segbars (rail section migrated) -->
+    <section class="usage-inline" aria-label="Usage, 5 hour window">
+      <div class="u-row-i u-claude">
+        <span class="u-name">CLAUDE</span>
+        <span class="meterwrap segbar" data-fill="62" aria-hidden="true"></span>
+        <span class="u-pct tnum">62%</span>
+      </div>
+      <div class="u-row-i u-api">
+        <span class="u-name">API</span>
+        <span class="meterwrap segbar" data-fill="38" aria-hidden="true"></span>
+        <span class="u-pct tnum">38%</span>
+      </div>
+      <div class="u-row-i u-ollama">
+        <span class="u-name">OLLAMA</span>
+        <span class="meterwrap segbar" data-fill="11" aria-hidden="true"></span>
+        <span class="u-pct tnum">11%</span>
+      </div>
+    </section>
+
+    <div class="push">
+      <div class="meta">
+        CODE:<b>4317</b> · EX:<b>MANUAL</b> · PRI:<b>AA-</b>
+      </div>
+      <span class="stamp sm glow t-mint" id="sysstamp">SYS:NOMINAL</span>
+      <span class="stamp sm fill t-mint"><span>接続 CONNECTED</span></span>
+      <div class="health" id="health" role="img" aria-label="Daemon health columns"></div>
+      <div class="healthcap">LOAD<b id="healthword">OPTIMAL</b></div>
+      <div class="clockstack">
+        <span class="timechip" id="timechip" role="img" aria-label="Local time"></span>
+        <span class="dateline" id="dateline">— — —</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ===================== BODY (term-region | col-handle | shelf) ===================== -->
+  <div class="body">
+
+    <!-- ---------- terminal region (left ~58%) ---------- -->
+    <section class="term-region" aria-label="Agent sessions">
+
+      <!-- horizontal session tab strip -->
+      <div class="tabstrip scroll" id="tabstrip" role="tablist" aria-label="Sessions — select a tab to view its console">
+        <div class="ts-head"><span class="jp">部隊</span>SESSIONS<span class="ct" id="sessCount">2 RUN · 4 TOTAL</span></div>
+        <!-- tabs injected by JS -->
+        <button class="tab ts-new" id="newSess" role="button" aria-label="New session" tabindex="0"><span class="plus">+</span>新規 NEW</button>
+      </div>
+
+      <div class="term-wrap">
+        <div class="termbar">
+          <span class="tt">STDOUT // <b id="termTitle">—</b></span>
+          <span class="path" id="termPath">—</span>
+          <span class="conn" id="termConn">CONNECTED: OK</span>
+          <div class="tools">
+            <button class="iconbtn" aria-label="View transcript">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 5h16v11H4zM4 20h16"/></svg>
+            </button>
+            <button class="iconbtn" aria-label="Expand terminal" id="termExpand">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M15 20h5v-5"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="term scroll" id="term" role="tabpanel" aria-live="polite" aria-label="Session output"></div>
+      </div>
+    </section>
+
+    <!-- col-resize handle on the terminal region's right edge -->
+    <div class="col-handle" id="colHandle" role="separator" aria-orientation="vertical"
+         aria-label="Resize terminal region" tabindex="0"
+         aria-valuemin="420" aria-valuenow="980" aria-valuemax="2200"></div>
+
+    <!-- ---------- task shelf (right ~42%) ---------- -->
+    <section class="shelf" aria-label="Task shelf">
+      <div class="shelf-head">
+        <div class="vb-title">
+          <h2>TASKS <span class="jp">任務</span></h2>
+          <div class="vb-sub tnum">
+            ORCH:<b>7</b> · RUN:<b>2</b> · GATED:<b>1</b> · SPEND:<b>$4.18</b>
+          </div>
+        </div>
+        <div class="vb-actions">
+          <div class="seg" role="tablist" aria-label="View mode">
+            <button role="tab" aria-selected="true">SHELF</button>
+            <button role="tab" aria-selected="false">HISTORY</button>
+          </div>
+          <button class="btn primary" id="newTask">+ NEW</button>
+        </div>
+      </div>
+
+      <div class="legend" role="img" aria-label="Task status key">
+        <span class="lg t-map"><span class="jp">待機</span><span class="cap">QUEUED</span></span>
+        <span class="lg t-blue"><span class="jp">立案</span><span class="cap">PLAN</span></span>
+        <span class="lg t-mint"><span class="jp">稼働</span><span class="cap">RUN</span></span>
+        <span class="lg t-amber"><span class="jp">審査</span><span class="cap">REVIEW</span></span>
+        <span class="lg fill t-mint"><span class="jp">完了</span><span class="cap">MERGED</span></span>
+        <span class="legend-note">SELECT A TASK → DOSSIER</span>
+      </div>
+
+      <div class="shelf-list scroll" id="shelf">
+        <!-- groups + cards injected by JS -->
+      </div>
+    </section>
+
+  </div>
+
+</div>
+
+<!-- ===================== TASK DOSSIER (modal slideout, right edge) ===================== -->
+<div class="scrim" id="detailScrim" hidden></div>
+<aside class="detail scroll" id="detail" role="dialog" aria-modal="true"
+       aria-labelledby="dTitle" hidden>
+  <div class="d-head">
+    <span class="stamp sm" id="dStamp">—</span>
+    <span class="d-id" id="dId">TSK·0000</span>
+    <button class="iconbtn" id="detailClose" aria-label="Close dossier">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <h3 class="d-title" id="dTitle">—</h3>
+  <div class="d-meta" id="dMeta"></div>
+
+  <div class="d-stats">
+    <div class="st"><div class="k">COST</div><div class="v tnum" id="dCost">—</div><div class="f">USD · STATUSLINE</div></div>
+    <div class="st"><div class="k">TOKENS</div><div class="v tnum" id="dTokens">—</div><div class="f">TOTAL I/O</div></div>
+    <div class="st"><div class="k">TURNS</div><div class="v tnum" id="dTurns">—</div><div class="f">ASSISTANT</div></div>
+  </div>
+
+  <div class="d-sec" id="dProgWrap" hidden>
+    <div class="zone-title">PROGRESS <span class="zt-jp">進捗</span></div>
+    <div class="meterwrap">
+      <div class="segbar tall t-mint" id="dProgBar"></div>
+      <div class="gate-line" style="left:80%"><span class="stamp">REVIEW GATE · 80</span></div>
+    </div>
+    <div class="d-prog-read"><span><b class="tnum" id="dProgPct">0%</b> COMPLETE</span><span id="dProgLabel">—</span></div>
+  </div>
+
+  <div class="d-sec">
+    <div class="zone-title">DIRECTIVE <span class="zt-jp">指令</span></div>
+    <p class="d-copy prose" id="dDesc"></p>
+  </div>
+
+  <div class="d-sec">
+    <div class="zone-title">ACTIVITY <span class="zt-jp">経過</span></div>
+    <ol class="flow" id="dFlow"></ol>
+  </div>
+
+  <div class="d-actions">
+    <button class="btn ghost" id="dTranscript">TRANSCRIPT</button>
+    <button class="btn primary" id="dPrimary">OPEN SESSION</button>
+  </div>
+</aside>
+
+<!-- ===================== OVERFLOW MENU ===================== -->
+<div class="menu-backdrop" id="menuBackdrop"></div>
+<div class="menu" id="appMenu" role="menu" aria-label="More" hidden>
+  <button class="mi" role="menuitem"><span class="jp">設定</span><span class="en">CONFIG</span></button>
+  <button class="mi" role="menuitem"><span class="jp">連鎖</span><span class="en">HOOKS</span></button>
+  <button class="mi" role="menuitem"><span class="jp">技能</span><span class="en">SKILLS</span></button>
+  <button class="mi" role="menuitem"><span class="jp">規則</span><span class="en">RULES</span></button>
+  <button class="mi" role="menuitem"><span class="jp">記憶</span><span class="en">MEMORY</span></button>
+  <button class="mi" role="menuitem"><span class="jp">記録</span><span class="en">TRANSCRIPTS</span></button>
+  <button class="mi" role="menuitem"><span class="jp">文庫</span><span class="en">WIKI</span></button>
+  <button class="mi" role="menuitem"><span class="jp">外観</span><span class="en">APPEARANCE</span></button>
+  <button class="mi" role="menuitem"><span class="jp">状態</span><span class="en">STATUS</span></button>
+
+  <div class="msep"></div>
+
+  <button class="mi" role="menuitem"><span class="jp">工程</span><span class="en">PROCESSES</span></button>
+  <div class="msys">
+    <div class="row"><span>CPU</span><b class="tnum">18%</b></div>
+    <svg class="spark t-mint" viewBox="0 0 120 30" preserveAspectRatio="none" aria-hidden="true">
+      <line class="thresh" x1="0" y1="7" x2="120" y2="7"/>
+      <circle class="base" cx="20" cy="27" r=".8"/><circle class="base" cx="50" cy="27" r=".8"/>
+      <circle class="base" cx="80" cy="27" r=".8"/><circle class="base" cx="110" cy="27" r=".8"/>
+      <path class="area" style="fill:currentColor" d="M0,21 12,17 24,22 36,12 48,16 60,10 72,14 84,18 96,11 108,15 120,12 120,30 0,30 Z"/>
+      <path class="line" style="stroke:currentColor" d="M0,21 12,17 24,22 36,12 48,16 60,10 72,14 84,18 96,11 108,15 120,12"/>
+      <circle class="dot" style="fill:currentColor" cx="120" cy="12" r="2.2"/>
+    </svg>
+    <div class="row"><span>RAM</span><b class="tnum">61% · 19.4 / 32.0 GB</b></div>
+    <svg class="spark t-mint" viewBox="0 0 120 30" preserveAspectRatio="none" aria-hidden="true">
+      <line class="thresh" x1="0" y1="7" x2="120" y2="7"/>
+      <circle class="base" cx="20" cy="27" r=".8"/><circle class="base" cx="50" cy="27" r=".8"/>
+      <circle class="base" cx="80" cy="27" r=".8"/><circle class="base" cx="110" cy="27" r=".8"/>
+      <path class="area" style="fill:currentColor" d="M0,14 12,13 24,15 36,12 48,13 60,11 72,12 84,10 96,12 108,11 120,10 120,30 0,30 Z"/>
+      <path class="line" style="stroke:currentColor" d="M0,14 12,13 24,15 36,12 48,13 60,11 72,12 84,10 96,12 108,11 120,10"/>
+      <circle class="dot" style="fill:currentColor" cx="120" cy="10" r="2.2"/>
+    </svg>
+    <div class="mpills" role="tablist" aria-label="Sparkline window">
+      <button class="mpill" role="tab" aria-selected="false">5 MIN</button>
+      <button class="mpill" role="tab" aria-selected="true">30 MIN</button>
+      <button class="mpill" role="tab" aria-selected="false">1 HOUR</button>
+    </div>
+  </div>
+
+  <div class="msep"></div>
+
+  <button class="mi danger" role="menuitem">
+    <span class="jp">再起</span><span class="en">RESTART SERVER</span>
+  </button>
+</div>
+
+<script>
+"use strict";
+
+/* Zero-size viewport guard (EXPERIMENTS-SPEC §2). */
+if (innerWidth < 2 || innerHeight < 2) {
+  const poll = setInterval(() => {
+    if (innerWidth > 1 && innerHeight > 1) { clearInterval(poll); location.reload(); }
+  }, 250);
+}
+
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = (id) => document.getElementById(id);
+const pad2 = (n) => String(n).padStart(2, "0");
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function flicker(el) {
+  if (REDUCED) return;
+  el.classList.add("flicker");
+  setTimeout(() => el.classList.remove("flicker"), 60);
+}
+
+/* ==========================================================================
+   SEGMENTED METERS — discrete LEDs.
+   ========================================================================== */
+function buildSegs(el, count) {
+  el.textContent = "";
+  for (let i = 0; i < count; i++) el.appendChild(document.createElement("i"));
+  return [...el.children];
+}
+function paintSegs(segs, pct) {
+  const lit = Math.round((pct / 100) * segs.length);
+  segs.forEach((s, i) => s.classList.toggle("on", i < lit));
+}
+function fillSegs(segs, pct, done) {
+  const target = Math.round((pct / 100) * segs.length);
+  segs.forEach((s) => s.classList.remove("on"));
+  if (REDUCED) { paintSegs(segs, pct); if (done) done(pct); return; }
+  let i = 0;
+  const t = setInterval(() => {
+    if (i >= target) { clearInterval(t); return; }
+    segs[i].classList.add("on");
+    i++;
+    if (done) done(Math.round((i / segs.length) * 100));
+  }, 90);
+}
+
+document.querySelectorAll(".segbar[data-fill]").forEach((el) => {
+  const segs = buildSegs(el, 20);
+  paintSegs(segs, +el.dataset.fill);
+});
+/* usage: gate line on the Claude window — the 5h limit is a drawn object */
+(function addUsageGate() {
+  const claude = document.querySelector(".u-claude .segbar");
+  if (!claude) return;
+  const gate = document.createElement("span");
+  gate.className = "gate-line";
+  gate.style.left = "80%";
+  gate.style.top = "-3px";
+  gate.style.bottom = "-3px";
+  claude.appendChild(gate);
+})();
+
+/* ==========================================================================
+   7-SEGMENT CLOCK — digits drawn as SVG polygons, not set in a font
+   ========================================================================== */
+const SVGNS = "http://www.w3.org/2000/svg";
+const SEGMAP = {0:"abcdef",1:"bc",2:"abged",3:"abgcd",4:"fgbc",5:"afgcd",6:"afgedc",7:"abc",8:"abcdefg",9:"abcfgd"};
+const SEGPTS = {
+  a:"7,4 10.5,0.5 29.5,0.5 33,4 29.5,7.5 10.5,7.5",
+  b:"36,7 39.5,10.5 39.5,27.5 36,31 32.5,27.5 32.5,10.5",
+  c:"36,33 39.5,36.5 39.5,53.5 36,57 32.5,53.5 32.5,36.5",
+  d:"7,60 10.5,56.5 29.5,56.5 33,60 29.5,63.5 10.5,63.5",
+  e:"4,33 7.5,36.5 7.5,53.5 4,57 0.5,53.5 0.5,36.5",
+  f:"4,7 7.5,10.5 7.5,27.5 4,31 0.5,27.5 0.5,10.5",
+  g:"7,32 10.5,28.5 29.5,28.5 33,32 29.5,35.5 10.5,35.5"
+};
+function makeDigit(w, h, on, off) {
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("width", w); svg.setAttribute("height", h);
+  svg.setAttribute("viewBox", "0 0 46 64");
+  svg.dataset.on = on; svg.dataset.off = off;
+  for (const k of "abcdefg") {
+    const p = document.createElementNS(SVGNS, "polygon");
+    p.setAttribute("points", SEGPTS[k]);
+    p.setAttribute("data-seg", k);
+    p.setAttribute("transform", "translate(6,0) skewX(-6)");
+    p.setAttribute("fill", off);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+function renderDigit(svg, val) {
+  const lit = SEGMAP[val];
+  for (const p of svg.children) {
+    p.setAttribute("fill", lit.includes(p.getAttribute("data-seg")) ? svg.dataset.on : svg.dataset.off);
+  }
+}
+const chip = $("timechip");
+const chipDigits = [];
+for (let i = 0; i < 6; i++) {
+  const d = makeDigit(16, 22, "#F26400", "rgba(242,100,0,.08)");
+  chipDigits.push(d); chip.appendChild(d);
+  if (i === 1 || i === 3) {
+    const c = document.createElement("span");
+    c.className = "tc-colon"; c.innerHTML = "<i></i><i></i>";
+    chip.appendChild(c);
+  }
+}
+let colonOn = true;
+function tickClock() {
+  const d = new Date();
+  const s = pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds());
+  chipDigits.forEach((dg, i) => renderDigit(dg, +s[i]));
+  colonOn = !colonOn;
+  chip.querySelectorAll(".tc-colon").forEach((c) => { c.style.opacity = (colonOn || REDUCED) ? 1 : .25; });
+}
+const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+function tickDate() {
+  const d = new Date();
+  $("dateline").textContent = MONTHS[d.getMonth()] + " " + pad2(d.getDate()) + " " + d.getFullYear();
+}
+
+/* ==========================================================================
+   DAEMON HEALTH COLUMNS — stepped repaint, biased nominal
+   ========================================================================== */
+(function health() {
+  const wrap = $("health");
+  const COLS = 5, CELLS = 7;
+  const cols = [];
+  for (let c = 0; c < COLS; c++) {
+    const col = document.createElement("div");
+    col.className = "hcol";
+    for (let i = 0; i < CELLS; i++) col.appendChild(document.createElement("i"));
+    wrap.appendChild(col); cols.push(col);
+  }
+  function paint() {
+    let hotAny = false;
+    cols.forEach((col) => {
+      const lit = 3 + Math.floor(Math.random() * 3);
+      const hot = Math.random() < 0.16;
+      if (hot) hotAny = true;
+      [...col.children].forEach((cell, i) => {
+        cell.className = i < lit ? ((hot && i === lit - 1) ? "on hot" : "on") : "";
+      });
+    });
+    $("healthword").textContent = hotAny ? "ELEVATED" : "OPTIMAL";
+    $("healthword").style.color = hotAny ? "var(--amber)" : "";
+  }
+  paint();
+  if (!REDUCED) setInterval(paint, 700);
+})();
+
+/* SYS stamp drifts nominal/caution */
+setInterval(() => {
+  const caution = Math.random() < 0.1;
+  const st = $("sysstamp");
+  st.textContent = caution ? "SYS:CAUTION" : "SYS:NOMINAL";
+  st.className = "stamp glow " + (caution ? "t-amber" : "t-mint");
+}, 7000);
+
+/* ==========================================================================
+   RESIZE — col-handle resizes the terminal region width (--term-w).
+   Mirrors the source useResizable: pointer drag + arrow keys, clamped.
+   ========================================================================== */
+const frame = $("frame");
+const cssPx = (prop) => parseFloat(getComputedStyle(frame).getPropertyValue(prop));
+
+/* keep the col-handle's ARIA slider state in step with --term-w */
+function syncHandleAria() {
+  const h = $("colHandle");
+  if (!h) return;
+  const max = frame.clientWidth - h.offsetWidth - 280;
+  h.setAttribute("aria-valuemax", String(max));
+  h.setAttribute("aria-valuenow", String(Math.round(cssPx("--term-w"))));
+}
+
+(function makeColResizer() {
+  const handle = $("colHandle");
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    handle.classList.add("dragging");
+    document.body.classList.add("resizing");
+    document.body.style.cursor = "col-resize";
+    const move = (ev) => {
+      const start = cssPx("--term-w");
+      const next = start + ev.movementX;
+      const max = frame.clientWidth - handle.offsetWidth - 280;
+      frame.style.setProperty("--term-w", clamp(next, 420, max) + "px");
+      syncHandleAria();
+    };
+    const up = () => {
+      handle.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", move);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
+  });
+  handle.addEventListener("keydown", (e) => {
+    const step = 24;
+    let d = 0;
+    if (e.key === "ArrowRight") d = step;
+    if (e.key === "ArrowLeft") d = -step;
+    if (!d) return;
+    e.preventDefault();
+    const max = frame.clientWidth - handle.offsetWidth - 280;
+    frame.style.setProperty("--term-w", clamp(cssPx("--term-w") + d, 420, max) + "px");
+    syncHandleAria();
+  });
+  syncHandleAria();
+})();
+
+/* expand terminal = snap wide; toggle back to default 980 */
+$("termExpand").addEventListener("click", () => {
+  const max = frame.clientWidth - $("colHandle").offsetWidth - 280;
+  frame.style.setProperty("--term-w", cssPx("--term-w") < max - 40 ? (max + "px") : "980px");
+  syncHandleAria();
+});
+
+/* ==========================================================================
+   OVERFLOW MENU
+   ========================================================================== */
+const menu = $("appMenu");
+const backdrop = $("menuBackdrop");
+const moreBtn = $("moreBtn");
+
+function openMenu() {
+  menu.hidden = false;
+  const r = moreBtn.getBoundingClientRect();
+  menu.style.left = clamp(r.left, 12, innerWidth - menu.offsetWidth - 12) + "px";
+  menu.style.top = clamp(r.bottom + 6, 12, innerHeight - menu.offsetHeight - 12) + "px";
+  backdrop.classList.add("open");
+  moreBtn.setAttribute("aria-expanded", "true");
+  flicker(menu);
+}
+function closeMenu() {
+  menu.hidden = true;
+  backdrop.classList.remove("open");
+  moreBtn.setAttribute("aria-expanded", "false");
+}
+moreBtn.addEventListener("click", (e) => { e.stopPropagation(); menu.hidden ? openMenu() : closeMenu(); });
+backdrop.addEventListener("click", closeMenu);
+menu.querySelectorAll(".mi").forEach((it) => it.addEventListener("click", closeMenu));
+menu.querySelectorAll(".mpill").forEach((p) => p.addEventListener("click", (e) => {
+  e.stopPropagation();
+  menu.querySelectorAll(".mpill").forEach((x) => x.setAttribute("aria-selected", "false"));
+  p.setAttribute("aria-selected", "true");
+}));
+
+/* segmented view toggle */
+document.querySelectorAll(".seg").forEach((seg) => {
+  seg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-selected", "false"));
+    b.setAttribute("aria-selected", "true");
+  }));
+});
+/* top nav view switch */
+document.querySelectorAll(".topnav button:not(.nav-more)").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".topnav button:not(.nav-more)").forEach((x) => x.setAttribute("aria-current", "false"));
+    b.setAttribute("aria-current", "true");
+  });
+});
+
+/* ==========================================================================
+   TASK DATA + SHELF + DOSSIER
+   ========================================================================== */
+const STAGES = [
+  { jp: "待機", en: "QUEUED" },
+  { jp: "立案", en: "PLANNING" },
+  { jp: "稼働", en: "IN PROGRESS" },
+  { jp: "審査", en: "IN REVIEW" },
+  { jp: "完了", en: "DONE" },
+];
+const TONE = { queued: "t-map", planning: "t-blue", running: "t-mint", review: "t-amber", merged: "t-mint" };
+const LABEL = {
+  queued: "待機 QUEUED", planning: "立案 PLANNING", running: "稼働 RUNNING",
+  review: "審査 GATED", merged: "完了 MERGED",
+};
+
+const TASKS = {
+  a1f2: { state:"queued", title:"REAP ORPHAN ESBUILD / VITE PROCS ON BUILD HANG",
+    repo:"SINGULARITY", branch:"MAIN", model:"SONNET", cost:"$0.00", tokens:"—", turns:"0",
+    created:"QUEUED 4M AGO", stage:0, kind:"CHORE",
+    desc:"Builds occasionally hang behind orphaned esbuild/vite workers. Add a <b>pnpm clean</b> reap step and wire it into the prebuild hook so a stale worker can never block a fresh build." },
+  b7c0: { state:"queued", title:"PER-PROVIDER SPEND SPARKLINE IN USAGE VIEW",
+    repo:"SINGULARITY", branch:"MAIN", model:"OPUS", cost:"$0.00", tokens:"—", turns:"0",
+    created:"QUEUED 9M AGO", stage:0, kind:"FEATURE",
+    desc:"The usage view reports totals but no trend. Add a compact 7-day spend sparkline per provider (Claude / API / Ollama), reusing the existing <b>LineChart</b> grammar — glowing polyline, sparse baseline dots, drawn threshold." },
+  c3d9: { state:"planning", title:"MIGRATE AUTOMATION DIALOGS ONTO SHARED CREATEDIALOG",
+    repo:"SINGULARITY", branch:"WT/DEBA6C3D", model:"OPUS", cost:"$0.62", tokens:"410K", turns:"11",
+    created:"STARTED 6M AGO", stage:1, kind:"REFACTOR",
+    desc:"The cron and background dialogs duplicate field logic. Fold them onto the shared <b>CreateDialog</b> primitive so validation, the scope picker, and cwd behaviour are defined exactly once." },
+  e5a1: { state:"running", title:"PLAYWRIGHT E2E SUITE + ESLINT PASS",
+    repo:"SINGULARITY", branch:"WT/9E0B59D", model:"OPUS", cost:"$1.94", tokens:"1.2M", turns:"48",
+    created:"STARTED 18M AGO", stage:2, kind:"TEST", progress:64, progressLabel:"SPECS 32 / 50 · GATE AT 80",
+    desc:"Add a Playwright E2E suite covering the tasks board and the session flows, then fix whatever it surfaces. Stabilise the flaky dock-resize spec before the full run." },
+  f0b8: { state:"running", title:"UI CONSISTENCY PASS ON RAILHEADER PANELS",
+    repo:"SINGULARITY", branch:"WT/8F9C786", model:"SONNET", cost:"$0.88", tokens:"540K", turns:"22",
+    created:"STARTED 11M AGO", stage:2, kind:"POLISH", progress:41, progressLabel:"PANELS 7 / 14 · GATE AT 80",
+    desc:"Seven panels were migrated onto RailHeader but still carry per-file spacing and heading drift. Align them to the shared header rhythm and drop the leftover one-off styles." },
+  "7d21": { state:"review", title:"ROADMAP CHIP FILTER + LABEL FIXES IN USAGE-REPORT",
+    repo:"SINGULARITY", branch:"WT/8AFBF74", model:"OPUS", cost:"$2.31", tokens:"1.6M", turns:"61",
+    created:"STARTED 42M AGO", stage:3, kind:"REPORT",
+    desc:"Adds a roadmap chip filter to the usage-report skill and corrects two mislabeled series. The diff is ready and the worktree is clean — this one is waiting on your ruling before it merges to main." },
+  "3c02": { state:"merged", title:"DROP UNUSED IMPORTS FROM 7 MIGRATED PANELS",
+    repo:"SINGULARITY", branch:"MAIN", model:"HAIKU", cost:"$0.44", tokens:"210K", turns:"9",
+    created:"MERGED 2H AGO", stage:4, kind:"CLEANUP",
+    desc:"Post-migration cleanup: remove the imports left dangling after the RailHeader move across seven panels. Merged to main — no follow-up needed." },
+};
+
+/* shelf groups in stage order (sorted list, grouped by state) */
+const GROUPS = [
+  { state: "queued",   jp: "待機", en: "QUEUED",       tone: "t-map" },
+  { state: "planning", jp: "立案", en: "PLANNING",     tone: "t-blue" },
+  { state: "running",  jp: "稼働", en: "IN PROGRESS",  tone: "t-mint" },
+  { state: "review",   jp: "審査", en: "IN REVIEW",    tone: "t-amber" },
+  { state: "merged",   jp: "完了", en: "DONE",         tone: "t-mint" },
+];
+
+function buildShelf() {
+  const list = $("shelf");
+  const byState = {};
+  Object.keys(TASKS).forEach((id) => {
+    const t = TASKS[id];
+    (byState[t.state] = byState[t.state] || []).push(id);
+  });
+  const frag = document.createDocumentFragment();
+  GROUPS.forEach((g) => {
+    const ids = byState[g.state] || [];
+    if (!ids.length) return;
+    const group = document.createElement("div");
+    group.className = "group";
+    const countTone = g.state === "merged" ? "t-mint fill" : g.tone;
+    group.innerHTML =
+      '<div class="group-head">' +
+        '<span class="ct">' + g.en + '</span>' +
+        '<span class="cjp ' + g.tone + '">' + g.jp + '</span>' +
+        '<span class="stamp sm ' + countTone + ' tnum">' +
+          (g.state === "merged" ? '<span>' + ids.length + '</span>' : ids.length) +
+        '</span>' +
+      '</div>';
+    ids.forEach((id) => {
+      const t = TASKS[id];
+      const card = document.createElement("button");
+      card.className = "tcard";
+      card.dataset.task = id;
+      card.dataset.state = t.state;
+      card.setAttribute("aria-pressed", "false");
+      let html = '<div class="tc-line1">';
+      html += '<span class="stamp sm ' + TONE[t.state] + (t.state === "merged" ? " fill" : "") + '">';
+      html += t.state === "merged" ? "<span>" + LABEL[t.state] + "</span>" : LABEL[t.state];
+      html += '</span>';
+      html += '<span class="tc-title">' + t.title + '</span>';
+      html += '<span class="tc-id tnum">TSK·' + id.toUpperCase() + '</span>';
+      html += '</div>';
+      html += '<div class="tc-foot">';
+      html += '<span class="tag">' + t.kind + '</span>';
+      html += '<span class="tag">' + t.repo + '</span>';
+      if (t.cost !== "$0.00") html += '<span class="tc-cost tnum">' + t.cost + '</span>';
+      html += '</div>';
+      if (typeof t.progress === "number") {
+        html += '<div class="tc-prog ' + TONE[t.state] + '">';
+        html += '<span class="segbar" data-fill="' + t.progress + '"></span>';
+        html += '<b class="tnum">' + t.progress + '%</b>';
+        html += '</div>';
+      } else if (t.state === "running") {
+        /* running without explicit progress: a faint live row */
+        html += '<div class="tc-live ' + TONE[t.state] + '">';
+        html += '<span class="stamp sm blink">稼働中</span><span class="tnum">' + t.model + ' · ' + t.turns + ' TURNS</span>';
+        html += '</div>';
+      } else if (t.state === "planning") {
+        html += '<div class="tc-live ' + TONE[t.state] + '">';
+        html += '<span class="stamp sm blink">立案中</span><span>DRAFTING PLAN</span>';
+        html += '</div>';
+      } else if (t.state === "review") {
+        html += '<div class="tc-live ' + TONE[t.state] + '">';
+        html += '<span class="stamp sm blink">裁定待ち</span><span>AWAITING RULING</span>';
+        html += '</div>';
+      }
+      card.innerHTML = html;
+      card.addEventListener("click", () => openDossier(id, card));
+      group.appendChild(card);
+    });
+    frag.appendChild(group);
+  });
+  list.appendChild(frag);
+  /* paint the inline segbars that were just added */
+  list.querySelectorAll(".segbar[data-fill]").forEach((el) => {
+    const segs = buildSegs(el, 12);
+    paintSegs(segs, +el.dataset.fill);
+  });
+}
+
+const detail = $("detail");
+const detailScrim = $("detailScrim");
+let selectedCard = null;
+let dProgSegs = buildSegs($("dProgBar"), 25);
+
+function renderFlow(stage) {
+  const times = ["0:12", "1:40", "6:02", "—", "—"];
+  return STAGES.map((s, i) => {
+    const cls = i < stage ? "done" : (i === stage ? "now" : "");
+    const nodeBlink = (i === stage && stage < 4) ? " blink" : "";
+    const when = i < stage ? times[i] : (i === stage ? "NOW" : "");
+    return '<li class="fl ' + cls + '">'
+      + '<span class="node' + nodeBlink + '">' + (i < stage ? "✓" : String(i + 1).padStart(2, "0")) + "</span>"
+      + '<span class="lbl"><span class="jp">' + s.jp + "</span>" + s.en + "</span>"
+      + (when ? '<span class="when">' + when + "</span>" : "")
+      + "</li>";
+  }).join("");
+}
+
+function openDossier(id, card) {
+  const t = TASKS[id];
+  if (!t) return;
+  const tone = TONE[t.state];
+  $("dStamp").className = "stamp sm " + tone + (t.state === "merged" ? " fill" : "");
+  $("dStamp").innerHTML = t.state === "merged" ? "<span>" + LABEL[t.state] + "</span>" : LABEL[t.state];
+  $("dId").textContent = "TSK·" + id.toUpperCase();
+  $("dTitle").textContent = t.title;
+  $("dMeta").innerHTML =
+    "KIND:<b>" + t.kind + "</b> · MODEL:<b>" + t.model + "</b><br>" +
+    "REPO:<b>" + t.repo + "</b> · BRANCH:<b>" + t.branch + "</b><br>" +
+    "STATE:<b>" + t.created + "</b>";
+  $("dCost").textContent = t.cost;
+  $("dTokens").textContent = t.tokens;
+  $("dTurns").textContent = t.turns;
+  [$("dCost"), $("dTokens"), $("dTurns")].forEach((el) => { el.className = "v tnum"; });
+
+  const hasProg = typeof t.progress === "number";
+  $("dProgWrap").hidden = !hasProg;
+  if (hasProg) {
+    $("dProgLabel").textContent = t.progressLabel || "";
+    fillSegs(dProgSegs, t.progress, (pct) => { $("dProgPct").textContent = pct + "%"; });
+  }
+
+  $("dDesc").innerHTML = t.desc;
+  $("dFlow").innerHTML = renderFlow(t.stage);
+
+  const prim = $("dPrimary");
+  prim.textContent = t.state === "queued" ? "START NOW"
+    : t.state === "review" ? "承認 APPROVE · MERGE"
+    : t.state === "merged" ? "REOPEN" : "OPEN SESSION";
+  $("dTranscript").style.display = t.state === "queued" ? "none" : "";
+
+  if (selectedCard) selectedCard.setAttribute("aria-pressed", "false");
+  selectedCard = card || null;
+  if (selectedCard) selectedCard.setAttribute("aria-pressed", "true");
+
+  detail.hidden = false;
+  detailScrim.hidden = false;
+  detail.scrollTop = 0;
+  flicker(detail);
+  setTimeout(() => $("detailClose").focus(), REDUCED ? 0 : 70);
+}
+function closeDossier() {
+  detail.hidden = true;
+  detailScrim.hidden = true;
+  if (selectedCard) {
+    selectedCard.setAttribute("aria-pressed", "false");
+    selectedCard.focus();
+    selectedCard = null;
+  }
+}
+
+detail.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab") return;
+  const focusables = [...detail.querySelectorAll("button:not([disabled]),[tabindex]:not([tabindex='-1'])")]
+    .filter((el) => el.offsetParent !== null);
+  if (!focusables.length) return;
+  const first = focusables[0];
+  const last = focusables[focusables.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
+$("detailClose").addEventListener("click", closeDossier);
+detailScrim.addEventListener("click", closeDossier);
+
+addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  if (!detail.hidden) { closeDossier(); return; }
+  if (!menu.hidden) closeMenu();
+});
+
+/* ==========================================================================
+   TERMINAL — signature amber-on-black log, teletype entrance.
+   Session roster renders as horizontal tabs in the tabstrip.
+   ========================================================================== */
+const SESSIONS = [
+  {
+    name: "E2E-SUITE", state: "run", model: "OPUS", branch: "WT/9E0B59D",
+    path: "~/singularity/.worktrees/9e0b59d",
+    rows: [
+      { t: "rule", jp: "開始", en: "SESSION START" },
+      { t: "dot", l: "MODEL", v: "OPUS", tone: "tok" },
+      { t: "dot", l: "PERMISSION MODE", v: "ACCEPT EDITS", tone: "tok" },
+      { t: "dot", l: "WORKTREE", v: "CLEAN", tone: "tok" },
+      { t: "user", body: 'Add a Playwright E2E suite covering the tasks board and session flows, then fix whatever it surfaces.' },
+      { t: "asst", body: "I'll scaffold the suite, run it, and stabilise any flakes it turns up." },
+      { t: "tool", tool: "BASH", arg: "pnpm test:e2e --reporter=line" },
+      { t: "res", lines: [
+        { cls: "tdim", text: "RUNNING 50 TESTS USING 4 WORKERS" },
+        { cls: "", text: '<span class="tok">✓</span> TASKS › CREATES A TASK FROM THE BOARD DIALOG <span class="tdim">1.2S</span>' },
+        { cls: "", text: '<span class="tok">✓</span> TASKS › MOVES A CARD BETWEEN COLUMNS <span class="tdim">0.9S</span>' },
+        { cls: "", text: '<span class="tok">✓</span> SESSIONS › RESUME PREFILLS MODEL + SCOPES <span class="tdim">1.4S</span>' },
+        { cls: "", text: '<span class="tfail">✗ FAIL</span> SHELL › DOCK RESIZE CLAMPS MIN HEIGHT <span class="tdim">RETRY 1/2</span>' },
+        { cls: "tdim", text: "… +28 LINES · CTRL+R TO EXPAND" },
+      ]},
+      { t: "stamp", tone: "t-amber", text: "注意 CAUTION · 1 FLAKY SPEC QUARANTINED" },
+      { t: "tool", tool: "UPDATE", arg: "web/e2e/shell.spec.js" },
+      { t: "res", lines: [
+        { cls: "tdim", text: "3 ADDITIONS · 1 REMOVAL — AWAIT THE DRAG HANDLE BEFORE ASSERTING HEIGHT" },
+      ]},
+      { t: "asst", body: "32 of 50 passing. Re-running the shell spec to confirm the resize flake is gone." },
+      { t: "spin", text: "STABILISING…", meta: "32S · ↑ 4.1K TOKENS · ESC TO INTERRUPT" },
+      { t: "input", ph: 'Try "run the full suite once the flake is fixed"' },
+    ],
+  },
+  {
+    name: "CREATE-DIALOG", state: "run", model: "OPUS", branch: "WT/DEBA6C3D",
+    path: "~/singularity/.worktrees/deba6c3d",
+    rows: [
+      { t: "rule", jp: "立案", en: "PLANNING PHASE" },
+      { t: "dot", l: "MODEL", v: "OPUS", tone: "tok" },
+      { t: "dot", l: "PLAN MODE", v: "ON", tone: "tok" },
+      { t: "user", body: "Fold the cron and background dialogs onto the shared CreateDialog primitive." },
+      { t: "tool", tool: "GREP", arg: "CreateDialog|useCreateForm — web/src" },
+      { t: "res", lines: [
+        { cls: "tdim", text: "7 FILES · 19 MATCHES" },
+        { cls: "", text: '<span class="tok">✓</span> WEB/SRC/SHELL/CREATEDIALOG.JSX <span class="tdim">PRIMITIVE</span>' },
+        { cls: "", text: '<span class="tok">✓</span> WEB/SRC/PANELS/CRONPANEL.JSX <span class="tdim">DUPLICATE FIELDS</span>' },
+        { cls: "", text: '<span class="tok">✓</span> WEB/SRC/PANELS/BACKGROUNDPANEL.JSX <span class="tdim">DUPLICATE FIELDS</span>' },
+      ]},
+      { t: "asst", body: "Both panels re-derive validation and the scope picker. Drafting a plan that moves cwd resolution into the primitive so the panels only pass a schema." },
+      { t: "spin", text: "DRAFTING IMPLEMENTATION PLAN…", meta: "6M · ↑ 410K TOKENS · ESC TO INTERRUPT" },
+      { t: "input", ph: 'Try "show me the plan before you write anything"' },
+    ],
+  },
+  {
+    name: "UI-CONSISTENCY", state: "idle", model: "SONNET", branch: "WT/8F9C786",
+    path: "~/singularity/.worktrees/8f9c786",
+    rows: [
+      { t: "rule", jp: "待機", en: "SESSION IDLE" },
+      { t: "dot", l: "LAST TURN", v: "4M AGO", tone: "tdim" },
+      { t: "dot", l: "PANELS ALIGNED", v: "7 / 14", tone: "tok" },
+      { t: "asst", body: "Seven panels aligned to the RailHeader rhythm. Waiting on your call for the remaining seven — some carry intentional spacing." },
+      { t: "stamp", tone: "t-blue", text: "待機 IDLE · AWAITING INPUT" },
+      { t: "input", ph: 'Try "align the rest and drop the one-off styles"' },
+    ],
+  },
+  {
+    name: "IMPORT-CLEANUP", state: "done", model: "HAIKU", branch: "MAIN",
+    path: "~/singularity",
+    rows: [
+      { t: "rule", jp: "完了", en: "SESSION CLOSED" },
+      { t: "dot", l: "LINT", v: "PASS", tone: "tok" },
+      { t: "dot", l: "TESTS", v: "PASS", tone: "tok" },
+      { t: "dot", l: "MERGED TO MAIN", v: "8F9C786", tone: "tok" },
+      { t: "asst", body: "Removed 23 dangling imports across seven panels. Lint and tests clean, merged to main." },
+      { t: "stamp", tone: "t-mint", text: "完了 RECORDED · 2H AGO" },
+    ],
+  },
+];
+
+const LED_TONE = { run: "t-mint", idle: "t-blue", done: "t-map" };
+const term = $("term");
+const tabstrip = $("tabstrip");
+let sessIdx = 0;
+let teletype = null;
+
+/* ---- row → HTML (one function per row grammar; identical to source) ---- */
+function rowHTML(r) {
+  switch (r.t) {
+    case "rule":
+      return '<div class="trule"><span class="jp">' + r.jp + "</span><span>" + r.en
+        + '</span><span class="line"></span></div>';
+    case "dot":
+      return '<div class="dotrow"><span class="l">' + r.l + '</span><span class="d"></span>'
+        + '<span class="v ' + (r.tone || "tok") + '">' + r.v + "</span></div>";
+    case "user":
+      return '<div class="trow"><span class="g">&gt;</span>'
+        + '<span class="body tprose">' + r.body + "</span></div>";
+    case "asst":
+      return '<div class="trow"><span class="g assistant">⏺</span>'
+        + '<span class="body tprose">' + r.body + "</span></div>";
+    case "tool":
+      return '<div class="trow"><span class="g assistant">⏺</span><span class="body">'
+        + '<span class="tk">' + r.tool + '</span>(<span class="targ path">' + r.arg + "</span>)</span></div>";
+    case "res":
+      return '<div class="trow"><span class="g branch">⎿</span><span class="body">'
+        + r.lines.map((l) => '<div class="' + l.cls + '">' + l.text + "</div>").join("")
+        + "</span></div>";
+    case "stamp":
+      return '<div class="trow indent"><span class="stamp sm blink ' + r.tone + '">' + r.text + "</span></div>";
+    case "spin":
+      return '<div class="tspin"><span class="star">✻</span><span>' + r.text
+        + ' <span class="tdim">' + r.meta + "</span></span></div>";
+    case "input":
+      return '<div class="tinput"><span class="caret">&gt;</span>'
+        + '<span class="ph">' + r.ph + '</span><span class="cursor"></span></div>'
+        + '<div class="thints"><span>? FOR SHORTCUTS</span>'
+        + '<span class="r"><b>⏵⏵ ACCEPT EDITS ON</b> · SHIFT+TAB TO CYCLE</span></div>';
+    default:
+      return "";
+  }
+}
+
+/* ---- teletype: rows land one at a time, ~120ms, never a fade ---- */
+function renderSession(i) {
+  const s = SESSIONS[i];
+  sessIdx = i;
+
+  $("termTitle").textContent = s.name;
+  $("termPath").textContent = s.path;
+  const conn = $("termConn");
+  conn.textContent = s.state === "done" ? "CLOSED: EXIT 0" : s.state === "idle" ? "IDLE: WAITING" : "CONNECTED: OK";
+  conn.style.color = s.state === "run" ? "var(--mint)" : s.state === "idle" ? "var(--blue)" : "var(--green-map)";
+
+  document.querySelectorAll(".tab[data-sess]").forEach((el, n) => {
+    const sel = n === i;
+    el.setAttribute("aria-selected", String(sel));
+    el.tabIndex = sel ? 0 : -1;
+  });
+
+  if (teletype) { clearInterval(teletype); teletype = null; }
+  term.textContent = "";
+
+  if (REDUCED) {
+    term.innerHTML = s.rows.map(rowHTML).join("");
+    term.scrollTop = term.scrollHeight;
+    return;
+  }
+  let n = 0;
+  teletype = setInterval(() => {
+    if (n >= s.rows.length) { clearInterval(teletype); teletype = null; return; }
+    term.insertAdjacentHTML("beforeend", rowHTML(s.rows[n]));
+    term.scrollTop = term.scrollHeight;
+    n++;
+  }, 120);
+}
+
+/* ---- session roster rendered as horizontal tabs (inserted before ts-new) ---- */
+(function buildRoster() {
+  const newBtn = $("newSess");
+  SESSIONS.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.className = "tab " + LED_TONE[s.state];
+    b.dataset.sess = String(i);
+    b.setAttribute("role", "tab");
+    b.setAttribute("aria-selected", "false");
+    b.setAttribute("aria-controls", "term");
+    b.tabIndex = -1;
+    b.innerHTML =
+      '<span class="led' + (s.state === "idle" ? " idle" : "") + '"></span>'
+      + '<span class="sbody"><span class="sname">' + s.name + "</span>"
+      + '<span class="smeta">' + s.model + " · <b>" + s.branch + "</b></span></span>";
+    b.addEventListener("click", () => renderSession(i));
+    tabstrip.insertBefore(b, newBtn);
+  });
+  $("sessCount").textContent = SESSIONS.filter((s) => s.state === "run").length + " RUN · " + SESSIONS.length + " TOTAL";
+
+  /* ARIA tab pattern: arrow keys + Home/End move focus and activate */
+  tabstrip.addEventListener("keydown", (e) => {
+    const tabs = [...tabstrip.querySelectorAll(".tab[data-sess]")];
+    if (!tabs.length) return;
+    const cur = tabs.findIndex((t) => t.tabIndex === 0);
+    let n = cur < 0 ? 0 : cur;
+    if (e.key === "ArrowRight") n = (cur + 1) % tabs.length;
+    else if (e.key === "ArrowLeft") n = (cur - 1 + tabs.length) % tabs.length;
+    else if (e.key === "Home") n = 0;
+    else if (e.key === "End") n = tabs.length - 1;
+    else return;
+    e.preventDefault();
+    tabs[n].focus();
+    renderSession(n);
+  });
+})();
+
+/* ==========================================================================
+   START
+   ========================================================================== */
+buildShelf();
+tickClock();
+tickDate();
+renderSession(0);
+setInterval(tickClock, 500);
+setInterval(tickDate, 60000);
+</script>
+</body>
+</html>

@@ -1,0 +1,1918 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PHOSPHOR-LAYOUT-04 · SINGULARITY — DUAL RAIL · NOTHING HIDDEN</title>
+<style>
+/* ============================================================================
+   PHOSPHOR-LAYOUT-04 — SINGULARITY, "DUAL RAIL · NOTHING HIDDEN"
+
+   CONCEPT
+   A control deck with no hiding places. Every navigable surface in the app is
+   on screen at rest: primary views ride the LEFT rail, and the nine secondary
+   panels that layout-02 buried in an overflow popover are permanently pinned
+   down the RIGHT rail. Two rails, one board, one dock — the operator never has
+   to remember where anything went.
+
+   MENU PATTERN — abolished. There is no dropdown, no command palette, no
+   backdrop, no popover anywhere in this file. The secondary nav (CONFIG · HOOKS
+   · SKILLS · RULES · MEMORY · TRANSCRIPTS · WIKI · APPEARANCE · STATUS) is a
+   stacked bilingual list on the right rail; PROCESSES (CPU/RAM sparklines +
+   window pills) is pinned at that rail's foot with RESTART SERVER as the red
+   destructive row at the very bottom. Both rails COLLAPSE to a kanji-width
+   sliver via a toggle — a mechanical snap, no width animation — and when
+   collapsed each glyph keeps a tiny EN caption stacked beneath it, because a
+   lone Mincho kanji in functional UI is forbidden (Bilingual-Pairing Rule).
+
+   TASK DETAIL PATTERN — INLINE PROGRESSIVE EXPANSION, promotion variant.
+   Clicking a card expands it in place as a FULL-WIDTH row that spans the board
+   and pushes the five columns down; no overlay, no scrim, no modal, no focus
+   trap. Chosen over "the card grows inside its column" because a column is
+   180px wide and the expanded region has to carry the agentic-loop ring — five
+   bilingual nodes with → connectors — plus three stat tiles and a 68ch prose
+   directive. Growing in-column would either shred the ring into a vertical
+   stack (losing the loop grammar the brief asks for) or force a horizontal
+   scroll inside a card. Promotion keeps the ring horizontal and the board's
+   five-lane geometry intact. DESIGN.md: "Don't reach for a modal by default —
+   exhaust inline and progressive alternatives first." This layout is that rule
+   demonstrated. The card owns aria-expanded + aria-controls; the region owns
+   role=region + aria-labelledby. One card at a time; click again or ESC
+   collapses. Expansion snaps — no height transition.
+
+   COMPONENTS MINED FROM sample-layouts/landing-page-02.html
+   · dual-sidebar shell (sonnet-34)            → the two permanent rails
+   · agentic loop, stepped ignition of 5 nodes → the expanded task's phase ring
+   · wave separator (exp-06 clean sine)        → canvas band between board+dock
+   · retention bar graph (sonnet-15)           → 12-cycle throughput columns
+   · filterable memory list (sonnet-35)        → session roster: filters DIM
+   · throughput line chart (sonnet-18 cleaned) → left-rail spend readout
+   · right-rail live status meters + feed      → right-rail PROCESSES block
+   Shared atoms (:root tokens, .stamp, .zone-title, .segbar, .btn, .scroll,
+   CRT pass, 7-seg clock) are reused verbatim from phosphor-layout-02.
+
+   DELIBERATE DEVIATIONS / DECISIONS
+   1. No theme, appearance or CRT toggle. The system is dark-only; APPEARANCE
+      exists on the right rail as a NAV DESTINATION (parity with the real app's
+      panel list) and toggles nothing. The CRT pass is unconditional.
+   2. Selected card = 2px mint border + inset glow, and its ID chip inverts to
+      a filled mint stamp — rather than flooding a whole 180px card with mint
+      fill. Figure/ground inversion is honoured by the marker, not the slab;
+      a solid mint card would out-shout the expanded region it points at.
+   3. KEY:VALUE metadata is drawn with ORANGE KEYS and AMBER VALUES. The
+      reference layouts do the reverse (orange values), which makes orange
+      carry data — a direct violation of the Orange-Is-Chrome Rule. Corrected.
+   4. Focus is NOT stolen on expand. This is a disclosure, not a dialog, so
+      focus stays on the trigger card; ESC and a second click both collapse.
+   5. The phase ring cycles only over phases the task has actually REACHED
+      (indices 0..stage). Cycling through future phases would imply work that
+      hasn't happened. A merged task renders settled — no cycling at all.
+   6. landing-page-02's .recall uses a 3px teal left stripe. Banned pattern —
+      the recall note here is a full 1px border plus a leading kind stamp.
+
+   MOTION — mechanical only. Zero CSS transition, zero cubic-bezier, zero
+   opacity fades for state. Blink 1s steps(1); segment fills 90ms/segment;
+   teletype 120ms/row; loop ignition 900ms; canvas wave 83ms (~12fps); clock
+   500ms. prefers-reduced-motion renders every final state and kills the lot.
+
+   CONTRAST (WCAG AA, measured against #0A0A0A)
+   · mint 14.0:1 · paper 17.9:1 · amber 9.3:1 · orange 6.3:1
+   · blue 5.8:1 · green-map 5.8:1                → all cleared for body text
+   · green-dim 3.1:1 / amber-dim 3.0:1 are CHROME ONLY — borders, tracks,
+     dot-leaders, rules. Never readable text. (The sample layouts leak here.)
+   · red-hi 4.3:1 only at >=14px/700 or as border/fill, and never as the sole
+     carrier of meaning — always a symbol plus a word.
+
+   ONE self-contained file. No build, no framework, no CDN, no web fonts, no
+   images. System font stacks, inline SVG, one canvas. Renders over file://.
+   ========================================================================== */
+
+:root{
+  /* --- palette (DESIGN.md frontmatter, verbatim) --- */
+  --bg:#0A0A0A;
+  --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6;
+  --orange:#F26400; --amber:#F49F09; --amber-dim:#9C3C24;
+  --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225;
+  --teal:#0C6C80; --blue:#5090D0;
+
+  /* --- type --- */
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+
+  /* --- shape --- */
+  --r-chip:2px; --r-seg:4px;
+
+  /* --- rail geometry: collapse is a width SWAP, never an animation --- */
+  --railL-w:214px; --railR-w:244px; --rail-shut:70px;
+
+  /* --- semantic z-scale (no arbitrary 999s) --- */
+  --z-base:0; --z-content:1; --z-rail:2; --z-handle:3; --z-crt:99;
+}
+
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:#000}
+body{
+  font-family:var(--mono);font-size:13px;line-height:1.5;letter-spacing:.03em;
+  color:var(--mint);text-transform:uppercase;overflow:hidden;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;
+}
+button{font:inherit;font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em;
+  color:inherit;background:none;border:none;cursor:pointer}
+svg,canvas{display:block}
+.tnum{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+/* reading prose + machine strings opt out of the No-Lowercase rule */
+.prose,.msg,.path{text-transform:none}
+
+/* ---------- CRT pass (scanline + vignette) — always on, no toggle ---------- */
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:var(--z-crt);
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)}
+
+/* ---------- focus: amber dashed for nav, paper solid for actions ---------- */
+:focus-visible{outline:2px dashed var(--amber);outline-offset:2px}
+.btn:focus-visible,.seg button:focus-visible,.fchip:focus-visible{
+  outline:2px solid var(--paper);outline-offset:2px}
+
+/* ============================================================================
+   FRAME — the signature double shell: 3px orange border, 1px inset line, two
+   chamfered corners. Holds head / (railL + main + railR) / wave / dock.
+   ========================================================================== */
+.frame{
+  position:relative;margin:12px;height:calc(100vh - 24px);background:var(--bg);
+  border:3px solid var(--orange);
+  clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));
+  box-shadow:0 0 10px rgba(242,100,0,.4),inset 0 0 12px rgba(242,100,0,.14);
+  display:flex;flex-direction:column;overflow:hidden;
+  /* 226, not 266: the expanded task panel is ~560px tall and the wave band
+     eats 46px, so a taller default dock cut the PHASE ring off the bottom.
+     The dock is still drag-resizable if the operator wants more log. */
+  --dock-h:226px; --list-w:236px;
+}
+.frame::before{content:"";position:absolute;inset:6px;border:1px solid var(--orange);
+  opacity:.4;pointer-events:none;z-index:var(--z-base)}
+
+/* ============================================================================
+   SHARED ATOMS (reused from phosphor-layout-02)
+   ========================================================================== */
+.zone-title{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--orange);
+  letter-spacing:.12em;border-bottom:1px solid var(--green-dim);padding-bottom:4px;margin-bottom:9px;
+  display:flex;align-items:baseline;gap:8px;flex-wrap:nowrap;white-space:nowrap;overflow:hidden}
+.zone-title .zt-jp{font-family:var(--jp);font-weight:800;font-size:12px;text-transform:none;
+  letter-spacing:.14em;flex:none}
+.zone-title .zt-end{margin-left:auto;font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+  color:var(--green-map);flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis}
+
+.stamp{display:inline-block;border:1px solid currentColor;border-radius:var(--r-chip);
+  padding:2px 9px;font-size:11px;line-height:1.4;white-space:nowrap;flex:none}
+.stamp.sm{font-size:9px;padding:1px 6px;letter-spacing:.08em}
+.stamp.fill{background:currentColor;border-color:currentColor}
+.stamp.fill > span{color:var(--bg)}          /* content punched out — no glow on it */
+.stamp.glow{text-shadow:0 0 4px currentColor}
+.stamp.big{font-size:13px;font-weight:700;padding:3px 10px}
+.blink{animation:blink 1s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+.t-mint{color:var(--mint)} .t-blue{color:var(--blue)} .t-amber{color:var(--amber)}
+.t-red{color:var(--red-hi)} .t-map{color:var(--green-map)} .t-orange{color:var(--orange)}
+.t-paper{color:var(--paper)}
+
+/* KEY:VALUE metadata — orange KEY (chrome), amber VALUE (data). See note 3. */
+.meta{font-size:10px;line-height:1.45;letter-spacing:.06em;color:var(--orange)}
+.meta b{color:var(--amber);font-weight:400}
+
+/* buttons: mint = primary, orange outline = chrome-level alt, green-dim = ghost */
+.btn{border:1px solid var(--orange);background:var(--bg);color:var(--orange);
+  padding:8px 15px;font-size:11px;letter-spacing:.12em;font-family:var(--cond);font-weight:700}
+.btn:hover{background:var(--orange);color:var(--bg)}
+.btn.primary{border:2px solid var(--mint);color:var(--mint);
+  box-shadow:0 0 8px rgba(82,242,154,.22),inset 0 0 8px rgba(82,242,154,.08)}
+.btn.primary:hover{background:var(--mint);color:var(--bg);box-shadow:0 0 12px rgba(82,242,154,.45)}
+.btn.primary[aria-pressed="true"],.btn.primary.on{background:var(--mint);color:var(--bg)}
+.btn.ghost{border-color:var(--green-dim);color:var(--green-map);font-family:var(--mono);
+  font-weight:400;letter-spacing:.1em}
+.btn.ghost:hover{border-color:var(--mint);background:var(--bg);color:var(--mint)}
+.btn.danger{border-color:var(--red-hi);color:var(--red-hi);font-size:13px}
+.btn.danger:hover{background:var(--red-hi);color:var(--bg)}
+.btn:disabled{opacity:.4;cursor:default;animation:none}
+.btn:disabled:hover{background:var(--bg);color:var(--orange)}
+.iconbtn{width:26px;height:26px;border:1px solid var(--green-dim);color:var(--green-map);
+  display:grid;place-items:center;flex:none;background:var(--bg)}
+.iconbtn:hover{border-color:var(--mint);color:var(--mint)}
+.iconbtn svg{width:13px;height:13px}
+.iconbtn:disabled{opacity:.4;cursor:default}
+.iconbtn:disabled:hover{border-color:var(--green-dim);color:var(--green-map)}
+
+/* segmented meters — discrete LEDs, never a continuous fill */
+.segbar{display:flex;gap:2px;height:8px;flex:1;min-width:0}
+.segbar i{flex:1;border-radius:1px;background:var(--green-dim);opacity:.3}
+.segbar i.on{opacity:1;background:currentColor;box-shadow:0 0 4px currentColor}
+.segbar.tall{height:14px;gap:3px}
+.segbar.tall i{border-radius:var(--r-chip)}
+.meterwrap{position:relative}
+.gate-line{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--amber);
+  box-shadow:0 0 6px rgba(244,159,9,.6);pointer-events:none}
+.gate-line .stamp{position:absolute;top:-9px;left:50%;transform:translate(-50%,-100%);
+  color:var(--amber);background:var(--bg);font-size:9px;padding:1px 6px}
+
+/* sparklines / line charts — one glowing polyline, sparse ticks, leading dot */
+.spark{display:block;width:100%;height:30px}
+.spark .area{stroke:none;fill:currentColor;opacity:.14}
+.spark .line{fill:none;stroke:currentColor;stroke-width:1.6;
+  filter:drop-shadow(0 0 3px currentColor)}
+.spark .dot{stroke:none;fill:currentColor}
+.spark .base{fill:currentColor;opacity:.32}
+.spark .axis{stroke:var(--orange);stroke-width:1;fill:none}
+.spark .thresh{stroke:var(--amber);stroke-width:1;stroke-dasharray:3 3;opacity:.8;fill:none}
+.spark .tick{stroke:var(--green-dim);stroke-width:1;fill:none}
+
+/* themed scrollbars */
+.scroll{scrollbar-width:thin;scrollbar-color:var(--amber-dim) rgba(242,100,0,.05)}
+.scroll::-webkit-scrollbar{width:9px;height:9px}
+.scroll::-webkit-scrollbar-track{background:rgba(242,100,0,.05)}
+.scroll::-webkit-scrollbar-thumb{background:var(--amber-dim);border:1px solid var(--green-dim)}
+.scroll::-webkit-scrollbar-thumb:hover{background:var(--amber)}
+
+/* ============================================================================
+   HEAD — masthead: monogram · wordmark · KEY:VALUE · sys stamp · 7-seg clock
+   ========================================================================== */
+.head{flex:none;display:flex;align-items:center;gap:16px;padding:10px 26px 10px 20px;
+  border-bottom:1px solid var(--orange);position:relative;z-index:var(--z-content)}
+.mono-stamp{border:1px solid var(--orange);color:var(--orange);font-family:var(--jp);font-weight:800;
+  font-size:24px;line-height:1;padding:6px 8px;text-align:center;flex:none;text-transform:none;
+  letter-spacing:.1em;text-indent:.1em;text-shadow:0 0 4px currentColor}
+.mono-stamp small{display:block;font-family:var(--cond);font-weight:700;font-size:8px;
+  letter-spacing:.16em;margin-top:4px;text-transform:uppercase;text-indent:0}
+.ttl{min-width:0}
+.ttl h1{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1;color:var(--paper);
+  letter-spacing:.02em;text-shadow:0 0 4px currentColor,0 0 12px rgba(82,242,154,.3);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ttl .eyebrow{font-size:10px;letter-spacing:.2em;color:var(--amber);margin-top:4px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ttl .eyebrow .jp{font-family:var(--jp);font-weight:800;text-transform:none;letter-spacing:.14em}
+.head .meta{margin-left:auto;text-align:right;flex:none}
+.clockstack{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex:none}
+.timechip{display:flex;align-items:center;gap:3px}
+.timechip svg{filter:drop-shadow(0 0 3px rgba(242,100,0,.85)) drop-shadow(0 0 8px rgba(242,100,0,.4))}
+.timechip .tc-colon{display:flex;flex-direction:column;gap:6px;margin:0 1px}
+.timechip .tc-colon i{width:4px;height:4px;background:var(--orange);display:block;
+  box-shadow:0 0 4px var(--orange)}
+.dateline{font-size:10px;color:var(--amber);letter-spacing:.14em}
+
+/* ============================================================================
+   MID — the dual-rail row (sonnet-34): railL · main · railR
+   ========================================================================== */
+.mid{flex:1;min-height:0;display:flex;position:relative;z-index:var(--z-content)}
+
+.rail{flex:none;display:flex;flex-direction:column;gap:9px;min-height:0;overflow-y:auto;
+  padding:12px 13px;background:var(--bg);position:relative;z-index:var(--z-rail)}
+.railL{width:var(--railL-w);border-right:1px solid var(--orange)}
+.railR{width:var(--railR-w);border-left:1px solid var(--orange)}
+.rail[data-shut="1"]{width:var(--rail-shut);padding:12px 6px}
+
+/* rail head: the collapse control + a bilingual rail label */
+.rhead{flex:none;display:flex;align-items:center;gap:7px}
+.rhead .rl{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.13em;
+  color:var(--orange);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rhead .rl .jp{font-family:var(--jp);font-weight:800;font-size:12px;text-transform:none;
+  letter-spacing:.12em;margin-right:5px}
+.railR .rhead{flex-direction:row-reverse}
+.rtoggle{width:24px;height:24px;flex:none;border:1px solid var(--orange);color:var(--orange);
+  display:grid;place-items:center;font-size:11px;line-height:1;letter-spacing:0;background:var(--bg)}
+.rtoggle:hover:not(:disabled){background:var(--orange);color:var(--bg)}
+.rtoggle:disabled{opacity:.4;cursor:default}
+.rail[data-shut="1"] .rhead{justify-content:center}
+
+/* ---------- nav rows: the one grammar both rails share ---------- */
+.nav{display:flex;flex-direction:column;gap:5px;flex:none}
+.nrow{display:flex;align-items:center;gap:9px;background:var(--bg);
+  border:1px solid var(--green-dim);color:var(--mint);padding:6px 9px;text-align:left;width:100%}
+.nrow .jp{font-family:var(--jp);font-weight:800;font-size:17px;line-height:1;
+  text-transform:none;letter-spacing:.1em;flex:none}
+.nrow .en{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.13em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.92}
+.nrow .cnt{margin-left:auto;font-size:10px;border:1px solid currentColor;
+  border-radius:var(--r-chip);padding:0 5px;line-height:1.5;flex:none}
+.nrow:not([aria-current="page"]):hover{border-color:var(--mint)}
+.nrow[aria-current="page"]{background:var(--mint);border-color:var(--mint);color:var(--bg)}
+.nrow[aria-current="page"] .en{opacity:1}
+.nrow.dangerrow{border-color:var(--red-hi);color:var(--red-hi)}
+/* red-hi is 4.3:1 → legal only at the large-text bar, so this caption is
+   14px/700, and the row always reads as symbol (⏻) plus word (RESTART). */
+.nrow.dangerrow .en{font-size:14px;font-weight:700;opacity:1}
+.nrow.dangerrow:hover{background:var(--red-hi);color:var(--bg)}
+
+/* collapsed rails: kanji on top, tiny EN caption beneath — never a lone glyph */
+.rail[data-shut="1"] .nrow{flex-direction:column;align-items:center;gap:2px;padding:6px 2px;
+  text-align:center}
+.rail[data-shut="1"] .nrow .en{font-size:8px;letter-spacing:.03em;font-weight:700}
+.rail[data-shut="1"] .nrow.dangerrow .en{font-size:9px}
+.rail[data-shut="1"] .nrow .cnt{margin:1px 0 0}
+.rail[data-shut="1"] .wide-only{display:none}
+.rail:not([data-shut="1"]) .narrow-only{display:none}
+.narrow-stack{display:flex;flex-direction:column;gap:5px;align-items:center;
+  font-size:9px;letter-spacing:.06em;color:var(--green-map);text-align:center}
+.narrow-stack b{color:var(--mint);font-weight:400;display:block}
+.narrow-rule{width:100%;height:1px;background:var(--green-dim);flex:none}
+
+.rail-spacer{flex:1;min-height:6px}
+
+/* ---------- left rail: new session · throughput chart · usage · daemon ------ */
+.newsess{border:2px solid var(--mint);background:var(--bg);color:var(--mint);flex:none;
+  display:flex;align-items:center;gap:9px;padding:8px 10px;text-align:left;width:100%;
+  box-shadow:0 0 8px rgba(82,242,154,.2),inset 0 0 8px rgba(82,242,154,.07)}
+.newsess .jp{font-family:var(--jp);font-weight:800;font-size:16px;line-height:1;
+  text-transform:none;letter-spacing:.12em;flex:none}
+.newsess .en{font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.14em}
+.newsess .plus{margin-left:auto;font-size:15px;line-height:1;flex:none}
+.newsess:hover{background:var(--mint);color:var(--bg);box-shadow:0 0 12px rgba(82,242,154,.45)}
+.rail[data-shut="1"] .newsess{flex-direction:column;align-items:center;gap:2px;padding:6px 2px}
+.rail[data-shut="1"] .newsess .en{font-size:8px;letter-spacing:.03em}
+.rail[data-shut="1"] .newsess .plus{margin:0}
+
+.chartcard{flex:none}
+.chartcard .cread{display:flex;align-items:baseline;justify-content:space-between;
+  font-size:9px;letter-spacing:.08em;color:var(--green-map);margin-top:5px}
+.chartcard .cread b{font-family:var(--cond);font-weight:700;font-size:17px;letter-spacing:.04em;
+  color:var(--mint);text-shadow:0 0 6px rgba(82,242,154,.4)}
+.chartcard .spark{height:64px}
+
+/* 12-cycle throughput columns (mined from landing-page-02's retention graph) */
+.bargraph{flex:none}
+.bars{display:flex;gap:3px;align-items:flex-end;height:52px}
+.bars .col{flex:1;display:flex;flex-direction:column-reverse;gap:2px;height:100%}
+.bars .col .s{flex:0 0 3px;background:var(--green-dim);opacity:.3;border-radius:1px}
+.bars .col .s.on{opacity:1;background:var(--mint);box-shadow:0 0 3px var(--mint)}
+.bars .col .s.on.hot{background:var(--amber);box-shadow:0 0 3px var(--amber)}
+.bx{display:flex;gap:3px;margin-top:5px;font-size:8px;letter-spacing:.06em;color:var(--green-map)}
+.bx span{flex:1;text-align:center}
+
+.usage{flex:none}
+.u-row{display:flex;align-items:center;gap:9px;margin-bottom:9px}
+.u-row:last-child{margin-bottom:0}
+.u-name{font-size:10px;letter-spacing:.1em;color:var(--green-map);width:50px;flex:none}
+.u-pct{font-size:10px;width:32px;text-align:right;flex:none;color:currentColor}
+.u-claude,.u-api{color:var(--mint)} .u-ollama{color:var(--green-map)}
+
+.rail-foot{flex:none;display:flex;align-items:center;gap:7px;flex-wrap:wrap;padding-top:10px;
+  border-top:1px solid var(--green-dim)}
+.rail-foot .addr{font-size:10px;color:var(--amber);letter-spacing:.08em}
+
+/* ---------- right rail: processes block pinned at the foot ---------- */
+.procs{flex:none;border-top:1px solid var(--green-dim);padding-top:10px}
+.procs .row{display:flex;justify-content:space-between;align-items:baseline;
+  font-size:10px;letter-spacing:.08em;color:var(--green-map);margin-bottom:4px}
+.procs .row b{color:var(--mint);font-weight:400}
+.pills{display:flex;gap:5px;margin-top:4px}
+.pill{border:1px solid var(--orange);color:var(--orange);border-radius:var(--r-chip);
+  padding:2px 7px;font-size:9px;letter-spacing:.1em;background:var(--bg)}
+.pill[aria-selected="true"]{background:var(--orange);color:var(--bg)}
+.pill:hover:not([aria-selected="true"]){color:var(--mint);border-color:var(--mint)}
+
+/* ============================================================================
+   MAIN — view bar · legend · inline expansion row · board
+   ========================================================================== */
+.main{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0}
+.viewbar{flex:none;display:flex;align-items:flex-end;gap:14px;row-gap:9px;flex-wrap:wrap;
+  padding:11px 16px 10px;border-bottom:1px solid var(--orange)}
+.vb-title{min-width:0;flex:1 1 auto}
+.vb-title h2{font-family:var(--cond);font-weight:700;font-size:22px;line-height:1;color:var(--paper);
+  letter-spacing:.03em;text-shadow:0 0 4px rgba(237,248,214,.35);display:flex;align-items:baseline;gap:10px}
+.vb-title h2 .jp{font-family:var(--jp);font-weight:800;font-size:19px;color:var(--mint);
+  text-transform:none;letter-spacing:.14em;text-shadow:0 0 6px rgba(82,242,154,.45)}
+.vb-sub{font-size:10px;letter-spacing:.08em;color:var(--amber);margin-top:5px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vb-sub b{color:var(--orange);font-weight:400}
+.vb-actions{margin-left:auto;display:flex;align-items:center;gap:9px;flex:none}
+.seg{display:flex;border:1px solid var(--orange)}
+.seg button{padding:7px 13px;font-family:var(--cond);font-weight:700;font-size:11px;
+  letter-spacing:.13em;color:var(--orange);background:var(--bg)}
+.seg button + button{border-left:1px solid var(--orange)}
+.seg button:hover:not([aria-selected="true"]){color:var(--mint)}
+.seg button[aria-selected="true"]{background:var(--mint);color:var(--bg);border-color:var(--mint)}
+
+/* viewbody scrolls as a whole: when the expansion row lands it PUSHES the
+   columns down rather than crushing them (min-height keeps lanes usable) */
+.viewbody{flex:1;min-height:0;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden}
+
+.legend{flex:none;display:flex;gap:6px;flex-wrap:wrap;padding:10px 16px 0;align-items:stretch}
+.lg{border:1px solid currentColor;border-radius:var(--r-chip);padding:2px 8px;
+  display:flex;flex-direction:column;align-items:center;min-width:54px}
+.lg .jp{font-family:var(--jp);font-weight:800;font-size:13px;line-height:1.2;
+  text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.lg .cap{font-size:8px;letter-spacing:.1em}
+.lg.fill{background:currentColor}
+.lg.fill .jp,.lg.fill .cap{color:var(--bg)}
+.legend-note{margin-left:auto;align-self:center;font-size:9px;letter-spacing:.14em;color:var(--green-map)}
+
+/* ---------- board ---------- */
+.board{flex:1 0 auto;min-height:262px;display:flex;gap:9px;padding:11px 16px 12px;
+  overflow-x:auto;overflow-y:hidden}
+.col{width:180px;flex:none;display:flex;flex-direction:column;min-height:0}
+.col-head{flex:none;display:flex;align-items:baseline;gap:7px;padding-bottom:5px;
+  border-bottom:1px solid var(--green-dim);margin-bottom:8px}
+.col-head .ct{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.11em;
+  color:var(--orange);white-space:nowrap}
+.col-head .cjp{font-family:var(--jp);font-weight:800;font-size:12px;text-transform:none;letter-spacing:.14em}
+.col-head .stamp{margin-left:auto}
+.col-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;padding-right:3px}
+
+.tcard{background:var(--bg);border:1px solid var(--green-dim);padding:8px 10px;
+  text-align:left;width:100%;display:block;color:var(--mint);cursor:pointer}
+.tcard:hover{border-color:var(--mint)}
+.tcard[data-state="planning"]{border-color:rgba(80,144,208,.55)}
+.tcard[data-state="running"]{border-color:rgba(82,242,154,.55)}
+.tcard[data-state="review"]{border-color:rgba(244,159,9,.55)}
+/* selected: 2px mint + inset glow; the ID chip inverts (see deviation 2) */
+.tcard[aria-expanded="true"]{border:2px solid var(--mint);padding:7px 9px;
+  box-shadow:0 0 8px rgba(82,242,154,.25),inset 0 0 12px rgba(82,242,154,.1)}
+.tc-top{display:flex;align-items:center;gap:6px;margin-bottom:6px}
+.tc-id{margin-left:auto;font-size:9px;color:var(--amber);letter-spacing:.06em;white-space:nowrap;
+  border:1px solid var(--amber-dim);border-radius:var(--r-chip);padding:1px 5px}
+.tcard[aria-expanded="true"] .tc-id{background:var(--mint);border-color:var(--mint);color:var(--bg)}
+.tc-title{font-family:var(--cond);font-weight:700;font-size:13px;line-height:1.22;
+  letter-spacing:.02em;color:var(--paper);margin-bottom:6px}
+.tc-repo{font-size:9px;letter-spacing:.06em;color:var(--green-map);line-height:1.4;margin-bottom:7px}
+.tc-repo b{color:var(--amber);font-weight:400}
+.tc-foot{display:flex;align-items:center;gap:4px;flex-wrap:wrap}
+.tag{border:1px solid var(--green-dim);color:var(--green-map);border-radius:var(--r-chip);
+  padding:1px 5px;font-size:9px;letter-spacing:.08em}
+.tc-cost{margin-left:auto;font-size:10px;color:var(--amber);letter-spacing:.06em;white-space:nowrap}
+.tc-prog{display:flex;align-items:center;gap:7px;margin-top:8px;font-size:9px;color:var(--green-map)}
+.tc-prog .segbar{height:6px}
+.tc-prog b{color:var(--mint);font-weight:400;flex:none}
+.tc-live{display:flex;align-items:center;gap:6px;margin-top:7px;font-size:9px;letter-spacing:.06em}
+
+/* ============================================================================
+   INLINE EXPANSION ROW — full-width, spans the board, pushes the columns down.
+   No overlay, no scrim, no modal, no focus trap. Snaps open and shut.
+   ========================================================================== */
+.xrow{flex:none;margin:11px 16px 0;border:2px solid var(--mint);background:var(--bg);
+  box-shadow:0 0 10px rgba(82,242,154,.2),inset 0 0 18px rgba(82,242,154,.06);
+  clip-path:polygon(0 0,calc(100% - 20px) 0,100% 20px,100% 100%,20px 100%,0 calc(100% - 20px))}
+.xrow[hidden]{display:none}
+.xr-bar{display:flex;align-items:center;gap:10px;padding:13px 18px 0;flex-wrap:wrap}
+.x-id{font-size:11px;color:var(--amber);letter-spacing:.08em}
+.x-hint{margin-left:auto;font-size:9px;letter-spacing:.12em;color:var(--green-map)}
+.xr-bar .iconbtn{width:28px;height:28px}
+.x-title{font-family:var(--cond);font-weight:700;font-size:27px;line-height:1.08;
+  letter-spacing:.02em;color:var(--paper);padding:10px 18px 0;text-wrap:balance;
+  text-shadow:0 0 4px rgba(237,248,214,.3)}
+.xr-grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(0,1fr);gap:18px;
+  padding:16px 18px 0;align-items:start}
+.xr-col{min-width:0}
+.x-copy{font-size:12px;line-height:1.7;color:var(--green-map);max-width:70ch;text-wrap:pretty}
+.x-copy b{color:var(--mint);font-weight:400}
+
+/* recall note: FULL 1px border + leading kind stamp. landing-page-02 uses a
+   3px teal left stripe here — that exact pattern is banned, so it is gone. */
+.recall{margin-top:14px;border:1px solid var(--green-dim);padding:9px 11px;
+  display:flex;gap:9px;align-items:flex-start}
+.recall .rc-t{font-size:10px;line-height:1.5;letter-spacing:.06em;color:var(--amber);min-width:0}
+.recall .rc-t i{display:block;font-style:normal;color:var(--green-map);font-size:9px;
+  letter-spacing:.1em;margin-bottom:2px}
+
+.x-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px;margin-top:11px}
+.st{border:1px solid var(--green-dim);padding:8px 9px 9px;min-width:0}
+.st .k{font-size:9px;letter-spacing:.11em;color:var(--green-map)}
+.st .v{font-family:var(--cond);font-weight:700;font-size:30px;line-height:1;letter-spacing:.02em;
+  color:var(--mint);margin-top:5px;text-shadow:0 0 6px rgba(82,242,154,.4);
+  overflow:hidden;text-overflow:ellipsis}
+.st .f{font-size:8px;letter-spacing:.1em;color:var(--green-map);margin-top:5px}
+.x-prog{margin-top:14px}
+.x-prog-read{display:flex;justify-content:space-between;gap:10px;font-size:10px;
+  color:var(--green-map);margin-top:7px}
+.x-prog-read b{color:var(--mint);font-weight:400}
+
+/* ---------- the agentic loop ring: 5 bilingual nodes, → connectors ---------- */
+.xr-loop{padding:18px 18px 0}
+.loopnodes{display:flex;align-items:stretch;gap:5px}
+.lnode{flex:1;min-width:0;text-align:center;border:1px solid var(--green-dim);background:var(--bg);
+  padding:9px 4px 8px;display:flex;flex-direction:column;align-items:center;gap:3px}
+.lnode .n{font-size:9px;letter-spacing:.12em;color:var(--green-map);line-height:1}
+.lnode .k{font-family:var(--jp);font-weight:800;font-size:20px;line-height:1;color:var(--green-map);
+  text-transform:none;letter-spacing:.12em;text-indent:.12em}
+.lnode .e{font-family:var(--cond);font-weight:700;font-size:9px;letter-spacing:.1em;
+  color:var(--green-map);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%}
+.lnode.done{background:var(--mint);border-color:var(--mint)}
+.lnode.done .n,.lnode.done .k,.lnode.done .e{color:var(--bg)}   /* punched out, no glow */
+.lnode.now{background:var(--blue);border-color:var(--blue)}
+.lnode.now .n,.lnode.now .k,.lnode.now .e{color:var(--bg)}
+/* the ignition ring — the cycling marker; a box glow, never glow on content */
+.lnode.scan{box-shadow:0 0 12px rgba(124,244,171,.5);border-color:var(--mint-hi)}
+.larrow{flex:none;align-self:center;color:var(--orange);font-size:13px;line-height:1}
+
+.xr-actions{display:flex;gap:10px;padding:16px 18px;margin-top:4px;
+  border-top:1px solid var(--orange)}
+.xr-actions .btn{min-width:150px;text-align:center}
+
+/* ============================================================================
+   WAVE BAND — canvas sine separator between the board and the terminal dock
+   ========================================================================== */
+.waveband{flex:none;height:46px;position:relative;border-top:1px solid var(--orange);
+  z-index:var(--z-content);overflow:hidden}
+.waveband canvas{width:100%;height:100%}
+.waveband .wcap{position:absolute;left:16px;top:50%;transform:translateY(-50%);
+  background:var(--bg);border:1px solid var(--amber-dim);padding:1px 7px;
+  font-size:9px;letter-spacing:.12em;color:var(--amber);white-space:nowrap}
+.waveband .wcap .jp{font-family:var(--jp);font-weight:800;font-size:10px;
+  text-transform:none;letter-spacing:.12em;margin-right:5px}
+
+/* ============================================================================
+   RESIZE HANDLES — mirror the real app's useResizable (pointer + arrow keys)
+   ========================================================================== */
+.dock-handle{flex:none;height:11px;cursor:row-resize;position:relative;touch-action:none;
+  border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);
+  background:repeating-linear-gradient(-45deg,rgba(242,100,0,.16) 0 5px,transparent 5px 10px);
+  z-index:var(--z-handle)}
+.dock-handle::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:46px;height:3px;background:var(--orange);opacity:.5}
+.dock-handle:hover::after,.dock-handle.dragging::after,.dock-handle:focus-visible::after{
+  opacity:1;box-shadow:0 0 8px var(--orange)}
+.list-handle{flex:none;width:9px;cursor:col-resize;position:relative;touch-action:none;
+  border-left:1px solid var(--orange);border-right:1px solid var(--orange);
+  background:repeating-linear-gradient(-45deg,rgba(242,100,0,.16) 0 5px,transparent 5px 10px);
+  z-index:var(--z-handle)}
+.list-handle::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:3px;height:46px;background:var(--orange);opacity:.5}
+.list-handle:hover::after,.list-handle.dragging::after,.list-handle:focus-visible::after{
+  opacity:1;box-shadow:0 0 8px var(--orange)}
+body.resizing *{pointer-events:none}
+body.resizing .dock-handle,body.resizing .list-handle{pointer-events:auto}
+
+/* ============================================================================
+   DOCK — session roster (filter DIMS, never hides) + the amber terminal
+   ========================================================================== */
+.dock{flex:none;height:var(--dock-h);display:flex;min-height:0;position:relative;z-index:var(--z-content)}
+.dock-list{width:var(--list-w);flex:none;display:flex;flex-direction:column;min-height:0;padding:10px 12px}
+.dl-head{flex:none}
+.fchips{flex:none;display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px}
+.fchip{border:1px solid var(--orange);color:var(--orange);border-radius:var(--r-chip);
+  padding:2px 7px;font-size:9px;letter-spacing:.08em;background:var(--bg)}
+.fchip .jp{font-family:var(--jp);font-weight:800;font-size:10px;text-transform:none;
+  letter-spacing:.1em;margin-right:4px}
+.fchip[aria-pressed="true"]{background:var(--orange);color:var(--bg)}
+.fchip:hover:not([aria-pressed="true"]){color:var(--mint);border-color:var(--mint)}
+.dl-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:6px;padding-right:3px}
+.sess{display:flex;align-items:center;gap:9px;border:1px solid var(--green-dim);background:var(--bg);
+  padding:6px 9px;text-align:left;width:100%;color:var(--mint)}
+.sess:hover{border-color:var(--mint)}
+.sess[aria-pressed="true"]{border:2px solid var(--mint);padding:5px 8px;
+  box-shadow:inset 0 0 12px rgba(82,242,154,.12)}
+/* filter grammar mined from sonnet-35: non-matching rows DIM, they never
+   disappear — the set stays visible and the filter only narrows attention */
+.sess.dim{opacity:.25;filter:grayscale(1)}
+.sess .led{width:8px;height:8px;flex:none;border-radius:50%;background:currentColor;
+  box-shadow:0 0 5px currentColor}
+.sess .led.idle{box-shadow:none;opacity:.7}
+.sess .sbody{min-width:0;flex:1;display:flex;flex-direction:column;gap:1px}
+.sess .sname{display:block;font-family:var(--cond);font-weight:700;font-size:13px;line-height:1.15;
+  letter-spacing:.04em;color:var(--paper);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess[aria-pressed="true"] .sname{color:var(--mint)}
+.sess .smeta{display:block;font-size:9px;line-height:1.3;letter-spacing:.06em;color:var(--green-map);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess .smeta b{color:var(--amber);font-weight:400}
+
+.term-wrap{flex:1;min-width:0;display:flex;flex-direction:column;min-height:0;
+  border-left:1px solid var(--orange)}
+.termbar{flex:none;display:flex;align-items:center;gap:10px;padding:6px 13px;
+  border-bottom:1px solid var(--amber-dim);font-size:10px;letter-spacing:.12em;color:var(--amber)}
+.termbar .tt{color:var(--amber);white-space:nowrap}
+.termbar .tt b{color:var(--paper);font-weight:400}
+.termbar .path{color:var(--green-map);letter-spacing:.04em;min-width:0;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.termbar .conn{color:var(--mint);flex:none}
+.termbar .tools{margin-left:auto;display:flex;gap:5px;flex:none}
+
+/* the log: amber-on-black, two brightness levels (bright=data, dim=chrome) */
+.term{flex:1;min-height:0;overflow-y:auto;padding:9px 14px 12px;
+  background:rgba(244,159,9,.02);font-size:12px;line-height:1.55;color:var(--amber)}
+.trow{display:flex;gap:9px;align-items:flex-start}
+.trow + .trow{margin-top:2px}
+.trow .g{flex:none;width:1.4ch;text-align:center;color:var(--amber)}
+.trow .g.assistant{color:var(--mint);text-shadow:0 0 4px rgba(82,242,154,.4)}
+.trow .g.branch{color:var(--amber-dim)}
+.trow .body{min-width:0;flex:1;word-break:break-word}
+.trow.indent{padding-left:calc(1.4ch + 9px)}
+.trule{display:flex;align-items:center;gap:9px;margin:12px 0 8px;font-size:9px;
+  letter-spacing:.18em;color:var(--orange)}
+.trule:first-child{margin-top:0}
+.trule .jp{font-family:var(--jp);font-weight:800;font-size:11px;text-transform:none;
+  letter-spacing:.14em;color:var(--amber)}
+.trule .line{flex:1;height:1px;background:var(--amber-dim)}
+.tk{color:var(--paper)}                       /* tool name */
+.targ{color:var(--orange)}                    /* tool argument */
+.tdim{color:var(--green-map)}                 /* readable secondary — NOT amber-dim */
+.tok{color:var(--mint)}
+.tfail{color:var(--red-hi);font-weight:700;font-size:14px}
+.tprose{color:var(--amber);text-transform:none}
+.dotrow{display:flex;gap:8px;align-items:baseline;font-size:11px}
+.dotrow .l{flex:none;color:var(--amber)}
+.dotrow .d{flex:1;overflow:hidden;white-space:nowrap;color:var(--amber-dim);letter-spacing:2px}
+.dotrow .d::after{content:"........................................................................"}
+.dotrow .v{flex:none}
+.term .stamp{margin:5px 0}
+.tspin{display:flex;gap:8px;align-items:baseline;margin-top:9px;color:var(--amber);font-size:11px}
+.tspin .star{display:inline-block;color:var(--mint);animation:spin 1.1s steps(8) infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.tinput{display:flex;align-items:center;gap:8px;margin-top:11px;padding:7px 10px;
+  border:1px solid var(--green-dim);font-size:11px}
+.tinput .caret{color:var(--mint);flex:none}
+.tinput .ph{color:var(--green-map);text-transform:none}
+.cursor{display:inline-block;width:7px;height:12px;background:var(--amber);vertical-align:-1px;
+  flex:none;box-shadow:0 0 5px var(--amber);animation:blink 1s steps(1) infinite}
+.thints{display:flex;flex-wrap:wrap;gap:5px 16px;margin-top:7px;font-size:9px;
+  letter-spacing:.1em;color:var(--green-map)}
+.thints .r{margin-left:auto}
+.thints b{color:var(--mint);font-weight:400}
+
+/* ============================================================================
+   REDUCED MOTION — render the final state, kill every blink / strobe / tick
+   ========================================================================== */
+@media (prefers-reduced-motion:reduce){
+  .blink,.cursor,.tspin .star{animation:none}
+  .lnode.scan{box-shadow:none;border-color:var(--green-dim)}
+}
+
+/* ============================================================================
+   NARROW SHELL — structural collapse, not fluid type. Because BOTH rails are
+   permanent the horizontal budget is tight: the right rail folds at 1080px and
+   both fold at 820px. Enforced from JS (single source of truth) so the toggles
+   stay in sync; these rules only trim the surrounding chrome.
+   ========================================================================== */
+@media (max-width:1080px){
+  .head .meta{display:none}
+  .xr-grid{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:820px){
+  .ttl .eyebrow{display:none}
+  .col{width:168px}
+  .x-title{font-size:22px}
+  .loopnodes{flex-wrap:wrap}
+  .lnode{flex:1 1 28%}
+  .larrow{display:none}
+}
+</style>
+</head>
+<body>
+
+<div class="frame" id="frame">
+
+  <!-- ===================== HEAD ===================== -->
+  <header class="head">
+    <div class="mono-stamp">特異点<small>SINGULARITY</small></div>
+    <div class="ttl">
+      <h1>FLEET CONTROL PLANE</h1>
+      <div class="eyebrow">DUAL RAIL · NOTHING HIDDEN · <span class="jp">全開示</span></div>
+    </div>
+
+    <div class="meta">
+      CODE:<b>4317</b><br>
+      FILE:<b>TASKS_BOARD</b><br>
+      EX_MODE:<b>MANUAL</b><br>
+      PRIORITY:<b>AA-</b>
+    </div>
+
+    <span class="stamp glow t-mint" id="sysstamp">SYS:NOMINAL</span>
+
+    <div class="clockstack">
+      <span class="timechip" id="timechip" role="img" aria-label="Local time"></span>
+      <span class="dateline" id="dateline">— — —</span>
+    </div>
+  </header>
+
+  <!-- ===================== MID: railL · main · railR ===================== -->
+  <div class="mid">
+
+    <!-- ---------------- LEFT RAIL — primary views ---------------- -->
+    <aside class="rail railL scroll" id="railL" aria-label="Primary views">
+      <div class="rhead">
+        <button class="rtoggle" id="toggleL" aria-controls="railL" aria-expanded="true"
+                aria-label="Collapse left rail">«</button>
+        <span class="rl wide-only"><span class="jp">主系</span>PRIMARY</span>
+      </div>
+
+      <button class="newsess" id="newSess">
+        <span class="jp">新規</span><span class="en">NEW SESSION</span><span class="plus">+</span>
+      </button>
+
+      <nav class="nav" aria-label="Views">
+        <button class="nrow" aria-current="page">
+          <span class="jp">任務</span><span class="en">TASKS</span><span class="cnt tnum">7</span>
+        </button>
+        <button class="nrow">
+          <span class="jp">自動</span><span class="en">AUTOMATION</span><span class="cnt tnum">3</span>
+        </button>
+        <button class="nrow">
+          <span class="jp">消費</span><span class="en">USAGE</span>
+        </button>
+      </nav>
+
+      <!-- throughput line chart: one glowing polyline, sparse baseline ticks,
+           leading dot. Earns its place as the rail's spend/throughput readout. -->
+      <section class="chartcard wide-only" aria-label="Spend and throughput, 48 hour window">
+        <div class="zone-title">THROUGHPUT <span class="zt-jp">処理</span><span class="zt-end">48H</span></div>
+        <svg class="spark t-mint" id="thruChart" viewBox="0 0 186 64"
+             preserveAspectRatio="none" aria-hidden="true"></svg>
+        <div class="cread"><span>SPEND TODAY</span><b class="tnum">$4.18</b></div>
+        <div class="cread"><span>CHAINS / HR</span><b class="tnum">+34%</b></div>
+      </section>
+
+      <!-- 12-cycle column bank (retention-graph grammar), stepped fill -->
+      <section class="bargraph wide-only" aria-label="Task chains completed per cycle">
+        <div class="zone-title">CYCLES <span class="zt-jp">周期</span><span class="zt-end">12</span></div>
+        <div class="bars" id="bars" role="img" aria-label="Chains per cycle, 12 cycles, trending up"></div>
+        <div class="bx"><span>-11</span><span>-8</span><span>-5</span><span>-2</span><span>NOW</span></div>
+      </section>
+
+      <div class="rail-spacer"></div>
+
+      <section class="usage wide-only" aria-label="Usage, 5 hour window">
+        <div class="zone-title">USAGE <span class="zt-jp">消費</span><span class="zt-end">5H WINDOW</span></div>
+        <div class="u-row u-claude">
+          <span class="u-name">CLAUDE</span>
+          <span class="meterwrap segbar" data-fill="62" aria-hidden="true"></span>
+          <span class="u-pct tnum">62%</span>
+        </div>
+        <div class="u-row u-api">
+          <span class="u-name">API</span>
+          <span class="meterwrap segbar" data-fill="38" aria-hidden="true"></span>
+          <span class="u-pct tnum">38%</span>
+        </div>
+        <div class="u-row u-ollama">
+          <span class="u-name">OLLAMA</span>
+          <span class="meterwrap segbar" data-fill="11" aria-hidden="true"></span>
+          <span class="u-pct tnum">11%</span>
+        </div>
+      </section>
+
+      <!-- collapsed rail keeps the numbers, drops only the drawn bars -->
+      <div class="narrow-only narrow-stack" aria-label="Usage, 5 hour window">
+        <span class="narrow-rule"></span>
+        <span>CLA<b class="tnum">62%</b></span>
+        <span>API<b class="tnum">38%</b></span>
+        <span>OLL<b class="tnum">11%</b></span>
+      </div>
+
+      <div class="rail-foot wide-only">
+        <span class="stamp fill t-mint"><span>接続 CONNECTED</span></span>
+        <span class="addr path">127.0.0.1:4317</span>
+      </div>
+      <div class="narrow-only narrow-stack">
+        <span class="narrow-rule"></span>
+        <span class="stamp sm fill t-mint"><span>接続 OK</span></span>
+        <span class="path" style="color:var(--amber);font-size:8px">:4317</span>
+      </div>
+    </aside>
+
+    <!-- ---------------- MAIN ---------------- -->
+    <main class="main">
+      <div class="viewbar">
+        <div class="vb-title">
+          <h2>TASKS <span class="jp">任務</span></h2>
+          <div class="vb-sub tnum">
+            ORCHESTRATED:<b>7</b> · RUNNING:<b>2</b> · GATED:<b>1</b> · SPEND_TODAY:<b>$4.18</b>
+          </div>
+        </div>
+        <div class="vb-actions">
+          <div class="seg" role="tablist" aria-label="View mode">
+            <button role="tab" aria-selected="true">BOARD</button>
+            <button role="tab" aria-selected="false">HISTORY</button>
+          </div>
+          <button class="btn primary" id="newTask">+ NEW TASK</button>
+        </div>
+      </div>
+
+      <div class="viewbody scroll" id="viewbody">
+
+        <!-- status key for every hue used in the board below it -->
+        <div class="legend" role="img" aria-label="Task status key">
+          <span class="lg t-map"><span class="jp">待機</span><span class="cap">QUEUED</span></span>
+          <span class="lg t-blue"><span class="jp">立案</span><span class="cap">PLANNING</span></span>
+          <span class="lg t-mint"><span class="jp">稼働</span><span class="cap">RUNNING</span></span>
+          <span class="lg t-amber"><span class="jp">審査</span><span class="cap">REVIEW</span></span>
+          <span class="lg fill t-mint"><span class="jp">完了</span><span class="cap">MERGED</span></span>
+          <span class="legend-note">A CARD EXPANDS IN PLACE — NO OVERLAY</span>
+        </div>
+
+        <!-- ===== INLINE EXPANSION ROW (the task detail; no modal) ===== -->
+        <section class="xrow" id="xrow" role="region" aria-labelledby="xTitle" hidden>
+          <div class="xr-bar">
+            <span class="stamp sm" id="xStamp">—</span>
+            <span class="x-id" id="xId">TSK·0000</span>
+            <span class="x-hint">ESC — OR THE SAME CARD AGAIN — COLLAPSES THIS ROW</span>
+            <button class="iconbtn" id="xClose" aria-label="Collapse task detail">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+
+          <h3 class="x-title" id="xTitle">—</h3>
+
+          <div class="xr-grid">
+            <div class="xr-col">
+              <div class="zone-title">DIRECTIVE <span class="zt-jp">指令</span><span class="zt-end" id="xKind">—</span></div>
+              <p class="x-copy prose" id="xDesc"></p>
+              <div class="recall" id="xRecall"></div>
+            </div>
+
+            <div class="xr-col">
+              <div class="zone-title">DOSSIER <span class="zt-jp">記録</span></div>
+              <div class="meta" id="xMeta"></div>
+              <div class="x-stats">
+                <div class="st"><div class="k">COST</div><div class="v tnum" id="xCost">—</div><div class="f">USD · STATUSLINE</div></div>
+                <div class="st"><div class="k">TOKENS</div><div class="v tnum" id="xTokens">—</div><div class="f">TOTAL I/O</div></div>
+                <div class="st"><div class="k">TURNS</div><div class="v tnum" id="xTurns">—</div><div class="f">ASSISTANT</div></div>
+              </div>
+              <div class="x-prog" id="xProgWrap" hidden>
+                <div class="zone-title">PROGRESS <span class="zt-jp">進捗</span></div>
+                <div class="meterwrap">
+                  <div class="segbar tall t-mint" id="xProgBar"></div>
+                  <div class="gate-line" style="left:80%"><span class="stamp">REVIEW GATE · 80</span></div>
+                </div>
+                <div class="x-prog-read"><span><b class="tnum" id="xProgPct">0%</b> COMPLETE</span><span id="xProgLabel">—</span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- the agentic loop replaces a plain vertical timeline -->
+          <div class="xr-loop">
+            <div class="zone-title">PHASE <span class="zt-jp">段階</span><span class="zt-end" id="xLoopEnd">—</span></div>
+            <div class="loopnodes" id="xLoop" role="img" aria-label="Task phase ring"></div>
+          </div>
+
+          <div class="xr-actions">
+            <button class="btn ghost" id="xTranscript">記録 TRANSCRIPT</button>
+            <button class="btn primary" id="xPrimary">OPEN SESSION</button>
+          </div>
+        </section>
+
+        <!-- ===== BOARD ===== -->
+        <div class="board scroll" id="board">
+
+          <section class="col" aria-label="Queued">
+            <div class="col-head">
+              <span class="ct">QUEUED</span><span class="cjp t-map">待機</span>
+              <span class="stamp sm t-map tnum">2</span>
+            </div>
+            <div class="col-body scroll">
+              <button class="tcard" data-task="a1f2" data-state="queued"
+                      aria-expanded="false" aria-controls="xrow">
+                <div class="tc-top"><span class="stamp sm t-map">CHORE</span><span class="tc-id">TSK·A1F2</span></div>
+                <div class="tc-title">REAP ORPHAN ESBUILD / VITE PROCS ON BUILD HANG</div>
+                <div class="tc-repo">REPO:<b>SINGULARITY</b><br>BRANCH:<b>MAIN</b></div>
+                <div class="tc-foot"><span class="tag">INFRA</span><span class="tag">DX</span></div>
+              </button>
+              <button class="tcard" data-task="b7c0" data-state="queued"
+                      aria-expanded="false" aria-controls="xrow">
+                <div class="tc-top"><span class="stamp sm t-map">FEATURE</span><span class="tc-id">TSK·B7C0</span></div>
+                <div class="tc-title">PER-PROVIDER SPEND SPARKLINE IN USAGE VIEW</div>
+                <div class="tc-repo">REPO:<b>SINGULARITY</b><br>BRANCH:<b>MAIN</b></div>
+                <div class="tc-foot"><span class="tag">USAGE</span></div>
+              </button>
+            </div>
+          </section>
+
+          <section class="col" aria-label="Planning">
+            <div class="col-head">
+              <span class="ct">PLANNING</span><span class="cjp t-blue">立案</span>
+              <span class="stamp sm t-blue tnum">1</span>
+            </div>
+            <div class="col-body scroll">
+              <button class="tcard" data-task="c3d9" data-state="planning"
+                      aria-expanded="false" aria-controls="xrow">
+                <div class="tc-top"><span class="stamp sm t-blue">立案 PLANNING</span><span class="tc-id">TSK·C3D9</span></div>
+                <div class="tc-title">MIGRATE AUTOMATION DIALOGS ONTO SHARED CREATEDIALOG</div>
+                <div class="tc-repo">REPO:<b>SINGULARITY</b><br>BRANCH:<b>WT/DEBA6C3D</b></div>
+                <div class="tc-foot"><span class="tag">REFACTOR</span><span class="tag">WEB</span><span class="tc-cost tnum">$0.62</span></div>
+                <div class="tc-live t-blue">
+                  <span class="stamp sm blink">立案中</span><span>DRAFTING PLAN</span>
+                </div>
+              </button>
+            </div>
+          </section>
+
+          <section class="col" aria-label="In progress">
+            <div class="col-head">
+              <span class="ct">IN PROGRESS</span><span class="cjp t-mint">稼働</span>
+              <span class="stamp sm t-mint tnum">2</span>
+            </div>
+            <div class="col-body scroll">
+              <button class="tcard" data-task="e5a1" data-state="running"
+                      aria-expanded="false" aria-controls="xrow">
+                <div class="tc-top"><span class="stamp sm t-mint">稼働 RUNNING</span><span class="tc-id">TSK·E5A1</span></div>
+                <div class="tc-title">PLAYWRIGHT E2E SUITE + ESLINT PASS</div>
+                <div class="tc-repo">REPO:<b>SINGULARITY</b><br>BRANCH:<b>WT/9E0B59D</b></div>
+                <div class="tc-foot"><span class="tag">E2E</span><span class="tag">TEST</span><span class="tc-cost tnum">$1.94</span></div>
+                <div class="tc-prog t-mint">
+                  <span class="segbar" data-fill="64"></span><b class="tnum">64%</b>
+                </div>
+                <div class="tc-live t-mint">
+                  <span class="stamp sm blink">稼働中</span><span class="tnum">32 / 50 SPECS</span>
+                </div>
+              </button>
+              <button class="tcard" data-task="f0b8" data-state="running"
+                      aria-expanded="false" aria-controls="xrow">
+                <div class="tc-top"><span class="stamp sm t-mint">稼働 RUNNING</span><span class="tc-id">TSK·F0B8</span></div>
+                <div class="tc-title">UI CONSISTENCY PASS ON RAILHEADER PANELS</div>
+                <div class="tc-repo">REPO:<b>SINGULARITY</b><br>BRANCH:<b>WT/8F9C786</b></div>
+                <div class="tc-foot"><span class="tag">WEB</span><span class="tag">POLISH</span><span class="tc-cost tnum">$0.88</span></div>
+                <div class="tc-prog t-mint">
+                  <span class="segbar" data-fill="41"></span><b class="tnum">41%</b>
+                </div>
+              </button>
+            </div>
+          </section>
+
+          <section class="col" aria-label="Review">
+            <div class="col-head">
+              <span class="ct">REVIEW</span><span class="cjp t-amber">審査</span>
+              <span class="stamp sm t-amber tnum">1</span>
+            </div>
+            <div class="col-body scroll">
+              <button class="tcard" data-task="7d21" data-state="review"
+                      aria-expanded="false" aria-controls="xrow">
+                <div class="tc-top"><span class="stamp sm t-amber">審査 GATED</span><span class="tc-id">TSK·7D21</span></div>
+                <div class="tc-title">ROADMAP CHIP FILTER + LABEL FIXES IN USAGE-REPORT</div>
+                <div class="tc-repo">REPO:<b>SINGULARITY</b><br>BRANCH:<b>WT/8AFBF74</b></div>
+                <div class="tc-foot"><span class="tag">REPORT</span><span class="tc-cost tnum">$2.31</span></div>
+                <div class="tc-live t-amber">
+                  <span class="stamp sm blink">裁定待ち</span><span>AWAITING RULING</span>
+                </div>
+              </button>
+            </div>
+          </section>
+
+          <section class="col" aria-label="Done">
+            <div class="col-head">
+              <span class="ct">DONE</span><span class="cjp t-mint">完了</span>
+              <span class="stamp sm fill t-mint tnum"><span>1</span></span>
+            </div>
+            <div class="col-body scroll">
+              <button class="tcard" data-task="3c02" data-state="merged"
+                      aria-expanded="false" aria-controls="xrow">
+                <div class="tc-top"><span class="stamp sm fill t-mint"><span>完了 MERGED</span></span><span class="tc-id">TSK·3C02</span></div>
+                <div class="tc-title">DROP UNUSED IMPORTS FROM 7 MIGRATED PANELS</div>
+                <div class="tc-repo">REPO:<b>SINGULARITY</b><br>BRANCH:<b>MAIN</b></div>
+                <div class="tc-foot"><span class="tag">CLEANUP</span><span class="tc-cost tnum">$0.44</span></div>
+              </button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
+
+    <!-- ---------------- RIGHT RAIL — the abolished menu, made permanent ----- -->
+    <aside class="rail railR scroll" id="railR" aria-label="Secondary panels">
+      <div class="rhead">
+        <button class="rtoggle" id="toggleR" aria-controls="railR" aria-expanded="true"
+                aria-label="Collapse right rail">»</button>
+        <span class="rl wide-only"><span class="jp">副系</span>SECONDARY</span>
+      </div>
+
+      <nav class="nav" aria-label="Secondary panels">
+        <button class="nrow"><span class="jp">設定</span><span class="en">CONFIG</span></button>
+        <button class="nrow"><span class="jp">連鎖</span><span class="en">HOOKS</span></button>
+        <button class="nrow"><span class="jp">技能</span><span class="en">SKILLS</span></button>
+        <button class="nrow"><span class="jp">規則</span><span class="en">RULES</span></button>
+        <button class="nrow"><span class="jp">記憶</span><span class="en">MEMORY</span></button>
+        <button class="nrow"><span class="jp">記録</span><span class="en">TRANSCRIPTS</span></button>
+        <button class="nrow"><span class="jp">文庫</span><span class="en">WIKI</span></button>
+        <!-- APPEARANCE is a panel destination for parity; it toggles nothing.
+             This system is dark-only — there is no theme to switch to. -->
+        <button class="nrow"><span class="jp">外観</span><span class="en">APPEARANCE</span></button>
+        <button class="nrow"><span class="jp">状態</span><span class="en">STATUS</span></button>
+      </nav>
+
+      <div class="rail-spacer"></div>
+
+      <!-- PROCESSES pinned at the rail's foot -->
+      <section class="procs" aria-label="Processes">
+        <div class="zone-title wide-only">PROCESSES <span class="zt-jp">工程</span><span class="zt-end">LOOPBACK</span></div>
+        <div class="wide-only">
+          <div class="row"><span>CPU</span><b class="tnum">18%</b></div>
+          <svg class="spark t-mint" viewBox="0 0 120 30" preserveAspectRatio="none" aria-hidden="true">
+            <line class="thresh" x1="0" y1="7" x2="120" y2="7"/>
+            <circle class="base" cx="20" cy="27" r=".8"/><circle class="base" cx="50" cy="27" r=".8"/>
+            <circle class="base" cx="80" cy="27" r=".8"/><circle class="base" cx="110" cy="27" r=".8"/>
+            <path class="area" d="M0,21 12,17 24,22 36,12 48,16 60,10 72,14 84,18 96,11 108,15 120,12 120,30 0,30 Z"/>
+            <path class="line" d="M0,21 12,17 24,22 36,12 48,16 60,10 72,14 84,18 96,11 108,15 120,12"/>
+            <circle class="dot" cx="119" cy="12" r="2.2"/>
+          </svg>
+          <div class="row"><span>RAM</span><b class="tnum">61% · 19.4 / 32.0 GB</b></div>
+          <svg class="spark t-mint" viewBox="0 0 120 30" preserveAspectRatio="none" aria-hidden="true">
+            <line class="thresh" x1="0" y1="7" x2="120" y2="7"/>
+            <circle class="base" cx="20" cy="27" r=".8"/><circle class="base" cx="50" cy="27" r=".8"/>
+            <circle class="base" cx="80" cy="27" r=".8"/><circle class="base" cx="110" cy="27" r=".8"/>
+            <path class="area" d="M0,14 12,13 24,15 36,12 48,13 60,11 72,12 84,10 96,12 108,11 120,10 120,30 0,30 Z"/>
+            <path class="line" d="M0,14 12,13 24,15 36,12 48,13 60,11 72,12 84,10 96,12 108,11 120,10"/>
+            <circle class="dot" cx="119" cy="10" r="2.2"/>
+          </svg>
+          <div class="pills" role="tablist" aria-label="Sparkline window">
+            <button class="pill" role="tab" aria-selected="false">5 MIN</button>
+            <button class="pill" role="tab" aria-selected="true">30 MIN</button>
+            <button class="pill" role="tab" aria-selected="false">1 HOUR</button>
+          </div>
+        </div>
+        <div class="narrow-only narrow-stack">
+          <span class="jp" style="font-family:var(--jp);font-weight:800;font-size:16px;
+            text-transform:none;color:var(--orange)">工程</span>
+          <span style="font-family:var(--cond);font-weight:700;font-size:8px;color:var(--orange)">PROCESSES</span>
+          <span>CPU<b class="tnum">18%</b></span>
+          <span>RAM<b class="tnum">61%</b></span>
+        </div>
+      </section>
+
+      <!-- destructive row at the very bottom: symbol + word, 14px/700 red -->
+      <button class="nrow dangerrow" id="restartBtn">
+        <span class="jp">再起</span><span class="en">⏻ RESTART SERVER</span>
+      </button>
+    </aside>
+
+  </div>
+
+  <!-- ===== WAVE SEPARATOR: board above, terminal dock below ===== -->
+  <div class="waveband">
+    <canvas id="waveCv" aria-hidden="true"></canvas>
+    <span class="wcap"><span class="jp">波形</span>SIGNAL BAND</span>
+  </div>
+
+  <!-- Drag (or arrow-key) to resize the terminal dock. -->
+  <div class="dock-handle" id="dockHandle" role="separator" aria-orientation="horizontal"
+       aria-label="Resize terminal dock" tabindex="0"></div>
+
+  <!-- ===================== DOCK ===================== -->
+  <section class="dock" aria-label="Agent sessions">
+    <div class="dock-list">
+      <div class="dl-head">
+        <div class="zone-title">SESSIONS <span class="zt-jp">部隊</span><span class="zt-end" id="sessCount">—</span></div>
+      </div>
+      <!-- filter grammar: DIMS non-matching rows, never hides them -->
+      <div class="fchips" id="sessFilters" role="group" aria-label="Roster filter — dims non-matching sessions">
+        <button class="fchip" data-f="all" aria-pressed="true">ALL</button>
+        <button class="fchip" data-f="run" aria-pressed="false"><span class="jp">稼働</span>RUN</button>
+        <button class="fchip" data-f="idle" aria-pressed="false"><span class="jp">待機</span>IDLE</button>
+        <button class="fchip" data-f="done" aria-pressed="false"><span class="jp">完了</span>DONE</button>
+      </div>
+      <div class="dl-body scroll" id="sessList" role="group"
+           aria-label="Sessions — select one to view its console"></div>
+    </div>
+
+    <!-- Drag (or arrow-key) to resize the session roster. -->
+    <div class="list-handle" id="listHandle" role="separator" aria-orientation="vertical"
+         aria-label="Resize session list" tabindex="0"></div>
+
+    <div class="term-wrap">
+      <div class="termbar">
+        <span class="tt">STDOUT // <b id="termTitle">—</b></span>
+        <span class="path" id="termPath">—</span>
+        <span class="conn" id="termConn">CONNECTED: OK</span>
+        <div class="tools">
+          <button class="iconbtn" aria-label="View transcript">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M4 5h16v11H4zM4 20h16"/></svg>
+          </button>
+          <button class="iconbtn" aria-label="Minimize dock" id="dockMin">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 12h14"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="term scroll" id="term" role="log" aria-label="Session output"></div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+"use strict";
+
+/* Zero-size viewport guard (EXPERIMENTS-SPEC §2) — headless panes sometimes
+   report 0x0 on first paint; reload once real dimensions exist. */
+if (innerWidth < 2 || innerHeight < 2) {
+  const poll = setInterval(() => {
+    if (innerWidth > 1 && innerHeight > 1) { clearInterval(poll); location.reload(); }
+  }, 250);
+}
+
+/* ==========================================================================
+   HELPERS — everything defined before anything is called (see START section)
+   ========================================================================== */
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $ = (id) => document.getElementById(id);
+const pad2 = (n) => String(n).padStart(2, "0");
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const SVGNS = "http://www.w3.org/2000/svg";
+const svgEl = (name, attrs, parent) => {
+  const e = document.createElementNS(SVGNS, name);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(e);
+  return e;
+};
+
+/* ==========================================================================
+   SEGMENTED METERS — discrete LEDs; no continuous fill anywhere on this screen
+   ========================================================================== */
+function buildSegs(el, count) {
+  el.textContent = "";
+  for (let i = 0; i < count; i++) el.appendChild(document.createElement("i"));
+  return [...el.children];
+}
+function paintSegs(segs, pct) {
+  const lit = Math.round((pct / 100) * segs.length);
+  segs.forEach((s, i) => s.classList.toggle("on", i < lit));
+}
+/* stepped fill — 90ms per segment, never an eased width transition */
+let segTimer = null;
+function fillSegs(segs, pct, done) {
+  const target = Math.round((pct / 100) * segs.length);
+  segs.forEach((s) => s.classList.remove("on"));
+  if (segTimer) { clearInterval(segTimer); segTimer = null; }
+  if (REDUCED) { paintSegs(segs, pct); if (done) done(pct); return; }
+  let i = 0;
+  segTimer = setInterval(() => {
+    if (i >= target) { clearInterval(segTimer); segTimer = null; return; }
+    segs[i].classList.add("on");
+    i++;
+    if (done) done(Math.round((i / segs.length) * 100));
+  }, 90);
+}
+
+/* ==========================================================================
+   7-SEGMENT CLOCK — digits drawn as SVG polygons, not set in a font
+   ========================================================================== */
+const SEGMAP = {0:"abcdef",1:"bc",2:"abged",3:"abgcd",4:"fgbc",5:"afgcd",6:"afgedc",7:"abc",8:"abcdefg",9:"abcfgd"};
+const SEGPTS = {
+  a:"7,4 10.5,0.5 29.5,0.5 33,4 29.5,7.5 10.5,7.5",
+  b:"36,7 39.5,10.5 39.5,27.5 36,31 32.5,27.5 32.5,10.5",
+  c:"36,33 39.5,36.5 39.5,53.5 36,57 32.5,53.5 32.5,36.5",
+  d:"7,60 10.5,56.5 29.5,56.5 33,60 29.5,63.5 10.5,63.5",
+  e:"4,33 7.5,36.5 7.5,53.5 4,57 0.5,53.5 0.5,36.5",
+  f:"4,7 7.5,10.5 7.5,27.5 4,31 0.5,27.5 0.5,10.5",
+  g:"7,32 10.5,28.5 29.5,28.5 33,32 29.5,35.5 10.5,35.5"
+};
+function makeDigit(w, h, on, off) {
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("width", w); svg.setAttribute("height", h);
+  svg.setAttribute("viewBox", "0 0 46 64");
+  svg.dataset.on = on; svg.dataset.off = off;
+  for (const k of "abcdefg") {
+    const p = document.createElementNS(SVGNS, "polygon");
+    p.setAttribute("points", SEGPTS[k]);
+    p.setAttribute("data-seg", k);
+    p.setAttribute("transform", "translate(6,0) skewX(-6)");
+    p.setAttribute("fill", off);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+function renderDigit(svg, val) {
+  const lit = SEGMAP[val];
+  for (const p of svg.children) {
+    p.setAttribute("fill", lit.includes(p.getAttribute("data-seg")) ? svg.dataset.on : svg.dataset.off);
+  }
+}
+const chip = $("timechip");
+const chipDigits = [];
+for (let i = 0; i < 6; i++) {
+  const d = makeDigit(18, 26, "#F26400", "rgba(242,100,0,.08)");
+  chipDigits.push(d); chip.appendChild(d);
+  if (i === 1 || i === 3) {
+    const c = document.createElement("span");
+    c.className = "tc-colon"; c.innerHTML = "<i></i><i></i>";
+    chip.appendChild(c);
+  }
+}
+let colonOn = true;
+function tickClock() {
+  const d = new Date();
+  const s = pad2(d.getHours()) + pad2(d.getMinutes()) + pad2(d.getSeconds());
+  chipDigits.forEach((dg, i) => renderDigit(dg, +s[i]));
+  colonOn = !colonOn;
+  chip.querySelectorAll(".tc-colon").forEach((c) => { c.style.opacity = (colonOn || REDUCED) ? 1 : .25; });
+}
+const MONTHS = ["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+function tickDate() {
+  const d = new Date();
+  $("dateline").textContent = MONTHS[d.getMonth()] + " " + pad2(d.getDate()) + " " + d.getFullYear();
+}
+
+/* SYS stamp drifts nominal/caution — hue carries the state, text confirms it */
+function tickSys() {
+  const caution = Math.random() < 0.1;
+  const st = $("sysstamp");
+  st.textContent = caution ? "SYS:CAUTION" : "SYS:NOMINAL";
+  st.className = "stamp glow " + (caution ? "t-amber" : "t-mint");
+}
+
+/* ==========================================================================
+   THROUGHPUT LINE CHART (left rail) — one clean glowing polyline over sparse
+   baseline ticks, orange axes, a leading dot. Fixed viewBox, so no measuring.
+   ========================================================================== */
+function drawThroughput() {
+  const svg = $("thruChart");
+  if (!svg) return;
+  svg.textContent = "";
+  const W = 186, H = 64, pad = 6;
+  /* sparse baseline ticks — never a dense + grid */
+  for (let gx = 34; gx < W - pad; gx += 38) {
+    svgEl("line", { class: "tick", x1: gx, y1: H - pad - 3, x2: gx, y2: H - pad + 3 }, svg);
+  }
+  svgEl("line", { class: "axis", x1: pad, y1: H - pad, x2: W - pad, y2: H - pad }, svg);
+  svgEl("line", { class: "axis", x1: pad, y1: pad, x2: pad, y2: H - pad }, svg);
+
+  /* 18 samples, biased upward — chains per hour over 48h */
+  const SAMP = [22,26,21,30,27,34,31,29,38,35,42,39,46,43,50,47,55,61];
+  const N = SAMP.length, hi = 66;
+  const pts = SAMP.map((v, i) => [
+    pad + (i / (N - 1)) * (W - 2 * pad),
+    (H - pad) - (v / hi) * (H - 2 * pad),
+  ]);
+  const line = pts.map((p, i) => (i ? "L" : "M") + p[0].toFixed(1) + " " + p[1].toFixed(1)).join(" ");
+  svgEl("path", { class: "area",
+    d: line + " L" + pts[N - 1][0].toFixed(1) + " " + (H - pad) + " L" + pts[0][0].toFixed(1) + " " + (H - pad) + " Z" }, svg);
+  svgEl("path", { class: "line", d: line }, svg);
+  const last = pts[N - 1];
+  svgEl("circle", { class: "dot", cx: (last[0] - 1.6).toFixed(1), cy: last[1].toFixed(1), r: 2.6 }, svg);
+}
+
+/* ==========================================================================
+   CYCLE COLUMN BANK (left rail) — stepped left-to-right fill, 70ms/column
+   ========================================================================== */
+const CYC = [7,8,6,9,8,10,9,11,10,11,12,13];
+let cycTimers = [];
+function buildCycles() {
+  const wrap = $("bars");
+  if (!wrap) return;
+  wrap.textContent = "";
+  const COLS = CYC.length, SEG = 14;
+  for (let c = 0; c < COLS; c++) {
+    const col = document.createElement("div");
+    col.className = "col";
+    for (let s = 0; s < SEG; s++) {
+      const seg = document.createElement("div");
+      seg.className = "s";
+      col.appendChild(seg);
+    }
+    wrap.appendChild(col);
+  }
+  const cols = [...wrap.children];
+  const litClass = (c, i) => (c === COLS - 1 && i >= 12) ? "s on hot" : "s on";
+  if (REDUCED) {
+    cols.forEach((col, c) => [...col.children].forEach((s, i) => {
+      s.className = i < CYC[c] ? litClass(c, i) : "s";
+    }));
+    return;
+  }
+  let step = 0;
+  const walk = setInterval(() => {
+    if (step >= COLS) { clearInterval(walk); return; }
+    const c = step, col = cols[c], target = CYC[c];
+    let cur = 0;
+    const fill = setInterval(() => {
+      cur++;
+      [...col.children].forEach((s, i) => { if (i < cur) s.className = litClass(c, i); });
+      if (cur >= target) clearInterval(fill);
+    }, 24);
+    cycTimers.push(fill);
+    step++;
+  }, 70);
+  cycTimers.push(walk);
+}
+
+/* ==========================================================================
+   WAVE SEPARATOR — canvas sine band, edge-tapered, redrawn in mechanical
+   steps at ~12fps. Guarded against zero size and a missing 2D context.
+   ========================================================================== */
+const wave = (function () {
+  const cv = $("waveCv");
+  const ctx = cv && cv.getContext ? cv.getContext("2d") : null;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  let W = 0, H = 0, phase = 0;
+
+  function measure() {
+    if (!cv || !ctx) return false;
+    const w = Math.floor(cv.clientWidth), h = Math.floor(cv.clientHeight);
+    if (w < 2 || h < 2) return false;                 /* zero-size guard */
+    if (w !== W || h !== H) {
+      W = w; H = h;
+      cv.width = Math.max(2, Math.floor(w * dpr));
+      cv.height = Math.max(2, Math.floor(h * dpr));
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+    return true;
+  }
+  /* edge-tapered: the sin(x/W·π) envelope pins both ends to the baseline */
+  function band(ph, amp, k, color, width, glow) {
+    ctx.save();
+    ctx.beginPath();
+    const mid = H / 2;
+    for (let x = 0; x <= W; x += 6) {
+      const y = mid + Math.sin((x / W) * Math.PI * k + ph) * amp * Math.sin((x / W) * Math.PI);
+      if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    if (glow) { ctx.shadowColor = color; ctx.shadowBlur = 6; }
+    ctx.stroke();
+    ctx.restore();
+  }
+  function draw() {
+    if (!measure()) return;
+    ctx.clearRect(0, 0, W, H);
+    const mid = H / 2;
+    ctx.save();
+    ctx.setLineDash([4, 6]);
+    ctx.strokeStyle = "#246C3C";          /* green-dim = chrome, never text */
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(0, mid + .5); ctx.lineTo(W, mid + .5); ctx.stroke();
+    ctx.restore();
+    band(phase, H * 0.30, 6, "#52F29A", 2, true);
+    band(phase * 0.6 + 1, H * 0.18, 9, "#F26400", 1, false);
+  }
+  function tick() { phase += 0.35; draw(); }
+  return { draw, tick };
+})();
+
+/* ==========================================================================
+   RAIL COLLAPSE — a mechanical width swap (no transition, no animation).
+   JS owns the responsive rule too, so the toggles never lie about the state:
+   <=1080px folds the right rail, <=820px folds both. The user preference is
+   remembered and restored when the viewport grows back.
+   ========================================================================== */
+const mqRight = matchMedia("(max-width:1080px)");
+const mqBoth = matchMedia("(max-width:820px)");
+let prefL = true, prefR = true;          /* the operator's desired open state */
+
+function applyRails() {
+  const foldBoth = mqBoth.matches;
+  const foldRight = mqRight.matches;
+  const openL = prefL && !foldBoth;
+  const openR = prefR && !foldBoth && !foldRight;
+
+  $("railL").dataset.shut = openL ? "0" : "1";
+  $("railR").dataset.shut = openR ? "0" : "1";
+
+  const tL = $("toggleL"), tR = $("toggleR");
+  tL.setAttribute("aria-expanded", String(openL));
+  tR.setAttribute("aria-expanded", String(openR));
+  tL.textContent = openL ? "«" : "»";
+  tR.textContent = openR ? "»" : "«";
+  tL.setAttribute("aria-label", (openL ? "Collapse" : "Expand") + " left rail");
+  tR.setAttribute("aria-label", (openR ? "Collapse" : "Expand") + " right rail");
+  /* below the structural breakpoints the fold is not negotiable — say so */
+  tL.disabled = foldBoth;
+  tR.disabled = foldBoth || foldRight;
+  tL.title = foldBoth ? "LEFT RAIL LOCKED FOLDED BELOW 820PX" : "";
+  tR.title = (foldBoth || foldRight) ? "RIGHT RAIL LOCKED FOLDED BELOW 1080PX" : "";
+  /* the wave band's width just changed if a rail moved — it is full-bleed, but
+     a viewport change also resizes it, so redraw once either way */
+  wave.draw();
+}
+
+/* ==========================================================================
+   RESIZE — mirrors the real app's useResizable: pointer drag + arrow keys,
+   clamped, values live on CSS custom props on .frame.
+   ========================================================================== */
+const frame = $("frame");
+const cssPx = (prop) => parseFloat(getComputedStyle(frame).getPropertyValue(prop));
+
+function makeResizer(handle, { axis, prop, min, max }) {
+  const maxOf = () => Math.max(min, typeof max === "function" ? max() : max);
+  handle.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    handle.classList.add("dragging");
+    document.body.classList.add("resizing");
+    document.body.style.cursor = axis === "y" ? "row-resize" : "col-resize";
+    const move = (ev) => {
+      const start = cssPx(prop);
+      /* dock grows upward (drag up = taller); the roster grows rightward */
+      const next = axis === "y" ? start - ev.movementY : start + ev.movementX;
+      frame.style.setProperty(prop, clamp(next, min, maxOf()) + "px");
+    };
+    const up = () => {
+      handle.classList.remove("dragging");
+      document.body.classList.remove("resizing");
+      document.body.style.cursor = "";
+      window.removeEventListener("pointermove", move);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up, { once: true });
+  });
+  handle.addEventListener("keydown", (e) => {
+    const step = 16;
+    let d = 0;
+    if (axis === "y") {
+      if (e.key === "ArrowUp") d = step;
+      if (e.key === "ArrowDown") d = -step;
+    } else {
+      if (e.key === "ArrowRight") d = step;
+      if (e.key === "ArrowLeft") d = -step;
+    }
+    if (!d) return;
+    e.preventDefault();
+    frame.style.setProperty(prop, clamp(cssPx(prop) + d, min, maxOf()) + "px");
+  });
+}
+
+/* ==========================================================================
+   TASK DATA — identical to docs/one-shot/layout-02.html, plus a cited memory
+   fragment per task for the recall note.
+   ========================================================================== */
+const STAGES = [
+  { jp: "待機", en: "QUEUED" },
+  { jp: "立案", en: "PLANNING" },
+  { jp: "稼働", en: "IN PROGRESS" },
+  { jp: "審査", en: "IN REVIEW" },
+  { jp: "完了", en: "DONE" },
+];
+const TONE = { queued: "t-map", planning: "t-blue", running: "t-mint", review: "t-amber", merged: "t-mint" };
+const LABEL = {
+  queued: "待機 QUEUED", planning: "立案 PLANNING", running: "稼働 RUNNING",
+  review: "審査 GATED", merged: "完了 MERGED",
+};
+/* recall-kind colourways: a MISTAKE stamp renders FILLED because red-hi is
+   4.3:1 and illegal as small text — as a fill it is legal and reads louder. */
+const RKIND = {
+  pattern:  { tone: "t-mint",  text: "◈ 型 PATTERN",  fill: false },
+  decision: { tone: "t-amber", text: "◈ 決 DECISION", fill: false },
+  mistake:  { tone: "t-red",   text: "✕ 誤 MISTAKE",  fill: true  },
+  learning: { tone: "t-blue",  text: "◈ 学 LEARNING", fill: false },
+};
+
+const TASKS = {
+  a1f2: { state:"queued", title:"REAP ORPHAN ESBUILD / VITE PROCS ON BUILD HANG",
+    repo:"SINGULARITY", branch:"MAIN", model:"SONNET", cost:"$0.00", tokens:"—", turns:"0",
+    created:"QUEUED 4M AGO", stage:0, kind:"CHORE", tags:["INFRA","DX"],
+    desc:"Builds occasionally hang behind orphaned esbuild/vite workers. Add a <b>pnpm clean</b> reap step and wire it into the prebuild hook so a stale worker can never block a fresh build.",
+    rk:"pattern", recallId:"MEM·0512",
+    recall:"ORPHANED WORKERS SURVIVE VITE'S SIGTERM ON MACOS — REAP BY PROCESS GROUP, NOT BY PID." },
+  b7c0: { state:"queued", title:"PER-PROVIDER SPEND SPARKLINE IN USAGE VIEW",
+    repo:"SINGULARITY", branch:"MAIN", model:"OPUS", cost:"$0.00", tokens:"—", turns:"0",
+    created:"QUEUED 9M AGO", stage:0, kind:"FEATURE", tags:["USAGE"],
+    desc:"The usage view reports totals but no trend. Add a compact 7-day spend sparkline per provider (Claude / API / Ollama), reusing the existing <b>LineChart</b> grammar — glowing polyline, sparse baseline dots, drawn threshold.",
+    rk:"decision", recallId:"MEM·0498",
+    recall:"SPARKLINES REUSE THE LINECHART GRAMMAR. NEVER STAND UP A SECOND CHART PRIMITIVE." },
+  c3d9: { state:"planning", title:"MIGRATE AUTOMATION DIALOGS ONTO SHARED CREATEDIALOG",
+    repo:"SINGULARITY", branch:"WT/DEBA6C3D", model:"OPUS", cost:"$0.62", tokens:"410K", turns:"11",
+    created:"STARTED 6M AGO", stage:1, kind:"REFACTOR", tags:["REFACTOR","WEB"],
+    desc:"The cron and background dialogs duplicate field logic. Fold them onto the shared <b>CreateDialog</b> primitive so validation, the scope picker, and cwd behaviour are defined exactly once.",
+    rk:"decision", recallId:"MEM·0511",
+    recall:"CWD RESOLUTION BELONGS TO THE PRIMITIVE, NOT THE PANEL. PANELS PASS A SCHEMA ONLY." },
+  e5a1: { state:"running", title:"PLAYWRIGHT E2E SUITE + ESLINT PASS",
+    repo:"SINGULARITY", branch:"WT/9E0B59D", model:"OPUS", cost:"$1.94", tokens:"1.2M", turns:"48",
+    created:"STARTED 18M AGO", stage:2, kind:"TEST", tags:["E2E","TEST"],
+    progress:64, progressLabel:"SPECS 32 / 50 · GATE AT 80",
+    desc:"Add a Playwright E2E suite covering the tasks board and the session flows, then fix whatever it surfaces. Stabilise the flaky dock-resize spec before the full run.",
+    rk:"mistake", recallId:"MEM·0508",
+    recall:"ASSERTING DOCK HEIGHT BEFORE THE DRAG HANDLE MOUNTS FLAKES ONE RUN IN SIX. AWAIT THE HANDLE." },
+  f0b8: { state:"running", title:"UI CONSISTENCY PASS ON RAILHEADER PANELS",
+    repo:"SINGULARITY", branch:"WT/8F9C786", model:"SONNET", cost:"$0.88", tokens:"540K", turns:"22",
+    created:"STARTED 11M AGO", stage:2, kind:"POLISH", tags:["WEB","POLISH"],
+    progress:41, progressLabel:"PANELS 7 / 14 · GATE AT 80",
+    desc:"Seven panels were migrated onto RailHeader but still carry per-file spacing and heading drift. Align them to the shared header rhythm and drop the leftover one-off styles.",
+    rk:"learning", recallId:"MEM·0505",
+    recall:"THE OPERATOR PREFERS HIGH-DENSITY PANELS. DO NOT PAD A SURFACE TO LET IT BREATHE." },
+  "7d21": { state:"review", title:"ROADMAP CHIP FILTER + LABEL FIXES IN USAGE-REPORT",
+    repo:"SINGULARITY", branch:"WT/8AFBF74", model:"OPUS", cost:"$2.31", tokens:"1.6M", turns:"61",
+    created:"STARTED 42M AGO", stage:3, kind:"REPORT", tags:["REPORT"],
+    desc:"Adds a roadmap chip filter to the usage-report skill and corrects two mislabeled series. The diff is ready and the worktree is clean — this one is waiting on your ruling before it merges to main.",
+    rk:"mistake", recallId:"MEM·0495",
+    recall:"TWO SERIES WERE MISLABELED IN THE PREVIOUS REPORT PASS. VERIFY LEGEND KEYS AGAINST THE CSV." },
+  "3c02": { state:"merged", title:"DROP UNUSED IMPORTS FROM 7 MIGRATED PANELS",
+    repo:"SINGULARITY", branch:"MAIN", model:"HAIKU", cost:"$0.44", tokens:"210K", turns:"9",
+    created:"MERGED 2H AGO", stage:4, kind:"CLEANUP", tags:["CLEANUP"],
+    desc:"Post-migration cleanup: remove the imports left dangling after the RailHeader move across seven panels. Merged to main — no follow-up needed.",
+    rk:"pattern", recallId:"MEM·0491",
+    recall:"AN IMPORT SWEEP CLOSES THE LOOP ON EVERY FILE MOVE. RUN IT IN THE SAME BRANCH." },
+};
+
+/* ==========================================================================
+   INLINE EXPANSION — the task detail. Snaps open, snaps shut, no overlay.
+   ========================================================================== */
+const xrow = $("xrow");
+let openId = null;                 /* the currently expanded task id, or null */
+let openCard = null;
+let xProgSegs = null;              /* built lazily on first expand */
+let loopTimer = null;
+
+/* the agentic loop: 5 bilingual nodes, → connectors, stepped ignition */
+function renderLoop(stage) {
+  const parts = [];
+  STAGES.forEach((s, i) => {
+    if (i) parts.push('<span class="larrow" aria-hidden="true">→</span>');
+    const cls = i < stage ? "done" : (i === stage ? "now" : "");
+    const idx = i < stage ? "✓" : pad2(i + 1);
+    /* only the index blinks on the live node — blinking the whole filled node
+       would strobe a solid block of colour, which reads as an alarm */
+    const nBlink = (i === stage && stage < 4) ? " blink" : "";
+    parts.push(
+      '<span class="lnode ' + cls + '" data-i="' + i + '">' +
+        '<span class="n' + nBlink + '">' + idx + "</span>" +
+        '<span class="k">' + s.jp + "</span>" +
+        '<span class="e">' + s.en + "</span>" +
+      "</span>"
+    );
+  });
+  $("xLoop").innerHTML = parts.join("");
+  $("xLoop").setAttribute("aria-label",
+    "Task phase ring — " + STAGES.map((s, i) =>
+      s.en + " " + (i < stage ? "done" : i === stage ? "current" : "upcoming")).join(", "));
+}
+
+/* stepped ignition: cycles ONLY over phases the task has reached (0..stage),
+   so the marker never implies work that hasn't happened. A finished task
+   settles — no cycling at all. */
+function startLoop(stage, settled) {
+  if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
+  const nodes = [...$("xLoop").querySelectorAll(".lnode")];
+  nodes.forEach((n) => n.classList.remove("scan"));
+  if (settled || REDUCED) {
+    $("xLoopEnd").textContent = settled ? "SETTLED · 完了" : "STATIC · 静止";
+    return;
+  }
+  $("xLoopEnd").textContent = "IGNITION 01–" + pad2(stage + 1) + " · 巡回";
+  let i = 0;
+  const light = () => {
+    nodes.forEach((n, x) => n.classList.toggle("scan", x === i));
+    i = (i + 1) % (stage + 1);
+  };
+  light();
+  loopTimer = setInterval(light, 900);
+}
+function stopLoop() {
+  if (loopTimer) { clearInterval(loopTimer); loopTimer = null; }
+}
+
+function expand(id, card) {
+  const t = TASKS[id];
+  if (!t) return;
+
+  /* one at a time */
+  document.querySelectorAll('.tcard[aria-expanded="true"]').forEach((c) => {
+    if (c !== card) c.setAttribute("aria-expanded", "false");
+  });
+
+  const tone = TONE[t.state];
+  const xStamp = $("xStamp");
+  xStamp.className = "stamp sm " + tone + (t.state === "merged" ? " fill" : "");
+  xStamp.innerHTML = t.state === "merged" ? "<span>" + LABEL[t.state] + "</span>" : LABEL[t.state];
+
+  $("xId").textContent = "TSK·" + id.toUpperCase();
+  $("xTitle").textContent = t.title;
+  $("xKind").textContent = t.kind;
+  $("xMeta").innerHTML =
+    "STATE:<b>" + LABEL[t.state].replace(/^\S+\s/, "") + "</b> · KIND:<b>" + t.kind + "</b><br>" +
+    "MODEL:<b>" + t.model + "</b> · TAGS:<b>" + t.tags.join(" / ") + "</b><br>" +
+    "REPO:<b>" + t.repo + "</b> · BRANCH:<b>" + t.branch + "</b><br>" +
+    "CREATED:<b>" + t.created + "</b>";
+  $("xCost").textContent = t.cost;
+  $("xTokens").textContent = t.tokens;
+  $("xTurns").textContent = t.turns;
+
+  /* progress: running tasks only */
+  const hasProg = typeof t.progress === "number";
+  $("xProgWrap").hidden = !hasProg;
+  if (hasProg) {
+    if (!xProgSegs) xProgSegs = buildSegs($("xProgBar"), 25);
+    $("xProgLabel").textContent = t.progressLabel || "";
+    fillSegs(xProgSegs, t.progress, (pct) => { $("xProgPct").textContent = pct + "%"; });
+  }
+
+  $("xDesc").innerHTML = t.desc;
+
+  const rk = RKIND[t.rk] || RKIND.pattern;
+  $("xRecall").innerHTML =
+    '<span class="stamp sm ' + rk.tone + (rk.fill ? " fill" : "") + '">' +
+      (rk.fill ? "<span>" + rk.text + "</span>" : rk.text) + "</span>" +
+    '<span class="rc-t"><i>RECALL · ' + t.recallId + "</i>" + t.recall + "</span>";
+
+  renderLoop(t.stage);
+  startLoop(t.stage, t.state === "merged");
+
+  const prim = $("xPrimary");
+  prim.textContent = t.state === "queued" ? "START NOW"
+    : t.state === "review" ? "承認 APPROVE · MERGE"
+    : t.state === "merged" ? "REOPEN" : "OPEN SESSION";
+  $("xTranscript").style.display = t.state === "queued" ? "none" : "";
+
+  xrow.hidden = false;
+  if (card) card.setAttribute("aria-expanded", "true");
+  openId = id;
+  openCard = card || null;
+  /* focus stays on the trigger — this is a disclosure, not a dialog */
+  /* "start", not "nearest": the panel is taller than the viewbody, and
+     "nearest" scrolls the minimum — which parks the view mid-panel and cuts
+     the PHASE ring through its glyphs, reading as a render bug rather than
+     as more content below. Aligning the panel top makes the rest a clean scroll. */
+  xrow.scrollIntoView({ block: "start", behavior: "auto" });
+}
+
+function collapse() {
+  if (!openId) return;
+  stopLoop();
+  if (segTimer) { clearInterval(segTimer); segTimer = null; }
+  xrow.hidden = true;
+  document.querySelectorAll('.tcard[aria-expanded="true"]')
+    .forEach((c) => c.setAttribute("aria-expanded", "false"));
+  if (openCard) openCard.focus();
+  openId = null;
+  openCard = null;
+}
+
+function toggleCard(card) {
+  const id = card.dataset.task;
+  if (openId === id) { collapse(); return; }
+  expand(id, card);
+}
+
+/* ==========================================================================
+   TERMINAL DOCK — the signature log: amber on black, two brightness levels,
+   dash-rule headers, dot-leader status columns, one boxed CAUTION stamp in an
+   otherwise unboxed log, teletype entrance, persistent blinking cursor.
+   ========================================================================== */
+const SESSIONS = [
+  {
+    name: "E2E-SUITE", state: "run", model: "OPUS", branch: "WT/9E0B59D",
+    path: "~/singularity/.worktrees/9e0b59d",
+    rows: [
+      { t: "rule", jp: "開始", en: "SESSION START" },
+      { t: "dot", l: "MODEL", v: "OPUS", tone: "tok" },
+      { t: "dot", l: "PERMISSION MODE", v: "ACCEPT EDITS", tone: "tok" },
+      { t: "dot", l: "WORKTREE", v: "CLEAN", tone: "tok" },
+      { t: "user", body: "Add a Playwright E2E suite covering the tasks board and session flows, then fix whatever it surfaces." },
+      { t: "asst", body: "I'll scaffold the suite, run it, and stabilise any flakes it turns up." },
+      { t: "tool", tool: "BASH", arg: "pnpm test:e2e --reporter=line" },
+      { t: "res", lines: [
+        { cls: "tdim", text: "RUNNING 50 TESTS USING 4 WORKERS" },
+        { cls: "", text: '<span class="tok">✓</span> TASKS › CREATES A TASK FROM THE BOARD DIALOG <span class="tdim">1.2S</span>' },
+        { cls: "", text: '<span class="tok">✓</span> TASKS › MOVES A CARD BETWEEN COLUMNS <span class="tdim">0.9S</span>' },
+        { cls: "", text: '<span class="tok">✓</span> SESSIONS › RESUME PREFILLS MODEL + SCOPES <span class="tdim">1.4S</span>' },
+        { cls: "", text: '<span class="tfail">✗ FAIL</span> SHELL › DOCK RESIZE CLAMPS MIN HEIGHT <span class="tdim">RETRY 1/2</span>' },
+        { cls: "tdim", text: "… +28 LINES · CTRL+R TO EXPAND" },
+      ]},
+      { t: "stamp", tone: "t-amber", text: "注意 CAUTION · 1 FLAKY SPEC QUARANTINED" },
+      { t: "tool", tool: "UPDATE", arg: "web/e2e/shell.spec.js" },
+      { t: "res", lines: [
+        { cls: "tdim", text: "3 ADDITIONS · 1 REMOVAL — AWAIT THE DRAG HANDLE BEFORE ASSERTING HEIGHT" },
+      ]},
+      { t: "asst", body: "32 of 50 passing. Re-running the shell spec to confirm the resize flake is gone." },
+      { t: "spin", text: "STABILISING…", meta: "32S · ↑ 4.1K TOKENS · ESC TO INTERRUPT" },
+      { t: "input", ph: 'Try "run the full suite once the flake is fixed"' },
+    ],
+  },
+  {
+    name: "CREATE-DIALOG", state: "run", model: "OPUS", branch: "WT/DEBA6C3D",
+    path: "~/singularity/.worktrees/deba6c3d",
+    rows: [
+      { t: "rule", jp: "立案", en: "PLANNING PHASE" },
+      { t: "dot", l: "MODEL", v: "OPUS", tone: "tok" },
+      { t: "dot", l: "PLAN MODE", v: "ON", tone: "tok" },
+      { t: "user", body: "Fold the cron and background dialogs onto the shared CreateDialog primitive." },
+      { t: "tool", tool: "GREP", arg: "CreateDialog|useCreateForm — web/src" },
+      { t: "res", lines: [
+        { cls: "tdim", text: "7 FILES · 19 MATCHES" },
+        { cls: "", text: '<span class="tok">✓</span> WEB/SRC/SHELL/CREATEDIALOG.JSX <span class="tdim">PRIMITIVE</span>' },
+        { cls: "", text: '<span class="tok">✓</span> WEB/SRC/PANELS/CRONPANEL.JSX <span class="tdim">DUPLICATE FIELDS</span>' },
+        { cls: "", text: '<span class="tok">✓</span> WEB/SRC/PANELS/BACKGROUNDPANEL.JSX <span class="tdim">DUPLICATE FIELDS</span>' },
+      ]},
+      { t: "asst", body: "Both panels re-derive validation and the scope picker. Drafting a plan that moves cwd resolution into the primitive so the panels only pass a schema." },
+      { t: "spin", text: "DRAFTING IMPLEMENTATION PLAN…", meta: "6M · ↑ 410K TOKENS · ESC TO INTERRUPT" },
+      { t: "input", ph: 'Try "show me the plan before you write anything"' },
+    ],
+  },
+  {
+    name: "UI-CONSISTENCY", state: "idle", model: "SONNET", branch: "WT/8F9C786",
+    path: "~/singularity/.worktrees/8f9c786",
+    rows: [
+      { t: "rule", jp: "待機", en: "SESSION IDLE" },
+      { t: "dot", l: "LAST TURN", v: "4M AGO", tone: "tdim" },
+      { t: "dot", l: "PANELS ALIGNED", v: "7 / 14", tone: "tok" },
+      { t: "asst", body: "Seven panels aligned to the RailHeader rhythm. Waiting on your call for the remaining seven — some carry intentional spacing." },
+      { t: "stamp", tone: "t-blue", text: "待機 IDLE · AWAITING INPUT" },
+      { t: "input", ph: 'Try "align the rest and drop the one-off styles"' },
+    ],
+  },
+  {
+    name: "IMPORT-CLEANUP", state: "done", model: "HAIKU", branch: "MAIN",
+    path: "~/singularity",
+    rows: [
+      { t: "rule", jp: "完了", en: "SESSION CLOSED" },
+      { t: "dot", l: "LINT", v: "PASS", tone: "tok" },
+      { t: "dot", l: "TESTS", v: "PASS", tone: "tok" },
+      { t: "dot", l: "MERGED TO MAIN", v: "8F9C786", tone: "tok" },
+      { t: "asst", body: "Removed 23 dangling imports across seven panels. Lint and tests clean, merged to main." },
+      { t: "stamp", tone: "t-mint", text: "完了 RECORDED · 2H AGO" },
+    ],
+  },
+];
+
+const LED_TONE = { run: "t-mint", idle: "t-blue", done: "t-map" };
+const term = $("term");
+let sessIdx = 0;
+let teletype = null;
+let sessFilter = "all";
+
+/* ---- row → HTML (one function per row grammar) ---- */
+function rowHTML(r) {
+  switch (r.t) {
+    case "rule":
+      return '<div class="trule"><span class="jp">' + r.jp + "</span><span>" + r.en
+        + '</span><span class="line"></span></div>';
+    case "dot":
+      return '<div class="dotrow"><span class="l">' + r.l + '</span><span class="d"></span>'
+        + '<span class="v ' + (r.tone || "tok") + '">' + r.v + "</span></div>";
+    case "user":
+      return '<div class="trow"><span class="g">&gt;</span>'
+        + '<span class="body tprose">' + r.body + "</span></div>";
+    case "asst":
+      return '<div class="trow"><span class="g assistant">⏺</span>'
+        + '<span class="body tprose">' + r.body + "</span></div>";
+    case "tool":
+      return '<div class="trow"><span class="g assistant">⏺</span><span class="body">'
+        + '<span class="tk">' + r.tool + '</span>(<span class="targ path">' + r.arg + "</span>)</span></div>";
+    case "res":
+      return '<div class="trow"><span class="g branch">⎿</span><span class="body">'
+        + r.lines.map((l) => '<div class="' + l.cls + '">' + l.text + "</div>").join("")
+        + "</span></div>";
+    case "stamp":
+      /* the single boxed exception in an otherwise unboxed log */
+      return '<div class="trow indent"><span class="stamp sm blink ' + r.tone + '">' + r.text + "</span></div>";
+    case "spin":
+      return '<div class="tspin"><span class="star">✻</span><span>' + r.text
+        + ' <span class="tdim">' + r.meta + "</span></span></div>";
+    case "input":
+      return '<div class="tinput"><span class="caret">&gt;</span>'
+        + '<span class="ph">' + r.ph + '</span><span class="cursor"></span></div>'
+        + '<div class="thints"><span>? FOR SHORTCUTS</span>'
+        + '<span class="r"><b>⏵⏵ ACCEPT EDITS ON</b> · SHIFT+TAB TO CYCLE</span></div>';
+    default:
+      return "";
+  }
+}
+
+/* ---- teletype: rows land one at a time, ~120ms, never a fade ---- */
+function renderSession(i) {
+  const s = SESSIONS[i];
+  if (!s) return;
+  sessIdx = i;
+
+  $("termTitle").textContent = s.name;
+  $("termPath").textContent = s.path;
+  const conn = $("termConn");
+  conn.textContent = s.state === "done" ? "CLOSED: EXIT 0"
+    : s.state === "idle" ? "IDLE: WAITING" : "CONNECTED: OK";
+  conn.style.color = s.state === "run" ? "var(--mint)"
+    : s.state === "idle" ? "var(--blue)" : "var(--green-map)";
+
+  document.querySelectorAll(".sess").forEach((el, n) => el.setAttribute("aria-pressed", String(n === i)));
+
+  if (teletype) { clearInterval(teletype); teletype = null; }
+  term.textContent = "";
+
+  if (REDUCED) {
+    term.innerHTML = s.rows.map(rowHTML).join("");
+    term.scrollTop = term.scrollHeight;
+    return;
+  }
+  let n = 0;
+  teletype = setInterval(() => {
+    if (n >= s.rows.length) { clearInterval(teletype); teletype = null; return; }
+    term.insertAdjacentHTML("beforeend", rowHTML(s.rows[n]));
+    term.scrollTop = term.scrollHeight;
+    n++;
+  }, 120);
+}
+
+/* ---- roster: built once, then filtered by DIMMING (never hiding) ---- */
+function buildRoster() {
+  const list = $("sessList");
+  list.textContent = "";
+  SESSIONS.forEach((s, i) => {
+    const b = document.createElement("button");
+    b.className = "sess " + LED_TONE[s.state];
+    b.dataset.state = s.state;
+    b.setAttribute("aria-pressed", "false");
+    b.innerHTML =
+      '<span class="led' + (s.state === "idle" ? " idle" : "") + '"></span>'
+      + '<span class="sbody"><span class="sname">' + s.name + "</span>"
+      + '<span class="smeta">' + s.model + " · <b>" + s.branch + "</b></span></span>";
+    b.addEventListener("click", () => renderSession(i));
+    list.appendChild(b);
+  });
+}
+function applySessFilter(f) {
+  sessFilter = f;
+  let shown = 0;
+  document.querySelectorAll(".sess").forEach((el) => {
+    const match = (f === "all" || el.dataset.state === f);
+    el.classList.toggle("dim", !match);
+    if (match) shown++;
+  });
+  const runs = SESSIONS.filter((s) => s.state === "run").length;
+  $("sessCount").textContent = f === "all"
+    ? runs + " RUN · " + SESSIONS.length + " TOTAL"
+    : shown + " / " + SESSIONS.length + " IN FOCUS";
+  document.querySelectorAll(".fchip").forEach((c) =>
+    c.setAttribute("aria-pressed", String(c.dataset.f === f)));
+}
+
+/* ==========================================================================
+   WIRING — every handler attached after all the functions above exist
+   ========================================================================== */
+
+/* usage + card meters */
+document.querySelectorAll(".segbar[data-fill]").forEach((el) => {
+  const segs = buildSegs(el, 20);
+  paintSegs(segs, +el.dataset.fill);
+});
+/* the 5h Claude window's limit is a drawn object riding the meter */
+(function addUsageGate() {
+  const claude = document.querySelector(".u-claude .segbar");
+  if (!claude) return;
+  const gate = document.createElement("span");
+  gate.className = "gate-line";
+  gate.style.left = "80%";
+  gate.style.top = "-3px";
+  gate.style.bottom = "-3px";
+  claude.appendChild(gate);
+})();
+
+/* rail collapse toggles */
+$("toggleL").addEventListener("click", () => { prefL = !prefL; applyRails(); });
+$("toggleR").addEventListener("click", () => { prefR = !prefR; applyRails(); });
+mqRight.addEventListener("change", applyRails);
+mqBoth.addEventListener("change", applyRails);
+addEventListener("resize", () => { wave.draw(); });
+
+/* resizers */
+makeResizer($("dockHandle"), {
+  axis: "y", prop: "--dock-h", min: 130,
+  /* keep at least 240px of board + the wave band above the dock */
+  max: () => frame.clientHeight - $("dockHandle").offsetHeight - 300,
+});
+makeResizer($("listHandle"), { axis: "x", prop: "--list-w", min: 170, max: 460 });
+$("dockMin").addEventListener("click", () => {
+  frame.style.setProperty("--dock-h", cssPx("--dock-h") > 140 ? "130px" : "266px");
+});
+
+/* segmented view toggle + both nav rails */
+document.querySelectorAll(".seg").forEach((seg) => {
+  seg.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => {
+    seg.querySelectorAll("button").forEach((x) => x.setAttribute("aria-selected", "false"));
+    b.setAttribute("aria-selected", "true");
+  }));
+});
+document.querySelectorAll(".railL .nav .nrow").forEach((b) => {
+  b.addEventListener("click", () => {
+    document.querySelectorAll(".railL .nav .nrow").forEach((x) => x.removeAttribute("aria-current"));
+    b.setAttribute("aria-current", "page");
+  });
+});
+/* the right rail's rows are panel destinations; none is "current" while the
+   Tasks view owns the work surface, so they only take a pressed-through hover */
+
+/* processes sparkline window pills */
+document.querySelectorAll(".pill").forEach((p) => p.addEventListener("click", () => {
+  document.querySelectorAll(".pill").forEach((x) => x.setAttribute("aria-selected", "false"));
+  p.setAttribute("aria-selected", "true");
+}));
+
+/* board cards: click toggles the inline expansion */
+document.querySelectorAll(".tcard[data-task]").forEach((card) => {
+  card.addEventListener("click", () => toggleCard(card));
+});
+$("xClose").addEventListener("click", collapse);
+
+/* roster filters */
+document.querySelectorAll(".fchip").forEach((c) =>
+  c.addEventListener("click", () => applySessFilter(c.dataset.f)));
+
+/* ESC collapses the expanded card — the only dismissible surface in this
+   layout, because there is no menu, palette, overlay or modal to dismiss. */
+addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && openId) { e.preventDefault(); collapse(); }
+});
+
+/* ==========================================================================
+   START — nothing is called before every const it touches is declared
+   ========================================================================== */
+drawThroughput();
+buildCycles();
+buildRoster();
+applySessFilter("all");
+renderSession(0);
+applyRails();
+tickClock();
+tickDate();
+wave.draw();
+
+if (!REDUCED) {
+  setInterval(tickClock, 500);
+  setInterval(tickDate, 60000);
+  setInterval(tickSys, 7000);
+  setInterval(wave.tick, 83);            /* ~12fps, hand-cranked */
+}
+</script>
+</body>
+</html>
