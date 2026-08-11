@@ -223,6 +223,17 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
                     color: punchedOut,
                     boxShadow: `0 0 12px color-mix(in srgb, ${mint} 45%, transparent)`,
                   },
+                  // MUI's ListItemButton adds `backgroundColor: action.focus` on
+                  // `.Mui-focusVisible` — under Phosphor that's a washed-out green
+                  // that makes the mint border/text invisible (e.g. after closing
+                  // the create-session dialog, focus restores here). Override with
+                  // the same mint fill + punched-out content as hover so focus
+                  // reads as the active CTA, not a muddy middle state.
+                  '&.Mui-focusVisible': {
+                    background: mint,
+                    color: punchedOut,
+                    boxShadow: `0 0 12px color-mix(in srgb, ${mint} 45%, transparent)`,
+                  },
                 };
               }
               return {

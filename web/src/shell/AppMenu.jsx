@@ -36,13 +36,13 @@ export const NAV_ITEMS = [
   { v: 'skills', icon: <SchoolIcon />, label: 'Skills', jp: '技能' },
   { v: 'rules', icon: <GavelIcon />, label: 'Rules', jp: '規則' },
   { v: 'memory', icon: <BookIcon />, label: 'Memory', jp: '記憶' },
-  { v: 'explorer', icon: <FolderOpenIcon />, label: 'Explorer', jp: '探索' },
+  { v: 'explorer', icon: <FolderOpenIcon />, label: 'Explorer', jp: '文件' },
   { v: 'sessions', icon: <HistoryIcon />, label: 'Transcripts', jp: '記録' },
   { v: 'history', icon: <TimelineIcon />, label: 'History', jp: '履歴' },
   { v: 'wiki', icon: <MenuBookIcon />, label: 'Wiki', jp: '文庫' },
   { v: 'appearance', icon: <PaletteIcon />, label: 'Appearance', jp: '外観' },
   { v: 'status', icon: <CloudSyncIcon />, label: 'Status', jp: '状態' },
-  { v: 'settings', icon: <KeyboardIcon />, label: 'Settings', jp: '操作' },
+  { v: 'settings', icon: <KeyboardIcon />, label: 'Settings', jp: '設定' },
 ];
 const PROCESSES_JP = '工程';
 const RESTART_JP = '再起動';
@@ -202,16 +202,19 @@ export default function AppMenu({ anchorEl, onClose, onNavigate, onOpenProcesses
                 isPhosphor
                   ? {
                       px: '10px', py: '3px', borderRadius: getTokens(t).radius.none, fontSize: 10, cursor: 'pointer', userSelect: 'none',
-                      border: `1px solid ${getRoles(t).chrome.stroke}`,
+                      border: `1px solid ${sparkWin === m ? getRoles(t).status.nominal : getRoles(t).chrome.stroke}`,
                       color: sparkWin === m ? getRoles(t).shell.surface : getRoles(t).chrome.stroke,
-                      background: sparkWin === m ? getRoles(t).chrome.stroke : 'transparent',
-                      '&:hover': { color: sparkWin === m ? getRoles(t).shell.surface : getRoles(t).status.nominal, borderColor: sparkWin === m ? getRoles(t).chrome.stroke : getRoles(t).status.nominal },
+                      background: sparkWin === m ? getRoles(t).status.nominal : 'transparent',
+                      fontWeight: sparkWin === m ? 700 : 400,
+                      boxShadow: sparkWin === m ? `0 0 8px color-mix(in srgb, ${getRoles(t).status.nominal} 45%, transparent)` : 'none',
+                      '&:hover': { color: sparkWin === m ? getRoles(t).shell.surface : getRoles(t).status.nominal, borderColor: getRoles(t).status.nominal },
                       '&:focus-visible': focusRing(t),
                     }
                   : {
                       px: '10px', py: '3px', borderRadius: 999, fontSize: 10, cursor: 'pointer', userSelect: 'none',
                       transition: 'background .14s ease',
                       color: sparkWin === m ? brandOrInk(t) : 'text.disabled',
+                      fontWeight: sparkWin === m ? 700 : 400,
                       bgcolor: sparkWin === m ? chipBg(t) : 'transparent',
                       '&:hover': { bgcolor: sparkWin === m ? chipBg(t) : surface2(t) },
                     }

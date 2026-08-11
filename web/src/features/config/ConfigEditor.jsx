@@ -17,7 +17,7 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 import ClearIcon from '@mui/icons-material/Clear';
 import TimerIcon from '@mui/icons-material/Timer';
 import TimerOffIcon from '@mui/icons-material/TimerOff';
-import { EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import { json } from '@codemirror/lang-json';
 import CmEditor from '@/components/CmEditor.jsx';
 import DirPicker from '@/components/DirPicker.jsx';

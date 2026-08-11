@@ -143,18 +143,10 @@ test('masthead and sidebar reflect live counts and connection state from real da
   await goto(page, 'Tasks');
 
   const masthead = page.getByRole('banner');
-  // The sandbox WS connects to the sandbox daemon — real `connected` state.
-  // Not `exact` and not a plain getByText: after the 8.6 review the loopback
-  // address moved INSIDE this stamp, so the element now owns two text nodes
-  // ("DAEMON:CONNECTED" + the host). Matching the stamp itself and asserting
-  // both parts keeps this honest about the merged readout rather than
-  // loosening it to a substring anywhere on the page.
-  const daemonStamp = masthead.getByText(/DAEMON:CONNECTED/);
-  await expect(daemonStamp).toBeVisible();
-  // Real loopback address from `location.host`, not a fabricated one — the
-  // sandbox serves the app on 127.0.0.1, so assert the shape rather than a
-  // hardcoded port (serve.mjs picks a free one per run).
-  await expect(daemonStamp).toHaveText(/DAEMON:CONNECTED\s*127\.0\.0\.1:\d+/);
+  // The daemon connection stamp was removed from the masthead (it was
+  // redundant with `Sidebar`'s `DaemonFooter`); only the sidebar renders it
+  // now. Assert the masthead no longer carries it.
+  await expect(masthead.getByText(/DAEMON:CONNECTED/)).toHaveCount(0);
   // The AGENTS n/n stat was removed in the 8.6 visual pass (it isn't in the
   // peg's masthead); its absence is asserted below alongside the other
   // non-fabricated-telemetry checks.
@@ -165,7 +157,7 @@ test('masthead and sidebar reflect live counts and connection state from real da
   // Nor the peg's other demo-only readouts (DAEMON LOAD / EX_MODE / PRIORITY).
   await expect(page.getByText(/DAEMON LOAD|EX_MODE|PRIORITY:/)).toHaveCount(0);
 
-  // Sidebar's DaemonFooter renders the same live `connected` flag as its own
+  // Sidebar's DaemonFooter renders the live `connected` flag as its own
   // domain-state-driven stamp + explicit English text (never colour-only).
   const sidebar = page.locator('aside');
   await expect(sidebar.getByText('DAEMON CONNECTED', { exact: true })).toBeVisible();

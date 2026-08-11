@@ -5,24 +5,21 @@
  * Mounted once by `AppShell.jsx`, above its existing (unmodified) interaction
  * tree, only when the active skin is Phosphor. Mirrors the structure of
  * `docs/one-shot/phosphor-layout-02.html`'s `.head` (monogram · title/eyebrow
- * · connection stamp · clock/date), but every value is real application
- * state — no fabricated telemetry:
+ * · clock/date), but every value is real application state — no fabricated
+ * telemetry:
  *
  *   - Product identity: the `特異点`/`SINGULARITY` monogram + "FLEET CONTROL
  *     PLANE" title are static copy describing what this app is (`CLAUDE.md`'s
  *     own description), not a live reading.
- *   - Connection: `connected` — the same `useAgents().connected` flag
- *     `Sidebar.jsx`'s `DaemonFooter` already renders, passed down from
- *     `AppShell` rather than re-subscribed here.
- *   - Loopback address: `location.host` — the same value `DaemonFooter`
- *     reads, computed locally since it's a pure environment read, not state.
- *     Rendered inside the connection `Stamp` (task 8.6) so status + address
- *     read as one unit, matching the peg's single boxed readout.
- *   - Local time: the vendored `SevenSegClock` (`variant="countdown"`, the
- *     glowing orange readout — the peg's `.timechip`), self-driven off the
- *     real wall-clock `Date`, not a controlled/fake value; a plain local date
- *     alongside it (peg's `.dateline`), refreshed every 30s from `Date` — a
- *     real value, not decorative motion, so it is not gated behind
+ *   - Local time: a glowing orange seven-segment readout (the peg's
+ *     `.timechip`), self-driven off the real wall-clock `Date`. Replaced the
+ *     vendored `SevenSegClock` with a local `PhosphorClock` that ticks at 1 Hz
+ *     (vs. the vendored 2 Hz), drives the colon blink via CSS keyframes (zero
+ *     React state for blinking), and pauses when the tab is hidden — the
+ *     vendored component's 120 renders/minute was a continuous source of
+ *     style recalculation under the heavy Phosphor overrides. A plain local
+ *     date alongside it (peg's `.dateline`), refreshed every 30s from `Date` —
+ *     a real value, not decorative motion, so it is not gated behind
  *     `prefers-reduced-motion` (that governs animation, not this periodic
  *     content refresh).
  *
@@ -32,10 +29,10 @@
  * (no `AGENTS n/n` readout — removed per task 8.6; `Sidebar`'s nav already
  * carries live task/cron counts), and the one-shot's `統制卓`/`COMMAND CONSOLE`
  * eyebrow label (removed whole, per task 8.6, rather than orphaning half a
- * bilingual pair — see the eyebrow tagline comment below). None of the
- * removed metadata had a real application-state source, so per the brief it
- * stays out rather than being invented. The connection `Stamp` is the one
- * health signal this app actually has, and it is derived, not invented.
+ * bilingual pair — see the eyebrow tagline comment below). The daemon
+ * connection stamp was also removed from the masthead — `Sidebar`'s
+ * `DaemonFooter` renders the same live `connected` flag + loopback address,
+ * so the masthead copy was redundant.
  *
  * Every large Mincho label is paired with an adjacent English caption
  * (`Monogram`'s own built-in caption); small mono captions (the date) are
@@ -44,14 +41,9 @@
  * Responsive collapse (task 3.4, revised 8.6) — secondary content drops
  * before identity:
  *   - >1080px (desktop): everything.
- *   - <=1080px (intermediate — matches the one-shot's own documented
- *     structural-collapse threshold): drop the address inside the connection
- *     stamp (secondary, and already duplicated in `Sidebar`'s `DaemonFooter`)
- *     — the stamp's own status text always remains.
  *   - <=820px (narrow — the one-shot's second documented threshold, and
  *     design.md's open-question default): drop the eyebrow tagline and the
- *     date line; identity (monogram + H1) and the connection stamp — the one
- *     primary safety-relevant readout — always remain.
+ *     date line; identity (monogram + H1) and the clock always remain.
  *   - <=560px height (short viewports, e.g. a laptop with the browser chrome
  *     eating vertical space): shrink vertical padding and drop the eyebrow/
  *     date regardless of width, so the masthead cannot grow tall enough to
@@ -61,10 +53,10 @@
  */
 import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
-import { Monogram, Stamp, SevenSegClock } from 'phosphor-console-theme/components';
+import { Monogram } from 'phosphor-console-theme/components';
+import PhosphorClock from '@/shell/PhosphorClock.jsx';
 import { getRoles } from '@/theme/contract.js';
 
-const NARROW = '@media (max-width:1080px)'; // one-shot's first structural-collapse breakpoint
 const COMPACT = '@media (max-width:820px)'; // one-shot's second — design.md's open-question default
 const SHORT = '@media (max-height:560px)'; // short-viewport safeguard (this batch's own choice)
 
@@ -88,10 +80,12 @@ function useLocalDateLabel() {
 
 /**
  * @param {Object} props
- * @param {boolean} props.connected live daemon/WS connection state (`useAgents().connected`)
+ * @param {boolean} props.connected live daemon/WS connection state (`useAgents().connected`) —
+ *   unused now (the connection stamp was removed; `Sidebar`'s `DaemonFooter`
+ *   renders the same state), kept in the signature to avoid churning
+ *   `AppShell`'s call site.
  */
-export default function PhosphorMasthead({ connected }) {
-  const host = typeof location !== 'undefined' ? location.host : '127.0.0.1:4317';
+export default function PhosphorMasthead({ connected: _connected }) {
   const dateLabel = useLocalDateLabel();
 
   return (
@@ -156,20 +150,10 @@ export default function PhosphorMasthead({ connected }) {
       </Box>
 
       {/* Secondary cluster — collapses progressively; see the module doc
-          comment for the exact breakpoint/field mapping. */}
+          comment for the exact breakpoint/field mapping. The daemon connection
+          status is rendered by `Sidebar`'s `DaemonFooter` (along with the
+          loopback address), so it is not duplicated here. */}
       <Box sx={{ display: 'flex', alignItems: 'center', gap: 2.5, flex: 'none' }}>
-        {/* Connection stamp — the one primary safety-relevant readout, so it
-            never collapses. The loopback address (task 8.6) renders INSIDE
-            it, dimmer, so status + address read as one boxed unit rather than
-            two separate elements; only the address sub-span drops at the
-            narrow breakpoint (it's secondary, and already duplicated in
-            `Sidebar`'s `DaemonFooter`). The connected/disconnected state is
-            always spelled out in visible English text, never colour-only. */}
-        <Stamp tone={connected ? 'mint' : 'red'} filled={!connected} glow={connected}>
-          {connected ? 'DAEMON:CONNECTED' : 'DAEMON:LOST'}
-          <Box component="span" sx={{ opacity: 0.72, ml: '8px', [NARROW]: { display: 'none' } }}>{host}</Box>
-        </Stamp>
-
         <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '3px' }}>
           {/* The peg's `.timechip`: a glowing seven-segment orange readout
               (task 8.6 — replaces the plain-digit `DigitalClock`, which was
@@ -184,7 +168,7 @@ export default function PhosphorMasthead({ connected }) {
               text alternative `SevenSegClock` doesn't carry on its own
               (mirrors the peg's own `role="img" aria-label="Local time"`). */}
           <Box role="img" aria-label="Local time">
-            <SevenSegClock variant="countdown" />
+            <PhosphorClock />
           </Box>
           <Box
             component="span"

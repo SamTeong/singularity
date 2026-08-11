@@ -19,7 +19,8 @@
  * `components/EmptyState.jsx`, and `components/SearchInput.jsx` (task 2.4) —
  * no runtime consumer reads `theme.zapac.*` off the Phosphor theme anymore.
  */
-import { ThemeProvider } from '@mui/material/styles';
+import { useEffect } from 'react';
+import { ThemeProvider, useColorScheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 import InitColorSchemeScript from '@mui/material/InitColorSchemeScript';
 import Box from '@mui/material/Box';
@@ -136,12 +137,27 @@ if (!phosphorTheme.tokens) {
   phosphorTheme.roles = buildPhosphorRoles(phosphorTheme);
 }
 
+// Phosphor is dark-only, but MUI's `useColorScheme` honours a previously-stored
+// mode (localStorage `mui-mode`) from a prior ZAPAC light-mode session. Without
+// forcing it, `useColorMode().resolved` reads 'light' under Phosphor — the
+// Appearance toggle is hidden (dark-only), but downstream consumers that key off
+// `resolved` (UsageReportView's report-theme seeding, Terminal/CmEditor palettes)
+// get the wrong value. This pins the mode to 'dark' once the provider mounts.
+function ForceDarkMode() {
+  const { mode, setMode } = useColorScheme();
+  useEffect(() => {
+    if (mode && mode !== 'dark') setMode('dark');
+  }, [mode, setMode]);
+  return null;
+}
+
 function PhosphorProvider({ children }) {
   return (
     <>
       <InitColorSchemeScript attribute="class" defaultMode="dark" />
       <ThemeProvider theme={phosphorTheme} defaultMode="dark" disableTransitionOnChange>
         <CssBaseline />
+        <ForceDarkMode />
         {children}
       </ThemeProvider>
     </>

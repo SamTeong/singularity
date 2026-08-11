@@ -206,8 +206,23 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
           })}
         >
           {/* layout-02 `.term-bar`: status LED, then mono "<b>title</b> · model
-              · cwd" — the active session's identity at a glance. */}
-          <Stack direction="row" sx={(t) => ({ alignItems: 'center', gap: '10px', px: '16px', py: '10px', flexShrink: 0, borderBottom: `1px solid ${phosphor ? t.nerv.hue.amberDim : stroke2(t)}` })}>
+              · cwd" — the active session's identity at a glance. The whole bar
+              is clickable to collapse the dock (same click/keyboard pattern as
+              the left-side `.dock-list-head` above: `role="button"`, `tabIndex`,
+              `toggleDock`, `focusRing`), so the user doesn't have to aim for the
+              trailing chevron — the entire header band is the hit target on
+              both sides. The IconButton below keeps its own `onClick` with
+              `stopPropagation` so it doesn't double-toggle when the event
+              bubbles back up to this Stack. */}
+          <Stack
+            direction="row"
+            role="button"
+            tabIndex={0}
+            onClick={toggleDock}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDock(); } }}
+            aria-label="Collapse sessions dock"
+            sx={(t) => ({ alignItems: 'center', gap: '10px', px: '16px', py: '10px', flexShrink: 0, cursor: 'pointer', userSelect: 'none', borderBottom: `1px solid ${phosphor ? t.nerv.hue.amberDim : stroke2(t)}`, '&:focus-visible': focusRing(t) })}
+          >
             {activeAgent
               ? <Box aria-hidden sx={(t) => sessionLed(t, activeAgent.status)} />
               : <TerminalIcon sx={{ fontSize: 14, color: 'text.secondary' }} />}
@@ -232,8 +247,10 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
             {/* `.term-tools` — the dock's minimize control lives here (mock's right-side
                 icon-btn row), not glued to the Sessions label anymore. Points down,
                 same as the `.dock-list-head` chevron: both collapse the
-                bottom-pinned dock, so both move it further down. */}
-            <IconButton onClick={toggleDock} size="small" title="Minimize" aria-label="Minimize dock" sx={(t) => ({ '&:focus-visible': focusRing(t) })}>
+                bottom-pinned dock, so both move it further down. `stopPropagation`
+                keeps the click from bubbling back into the term-bar's own
+                `toggleDock` and double-toggling. */}
+            <IconButton onClick={(e) => { e.stopPropagation(); toggleDock(); }} size="small" title="Minimize" aria-label="Minimize dock" sx={(t) => ({ '&:focus-visible': focusRing(t) })}>
               <ExpandMoreIcon sx={{ fontSize: 18 }} />
             </IconButton>
           </Stack>

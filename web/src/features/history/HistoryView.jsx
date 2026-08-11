@@ -18,7 +18,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
 import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
-import { EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { repoName } from '@/lib/paths.js';
