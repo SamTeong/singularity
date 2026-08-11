@@ -6,7 +6,7 @@ import Typography from '@mui/material/Typography';
 import { json } from '@codemirror/lang-json';
 import { javascript } from '@codemirror/lang-javascript';
 import IconButton from '@mui/material/IconButton';
-import { EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import WebhookIcon from '@mui/icons-material/Webhook';
 import CmEditor from '@/components/CmEditor.jsx';
 import DetailPane from '@/components/DetailPane.jsx';

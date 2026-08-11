@@ -4,7 +4,8 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import { useColorMode } from '@zapac/mui-theme';
-import { TERM_THEME } from '@/features/sessions/term-theme.js';
+import { useThemeSkin } from '@/theme/index.js';
+import { getTerminalTheme } from '@/features/sessions/term-theme.js';
 
 // Role/kind → xterm ANSI palette key (matches the live Terminal). Kept as a
 // palette-key lookup rather than raw hex so a theme tweak in term-theme.js
@@ -22,9 +23,10 @@ const ROLE_KEY = {
 // terminal: opaque machine-output bg + ANSI palette colors per role, monospace
 // via Typography variant="code" (same JetBrains Mono stack as Terminal.jsx).
 export default function TranscriptView({ messages, emptyText = 'No messages.' }) {
+  const { skinId } = useThemeSkin();
   const mode = useColorMode().resolved === 'light' ? 'light' : 'dark';
   const theme = useTheme();
-  const pal = TERM_THEME[mode] ?? TERM_THEME.dark;
+  const pal = getTerminalTheme(skinId, mode);
   const radius = getTokens(theme).radius?.sm ?? 6;
   const labelOf = (m) => (m.kind === 'toolUse' ? `tool: ${m.name}` : m.kind === 'toolResult' ? 'tool result' : m.kind === 'thinking' ? 'thinking' : m.role);
   const keyFor = (m) => ROLE_KEY[m.kind === 'toolUse' ? 'tool' : m.kind === 'toolResult' ? 'toolResult' : m.kind === 'thinking' ? 'thinking' : m.role] || 'foreground';

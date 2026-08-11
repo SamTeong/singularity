@@ -1,4 +1,4 @@
-import { getTokens } from '@/theme/contract.js';
+import { getTokens, getRoles } from '@/theme/contract.js';
 import { useEffect, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -10,6 +10,10 @@ import { meterColor, segTicks, fmtReset } from '@/lib/usageUtil.js';
 // + the @zapac/mui-theme palette — no clean extension point for a one-off
 // accent), so it stays one shared literal here instead of two.
 const NOW_MARKER = '#2dd4bf';
+
+// A framed skin (Phosphor) has its own hard-edged, semantic palette; ZAPAC is
+// the glass default. Same discriminator `shellStyles.glass()` uses.
+const isFramed = (th) => !!getRoles(th).shell?.frameBorderWidth;
 
 const fmtWall = (iso) => {
   if (!iso) return '';
@@ -47,7 +51,21 @@ export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
 
   const track = (
     <Box sx={{ position: 'relative', flex: sm ? 1 : undefined }}>
-      <Box sx={(th) => ({ position: 'relative', height: sm ? 5 : 10, borderRadius: sm ? 3 : 5, bgcolor: getTokens(th).glass.stroke, overflow: 'hidden' })}>
+      <Box sx={(th) => ({
+        position: 'relative',
+        height: sm ? 5 : 10,
+        // Hard edge under a framed skin — a pill track reads as a ZAPAC leftover.
+        borderRadius: isFramed(th) ? 0 : (sm ? 3 : 5),
+        // The EMPTY part of the bar. Under ZAPAC `glass.stroke` is a barely-there
+        // hairline, so an unfilled track reads as empty. Under Phosphor that same
+        // token is SAFETY ORANGE, which (a) uses orange as a data surface, which
+        // design.md D4 reserves for chrome, and (b) made every provider look
+        // maxed out — "Codex 0% used" rendered as a completely full orange bar.
+        // `roles.chrome.track` is the skin's actual track hue.
+        bgcolor: isFramed(th) ? getRoles(th).chrome.track : getTokens(th).glass.stroke,
+        overflow: 'hidden',
+      })}
+      >
         <Box sx={{ width: `${Math.min(100, pct ?? 0)}%`, height: '100%', bgcolor: meterColor(t, pct), transition: 'width .3s' }} />
         {segments > 1 && (
           <Box sx={(th) => ({ position: 'absolute', inset: 0, pointerEvents: 'none', backgroundImage: segTicks(th.vars.palette.background.paper, segments) })} />
@@ -55,7 +73,9 @@ export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
       </Box>
       {/* Marker sits outside the clipped track so it can overhang top/bottom. */}
       {nowPct != null && (
-        <Box sx={{ position: 'absolute', top: sm ? -2.5 : -3, bottom: sm ? -2.5 : -3, left: `${nowPct}%`, width: sm ? 1.5 : 2, ml: sm ? '-0.75px' : '-1px', borderRadius: 1, bgcolor: NOW_MARKER, pointerEvents: 'none' }} />
+        // The teal literal is off-palette for Phosphor (its hues are mint/blue/
+        // amber/red/orange); use the console's bright neutral there instead.
+        <Box sx={(th) => ({ position: 'absolute', top: sm ? -2.5 : -3, bottom: sm ? -2.5 : -3, left: `${nowPct}%`, width: sm ? 1.5 : 2, ml: sm ? '-0.75px' : '-1px', borderRadius: isFramed(th) ? 0 : 1, bgcolor: isFramed(th) ? th.nerv.hue.paper : NOW_MARKER, pointerEvents: 'none' })} />
       )}
     </Box>
   );
@@ -63,7 +83,12 @@ export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
   if (sm) {
     return (
       <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-        <Typography variant="code" sx={{ width: 16, fontSize: 10, color: 'text.secondary' }}>{label}</Typography>
+        {/* `minWidth`, not `width`. UsagePill's labels ("5h", "7d", "$") are
+            narrower than 16px so they still occupy the same 16px box as before,
+            but the sidebar rail passes provider names ("CLAUDE", "OLLAMA"),
+            which a fixed 16px box cannot hold — they overflowed and were
+            overlapped by the track. `nowrap` stops them wrapping instead. */}
+        <Typography variant="code" sx={{ minWidth: 16, flex: 'none', whiteSpace: 'nowrap', fontSize: 10, color: 'text.secondary' }}>{label}</Typography>
         {track}
         <Typography variant="code" sx={{ width: 34, textAlign: 'right', fontSize: 10, color: 'text.secondary' }}>
           {pct == null ? '—' : `${Math.round(pct)}%`}

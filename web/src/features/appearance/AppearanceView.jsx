@@ -56,11 +56,16 @@ function SkinCard({ skin, active, onSelect }) {
  * registry through {@link useThemeSkin}; the colour-mode toggle is delegated so
  * the shell can prompt to respawn live sessions after a change.
  */
-export default function AppearanceView({ onToggleColorMode }) {
+export default function AppearanceView({ onToggleColorMode, onSelectSkin }) {
   const { skinId, setSkin, skins } = useThemeSkin();
   const { resolved } = useColorMode();
   const activeSkin = skins.find((s) => s.id === skinId);
   const supportsColorMode = activeSkin?.supportsColorMode !== false;
+  // Skin selection routes through the shell's live-session respawn prompt
+  // (task 6.6): go through `onSelectSkin` if provided (so the shell can stash
+  // the live count across the skin remount and surface the respawn dialog),
+  // else fall back to the raw setter.
+  const handleSelectSkin = onSelectSkin ?? setSkin;
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -85,7 +90,7 @@ export default function AppearanceView({ onToggleColorMode }) {
         sx={{ flexWrap: 'wrap', gap: 2, mb: 4 }}
       >
         {skins.map((skin) => (
-          <SkinCard key={skin.id} skin={skin} active={skin.id === skinId} onSelect={() => setSkin(skin.id)} />
+          <SkinCard key={skin.id} skin={skin} active={skin.id === skinId} onSelect={() => handleSelectSkin(skin.id)} />
         ))}
       </Stack>
 
