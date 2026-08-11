@@ -1,6 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
 import { brandGrad, brandGlow, surface2, stroke2, chipBg, trackColor, statusColor, focusRing, statePill, cardTag, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -8,6 +8,7 @@ import Chip from '@mui/material/Chip';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import Drawer from '@mui/material/Drawer';
 import Table from '@mui/material/Table';
 import TableHead from '@mui/material/TableHead';
 import TableBody from '@mui/material/TableBody';
@@ -18,24 +19,29 @@ import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import OutlinedFlagOutlinedIcon from '@mui/icons-material/OutlinedFlagOutlined';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
-import ChevronRightIcon from '@mui/icons-material/ChevronRight';
-import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
-import VerticalSplitIcon from '@mui/icons-material/VerticalSplit';
 import { StatusPill } from '@/components/StatusPill.jsx';
 import TaskDetailPanel from '@/features/tasks/TaskDetailPanel.jsx';
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import { repoName } from '@/lib/paths.js';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
 import { KIND } from '@/lib/agentStatus.js';
-import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
 import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, StatusLegend, SegmentBar, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState, DOMAIN_STATE_ORDER } from '@/lib/domainState.js';
 import { COLUMNS, COLUMN_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
+
+// Read the reduced-motion preference once at mount for the transcript sheet —
+// mirrors TaskDetailPanel.jsx's own helper (kept local rather than shared: a
+// one-line media-query read isn't worth a new shared module).
+const prefersReducedMotion = () =>
+  typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    : false;
+
+// Column-head inner-row cap (task 1) — see the column-head comment below for
+// why this exists.
+const COL_HEAD_MAX_W = 340;
 
 // Duration formatter — cost/token formatters live in format.js.
 const fmtMs = (ms) => {
@@ -212,6 +218,153 @@ const cardTagPhosphor = (t) => ({
   '&.MuiChip-colorSuccess': { color: `${t.nerv.hue.greenMap} !important` },
 });
 
+/**
+ * TranscriptSheet — a read-only transcript viewer opened from a History table
+ * row, or handed off from TaskDetailPanel's "View transcript" action. Built on
+ * the same right-sliding-glass-sheet-over-scrim system as TaskDetailPanel (MUI
+ * Drawer, `anchor="right"`, scrim, close affordances, entrance motion) so the
+ * two right-hand sheets in this feature read as one system, not two competing
+ * overlay idioms — but deliberately wider: it hosts a wall of `pre-wrap`
+ * monospace transcript content (messages, tool I/O) that wraps hard at
+ * TaskDetailPanel's metadata-panel width, so it scales up through the sm–lg
+ * breakpoints instead of matching. Replaces the old dockable/resizable/
+ * collapsible transcript panel entirely — no side, no minimize, no
+ * drag-resize; just open, read, close.
+ *
+ * @param {object} props
+ * @param {{id:string,title:string,sessionId?:string}} props.item The generic
+ *   item threaded through TasksBoard's `openTranscript` (a History row or a
+ *   task handed off from TaskDetailPanel).
+ * @param {boolean} props.loading
+ * @param {string|null} props.error
+ * @param {object|null} props.transcript `{ messages: [...] }` once loaded.
+ * @param {()=>void} props.onClose Close the sheet (close button / scrim / Esc).
+ */
+function TranscriptSheet({ item, loading, error, transcript, onClose }) {
+  const { skinId } = useThemeSkin();
+  const phosphor = skinId === 'phosphor';
+  const reduced = prefersReducedMotion();
+
+  return (
+    <Drawer
+      open
+      anchor="right"
+      onClose={onClose}
+      disablePortal={false}
+      // Collapsing the slide transition to 0 lets the open/close state change
+      // still occur under reduced motion without animating the sheet — same
+      // treatment as TaskDetailPanel.
+      transitionDuration={reduced ? 0 : undefined}
+      slotProps={{
+        paper: {
+          role: 'dialog',
+          'aria-label': 'Transcript',
+          sx: (t) => (phosphor
+            ? {
+              // Phosphor — same chamfered void dossier treatment as
+              // TaskDetailPanel's phosphor sheet, but wider: transcript
+              // content is monospace and wraps hard at the detail panel's
+              // 400px, so this scales up through sm–lg instead of matching.
+              width: { xs: '92vw', sm: 560, md: 720, lg: 860 },
+              maxWidth: '90vw',
+              background: t.nerv.hue.void,
+              backgroundImage: 'none',
+              display: 'flex', flexDirection: 'column', overflow: 'hidden',
+              border: 'none',
+              borderLeft: `1px solid ${t.nerv.hue.orange}`,
+              borderRadius: 0,
+              clipPath: t.nerv.chamfer(),
+              boxShadow: 'none',
+            }
+            : {
+              // ZAPAC — `.detail`'s opaque surface-solid sheet, same shadow
+              // language as TaskDetailPanel but wider: transcript content is
+              // monospace and wraps hard at the detail panel's 400px, so
+              // this scales up through sm–lg instead of matching.
+              width: { xs: '92vw', sm: 560, md: 720, lg: 860 },
+              maxWidth: '90vw',
+              background: t.vars.palette.background.paper,
+              backgroundImage: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              border: 'none',
+              borderLeft: `1px solid ${getTokens(t).glass.stroke}`,
+              borderRadius: 0,
+              boxShadow: '-30px 0 70px -34px rgba(40,20,60,.55)',
+            }),
+        },
+        backdrop: {
+          'aria-hidden': true,
+          sx: { background: 'rgba(10,6,20,.34)' },
+        },
+      }}
+    >
+      {phosphor ? (
+        <>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', px: '16px', pt: '14px', flexShrink: 0 }}>
+            <Typography sx={(t) => ({ flex: 1, minWidth: 0, fontSize: 10, color: t.nerv.hue.orange, fontFamily: t.nerv.fonts.mono, letterSpacing: '.1em' })}>
+              記録 · TRANSCRIPT
+            </Typography>
+            <IconButton size="small" aria-label="Close" onClick={onClose} sx={(t) => ({ color: t.nerv.hue.orange, '&:hover': { color: t.nerv.hue.mint }, '&.Mui-focusVisible': { outline: `2px dashed ${t.nerv.hue.amber}`, outlineOffset: 2 } })}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+          <Typography
+            component="h2"
+            noWrap
+            sx={(t) => ({
+              px: '16px', pt: '6px', flexShrink: 0,
+              fontFamily: t.nerv.fonts.display, fontWeight: 700, fontSize: 18,
+              color: t.nerv.hue.mintHi, letterSpacing: '.01em', lineHeight: 1.2,
+            })}
+          >
+            {item.title}
+          </Typography>
+          <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: '16px', pt: '14px', pb: '16px' }}>
+            {loading ? (
+              <Typography sx={(t) => ({ color: t.nerv.hue.greenMap, fontFamily: t.nerv.fonts.mono, fontSize: 12 })}>Loading…</Typography>
+            ) : error ? (
+              <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
+                <Typography sx={(t) => ({ color: t.nerv.hue.greenMap, fontFamily: t.nerv.fonts.mono, fontSize: 12 })}>{error}</Typography>
+              </Box>
+            ) : transcript ? (
+              <TranscriptView messages={transcript.messages || []} />
+            ) : null}
+          </Box>
+        </>
+      ) : (
+        <>
+          <Stack direction="row" spacing={1.25} sx={{ alignItems: 'center', px: '18px', pt: '16px', flexShrink: 0 }}>
+            <Typography
+              component="h2"
+              variant="h3"
+              noWrap
+              sx={{ flex: 1, minWidth: 0, letterSpacing: '-0.02em', lineHeight: 1.15 }}
+            >
+              {item.title}
+            </Typography>
+            <IconButton size="small" aria-label="Close" onClick={onClose}>
+              <CloseIcon fontSize="small" />
+            </IconButton>
+          </Stack>
+          <Box sx={{ flex: 1, minHeight: 0, overflowY: 'auto', px: '18px', pt: '16px', pb: '18px' }}>
+            {loading ? (
+              <Typography color="text.secondary">Loading…</Typography>
+            ) : error ? (
+              <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
+                <Typography color="text.secondary">{error}</Typography>
+              </Box>
+            ) : transcript ? (
+              <TranscriptView messages={transcript.messages || []} />
+            ) : null}
+          </Box>
+        </>
+      )}
+    </Drawer>
+  );
+}
+
 export default function TasksBoard({ tasks, history, agents, stats, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
@@ -281,31 +434,17 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, activeTags, sort]);
 
-  // Transcript panel: selecting a History row — or a Done-column card — loads its
-  // session's transcript read-only, dockable bottom/right, resizable + collapsible,
-  // all persisted — mirrors the terminal dock pattern in App.jsx. Driven by a
+  // Transcript sheet: selecting a History row — or handing off from
+  // TaskDetailPanel's "View transcript" — loads its session's transcript
+  // read-only into the right-sliding TranscriptSheet modal above. Driven by a
   // generic item {id,title,sessionId,worktree,repo} so both entry points share it.
   const [tx, setTx] = useState(null);
   const [transcript, setTranscript] = useState(null);
   const [loadingT, setLoadingT] = useState(false);
   const [errT, setErrT] = useState(null);
-  const [side, setSide] = useState(() => (localStorage.getItem('sing-hist-side') === 'right' ? 'right' : 'bottom'));
-  const [panelMin, setPanelMin] = useState(() => localStorage.getItem('sing-hist-min') === '1');
-  const [panelW, setPanelW] = useState(() => { const v = Number(localStorage.getItem('sing-hist-w')); return v >= 200 && v <= 1600 ? v : 420; });
-  const dockRef = useRef(null);
-  // Panel height (bottom-docked) is a drag-resizable axis:'y' — mirrors App.jsx's dock.
-  const { width: panelH, startDrag: startPanelHeightDrag, onKeyDown: onPanelHeightKeyDown, dragging: panelHeightDragging, max: panelHMax } = useResizable('sing-hist-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: dockRef });
-  const [panelWidthDragging, setPanelWidthDragging] = useState(false); // width-drag is bespoke (see below), so it tracks its own dragging flag
-  const panelWidthUpRef = useRef(null); // active pointerup cleanup for the bespoke width-drag, so an unmount mid-drag can cancel it
-  const PANEL_W_MAX = 1600; // static ceiling — matches the panelW state initializer's clamp
-  // Dynamic ceiling (dockRef's own width, minus the 200px floor) for the drag
-  // clamp — reads `dockRef.current`, so it's only called from an event handler
-  // (react-hooks/refs forbids a ref read during render).
-  const panelWidthMax = () => { const rect = dockRef.current?.getBoundingClientRect(); return rect ? rect.width - 200 : PANEL_W_MAX; };
   const histReqRef = useRef(0); // guards against a slower stale fetch overwriting a newer selection
 
   const openTranscript = (item) => {
-    if (tx?.id === item.id) { setTx(null); return; }
     setTx(item);
     setTranscript(null); setErrT(null);
     const seq = ++histReqRef.current;
@@ -319,60 +458,6 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
       .finally(() => { if (seq === histReqRef.current) setLoadingT(false); });
   };
 
-  const toggleSide = (e) => {
-    e.stopPropagation();
-    setSide((s) => { const n = s === 'bottom' ? 'right' : 'bottom'; localStorage.setItem('sing-hist-side', n); return n; });
-  };
-  const togglePanelMin = () => setPanelMin((m) => { const n = !m; localStorage.setItem('sing-hist-min', n ? '1' : '0'); return n; });
-
-  // Drag the panel's inner edge (top when bottom-docked, left when right-docked)
-  // to resize. Height reuses useResizable (mirrors App.jsx's dock); width stays
-  // bespoke — it's anchored to the panel's right edge, not the left.
-  const startPanelWidthDrag = (e) => {
-    e.preventDefault();
-    const rect = dockRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    setPanelWidthDragging(true);
-    document.body.classList.add('resizing');
-    e.currentTarget.setPointerCapture?.(e.pointerId);
-    const move = (ev) => {
-      const w = Math.min(rect.width - 200, Math.max(200, rect.right - ev.clientX));
-      setPanelW(w);
-      localStorage.setItem('sing-hist-w', String(Math.round(w)));
-    };
-    const up = () => {
-      setPanelWidthDragging(false);
-      document.body.classList.remove('resizing');
-      window.removeEventListener('pointermove', move);
-      window.removeEventListener('pointerup', up);
-      panelWidthUpRef.current = null;
-    };
-    panelWidthUpRef.current = up;
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up);
-  };
-  // Cancel an in-flight width-drag if the handle unmounts mid-drag (side/panelMin toggle).
-  useEffect(() => () => panelWidthUpRef.current?.(), []);
-  // Keyboard mirror of the drag above — ArrowLeft widens (dragging the handle
-  // away from the panel's right edge always grows it), ArrowRight narrows. Reads
-  // `panelW` from the closure (like useResizable's own onKeyDown) rather than a
-  // setState updater, which must stay pure under StrictMode's double-invoke.
-  const onPanelWidthKeyDown = (e) => {
-    let d = 0;
-    if (e.key === 'ArrowLeft') d = 16; else if (e.key === 'ArrowRight') d = -16;
-    if (!d) return;
-    e.preventDefault();
-    const next = Math.min(panelWidthMax(), Math.max(200, panelW + d));
-    localStorage.setItem('sing-hist-w', String(Math.round(next)));
-    setPanelW(next);
-  };
-  const startPanelDrag = side === 'bottom' ? startPanelHeightDrag : startPanelWidthDrag;
-  const onPanelKeyDown = side === 'bottom' ? onPanelHeightKeyDown : onPanelWidthKeyDown;
-  const panelDragging = side === 'bottom' ? panelHeightDragging : panelWidthDragging;
-  const panelDragValue = side === 'bottom' ? panelH : panelW;
-  const panelDragMin = side === 'bottom' ? 140 : 200;
-  const panelDragMax = side === 'bottom' ? panelHMax : PANEL_W_MAX;
-
   const drop = (col) => {
     const t = tasks.find((x) => x.id === dragId);
     setDragId(null);
@@ -383,73 +468,6 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     }
     onMove(t.id, col);
   };
-
-  // Shared dockable transcript panel — rendered in both the History table view
-  // and the board view (for a selected Done card). Reads the generic `tx` item.
-  const dock = tx && (
-    <>
-      {/* Drag handle — resize the panel (hidden while minimized). Same grip +
-          a11y + keyboard treatment as the dock/list handles (layout-02
-          `.dock-handle`/`.list-handle`). */}
-      {!panelMin && (
-        <ResizeHandle
-          axis={side === 'bottom' ? 'y' : 'x'}
-          onPointerDown={startPanelDrag}
-          onKeyDown={onPanelKeyDown}
-          dragging={panelDragging}
-          value={panelDragValue}
-          min={panelDragMin}
-          max={panelDragMax}
-          label="Resize transcript panel"
-          sx={side === 'bottom' ? { mx: 1 } : { my: 1 }}
-        />
-      )}
-      <Box
-        sx={(t) => ({
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          overflow: 'hidden',
-          borderRadius: `${getTokens(t).radius.sm}px`,
-          border: `1px solid ${getTokens(t).glass.stroke}`,
-          ...(side === 'bottom' ? { width: '100%', height: panelMin ? 'auto' : panelH } : { height: '100%', width: panelMin ? 36 : panelW }),
-        })}
-      >
-        {/* Right-docked + collapsed → slim vertical strip: rotated title, stacked icons. */}
-        <Stack
-          direction={side === 'right' && panelMin ? 'column' : 'row'} spacing={1} role="button" tabIndex={0}
-          aria-label={panelMin ? `Expand ${tx.title} transcript` : `Collapse ${tx.title} transcript`}
-          onClick={togglePanelMin}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); togglePanelMin(e); } }}
-          sx={(t) => ({ flexShrink: 0, alignItems: 'center', cursor: 'pointer', userSelect: 'none',
-            ...(side === 'right' && panelMin
-              ? { flex: 1, minHeight: 0, py: 1 }
-              : { px: 1.5, height: 36, borderBottom: panelMin ? 'none' : `1px solid ${getTokens(t).glass.stroke}` }) })}
-        >
-          <Typography variant="subtitle2" noWrap sx={side === 'right' && panelMin ? { flex: 1, minHeight: 0, writingMode: 'vertical-rl' } : { flex: 1, minWidth: 0 }}>{tx.title}</Typography>
-          <Tooltip title={side === 'bottom' ? 'Dock right' : 'Dock bottom'} disableInteractive>
-            <IconButton size="small" onClick={toggleSide}>
-              {side === 'bottom' ? <VerticalSplitIcon fontSize="small" /> : <HorizontalSplitIcon fontSize="small" />}
-            </IconButton>
-          </Tooltip>
-          {side === 'right'
-            ? (panelMin ? <ChevronLeftIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ChevronRightIcon sx={{ fontSize: 18, color: 'text.secondary' }} />)
-            : (panelMin ? <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} /> : <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />)}
-        </Stack>
-        <Box sx={{ display: panelMin ? 'none' : 'block', flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
-          {loadingT ? (
-            <Typography color="text.secondary">Loading…</Typography>
-          ) : errT ? (
-            <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
-              <Typography color="text.secondary">{errT}</Typography>
-            </Box>
-          ) : transcript ? (
-            <TranscriptView messages={transcript.messages || []} />
-          ) : null}
-        </Box>
-      </Box>
-    </>
-  );
 
   return (
     <Stack sx={{ height: '100%' }}>
@@ -547,83 +565,89 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
         </Stack>
       )}
       {showHistory ? (
-        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0, px: '10px', pt: '6px', pb: '12px' }}>
-          <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
-            <Table size="small" stickyHeader>
-              <TableHead>
-                <TableRow>
-                  <TableCell sortDirection={sort.key === 'title' ? sort.dir : false}><TableSortLabel active={sort.key === 'title'} direction={sort.dir} onClick={() => changeSort('title')}>Title</TableSortLabel></TableCell>
-                  <TableCell sortDirection={sort.key === 'repo' ? sort.dir : false}><TableSortLabel active={sort.key === 'repo'} direction={sort.dir} onClick={() => changeSort('repo')}>Repo</TableSortLabel></TableCell>
-                  <TableCell sortDirection={sort.key === 'branch' ? sort.dir : false}><TableSortLabel active={sort.key === 'branch'} direction={sort.dir} onClick={() => changeSort('branch')}>Branch</TableSortLabel></TableCell>
-                  <TableCell sortDirection={sort.key === 'outcome' ? sort.dir : false}><TableSortLabel active={sort.key === 'outcome'} direction={sort.dir} onClick={() => changeSort('outcome')}>Outcome</TableSortLabel></TableCell>
-                  <TableCell sortDirection={sort.key === 'busyMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'busyMs'} direction={sort.dir} onClick={() => changeSort('busyMs')}>Busy</TableSortLabel></TableCell>
-                  <TableCell sortDirection={sort.key === 'apiMs' ? sort.dir : false}><Tooltip title="Time spent waiting for the AI model to respond" disableInteractive><TableSortLabel active={sort.key === 'apiMs'} direction={sort.dir} onClick={() => changeSort('apiMs')}>API time</TableSortLabel></Tooltip></TableCell>
-                  <TableCell sortDirection={sort.key === 'costUsd' ? sort.dir : false}><TableSortLabel active={sort.key === 'costUsd'} direction={sort.dir} onClick={() => changeSort('costUsd')}>Cost</TableSortLabel></TableCell>
-                  <TableCell sortDirection={sort.key === 'tokens' ? sort.dir : false}><TableSortLabel active={sort.key === 'tokens'} direction={sort.dir} onClick={() => changeSort('tokens')}>Tokens</TableSortLabel></TableCell>
-                  <TableCell sortDirection={sort.key === 'concludedAt' ? sort.dir : false}><TableSortLabel active={sort.key === 'concludedAt'} direction={sort.dir} onClick={() => changeSort('concludedAt')}>Concluded</TableSortLabel></TableCell>
-                  <TableCell />
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {sortedHistory.map((h) => {
-                  const s = h.finalStats;
-                  return (
-                    <TableRow key={h.id} hover selected={tx?.id === h.id} onClick={() => openTranscript({ id: h.id, title: h.title, sessionId: h.sessionId, worktree: h.worktree, repo: h.repo })} sx={{ cursor: 'pointer' }}>
-                      <TableCell>
-                        {h.title}
-                        {(h.tags || []).length > 0 && (
-                          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, mt: 0.5 }}>
-                            {h.tags.map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 18, fontSize: 10 }} />)}
-                          </Stack>
-                        )}
-                      </TableCell>
-                      <TableCell>{repoName(h.repo)}</TableCell>
-                      <TableCell>{h.branch || '—'}</TableCell>
-                      <TableCell><Chip size="small" label={h.outcome} sx={{ height: 20, fontSize: 11 }} /></TableCell>
-                      <TableCell>{fmtMs(s?.busyMs) || '—'}</TableCell>
-                      <TableCell>{fmtMs(s?.apiMs) || '—'}</TableCell>
-                      <TableCell>{fmtUsd(s?.costUsd) || '—'}</TableCell>
-                      <TableCell>{s?.tokens > 0 ? fmtTokens(s.tokens) : '—'}</TableCell>
-                      <TableCell>{new Date(h.concludedAt).toLocaleString()}</TableCell>
-                      <TableCell align="right">
-                        <Tooltip title="Delete permanently" disableInteractive>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (window.confirm(`Permanently delete "${h.title}" from history?`)) onDeleteHistory(h.id);
-                            }}
-                          >
-                            <DeleteOutlineIcon fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-          </Box>
-          {dock}
-        </Stack>
+        <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', px: '10px', pt: '6px', pb: '12px' }}>
+          <Table size="small" stickyHeader>
+            <TableHead>
+              <TableRow>
+                <TableCell sortDirection={sort.key === 'title' ? sort.dir : false}><TableSortLabel active={sort.key === 'title'} direction={sort.dir} onClick={() => changeSort('title')}>Title</TableSortLabel></TableCell>
+                <TableCell sortDirection={sort.key === 'repo' ? sort.dir : false}><TableSortLabel active={sort.key === 'repo'} direction={sort.dir} onClick={() => changeSort('repo')}>Repo</TableSortLabel></TableCell>
+                <TableCell sortDirection={sort.key === 'branch' ? sort.dir : false}><TableSortLabel active={sort.key === 'branch'} direction={sort.dir} onClick={() => changeSort('branch')}>Branch</TableSortLabel></TableCell>
+                <TableCell sortDirection={sort.key === 'outcome' ? sort.dir : false}><TableSortLabel active={sort.key === 'outcome'} direction={sort.dir} onClick={() => changeSort('outcome')}>Outcome</TableSortLabel></TableCell>
+                <TableCell sortDirection={sort.key === 'busyMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'busyMs'} direction={sort.dir} onClick={() => changeSort('busyMs')}>Busy</TableSortLabel></TableCell>
+                <TableCell sortDirection={sort.key === 'apiMs' ? sort.dir : false}><Tooltip title="Time spent waiting for the AI model to respond" disableInteractive><TableSortLabel active={sort.key === 'apiMs'} direction={sort.dir} onClick={() => changeSort('apiMs')}>API time</TableSortLabel></Tooltip></TableCell>
+                <TableCell sortDirection={sort.key === 'costUsd' ? sort.dir : false}><TableSortLabel active={sort.key === 'costUsd'} direction={sort.dir} onClick={() => changeSort('costUsd')}>Cost</TableSortLabel></TableCell>
+                <TableCell sortDirection={sort.key === 'tokens' ? sort.dir : false}><TableSortLabel active={sort.key === 'tokens'} direction={sort.dir} onClick={() => changeSort('tokens')}>Tokens</TableSortLabel></TableCell>
+                <TableCell sortDirection={sort.key === 'concludedAt' ? sort.dir : false}><TableSortLabel active={sort.key === 'concludedAt'} direction={sort.dir} onClick={() => changeSort('concludedAt')}>Concluded</TableSortLabel></TableCell>
+                <TableCell />
+              </TableRow>
+            </TableHead>
+            <TableBody>
+              {sortedHistory.map((h) => {
+                const s = h.finalStats;
+                return (
+                  <TableRow key={h.id} hover selected={tx?.id === h.id} onClick={() => openTranscript({ id: h.id, title: h.title, sessionId: h.sessionId, worktree: h.worktree, repo: h.repo })} sx={{ cursor: 'pointer' }}>
+                    <TableCell>
+                      {h.title}
+                      {(h.tags || []).length > 0 && (
+                        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, mt: 0.5 }}>
+                          {h.tags.map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 18, fontSize: 10 }} />)}
+                        </Stack>
+                      )}
+                    </TableCell>
+                    <TableCell>{repoName(h.repo)}</TableCell>
+                    <TableCell>{h.branch || '—'}</TableCell>
+                    <TableCell><Chip size="small" label={h.outcome} sx={{ height: 20, fontSize: 11 }} /></TableCell>
+                    <TableCell>{fmtMs(s?.busyMs) || '—'}</TableCell>
+                    <TableCell>{fmtMs(s?.apiMs) || '—'}</TableCell>
+                    <TableCell>{fmtUsd(s?.costUsd) || '—'}</TableCell>
+                    <TableCell>{s?.tokens > 0 ? fmtTokens(s.tokens) : '—'}</TableCell>
+                    <TableCell>{new Date(h.concludedAt).toLocaleString()}</TableCell>
+                    <TableCell align="right">
+                      <Tooltip title="Delete permanently" disableInteractive>
+                        <IconButton
+                          size="small"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            if (window.confirm(`Permanently delete "${h.title}" from history?`)) onDeleteHistory(h.id);
+                          }}
+                        >
+                          <DeleteOutlineIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </Box>
       ) : (
-        // layout-02 `.board`: 18px/22px padding, 16px between columns.
-        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0, px: '22px', py: '18px' }}>
-          <Stack direction="row" spacing={2} sx={{ flex: 1, minHeight: 0 }}>
+        // layout-02 `.board`: columns now flex to fill the full board width
+        // (Task 1) — px/spacing scale up at wide breakpoints so the extra
+        // desktop real estate becomes breathing room between lanes, not a
+        // fixed 16px gap that would otherwise look cramped once the columns
+        // stop capping out at 340px.
+        <Stack direction="row" spacing={{ xs: 2, lg: 3, xl: 4 }} sx={{ flex: 1, minHeight: 0, px: { xs: '22px', xl: '32px' }, py: { xs: '18px', xl: '24px' } }}>
           {COLUMNS.map(([col, label]) => {
             const cards = tasks.filter((t) => t.column === col && matchesTags(t));
             const colDom = getDomainState(COLUMN_DOMAIN[col]);
             return (
               // No column chrome — `.col` is a bare flex column; the containment
-              // comes from the view's glass pane, not a per-column border. Width
-              // tracks the mockup's 270px lane rather than stretching: past ~340px
-              // the head's dot and its right-aligned count drift apart and the
-              // column stops reading as a lane.
+              // comes from the view's glass pane, not a per-column border.
+              // Columns now share the board's full width (Task 1) instead of
+              // capping out at the mockup's 270px lane, so on a wide monitor
+              // each column just gets more room for its card list. Only the
+              // head row below keeps a width cap — past ~340px the dot/label
+              // and its right-aligned count (or, under Phosphor, the
+              // label+kanji and its stamped count) drift apart far enough that
+              // the head stops reading as one grouped unit — so the cap moved
+              // from the column to the head's own inner row, which still
+              // reads as a lane regardless of how wide the column grows.
               <Stack
                 key={col}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => drop(col)}
-                sx={{ flex: '1 1 0', minWidth: 0, maxWidth: 340, minHeight: 0 }}
+                sx={{ flex: '1 1 0', minWidth: 0, minHeight: 0 }}
               >
                 {/* `.col-head` (peg lines 275-279, fix 2) — under Phosphor this is
                     now ONE flex row: the English label (`.ct`, orange) + the
@@ -636,40 +660,48 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                     `aria-label` instead — a proper ARIA name computation
                     rather than incidental textContent parsing, but still the
                     exact same locked string. ZAPAC keeps the original
-                    dot+label+count Typography untouched (task 5.2). */}
+                    dot+label+count Typography untouched (task 5.2). The
+                    green-dim rule below is drawn on this OUTER element so it
+                    still spans the column's full width (reading as one lane
+                    divider); the label+kanji+count trio sits in an INNER row
+                    capped at COL_HEAD_MAX_W so the two stay optically grouped
+                    on a wide lane instead of the count drifting off to the
+                    far right. */}
                 {phosphor ? (
                   <Box
                     role="group"
                     aria-label={`${label} (${cards.length})`}
                     sx={(t) => ({
-                      display: 'flex', alignItems: 'baseline', gap: '8px', flexShrink: 0,
-                      pb: '5px', px: '6px', mb: '9px',
+                      pb: '5px', px: '6px', mb: '9px', flexShrink: 0,
                       borderBottom: `1px solid ${t.nerv.hue.greenDim}`,
                     })}
                   >
-                    <Box component="span" sx={(t) => ({
-                      fontFamily: t.nerv.fonts.display, fontWeight: 700, fontSize: 12,
-                      letterSpacing: '.13em', color: t.nerv.hue.orange, textTransform: 'uppercase',
-                    })}
-                    >
-                      {label}
+                    <Box sx={{ display: 'flex', alignItems: 'baseline', gap: '8px', maxWidth: COL_HEAD_MAX_W }}>
+                      <Box component="span" sx={(t) => ({
+                        fontFamily: t.nerv.fonts.display, fontWeight: 700, fontSize: 12,
+                        letterSpacing: '.13em', color: t.nerv.hue.orange, textTransform: 'uppercase',
+                      })}
+                      >
+                        {label}
+                      </Box>
+                      <Box component="span" sx={(t) => ({
+                        fontFamily: t.nerv.fonts.jp, fontWeight: 800, fontSize: 12,
+                        textTransform: 'none', letterSpacing: '.14em', color: toneHue(t, colDom.tone),
+                      })}
+                      >
+                        {colDom.jp}
+                      </Box>
+                      <Stamp tone={colDom.tone} filled={colDom.filled} size="sm" sx={{ ml: 'auto' }}>
+                        ({cards.length})
+                      </Stamp>
                     </Box>
-                    <Box component="span" sx={(t) => ({
-                      fontFamily: t.nerv.fonts.jp, fontWeight: 800, fontSize: 12,
-                      textTransform: 'none', letterSpacing: '.14em', color: toneHue(t, colDom.tone),
-                    })}
-                    >
-                      {colDom.jp}
-                    </Box>
-                    <Stamp tone={colDom.tone} filled={colDom.filled} size="sm" sx={{ ml: 'auto' }}>
-                      ({cards.length})
-                    </Stamp>
                   </Box>
                 ) : (
                   <Typography
                     component="div"
                     sx={{
                       display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0,
+                      maxWidth: COL_HEAD_MAX_W,
                       pt: '2px', px: '6px', pb: '12px',
                       fontSize: 12, fontWeight: 700, letterSpacing: '.1em',
                       textTransform: 'uppercase', color: 'text.secondary',
@@ -885,14 +917,12 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
               </Stack>
             );
           })}
-          </Stack>
-          {dock}
         </Stack>
       )}
       {/* Right-sliding detail panel — one at a time, driven by the live task
           (liveDetailTask is null when the open task leaves the board, which the
           effect above turns into a close). Rendered last so it overlays above
-          the board columns + the transcript dock regardless of dock side. */}
+          the board/history content regardless of which is showing. */}
       {liveDetailTask && (
         <TaskDetailPanel
           task={liveDetailTask}
@@ -901,6 +931,22 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
           onSelect={onSelect}
           onViewTranscript={openTranscript}
           onClose={() => setDetailId(null)}
+        />
+      )}
+      {/* Transcript sheet — the second right-sliding overlay in this feature
+          (task 2), opened from a History row or handed off from
+          TaskDetailPanel's "View transcript". Independent of `liveDetailTask`
+          above; in normal use only one of the two is ever open at a time
+          (the handoff closes the detail panel in the same batch it opens
+          this), but nothing stops both from existing side by side if that
+          ever changes. */}
+      {tx && (
+        <TranscriptSheet
+          item={tx}
+          loading={loadingT}
+          error={errT}
+          transcript={transcript}
+          onClose={() => setTx(null)}
         />
       )}
     </Stack>

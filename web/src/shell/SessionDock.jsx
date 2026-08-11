@@ -96,7 +96,10 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
             <Box sx={(t) => ({ fontSize: 11, fontWeight: 700, color: 'text.disabled', background: chipBg(t), px: '8px', py: '2px', borderRadius: 999, lineHeight: 1.4 })}>{agents.length}</Box>
           )}
           <Box sx={{ flex: 1 }} />
-          <ExpandMoreIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
+          {/* Points up: restoring the collapsed strip re-expands the dock upward
+              (it's pinned to the bottom of the shell), the inverse of the
+              collapse chevrons below. */}
+          <ExpandLessIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
         </Stack>
       )}
 
@@ -104,8 +107,18 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
           their live xterm + scrollback. */}
       <Box sx={{ display: dockMin ? 'none' : 'flex', flex: 1, minHeight: 0 }}>
         <Box sx={(t) => ({ width: listW.width, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: `1px solid ${stroke2(t)}`, background: surface2(t) })}>
-          {/* layout-02 `.dock-list-head`: plain label + count, no icon, no click
-              handler — scoped to the session-list column's width, not the dock.
+          {/* layout-02 `.dock-list-head`: label + count + a trailing chevron —
+              scoped to the session-list column's width, not the dock. Clicking
+              (or Enter/Space on) the row collapses the dock, same click/keyboard
+              pattern as the minimized strip above (`toggleDock`, `role="button"`,
+              `tabIndex`, `focusRing`); `aria-label` gives it a distinct
+              accessible name ("Collapse sessions dock") so it doesn't collide
+              with the term-bar's "Minimize dock" button or this strip's own
+              "Restore" title in Playwright's strict-mode locators. The chevron
+              points down — the dock is pinned to the bottom of the shell, so
+              collapsing moves it further down (the term-bar's minimize button
+              mirrors this: it points down too, since it triggers the same
+              collapse; only the minimized strip's "Restore" chevron points up).
               No `spacing` prop: MUI Stack's `spacing` emulates gap via a
               `margin-left` rule on every non-first child, which outranks the
               count's own `ml: 'auto'` below and pins it next to the label
@@ -119,7 +132,15 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
               (was `14px`, 4px taller than the term-bar) so the two side-by-side
               header bands land at the same height/baseline and read as one
               continuous band across the dock — ZAPAC's own padding is untouched. */}
-          <Stack direction="row" sx={(t) => ({ alignItems: phosphor ? 'baseline' : 'center', gap: '8px', px: '16px', pt: phosphor ? '10px' : '14px', pb: '10px', flexShrink: 0, borderBottom: phosphor ? `1px solid ${stroke2(t)}` : 'none' })}>
+          <Stack
+            direction="row"
+            role="button"
+            tabIndex={0}
+            onClick={toggleDock}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDock(); } }}
+            aria-label="Collapse sessions dock"
+            sx={(t) => ({ alignItems: phosphor ? 'baseline' : 'center', gap: '8px', px: '16px', pt: phosphor ? '10px' : '14px', pb: '10px', flexShrink: 0, cursor: 'pointer', userSelect: 'none', borderBottom: phosphor ? `1px solid ${stroke2(t)}` : 'none', '&:focus-visible': focusRing(t) })}
+          >
             <Typography component="h4" sx={(t) => ({ fontSize: 11, fontWeight: 700, letterSpacing: '0.14em', textTransform: 'uppercase', color: phosphor ? t.nerv.hue.orange : 'text.disabled', m: 0 })} noWrap>
               Sessions
               {phosphor && <Box component="span" sx={(t) => ({ ml: 0.75, fontFamily: t.nerv.fonts.jp, fontWeight: 800, letterSpacing: '0.14em' })}>部隊</Box>}
@@ -129,6 +150,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
             ) : (
               <Box sx={(t) => ({ ml: 'auto', fontSize: 11, fontWeight: 700, color: 'text.disabled', background: chipBg(t), px: '8px', py: '2px', borderRadius: 999, lineHeight: 1.4 })}>{agents.length}</Box>
             )}
+            <ExpandMoreIcon aria-hidden sx={{ fontSize: 18, color: 'text.secondary' }} />
           </Stack>
           <List sx={{ flex: 1, overflow: 'auto', px: 1, py: 0.5 }}>
             {agents.map((a) => (
@@ -208,9 +230,11 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
             </Typography>
             <Box sx={{ flex: 1 }} />
             {/* `.term-tools` — the dock's minimize control lives here (mock's right-side
-                icon-btn row), not glued to the Sessions label anymore. */}
+                icon-btn row), not glued to the Sessions label anymore. Points down,
+                same as the `.dock-list-head` chevron: both collapse the
+                bottom-pinned dock, so both move it further down. */}
             <IconButton onClick={toggleDock} size="small" title="Minimize" aria-label="Minimize dock" sx={(t) => ({ '&:focus-visible': focusRing(t) })}>
-              <ExpandLessIcon sx={{ fontSize: 18 }} />
+              <ExpandMoreIcon sx={{ fontSize: 18 }} />
             </IconButton>
           </Stack>
           {/* Selected terminal. All non-detached terminals stay mounted

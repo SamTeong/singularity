@@ -137,7 +137,8 @@ const metaRow = (t) => ({
  * @param {object} [props.stats] The AppShell stats map (id -> session stats).
  * @param {(sessionId:string)=>void} props.onSelect "Open session" handler.
  * @param {(item:object)=>void} props.onViewTranscript "View transcript" handler
- *   — the shared openTranscript path (renders the dockable transcript panel).
+ *   — the shared openTranscript path (opens TasksBoard's right-sliding
+ *   TranscriptSheet, the second sheet in this feature's right-hand system).
  * @param {()=>void} props.onClose Close the panel (close button / scrim / Esc).
  */
 // ── Phosphor-only helpers (task 5.4) ────────────────────────────────────────────
@@ -248,9 +249,9 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
   // stable hue"), not by two independently-written mappings staying in sync.
   const dom = getDomainState(cardDomainId(task, agent));
 
-  // "View transcript" hands off to the existing dockable transcript panel, then
-  // closes this detail panel so the transcript dock becomes the focus — cleaner
-  // than stacking two overlays (the panel would otherwise sit over the dock).
+  // "View transcript" hands off to TasksBoard's TranscriptSheet, then closes
+  // this detail panel so the transcript sheet becomes the focus — cleaner than
+  // stacking two right-hand overlays at once.
   const handleViewTranscript = () => {
     onViewTranscript({ id: task.id, title: task.title, sessionId: task.sessionId, worktree: task.worktree, repo: task.repo });
     onClose();

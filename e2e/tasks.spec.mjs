@@ -89,20 +89,17 @@ test('tag filter chips toggle and "Clear all" resets the selection', async ({ pa
   await expect(fixtureChip).toBeVisible(); // chip row itself stays
 });
 
-test('clicking a card opens the right detail panel (not the dock); view-transcript, dock toggle, and close all work', async ({ page }) => {
+test('clicking a card opens the right detail panel; "View transcript" hands off to a right-side transcript sheet with close/Escape/scrim affordances', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Tasks');
 
-  // exact:true — once the dock opens its header's accessible name ("Collapse
-  // Seeded review card transcript") contains "Seeded review card" as a
-  // substring, so a non-exact match on the card would become ambiguous then.
   const card = page.getByRole('button', { name: 'Seeded review card', exact: true });
   await card.click();
 
-  // Card click now opens a right-sliding detail panel — a dialog named "Task
-  // detail" — instead of the transcript dock directly. (MUI Drawer renders its
-  // Paper with role=dialog + aria-label="Task detail" via slotProps.paper, so
-  // the role/name query resolves to the sheet, not the board behind it.)
+  // Card click opens a right-sliding detail panel — a dialog named "Task
+  // detail". (MUI Drawer renders its Paper with role=dialog +
+  // aria-label="Task detail" via slotProps.paper, so the role/name query
+  // resolves to the sheet, not the board behind it.)
   const dialog = page.getByRole('dialog', { name: 'Task detail', exact: true });
   await expect(dialog).toBeVisible();
   // By role, not by text: the panel's "Task" section renders the seeded
@@ -127,36 +124,42 @@ test('clicking a card opens the right detail panel (not the dock); view-transcri
   // exercise the enabled/selects-terminal path — that needs a live agent).
   await expect(dialog.getByRole('button', { name: 'Open session' })).toBeDisabled();
 
-  // "View transcript" hands off to the shared dockable transcript panel and
-  // closes this panel. No sessionId on the seeded card → the dock shows the
-  // not-found message — the same surface the card click used to open directly.
+  // "View transcript" closes the detail panel and hands off to TasksBoard's
+  // right-sliding TranscriptSheet — a second dialog, named "Transcript", built
+  // on the exact same Drawer-over-scrim system (same anchor/width/scrim/close
+  // affordances/entrance motion as the detail panel). No sessionId on the
+  // seeded card → its body shows the not-found message.
   await dialog.getByRole('button', { name: 'View transcript' }).click();
   await expect(dialog).not.toBeVisible();
-  await expect(page.getByText('No transcript found for this task.')).toBeVisible();
 
-  // The dock the card click used to open directly is now reached via the
-  // panel's "View transcript" — exercise its collapse + dock-side toggle so
-  // that behaviour stays covered after the card→panel change. Header is
-  // role=button, aria-label swaps Expand|Collapse with the panelMin toggle;
-  // freshly opened it is not minimized, so "Collapse ...". Bind both names up
-  // front — the accessible name flips with the state, so a locator built from
-  // the pre-toggle name resolves to nothing once the label has moved.
-  const collapseHeader = page.getByRole('button', { name: 'Collapse Seeded review card transcript' });
-  const expandHeader = page.getByRole('button', { name: 'Expand Seeded review card transcript' });
-  await expect(collapseHeader).toBeVisible();
-  await collapseHeader.click();
-  await expect(expandHeader).toBeVisible();
-  await expandHeader.click(); // back to expanded for the dock-side toggle below
-  await expect(collapseHeader).toBeVisible();
+  const tx = page.getByRole('dialog', { name: 'Transcript', exact: true });
+  await expect(tx).toBeVisible();
+  await expect(tx.getByRole('heading', { name: 'Seeded review card', exact: true })).toBeVisible();
+  await expect(tx.getByText('No transcript found for this task.')).toBeVisible();
 
-  const dockRight = page.getByRole('button', { name: 'Dock right' });
-  await expect(dockRight).toBeVisible();
-  await dockRight.click();
-  await expect(page.getByRole('button', { name: 'Dock bottom' })).toBeVisible();
+  // Close via the explicit close button.
+  await tx.getByRole('button', { name: 'Close' }).click();
+  await expect(tx).not.toBeVisible();
 
-  // Re-open the panel and dismiss it with Escape (a scrim click routes to the
-  // same onClose, but Escape is coordinate-independent and robust to the
-  // right-docked transcript panel sharing the right edge).
+  // Reopen via the same handoff and dismiss with Escape.
+  await card.click();
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'View transcript' }).click();
+  await expect(tx).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(tx).not.toBeVisible();
+
+  // Reopen once more and dismiss with a scrim (backdrop) click — coordinate-
+  // independent affordances (close button, Escape) are covered above; this
+  // proves the backdrop itself also routes to the same onClose.
+  await card.click();
+  await dialog.getByRole('button', { name: 'View transcript' }).click();
+  await expect(tx).toBeVisible();
+  await page.locator('.MuiBackdrop-root').click();
+  await expect(tx).not.toBeVisible();
+
+  // The detail panel's own Escape-to-close (independent of the handoff above)
+  // stays covered too.
   await card.click();
   await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape');
@@ -451,24 +454,20 @@ test.describe('Tasks board — Phosphor Console', () => {
     await expect(dialog.getByRole('button', { name: 'Open session' })).toBeDisabled();
 
     // Dismiss with Escape — MUI Drawer's focus trap/restore is shared with
-    // ZAPAC, so focus returns to the card that opened it. Checked BEFORE the
-    // "View transcript" handoff below (not after re-opening the card a second
-    // time): once that handoff opens the bottom-docked transcript panel, its
-    // expanded body overlaps the board's own layout region enough that
-    // Playwright can no longer land a click on the card underneath — a
-    // dock/board-layout interaction that's orthogonal to this test's
-    // dossier-dismissal assertion, so it's avoided here rather than chased.
+    // ZAPAC, so focus returns to the card that opened it.
     await page.keyboard.press('Escape');
     await expect(dialog).not.toBeVisible();
     await expect(card).toBeFocused();
 
-    // Reopen and hand off to the shared dockable transcript panel — identical
-    // handoff to the ZAPAC behavior.
+    // Reopen and hand off to TasksBoard's TranscriptSheet — identical handoff
+    // to the ZAPAC behavior, into a second dialog named "Transcript".
     await card.click();
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: 'View transcript' }).click();
     await expect(dialog).not.toBeVisible();
-    await expect(page.getByText('No transcript found for this task.')).toBeVisible();
+    const tx = page.getByRole('dialog', { name: 'Transcript', exact: true });
+    await expect(tx).toBeVisible();
+    await expect(tx.getByText('No transcript found for this task.')).toBeVisible();
   });
 
   test('tag filter chips and the Board/History toggle keep working under Phosphor', async ({ page }) => {

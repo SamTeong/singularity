@@ -449,7 +449,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
 
       <Box sx={{ flex: 1 }} />
 
-      {/* "Usage · 5h window" mini-bar panel — only in the expanded rail. */}
+      {/* "Usage · 5h & 7d windows" mini-bar panel — only in the expanded rail. */}
       {!collapsed && <UsagePanel usage={usage} caps={caps} />}
 
       {/* Daemon-status footer — always visible (replaces the conditional StatusPill). */}
@@ -459,9 +459,18 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
 }
 
 /**
- * Sidebar usage panel (layout-02 `.usage`): a recessed glass tile with a labelled
- * mini-bar + percentage per provider, wired to the live `useAgents.usage` shape.
- * Renders a muted placeholder row when no data has loaded yet.
+ * Sidebar usage panel (layout-02 `.usage`): a recessed glass tile with a
+ * labelled mini-bar + percentage per provider, wired to the live
+ * `useAgents.usage` shape. Renders a muted placeholder row when no data has
+ * loaded yet.
+ *
+ * Each provider gets 2–3 readings — the same anatomy `ProviderRow`
+ * (features/usage/UsagePill.jsx, the collapsed-rail tooltip's source) uses: a
+ * 5h session window, a 7d weekly window, and a $ extra-usage reading once
+ * `extra.enabled && extra.pctUsed != null` (a monthly budget, not a rolling
+ * window — it's what keeps the rail non-empty once the plan windows null out
+ * on overage). A provider's name is a small group heading over its windows so
+ * a reader can tell which bar reads which without a legend.
  *
  * Phosphor renders the same rows (task 4.3, revised 8.6) through `@/components/
  * Meter.jsx` — the same themed bar the Usage view's main pane uses (`size="lg"`
@@ -469,34 +478,60 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
  * one implementation. Real percentages/placeholders only, no fabricated
  * provider or telemetry.
  */
+// Per-provider windows, in display order. `pick` mirrors ProviderRow's own
+// `u.ok ? u.session : null` guard so a broken/unauthenticated provider shows
+// '—' per window instead of stale data.
+const USAGE_WINDOWS = [
+  { key: '5h', pick: (u) => (u?.ok ? u.session : null), segments: 5, windowMs: 5 * 3.6e6 },
+  { key: '7d', pick: (u) => (u?.ok ? u.weekly : null), segments: 7, windowMs: 7 * 24 * 3.6e6 },
+];
+
+function usageRows(usage, caps) {
+  return visibleProviders(caps).map((p) => {
+    const u = usage?.[p.key];
+    const windows = USAGE_WINDOWS.map((w) => ({ key: w.key, win: w.pick(u), segments: w.segments, windowMs: w.windowMs }));
+    if (u?.ok && u.extra?.enabled && u.extra.pctUsed != null) {
+      windows.push({ key: '$', win: u.extra, segments: 1, windowMs: undefined });
+    }
+    return { key: p.key, label: p.label, windows };
+  });
+}
+
 function UsagePanel({ usage, caps }) {
   const { skinId } = useThemeSkin();
   const isPhosphor = skinId === 'phosphor';
-  const rows = visibleProviders(caps).map((p) => {
-    const u = usage?.[p.key];
-    const win = u?.ok ? u.session : null; // the same "5h session" window shape Meter/UsageView already consume
-    const pct = win?.pctUsed != null ? Math.round(win.pctUsed) : null;
-    return { key: p.key, label: p.label, pct, win };
-  });
-  const hasData = rows.some((r) => r.pct != null);
+  const rows = usageRows(usage, caps);
+  // A provider "has data" if ANY of its windows resolved a percentage — a
+  // provider with only a weekly (7d) reading (5h null/unauthenticated) must
+  // still clear the placeholder, so this checks every window, not just 5h.
+  const hasData = rows.some((r) => r.windows.some((w) => w.win?.pctUsed != null));
 
   if (isPhosphor) {
     return (
       <Box sx={{ mx: 1.5, mb: 1.5 }}>
-        <ZoneTitle aside="5H WINDOW">
+        <ZoneTitle aside="5H · 7D">
           <Box component="span">USAGE</Box>
           <Box component="span" aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.jp, ml: '8px' })}>消費</Box>
         </ZoneTitle>
         {!hasData ? (
           <Typography sx={(t) => ({ fontSize: 11, fontFamily: getTokens(t).fonts.mono, textTransform: 'uppercase', color: getRoles(t).status.idle })}>No usage yet</Typography>
         ) : (
-          // Same themed `Meter` the Usage view's main pane renders (size="lg"),
-          // at its documented compact size — one bar component, two surfaces.
-          // `win`/`segments`/`windowMs` mirror UsageView.jsx's own "Session (5h)"
-          // Meter exactly, so both readings of the same 5h window match.
-          <Stack spacing="9px">
+          // Same themed `Meter` the Usage view's main pane and `ProviderRow`
+          // render, at its documented compact size — one bar component, three
+          // surfaces. A mono provider heading groups each provider's 5h/7d(/$)
+          // bars, mirroring ProviderRow's own label-over-meters anatomy.
+          <Stack spacing="12px">
             {rows.map((r) => (
-              <Meter key={r.key} size="sm" label={r.label.toUpperCase()} win={r.win} segments={5} windowMs={5 * 3.6e6} />
+              <Box key={r.key}>
+                <Typography sx={(t) => ({ fontSize: 10, fontFamily: getTokens(t).fonts.mono, letterSpacing: '.08em', textTransform: 'uppercase', color: INK2, mb: '4px' })}>
+                  {r.label}
+                </Typography>
+                <Stack spacing="4px">
+                  {r.windows.map((w) => (
+                    <Meter key={w.key} size="sm" label={w.key} win={w.win} segments={w.segments} windowMs={w.windowMs} />
+                  ))}
+                </Stack>
+              </Box>
             ))}
           </Stack>
         )}
@@ -516,38 +551,48 @@ function UsagePanel({ usage, caps }) {
       })}
     >
       <Typography sx={{ fontSize: 11, fontWeight: 700, letterSpacing: '.14em', textTransform: 'uppercase', color: INK3, mb: '11px' }}>
-        Usage · 5h window
+        Usage · 5h & 7d windows
       </Typography>
       {!hasData ? (
         <Typography sx={{ fontSize: 12, color: INK3 }}>No usage yet</Typography>
       ) : (
-        <Stack spacing="10px">
+        <Stack spacing="12px">
           {rows.map((r) => (
-            <Stack key={r.key} direction="row" spacing="10px" sx={{ alignItems: 'center' }}>
-              <Typography sx={{ fontSize: 12, color: INK2, width: '52px', flex: 'none' }}>{r.label}</Typography>
-              <Box
-                sx={(t) => ({
-                  flex: 1,
-                  height: '6px',
-                  borderRadius: `${getTokens(t).radius.pill ?? 999}px`,
-                  background: trackColor(t),
-                  overflow: 'hidden',
+            <Box key={r.key}>
+              <Typography sx={{ fontSize: 11, fontWeight: 700, color: INK2, mb: '6px' }}>{r.label}</Typography>
+              <Stack spacing="6px">
+                {r.windows.map((w) => {
+                  const pct = w.win?.pctUsed != null ? Math.round(w.win.pctUsed) : null;
+                  return (
+                    <Stack key={w.key} direction="row" spacing="8px" sx={{ alignItems: 'center' }}>
+                      <Typography sx={{ fontSize: 10, color: INK3, width: '20px', flex: 'none' }}>{w.key}</Typography>
+                      <Box
+                        sx={(t) => ({
+                          flex: 1,
+                          height: '5px',
+                          borderRadius: `${getTokens(t).radius.pill ?? 999}px`,
+                          background: trackColor(t),
+                          overflow: 'hidden',
+                        })}
+                      >
+                        <Box
+                          sx={(t) => ({
+                            display: 'block',
+                            height: '100%',
+                            width: `${pct ?? 0}%`,
+                            borderRadius: `${getTokens(t).radius.pill ?? 999}px`,
+                            background: brandGrad(t),
+                          })}
+                        />
+                      </Box>
+                      <Typography sx={{ fontSize: 10, fontWeight: 700, color: INK3, width: '28px', textAlign: 'right', flex: 'none' }}>
+                        {pct == null ? '—' : `${pct}%`}
+                      </Typography>
+                    </Stack>
+                  );
                 })}
-              >
-                <Box
-                  sx={(t) => ({
-                    display: 'block',
-                    height: '100%',
-                    width: `${r.pct ?? 0}%`,
-                    borderRadius: `${getTokens(t).radius.pill ?? 999}px`,
-                    background: brandGrad(t),
-                  })}
-                />
-              </Box>
-              <Typography sx={{ fontSize: 11, fontWeight: 700, color: INK3, width: '34px', textAlign: 'right', flex: 'none' }}>
-                {r.pct == null ? '—' : `${r.pct}%`}
-              </Typography>
-            </Stack>
+              </Stack>
+            </Box>
           ))}
         </Stack>
       )}

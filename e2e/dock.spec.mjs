@@ -29,6 +29,29 @@ test('dock minimize round-trips between the term-bar button and the collapsed st
   await expect(restore).toHaveCount(0);
 });
 
+test('clicking the session-list header also collapses the dock', async ({ page }) => {
+  await page.goto('/');
+
+  // A second collapse trigger alongside the term-bar's minimize button: the
+  // `.dock-list-head` row itself, distinguished by its own accessible name so
+  // it doesn't collide with "Minimize dock" or the collapsed strip's "Restore".
+  const header = page.getByRole('button', { name: 'Collapse sessions dock' });
+  const restore = page.locator('[role="button"][title="Restore"]');
+
+  await expect(header).toBeVisible();
+  await expect(restore).toHaveCount(0);
+
+  await header.click();
+
+  await expect(restore).toBeVisible();
+  await expect(header).toBeHidden();
+
+  await restore.click();
+
+  await expect(header).toBeVisible();
+  await expect(restore).toHaveCount(0);
+});
+
 test('dock empty state shows "No agent selected" when no session is active', async ({ page }) => {
   await page.goto('/');
 
