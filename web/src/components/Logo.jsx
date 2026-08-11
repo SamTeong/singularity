@@ -9,17 +9,30 @@ const LOGO_NODES = [-90, -30, 30, 90, 150, 210].map((a) => {
   return [+(16 + 11 * Math.cos(r)).toFixed(2), +(16 + 11 * Math.sin(r)).toFixed(2)];
 });
 
-export default function Logo({ active }) {
+/**
+ * @param {object} props
+ * @param {boolean} [props.active] pulse the hub halo (an agent is running)
+ * @param {boolean} [props.onBrand] render for layout-02's `.brand-mark`: the mark
+ *   sits inside a gradient-filled tile, so the glyph goes flat white (the
+ *   gradient is already the tile) and drops its own bloom + a few px of size.
+ */
+export default function Logo({ active, onBrand = false }) {
   const t = useTheme();
-  const line = t.vars.palette.text.secondary;
-  const nodeFill = t.vars.palette.background.default;
+  const line = onBrand ? '#fff' : t.vars.palette.text.secondary;
+  const nodeFill = onBrand ? 'rgba(255,255,255,0.22)' : t.vars.palette.background.default;
+  const hub = onBrand ? '#fff' : 'url(#sing-grad)';
   return (
     <Box
       component="svg"
       viewBox="0 0 32 32"
       role="img"
       aria-label="Singularity"
-      sx={{ width: 30, height: 30, flexShrink: 0, filter: 'drop-shadow(0 0 5px rgba(152,91,156,0.55))' }}
+      sx={{
+        width: onBrand ? 21 : 30,
+        height: onBrand ? 21 : 30,
+        flexShrink: 0,
+        filter: onBrand ? 'none' : 'drop-shadow(0 0 5px rgba(152,91,156,0.55))',
+      }}
     >
       <defs>
         <linearGradient id="sing-grad" x1="0" y1="0" x2="1" y2="1">
@@ -34,7 +47,7 @@ export default function Logo({ active }) {
       {active && (
         <Box
           component="circle"
-          cx="16" cy="16" r="3" fill="url(#sing-grad)"
+          cx="16" cy="16" r="3" fill={hub}
           sx={{
             transformBox: 'fill-box', transformOrigin: 'center',
             animation: 'sing-ping 2s cubic-bezier(0,0,0.2,1) infinite',
@@ -43,8 +56,8 @@ export default function Logo({ active }) {
           }}
         />
       )}
-      <circle cx="16" cy="16" r="5.2" fill="none" stroke="url(#sing-grad)" strokeWidth="1.4" />
-      <circle cx="16" cy="16" r="3" fill="url(#sing-grad)" />
+      <circle cx="16" cy="16" r="5.2" fill="none" stroke={hub} strokeWidth="1.4" />
+      <circle cx="16" cy="16" r="3" fill={hub} />
       {LOGO_NODES.map(([x, y], i) => (
         <circle key={`n${i}`} cx={x} cy={y} r="2.4" fill={nodeFill} stroke={line} strokeWidth="1.3" />
       ))}

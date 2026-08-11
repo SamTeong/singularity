@@ -1,5 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
-import { useRef, useState, useMemo } from 'react';
+import { brandGrad, brandGlow, surface2, stroke2, chipBg, trackColor, statusColor, focusRing, statePill, cardTag, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -17,20 +18,20 @@ import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import OutlinedFlagOutlinedIcon from '@mui/icons-material/OutlinedFlagOutlined';
-import HistoryIcon from '@mui/icons-material/History';
-import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import HorizontalSplitIcon from '@mui/icons-material/HorizontalSplit';
+import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import VerticalSplitIcon from '@mui/icons-material/VerticalSplit';
 import { StatusPill } from '@zapac/mui-theme';
+import TaskDetailPanel from '@/features/tasks/TaskDetailPanel.jsx';
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import { repoName } from '@/lib/paths.js';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
 import { KIND } from '@/lib/agentStatus.js';
-import { useResizable } from '@/hooks/useResizable.jsx';
+import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
 
 const COLUMNS = [
   ['todo', 'To-Do'],
@@ -66,10 +67,94 @@ function statsLine(s) {
 // Header toggles to a History table (concluded tasks — completed or abandoned).
 const LIVE_STATUS = new Set(['starting', 'running', 'idle']);
 
-export default function TasksBoard({ tasks, history, agents, stats, activeId, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
+// layout-02 column-dot colours — a status-ish marker per column (`.col-dot`:
+// ink-3 queued · info in-progress · brand review · ok done).
+const COL_DOT = { todo: 'text.disabled', inprogress: 'info.main', inreview: 'primary.main', done: 'success.main' };
+
+// Segmented-control (Board | History) button styling. `on` marks the active
+// segment: surface-solid fill, primary ink, and the card shadow per .seg .on.
+// Both buttons stay role=button with aria-pressed so the e2e (getByRole 'Board'
+// / 'History') keeps matching — NOT MUI ToggleButton/Tab.
+const segBtn = (t, on) => {
+  const g = getTokens(t);
+  return {
+    px: '14px', py: '6px', minWidth: 0, minHeight: 27, borderRadius: 999,
+    fontSize: 12, fontWeight: 700, lineHeight: 1.2, letterSpacing: 0,
+    color: 'text.disabled', textTransform: 'none',
+    border: 'none', boxShadow: 'none', background: 'transparent',
+    ...(on && {
+      background: t.vars.palette.background.paper,
+      color: 'text.primary',
+      boxShadow: g.glass.cardShadow,
+    }),
+    '&:hover': { background: on ? t.vars.palette.background.paper : 'transparent', boxShadow: on ? g.glass.cardShadow : 'none' },
+    '&.Mui-focusVisible': focusRing(t),
+  };
+};
+
+// Gradient primary action (.btn-primary) — brand-grad fill, white ink, soft
+// brand glow, hover lift + stronger glow, focus ring on keyboard focus.
+const primaryBtn = (t) => {
+  const glow = brandGlow(t);
+  return {
+    borderRadius: 999, px: '18px', py: '7px', minHeight: 38,
+    background: brandGrad(t), color: '#fff',
+    fontWeight: 700, fontSize: 13, textTransform: 'none', lineHeight: 1.2,
+    border: 'none',
+    boxShadow: `0 14px 34px -12px ${glow}`,
+    transition: 'transform .18s ease, box-shadow .18s ease',
+    '&:hover': { transform: 'translateY(-2px)', boxShadow: `0 20px 44px -14px ${glow}`, background: brandGrad(t) },
+    '&.Mui-focusVisible': focusRing(t),
+    '&:active': { transform: 'translateY(0)' },
+    // The hover lift + glow intensify are motion — suppress the transform under
+    // reduced motion (DESIGN §6 "give every animation a prefers-reduced-motion
+    // end-state fallback"); keep the shadow/bg colour change, which isn't motion.
+    '@media (prefers-reduced-motion: reduce)': { transition: 'none', '&:hover': { transform: 'none' }, '&:active': { transform: 'none' } },
+  };
+};
+
+// Tag-filter chip (.tag) — mono, surface2/chip bg, stroke2 border, pill;
+// selected → brand border + stronger tint.
+const tagChip = (t, on) => ({
+  height: 22, fontSize: 11, fontWeight: 700, borderRadius: 999,
+  fontFamily: (tt) => tt.typography?.code?.fontFamily ?? 'ui-monospace, monospace',
+  background: on ? chipBg(t) : surface2(t),
+  border: `1px solid ${on ? t.vars.palette.primary.main : stroke2(t)}`,
+  color: 'text.secondary',
+  '&:hover': { background: chipBg(t) },
+});
+
+// Count chip at the right of a column header (`.col-count` — ink-3 on `--chip`).
+// The mock's chip fill composites over its ambient glow, which sits behind the
+// main panel there; ours has no glow behind that corner, so bare chipBg(t)
+// lands ~12 RGB units darker than the mockup. chipBg is shared broadly (focus
+// rings, hover fills, tag chips) so we don't bump that token — we tint just
+// this fill with a little primary, the same color-mix idiom Sidebar.jsx uses
+// for its active nav-item fill. Ink stays ink-3 per `.col-count`.
+const countChip = (t) => ({
+  ml: 'auto', flexShrink: 0,
+  fontSize: 11, fontWeight: 700, lineHeight: 1.45,
+  color: 'text.disabled',
+  background: `color-mix(in srgb, ${t.vars.palette.primary.main} 12%, ${chipBg(t)})`,
+  px: '9px', py: '2px', borderRadius: 999,
+});
+
+export default function TasksBoard({ tasks, history, agents, stats, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
   const [dragId, setDragId] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [activeTags, setActiveTags] = useState(() => new Set());
+  // Detail panel: a card click opens the right-sliding sheet instead of the
+  // transcript dock / terminal select. State is the open task's ID only — the
+  // task object is re-derived from `tasks` each render, so the panel reflects
+  // live stat/status updates and a different card swaps content (one panel, not
+  // two). When the open task leaves the board (concluded, moved to history, or
+  // removed) it drops out of `tasks`, so the lookup goes null and the panel
+  // unmounts on its own — no closing effect, no stale snapshot to sync.
+  const [detailId, setDetailId] = useState(null);
+  const liveDetailTask = useMemo(
+    () => (detailId ? tasks.find((t) => t.id === detailId) ?? null : null),
+    [tasks, detailId],
+  );
   // History table sort: click a header to sort, click again to reverse. Numeric
   // fields compare by value, strings by localeCompare. Default = newest first.
   const [sort, setSort] = useState({ key: 'concludedAt', dir: 'desc' });
@@ -90,6 +175,10 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
     if (n.has(tag)) n.delete(tag); else n.add(tag);
     return n;
   });
+
+  // Live subtitle for the view topbar: task count + count of agents currently
+  // in a live state (starting/running/idle).
+  const runningCount = agents.filter((a) => LIVE_STATUS.has(a.status)).length;
 
   // Sort value per header key. Numeric fields fall back to 0; strings to ''.
   const sortValue = (h, key) => {
@@ -130,7 +219,14 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   const [panelW, setPanelW] = useState(() => { const v = Number(localStorage.getItem('sing-hist-w')); return v >= 200 && v <= 1600 ? v : 420; });
   const dockRef = useRef(null);
   // Panel height (bottom-docked) is a drag-resizable axis:'y' — mirrors App.jsx's dock.
-  const { width: panelH, startDrag: startPanelHeightDrag } = useResizable('sing-hist-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: dockRef });
+  const { width: panelH, startDrag: startPanelHeightDrag, onKeyDown: onPanelHeightKeyDown, dragging: panelHeightDragging, max: panelHMax } = useResizable('sing-hist-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: dockRef });
+  const [panelWidthDragging, setPanelWidthDragging] = useState(false); // width-drag is bespoke (see below), so it tracks its own dragging flag
+  const panelWidthUpRef = useRef(null); // active pointerup cleanup for the bespoke width-drag, so an unmount mid-drag can cancel it
+  const PANEL_W_MAX = 1600; // static ceiling — matches the panelW state initializer's clamp
+  // Dynamic ceiling (dockRef's own width, minus the 200px floor) for the drag
+  // clamp — reads `dockRef.current`, so it's only called from an event handler
+  // (react-hooks/refs forbids a ref read during render).
+  const panelWidthMax = () => { const rect = dockRef.current?.getBoundingClientRect(); return rect ? rect.width - 200 : PANEL_W_MAX; };
   const histReqRef = useRef(0); // guards against a slower stale fetch overwriting a newer selection
 
   const openTranscript = (item) => {
@@ -161,16 +257,46 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
     e.preventDefault();
     const rect = dockRef.current?.getBoundingClientRect();
     if (!rect) return;
+    setPanelWidthDragging(true);
+    document.body.classList.add('resizing');
+    e.currentTarget.setPointerCapture?.(e.pointerId);
     const move = (ev) => {
       const w = Math.min(rect.width - 200, Math.max(200, rect.right - ev.clientX));
       setPanelW(w);
       localStorage.setItem('sing-hist-w', String(Math.round(w)));
     };
-    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+    const up = () => {
+      setPanelWidthDragging(false);
+      document.body.classList.remove('resizing');
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+      panelWidthUpRef.current = null;
+    };
+    panelWidthUpRef.current = up;
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+  // Cancel an in-flight width-drag if the handle unmounts mid-drag (side/panelMin toggle).
+  useEffect(() => () => panelWidthUpRef.current?.(), []);
+  // Keyboard mirror of the drag above — ArrowLeft widens (dragging the handle
+  // away from the panel's right edge always grows it), ArrowRight narrows. Reads
+  // `panelW` from the closure (like useResizable's own onKeyDown) rather than a
+  // setState updater, which must stay pure under StrictMode's double-invoke.
+  const onPanelWidthKeyDown = (e) => {
+    let d = 0;
+    if (e.key === 'ArrowLeft') d = 16; else if (e.key === 'ArrowRight') d = -16;
+    if (!d) return;
+    e.preventDefault();
+    const next = Math.min(panelWidthMax(), Math.max(200, panelW + d));
+    localStorage.setItem('sing-hist-w', String(Math.round(next)));
+    setPanelW(next);
   };
   const startPanelDrag = side === 'bottom' ? startPanelHeightDrag : startPanelWidthDrag;
+  const onPanelKeyDown = side === 'bottom' ? onPanelHeightKeyDown : onPanelWidthKeyDown;
+  const panelDragging = side === 'bottom' ? panelHeightDragging : panelWidthDragging;
+  const panelDragValue = side === 'bottom' ? panelH : panelW;
+  const panelDragMin = side === 'bottom' ? 140 : 200;
+  const panelDragMax = side === 'bottom' ? panelHMax : PANEL_W_MAX;
 
   const drop = (col) => {
     const t = tasks.find((x) => x.id === dragId);
@@ -187,15 +313,20 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   // and the board view (for a selected Done card). Reads the generic `tx` item.
   const dock = tx && (
     <>
-      {/* Drag handle — resize the panel (hidden while minimized). */}
+      {/* Drag handle — resize the panel (hidden while minimized). Same grip +
+          a11y + keyboard treatment as the dock/list handles (layout-02
+          `.dock-handle`/`.list-handle`). */}
       {!panelMin && (
-        <Box
-          onMouseDown={startPanelDrag}
-          sx={{
-            flexShrink: 0,
-            cursor: side === 'bottom' ? 'row-resize' : 'col-resize',
-            ...(side === 'bottom' ? { height: 8, mx: 1 } : { width: 8, my: 1 }),
-          }}
+        <ResizeHandle
+          axis={side === 'bottom' ? 'y' : 'x'}
+          onPointerDown={startPanelDrag}
+          onKeyDown={onPanelKeyDown}
+          dragging={panelDragging}
+          value={panelDragValue}
+          min={panelDragMin}
+          max={panelDragMax}
+          label="Resize transcript panel"
+          sx={side === 'bottom' ? { mx: 1 } : { my: 1 }}
         />
       )}
       <Box
@@ -246,18 +377,37 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
   );
 
   return (
-    <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
-        <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Tasks</Typography>
-        <Box sx={{ flex: 1 }} />
-        <Button size="small" startIcon={showHistory ? <ViewKanbanOutlinedIcon /> : <HistoryIcon />} onClick={() => setShowHistory((v) => !v)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>
-          {showHistory ? 'Board' : 'History'}
-        </Button>
-        <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Task</Button>
+    <Stack sx={{ height: '100%' }}>
+      {/* layout-02 `.topbar`: 16px/22px, hairline rule under it, actions right. */}
+      <Stack
+        direction="row"
+        spacing={2}
+        sx={(t) => ({
+          alignItems: 'center', flexWrap: 'wrap', rowGap: 1.5, flexShrink: 0,
+          px: '22px', py: '16px', borderBottom: `1px solid ${stroke2(t)}`,
+        })}
+      >
+        <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
+          {/* h3 for the display face; `.view-title` tracks/leads tighter than the
+              variant's -0.01em/1.2, so those two stay explicit. */}
+          <Typography variant="h3" sx={{ letterSpacing: '-0.02em', lineHeight: 1 }}>Tasks</Typography>
+          <Typography sx={{ fontSize: 12, color: 'text.disabled', mt: 0.5, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+            {tasks.length} tasks · {runningCount} running
+          </Typography>
+        </Box>
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1.25, flexShrink: 0 }}>
+          {/* Segmented Board|History control — two plain Buttons (role=button)
+              with aria-pressed, NOT ToggleButton/Tab, so the e2e role/name
+              matches stay exact. Both buttons always visible. */}
+          <Box sx={(t) => ({ display: 'flex', background: surface2(t), border: `1px solid ${stroke2(t)}`, borderRadius: 999, p: '3px' })}>
+            <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={!showHistory} onClick={() => setShowHistory(false)} sx={(t) => segBtn(t, !showHistory)}>Board</Button>
+            <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={showHistory} onClick={() => setShowHistory(true)} sx={(t) => segBtn(t, showHistory)}>History</Button>
+          </Box>
+          <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => primaryBtn(t)}>New task</Button>
+        </Box>
       </Stack>
-      <Stack sx={{ flex: 1, minHeight: 0, p: 2 }} spacing={1}>
-        {allTags.length > 0 && (
-        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
+      {allTags.length > 0 && (
+        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center', flexShrink: 0, px: '22px', pt: '14px' }}>
           {allTags.map((tag) => {
             const on = activeTags.has(tag);
             return (
@@ -265,11 +415,10 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                 key={tag}
                 size="small"
                 label={tag}
-                variant={on ? 'filled' : 'outlined'}
-                color={on ? 'primary' : 'default'}
+                variant="outlined"
                 onClick={() => toggleTag(tag)}
                 onDelete={on ? () => toggleTag(tag) : undefined}
-                sx={{ height: 22, fontSize: 11 }}
+                sx={(t) => tagChip(t, on)}
               />
             );
           })}
@@ -281,13 +430,13 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
               onClick={() => setActiveTags(new Set())}
               onDelete={() => setActiveTags(new Set())}
               deleteIcon={<CloseIcon />}
-              sx={{ height: 22, fontSize: 11, ml: 0.5, color: 'text.secondary' }}
+              sx={(t) => ({ height: 22, fontSize: 11, fontWeight: 700, borderRadius: 999, fontFamily: (tt) => tt.typography?.code?.fontFamily ?? 'ui-monospace, monospace', background: 'transparent', border: `1px solid ${stroke2(t)}`, color: 'text.disabled', ml: 0.5, '&:hover': { background: surface2(t) } })}
             />
           )}
         </Stack>
       )}
       {showHistory ? (
-        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0 }}>
+        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0, px: '10px', pt: '6px', pb: '12px' }}>
           <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto' }}>
             <Table size="small" stickyHeader>
               <TableHead>
@@ -347,39 +496,61 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
           {dock}
         </Stack>
       ) : (
-        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0 }}>
-          <Stack direction="row" spacing={1} sx={{ flex: 1, minHeight: 0 }}>
+        // layout-02 `.board`: 18px/22px padding, 16px between columns.
+        <Stack ref={dockRef} direction={side === 'right' ? 'row' : 'column'} spacing={0} sx={{ flex: 1, minHeight: 0, px: '22px', py: '18px' }}>
+          <Stack direction="row" spacing={2} sx={{ flex: 1, minHeight: 0 }}>
           {COLUMNS.map(([col, label]) => {
             const cards = tasks.filter((t) => t.column === col && matchesTags(t));
             return (
+              // No column chrome — `.col` is a bare flex column; the containment
+              // comes from the view's glass pane, not a per-column border. Width
+              // tracks the mockup's 270px lane rather than stretching: past ~340px
+              // the head's dot and its right-aligned count drift apart and the
+              // column stops reading as a lane.
               <Stack
                 key={col}
-                spacing={0.75}
                 onDragOver={(e) => e.preventDefault()}
                 onDrop={() => drop(col)}
-                sx={(t) => ({
-                  flex: 1, minWidth: 0, minHeight: 0,
-                  borderRadius: `${getTokens(t).radius.sm}px`,
-                  border: `1px solid ${getTokens(t).glass.stroke}`,
-                  p: 0.75,
-                })}
+                sx={{ flex: '1 1 0', minWidth: 0, maxWidth: 340, minHeight: 0 }}
               >
-                <Typography variant="overline" sx={{ px: 0.5, lineHeight: 1.6, color: 'text.secondary' }}>
-                  {label} ({cards.length})
+                {/* `.col-head` — dot + uppercase label, count chip pushed right.
+                    The count keeps its parens INSIDE the chip so the header's text
+                    content stays exactly "<Label> (<n>)" for tasks.spec.mjs. */}
+                <Typography
+                  component="div"
+                  sx={{
+                    display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0,
+                    pt: '2px', px: '6px', pb: '12px',
+                    fontSize: 12, fontWeight: 700, letterSpacing: '.1em',
+                    textTransform: 'uppercase', color: 'text.secondary',
+                  }}
+                >
+                  <Box component="span" sx={{ width: 9, height: 9, borderRadius: '50%', flexShrink: 0, bgcolor: COL_DOT[col] }} />
+                  {label}{' '}
+                  <Box component="span" sx={(t) => countChip(t)}>({cards.length})</Box>
                 </Typography>
                 {/* Card list scrolls inside the column when it outgrows the pane. */}
-                <Stack spacing={0.75} sx={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+                <Stack spacing="11px" sx={(t) => ({
+                  flex: 1, minHeight: 0, overflowY: 'auto',
+                  pt: '2px', px: '4px', pb: '8px',
+                  '&::-webkit-scrollbar': { width: 8 },
+                  '&::-webkit-scrollbar-thumb': { background: trackColor(t), borderRadius: 8 },
+                })}>
                   {cards.map((task) => {
                     const agent = agents.find((a) => a.id === task.sessionId);
-                    // Done cards open the transcript dock; a live session selects the
-                    // terminal; a card whose session already exited (nothing to attach)
-                    // also falls back to the transcript so it's still viewable.
-                    const usesTx = col === 'done' || !(agent && LIVE_STATUS.has(agent.status));
-                    const sel = usesTx ? tx?.id === task.id : task.sessionId === activeId;
-                    const line = statsLine(stats?.[task.sessionId]);
-                    const activate = () => (usesTx
-                      ? openTranscript({ id: task.id, title: task.title, sessionId: task.sessionId, worktree: task.worktree, repo: task.repo })
-                      : onSelect(task.sessionId));
+                    // Board card click now opens the right-sliding detail panel
+                    // (the panel's "Open session"/"View transcript" actions re-home
+                    // what the card click used to do directly). Done cards and
+                    // dead-session cards that previously fell back to the
+                    // transcript dock all open the panel too — "View transcript"
+                    // there reaches the same dock.
+                    const sel = detailId === task.id;
+                    const s = stats?.[task.sessionId];
+                    const line = statsLine(s);
+                    const cost = fmtUsd(s?.costUsd);
+                    // `.tcard.live` — a live session tints the card's edge toward info.
+                    const live = agent && LIVE_STATUS.has(agent.status);
+                    const activate = () => setDetailId(task.id);
                     return (
                       <Box
                         key={task.id}
@@ -391,18 +562,45 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                         aria-label={task.title}
                         onClick={activate}
                         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); activate(); } }}
-                        sx={(t) => ({
-                          p: 1, cursor: 'pointer', flexShrink: 0,
-                          borderRadius: `${getTokens(t).radius.sm}px`,
-                          border: `1px solid ${sel ? t.vars.palette.primary.main : getTokens(t).glass.stroke}`,
-                          background: getTokens(t).glass.surface,
-                          opacity: dragId === task.id ? 0.4 : 1,
-                          '& .card-act': { opacity: 0 },
-                          '&:hover .card-act': { opacity: 1 },
-                        })}
+                        sx={(t) => {
+                          const g = getTokens(t);
+                          const edge = sel
+                            ? t.vars.palette.primary.main
+                            : live
+                              ? `color-mix(in srgb, ${statusColor(t, 'info')} 55%, ${g.glass.stroke})`
+                              : g.glass.stroke;
+                          return {
+                            p: '14px', cursor: 'grab', flexShrink: 0,
+                            borderRadius: `${g.radius.md ?? g.radius.sm}px`,
+                            border: `1px solid ${edge}`,
+                            background: g.glass.surface,
+                            boxShadow: g.glass.cardShadow,
+                            opacity: dragId === task.id ? 0.4 : 1,
+                            transition: 'transform .18s ease, border-color .18s ease, box-shadow .18s ease',
+                            '&:hover': { transform: 'translateY(-2px)', borderColor: t.vars.palette.primary.main },
+                            // Compose the focus ring ON TOP of the card's elevation — spreading
+                            // focusRing alone would replace cardShadow and flatten the card on
+                            // keyboard focus. Keep the lift, add the ring.
+                            '&:focus-visible': { boxShadow: `${g.glass.cardShadow}, 0 0 0 3px ${chipBg(t)}`, borderColor: t.vars.palette.primary.main },
+                            '@media (prefers-reduced-motion: reduce)': { transition: 'none', '&:hover': { transform: 'none' } },
+                            '& .card-act': { opacity: 0 },
+                            '&:hover .card-act': { opacity: 1 },
+                            ...(sel && { boxShadow: `${g.glass.cardShadow}, 0 0 0 2px ${chipBg(t)}`, borderColor: t.vars.palette.primary.main }),
+                          };
+                        }}
                       >
+                        {/* Top row: status pill (live agent → StatusPill, else a
+                            task.state chip) + mono task-id, mirroring .tcard-top. */}
+                        <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center', mb: '9px' }}>
+                          {agent
+                            ? <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>
+                            : (task.state && <Chip size="small" label={task.state} sx={(t) => statePill(t)} />)}
+                          <Typography variant="code" sx={{ ml: 'auto', fontSize: 11, color: 'text.disabled' }}>#{task.id.slice(-4)}</Typography>
+                        </Stack>
                         <Stack direction="row" spacing={0.5} sx={{ alignItems: 'flex-start' }}>
-                          <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0 }} noWrap>{task.title}</Typography>
+                          {/* `.tcard-title` wraps rather than truncating — a task title
+                              is the card's payload, and two lines beat an ellipsis. */}
+                          <Typography variant="subtitle2" sx={{ flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14, lineHeight: 1.35, letterSpacing: '-.01em' }}>{task.title}</Typography>
                           <Stack direction="row" className="card-act" sx={{ transition: 'opacity .15s' }}>
                             {col === 'done' && (
                               <Tooltip title={task.branch ? 'Remove (temporary work folder already gone; your changes are saved)' : 'Remove (moves to history)'} disableInteractive>
@@ -432,21 +630,30 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
                             </Tooltip>
                           </Stack>
                         </Stack>
-                        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }} noWrap>
-                          {repoName(task.repo)}{task.branch ? ` · ${task.branch}` : ''}
-                        </Typography>
-                        {line && (
-                          <Tooltip title="Active = time the agent spent working · API = time waiting on the AI model · tokens = amount of text processed" disableInteractive>
-                            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }} noWrap>
-                              {line}
-                            </Typography>
-                          </Tooltip>
-                        )}
-                        <Stack direction="row" spacing={0.5} sx={{ mt: 0.5, flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
-                          {task.state && <Chip size="small" label={task.state} sx={{ height: 20, fontSize: 11 }} />}
-                          {(task.tags || []).map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 20, fontSize: 11 }} />)}
-                          {agent && <StatusPill status={KIND[agent.status] ?? 'review'}>{agent.status}</StatusPill>}
+                        {/* `.tcard-repo` — repo icon + mono "<repo> · <branch>". */}
+                        <Stack direction="row" spacing="6px" sx={{ alignItems: 'center', mt: '10px', minWidth: 0 }}>
+                          <StorageOutlinedIcon sx={{ fontSize: 13, opacity: 0.8, color: 'text.secondary', flexShrink: 0 }} />
+                          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, minWidth: 0 }} noWrap>
+                            {repoName(task.repo)}{task.branch ? ` · ${task.branch}` : ''}
+                          </Typography>
                         </Stack>
+                        {/* `.tcard-foot` — tags left, spend right. The fuller
+                            active/API/token breakdown rides along in the tooltip
+                            rather than crowding a 270px card. */}
+                        {((task.tags || []).length > 0 || cost) && (
+                          <Stack direction="row" spacing="8px" sx={{ mt: '11px', alignItems: 'center' }}>
+                            <Stack direction="row" spacing="6px" sx={{ flexWrap: 'wrap', rowGap: '6px', alignItems: 'center', minWidth: 0 }}>
+                              {(task.tags || []).map((tag) => <Chip key={tag} size="small" label={tag} sx={(t) => cardTag(t)} />)}
+                            </Stack>
+                            {cost && (
+                              <Tooltip title={`${line || cost}\nActive = time the agent spent working · API = time waiting on the AI model · tokens = amount of text processed`} disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+                                <Typography variant="code" sx={{ ml: 'auto', flexShrink: 0, fontSize: 11, fontWeight: 500, color: 'text.secondary' }}>
+                                  {cost}
+                                </Typography>
+                              </Tooltip>
+                            )}
+                          </Stack>
+                        )}
                       </Box>
                     );
                   })}
@@ -458,7 +665,20 @@ export default function TasksBoard({ tasks, history, agents, stats, activeId, on
           {dock}
         </Stack>
       )}
-      </Stack>
-    </Box>
+      {/* Right-sliding detail panel — one at a time, driven by the live task
+          (liveDetailTask is null when the open task leaves the board, which the
+          effect above turns into a close). Rendered last so it overlays above
+          the board columns + the transcript dock regardless of dock side. */}
+      {liveDetailTask && (
+        <TaskDetailPanel
+          task={liveDetailTask}
+          agent={agents.find((a) => a.id === liveDetailTask.sessionId)}
+          stats={stats}
+          onSelect={onSelect}
+          onViewTranscript={openTranscript}
+          onClose={() => setDetailId(null)}
+        />
+      )}
+    </Stack>
   );
 }

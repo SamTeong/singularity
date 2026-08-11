@@ -350,7 +350,7 @@ export default function ConfigEditor() {
                     <ListItemButton key={`${it.path}:${i}`} onClick={() => openResult(it)}
                       sx={{ ...rowSx, display: 'block' }}>
                       <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                      <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
+                      <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
                     </ListItemButton>
                   ))}
                   {results.list.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}

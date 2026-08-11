@@ -43,6 +43,18 @@ Object.assign(env, {
   CODEX_HOME: join(HOME_DIR, 'no-codex'),
   // SING_SCOPE_ROOT / SING_USAGE_SKILL / SING_USAGE_REPORTS stay unset on
   // purpose — those degraded empty states are part of what we test.
+  // DISPLAY home for the client's tildify()/untildify() (GET /env) — the daemon
+  // itself still resolves real ~/.claude via its inherited HOME.
+  //
+  // Not the real OS home: this sandbox lives inside the repo, which on macOS/
+  // Linux is itself under $HOME, so tildify() would abbreviate every seeded root
+  // to ~/... the moment setHome() lands — a race the rail assertions (which
+  // expect full paths) can lose. Not empty either: untildify() no-ops without a
+  // home, so a '~' default (DirPicker start, ConfigEditor cwd) would reach the
+  // daemon as a literal '~' and 400. HOME_DIR is the sandbox's own home — a real,
+  // browsable directory that is NOT an ancestor of e2e/.tmp/corpus/*, so seeded
+  // roots stay full paths while '~' still resolves to something real.
+  SING_HOME_DISPLAY: HOME_DIR,
 });
 
 const child = spawn(process.execPath, [join(REPO_ROOT, 'server', 'index.mjs')], {
