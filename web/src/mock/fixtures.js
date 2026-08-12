@@ -246,6 +246,13 @@ export function seedAgents() {
   return [];
 }
 
+// Recent-repos list carried by the `list` WS frame (reg.getRecentRepos). The
+// daemon seeds it from agent cwds; the mock seeds the two fixture projects so
+// the New-session dialog's cwd picker opens with suggestions instead of empty.
+export function seedRecentRepos() {
+  return [join(ROOTS.projects, PROJECT_A), join(ROOTS.projects, PROJECT_B)];
+}
+
 // ---------------------------------------------------------------------- misc
 
 // Per-panel picker roots — mirrors the *-root.json files
