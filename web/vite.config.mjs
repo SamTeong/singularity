@@ -28,7 +28,7 @@ const singTokenInject = {
   },
 };
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   root: 'web',
   plugins: [react(), singTokenInject],
   resolve: { alias: { '@': srcDir } },
@@ -72,7 +72,14 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    // mock mode emits to a sibling dir so `build:mock` can never clobber the
+    // real production output (`web/dist`).
+    outDir: mode === 'mock' ? 'dist-mock' : 'dist',
+    // Default target (es2020) predates top-level await; main.jsx's guarded
+    // `await import('@/mock/index.js')` only survives esbuild's dead-code
+    // elimination in mock mode (VITE_MOCK=1), so only mock mode needs a
+    // target new enough to allow it. Production keeps Vite's default.
+    target: mode === 'mock' ? 'es2022' : undefined,
     emptyOutDir: true,
     rollupOptions: {
       output: {
@@ -88,4 +95,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

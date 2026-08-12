@@ -2,6 +2,7 @@ node_modules/
 web/dist/
 github-pages/dist/
 github-pages/public/*.glb
+web/dist-mock/
 *.log
 *.local.*
 *.bak
