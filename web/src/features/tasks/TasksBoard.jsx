@@ -1,6 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
 import { brandGrad, brandGlow, surface2, stroke2, chipBg, trackColor, statusColor, focusRing, statePill, cardTag, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
-import { useRef, useState, useMemo } from 'react';
+import { useRef, useState, useMemo, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -21,7 +21,7 @@ import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import OutlinedFlagOutlinedIcon from '@mui/icons-material/OutlinedFlagOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import { StatusPill } from '@/components/StatusPill.jsx';
-import TaskDetailPanel from '@/features/tasks/TaskDetailPanel.jsx';
+import TaskDetailPanel, { DETAIL_SHEET_W } from '@/features/tasks/TaskDetailPanel.jsx';
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import { repoName } from '@/lib/paths.js';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
@@ -29,6 +29,7 @@ import { KIND } from '@/lib/agentStatus.js';
 import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, StatusLegend, SegmentBar, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState, DOMAIN_STATE_ORDER } from '@/lib/domainState.js';
+import { insetQuery } from '@/lib/sheetInset.js';
 import { COLUMNS, COLUMN_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
 
 // Read the reduced-motion preference once at mount for the transcript sheet —
@@ -218,6 +219,11 @@ const cardTagPhosphor = (t) => ({
   '&.MuiChip-colorSuccess': { color: `${t.nerv.hue.greenMap} !important` },
 });
 
+// Transcript sheet width at its widest (`lg` and up). Doubles as the strip the
+// shell vacates while the sheet is open — `insetQuery` only lets that happen far
+// above the `lg` breakpoint, so the sheet is always exactly this wide by then.
+const TRANSCRIPT_SHEET_W = 860;
+
 /**
  * TranscriptSheet — a read-only transcript viewer opened from a History table
  * row, or handed off from TaskDetailPanel's "View transcript" action. Built on
@@ -265,7 +271,7 @@ function TranscriptSheet({ item, loading, error, transcript, onClose }) {
               // TaskDetailPanel's phosphor sheet, but wider: transcript
               // content is monospace and wraps hard at the detail panel's
               // 400px, so this scales up through sm–lg instead of matching.
-              width: { xs: '92vw', sm: 560, md: 720, lg: 860 },
+              width: { xs: '92vw', sm: 560, md: 720, lg: TRANSCRIPT_SHEET_W },
               maxWidth: '90vw',
               background: t.nerv.hue.void,
               backgroundImage: 'none',
@@ -281,7 +287,7 @@ function TranscriptSheet({ item, loading, error, transcript, onClose }) {
               // language as TaskDetailPanel but wider: transcript content is
               // monospace and wraps hard at the detail panel's 400px, so
               // this scales up through sm–lg instead of matching.
-              width: { xs: '92vw', sm: 560, md: 720, lg: 860 },
+              width: { xs: '92vw', sm: 560, md: 720, lg: TRANSCRIPT_SHEET_W },
               maxWidth: '90vw',
               background: t.vars.palette.background.paper,
               backgroundImage: 'none',
@@ -296,7 +302,18 @@ function TranscriptSheet({ item, loading, error, transcript, onClose }) {
         },
         backdrop: {
           'aria-hidden': true,
-          sx: { background: 'rgba(10,6,20,.34)' },
+          // Same deal as TaskDetailPanel's scrim: once the viewport can spare
+          // TRANSCRIPT_SHEET_W the shell slides out from under this sheet, so
+          // the scrim stops tinting and stops the theme-level blur and stays on
+          // only as the click-away/focus-trap surface. This sheet is more than
+          // twice the dossier's width, so its threshold lands much wider — which
+          // is exactly why `insetQuery` derives it from the width instead of
+          // both sheets sharing one breakpoint.
+          sx: {
+            background: 'rgba(10,6,20,.34)',
+            backdropFilter: 'blur(4px)',
+            [insetQuery(TRANSCRIPT_SHEET_W)]: { background: 'transparent', backdropFilter: 'none' },
+          },
         },
       }}
     >
@@ -365,7 +382,7 @@ function TranscriptSheet({ item, loading, error, transcript, onClose }) {
   );
 }
 
-export default function TasksBoard({ tasks, history, agents, stats, onSelect, onAdd, onMove, onConclude, onDeleteHistory }) {
+export default function TasksBoard({ tasks, history, agents, stats, onSelect, onAdd, onMove, onConclude, onDeleteHistory, onSheetInset }) {
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
   const [dragId, setDragId] = useState(null);
@@ -383,6 +400,15 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     () => (detailId ? tasks.find((t) => t.id === detailId) ?? null : null),
     [tasks, detailId],
   );
+  // Tell the shell how wide the open sheet is so it can vacate that strip
+  // (AppShell's `sheetInset`) — the whole shell shifts, not just this board, so
+  // the view pane AND the session dock keep their full borders beside the sheet.
+  // Cleared on unmount too: leaving the Tasks view unmounts this board with a
+  // sheet still open, and the shell must not stay inset.
+  //
+  // Declared below `tx` (the transcript sheet's state) — see the effect itself.
+  // Both sheets can technically be open at once; the wider one wins, since it is
+  // the one that would otherwise cover the shell.
   // History table sort: click a header to sort, click again to reverse. Numeric
   // fields compare by value, strings by localeCompare. Default = newest first.
   const [sort, setSort] = useState({ key: 'concludedAt', dir: 'desc' });
@@ -443,6 +469,13 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   const [loadingT, setLoadingT] = useState(false);
   const [errT, setErrT] = useState(null);
   const histReqRef = useRef(0); // guards against a slower stale fetch overwriting a newer selection
+
+  // The shell inset both sheets share (see the note next to `liveDetailTask`).
+  const sheetInset = tx ? TRANSCRIPT_SHEET_W : liveDetailTask ? DETAIL_SHEET_W : 0;
+  useEffect(() => {
+    onSheetInset?.(sheetInset);
+    return () => onSheetInset?.(0);
+  }, [sheetInset, onSheetInset]);
 
   const openTranscript = (item) => {
     setTx(item);

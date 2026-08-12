@@ -47,6 +47,7 @@ import { KIND } from '@/lib/agentStatus.js';
 import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState } from '@/lib/domainState.js';
+import { insetQuery } from '@/lib/sheetInset.js';
 import { COLUMNS as STAGES, COLUMN_DOMAIN as STAGE_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
 
 // Live agent states — an "Open session" action only makes sense while a real
@@ -65,6 +66,13 @@ const prefersReducedMotion = () =>
   typeof window !== 'undefined' && typeof window.matchMedia === 'function'
     ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
     : false;
+
+// Sheet width from `sm` up (below that it goes near-fullwidth, see the paper sx).
+// Exported because TasksBoard shifts the board left by exactly this much while
+// the sheet is open — the board makes room for the dossier instead of sitting
+// under a dimming scrim, so the two widths must be the same number, not two
+// hand-synced literals.
+export const DETAIL_SHEET_W = 400;
 
 // ── ZAPAC helpers (unchanged) ──────────────────────────────────────────────────
 // Ghost secondary action (.btn-ghost) — surface2 fill, hairline border, hover
@@ -276,7 +284,7 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
               // inner (left) edge is a safety-orange rule (chrome only), no
               // elevation shadow. Width matches the ZAPAC sheet so the e2e's
               // dialog geometry stays stable across skins.
-              width: { xs: '88vw', sm: 400 },
+              width: { xs: '88vw', sm: DETAIL_SHEET_W },
               background: t.nerv.hue.void,
               backgroundImage: 'none',
               display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -296,7 +304,7 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
             : {
               // `.detail`: opaque surface-solid, only the inner (left) edge drawn,
               // and a long soft shadow cast leftward over the board.
-              width: { xs: '88vw', sm: 400 },
+              width: { xs: '88vw', sm: DETAIL_SHEET_W },
               background: t.vars.palette.background.paper,
               backgroundImage: 'none', // MUI Paper's default elevation overlay
               display: 'flex',
@@ -310,7 +318,20 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
         },
         backdrop: {
           'aria-hidden': true,
-          sx: { background: 'rgba(10,6,20,.34)' },
+          // Once the viewport is wide enough (`insetQuery`) the whole shell
+          // gives up DETAIL_SHEET_W to make room for this sheet (AppShell's
+          // `sheetInset`), so there is nothing left to dim — the scrim drops
+          // both its tint AND the theme-level `MuiBackdrop` blur (overlays.js
+          // sets `blur(4px)` on every backdrop; clearing the background alone
+          // would leave a blurred-but-untinted shell behind), surviving only as
+          // the click-away/focus-trap surface. Narrower than that the shell does
+          // not shift and both stay — same helper as AppShell, so the scrim and
+          // the shift always flip together.
+          sx: {
+            background: 'rgba(10,6,20,.34)',
+            backdropFilter: 'blur(4px)',
+            [insetQuery(DETAIL_SHEET_W)]: { background: 'transparent', backdropFilter: 'none' },
+          },
         },
       }}
     >

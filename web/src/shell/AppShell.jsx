@@ -31,6 +31,7 @@ import { useDoubleTap } from '@/features/palette/useDoubleTap.js';
 import CommandPalette from '@/features/palette/CommandPalette.jsx';
 import { buildCommands } from '@/features/palette/commands.mjs';
 import { isCodexModel } from '@/lib/models.js';
+import { insetQuery } from '@/lib/sheetInset.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
@@ -111,6 +112,11 @@ export default function AppShell() {
   const [toast, setToast] = useState(null);
   const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
   const [openTx, setOpenTx] = useState(null); // {project, id, cwd, mtime} handed to SessionHistory
+  // Width (px) the open right-hand sheet wants the shell to vacate; 0 = none
+  // open. A feature reports it rather than the shell knowing sheet widths, so
+  // the number stays owned by the sheet that defines it (no duplicated literal,
+  // and no static import that would pull a lazy feature into the shell chunk).
+  const [sheetInset, setSheetInset] = useState(0);
   // >0 -> respawn-confirm dialog open, holds live-session count. Initialized
   // from `useThemeSkin()`'s `pendingRespawn` so a skin change (which remounts
   // this whole component — see theme/AppThemeProvider.jsx's `key={skin.id}`)
@@ -302,11 +308,28 @@ export default function AppShell() {
   const shell = (
     <Box
       ref={mainRef}
-      sx={
-        isPhosphor
+      sx={(t) => ({
+        ...(isPhosphor
           ? { position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
-          : { position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }
-      }
+          : { position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }),
+        // A feature's right-sliding sheet (currently only Tasks' detail panel)
+        // reports its width here and the whole shell gives up that strip, so the
+        // sheet lands on empty background instead of over the view pane and the
+        // session dock — both keep their full rounded border, and the sheet's
+        // scrim no longer needs to dim or blur anything (TaskDetailPanel's
+        // backdrop slot). Padding, not margin: the shell is the viewport box and
+        // must stay put. `insetQuery` gates it on the viewport still being able
+        // to leave the shell a usable width — below that the sheet goes back to
+        // overlaying a dimmed shell, and the sheet's own backdrop flips at the
+        // same threshold because it asks the same helper.
+        pr: 0,
+        ...(sheetInset ? { [insetQuery(sheetInset)]: { pr: `${sheetInset}px` } } : null),
+        transition: t.transitions.create('padding-right', {
+          easing: t.transitions.easing.easeOut,
+          duration: t.transitions.duration.enteringScreen,
+        }),
+        '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+      })}
     >
       {SkinBackground && <SkinBackground />}
 
@@ -367,6 +390,7 @@ export default function AppShell() {
                 onMove={moveTask}
                 onConclude={concludeTask}
                 onDeleteHistory={deleteHistory}
+                onSheetInset={setSheetInset}
               />
             )}
           </Suspense>
