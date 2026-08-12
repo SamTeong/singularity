@@ -1,14 +1,9 @@
 // Entry point for mock run mode. Invoked from main.jsx's guarded dynamic
 // import, before the first render (see design.md D2).
 import { setHome } from '@/lib/paths.js';
+import { FAKE_HOME } from './fixtures.js';
 import { makeServer } from './server.js';
 import { startWs } from './ws.js';
-
-// A fixed, machine-independent stand-in for the daemon's `home` (os.homedir()
-// on the real server). Without it, web/src/lib/paths.js `tildify`/`untildify`
-// are no-ops: panels would send a literal `~` to route handlers and display
-// unabbreviated paths (see design.md D3).
-export const FAKE_HOME = '/home/mock';
 
 export function startMock() {
   // window.__SING_HOME__ mirrors what the daemon/Vite dev proxy injects into
