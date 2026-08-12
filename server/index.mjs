@@ -37,7 +37,7 @@ import { CLAUDE_ALIASES, OLLAMA_PRESETS, CODEX_PRESETS } from './models.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
-const PORT = Number(process.env.PORT);
+const PORT = Number(process.env.DAEMON_PORT);
 const VITE_PORT = Number(process.env.VITE_PORT ?? 5317);
 // Optional loopback token (defense-in-depth on top of the 127.0.0.1 bind).
 // Set SING_TOKEN to require it on data endpoints + WS; the shell/assets stay open.
@@ -48,7 +48,7 @@ const TOKEN = process.env.SING_TOKEN || null;
 // required var is missing. SINGULARITY_HOME is enforced at app-dir.mjs load.
 function requireEnv() {
   const missing = [];
-  if (!process.env.PORT || !Number(process.env.PORT)) missing.push('PORT (listen port, e.g. 4317)');
+  if (!process.env.DAEMON_PORT || !Number(process.env.DAEMON_PORT)) missing.push('DAEMON_PORT (listen port, e.g. 4317)');
   if (!reg.CLAUDE_BIN) missing.push('CLAUDE_BIN (absolute path to claude exe)');
   // OLLAMA_BIN + SING_SCOPE_ROOT are optional: absent OLLAMA_BIN fails only
   // ollama-model spawns (clear buildSpawn error); absent SING_SCOPE_ROOT just

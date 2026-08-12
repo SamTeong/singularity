@@ -7,11 +7,11 @@ import react from '@vitejs/plugin-react';
 // Node's test runner does NOT resolve this alias — *.test.mjs files must keep
 // relative imports to their co-located source.
 const srcDir = fileURLToPath(new URL('./src', import.meta.url));
-const backendPort = process.env.PORT ?? '4317';
+const backendPort = process.env.DAEMON_PORT ?? '4317';
 const vitePort = Number(process.env.VITE_PORT ?? 5317);
 const apiTarget = `http://127.0.0.1:${backendPort}`;
 
-// Phase 1: Vite dev server proxies WS to the daemon on PORT.
+// Phase 1: Vite dev server proxies WS to the daemon on DAEMON_PORT.
 // Dev-only mirror of the daemon's serve-time SING_TOKEN + home injection
 // (index.mjs) — without it the Vite-served shell has no window.__SING_TOKEN__
 // (every data call 401s) and no window.__SING_HOME__ (`~` never resolves).

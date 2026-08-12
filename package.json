@@ -14,7 +14,7 @@
     "build": "node scripts/reap-build-orphans.mjs && vite build --config web/vite.config.mjs",
     "clean": "node scripts/reap-build-orphans.mjs",
     "dev": "concurrently -k \"npm:server\" \"npm:web\"",
-    "dev:theming-v4": "concurrently -k \"set PORT=4318&& set VITE_PORT=5318&& pnpm server\" \"set PORT=4318&& set VITE_PORT=5318&& pnpm web -- --strictPort\"",
+    "dev:theming-v4": "concurrently -k \"set DAEMON_PORT=4318&& set VITE_PORT=5318&& pnpm server\" \"set DAEMON_PORT=4318&& set VITE_PORT=5318&& pnpm web -- --strictPort\"",
     "start": "npm run build && npm run server",
     "ollama-login": "node --env-file-if-exists=.env scripts/ollama-login.mjs",
     "lint": "eslint .",

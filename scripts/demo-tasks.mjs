@@ -20,8 +20,8 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert';
 
-const PORT = process.env.PORT;
-if (!PORT) { console.error('PORT not set (run with --env-file-if-exists=.env from repo root)'); process.exit(1); }
+const PORT = process.env.DAEMON_PORT;
+if (!PORT) { console.error('DAEMON_PORT not set (run with --env-file-if-exists=.env from repo root)'); process.exit(1); }
 const TOKEN = process.env.SING_TOKEN || null;
 const BASE = `http://127.0.0.1:${PORT}`;
 const authHeaders = TOKEN ? { 'x-sing-token': TOKEN } : {};
