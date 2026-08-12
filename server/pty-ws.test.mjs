@@ -15,7 +15,7 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-pty-ws-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { stripQueries } = await import('./pty-ws.mjs');
+const { stripQueries, stripColorResponses } = await import('./pty-ws.mjs');
 
 test('stripQueries: removes each covered query sequence', () => {
   assert.equal(stripQueries('\x1b[c'), ''); // DA1
@@ -45,4 +45,14 @@ test('stripQueries: leaves ordinary output byte-identical', () => {
     '\x1b[10;5H',
   ];
   for (const s of samples) assert.equal(stripQueries(s), s);
+});
+
+test('stripColorResponses: removes automatic OSC colour replies from live input', () => {
+  const reply = '\x1b]10;rgb:d9d9/d2d2/eeee\x1b\\\x1b]11;rgb:0b0b/0808/1313\x1b\\';
+  assert.equal(stripColorResponses(reply), '');
+  assert.equal(stripColorResponses(`before${reply}after`), 'beforeafter');
+});
+
+test('stripColorResponses: leaves normal input byte-identical', () => {
+  assert.equal(stripColorResponses('hello\x1b[A'), 'hello\x1b[A');
 });

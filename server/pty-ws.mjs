@@ -31,6 +31,14 @@ const QUERY_RE = new RegExp([
 ].join('|'), 'g');
 export function stripQueries(s) { return s.replace(QUERY_RE, ''); }
 
+// xterm sends colour-query replies through onData alongside keystrokes. Codex
+// can receive a delayed reply after its startup probe has finished and render
+// it as prompt text, so do not forward those automatic replies to the PTY.
+const COLOR_RESPONSE_RE = new RegExp([
+  '\\x1b\\]1[012];rgb:[0-9a-fA-F]{1,4}/[0-9a-fA-F]{1,4}/[0-9a-fA-F]{1,4}(?:\\x07|\\x1b\\\\)',
+].join(''), 'g');
+export function stripColorResponses(s) { return s.replace(COLOR_RESPONSE_RE, ''); }
+
 export function attachPtyWs(wss, log, token = null, originAllowed = () => true) {
   const sockets = new Set();
 
@@ -138,7 +146,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
           send(ws, { t: 'status', id: m.id, status: reg.getStatus(m.id) });
           break;
         }
-        case 'input': reg.input(m.id, m.data); break;
+        case 'input': reg.input(m.id, stripColorResponses(m.data)); break;
         case 'txmeta': send(ws, { t: 'txmeta', id: m.id, written: reg.getWritten(m.id), ringMax: reg.RING_MAX }); break;
         case 'resize': reg.resize(m.id, m.cols, m.rows); break;
         case 'kill': reg.kill(m.id); break;
