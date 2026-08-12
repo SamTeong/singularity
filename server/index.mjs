@@ -37,7 +37,8 @@ import { CLAUDE_ALIASES, OLLAMA_PRESETS, CODEX_PRESETS } from './models.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
-const PORT = Number(process.env.PORT);
+const PORT = Number(process.env.DAEMON_PORT);
+const VITE_PORT = Number(process.env.VITE_PORT ?? 5317);
 // Optional loopback token (defense-in-depth on top of the 127.0.0.1 bind).
 // Set SING_TOKEN to require it on data endpoints + WS; the shell/assets stay open.
 const TOKEN = process.env.SING_TOKEN || null;
@@ -47,7 +48,7 @@ const TOKEN = process.env.SING_TOKEN || null;
 // required var is missing. SINGULARITY_HOME is enforced at app-dir.mjs load.
 function requireEnv() {
   const missing = [];
-  if (!process.env.PORT || !Number(process.env.PORT)) missing.push('PORT (listen port, e.g. 4317)');
+  if (!process.env.DAEMON_PORT || !Number(process.env.DAEMON_PORT)) missing.push('DAEMON_PORT (listen port, e.g. 4317)');
   if (!reg.CLAUDE_BIN) missing.push('CLAUDE_BIN (absolute path to claude exe)');
   // OLLAMA_BIN + SING_SCOPE_ROOT are optional: absent OLLAMA_BIN fails only
   // ollama-model spawns (clear buildSpawn error); absent SING_SCOPE_ROOT just
@@ -127,12 +128,12 @@ const webDist = join(__dirname, '..', 'web', 'dist');
 // deputy: a malicious page can fetch/WS straight to localhost. Allow only our
 // own origins (daemon + Vite dev); requests without Origin (curl, same-origin
 // GET navigations) pass — this blocks browsers, not local tools. The Vite dev
-// origin (:5317) is always trusted: DEV is inferred from dist presence, but
-// `pnpm dev` can leave a stale dist around → DEV=false → the proxied :5317 WS
+// origin (VITE_PORT) is always trusted: DEV is inferred from dist presence, but
+// `pnpm dev` can leave a stale dist around → DEV=false → the proxied Vite WS
 // Origin would 403 and the shell shows "disconnected". Loopback-only bind makes
 // trusting the dev port unconditionally free.
 const SELF_HOSTS = new Set(
-  [PORT, 5317].flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
+  [PORT, VITE_PORT].flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
 );
 function originAllowed(origin) {
   if (!origin) return true;
@@ -305,8 +306,13 @@ app.get('/procs', async () => ({ procs: await scanClaude() }));
 app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS, codex: CODEX_PRESETS }));
 
 // Home dir, for the client to collapse full paths to `~` on display (pure
-// presentation — the backend itself always deals in full paths).
-app.get('/env', async () => ({ home: homedir() }));
+// presentation — the backend itself always deals in full paths). SING_HOME_DISPLAY
+// optionally overrides it so a sandbox/hermetic env can keep the OS home for real
+// `~/.claude` reads while reporting a display home that doesn't abbreviate seeded
+// paths — keeps tildify() from racing the e2e rail assertions. Falsy falls back to
+// the real home: the client's untildify() no-ops without one, which would send a
+// literal '~' to path-taking routes.
+app.get('/env', async () => ({ home: process.env.SING_HOME_DISPLAY || homedir() }));
 
 // Optional-feature flags for the shell: which features are wired up on this
 // machine so the UI can show inline "set X to enable" hints instead of failing

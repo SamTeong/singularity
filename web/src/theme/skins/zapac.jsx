@@ -7,10 +7,17 @@
  * pre-paint color-scheme script, and exposes `useColorMode` for light/dark
  * toggling. This module just packages it as a registry {@link Skin}.
  */
-import { ZapacThemeProvider, AmbientBackground } from '@zapac/mui-theme';
+import { ZapacThemeProvider, AmbientBackground, theme as zapacTheme } from '@zapac/mui-theme';
 import { useTheme } from '@mui/material/styles';
 import Box from '@mui/material/Box';
 import { assertSkinContract, getTokens } from '@/theme/contract.js';
+import { buildZapacRoles } from '@/theme/skins/zapac.roles.js';
+import { ZAPAC_META } from '@/theme/skins/zapac.meta.js';
+
+// See zapac.roles.js's doc comment: every value is a CSS-var *reference*
+// string, so this is safe to compute once at module load and stays correct
+// across a live light/dark toggle without re-render.
+if (!zapacTheme.roles) zapacTheme.roles = buildZapacRoles(zapacTheme);
 
 /** Dev-only: verify the vendored theme still satisfies the token contract. */
 function ContractCheck() {
@@ -100,11 +107,8 @@ export function ZapacPreview() {
 
 /** @type {import('@/theme/registry.js').Skin} */
 export const zapacSkin = {
-  id: 'zapac',
-  label: 'ZAPAC',
-  description: 'Glass-over-gradient on the Zühlke purple→cyan identity.',
+  ...ZAPAC_META,
   Provider: ZapacProvider,
   Background: AmbientBackground, // the flowing WebGL gradient field behind the glass
   Preview: ZapacPreview,
-  supportsColorMode: true,
 };

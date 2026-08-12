@@ -7,8 +7,11 @@ import react from '@vitejs/plugin-react';
 // Node's test runner does NOT resolve this alias — *.test.mjs files must keep
 // relative imports to their co-located source.
 const srcDir = fileURLToPath(new URL('./src', import.meta.url));
+const backendPort = process.env.DAEMON_PORT ?? '4317';
+const vitePort = Number(process.env.VITE_PORT ?? 5317);
+const apiTarget = `http://127.0.0.1:${backendPort}`;
 
-// Phase 1: Vite dev server proxies WS to the daemon on 4317.
+// Phase 1: Vite dev server proxies WS to the daemon on DAEMON_PORT.
 // Dev-only mirror of the daemon's serve-time SING_TOKEN + home injection
 // (index.mjs) — without it the Vite-served shell has no window.__SING_TOKEN__
 // (every data call 401s) and no window.__SING_HOME__ (`~` never resolves).
@@ -31,40 +34,41 @@ export default defineConfig({
   resolve: { alias: { '@': srcDir } },
   server: {
     host: '127.0.0.1',
-    port: 5317,
+    port: vitePort,
+    strictPort: true,
     open: false,
     proxy: {
-      '/ws': { target: 'ws://127.0.0.1:4317', ws: true },
-      '/health': 'http://127.0.0.1:4317',
-      '/agent-stats': 'http://127.0.0.1:4317',
-      '/sysstats': 'http://127.0.0.1:4317',
-      '/fs': 'http://127.0.0.1:4317',
-      '/procs': 'http://127.0.0.1:4317',
-      '/restart': 'http://127.0.0.1:4317',
-      '/models': 'http://127.0.0.1:4317',
-      '/env': 'http://127.0.0.1:4317',
-      '/skill-scopes': 'http://127.0.0.1:4317',
-      '/skills': 'http://127.0.0.1:4317',
-      '/skill': 'http://127.0.0.1:4317',
-      '/config': 'http://127.0.0.1:4317',
-      '/codex-config': 'http://127.0.0.1:4317',
-      '/capabilities': 'http://127.0.0.1:4317',
-      '/hooks': 'http://127.0.0.1:4317',
-      '/rules': 'http://127.0.0.1:4317',
-      '/memory': 'http://127.0.0.1:4317',
-      '/wiki': 'http://127.0.0.1:4317',
-      '/sessions': 'http://127.0.0.1:4317',
-      '/subagents': 'http://127.0.0.1:4317',
-      '/session': 'http://127.0.0.1:4317',
-      '/usage': 'http://127.0.0.1:4317',
-      '/status': 'http://127.0.0.1:4317',
-      '/claude': 'http://127.0.0.1:4317',
-      '/usagereport': 'http://127.0.0.1:4317',
-      '/tasks': 'http://127.0.0.1:4317',
-      '/crons': 'http://127.0.0.1:4317',
-      '/background': 'http://127.0.0.1:4317',
-      '/history': 'http://127.0.0.1:4317',
-      '/keys': 'http://127.0.0.1:4317',
+      '/ws': { target: `ws://127.0.0.1:${backendPort}`, ws: true },
+      '/health': apiTarget,
+      '/agent-stats': apiTarget,
+      '/sysstats': apiTarget,
+      '/fs': apiTarget,
+      '/procs': apiTarget,
+      '/restart': apiTarget,
+      '/models': apiTarget,
+      '/env': apiTarget,
+      '/skill-scopes': apiTarget,
+      '/skills': apiTarget,
+      '/skill': apiTarget,
+      '/config': apiTarget,
+      '/codex-config': apiTarget,
+      '/capabilities': apiTarget,
+      '/hooks': apiTarget,
+      '/rules': apiTarget,
+      '/memory': apiTarget,
+      '/wiki': apiTarget,
+      '/sessions': apiTarget,
+      '/subagents': apiTarget,
+      '/session': apiTarget,
+      '/usage': apiTarget,
+      '/status': apiTarget,
+      '/claude': apiTarget,
+      '/usagereport': apiTarget,
+      '/tasks': apiTarget,
+      '/crons': apiTarget,
+      '/background': apiTarget,
+      '/history': apiTarget,
+      '/keys': apiTarget,
     },
   },
   build: {

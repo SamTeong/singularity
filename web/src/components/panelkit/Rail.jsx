@@ -23,7 +23,17 @@ export default function Rail({ storageKey, defaultWidth, collapsedTitle, childre
           </Tooltip>
         ) : children({ collapse: () => setCollapsed(true) })}
       </Stack>
-      {!collapsed && <ResizeHandle onMouseDown={railW.startDrag} />}
+      {!collapsed && (
+        <ResizeHandle
+          onPointerDown={railW.startDrag}
+          onKeyDown={railW.onKeyDown}
+          dragging={railW.dragging}
+          value={railW.width}
+          min={railW.min}
+          max={railW.max}
+          label={`Resize ${collapsedTitle}`}
+        />
+      )}
     </>
   );
 }

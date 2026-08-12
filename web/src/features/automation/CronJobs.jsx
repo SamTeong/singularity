@@ -29,7 +29,8 @@ import HistoryIcon from '@mui/icons-material/History';
 import ViewKanbanOutlinedIcon from '@mui/icons-material/ViewKanbanOutlined';
 import FlagIcon from '@mui/icons-material/Flag';
 import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
-import { StatusPill, EmptyState } from '@zapac/mui-theme';
+import { StatusPill } from '@/components/StatusPill.jsx';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import CreateBackgroundJobDialog from '@/features/automation/CreateBackgroundJobDialog.jsx';
 import MarkdownBody from '@/components/MarkdownBody.jsx';
 import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
@@ -329,7 +330,15 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
                   </ListItemButton>
                 ))}
               </List>
-              <ResizeHandle onMouseDown={railW.startDrag} />
+              <ResizeHandle
+                onPointerDown={railW.startDrag}
+                onKeyDown={railW.onKeyDown}
+                dragging={railW.dragging}
+                value={railW.width}
+                min={railW.min}
+                max={railW.max}
+                label="Resize report list"
+              />
               <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto', p: 2 }}>
                 {!selReport ? (
                   <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>

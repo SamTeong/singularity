@@ -8,8 +8,10 @@ import CircularProgress from '@mui/material/CircularProgress';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ReceiptLongIcon from '@mui/icons-material/ReceiptLong';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { EmptyState, useColorMode } from '@zapac/mui-theme';
+import { useColorMode } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
+import { useThemeSkin } from '@/theme/AppThemeProvider.jsx';
 
 // The report bootstraps its theme from documentElement.dataset.theme, seeded by
 // localStorage['agents-report-theme']. Same-origin iframe → we drive both: seed
@@ -35,6 +37,7 @@ export default function UsageReportView() {
   const [error, setError] = useState(null);
   const [open, setOpen] = useState(true);
   const { resolved } = useColorMode(); // 'light' | 'dark' — the app's active mode
+  const { skinId } = useThemeSkin();
   const iframeRef = useRef(null);
   const caps = useCapabilities();
   // usageReport.available gates this whole view (the skill path is configured via
@@ -46,11 +49,19 @@ export default function UsageReportView() {
   // Seed the report's bootstrap key so a (re)load starts in the app's mode.
   try { localStorage.setItem(REPORT_THEME_KEY, resolved); } catch {}
 
-  // Push the app's mode into the already-loaded report doc (same-origin access).
+  // Push the app's mode + skin into the already-loaded report doc (same-origin
+  // access). `data-skin="phosphor"` activates the report's Phosphor CSS overrides
+  // (black CRT surfaces, orange chrome, mint nominal); absent = ZAPAC default.
   const syncTheme = useCallback(() => {
     const doc = iframeRef.current?.contentDocument;
-    if (doc) { try { doc.documentElement.dataset.theme = resolved; } catch {} }
-  }, [resolved]);
+    if (doc) {
+      try {
+        doc.documentElement.dataset.theme = resolved;
+        if (skinId === 'phosphor') doc.documentElement.dataset.skin = 'phosphor';
+        else delete doc.documentElement.dataset.skin;
+      } catch {}
+    }
+  }, [resolved, skinId]);
   useEffect(syncTheme, [syncTheme, status?.at]);
 
   useEffect(() => {

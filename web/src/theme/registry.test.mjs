@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { registerSkin, getSkin, listSkins, DEFAULT_SKIN_ID } from './registry.js';
+import { ZAPAC_META } from './skins/zapac.meta.js';
+import { PHOSPHOR_META } from './skins/phosphor.meta.js';
 
 const fakeSkin = (id, extra = {}) => ({ id, label: id.toUpperCase(), Provider: () => null, ...extra });
 
@@ -38,4 +40,23 @@ test('registerSkin rejects a skin without id or Provider', () => {
 
 test('DEFAULT_SKIN_ID is zapac', () => {
   assert.equal(DEFAULT_SKIN_ID, 'zapac');
+});
+
+test('ZAPAC remains the default skin and supports color-mode toggling', () => {
+  assert.equal(ZAPAC_META.id, DEFAULT_SKIN_ID);
+  assert.equal(ZAPAC_META.supportsColorMode, true);
+});
+
+test('Phosphor Console is dark-only', () => {
+  assert.equal(PHOSPHOR_META.id, 'phosphor');
+  assert.equal(PHOSPHOR_META.supportsColorMode, false);
+});
+
+test('registering the real built-in skin metadata round-trips through the registry', () => {
+  const zapac = registerSkin({ ...ZAPAC_META, Provider: () => null });
+  assert.equal(zapac.supportsColorMode, true);
+
+  const phosphor = registerSkin({ ...PHOSPHOR_META, Provider: () => null });
+  assert.equal(phosphor.supportsColorMode, false);
+  assert.equal(getSkin('phosphor').supportsColorMode, false);
 });

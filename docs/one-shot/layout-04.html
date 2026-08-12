@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Singularity · Layout 04 — Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   SINGULARITY — LAYOUT 04  "Studio"
+   A third angle on the fleet control plane. Where -02 was dark
+   atmospheric glass and -03 a dark engineering schematic, -04 is
+   a LIGHT-first editorial workspace: a bright daytime ops desk,
+   a top command bar (no rail), full-width board, and a
+   characterful display face carrying the personality.
+   ============================================================ */
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{-webkit-text-size-adjust:100%}
+body{min-height:100vh;font-synthesis:none;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+img,svg{display:block;max-width:100%}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+a{color:inherit;text-decoration:none}
+
+:root{
+  --grad:linear-gradient(90deg,#aa41af 0%,#3c69c8 55%,#00a5e6 100%);
+  --font-display:"Bricolage Grotesque",system-ui,sans-serif;
+  --font-ui:"Inter",system-ui,-apple-system,sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --r-sm:8px; --r-md:12px; --r-lg:14px; --r-pill:999px;
+  --ease:cubic-bezier(.2,.8,.2,1);
+  --z-orb:0; --z-content:2; --z-bar:20; --z-dock:30; --z-overlay:60;
+}
+/* LIGHT — the character: cool near-white daylight, crisp white panels */
+:root[data-theme="light"]{
+  --bg:#f5f6fb; --panel:#ffffff; --panel-2:#fafafe; --panel-3:#f7f7fc;
+  --hair:#e7e7f1; --hair-2:#d7d7e5;
+  --ink:#191723; --ink-2:#565273; --ink-3:#6c6987;
+  --accent:#834f88; --accent-strong:#985b9c; --accent-soft:rgba(152,91,156,.09);
+  --ok:#0b8a4a; --live:#0a7fb0; --warn:#b9781a; --review:#7a45b0; --danger:#c62f3f;
+  --track:rgba(60,50,110,.10);
+  --shadow-1:0 1px 2px rgba(30,25,60,.06);
+  --shadow-2:0 1px 2px rgba(30,25,60,.05),0 14px 30px -18px rgba(60,45,110,.30);
+  --cc:#bf5a34;
+}
+/* DARK — a quiet neutral counterpart (light stays the primary voice) */
+:root[data-theme="dark"]{
+  --bg:#111019; --panel:#1a1925; --panel-2:#201e2d; --panel-3:#16151f;
+  --hair:rgba(184,174,224,.13); --hair-2:rgba(184,174,224,.22);
+  --ink:#f1eff8; --ink-2:#b1acc7; --ink-3:#847f9c;
+  --accent:#bd93ef; --accent-strong:#c9a6f2; --accent-soft:rgba(189,147,239,.14);
+  --ok:#2ec76f; --live:#46b8e6; --warn:#f0a63e; --review:#c295f0; --danger:#ff6b7a;
+  --track:rgba(184,174,224,.14);
+  --shadow-1:0 1px 2px rgba(0,0,0,.4);
+  --shadow-2:0 16px 40px -20px rgba(0,0,0,.7);
+  --cc:#e0895f;
+}
+
+body{font-family:var(--font-ui);color:var(--ink);background:var(--bg);overflow:hidden;
+  transition:background .45s var(--ease),color .3s var(--ease)}
+.tnum{font-variant-numeric:tabular-nums} .mono{font-family:var(--font-mono)}
+
+/* ============================================================
+   SHELL — edge-to-edge: top command bar · main · dock
+   ============================================================ */
+.app{height:100dvh;display:flex;flex-direction:column;overflow:hidden;--dock-h:300px;--list-w:250px}
+
+/* ---------- Top command bar ---------- */
+.topbar{flex:none;height:56px;display:flex;align-items:center;gap:6px;padding:0 16px;
+  background:var(--panel);border-bottom:1px solid var(--hair);z-index:var(--z-bar)}
+.brand{display:flex;align-items:center;gap:11px;padding-right:6px}
+.brand-mark{width:30px;height:30px;flex:none;border-radius:9px;background:var(--grad);
+  display:grid;place-items:center;color:#fff;position:relative;box-shadow:0 4px 12px -4px rgba(152,91,156,.5)}
+.brand-mark svg{width:17px;height:17px}
+.brand-name{font-family:var(--font-display);font-weight:600;font-size:17px;letter-spacing:-.02em}
+.tabs{display:flex;align-items:center;gap:2px;margin-left:8px;height:100%}
+.tab{position:relative;display:flex;align-items:center;gap:8px;padding:0 13px;height:100%;
+  font-size:13.5px;font-weight:500;color:var(--ink-2);transition:color .16s var(--ease)}
+.tab svg{width:16px;height:16px;opacity:.8}
+.tab:hover{color:var(--ink)}
+.tab.active{color:var(--ink);font-weight:600}
+.tab.active::after{content:"";position:absolute;left:11px;right:11px;bottom:-1px;height:2px;border-radius:2px 2px 0 0;background:var(--grad)}
+.tab .count{font-family:var(--font-mono);font-size:11px;color:var(--ink-3);font-weight:400}
+
+.bar-right{margin-left:auto;display:flex;align-items:center;gap:6px}
+/* Provider usage — a small equalizer, gradient = live data */
+.use-mini{display:flex;align-items:center;gap:9px;padding:0 6px}
+.use-lbl{font-family:var(--font-mono);font-size:10px;letter-spacing:.12em;color:var(--ink-3)}
+.use-set{display:flex;gap:8px;align-items:flex-end}
+.use-col{display:flex;flex-direction:column;align-items:center;gap:4px}
+.use-bar{width:5px;height:22px;border-radius:3px;background:var(--track);overflow:hidden;display:flex;align-items:flex-end}
+.use-bar i{display:block;width:100%;background:var(--grad);border-radius:3px}
+.use-t{font-family:var(--font-mono);font-size:9px;color:var(--ink-3)}
+.bar-sep{width:1px;height:24px;background:var(--hair);margin:0 4px}
+.conn{display:flex;align-items:center;gap:7px;font-family:var(--font-mono);font-size:11px;color:var(--ink-2);padding:0 6px}
+.conn .led{width:8px;height:8px;border-radius:50%;background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 20%,transparent)}
+.icon-btn{width:34px;height:34px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--ink-2);
+  transition:background .16s var(--ease),color .16s var(--ease)}
+.icon-btn:hover{background:var(--panel-3);color:var(--ink)}
+.icon-btn svg{width:18px;height:18px}
+
+/* ---------- Main region ---------- */
+.main{flex:1;min-height:0;position:relative;display:flex;flex-direction:column;overflow:hidden}
+.view-header{flex:none;display:flex;align-items:flex-end;gap:18px;row-gap:14px;flex-wrap:wrap;padding:22px 24px 18px}
+.vh-title{min-width:0;flex:1 1 auto}
+.view-title{font-family:var(--font-display);font-weight:600;font-size:clamp(24px,3vw,31px);letter-spacing:-.025em;line-height:1;text-wrap:balance}
+.view-sub{margin-top:9px;font-size:13px;color:var(--ink-2)}
+.view-sub b{color:var(--ink);font-weight:600}
+.view-sub .live-dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--live);margin:0 2px -1px 4px}
+.vh-actions{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.seg{display:flex;background:var(--panel-3);border:1px solid var(--hair);border-radius:var(--r-sm);padding:3px}
+.seg button{padding:6px 14px;border-radius:6px;font-size:12.5px;font-weight:600;color:var(--ink-3);transition:color .14s var(--ease)}
+.seg button:not(.on):hover{color:var(--ink)}
+.seg button.on{background:var(--panel);color:var(--ink);box-shadow:var(--shadow-1)}
+.btn{display:inline-flex;align-items:center;gap:8px;height:38px;padding:0 17px;border-radius:var(--r-sm);
+  font-size:13px;font-weight:600;transition:transform .16s var(--ease),box-shadow .16s var(--ease),background .16s var(--ease),border-color .16s var(--ease)}
+.btn svg{width:16px;height:16px}
+.btn-ghost{border:1px solid var(--hair-2);color:var(--ink)}
+.btn-ghost:hover{border-color:var(--accent);background:var(--accent-soft)}
+.btn-primary{background:var(--grad);color:#fff;box-shadow:0 8px 20px -8px rgba(152,91,156,.55)}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 12px 26px -8px rgba(152,91,156,.6)}
+.btn:active{transform:translateY(0)}
+
+/* ---------- Board ---------- */
+.view-body{position:relative;flex:1;min-height:0;display:flex;overflow:hidden}
+.board{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;display:flex;gap:18px;padding:8px 24px 22px}
+.col{width:280px;flex:none;display:flex;flex-direction:column;min-height:0}
+.col-head{display:flex;align-items:center;gap:9px;padding:0 4px 14px}
+.col-dot{width:8px;height:8px;border-radius:50%;flex:none}
+.col-title{font-size:13px;font-weight:600;letter-spacing:-.01em;color:var(--ink)}
+.col-count{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--ink-3);
+  background:var(--panel-3);border:1px solid var(--hair);padding:1px 8px;border-radius:var(--r-pill)}
+.col-body{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:12px;padding:2px 4px 8px}
+.col-body::-webkit-scrollbar{width:8px} .col-body::-webkit-scrollbar-thumb{background:var(--track);border-radius:8px}
+
+.tcard{position:relative;border-radius:var(--r-md);padding:15px;background:var(--panel);border:1px solid var(--hair);
+  box-shadow:var(--shadow-1);cursor:pointer;overflow:hidden;transition:transform .16s var(--ease),box-shadow .16s var(--ease),border-color .16s var(--ease)}
+.tcard:hover{transform:translateY(-2px);box-shadow:var(--shadow-2);border-color:var(--hair-2)}
+.tcard:active{transform:translateY(0);box-shadow:var(--shadow-1)}
+.tcard.live::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--grad)}
+.tcard.sel{border-color:var(--accent);box-shadow:var(--shadow-2),0 0 0 1px var(--accent)}
+.tcard-top{display:flex;align-items:center;gap:8px;margin-bottom:11px}
+.pill{font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.04em;text-transform:uppercase;
+  padding:3px 8px;border-radius:var(--r-pill);background:var(--panel-3);border:1px solid var(--hair);color:var(--ink-2)}
+.pill.ok{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 34%,var(--hair));background:color-mix(in srgb,var(--ok) 8%,transparent)}
+.pill.info{color:var(--live);border-color:color-mix(in srgb,var(--live) 34%,var(--hair));background:color-mix(in srgb,var(--live) 8%,transparent)}
+.pill.review{color:var(--review);border-color:color-mix(in srgb,var(--review) 36%,var(--hair));background:color-mix(in srgb,var(--review) 8%,transparent)}
+.pill.warn{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 36%,var(--hair));background:color-mix(in srgb,var(--warn) 9%,transparent)}
+.tcard-id{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+.tcard-title{font-size:14.5px;font-weight:600;line-height:1.35;letter-spacing:-.01em;margin-bottom:11px;text-wrap:pretty}
+.tcard-repo{display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:11px;color:var(--ink-2);margin-bottom:12px}
+.tcard-repo svg{width:12px;height:12px;opacity:.7;flex:none}
+.tcard-foot{display:flex;align-items:center;gap:7px}
+.tags{display:flex;gap:6px;flex-wrap:wrap}
+.tag{font-family:var(--font-mono);font-size:10px;color:var(--ink-3);background:var(--panel-3);border:1px solid var(--hair);padding:2px 7px;border-radius:var(--r-pill)}
+.tcost{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--ink-2)}
+.mini-prog{height:5px;border-radius:var(--r-pill);background:var(--track);overflow:hidden;margin-top:12px}
+.mini-prog i{display:block;height:100%;background:var(--grad);border-radius:var(--r-pill)}
+.tcard-live{display:flex;align-items:center;gap:8px;margin-top:11px;font-size:11px;color:var(--live)}
+.tcard-live .beat{width:6px;height:6px;border-radius:50%;background:var(--live);animation:beat 1.5s var(--ease) infinite}
+@keyframes beat{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.3;transform:scale(.7)}}
+
+/* ---------- Task detail modal (centered, two-column) ---------- */
+.detail-scrim{position:fixed;inset:0;z-index:var(--z-overlay);background:rgba(25,20,45,.42);
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);animation:fadeIn .18s var(--ease)}
+:root[data-theme="dark"] .detail-scrim{background:rgba(6,5,12,.62)}
+.detail-scrim[hidden]{display:none}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+.detail{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);z-index:calc(var(--z-overlay) + 1);
+  width:min(720px,calc(100vw - 40px));max-height:min(88vh,760px);display:flex;flex-direction:column;overflow:hidden;
+  background:var(--panel);border:1px solid var(--hair);border-radius:16px;box-shadow:var(--shadow-2);animation:modalIn .22s var(--ease)}
+.detail[hidden]{display:none}
+@keyframes modalIn{from{opacity:0;transform:translate(-50%,-50%) scale(.97)}to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.detail-head{display:flex;align-items:center;gap:10px;padding:20px 24px 0}
+.detail-id{font-family:var(--font-mono);font-size:12px;color:var(--ink-3)}
+.detail-head .icon-btn{margin-left:auto}
+.detail-title{font-family:var(--font-display);font-size:23px;font-weight:600;letter-spacing:-.02em;line-height:1.2;text-wrap:balance;padding:12px 24px 0}
+.detail-repo{display:flex;align-items:center;gap:6px;font-family:var(--font-mono);font-size:12px;color:var(--ink-2);padding:9px 24px 0}
+.detail-repo svg{width:13px;height:13px;opacity:.7;flex:none}
+.modal-body{flex:1;min-height:0;overflow-y:auto;padding:20px 24px 6px;display:flex;flex-direction:column;gap:22px}
+.detail-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}
+.ds{background:var(--panel-3);border:1px solid var(--hair);border-radius:var(--r-sm);padding:12px 14px}
+.ds-k{font-family:var(--font-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-3)}
+.ds-v{font-family:var(--font-display);font-size:20px;font-weight:600;color:var(--ink);margin-top:5px;font-variant-numeric:tabular-nums}
+.detail-prog .pl{display:flex;justify-content:space-between;font-size:11px;color:var(--ink-2);margin-bottom:7px}
+.detail-prog .pl .tnum{font-family:var(--font-mono)}
+.detail-prog .bar{height:6px;border-radius:var(--r-pill);background:var(--track);overflow:hidden}
+.detail-prog .bar i{display:block;height:100%;background:var(--grad);border-radius:var(--r-pill)}
+.modal-cols{display:grid;grid-template-columns:1.5fr 1fr;gap:28px}
+.modal-main,.modal-aside{display:flex;flex-direction:column;gap:22px;min-width:0}
+.detail-sec h4{margin-bottom:12px;font-family:var(--font-mono);font-size:10px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.detail-sec p{font-size:13.5px;line-height:1.62;color:var(--ink-2)}
+.detail-meta{display:flex;flex-direction:column}
+.detail-meta>div{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:9px 0;border-bottom:1px solid var(--hair)}
+.detail-meta>div:first-child{padding-top:0}
+.detail-meta>div:last-child{border-bottom:none}
+.detail-meta dt{font-size:12px;color:var(--ink-3);flex:none}
+.detail-meta dd{font-family:var(--font-mono);font-size:12px;color:var(--ink);text-align:right;min-width:0;word-break:break-word}
+.detail-tags{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.timeline{list-style:none;display:flex;flex-direction:column}
+.tl{display:flex;gap:11px;align-items:flex-start;position:relative;padding-bottom:15px}
+.tl:last-child{padding-bottom:0}
+.tl::before{content:"";position:absolute;left:6px;top:14px;bottom:-1px;width:2px;background:var(--hair)}
+.tl:last-child::before{display:none}
+.tl.done::before{background:var(--ok)}
+.tl-dot{width:14px;height:14px;flex:none;border-radius:50%;border:2px solid var(--hair-2);background:var(--panel);margin-top:1px;z-index:1}
+.tl.done .tl-dot{background:var(--ok);border-color:var(--ok)}
+.tl.cur .tl-dot{background:var(--live);border-color:var(--live);box-shadow:0 0 0 4px color-mix(in srgb,var(--live) 20%,transparent);animation:beat 1.5s var(--ease) infinite}
+.tl-txt{font-size:13px;color:var(--ink)}
+.tl.future .tl-txt{color:var(--ink-3)}
+.tl-time{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--ink-3);flex:none}
+.modal-foot{display:flex;justify-content:flex-end;gap:10px;padding:15px 24px;border-top:1px solid var(--hair);background:var(--panel-2)}
+.modal-foot .btn{min-width:132px;justify-content:center}
+@media (max-width:600px){.modal-cols{grid-template-columns:1fr;gap:22px}.detail-stats{grid-template-columns:1fr 1fr}}
+
+/* ---------- Resize handles ---------- */
+.dock-handle{height:11px;flex:none;cursor:row-resize;position:relative;touch-action:none;background:var(--bg)}
+.dock-handle::after{content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:38px;height:3px;border-radius:var(--r-pill);background:var(--hair-2);opacity:0;transition:opacity .18s var(--ease)}
+.dock-handle:hover::after,.dock-handle.dragging::after{opacity:1;background:var(--accent)}
+.list-handle{width:8px;flex:none;cursor:col-resize;position:relative;touch-action:none;margin:0 -4px;z-index:1}
+.list-handle::after{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:3px;height:38px;border-radius:var(--r-pill);background:var(--hair-2);opacity:0;transition:opacity .18s var(--ease)}
+.list-handle:hover::after,.list-handle.dragging::after{opacity:1;background:var(--accent)}
+body.resizing{user-select:none} body.resizing *{pointer-events:none}
+
+/* ---------- Terminal dock ---------- */
+.dock{flex:none;height:var(--dock-h);display:flex;overflow:hidden;background:var(--panel);border-top:1px solid var(--hair);z-index:var(--z-dock)}
+.dock-list{width:var(--list-w);flex:none;border-right:1px solid var(--hair);display:flex;flex-direction:column}
+.dock-list-head{display:flex;align-items:center;gap:8px;padding:13px 16px 11px;border-bottom:1px solid var(--hair)}
+.dock-list-head .h{font-family:var(--font-mono);font-size:11px;font-weight:500;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-3)}
+.dock-list-head .count{margin-left:auto;font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+.sess{display:flex;align-items:center;gap:11px;padding:10px 16px;position:relative;cursor:pointer;transition:background .14s var(--ease)}
+.sess:hover{background:var(--panel-3)}
+.sess.on{background:var(--accent-soft)}
+.sess.on::before{content:"";position:absolute;left:0;top:8px;bottom:8px;width:3px;border-radius:0 3px 3px 0;background:var(--grad)}
+.led{width:8px;height:8px;flex:none;border-radius:50%}
+.led.run{background:var(--live);box-shadow:0 0 0 3px color-mix(in srgb,var(--live) 22%,transparent)}
+.led.idle{background:var(--ink-3)} .led.done{background:var(--ok)}
+.sess-body{min-width:0;flex:1}
+.sess-name{font-size:13px;font-weight:600;line-height:1.2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sess-meta{font-family:var(--font-mono);font-size:11px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.term{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--panel-3)}
+.term-bar{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--hair)}
+.term-bar .tt{font-family:var(--font-mono);font-size:11.5px;color:var(--ink-2)} .term-bar .tt b{color:var(--ink);font-weight:600}
+.term-tools{margin-left:auto;display:flex;gap:3px}
+.term-body{flex:1;min-height:0;overflow:auto;padding:15px 18px;font-family:var(--font-mono);font-size:13px;line-height:1.65;color:var(--ink-2)}
+.term-body::-webkit-scrollbar{width:9px} .term-body::-webkit-scrollbar-thumb{background:var(--track);border-radius:9px}
+.cc-welcome{border:1px solid var(--hair);border-radius:var(--r-sm);padding:11px 13px;margin-bottom:15px;background:var(--panel)}
+.cc-welcome .star{color:var(--cc);font-weight:600} .cc-welcome .w-title{color:var(--ink);font-weight:600}
+.cc-welcome .w-line{color:var(--ink-3);margin-top:5px} .cc-welcome .w-line b{color:var(--ink-2);font-weight:400}
+.cc-turn{display:grid;grid-template-columns:1.4ch 1fr;column-gap:9px;margin-bottom:12px}
+.cc-g{color:var(--cc);font-weight:600} .cc-g.user{color:var(--ink-3)}
+.cc-b{min-width:0;word-break:break-word} .cc-b>div{margin-bottom:2px} .cc-b .msg{color:var(--ink)}
+.cc-tool{color:var(--ink);font-weight:600} .cc-arg{color:var(--cc)}
+.cc-result{display:grid;grid-template-columns:1.4ch 1fr;column-gap:9px;margin-top:3px}
+.cc-branch{color:var(--ink-3)}
+.cc-ok{color:var(--ok)} .cc-warn{color:var(--warn)} .cc-dim{color:var(--ink-3)}
+.cc-spinner{color:var(--ink-2);margin:2px 0}
+.cc-spinner .star{color:var(--cc);display:inline-block;animation:ccspin 1.1s steps(8) infinite}
+@keyframes ccspin{to{transform:rotate(360deg)}}
+.cc-input{display:flex;align-items:center;gap:9px;margin-top:15px;padding:10px 12px;border:1px solid var(--hair-2);border-radius:var(--r-sm);background:var(--panel)}
+.cc-input .caret{color:var(--cc);font-weight:600;flex:none} .cc-input .ph{color:var(--ink-3);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cursor{display:inline-block;width:7px;height:15px;vertical-align:-2px;background:var(--cc);border-radius:1px;animation:blink 1.1s steps(2) infinite}
+@keyframes blink{50%{opacity:0}}
+.cc-hints{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:8px;padding:0 2px;font-family:var(--font-mono);font-size:11px;color:var(--ink-3)}
+.cc-hints .r{margin-left:auto} .cc-hints b{color:var(--cc);font-weight:400}
+
+/* ---------- More menu ---------- */
+.menu-backdrop{position:fixed;inset:0;z-index:var(--z-overlay);display:none}
+.menu-backdrop.open{display:block}
+.menu{position:fixed;z-index:calc(var(--z-overlay) + 1);width:246px;max-height:min(560px,80vh);overflow-y:auto;padding:5px;
+  border-radius:var(--r-md);background:var(--panel);border:1px solid var(--hair);box-shadow:var(--shadow-2);
+  transform-origin:top right;animation:menuIn .15s var(--ease)}
+.menu[hidden]{display:none}
+@keyframes menuIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.menu-item{display:flex;align-items:center;gap:11px;width:100%;padding:9px 11px;border-radius:6px;font-size:13px;color:var(--ink);cursor:pointer;transition:background .14s var(--ease)}
+.menu-item:hover,.menu-item:focus-visible{background:var(--panel-3);outline:none}
+.menu-item svg{width:16px;height:16px;flex:none;color:var(--ink-2)}
+.menu-item.warn{color:var(--warn)} .menu-item.warn svg{color:var(--warn)}
+.menu-sep{height:1px;background:var(--hair);margin:5px 8px}
+.menu-sys{padding:8px 11px 10px}
+.menu-sys .row{display:flex;justify-content:space-between;align-items:baseline;font-family:var(--font-mono);font-size:11px;color:var(--ink-3);margin-bottom:6px}
+.menu-sys .row b{color:var(--ink-2);font-weight:600}
+.menu-spark{display:block;width:100%;height:24px}
+.menu-spark path.line{fill:none;stroke-width:1.5} .menu-spark path.area{stroke:none;opacity:.12}
+.menu-pills{display:flex;gap:5px;margin-top:9px}
+.menu-pill{font-family:var(--font-mono);font-size:10px;padding:3px 9px;border-radius:5px;color:var(--ink-3);border:1px solid transparent;cursor:pointer}
+.menu-pill.on{border-color:var(--hair-2);color:var(--accent)}
+.menu-pill:not(.on):hover{background:var(--panel-3)}
+
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+:where(.tab,.seg button,.btn,.icon-btn,.tcard,.sess,.menu-item):focus-visible{outline:none;box-shadow:0 0 0 2px var(--accent)}
+@media (max-width:680px){.use-mini,.bar-sep,.conn .lbl{display:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===== Top command bar ===== -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg></div>
+      <span class="brand-name">Singularity</span>
+    </div>
+    <nav class="tabs" aria-label="Primary">
+      <a class="tab active" role="button" tabindex="0" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16M15 4v16"/></svg>Tasks<span class="count">7</span></a>
+      <a class="tab" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Automation<span class="count">3</span></a>
+      <a class="tab" role="button" tabindex="0"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 12a9 9 0 1 0 9-9M12 12l5-5"/></svg>Usage</a>
+    </nav>
+
+    <div class="bar-right">
+      <div class="use-mini" title="Provider usage · 5h window">
+        <span class="use-lbl">5H</span>
+        <div class="use-set">
+          <div class="use-col"><span class="use-bar"><i style="height:62%"></i></span><span class="use-t">cl</span></div>
+          <div class="use-col"><span class="use-bar"><i style="height:38%"></i></span><span class="use-t">api</span></div>
+          <div class="use-col"><span class="use-bar"><i style="height:11%"></i></span><span class="use-t">ol</span></div>
+        </div>
+      </div>
+      <div class="bar-sep"></div>
+      <div class="conn"><span class="led"></span><span class="lbl">127.0.0.1:4317</span></div>
+      <button class="icon-btn" id="moreBtn" aria-label="More" aria-haspopup="menu" aria-expanded="false"><svg viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="5" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="12" cy="19" r="1.8"/></svg></button>
+      <button class="icon-btn" id="themeToggle" aria-label="Toggle theme"><svg id="tIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M19.4 4.6l-1.7 1.7M6.3 17.7l-1.7 1.7" stroke-linecap="round"/></svg></button>
+    </div>
+  </header>
+
+  <!-- ===== Main ===== -->
+  <main class="main">
+    <div class="view-header">
+      <div class="vh-title">
+        <h1 class="view-title">Tasks</h1>
+        <div class="view-sub"><b>7</b> agents orchestrated · <b>2</b> live<span class="live-dot"></span> · <b>$4.18</b> spent today</div>
+      </div>
+      <div class="vh-actions">
+        <div class="seg" role="tablist"><button class="on">Board</button><button>History</button></div>
+        <button class="btn btn-primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>New task</button>
+      </div>
+    </div>
+
+    <div class="view-body">
+      <div class="board">
+
+        <section class="col">
+          <div class="col-head"><span class="col-dot" style="background:var(--ink-3)"></span><span class="col-title">Queued</span><span class="col-count">2</span></div>
+          <div class="col-body">
+            <article class="tcard" data-task="a1f2" role="button" tabindex="0" aria-label="Open task Reap orphan esbuild/vite procs">
+              <div class="tcard-top"><span class="pill">Chore</span><span class="tcard-id">#a1f2</span></div>
+              <div class="tcard-title">Reap orphan esbuild/vite procs on build hang</div>
+              <div class="tcard-repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg>singularity · main</div>
+              <div class="tcard-foot"><div class="tags"><span class="tag">infra</span><span class="tag">dx</span></div></div>
+            </article>
+            <article class="tcard" data-task="b7c0" role="button" tabindex="0" aria-label="Open task Add per-provider spend sparkline">
+              <div class="tcard-top"><span class="pill">Feature</span><span class="tcard-id">#b7c0</span></div>
+              <div class="tcard-title">Add per-provider spend sparkline to Usage view</div>
+              <div class="tcard-repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg>singularity · main</div>
+              <div class="tcard-foot"><div class="tags"><span class="tag">usage</span></div></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="col">
+          <div class="col-head"><span class="col-dot" style="background:var(--warn)"></span><span class="col-title">Planning</span><span class="col-count">1</span></div>
+          <div class="col-body">
+            <article class="tcard live" data-task="c3d9" role="button" tabindex="0" aria-label="Open task Migrate automation dialogs">
+              <div class="tcard-top"><span class="pill warn">Planning</span><span class="tcard-id">#c3d9</span></div>
+              <div class="tcard-title">Migrate automation dialogs onto shared CreateDialog</div>
+              <div class="tcard-repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg>singularity · wt/deba6c3d</div>
+              <div class="tcard-foot"><div class="tags"><span class="tag">refactor</span><span class="tag">web</span></div><span class="tcost tnum">$0.62</span></div>
+              <div class="tcard-live"><span class="beat"></span>drafting plan…</div>
+            </article>
+          </div>
+        </section>
+
+        <section class="col">
+          <div class="col-head"><span class="col-dot" style="background:var(--live)"></span><span class="col-title">In progress</span><span class="col-count">2</span></div>
+          <div class="col-body">
+            <article class="tcard live" data-task="e5a1" role="button" tabindex="0" aria-label="Open task Playwright E2E suite">
+              <div class="tcard-top"><span class="pill info">Running</span><span class="tcard-id">#e5a1</span></div>
+              <div class="tcard-title">Playwright E2E suite + eslint pass</div>
+              <div class="tcard-repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg>singularity · wt/9e0b59d</div>
+              <div class="tcard-foot"><div class="tags"><span class="tag">e2e</span><span class="tag">test</span></div><span class="tcost tnum">$1.94</span></div>
+              <div class="mini-prog"><i style="width:64%"></i></div>
+              <div class="tcard-live"><span class="beat"></span>running 32/50 specs</div>
+            </article>
+            <article class="tcard" data-task="f0b8" role="button" tabindex="0" aria-label="Open task UI consistency pass">
+              <div class="tcard-top"><span class="pill info">Running</span><span class="tcard-id">#f0b8</span></div>
+              <div class="tcard-title">UI consistency pass on RailHeader panels</div>
+              <div class="tcard-repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg>singularity · wt/8f9c786</div>
+              <div class="tcard-foot"><div class="tags"><span class="tag">web</span><span class="tag">polish</span></div><span class="tcost tnum">$0.88</span></div>
+              <div class="mini-prog"><i style="width:41%"></i></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="col">
+          <div class="col-head"><span class="col-dot" style="background:var(--review)"></span><span class="col-title">Review</span><span class="col-count">1</span></div>
+          <div class="col-body">
+            <article class="tcard" data-task="7d21" role="button" tabindex="0" aria-label="Open task Roadmap chip filter">
+              <div class="tcard-top"><span class="pill review">In review</span><span class="tcard-id">#7d21</span></div>
+              <div class="tcard-title">Roadmap chip filter + label fixes in usage-report</div>
+              <div class="tcard-repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg>singularity · wt/8afbf74</div>
+              <div class="tcard-foot"><div class="tags"><span class="tag">report</span></div><span class="tcost tnum">$2.31</span></div>
+            </article>
+          </div>
+        </section>
+
+        <section class="col">
+          <div class="col-head"><span class="col-dot" style="background:var(--ok)"></span><span class="col-title">Done</span><span class="col-count">1</span></div>
+          <div class="col-body">
+            <article class="tcard" data-task="3c02" role="button" tabindex="0" aria-label="Open task Drop unused imports">
+              <div class="tcard-top"><span class="pill ok">Merged</span><span class="tcard-id">#3c02</span></div>
+              <div class="tcard-title">Drop unused imports from 7 migrated panels</div>
+              <div class="tcard-repo"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg>singularity · main</div>
+              <div class="tcard-foot"><div class="tags"><span class="tag">cleanup</span></div><span class="tcost tnum">$0.44</span></div>
+            </article>
+          </div>
+        </section>
+
+      </div>
+
+      <!-- Task detail modal lives at document root (below) -->
+    </div>
+  </main>
+
+  <!-- Resize: dock height -->
+  <div class="dock-handle" id="dockHandle" role="separator" aria-orientation="horizontal" aria-label="Resize terminal dock" tabindex="0"></div>
+
+  <!-- ===== Terminal dock ===== -->
+  <section class="dock">
+    <div class="dock-list">
+      <div class="dock-list-head"><span class="h">Sessions</span><span class="count">4</span></div>
+      <div class="sess on" role="button" tabindex="0" aria-current="true"><span class="led run"></span><div class="sess-body"><div class="sess-name">e2e-suite</div><div class="sess-meta">opus · wt/9e0b59d</div></div></div>
+      <div class="sess" role="button" tabindex="0"><span class="led run"></span><div class="sess-body"><div class="sess-name">create-dialog</div><div class="sess-meta">opus · wt/deba6c3d</div></div></div>
+      <div class="sess" role="button" tabindex="0"><span class="led idle"></span><div class="sess-body"><div class="sess-name">ui-consistency</div><div class="sess-meta">sonnet · wt/8f9c786</div></div></div>
+      <div class="sess" role="button" tabindex="0"><span class="led done"></span><div class="sess-body"><div class="sess-name">import-cleanup</div><div class="sess-meta">haiku · main</div></div></div>
+    </div>
+
+    <!-- Resize: session list width -->
+    <div class="list-handle" id="listHandle" role="separator" aria-orientation="vertical" aria-label="Resize session list" tabindex="0"></div>
+
+    <div class="term">
+      <div class="term-bar">
+        <span class="led run"></span>
+        <span class="tt"><b>e2e-suite</b> · opus · ~/singularity/.worktrees/9e0b59d</span>
+        <div class="term-tools">
+          <button class="icon-btn" aria-label="View transcript"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16v11H4zM4 20h16"/></svg></button>
+          <button class="icon-btn" aria-label="Minimize dock"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/></svg></button>
+        </div>
+      </div>
+      <div class="term-body">
+        <div class="cc-welcome">
+          <div><span class="star">✻</span> <span class="w-title">Welcome to Claude Code</span></div>
+          <div class="w-line">/help for help · /status for your current setup</div>
+          <div class="w-line">cwd: <b>~/singularity/.worktrees/9e0b59d</b> · model: <b>opus</b></div>
+        </div>
+        <div class="cc-turn"><span class="cc-g user">&gt;</span><div class="cc-b"><div class="msg">Add a Playwright E2E suite covering the tasks board and session flows, then fix whatever it surfaces.</div></div></div>
+        <div class="cc-turn"><span class="cc-g">⏺</span><div class="cc-b"><div>I'll scaffold the Playwright suite, run it, and stabilize any flakes.</div></div></div>
+        <div class="cc-turn"><span class="cc-g">⏺</span><div class="cc-b">
+          <div><span class="cc-tool">Bash</span>(<span class="cc-arg">pnpm test:e2e --reporter=line</span>)</div>
+          <div class="cc-result"><span class="cc-branch">⎿</span><div>
+            <div class="cc-dim">Running 50 tests using 4 workers</div>
+            <div><span class="cc-ok">✓</span> tasks › creates a task from the board dialog <span class="cc-dim">(1.2s)</span></div>
+            <div><span class="cc-ok">✓</span> tasks › moves a card between columns <span class="cc-dim">(0.9s)</span></div>
+            <div><span class="cc-warn">✗</span> shell › dock resize clamps min height <span class="cc-dim">(flaky · retry 1/2)</span></div>
+            <div class="cc-dim">… +28 lines (ctrl+r to expand)</div>
+          </div></div>
+        </div></div>
+        <div class="cc-turn"><span class="cc-g">⏺</span><div class="cc-b">
+          <div><span class="cc-tool">Update</span>(<span class="cc-arg">web/e2e/shell.spec.js</span>)</div>
+          <div class="cc-result"><span class="cc-branch">⎿</span><div><span class="cc-dim">Updated with 3 additions — wait for the drag handle before asserting height.</span></div></div>
+        </div></div>
+        <div class="cc-turn"><span class="cc-g">⏺</span><div class="cc-b"><div>32 of 50 passing. Re-running the shell spec to confirm the resize flake is gone.</div></div></div>
+        <div class="cc-spinner"><span class="star">✻</span> Stabilizing… <span class="cc-dim">(32s · ↑ 4.1k tokens · esc to interrupt)</span></div>
+        <div class="cc-input"><span class="caret">&gt;</span><span class="ph">Try "run the full suite once the flake is fixed"</span><span class="cursor"></span></div>
+        <div class="cc-hints"><span>? for shortcuts</span><span class="r"><b>⏵⏵ accept edits on</b> · shift+tab to cycle</span></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<!-- Task detail — centered modal -->
+<div class="detail-scrim" id="detailScrim" hidden></div>
+<div class="detail" id="detail" role="dialog" aria-modal="true" aria-labelledby="dTitle" hidden>
+  <div class="detail-head">
+    <span class="pill" id="dPill">Running</span>
+    <span class="detail-id" id="dId">#0000</span>
+    <button class="icon-btn" id="detailClose" aria-label="Close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+  </div>
+  <h2 class="detail-title" id="dTitle">—</h2>
+  <div class="detail-repo" id="dRepo"></div>
+  <div class="modal-body">
+    <div class="detail-stats">
+      <div class="ds"><div class="ds-k">Cost</div><div class="ds-v tnum" id="dCost">—</div></div>
+      <div class="ds"><div class="ds-k">Tokens</div><div class="ds-v tnum" id="dTokens">—</div></div>
+      <div class="ds"><div class="ds-k">Turns</div><div class="ds-v tnum" id="dTurns">—</div></div>
+    </div>
+    <div class="detail-prog" id="dProgWrap" hidden>
+      <div class="pl"><span id="dProgLabel">Progress</span><span class="tnum" id="dProgPct">0%</span></div>
+      <div class="bar"><i id="dProgBar" style="width:0%"></i></div>
+    </div>
+    <div class="modal-cols">
+      <div class="modal-main">
+        <section class="detail-sec"><h4>Task</h4><p id="dDesc"></p></section>
+        <section class="detail-sec"><h4>Pipeline</h4><ol class="timeline" id="dTimeline"></ol></section>
+      </div>
+      <aside class="modal-aside">
+        <section class="detail-sec">
+          <h4>Details</h4>
+          <dl class="detail-meta">
+            <div><dt>Model</dt><dd id="dModel"></dd></div>
+            <div><dt>Branch</dt><dd id="dBranch"></dd></div>
+            <div><dt>Created</dt><dd id="dCreated"></dd></div>
+            <div><dt>Tags</dt><dd class="detail-tags" id="dTags"></dd></div>
+          </dl>
+        </section>
+      </aside>
+    </div>
+  </div>
+  <div class="modal-foot">
+    <button class="btn btn-ghost" id="dTranscript">View transcript</button>
+    <button class="btn btn-primary" id="dPrimary">Open session</button>
+  </div>
+</div>
+
+<!-- More menu -->
+<div class="menu-backdrop" id="menuBackdrop"></div>
+<div class="menu" id="appMenu" role="menu" aria-label="More" hidden>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M5 19l2-2"/></svg>Config</button>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M9 12h6M8 8a4 4 0 0 0 0 8h1M16 8a4 4 0 0 1 0 8h-1"/></svg>Hooks</button>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>Skills</button>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M7 21h10M6 7h12M6 7l-3 6a3 3 0 0 0 6 0zM18 7l3 6a3 3 0 0 1-6 0z"/></svg>Rules</button>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M5 4a1 1 0 0 1 1-1h13v18H6a1 1 0 0 1-1-1z"/><path d="M9 3v18"/></svg>Memory</button>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7M3 4v4h4"/><path d="M12 8v4l3 2"/></svg>Transcripts</button>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"><path d="M12 6c-2-1.4-5.5-1.4-8 0v13c2.5-1.4 6-1.4 8 0 2-1.4 5.5-1.4 8 0V6c-2.5-1.4-6-1.4-8 0z"/><path d="M12 6v13"/></svg>Wiki</button>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3a9 9 0 1 0 1 18c1 0 1.3-1 .7-1.8-.6-.9 0-2.2 1.3-2.2H17a4 4 0 0 0 0-8"/><circle cx="8" cy="11" r="1"/><circle cx="12" cy="8" r="1"/><circle cx="16" cy="11" r="1"/></svg>Appearance</button>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 18a4 4 0 0 1 0-8 5 5 0 0 1 9.6-1A4 4 0 0 1 17 18"/><path d="M9.5 13.5 11 15l3.5-3.5"/></svg>Status</button>
+  <div class="menu-sep"></div>
+  <button class="menu-item" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M6 11h2l1.5 3 2-6 1.5 3H18"/><path d="M8 21h8"/></svg>Processes</button>
+  <div class="menu-sys">
+    <div class="row"><span>CPU</span><b class="tnum">18%</b></div>
+    <svg class="menu-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true">
+      <path class="area" style="fill:var(--accent)" d="M0,16 10,13 20,17 30,9 40,13 50,7 60,11 70,15 80,8 90,12 100,6 110,10 120,8 120,24 0,24 Z"/>
+      <path class="line" style="stroke:var(--accent)" d="M0,16 10,13 20,17 30,9 40,13 50,7 60,11 70,15 80,8 90,12 100,6 110,10 120,8"/>
+    </svg>
+    <div class="row" style="margin-top:9px"><span>RAM</span><b class="tnum">61% · 19.4 / 32.0 GB</b></div>
+    <svg class="menu-spark" viewBox="0 0 120 24" preserveAspectRatio="none" aria-hidden="true">
+      <path class="area" style="fill:var(--live)" d="M0,10 12,9 24,11 36,8 48,9 60,7 72,8 84,6 96,8 108,7 120,6 120,24 0,24 Z"/>
+      <path class="line" style="stroke:var(--live)" d="M0,10 12,9 24,11 36,8 48,9 60,7 72,8 84,6 96,8 108,7 120,6"/>
+    </svg>
+    <div class="menu-pills" role="tablist" aria-label="Sparkline window">
+      <span class="menu-pill" role="tab">5m</span><span class="menu-pill on" role="tab" aria-selected="true">30m</span><span class="menu-pill" role="tab">1h</span>
+    </div>
+  </div>
+  <div class="menu-sep"></div>
+  <button class="menu-item warn" role="menuitem"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7M21 4v4h-4"/></svg>Restart server</button>
+</div>
+
+<script>
+  const root = document.documentElement;
+  const tIcon = document.getElementById('tIcon');
+  const sun = '<circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.4M12 19.6V22M2 12h2.4M19.6 12H22M4.6 4.6l1.7 1.7M17.7 17.7l1.7 1.7M19.4 4.6l-1.7 1.7M6.3 17.7l-1.7 1.7" stroke-linecap="round"/>';
+  const moon = '<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>';
+  themeToggle.addEventListener('click', () => {
+    const next = root.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+    root.setAttribute('data-theme', next);
+    tIcon.innerHTML = next === 'dark' ? moon : sun;
+  });
+
+  /* ---- Drag-to-resize (dock height + session-list width) ---- */
+  const app = document.querySelector('.app');
+  const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  const px = (name) => parseFloat(getComputedStyle(app).getPropertyValue(name));
+  function makeResizer(handle, { axis, prop, min, max }) {
+    const maxOf = () => (typeof max === 'function' ? max() : max);
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      handle.classList.add('dragging');
+      document.body.classList.add('resizing');
+      document.body.style.cursor = axis === 'y' ? 'row-resize' : 'col-resize';
+      const move = (ev) => {
+        const start = px(prop);
+        const next = axis === 'y' ? start - ev.movementY : start + ev.movementX;
+        app.style.setProperty(prop, clamp(next, min, maxOf()) + 'px');
+      };
+      const up = () => {
+        handle.classList.remove('dragging');
+        document.body.classList.remove('resizing');
+        document.body.style.cursor = '';
+        window.removeEventListener('pointermove', move);
+      };
+      window.addEventListener('pointermove', move);
+      window.addEventListener('pointerup', up, { once: true });
+    });
+    handle.addEventListener('keydown', (e) => {
+      const step = 16; let d = 0;
+      if (axis === 'y') { if (e.key === 'ArrowUp') d = step; if (e.key === 'ArrowDown') d = -step; }
+      else { if (e.key === 'ArrowRight') d = step; if (e.key === 'ArrowLeft') d = -step; }
+      if (!d) return; e.preventDefault();
+      app.style.setProperty(prop, clamp(px(prop) + d, min, maxOf()) + 'px');
+    });
+  }
+  makeResizer(dockHandle, { axis: 'y', prop: '--dock-h', min: 140, max: () => app.clientHeight - 56 - 11 - 200 });
+  makeResizer(listHandle, { axis: 'x', prop: '--list-w', min: 180, max: 520 });
+
+  /* ---- More menu ---- */
+  const menu = document.getElementById('appMenu');
+  const backdrop = document.getElementById('menuBackdrop');
+  const openMenu = () => {
+    const r = moreBtn.getBoundingClientRect();
+    menu.hidden = false;
+    menu.style.left = Math.min(r.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 10) + 'px';
+    menu.style.top = Math.min(r.bottom + 6, window.innerHeight - menu.offsetHeight - 12) + 'px';
+    backdrop.classList.add('open');
+    moreBtn.setAttribute('aria-expanded', 'true');
+  };
+  const closeMenu = () => { menu.hidden = true; backdrop.classList.remove('open'); moreBtn.setAttribute('aria-expanded', 'false'); };
+  moreBtn.addEventListener('click', (e) => { e.stopPropagation(); menu.hidden ? openMenu() : closeMenu(); });
+  backdrop.addEventListener('click', closeMenu);
+  menu.querySelectorAll('.menu-item').forEach((it) => it.addEventListener('click', closeMenu));
+  menu.querySelectorAll('.menu-pill').forEach((p) => p.addEventListener('click', (e) => {
+    e.stopPropagation();
+    menu.querySelectorAll('.menu-pill').forEach((x) => { x.classList.remove('on'); x.removeAttribute('aria-selected'); });
+    p.classList.add('on'); p.setAttribute('aria-selected', 'true');
+  }));
+
+  /* ---- Task detail drawer ---- */
+  const STAGES = ['Queued', 'Planning', 'In progress', 'In review', 'Done'];
+  const PILL = { queued: '', planning: 'warn', running: 'info', review: 'review', merged: 'ok' };
+  const TASKS = {
+    a1f2: { state: 'queued', label: 'Queued', title: 'Reap orphan esbuild/vite procs on build hang', repo: 'singularity', branch: 'main', model: 'sonnet', cost: '$0.00', tokens: '—', turns: '0', created: 'queued 4m ago', stage: 0, tags: ['infra', 'dx'],
+      desc: 'Builds occasionally hang behind orphaned esbuild/vite workers. Add a `pnpm clean` reap step and wire it into the prebuild hook so a stale worker never blocks a fresh build.' },
+    b7c0: { state: 'queued', label: 'Queued', title: 'Add per-provider spend sparkline to Usage view', repo: 'singularity', branch: 'main', model: 'opus', cost: '$0.00', tokens: '—', turns: '0', created: 'queued 9m ago', stage: 0, tags: ['usage'],
+      desc: 'The Usage view shows totals but no trend. Add a compact 7-day spend sparkline per provider (Claude / API / Ollama), reusing the existing Sparkline component and the gradient data-viz treatment.' },
+    c3d9: { state: 'planning', label: 'Planning', title: 'Migrate automation dialogs onto shared CreateDialog', repo: 'singularity', branch: 'wt/deba6c3d', model: 'opus', cost: '$0.62', tokens: '410k', turns: '11', created: 'started 6m ago', stage: 1, tags: ['refactor', 'web'],
+      desc: 'The cron + background dialogs duplicate field logic. Fold them onto the shared CreateDialog primitive so validation, scope-picker, and cwd behaviour are defined once.' },
+    e5a1: { state: 'running', label: 'Running', title: 'Playwright E2E suite + eslint pass', repo: 'singularity', branch: 'wt/9e0b59d', model: 'opus', cost: '$1.94', tokens: '1.2M', turns: '48', created: 'started 18m ago', stage: 2, tags: ['e2e', 'test'], progress: 64, progressLabel: 'Running specs · 32 / 50',
+      desc: 'Add a Playwright E2E suite covering the tasks board and session flows, then fix whatever it surfaces. Stabilise the flaky dock-resize spec before the full run.' },
+    f0b8: { state: 'running', label: 'Running', title: 'UI consistency pass on RailHeader panels', repo: 'singularity', branch: 'wt/8f9c786', model: 'sonnet', cost: '$0.88', tokens: '540k', turns: '22', created: 'started 11m ago', stage: 2, tags: ['web', 'polish'], progress: 41, progressLabel: 'Editing panels · 7 / 14',
+      desc: 'Seven panels were migrated onto RailHeader but still carry per-file spacing and heading drift. Align them to the shared header rhythm and drop the leftover one-off styles.' },
+    '7d21': { state: 'review', label: 'In review', title: 'Roadmap chip filter + label fixes in usage-report', repo: 'singularity', branch: 'wt/8afbf74', model: 'opus', cost: '$2.31', tokens: '1.6M', turns: '61', created: 'started 42m ago', stage: 3, tags: ['report'],
+      desc: 'Adds a roadmap chip filter to the usage-report skill and corrects mislabeled series. Diff is ready; awaiting review before merge to main.' },
+    '3c02': { state: 'merged', label: 'Merged', title: 'Drop unused imports from 7 migrated panels', repo: 'singularity', branch: 'main', model: 'haiku', cost: '$0.44', tokens: '210k', turns: '9', created: 'merged 2h ago', stage: 4, tags: ['cleanup'],
+      desc: 'Post-migration cleanup: remove imports left dangling after the RailHeader move across 7 panels. Merged to main — no follow-up needed.' },
+  };
+  const detail = document.getElementById('detail');
+  const detailScrim = document.getElementById('detailScrim');
+  const $ = (id) => document.getElementById(id);
+  const REPO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg>';
+  let selectedCard = null;
+  function renderTimeline(stage) {
+    const times = ['0:12', '1:40', '—', '—', '—'];
+    return STAGES.map((name, i) => {
+      const cls = i < stage ? 'done' : (i === stage ? 'cur' : 'future');
+      const time = i < stage ? `<span class="tl-time">${times[i]}</span>` : (i === stage ? '<span class="tl-time">now</span>' : '');
+      return `<li class="tl ${cls}"><span class="tl-dot"></span><span class="tl-txt">${name}</span>${time}</li>`;
+    }).join('');
+  }
+  function openDetail(id, card) {
+    const t = TASKS[id]; if (!t) return;
+    $('dPill').textContent = t.label;
+    $('dPill').className = 'pill' + (PILL[t.state] ? ' ' + PILL[t.state] : '');
+    $('dId').textContent = '#' + id;
+    $('dTitle').textContent = t.title;
+    $('dRepo').innerHTML = REPO_ICON + `<span>${t.repo} · ${t.branch}</span>`;
+    $('dCost').textContent = t.cost; $('dTokens').textContent = t.tokens; $('dTurns').textContent = t.turns;
+    const hasProg = typeof t.progress === 'number';
+    $('dProgWrap').hidden = !hasProg;
+    if (hasProg) { $('dProgLabel').textContent = t.progressLabel || 'Progress'; $('dProgPct').textContent = t.progress + '%'; $('dProgBar').style.width = t.progress + '%'; }
+    $('dDesc').textContent = t.desc;
+    $('dModel').textContent = t.model; $('dBranch').textContent = t.branch; $('dCreated').textContent = t.created;
+    $('dTags').innerHTML = t.tags.map((x) => `<span class="tag">${x}</span>`).join('');
+    $('dTimeline').innerHTML = renderTimeline(t.stage);
+    $('dPrimary').textContent = t.state === 'queued' ? 'Start now' : t.state === 'merged' ? 'Reopen' : 'Open session';
+    $('dTranscript').style.display = t.state === 'queued' ? 'none' : '';
+    if (selectedCard) selectedCard.classList.remove('sel');
+    selectedCard = card; if (card) card.classList.add('sel');
+    detail.hidden = false; detailScrim.hidden = false;
+    detail.querySelector('.modal-body').scrollTop = 0;
+    document.getElementById('detailClose').focus(); // move focus into the modal
+  }
+  function closeDetail() {
+    detail.hidden = true; detailScrim.hidden = true;
+    if (selectedCard) { const c = selectedCard; selectedCard = null; c.classList.remove('sel'); c.focus(); } // restore focus to the card
+  }
+  document.querySelectorAll('.tcard[data-task]').forEach((card) => {
+    const open = () => openDetail(card.getAttribute('data-task'), card);
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); open(); } });
+  });
+  $('detailClose').addEventListener('click', closeDetail);
+  detailScrim.addEventListener('click', closeDetail);
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (!menu.hidden) closeMenu(); else if (!detail.hidden) closeDetail();
+  });
+</script>
+</body>
+</html>

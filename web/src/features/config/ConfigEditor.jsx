@@ -17,7 +17,7 @@ import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutl
 import ClearIcon from '@mui/icons-material/Clear';
 import TimerIcon from '@mui/icons-material/Timer';
 import TimerOffIcon from '@mui/icons-material/TimerOff';
-import { EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import { json } from '@codemirror/lang-json';
 import CmEditor from '@/components/CmEditor.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
@@ -350,7 +350,7 @@ export default function ConfigEditor() {
                     <ListItemButton key={`${it.path}:${i}`} onClick={() => openResult(it)}
                       sx={{ ...rowSx, display: 'block' }}>
                       <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                      <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5, fontFamily: 'monospace' }} noWrap>{it.text}</Typography>
+                      <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
                     </ListItemButton>
                   ))}
                   {results.list.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
@@ -420,14 +420,16 @@ export default function ConfigEditor() {
 
       <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, pt: 1, minHeight: 0 }} spacing={1}>
         {picking && <DirPicker start={untildify(activeTab?.cwd ?? shownRoots[0] ?? '~')} onPick={pick} onClose={() => setPicking(false)} />}
-        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} />}
+          </Box>
           <Tooltip title={autosave ? 'Autosave on (5s)' : 'Autosave off'} placement="bottom" disableInteractive>
             <IconButton size="small" onClick={toggleAutosave} color={autosave ? 'primary' : 'default'}>
               {autosave ? <TimerIcon /> : <TimerOffIcon />}
             </IconButton>
           </Tooltip>
         </Stack>
-        {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} />}
         {activeTab ? (
           <>
             <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>

@@ -1,7 +1,7 @@
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import ClearIcon from '@mui/icons-material/Clear';
-import { SearchInput } from '@zapac/mui-theme';
+import { SearchInput } from '@/components/SearchInput.jsx';
 
 // Search field + inline clear button — the rail-header search block shared by
 // every file-browser panel. Clear appears only when there's a value.

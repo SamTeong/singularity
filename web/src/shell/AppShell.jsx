@@ -18,17 +18,20 @@ import ProcessManager from '@/features/processes/ProcessManager.jsx';
 import CreateSessionDialog from '@/features/sessions/CreateSessionDialog.jsx';
 import CreateTaskDialog from '@/features/tasks/CreateTaskDialog.jsx';
 import CreateScheduledJobDialog from '@/features/automation/CreateScheduledJobDialog.jsx';
-import { useResizable } from '@/hooks/useResizable.jsx';
+import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { useTaskActions } from '@/hooks/useTaskActions.js';
 import Sidebar from '@/shell/Sidebar.jsx';
 import SessionDock from '@/shell/SessionDock.jsx';
 import AppMenu, { NAV_ITEMS } from '@/shell/AppMenu.jsx';
+import PhosphorFrame from '@/shell/PhosphorFrame.jsx';
+import PhosphorMasthead from '@/shell/PhosphorMasthead.jsx';
 import { glass } from '@/shell/shellStyles.js';
 import { useDoubleTap } from '@/features/palette/useDoubleTap.js';
 import CommandPalette from '@/features/palette/CommandPalette.jsx';
 import { buildCommands } from '@/features/palette/commands.mjs';
 import { isCodexModel } from '@/lib/models.js';
+import { insetQuery } from '@/lib/sheetInset.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
@@ -53,6 +56,15 @@ const SettingsView = lazy(() => import('@/features/settings/SettingsView.jsx'));
 // hidden) so live CodeMirror + unsaved edits survive view switches.
 const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'sessions', 'explorer'];
 
+// A skin change remounts this entire component — `AppThemeProvider` keys its
+// skin subtree by `skin.id` (see theme/AppThemeProvider.jsx), so any React
+// state set before calling `setSkin` (e.g. `respawnCount`) is gone by the time
+// the new skin's AppShell instance mounts. The live-session count crosses that
+// remount via `AppThemeProvider`'s own `pendingRespawn` context field (task
+// 6.6) — that state lives above the remount boundary, so it survives without
+// this component needing its own Web Storage handoff (see `useThemeSkin()`'s
+// `pendingRespawn`/`clearPendingRespawn` below).
+
 const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
 
 // Glass snackbar content — MUI v9 dropped `ContentProps`, so this must go through
@@ -67,14 +79,18 @@ const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.
  */
 export default function AppShell() {
   const {
-    agents, active, setActive, connected, tasks, taskHistory, crons, background, recent,
+    agents, setActive, connected, tasks, taskHistory, crons, background, recent,
     usage, stats, sendMsg, refreshUsage, registerChat, registerError,
   } = useAgents();
   const { keys } = useKeys();
   const { toggle: toggleColorMode } = useColorMode();
   // The active skin optionally paints a full-bleed background behind the shell.
-  const { skinId } = useThemeSkin();
+  const { skinId, setSkin, pendingRespawn, clearPendingRespawn } = useThemeSkin();
   const SkinBackground = getSkin(skinId)?.Background;
+  // Phosphor is the only skin with a command-console frame/masthead (task 3.1/
+  // 3.2, design.md D1/D5) — everything below this still renders unconditionally;
+  // only the root wrapper and the `mainRef` Box's own sizing branch on it.
+  const isPhosphor = skinId === 'phosphor';
 
   const [cwd, setCwd] = useState('~');
   const [picking, setPicking] = useState(false);
@@ -96,7 +112,24 @@ export default function AppShell() {
   const [toast, setToast] = useState(null);
   const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
   const [openTx, setOpenTx] = useState(null); // {project, id, cwd, mtime} handed to SessionHistory
-  const [respawnCount, setRespawnCount] = useState(0); // >0 -> respawn-confirm dialog open, holds live-session count
+  // Width (px) the open right-hand sheet wants the shell to vacate; 0 = none
+  // open. A feature reports it rather than the shell knowing sheet widths, so
+  // the number stays owned by the sheet that defines it (no duplicated literal,
+  // and no static import that would pull a lazy feature into the shell chunk).
+  const [sheetInset, setSheetInset] = useState(0);
+  // >0 -> respawn-confirm dialog open, holds live-session count. Initialized
+  // from `useThemeSkin()`'s `pendingRespawn` so a skin change (which remounts
+  // this whole component — see theme/AppThemeProvider.jsx's `key={skin.id}`)
+  // can still surface the respawn confirmation for the live sessions it
+  // affected (task 6.6). Color-mode toggles set this directly mid-session.
+  const [respawnCount, setRespawnCount] = useState(() => pendingRespawn || 0);
+  // Consume the one-shot pending-respawn signal once this instance has read
+  // it into local state above — done in an effect, not during render, since
+  // clearing it calls a state setter that belongs to `AppThemeProvider` (a
+  // different, un-remounted component sitting above this one).
+  useEffect(() => {
+    if (pendingRespawn) clearPendingRespawn();
+  }, [pendingRespawn, clearPendingRespawn]);
   const [restartOpen, setRestartOpen] = useState(false); // restart-daemon confirm dialog
   const [restarting, setRestarting] = useState(false); // true while polling /health for the new daemon
   // Terminal dock minimized state, persisted (height is a useResizable below).
@@ -107,7 +140,7 @@ export default function AppShell() {
   const listW = useResizable('sing-list-w', 260, { min: 160, max: 640 });
   // Terminal dock height (px, drag-resizable), persisted — resizes up from the
   // main pane's bottom, clamped so neither the dock nor the top view can vanish.
-  const { width: dockH, startDrag: startDockDrag } = useResizable('sing-dock-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: mainRef });
+  const { width: dockH, startDrag: startDockDrag, onKeyDown: onDockKeyDown, dragging: dockDragging, max: dockHMax } = useResizable('sing-dock-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: mainRef });
 
   // Panels that mount once and stay mounted — track which have ever been shown.
   // Updated during render (React's documented "adjust state on prop change"
@@ -161,6 +194,24 @@ export default function AppShell() {
     toggleColorMode();
     const live = agents.filter((a) => isLive(a.status)).length;
     if (live) setRespawnCount(live);
+  };
+
+  // Skin selection routes through the same live-session respawn confirmation
+  // (task 6.6, design.md D6): a running child TUI picks its theme at spawn, so
+  // a skin change prompts to respawn live sessions so their TUI matches. The
+  // skin applies immediately (xterm palette flips live via Terminal.jsx's
+  // theme effect); the prompt only offers to respawn the live children. A
+  // skin change remounts this whole component (`AppThemeProvider` keys its
+  // subtree by `skin.id`), so `respawnCount` state set here is gone by the
+  // time the new skin's AppShell mounts — pass the live count as `setSkin`'s
+  // second argument, which `AppThemeProvider` stashes above the remount
+  // boundary, and the fresh mount reads it back (via `pendingRespawn` above)
+  // to open the same dialog. Never auto-respawn; skip the prompt when no live
+  // sessions.
+  const onSelectSkin = (id) => {
+    if (id === skinId) return;
+    const live = agents.filter((a) => isLive(a.status)).length;
+    setSkin(id, live);
   };
 
   // Restart the daemon: it respawns itself detached and exits, so the socket
@@ -244,8 +295,42 @@ export default function AppShell() {
   const commands = useMemo(() => buildCommands(paletteCtx), [paletteCtx]);
   useDoubleTap(keys.paletteOpen, () => setPaletteOpen(true));
 
-  return (
-    <Box ref={mainRef} sx={{ position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+  // The app's real interaction tree — identical JSX regardless of skin. Under
+  // Phosphor it is wrapped (below) by an additive outer frame + masthead; the
+  // ZAPAC branch returns this exact element with no wrapper at all, so ZAPAC's
+  // rendered output stays byte-for-byte what it is today (design.md D1/D5).
+  // Two `sx` values inside branch on `isPhosphor`: this Box's height model, and
+  // the selected-view panel's corner radius. The height model fills the frame's
+  // remaining space (`flex: 1, minHeight: 0`) instead of the viewport
+  // (`height: '100dvh'`) once a masthead sits above it — `useResizable`'s
+  // `containerRef: mainRef` dock-height clamp measures this element's live
+  // `getBoundingClientRect()`, so it stays correct either way.
+  const shell = (
+    <Box
+      ref={mainRef}
+      sx={(t) => ({
+        ...(isPhosphor
+          ? { position: 'relative', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }
+          : { position: 'relative', height: '100dvh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }),
+        // A feature's right-sliding sheet (currently only Tasks' detail panel)
+        // reports its width here and the whole shell gives up that strip, so the
+        // sheet lands on empty background instead of over the view pane and the
+        // session dock — both keep their full rounded border, and the sheet's
+        // scrim no longer needs to dim or blur anything (TaskDetailPanel's
+        // backdrop slot). Padding, not margin: the shell is the viewport box and
+        // must stay put. `insetQuery` gates it on the viewport still being able
+        // to leave the shell a usable width — below that the sheet goes back to
+        // overlaying a dimmed shell, and the sheet's own backdrop flips at the
+        // same threshold because it asks the same helper.
+        pr: 0,
+        ...(sheetInset ? { [insetQuery(sheetInset)]: { pr: `${sheetInset}px` } } : null),
+        transition: t.transitions.create('padding-right', {
+          easing: t.transitions.easing.easeOut,
+          duration: t.transitions.duration.enteringScreen,
+        }),
+        '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+      })}
+    >
       {SkinBackground && <SkinBackground />}
 
       {/* Top row: sidebar + selected view. The terminal dock spans full width below. */}
@@ -257,11 +342,12 @@ export default function AppShell() {
           setView={setView}
           onNewSession={() => setCreateOpen(true)}
           onOpenMenu={(e) => setMenuAnchor(e.currentTarget)}
+          menuOpen={!!menuAnchor}
         />
 
         {/* Selected view. Persistent views mount once (visited) and stay mounted
             (display:none when hidden); Tasks/Cron/Usage render on demand. */}
-        <Box sx={(t) => ({ ...glass(t), position: 'relative', flex: 1, mt: 1.5, mx: 1.5, minWidth: 0, borderRadius: `${getTokens(t).radius.lg}px`, overflow: 'hidden', zIndex: getTokens(t).layers.content })}>
+        <Box sx={(t) => ({ ...glass(t), position: 'relative', flex: 1, mt: 1.5, mx: 1.5, minWidth: 0, borderRadius: isPhosphor ? 0 : `${getTokens(t).radius.lg}px`, overflow: 'hidden', zIndex: getTokens(t).layers.content })}>
           <Suspense fallback={<Box sx={{ p: 3, color: 'text.secondary' }}>Loading…</Box>}>
             {visited.has('config') && (
               <Box sx={{ display: view === 'config' ? 'block' : 'none', height: '100%' }}><ConfigEditor /></Box>
@@ -288,7 +374,7 @@ export default function AppShell() {
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
             {view === 'history' && <HistoryView onOpenSession={openHistorySession} />}
-            {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} />}
+            {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} onSelectSkin={onSelectSkin} />}
             {view === 'status' && <StatusView />}
             {view === 'settings' && <SettingsView />}
             {view === 'skills' && <SkillsPanel />}
@@ -299,20 +385,33 @@ export default function AppShell() {
                 history={taskHistory}
                 agents={agents}
                 stats={stats}
-                activeId={active}
                 onSelect={(sid) => sid && setActive(sid)}
                 onAdd={() => setTaskOpen(true)}
                 onMove={moveTask}
                 onConclude={concludeTask}
                 onDeleteHistory={deleteHistory}
+                onSheetInset={setSheetInset}
               />
             )}
           </Suspense>
         </Box>
       </Box>
 
-      {/* Drag handle — resize the dock (hidden while minimized). */}
-      {!dockMin && <Box onMouseDown={startDockDrag} sx={{ height: 12, flexShrink: 0, mx: 1.5, cursor: 'row-resize' }} />}
+      {/* Drag handle — resize the dock (hidden while minimized). layout-02
+          `.dock-handle`: 12px hit strip, grip fades in on hover/drag/focus. */}
+      {!dockMin && (
+        <ResizeHandle
+          axis="y"
+          onPointerDown={startDockDrag}
+          onKeyDown={onDockKeyDown}
+          dragging={dockDragging}
+          value={dockH}
+          min={140}
+          max={dockHMax}
+          label="Resize terminal dock"
+          sx={{ mx: 1.5 }}
+        />
+      )}
 
       <SessionDock
         dockMin={dockMin}
@@ -430,5 +529,13 @@ export default function AppShell() {
         />
       )}
     </Box>
+  );
+
+  if (!isPhosphor) return shell;
+
+  return (
+    <PhosphorFrame masthead={<PhosphorMasthead connected={connected} />}>
+      {shell}
+    </PhosphorFrame>
   );
 }

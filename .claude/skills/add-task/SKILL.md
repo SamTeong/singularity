@@ -14,8 +14,8 @@ session drives itself through plan → implement → review → done via `POST /
 
 ## Prerequisites
 
-The daemon must be running (default `http://127.0.0.1:$PORT`, `PORT=4317`). Read
-`PORT` and `SING_TOKEN` from the project `.env` — never hardcode the token. If
+The daemon must be running (default `http://127.0.0.1:$DAEMON_PORT`, `DAEMON_PORT=4317`). Read
+`DAEMON_PORT` and `SING_TOKEN` from the project `.env` — never hardcode the token. If
 `SING_TOKEN` is set, every data request needs the `x-sing-token` header.
 
 ## Create
@@ -43,7 +43,7 @@ Response: `{ ok: true, task: { id, sessionId, column, ... } }`, or `400 { ok:fal
 Multi-line descriptions quote badly — write the body to a JSON file and `--data @file`:
 
 ```bash
-# read PORT + token from .env, build the payload, POST it
+# read DAEMON_PORT + token from .env, build the payload, POST it
 node --env-file-if-exists=.env -e '
   const body = {
     repo: "C:/git/singularity",
@@ -56,7 +56,7 @@ node --env-file-if-exists=.env -e '
   };
   require("fs").writeFileSync(process.env.TEMP + "/task.json", JSON.stringify(body));
 '
-curl -s -X POST "http://127.0.0.1:$PORT/tasks" \
+curl -s -X POST "http://127.0.0.1:$DAEMON_PORT/tasks" \
   -H "x-sing-token: $SING_TOKEN" \
   -H "content-type: application/json" \
   --data @"$TEMP/task.json"

@@ -47,6 +47,39 @@
   --glow-a:rgba(170,65,175,.30); --glow-b:rgba(60,105,200,.20); --glow-c:rgba(0,165,230,.18);
   --grain:0.05;
 }
+/* Phosphor Console skin — NERV/MAGI tactical CRT command deck. Activated by
+   `data-skin="phosphor"` on the report's <html>, set by the app's
+   UsageReportView when the active skin is Phosphor. Overrides the ZAPAC
+   identity tokens with Phosphor's dark-only CRT palette: black void surfaces,
+   orange chrome, mint nominal, amber caution, red critical. No light variant
+   — Phosphor is dark-only, so this builds on `data-theme="dark"`. */
+:root[data-skin="phosphor"]{
+  --paper:#0A0A0A; --paper-2:#0F0F0F; --paper-3:#141414;
+  --bg:var(--paper); --surface:rgba(242,100,0,.04); --surface-2:rgba(242,100,0,.02);
+  --ink:#E8E8E8; --ink-soft:#9A9A9A; --ink-faint:#6A6A6A;
+  --line:rgba(242,100,0,.22); --line-soft:rgba(242,100,0,.10);
+  --weekend:color-mix(in srgb,var(--ink-faint) 14%,var(--paper));
+  --clay:#F26400; --clay-deep:#F26400; --amber:#F49F09; --sage:#52F29A; --azure:#4DB8FF; --red:#F04438;
+  --ok:var(--sage); --info:var(--azure); --warn:var(--amber); --danger:var(--red); --pos:var(--sage); --neg:var(--red);
+  --ac:var(--clay);
+  --cyan:#4DB8FF;
+  --grad-brand:linear-gradient(45deg,#F26400 5%,#F49F09 60%,#52F29A 100%);
+  --grad-pane:linear-gradient(150deg,#F26400 0%,#F49F09 50%,#0A0A0A 100%);
+  --glass-chip:rgba(242,100,0,.10);
+  --head-bg:transparent; --head-ink:var(--ink); --head-soft:var(--ink-soft);
+  --card:rgba(242,100,0,.04); --card-2:rgba(242,100,0,.06); --card-brd:rgba(242,100,0,.22);
+  --card-shadow:0 0 0 1px rgba(242,100,0,.08), inset 0 0 12px rgba(242,100,0,.03);
+  --glow-a:rgba(242,100,0,.10); --glow-b:rgba(82,242,154,.06); --glow-c:rgba(77,184,255,.04);
+  --grain:0.02;
+  --r-sm:2px; --r-md:4px; --r-lg:4px; --r-xl:4px; --r-pill:2px;
+}
+:root[data-skin="phosphor"] .flagnum{background-image:linear-gradient(120deg,#fff,var(--clay));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
+:root[data-skin="phosphor"] .flagcard{backdrop-filter:none;-webkit-backdrop-filter:none;border-radius:var(--r-md);box-shadow:var(--card-shadow)}
+:root[data-skin="phosphor"] body::before{
+  background:
+    repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.45) 100%);
+}
 *{box-sizing:border-box}
 /* ponytail: standard scrollbar-* only (Chrome 121+/FF/Safari 18.4+) -- no ::-webkit-scrollbar
    twin. Older engines just get the default bar, which is the pre-existing look anyway. */

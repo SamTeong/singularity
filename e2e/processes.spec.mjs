@@ -1,6 +1,12 @@
 import { test, expect } from './fixtures/test.mjs';
 import { openMenu } from './helpers/nav.mjs';
 
+// The "daemon" kind pill has to be matched INSIDE the table: getByText's default
+// is a case-insensitive substring match, and the sidebar footer renders "Daemon
+// connected" — an unscoped getByText('daemon').first() resolves to that instead,
+// which has no ancestor <tr>. Scope every daemon query to the row.
+const daemonRow = (page) => page.locator('table tr').filter({ has: page.getByText('daemon', { exact: true }) }).first();
+
 test('More menu -> Processes opens the "Running Processes" dialog', async ({ page }) => {
   await page.goto('/');
   await openMenu(page);
@@ -33,7 +39,7 @@ test('Processes table structure renders and daemon process exists', async ({ pag
 
   // At least one `daemon` row — /procs scans the real machine, so a parallel
   // sandbox run (E2E_PORT) puts several daemons in this table. Never assert a count.
-  await expect(page.getByText('daemon').first()).toBeVisible();
+  await expect(daemonRow(page)).toBeVisible();
 });
 
 test('Daemon process row kill button is disabled (never stops daemon)', async ({ page }) => {
@@ -41,13 +47,8 @@ test('Daemon process row kill button is disabled (never stops daemon)', async ({
   await openMenu(page);
   await page.getByRole('menuitem', { name: 'Processes' }).click();
 
-  // Find daemon text and locate its close/kill button
-  const daemonText = page.getByText('daemon').first();
-  const tr = daemonText.locator('xpath=ancestor::tr');
-
-  // The button in the "Stop" column of daemon row should be disabled
-  const buttons = tr.getByRole('button');
-  const killButton = buttons.first();
+  // The button in the "Stop" column of the daemon row should be disabled
+  const killButton = daemonRow(page).getByRole('button').first();
 
   // Daemon row kill button is disabled (cannot stop daemon)
   await expect(killButton).toBeDisabled();

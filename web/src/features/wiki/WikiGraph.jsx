@@ -26,16 +26,28 @@ export default function WikiGraph({ root, wiki, selected, onOpenPage }) {
   const { mode, systemMode } = useColorScheme();
   const dark = (mode === 'system' ? systemMode : mode) === 'dark';
   const [state, setState] = useState({ loading: true, error: null, empty: false });
+
+  // Keep the latest theme/dark values in refs so the Cytoscape build effect
+  // below doesn't depend on them. The graph is expensive to build (fetch +
+  // fcose force-directed layout) and the only thing that changes with `dark`
+  // is two colors (node label text + edge stroke) — those are applied in a
+  // separate, cheap effect below that mutates the existing instance's style
+  // in place instead of tearing the whole graph down. `theme` is a
+  // module-level singleton under both skins (same identity every render), so
+  // it never actually changes — but listing it in deps was still forcing the
+  // effect to close over it and re-run on any parent re-render that produced
+  // a new `dark` value. Refs break both hazards at once.
+  const themeRef = useRef(theme);
+  useEffect(() => { themeRef.current = theme; }, [theme]);
+  const darkRef = useRef(dark);
+  useEffect(() => { darkRef.current = dark; }, [dark]);
+
   // Show the loading state as soon as the graph identity changes, not a tick
   // later — compared as a derived string key during render rather than reset
-  // at the top of the effect below. `theme` is deliberately left out of the
-  // key: it's the vendored zapac module-level theme singleton (same object for
-  // every render, light and dark alike — see ZapacThemeProvider), so comparing
-  // it by identity would never fire; `dark` already covers every mode-driven
-  // color the effect below reads off `theme.palette.*`. A plain string
-  // comparison also sidesteps the object-identity hazard entirely (no more
-  // relying on MUI happening to memoize the theme).
-  const depKey = JSON.stringify([root, wiki, dark]);
+  // at the top of the effect below. `dark` is deliberately left out of the
+  // key now: it no longer triggers a rebuild (the color-only effect below
+  // handles it), so showing the loading state on a mode flip would be a lie.
+  const depKey = JSON.stringify([root, wiki]);
   const [prevDepKey, setPrevDepKey] = useState(depKey);
   if (depKey !== prevDepKey) {
     setPrevDepKey(depKey);
@@ -53,7 +65,9 @@ export default function WikiGraph({ root, wiki, selected, onOpenPage }) {
         setState({ loading: false, error: null, empty: false });
         const cats = [...new Set(d.nodes.map((n) => n.category))];
         const colorOf = (c) => PALETTE[Math.max(0, cats.indexOf(c)) % PALETTE.length];
-        const stroke = theme.palette.divider;
+        const t = themeRef.current;
+        const isDark = darkRef.current;
+        const stroke = t.palette.divider;
         cy = cytoscape({
           container: ref.current,
           elements: [
@@ -63,10 +77,10 @@ export default function WikiGraph({ root, wiki, selected, onOpenPage }) {
           style: [
             { selector: 'node', style: {
               'background-color': 'data(color)', label: 'data(label)', 'font-size': 9,
-              color: dark ? '#fff' : '#111', 'text-valign': 'bottom', 'text-margin-y': 3,
+              color: isDark ? '#fff' : '#111', 'text-valign': 'bottom', 'text-margin-y': 3,
               width: 16, height: 16, 'min-zoomed-font-size': 6,
             } },
-            { selector: 'node:selected', style: { 'border-width': 3, 'border-color': theme.palette.primary.main } },
+            { selector: 'node:selected', style: { 'border-width': 3, 'border-color': t.palette.primary.main } },
             { selector: 'edge', style: {
               width: 1, 'line-color': stroke, 'target-arrow-color': stroke,
               'target-arrow-shape': 'triangle', 'curve-style': 'bezier', 'arrow-scale': 0.7, opacity: 0.7,
@@ -80,7 +94,26 @@ export default function WikiGraph({ root, wiki, selected, onOpenPage }) {
         cyRef.current = cy;
       }).catch(() => { if (!cancelled) setState({ loading: false, error: 'failed to load graph', empty: false }); });
     return () => { cancelled = true; cyRef.current = null; if (cy) cy.destroy(); };
-  }, [root, wiki, theme, dark]);
+  }, [root, wiki]);
+
+  // Recolor the existing instance in place when the color mode flips — no
+  // fetch, no layout re-run, no node/edge rebuild. Cytoscape's `style()`
+  // accepts a full style sheet and re-applies it to live elements; the
+  // fcose layout coordinates are untouched. This is the difference between
+  // a ~50ms style update and a ~800ms tear-down + fetch + fcose on a wiki
+  // with a few hundred pages.
+  useEffect(() => {
+    const cy = cyRef.current;
+    if (!cy) return;
+    const t = themeRef.current;
+    const isDark = darkRef.current;
+    const stroke = t.palette.divider;
+    cy.style()
+      .selector('node').style({ color: isDark ? '#fff' : '#111' })
+      .selector('node:selected').style({ 'border-color': t.palette.primary.main })
+      .selector('edge').style({ 'line-color': stroke, 'target-arrow-color': stroke })
+      .update();
+  }, [dark, theme]);
 
   // Sync selection from the left panel: show ONLY the matching node (as the
   // concentric root) plus its first-degree neighbors; hide all others.

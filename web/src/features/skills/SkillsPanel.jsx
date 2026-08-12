@@ -19,7 +19,7 @@ import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import CodeOutlinedIcon from '@mui/icons-material/CodeOutlined';
 import ImageIcon from '@mui/icons-material/Image';
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined';
-import { EmptyState } from '@zapac/mui-theme';
+import { EmptyState } from '@/components/EmptyState.jsx';
 import { markdown } from '@codemirror/lang-markdown';
 import DetailPane from '@/components/DetailPane.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
