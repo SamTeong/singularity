@@ -84,6 +84,9 @@ SINGULARITY_HOME=${singHome}
 # REQUIRED — loopback port the Fastify + ws daemon binds (127.0.0.1 only).
 DAEMON_PORT=4317
 
+# OPTIONAL — Vite dev-server port (default: 5317).
+VITE_PORT=5317
+
 # REQUIRED — absolute path to the claude binary. No PATH fallback (Windows node-pty
 # does no PATH resolution). If detection failed, the placeholder below must be fixed.
 CLAUDE_BIN=${claudeLine}
