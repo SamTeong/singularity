@@ -516,7 +516,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
               vendored theme's own `contained` Button override (mint outline,
               fills mint on hover, hard corners, uppercase) carry the button —
               design.md D2 prefers the stock MUI override over a hand-rolled one. */}
-          <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => (phosphor ? { height: PHOSPHOR_CONTROL_H } : primaryBtn(t))}>New task</Button>
+            <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => (phosphor ? { height: PHOSPHOR_CONTROL_H } : primaryBtn(t))}>New task</Button>
         </Box>
       </Stack>
       {/* Phosphor-only bilingual status legend (task 5.1) — the centralized

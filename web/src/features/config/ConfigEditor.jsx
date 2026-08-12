@@ -420,14 +420,16 @@ export default function ConfigEditor() {
 
       <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, pt: 1, minHeight: 0 }} spacing={1}>
         {picking && <DirPicker start={untildify(activeTab?.cwd ?? shownRoots[0] ?? '~')} onPick={pick} onClose={() => setPicking(false)} />}
-        <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'flex-end' }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} />}
+          </Box>
           <Tooltip title={autosave ? 'Autosave on (5s)' : 'Autosave off'} placement="bottom" disableInteractive>
             <IconButton size="small" onClick={toggleAutosave} color={autosave ? 'primary' : 'default'}>
               {autosave ? <TimerIcon /> : <TimerOffIcon />}
             </IconButton>
           </Tooltip>
         </Stack>
-        {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} />}
         {activeTab ? (
           <>
             <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>

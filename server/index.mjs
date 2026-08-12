@@ -38,6 +38,7 @@ import { CLAUDE_ALIASES, OLLAMA_PRESETS, CODEX_PRESETS } from './models.mjs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
 const PORT = Number(process.env.PORT);
+const VITE_PORT = Number(process.env.VITE_PORT ?? 5317);
 // Optional loopback token (defense-in-depth on top of the 127.0.0.1 bind).
 // Set SING_TOKEN to require it on data endpoints + WS; the shell/assets stay open.
 const TOKEN = process.env.SING_TOKEN || null;
@@ -127,12 +128,12 @@ const webDist = join(__dirname, '..', 'web', 'dist');
 // deputy: a malicious page can fetch/WS straight to localhost. Allow only our
 // own origins (daemon + Vite dev); requests without Origin (curl, same-origin
 // GET navigations) pass — this blocks browsers, not local tools. The Vite dev
-// origin (:5317) is always trusted: DEV is inferred from dist presence, but
-// `pnpm dev` can leave a stale dist around → DEV=false → the proxied :5317 WS
+// origin (VITE_PORT) is always trusted: DEV is inferred from dist presence, but
+// `pnpm dev` can leave a stale dist around → DEV=false → the proxied Vite WS
 // Origin would 403 and the shell shows "disconnected". Loopback-only bind makes
 // trusting the dev port unconditionally free.
 const SELF_HOSTS = new Set(
-  [PORT, 5317].flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
+  [PORT, VITE_PORT].flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
 );
 function originAllowed(origin) {
   if (!origin) return true;

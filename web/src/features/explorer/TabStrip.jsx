@@ -17,7 +17,9 @@ export default function TabStrip({ tabs, active, onSelect, onClose }) {
           sx={(t) => ({
             alignItems: 'center', flexShrink: 0, gap: 0.5, px: 1, py: 0.5, cursor: 'pointer',
             borderRight: `1px solid ${getTokens(t).glass.stroke}`,
-            bgcolor: tab.path === active ? 'action.selected' : 'transparent',
+            ...(tab.path === active && t.nerv
+              ? { bgcolor: t.nerv.hue.mint, color: t.nerv.hue.void, '&:hover': { bgcolor: t.nerv.hue.mintHi }, '& .MuiIconButton-root': { color: 'inherit' } }
+              : { bgcolor: tab.path === active ? 'action.selected' : 'transparent' }),
           })}
         >
           {tab.dirty && <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main', flexShrink: 0 }} />}

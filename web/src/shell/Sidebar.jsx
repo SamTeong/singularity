@@ -10,6 +10,7 @@ import ListItemButton from '@mui/material/ListItemButton';
 import ListItemIcon from '@mui/material/ListItemIcon';
 import ListItemText from '@mui/material/ListItemText';
 import AddIcon from '@mui/icons-material/Add';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import MoreVertIcon from '@mui/icons-material/MoreVert';
 import ViewKanbanIcon from '@mui/icons-material/ViewKanban';
 import ScheduleIcon from '@mui/icons-material/Schedule';
@@ -425,36 +426,45 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
             though the visible caption reads "MORE" (this theme's chrome is
             never lowercase). */}
         {isPhosphor && (
-          <Tooltip title={collapsed ? 'More' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
-            <ListItemButton
-              onClick={onOpenMenu}
-              aria-label="More"
-              aria-haspopup="menu"
-              aria-expanded={menuOpen}
-              sx={(t) => ({
-                ...moreBtnSx(t),
-                display: 'flex',
-                alignItems: 'center',
-                gap: '13px',
-                justifyContent: collapsed ? 'center' : 'flex-start',
-                minHeight: 40,
-                pl: collapsed ? 0 : '14px',
-                pr: collapsed ? 0 : '14px',
-                py: '8px',
-                mt: '3px',
-              })}
-            >
-              <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: 'inherit' }}>
-                <Box aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.mono, fontSize: 15, letterSpacing: '.2em' })}>···</Box>
-              </ListItemIcon>
-              {!collapsed && (
-                <ListItemText
-                  primary={<Box aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.display, fontWeight: 700, fontSize: 11, letterSpacing: '.12em' })}>MORE</Box>}
-                  sx={{ my: 0 }}
-                />
-              )}
-            </ListItemButton>
-          </Tooltip>
+          <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: '3px', mt: '3px' }}>
+            {!collapsed && (
+              <Tooltip title="Collapse nav rail" placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+                <IconButton onClick={() => setCollapsed(true)} size="small" aria-label="Collapse nav rail" sx={(t) => ({ ...moreBtnSx(t), height: 42, minHeight: 42 })}>
+                  <ChevronLeftIcon />
+                </IconButton>
+              </Tooltip>
+            )}
+            <Tooltip title={collapsed ? 'More' : ''} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+              <ListItemButton
+                onClick={onOpenMenu}
+                aria-label="More"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                sx={(t) => ({
+                  ...moreBtnSx(t),
+                  display: 'flex',
+                  flex: 1,
+                  alignItems: 'center',
+                  gap: '13px',
+                  justifyContent: collapsed ? 'center' : 'flex-start',
+                  minHeight: 40,
+                  pl: collapsed ? 0 : '14px',
+                  pr: collapsed ? 0 : '14px',
+                  py: '8px',
+                })}
+              >
+                <ListItemIcon sx={{ minWidth: collapsed ? 0 : 36, justifyContent: 'center', color: 'inherit' }}>
+                  <Box aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.mono, fontSize: 15, letterSpacing: '.2em' })}>···</Box>
+                </ListItemIcon>
+                {!collapsed && (
+                  <ListItemText
+                    primary={<Box aria-hidden sx={(t) => ({ fontFamily: getTokens(t).fonts.display, fontWeight: 700, fontSize: 11, letterSpacing: '.12em' })}>MORE</Box>}
+                    sx={{ my: 0 }}
+                  />
+                )}
+              </ListItemButton>
+            </Tooltip>
+          </Box>
         )}
       </List>
 
