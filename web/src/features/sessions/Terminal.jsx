@@ -7,6 +7,7 @@ import { matches } from '@/lib/keys.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 import { useThemeSkin } from '@/theme/index.js';
 import { getTerminalTheme } from './term-theme.js';
+import { createScrollAreaResync } from './scrollAreaResync.js';
 
 // Machine-output layer — opaque, never glass — but themed with the app's skin
 // (+ color mode for ZAPAC). Palette lives in ./term-theme.js (shared with
@@ -129,19 +130,15 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     //
     // WebGL + scrollback-trim desyncs .xterm-viewport's DOM scrollHeight from the
     // buffer (xtermjs#4819/#5620): after a long stream the scroll range collapses,
-    // so wheel-up can't move and the scrollbar reads as absent — until the next
-    // command's input handler re-syncs it. Re-sync ourselves once writes settle,
-    // preserving ydisp (doesn't yank a user who scrolled up). Mirrors the down
-    // snap below; both are the cost of the WebGL renderer over the DOM one.
+    // so wheel-up can't move and the scrollbar reads as absent. Re-sync at most
+    // every 120ms while output continues, preserving ydisp (doesn't yank a user
+    // who scrolled up). Mirrors the down snap below; both are the cost of the
+    // WebGL renderer over the DOM one.
     // ponytail: term._core.viewport is internal — xterm exposes no public
     // scroll-area refresh; drop if one lands.
-    let resyncTimer = null;
-    const scheduleResync = () => {
-      clearTimeout(resyncTimer);
-      resyncTimer = setTimeout(() => { try { term._core?.viewport?.syncScrollArea?.(); } catch {} }, 120);
-    };
+    const resync = createScrollAreaResync(() => { try { term._core?.viewport?.syncScrollArea?.(); } catch {} });
     registerOutput(agent.id, {
-      write: (data) => { term.write(data); scheduleResync(); },
+      write: (data) => { term.write(data); resync.schedule(); },
       reset: () => term.reset(),
       meta: (m) => {
         pending = false;
@@ -171,7 +168,7 @@ export default function Terminal({ agent, visible, sendMsg, onSwitch, registerOu
     setTimeout(doFit, 50);
 
     const host = hostRef.current;
-    return () => { clearTimeout(roTimer); clearTimeout(resyncTimer); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); host.removeEventListener('wheel', onWheel); viewport?.removeEventListener('scroll', onViewportScroll); term.dispose(); registerOutput(agent.id, null); };
+    return () => { clearTimeout(roTimer); resync.dispose(); ro.disconnect(); host.removeEventListener('contextmenu', onContextMenu); host.removeEventListener('wheel', onWheel); viewport?.removeEventListener('scroll', onViewportScroll); term.dispose(); registerOutput(agent.id, null); };
   }, [agent.id, sendMsg, registerOutput]);
 
   // Apply the app theme (skin + color mode) live — no need to recreate the
