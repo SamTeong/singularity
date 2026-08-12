@@ -1,0 +1,274 @@
+/* Phosphor Console skin — NERV/MAGI tactical CRT command deck. Activated by
+   `data-skin="phosphor"` on the report's <html>, set at load time by the query
+   parameter the app's UsageReportView appends (and by that component's post-load
+   sync for a live switch). Everything here is scoped under
+   `:root[data-skin="phosphor"]` and this file is concatenated LAST by
+   render_style(), because `:root[data-skin="phosphor"]` and
+   `:root[data-theme="dark"]` have identical specificity — source order is what
+   makes the skin win, and what makes Phosphor correctly dark-only regardless of
+   the stored colour mode.
+
+   Grammar transcribed from docs/one-shot/phosphor-layout-02.html and
+   web/src/theme/skins/phosphor.roles.js: near-black is the only foundational
+   surface, hierarchy comes from border + hue + glow rather than glass, colour is
+   state (mint nominal, blue pending, amber caution, red critical, greenMap idle),
+   and ORANGE IS CHROME ONLY — never a status or series hue. The report cannot
+   import the vendored theme (it must stay a single self-contained file), so these
+   values are a transcription, not a dependency. */
+:root[data-skin="phosphor"]{
+  --paper:#0A0A0A; --paper-2:#0F0F0F; --paper-3:#141414;
+  --bg:var(--paper); --surface:rgba(242,100,0,.04); --surface-2:rgba(242,100,0,.02);
+  --ink:#E8E8E8; --ink-soft:#9A9A9A; --ink-faint:#6A6A6A;
+  --line:rgba(242,100,0,.22); --line-soft:rgba(242,100,0,.10);
+  --weekend:color-mix(in srgb,var(--ink-faint) 14%,var(--paper));
+  /* --red is the AA-corrected #F04438, NOT the vendored raw redHi #E2280F: that
+     hue is 4.28:1 on the void surface, below AA in both directions (filling it
+     doesn't help — contrast is a property of the pair). e2e/phosphor.spec.mjs
+     enforces the correction app-side; this mirrors it. */
+  --clay:#F26400; --clay-deep:#F26400; --amber:#F49F09; --sage:#52F29A; --azure:#5090D0; --red:#F04438;
+  --ok:var(--sage); --info:var(--azure); --warn:var(--amber); --danger:var(--red); --pos:var(--sage); --neg:var(--red);
+  /* --ac is MINT, not orange, and that is deliberate — not a transcription slip.
+     The app reserves orange for chrome (frames, rules, labels) and never uses it
+     as a status or data colour, but --ac is this report's primary *data* accent:
+     it drives the heat ramp, the meter fills and series slot 1. Mint is the
+     nominal hue, so the report's accent and the app's accent legitimately differ.
+     --clay stays orange, which is what keeps the chrome orange. */
+  --ac:var(--sage);
+  --cyan:var(--azure);
+  --grad-brand:linear-gradient(45deg,#F26400 5%,#F49F09 60%,#52F29A 100%);
+  --grad-pane:linear-gradient(150deg,#F26400 0%,#F49F09 50%,#0A0A0A 100%);
+  --glass-chip:rgba(242,100,0,.10);
+  --head-bg:transparent; --head-ink:var(--ink); --head-soft:var(--ink-soft);
+  --card:rgba(242,100,0,.04); --card-2:rgba(242,100,0,.06); --card-brd:rgba(242,100,0,.22);
+  /* no cast shadow — a 1px orange hairline plus a faint inset glow, per the
+     reference's .frame. Depth in Phosphor is border + glow, never a drop shadow. */
+  --card-shadow:0 0 0 1px rgba(242,100,0,.55), inset 0 0 12px rgba(242,100,0,.06);
+  --glow-a:transparent; --glow-b:transparent; --glow-c:transparent;
+  --grain:0; /* film grain is a ZAPAC texture; body::after is repurposed for the CRT pass below */
+
+  /* --- chart series ramp: mint · blue · amber · greenMap · paper · teal · amberDim · greenDim.
+     Orange is absent by design (chrome-only). NOTE --pal-5 is the reference's
+     `--paper` (#EDF8D6, a bone INK colour) — not style.css's `--paper`, which is
+     the page background and is near-black here. Same name, opposite ends of the
+     scale; writing the literal avoids a black series on a black surface. */
+  --pal-1:#52F29A; --pal-2:#5090D0; --pal-3:#F49F09; --pal-4:#3C9C6C;
+  --pal-5:#EDF8D6; --pal-6:#0C6C80; --pal-7:#9C3C24; --pal-8:#246C3C;
+  /* token composition — kept mutually distinct and clear of orange */
+  --tok-in:#5090D0; --tok-out:#52F29A; --tok-cr:#0C6C80; --tok-cc:#F49F09;
+  --paper-fg:var(--bg); /* punched-out content on an accent fill, per .stamp.fill > span */
+
+  /* --- type. System stacks only: the report has a zero-network guarantee, so no
+     webfont may be added. --disp is the condensed display face used by the
+     heading/label classes below; body text is mono, as in the reference. */
+  --mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --disp:'Arial Narrow','Avenir Next Condensed','Helvetica Neue',Arial,sans-serif;
+  --body:var(--mono);
+  --sans:var(--body);
+
+  /* --- shape: 2px chips / 4px panels, and squared data surfaces. */
+  --r-sm:2px; --r-md:4px; --r-lg:4px; --r-xl:4px; --r-pill:2px;
+  --tm-r:0px; /* treemap tiles are hard-cornered */
+}
+
+/* ---------- CRT pass: scanline + vignette ABOVE content ----------
+   body::before is z-index:-1, so the previous version of this skin — which put
+   the scanlines there — buried them under every card. The reference runs the CRT
+   pass at --z-crt:99, over everything. So: flatten ::before to a plain surface
+   fill, and move the pass to ::after (already fixed + pointer-events:none for the
+   film grain Phosphor drops). ::after inherits opacity:var(--grain), which is 0
+   here, so opacity MUST be reset or the pass is invisible. */
+:root[data-skin="phosphor"] body::before{background:var(--paper)}
+:root[data-skin="phosphor"] body::after{
+  z-index:99;opacity:1;pointer-events:none;
+  background:
+    repeating-linear-gradient(0deg, rgba(0,0,0,.22) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%);
+}
+
+/* The #glow canvas (motion.html) paints three drifting radial gradients from
+   --clay/--azure/--cyan. It reads the live tokens, so it leaks no ZAPAC colour —
+   but it IS an ambient radial glow field, which Phosphor does not have: the void
+   is flat and hierarchy comes from borders. Hiding it also stops the animation
+   loop from doing work nothing can see. */
+:root[data-skin="phosphor"] #glow{display:none}
+
+/* ---------- de-glass: no blur anywhere ---------- */
+:root[data-skin="phosphor"] .card,
+:root[data-skin="phosphor"] .supp,
+:root[data-skin="phosphor"] .eff,
+:root[data-skin="phosphor"] .scroll,
+:root[data-skin="phosphor"] .flagcard,
+:root[data-skin="phosphor"] .topbar,
+:root[data-skin="phosphor"] .secnav-panel,
+:root[data-skin="phosphor"] .filterrail-rail,
+:root[data-skin="phosphor"] .filterrail-panel{backdrop-filter:none;-webkit-backdrop-filter:none}
+
+/* ---------- typography: uppercase is OPT-IN ----------
+   The reference uppercases `body` and escapes prose. Inverted here: this report is
+   dense with model identifiers, file paths, project names and full prose, so the
+   opt-out list would be longer and far more fragile than the opt-in list. Only
+   headings and labels are listed — nothing here carries a data string. */
+:root[data-skin="phosphor"] .flag h1.hl,
+:root[data-skin="phosphor"] .shead-title h2,
+:root[data-skin="phosphor"] .card h3,
+:root[data-skin="phosphor"] .subhead,
+:root[data-skin="phosphor"] .colcards h4,
+:root[data-skin="phosphor"] .sg-a,
+:root[data-skin="phosphor"] .sg-b,
+:root[data-skin="phosphor"] .empty-state h4,
+:root[data-skin="phosphor"] .eyebrow-hero,
+:root[data-skin="phosphor"] .numlbl,
+:root[data-skin="phosphor"] .flagstats .l,
+:root[data-skin="phosphor"] .ratio-eyebrow,
+:root[data-skin="phosphor"] .filter-lbl,
+:root[data-skin="phosphor"] .cal-lbl,
+:root[data-skin="phosphor"] .donut-sub,
+:root[data-skin="phosphor"] .tbl th,
+:root[data-skin="phosphor"] .fpill,
+:root[data-skin="phosphor"] .toggle button{text-transform:uppercase;font-family:var(--disp)}
+/* the condensed face has no tabular figures; keep numerals mono where they align */
+:root[data-skin="phosphor"] .tbl th.n{font-family:var(--mono)}
+
+/* ---------- panels: the double frame ----------
+   1px orange rule plus a ::before inset hairline at inset:4px / opacity:.4. The
+   28px chamfer goes on .flagcard ONLY: clip-path clips descendants, and .card
+   hosts hover tooltips that deliberately overflow (.seg:hover::after sits 17px
+   above its bar) plus scaled cells (.cal .c:hover, .heat .cell:hover). Chamfering
+   those would shear them. .flagcard has no overflowing children. */
+:root[data-skin="phosphor"] .card,
+:root[data-skin="phosphor"] .flagcard,
+:root[data-skin="phosphor"] .supp,
+:root[data-skin="phosphor"] .eff{position:relative;border:1px solid var(--clay);box-shadow:var(--card-shadow)}
+:root[data-skin="phosphor"] .card::before,
+:root[data-skin="phosphor"] .flagcard::before,
+:root[data-skin="phosphor"] .supp::before,
+:root[data-skin="phosphor"] .eff::before{
+  content:"";position:absolute;inset:4px;border:1px solid var(--clay);
+  opacity:.4;pointer-events:none;
+}
+/* .scroll is an overflow-x container: an absolutely positioned ::before would
+   scroll away from the frame with the content. An outline is painted on the
+   element's own border box and does not scroll, so the inset hairline is drawn
+   that way here — same 4px inset, same 40% orange, and it can neither clip nor
+   intercept anything. */
+:root[data-skin="phosphor"] .scroll{
+  border:1px solid var(--clay);box-shadow:var(--card-shadow);
+  outline:1px solid color-mix(in srgb,var(--clay) 40%,transparent);outline-offset:-5px;
+}
+:root[data-skin="phosphor"] .flagcard{
+  clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));
+}
+
+/* ---------- controls: square, orange-outlined, on the void ----------
+   Active inverts to a MINT fill (selection is a data signal, so it may not be
+   orange) with punched-out --paper-fg text. */
+:root[data-skin="phosphor"] .fpill,
+:root[data-skin="phosphor"] button.lg-item,
+:root[data-skin="phosphor"] .range-preset,
+:root[data-skin="phosphor"] .lg-all,
+:root[data-skin="phosphor"] .iconbtn{
+  background:var(--bg);border:1px solid var(--clay);border-radius:0;
+  color:var(--clay);box-shadow:none;
+}
+:root[data-skin="phosphor"] .fpill:hover,
+:root[data-skin="phosphor"] button.lg-item:hover,
+:root[data-skin="phosphor"] .range-preset:hover,
+:root[data-skin="phosphor"] .lg-all:hover{background:var(--clay);color:var(--bg);transform:none}
+:root[data-skin="phosphor"] .iconbtn:hover{background:var(--clay);color:var(--bg);transform:none}
+:root[data-skin="phosphor"] .range-preset.active,
+:root[data-skin="phosphor"] .lg-all.active{
+  background:var(--sage);border-color:var(--sage);color:var(--paper-fg);box-shadow:none;
+}
+:root[data-skin="phosphor"] .toggle{
+  background:var(--bg);border:1px solid var(--clay);border-radius:0;box-shadow:none;
+}
+:root[data-skin="phosphor"] .toggle button{border-radius:0;color:var(--clay)}
+:root[data-skin="phosphor"] .toggle button.active{
+  background:var(--sage);color:var(--paper-fg);box-shadow:none;
+}
+
+/* ---------- focus: dashed amber, per DESIGN.md nav focus ---------- */
+:root[data-skin="phosphor"] :focus-visible{outline:2px dashed var(--amber);outline-offset:2px;border-radius:0}
+/* .filterrail-rail carries its own solid-clay focus rule; keep it consistent */
+:root[data-skin="phosphor"] .filterrail-rail:focus-visible{outline:2px dashed var(--amber);outline-offset:2px;border-radius:0}
+
+/* ---------- meters become discrete LEDs ----------
+   Achieved by masking, not by markup: app.js keeps emitting continuous
+   `style='width:…%'` fills, and a repeating-gradient mask on the track segments
+   both the track and the fill inside it. If a mask ever fails the meter degrades
+   to the existing continuous fill — legible, just not segmented. */
+:root[data-skin="phosphor"] .bar-track,
+:root[data-skin="phosphor"] .sbar-track,
+:root[data-skin="phosphor"] .ratio-meter{
+  border-radius:0;
+  mask-image:repeating-linear-gradient(90deg,#000 0 3px,transparent 3px 5px);
+}
+:root[data-skin="phosphor"] .sbars i{
+  border-radius:0;
+  mask-image:repeating-linear-gradient(0deg,#000 0 3px,transparent 3px 5px);
+}
+:root[data-skin="phosphor"] .bar,
+:root[data-skin="phosphor"] .ratio-meter>i,
+:root[data-skin="phosphor"] .seg,
+:root[data-skin="phosphor"] .seg:first-child,
+:root[data-skin="phosphor"] .seg:last-child{border-radius:0}
+
+/* ---------- squared data surfaces ---------- */
+:root[data-skin="phosphor"] .cal .c,
+:root[data-skin="phosphor"] .heat .cell,
+:root[data-skin="phosphor"] .lg-swatch,
+:root[data-skin="phosphor"] .fdot,
+:root[data-skin="phosphor"] .donut-legend .li i,
+:root[data-skin="phosphor"] .swatch-legend .sw,
+:root[data-skin="phosphor"] .scalekey i,
+:root[data-skin="phosphor"] .treemap,
+:root[data-skin="phosphor"] .tag,
+:root[data-skin="phosphor"] .tbl .tag,
+:root[data-skin="phosphor"] .sg-b{border-radius:0}
+
+/* ---------- luminous readouts ---------- */
+:root[data-skin="phosphor"] .flagnum,
+:root[data-skin="phosphor"] .ratio-val,
+:root[data-skin="phosphor"] .supp .v,
+:root[data-skin="phosphor"] .flagstats .v{text-shadow:0 0 4px currentColor}
+/* .flagnum is gradient-clipped text under ZAPAC (and in this skin's first draft).
+   A flat mint fill needs the clip AND the transparent text-fill actively reset —
+   setting `color` alone loses to -webkit-text-fill-color. */
+:root[data-skin="phosphor"] .flagnum{
+  background-image:none;background-clip:border-box;-webkit-background-clip:border-box;
+  -webkit-text-fill-color:var(--sage);color:var(--sage);
+}
+
+/* ---------- state colour, per the roles map ----------
+   nominal mint · pending blue · caution amber · critical red · idle greenMap.
+   Most of these already resolve correctly through the tokens above; what genuinely
+   moves is "idle/neutral", which ZAPAC paints in --ink-faint grey and Phosphor
+   gives the greenMap map-hue. */
+:root[data-skin="phosphor"] .sg-b.st-ok{color:var(--sage);background:color-mix(in srgb,var(--sage) 14%,transparent)}
+:root[data-skin="phosphor"] .sg-b.st-part{color:var(--amber);background:color-mix(in srgb,var(--amber) 16%,transparent)}
+:root[data-skin="phosphor"] .sg-b.st-idea{color:var(--azure);background:color-mix(in srgb,var(--azure) 16%,transparent)}
+:root[data-skin="phosphor"] .sg-b.st-done{color:#3C9C6C;background:color-mix(in srgb,#3C9C6C 16%,transparent)}
+:root[data-skin="phosphor"] .note.info{border-left-color:var(--azure)}
+:root[data-skin="phosphor"] .note.info svg{color:var(--azure)}
+:root[data-skin="phosphor"] .note.warn{border-left-color:var(--amber)}
+:root[data-skin="phosphor"] .note.warn svg{color:var(--amber)}
+:root[data-skin="phosphor"] .note.ok{border-left-color:var(--sage)}
+:root[data-skin="phosphor"] .note.ok svg{color:var(--sage)}
+:root[data-skin="phosphor"] .trend-chip[data-dir="up"]{color:var(--sage);background:color-mix(in srgb,var(--sage) 14%,transparent)}
+:root[data-skin="phosphor"] .trend-chip[data-dir="down"]{color:var(--red);background:color-mix(in srgb,var(--red) 14%,transparent)}
+:root[data-skin="phosphor"] .trend-chip[data-dir="flat"]{color:#3C9C6C;background:color-mix(in srgb,#3C9C6C 14%,transparent)}
+:root[data-skin="phosphor"] .pill .dot{
+  background:var(--sage);box-shadow:0 0 0 3px color-mix(in srgb,var(--sage) 25%,transparent);
+}
+/* model/token tags are DATA, so they may not carry the chrome orange --clay
+   resolves to; mint is the nominal data hue. */
+:root[data-skin="phosphor"] .tag,
+:root[data-skin="phosphor"] .tbl .tag{
+  color:var(--sage);background:color-mix(in srgb,var(--sage) 14%,transparent);
+}
+/* scrollbars are chrome furniture: the dim greens are chrome-only (below AA for
+   text, which is exactly what a scrollbar thumb should be). */
+:root[data-skin="phosphor"] *{scrollbar-color:#246C3C transparent}
+
+/* ---------- Phosphor is dark-only: no colour-mode control ---------- */
+:root[data-skin="phosphor"] #theme-tgl{display:none}

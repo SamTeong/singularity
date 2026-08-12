@@ -29,6 +29,14 @@
   --ctl-h:34px; /* shared height for header filter pills + segmented toggle */
   /* radius scale — zapac radii 12/18/26/34/999 */
   --r-sm:12px; --r-md:18px; --r-lg:26px; --r-xl:34px; --r-pill:999px;
+  /* chart series ramp — decoupled from the semantic status tokens above so a skin
+     can assign distinct series hues without colliding with ok/warn/info/danger */
+  --pal-1:var(--ac); --pal-2:var(--azure); --pal-3:var(--amber); --pal-4:var(--sage); --pal-5:var(--ink-soft);
+  --pal-6:#aa41af; --pal-7:#3c69c8; --pal-8:#00a5e6;
+  /* token-composition series (input/output/cache read/cache creation) */
+  --tok-in:var(--azure); --tok-out:var(--ac); --tok-cr:var(--sage); --tok-cc:var(--amber);
+  --paper-fg:#fff; /* foreground legible on an accent-filled surface */
+  --tm-r:12px; /* treemap tile radius */
 }
 :root[data-theme="dark"]{
   --paper:#0b0813; --paper-2:#120c1f; --paper-3:#181226;
@@ -46,39 +54,8 @@
   --card-shadow:0 24px 60px -28px rgba(0,0,0,.8), inset 0 1px 0 rgba(255,255,255,.04);
   --glow-a:rgba(170,65,175,.30); --glow-b:rgba(60,105,200,.20); --glow-c:rgba(0,165,230,.18);
   --grain:0.05;
-}
-/* Phosphor Console skin — NERV/MAGI tactical CRT command deck. Activated by
-   `data-skin="phosphor"` on the report's <html>, set by the app's
-   UsageReportView when the active skin is Phosphor. Overrides the ZAPAC
-   identity tokens with Phosphor's dark-only CRT palette: black void surfaces,
-   orange chrome, mint nominal, amber caution, red critical. No light variant
-   — Phosphor is dark-only, so this builds on `data-theme="dark"`. */
-:root[data-skin="phosphor"]{
-  --paper:#0A0A0A; --paper-2:#0F0F0F; --paper-3:#141414;
-  --bg:var(--paper); --surface:rgba(242,100,0,.04); --surface-2:rgba(242,100,0,.02);
-  --ink:#E8E8E8; --ink-soft:#9A9A9A; --ink-faint:#6A6A6A;
-  --line:rgba(242,100,0,.22); --line-soft:rgba(242,100,0,.10);
-  --weekend:color-mix(in srgb,var(--ink-faint) 14%,var(--paper));
-  --clay:#F26400; --clay-deep:#F26400; --amber:#F49F09; --sage:#52F29A; --azure:#4DB8FF; --red:#F04438;
-  --ok:var(--sage); --info:var(--azure); --warn:var(--amber); --danger:var(--red); --pos:var(--sage); --neg:var(--red);
-  --ac:var(--clay);
-  --cyan:#4DB8FF;
-  --grad-brand:linear-gradient(45deg,#F26400 5%,#F49F09 60%,#52F29A 100%);
-  --grad-pane:linear-gradient(150deg,#F26400 0%,#F49F09 50%,#0A0A0A 100%);
-  --glass-chip:rgba(242,100,0,.10);
-  --head-bg:transparent; --head-ink:var(--ink); --head-soft:var(--ink-soft);
-  --card:rgba(242,100,0,.04); --card-2:rgba(242,100,0,.06); --card-brd:rgba(242,100,0,.22);
-  --card-shadow:0 0 0 1px rgba(242,100,0,.08), inset 0 0 12px rgba(242,100,0,.03);
-  --glow-a:rgba(242,100,0,.10); --glow-b:rgba(82,242,154,.06); --glow-c:rgba(77,184,255,.04);
-  --grain:0.02;
-  --r-sm:2px; --r-md:4px; --r-lg:4px; --r-xl:4px; --r-pill:2px;
-}
-:root[data-skin="phosphor"] .flagnum{background-image:linear-gradient(120deg,#fff,var(--clay));-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;color:transparent}
-:root[data-skin="phosphor"] .flagcard{backdrop-filter:none;-webkit-backdrop-filter:none;border-radius:var(--r-md);box-shadow:var(--card-shadow)}
-:root[data-skin="phosphor"] body::before{
-  background:
-    repeating-linear-gradient(0deg, rgba(0,0,0,.18) 0 1px, transparent 1px 3px),
-    radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.45) 100%);
+  /* the series ramp needs no dark override — pal-1..5 and tok-* resolve through the
+     status tokens redefined above, and pal-6/7/8 + paper-fg are unconditional literals. */
 }
 *{box-sizing:border-box}
 /* ponytail: standard scrollbar-* only (Chrome 121+/FF/Safari 18.4+) -- no ::-webkit-scrollbar
@@ -97,7 +74,7 @@ body::after{ /* film grain */
   content:"";position:fixed;inset:0;z-index:9;pointer-events:none;opacity:var(--grain);
   background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-::selection{background:var(--clay);color:#fff}
+::selection{background:var(--clay);color:var(--paper-fg)}
 :focus-visible{outline:2px solid var(--clay);outline-offset:3px;border-radius:6px}
 .wrap{max-width:1080px;margin:0 auto;padding:0 clamp(18px,4vw,40px)}
 .num{font-family:var(--mono);font-variant-numeric:tabular-nums}
@@ -210,8 +187,10 @@ header{background:transparent;color:var(--ink);padding:var(--s6) 0 var(--s2);bor
 .fpill:hover,button.lg-item:hover,.range-preset:hover,.lg-all:hover{color:var(--ink);transform:translateY(-1px)}
 .lg-swatch,.fdot{width:10px;height:10px;border-radius:3px;flex:none}
 /* active (clay-filled) — model/token pills use .off to dim; range presets + "all" use .active */
-.range-preset.active,.lg-all.active{color:#fff;background:var(--clay);border-color:transparent;box-shadow:0 4px 12px -4px var(--clay)}
-.range-preset.active .lg-swatch,.lg-all.active .lg-swatch{box-shadow:0 0 0 1.5px rgba(255,255,255,.7)}
+.range-preset.active,.lg-all.active{color:var(--paper-fg);background:var(--clay);border-color:transparent;box-shadow:0 4px 12px -4px var(--clay)}
+/* same on-accent foreground as the label beside it — resolves to the identical
+   rgba(255,255,255,.7) under zapac, but follows a skin that repaints the fill */
+.range-preset.active .lg-swatch,.lg-all.active .lg-swatch{box-shadow:0 0 0 1.5px color-mix(in srgb,var(--paper-fg) 70%,transparent)}
 button.lg-item.off{opacity:.42}
 button.lg-item.off:hover{opacity:.7}
 /* the "all" reset reads as a ghost pill until it's the active state */
@@ -242,11 +221,14 @@ tr.total td{font-weight:700;border-top:2px solid var(--line);font-family:var(--m
 .toggle{display:inline-flex;background:var(--card-2);border:1px solid var(--card-brd);border-radius:var(--r-pill);padding:3px;box-shadow:var(--card-shadow)}
 .toggle button{height:calc(var(--ctl-h) - 8px);display:inline-flex;align-items:center;font-family:var(--mono);background:none;border:none;color:var(--ink-soft);border-radius:var(--r-pill);padding:0 14px;font-size:11.5px;font-weight:600;letter-spacing:.04em;cursor:pointer;transition:color .2s}
 .toggle button:hover{color:var(--ink)}
-.toggle button.active{background:var(--clay);color:#fff;box-shadow:0 4px 12px -4px var(--clay)}
+.toggle button.active{background:var(--clay);color:var(--paper-fg);box-shadow:0 4px 12px -4px var(--clay)}
 .chart{width:100%;height:auto;display:block}
 .chart text{font-family:var(--mono);font-size:11px;fill:var(--ink-faint)}
 .chart .axis{stroke:var(--line);stroke-width:1}
 .treemap{width:100%;height:auto;display:block;border-radius:12px}
+/* geometry props beat the rect's rx/ry presentation attrs (kept there as a fallback
+   for engines without CSS rx/ry support), so a skin can square tiles via --tm-r alone */
+.treemap rect{rx:var(--tm-r);ry:var(--tm-r)}
 .spark{display:block;width:100%;height:28px;margin-top:8px}
 .donut-wrap{display:flex;align-items:center;gap:14px;flex-wrap:wrap;justify-content:center;padding:2px 0}
 .donut-val{font-family:var(--mono);font-weight:700;font-size:26px;fill:var(--ink);letter-spacing:-.02em}
