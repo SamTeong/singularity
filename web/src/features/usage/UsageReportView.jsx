@@ -13,11 +13,13 @@ import { EmptyState } from '@/components/EmptyState.jsx';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { useThemeSkin } from '@/theme/AppThemeProvider.jsx';
 
-// The report bootstraps its theme from documentElement.dataset.theme, seeded by
-// localStorage['agents-report-theme']. Same-origin iframe → we drive both: seed
-// the key (governs the bootstrap read, so no light-flash) and set data-theme
-// directly on the live doc so an already-loaded report follows the app instantly.
+// The report bootstraps its theme/skin from documentElement.dataset.{theme,skin},
+// seeded by localStorage['agents-report-theme']/['agents-report-skin']. Same-origin
+// iframe → we drive both: seed the keys (governs the bootstrap read, so no
+// light/ZAPAC flash) and set the dataset directly on the live doc so an
+// already-loaded report follows the app instantly.
 const REPORT_THEME_KEY = 'agents-report-theme';
+const REPORT_SKIN_KEY = 'agents-report-skin';
 
 // ponytail: the iframe src can't set the x-sing-token header (iframe attributes
 // can't carry custom headers), and switching to fetch() + srcdoc/blob breaks the
@@ -27,7 +29,32 @@ const REPORT_THEME_KEY = 'agents-report-theme';
 // origin allowlist keep the query-string token's exposure to loopback only, and
 // the server redacts token= from logs. So ?token= stays.
 const TOKEN = window.__SING_TOKEN__;
-const reportSrc = (t) => `/usagereport/report?t=${t}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}`;
+// skin/theme ride along so the report's inline bootstrap (base.html) resolves the
+// right presentation on its first painted frame, before any host round-trip.
+const reportSrc = (t, skinId, theme) =>
+  `/usagereport/report?t=${t}&skin=${encodeURIComponent(skinId)}&theme=${encodeURIComponent(theme)}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}`;
+
+// The `src` is captured once per mount rather than recomputed each render, and
+// that is load-bearing: `src` is a DOM attribute, so letting it track live skin/
+// mode state would make React rewrite it on every light/dark toggle and navigate
+// the iframe — throwing away scroll position, legend selection and the hero's
+// typing animation, and re-parsing the whole self-contained document. The query
+// string exists only to get the FIRST frame right; every change after that is
+// syncTheme's job. The caller keys this on `status.at`, so a Refresh (the one
+// event that legitimately reloads) remounts and re-captures the current values.
+function ReportFrame({ at, skinId, mode, onLoad, ref }) {
+  const [src] = useState(() => reportSrc(at, skinId, mode));
+  return (
+    <Box
+      component="iframe"
+      ref={ref}
+      onLoad={onLoad}
+      title="Usage report"
+      src={src}
+      sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
+    />
+  );
+}
 
 // Usage report: renders the harness-usage-report skill's self-contained HTML
 // in a sandboxed iframe. Generate/Refresh spawns the skill server-side.
@@ -46,19 +73,33 @@ export default function UsageReportView() {
   const usageReportUnavailable = caps && caps.usageReport?.available === false;
   const usageReportHint = caps?.usageReport?.hint;
 
-  // Seed the report's bootstrap key so a (re)load starts in the app's mode.
-  try { localStorage.setItem(REPORT_THEME_KEY, resolved); } catch {}
+  // Seed the report's bootstrap keys so a (re)load with no query string still
+  // starts in the app's mode/skin — i.e. someone opening
+  // /usagereport/report directly in a tab. (A report copied out and opened as a
+  // file:// URL has a different storage origin and can never read these; it
+  // falls back to ZAPAC/light by design.) Persisting the raw skinId is fine: the
+  // report's Phosphor CSS keys off data-skin="phosphor" specifically, so any
+  // other value is inert — and it is the same value the live-sync path writes.
+  try {
+    localStorage.setItem(REPORT_THEME_KEY, resolved);
+    localStorage.setItem(REPORT_SKIN_KEY, skinId);
+  } catch {}
 
   // Push the app's mode + skin into the already-loaded report doc (same-origin
   // access). `data-skin="phosphor"` activates the report's Phosphor CSS overrides
-  // (black CRT surfaces, orange chrome, mint nominal); absent = ZAPAC default.
+  // (black CRT surfaces, orange chrome, mint nominal); any other value is inert
+  // and renders ZAPAC. Written unconditionally — the same value the load-time
+  // query string and the bootstrap's localStorage fallback resolve to — so the
+  // two paths can't leave the doc in states that differ (an earlier version
+  // deleted the attribute for ZAPAC, which disagreed with the `zapac` the
+  // bootstrap writes, and would diverge the moment a `:not([data-skin])` rule
+  // appears). Mirrors AppThemeProvider, which publishes the raw id the same way.
   const syncTheme = useCallback(() => {
     const doc = iframeRef.current?.contentDocument;
     if (doc) {
       try {
         doc.documentElement.dataset.theme = resolved;
-        if (skinId === 'phosphor') doc.documentElement.dataset.skin = 'phosphor';
-        else delete doc.documentElement.dataset.skin;
+        doc.documentElement.dataset.skin = skinId;
       } catch {}
     }
   }, [resolved, skinId]);
@@ -110,14 +151,13 @@ export default function UsageReportView() {
           // so the report's theme toggle uses its own localStorage and the parent can
           // reach contentDocument for syncTheme. Report is trusted same-origin local
           // content (127.0.0.1, token-gated, user-owned), so no sandbox is fine.
-          <Box
-            component="iframe"
+          <ReportFrame
             key={status.at}
-            ref={iframeRef}
+            at={status.at}
+            skinId={skinId}
+            mode={resolved}
             onLoad={syncTheme}
-            title="Usage report"
-            src={reportSrc(status.at)}
-            sx={{ position: 'absolute', inset: 0, width: '100%', height: '100%', border: 0 }}
+            ref={iframeRef}
           />
         ) : (
           <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center' }}>
