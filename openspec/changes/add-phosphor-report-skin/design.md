@@ -68,8 +68,23 @@ before the `<style>` block — which is why light/dark never flashes. Extend it 
 already builds a query string; append `&skin=` and `&theme=`.
 
 The post-load `syncTheme` poke stays. The two paths are complementary, not redundant:
-the query parameter fixes first paint, the DOM write handles a *live* skin switch
-without reloading the iframe. Both write the same attribute, so they cannot disagree.
+the query parameter fixes first paint, the DOM write handles a live *colour-mode*
+change without reloading the iframe. Both write the same attribute, so they cannot
+disagree.
+
+**Corrected during implementation** (verified in the running app, task 7.5): the DOM
+write does *not* carry a live **skin** switch, because `AppThemeProvider` renders
+`<SkinProvider key={skin.id}>` — changing skin remounts the entire subtree, so
+`UsageReportView` unmounts and the iframe is recreated. The user-visible requirement
+still holds: the report is never *regenerated* (no skill spawn), and the fresh iframe
+carries `&skin=` so it paints the new skin on its first frame with no ZAPAC flash.
+But the iframe *is* reloaded on a skin change, and `syncTheme`'s skin branch only
+ever runs against a freshly-loaded document. This is pre-existing app-shell
+behaviour, not something this change introduced. Consequence for the design: the
+query parameter is the load-bearing path for skin, and `syncTheme` is load-bearing
+for colour mode. That is also why the iframe `src` must be captured once per mount
+rather than tracked live — a `src` that followed `resolved` would navigate the
+iframe on every light/dark toggle, discarding scroll position and legend state.
 
 No daemon change — `/usagereport/report` serves a static file and ignores unknown query
 parameters, and `?t=` already rides along.
