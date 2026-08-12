@@ -2,7 +2,8 @@
 <html lang='en'><head><meta charset='utf-8'>
 <meta name='viewport' content='width=device-width, initial-scale=1'>
 <title>AI Coding Usage Report</title>
-<script>(function(){try{document.documentElement.dataset.theme=localStorage.getItem('agents-report-theme')||'light';}catch(e){document.documentElement.dataset.theme='light';}})();</script>
+<!-- Runs before <style> deliberately: resolving theme/skin here, ahead of any CSS evaluation, is what prevents a ZAPAC/light flash on first paint. -->
+<script>(function(){try{var q=new URLSearchParams(location.search),SK=/^[a-z0-9-]+$/,s=q.get('skin');if(!(s&&SK.test(s)))s=localStorage.getItem('agents-report-skin');if(s&&SK.test(s))document.documentElement.dataset.skin=s;var t=q.get('theme');if(t!=='light'&&t!=='dark')t=localStorage.getItem('agents-report-theme');document.documentElement.dataset.theme=(t==='light'||t==='dark')?t:'light';}catch(e){document.documentElement.dataset.theme='light';}})();</script>
 <style>
 {{STYLE}}
 </style></head><body>

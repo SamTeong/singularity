@@ -1,6 +1,6 @@
 const CFG = {
-  PALETTE: ["var(--ac)", "var(--azure)", "var(--amber)", "var(--sage)", "var(--ink-soft)", "#aa41af", "#3c69c8", "#00a5e6"],
-  TOKEN: [{name:"Input",key:"in",col:"var(--azure)"},{name:"Output",key:"out",col:"var(--ac)"},{name:"Cache read",key:"cr",col:"var(--sage)"},{name:"Cache creation",key:"cc",col:"var(--amber)"}],
+  PALETTE: ["var(--pal-1)", "var(--pal-2)", "var(--pal-3)", "var(--pal-4)", "var(--pal-5)", "var(--pal-6)", "var(--pal-7)", "var(--pal-8)"],
+  TOKEN: [{name:"Input",key:"in",col:"var(--tok-in)"},{name:"Output",key:"out",col:"var(--tok-out)"},{name:"Cache read",key:"cr",col:"var(--tok-cr)"},{name:"Cache creation",key:"cc",col:"var(--tok-cc)"}],
   HEAT: ["transparent","color-mix(in srgb,var(--ac) 22%,transparent)","color-mix(in srgb,var(--ac) 45%,transparent)","color-mix(in srgb,var(--ac) 70%,transparent)","var(--ac)"],
   LINE_COV: 0.05,
   PRESETS: [{id:"7d",label:"last 7 days",days:7},{id:"30d",label:"last 30 days",days:30},{id:"all",label:"all time"}]
@@ -145,7 +145,7 @@ function svgTreemap(pm,cmap,dispMap){
   var items=Object.keys(pm).map(function(m){return [m,pm[m].cost];}).filter(function(x){return x[1]>0;}).sort(function(a,b){return b[1]-a[1];});
   if(!items.length)return '<p class="muted">No data.</p>';
   var W=1000,H=170,tot=items.reduce(function(a,b){return a+b[1];},0)||1,x=0,inner='';
-  items.forEach(function(it){var m=it[0],c=it[1],w=c/tot*W;inner+="<rect x='"+x.toFixed(1)+"' y='0' width='"+w.toFixed(1)+"' height='"+H+"' rx='12' ry='12' fill='"+(cmap[m]||'var(--ink-faint)')+"' stroke='var(--surface)' stroke-width='3'><title>"+escAttr(m)+" · $"+c.toFixed(2)+" · "+(c/tot*100).toFixed(1)+"%</title></rect>";if(w>64){var label=esc(((dispMap&&dispMap[m])?dispMap[m]:m).split('/').pop().slice(0,18));inner+="<text x='"+(x+7).toFixed(1)+"' y='22' fill='#fff' style='font-size:11px'>"+label+"</text><text x='"+(x+7).toFixed(1)+"' y='39' fill='#fff' style='font-size:11px'>$"+Math.round(c)+"</text>";}x+=w;});
+  items.forEach(function(it){var m=it[0],c=it[1],w=c/tot*W;inner+="<rect x='"+x.toFixed(1)+"' y='0' width='"+w.toFixed(1)+"' height='"+H+"' rx='12' ry='12' fill='"+(cmap[m]||'var(--ink-faint)')+"' stroke='var(--surface)' stroke-width='3'><title>"+escAttr(m)+" · $"+c.toFixed(2)+" · "+(c/tot*100).toFixed(1)+"%</title></rect>";if(w>64){var label=esc(((dispMap&&dispMap[m])?dispMap[m]:m).split('/').pop().slice(0,18));inner+="<text x='"+(x+7).toFixed(1)+"' y='22' fill='var(--paper-fg)' style='font-size:11px'>"+label+"</text><text x='"+(x+7).toFixed(1)+"' y='39' fill='var(--paper-fg)' style='font-size:11px'>$"+Math.round(c)+"</text>";}x+=w;});
   return svgWrap(W,H,inner,'treemap');
 }
 // month-grid calendar (design-system: Charts > Daily spend calendar) — renders the
