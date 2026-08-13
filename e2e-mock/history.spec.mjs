@@ -1,0 +1,78 @@
+// History page (HistoryView). The mock returns seven days: six populated days
+// and one `llm.reason: 'empty'` gap, so no history regeneration is needed.
+import { test, expect } from './fixtures/test.mjs';
+import { gotoView, visible } from '../e2e/helpers/nav.mjs';
+
+// 'history' has no VIEW_LANDMARK entry in nav.mjs — gotoView falls back to a
+// short settle, then we wait on the page title directly. The title renders
+// before the async fetch lands, so the card assertions below are what actually
+// wait for data.
+async function openHistory(page) {
+  await gotoView(page, 'history');
+  await expect(page.getByText('History', { exact: true }).first()).toBeVisible({ timeout: 15000 });
+}
+
+test('seeded days render in newest-first order', async ({ page }) => {
+  await openHistory(page);
+
+  // 6 non-empty seeded days + today = 7 cards. The gap day (day-2) renders as
+  // a GapSegment, not an <article>, so it's excluded from this count.
+  const cards = page.getByRole('article');
+  await expect(cards).toHaveCount(7, { timeout: 15000 });
+
+  // The day's narrative is per-project bullets inside the cards, so the cards
+  // carry the seeded text. Comparing their vertical positions proves
+  // descending-date order, not just "row exists".
+  const yOf = async (text) => (await cards.filter({ hasText: text }).first().boundingBox()).y;
+  expect(await yOf('Shipped the history timeline')).toBeLessThan(await yOf('Built the e2e sandbox seed corpus'));
+  // Second bullet of the same day's project renders too (up to 3 per project).
+  await expect(cards.filter({ hasText: 'Shipped the history timeline' }).first()).toContainText('Fixed a concurrent backfill bug');
+});
+
+test('expand a day reveals its session list', async ({ page }) => {
+  await openHistory(page);
+
+  // Click day-1's project card — its header block is the toggle (role="button",
+  // onClick=onToggle) and expands the whole row.
+  const card = page.getByRole('article').filter({ hasText: 'Shipped the history timeline' }).first();
+  await card.getByRole('button').first().click();
+
+  // The session list region appears with both seeded sessions.
+  const sessions = page.getByRole('region', { name: /^Sessions/ });
+  await expect(sessions).toBeVisible();
+  await expect(sessions.getByText('Retry backoff cap')).toBeVisible();
+  await expect(sessions.getByText('Fixture session 901')).toBeVisible();
+});
+
+test('deep-link from a session row into Transcripts', async ({ page }) => {
+  await openHistory(page);
+
+  // Expand day-1, then click the rich session's row.
+  const card = page.getByRole('article').filter({ hasText: 'Shipped the history timeline' }).first();
+  await card.getByRole('button').first().click();
+  const sessions = page.getByRole('region', { name: /^Sessions/ });
+  await expect(sessions).toBeVisible();
+  await sessions.getByText('Retry backoff cap').click();
+
+  // View switched to Transcripts — the search box is the view landmark.
+  await expect(page.getByPlaceholder('Search transcripts…')).toBeVisible();
+  // The transcript auto-opened from the openSession prop (SessionHistory's
+  // useEffect at line 142). The deep-link item carries no title (only
+  // project/id/cwd/source), so the header shows the raw id, not "title - id".
+  // Assert on the transcript content instead — it proves the right session
+  // opened, not just that the view switched.
+  await expect(visible(page.getByText('Trace the retry path and tell me where the backoff is capped.')).first()).toBeVisible({ timeout: 15000 });
+});
+
+test('a gap day renders absence, not a shimmer placeholder', async ({ page }) => {
+  await openHistory(page);
+
+  // The gap day (2 days ago) renders as a compressed segment with the
+  // "no work" aria-label — absence is information, not an error.
+  await expect(page.locator('[aria-label*="no work"]')).toBeVisible({ timeout: 15000 });
+
+  // No shimmer placeholders: every day is seeded, so `pending` is empty and
+  // no ShimmerCard (aria-busy="true") should be present. Sessions region name
+  // matches the new format with project label.
+  await expect(page.locator('[aria-busy="true"]')).toHaveCount(0);
+});
