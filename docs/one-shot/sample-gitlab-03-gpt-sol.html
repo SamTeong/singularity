@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Singularity is a local control plane for managing fleets of coding agents, tasks, worktrees, automation, context, and usage.">
+<title>SINGULARITY · 特異点 — LOCAL AGENT CONTROL PLANE</title>
+<!--
+  sample-gitlab-03-gpt-sol.html
+  A self-contained product page for Singularity.
+  Visual system: JAIRUS OS / NERV-MAGI Tactical Console.
+  No external fonts, scripts, images, or runtime dependencies.
+-->
+<style>
+:root{
+  --bg:#0A0A0A;--mint:#52F29A;--mint-hi:#7CF4AB;--green-map:#3C9C6C;--green-dim:#246C3C;
+  --paper:#EDF8D6;--orange:#F26400;--amber:#F49F09;--amber-dim:#9C3C24;
+  --red:#C20C0C;--red-hi:#E2280F;--crimson:#E60225;--teal:#0C6C80;--blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+  --header-h:52px;--page-x:clamp(18px,4vw,64px);--max:1480px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;background:var(--bg)}
+body{background:var(--bg);color:var(--mint);font-family:var(--mono);font-size:13px;line-height:1.5;letter-spacing:.03em;overflow-x:hidden}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:500;background:
+  repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+  radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.58) 100%)}
+a{color:inherit;text-decoration:none}
+button{font:inherit}
+::selection{background:var(--mint);color:var(--bg)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:#030303}
+::-webkit-scrollbar-thumb{background:var(--green-dim)}
+
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes btnblink{0%,74%{background:var(--mint);color:var(--bg)}75%,100%{background:transparent;color:var(--mint)}}
+@keyframes scan{from{transform:translateY(-100%)}to{transform:translateY(100vh)}}
+@keyframes march{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@keyframes flick{0%,49%{visibility:hidden}50%,100%{visibility:visible}}
+.blink{animation:blink 1s steps(1) infinite}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
+.scroll-progress{position:fixed;left:0;top:0;width:0;height:3px;background:var(--mint);box-shadow:0 0 8px var(--mint);z-index:620}
+.topbar{position:fixed;top:0;left:0;right:0;height:var(--header-h);z-index:600;background:rgba(10,10,10,.97);border-bottom:2px solid var(--orange);display:flex;align-items:center;padding:0 16px;gap:14px;text-transform:uppercase}
+.brand{display:flex;align-items:center;gap:10px;min-width:max-content}
+.brand-mark{width:14px;height:14px;background:var(--mint);box-shadow:0 0 10px var(--mint);transform:rotate(45deg)}
+.brand-name{font-family:var(--cond);font-weight:700;font-size:18px;letter-spacing:.13em;color:var(--mint-hi);text-shadow:0 0 7px rgba(82,242,154,.55)}
+.version{font-size:8px;color:var(--orange);letter-spacing:.18em;border-left:1px solid var(--green-dim);padding-left:13px}
+.topnav{display:flex;align-items:center;gap:4px;margin-left:auto}
+.topnav a{min-height:44px;display:flex;align-items:center;padding:0 10px;color:var(--green-map);font-size:9px;letter-spacing:.13em;border-bottom:2px solid transparent}
+.topnav a:hover,.topnav a[aria-current="true"]{color:var(--mint);border-bottom-color:var(--mint)}
+.topmeta{display:flex;align-items:center;gap:8px;margin-left:8px}
+.stamp{display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:2px 9px;border:1px solid currentColor;border-radius:2px;font-size:9px;line-height:1;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.stamp.fill{background:currentColor}.stamp.fill>span{color:var(--bg)}
+.c-mint{color:var(--mint)}.c-blue{color:var(--blue)}.c-amber{color:var(--amber)}.c-red{color:var(--red-hi)}.c-orange{color:var(--orange)}
+.timechip{display:flex;align-items:center;background:var(--paper);color:var(--bg);height:25px;padding:0 8px;border-radius:2px;font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.08em;box-shadow:0 0 8px rgba(237,248,214,.35);font-variant-numeric:tabular-nums}
+.timechip i{font-style:normal;margin:0 2px;animation:blink 1s steps(1) infinite}
+
+.chapter-rail{position:fixed;right:12px;top:50%;transform:translateY(-50%);z-index:580;display:flex;flex-direction:column;gap:8px}
+.chapter-rail a{display:flex;align-items:center;justify-content:flex-end;gap:8px;min-height:24px;color:var(--green-dim);font-size:8px;letter-spacing:.13em;text-transform:uppercase}
+.chapter-rail .jp{font-family:var(--jp);font-size:11px;text-transform:none}
+.chapter-rail .tick{width:24px;height:2px;background:currentColor}
+.chapter-rail a.on{color:var(--mint)}
+.chapter-rail a.on .tick{box-shadow:0 0 6px var(--mint);width:34px}
+
+main{padding-top:var(--header-h)}
+.chapter{position:relative;scroll-margin-top:var(--header-h);padding:clamp(74px,10vw,150px) var(--page-x)}
+.chapter-inner{width:min(100%,var(--max));margin:0 auto}
+.eyebrow{display:flex;align-items:center;gap:12px;color:var(--amber);font-size:10px;letter-spacing:.22em;text-transform:uppercase;margin-bottom:22px}
+.eyebrow::before{content:"";width:28px;height:2px;background:var(--orange);box-shadow:0 0 6px rgba(242,100,0,.5)}
+.eyebrow .jp{font-family:var(--jp);font-weight:800;font-size:13px;text-transform:none;color:var(--orange)}
+.display{font-family:var(--cond);font-weight:700;line-height:.86;letter-spacing:-.025em;text-transform:uppercase;color:var(--paper);text-shadow:0 0 5px currentColor,0 0 18px rgba(82,242,154,.23)}
+.display .mint{color:var(--mint-hi)}
+.display .orange{color:var(--orange)}
+.section-head{display:grid;grid-template-columns:auto auto 1fr;align-items:center;gap:14px;margin-bottom:12px;text-transform:uppercase}
+.section-head .idx{font-family:var(--cond);font-weight:700;background:var(--orange);color:var(--bg);padding:3px 9px;letter-spacing:.1em}
+.section-head .jp{font-family:var(--jp);font-weight:800;font-size:20px;color:var(--orange);text-transform:none;letter-spacing:.08em}
+.section-head h2{font-family:var(--cond);font-weight:700;font-size:clamp(24px,4vw,48px);line-height:1;color:var(--mint-hi);letter-spacing:.02em}
+.section-head::after{content:"";grid-column:3;height:2px;background:linear-gradient(90deg,var(--orange),transparent)}
+.lead{max-width:72ch;color:var(--green-map);font-size:clamp(12px,1.25vw,15px);line-height:1.72;letter-spacing:.035em}
+.lead strong{color:var(--mint);font-weight:400}
+.btn{display:inline-flex;min-height:46px;align-items:center;justify-content:center;padding:10px 20px;border:2px solid var(--mint);background:transparent;color:var(--mint);font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.13em;text-transform:uppercase;cursor:pointer;border-radius:0}
+.btn:hover{background:var(--mint);color:var(--bg);box-shadow:0 0 12px rgba(82,242,154,.45)}
+.btn.alt{border-color:var(--orange);color:var(--orange)}
+.btn.alt:hover{background:var(--orange);color:var(--bg);box-shadow:0 0 12px rgba(242,100,0,.42)}
+.btn.primary{animation:btnblink 1s steps(1) infinite}
+.btn:focus-visible,.tab:focus-visible,.module:focus-visible,.chapter-rail a:focus-visible,.topnav a:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+
+/* HERO */
+.hero{min-height:calc(100vh - var(--header-h));display:flex;align-items:center;padding-top:56px;padding-bottom:48px;overflow:hidden}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(300px,.75fr);align-items:center;gap:clamp(32px,7vw,110px)}
+.hero-jp{font-family:var(--jp);font-weight:800;color:var(--orange);font-size:clamp(35px,5.5vw,76px);line-height:1;letter-spacing:.22em;text-indent:.22em;text-shadow:0 0 6px currentColor;margin-bottom:14px;text-transform:none}
+.hero h1{font-size:clamp(72px,13.4vw,192px);max-width:8ch}
+.hero-sub{max-width:25ch;margin-top:30px;font-family:var(--cond);font-weight:700;font-size:clamp(22px,3.25vw,46px);line-height:1.02;letter-spacing:.015em;color:var(--mint);text-transform:uppercase}
+.hero-copy{margin-top:24px;max-width:60ch;color:var(--green-map);line-height:1.7;text-transform:none}
+.hero-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
+.hero-viz{position:relative;aspect-ratio:1;display:grid;place-items:center;min-width:0}
+.orbit{position:absolute;border:1px solid var(--green-dim);border-radius:50%;inset:8%}
+.orbit.o2{inset:22%;border-color:var(--orange)}
+.orbit.o3{inset:36%;border-color:var(--teal);border-width:2px}
+.cross-x,.cross-y{position:absolute;background:var(--green-dim)}
+.cross-x{left:3%;right:3%;height:1px}.cross-y{top:3%;bottom:3%;width:1px}
+.core{position:relative;z-index:2;width:30%;aspect-ratio:1;display:grid;place-items:center;background:var(--mint);clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);color:var(--bg);font-family:var(--jp);font-weight:800;font-size:clamp(24px,4vw,56px);text-transform:none;box-shadow:0 0 20px var(--mint)}
+.node{position:absolute;width:13px;height:13px;background:var(--node,var(--mint));box-shadow:0 0 8px var(--node,var(--mint));transform:rotate(45deg)}
+.node::after{content:attr(data-label);position:absolute;left:18px;top:-1px;transform:rotate(-45deg);font-size:8px;letter-spacing:.1em;color:var(--node,var(--mint));white-space:nowrap}
+.n1{top:10%;left:48%}.n2{right:7%;top:47%;--node:var(--blue)}.n3{bottom:8%;left:47%;--node:var(--amber)}.n4{left:6%;top:49%;--node:var(--mint)}
+.hero-meta{position:absolute;right:0;bottom:5%;font-size:9px;line-height:1.6;color:var(--amber-dim);text-transform:uppercase}.hero-meta b{color:var(--orange);font-weight:400}
+.downlink{position:absolute;bottom:17px;left:50%;transform:translateX(-50%);font-size:8px;color:var(--green-map);letter-spacing:.16em;text-transform:uppercase}.downlink::after{content:"";display:block;width:1px;height:28px;background:var(--mint);margin:7px auto 0;animation:blink 1s steps(1) infinite}
+
+/* PROBLEM */
+.problem{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(90deg,rgba(226,40,15,.045),transparent 42%,rgba(82,242,154,.03))}
+.problem-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:clamp(36px,8vw,120px);align-items:center}
+.problem h2{font-size:clamp(54px,8vw,116px);margin-top:26px}
+.problem .lead{margin-top:28px}
+.sprawl{position:relative;min-height:470px;border:2px solid var(--red-hi);padding:4px;clip-path:polygon(0 0,calc(100% - 24px) 0,100% 24px,100% 100%,24px 100%,0 calc(100% - 24px));box-shadow:0 0 12px rgba(226,40,15,.2)}
+.sprawl-inner{height:100%;min-height:460px;border:1px solid var(--red);position:relative;overflow:hidden;background:
+  linear-gradient(rgba(194,12,12,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(194,12,12,.12) 1px,transparent 1px);background-size:38px 38px}
+.hazard{height:13px;background:repeating-linear-gradient(-45deg,var(--crimson) 0 9px,var(--bg) 9px 18px)}
+.chaos-card{position:absolute;width:min(210px,43%);border:1px solid var(--tone,var(--red-hi));background:var(--bg);padding:10px;color:var(--tone,var(--red-hi));box-shadow:0 0 7px color-mix(in srgb,var(--tone) 35%,transparent)}
+.chaos-card b{display:block;font-family:var(--cond);font-size:16px;letter-spacing:.07em}.chaos-card small{display:block;font-size:8px;margin-top:7px;color:var(--green-map);line-height:1.4}
+.cc1{left:7%;top:12%;transform:rotate(-2deg)}.cc2{right:6%;top:26%;--tone:var(--amber);transform:rotate(2deg)}.cc3{left:17%;top:50%;--tone:var(--blue);transform:rotate(1deg)}.cc4{right:12%;bottom:8%;--tone:var(--mint);transform:rotate(-1deg)}
+.sprawl-alert{position:absolute;top:44%;left:0;right:0;background:var(--red-hi);color:var(--bg);padding:8px;text-align:center;font-family:var(--cond);font-weight:700;font-size:clamp(20px,3vw,37px);letter-spacing:.06em;z-index:3}
+.problem-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:30px}
+.stat{border:1px solid var(--green-dim);padding:15px 14px;min-height:116px;display:flex;flex-direction:column;justify-content:space-between}
+.stat .label{font-size:8px;color:var(--green-map);letter-spacing:.15em;text-transform:uppercase}.stat .value{font-family:var(--cond);font-weight:700;font-size:38px;line-height:1;color:var(--mint-hi);font-variant-numeric:tabular-nums}.stat .foot{font-size:8px;color:var(--amber);letter-spacing:.08em}
+
+/* COCKPIT */
+.cockpit{padding-left:clamp(10px,2vw,28px);padding-right:clamp(10px,2vw,28px)}
+.cockpit .intro{padding:0 max(8px,calc((100% - var(--max))/2));margin-bottom:34px}
+.console{max-width:1560px;margin:0 auto;border:3px solid var(--orange);padding:5px;position:relative;background:var(--bg);clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));box-shadow:0 0 14px rgba(242,100,0,.25),inset 0 0 12px rgba(242,100,0,.09)}
+.console::before{content:"";position:absolute;inset:7px;border:1px solid var(--orange);pointer-events:none;clip-path:inherit}
+.console-head{position:relative;z-index:2;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;border-bottom:2px solid var(--teal);padding:10px 14px;margin:3px 3px 0}
+.console-mono{font-family:var(--jp);font-weight:800;font-size:24px;line-height:1;color:var(--orange);border:1px solid var(--orange);padding:6px 8px;text-transform:none;letter-spacing:.14em;text-indent:.14em}
+.console-title{font-family:var(--cond);font-weight:700;font-size:18px;color:var(--paper);letter-spacing:.1em;text-transform:uppercase}.console-title small{display:block;font-family:var(--mono);font-size:8px;color:var(--green-map);margin-top:3px;font-weight:400}
+.console-meta{text-align:right;font-size:8px;color:var(--amber);line-height:1.6;letter-spacing:.1em}.console-meta b{color:var(--orange);font-weight:400}
+.console-tabs{position:relative;z-index:3;display:grid;grid-template-columns:repeat(4,1fr);margin:0 3px;border-bottom:1px solid var(--orange)}
+.tab{min-height:48px;border:0;border-right:1px solid var(--orange);background:var(--bg);color:var(--green-map);font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.12em;cursor:pointer;text-transform:uppercase}
+.tab:last-child{border-right:0}.tab:hover{color:var(--mint);background:rgba(82,242,154,.05)}.tab[aria-selected="true"]{background:var(--mint);color:var(--bg)}
+.console-body{position:relative;z-index:2;min-height:570px;margin:0 3px 3px}
+.view{display:none;min-height:570px}.view.active{display:grid}
+.view-sessions{grid-template-columns:235px minmax(0,1fr) 235px;grid-template-areas:"rail main side"}
+.console-rail{grid-area:rail;border-right:1px solid var(--orange);padding:14px 10px}.console-main{grid-area:main;padding:14px}.console-side{grid-area:side;border-left:1px solid var(--orange);padding:14px 10px}
+.zone-title{font-family:var(--cond);font-weight:700;font-size:11px;color:var(--orange);letter-spacing:.14em;border-bottom:1px solid var(--green-dim);padding-bottom:4px;margin-bottom:10px;text-transform:uppercase}
+.session{width:100%;min-height:68px;background:var(--bg);border:1px solid var(--green-dim);color:var(--mint);padding:8px;margin-bottom:7px;text-align:left;cursor:pointer;text-transform:uppercase}
+.session.active{border:2px solid var(--mint);background:var(--mint);color:var(--bg)}
+.session .s-top{display:flex;align-items:center;justify-content:space-between;font-family:var(--cond);font-weight:700;font-size:13px}.session .s-meta{font-size:8px;margin-top:8px;color:var(--green-map)}.session.active .s-meta{color:var(--bg)}
+.terminal{border:1px solid var(--amber-dim);height:390px;background:rgba(244,159,9,.018);display:flex;flex-direction:column}
+.terminal-head{display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid var(--amber-dim);color:var(--amber);font-size:9px;letter-spacing:.12em;text-transform:uppercase}.terminal-head .dots{display:flex;gap:5px;margin-left:auto}.terminal-head i{display:block;width:8px;height:8px;border-radius:50%}.terminal-head i:nth-child(1){background:var(--red-hi)}.terminal-head i:nth-child(2){background:var(--amber)}.terminal-head i:nth-child(3){background:var(--mint)}
+.terminal-body{padding:13px 14px;color:var(--amber);font-size:11px;line-height:1.65;overflow:auto;flex:1}.term-row{display:flex;gap:7px}.term-row .prompt{color:var(--orange)}.term-row.dim{color:var(--amber-dim)}.term-row.ok{color:var(--mint)}.term-cursor{display:inline-block;width:8px;height:13px;background:var(--amber);vertical-align:-2px;animation:blink 1s steps(1) infinite}
+.terminal-foot{border-top:1px solid var(--teal);padding:7px 12px;font-size:8px;color:var(--green-map);display:flex;justify-content:space-between;text-transform:uppercase}
+.metric{margin-bottom:14px}.metric-row{display:flex;justify-content:space-between;font-size:9px;color:var(--green-map);margin-bottom:5px}.metric-row b{color:var(--mint);font-weight:400}.segments{display:flex;gap:3px;height:10px}.segments i{flex:1;background:var(--green-dim);opacity:.3;border-radius:2px}.segments i.on{background:var(--tone,var(--mint));opacity:1;box-shadow:0 0 5px color-mix(in srgb,var(--tone,var(--mint)) 55%,transparent)}
+.logbox{margin-top:18px;border:1px solid var(--green-dim);padding:9px;font-size:8px;color:var(--green-map);line-height:1.8}.logbox b{color:var(--amber);font-weight:400}
+
+.view-tasks{grid-template-rows:auto 1fr}.task-tools{display:flex;align-items:center;gap:8px;padding:12px;border-bottom:1px solid var(--orange)}.task-tools .spacer{flex:1}.filter{min-height:34px;border:1px solid var(--orange);background:var(--bg);color:var(--orange);padding:0 12px;font-size:9px;letter-spacing:.1em;cursor:pointer}.filter.on{background:var(--orange);color:var(--bg)}
+.kanban{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;padding:12px}.column{border:1px solid var(--green-dim);padding:8px;min-width:0}.column-head{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--green-dim);padding:3px 2px 8px;margin-bottom:8px;font-family:var(--cond);font-weight:700;font-size:12px;color:var(--orange);letter-spacing:.1em}.taskcard{border:1px solid var(--tone,var(--green-dim));padding:10px;margin-bottom:7px;color:var(--tone,var(--mint));background:var(--bg);min-height:98px}.taskcard .id{font-size:8px;color:var(--amber);letter-spacing:.1em}.taskcard b{display:block;font-family:var(--cond);font-size:14px;line-height:1.12;color:var(--paper);margin:7px 0}.taskcard .meta{font-size:8px;color:var(--green-map);line-height:1.5}.taskcard.active{--tone:var(--blue);animation:edgeblue 1s steps(1) infinite}.taskcard.done{--tone:var(--mint)}
+@keyframes edgeblue{0%,49%{border-color:var(--blue)}50%,100%{border-color:var(--green-dim)}}
+
+.view-automation{grid-template-columns:minmax(0,1.25fr) minmax(270px,.75fr)}.auto-main{padding:18px;border-right:1px solid var(--orange)}.auto-side{padding:18px}.pipeline{display:grid;grid-template-columns:repeat(5,1fr);align-items:center;margin:55px 0 40px}.pipe-step{position:relative;text-align:center}.pipe-step:not(:last-child)::after{content:"";position:absolute;left:64%;right:-36%;top:24px;height:2px;background:var(--green-dim)}.pipe-step.done:not(:last-child)::after{background:var(--mint)}.pipe-node{width:50px;height:50px;margin:0 auto 8px;border:2px solid var(--green-dim);display:grid;place-items:center;clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px));font-family:var(--cond);font-weight:700;color:var(--green-map)}.pipe-step.done .pipe-node{background:var(--mint);border-color:var(--mint);color:var(--bg)}.pipe-step.now .pipe-node{background:var(--blue);border-color:var(--blue);color:var(--bg);animation:blink 1s steps(1) infinite}.pipe-label{font-size:8px;color:var(--green-map);letter-spacing:.1em}
+.job{display:grid;grid-template-columns:auto 1fr auto;gap:9px;align-items:center;border:1px solid var(--green-dim);padding:10px;margin-bottom:8px}.job-id{color:var(--amber);font-size:9px}.job-name{font-family:var(--cond);font-weight:700;color:var(--paper);font-size:13px}.job-state{font-size:8px;color:var(--mint)}
+.receipt{border:1px solid var(--amber-dim);padding:12px;color:var(--amber);font-size:9px;line-height:1.8}.receipt .line{display:flex;gap:8px}.receipt .dots{flex:1;border-bottom:1px dotted var(--amber-dim);height:10px}.receipt .ok{color:var(--mint)}
+
+.view-usage{grid-template-columns:minmax(0,1.4fr) minmax(280px,.6fr)}.chart-pane{padding:18px;border-right:1px solid var(--orange)}.gauge-pane{padding:18px}.chart-wrap{height:340px;border:1px solid var(--green-dim);position:relative;overflow:hidden}.chart-wrap canvas{width:100%;height:100%;display:block}.chart-label{position:absolute;left:12px;top:10px;color:var(--green-map);font-size:9px;letter-spacing:.12em}.chart-label b{color:var(--mint);font-weight:400}.usage-totals{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}.usage-total{border:1px solid var(--green-dim);padding:12px}.usage-total small{display:block;color:var(--green-map);font-size:8px;letter-spacing:.12em}.usage-total b{display:block;color:var(--mint-hi);font-family:var(--cond);font-size:28px;margin-top:4px;font-variant-numeric:tabular-nums}
+.radial{width:170px;aspect-ratio:1;margin:20px auto;position:relative}.radial svg{width:100%;height:100%;transform:rotate(-90deg)}.radial .track{fill:none;stroke:var(--green-dim);stroke-width:8;stroke-dasharray:4 4;opacity:.38}.radial .value{fill:none;stroke:var(--mint);stroke-width:8;stroke-dasharray:4 4;stroke-dashoffset:42;filter:drop-shadow(0 0 4px var(--mint))}.radial-text{position:absolute;inset:0;display:grid;place-content:center;text-align:center}.radial-text b{font-family:var(--cond);font-size:38px;line-height:1;color:var(--mint-hi)}.radial-text small{font-size:8px;color:var(--green-map);letter-spacing:.13em}
+
+.console-status{position:relative;z-index:2;margin:0 3px 3px;border-top:1px solid var(--orange);display:flex;align-items:center;gap:16px;padding:7px 11px;font-size:8px;color:var(--green-map);letter-spacing:.11em;text-transform:uppercase}.console-status .good{color:var(--mint)}.console-status .spacer{flex:1}
+
+/* WORKFLOW */
+.workflow{background:rgba(12,108,128,.035);border-top:2px solid var(--teal);border-bottom:2px solid var(--teal)}
+.workflow .lead{margin-bottom:45px}.flow{display:grid;grid-template-columns:repeat(5,1fr);position:relative;margin:0 0 42px}.flow::before{content:"";position:absolute;left:8%;right:8%;top:39px;height:2px;background:var(--green-dim)}
+.flow-item{position:relative;z-index:2;text-align:center;cursor:pointer;background:none;border:0;color:var(--green-map);min-height:120px;padding:0 8px}.flow-item .num{width:78px;height:78px;margin:0 auto 12px;background:var(--bg);border:2px solid var(--green-dim);display:grid;place-items:center;font-family:var(--cond);font-size:22px;clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}.flow-item .jp{display:block;font-family:var(--jp);font-weight:800;font-size:16px;text-transform:none;color:inherit}.flow-item .en{display:block;font-size:8px;letter-spacing:.13em;margin-top:2px}.flow-item.done .num{background:var(--mint);border-color:var(--mint);color:var(--bg)}.flow-item.now{color:var(--blue)}.flow-item.now .num{background:var(--blue);border-color:var(--blue);color:var(--bg);box-shadow:0 0 10px rgba(80,144,208,.55)}
+.flow-detail{border:1px solid var(--orange);padding:4px;max-width:1000px;margin:0 auto}.flow-detail-inner{border:2px solid var(--orange);padding:clamp(18px,3vw,32px);display:grid;grid-template-columns:120px 1fr auto;align-items:center;gap:24px}.flow-kanji{font-family:var(--jp);font-weight:800;font-size:64px;color:var(--orange);text-align:center;line-height:1;text-transform:none;text-shadow:0 0 5px currentColor}.flow-copy h3{font-family:var(--cond);font-weight:700;color:var(--paper);font-size:24px;letter-spacing:.05em;text-transform:uppercase}.flow-copy p{color:var(--green-map);margin-top:8px;line-height:1.65;text-transform:none}.flow-code{font-size:9px;color:var(--amber);line-height:1.7;text-align:right}.flow-code b{color:var(--orange);font-weight:400}
+
+/* CAPABILITIES */
+.capabilities .lead{margin-bottom:34px}.modules{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}.module{min-height:235px;border:1px solid var(--green-dim);background:var(--bg);color:var(--mint);padding:18px;position:relative;text-align:left;cursor:pointer;clip-path:polygon(0 0,calc(100% - 17px) 0,100% 17px,100% 100%,0 100%);display:flex;flex-direction:column;text-transform:uppercase}.module:hover,.module[aria-pressed="true"]{border-color:var(--mint);box-shadow:0 0 12px rgba(82,242,154,.2)}.module[aria-pressed="true"]::after{content:"PINNED";position:absolute;right:0;top:0;background:var(--mint);color:var(--bg);padding:3px 8px;font-size:8px}.module .glyph{font-family:var(--jp);font-weight:800;font-size:44px;color:var(--tone,var(--mint));line-height:1;text-transform:none;text-shadow:0 0 6px currentColor}.module .code{font-size:8px;color:var(--orange);letter-spacing:.14em;margin-top:12px}.module h3{font-family:var(--cond);font-weight:700;font-size:19px;color:var(--paper);margin-top:7px;letter-spacing:.04em}.module p{color:var(--green-map);font-size:10px;line-height:1.62;margin-top:11px;text-transform:none}.module .module-foot{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:14px;border-top:1px solid var(--green-dim);font-size:8px;color:var(--tone,var(--mint));letter-spacing:.11em}
+
+/* LOCAL */
+.local{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(180deg,rgba(82,242,154,.03),transparent)}
+.local-grid{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:clamp(36px,7vw,100px);align-items:center}.local h2{font-size:clamp(54px,8vw,110px);margin-top:24px}.local .lead{margin-top:26px}.security-list{margin-top:28px;display:grid;gap:7px}.security-row{display:grid;grid-template-columns:105px 1fr auto;gap:10px;align-items:center;border:1px solid var(--green-dim);padding:9px 10px;font-size:9px}.security-row .key{color:var(--orange)}.security-row .val{color:var(--green-map)}
+.architecture{border:3px solid var(--orange);padding:5px;clip-path:polygon(0 0,calc(100% - 26px) 0,100% 26px,100% 100%,26px 100%,0 calc(100% - 26px));box-shadow:0 0 12px rgba(242,100,0,.2)}.architecture-inner{border:1px solid var(--orange);padding:24px;min-height:500px;display:flex;flex-direction:column;justify-content:center}.arch-row{display:grid;grid-template-columns:repeat(3,1fr);align-items:center;gap:20px}.arch-box{border:2px solid var(--tone,var(--mint));color:var(--tone,var(--mint));padding:18px 12px;text-align:center;min-height:120px;display:grid;place-content:center;clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}.arch-box .jp{font-family:var(--jp);font-weight:800;font-size:26px;text-transform:none}.arch-box b{font-family:var(--cond);font-size:15px;letter-spacing:.08em}.arch-box small{font-size:8px;color:var(--green-map);margin-top:5px}.arch-link{position:relative;height:2px;background:var(--orange)}.arch-link::after{content:"▶";position:absolute;right:-4px;top:-9px;color:var(--orange)}.loopback{margin:22px auto;border:1px solid var(--mint);color:var(--mint);padding:8px 16px;font-size:10px;letter-spacing:.16em;box-shadow:0 0 8px rgba(82,242,154,.3)}.daemon-core{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px}.daemon-core .wire{height:1px;background:var(--teal)}.daemon{border:2px solid var(--teal);padding:16px;text-align:center;color:var(--blue)}.daemon .jp{font-family:var(--jp);font-size:26px;font-weight:800;text-transform:none}.arch-footer{margin-top:24px;border-top:1px solid var(--green-dim);padding-top:14px;display:flex;justify-content:space-between;gap:16px;font-size:8px;color:var(--green-map);letter-spacing:.09em}.arch-footer b{color:var(--amber);font-weight:400}
+
+/* CTA */
+.cta{min-height:88vh;display:flex;align-items:center;text-align:center;overflow:hidden}.cta .chapter-inner{position:relative}.cta-jp{font-family:var(--jp);font-weight:800;font-size:clamp(42px,7vw,92px);color:var(--orange);letter-spacing:.35em;text-indent:.35em;text-transform:none;text-shadow:0 0 8px currentColor}.cta h2{font-size:clamp(82px,16vw,220px);margin-top:10px}.cta-sub{font-family:var(--cond);font-weight:700;font-size:clamp(20px,3vw,38px);color:var(--mint);letter-spacing:.04em;text-transform:uppercase;margin:25px auto 0}.install{max-width:920px;margin:38px auto 0;border:1px solid var(--amber-dim);text-align:left}.install-head{display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid var(--amber-dim);font-size:9px;color:var(--amber);letter-spacing:.12em}.install-head .spacer{flex:1}.copy-btn{min-height:36px;border:1px solid var(--mint);background:var(--bg);color:var(--mint);padding:0 13px;cursor:pointer;font-size:9px;letter-spacing:.1em}.copy-btn:hover{background:var(--mint);color:var(--bg)}.install code{display:block;padding:18px;color:var(--mint-hi);font-family:var(--mono);font-size:clamp(10px,1.4vw,14px);white-space:pre-wrap;word-break:break-word}.copy-state{min-height:24px;margin-top:9px;color:var(--green-map);font-size:9px;letter-spacing:.11em}.cta-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin-top:18px}
+.final-marquee{position:absolute;left:50%;bottom:-105px;transform:translateX(-50%);width:100vw;border-top:2px solid var(--red-hi);border-bottom:2px solid var(--red-hi);background:#170303;overflow:hidden;white-space:nowrap}.marquee-track{display:inline-flex;min-width:max-content;animation:march 22s steps(220) infinite}.marquee-track span{padding:8px 28px;color:var(--red-hi);font-size:9px;letter-spacing:.15em}.marquee-track span::before{content:"◚ ";color:var(--orange)}
+.site-footer{border-top:2px solid var(--orange);min-height:46px;padding:10px 16px;display:flex;align-items:center;gap:16px;color:var(--green-map);font-size:8px;letter-spacing:.12em;text-transform:uppercase}.site-footer .good{color:var(--mint)}.site-footer .spacer{flex:1}
+
+@media(max-width:1500px){.chapter-rail{display:none}}
+@media(max-width:1100px){
+  .topnav{display:none}.hero-grid,.problem-grid,.local-grid{grid-template-columns:1fr}.hero-viz{max-width:560px;width:80%;margin:0 auto}.problem-grid{gap:50px}
+  .modules{grid-template-columns:repeat(2,1fr)}.view-sessions{grid-template-columns:190px 1fr;grid-template-areas:"rail main"}.console-side{display:none}
+  .kanban{grid-template-columns:repeat(2,1fr)}.view-automation,.view-usage{grid-template-columns:1fr}.auto-main,.chart-pane{border-right:0;border-bottom:1px solid var(--orange)}
+  .flow-detail-inner{grid-template-columns:90px 1fr}.flow-code{grid-column:2;text-align:left}
+}
+@media(max-width:720px){
+  :root{--header-h:48px}.topbar{padding:0 10px;gap:9px}.brand-name{font-size:15px}.version{display:none}.topmeta .stamp{display:none}.timechip{font-size:11px}
+  .chapter{padding:70px 16px}.hero{padding-top:42px}.hero h1{font-size:clamp(48px,15vw,72px);line-height:.86;letter-spacing:-.055em}.hero-grid{gap:40px}.hero-viz{width:100%}.node::after{display:none}
+  .problem h2,.local h2{font-size:clamp(48px,16vw,76px)}.problem-stats{grid-template-columns:1fr}.sprawl,.sprawl-inner{min-height:410px}.chaos-card{width:47%}
+  .console{border-width:2px;padding:3px;clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}.console-head{grid-template-columns:auto 1fr;padding:8px}.console-meta{display:none}.console-mono{font-size:18px}.console-title{font-size:14px}.console-tabs{grid-template-columns:repeat(2,1fr)}.tab:nth-child(2){border-right:0}.tab:nth-child(-n+2){border-bottom:1px solid var(--orange)}
+  .view-sessions{grid-template-columns:1fr;grid-template-areas:"rail" "main"}.console-rail{border-right:0;border-bottom:1px solid var(--orange);display:grid;grid-template-columns:repeat(2,1fr);gap:6px}.console-rail .zone-title{grid-column:1/-1}.session{margin:0}.console-main{padding:9px}.terminal{height:340px}.console-body,.view{min-height:0}.console-status{flex-wrap:wrap;gap:8px}
+  .kanban{grid-template-columns:1fr}.task-tools{flex-wrap:wrap}.task-tools .spacer{display:none}.filter{flex:1}.pipeline{grid-template-columns:1fr;margin:22px 0}.pipe-step{display:grid;grid-template-columns:54px 1fr;text-align:left;align-items:center}.pipe-node{margin:5px 0}.pipe-step:not(:last-child)::after{left:24px;right:auto;top:48px;width:2px;height:28px}.pipe-label{padding-left:10px}
+  .usage-totals{grid-template-columns:1fr}.chart-wrap{height:260px}.modules{grid-template-columns:1fr}.module{min-height:205px}
+  .flow{grid-template-columns:1fr;gap:4px}.flow::before{left:38px;right:auto;top:35px;bottom:35px;width:2px;height:auto}.flow-item{display:grid;grid-template-columns:78px 1fr;text-align:left;align-items:center;min-height:86px}.flow-item .num{margin:0}.flow-item .jp,.flow-item .en{grid-column:2}.flow-item .jp{align-self:end}.flow-item .en{align-self:start}.flow-detail-inner{grid-template-columns:1fr;text-align:center}.flow-kanji{font-size:50px}.flow-code{grid-column:auto;text-align:center}
+  .arch-row{grid-template-columns:1fr}.arch-link{width:2px;height:30px;margin:auto}.arch-link::after{content:"▼";right:-7px;top:19px}.architecture-inner{padding:15px}.security-row{grid-template-columns:85px 1fr}.security-row .stamp{grid-column:1/-1;justify-self:start}.arch-footer{flex-direction:column}
+  .cta h2{font-size:clamp(66px,22vw,108px)}.cta-jp{font-size:48px}.install code{padding:13px}.site-footer{flex-wrap:wrap}.site-footer .spacer{display:none}.final-marquee{bottom:-90px}
+}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}.blink,.btn.primary,.timechip i,.term-cursor,.pipe-step.now .pipe-node,.taskcard.active,.downlink::after,.marquee-track{animation:none!important}
+}
+</style>
+</head>
+<body>
+<div class="scroll-progress" id="scrollProgress" aria-hidden="true"></div>
+
+<header class="topbar">
+  <a class="brand" href="#hero" aria-label="Singularity home">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">SINGULARITY</span>
+  </a>
+  <span class="version">V0.9 · 特異点</span>
+  <nav class="topnav" aria-label="Primary navigation">
+    <a href="#control">CONTROL</a><a href="#workflow">WORKFLOW</a><a href="#systems">SYSTEMS</a><a href="#local">LOCAL</a>
+  </nav>
+  <div class="topmeta">
+    <span class="stamp c-mint">LOOPBACK</span>
+    <span class="timechip" aria-label="Local time"><span id="hh">00</span><i>:</i><span id="mm">00</span><i>:</i><span id="ss">00</span></span>
+  </div>
+</header>
+
+<nav class="chapter-rail" id="chapterRail" aria-label="Page chapters">
+  <a href="#hero" class="on"><span class="jp">起動</span><span>ORIENT</span><span class="tick"></span></a>
+  <a href="#problem"><span class="jp">混沌</span><span>SPRAWL</span><span class="tick"></span></a>
+  <a href="#control"><span class="jp">制御</span><span>CONTROL</span><span class="tick"></span></a>
+  <a href="#workflow"><span class="jp">流程</span><span>FLOW</span><span class="tick"></span></a>
+  <a href="#systems"><span class="jp">系統</span><span>SYSTEMS</span><span class="tick"></span></a>
+  <a href="#local"><span class="jp">局所</span><span>LOCAL</span><span class="tick"></span></a>
+  <a href="#boot"><span class="jp">開始</span><span>BOOT</span><span class="tick"></span></a>
+</nav>
+
+<main>
+  <section class="chapter hero" id="hero" aria-labelledby="hero-title">
+    <div class="chapter-inner hero-grid">
+      <div>
+        <div class="eyebrow"><span class="jp">統合</span>LOCAL AGENT OPERATIONS</div>
+        <div class="hero-jp">特異点</div>
+        <h1 class="display" id="hero-title">SINGU<span class="mint">LARITY</span></h1>
+        <p class="hero-sub">ONE CONTROL PLANE FOR YOUR WHOLE FLEET OF CODING AGENTS.</p>
+        <p class="hero-copy">Run live sessions. Turn specs into worktree-backed tasks. Dispatch background jobs. Keep usage, context, transcripts, and the state of every agent in one local command deck.</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="#control">ENTER CONTROL</a>
+          <a class="btn alt" href="#boot">BOOT SEQUENCE</a>
+        </div>
+      </div>
+      <div class="hero-viz" aria-label="Four agent nodes connected to the Singularity control plane" role="img">
+        <span class="orbit"></span><span class="orbit o2"></span><span class="orbit o3"></span>
+        <span class="cross-x"></span><span class="cross-y"></span>
+        <span class="node n1" data-label="SESSION·04"></span><span class="node n2" data-label="TASK·118"></span><span class="node n3" data-label="CRON·02"></span><span class="node n4" data-label="REVIEW·07"></span>
+        <span class="core">統</span>
+        <div class="hero-meta"><b>DAEMON:</b> 127.0.0.1:4317<br><b>CHANNEL:</b> WS + REST<br><b>STATE:</b> NOMINAL</div>
+      </div>
+    </div>
+    <span class="downlink">SCROLL TO SYNCHRONIZE</span>
+  </section>
+
+  <section class="chapter problem" id="problem" aria-labelledby="problem-title">
+    <div class="chapter-inner problem-grid">
+      <div>
+        <div class="eyebrow"><span class="jp">混沌</span>AGENT SPRAWL DETECTED</div>
+        <h2 class="display" id="problem-title">ONE TERMINAL WAS <span class="orange">FINE.</span><br>THEN THERE WERE SEVEN.</h2>
+        <p class="lead">Sessions multiply. Branches drift. Reviews wait in windows you forgot were open. <strong>The problem is no longer writing code. It is knowing what every agent is doing, what it costs, and what needs your decision.</strong></p>
+        <div class="problem-stats" aria-label="Example fleet status">
+          <div class="stat"><span class="label">LIVE SESSIONS</span><span class="value">04</span><span class="foot">2 RUN · 1 IDLE · 1 REVIEW</span></div>
+          <div class="stat"><span class="label">OPEN WORKTREES</span><span class="value">07</span><span class="foot">3 READY FOR RULING</span></div>
+          <div class="stat"><span class="label">CONTEXT SWITCHES</span><span class="value">∞</span><span class="foot">WITHOUT A CONTROL PLANE</span></div>
+        </div>
+      </div>
+      <div class="sprawl" aria-label="Disconnected agent terminals before Singularity" role="img">
+        <div class="sprawl-inner">
+          <div class="hazard"></div>
+          <div class="chaos-card cc1"><b>TERMINAL·03</b><small>BRANCH UNKNOWN<br>LAST OUTPUT 14M AGO</small></div>
+          <div class="chaos-card cc2"><b>AGENT·OPUS</b><small>WAITING FOR APPROVAL<br>COST STATE UNREAD</small></div>
+          <div class="chaos-card cc3"><b>WORKTREE·9E0B</b><small>17 FILES CHANGED<br>REVIEW NOT OPENED</small></div>
+          <div class="chaos-card cc4"><b>SESSION·7FE8</b><small>CONTEXT 42K / 1.0M<br>STATUS IDLE</small></div>
+          <div class="sprawl-alert">NO SHARED OPERATIONAL PICTURE</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter cockpit" id="control" aria-labelledby="control-title">
+    <div class="intro">
+      <div class="section-head"><span class="idx">01</span><span class="jp">制御</span><h2 id="control-title">THE WHOLE FLEET. ONE LIVE DECK.</h2></div>
+      <p class="lead">The cockpit does not replace your tools. It connects them. Switch the live preview between sessions, tasks, automation, and usage.</p>
+    </div>
+    <div class="console" aria-label="Interactive Singularity control plane preview">
+      <div class="console-head">
+        <span class="console-mono">特</span>
+        <div class="console-title">SINGULARITY · FLEET CONTROL<small>LOCAL WEB SHELL // LOOPBACK NODE DAEMON</small></div>
+        <div class="console-meta"><b>LINK:</b> 127.0.0.1<br><b>PORT:</b> 4317<br><b>UPTIME:</b> <span id="uptime">02:41:09</span></div>
+      </div>
+      <div class="console-tabs" role="tablist" aria-label="Control plane views">
+        <button class="tab" id="tab-sessions" role="tab" aria-selected="true" aria-controls="view-sessions" data-view="sessions">SESSIONS 会話</button>
+        <button class="tab" id="tab-tasks" role="tab" aria-selected="false" aria-controls="view-tasks" data-view="tasks" tabindex="-1">TASKS 任務</button>
+        <button class="tab" id="tab-automation" role="tab" aria-selected="false" aria-controls="view-automation" data-view="automation" tabindex="-1">AUTOMATION 自動</button>
+        <button class="tab" id="tab-usage" role="tab" aria-selected="false" aria-controls="view-usage" data-view="usage" tabindex="-1">USAGE 消費</button>
+      </div>
+      <div class="console-body">
+        <section class="view view-sessions active" id="view-sessions" role="tabpanel" aria-labelledby="tab-sessions">
+          <aside class="console-rail">
+            <div class="zone-title">LIVE AGENTS · 04</div>
+            <button class="session active"><span class="s-top">E2E-SUITE <span>◉</span></span><span class="s-meta">OPUS · 18 TURNS · 418K TOK</span></button>
+            <button class="session"><span class="s-top">HISTORY-CORE <span>○</span></span><span class="s-meta">SONNET · 9 TURNS · 124K TOK</span></button>
+            <button class="session"><span class="s-top">USAGE-GRAPH <span>◉</span></span><span class="s-meta">CODEX · 11 TURNS · 201K TOK</span></button>
+            <button class="session"><span class="s-top">WIKI-LINKS <span>□</span></span><span class="s-meta">OPUS · REVIEW REQUIRED</span></button>
+          </aside>
+          <div class="console-main">
+            <div class="zone-title">ACTIVE PTY · E2E-SUITE · ~/SINGULARITY/.WORKTREES/9E0B59D</div>
+            <div class="terminal" aria-label="Live agent terminal">
+              <div class="terminal-head">STDOUT // CLAUDE CODE PTY<span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+              <div class="terminal-body" id="terminalBody" aria-live="polite"></div>
+              <div class="terminal-foot"><span>MODEL: OPUS</span><span>MODE: AGENT</span><span>LINK: LIVE</span></div>
+            </div>
+          </div>
+          <aside class="console-side">
+            <div class="zone-title">LIVE TELEMETRY</div>
+            <div class="metric"><div class="metric-row"><span>CONTEXT</span><b>42%</b></div><div class="segments" data-value="8" data-tone="mint"></div></div>
+            <div class="metric"><div class="metric-row"><span>CPU</span><b>34%</b></div><div class="segments" data-value="6" data-tone="blue"></div></div>
+            <div class="metric"><div class="metric-row"><span>MEMORY</span><b>61%</b></div><div class="segments" data-value="11" data-tone="amber"></div></div>
+            <div class="metric"><div class="metric-row"><span>5H USAGE</span><b>19%</b></div><div class="segments" data-value="4" data-tone="mint"></div></div>
+            <div class="logbox"><b>EVENT FEED</b><br>16:21 TASK MOVED → REVIEW<br>16:18 SESSION RESUMED<br>16:11 WORKTREE CLEAN<br>15:52 CRON·02 COMPLETE</div>
+          </aside>
+        </section>
+
+        <section class="view view-tasks" id="view-tasks" role="tabpanel" aria-labelledby="tab-tasks" hidden>
+          <div class="task-tools"><button class="filter on">ALL · 07</button><button class="filter">FEATURE</button><button class="filter">BUG</button><span class="spacer"></span><span class="stamp c-mint">BOARD LIVE</span></div>
+          <div class="kanban">
+            <div class="column"><div class="column-head"><span>TO-DO 待機</span><span>02</span></div><article class="taskcard"><span class="id">TSK·121</span><b>ADD SEARCH TO TRANSCRIPTS</b><span class="meta">MAIN · FEATURE<br>NO SESSION ATTACHED</span></article><article class="taskcard"><span class="id">TSK·124</span><b>STATUS PROVIDER RETRY</b><span class="meta">MAIN · RELIABILITY</span></article></div>
+            <div class="column"><div class="column-head"><span>IN PROGRESS 進行</span><span>02</span></div><article class="taskcard active"><span class="id">TSK·118</span><b>USAGE SPARKLINES</b><span class="meta">WT/9E0B59D · CODEX<br>11 TURNS · $4.18</span></article><article class="taskcard active"><span class="id">TSK·119</span><b>HISTORY CORE SAMPLE</b><span class="meta">WT/DEBA6C3D · SONNET</span></article></div>
+            <div class="column"><div class="column-head"><span>IN REVIEW 審査</span><span>01</span></div><article class="taskcard" style="--tone:var(--amber)"><span class="id">TSK·116</span><b>WIKI GRAPH LINKS</b><span class="meta">WT/8AFBF74 · DIFF READY<br>OPERATOR RULING REQUIRED</span></article></div>
+            <div class="column"><div class="column-head"><span>DONE 完了</span><span>02</span></div><article class="taskcard done"><span class="id">TSK·112</span><b>PHOSPHOR THEME</b><span class="meta">MERGED · TRANSCRIPT SAVED</span></article><article class="taskcard done"><span class="id">TSK·113</span><b>BACKGROUND DISPATCH</b><span class="meta">MERGED · 14 TESTS PASS</span></article></div>
+          </div>
+        </section>
+
+        <section class="view view-automation" id="view-automation" role="tabpanel" aria-labelledby="tab-automation" hidden>
+          <div class="auto-main">
+            <div class="zone-title">BACKGROUND DISPATCH · LIVE PIPELINE</div>
+            <div class="pipeline" aria-label="Automation pipeline">
+              <div class="pipe-step done"><div class="pipe-node">01</div><div class="pipe-label">PICK</div></div>
+              <div class="pipe-step done"><div class="pipe-node">02</div><div class="pipe-label">WORKTREE</div></div>
+              <div class="pipe-step now"><div class="pipe-node">03</div><div class="pipe-label">DISPATCH</div></div>
+              <div class="pipe-step"><div class="pipe-node">04</div><div class="pipe-label">VERIFY</div></div>
+              <div class="pipe-step"><div class="pipe-node">05</div><div class="pipe-label">REVIEW</div></div>
+            </div>
+            <div class="job"><span class="job-id">BGA·02</span><span class="job-name">PICK READY · LABEL AGENT-OK</span><span class="stamp c-blue blink">RUNNING</span></div>
+            <div class="job"><span class="job-id">CRN·01</span><span class="job-name">NIGHTLY REVIEW · 02:00 UTC</span><span class="job-state">SCHEDULED</span></div>
+            <div class="job"><span class="job-id">CRN·04</span><span class="job-name">JOURNAL SYNC · 06:30 UTC</span><span class="job-state">NOMINAL</span></div>
+          </div>
+          <aside class="auto-side"><div class="zone-title">DISPATCH RECEIPT</div><div class="receipt"><div class="line"><span>TASK SELECTED</span><span class="dots"></span><span class="ok">OK</span></div><div class="line"><span>WORKTREE CREATED</span><span class="dots"></span><span class="ok">OK</span></div><div class="line"><span>CONTEXT ATTACHED</span><span class="dots"></span><span class="ok">06</span></div><div class="line"><span>AGENT SPAWNED</span><span class="dots"></span><span class="ok">PID 4821</span></div><div class="line"><span>STATE CHANNEL</span><span class="dots"></span><span class="ok">LIVE</span></div></div></aside>
+        </section>
+
+        <section class="view view-usage" id="view-usage" role="tabpanel" aria-labelledby="tab-usage" hidden>
+          <div class="chart-pane"><div class="zone-title">FLEET TOKEN VELOCITY · 60 MIN</div><div class="chart-wrap"><canvas id="usageChart" aria-label="Fleet token usage trend"></canvas><span class="chart-label">TOKENS / MIN · <b>1.2K</b></span></div><div class="usage-totals"><div class="usage-total"><small>TODAY</small><b>$18.42</b></div><div class="usage-total"><small>5H WINDOW</small><b>19%</b></div><div class="usage-total"><small>7D WINDOW</small><b>33%</b></div></div></div>
+          <aside class="gauge-pane"><div class="zone-title">CAPACITY STATUS</div><div class="radial"><svg viewBox="0 0 120 120" aria-hidden="true"><circle class="track" cx="60" cy="60" r="48"></circle><circle class="value" cx="60" cy="60" r="48"></circle></svg><div class="radial-text"><b>81%</b><small>AVAILABLE</small></div></div><div class="metric"><div class="metric-row"><span>CLAUDE · 5H</span><b>19%</b></div><div class="segments" data-value="4" data-tone="mint"></div></div><div class="metric"><div class="metric-row"><span>OLLAMA · 7D</span><b>33%</b></div><div class="segments" data-value="7" data-tone="blue"></div></div></aside>
+        </section>
+      </div>
+      <div class="console-status"><span class="good">◉ DAEMON ONLINE</span><span>AGENTS 04</span><span>TASKS 07</span><span>WORKTREES 05</span><span class="spacer"></span><span>LOCAL STATE · NO CLOUD TENANT</span></div>
+    </div>
+  </section>
+
+  <section class="chapter workflow" id="workflow" aria-labelledby="workflow-title">
+    <div class="chapter-inner">
+      <div class="section-head"><span class="idx">02</span><span class="jp">流程</span><h2 id="workflow-title">WORK MOVES. CONTEXT STAYS ATTACHED.</h2></div>
+      <p class="lead">A task is not just a card. It binds the requirement, branch, worktree, live session, transcript, and final review into one operational record.</p>
+      <div class="flow" role="group" aria-label="Task workflow">
+        <button class="flow-item done" data-step="0"><span class="num">01</span><span class="jp">仕様</span><span class="en">SPEC</span></button>
+        <button class="flow-item done" data-step="1"><span class="num">02</span><span class="jp">任務</span><span class="en">TASK</span></button>
+        <button class="flow-item now" data-step="2"><span class="num">03</span><span class="jp">分岐</span><span class="en">WORKTREE</span></button>
+        <button class="flow-item" data-step="3"><span class="num">04</span><span class="jp">実行</span><span class="en">AGENT</span></button>
+        <button class="flow-item" data-step="4"><span class="num">05</span><span class="jp">審査</span><span class="en">REVIEW</span></button>
+      </div>
+      <div class="flow-detail" aria-live="polite"><div class="flow-detail-inner"><div class="flow-kanji" id="flowKanji">分岐</div><div class="flow-copy"><h3 id="flowTitle">ISOLATE THE CHANGE</h3><p id="flowText">Singularity creates a dedicated git worktree and branch for the task, so parallel agents can build without colliding with one another or contaminating main.</p></div><div class="flow-code" id="flowCode"><b>PATH:</b> .WORKTREES/9E0B59D<br><b>BRANCH:</b> TASK/9E0B59D<br><b>STATE:</b> CLEAN</div></div></div>
+    </div>
+  </section>
+
+  <section class="chapter capabilities" id="systems" aria-labelledby="systems-title">
+    <div class="chapter-inner">
+      <div class="section-head"><span class="idx">03</span><span class="jp">系統</span><h2 id="systems-title">EVERYTHING AROUND THE WORK.</h2></div>
+      <p class="lead">Agents need more than a terminal. Singularity keeps the operational surfaces around them visible, editable, and close at hand.</p>
+      <div class="modules">
+        <button class="module" aria-pressed="false" style="--tone:var(--blue)"><span class="glyph">自</span><span class="code">SYS·01</span><h3>AUTOMATION</h3><p>Schedule cron jobs or let a background dispatcher pick eligible tasks and launch agents.</p><span class="module-foot"><span>CRON + QUEUE</span><span class="stamp c-blue">LIVE</span></span></button>
+        <button class="module" aria-pressed="false" style="--tone:var(--orange)"><span class="glyph">設</span><span class="code">SYS·02</span><h3>CONFIG + HOOKS</h3><p>Inspect and edit project or local settings, hooks, rules, and agent skill scopes.</p><span class="module-foot"><span>VALIDATED EDITS</span><span class="stamp c-mint">READY</span></span></button>
+        <button class="module" aria-pressed="false"><span class="glyph">記</span><span class="code">SYS·03</span><h3>MEMORY + SKILLS</h3><p>Keep project memory and reusable instructions discoverable instead of repasting context.</p><span class="module-foot"><span>LOCAL FILES</span><span class="stamp c-mint">INDEXED</span></span></button>
+        <button class="module" aria-pressed="false" style="--tone:var(--amber)"><span class="glyph">消</span><span class="code">SYS·04</span><h3>USAGE</h3><p>Read five-hour and seven-day windows, per-session tokens, turns, and cost reporting.</p><span class="module-foot"><span>FLEET METRICS</span><span class="stamp c-amber">19%</span></span></button>
+        <button class="module" aria-pressed="false" style="--tone:var(--blue)"><span class="glyph">履</span><span class="code">SYS·05</span><h3>HISTORY</h3><p>Review daily work by session, then drill directly into the transcript that produced it.</p><span class="module-foot"><span>DAILY RECORD</span><span class="stamp c-blue">SYNCED</span></span></button>
+        <button class="module" aria-pressed="false"><span class="glyph">記</span><span class="code">SYS·06</span><h3>TRANSCRIPTS</h3><p>Search, inspect, and resume past local agent conversations without leaving the deck.</p><span class="module-foot"><span>LOCAL ARCHIVE</span><span class="stamp c-mint">READY</span></span></button>
+        <button class="module" aria-pressed="false" style="--tone:var(--orange)"><span class="glyph">文</span><span class="code">SYS·07</span><h3>WIKI + EXPLORER</h3><p>Browse linked documentation and edit repository files in the same operational shell.</p><span class="module-foot"><span>GRAPH + TREE</span><span class="stamp c-mint">OPEN</span></span></button>
+        <button class="module" aria-pressed="false" style="--tone:var(--red-hi)"><span class="glyph">状</span><span class="code">SYS·08</span><h3>STATUS + PROCESSES</h3><p>Watch provider availability, daemon health, CPU, memory, and every running agent process.</p><span class="module-foot"><span>OBSERVABILITY</span><span class="stamp c-mint">NOMINAL</span></span></button>
+      </div>
+    </div>
+  </section>
+
+  <section class="chapter local" id="local" aria-labelledby="local-title">
+    <div class="chapter-inner local-grid">
+      <div>
+        <div class="eyebrow"><span class="jp">局所</span>LOCAL-FIRST ARCHITECTURE</div>
+        <h2 class="display" id="local-title">YOUR MACHINE.<br><span class="mint">YOUR STATE.</span><br>YOUR AGENTS.</h2>
+        <p class="lead">The daemon binds to <strong>127.0.0.1 only</strong>. It serves the browser shell, manages agent PTYs, and keeps owned state under your configured Singularity home. There is no hosted control plane and no cloud tenant.</p>
+        <div class="security-list">
+          <div class="security-row"><span class="key">BIND</span><span class="val">127.0.0.1 · LOOPBACK ONLY</span><span class="stamp c-mint">LOCKED</span></div>
+          <div class="security-row"><span class="key">AUTH</span><span class="val">OPTIONAL SING_TOKEN</span><span class="stamp c-blue">AVAILABLE</span></div>
+          <div class="security-row"><span class="key">WORK</span><span class="val">GIT WORKTREES AT TRUSTED ROOT</span><span class="stamp c-mint">LOCAL</span></div>
+          <div class="security-row"><span class="key">TRANSCRIPTS</span><span class="val">READ FROM LOCAL AGENT ARCHIVES</span><span class="stamp c-mint">LOCAL</span></div>
+        </div>
+      </div>
+      <div class="architecture" aria-label="Singularity local architecture diagram" role="img"><div class="architecture-inner">
+        <div class="arch-row"><div class="arch-box"><span class="jp">画面</span><b>BROWSER SHELL</b><small>REACT · XTERM · MUI</small></div><span class="arch-link"></span><div class="arch-box" style="--tone:var(--blue)"><span class="jp">通信</span><b>WS + REST</b><small>LIVE STATE CHANNEL</small></div></div>
+        <div class="loopback">127.0.0.1:4317 · LOOPBACK BOUND</div>
+        <div class="daemon-core"><span class="wire"></span><div class="daemon"><span class="jp">常駐</span><br><b>NODE DAEMON</b><br><small>FASTIFY · WS · NODE-PTY</small></div><span class="wire"></span></div>
+        <div class="arch-row" style="margin-top:24px"><div class="arch-box" style="--tone:var(--amber)"><span class="jp">代理</span><b>CODING AGENTS</b><small>LIVE PTY PROCESSES</small></div><span class="arch-link"></span><div class="arch-box"><span class="jp">分岐</span><b>GIT WORKTREES</b><small>ISOLATED TASK BRANCHES</small></div></div>
+        <div class="arch-footer"><span><b>STATE:</b> SINGULARITY_HOME/STATE</span><span><b>TRUST:</b> REPO-CONTROLLABLE PERMISSIONS</span><span><b>EXPOSURE:</b> LOOPBACK ONLY</span></div>
+      </div></div>
+    </div>
+  </section>
+
+  <section class="chapter cta" id="boot" aria-labelledby="boot-title">
+    <div class="chapter-inner">
+      <div class="cta-jp">開始</div>
+      <h2 class="display" id="boot-title">TAKE <span class="mint">CONTROL.</span></h2>
+      <p class="cta-sub">FROM ONE TERMINAL TO ONE OPERATIONAL PICTURE.</p>
+      <div class="install">
+        <div class="install-head"><span>BOOT SEQUENCE · FIRST RUN</span><span class="spacer"></span><button class="copy-btn" id="copyCommand" type="button">COPY COMMAND</button></div>
+        <code id="installCommand">git clone https://github.com/SamTeong/singularity.git
+cd singularity
+pnpm bootstrap</code>
+      </div>
+      <div class="copy-state" id="copyState" role="status" aria-live="polite">BOOTSTRAP GENERATES LOCAL CONFIG, INSTALLS DEPENDENCIES, AND STARTS THE CONTROL PLANE.</div>
+      <div class="cta-actions"><a class="btn primary" href="https://github.com/SamTeong/singularity">OPEN REPOSITORY</a><a class="btn alt" href="#hero">RETURN TO ORIENTATION</a></div>
+      <div class="final-marquee" aria-hidden="true"><div class="marquee-track"><span>SESSIONS LIVE</span><span>TASKS SYNCHRONIZED</span><span>WORKTREES ISOLATED</span><span>DAEMON LOOPBACK</span><span>CONTEXT ATTACHED</span><span>SESSIONS LIVE</span><span>TASKS SYNCHRONIZED</span><span>WORKTREES ISOLATED</span><span>DAEMON LOOPBACK</span><span>CONTEXT ATTACHED</span></div></div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer"><span class="good">◉ SINGULARITY SYSTEM NOMINAL</span><span>MIT LICENSE</span><span>LOCAL CONTROL PLANE</span><span class="spacer"></span><span>DESIGNED WITH JAIRUS OS · 特異点</span></footer>
+
+<script>
+"use strict";
+const $=(s,r=document)=>r.querySelector(s);
+const $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const pad=n=>String(n).padStart(2,"0");
+
+/* Local clock + console uptime */
+let up=2*3600+41*60+9;
+function tick(){
+  const d=new Date();$("#hh").textContent=pad(d.getHours());$("#mm").textContent=pad(d.getMinutes());$("#ss").textContent=pad(d.getSeconds());
+  up++;$("#uptime").textContent=pad(Math.floor(up/3600))+":"+pad(Math.floor(up/60)%60)+":"+pad(up%60);
+}
+tick();setInterval(tick,1000);
+
+/* Scroll progress and chapter wayfinding */
+const chapters=$$(".chapter");const railLinks=$$("#chapterRail a");const topLinks=$$(".topnav a");
+function onScroll(){
+  const max=document.documentElement.scrollHeight-innerHeight;
+  $("#scrollProgress").style.width=(max>0?scrollY/max*100:0)+"%";
+  let current=chapters[0].id;
+  for(const section of chapters){if(section.getBoundingClientRect().top<=innerHeight*.42)current=section.id;}
+  railLinks.forEach(a=>a.classList.toggle("on",a.getAttribute("href")==="#"+current));
+  topLinks.forEach(a=>a.setAttribute("aria-current",a.getAttribute("href")==="#"+current?"true":"false"));
+}
+addEventListener("scroll",onScroll,{passive:true});onScroll();
+
+/* Build segmented meters */
+const tones={mint:"var(--mint)",blue:"var(--blue)",amber:"var(--amber)",red:"var(--red-hi)"};
+$$('.segments').forEach(host=>{const value=+host.dataset.value||0;host.style.setProperty('--tone',tones[host.dataset.tone]||tones.mint);for(let i=0;i<16;i++){const seg=document.createElement('i');if(i<value)seg.className='on';host.appendChild(seg);}});
+
+/* Terminal teletype */
+const termRows=[
+  ['dim','SINGULARITY SESSION BRIDGE · REV 0.9'],
+  ['','\u203a pnpm test -- web/src/lib/domainState.test.mjs'],
+  ['dim','TAP VERSION 13'],
+  ['ok','\u2713 MAPS AGENT STATES TO TASK DOMAINS'],
+  ['ok','\u2713 PRESERVES REVIEW STATE ON DISCONNECT'],
+  ['ok','\u2713 NORMALIZES BACKGROUND COMPLETION'],
+  ['dim','# TESTS 3 · PASS 3 · FAIL 0'],
+  ['','\u203a git status --short'],
+  ['ok','WORKTREE CLEAN · READY FOR REVIEW']
+];
+let termTimer=0;
+function renderTerminal(){
+  clearTimeout(termTimer);const host=$("#terminalBody");host.innerHTML="";let i=0;
+  const add=()=>{if(i>=termRows.length){const c=document.createElement('span');c.className='term-cursor';host.appendChild(c);return;}const [kind,text]=termRows[i++];const row=document.createElement('div');row.className='term-row '+kind;row.innerHTML=(text.startsWith('\u203a')?'<span class="prompt">\u203a</span><span>'+text.slice(1).trim()+'</span>':'<span>'+text+'</span>');host.appendChild(row);host.scrollTop=host.scrollHeight;termTimer=setTimeout(add,REDUCED?0:115);};add();
+}
+renderTerminal();
+
+/* Console tabs: click and arrow-key navigation */
+const tabs=$$(".tab");
+function selectView(name,focus=false){
+  tabs.forEach(tab=>{const on=tab.dataset.view===name;tab.setAttribute('aria-selected',String(on));tab.tabIndex=on?0:-1;if(on&&focus)tab.focus();});
+  $$('.view').forEach(view=>{const on=view.id==='view-'+name;view.classList.toggle('active',on);view.hidden=!on;});
+  if(name==='sessions')renderTerminal();if(name==='usage')requestAnimationFrame(drawChart);
+}
+tabs.forEach((tab,index)=>{tab.addEventListener('click',()=>selectView(tab.dataset.view));tab.addEventListener('keydown',e=>{if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();const d=e.key==='ArrowRight'?1:-1;const next=(index+d+tabs.length)%tabs.length;selectView(tabs[next].dataset.view,true);}if(e.key==='Home'){e.preventDefault();selectView(tabs[0].dataset.view,true);}if(e.key==='End'){e.preventDefault();selectView(tabs.at(-1).dataset.view,true);}});});
+
+/* Demo session selection */
+$$('.session').forEach(button=>button.addEventListener('click',()=>{$$('.session').forEach(x=>x.classList.toggle('active',x===button));renderTerminal();}));
+$$('.filter').forEach(button=>button.addEventListener('click',()=>{$$('.filter').forEach(x=>x.classList.toggle('on',x===button));}));
+
+/* Responsive usage chart */
+const data=Array.from({length:48},(_,i)=>42+Math.sin(i/4.2)*13+Math.cos(i/8)*8);
+function drawChart(){
+  const cv=$("#usageChart");if(!cv||cv.closest('.view').hidden)return;const box=cv.getBoundingClientRect();if(!box.width||!box.height)return;
+  const dpr=devicePixelRatio||1;cv.width=Math.round(box.width*dpr);cv.height=Math.round(box.height*dpr);const ctx=cv.getContext('2d');ctx.scale(dpr,dpr);const W=box.width,H=box.height;ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle='rgba(36,108,60,.55)';ctx.lineWidth=1;for(let y=H*.25;y<H;y+=H*.25){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(W,y);ctx.stroke();}
+  ctx.fillStyle='rgba(60,156,108,.55)';for(let x=26;x<W;x+=56)for(let y=28;y<H;y+=72)ctx.fillRect(x,y,1.5,1.5);
+  const pts=data.map((v,i)=>[i/(data.length-1)*W,H-(v/80)*H]);const g=ctx.createLinearGradient(0,0,0,H);g.addColorStop(0,'rgba(82,242,154,.3)');g.addColorStop(1,'rgba(82,242,154,0)');ctx.beginPath();ctx.moveTo(0,H);pts.forEach(([x,y])=>ctx.lineTo(x,y));ctx.lineTo(W,H);ctx.closePath();ctx.fillStyle=g;ctx.fill();
+  ctx.beginPath();pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.strokeStyle='#52F29A';ctx.lineWidth=2;ctx.shadowColor='#52F29A';ctx.shadowBlur=6;ctx.stroke();ctx.shadowBlur=0;const [lx,ly]=pts.at(-1);ctx.fillStyle='#7CF4AB';ctx.beginPath();ctx.arc(lx-2,ly,4,0,Math.PI*2);ctx.fill();
+}
+addEventListener('resize',drawChart);
+
+/* Workflow explainer */
+const flowData=[
+  ['\u4ed5\u69d8','DEFINE THE OUTCOME','Write the requirement and acceptance criteria once. The task begins with a durable description of done.','CODE: SPEC\u00b7121<br>STATE: APPROVED<br>INPUT: REQUIREMENTS'],
+  ['\u4efb\u52d9','CREATE THE OPERATIONAL RECORD','The task board binds the requirement to status, tags, repository, and the agent that will own the work.','TASK: TSK\u00b7121<br>QUEUE: READY<br>LABEL: AGENT-OK'],
+  ['\u5206\u5c90','ISOLATE THE CHANGE','Singularity creates a dedicated git worktree and branch for the task, so parallel agents can build without colliding with one another or contaminating main.','PATH: .WORKTREES/9E0B59D<br>BRANCH: TASK/9E0B59D<br>STATE: CLEAN'],
+  ['\u5b9f\u884c','DISPATCH A LIVE AGENT','A coding-agent PTY starts inside the worktree with the selected model and context scopes. Its terminal remains available in the session dock.','MODEL: OPUS<br>SESSION: 7FE813AB<br>CHANNEL: LIVE'],
+  ['\u5be9\u67fb','MAKE THE HUMAN RULING','When work is ready, inspect the diff and transcript, resolve the review, and conclude or return the task without losing its history.','DIFF: READY<br>TESTS: PASS<br>RULING: REQUIRED']
+];
+const flowItems=$$('.flow-item');let flowIndex=2;let flowTimer=0;
+function showFlow(index,user=false){flowIndex=index;flowItems.forEach((item,i)=>{item.classList.toggle('done',i<index);item.classList.toggle('now',i===index);});const [k,t,p,c]=flowData[index];$('#flowKanji').textContent=k;$('#flowTitle').textContent=t;$('#flowText').textContent=p;$('#flowCode').innerHTML=c;if(user&&!REDUCED){clearInterval(flowTimer);flowTimer=setInterval(()=>showFlow((flowIndex+1)%flowItems.length),4200);}}
+flowItems.forEach(item=>item.addEventListener('click',()=>showFlow(+item.dataset.step,true)));
+if(!REDUCED)flowTimer=setInterval(()=>showFlow((flowIndex+1)%flowItems.length),4200);
+
+/* Module pinning */
+$$('.module').forEach(module=>module.addEventListener('click',()=>{const on=module.getAttribute('aria-pressed')==='true';$$('.module').forEach(x=>x.setAttribute('aria-pressed','false'));module.setAttribute('aria-pressed',String(!on));}));
+
+/* Copy with a file://-safe fallback */
+$('#copyCommand').addEventListener('click',async()=>{const text=$('#installCommand').textContent;let ok=false;try{await navigator.clipboard.writeText(text);ok=true;}catch(_){const area=document.createElement('textarea');area.value=text;area.style.position='fixed';area.style.opacity='0';document.body.appendChild(area);area.select();try{ok=document.execCommand('copy');}catch(__){}area.remove();}$('#copyState').textContent=ok?'COMMAND COPIED · PASTE INTO YOUR TERMINAL':'COPY BLOCKED · SELECT THE COMMAND MANUALLY';});
+
+/* Render chart when its tab is first shown; keep static under reduced motion. */
+if(!REDUCED)setInterval(()=>{data.push(Math.max(18,Math.min(72,data.at(-1)+(Math.random()-.5)*9)));data.shift();if(!$('#view-usage').hidden)drawChart();},650);
+</script>
+</body>
+</html>
