@@ -162,7 +162,7 @@ export function registerFs(server) {
     if (db.files[path] != null || isDir(path)) return new Response(400, {}, { ok: false, error: 'already exists' });
     db.files[path] = kind === 'dir' ? { content: null, mtime: Date.now(), dir: true } : { content: '', mtime: Date.now() };
     return { ok: true };
-  });
+  }, 200);
 
   // Delete a file or a folder (recursively — the marker plus every key under
   // `path/`, mirroring rmSync(path, { recursive: true })).

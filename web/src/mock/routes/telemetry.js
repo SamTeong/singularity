@@ -24,10 +24,10 @@ function listFrame() {
   return { t: 'list', agents, recentRepos: db.recentRepos || [] };
 }
 
-// A stable fake pid per agent row — db.agents stores pid:1 for every agent
-// (ws.js makeAgent), so /procs derives a unique pid from the row index and
-// /procs/kill resolves it back the same way.
-const agentPid = (i) => 2000 + i;
+// The pid on each agent row is the single source of truth — ws.js makeAgent
+// stamps a unique fake pid (>= 2000) on every agent, and /procs + /procs/kill
+// both read a.pid directly. pid 1 is the mock's own 'daemon' row (added in
+// /procs below), not an agent.
 
 // ---- /history seed ---------------------------------------------------------
 // Seven days (yesterday back), one per day in the default 7-day window, so
@@ -181,14 +181,14 @@ export function registerTelemetry(server) {
         builtAt: new Date().toISOString(),
       },
     };
-  });
+  }, 200);
 
   // /procs — { procs: [...] } (procs.mjs scanClaude row shape). One row per
   // live agent (kind 'tracked') plus the mock's own 'daemon' row, so the
   // Processes dialog shows a protected daemon row like the real daemon.
   server.get('/procs', () => {
-    const procs = db.agents.map((a, i) => ({
-      pid: agentPid(i), ppid: 1, name: 'claude',
+    const procs = db.agents.map((a) => ({
+      pid: a.pid, ppid: 1, name: 'claude',
       started: new Date(a.createdAt).toISOString().slice(0, 19),
       session: a.id, kind: 'tracked',
     }));
@@ -204,21 +204,25 @@ export function registerTelemetry(server) {
     const pid = Number(parseBody(req).pid);
     if (!Number.isInteger(pid)) return new Response(400, {}, { ok: false, error: 'bad pid' });
     if (pid === 1) return { ok: false, error: 'daemon process — cannot stop from here' };
-    const idx = db.agents.findIndex((a, i) => agentPid(i) === pid);
+    const idx = db.agents.findIndex((a) => a.pid === pid);
     if (idx < 0) return { ok: false, error: 'not a tracked process' };
     db.agents.splice(idx, 1);
     broadcast(listFrame());
     return { ok: true };
-  });
+  }, 200);
 
   // /usagereport/status — { exists, at } (usagereport.mjs reportStatus). No
   // report exists in mock mode, so the panel shows its "No report yet" state.
   server.get('/usagereport/status', () => ({ exists: false, at: null }));
 
-  // /usagereport/refresh — the mock can't spawn the skill or serve the report
-  // HTML (no /usagereport/report route), so it degrades to the failure path
-  // the client already renders inline (generateReport's { ok:false, error }).
-  server.post('/usagereport/refresh', () => ({
+  // /usagereport/refresh — the mock can't spawn the usage-report skill, so it
+  // degrades to the failure path the client already renders inline
+  // (generateReport's { ok:false, error }). The daemon sets HTTP 400 when !r.ok
+  // (server/index.mjs) — mirror it.
+  // No `, 200` third argument here (unlike every other POST above): this handler
+  // only ever returns a Response, whose own code always wins, so a 200 default
+  // would be dead weight that reads as a contradiction.
+  server.post('/usagereport/refresh', () => new Response(400, {}, {
     ok: false, error: 'usage-report skill not configured in mock mode',
   }));
 }

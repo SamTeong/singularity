@@ -198,9 +198,12 @@ export function seedTasks() {
 }
 
 export function seedTaskHistory() {
+  // finalStats uses the statsFor shape (server/stats.mjs) — the client's
+  // history table reads h.finalStats.tokens and h.finalStats.costUsd, so the
+  // legacy { totalTokens, activeMs, cost_usd } keys would render "—".
   return [
-    { ...task(sessionId(1005), 'Concluded fixture run', 'done', 'report ready'), outcome: 'completed', concludedAt: T0 + 7200_000, finalStats: { turns: 4, totalTokens: 12_345, activeMs: 120_000, cost_usd: 0.42 } },
-    { ...task(sessionId(1006), 'Abandoned fixture run', 'done', 'abandoned'), outcome: 'abandoned', concludedAt: T0 + 10800_000, finalStats: { turns: 1, totalTokens: 900, activeMs: 20_000, cost_usd: 0.01 } },
+    { ...task(sessionId(1005), 'Concluded fixture run', 'done', 'report ready'), outcome: 'completed', concludedAt: T0 + 7200_000, finalStats: { turns: 4, tokens: 12_345, inputTokens: 8_000, outputTokens: 2_000, cacheReadTokens: 1_000, cacheWriteTokens: 1_345, models: ['claude'], exists: true, estCostUsd: null, costUsd: 0.42, costSource: 'statusline', apiMs: 100_000, wallMs: 120_000, busyMs: 120_000 } },
+    { ...task(sessionId(1006), 'Abandoned fixture run', 'done', 'abandoned'), outcome: 'abandoned', concludedAt: T0 + 10800_000, finalStats: { turns: 1, tokens: 900, inputTokens: 600, outputTokens: 200, cacheReadTokens: 50, cacheWriteTokens: 50, models: ['claude'], exists: true, estCostUsd: null, costUsd: 0.01, costSource: 'statusline', apiMs: 15_000, wallMs: 20_000, busyMs: 20_000 } },
   ];
 }
 
@@ -226,9 +229,12 @@ function bgJob(i, title) {
     id: sessionId(3000 + i), title, description: `${title} — seeded fixture job.`, cwd: ROOTS.scratch,
     cooldownHours: 24, enabled: false,
     window: { startHour: 9, endHour: 18, days: [1, 2, 3, 4, 5] },
-    thresholds: { claude: { start: 50, stop: 75, weeklyMax: 50 }, ollama: { start: 50, stop: 75, weeklyMax: 50 } },
-    models: { claude: 'opus', ollama: 'glm-5.2:cloud' },
-    tokenCaps: { claude: 15_000_000, ollama: 15_000_000 },
+    // All three backends, matching server/background.mjs DEFAULT_JOB — the
+    // CreateBackgroundJobDialog renders thresholds[b].start for b in
+    // ['claude','codex','ollama'], so a seeded job missing `codex` crashes Edit.
+    thresholds: { claude: { start: 50, stop: 75, weeklyMax: 50 }, codex: { start: 50, stop: 75, weeklyMax: 50 }, ollama: { start: 50, stop: 75, weeklyMax: 50 } },
+    models: { claude: 'opus', codex: 'gpt-5.6-luna', ollama: 'glm-5.2:cloud' },
+    tokenCaps: { claude: 15_000_000, codex: 15_000_000, ollama: 15_000_000 },
     scopes: [], conclude: 'inreview', lastRunAt: null, lastTaskId: null,
   };
 }

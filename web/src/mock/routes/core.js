@@ -9,10 +9,10 @@ import { FAKE_HOME } from '../fixtures.js';
 
 export function registerCore(server) {
   // /health — { ok, pid, clients }. The daemon reports live WS client count; the
-  // mock has one WS server, so clients is the count of connected sockets at call
-  // time. AppShell's restart loop polls this and reloads once the pid changes —
-  // under the mock the pid never changes, but /restart is a no-op below, so the
-  // loop times out harmlessly.
+  // mock has no live socket accounting, so clients is hardcoded to 0 here
+  // (nothing in the UI reads it). AppShell's restart loop polls this and reloads
+  // once the pid changes — under the mock the pid never changes, but /restart is
+  // a no-op below, so the loop times out harmlessly.
   server.get('/health', () => ({ ok: true, pid: 1, clients: 0 }));
 
   // /capabilities — feature availability flags. The mock pretends every optional
@@ -95,5 +95,5 @@ export function registerCore(server) {
   // AppShell restart loop will poll /health, see the same pid, and time out
   // harmlessly. Mirrors the daemon's own immediate reply (it exits after a
   // 100ms setTimeout).
-  server.post('/restart', () => ({ ok: true }));
+  server.post('/restart', () => ({ ok: true }), 200);
 }

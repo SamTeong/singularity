@@ -10,6 +10,7 @@ import { Response } from 'miragejs';
 import { db } from '../db.js';
 import { ROOTS } from '../fixtures.js';
 import { parseBody } from '../helpers.js';
+import { untildify } from '@/lib/paths.js';
 
 const RUNNING_MS = 30000;        // mtime within this window reads as a live session (sessions.mjs)
 const RESULT_CAP = 200;          // search result cap (sessions.mjs)
@@ -208,6 +209,14 @@ export function registerSessions(server) {
   // running, source }. The mock has no subagents, so no subagents field.
   server.get('/sessions', (schema, req) => {
     const cap = Number(req.queryParams.cap) || 5000;
+    // The daemon resolves the client-supplied root to enumerate transcripts
+    // (sessions.mjs listSessions). The seeded 32-session corpus lives at the
+    // ROOTS.projects path and never moves — a root other than that corpus root
+    // has no sessions in the mock, so return an empty list. Compare against the
+    // constant, not the mutable db.roots.sessions (PUT /sessions/root mutates
+    // it), or the corpus would be served under any freshly-picked root.
+    const root = req.queryParams.root;
+    if (root && untildify(root) !== ROOTS.projects) return { sessions: [] };
     const now = Date.now();
     const rows = [];
     for (const [project, sessions] of Object.entries(db.sessions)) {
@@ -247,6 +256,11 @@ export function registerSessions(server) {
     const q = req.queryParams.q || '';
     const ql = q.toLowerCase();
     if (!ql) return { results: [], capped: false };
+    // Same root gate as /sessions: the corpus lives at ROOTS.projects, so any
+    // other root (including a freshly-picked db.roots.sessions) has nothing to
+    // search.
+    const root = req.queryParams.root;
+    if (root && untildify(root) !== ROOTS.projects) return { results: [], capped: false };
     const { project, id } = req.queryParams || {};
     const targets = [];
     if (project && id) {
@@ -286,5 +300,5 @@ export function registerSessions(server) {
       }
     }
     return { stats };
-  });
+  }, 200);
 }

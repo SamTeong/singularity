@@ -85,7 +85,7 @@ export function registerTasks(server) {
     db.tasks.push(task);
     broadcast(tasksFrame());
     return { ok: true, task };
-  });
+  }, 200);
 
   // POST /tasks/:id/status — move a card (column/state). Mirrors
   // server/tasks.mjs updateTask: validates column + state, bumps updatedAt.
@@ -118,7 +118,7 @@ export function registerTasks(server) {
     t.updatedAt = Date.now();
     broadcast(tasksFrame());
     return { ok: true, task: t };
-  });
+  }, 200);
 
   // POST /tasks/:id/conclude — move a card to history with outcome + stats.
   // finalStats mirrors statsFor's shape (server/stats.mjs) — the mock has no
@@ -143,5 +143,5 @@ export function registerTasks(server) {
     });
     broadcast(tasksFrame());
     return { ok: true };
-  });
+  }, 200);
 }

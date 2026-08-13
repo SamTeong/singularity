@@ -65,7 +65,7 @@ export function registerAgents(server) {
     db.agents.splice(i, 1);
     broadcast({ t: 'list', agents: snapshotAgents(), recentRepos: db.recentRepos || [] });
     return { ok: true };
-  });
+  }, 200);
 
   // /session/codex-thread — GET ?id=. The daemon resolves a codex agent's
   // registry id to its codex-minted thread uuid (agents.mjs codexThreadFor);

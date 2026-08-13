@@ -18,6 +18,13 @@ const RING_MAX = 256 * 1024; // mirrors server/agents.mjs RING_MAX
 const OPEN = 1; // WebSocket.OPEN — mock-socket sockets report the same constants
 const sockets = new Set();
 
+// Fake-pid source for every agent the mock creates. pid 1 is reserved for the
+// mock's own "daemon" row (routes/telemetry.js /procs adds it), so agent pids
+// start at 2000. The pid is fake but must be unique and stable per agent
+// because routes/telemetry.js's /procs lists it and /procs/kill resolves a
+// kill back to the agent by matching a.pid.
+let nextPid = 2000;
+
 // The `list` frame's agents array — the 9 fields reg.snapshot() exposes
 // (server/agents.mjs:128). db.agents holds the full objects (with buf/written);
 // this projection is what the client renders.
@@ -61,13 +68,14 @@ function setStatus(id, status) {
   broadcast({ t: 'status', id, status });
 }
 
-// A fresh agent object for the mock registry. pid is fake (no real pty); the
-// client only displays it, never acts on it.
+// A fresh agent object for the mock registry. pid is fake (no real pty) but
+// unique and stable — see the nextPid counter above; routes/telemetry.js's
+// /procs lists it and /procs/kill resolves a kill by matching it.
 function makeAgent({ id, title, cwd, model, scopes, tool }) {
   return {
     id, title: title || id.slice(0, 8), cwd,
     model: model || 'claude', scopes: scopes || [], tool: tool || 'claude',
-    status: 'starting', pid: 1, createdAt: Date.now(), buf: [], written: 0,
+    status: 'starting', pid: nextPid++, createdAt: Date.now(), buf: [], written: 0,
   };
 }
 

@@ -82,8 +82,21 @@ function readConfig(cwd) {
   return { project: fileEntry(paths.project), local: fileEntry(paths.local) };
 }
 
+// The daemon's writeConfig rejects a cwd outside the pinned roots
+// (server/config.mjs isKnownConfigRoot). Mirror it so a write to an unpicked
+// root fails the same way instead of silently creating a file.
+function isKnownRoot(cwd, roots) {
+  const abs = untildify(cwd);
+  if (!abs) return false;
+  return (roots || []).some((raw) => {
+    const root = untildify(raw);
+    return root && (abs === root || abs.startsWith(root + '/'));
+  });
+}
+
 function writeConfig(cwd, scope, content, mtime, force) {
   if (scope !== 'project' && scope !== 'local') return { ok: false, error: 'bad scope' };
+  if (!isKnownRoot(cwd, db.roots.config)) return { ok: false, error: 'cwd outside config roots' };
   const p = configPaths(cwd)[scope];
   try { JSON.parse(content); } catch (e) { return { ok: false, error: `invalid JSON: ${e.message}` }; }
   return guardedWriteWithBackup(p, content, mtime, force);
@@ -143,6 +156,7 @@ function readCodexConfig(cwd) {
 
 function writeCodexConfig(cwd, scope, content, mtime, force) {
   if (scope !== 'project' && scope !== 'user') return { ok: false, error: 'bad scope' };
+  if (!isKnownRoot(cwd, db.roots.codexConfig)) return { ok: false, error: 'cwd outside config roots' };
   // Enforce the client's cwd→scope mapping (mirrors writeCodexConfig): 'user'
   // only for cwd ~ (home), 'project' only for a non-home cwd.
   const isHome = untildify(cwd) === FAKE_HOME;
@@ -426,9 +440,12 @@ function readSkillsDir(dir) {
 function listSkills(root) {
   root = untildify(root || (db.roots.skills || [])[0] || '');
   if (!root) return { scopes: [], flat: false, error: 'skills root not configured' };
+  const under = Object.keys(db.files).filter((p) => p.startsWith(root + '/'));
+  // No files under the root → the virtual root doesn't exist (listSkills's
+  // `skills root not found`). A root with files but no skills returns no error.
+  if (!under.length) return { scopes: [], flat: false, error: 'skills root not found' };
   const subdirs = new Set();
-  for (const path of Object.keys(db.files)) {
-    if (!path.startsWith(root + '/')) continue;
+  for (const path of under) {
     const seg = path.slice(root.length + 1).split('/')[0];
     if (seg) subdirs.add(seg);
   }
@@ -547,8 +564,8 @@ export function registerEditors(server) {
   server.post('/config/search', (schema, req) => {
     const b = parseBody(req);
     return { results: searchConfig(b.roots, b.q) };
-  });
-  server.get('/config/state', () => ({ state: db.ui.configState || {} }));
+  }, 200);
+  server.get('/config/state', () => ({ state: getConfigState() }));
   server.put('/config/state', (schema, req) => setConfigState(parseBody(req)));
   server.put('/config/:scope', (schema, req) => {
     const b = parseBody(req);
@@ -585,7 +602,7 @@ export function registerEditors(server) {
   server.post('/codex-config/search', (schema, req) => {
     const b = parseBody(req);
     return { results: searchCodexConfig(b.roots, b.q) };
-  });
+  }, 200);
   server.put('/codex-config/:scope', (schema, req) => {
     const b = parseBody(req);
     const { cwd, content, mtime, force } = b;
@@ -600,11 +617,11 @@ export function registerEditors(server) {
   server.post('/hooks/list', (schema, req) => {
     const roots = parseBody(req).roots || [];
     return { groups: roots.map((cwd) => ({ cwd, files: listHooks(cwd) })) };
-  });
+  }, 200);
   server.post('/hooks/search', (schema, req) => {
     const b = parseBody(req);
     return { results: searchHooks(b.roots, b.q) };
-  });
+  }, 200);
   server.get('/hooks/file', (schema, req) => {
     const r = readHook(req.queryParams.path);
     if (r.error) return new Response(400, {}, r);
@@ -621,11 +638,11 @@ export function registerEditors(server) {
 
   // ---- Rules editor.
   rootsRoutes(server, 'rules');
-  server.post('/rules/files', (schema, req) => listRuleFiles(parseBody(req).roots));
+  server.post('/rules/files', (schema, req) => listRuleFiles(parseBody(req).roots), 200);
   server.post('/rules/search', (schema, req) => {
     const b = parseBody(req);
     return searchRules(b.roots, b.q);
-  });
+  }, 200);
   server.get('/rules/reference', (schema, req) => {
     const r = findRuleReference(req.queryParams.path);
     if (!r.ok) return new Response(r.error === 'no reference' ? 404 : 400, {}, r);

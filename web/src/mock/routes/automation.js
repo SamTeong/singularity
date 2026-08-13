@@ -66,7 +66,7 @@ export function registerAutomation(server) {
     db.crons.push(cron);
     broadcast({ t: 'crons', crons: db.crons });
     return { ok: true, cron };
-  });
+  }, 200);
 
   server.post('/crons/:id', (schema, req) => {
     const job = db.crons.find((c) => c.id === req.params.id);
@@ -87,7 +87,7 @@ export function registerAutomation(server) {
     job.updatedAt = Date.now();
     broadcast({ t: 'crons', crons: db.crons });
     return { ok: true, cron: job };
-  });
+  }, 200);
 
   server.delete('/crons/:id', (schema, req) => {
     const i = db.crons.findIndex((c) => c.id === req.params.id);
@@ -107,7 +107,7 @@ export function registerAutomation(server) {
     job.lastError = null;
     broadcast({ t: 'crons', crons: db.crons });
     return { ok: true, cron: job };
-  });
+  }, 200);
 
   // ---- Background jobs ----------------------------------------------------
 
@@ -141,7 +141,7 @@ export function registerAutomation(server) {
     db.background.push(job);
     broadcast(bgFrame());
     return { ok: true, job };
-  });
+  }, 200);
 
   server.patch('/background/reorder', (schema, req) => {
     const ids = parseBody(req).ids;
@@ -166,7 +166,7 @@ export function registerAutomation(server) {
     job.lastRunAt = now;
     broadcast(bgFrame());
     return { ok: true, taskId: null };
-  });
+  }, 200);
 
   server.patch('/background/jobs/:id', (schema, req) => {
     const job = db.background.find((d) => d.id === req.params.id);
