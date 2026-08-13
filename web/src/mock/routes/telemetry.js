@@ -8,7 +8,7 @@ import { Response } from 'miragejs';
 import { db } from '../db.js';
 import { broadcast } from '../ws.js';
 import { parseBody } from '../helpers.js';
-import { sessionId, RICH_SESSION, PROJECT_A, PROJECT_B } from '../fixtures.js';
+import { sessionId, RICH_SESSION, PROJECT_A, PROJECT_B, T0 } from '../fixtures.js';
 
 // Machine-local YYYY-MM-DD — same convention as server/history.mjs localDay.
 const localDay = (ts) => (ts ? new Date(ts) : new Date()).toLocaleDateString('en-CA');
@@ -80,6 +80,11 @@ function liveToday() {
 }
 
 export function registerTelemetry(server) {
+  // A canned report is always present in mock mode. Keep its cache-busting
+  // timestamp in page-local state so Refresh can remount the iframe without
+  // spawning the real usage-report skill.
+  if (!Number.isFinite(db.ui.usageReportAt)) db.ui.usageReportAt = T0;
+
   // /usage — { ollama, claude, codex }, each a provider payload (usage.mjs
   // getUsage). The mock can't scrape real accounts, so every provider reports
   // ok:true with plausible windows; the cards render their populated state.
@@ -211,18 +216,17 @@ export function registerTelemetry(server) {
     return { ok: true };
   }, 200);
 
-  // /usagereport/status — { exists, at } (usagereport.mjs reportStatus). No
-  // report exists in mock mode, so the panel shows its "No report yet" state.
-  server.get('/usagereport/status', () => ({ exists: false, at: null }));
-
-  // /usagereport/refresh — the mock can't spawn the usage-report skill, so it
-  // degrades to the failure path the client already renders inline
-  // (generateReport's { ok:false, error }). The daemon sets HTTP 400 when !r.ok
-  // (server/index.mjs) — mirror it.
-  // No `, 200` third argument here (unlike every other POST above): this handler
-  // only ever returns a Response, whose own code always wins, so a 200 default
-  // would be dead weight that reads as a contradiction.
-  server.post('/usagereport/refresh', () => new Response(400, {}, {
-    ok: false, error: 'usage-report skill not configured in mock mode',
+  // /usagereport/status — { exists, at } (usagereport.mjs reportStatus). The
+  // Vite mock-assets plugin serves the corresponding canned HTML document.
+  server.get('/usagereport/status', () => ({
+    exists: true,
+    at: db.ui.usageReportAt,
   }));
+
+  // /usagereport/refresh — successful mock-only no-op. Advancing `at` mirrors
+  // a newly generated report and makes UsageReportView remount its iframe.
+  server.post('/usagereport/refresh', () => {
+    db.ui.usageReportAt += 1;
+    return { ok: true, at: db.ui.usageReportAt };
+  }, 200);
 }

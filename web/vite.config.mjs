@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import mockAssetsPlugin from './mock-assets.plugin.mjs';
 
 // `@/` → web/src, so imports are location-independent (no fragile ../../..).
 // Node's test runner does NOT resolve this alias — *.test.mjs files must keep
@@ -30,7 +31,7 @@ const singTokenInject = {
 
 export default defineConfig(({ mode }) => ({
   root: 'web',
-  plugins: [react(), singTokenInject],
+  plugins: [react(), singTokenInject, ...(mode === 'mock' ? [mockAssetsPlugin()] : [])],
   resolve: { alias: { '@': srcDir } },
   server: {
     host: '127.0.0.1',
