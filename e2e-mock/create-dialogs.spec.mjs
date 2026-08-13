@@ -180,8 +180,23 @@ test('New task dialog: Escape and Cancel close it without POST /tasks, even subm
   await dialog.getByLabel('orchestrator model').fill('sonnet');
   await expect(dialog.getByRole('button', { name: 'Create', exact: true })).toBeEnabled();
 
-  let posted = false;
-  page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/tasks')) posted = true; });
+  // Mirage intercepts fetch in-page, so Playwright's network layer never sees
+  // app requests. Patch window.fetch from inside the page to record whether a
+  // POST to /tasks occurs — this actually exercises the path Mirage uses.
+  await page.evaluate(() => {
+    window.__e2ePosted = false;
+    const orig = window.fetch;
+    window.fetch = async (...args) => {
+      const [input, init] = args;
+      const url = typeof input === 'string' ? input : input.url;
+      const method = (init?.method || 'GET').toUpperCase();
+      if (method === 'POST' && new URL(url, location.origin).pathname.endsWith('/tasks')) {
+        window.__e2ePosted = true;
+      }
+      return orig(...args);
+    };
+  });
+  const postedToTasks = (page) => page.evaluate(() => window.__e2ePosted);
 
   // Move focus away from ModelSelect so Escape belongs to the dialog rather
   // than its option popper.
@@ -196,5 +211,5 @@ test('New task dialog: Escape and Cancel close it without POST /tasks, even subm
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(dialog).not.toBeVisible();
 
-  expect(posted).toBe(false);
+  expect(await postedToTasks(page)).toBe(false);
 });

@@ -6,7 +6,7 @@
 // dialog's cancel-only mechanics separately; these board tests only use seeded
 // cards and the mock's REST → WebSocket convergence path.
 import { test, expect, onceConfirm } from './fixtures/test.mjs';
-import { goto, openMenu } from '../e2e/helpers/nav.mjs';
+import { goto, setSkin } from '../e2e/helpers/nav.mjs';
 
 // Playwright's dragTo()/mouse.down+move+up did not reliably fire React's
 // onDragStart/onDragOver/onDrop for these HTML5-draggable elements under
@@ -19,14 +19,6 @@ async function html5Drag(page, source, target) {
   await target.dispatchEvent('dragover', { dataTransfer });
   await target.dispatchEvent('drop', { dataTransfer });
   await source.dispatchEvent('dragend', { dataTransfer });
-}
-
-async function setSkin(page, skin) {
-  await openMenu(page);
-  await page.getByRole('menuitem', { name: 'Appearance', exact: true }).click();
-  await expect(page.getByText('Appearance', { exact: true }).first()).toBeVisible();
-  await page.getByRole('radio').filter({ hasText: skin }).click();
-  await expect(page.getByText('Appearance', { exact: true }).first()).toBeVisible();
 }
 
 test('all four columns render with their seeded counts', async ({ page }) => {

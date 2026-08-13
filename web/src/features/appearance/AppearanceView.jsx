@@ -72,7 +72,7 @@ export default function AppearanceView({ onToggleColorMode, onSelectSkin }) {
       {/* minHeight matches the small-button header bars (button 42 + padding 28 + 1px border)
           so the title centers level with pages carrying a top-right control. */}
       <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', minHeight: 71, borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
-        <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Appearance</Typography>
+        <Typography component="h1" sx={{ fontSize: 20, fontWeight: 600 }}>Appearance</Typography>
       </Stack>
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
         <Typography variant="body2" sx={{ color: 'text.secondary', mb: 3 }}>

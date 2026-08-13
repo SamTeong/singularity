@@ -1,24 +1,11 @@
 // Appearance settings spec: validates the theme skin selector and colour mode
 // toggle, and ensures the respawn dialog appears only when sessions are live.
 import { test, expect } from './fixtures/test.mjs';
-import { openMenu, SKINS } from '../e2e/helpers/nav.mjs';
-
-// Appearance navigation can be slow. Raise the timeout.
-async function gotoAppearance(page) {
-  await openMenu(page);
-  await page.getByRole('menuitem', { name: 'Appearance', exact: true }).click();
-  await expect(page.getByText('Appearance', { exact: true }).first()).toBeVisible();
-}
-
-async function setSkin(page, skin) {
-  await gotoAppearance(page);
-  await page.getByRole('radio').filter({ hasText: skin }).click();
-  await expect(page.getByText('Appearance', { exact: true }).first()).toBeVisible();
-}
+import { gotoMenu, setSkin, SKINS } from '../e2e/helpers/nav.mjs';
 
 test('theme skin radiogroup selects each skin', async ({ page }) => {
   await page.goto('/');
-  await gotoAppearance(page);
+  await gotoMenu(page, 'Appearance');
 
   // Walk each skin: select it, verify it's marked checked.
   for (const skin of SKINS) {
@@ -34,7 +21,7 @@ test('theme skin radiogroup selects each skin', async ({ page }) => {
 
 test('colour mode toggle switches between light and dark', async ({ page }) => {
   await page.goto('/');
-  await gotoAppearance(page);
+  await gotoMenu(page, 'Appearance');
 
   // The group should have two buttons: Light mode and Dark mode.
   const lightBtn = page.getByRole('button', { name: 'Light mode' });
@@ -60,7 +47,7 @@ test('respawn dialog does not appear with no live sessions', async ({ page }) =>
   // if agents.filter(isLive).length > 0. Thus the dialog must NOT appear.
 
   await page.goto('/');
-  await gotoAppearance(page);
+  await gotoMenu(page, 'Appearance');
 
   // Attempt to toggle the colour mode — this is what would trigger respawnCount.
   const darkBtn = page.getByRole('button', { name: 'Dark mode' });
@@ -111,7 +98,7 @@ test('switching skin with no live sessions applies immediately without a respawn
   // toggle (`onToggleTheme`) — both gate the same respawn dialog independently
   // in AppShell.jsx, so both need their own "no live sessions" coverage.
   await page.goto('/');
-  await gotoAppearance(page);
+  await gotoMenu(page, 'Appearance');
 
   await setSkin(page, 'Phosphor Console');
   await page.waitForTimeout(400); // give a buggy delayed open a chance to appear
