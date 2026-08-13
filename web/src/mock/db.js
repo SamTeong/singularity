@@ -7,7 +7,7 @@
 // (design.md D7).
 import {
   seedFiles, seedSessions, seedTasks, seedTaskHistory,
-  seedCrons, seedBackgroundJobs, seedAgents, seedRoots, seedRecentRepos,
+  seedCrons, seedBackgroundJobs, seedAgents, seedRoots, seedRecentRepos, T0,
 } from './fixtures.js';
 
 // Fresh top-level containers on every module evaluation — deep clone from
@@ -25,5 +25,10 @@ export const db = {
   agents: clone(seedAgents()), // [] — grows at runtime (create/fork/attach, section 4)
   recentRepos: clone(seedRecentRepos()), // cwd list carried by the `list` frame
   roots: clone(seedRoots()), // per-panel picker roots
-  ui: {}, // panel UI state (open tabs, selections, ...) — starts empty, route groups populate as needed
+  // Panel UI state (open tabs, selections, ...) — route groups lazy-populate
+  // the rest as needed. `usageReportAt` is seeded rather than lazy because it
+  // is fixture data, not UI state: it stands in for the mtime of the canned
+  // report the mock-assets Vite plugin serves, and `POST /usagereport/refresh`
+  // advances it so UsageReportView remounts its iframe.
+  ui: { usageReportAt: T0 },
 };
