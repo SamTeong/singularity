@@ -42,7 +42,7 @@ export const NAV_ITEMS = [
   { v: 'wiki', icon: <MenuBookIcon />, label: 'Wiki', jp: '文庫' },
   { v: 'appearance', icon: <PaletteIcon />, label: 'Appearance', jp: '外観' },
   { v: 'status', icon: <CloudSyncIcon />, label: 'Status', jp: '状態' },
-  { v: 'settings', icon: <KeyboardIcon />, label: 'Settings', jp: '設定' },
+  { v: 'settings', icon: <KeyboardIcon />, label: 'Settings', jp: '操作' },
 ];
 const PROCESSES_JP = '工程';
 const RESTART_JP = '再起動';

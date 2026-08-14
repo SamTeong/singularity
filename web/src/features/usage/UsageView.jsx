@@ -18,8 +18,8 @@ function ProviderCard({ label, u }) {
   const authHelp = {
     // Browser mode (error 'no-login') vs manual-cookie mode need different fixes.
     ollama: u?.error === 'no-login'
-      ? 'Fresh auth required. Run "npm run ollama-login" in a terminal, then log in to ollama.com when the browser opens.'
-      : 'Fresh auth required. Run "npm run ollama-login" in a terminal, or paste a fresh cookie and browser ID from a logged-in ollama.com tab into state/ollama.json.',
+      ? 'Fresh auth required. Run "npm run ollama-login" in a terminal, then sign in to ollama.com when the browser opens.'
+      : 'Fresh auth required. Run "npm run ollama-login" in a terminal, or sign in to ollama.com and paste a fresh cookie and browser ID from that tab into state/ollama.json.',
     claude: 'No usage data yet — run Claude Code to update.',
     codex: 'No usage data yet — run Codex to update.',
   };

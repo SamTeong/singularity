@@ -20,10 +20,11 @@ async function openHistory(page) {
 test('seeded days render in newest-first order', async ({ page }) => {
   await openHistory(page);
 
-  // 6 non-empty seeded days + today = 7 cards. The gap day (day-2) renders as
-  // a GapSegment, not an <article>, so it's excluded from this count.
+  // Articles are project cards, not day headers: the 6 non-empty seeded days
+  // each contribute one. The gap day and today's zero-session live header
+  // contribute no <article> nodes.
   const cards = page.getByRole('article');
-  await expect(cards).toHaveCount(7, { timeout: 15000 });
+  await expect(cards).toHaveCount(6, { timeout: 15000 });
 
   // The day's narrative is per-project bullets inside the cards, so the cards
   // carry the seeded text. Comparing their vertical positions proves
