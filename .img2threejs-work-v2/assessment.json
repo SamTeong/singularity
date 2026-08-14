@@ -1,0 +1,417 @@
+{
+  "targetName": "NERV-style Utility Shaft Atrium",
+  "sourceImage": "reference.png",
+  "preSpecAssessment": {
+    "objectClass": {
+      "primaryType": "utility shaft atrium (multi-tier architectural catwalk set)",
+      "primaryDomain": "object",
+      "formLanguage": [
+        "geometric",
+        "extruded",
+        "faceted",
+        "chamfered",
+        "hexagonal-tiled"
+      ],
+      "structureKind": [
+        "architectural-shell",
+        "tapering-tower",
+        "truss-bridge",
+        "stair-run",
+        "hex-panel-wall",
+        "hex-floor"
+      ],
+      "motionPotential": [
+        "static-set (no rig required)",
+        "monitor-post screens could pulse"
+      ],
+      "materialFamilies": [
+        "painted-structural-steel",
+        "painted-accent-metal-heavy",
+        "honeycomb-composite-panel",
+        "hex-floor-tile",
+        "emissive-screen-panel-minor"
+      ],
+      "notes": "Companion set to the command-room reference, same design language (orange trim, dark steel, self-lit accents) but different macro topology: one central shaft + one catwalk bridge (not twin catwalks), no dais, no wall-of-screens -- honeycomb wall panels and hex floor tiling are the new identity features."
+    },
+    "complexity": {
+      "tier": "ultra-complex",
+      "scores": {
+        "silhouetteComplexity": 2,
+        "componentCount": 2,
+        "hierarchyDepth": 2,
+        "repetitionDensity": 2,
+        "materialLayerCount": 2,
+        "localDetailDensity": 2,
+        "occlusionRisk": 2,
+        "actionReadinessNeed": 1
+      },
+      "estimatedCounts": {
+        "macroComponents": 10,
+        "mesoComponents": 8,
+        "microFeatureGroups": 4,
+        "materialLayers": 5,
+        "repetitionSystems": 2
+      },
+      "reasoning": [
+        "10 macro assemblies (shaft, bridge, 2x staircase, 2x hex platform, 2x honeycomb wall panel, 2x control booth) with bilateral mirroring.",
+        "Repetition: monitor-post pedestals (4x, radial-ish along ramps), stair treads/handrail (linear, hand-authored per the same generator limitation documented for v1).",
+        "5 material families -- steel, heavy orange trim, NEW honeycomb panel, NEW hex floor tile, minor screen emissive.",
+        "Lower actionReadinessNeed than v1: fewer distinct movable/interactive props (no chairs/carts at this density)."
+      ]
+    },
+    "specDepthDecision": {
+      "requiredDepth": "ultra-complex",
+      "minimumComponentLevels": [
+        "macro",
+        "meso",
+        "micro"
+      ],
+      "needsRepetitionSystems": true,
+      "needsMaterialLocalOverrides": true,
+      "needsMultipleReviewViews": true,
+      "needsActionReadyHierarchy": true,
+      "rationale": "10 macro parts x mirrored pairs x hex-tile/panel repetition x 5 material families clears ultra-complex; matches v1's justification pattern."
+    },
+    "unknownsToResolveBeforeImplementation": [],
+    "detailInventory": {
+      "scanMethod": "component-zones",
+      "targetMinDetails": 12,
+      "note": "Enumerate every identity-defining small detail before authoring the spec. Each detail must map to a component.localFeatures entry or material.localOverrides entry, never prose only. Use forge/stage1_intake/build_detail_inventory.py to scan zones.",
+      "details": [
+        {
+          "id": "det2-shaft-taper-beams",
+          "zone": "central shaft",
+          "description": "tapering wall segments with chamfered orange edge beams rising full height",
+          "kind": "bevel",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-shaft-taper-beams"
+          }
+        },
+        {
+          "id": "det2-shaft-top-light",
+          "zone": "top of shaft",
+          "description": "bright warm/white emissive cap implying an overhead vent or skylight",
+          "kind": "emissive",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-shaft-top-light"
+          }
+        },
+        {
+          "id": "det2-elevator-door",
+          "zone": "shaft base, both walls",
+          "description": "dark violet-grey door panel with a small warm-orange indicator light above",
+          "kind": "decal",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-elevator-door"
+          }
+        },
+        {
+          "id": "det2-honeycomb-panel",
+          "zone": "upper wall panels L/R",
+          "description": "large-scale hex-tile relief on a warm cream/off-white composite panel",
+          "kind": "groove",
+          "mapsTo": {
+            "type": "material.localOverrides",
+            "ref": "honeycombPanel"
+          }
+        },
+        {
+          "id": "det2-bridge-truss-brace",
+          "zone": "catwalk bridge underside",
+          "description": "X-braced diagonal truss bracing under the octagonal bridge deck",
+          "kind": "ridge",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-bridge-truss-brace"
+          }
+        },
+        {
+          "id": "det2-stair-handrail",
+          "zone": "both staircases",
+          "description": "thin tubular handrail with vertical baluster repeat",
+          "kind": "ridge",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-stair-handrail"
+          }
+        },
+        {
+          "id": "det2-hex-floor-tile",
+          "zone": "lower platforms L/R",
+          "description": "hexagonal floor tiling, dark warm grey",
+          "kind": "seam",
+          "mapsTo": {
+            "type": "material.localOverrides",
+            "ref": "hexFloor"
+          }
+        },
+        {
+          "id": "det2-monitor-post",
+          "zone": "4x ramp positions",
+          "description": "small standing monitor pedestal (post + emissive screen head)",
+          "kind": "emissive",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-monitor-post"
+          }
+        },
+        {
+          "id": "det2-control-booth",
+          "zone": "stair mid-landings L/R",
+          "description": "small rust-colored crate booth with a screen and rooftop vent",
+          "kind": "decal",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-control-booth"
+          }
+        },
+        {
+          "id": "det2-ladder",
+          "zone": "upper right wall",
+          "description": "vertical ladder rungs on the right wall",
+          "kind": "ridge",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-ladder"
+          }
+        },
+        {
+          "id": "det2-ramp-slope",
+          "zone": "lower platform entries",
+          "description": "sloped ramp/track transition from shaft floor to hex platforms",
+          "kind": "bevel",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-ramp-slope"
+          }
+        },
+        {
+          "id": "det2-orange-trim-heavy",
+          "zone": "shaft + wall-panel capitals",
+          "description": "thick chamfered orange trim, heavier presence than the command-room reference",
+          "kind": "bevel",
+          "mapsTo": {
+            "type": "material.localOverrides",
+            "ref": "accentTrim"
+          }
+        }
+      ]
+    },
+    "anatomy": {
+      "applies": false,
+      "styleHeads": 0.0,
+      "proportions": {
+        "headUnit": 0.0,
+        "torso": 0.0,
+        "legs": 0.0,
+        "shoulderWidth": 0.0,
+        "hipWidth": 0.0
+      },
+      "pose": {
+        "type": "unassessed",
+        "jointAngles": {}
+      },
+      "faceLandmarks": {
+        "eyeLine": 0.0,
+        "eyeSpacing": 0.0,
+        "noseBase": 0.0,
+        "mouthLine": 0.0,
+        "hairline": 0.0
+      },
+      "features": [],
+      "confidence": 0.0,
+      "note": "Only meaningful when objectClass.primaryDomain is character or hybrid. Set applies=true and fill from forge/stage1_intake/extract_landmarks.py. See grimoire/character/reconstruction.md and grimoire/character/likeness_maximization.md."
+    },
+    "sourceImage": "reference.png"
+  },
+  "qualityContract": {
+    "qualityBar": "ultra-complex",
+    "definitionOfDone": [
+      "The rendered model matches the reference silhouette, primary proportions, visible component hierarchy, material response, and most recognizable local features for the selected fidelity tier."
+    ],
+    "minimumSpecDepth": {
+      "macroComponents": 10,
+      "mesoComponents": 6,
+      "microFeatureGroups": 4,
+      "materialLayers": 5,
+      "repetitionSystems": 2,
+      "reviewViewpoints": 5
+    },
+    "featureGroups": [
+      {
+        "id": "overall-silhouette",
+        "name": "Overall silhouette and proportions",
+        "required": true,
+        "qualityCriteria": [
+          "Bounding shape, dominant curves, negative spaces, and scale relationships are explicitly described."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "model reads as a generic placeholder instead of the reference object",
+          "major proportions are guessed without evidence"
+        ]
+      },
+      {
+        "id": "primary-structure",
+        "name": "Primary structure and hierarchy",
+        "required": true,
+        "qualityCriteria": [
+          "Major parts, joints, seams, contact points, and parent-child relationships are named before code generation."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "large visible parts are merged into one mesh",
+          "component hierarchy is too shallow for the observed complexity"
+        ]
+      },
+      {
+        "id": "attachment-joint-correctness",
+        "name": "Attachment and joint correctness",
+        "required": true,
+        "qualityCriteria": [
+          "Every visible child appendage, branch, limb, handle, connector, tube, cable, horn, wing, leg, or hinged part has an attachment contract with parent socket, localStart/localEnd, contact type, embed/overlap, and gap tolerance."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "child part root floats away from the parent",
+          "branch/limb/tube is centered in space instead of pivoting from its root",
+          "parent-child transform mixes world and local coordinates"
+        ]
+      },
+      {
+        "id": "surface-material-response",
+        "name": "Surface material response",
+        "required": true,
+        "qualityCriteria": [
+          "Albedo zones, roughness, normal/bump/displacement intent, cavity dirt, edge wear, and local overrides are specified where visible.",
+          "Important materials define independent albedo, roughness, height/normal, and AO responses instead of reusing one texture for unrelated PBR channels.",
+          "Surface response is decomposed into macro, meso, and micro frequency bands with scale and amplitude tied to object scale."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "surface looks like flat plastic",
+          "local material variation is missing or not tied to image evidence"
+        ]
+      },
+      {
+        "id": "reference-lookdev",
+        "name": "Reference color, material, and lighting response",
+        "required": true,
+        "qualityCriteria": [
+          "Material-pass names the reference-derived albedo palette, roughness variation, tactile normal/bump/displacement response, and local masks.",
+          "When a source image is available, run reference PBR extraction and require confidence >= 0.7 before treating maps as implementation-ready.",
+          "Lighting-pass names key/fill/rim or environment light, exposure, tone mapping, background, and contact shadow behavior.",
+          "Neutral, grazing-angle, and reference-matched renders prove that surface relief survives relighting and is not painted into albedo."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "model has acceptable shape but reads as flat shaded or plastic",
+          "colors are a generic average instead of reference-observed local color zones",
+          "lighting is evenly ambient and cannot reproduce the source value range"
+        ]
+      },
+      {
+        "id": "shaft-bridge-topology",
+        "name": "Central tapering shaft + single catwalk bridge",
+        "required": true,
+        "qualityCriteria": [
+          "Shaft tapers with chamfered orange edge beams and a bright top light cap.",
+          "One octagonal catwalk bridge spans both staircases at mid-height (not twin bridges)."
+        ],
+        "evidenceRefs": [
+          "det2-shaft-taper-beams",
+          "det2-bridge-truss-brace"
+        ],
+        "failureModes": [
+          "shaft rendered as a plain vertical box with no taper/trim",
+          "bridge omitted or mispositioned"
+        ]
+      },
+      {
+        "id": "honeycomb-panel-material",
+        "name": "Honeycomb wall panel + hex floor tiling",
+        "required": true,
+        "qualityCriteria": [
+          "Upper wall panels read as a warm cream/off-white hex-tile relief, visually distinct from the darker steel.",
+          "Lower platform floors read as hexagonal tiling."
+        ],
+        "evidenceRefs": [
+          "det2-honeycomb-panel",
+          "det2-hex-floor-tile"
+        ],
+        "failureModes": [
+          "wall panels rendered as flat steel with no hex pattern or color distinction"
+        ]
+      }
+    ],
+    "visualDeltaChecks": [
+      "silhouette and negative-space delta",
+      "component hierarchy depth delta",
+      "repetition density and distribution delta",
+      "material albedo/roughness/normal response delta",
+      "local feature placement and scale delta"
+    ],
+    "antiShallowSpecRules": [
+      "Do not proceed to code if qualityContract.qualityBar is unassessed.",
+      "Do not proceed to code if the spec only contains a root component for a moderate or complex object.",
+      "Do not proceed to code if required featureGroups are not represented by componentTree, materials, or repetitionSystems.",
+      "Do not proceed to code if visible local features are described only in prose and not attached to components/materials/evidenceRefs.",
+      "Do not proceed past structural-pass if attached child parts lack attachment.parentSocket, localStart, localEnd, embedDepth/overlap, and gapTolerance.",
+      "Do not pass material look-dev when albedo is reused as roughness, height, normal, or AO.",
+      "Do not pass material look-dev without macro, meso, and micro surface frequency bands for close-up materials.",
+      "Do not pass reference-fidelity material look-dev from a source image without usable referencePbr maps or an explicit documented limitation.",
+      "Do not patch a spec with extracted PBR maps when extraction confidence is below the target threshold unless the user explicitly accepts lower fidelity.",
+      "Do not place adjacent separate-geometry parts below 0.02 world-unit seam overlap (source: grimoire/build/geometry_patterns.md).",
+      "Do not satisfy raised or recessed relief, fasteners, or grip structure with a map alone when the feature affects form; use geometry or displacement (source: grimoire/build/geometry_patterns.md)."
+    ]
+  },
+  "authoringInstruction": "Fill observed object class, complexity reasoning, featureGroups, visualDeltaChecks, and unknowns before generating or implementing ObjectSculptSpec.",
+  "localSpecSearch": {
+    "collection": "core_3d",
+    "query": "NERV-style Utility Shaft Atrium elevator shaft catwalk bridge honeycomb hex panel wall hexagonal floor tile staircase mid landing monitor pedestal cart",
+    "index": {
+      "status": "hit",
+      "reason": "current",
+      "fingerprint": "6857e5ab528b42ac12f4f411f862610a0bffce8e47aee3610a7603c318072fe8"
+    },
+    "matches": [
+      {
+        "record_id": "core.shader-mapping-boxgeometry-slides-receivers-grips",
+        "file_path": "docs/raw/img2threejs-skill-dataset.json",
+        "heading": null,
+        "key_path": "categories.rendering_shader_mapping[5]",
+        "score": 3.982060806801,
+        "snippets": [
+          "... r\u00e1p h\u00ecnh ch\u1eef nh\u1eadt/kh\u1ed1i. Recognition cues: Flat-faced, roughly rectangular volume (pistol slide, receiver/frame, grip, panel) D\u1ea5u hi\u1ec7u nh\u1eadn di\u1ec7n: Kh\u1ed1i g\u1ea7n ch\u1eef nh\u1eadt v\u1edbi c\u00e1c m\u1eb7t ph\u1eb3ng (kh\u00f3a n\u00f2ng s\u00fang l\u1ee5c, th\u00e2n/khung s\u00fang, tay c\u1ea7m, t\u1ea5m ph\u1eb3ng) ..."
+        ],
+        "source_refs": [
+          {
+            "path": "docs/raw/img2threejs-skill-dataset.json",
+            "heading": null,
+            "key_path": "categories.rendering_shader_mapping[5]"
+          }
+        ],
+        "evidence_refs": [
+          {
+            "kind": "source",
+            "ref": "docs/raw/img2threejs-skill-dataset.json",
+            "note": "img2threejs NotebookLM research distillation"
+          }
+        ]
+      }
+    ]
+  }
+}

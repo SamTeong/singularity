@@ -1,0 +1,450 @@
+{
+  "targetName": "NERV-style Tactical Command Room",
+  "sourceImage": "reference.png",
+  "preSpecAssessment": {
+    "objectClass": {
+      "primaryType": "tactical command room (multi-tier architectural console set)",
+      "primaryDomain": "object",
+      "formLanguage": [
+        "geometric",
+        "extruded",
+        "faceted",
+        "chamfered"
+      ],
+      "structureKind": [
+        "architectural-shell",
+        "raised-platform",
+        "truss-bridge",
+        "stair-run",
+        "tiled-panel-wall",
+        "sunken-pit"
+      ],
+      "motionPotential": [
+        "static-set (no rig required)",
+        "screens could pulse/flicker emissive intensity"
+      ],
+      "materialFamilies": [
+        "painted-structural-steel",
+        "painted-accent-metal",
+        "satin-gloss-composite-deck",
+        "emissive-screen-panel",
+        "glossy-dark-composite (pit)"
+      ],
+      "notes": "Composite architectural assembly, not a single prop. Reconstructed as one Group with a deep macro/meso/micro component tree; bilateral (mirror) symmetry used to infer the unseen mirrored half. True back wall/ceiling/camera-side wall are out of frame and intentionally omitted (open shell)."
+    },
+    "complexity": {
+      "tier": "ultra-complex",
+      "scores": {
+        "silhouetteComplexity": 0.8,
+        "componentCount": 0.9,
+        "hierarchyDepth": 0.85,
+        "repetitionDensity": 0.9,
+        "materialLayerCount": 0.6,
+        "localDetailDensity": 0.55,
+        "occlusionRisk": 0.5,
+        "actionReadinessNeed": 0.2
+      },
+      "estimatedCounts": {
+        "macroComponents": 9,
+        "mesoComponents": 22,
+        "microFeatureGroups": 8,
+        "materialLayers": 5,
+        "repetitionSystems": 5
+      },
+      "reasoning": [
+        "9 macro assemblies (room shell, central dais, logo monument, 2x vice-command platform, 2x staircase, 2x catwalk, floor pit, 2x monitor-wall tower, 4x satellite cart) with bilateral left/right mirroring.",
+        "High repetition density: screen module repeated across every console + both wall towers; stair tread repeated per flight; catwalk baluster repeated per rail run; wall panel tiling repeated per tower.",
+        "5 material families (structural steel, orange accent, console composite, emissive screen, pit glass/composite) each need local overrides (screen brightness varies per instance, trim is a thin edge treatment not a fill).",
+        "Local detail density moderate (rivets/seams below resolvable detail, approximated tileable) rather than high (no fine carved ornament).",
+        "Occlusion risk moderate: dollhouse-cutaway framing hides ceiling/back/camera-side walls and the far side of every desk \u2014 flagged as unknowns, not invented.",
+        "actionReadinessNeed low: this is a static architectural set, not a handled prop \u2014 no grip/socket anchors needed, still ships with an explode-map and clickable component IDs per the structure gate."
+      ]
+    },
+    "specDepthDecision": {
+      "requiredDepth": "ultra-complex",
+      "minimumComponentLevels": [
+        "macro",
+        "meso",
+        "micro"
+      ],
+      "needsRepetitionSystems": true,
+      "needsMaterialLocalOverrides": true,
+      "needsMultipleReviewViews": true,
+      "needsActionReadyHierarchy": true,
+      "rationale": "9 macro parts x mirrored pairs x tiled screen/step/rail repetition systems x 5 material families with per-instance emissive overrides clears every ultra-complex threshold; a shallow 1-2 level spec would not capture the wall-of-screens or stair/catwalk topology that the identity-defining-features layer flagged as most important."
+    },
+    "unknownsToResolveBeforeImplementation": [
+      "True back wall / ceiling / camera-side (4th) wall geometry -- hidden in this single dollhouse-cutaway view. Resolution: leave the shell open on those sides rather than invent them.",
+      "Exact screen readout content (implied line-art only at this resolution). Resolution: generic procedural readout canvases (grid/bars/scan-text), not literal transcription.",
+      "Exact rivet/panel-seam frequency on structural steel. Resolution: plausible tileable seam module.",
+      "Exact stair tread count and catwalk baluster pitch. Resolution: regular repeat consistent with the observed silhouette proportions.",
+      "Logo emblem exact glyph. Resolution: reconstructed as a generic abstract angular mark, not a reproduction of any copyrighted symbol."
+    ],
+    "detailInventory": {
+      "scanMethod": "component-zones",
+      "targetMinDetails": 16,
+      "note": "Enumerate every identity-defining small detail before authoring the spec. Each detail must map to a component.localFeatures entry or material.localOverrides entry, never prose only. Use forge/stage1_intake/build_detail_inventory.py to scan zones.",
+      "details": [
+        {
+          "id": "det-orange-trim-band",
+          "zone": "beams/stair-stringers/wall-capitals",
+          "description": "thin saturated burnt-orange edge/trim line on structural members",
+          "maps_to": "material.localOverrides[accentTrim]"
+        },
+        {
+          "id": "det-screen-hotspot-gradient",
+          "zone": "every screen instance",
+          "description": "emissive value gradient from panel edge (darker) to a near-white hot patch",
+          "maps_to": "material.localOverrides[screenEmissive] via CanvasTexture gradient"
+        },
+        {
+          "id": "det-screen-tile-grid",
+          "zone": "left/right monitor-wall towers",
+          "description": "non-uniform tiled grid of individually framed rectangular screens",
+          "maps_to": "component.repetitionSystem[wallScreenGrid]"
+        },
+        {
+          "id": "det-dais-guardrail-lip",
+          "zone": "central dais edge",
+          "description": "raised bevelled lip/guard-rail rim around the octagonal deck",
+          "maps_to": "component[daisGuardLip].localFeatures"
+        },
+        {
+          "id": "det-stair-handrail-tube",
+          "zone": "both staircases",
+          "description": "thin tubular handrail with vertical baluster repeat",
+          "maps_to": "component.repetitionSystem[stairBaluster]"
+        },
+        {
+          "id": "det-catwalk-truss-web",
+          "zone": "both catwalks",
+          "description": "diagonal web between top/bottom chord, truncated-triangular truss profile",
+          "maps_to": "component[catwalkTruss].localFeatures"
+        },
+        {
+          "id": "det-logo-emblem-glyph",
+          "zone": "central monument",
+          "description": "abstract angular emissive emblem + text plate (kept generic, non-reproduction)",
+          "maps_to": "component[logoEmblem].localFeatures"
+        },
+        {
+          "id": "det-pit-inner-slope-facets",
+          "zone": "central floor pit",
+          "description": "faceted/bevelled inward-sloping walls of the sunken octagon, glossy-dark finish",
+          "maps_to": "component[floorPitWall].material"
+        },
+        {
+          "id": "det-satellite-cart-cable",
+          "zone": "4x satellite carts",
+          "description": "cable/pipe stub connecting each cart body to the floor",
+          "maps_to": "component[satelliteCart].localFeatures"
+        },
+        {
+          "id": "det-console-desk-monitor-bezel",
+          "zone": "every desk (dais + vice-command platforms)",
+          "description": "individual framed monitor bezel + emissive inner panel per desk position",
+          "maps_to": "component.repetitionSystem[deskScreenModule]"
+        },
+        {
+          "id": "det-wall-tower-rake",
+          "zone": "left/right monitor-wall towers",
+          "description": "wall leans inward toward the room's central axis at the top (raked, not vertical)",
+          "maps_to": "component[monitorWallTower].transform"
+        },
+        {
+          "id": "det-structural-column-panel-seam",
+          "zone": "room shell columns",
+          "description": "tileable riveted/paneled plate-seam normal detail on structural steel",
+          "maps_to": "material.localOverrides[structuralSteel] via generated normal-ish canvas"
+        },
+        {
+          "id": "det-vice-command-desk-wing",
+          "zone": "left/right vice-command platforms",
+          "description": "winged desk silhouette flanking a smaller centered console",
+          "maps_to": "component[viceCommandDesk].localFeatures"
+        },
+        {
+          "id": "det-dais-task-chairs",
+          "zone": "central dais",
+          "description": "3x task chair silhouettes at the dais consoles",
+          "maps_to": "component.repetitionSystem[taskChair]"
+        },
+        {
+          "id": "det-floor-pit-emitter-strip",
+          "zone": "floor pit center",
+          "description": "flush emissive strip/seam at the very bottom-center of the pit",
+          "maps_to": "component[floorPitFloor].material"
+        },
+        {
+          "id": "det-corridor-nameplate",
+          "zone": "monitor-wall towers, lower band",
+          "description": "small nameplate/signage rectangle distinct from the screen tiles",
+          "maps_to": "component[wallNameplate].localFeatures"
+        }
+      ]
+    },
+    "anatomy": {
+      "applies": false,
+      "styleHeads": 0.0,
+      "proportions": {
+        "headUnit": 0.0,
+        "torso": 0.0,
+        "legs": 0.0,
+        "shoulderWidth": 0.0,
+        "hipWidth": 0.0
+      },
+      "pose": {
+        "type": "unassessed",
+        "jointAngles": {}
+      },
+      "faceLandmarks": {
+        "eyeLine": 0.0,
+        "eyeSpacing": 0.0,
+        "noseBase": 0.0,
+        "mouthLine": 0.0,
+        "hairline": 0.0
+      },
+      "features": [],
+      "confidence": 0.0,
+      "note": "Only meaningful when objectClass.primaryDomain is character or hybrid. Set applies=true and fill from forge/stage1_intake/extract_landmarks.py. See grimoire/character/reconstruction.md and grimoire/character/likeness_maximization.md."
+    },
+    "sourceImage": "reference.png"
+  },
+  "qualityContract": {
+    "qualityBar": "ultra-complex",
+    "definitionOfDone": [
+      "The rendered model matches the reference silhouette, primary proportions, visible component hierarchy, material response, and most recognizable local features for the selected fidelity tier."
+    ],
+    "minimumSpecDepth": {
+      "macroComponents": 9,
+      "mesoComponents": 22,
+      "microFeatureGroups": 8,
+      "materialLayers": 5,
+      "repetitionSystems": 5,
+      "reviewViewpoints": 5
+    },
+    "featureGroups": [
+      {
+        "id": "overall-silhouette",
+        "name": "Overall silhouette and proportions",
+        "required": true,
+        "qualityCriteria": [
+          "Bounding shape, dominant curves, negative spaces, and scale relationships are explicitly described."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "model reads as a generic placeholder instead of the reference object",
+          "major proportions are guessed without evidence"
+        ]
+      },
+      {
+        "id": "primary-structure",
+        "name": "Primary structure and hierarchy",
+        "required": true,
+        "qualityCriteria": [
+          "Major parts, joints, seams, contact points, and parent-child relationships are named before code generation."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "large visible parts are merged into one mesh",
+          "component hierarchy is too shallow for the observed complexity"
+        ]
+      },
+      {
+        "id": "attachment-joint-correctness",
+        "name": "Attachment and joint correctness",
+        "required": true,
+        "qualityCriteria": [
+          "Every visible child appendage, branch, limb, handle, connector, tube, cable, horn, wing, leg, or hinged part has an attachment contract with parent socket, localStart/localEnd, contact type, embed/overlap, and gap tolerance."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "child part root floats away from the parent",
+          "branch/limb/tube is centered in space instead of pivoting from its root",
+          "parent-child transform mixes world and local coordinates"
+        ]
+      },
+      {
+        "id": "surface-material-response",
+        "name": "Surface material response",
+        "required": true,
+        "qualityCriteria": [
+          "Albedo zones, roughness, normal/bump/displacement intent, cavity dirt, edge wear, and local overrides are specified where visible.",
+          "Important materials define independent albedo, roughness, height/normal, and AO responses instead of reusing one texture for unrelated PBR channels.",
+          "Surface response is decomposed into macro, meso, and micro frequency bands with scale and amplitude tied to object scale."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "surface looks like flat plastic",
+          "local material variation is missing or not tied to image evidence"
+        ]
+      },
+      {
+        "id": "reference-lookdev",
+        "name": "Reference color, material, and lighting response",
+        "required": true,
+        "qualityCriteria": [
+          "Material-pass names the reference-derived albedo palette, roughness variation, tactile normal/bump/displacement response, and local masks.",
+          "When a source image is available, run reference PBR extraction and require confidence >= 0.7 before treating maps as implementation-ready.",
+          "Lighting-pass names key/fill/rim or environment light, exposure, tone mapping, background, and contact shadow behavior.",
+          "Neutral, grazing-angle, and reference-matched renders prove that surface relief survives relighting and is not painted into albedo."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "model has acceptable shape but reads as flat shaded or plastic",
+          "colors are a generic average instead of reference-observed local color zones",
+          "lighting is evenly ambient and cannot reproduce the source value range"
+        ]
+      },
+      {
+        "id": "screen-wall-tiling",
+        "name": "Wall-of-screens tiled grid",
+        "required": true,
+        "qualityCriteria": [
+          "Both monitor-wall towers read as a non-uniform tiled grid of individually framed rectangular screens, not one flat emissive panel.",
+          "Per-screen emissive brightness varies (some near-white hot, most mid-value cyan-green) via a canvas-texture gradient, not a flat emissive color."
+        ],
+        "evidenceRefs": [
+          "det-screen-tile-grid",
+          "det-screen-hotspot-gradient"
+        ],
+        "failureModes": [
+          "wall rendered as a single uniform emissive plane",
+          "every screen given identical brightness/color"
+        ]
+      },
+      {
+        "id": "symmetric-hall-topology",
+        "name": "Bilateral dais / stair / catwalk topology",
+        "required": true,
+        "qualityCriteria": [
+          "Central raised dais, two staircases, two catwalks bridging them mid-height, and the sunken octagonal floor pit are all present and correctly connected per the Layer 4 scene-graph.",
+          "Left/right pairs are true mirror instances sharing one authored definition, not independently eyeballed twins."
+        ],
+        "evidenceRefs": [
+          "det-dais-guardrail-lip",
+          "det-catwalk-truss-web",
+          "det-stair-handrail-tube"
+        ],
+        "failureModes": [
+          "stairs/catwalks omitted or replaced with a generic ramp",
+          "left/right pair proportions visibly mismatched"
+        ]
+      }
+    ],
+    "visualDeltaChecks": [
+      "silhouette and negative-space delta",
+      "component hierarchy depth delta",
+      "repetition density and distribution delta",
+      "material albedo/roughness/normal response delta",
+      "local feature placement and scale delta"
+    ],
+    "antiShallowSpecRules": [
+      "Do not proceed to code if qualityContract.qualityBar is unassessed.",
+      "Do not proceed to code if the spec only contains a root component for a moderate or complex object.",
+      "Do not proceed to code if required featureGroups are not represented by componentTree, materials, or repetitionSystems.",
+      "Do not proceed to code if visible local features are described only in prose and not attached to components/materials/evidenceRefs.",
+      "Do not proceed past structural-pass if attached child parts lack attachment.parentSocket, localStart, localEnd, embedDepth/overlap, and gapTolerance.",
+      "Do not pass material look-dev when albedo is reused as roughness, height, normal, or AO.",
+      "Do not pass material look-dev without macro, meso, and micro surface frequency bands for close-up materials.",
+      "Do not pass reference-fidelity material look-dev from a source image without usable referencePbr maps or an explicit documented limitation.",
+      "Do not patch a spec with extracted PBR maps when extraction confidence is below the target threshold unless the user explicitly accepts lower fidelity.",
+      "Do not place adjacent separate-geometry parts below 0.02 world-unit seam overlap (source: grimoire/build/geometry_patterns.md).",
+      "Do not satisfy raised or recessed relief, fasteners, or grip structure with a map alone when the feature affects form; use geometry or displacement (source: grimoire/build/geometry_patterns.md)."
+    ]
+  },
+  "authoringInstruction": "Fill observed object class, complexity reasoning, featureGroups, visualDeltaChecks, and unknowns before generating or implementing ObjectSculptSpec.",
+  "localSpecSearch": {
+    "collection": "core_3d",
+    "query": "NERV-style Tactical Command Room control room console raised dais platform staircase catwalk truss wall of monitor screens emissive display panel",
+    "index": {
+      "status": "rebuilt",
+      "reason": "missing",
+      "fingerprint": "6857e5ab528b42ac12f4f411f862610a0bffce8e47aee3610a7603c318072fe8"
+    },
+    "matches": [
+      {
+        "record_id": "core.pbr-wearness-alpha-mask",
+        "file_path": "docs/raw/img2threejs-skill-dataset.json",
+        "heading": null,
+        "key_path": "categories.material_pbr[9]",
+        "score": 4.627714671653,
+        "snippets": [
+          "CS2-specific per-pixel durability control embedded in the alpha channel of the Base Color texture, independent of visible transparency. C\u01a1 ch\u1ebf \u0111i\u1ec1u khi\u1ec3n \u0111\u1ed9 b\u1ec1n theo t\u1eebng pixel \u0111\u1eb7c th\u00f9 c\u1ee7a CS2, nh\u00fang trong k\u00eanh alpha c\u1ee7a texture Base Color, \u0111\u1ed9c ..."
+        ],
+        "source_refs": [
+          {
+            "path": "docs/raw/img2threejs-skill-dataset.json",
+            "heading": null,
+            "key_path": "categories.material_pbr[9]"
+          }
+        ],
+        "evidence_refs": [
+          {
+            "kind": "source",
+            "ref": "docs/raw/img2threejs-skill-dataset.json",
+            "note": "img2threejs NotebookLM research distillation"
+          }
+        ]
+      },
+      {
+        "record_id": "core.pbr-color-space-srgb-vs-linearnocolorspace",
+        "file_path": "docs/raw/img2threejs-skill-dataset.json",
+        "heading": null,
+        "key_path": "categories.material_pbr[11]",
+        "score": 4.606367423049,
+        "snippets": [
+          "... v\u00e0 c\u00e1c b\u1ea3n \u0111\u1ed3 d\u1eef li\u1ec7u to\u00e1n h\u1ecdc (ph\u1ea3i gi\u1eef tuy\u1ebfn t\u00ednh/kh\u00f4ng hi\u1ec7u ch\u1ec9nh). Recognition cues: Base color/albedo and emissive textures are the only ones that should look like natural photographic color; Normal, roughness, metalness, and ..."
+        ],
+        "source_refs": [
+          {
+            "path": "docs/raw/img2threejs-skill-dataset.json",
+            "heading": null,
+            "key_path": "categories.material_pbr[11]"
+          }
+        ],
+        "evidence_refs": [
+          {
+            "kind": "source",
+            "ref": "docs/raw/img2threejs-skill-dataset.json",
+            "note": "img2threejs NotebookLM research distillation"
+          }
+        ]
+      },
+      {
+        "record_id": "core.shader-mapping-boxgeometry-slides-receivers-grips",
+        "file_path": "docs/raw/img2threejs-skill-dataset.json",
+        "heading": null,
+        "key_path": "categories.rendering_shader_mapping[5]",
+        "score": 3.982060806801,
+        "snippets": [
+          "... r\u00e1p h\u00ecnh ch\u1eef nh\u1eadt/kh\u1ed1i. Recognition cues: Flat-faced, roughly rectangular volume (pistol slide, receiver/frame, grip, panel) D\u1ea5u hi\u1ec7u nh\u1eadn di\u1ec7n: Kh\u1ed1i g\u1ea7n ch\u1eef nh\u1eadt v\u1edbi c\u00e1c m\u1eb7t ph\u1eb3ng (kh\u00f3a n\u00f2ng s\u00fang l\u1ee5c, th\u00e2n/khung s\u00fang, tay c\u1ea7m, t\u1ea5m ph\u1eb3ng) ..."
+        ],
+        "source_refs": [
+          {
+            "path": "docs/raw/img2threejs-skill-dataset.json",
+            "heading": null,
+            "key_path": "categories.rendering_shader_mapping[5]"
+          }
+        ],
+        "evidence_refs": [
+          {
+            "kind": "source",
+            "ref": "docs/raw/img2threejs-skill-dataset.json",
+            "note": "img2threejs NotebookLM research distillation"
+          }
+        ]
+      }
+    ]
+  }
+}

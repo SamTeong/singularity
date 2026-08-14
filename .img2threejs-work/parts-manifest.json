@@ -1,0 +1,87 @@
+{
+  "model": "nerv-style-tactical-command-room",
+  "parts": [
+    {
+      "name": "roomShell",
+      "kind": "part"
+    },
+    {
+      "name": "centralDais",
+      "kind": "part"
+    },
+    {
+      "name": "daisConsoleCenter",
+      "kind": "part"
+    },
+    {
+      "name": "daisConsoleLeft",
+      "kind": "part"
+    },
+    {
+      "name": "daisConsoleRight",
+      "kind": "part"
+    },
+    {
+      "name": "logoMonument",
+      "kind": "part"
+    },
+    {
+      "name": "logoEmblemPanel",
+      "kind": "part"
+    },
+    {
+      "name": "viceCommandPlatform.left",
+      "kind": "part"
+    },
+    {
+      "name": "viceCommandPlatform.right",
+      "kind": "part"
+    },
+    {
+      "name": "staircase.left",
+      "kind": "part"
+    },
+    {
+      "name": "staircase.right",
+      "kind": "part"
+    },
+    {
+      "name": "catwalk.left",
+      "kind": "part"
+    },
+    {
+      "name": "catwalk.right",
+      "kind": "part"
+    },
+    {
+      "name": "floorPit",
+      "kind": "part"
+    },
+    {
+      "name": "monitorWallTower.left",
+      "kind": "part"
+    },
+    {
+      "name": "monitorWallTower.right",
+      "kind": "part"
+    },
+    {
+      "name": "satelliteCart.0",
+      "kind": "part"
+    },
+    {
+      "name": "satelliteCart.1",
+      "kind": "part"
+    },
+    {
+      "name": "satelliteCart.2",
+      "kind": "part"
+    },
+    {
+      "name": "satelliteCart.3",
+      "kind": "part"
+    }
+  ],
+  "unnamedMeshes": 0,
+  "integralMeshes": 112
+}

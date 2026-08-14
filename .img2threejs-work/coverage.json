@@ -1,0 +1,88 @@
+{
+  "model": "nerv-style-tactical-command-room",
+  "specifiedComponents": 24,
+  "builtParts": 20,
+  "errors": 0,
+  "warnings": 1,
+  "result": "pass",
+  "findings": [
+    {
+      "check": "detail-dangling",
+      "severity": "warning",
+      "subject": "det-orange-trim-band",
+      "detail": "mapsTo 'accentTrim' matches no component, localFeature or localOverride"
+    },
+    {
+      "check": "component-folded",
+      "severity": "info",
+      "subject": "logoTextPlate",
+      "detail": "no mesh of its own \u2014 folded into 'logoMonument', which is built. Correct for relief; a real gap only if this needed to be separable."
+    },
+    {
+      "check": "component-folded",
+      "severity": "info",
+      "subject": "viceCommandDesk.left",
+      "detail": "no mesh of its own \u2014 folded into 'viceCommandPlatform.left', which is built. Correct for relief; a real gap only if this needed to be separable."
+    },
+    {
+      "check": "component-folded",
+      "severity": "info",
+      "subject": "viceCommandDesk.right",
+      "detail": "no mesh of its own \u2014 folded into 'viceCommandPlatform.right', which is built. Correct for relief; a real gap only if this needed to be separable."
+    },
+    {
+      "check": "component-folded",
+      "severity": "info",
+      "subject": "stairHandrail.left",
+      "detail": "no mesh of its own \u2014 folded into 'staircase.left', which is built. Correct for relief; a real gap only if this needed to be separable."
+    },
+    {
+      "check": "component-folded",
+      "severity": "info",
+      "subject": "stairHandrail.right",
+      "detail": "no mesh of its own \u2014 folded into 'staircase.right', which is built. Correct for relief; a real gap only if this needed to be separable."
+    },
+    {
+      "check": "component-folded",
+      "severity": "info",
+      "subject": "floorPitEmitterStrip",
+      "detail": "no mesh of its own \u2014 folded into 'floorPit', which is built. Correct for relief; a real gap only if this needed to be separable."
+    },
+    {
+      "check": "component-folded",
+      "severity": "info",
+      "subject": "wallNameplate.left",
+      "detail": "no mesh of its own \u2014 folded into 'monitorWallTower.left', which is built. Correct for relief; a real gap only if this needed to be separable."
+    },
+    {
+      "check": "component-folded",
+      "severity": "info",
+      "subject": "wallNameplate.right",
+      "detail": "no mesh of its own \u2014 folded into 'monitorWallTower.right', which is built. Correct for relief; a real gap only if this needed to be separable."
+    },
+    {
+      "check": "part-not-specified",
+      "severity": "info",
+      "subject": "satelliteCart.0",
+      "detail": "built part has no matching component in the spec (fine for detail groups; a sign of spec drift for anything larger)"
+    },
+    {
+      "check": "part-not-specified",
+      "severity": "info",
+      "subject": "satelliteCart.1",
+      "detail": "built part has no matching component in the spec (fine for detail groups; a sign of spec drift for anything larger)"
+    },
+    {
+      "check": "part-not-specified",
+      "severity": "info",
+      "subject": "satelliteCart.2",
+      "detail": "built part has no matching component in the spec (fine for detail groups; a sign of spec drift for anything larger)"
+    },
+    {
+      "check": "part-not-specified",
+      "severity": "info",
+      "subject": "satelliteCart.3",
+      "detail": "built part has no matching component in the spec (fine for detail groups; a sign of spec drift for anything larger)"
+    }
+  ]
+}

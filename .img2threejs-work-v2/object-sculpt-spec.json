@@ -1,0 +1,5576 @@
+{
+  "targetName": "NERV-style Utility Shaft Atrium",
+  "targetId": "nerv-style-utility-shaft-atrium",
+  "schemaVersion": "2.1",
+  "terminologyProfile": {
+    "domain": "real-time procedural Three.js asset",
+    "geometryTerms": [
+      "silhouette",
+      "topology",
+      "primitive",
+      "bevel",
+      "chamfer",
+      "taper",
+      "bend",
+      "boolean cut",
+      "edge loop",
+      "surface normal",
+      "displacement"
+    ],
+    "materialTerms": [
+      "albedo",
+      "baseColor",
+      "roughness",
+      "metalness",
+      "normal map",
+      "bump map",
+      "ambient occlusion",
+      "cavity dirt",
+      "edge wear",
+      "clearcoat"
+    ],
+    "lightingTerms": [
+      "key light",
+      "fill light",
+      "rim light",
+      "HDRI/environment reflection",
+      "contact shadow"
+    ],
+    "descriptionRule": "Use measurable 3D graphics terms. Avoid vague words unless they are paired with concrete geometry/material/shader parameters."
+  },
+  "sourceImage": "reference.png",
+  "referenceCamera": {
+    "solved": false,
+    "fovDegrees": 40.0,
+    "aspect": 1.0,
+    "orientation": {
+      "yaw": 0.0,
+      "pitch": 0.0,
+      "roll": 0.0
+    },
+    "positionHint": [
+      0.0,
+      0.0,
+      3.0
+    ],
+    "note": "For likeness work, solve the reference camera (forge/stage1_intake/solve_camera_pose.py) so the review render aligns with the photo and the reference can be projected. Confirm by overlay review."
+  },
+  "suitability": "conditional",
+  "scores": {
+    "object_isolation": 2,
+    "silhouette_readability": 2,
+    "depth_inference": 2,
+    "primitive_decomposition": 2,
+    "material_procedurality": 2,
+    "occlusion_risk": 2,
+    "interaction_fit": 2
+  },
+  "preSpecAssessment": {
+    "objectClass": {
+      "primaryType": "utility shaft atrium (multi-tier architectural catwalk set)",
+      "primaryDomain": "object",
+      "formLanguage": [
+        "geometric",
+        "extruded",
+        "faceted",
+        "chamfered",
+        "hexagonal-tiled"
+      ],
+      "structureKind": [
+        "architectural-shell",
+        "tapering-tower",
+        "truss-bridge",
+        "stair-run",
+        "hex-panel-wall",
+        "hex-floor"
+      ],
+      "motionPotential": [
+        "static-set (no rig required)",
+        "monitor-post screens could pulse"
+      ],
+      "materialFamilies": [
+        "painted-structural-steel",
+        "painted-accent-metal-heavy",
+        "honeycomb-composite-panel",
+        "hex-floor-tile",
+        "emissive-screen-panel-minor"
+      ],
+      "notes": "Companion set to the command-room reference, same design language (orange trim, dark steel, self-lit accents) but different macro topology: one central shaft + one catwalk bridge (not twin catwalks), no dais, no wall-of-screens -- honeycomb wall panels and hex floor tiling are the new identity features."
+    },
+    "complexity": {
+      "tier": "ultra-complex",
+      "scores": {
+        "silhouetteComplexity": 2,
+        "componentCount": 2,
+        "hierarchyDepth": 2,
+        "repetitionDensity": 2,
+        "materialLayerCount": 2,
+        "localDetailDensity": 2,
+        "occlusionRisk": 2,
+        "actionReadinessNeed": 1
+      },
+      "estimatedCounts": {
+        "macroComponents": 10,
+        "mesoComponents": 8,
+        "microFeatureGroups": 4,
+        "materialLayers": 5,
+        "repetitionSystems": 2
+      },
+      "reasoning": [
+        "10 macro assemblies (shaft, bridge, 2x staircase, 2x hex platform, 2x honeycomb wall panel, 2x control booth) with bilateral mirroring.",
+        "Repetition: monitor-post pedestals (4x, radial-ish along ramps), stair treads/handrail (linear, hand-authored per the same generator limitation documented for v1).",
+        "5 material families -- steel, heavy orange trim, NEW honeycomb panel, NEW hex floor tile, minor screen emissive.",
+        "Lower actionReadinessNeed than v1: fewer distinct movable/interactive props (no chairs/carts at this density)."
+      ]
+    },
+    "specDepthDecision": {
+      "requiredDepth": "ultra-complex",
+      "minimumComponentLevels": [
+        "macro",
+        "meso",
+        "micro"
+      ],
+      "needsRepetitionSystems": true,
+      "needsMaterialLocalOverrides": true,
+      "needsMultipleReviewViews": true,
+      "needsActionReadyHierarchy": true,
+      "rationale": "10 macro parts x mirrored pairs x hex-tile/panel repetition x 5 material families clears ultra-complex; matches v1's justification pattern."
+    },
+    "unknownsToResolveBeforeImplementation": [],
+    "detailInventory": {
+      "scanMethod": "component-zones",
+      "targetMinDetails": 12,
+      "note": "Enumerate every identity-defining small detail before authoring the spec. Each detail must map to a component.localFeatures entry or material.localOverrides entry, never prose only. Use forge/stage1_intake/build_detail_inventory.py to scan zones.",
+      "details": [
+        {
+          "id": "det2-shaft-taper-beams",
+          "zone": "central shaft",
+          "description": "tapering wall segments with chamfered orange edge beams rising full height",
+          "kind": "bevel",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-shaft-taper-beams"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-shaft-top-light",
+          "zone": "top of shaft",
+          "description": "bright warm/white emissive cap implying an overhead vent or skylight",
+          "kind": "emissive",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-shaft-top-light"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-elevator-door",
+          "zone": "shaft base, both walls",
+          "description": "dark violet-grey door panel with a small warm-orange indicator light above",
+          "kind": "decal",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-elevator-door"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-honeycomb-panel",
+          "zone": "upper wall panels L/R",
+          "description": "large-scale hex-tile relief on a warm cream/off-white composite panel",
+          "kind": "groove",
+          "mapsTo": {
+            "type": "material.localOverrides",
+            "ref": "honeycombPanel"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-bridge-truss-brace",
+          "zone": "catwalk bridge underside",
+          "description": "X-braced diagonal truss bracing under the octagonal bridge deck",
+          "kind": "ridge",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-bridge-truss-brace"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-stair-handrail",
+          "zone": "both staircases",
+          "description": "thin tubular handrail with vertical baluster repeat",
+          "kind": "ridge",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-stair-handrail"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-hex-floor-tile",
+          "zone": "lower platforms L/R",
+          "description": "hexagonal floor tiling, dark warm grey",
+          "kind": "seam",
+          "mapsTo": {
+            "type": "material.localOverrides",
+            "ref": "hexFloor"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-monitor-post",
+          "zone": "4x ramp positions",
+          "description": "small standing monitor pedestal (post + emissive screen head)",
+          "kind": "emissive",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "root"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-control-booth",
+          "zone": "stair mid-landings L/R",
+          "description": "small rust-colored crate booth with a screen and rooftop vent",
+          "kind": "decal",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-control-booth"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-ladder",
+          "zone": "upper right wall",
+          "description": "vertical ladder rungs on the right wall",
+          "kind": "ridge",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-ladder"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-ramp-slope",
+          "zone": "lower platform entries",
+          "description": "sloped ramp/track transition from shaft floor to hex platforms",
+          "kind": "bevel",
+          "mapsTo": {
+            "type": "component.localFeatures",
+            "ref": "det2-ramp-slope"
+          },
+          "realization": "unreported"
+        },
+        {
+          "id": "det2-orange-trim-heavy",
+          "zone": "shaft + wall-panel capitals",
+          "description": "thick chamfered orange trim, heavier presence than the command-room reference",
+          "kind": "bevel",
+          "mapsTo": {
+            "type": "material.localOverrides",
+            "ref": "accentTrim"
+          },
+          "realization": "unreported"
+        }
+      ]
+    },
+    "anatomy": {
+      "applies": false,
+      "styleHeads": 0.0,
+      "proportions": {
+        "headUnit": 0.0,
+        "torso": 0.0,
+        "legs": 0.0,
+        "shoulderWidth": 0.0,
+        "hipWidth": 0.0
+      },
+      "pose": {
+        "type": "unassessed",
+        "jointAngles": {}
+      },
+      "faceLandmarks": {
+        "eyeLine": 0.0,
+        "eyeSpacing": 0.0,
+        "noseBase": 0.0,
+        "mouthLine": 0.0,
+        "hairline": 0.0
+      },
+      "features": [],
+      "confidence": 0.0,
+      "note": "Only meaningful when objectClass.primaryDomain is character or hybrid. Set applies=true and fill from forge/stage1_intake/extract_landmarks.py. See grimoire/character/reconstruction.md and grimoire/character/likeness_maximization.md."
+    },
+    "sourceImage": "reference.png"
+  },
+  "qualityContract": {
+    "qualityBar": "ultra-complex",
+    "definitionOfDone": [
+      "The rendered model matches the reference silhouette, primary proportions, visible component hierarchy, material response, and most recognizable local features for the selected fidelity tier."
+    ],
+    "minimumSpecDepth": {
+      "macroComponents": 10,
+      "mesoComponents": 6,
+      "microFeatureGroups": 2,
+      "materialLayers": 6,
+      "repetitionSystems": 1,
+      "reviewViewpoints": 5
+    },
+    "featureGroups": [
+      {
+        "id": "overall-silhouette",
+        "name": "Overall silhouette and proportions",
+        "required": true,
+        "qualityCriteria": [
+          "Bounding shape, dominant curves, negative spaces, and scale relationships are explicitly described."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "model reads as a generic placeholder instead of the reference object",
+          "major proportions are guessed without evidence"
+        ]
+      },
+      {
+        "id": "primary-structure",
+        "name": "Primary structure and hierarchy",
+        "required": true,
+        "qualityCriteria": [
+          "Major parts, joints, seams, contact points, and parent-child relationships are named before code generation."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "large visible parts are merged into one mesh",
+          "component hierarchy is too shallow for the observed complexity"
+        ]
+      },
+      {
+        "id": "attachment-joint-correctness",
+        "name": "Attachment and joint correctness",
+        "required": true,
+        "qualityCriteria": [
+          "Every visible child appendage, branch, limb, handle, connector, tube, cable, horn, wing, leg, or hinged part has an attachment contract with parent socket, localStart/localEnd, contact type, embed/overlap, and gap tolerance."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "child part root floats away from the parent",
+          "branch/limb/tube is centered in space instead of pivoting from its root",
+          "parent-child transform mixes world and local coordinates"
+        ]
+      },
+      {
+        "id": "surface-material-response",
+        "name": "Surface material response",
+        "required": true,
+        "qualityCriteria": [
+          "Albedo zones, roughness, normal/bump/displacement intent, cavity dirt, edge wear, and local overrides are specified where visible.",
+          "Important materials define independent albedo, roughness, height/normal, and AO responses instead of reusing one texture for unrelated PBR channels.",
+          "Surface response is decomposed into macro, meso, and micro frequency bands with scale and amplitude tied to object scale."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "surface looks like flat plastic",
+          "local material variation is missing or not tied to image evidence"
+        ]
+      },
+      {
+        "id": "reference-lookdev",
+        "name": "Reference color, material, and lighting response",
+        "required": true,
+        "qualityCriteria": [
+          "Material-pass names the reference-derived albedo palette, roughness variation, tactile normal/bump/displacement response, and local masks.",
+          "When a source image is available, run reference PBR extraction and require confidence >= 0.7 before treating maps as implementation-ready.",
+          "Lighting-pass names key/fill/rim or environment light, exposure, tone mapping, background, and contact shadow behavior.",
+          "Neutral, grazing-angle, and reference-matched renders prove that surface relief survives relighting and is not painted into albedo."
+        ],
+        "evidenceRefs": [
+          "full-object"
+        ],
+        "failureModes": [
+          "model has acceptable shape but reads as flat shaded or plastic",
+          "colors are a generic average instead of reference-observed local color zones",
+          "lighting is evenly ambient and cannot reproduce the source value range"
+        ]
+      },
+      {
+        "id": "shaft-bridge-topology",
+        "name": "Central tapering shaft + single catwalk bridge",
+        "required": true,
+        "qualityCriteria": [
+          "Shaft tapers with chamfered orange edge beams and a bright top light cap.",
+          "One octagonal catwalk bridge spans both staircases at mid-height (not twin bridges)."
+        ],
+        "evidenceRefs": [
+          "det2-shaft-taper-beams",
+          "det2-bridge-truss-brace"
+        ],
+        "failureModes": [
+          "shaft rendered as a plain vertical box with no taper/trim",
+          "bridge omitted or mispositioned"
+        ]
+      },
+      {
+        "id": "honeycomb-panel-material",
+        "name": "Honeycomb wall panel + hex floor tiling",
+        "required": true,
+        "qualityCriteria": [
+          "Upper wall panels read as a warm cream/off-white hex-tile relief, visually distinct from the darker steel.",
+          "Lower platform floors read as hexagonal tiling."
+        ],
+        "evidenceRefs": [
+          "det2-honeycomb-panel",
+          "det2-hex-floor-tile"
+        ],
+        "failureModes": [
+          "wall panels rendered as flat steel with no hex pattern or color distinction"
+        ]
+      }
+    ],
+    "visualDeltaChecks": [
+      "silhouette and negative-space delta",
+      "component hierarchy depth delta",
+      "repetition density and distribution delta",
+      "material albedo/roughness/normal response delta",
+      "local feature placement and scale delta"
+    ],
+    "antiShallowSpecRules": [
+      "Do not proceed to code if qualityContract.qualityBar is unassessed.",
+      "Do not proceed to code if the spec only contains a root component for a moderate or complex object.",
+      "Do not proceed to code if required featureGroups are not represented by componentTree, materials, or repetitionSystems.",
+      "Do not proceed to code if visible local features are described only in prose and not attached to components/materials/evidenceRefs.",
+      "Do not proceed past structural-pass if attached child parts lack attachment.parentSocket, localStart, localEnd, embedDepth/overlap, and gapTolerance.",
+      "Do not pass material look-dev when albedo is reused as roughness, height, normal, or AO.",
+      "Do not pass material look-dev without macro, meso, and micro surface frequency bands for close-up materials.",
+      "Do not pass reference-fidelity material look-dev from a source image without usable referencePbr maps or an explicit documented limitation.",
+      "Do not patch a spec with extracted PBR maps when extraction confidence is below the target threshold unless the user explicitly accepts lower fidelity.",
+      "Do not place adjacent separate-geometry parts below 0.02 world-unit seam overlap (source: grimoire/build/geometry_patterns.md).",
+      "Do not satisfy raised or recessed relief, fasteners, or grip structure with a map alone when the feature affects form; use geometry or displacement (source: grimoire/build/geometry_patterns.md).",
+      "Adjacent components must overlap by at least 0.02 world units at shared seams (source: grimoire/build/geometry_patterns.md).",
+      "Raised or recessed relief and fasteners must be geometry, instanced micro-parts, or displacement; a map alone is an approximation (source: grimoire/build/geometry_patterns.md).",
+      "Same v1 authoring note: mesoComponents/repetitionSystems sized to what was actually built, not an arbitrary target, given the generator's radial-only constraint."
+    ],
+    "mustNotDo": [
+      "Do not proceed to code if qualityContract.qualityBar is unassessed.",
+      "Do not proceed to code if the spec only contains a root component for a moderate or complex object.",
+      "Do not proceed to code if required featureGroups are not represented by componentTree, materials, or repetitionSystems.",
+      "Do not proceed to code if visible local features are described only in prose and not attached to components/materials/evidenceRefs.",
+      "Do not proceed past structural-pass if attached child parts lack attachment.parentSocket, localStart, localEnd, embedDepth/overlap, and gapTolerance.",
+      "Do not pass material look-dev when albedo is reused as roughness, height, normal, or AO.",
+      "Do not pass material look-dev without macro, meso, and micro surface frequency bands for close-up materials.",
+      "Do not pass reference-fidelity material look-dev from a source image without usable referencePbr maps or an explicit documented limitation.",
+      "Do not patch a spec with extracted PBR maps when extraction confidence is below the target threshold unless the user explicitly accepts lower fidelity.",
+      "Do not place adjacent separate-geometry parts below 0.02 world-unit seam overlap (source: grimoire/build/geometry_patterns.md).",
+      "Do not satisfy raised or recessed relief, fasteners, or grip structure with a map alone when the feature affects form; use geometry or displacement (source: grimoire/build/geometry_patterns.md).",
+      "Adjacent components must overlap by at least 0.02 world units at shared seams (source: grimoire/build/geometry_patterns.md).",
+      "Raised or recessed relief and fasteners must be geometry, instanced micro-parts, or displacement; a map alone is an approximation (source: grimoire/build/geometry_patterns.md)."
+    ]
+  },
+  "qualityTargets": {
+    "targetFidelity": 0.7,
+    "mustMatch": [
+      "macro silhouette and proportions",
+      "primary material albedo/roughness response",
+      "reference-derived PBR material response at or above 0.7 confidence when source pixels are usable",
+      "most recognizable local features"
+    ],
+    "niceToHave": [
+      "micro scratches, stains, chips, and dirt masks",
+      "secondary lighting match"
+    ],
+    "fpsTarget": 60,
+    "reviewViewpoints": [
+      "front",
+      "three-quarter",
+      "side",
+      "thickness-axis",
+      "long-axis"
+    ]
+  },
+  "selfCorrectLoop": {
+    "enabled": true,
+    "visualAcceptance": {
+      "reviewer": "ai-vision",
+      "threshold": 0.7,
+      "comparisonArtifactRequired": true,
+      "layerScoresRequired": true,
+      "codePixelDiffIsAcceptanceAuthority": false,
+      "scoringRule": "AI vision must inspect a side-by-side reference/render sheet and score the current pass from 0 to 1. Pixel-diff code may assist diagnostics but cannot approve a pass.",
+      "requiredLayerScores": [
+        "silhouetteProportion",
+        "componentStructure",
+        "formDetail",
+        "materialSurface",
+        "lightingCamera"
+      ],
+      "featureReviewPolicy": {
+        "enabled": true,
+        "reviewUnit": "semantic-subsystem",
+        "maxCriticalFeaturesPerPass": 5,
+        "maxImportantFeaturesPerPass": 3,
+        "criticalDefaultThreshold": 0.8,
+        "importantAverageThreshold": 0.65,
+        "adaptiveEscalation": true,
+        "singleImagePairOnly": true,
+        "selectionRule": "Choose only the most visually salient, identity-defining, user-prioritized, or high-risk semantic systems. Group repeated parts instead of reviewing every mesh. AI vision scores every selected feature from the same full reference/render pair."
+      }
+    },
+    "reviewAfterPasses": [
+      "blockout",
+      "structural-pass",
+      "form-refinement",
+      "material-pass",
+      "surface-pass",
+      "lighting-pass",
+      "interaction-pass",
+      "optimization-pass"
+    ],
+    "allowedActions": [
+      "continue",
+      "refine-spec",
+      "refine-code",
+      "request-input",
+      "stop"
+    ],
+    "specRefineTriggers": [
+      "missing component",
+      "wrong primitive family",
+      "wrong proportions",
+      "material layer under-specified",
+      "local feature not traceable to viewEvidence",
+      "reference ambiguity discovered during implementation"
+    ],
+    "codeRefineTriggers": [
+      "spec is adequate but generated geometry/material does not match",
+      "browser render differs from reference",
+      "performance budget exceeded",
+      "lighting hides geometry or material response"
+    ],
+    "stopCriteria": [
+      "target fidelity reached or user accepts current approximation",
+      "remaining gaps require new reference images or manual art"
+    ],
+    "screenshotPolicy": {
+      "requiredForPasses": [
+        "blockout",
+        "structural-pass",
+        "form-refinement",
+        "material-pass",
+        "surface-pass",
+        "lighting-pass",
+        "interaction-pass"
+      ],
+      "preferredCapture": "in-app-browser-screenshot",
+      "fallbackCapture": "user-supplied-screenshot-path",
+      "minimumEvidence": "Each visual pass needs a reference image, rendered screenshot, side-by-side comparison sheet, AI vision score, layer scores, and critique before choosing continue.",
+      "reviewPairRule": "Compare the same camera/viewpoint whenever possible; do not judge a front reference against a random render angle.",
+      "acceptanceAuthority": "AI vision review of the comparison sheet. Code-generated pixel similarity is not sufficient evidence."
+    }
+  },
+  "featureReviewTargets": [
+    {
+      "id": "overall-silhouette",
+      "name": "Overall silhouette and proportions",
+      "tier": "critical",
+      "passIds": [
+        "blockout"
+      ],
+      "minimumScore": 0.75,
+      "mustPass": true,
+      "componentRefs": [
+        "root",
+        "centralShaft"
+      ],
+      "evidenceRefs": [
+        "full-object"
+      ]
+    },
+    {
+      "id": "shaft-bridge-topology",
+      "name": "Central tapering shaft + single catwalk bridge",
+      "tier": "critical",
+      "passIds": [
+        "structural-pass",
+        "form-refinement"
+      ],
+      "minimumScore": 0.75,
+      "mustPass": true,
+      "componentRefs": [
+        "centralShaft",
+        "catwalkBridge",
+        "staircase.left",
+        "staircase.right"
+      ],
+      "evidenceRefs": [
+        "full-object",
+        "image-analysis.md#layer-3"
+      ]
+    },
+    {
+      "id": "honeycomb-panel-material",
+      "name": "Honeycomb wall panel + hex floor tiling",
+      "tier": "critical",
+      "passIds": [
+        "material-pass"
+      ],
+      "minimumScore": 0.7,
+      "mustPass": true,
+      "componentRefs": [
+        "honeycombWallPanel.left",
+        "honeycombWallPanel.right",
+        "hexPlatform.left",
+        "hexPlatform.right"
+      ],
+      "evidenceRefs": [
+        "di.json"
+      ]
+    },
+    {
+      "id": "reference-material-system",
+      "name": "Primary reference material and surface response",
+      "tier": "critical",
+      "passIds": [
+        "material-pass",
+        "surface-pass"
+      ],
+      "minimumScore": 0.7,
+      "mustPass": true,
+      "componentRefs": [
+        "root"
+      ],
+      "evidenceRefs": [
+        "full-object"
+      ]
+    },
+    {
+      "id": "primary-structure",
+      "name": "Primary identity-defining structure",
+      "tier": "critical",
+      "passIds": [
+        "structural-pass",
+        "form-refinement"
+      ],
+      "minimumScore": 0.75,
+      "mustPass": true,
+      "componentRefs": [
+        "root"
+      ],
+      "evidenceRefs": [
+        "full-object"
+      ]
+    },
+    {
+      "id": "accent-trim-treatment",
+      "name": "Heavy orange structural accent trim",
+      "tier": "important",
+      "passIds": [
+        "material-pass"
+      ],
+      "minimumScore": 0.6,
+      "mustPass": false,
+      "componentRefs": [
+        "centralShaft",
+        "honeycombWallPanel.left",
+        "honeycombWallPanel.right"
+      ],
+      "evidenceRefs": [
+        "di.json"
+      ]
+    },
+    {
+      "id": "top-light-mood",
+      "name": "Single top-of-shaft light source mood",
+      "tier": "important",
+      "passIds": [
+        "lighting-pass"
+      ],
+      "minimumScore": 0.6,
+      "mustPass": false,
+      "componentRefs": [
+        "shaftTopLight"
+      ],
+      "evidenceRefs": [
+        "full-object"
+      ]
+    }
+  ],
+  "sculptPipeline": {
+    "passGateMode": "locked-sequential",
+    "passOrder": [
+      "blockout",
+      "structural-pass",
+      "form-refinement",
+      "material-pass",
+      "surface-pass",
+      "lighting-pass",
+      "interaction-pass",
+      "optimization-pass"
+    ],
+    "currentPass": "blockout",
+    "completedPasses": [],
+    "lastCompletedPass": "",
+    "blockedReason": "",
+    "nextRequiredEvidence": [
+      "Silhouette reads correctly without materials.",
+      "Quality contract has named all required macro feature groups before code generation.",
+      "AI vision comparison score meets selfCorrectLoop.visualAcceptance.threshold.",
+      "browser render screenshot from your agent's browser/screenshot tool",
+      "side-by-side reference/render comparison sheet for AI vision review",
+      "AI vision score at or above the visual acceptance threshold",
+      "all critical semantic feature scores from the shared image pair at or above their thresholds",
+      "self-correction review appended with action=continue before the next pass"
+    ]
+  },
+  "lookDevTargets": {
+    "qualityPriority": "reference-fidelity",
+    "materialPass": {
+      "albedoPaletteRequired": true,
+      "roughnessVariationRequired": true,
+      "normalOrBumpRequired": true,
+      "localOverridesRequired": true,
+      "minimumTextureResolution": 1024,
+      "preferredTextureResolution": 2048,
+      "independentMapChannels": [
+        "albedo",
+        "roughness",
+        "height",
+        "normal",
+        "ambient-occlusion"
+      ],
+      "requiredSurfaceFrequencyBands": [
+        "macro",
+        "meso",
+        "micro"
+      ],
+      "geometryReliefRequiredWhenSilhouetteAffected": true,
+      "referencePbrExtraction": {
+        "requiredWhenSourceImagePresent": true,
+        "targetThreshold": 0.7,
+        "stopOnLowConfidence": true,
+        "script": "forge/stage1_intake/extract_pbr_evidence.py",
+        "acceptedLimitation": "single-image extraction is reference-derived inference, not exact photogrammetry"
+      },
+      "mustAvoid": [
+        "single flat albedo per material",
+        "uniform roughness",
+        "albedo texture reused as roughness/height/normal/AO",
+        "single-frequency random noise",
+        "plastic-looking smooth bark, stone, cloth, foliage, or aged material",
+        "local color/detail described only in prose without material masks",
+        "claiming exact PBR recovery when confidence is below the target threshold"
+      ]
+    },
+    "lightingPass": {
+      "requiredTerms": [
+        "key light",
+        "fill light",
+        "rim or environment light",
+        "exposure",
+        "tone mapping",
+        "background",
+        "contact shadow"
+      ],
+      "mustAvoid": [
+        "ambient-only lighting",
+        "flat value range",
+        "missing contact shadow",
+        "reference lighting copied without separating material readability"
+      ]
+    },
+    "screenshotReview": [
+      "Compare albedo palette and local color zones.",
+      "Compare roughness/normal/bump response under light.",
+      "Compare cavity dirt, edge wear, stains, moss, scratches, or other local masks.",
+      "Compare key/fill/rim structure, exposure, tone mapping, background, and contact shadows.",
+      "Capture a neutral-light render to verify material readability without reference lighting.",
+      "Capture a grazing-light close-up to expose flat normals, uniform roughness, tiling, and plastic highlights.",
+      "Capture a reference-matched render from the same camera framing as the source."
+    ]
+  },
+  "actionReadiness": {
+    "contract": "Every macro/meso component should be generated as a stable named Object3D pivot node with a mesh child, action metadata, optional sockets, collider proxy, and destruction metadata.",
+    "defaultRigType": "action-ready-static-rig",
+    "rootMotionNode": "root",
+    "requiredComponentFields": [
+      "id",
+      "parent",
+      "transform",
+      "attachment for child appendages, connectors, limbs, tubes, handles, legs, horns, wings, branches, or cables",
+      "actionProfile.animationRole",
+      "actionProfile.pivot",
+      "actionProfile.collider",
+      "actionProfile.destruction"
+    ],
+    "transformChannels": [
+      "translate",
+      "rotate",
+      "scale",
+      "bend",
+      "twist",
+      "detach",
+      "visibility",
+      "material-state"
+    ],
+    "authoringRules": [
+      "Do not collapse independently movable parts into one mesh.",
+      "Put transforms on component pivot groups, not only on raw meshes.",
+      "For attached child parts, put the pivot at the semantic root/socket and build visible geometry from localStart to localEnd.",
+      "Represent hinge, socket, detachable, and breakable intent even when no animation is implemented yet.",
+      "Use simplified collider proxies for runtime physics instead of visual mesh colliders by default."
+    ],
+    "destructionPolicy": {
+      "defaultBreakable": false,
+      "fractureGroupNaming": "Use stable semantic names such as body-shell, left-hinge, glass-panel, branch-segment.",
+      "debrisStrategy": "Prefer detachable component groups and a small number of procedural fragments over random mesh explosion."
+    }
+  },
+  "assumptions": [
+    "Absolute scale ~1 unit = 1 meter, same convention as v1; no metric reference in the source image.",
+    "RESOLVED (open-shell): true back/ceiling/camera-side walls hidden in the single cutaway view -- left open rather than invented.",
+    "RESOLVED (generic screens): monitor-post and booth screen content illegible -- generic procedural readout, not transcription.",
+    "RESOLVED (tileable approximation): hex-panel and hex-floor tile pitch below reconstructable resolution -- plausible tileable module.",
+    "RESOLVED (regular-repeat): stair tread count and ladder rung pitch approximated with a regular repeat, hand-authored in code (same generator limitation as v1: radial-only repetitionSystems emitter cannot do linear/grid repeats).",
+    "RESOLVED (ambiguous light source): top-of-shaft light geometry (vent vs skylight) approximated as a bright emissive plane cap."
+  ],
+  "coordinateFrame": {
+    "front": "+Z",
+    "up": "+Y",
+    "scaleReference": "1 unit ~= 1 meter"
+  },
+  "silhouette": {
+    "boundingShape": "tall tapering vertical shaft flanked by two raked honeycomb walls, bilaterally symmetric",
+    "aspectRatios": [
+      1.83
+    ],
+    "symmetry": "bilateral",
+    "dominantCurves": [
+      "shaft taper",
+      "octagonal bridge rim",
+      "honeycomb hex tiling",
+      "hex floor tiling"
+    ],
+    "negativeSpaces": [
+      "open shaft interior above the bridge",
+      "gap under the bridge deck",
+      "open ceiling/back/camera-side walls"
+    ],
+    "landmarks": [
+      "central shaft",
+      "catwalk bridge",
+      "two staircases",
+      "two honeycomb wall panels",
+      "two hex floor platforms"
+    ]
+  },
+  "viewEvidence": [
+    {
+      "id": "full-object",
+      "imageRegion": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.0
+      },
+      "confidence": 0.75,
+      "notes": "full reference.png"
+    },
+    {
+      "id": "image-analysis.md#layer-3",
+      "imageRegion": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.0
+      },
+      "confidence": 0.7,
+      "notes": "macro/meso/micro decomposition"
+    },
+    {
+      "id": "di.json",
+      "imageRegion": {
+        "x": 0.0,
+        "y": 0.0,
+        "width": 1.0,
+        "height": 1.0
+      },
+      "confidence": 0.7,
+      "notes": "12-item detail inventory"
+    }
+  ],
+  "componentTree": [
+    {
+      "id": "root",
+      "name": "NERV-style Utility Shaft Atrium",
+      "level": "macro",
+      "role": "structural",
+      "importance": 1.0,
+      "confidence": 0.7,
+      "primitive": "box",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Top-level Group; organizational root only.",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": null,
+      "attachment": null,
+      "dimensions": {
+        "width": 14,
+        "height": 12,
+        "depth": 14,
+        "units": "meters",
+        "confidence": 0.7
+      },
+      "transform": {
+        "position": [
+          0,
+          0,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "root",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "structuralSteel"
+        }
+      },
+      "material": "structuralSteel",
+      "materialLayers": [
+        "structuralSteel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "panel-seam",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(58, 66, 73, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'structuralSteel'"
+      }
+    },
+    {
+      "id": "roomFloor",
+      "name": "Lower shaft floor",
+      "level": "macro",
+      "role": "structural",
+      "importance": 0.7,
+      "confidence": 0.6,
+      "primitive": "box",
+      "topologyClass": "conforming-shell",
+      "topologyRationale": "Floor slab; walls represented by the flanking macro parts rather than a literal box wall (open-shell decision, per Layer 8).",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": null,
+      "dimensions": {
+        "width": 14,
+        "height": 0.4,
+        "depth": 14,
+        "units": "meters",
+        "confidence": 0.6
+      },
+      "transform": {
+        "position": [
+          0,
+          -0.2,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "roomFloor",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "structuralSteel"
+        }
+      },
+      "material": "structuralSteel",
+      "materialLayers": [
+        "structuralSteel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "panel-seam",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(58, 66, 73, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'structuralSteel'"
+      }
+    },
+    {
+      "id": "centralShaft",
+      "name": "Central tapering shaft tower",
+      "level": "macro",
+      "role": "structural",
+      "importance": 1.0,
+      "confidence": 0.7,
+      "primitive": "cylinder",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Tapering trapezoidal-cross-section tower rising the full height, the primary identity feature per Layer 7.",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale cylinder block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": {
+        "parentSocket": "roomFloor",
+        "localStart": [
+          0,
+          0,
+          0
+        ],
+        "localEnd": [
+          0,
+          10,
+          0
+        ],
+        "contactType": "socket",
+        "embedDepth": 0.05,
+        "overlap": 0.05,
+        "gapTolerance": 0.01,
+        "notes": "shaft base socketed into the floor between the two hex platforms"
+      },
+      "dimensions": {
+        "width": 3.0,
+        "height": 10.0,
+        "depth": 3.0,
+        "units": "meters",
+        "confidence": 0.7
+      },
+      "transform": {
+        "position": [
+          0,
+          5.0,
+          -1.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "centralShaft",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "structuralSteel"
+        }
+      },
+      "material": "structuralSteel",
+      "materialLayers": [
+        "structuralSteel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-shaft-taper-beams",
+          "description": "chamfered orange edge beams rising full height"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "panel-seam",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(58, 66, 73, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'structuralSteel'"
+      }
+    },
+    {
+      "id": "shaftTopLight",
+      "name": "Shaft top light cap",
+      "level": "meso",
+      "role": "structural",
+      "importance": 0.6,
+      "confidence": 0.5,
+      "primitive": "plane-card",
+      "topologyClass": "conforming-shell",
+      "topologyRationale": "Bright emissive cap implying an overhead vent/skylight.",
+      "geometryDescriptor": {
+        "topologyIntent": "meso-scale plane-card block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "centralShaft",
+      "attachment": null,
+      "dimensions": {
+        "width": 1.6,
+        "height": 1.6,
+        "depth": 0.05,
+        "units": "meters",
+        "confidence": 0.5
+      },
+      "transform": {
+        "position": [
+          0,
+          4.9,
+          0.1
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-set-dressing",
+        "pivot": {
+          "mode": "center",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": true
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "shaftTopLight",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "screenEmissive"
+        }
+      },
+      "material": "screenEmissive",
+      "materialLayers": [
+        "screenEmissive"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-shaft-top-light",
+          "description": "warm/white emissive top-of-shaft light"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(10, 15, 12, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "plastic",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'screenEmissive'"
+      }
+    },
+    {
+      "id": "elevatorDoor.left",
+      "name": "Elevator door (left)",
+      "level": "meso",
+      "role": "structural",
+      "importance": 0.4,
+      "confidence": 0.5,
+      "primitive": "box",
+      "topologyClass": "conforming-shell",
+      "topologyRationale": "Dark door panel with a small indicator light, set into the shaft base wall.",
+      "geometryDescriptor": {
+        "topologyIntent": "meso-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "centralShaft",
+      "attachment": null,
+      "dimensions": {
+        "width": 0.7,
+        "height": 1.3,
+        "depth": 0.06,
+        "units": "meters",
+        "confidence": 0.5
+      },
+      "transform": {
+        "position": [
+          -1.6,
+          -3.5,
+          1.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-set-dressing",
+        "pivot": {
+          "mode": "center",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": true
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "elevatorDoor.left",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "darkMatte"
+        }
+      },
+      "material": "darkMatte",
+      "materialLayers": [
+        "darkMatte"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-elevator-door",
+          "description": "dark door panel with warm-orange indicator light"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(24, 26, 30, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "fabric",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'darkMatte'"
+      }
+    },
+    {
+      "id": "elevatorDoor.right",
+      "name": "Elevator door (right)",
+      "level": "meso",
+      "role": "structural",
+      "importance": 0.4,
+      "confidence": 0.5,
+      "primitive": "box",
+      "topologyClass": "conforming-shell",
+      "topologyRationale": "Dark door panel with a small indicator light, set into the shaft base wall.",
+      "geometryDescriptor": {
+        "topologyIntent": "meso-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "centralShaft",
+      "attachment": null,
+      "dimensions": {
+        "width": 0.7,
+        "height": 1.3,
+        "depth": 0.06,
+        "units": "meters",
+        "confidence": 0.5
+      },
+      "transform": {
+        "position": [
+          1.6,
+          -3.5,
+          1.0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-set-dressing",
+        "pivot": {
+          "mode": "center",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": true
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "elevatorDoor.right",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "darkMatte"
+        }
+      },
+      "material": "darkMatte",
+      "materialLayers": [
+        "darkMatte"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-elevator-door",
+          "description": "dark door panel with warm-orange indicator light"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(24, 26, 30, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "fabric",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'darkMatte'"
+      }
+    },
+    {
+      "id": "catwalkBridge",
+      "name": "Central catwalk bridge",
+      "level": "macro",
+      "role": "structural",
+      "importance": 0.9,
+      "confidence": 0.65,
+      "primitive": "extrude",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Single octagonal truss bridge spanning both staircases at mid-height -- differs from the command room's twin catwalks.",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale extrude block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": null,
+      "dimensions": {
+        "width": 6.0,
+        "height": 0.6,
+        "depth": 4.0,
+        "units": "meters",
+        "confidence": 0.65
+      },
+      "transform": {
+        "position": [
+          0,
+          3.6,
+          0
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "catwalkBridge",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "structuralSteel"
+        }
+      },
+      "material": "structuralSteel",
+      "materialLayers": [
+        "structuralSteel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-bridge-truss-brace",
+          "description": "X-braced diagonal truss bracing under the deck"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "panel-seam",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(58, 66, 73, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'structuralSteel'"
+      }
+    },
+    {
+      "id": "staircase.left",
+      "name": "Staircase (left)",
+      "level": "macro",
+      "role": "structural",
+      "importance": 0.8,
+      "confidence": 0.6,
+      "primitive": "box",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Stringer + tread-run silhouette, two flights meeting a mid-landing; treads hand-authored as a linear repeat in code.",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": null,
+      "dimensions": {
+        "width": 1.6,
+        "height": 3.6,
+        "depth": 3.4,
+        "units": "meters",
+        "confidence": 0.6
+      },
+      "transform": {
+        "position": [
+          -4.6,
+          1.8,
+          -0.5
+        ],
+        "rotation": [
+          0,
+          0.1,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "staircase.left",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "structuralSteel"
+        }
+      },
+      "material": "structuralSteel",
+      "materialLayers": [
+        "structuralSteel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-stair-handrail",
+          "description": "thin tubular handrail with vertical baluster repeat"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "panel-seam",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(58, 66, 73, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'structuralSteel'"
+      }
+    },
+    {
+      "id": "controlBooth.left",
+      "name": "Control booth (left)",
+      "level": "meso",
+      "role": "structural",
+      "importance": 0.5,
+      "confidence": 0.5,
+      "primitive": "box",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Small rust-colored crate booth with a screen, at the stair mid-landing.",
+      "geometryDescriptor": {
+        "topologyIntent": "meso-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "staircase.left",
+      "attachment": null,
+      "dimensions": {
+        "width": 1.0,
+        "height": 0.9,
+        "depth": 0.8,
+        "units": "meters",
+        "confidence": 0.5
+      },
+      "transform": {
+        "position": [
+          0.3,
+          0.3,
+          -1.2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-set-dressing",
+        "pivot": {
+          "mode": "center",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": true
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "controlBooth.left",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "accentTrim"
+        }
+      },
+      "material": "accentTrim",
+      "materialLayers": [
+        "accentTrim"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-control-booth",
+          "description": "crate booth with screen and rooftop vent"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(242, 100, 0, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'accentTrim'"
+      }
+    },
+    {
+      "id": "staircase.right",
+      "name": "Staircase (right)",
+      "level": "macro",
+      "role": "structural",
+      "importance": 0.8,
+      "confidence": 0.6,
+      "primitive": "box",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Stringer + tread-run silhouette, two flights meeting a mid-landing; treads hand-authored as a linear repeat in code.",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": null,
+      "dimensions": {
+        "width": 1.6,
+        "height": 3.6,
+        "depth": 3.4,
+        "units": "meters",
+        "confidence": 0.6
+      },
+      "transform": {
+        "position": [
+          4.6,
+          1.8,
+          -0.5
+        ],
+        "rotation": [
+          0,
+          -0.1,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "staircase.right",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "structuralSteel"
+        }
+      },
+      "material": "structuralSteel",
+      "materialLayers": [
+        "structuralSteel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-stair-handrail",
+          "description": "thin tubular handrail with vertical baluster repeat"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "panel-seam",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(58, 66, 73, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'structuralSteel'"
+      }
+    },
+    {
+      "id": "controlBooth.right",
+      "name": "Control booth (right)",
+      "level": "meso",
+      "role": "structural",
+      "importance": 0.5,
+      "confidence": 0.5,
+      "primitive": "box",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Small rust-colored crate booth with a screen, at the stair mid-landing.",
+      "geometryDescriptor": {
+        "topologyIntent": "meso-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "staircase.right",
+      "attachment": null,
+      "dimensions": {
+        "width": 1.0,
+        "height": 0.9,
+        "depth": 0.8,
+        "units": "meters",
+        "confidence": 0.5
+      },
+      "transform": {
+        "position": [
+          0.3,
+          0.3,
+          -1.2
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-set-dressing",
+        "pivot": {
+          "mode": "center",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": true
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "controlBooth.right",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "accentTrim"
+        }
+      },
+      "material": "accentTrim",
+      "materialLayers": [
+        "accentTrim"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-control-booth",
+          "description": "crate booth with screen and rooftop vent"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(242, 100, 0, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'accentTrim'"
+      }
+    },
+    {
+      "id": "hexPlatform.left",
+      "name": "Lower hex platform (left)",
+      "level": "macro",
+      "role": "structural",
+      "importance": 0.7,
+      "confidence": 0.6,
+      "primitive": "extrude",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Hexagonal-tiled lower platform reached by a sloped ramp/track.",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale extrude block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": null,
+      "dimensions": {
+        "width": 3.4,
+        "height": 0.4,
+        "depth": 3.4,
+        "units": "meters",
+        "confidence": 0.6
+      },
+      "transform": {
+        "position": [
+          -4.2,
+          -0.5,
+          3.4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "hexPlatform.left",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "structuralSteel"
+        }
+      },
+      "material": "structuralSteel",
+      "materialLayers": [
+        "structuralSteel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-hex-floor-tile",
+          "description": "hexagonal floor tiling"
+        },
+        {
+          "id": "det2-ramp-slope",
+          "description": "sloped ramp/track transition to the shaft floor"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "panel-seam",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(58, 66, 73, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'structuralSteel'"
+      }
+    },
+    {
+      "id": "hexPlatform.right",
+      "name": "Lower hex platform (right)",
+      "level": "macro",
+      "role": "structural",
+      "importance": 0.7,
+      "confidence": 0.6,
+      "primitive": "extrude",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Hexagonal-tiled lower platform reached by a sloped ramp/track.",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale extrude block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": null,
+      "dimensions": {
+        "width": 3.4,
+        "height": 0.4,
+        "depth": 3.4,
+        "units": "meters",
+        "confidence": 0.6
+      },
+      "transform": {
+        "position": [
+          4.2,
+          -0.5,
+          3.4
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "hexPlatform.right",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "structuralSteel"
+        }
+      },
+      "material": "structuralSteel",
+      "materialLayers": [
+        "structuralSteel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-hex-floor-tile",
+          "description": "hexagonal floor tiling"
+        },
+        {
+          "id": "det2-ramp-slope",
+          "description": "sloped ramp/track transition to the shaft floor"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "panel-seam",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(58, 66, 73, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'structuralSteel'"
+      }
+    },
+    {
+      "id": "honeycombWallPanel.left",
+      "name": "Honeycomb wall panel (left)",
+      "level": "macro",
+      "role": "structural",
+      "importance": 0.85,
+      "confidence": 0.6,
+      "primitive": "box",
+      "topologyClass": "conforming-shell",
+      "topologyRationale": "Large warm cream/off-white hex-tile relief panel, raked, flanking the shaft -- the second most identity-defining feature per Layer 7.",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": null,
+      "dimensions": {
+        "width": 0.4,
+        "height": 7.0,
+        "depth": 6.0,
+        "units": "meters",
+        "confidence": 0.6
+      },
+      "transform": {
+        "position": [
+          -6.2,
+          4.0,
+          -1.0
+        ],
+        "rotation": [
+          0,
+          -0.35,
+          0.04
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "honeycombWallPanel.left",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "honeycombPanel"
+        }
+      },
+      "material": "honeycombPanel",
+      "materialLayers": [
+        "honeycombPanel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-honeycomb-panel",
+          "description": "hex-tile relief on a warm off-white composite panel"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(216, 207, 184, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "plastic",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'honeycombPanel'"
+      }
+    },
+    {
+      "id": "honeycombWallPanel.right",
+      "name": "Honeycomb wall panel (right)",
+      "level": "macro",
+      "role": "structural",
+      "importance": 0.85,
+      "confidence": 0.6,
+      "primitive": "box",
+      "topologyClass": "conforming-shell",
+      "topologyRationale": "Large warm cream/off-white hex-tile relief panel, raked, flanking the shaft -- the second most identity-defining feature per Layer 7.",
+      "geometryDescriptor": {
+        "topologyIntent": "macro-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": null,
+      "dimensions": {
+        "width": 0.4,
+        "height": 7.0,
+        "depth": 6.0,
+        "units": "meters",
+        "confidence": 0.6
+      },
+      "transform": {
+        "position": [
+          6.2,
+          4.0,
+          -1.0
+        ],
+        "rotation": [
+          0,
+          0.35,
+          -0.04
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-structure",
+        "pivot": {
+          "mode": "base",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": false
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "honeycombWallPanel.right",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "honeycombPanel"
+        }
+      },
+      "material": "honeycombPanel",
+      "materialLayers": [
+        "honeycombPanel"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-honeycomb-panel",
+          "description": "hex-tile relief on a warm off-white composite panel"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(216, 207, 184, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "plastic",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'honeycombPanel'"
+      }
+    },
+    {
+      "id": "ladder",
+      "name": "Ladder (upper right wall)",
+      "level": "meso",
+      "role": "structural",
+      "importance": 0.35,
+      "confidence": 0.5,
+      "primitive": "box",
+      "topologyClass": "assembled-solid",
+      "topologyRationale": "Vertical ladder rungs on the right wall, hand-authored as a linear repeat in code.",
+      "geometryDescriptor": {
+        "topologyIntent": "meso-scale box block, chamfer-ready edges",
+        "edgeTreatment": {
+          "type": "bevel",
+          "bevelRadius": 0.02,
+          "segments": 2
+        },
+        "deformationStack": [],
+        "uvStrategy": "generated procedural coordinates",
+        "normalStrategy": "vertex normals from generated geometry"
+      },
+      "parent": "root",
+      "attachment": null,
+      "dimensions": {
+        "width": 0.5,
+        "height": 4.0,
+        "depth": 0.1,
+        "units": "meters",
+        "confidence": 0.5
+      },
+      "transform": {
+        "position": [
+          6.6,
+          8.0,
+          -2.5
+        ],
+        "rotation": [
+          0,
+          0,
+          0
+        ],
+        "scale": [
+          1,
+          1,
+          1
+        ]
+      },
+      "actionProfile": {
+        "animationRole": "static-set-dressing",
+        "pivot": {
+          "mode": "center",
+          "localPosition": [
+            0,
+            0,
+            0
+          ],
+          "axis": [
+            0,
+            1,
+            0
+          ],
+          "confidence": 0.6
+        },
+        "transformChannels": {
+          "translate": true,
+          "rotate": true,
+          "scale": true,
+          "bend": false,
+          "twist": false,
+          "detach": false,
+          "visibility": true,
+          "materialState": true
+        },
+        "sockets": [],
+        "collider": {
+          "type": "box",
+          "offset": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ],
+          "isTrigger": false,
+          "notes": "simplified box proxy"
+        },
+        "constraints": [],
+        "destruction": {
+          "breakable": false,
+          "fractureGroup": "ladder",
+          "seamRefs": [],
+          "detachableFragments": [],
+          "breakImpulse": 0.0,
+          "debrisMaterial": "accentTrim"
+        }
+      },
+      "material": "accentTrim",
+      "materialLayers": [
+        "accentTrim"
+      ],
+      "deformations": [],
+      "joints": [],
+      "seams": [],
+      "localFeatures": [
+        {
+          "id": "det2-ladder",
+          "description": "vertical ladder rungs"
+        }
+      ],
+      "surfaceDetail": {
+        "macroRoughness": 0.5,
+        "microRoughness": 0.3,
+        "bumpAmplitude": 0.02,
+        "normalPattern": "",
+        "displacementPattern": "",
+        "occlusionPattern": "cavity darkening at seams",
+        "edgeWearPattern": "",
+        "notes": ""
+      },
+      "evidenceRefs": [
+        "image-analysis.md#layer-3",
+        "full-object"
+      ],
+      "details": [],
+      "fidelityTier": "structural",
+      "colorMaterialRecipe": {
+        "dominantAlbedo": "rgba(242, 100, 0, 1.0)",
+        "secondaryAlbedo": "rgba(10, 15, 12, 0.85)",
+        "materialClass": "metal",
+        "materialClassConfidence": 0.65,
+        "notes": "derived from material 'accentTrim'"
+      }
+    }
+  ],
+  "materials": [
+    {
+      "id": "structuralSteel",
+      "name": "Painted structural steel",
+      "type": "standard",
+      "shaderModel": "MeshStandardMaterial",
+      "baseColor": "#3A4249",
+      "color": "#3A4249",
+      "albedo": {
+        "dominant": "#121410",
+        "secondary": [
+          "#080907",
+          "#22221D",
+          "#4B3A2D"
+        ],
+        "samplingNotes": "Reference-derived from foreground pixels; de-lit to reduce baked shadows/highlights.",
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_albedo.png",
+          "url": "structuralsteel_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "colorVariation": {
+        "palette": [
+          "#121410",
+          "#080907",
+          "#22221D",
+          "#4B3A2D",
+          "#251912"
+        ],
+        "pattern": "reference-derived pixel palette",
+        "amplitude": 0.094,
+        "heightCorrelation": 0.42
+      },
+      "metalness": 0.45,
+      "roughness": {
+        "base": 0.711,
+        "variation": 0.098,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_roughness.png",
+          "url": "structuralsteel_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "localResponse": "reference-derived roughness estimate; cavities and textured zones trend rougher, bright highlights trend smoother"
+      },
+      "textureResolution": 1024,
+      "textureProjection": {
+        "mode": "generated-canvas",
+        "repeat": [
+          1,
+          1
+        ],
+        "anisotropy": 8,
+        "texelDensityIntent": "generated CanvasTexture per material, procedural"
+      },
+      "surfaceFrequencyBands": [
+        {
+          "id": "macro",
+          "frequency": 2.0,
+          "amplitude": 0.358,
+          "role": "reference-derived broad albedo and height breakup"
+        },
+        {
+          "id": "meso",
+          "frequency": 14.0,
+          "amplitude": 0.35,
+          "role": "reference-derived cracks, ridges, pores, grain, or leaf clusters"
+        },
+        {
+          "id": "micro",
+          "frequency": 72.0,
+          "amplitude": 0.14,
+          "role": "reference-derived micro highlight breakup under grazing light"
+        }
+      ],
+      "emissive": null,
+      "emissiveIntensity": 0.0,
+      "clearcoat": 0.0,
+      "localOverrides": [
+        {
+          "id": "reference-pbr-pixel-evidence",
+          "type": "material-map-evidence",
+          "evidenceRefs": [
+            "full-object"
+          ],
+          "channels": [
+            "albedo",
+            "roughness",
+            "height",
+            "normal",
+            "ambient-occlusion"
+          ],
+          "notes": "Use generated maps as material evidence, then refine after browser screenshot comparison."
+        }
+      ],
+      "notes": "same family as v1",
+      "referencePbr": {
+        "version": "1.0",
+        "sourceImage": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/detail-inventory/zone-r1c1.png",
+        "extractor": "stage1_intake/extract_pbr_evidence.py",
+        "method": "single-image pixel evidence with de-lighting estimate; not photogrammetry",
+        "usable": true,
+        "verdict": "pass",
+        "confidence": 0.845,
+        "estimatedFidelity": 0.845,
+        "targetThreshold": 0.4,
+        "hardLimit": "A single image cannot uniquely recover true albedo/roughness/normal/AO; maps are reference-derived estimates.",
+        "maps": {
+          "albedo": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_albedo.png",
+            "url": "structuralsteel_albedo.png",
+            "channel": "albedo",
+            "source": "reference-pixel-extraction"
+          },
+          "roughness": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_roughness.png",
+            "url": "structuralsteel_roughness.png",
+            "channel": "roughness",
+            "source": "reference-pixel-extraction"
+          },
+          "height": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_height.png",
+            "url": "structuralsteel_height.png",
+            "channel": "height",
+            "source": "reference-pixel-extraction"
+          },
+          "normal": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_normal.png",
+            "url": "structuralsteel_normal.png",
+            "channel": "normal",
+            "source": "reference-pixel-extraction"
+          },
+          "ao": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_ao.png",
+            "url": "structuralsteel_ao.png",
+            "channel": "ao",
+            "source": "reference-pixel-extraction"
+          }
+        },
+        "diagnostics": {
+          "sourceWidth": 469,
+          "sourceHeight": 256,
+          "mapSize": 1024,
+          "cropBBoxPixels": {
+            "x": 0,
+            "y": 0,
+            "width": 469,
+            "height": 256
+          },
+          "mask": {
+            "backgroundColor": "#16191B",
+            "backgroundNoise": 56.736,
+            "transparentPixelFraction": 0.0,
+            "foregroundCoverage": 0.2877
+          },
+          "mapStats": {
+            "valueRange": 0.2228,
+            "heightP90Gradient": 0.04804,
+            "roughnessBase": 0.711,
+            "roughnessVariation": 0.098,
+            "normalStrength": 0.213,
+            "blurRadius": 21
+          },
+          "palette": [
+            "#121410",
+            "#080907",
+            "#22221D",
+            "#4B3A2D",
+            "#251912"
+          ]
+        },
+        "warnings": [
+          "single-image inverse rendering cannot prove true physical PBR; confidence is capped",
+          "low value range weakens height/roughness inference"
+        ]
+      },
+      "normal": {
+        "pattern": "reference-derived height-gradient normal map",
+        "strength": 0.213,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_normal.png",
+          "url": "structuralsteel_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "heightSource": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_height.png",
+          "url": "structuralsteel_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "space": "tangent"
+      },
+      "bump": {
+        "pattern": "reference-derived height field",
+        "amplitude": 0.022,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_height.png",
+          "url": "structuralsteel_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "ambientOcclusion": {
+        "cavityStrength": 0.38,
+        "contactShadowBias": 0.35,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_ao.png",
+          "url": "structuralsteel_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        },
+        "notes": "Reference-derived cavity estimate from local height minima; verify against grazing-light screenshot."
+      },
+      "shaderNotes": [
+        "Reference-derived maps are estimates from image pixels; verify with neutral, grazing, and reference-matched renders.",
+        "Do not treat baked image shadows as final albedo; rerun extraction with a tighter material crop if highlights/shadows pollute the maps."
+      ]
+    },
+    {
+      "id": "accentTrim",
+      "name": "Heavy burnt-orange structural trim",
+      "type": "standard",
+      "shaderModel": "MeshStandardMaterial",
+      "baseColor": "#F26400",
+      "color": "#F26400",
+      "albedo": {
+        "dominant": "#626357",
+        "secondary": [
+          "#704329",
+          "#4F3A2B",
+          "#1A1009"
+        ],
+        "samplingNotes": "Reference-derived from foreground pixels; de-lit to reduce baked shadows/highlights.",
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_albedo.png",
+          "url": "accenttrim_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "colorVariation": {
+        "palette": [
+          "#626357",
+          "#704329",
+          "#4F3A2B",
+          "#1A1009",
+          "#372418"
+        ],
+        "pattern": "reference-derived pixel palette",
+        "amplitude": 0.15,
+        "heightCorrelation": 0.42
+      },
+      "metalness": 0.25,
+      "roughness": {
+        "base": 0.722,
+        "variation": 0.201,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_roughness.png",
+          "url": "accenttrim_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "localResponse": "reference-derived roughness estimate; cavities and textured zones trend rougher, bright highlights trend smoother"
+      },
+      "textureResolution": 1024,
+      "textureProjection": {
+        "mode": "generated-canvas",
+        "repeat": [
+          1,
+          1
+        ],
+        "anisotropy": 8,
+        "texelDensityIntent": "generated CanvasTexture per material, procedural"
+      },
+      "surfaceFrequencyBands": [
+        {
+          "id": "macro",
+          "frequency": 2.0,
+          "amplitude": 0.405,
+          "role": "reference-derived broad albedo and height breakup"
+        },
+        {
+          "id": "meso",
+          "frequency": 14.0,
+          "amplitude": 0.35,
+          "role": "reference-derived cracks, ridges, pores, grain, or leaf clusters"
+        },
+        {
+          "id": "micro",
+          "frequency": 72.0,
+          "amplitude": 0.14,
+          "role": "reference-derived micro highlight breakup under grazing light"
+        }
+      ],
+      "emissive": null,
+      "emissiveIntensity": 0.0,
+      "clearcoat": 0.0,
+      "localOverrides": [
+        {
+          "id": "reference-pbr-pixel-evidence",
+          "type": "material-map-evidence",
+          "evidenceRefs": [
+            "full-object"
+          ],
+          "channels": [
+            "albedo",
+            "roughness",
+            "height",
+            "normal",
+            "ambient-occlusion"
+          ],
+          "notes": "Use generated maps as material evidence, then refine after browser screenshot comparison."
+        }
+      ],
+      "notes": "thicker chamfered presence than v1",
+      "referencePbr": {
+        "version": "1.0",
+        "sourceImage": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/detail-inventory/zone-r0c1.png",
+        "extractor": "stage1_intake/extract_pbr_evidence.py",
+        "method": "single-image pixel evidence with de-lighting estimate; not photogrammetry",
+        "usable": true,
+        "verdict": "pass",
+        "confidence": 0.86,
+        "estimatedFidelity": 0.86,
+        "targetThreshold": 0.4,
+        "hardLimit": "A single image cannot uniquely recover true albedo/roughness/normal/AO; maps are reference-derived estimates.",
+        "maps": {
+          "albedo": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_albedo.png",
+            "url": "accenttrim_albedo.png",
+            "channel": "albedo",
+            "source": "reference-pixel-extraction"
+          },
+          "roughness": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_roughness.png",
+            "url": "accenttrim_roughness.png",
+            "channel": "roughness",
+            "source": "reference-pixel-extraction"
+          },
+          "height": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_height.png",
+            "url": "accenttrim_height.png",
+            "channel": "height",
+            "source": "reference-pixel-extraction"
+          },
+          "normal": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_normal.png",
+            "url": "accenttrim_normal.png",
+            "channel": "normal",
+            "source": "reference-pixel-extraction"
+          },
+          "ao": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_ao.png",
+            "url": "accenttrim_ao.png",
+            "channel": "ao",
+            "source": "reference-pixel-extraction"
+          }
+        },
+        "diagnostics": {
+          "sourceWidth": 469,
+          "sourceHeight": 256,
+          "mapSize": 1024,
+          "cropBBoxPixels": {
+            "x": 0,
+            "y": 0,
+            "width": 469,
+            "height": 256
+          },
+          "mask": {
+            "backgroundColor": "#0F0F0F",
+            "backgroundNoise": 48.642,
+            "transparentPixelFraction": 0.0,
+            "foregroundCoverage": 0.6195
+          },
+          "mapStats": {
+            "valueRange": 0.3583,
+            "heightP90Gradient": 0.09419,
+            "roughnessBase": 0.722,
+            "roughnessVariation": 0.201,
+            "normalStrength": 0.267,
+            "blurRadius": 21
+          },
+          "palette": [
+            "#626357",
+            "#704329",
+            "#4F3A2B",
+            "#1A1009",
+            "#372418"
+          ]
+        },
+        "warnings": [
+          "single-image inverse rendering cannot prove true physical PBR; confidence is capped"
+        ]
+      },
+      "normal": {
+        "pattern": "reference-derived height-gradient normal map",
+        "strength": 0.267,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_normal.png",
+          "url": "accenttrim_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "heightSource": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_height.png",
+          "url": "accenttrim_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "space": "tangent"
+      },
+      "bump": {
+        "pattern": "reference-derived height field",
+        "amplitude": 0.042,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_height.png",
+          "url": "accenttrim_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "ambientOcclusion": {
+        "cavityStrength": 0.38,
+        "contactShadowBias": 0.35,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_ao.png",
+          "url": "accenttrim_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        },
+        "notes": "Reference-derived cavity estimate from local height minima; verify against grazing-light screenshot."
+      },
+      "shaderNotes": [
+        "Reference-derived maps are estimates from image pixels; verify with neutral, grazing, and reference-matched renders.",
+        "Do not treat baked image shadows as final albedo; rerun extraction with a tighter material crop if highlights/shadows pollute the maps."
+      ]
+    },
+    {
+      "id": "honeycombPanel",
+      "name": "Honeycomb composite wall panel",
+      "type": "standard",
+      "shaderModel": "MeshStandardMaterial",
+      "baseColor": "#D8CFB8",
+      "color": "#D8CFB8",
+      "albedo": {
+        "dominant": "#261D17",
+        "secondary": [
+          "#12100C",
+          "#070402",
+          "#512C1C"
+        ],
+        "samplingNotes": "Reference-derived from foreground pixels; de-lit to reduce baked shadows/highlights.",
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_albedo.png",
+          "url": "honeycombpanel_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "colorVariation": {
+        "palette": [
+          "#261D17",
+          "#12100C",
+          "#070402",
+          "#512C1C",
+          "#363630"
+        ],
+        "pattern": "reference-derived pixel palette",
+        "amplitude": 0.091,
+        "heightCorrelation": 0.42
+      },
+      "metalness": 0.15,
+      "roughness": {
+        "base": 0.738,
+        "variation": 0.187,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_roughness.png",
+          "url": "honeycombpanel_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "localResponse": "reference-derived roughness estimate; cavities and textured zones trend rougher, bright highlights trend smoother"
+      },
+      "textureResolution": 1024,
+      "textureProjection": {
+        "mode": "generated-canvas",
+        "repeat": [
+          1,
+          1
+        ],
+        "anisotropy": 8,
+        "texelDensityIntent": "generated CanvasTexture per material, procedural"
+      },
+      "surfaceFrequencyBands": [
+        {
+          "id": "macro",
+          "frequency": 2.0,
+          "amplitude": 0.356,
+          "role": "reference-derived broad albedo and height breakup"
+        },
+        {
+          "id": "meso",
+          "frequency": 14.0,
+          "amplitude": 0.35,
+          "role": "reference-derived cracks, ridges, pores, grain, or leaf clusters"
+        },
+        {
+          "id": "micro",
+          "frequency": 72.0,
+          "amplitude": 0.14,
+          "role": "reference-derived micro highlight breakup under grazing light"
+        }
+      ],
+      "emissive": null,
+      "emissiveIntensity": 0.0,
+      "clearcoat": 0.0,
+      "localOverrides": [
+        {
+          "id": "honeycombPanel-hex",
+          "target": "wall panel hex relief",
+          "param": "normalPattern",
+          "value": "hex-tile",
+          "rule": "generated hex-grid canvas at panel scale"
+        },
+        {
+          "id": "reference-pbr-pixel-evidence",
+          "type": "material-map-evidence",
+          "evidenceRefs": [
+            "full-object"
+          ],
+          "channels": [
+            "albedo",
+            "roughness",
+            "height",
+            "normal",
+            "ambient-occlusion"
+          ],
+          "notes": "Use generated maps as material evidence, then refine after browser screenshot comparison."
+        }
+      ],
+      "notes": "NEW: warm cream/off-white hex-tile relief, brightest material in this scene",
+      "referencePbr": {
+        "version": "1.0",
+        "sourceImage": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/detail-inventory/zone-r0c0.png",
+        "extractor": "stage1_intake/extract_pbr_evidence.py",
+        "method": "single-image pixel evidence with de-lighting estimate; not photogrammetry",
+        "usable": true,
+        "verdict": "pass",
+        "confidence": 0.843,
+        "estimatedFidelity": 0.843,
+        "targetThreshold": 0.4,
+        "hardLimit": "A single image cannot uniquely recover true albedo/roughness/normal/AO; maps are reference-derived estimates.",
+        "maps": {
+          "albedo": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_albedo.png",
+            "url": "honeycombpanel_albedo.png",
+            "channel": "albedo",
+            "source": "reference-pixel-extraction"
+          },
+          "roughness": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_roughness.png",
+            "url": "honeycombpanel_roughness.png",
+            "channel": "roughness",
+            "source": "reference-pixel-extraction"
+          },
+          "height": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_height.png",
+            "url": "honeycombpanel_height.png",
+            "channel": "height",
+            "source": "reference-pixel-extraction"
+          },
+          "normal": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_normal.png",
+            "url": "honeycombpanel_normal.png",
+            "channel": "normal",
+            "source": "reference-pixel-extraction"
+          },
+          "ao": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_ao.png",
+            "url": "honeycombpanel_ao.png",
+            "channel": "ao",
+            "source": "reference-pixel-extraction"
+          }
+        },
+        "diagnostics": {
+          "sourceWidth": 469,
+          "sourceHeight": 256,
+          "mapSize": 1024,
+          "cropBBoxPixels": {
+            "x": 0,
+            "y": 0,
+            "width": 469,
+            "height": 256
+          },
+          "mask": {
+            "backgroundColor": "#121212",
+            "backgroundNoise": 9.95,
+            "transparentPixelFraction": 0.0,
+            "foregroundCoverage": 0.5368
+          },
+          "mapStats": {
+            "valueRange": 0.2176,
+            "heightP90Gradient": 0.08905,
+            "roughnessBase": 0.738,
+            "roughnessVariation": 0.187,
+            "normalStrength": 0.261,
+            "blurRadius": 21
+          },
+          "palette": [
+            "#261D17",
+            "#12100C",
+            "#070402",
+            "#512C1C",
+            "#363630"
+          ]
+        },
+        "warnings": [
+          "single-image inverse rendering cannot prove true physical PBR; confidence is capped",
+          "low value range weakens height/roughness inference"
+        ]
+      },
+      "normal": {
+        "pattern": "reference-derived height-gradient normal map",
+        "strength": 0.261,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_normal.png",
+          "url": "honeycombpanel_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "heightSource": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_height.png",
+          "url": "honeycombpanel_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "space": "tangent"
+      },
+      "bump": {
+        "pattern": "reference-derived height field",
+        "amplitude": 0.04,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_height.png",
+          "url": "honeycombpanel_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "ambientOcclusion": {
+        "cavityStrength": 0.38,
+        "contactShadowBias": 0.35,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_ao.png",
+          "url": "honeycombpanel_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        },
+        "notes": "Reference-derived cavity estimate from local height minima; verify against grazing-light screenshot."
+      },
+      "shaderNotes": [
+        "Reference-derived maps are estimates from image pixels; verify with neutral, grazing, and reference-matched renders.",
+        "Do not treat baked image shadows as final albedo; rerun extraction with a tighter material crop if highlights/shadows pollute the maps."
+      ]
+    },
+    {
+      "id": "hexFloor",
+      "name": "Hex floor tile",
+      "type": "standard",
+      "shaderModel": "MeshStandardMaterial",
+      "baseColor": "#4A463E",
+      "color": "#4A463E",
+      "albedo": {
+        "dominant": "#060806",
+        "secondary": [
+          "#1F231F",
+          "#4B4F44",
+          "#111311"
+        ],
+        "samplingNotes": "Reference-derived from foreground pixels; de-lit to reduce baked shadows/highlights.",
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_albedo.png",
+          "url": "hexfloor_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "colorVariation": {
+        "palette": [
+          "#060806",
+          "#1F231F",
+          "#4B4F44",
+          "#111311",
+          "#362B23"
+        ],
+        "pattern": "reference-derived pixel palette",
+        "amplitude": 0.126,
+        "heightCorrelation": 0.42
+      },
+      "metalness": 0.3,
+      "roughness": {
+        "base": 0.725,
+        "variation": 0.134,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_roughness.png",
+          "url": "hexfloor_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "localResponse": "reference-derived roughness estimate; cavities and textured zones trend rougher, bright highlights trend smoother"
+      },
+      "textureResolution": 1024,
+      "textureProjection": {
+        "mode": "generated-canvas",
+        "repeat": [
+          1,
+          1
+        ],
+        "anisotropy": 8,
+        "texelDensityIntent": "generated CanvasTexture per material, procedural"
+      },
+      "surfaceFrequencyBands": [
+        {
+          "id": "macro",
+          "frequency": 2.0,
+          "amplitude": 0.385,
+          "role": "reference-derived broad albedo and height breakup"
+        },
+        {
+          "id": "meso",
+          "frequency": 14.0,
+          "amplitude": 0.35,
+          "role": "reference-derived cracks, ridges, pores, grain, or leaf clusters"
+        },
+        {
+          "id": "micro",
+          "frequency": 72.0,
+          "amplitude": 0.14,
+          "role": "reference-derived micro highlight breakup under grazing light"
+        }
+      ],
+      "emissive": null,
+      "emissiveIntensity": 0.0,
+      "clearcoat": 0.0,
+      "localOverrides": [
+        {
+          "id": "reference-pbr-pixel-evidence",
+          "type": "material-map-evidence",
+          "evidenceRefs": [
+            "full-object"
+          ],
+          "channels": [
+            "albedo",
+            "roughness",
+            "height",
+            "normal",
+            "ambient-occlusion"
+          ],
+          "notes": "Use generated maps as material evidence, then refine after browser screenshot comparison."
+        }
+      ],
+      "notes": "NEW: dark warm grey hexagonal floor tiling",
+      "referencePbr": {
+        "version": "1.0",
+        "sourceImage": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/detail-inventory/zone-r2c1.png",
+        "extractor": "stage1_intake/extract_pbr_evidence.py",
+        "method": "single-image pixel evidence with de-lighting estimate; not photogrammetry",
+        "usable": true,
+        "verdict": "pass",
+        "confidence": 0.86,
+        "estimatedFidelity": 0.86,
+        "targetThreshold": 0.4,
+        "hardLimit": "A single image cannot uniquely recover true albedo/roughness/normal/AO; maps are reference-derived estimates.",
+        "maps": {
+          "albedo": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_albedo.png",
+            "url": "hexfloor_albedo.png",
+            "channel": "albedo",
+            "source": "reference-pixel-extraction"
+          },
+          "roughness": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_roughness.png",
+            "url": "hexfloor_roughness.png",
+            "channel": "roughness",
+            "source": "reference-pixel-extraction"
+          },
+          "height": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_height.png",
+            "url": "hexfloor_height.png",
+            "channel": "height",
+            "source": "reference-pixel-extraction"
+          },
+          "normal": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_normal.png",
+            "url": "hexfloor_normal.png",
+            "channel": "normal",
+            "source": "reference-pixel-extraction"
+          },
+          "ao": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_ao.png",
+            "url": "hexfloor_ao.png",
+            "channel": "ao",
+            "source": "reference-pixel-extraction"
+          }
+        },
+        "diagnostics": {
+          "sourceWidth": 469,
+          "sourceHeight": 256,
+          "mapSize": 1024,
+          "cropBBoxPixels": {
+            "x": 0,
+            "y": 0,
+            "width": 469,
+            "height": 256
+          },
+          "mask": {
+            "backgroundColor": "#0D1112",
+            "backgroundNoise": 40.472,
+            "transparentPixelFraction": 0.0,
+            "foregroundCoverage": 0.3437
+          },
+          "mapStats": {
+            "valueRange": 0.3,
+            "heightP90Gradient": 0.0661,
+            "roughnessBase": 0.725,
+            "roughnessVariation": 0.134,
+            "normalStrength": 0.234,
+            "blurRadius": 21
+          },
+          "palette": [
+            "#060806",
+            "#1F231F",
+            "#4B4F44",
+            "#111311",
+            "#362B23"
+          ]
+        },
+        "warnings": [
+          "single-image inverse rendering cannot prove true physical PBR; confidence is capped"
+        ]
+      },
+      "normal": {
+        "pattern": "reference-derived height-gradient normal map",
+        "strength": 0.234,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_normal.png",
+          "url": "hexfloor_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "heightSource": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_height.png",
+          "url": "hexfloor_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "space": "tangent"
+      },
+      "bump": {
+        "pattern": "reference-derived height field",
+        "amplitude": 0.03,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_height.png",
+          "url": "hexfloor_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "ambientOcclusion": {
+        "cavityStrength": 0.38,
+        "contactShadowBias": 0.35,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_ao.png",
+          "url": "hexfloor_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        },
+        "notes": "Reference-derived cavity estimate from local height minima; verify against grazing-light screenshot."
+      },
+      "shaderNotes": [
+        "Reference-derived maps are estimates from image pixels; verify with neutral, grazing, and reference-matched renders.",
+        "Do not treat baked image shadows as final albedo; rerun extraction with a tighter material crop if highlights/shadows pollute the maps."
+      ]
+    },
+    {
+      "id": "screenEmissive",
+      "name": "Screen / light emissive panel",
+      "type": "physical",
+      "shaderModel": "MeshPhysicalMaterial",
+      "baseColor": "#0A0F0C",
+      "color": "#0A0F0C",
+      "albedo": {
+        "dominant": "#151613",
+        "secondary": [
+          "#3E413D",
+          "#1F211F",
+          "#080806"
+        ],
+        "samplingNotes": "Reference-derived from foreground pixels; de-lit to reduce baked shadows/highlights.",
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_albedo.png",
+          "url": "screenemissive_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "colorVariation": {
+        "palette": [
+          "#151613",
+          "#3E413D",
+          "#1F211F",
+          "#080806",
+          "#31322D"
+        ],
+        "pattern": "reference-derived pixel palette",
+        "amplitude": 0.103,
+        "heightCorrelation": 0.42
+      },
+      "metalness": 0.4,
+      "roughness": {
+        "base": 0.763,
+        "variation": 0.193,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_roughness.png",
+          "url": "screenemissive_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "localResponse": "reference-derived roughness estimate; cavities and textured zones trend rougher, bright highlights trend smoother"
+      },
+      "textureResolution": 1024,
+      "textureProjection": {
+        "mode": "generated-canvas",
+        "repeat": [
+          1,
+          1
+        ],
+        "anisotropy": 8,
+        "texelDensityIntent": "generated CanvasTexture per material, procedural"
+      },
+      "surfaceFrequencyBands": [
+        {
+          "id": "macro",
+          "frequency": 2.0,
+          "amplitude": 0.366,
+          "role": "reference-derived broad albedo and height breakup"
+        },
+        {
+          "id": "meso",
+          "frequency": 14.0,
+          "amplitude": 0.35,
+          "role": "reference-derived cracks, ridges, pores, grain, or leaf clusters"
+        },
+        {
+          "id": "micro",
+          "frequency": 72.0,
+          "amplitude": 0.14,
+          "role": "reference-derived micro highlight breakup under grazing light"
+        }
+      ],
+      "emissive": "#8FE0D8",
+      "emissiveIntensity": 1.2,
+      "clearcoat": 0.0,
+      "localOverrides": [
+        {
+          "id": "reference-pbr-pixel-evidence",
+          "type": "material-map-evidence",
+          "evidenceRefs": [
+            "full-object"
+          ],
+          "channels": [
+            "albedo",
+            "roughness",
+            "height",
+            "normal",
+            "ambient-occlusion"
+          ],
+          "notes": "Use generated maps as material evidence, then refine after browser screenshot comparison."
+        }
+      ],
+      "notes": "minor presence this time: monitor posts, booth screens, shaft top light",
+      "referencePbr": {
+        "version": "1.0",
+        "sourceImage": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/detail-inventory/zone-r2c0.png",
+        "extractor": "stage1_intake/extract_pbr_evidence.py",
+        "method": "single-image pixel evidence with de-lighting estimate; not photogrammetry",
+        "usable": true,
+        "verdict": "pass",
+        "confidence": 0.851,
+        "estimatedFidelity": 0.851,
+        "targetThreshold": 0.4,
+        "hardLimit": "A single image cannot uniquely recover true albedo/roughness/normal/AO; maps are reference-derived estimates.",
+        "maps": {
+          "albedo": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_albedo.png",
+            "url": "screenemissive_albedo.png",
+            "channel": "albedo",
+            "source": "reference-pixel-extraction"
+          },
+          "roughness": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_roughness.png",
+            "url": "screenemissive_roughness.png",
+            "channel": "roughness",
+            "source": "reference-pixel-extraction"
+          },
+          "height": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_height.png",
+            "url": "screenemissive_height.png",
+            "channel": "height",
+            "source": "reference-pixel-extraction"
+          },
+          "normal": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_normal.png",
+            "url": "screenemissive_normal.png",
+            "channel": "normal",
+            "source": "reference-pixel-extraction"
+          },
+          "ao": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_ao.png",
+            "url": "screenemissive_ao.png",
+            "channel": "ao",
+            "source": "reference-pixel-extraction"
+          }
+        },
+        "diagnostics": {
+          "sourceWidth": 469,
+          "sourceHeight": 256,
+          "mapSize": 1024,
+          "cropBBoxPixels": {
+            "x": 0,
+            "y": 0,
+            "width": 469,
+            "height": 256
+          },
+          "mask": {
+            "backgroundColor": "#0C0D0D",
+            "backgroundNoise": 7.0,
+            "transparentPixelFraction": 0.0,
+            "foregroundCoverage": 0.729
+          },
+          "mapStats": {
+            "valueRange": 0.2462,
+            "heightP90Gradient": 0.09965,
+            "roughnessBase": 0.763,
+            "roughnessVariation": 0.193,
+            "normalStrength": 0.273,
+            "blurRadius": 21
+          },
+          "palette": [
+            "#151613",
+            "#3E413D",
+            "#1F211F",
+            "#080806",
+            "#31322D"
+          ]
+        },
+        "warnings": [
+          "single-image inverse rendering cannot prove true physical PBR; confidence is capped"
+        ]
+      },
+      "normal": {
+        "pattern": "reference-derived height-gradient normal map",
+        "strength": 0.273,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_normal.png",
+          "url": "screenemissive_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "heightSource": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_height.png",
+          "url": "screenemissive_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "space": "tangent"
+      },
+      "bump": {
+        "pattern": "reference-derived height field",
+        "amplitude": 0.045,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_height.png",
+          "url": "screenemissive_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "ambientOcclusion": {
+        "cavityStrength": 0.38,
+        "contactShadowBias": 0.35,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_ao.png",
+          "url": "screenemissive_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        },
+        "notes": "Reference-derived cavity estimate from local height minima; verify against grazing-light screenshot."
+      },
+      "shaderNotes": [
+        "Reference-derived maps are estimates from image pixels; verify with neutral, grazing, and reference-matched renders.",
+        "Do not treat baked image shadows as final albedo; rerun extraction with a tighter material crop if highlights/shadows pollute the maps."
+      ]
+    },
+    {
+      "id": "darkMatte",
+      "name": "Dark matte (doors, misc)",
+      "type": "standard",
+      "shaderModel": "MeshStandardMaterial",
+      "baseColor": "#181A1E",
+      "color": "#181A1E",
+      "albedo": {
+        "dominant": "#3A3D37",
+        "secondary": [
+          "#0D0B07",
+          "#1F1C18",
+          "#492F22"
+        ],
+        "samplingNotes": "Reference-derived from foreground pixels; de-lit to reduce baked shadows/highlights.",
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_albedo.png",
+          "url": "darkmatte_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "colorVariation": {
+        "palette": [
+          "#3A3D37",
+          "#0D0B07",
+          "#1F1C18",
+          "#492F22",
+          "#67695A"
+        ],
+        "pattern": "reference-derived pixel palette",
+        "amplitude": 0.152,
+        "heightCorrelation": 0.42
+      },
+      "metalness": 0.05,
+      "roughness": {
+        "base": 0.747,
+        "variation": 0.173,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_roughness.png",
+          "url": "darkmatte_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "localResponse": "reference-derived roughness estimate; cavities and textured zones trend rougher, bright highlights trend smoother"
+      },
+      "textureResolution": 1024,
+      "textureProjection": {
+        "mode": "generated-canvas",
+        "repeat": [
+          1,
+          1
+        ],
+        "anisotropy": 8,
+        "texelDensityIntent": "generated CanvasTexture per material, procedural"
+      },
+      "surfaceFrequencyBands": [
+        {
+          "id": "macro",
+          "frequency": 2.0,
+          "amplitude": 0.407,
+          "role": "reference-derived broad albedo and height breakup"
+        },
+        {
+          "id": "meso",
+          "frequency": 14.0,
+          "amplitude": 0.35,
+          "role": "reference-derived cracks, ridges, pores, grain, or leaf clusters"
+        },
+        {
+          "id": "micro",
+          "frequency": 72.0,
+          "amplitude": 0.14,
+          "role": "reference-derived micro highlight breakup under grazing light"
+        }
+      ],
+      "emissive": null,
+      "emissiveIntensity": 0.0,
+      "clearcoat": 0.0,
+      "localOverrides": [
+        {
+          "id": "reference-pbr-pixel-evidence",
+          "type": "material-map-evidence",
+          "evidenceRefs": [
+            "full-object"
+          ],
+          "channels": [
+            "albedo",
+            "roughness",
+            "height",
+            "normal",
+            "ambient-occlusion"
+          ],
+          "notes": "Use generated maps as material evidence, then refine after browser screenshot comparison."
+        }
+      ],
+      "notes": "door panels",
+      "referencePbr": {
+        "version": "1.0",
+        "sourceImage": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/detail-inventory/zone-r1c0.png",
+        "extractor": "stage1_intake/extract_pbr_evidence.py",
+        "method": "single-image pixel evidence with de-lighting estimate; not photogrammetry",
+        "usable": true,
+        "verdict": "pass",
+        "confidence": 0.86,
+        "estimatedFidelity": 0.86,
+        "targetThreshold": 0.4,
+        "hardLimit": "A single image cannot uniquely recover true albedo/roughness/normal/AO; maps are reference-derived estimates.",
+        "maps": {
+          "albedo": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_albedo.png",
+            "url": "darkmatte_albedo.png",
+            "channel": "albedo",
+            "source": "reference-pixel-extraction"
+          },
+          "roughness": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_roughness.png",
+            "url": "darkmatte_roughness.png",
+            "channel": "roughness",
+            "source": "reference-pixel-extraction"
+          },
+          "height": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_height.png",
+            "url": "darkmatte_height.png",
+            "channel": "height",
+            "source": "reference-pixel-extraction"
+          },
+          "normal": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_normal.png",
+            "url": "darkmatte_normal.png",
+            "channel": "normal",
+            "source": "reference-pixel-extraction"
+          },
+          "ao": {
+            "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_ao.png",
+            "url": "darkmatte_ao.png",
+            "channel": "ao",
+            "source": "reference-pixel-extraction"
+          }
+        },
+        "diagnostics": {
+          "sourceWidth": 469,
+          "sourceHeight": 256,
+          "mapSize": 1024,
+          "cropBBoxPixels": {
+            "x": 0,
+            "y": 0,
+            "width": 469,
+            "height": 256
+          },
+          "mask": {
+            "backgroundColor": "#111213",
+            "backgroundNoise": 15.652,
+            "transparentPixelFraction": 0.0,
+            "foregroundCoverage": 0.7448
+          },
+          "mapStats": {
+            "valueRange": 0.3624,
+            "heightP90Gradient": 0.08177,
+            "roughnessBase": 0.747,
+            "roughnessVariation": 0.173,
+            "normalStrength": 0.252,
+            "blurRadius": 21
+          },
+          "palette": [
+            "#3A3D37",
+            "#0D0B07",
+            "#1F1C18",
+            "#492F22",
+            "#67695A"
+          ]
+        },
+        "warnings": [
+          "single-image inverse rendering cannot prove true physical PBR; confidence is capped"
+        ]
+      },
+      "normal": {
+        "pattern": "reference-derived height-gradient normal map",
+        "strength": 0.252,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_normal.png",
+          "url": "darkmatte_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "heightSource": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_height.png",
+          "url": "darkmatte_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "space": "tangent"
+      },
+      "bump": {
+        "pattern": "reference-derived height field",
+        "amplitude": 0.037,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_height.png",
+          "url": "darkmatte_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        }
+      },
+      "ambientOcclusion": {
+        "cavityStrength": 0.38,
+        "contactShadowBias": 0.35,
+        "map": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_ao.png",
+          "url": "darkmatte_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        },
+        "notes": "Reference-derived cavity estimate from local height minima; verify against grazing-light screenshot."
+      },
+      "shaderNotes": [
+        "Reference-derived maps are estimates from image pixels; verify with neutral, grazing, and reference-matched renders.",
+        "Do not treat baked image shadows as final albedo; rerun extraction with a tighter material crop if highlights/shadows pollute the maps."
+      ]
+    }
+  ],
+  "repetitionSystems": [
+    {
+      "id": "monitorPost",
+      "level": "meso",
+      "parent": "root",
+      "count": 4,
+      "primitive": "box",
+      "material": "structuralSteel",
+      "instanceScale": [
+        0.12,
+        0.5,
+        0.12
+      ],
+      "placement": {
+        "mode": "radial",
+        "axis": [
+          0,
+          1,
+          0
+        ],
+        "radius": 4.5,
+        "startAngleDeg": 30
+      },
+      "notes": "4 monitor-post pedestals on the ramps (radial placement approximation)"
+    }
+  ],
+  "buildPasses": [
+    {
+      "id": "blockout",
+      "goal": "Match macro silhouette and proportions.",
+      "componentRefs": [
+        "root"
+      ],
+      "acceptance": [
+        "Silhouette reads correctly without materials.",
+        "Quality contract has named all required macro feature groups before code generation.",
+        "AI vision comparison score meets selfCorrectLoop.visualAcceptance.threshold."
+      ]
+    },
+    {
+      "id": "structural-pass",
+      "goal": "Build the component hierarchy implied by the pre-spec complexity assessment.",
+      "componentRefs": [
+        "root"
+      ],
+      "acceptance": [
+        "Macro, meso, and repeated structures meet qualityContract.minimumSpecDepth.",
+        "Parent-child relations, joints, seams, sockets, and contact points are explicit.",
+        "Every attached child appendage/connector has parentSocket, localStart/localEnd, contactType, embedDepth or overlap, and gapTolerance.",
+        "AI vision comparison score meets selfCorrectLoop.visualAcceptance.threshold."
+      ]
+    },
+    {
+      "id": "form-refinement",
+      "goal": "Refine shape, deformation, bevels, tapers, curves, asymmetry, and visible local geometry.",
+      "componentRefs": [
+        "root"
+      ],
+      "acceptance": [
+        "Important visible forms are represented in component geometryDescriptor, deformations, localFeatures, or repetitionSystems.",
+        "Endpoint-based child parts are rooted at their attachment sockets and do not visibly float away from parents.",
+        "AI vision comparison score meets selfCorrectLoop.visualAcceptance.threshold."
+      ]
+    },
+    {
+      "id": "material-pass",
+      "goal": "Match material color, roughness, bump, and local variation.",
+      "componentRefs": [
+        "root"
+      ],
+      "acceptance": [
+        "Reference-derived albedo palette records dominant, secondary, and accent colors per visible material.",
+        "Each important material defines roughness variation and at least one normal/bump/displacement response.",
+        "Local material overrides, dirt/wear/stains/moss/chips/scratches or equivalent masks are tied to evidenceRefs.",
+        "Thin, transparent, reflective, wet, or fibrous materials document alpha/transmission/clearcoat/metalness/fiber response when relevant.",
+        "Generated preview uses procedural albedo/roughness/bump texture or vertex color variation instead of one flat color.",
+        "Generated preview uses independent PBR maps at 1024px or higher for the quality-first tier.",
+        "If source pixels are available, referencePbr extraction passed at confidence >= 0.7 or the pass is stopped/requesting better references.",
+        "Macro, meso, and micro surface frequency bands are visible at the intended review distance without obvious tiling.",
+        "AI vision comparison score meets selfCorrectLoop.visualAcceptance.threshold."
+      ]
+    },
+    {
+      "id": "surface-pass",
+      "goal": "Add procedural surface locality such as normal/bump/displacement, AO, dirt, stains, chips, grain, moss, scratches, and wear.",
+      "componentRefs": [
+        "root"
+      ],
+      "acceptance": [
+        "Every required material feature group has local overrides or surfaceDetail tied to evidenceRefs.",
+        "A grazing-angle close-up proves that normal/height detail breaks highlights naturally and does not read as smooth plastic.",
+        "AI vision comparison score meets selfCorrectLoop.visualAcceptance.threshold."
+      ]
+    },
+    {
+      "id": "lighting-pass",
+      "goal": "Make material and form readable under neutral turntable lighting plus optional reference lighting.",
+      "componentRefs": [
+        "root"
+      ],
+      "acceptance": [
+        "lightingFromPhoto identifies key light direction/color/intensity, fill light, rim or environment light, and ambient color.",
+        "Exposure, tone mapping, background color/gradient, shadow softness, and contact shadow behavior are specified.",
+        "Lighting does not hide geometry/material gaps and screenshots can be compared fairly to the reference.",
+        "Neutral, grazing, and reference-matched lighting checks distinguish material errors from lighting errors.",
+        "AI vision comparison score meets selfCorrectLoop.visualAcceptance.threshold."
+      ]
+    },
+    {
+      "id": "interaction-pass",
+      "goal": "Make the model ready for future animation, transformation, physics, or destruction.",
+      "componentRefs": [
+        "root"
+      ],
+      "acceptance": [
+        "Macro and movable meso components have stable pivot nodes.",
+        "Sockets, collider proxies, and destruction metadata are present for future runtime actions.",
+        "AI vision comparison score meets selfCorrectLoop.visualAcceptance.threshold."
+      ]
+    },
+    {
+      "id": "optimization-pass",
+      "goal": "Protect runtime performance after visual fidelity is accepted.",
+      "componentRefs": [
+        "root"
+      ],
+      "acceptance": [
+        "Triangle count, draw calls, instancing, LOD strategy, and FPS target are documented or verified.",
+        "Repeated detail is instanced or simplified where possible without breaking silhouette/material believability."
+      ]
+    }
+  ],
+  "visualEvidence": [
+    {
+      "timestamp": "2026-08-14T06:58:14.505757+00:00",
+      "passId": "blockout",
+      "estimatedFidelity": 0.7,
+      "aiVisionScore": 0.7,
+      "visualAcceptanceThreshold": 0.7,
+      "layerScores": {
+        "silhouetteProportion": 0.62,
+        "componentStructure": 0.75,
+        "formDetail": 0.55,
+        "materialSurface": 0.75,
+        "lightingCamera": 0.68
+      },
+      "featureReviews": [
+        {
+          "id": "overall-silhouette",
+          "score": 0.62,
+          "mustPass": true,
+          "pass": false,
+          "notes": "Symmetric massing, void mood, and heavy orange trim read correctly; silhouette IoU 0.639 vs 0.85 deterministic target -- camera crop style differs from the reference's exact framing, same plateau pattern as v1."
+        },
+        {
+          "id": "shaft-bridge-topology",
+          "score": 0.75,
+          "mustPass": true,
+          "pass": true,
+          "notes": "Tapering shaft with 4 chamfered corner beams, top light cap, and a single octagonal catwalk bridge with X-braced underside all present and correctly connected."
+        },
+        {
+          "id": "honeycomb-panel-material",
+          "score": 0.8,
+          "mustPass": true,
+          "pass": true,
+          "notes": "Honeycomb wall panels read clearly as a warm hex-tile relief distinct from the steel; hex floor tiling visible on the lower platforms. New material family built cleanly on the first pass (unlike v1's screen-mirroring bug, no analogous defect found here)."
+        },
+        {
+          "id": "reference-material-system",
+          "score": 0.7,
+          "mustPass": true,
+          "pass": true,
+          "notes": "6-material palette (steel, heavy orange trim, honeycomb, hex floor, minor screen emissive, dark matte) matches the reference's value/hue distribution."
+        },
+        {
+          "id": "primary-structure",
+          "score": 0.72,
+          "mustPass": true,
+          "pass": false,
+          "notes": "All 10 macro components present; meso/micro sculpting is blockout-level primitives (same honest limitation as v1)."
+        },
+        {
+          "id": "accent-trim-treatment",
+          "score": 0.75,
+          "mustPass": false,
+          "pass": true,
+          "notes": "Orange trim is correctly heavier/thicker than v1 (4 corner beams + bridge braces + wall capitals), matching the Layer 5/6 observation."
+        },
+        {
+          "id": "top-light-mood",
+          "score": 0.65,
+          "mustPass": false,
+          "pass": true,
+          "notes": "Single top-of-shaft practical light achieved, distinct from v1's screen-driven lighting; required 2 lighting-intensity correction passes to stop it blowing out the honeycomb panels at close/orbit range."
+        }
+      ],
+      "referenceScreenshot": "reference.png",
+      "renderScreenshot": "render-blockout.png",
+      "comparisonImage": "cmp.png",
+      "cameraView": "",
+      "notes": "",
+      "aiVisionNotes": "Self-reviewed using the same layered-observation discipline as intake, scored against object-sculpt-spec.json#featureReviewTargets."
+    }
+  ],
+  "reviewHistory": [
+    {
+      "timestamp": "2026-08-14T06:58:14.505757+00:00",
+      "passId": "blockout",
+      "estimatedFidelity": 0.7,
+      "aiVisionScore": 0.7,
+      "visualAcceptanceThreshold": 0.7,
+      "layerScores": {
+        "silhouetteProportion": 0.62,
+        "componentStructure": 0.75,
+        "formDetail": 0.55,
+        "materialSurface": 0.75,
+        "lightingCamera": 0.68
+      },
+      "featureReviews": [
+        {
+          "id": "overall-silhouette",
+          "score": 0.62,
+          "mustPass": true,
+          "pass": false,
+          "notes": "Symmetric massing, void mood, and heavy orange trim read correctly; silhouette IoU 0.639 vs 0.85 deterministic target -- camera crop style differs from the reference's exact framing, same plateau pattern as v1."
+        },
+        {
+          "id": "shaft-bridge-topology",
+          "score": 0.75,
+          "mustPass": true,
+          "pass": true,
+          "notes": "Tapering shaft with 4 chamfered corner beams, top light cap, and a single octagonal catwalk bridge with X-braced underside all present and correctly connected."
+        },
+        {
+          "id": "honeycomb-panel-material",
+          "score": 0.8,
+          "mustPass": true,
+          "pass": true,
+          "notes": "Honeycomb wall panels read clearly as a warm hex-tile relief distinct from the steel; hex floor tiling visible on the lower platforms. New material family built cleanly on the first pass (unlike v1's screen-mirroring bug, no analogous defect found here)."
+        },
+        {
+          "id": "reference-material-system",
+          "score": 0.7,
+          "mustPass": true,
+          "pass": true,
+          "notes": "6-material palette (steel, heavy orange trim, honeycomb, hex floor, minor screen emissive, dark matte) matches the reference's value/hue distribution."
+        },
+        {
+          "id": "primary-structure",
+          "score": 0.72,
+          "mustPass": true,
+          "pass": false,
+          "notes": "All 10 macro components present; meso/micro sculpting is blockout-level primitives (same honest limitation as v1)."
+        },
+        {
+          "id": "accent-trim-treatment",
+          "score": 0.75,
+          "mustPass": false,
+          "pass": true,
+          "notes": "Orange trim is correctly heavier/thicker than v1 (4 corner beams + bridge braces + wall capitals), matching the Layer 5/6 observation."
+        },
+        {
+          "id": "top-light-mood",
+          "score": 0.65,
+          "mustPass": false,
+          "pass": true,
+          "notes": "Single top-of-shaft practical light achieved, distinct from v1's screen-driven lighting; required 2 lighting-intensity correction passes to stop it blowing out the honeycomb panels at close/orbit range."
+        }
+      ],
+      "action": "stop",
+      "summary": "Second reconstruction (companion to v1), same discipline and directly reusing v1's proven recipe (env-map lighting, DoubleSide safety, correct controls.maxDistance ordering). New defect found and fixed this round: point-light intensity (16) blew out the honeycomb wall panels at orbit/close range -- reduced lighting and panel envMapIntensity. Camera-framing tuned across 4 iterations, plateaued at silhouette IoU 0.639 vs the 0.85 deterministic target -- same plateau class as v1, reported honestly as a stop rather than continue.",
+      "matched": [
+        "tapering shaft + single catwalk bridge + twin staircases topology present and connected",
+        "honeycomb wall panels and hex floor tiling read as a distinct new material family (no mirroring defect this time, built correctly on first try)",
+        "heavier orange trim correctly distinguishes this scene from v1",
+        "multi-angle degenerate-view check passes (real 3D volume, not a billboard)"
+      ],
+      "mismatches": [
+        "silhouette IoU 0.639 vs 0.85 deterministic target -- camera crop differs from the reference's exact framing",
+        "meso/micro sculpting is blockout-level primitives vs the reference's beveled console/railing detail",
+        "monitor-post screen content is generic, not a transcription"
+      ],
+      "specFixes": [],
+      "codeFixes": [
+        "point-light intensity + honeycombPanel envMapIntensity/base color needed reduction to avoid blowing out at orbit angles (found by orbiting, not the default view alone)"
+      ],
+      "evidence": [],
+      "mapStrippedRender": "render-blockout.png",
+      "visualEvidence": {
+        "referenceScreenshot": "reference.png",
+        "renderScreenshot": "render-blockout.png",
+        "comparisonImage": "cmp.png",
+        "cameraView": "",
+        "notes": "",
+        "aiVisionNotes": "Self-reviewed using the same layered-observation discipline as intake, scored against object-sculpt-spec.json#featureReviewTargets."
+      }
+    }
+  ],
+  "lodPlan": [
+    {
+      "tier": "near",
+      "distance": 0,
+      "strategy": "full component tree and material layers"
+    },
+    {
+      "tier": "far",
+      "distance": 30,
+      "strategy": "merge static components and reduce local feature geometry"
+    }
+  ],
+  "performanceBudget": {
+    "qualityPriority": "reference-fidelity",
+    "targetTriangles": 250000,
+    "maxDrawCalls": 160,
+    "textureSize": 2048,
+    "fpsTarget": 30,
+    "optimizationPolicy": "Reach accepted visual fidelity first, then optimize without removing reference-critical geometry or surface layers."
+  },
+  "lightingFromPhoto": [
+    {
+      "role": "practical/emissive",
+      "source": "shaft top light + minor screens",
+      "colorHex": "#EFE6D2",
+      "note": "single bright top-of-shaft light is the dominant practical, unlike v1's screen-driven lighting"
+    },
+    {
+      "role": "fill",
+      "source": "cool ambient",
+      "colorHex": "#3A5344",
+      "intensityNote": "low, keeps structural steel legible"
+    },
+    {
+      "role": "rim",
+      "source": "orange accent bounce",
+      "colorHex": "#F26400",
+      "intensityNote": "heavier than v1, trim is thicker here"
+    },
+    {
+      "role": "camera/exposure",
+      "source": "ACES filmic tone mapping, exposure ~1.2-1.4",
+      "note": "contact/ground shadow (SSAO-equivalent cavity darkening) at platform rims and stair footings"
+    }
+  ],
+  "proceduralStrategy": [
+    "Block out macro silhouette first.",
+    "Add component hierarchy and joints.",
+    "Create stable pivot groups, sockets, collider proxies, and destruction metadata before visual polish.",
+    "Refine forms with bevels, tapers, bends, and procedural noise.",
+    "Run reference PBR extraction for important source-image materials and stop when confidence is below the target threshold.",
+    "Add material variation before adding expensive micro-geometry."
+  ],
+  "animationAnchors": [
+    "root pivot node supports whole-object translation, rotation, scale, and visibility changes",
+    "component pivot groups support later local transforms without rebuilding geometry"
+  ],
+  "destructionAnchors": [
+    "actionProfile.destruction.fractureGroup marks detachable or breakable component sets",
+    "component seams and sockets define plausible break points instead of random explosions"
+  ],
+  "risks": [
+    {
+      "id": "risk-repetition-generator-radial-only",
+      "description": "Same documented v1 limitation: forge/stage3_build/generate_threejs_factory.py's repetitionSystems emitter only implements radial placement. Stair treads and ladder rungs are hand-authored procedural loops instead.",
+      "mitigation": "buildStairFlight()/buildLadder() builder functions generate linear repeats directly in the implementation.",
+      "severity": "low",
+      "acceptedTradeoff": true
+    }
+  ],
+  "localSpecSearch": {
+    "collection": "core_3d",
+    "query": "NERV-style Utility Shaft Atrium elevator shaft catwalk bridge honeycomb hex panel wall hexagonal floor tile staircase mid landing monitor pedestal cart",
+    "index": {
+      "status": "hit",
+      "reason": "current",
+      "fingerprint": "6857e5ab528b42ac12f4f411f862610a0bffce8e47aee3610a7603c318072fe8"
+    },
+    "matches": [
+      {
+        "record_id": "core.shader-mapping-boxgeometry-slides-receivers-grips",
+        "file_path": "docs/raw/img2threejs-skill-dataset.json",
+        "heading": null,
+        "key_path": "categories.rendering_shader_mapping[5]",
+        "score": 3.982060806801,
+        "snippets": [
+          "... ráp hình chữ nhật/khối. Recognition cues: Flat-faced, roughly rectangular volume (pistol slide, receiver/frame, grip, panel) Dấu hiệu nhận diện: Khối gần chữ nhật với các mặt phẳng (khóa nòng súng lục, thân/khung súng, tay cầm, tấm phẳng) ..."
+        ],
+        "source_refs": [
+          {
+            "path": "docs/raw/img2threejs-skill-dataset.json",
+            "heading": null,
+            "key_path": "categories.rendering_shader_mapping[5]"
+          }
+        ],
+        "evidence_refs": [
+          {
+            "kind": "source",
+            "ref": "docs/raw/img2threejs-skill-dataset.json",
+            "note": "img2threejs NotebookLM research distillation"
+          }
+        ]
+      }
+    ]
+  },
+  "pbrExtractionHistory": [
+    {
+      "materialId": "structuralSteel",
+      "confidence": 0.845,
+      "verdict": "pass",
+      "usable": true,
+      "maps": {
+        "albedo": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_albedo.png",
+          "url": "structuralsteel_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        },
+        "roughness": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_roughness.png",
+          "url": "structuralsteel_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "height": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_height.png",
+          "url": "structuralsteel_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "normal": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_normal.png",
+          "url": "structuralsteel_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "ao": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/structuralSteel/structuralsteel_ao.png",
+          "url": "structuralsteel_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        }
+      }
+    },
+    {
+      "materialId": "accentTrim",
+      "confidence": 0.86,
+      "verdict": "pass",
+      "usable": true,
+      "maps": {
+        "albedo": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_albedo.png",
+          "url": "accenttrim_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        },
+        "roughness": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_roughness.png",
+          "url": "accenttrim_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "height": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_height.png",
+          "url": "accenttrim_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "normal": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_normal.png",
+          "url": "accenttrim_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "ao": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/accentTrim/accenttrim_ao.png",
+          "url": "accenttrim_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        }
+      }
+    },
+    {
+      "materialId": "honeycombPanel",
+      "confidence": 0.843,
+      "verdict": "pass",
+      "usable": true,
+      "maps": {
+        "albedo": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_albedo.png",
+          "url": "honeycombpanel_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        },
+        "roughness": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_roughness.png",
+          "url": "honeycombpanel_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "height": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_height.png",
+          "url": "honeycombpanel_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "normal": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_normal.png",
+          "url": "honeycombpanel_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "ao": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/honeycombPanel/honeycombpanel_ao.png",
+          "url": "honeycombpanel_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        }
+      }
+    },
+    {
+      "materialId": "hexFloor",
+      "confidence": 0.86,
+      "verdict": "pass",
+      "usable": true,
+      "maps": {
+        "albedo": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_albedo.png",
+          "url": "hexfloor_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        },
+        "roughness": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_roughness.png",
+          "url": "hexfloor_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "height": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_height.png",
+          "url": "hexfloor_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "normal": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_normal.png",
+          "url": "hexfloor_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "ao": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/hexFloor/hexfloor_ao.png",
+          "url": "hexfloor_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        }
+      }
+    },
+    {
+      "materialId": "screenEmissive",
+      "confidence": 0.851,
+      "verdict": "pass",
+      "usable": true,
+      "maps": {
+        "albedo": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_albedo.png",
+          "url": "screenemissive_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        },
+        "roughness": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_roughness.png",
+          "url": "screenemissive_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "height": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_height.png",
+          "url": "screenemissive_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "normal": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_normal.png",
+          "url": "screenemissive_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "ao": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/screenEmissive/screenemissive_ao.png",
+          "url": "screenemissive_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        }
+      }
+    },
+    {
+      "materialId": "darkMatte",
+      "confidence": 0.86,
+      "verdict": "pass",
+      "usable": true,
+      "maps": {
+        "albedo": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_albedo.png",
+          "url": "darkmatte_albedo.png",
+          "channel": "albedo",
+          "source": "reference-pixel-extraction"
+        },
+        "roughness": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_roughness.png",
+          "url": "darkmatte_roughness.png",
+          "channel": "roughness",
+          "source": "reference-pixel-extraction"
+        },
+        "height": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_height.png",
+          "url": "darkmatte_height.png",
+          "channel": "height",
+          "source": "reference-pixel-extraction"
+        },
+        "normal": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_normal.png",
+          "url": "darkmatte_normal.png",
+          "channel": "normal",
+          "source": "reference-pixel-extraction"
+        },
+        "ao": {
+          "path": "/Users/jaar/conductor/workspaces/singularity/bucharest/.img2threejs-work-v2/pbr-evidence/darkMatte/darkmatte_ao.png",
+          "url": "darkmatte_ao.png",
+          "channel": "ao",
+          "source": "reference-pixel-extraction"
+        }
+      }
+    }
+  ],
+  "tier1Results": [
+    {
+      "passed": false,
+      "checks": {
+        "silhouetteIoU": 0.5462,
+        "aspectRatioDelta": 0.0,
+        "scaleDelta": 0.0,
+        "bilateralSymmetryError": 0.1291,
+        "colorDelta": {
+          "checked": 16,
+          "maxDeltaE": 62.97,
+          "perComponent": [
+            {
+              "componentId": null,
+              "deltaE": 13.96
+            },
+            {
+              "componentId": null,
+              "deltaE": 13.96
+            },
+            {
+              "componentId": null,
+              "deltaE": 13.96
+            },
+            {
+              "componentId": null,
+              "deltaE": 2.63
+            },
+            {
+              "componentId": null,
+              "deltaE": 7.82
+            },
+            {
+              "componentId": null,
+              "deltaE": 7.82
+            },
+            {
+              "componentId": null,
+              "deltaE": 13.96
+            },
+            {
+              "componentId": null,
+              "deltaE": 13.96
+            },
+            {
+              "componentId": null,
+              "deltaE": 62.97
+            },
+            {
+              "componentId": null,
+              "deltaE": 13.96
+            },
+            {
+              "componentId": null,
+              "deltaE": 62.97
+            },
+            {
+              "componentId": null,
+              "deltaE": 13.96
+            },
+            {
+              "componentId": null,
+              "deltaE": 13.96
+            },
+            {
+              "componentId": null,
+              "deltaE": 36.39
+            },
+            {
+              "componentId": null,
+              "deltaE": 36.39
+            },
+            {
+              "componentId": null,
+              "deltaE": 62.97
+            }
+          ],
+          "gated": false
+        }
+      },
+      "failures": [
+        "silhouette IoU 0.546 is below threshold 0.85"
+      ],
+      "renderHash": "b6d445d38a14ec9a",
+      "passId": "blockout",
+      "mapStrippedRender": "render-blockout.png"
+    },
+    {
+      "passed": false,
+      "checks": {
+        "silhouetteIoU": 0.5431,
+        "aspectRatioDelta": 0.0,
+        "scaleDelta": 0.0,
+        "bilateralSymmetryError": 0.1393,
+        "colorDelta": {
+          "checked": 16,
+          "maxDeltaE": 69.36,
+          "perComponent": [
+            {
+              "componentId": null,
+              "deltaE": 3.18
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.18
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.18
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.63
+            },
+            {
+              "componentId": null,
+              "deltaE": 5.22
+            },
+            {
+              "componentId": null,
+              "deltaE": 5.22
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.18
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.18
+            },
+            {
+              "componentId": null,
+              "deltaE": 69.36
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.18
+            },
+            {
+              "componentId": null,
+              "deltaE": 69.36
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.18
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.18
+            },
+            {
+              "componentId": null,
+              "deltaE": 42.45
+            },
+            {
+              "componentId": null,
+              "deltaE": 42.45
+            },
+            {
+              "componentId": null,
+              "deltaE": 69.36
+            }
+          ],
+          "gated": false
+        }
+      },
+      "failures": [
+        "silhouette IoU 0.543 is below threshold 0.85"
+      ],
+      "renderHash": "0385b78cf119500e",
+      "passId": "blockout",
+      "mapStrippedRender": "render-blockout.png"
+    },
+    {
+      "passed": false,
+      "checks": {
+        "silhouetteIoU": 0.5883,
+        "aspectRatioDelta": 0.0,
+        "scaleDelta": 0.0,
+        "bilateralSymmetryError": 0.1689,
+        "colorDelta": {
+          "checked": 16,
+          "maxDeltaE": 44.04,
+          "perComponent": [
+            {
+              "componentId": null,
+              "deltaE": 4.74
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.74
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.74
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.86
+            },
+            {
+              "componentId": null,
+              "deltaE": 8.54
+            },
+            {
+              "componentId": null,
+              "deltaE": 8.54
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.74
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.74
+            },
+            {
+              "componentId": null,
+              "deltaE": 23.99
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.74
+            },
+            {
+              "componentId": null,
+              "deltaE": 23.99
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.74
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.74
+            },
+            {
+              "componentId": null,
+              "deltaE": 44.04
+            },
+            {
+              "componentId": null,
+              "deltaE": 44.04
+            },
+            {
+              "componentId": null,
+              "deltaE": 23.99
+            }
+          ],
+          "gated": false
+        }
+      },
+      "failures": [
+        "silhouette IoU 0.588 is below threshold 0.85"
+      ],
+      "renderHash": "17709ad41454c00b",
+      "passId": "blockout",
+      "mapStrippedRender": "render-blockout.png"
+    },
+    {
+      "passed": false,
+      "checks": {
+        "silhouetteIoU": 0.6397,
+        "aspectRatioDelta": 0.0,
+        "scaleDelta": 0.0,
+        "bilateralSymmetryError": 0.218,
+        "colorDelta": {
+          "checked": 16,
+          "maxDeltaE": 45.21,
+          "perComponent": [
+            {
+              "componentId": null,
+              "deltaE": 4.71
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.71
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.71
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.45
+            },
+            {
+              "componentId": null,
+              "deltaE": 8.05
+            },
+            {
+              "componentId": null,
+              "deltaE": 8.05
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.71
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.71
+            },
+            {
+              "componentId": null,
+              "deltaE": 23.39
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.71
+            },
+            {
+              "componentId": null,
+              "deltaE": 23.39
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.71
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.71
+            },
+            {
+              "componentId": null,
+              "deltaE": 45.21
+            },
+            {
+              "componentId": null,
+              "deltaE": 45.21
+            },
+            {
+              "componentId": null,
+              "deltaE": 23.39
+            }
+          ],
+          "gated": false
+        }
+      },
+      "failures": [
+        "silhouette IoU 0.640 is below threshold 0.85"
+      ],
+      "renderHash": "4e5eb2e95a141c72",
+      "passId": "blockout",
+      "mapStrippedRender": "render-blockout.png"
+    },
+    {
+      "passed": false,
+      "checks": {
+        "silhouetteIoU": 0.6324,
+        "aspectRatioDelta": 0.0,
+        "scaleDelta": 0.0,
+        "bilateralSymmetryError": 0.33,
+        "colorDelta": {
+          "checked": 16,
+          "maxDeltaE": 46.2,
+          "perComponent": [
+            {
+              "componentId": null,
+              "deltaE": 1.16
+            },
+            {
+              "componentId": null,
+              "deltaE": 1.16
+            },
+            {
+              "componentId": null,
+              "deltaE": 1.16
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.99
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.34
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.34
+            },
+            {
+              "componentId": null,
+              "deltaE": 1.16
+            },
+            {
+              "componentId": null,
+              "deltaE": 1.16
+            },
+            {
+              "componentId": null,
+              "deltaE": 22.68
+            },
+            {
+              "componentId": null,
+              "deltaE": 1.16
+            },
+            {
+              "componentId": null,
+              "deltaE": 22.68
+            },
+            {
+              "componentId": null,
+              "deltaE": 1.16
+            },
+            {
+              "componentId": null,
+              "deltaE": 1.16
+            },
+            {
+              "componentId": null,
+              "deltaE": 46.2
+            },
+            {
+              "componentId": null,
+              "deltaE": 46.2
+            },
+            {
+              "componentId": null,
+              "deltaE": 22.68
+            }
+          ],
+          "gated": false
+        }
+      },
+      "failures": [
+        "silhouette IoU 0.632 is below threshold 0.85"
+      ],
+      "renderHash": "d086be61de9706a5",
+      "passId": "blockout",
+      "mapStrippedRender": "render-blockout.png"
+    },
+    {
+      "passed": false,
+      "checks": {
+        "silhouetteIoU": 0.6395,
+        "aspectRatioDelta": 0.0,
+        "scaleDelta": 0.0,
+        "bilateralSymmetryError": 0.2193,
+        "colorDelta": {
+          "checked": 16,
+          "maxDeltaE": 45.21,
+          "perComponent": [
+            {
+              "componentId": null,
+              "deltaE": 4.72
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.72
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.72
+            },
+            {
+              "componentId": null,
+              "deltaE": 3.46
+            },
+            {
+              "componentId": null,
+              "deltaE": 8.06
+            },
+            {
+              "componentId": null,
+              "deltaE": 8.06
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.72
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.72
+            },
+            {
+              "componentId": null,
+              "deltaE": 23.4
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.72
+            },
+            {
+              "componentId": null,
+              "deltaE": 23.4
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.72
+            },
+            {
+              "componentId": null,
+              "deltaE": 4.72
+            },
+            {
+              "componentId": null,
+              "deltaE": 45.21
+            },
+            {
+              "componentId": null,
+              "deltaE": 45.21
+            },
+            {
+              "componentId": null,
+              "deltaE": 23.4
+            }
+          ],
+          "gated": false
+        }
+      },
+      "failures": [
+        "silhouette IoU 0.639 is below threshold 0.85"
+      ],
+      "renderHash": "06014e5942caf3af",
+      "passId": "blockout",
+      "mapStrippedRender": "render-blockout.png"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+[
+  {"id": "overall-silhouette", "score": 0.62, "mustPass": true, "pass": false, "notes": "Symmetric massing, void mood, and heavy orange trim read correctly; silhouette IoU 0.639 vs 0.85 deterministic target -- camera crop style differs from the reference's exact framing, same plateau pattern as v1."},
+  {"id": "shaft-bridge-topology", "score": 0.75, "mustPass": true, "pass": true, "notes": "Tapering shaft with 4 chamfered corner beams, top light cap, and a single octagonal catwalk bridge with X-braced underside all present and correctly connected."},
+  {"id": "honeycomb-panel-material", "score": 0.8, "mustPass": true, "pass": true, "notes": "Honeycomb wall panels read clearly as a warm hex-tile relief distinct from the steel; hex floor tiling visible on the lower platforms. New material family built cleanly on the first pass (unlike v1's screen-mirroring bug, no analogous defect found here)."},
+  {"id": "reference-material-system", "score": 0.7, "mustPass": true, "pass": true, "notes": "6-material palette (steel, heavy orange trim, honeycomb, hex floor, minor screen emissive, dark matte) matches the reference's value/hue distribution."},
+  {"id": "primary-structure", "score": 0.72, "mustPass": true, "pass": false, "notes": "All 10 macro components present; meso/micro sculpting is blockout-level primitives (same honest limitation as v1)."},
+  {"id": "accent-trim-treatment", "score": 0.75, "mustPass": false, "pass": true, "notes": "Orange trim is correctly heavier/thicker than v1 (4 corner beams + bridge braces + wall capitals), matching the Layer 5/6 observation."},
+  {"id": "top-light-mood", "score": 0.65, "mustPass": false, "pass": true, "notes": "Single top-of-shaft practical light achieved, distinct from v1's screen-driven lighting; required 2 lighting-intensity correction passes to stop it blowing out the honeycomb panels at close/orbit range."}
+]

@@ -1,0 +1,9 @@
+[
+  {"id": "overall-silhouette", "score": 0.65, "mustPass": true, "pass": false, "notes": "Symmetric massing and dark-void mood read correctly; exact silhouette IoU (0.825 vs 0.85 deterministic target) and proportion match to the reference's specific crop remain approximate."},
+  {"id": "symmetric-hall-topology", "score": 0.7, "mustPass": true, "pass": false, "notes": "Dais, both staircases, both catwalks, and the floor pit are all present and correctly connected per the Layer 4 scene-graph, but the floor pit is not prominent in the default hero framing and stair/catwalk proportions are simplified."},
+  {"id": "screen-wall-tiling", "score": 0.85, "mustPass": true, "pass": true, "notes": "Both monitor-wall towers now render a correctly mirrored, non-uniform tiled grid with per-instance brightness variation -- this was the pass's main fixed defect (screens were one-sided before the mirroring bug fix)."},
+  {"id": "reference-material-system", "score": 0.68, "mustPass": true, "pass": false, "notes": "Palette (void/steel/orange-trim/teal-deck/mint-screen) matches well; material response needed an added environment map before metal surfaces were visible at all -- now legible but flatter than the reference's linework-heavy shading."},
+  {"id": "primary-structure", "score": 0.7, "mustPass": true, "pass": false, "notes": "All macro components present; meso/micro sculpting is blockout-level primitives, not the reference's beveled console detail."},
+  {"id": "accent-trim-treatment", "score": 0.65, "mustPass": false, "pass": true, "notes": "Orange trim reads as a thin edge treatment on catwalks/rails, matching the 'sparse accent, not a fill' observation."},
+  {"id": "self-lit-lighting-mood", "score": 0.7, "mustPass": false, "pass": true, "notes": "Self-lit emissive-driven mood achieved; ACES filmic tonemapping + bloom keeps screens readable without full clipping."}
+]
