@@ -8,18 +8,10 @@
 // Deliberately NOT exercised: the Chat tab's Send button and submitting the
 // Resume dialog. Resume is opened and only ever Cancelled.
 import { test, expect } from './fixtures/test.mjs';
-import { gotoView, gotoMenu, openMenu, visible } from '../e2e/helpers/nav.mjs';
+import { gotoView, gotoMenu, setSkin, visible } from '../e2e/helpers/nav.mjs';
 import { RICH_SESSION, SESSION_COUNT_A } from '../web/src/mock/fixtures.js';
 
 const TOTAL_SESSIONS = SESSION_COUNT_A + 2; // 30 alpha + the rich session + "Fixture session 901"
-
-async function setSkin(page, skin) {
-  await openMenu(page);
-  await page.getByRole('menuitem', { name: 'Appearance', exact: true }).click();
-  await expect(page.getByText('Appearance', { exact: true }).first()).toBeVisible();
-  await page.getByRole('radio').filter({ hasText: skin }).click();
-  await expect(page.getByText('Appearance', { exact: true }).first()).toBeVisible();
-}
 
 // SessionHistory doesn't list until GET /sessions/root resolves, so there's
 // no root race to wait out here — this just waits for the (async) fetch of

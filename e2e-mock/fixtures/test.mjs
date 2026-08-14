@@ -43,3 +43,23 @@ export function onceConfirm(page, accept = true) {
     });
   });
 }
+
+// Mirage handles fetches inside the page, below Playwright's network layer.
+// Record method + path + query so specs can still prove the intended request
+// was made without coupling themselves to the mock response body.
+export async function recordFetchCalls(page) {
+  await page.evaluate(() => {
+    window.__e2eFetchCalls = [];
+    const originalFetch = window.fetch;
+    window.fetch = async (...args) => {
+      const [input, init] = args;
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const method = (init?.method || input?.method || 'GET').toUpperCase();
+      const url = new URL(rawUrl, location.origin);
+      window.__e2eFetchCalls.push(`${method} ${url.pathname}${url.search}`);
+      return originalFetch(...args);
+    };
+  });
+}
+
+export const fetchCalls = (page) => page.evaluate(() => window.__e2eFetchCalls || []);

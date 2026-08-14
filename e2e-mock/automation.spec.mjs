@@ -12,9 +12,9 @@
 // disappears, Switch toBeChecked, edited title text, Jobs/Reports toggle).
 //
 // To still prove the RIGHT endpoint+method was hit without testing the mock's
-// response body (which would just be testing the mock), a fetch intercept
-// records method+pathname only — never the body. The pathname is
-// port-independent (new URL(url, location.origin).pathname), so
+// response body (which would just be testing the mock), a shared fetch
+// recorder captures method + path + query, never the body. Paths are
+// port-independent, so
 // 'POST /crons', 'DELETE /crons/<id>', 'PATCH /background/reorder' etc. are
 // stable. After an action, wait for the DOM to converge (which implies the
 // fetch completed), then assert against the recorded calls.
@@ -27,7 +27,7 @@
 // only the seeded rows) so its Edit/Delete flows don't depend on another spec
 // leaving the seeded records alone — every mock test gets a fresh page-local
 // store.
-import { test, expect, onceConfirm } from './fixtures/test.mjs';
+import { test, expect, onceConfirm, recordFetchCalls, fetchCalls } from './fixtures/test.mjs';
 import { goto } from '../e2e/helpers/nav.mjs';
 import { sessionId } from '../web/src/mock/fixtures.js';
 
@@ -44,23 +44,8 @@ const CRON_EXPR = '0 0 1 1 *'; // valid — every Jan 1st at midnight UTC
 const BGJOB_1_ID = sessionId(3001); // 'Fixture backlog groomer'
 const BGJOB_TITLE = 'E2E background job';
 
-// Monkey-patch window.fetch to record method+pathname only (never the body).
-// Installed after goto so the initial WS/REST bootstrap isn't captured; the
-// calls array accumulates across the rest of the test.
-async function recordFetch(page) {
-  await page.evaluate(() => {
-    window.__e2eCalls = [];
-    const orig = window.fetch;
-    window.fetch = async (...args) => {
-      const [input, init] = args;
-      const url = typeof input === 'string' ? input : input.url;
-      window.__e2eCalls.push((init?.method || 'GET').toUpperCase() + ' ' + new URL(url, location.origin).pathname);
-      return orig(...args);
-    };
-  });
-}
-const calls = (page) => page.evaluate(() => window.__e2eCalls || []);
-
+// The shared fetch recorder is installed after navigation in each test so the
+// initial WS/REST bootstrap is excluded from the assertions.
 // Playwright's dragTo()/mouse.down+move+up did not reliably fire React's
 // onDragStart/onDragOver/onDrop for these HTML5-draggable elements under
 // headless Chromium (no real OS-level drag). Dispatching the drag events
@@ -77,7 +62,7 @@ async function html5Drag(page, source, target) {
 test('scheduled: create validates the cron expression live then POSTs /crons, Edit reopens it prefilled, Delete confirms then DELETEs', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Automation');
-  await recordFetch(page);
+  await recordFetchCalls(page);
 
   await page.getByRole('button', { name: 'Scheduled job' }).click();
   const dialog = page.getByRole('dialog');
@@ -104,7 +89,7 @@ test('scheduled: create validates the cron expression live then POSTs /crons, Ed
   // DELETE pathname is asserted with a regex below.
   const row = page.locator('tr').filter({ hasText: CRON_TITLE });
   await expect(row).toBeVisible();
-  expect(await calls(page)).toContain('POST /crons');
+  expect(await fetchCalls(page)).toContain('POST /crons');
 
   // Edit reopens the dialog prefilled with the job's fields, then Cancel — no mutation.
   await row.getByRole('button', { name: 'Edit' }).click();
@@ -123,13 +108,13 @@ test('scheduled: create validates the cron expression live then POSTs /crons, Ed
   await row.getByRole('button', { name: 'Delete' }).click();
   expect(await confirmMsg).toMatch(/delete scheduled job/i);
   await expect(row).not.toBeVisible();
-  expect(await calls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^DELETE \/crons\/[^/]+$/)]));
+  expect(await fetchCalls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^DELETE \/crons\/[^/]+$/)]));
 });
 
 test('scheduled: the enable Switch on a seeded (disabled) row flips via POST /crons/:id', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Automation');
-  await recordFetch(page);
+  await recordFetchCalls(page);
 
   const row = page.locator('tr').filter({ hasText: 'Nightly fixture sweep' });
   const sw = row.getByRole('switch');
@@ -137,13 +122,13 @@ test('scheduled: the enable Switch on a seeded (disabled) row flips via POST /cr
 
   await sw.click();
   await expect(sw).toBeChecked();
-  expect(await calls(page)).toContain('POST /crons/' + CRON_1_ID);
+  expect(await fetchCalls(page)).toContain('POST /crons/' + CRON_1_ID);
 });
 
 test('background: create POSTs /background/jobs, Edit PATCHes the title, Delete confirms then DELETEs', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Automation');
-  await recordFetch(page);
+  await recordFetchCalls(page);
 
   await page.getByRole('button', { name: 'Background job' }).click();
   const dialog = page.getByRole('dialog');
@@ -155,7 +140,7 @@ test('background: create POSTs /background/jobs, Edit PATCHes the title, Delete 
 
   const row = page.locator('tr').filter({ hasText: BGJOB_TITLE });
   await expect(row).toBeVisible();
-  expect(await calls(page)).toContain('POST /background/jobs');
+  expect(await fetchCalls(page)).toContain('POST /background/jobs');
 
   await row.getByRole('button', { name: 'Edit' }).click();
   const editDialog = page.getByRole('dialog');
@@ -168,19 +153,19 @@ test('background: create POSTs /background/jobs, Edit PATCHes the title, Delete 
 
   const editedRow = page.locator('tr').filter({ hasText: editedTitle });
   await expect(editedRow).toBeVisible();
-  expect(await calls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^PATCH \/background\/jobs\/[^/]+$/)]));
+  expect(await fetchCalls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^PATCH \/background\/jobs\/[^/]+$/)]));
 
   const confirmMsg = onceConfirm(page, true);
   await editedRow.getByRole('button', { name: 'Delete' }).click();
   expect(await confirmMsg).toMatch(/delete background job/i);
   await expect(editedRow).not.toBeVisible();
-  expect(await calls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^DELETE \/background\/jobs\/[^/]+$/)]));
+  expect(await fetchCalls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^DELETE \/background\/jobs\/[^/]+$/)]));
 });
 
 test('background: the enable Switch on a seeded (disabled) row flips via PATCH /background/jobs/:id', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Automation');
-  await recordFetch(page);
+  await recordFetchCalls(page);
 
   const row = page.locator('tr').filter({ hasText: 'Fixture backlog groomer' });
   const sw = row.getByRole('switch');
@@ -188,13 +173,13 @@ test('background: the enable Switch on a seeded (disabled) row flips via PATCH /
 
   await sw.click();
   await expect(sw).toBeChecked();
-  expect(await calls(page)).toContain('PATCH /background/jobs/' + BGJOB_1_ID);
+  expect(await fetchCalls(page)).toContain('PATCH /background/jobs/' + BGJOB_1_ID);
 });
 
 test('background: dragging one seeded row onto another PATCHes /background/reorder', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Automation');
-  await recordFetch(page);
+  await recordFetchCalls(page);
 
   const rowA = page.locator('tr').filter({ hasText: 'Fixture backlog groomer' });
   const rowB = page.locator('tr').filter({ hasText: 'Fixture dependency check' });
@@ -204,7 +189,7 @@ test('background: dragging one seeded row onto another PATCHes /background/reord
   const handle = rowA.locator('[aria-label*="Drag to change the order"]');
 
   await html5Drag(page, handle, rowB);
-  expect(await calls(page)).toContain('PATCH /background/reorder');
+  expect(await fetchCalls(page)).toContain('PATCH /background/reorder');
 });
 
 test('background: Jobs<->Reports toggle switches view; Reports shows the empty state', async ({ page }) => {

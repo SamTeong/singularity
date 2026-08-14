@@ -1,4 +1,4 @@
-import { test, expect } from './fixtures/test.mjs';
+import { test, expect, recordFetchCalls, fetchCalls } from './fixtures/test.mjs';
 import { goto } from '../e2e/helpers/nav.mjs';
 
 test('provider meter cards render from populated mock usage', async ({ page }) => {
@@ -46,24 +46,25 @@ test('collapse/expand toggle flips aria-label', async ({ page }) => {
   await expect(collapseButton).toHaveAttribute('aria-label', 'Collapse usage');
 });
 
-test('usage Refresh keeps the populated mock cards available', async ({ page }) => {
+test('usage Refresh triggers GET /usage with force=1', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
+  await recordFetchCalls(page);
 
   const refresh = page.getByRole('button', { name: 'Refresh', exact: true }).first();
   await expect(refresh).toBeEnabled();
   await refresh.click();
-  await expect(page.getByText('Session (5h)').first()).toBeVisible();
+  await expect.poll(() => fetchCalls(page)).toContain('GET /usage?force=1');
 });
 
 test('usage report loads the mock report document', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
 
-  // The mock asset plugin serves this same-origin document. Its layout can
-  // collapse at the default viewport, so assert its document rather than the
-  // iframe's outer geometry.
+  // Verify both the user-visible iframe and the document served inside it.
   const report = page.getByTitle('Usage report');
+  await expect(report).toBeVisible();
+  await expect.poll(async () => (await report.boundingBox())?.height || 0).toBeGreaterThan(0);
   const frame = report.contentFrame();
   await expect(frame.getByRole('heading', { name: 'Mock usage report' })).toBeVisible();
 });

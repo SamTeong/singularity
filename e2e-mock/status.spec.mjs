@@ -1,6 +1,6 @@
 // Provider status view. The mock returns Claude operational with two
 // components and OpenAI degraded with one component and one open incident.
-import { test, expect } from './fixtures/test.mjs';
+import { test, expect, recordFetchCalls, fetchCalls } from './fixtures/test.mjs';
 import { goto } from '../e2e/helpers/nav.mjs';
 
 test('provider cards render with indicator and description', async ({ page }) => {
@@ -35,14 +35,13 @@ test('incident row renders for a degraded provider', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'details' })).toBeVisible();
 });
 
-test('Refresh keeps provider status rendered', async ({ page }) => {
+test('Refresh triggers GET /status with force=1', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Status');
+  await recordFetchCalls(page);
 
   await page.getByRole('button', { name: 'Refresh' }).click();
-  // Mirage handles the request in-page, so there is no Playwright network
-  // response event to await. The refreshed provider card is the UI contract.
-  await expect(page.getByText('All Systems Operational')).toBeVisible();
+  await expect.poll(() => fetchCalls(page)).toContain('GET /status?force=1');
 });
 
 test('the freshness caption renders', async ({ page }) => {

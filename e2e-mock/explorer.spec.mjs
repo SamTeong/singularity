@@ -91,12 +91,25 @@ test.describe('Explorer', () => {
     await expect(page.getByRole('button', { name: 'created.txt', exact: true })).toHaveCount(0);
   });
 
-  // Deliberately not ported from e2e/explorer.spec.mjs: the daemon suite proves
-  // open tabs RESTORE across reload via PUT /fs/state. The mock's in-memory
-  // filesystem does not persist UI tab state across reload, so the reload-
-  // restores-tabs behavior is daemon-only coverage — asserting the negative
-  // here would pin a mock limitation that contradicts production and break the
-  // day the mock grows that persistence.
+  test('reload resets Explorer content and tabs to the seeded baseline', async ({ page }) => {
+    await gotoView(page, 'Explorer');
+    await page.getByRole('button', { name: 'script.mjs', exact: true }).click();
+    await expect(tab(page, SCRIPT)).toBeVisible();
+
+    const marker = `e2e-explorer-reset-${Date.now()}`;
+    await cm(page).click();
+    await page.keyboard.press('ControlOrMeta+End');
+    await page.keyboard.insertText(marker);
+    await page.getByRole('button', { name: 'Save', exact: true }).click();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+
+    await page.reload();
+    await page.getByPlaceholder('Search files…').waitFor({ state: 'visible' });
+    await expect(tab(page, SCRIPT)).toHaveCount(0);
+    await page.getByRole('button', { name: 'script.mjs', exact: true }).click();
+    await expect(cm(page)).toContainText('explorerFixture');
+    await expect(cm(page)).not.toContainText(marker);
+  });
 
   test('search finds a nested file by name from a collapsed tree', async ({ page }) => {
     await gotoView(page, 'Explorer');

@@ -98,7 +98,7 @@ export default function UsageView({ usage, onRefresh }) {
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
       </Stack>
-      <Box sx={{ flexShrink: 0, p: 2 }}>
+      <Box sx={{ flexShrink: 1, minHeight: 0, overflowY: 'auto', p: 2 }}>
         <Collapse in={open}>
           <Stack spacing={2}>
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
@@ -111,7 +111,7 @@ export default function UsageView({ usage, onRefresh }) {
         </Collapse>
       </Box>
       {/* Usage report (harness-usage-report skill) fills the rest of the pane. */}
-      <Box sx={{ flex: 1, minHeight: 0 }}>
+      <Box sx={{ flex: '1 0 240px', minHeight: 240 }}>
         <UsageReportView />
       </Box>
     </Stack>

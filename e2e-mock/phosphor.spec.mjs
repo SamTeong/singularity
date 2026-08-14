@@ -15,15 +15,7 @@
 // `--mui-palette-error-main` to a different (also AA/AAA-passing) red at
 // runtime than that literal; see this file's final report for the full trace.
 import { test, expect } from './fixtures/test.mjs';
-import { goto, openMenu } from '../e2e/helpers/nav.mjs';
-
-async function setSkin(page, skin) {
-  await openMenu(page);
-  await page.getByRole('menuitem', { name: 'Appearance', exact: true }).click();
-  await expect(page.getByText('Appearance', { exact: true }).first()).toBeVisible();
-  await page.getByRole('radio').filter({ hasText: skin }).click();
-  await expect(page.getByText('Appearance', { exact: true }).first()).toBeVisible();
-}
+import { goto, openMenu, setSkin } from '../e2e/helpers/nav.mjs';
 
 const ORANGE = 'rgb(242, 100, 0)';
 const MINT = 'rgb(82, 242, 154)';
