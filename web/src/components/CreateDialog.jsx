@@ -29,14 +29,8 @@ export const clearAdornment = (show, onClick) => show ? (
 export default function CreateDialog({ open, onClose, title, onCancel, onCreate, editing = false, createLabel, createDisabled = false, children }) {
   if (!open) return null;
   const submitLabel = createLabel ?? (editing ? 'Save' : 'Create');
-  const closeOnEscapeCapture = (event) => {
-    if (event.key !== 'Escape' || !event.currentTarget.contains(event.target)) return;
-    event.preventDefault();
-    event.stopPropagation();
-    onClose?.(event, 'escapeKeyDown');
-  };
   return (
-    <Dialog open onClose={onClose} onKeyDownCapture={closeOnEscapeCapture} maxWidth="sm" fullWidth>
+    <Dialog open onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>{title}</DialogTitle>
       <DialogContent sx={{ pb: 1.5 }}>
         <Stack spacing={1.5} sx={{ pt: 0.5 }}>

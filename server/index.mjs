@@ -42,6 +42,16 @@ const VITE_PORT = Number(process.env.VITE_PORT ?? 5317);
 // Optional loopback token (defense-in-depth on top of the 127.0.0.1 bind).
 // Set SING_TOKEN to require it on data endpoints + WS; the shell/assets stay open.
 const TOKEN = process.env.SING_TOKEN || null;
+// The home the *client* collapses paths against (pure presentation — the backend
+// always deals in full paths). SING_HOME_DISPLAY optionally overrides it so a
+// hermetic env can keep the OS home for real `~/.claude` reads while reporting a
+// display home that doesn't abbreviate seeded paths. Read through this helper
+// everywhere: the shell learns the home from the synchronous window.__SING_HOME__
+// injection, GET /env is the same value for anything that asks later, and an
+// override honoured by only one of them would leave the two disagreeing.
+// Falsy falls back to the real home: the client's untildify() no-ops without one,
+// which would send a literal '~' to path-taking routes.
+const displayHome = () => process.env.SING_HOME_DISPLAY || homedir();
 
 // No baked-in machine defaults — all machine-specific config must come from .env
 // (loaded via --env-file-if-exists=.env). Fail fast with a clear list if any
@@ -185,7 +195,9 @@ if (existsSync(webDist)) {
     // used to learn it from an async GET /env, so a tab that raced or missed
     // that one fetch kept `~` unresolved for its whole lifetime — it then sent
     // a literal '~' cwd on session create. Synchronous, no fetch, no race.
-    html = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(homedir())};</script></head>`);
+    // Same source as GET /env below — the two must agree, or a display-home
+    // override would apply to one and not the other.
+    html = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(displayHome())};</script></head>`);
     if (TOKEN) html = html.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(TOKEN)};</script></head>`);
     reply.type('text/html').send(html);
   });
@@ -305,14 +317,9 @@ app.get('/procs', async () => ({ procs: await scanClaude() }));
 // in the UI — these are suggestions; any typed value is passed through verbatim.
 app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS, codex: CODEX_PRESETS }));
 
-// Home dir, for the client to collapse full paths to `~` on display (pure
-// presentation — the backend itself always deals in full paths). SING_HOME_DISPLAY
-// optionally overrides it so a sandbox/hermetic env can keep the OS home for real
-// `~/.claude` reads while reporting a display home that doesn't abbreviate seeded
-// paths — keeps tildify() from racing the e2e rail assertions. Falsy falls back to
-// the real home: the client's untildify() no-ops without one, which would send a
-// literal '~' to path-taking routes.
-app.get('/env', async () => ({ home: process.env.SING_HOME_DISPLAY || homedir() }));
+// Home dir, for the client to collapse full paths to `~` on display. Same
+// source as the window.__SING_HOME__ injection above — see displayHome().
+app.get('/env', async () => ({ home: displayHome() }));
 
 // Optional-feature flags for the shell: which features are wired up on this
 // machine so the UI can show inline "set X to enable" hints instead of failing

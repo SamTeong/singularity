@@ -23,7 +23,11 @@ const singTokenInject = {
   apply: 'serve',
   transformIndexHtml(html) {
     const t = process.env.SING_TOKEN;
-    let out = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(homedir())};</script></head>`);
+    // Mirrors the daemon's displayHome() (server/index.mjs) — dev proxies /env
+    // to the daemon, so honouring the override in only one of them would leave
+    // the injected home and the route disagreeing.
+    const home = process.env.SING_HOME_DISPLAY || homedir();
+    let out = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(home)};</script></head>`);
     if (t) out = out.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(t)};</script></head>`);
     return out;
   },
