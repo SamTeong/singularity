@@ -1,4 +1,17 @@
-## ADDED Requirements
+# mock-backed-e2e
+
+## Purpose
+
+Defines the second, parallel Playwright end-to-end suite (`e2e-mock/`, run by
+`pnpm test:e2e-mock`) that drives the web UI against the mock backend instead
+of a daemon. This suite is the fast sanity layer verifying the UI renders,
+navigates, and responds to interaction; it runs in parallel across workers
+with per-worker state isolation, completes faster than the daemon-backed
+suite, and fails loudly whenever the mock diverges from what the client
+requests. Daemon-only behaviour and flows that only a real daemon can exercise
+stay in the existing daemon-backed suite.
+
+## Requirements
 
 ### Requirement: A second end-to-end suite runs against the mock backend
 
@@ -80,16 +93,50 @@ outcome through the user interface.
 
 ### Requirement: Daemon-dependent behaviour stays in the existing suite
 
-The existing daemon-backed suite, its sandbox harness, and its fixtures SHALL
-remain unchanged and SHALL continue to pass. Flows that only the real daemon can
-exercise — spawning agent processes, terminating real system processes, running
-skills, and any flow the existing suite already forbids driving — SHALL NOT be
-ported to the mock suite, because passing against a mock would assert nothing
-about them.
+The existing daemon-backed fixtures and behaviour contracts SHALL remain
+unchanged and the suite SHALL continue to pass. Verification MAY correct a
+stale structural assertion or selector when the rendered semantics prove that
+it misidentifies elements, and MAY adjust a spec's interaction when the
+assertion as written fights a framework contract the product deliberately
+keeps — provided the correction does not weaken a product-behaviour contract
+and the two suites are left asserting the same thing. Its launcher SHALL isolate the child daemon's actual
+POSIX and Windows home variables inside the existing sandbox so the suite cannot
+read the real user home. Flows that only the real daemon can exercise — spawning agent
+processes, terminating real system processes, running skills, and any flow the
+existing suite already forbids driving — SHALL NOT be ported to the mock suite,
+because passing against a mock would assert nothing about them.
 
 #### Scenario: The existing suite still passes
 - **WHEN** the daemon-backed suite is run after this change
-- **THEN** it passes with no modification to its specs, harness, or fixtures
+- **THEN** it passes with its fixtures and behaviour contracts unchanged and with its child daemon home confined to the sandbox
+
+#### Scenario: A stale structural assertion is corrected truthfully
+- **WHEN** strict verification proves a daemon spec counts a day header as a project-card article even though the day has no project sessions
+- **THEN** that count is corrected to the rendered project-card total without manufacturing fixture data or changing product behaviour
+
+#### Scenario: A stale structural selector targets the active overlay
+- **WHEN** MUI retains an exiting drawer backdrop while the active transcript drawer is visible
+- **THEN** the daemon spec scopes its scrim click to the active transcript drawer rather than matching every backdrop globally
+
+#### Scenario: Responsive geometry is measured after transition settlement
+- **WHEN** the task dossier becomes visible while its slide-in transition is still moving it into the viewport
+- **THEN** the daemon spec waits for the final right edge before asserting the unchanged narrow-viewport bounds and sticky actions
+
+#### Scenario: A nested overlay keeps its own dismissal
+- **WHEN** Escape is pressed while a dialog's model autocomplete popper is open
+- **THEN** the popper takes that Escape, the dialog stays open, and both suites move focus to a plain field before asserting the dialog's own Escape-to-close
+
+#### Scenario: Existing auth guidance remains explicit
+- **WHEN** Ollama reports that fresh authentication is required
+- **THEN** the Usage alert explicitly tells the user to sign in while preserving the existing login command and manual-cookie instructions
+
+#### Scenario: The daemon suite cannot read the real user home
+- **WHEN** the daemon-backed launcher starts its child process on POSIX or Windows
+- **THEN** the child's OS home resolves to the sandbox home rather than the invoking user's home, and every daemon read of `~` that finds nothing there takes its existing degraded branch rather than failing
+
+#### Scenario: A display-home override reaches the whole client
+- **WHEN** `SING_HOME_DISPLAY` is set for a daemon
+- **THEN** the injected `window.__SING_HOME__` and `GET /env` report the same home, so no client path resolves against one and displays against the other
 
 #### Scenario: Unsafe flows are not ported
 - **WHEN** the mock suite is reviewed against the existing suite's list of flows that must never be driven

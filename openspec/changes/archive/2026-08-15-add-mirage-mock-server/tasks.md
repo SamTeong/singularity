@@ -49,34 +49,34 @@ Each subtask lands with browser verification of its panel before moving on.
 
 ## 6. Subresource paths
 
-- [ ] 6.1 Create `web/mock-assets.plugin.mjs` implementing both `configureServer` and `configurePreviewServer`
-- [ ] 6.2 Serve a 1×1 PNG for `/fs/raw` and a canned HTML document for `/usagereport/report`; register the plugin in `web/vite.config.mjs` for mock mode only
-- [ ] 6.3 Verify image preview renders in the Explorer and the usage report iframe renders content
+- [x] 6.1 Create `web/mock-assets.plugin.mjs` implementing both `configureServer` and `configurePreviewServer`
+- [x] 6.2 Serve a 1×1 PNG for `/fs/raw` and a canned HTML document for `/usagereport/report`; register the plugin in `web/vite.config.mjs` for mock mode only
+- [x] 6.3 Verify image preview renders in the Explorer and the usage report iframe renders content
 
 ## 7. Mock e2e suite
 
-- [ ] 7.1 Create `playwright.mock.config.mjs` — `testDir: 'e2e-mock'`, `fullyParallel: true`, workers 4 local / 2 CI, `timeout: 30_000`, `webServer` running `vite preview` against `dist-mock`
-- [ ] 7.2 Create `e2e-mock/fixtures/test.mjs` with the `consoleGuard` fixture and `onceConfirm`; drop the `stubNetwork` fixture (the mock already owns `/status` and `/usage`)
-- [ ] 7.3 Share `e2e/helpers/nav.mjs` rather than copying it
-- [ ] 7.4 Port `smoke` and `nav` first; confirm the suite is green and running in parallel
-- [ ] 7.5 Port the remaining daemon-independent specs: `appearance`, `phosphor`, `resize`, `status`, `usage`, `history`, `wiki`, `create-dialogs`, `processes`, `transcripts`, `tasks`, `dock`
-- [ ] 7.6 Port `config`, `explorer`, `editors`, rewriting each `node:fs` assertion as a UI re-read (close tab → reopen → assert shown content)
-- [ ] 7.7 Confirm no flow from the existing suite's "Never drive these" list appears in `e2e-mock/`
+- [x] 7.1 Create `playwright.mock.config.mjs` — `testDir: 'e2e-mock'`, `fullyParallel: true`, workers 4 local / 2 CI, `timeout: 30_000`, `webServer` running `vite preview --config web/vite.config.mjs --mode mock` (both flags load-bearing: without `--mode mock` Vite resolves `build.outDir` back to `dist` and drops the mock-assets plugin, so preview serves the production build with no `/fs/raw` or `/usagereport/report`)
+- [x] 7.2 Create `e2e-mock/fixtures/test.mjs` with the `consoleGuard` fixture and `onceConfirm`; drop the `stubNetwork` fixture (the mock already owns `/status` and `/usage`)
+- [x] 7.3 Share `e2e/helpers/nav.mjs` rather than copying it
+- [x] 7.4 Port `smoke` and `nav` first; confirm the suite is green and running in parallel
+- [x] 7.5 Port the remaining daemon-independent specs: `appearance`, `phosphor`, `resize`, `status`, `usage`, `history`, `wiki`, `create-dialogs`, `processes`, `transcripts`, `tasks`, `dock`; verify the usage report iframe has visible geometry and its document renders
+- [x] 7.6 Port `config`, `explorer`, `editors`, rewriting each `node:fs` assertion as a UI re-read (close tab → reopen → assert shown content)
+- [x] 7.7 Confirm no flow from the existing suite's "Never drive these" list appears in `e2e-mock/`
 
 ## 8. Verification
 
-- [ ] 8.1 `pnpm dev-mock` with no `.env` present and no daemon running → every view renders, browser console clean
-- [ ] 8.2 Drag a task card between columns → it moves and stays moved (REST → WS broadcast round-trip)
-- [ ] 8.3 Run `pnpm test:e2e-mock` twice; results identical both times (no ordering flake from parallel workers)
-- [ ] 8.4 Measure and record wall-clock time for `pnpm test:e2e-mock` vs `pnpm test:e2e`; report both numbers
-- [ ] 8.5 `pnpm build && pnpm test:e2e` → the daemon-backed suite passes unchanged
-- [ ] 8.6 `grep -ri miragejs web/dist` and a search for the mock source dir → both empty, proving tree-shaking
-- [ ] 8.7 `pnpm test` (server unit tests) → still green
-- [ ] 8.8 `pnpm lint` → clean
+- [x] 8.1 `pnpm dev-mock` with no `.env` present and no daemon running → every view renders, browser console clean
+- [x] 8.2 Drag a task card between columns → it moves and stays moved (REST → WS broadcast round-trip)
+- [x] 8.3 Run `pnpm test:e2e-mock` twice; results identical both times (no ordering flake from parallel workers) — **144/144 both runs**
+- [x] 8.4 Measure and record wall-clock time for `pnpm test:e2e-mock` vs `pnpm test:e2e`; report both numbers — mock **2:31** and **2:57** across the two 8.3 runs (2.4m / 2.8m in-suite, 4 workers), daemon **4:12** (4.0m in-suite, 1 worker); every figure includes the `vite build` each script runs first. ~1.5× faster on the same box
+- [x] 8.5 `pnpm build && pnpm test:e2e` → 146/146 green with the child daemon home confined to the sandbox. Note the baseline: the suite and `pnpm lint` were **already red on `main`** (6 spec failures, 8 lint errors), each reproduced independently of this change; design.md D12 records the repair for every one
+- [x] 8.6 `grep -ri miragejs web/dist` and a search for the mock source dir → both empty, proving tree-shaking
+- [x] 8.7 `pnpm test` (server unit tests) → still green
+- [x] 8.8 `pnpm lint` → clean
 
 ## 9. Documentation
 
-- [ ] 9.1 Add `dev-mock` / `build:mock` / `test:e2e-mock` to the Run section of `CLAUDE.md`, noting that mock mode needs no `.env` and no daemon
-- [ ] 9.2 Add `web/src/mock/` and `e2e-mock/` to the File structure block in `CLAUDE.md`
-- [ ] 9.3 Add a note to `CLAUDE.md` working rules: a new server route now needs the Vite dev proxy prefix **and** a mock route
-- [ ] 9.4 Update `e2e/README.md` to state the division of responsibility between the two suites and where a new spec belongs
+- [x] 9.1 Add `dev-mock` / `build:mock` / `test:e2e-mock` to the Run section of `CLAUDE.md`, noting that mock mode needs no `.env` and no daemon
+- [x] 9.2 Add `web/src/mock/` and `e2e-mock/` to the File structure block in `CLAUDE.md`
+- [x] 9.3 Add a note to `CLAUDE.md` working rules: a new server route now needs the Vite dev proxy prefix **and** a mock route
+- [x] 9.4 Update `e2e/README.md` to state the division of responsibility between the two suites and where a new spec belongs

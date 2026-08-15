@@ -28,14 +28,34 @@ shared-mutable-state constraint that forces serial execution today.
   workers.
 - Add a Vite plugin serving `/fs/raw` and `/usagereport/report`, the two paths
   loaded as `<img>`/`<iframe>` subresources that Mirage cannot intercept.
-- One edit to existing app code: a guarded dynamic import in `web/src/main.jsx`,
-  statically eliminated from the production bundle.
-- Port the daemon-independent specs into `e2e-mock/`. The existing `e2e/` suite
-  and its sandbox harness are **unchanged** — it remains the integration layer
-  that proves the daemon itself works.
+- Production integration remains one guarded dynamic import in
+  `web/src/main.jsx`, statically eliminated from the production bundle.
+  Verification found the daemon suite and `pnpm lint` already red on `main`, so
+  this change also repairs that baseline: it gives the dock's two collapse
+  surfaces distinct accessible names, restores Settings' distinct `操作` label
+  next to Config's `設定`, restores the Usage alert's established “sign in” auth
+  guidance after a prior copy change, and removes behaviour-neutral lint errors
+  from agent skill-config strings and an obsolete masthead prop. It also clears
+  two History console warnings and makes the daemon's injected `__SING_HOME__`
+  and `GET /env` read one helper, so `SING_HOME_DISPLAY` can no longer be
+  honoured by one and ignored by the other.
+- Port the daemon-independent specs into `e2e-mock/`. The existing `e2e/`
+  fixtures and behaviour contracts remain unchanged; verification corrects a
+  stale History project-card count that treated today's empty day
+  header as an `<article>` and scopes a Tasks scrim click to the active drawer
+  while MUI retains the exiting drawer during its transition. It also waits for
+  the task dossier's slide-in transition to settle before measuring its narrow-
+  viewport bounds, and moves focus off the model autocomplete before asserting
+  Escape closes the New task dialog — both matching the already-proven mock
+  assertions, so the two suites encode one contract. Its launcher now
+  pins the sandbox daemon's POSIX and Windows home variables to
+  `e2e/.tmp/home`, preventing reads from the real user home while preserving it
+  as the integration layer that proves the daemon itself works.
 
-Not breaking. Nothing in `server/`, `e2e/`, or the production build path changes
-behaviour.
+Not breaking. The syntax-only cleanup in `server/agents.mjs`, the single-source
+home helper in `server/index.mjs` (no producer sets `SING_HOME_DISPLAY` once the
+launcher stops), the existing daemon-backed fixtures, and the production build
+path do not change behaviour.
 
 ## Capabilities
 
@@ -61,11 +81,25 @@ behaviour.
 
 **Modified:** `web/src/main.jsx` (one guarded dynamic import),
 `web/vite.config.mjs` (mode-conditional `build.outDir`, register the asset
-plugin), `package.json` (three scripts, two devDependencies), `CLAUDE.md` (Run
-section + File structure), `e2e/README.md` (point at the sibling suite).
+plugin, honour `SING_HOME_DISPLAY` in the dev injection like the daemon),
+`web/src/features/history/DayCard.jsx` and `HistoryView.jsx` (clear
+strict-QA warnings), `web/src/features/appearance/AppearanceView.jsx` (heading
+level for the view title), `web/src/shell/SessionDock.jsx` (distinct accessible
+name for the terminal header),
+`web/src/shell/AppMenu.jsx` (restore distinct Japanese navigation labels),
+`web/src/features/usage/UsageView.jsx` (restore the Ollama sign-in guidance contract),
+`web/src/shell/PhosphorMasthead.jsx` and `AppShell.jsx` (remove an obsolete prop),
+`e2e/history.spec.mjs`, `e2e/tasks.spec.mjs` and `e2e/create-dialogs.spec.mjs`
+(correct stale structural assertions, transition timing, and an Escape
+assertion that fought MUI's nested-overlay contract),
+`e2e/serve.mjs` (sandbox the child daemon's actual home),
+`server/index.mjs` (one `displayHome()` source for the injected home and `/env`),
+`server/agents.mjs` and `server/agents.test.mjs` (remove unnecessary quote escapes),
+`package.json` (three scripts, two devDependencies), `CLAUDE.md` (Run section +
+File structure), `e2e/README.md` (point at the sibling suite).
 
-**Unmodified:** all of `server/**`, all of `e2e/**` specs and fixtures, the
-production build output.
+**Unmodified:** all other `server/**`, all existing `e2e/**` fixtures and specs
+except the structural corrections above, and the production build output.
 
 **Dependencies:** `miragejs@^0.1.48` and `mock-socket@^9.3.1` as
 devDependencies. Note miragejs is in maintenance mode (no release since 2022);
