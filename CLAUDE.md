@@ -13,7 +13,13 @@ pnpm build           # build web only (vite build → web/dist); run before serv
 pnpm dev             # daemon (:4317) + Vite (:5317) → browse UI at 127.0.0.1:5317; Vite proxies /ws + REST to daemon
 pnpm test            # node --test-force-exit "server/*.test.mjs"
 pnpm clean           # reap orphan esbuild/vite procs (fixes build hangs before a fresh build)
+
+pnpm dev-mock        # UI only, no daemon: Vite (:5317) with an in-browser mock backend
+pnpm build:mock      # mock build → web/dist-mock (never touches web/dist)
+pnpm test:e2e-mock   # build:mock + the parallel Playwright suite in e2e-mock/
 ```
+
+**Mock mode needs no `.env` and no daemon.** `--mode mock` sets `VITE_MOCK=1`, which switches on `web/src/mock/` — a Mirage server answering every REST route plus a `mock-socket` `/ws` — so the whole UI runs against in-memory fixtures. Nothing reads `SINGULARITY_HOME`, `CLAUDE_BIN`, or the user's `~/.claude`. Use it for UI work; use `pnpm dev` when the change touches daemon behaviour.
 
 Pieces separately: `pnpm server` (daemon) / `pnpm web` (Vite dev server only — no build). Shell: PowerShell primary; Bash tool POSIX only.
 
@@ -36,7 +42,11 @@ web/       React + MUI + xterm shell (src/), vite.config.mjs (dev proxy :5317 �
     lib/          small utilities
     providers/    context providers
     theme/        MUI theme
+    mock/         mock backend (dev-mock + e2e-mock only) — server.js (Mirage) + routes/
+                   one-per-concern, ws.js (mock-socket /ws), db.js + fixtures.js (seed
+                   corpora), index.js (startMock). Tree-shaken out of the prod bundle.
 e2e/       Playwright suite driving every UI flow against a throwaway sandbox daemon
+e2e-mock/  sibling Playwright suite driving the same flows against web/src/mock (parallel)
 scripts/   bootstrap.mjs (first setup), demo-tasks.mjs, fix-pty-helper.mjs (postinstall +x),
            ollama-login.mjs, reap-build-orphans.mjs (pnpm clean)
 vendor/    vendored tgz deps (@zapac/mui-theme) so install works offline
@@ -45,7 +55,10 @@ assets/    screenshots
 
 Backend modules → routes in `server/index.mjs`. Add a concern = new module + route + co-located test.
 
-**New server route → also add its prefix to the Vite dev proxy** (`web/vite.config.mjs` `server.proxy`). Dev runs on :5317 and only proxies listed prefixes to the daemon (:4317); an unlisted route (e.g. `/skills`, `/skill`) falls through to the SPA shell → `fetch().json()` throws → "failed to load X" in the browser. `apply:'serve'` keeps proxy entries dev-only (daemon serves dist directly in prod).
+**New server route → two more edits, both mandatory:**
+
+1. **Add its prefix to the Vite dev proxy** (`web/vite.config.mjs` `server.proxy`). Dev runs on :5317 and only proxies listed prefixes to the daemon (:4317); an unlisted route (e.g. `/skills`, `/skill`) falls through to the SPA shell → `fetch().json()` throws → "failed to load X" in the browser. `apply:'serve'` keeps proxy entries dev-only (daemon serves dist directly in prod).
+2. **Add a handler to `web/src/mock/routes/`.** Mirage is configured to throw on any unhandled request, so a route the client gains but the mock lacks fails the whole mock suite loudly — that's the intended drift alarm, not a flake. Match the daemon's exact response shape (several routes return bare arrays or keyed objects with no `ok`), and broadcast the matching WS frame if the daemon does.
 
 ## State
 
