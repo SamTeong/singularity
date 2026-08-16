@@ -86,6 +86,10 @@ export function useTelemetryEngine({ sectionRef, view }: TelemetryEngineOptions)
     // running. Adding `sessionsVisible`/`usageVisible`-style values here
     // would tear down and recreate the timer on every tab click, resetting
     // both its 260ms phase and `tickN` — which drives the sin() waveforms
-    // and the `% 3` terminal cadence.
+    // and the `% 3` terminal cadence. sectionRef/viewRef are refs read only
+    // via `.current`; listing them would suggest they belong in the "things
+    // that restart this effect" category, which is exactly what must never
+    // happen here.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [REDUCED_MOTION]);
 }

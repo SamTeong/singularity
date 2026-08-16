@@ -1,0 +1,79 @@
+name: Pages
+
+# Builds and deploys the scanned-deck walkthrough (github-pages/) to GitHub Pages.
+#
+# The app is a standalone Vite project with its own lockfile and its own
+# pnpm-workspace.yaml marker, deliberately NOT part of the root workspace — so
+# every pnpm step here runs with `working-directory: github-pages`.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'github-pages/**'
+      - 'docs/one-shot/3d/scan-atrium.glb' # the model the build copies in
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Pages needs these; the default GITHUB_TOKEN is read-only for contents.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Never run two deploys at once, but do not cancel one in flight — a half-
+# finished Pages deployment is worse than a queued one.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: github-pages
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: github-pages/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      # `prebuild` runs scripts/copy-model.mjs, which pulls the 11.5MB
+      # scan-atrium.glb out of docs/one-shot/3d/ into public/. The model is
+      # gitignored inside github-pages/ precisely so it is stored once.
+      - run: pnpm build
+
+      # Guard the one thing that silently breaks a project-subpath deploy:
+      # an absolute /-rooted asset URL. `base: './'` should make every emitted
+      # reference relative.
+      - name: Assert assets are subpath-safe
+        run: |
+          if grep -qE '(src|href)="/[^/]' dist/index.html; then
+            echo "::error::dist/index.html has root-absolute asset paths; base must stay './'"
+            grep -nE '(src|href)="/[^/]' dist/index.html
+            exit 1
+          fi
+          test -f dist/.nojekyll || { echo '::error::dist/.nojekyll missing (public/.nojekyll should be copied by Vite)'; exit 1; }
+          echo "OK — all asset references are relative"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: github-pages/dist
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

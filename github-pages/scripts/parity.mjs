@@ -131,8 +131,12 @@ const browser = await chromium.launch({
 
 const report = {};
 for (const [w, h] of [[1440, 900], [1024, 768]]) {
+  // Both sides get the model aborted: that is what puts the ORIGINAL into its
+  // flat fallback, and since Phase 5 the port boots into 3D by default, so it
+  // needs the same treatment to be comparable. This harness compares the FLAT
+  // deck; scripts/verify-world.mjs is what exercises the 3D experience.
   const orig = await capture(browser, ORIG, 'orig', w, h, { abortGlb: true });
-  const port = await capture(browser, PORT, 'port', w, h);
+  const port = await capture(browser, PORT, 'port', w, h, { abortGlb: true });
   report[`${w}x${h}`] = { orig, port };
 }
 await browser.close();

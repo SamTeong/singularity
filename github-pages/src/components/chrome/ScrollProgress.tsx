@@ -1,5 +1,7 @@
-// Transcribed from docs/one-shot/3d/sample-gitlab-3d-scan.html, source line 444.
-// Phase 4 writes the bar width per animation frame; kept as an empty div here.
-export function ScrollProgress() {
-  return <div className="sx-progress" id="sxProgress" aria-hidden="true" />;
+// Source line 444. Width is written EVERY FRAME by the world's onFrame
+// callback (source L1436), so it is a ref write, never React state.
+import type { Ref } from 'react';
+
+export function ScrollProgress({ barRef }: { barRef?: Ref<HTMLDivElement> }) {
+  return <div className="sx-progress" id="sxProgress" aria-hidden="true" ref={barRef} />;
 }

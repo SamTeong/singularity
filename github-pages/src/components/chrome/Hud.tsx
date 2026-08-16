@@ -1,6 +1,21 @@
 // Transcribed from docs/one-shot/3d/sample-gitlab-3d-scan.html, source lines
 // 460-468 (Hud) and line 479 (ScrollHint).
-export function Hud() {
+//
+// The beat caption is the one piece of chrome that changes at human rate (~7x
+// per session), so it is React state rather than a per-frame ref write. The
+// source does the same writes imperatively in updateDom() at L1444-1448.
+import type { ChapterEntry } from '../../config/chapters';
+
+interface HudProps {
+  /** null before the 3D conductor starts, and forever in flat mode — the
+   *  source never calls updateDom() on those paths, so the markup's authored
+   *  values stand. Reproduced exactly rather than defaulting to CHAPTERS[0]:
+   *  the authored sub-line ("SCROLL TO ADVANCE THE WALKTHROUGH") differs from
+   *  chapter 1's ledger `sub`, so the two states are genuinely distinct. */
+  chapter: ChapterEntry | null;
+}
+
+export function Hud({ chapter }: HudProps) {
   return (
     <div className="sx-hud" aria-hidden="true">
       <span className="sx-corner tl" />
@@ -10,14 +25,14 @@ export function Hud() {
       <span className="sx-scan" />
       <div className="sx-beat">
         <div className="idx">
-          <b id="sxBeatNum">01</b>
+          <b id="sxBeatNum">{chapter ? chapter.num : '01'}</b>
           <span className="jp" id="sxBeatJp">
-            到着
+            {chapter ? chapter.jp : '到着'}
           </span>
-          <span id="sxBeatCode">SCR·01</span>
+          <span id="sxBeatCode">{chapter ? chapter.code : 'SCR·01'}</span>
         </div>
-        <h2 id="sxBeatTitle">ORIENTATION</h2>
-        <p id="sxBeatSub">SCROLL TO ADVANCE THE WALKTHROUGH</p>
+        <h2 id="sxBeatTitle">{chapter ? chapter.title : 'ORIENTATION'}</h2>
+        <p id="sxBeatSub">{chapter ? chapter.sub : 'SCROLL TO ADVANCE THE WALKTHROUGH'}</p>
       </div>
     </div>
   );

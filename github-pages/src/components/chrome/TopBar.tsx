@@ -1,5 +1,15 @@
 // Transcribed from docs/one-shot/3d/sample-gitlab-3d-scan.html, source lines 446-455.
-export function TopBar() {
+import type { ChapterEntry } from '../../config/chapters';
+
+interface TopBarProps {
+  /** null before the conductor starts and forever in flat mode — the source
+   *  never calls updateDom() on those paths, so the authored markup stands.
+   *  For chapter 0 the computed string happens to be identical, but the two
+   *  states are still distinct and are reproduced as such. */
+  chapter: ChapterEntry | null;
+}
+
+export function TopBar({ chapter }: TopBarProps) {
   return (
     <header className="sx-topbar">
       <span className="sx-brand">
@@ -8,7 +18,8 @@ export function TopBar() {
       </span>
       <span className="sx-ver">走査甲板 · SCANNED DECK</span>
       <span className="sx-note" id="sxNote">
-        CH·01 到着 — ORIENTATION
+        {/* source L1443: 'CH·' + c.num + ' ' + c.jp + ' — ' + c.title */}
+        {chapter ? `CH·${chapter.num} ${chapter.jp} — ${chapter.title}` : 'CH·01 到着 — ORIENTATION'}
       </span>
       {/* Deliberate deviation from the source (L450-454): the original has three
           links — COMMAND ROOM and EVA-01 point at sibling one-shot HTML files

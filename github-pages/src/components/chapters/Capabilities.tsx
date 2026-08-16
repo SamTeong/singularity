@@ -70,8 +70,9 @@ export function Capabilities({ sectionRef }: ChapterProps) {
           </button>
           <button
             className="module"
-            aria-pressed="false"
+            aria-pressed={pinned === 3}
             style={{ '--tone': 'var(--amber)' } as CSSProperties}
+            onClick={() => togglePin(3)}
           >
             <span className="glyph">消</span>
             <span className="code">SYS·04</span>
@@ -82,7 +83,12 @@ export function Capabilities({ sectionRef }: ChapterProps) {
               <span className="stamp c-amber">19%</span>
             </span>
           </button>
-          <button className="module" aria-pressed="false" style={{ '--tone': 'var(--blue)' } as CSSProperties}>
+          <button
+            className="module"
+            aria-pressed={pinned === 4}
+            style={{ '--tone': 'var(--blue)' } as CSSProperties}
+            onClick={() => togglePin(4)}
+          >
             <span className="glyph">履</span>
             <span className="code">SYS·05</span>
             <h3>HISTORY</h3>
@@ -92,7 +98,7 @@ export function Capabilities({ sectionRef }: ChapterProps) {
               <span className="stamp c-blue">SYNCED</span>
             </span>
           </button>
-          <button className="module" aria-pressed="false">
+          <button className="module" aria-pressed={pinned === 5} onClick={() => togglePin(5)}>
             <span className="glyph">記</span>
             <span className="code">SYS·06</span>
             <h3>TRANSCRIPTS</h3>
@@ -104,8 +110,9 @@ export function Capabilities({ sectionRef }: ChapterProps) {
           </button>
           <button
             className="module"
-            aria-pressed="false"
+            aria-pressed={pinned === 6}
             style={{ '--tone': 'var(--orange)' } as CSSProperties}
+            onClick={() => togglePin(6)}
           >
             <span className="glyph">文</span>
             <span className="code">SYS·07</span>
@@ -118,8 +125,9 @@ export function Capabilities({ sectionRef }: ChapterProps) {
           </button>
           <button
             className="module"
-            aria-pressed="false"
+            aria-pressed={pinned === 7}
             style={{ '--tone': 'var(--red-hi)' } as CSSProperties}
+            onClick={() => togglePin(7)}
           >
             <span className="glyph">状</span>
             <span className="code">SYS·08</span>

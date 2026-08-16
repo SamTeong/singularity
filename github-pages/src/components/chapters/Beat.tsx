@@ -23,21 +23,23 @@
 //      React must never touch these. world.destroy() restores all of them.
 //  I7  Descendants of a chapter are fully React-owned and may change freely.
 
-import type { ReactNode } from 'react';
+import type { ReactNode, Ref } from 'react';
 import type { ChapterEntry } from '../../config/chapters';
 
 interface BeatProps {
   chapter: ChapterEntry;
   children: ReactNode;
+  /** The conductor measures these wrappers and owns their inline height. */
+  beatRef?: Ref<HTMLDivElement>;
 }
 
-export function Beat({ chapter, children }: BeatProps) {
+export function Beat({ chapter, children, beatRef }: BeatProps) {
   // data-weight={chapter.weight} renders as e.g. "1.3" for a weight of 1.30 —
   // that's fine, parseFloat is identical either way, and the DOM attribute is
   // decorative. The conductor reads CHAPTERS[i].weight, not the attribute.
   // Do not "fix" this by stringifying with trailing zeros.
   return (
-    <div className="beat" data-chapter={chapter.id} data-weight={chapter.weight}>
+    <div className="beat" data-chapter={chapter.id} data-weight={chapter.weight} ref={beatRef}>
       {children}
     </div>
   );
