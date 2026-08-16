@@ -425,7 +425,13 @@ export function createWorld(o: WorldOptions): World {
     }
     ck();
 
-    o.onStatus('DECK MOUNTED · 07 SCREENS');
+    // Derived, not hardcoded. The source hardcodes '07 SCREENS' at L1640 even
+    // though it computes #roScreens two lines earlier — that goes stale the
+    // moment a chapter is added or removed, which is a routine edit here.
+    //
+    // CHAPTERS.length, NOT panels.length: this line runs before enter3D() ->
+    // buildPanels() has populated `panels`, so the latter reads 0 here.
+    o.onStatus(`DECK MOUNTED · ${pad(CHAPTERS.length)} SCREENS`);
     enter3D();
     ck();
     animate();
