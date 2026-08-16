@@ -2,3 +2,4 @@ node_modules/
 dist/
 public/*.glb
 *.local
+scripts/.parity/

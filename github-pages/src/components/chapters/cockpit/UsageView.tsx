@@ -1,19 +1,33 @@
-export function UsageView() {
+import { Metric, UsageChart, useTelemetryField } from '../../../deck';
+
+interface UsageViewProps {
+  active: boolean;
+}
+
+export function UsageView({ active }: UsageViewProps) {
+  const today = useTelemetryField('today');
+  const tpm = useTelemetryField('tpm');
+
   return (
-    <section className="view view-usage" id="view-usage" role="tabpanel" aria-labelledby="tab-usage" hidden>
+    <section
+      className={'view view-usage' + (active ? ' active' : '')}
+      id="view-usage"
+      role="tabpanel"
+      aria-labelledby="tab-usage"
+      hidden={!active}
+    >
       <div className="chart-pane">
         <div className="zone-title">FLEET TOKEN VELOCITY · 60 MIN</div>
         <div className="chart-wrap">
-          {/* Phase 3: JS draws the trend line into this canvas */}
-          <canvas id="usageChart" aria-label="Fleet token usage trend"></canvas>
+          <UsageChart />
           <span className="chart-label">
-            TOKENS / MIN · <b id="tpmValue">1.2K</b>
+            TOKENS / MIN · <b id="tpmValue">{tpm !== null ? tpm.toFixed(1) + 'K' : '1.2K'}</b>
           </span>
         </div>
         <div className="usage-totals">
           <div className="usage-total">
             <small>TODAY</small>
-            <b id="usdToday">$18.42</b>
+            <b id="usdToday">{today !== null ? '$' + today.toFixed(2) : '$18.42'}</b>
           </div>
           <div className="usage-total">
             <small>5H WINDOW</small>
@@ -37,22 +51,8 @@ export function UsageView() {
             <small>AVAILABLE</small>
           </div>
         </div>
-        <div className="metric">
-          <div className="metric-row">
-            <span>CLAUDE · 5H</span>
-            <b>19%</b>
-          </div>
-          {/* Phase 3: <Segments/> — JS appends 16 <i> children */}
-          <div className="segments" data-value="4" data-tone="mint"></div>
-        </div>
-        <div className="metric">
-          <div className="metric-row">
-            <span>OLLAMA · 7D</span>
-            <b>33%</b>
-          </div>
-          {/* Phase 3: <Segments/> — JS appends 16 <i> children */}
-          <div className="segments" data-value="7" data-tone="blue"></div>
-        </div>
+        <Metric label="CLAUDE · 5H" pct={19} seg={4} tone="mint" />
+        <Metric label="OLLAMA · 7D" pct={33} seg={7} tone="blue" />
       </aside>
     </section>
   );

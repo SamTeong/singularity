@@ -1,10 +1,21 @@
-export function AutomationView() {
+interface AutomationViewProps {
+  active: boolean;
+}
+
+export function AutomationView({ active }: AutomationViewProps) {
   return (
-    <section className="view view-automation" id="view-automation" role="tabpanel" aria-labelledby="tab-automation" hidden>
+    <section
+      className={'view view-automation' + (active ? ' active' : '')}
+      id="view-automation"
+      role="tabpanel"
+      aria-labelledby="tab-automation"
+      hidden={!active}
+    >
       <div className="auto-main">
         <div className="zone-title">BACKGROUND DISPATCH · LIVE PIPELINE</div>
         <div className="pipeline" aria-label="Automation pipeline">
-          {/* Phase 3: `.pipe-step.done` / `.pipe-step.now` are authored in the markup, not JS-toggled */}
+          {/* `.pipe-step.done` / `.pipe-step.now` are authored in the source
+              markup and never touched by JS there either — static forever. */}
           <div className="pipe-step done">
             <div className="pipe-node">01</div>
             <div className="pipe-label">PICK</div>

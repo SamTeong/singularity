@@ -1,8 +1,15 @@
 // Transcribed from docs/one-shot/3d/sample-gitlab-3d-scan.html, source lines 651-666.
+import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ChapterProps } from './types';
 
 export function Capabilities({ sectionRef }: ChapterProps) {
+  // Source L925-929: clicking the pinned module unpins it; clicking another
+  // moves the pin. `aria-pressed` drives both the styling and the
+  // `::after{content:"PINNED"}` badge.
+  const [pinned, setPinned] = useState<number | null>(null);
+  const togglePin = (i: number) => setPinned((p) => (p === i ? null : i));
+
   return (
     // className/id are constant literals and this section never receives a
     // `style` prop — Phase 4 adds `.as-panel` to classList and writes
@@ -21,8 +28,12 @@ export function Capabilities({ sectionRef }: ChapterProps) {
           and close at hand.
         </p>
         <div className="modules">
-          {/* Phase 3: pin toggle — no onClick/state here; aria-pressed="false" is authored literally. */}
-          <button className="module" aria-pressed="false" style={{ '--tone': 'var(--blue)' } as CSSProperties}>
+          <button
+            className="module"
+            aria-pressed={pinned === 0}
+            style={{ '--tone': 'var(--blue)' } as CSSProperties}
+            onClick={() => togglePin(0)}
+          >
             <span className="glyph">自</span>
             <span className="code">SYS·01</span>
             <h3>AUTOMATION</h3>
@@ -34,8 +45,9 @@ export function Capabilities({ sectionRef }: ChapterProps) {
           </button>
           <button
             className="module"
-            aria-pressed="false"
+            aria-pressed={pinned === 1}
             style={{ '--tone': 'var(--orange)' } as CSSProperties}
+            onClick={() => togglePin(1)}
           >
             <span className="glyph">設</span>
             <span className="code">SYS·02</span>
@@ -46,7 +58,7 @@ export function Capabilities({ sectionRef }: ChapterProps) {
               <span className="stamp c-mint">READY</span>
             </span>
           </button>
-          <button className="module" aria-pressed="false">
+          <button className="module" aria-pressed={pinned === 2} onClick={() => togglePin(2)}>
             <span className="glyph">記</span>
             <span className="code">SYS·03</span>
             <h3>MEMORY + SKILLS</h3>

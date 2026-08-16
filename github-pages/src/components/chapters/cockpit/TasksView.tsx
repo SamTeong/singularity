@@ -1,13 +1,39 @@
+import { useState } from 'react';
 import type { CSSProperties } from 'react';
+import { useTelemetryField } from '../../../deck';
 
-export function TasksView() {
+interface TasksViewProps {
+  active: boolean;
+}
+
+export function TasksView({ active }: TasksViewProps) {
+  // Only TSK·118's turns/cost are live (source: `$$('.t-turns')[0]`,
+  // `$$('.t-usd')[0]` — the first match only). Every other card's numbers
+  // stay frozen literals.
+  const turns = useTelemetryField('turns');
+  const usd = useTelemetryField('usd');
+  // Source L922-924: clicking a filter just moves `.on` to it — no actual
+  // filtering of the kanban board.
+  const [filter, setFilter] = useState<'all' | 'feature' | 'bug'>('all');
+
   return (
-    <section className="view view-tasks" id="view-tasks" role="tabpanel" aria-labelledby="tab-tasks" hidden>
+    <section
+      className={'view view-tasks' + (active ? ' active' : '')}
+      id="view-tasks"
+      role="tabpanel"
+      aria-labelledby="tab-tasks"
+      hidden={!active}
+    >
       <div className="task-tools">
-        {/* Phase 3: `.filter.on` on the first filter is authored, not JS-toggled — active filter state lives here */}
-        <button className="filter on">ALL · 07</button>
-        <button className="filter">FEATURE</button>
-        <button className="filter">BUG</button>
+        <button className={'filter' + (filter === 'all' ? ' on' : '')} onClick={() => setFilter('all')}>
+          ALL · 07
+        </button>
+        <button className={'filter' + (filter === 'feature' ? ' on' : '')} onClick={() => setFilter('feature')}>
+          FEATURE
+        </button>
+        <button className={'filter' + (filter === 'bug' ? ' on' : '')} onClick={() => setFilter('bug')}>
+          BUG
+        </button>
         <span className="spacer"></span>
         <span className="stamp c-mint">BOARD LIVE</span>
       </div>
@@ -20,7 +46,11 @@ export function TasksView() {
           <article className="taskcard">
             <span className="id">TSK·121</span>
             <b>ADD SEARCH TO TRANSCRIPTS</b>
-            <span className="meta">MAIN · FEATURE<br />NO SESSION ATTACHED</span>
+            <span className="meta">
+              MAIN · FEATURE
+              <br />
+              NO SESSION ATTACHED
+            </span>
           </article>
           <article className="taskcard">
             <span className="id">TSK·124</span>
@@ -33,13 +63,14 @@ export function TasksView() {
             <span>IN PROGRESS 進行</span>
             <span>02</span>
           </div>
-          {/* Phase 3: `.taskcard.active` is authored in the markup, not JS-toggled */}
           <article className="taskcard active">
             <span className="id">TSK·118</span>
             <b>USAGE SPARKLINES</b>
             <span className="meta">
-              WT/9E0B59D · CODEX<br />
-              <span className="t-turns">11</span> TURNS · $<span className="t-usd">4.18</span>
+              WT/9E0B59D · CODEX
+              <br />
+              <span className="t-turns">{turns !== null ? turns : 11}</span> TURNS · $
+              <span className="t-usd">{usd !== null ? usd.toFixed(2) : '4.18'}</span>
             </span>
           </article>
           <article className="taskcard active">
@@ -56,7 +87,11 @@ export function TasksView() {
           <article className="taskcard" style={{ '--tone': 'var(--amber)' } as CSSProperties}>
             <span className="id">TSK·116</span>
             <b>WIKI GRAPH LINKS</b>
-            <span className="meta">WT/8AFBF74 · DIFF READY<br />OPERATOR RULING REQUIRED</span>
+            <span className="meta">
+              WT/8AFBF74 · DIFF READY
+              <br />
+              OPERATOR RULING REQUIRED
+            </span>
           </article>
         </div>
         <div className="column">
@@ -64,7 +99,6 @@ export function TasksView() {
             <span>DONE 完了</span>
             <span>02</span>
           </div>
-          {/* Phase 3: `.taskcard.done` is authored in the markup, not JS-toggled */}
           <article className="taskcard done">
             <span className="id">TSK·112</span>
             <b>PHOSPHOR THEME</b>
