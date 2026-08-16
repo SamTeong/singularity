@@ -1,0 +1,36 @@
+/*
+ * This is the ONLY place CSS is ever imported in this app.
+ * Per-component CSS imports would make cascade order a function of the
+ * module graph, which Vite may reorder between dev and build — so every
+ * stylesheet is listed here, once, in the exact order that matches the
+ * original <style> block in docs/one-shot/3d/sample-gitlab-3d-scan.html.
+ */
+@import './tokens.css';
+@import './chrome.css';
+@import './deck.css';
+@import './chapters/hero.css';
+@import './chapters/problem.css';
+@import './chapters/cockpit.css';
+@import './chapters/workflow.css';
+@import './chapters/capabilities.css';
+@import './chapters/local.css';
+@import './chapters/cta.css';
+/*
+ * footer.css is its own file rather than a second chunk of chrome.css so that
+ * every stylesheet here is a single contiguous source range AND the emitted
+ * cascade matches source order exactly. `.site-footer` is declared at source
+ * L380-382 — after every chapter block, before `.chapter.as-panel`. Folding it
+ * back into chrome.css would hoist it ~250 lines earlier and silently flip the
+ * winner for any future `.site-footer` override authored in a chapter file.
+ */
+@import './footer.css';
+@import './panel.css';
+/*
+ * responsive.css MUST be imported last. Its media-query overrides win on
+ * source order, not just specificity — e.g. `.chapter.as-panel{padding:26px
+ * 30px}` (panel.css) and its 720px override `.chapter.as-panel{padding:18px}`
+ * (responsive.css) have identical (0,2,0) specificity, so whichever rule is
+ * declared later in the cascade wins. Importing responsive.css last
+ * reproduces the original single-file source order exactly.
+ */
+@import './responsive.css';

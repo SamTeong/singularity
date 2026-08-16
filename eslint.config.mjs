@@ -7,7 +7,7 @@ export default [
   // `test-results/` are Playwright artifacts — their bundled JS otherwise
   // dominates the report (~1100+ no-undef errors) and buries real source
   // findings.
-  { ignores: ['web/dist/**', 'vendor/**', '.worktrees/**', '.claude/**', 'playwright-report/**', 'test-results/**', 'e2e/.tmp*/**'] },
+  { ignores: ['web/dist/**', 'vendor/**', '.worktrees/**', '.claude/**', 'playwright-report/**', 'test-results/**', 'e2e/.tmp*/**', 'github-pages/**'] },
   js.configs.recommended,
   // best-effort `try { ... } catch {}` is a deliberate idiom throughout the daemon
   { rules: { 'no-empty': ['error', { allowEmptyCatch: true }] } },

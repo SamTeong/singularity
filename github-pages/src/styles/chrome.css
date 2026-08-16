@@ -1,0 +1,82 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 48-128 (line 48 is the blank boundary line preceding the chunk) */
+
+/* ============================================================ SHELL CHROME
+   Everything here is prefixed sx- / hud- so it can never collide with the
+   product-deck CSS ported from sample-gitlab-03-gpt-sol.html below. */
+.sx-skip{position:fixed;top:8px;left:8px;z-index:900;padding:11px 15px;transform:translateY(-160%);background:var(--mint);color:var(--bg);font-weight:700}
+.sx-skip:focus{transform:none}
+.sx-progress{position:fixed;left:0;top:0;width:0;height:3px;background:var(--mint);box-shadow:0 0 8px var(--mint);z-index:620;transition:width .12s linear}
+
+.sx-topbar{position:fixed;top:0;left:0;right:0;height:var(--header-h);z-index:600;background:rgba(10,10,10,.94);backdrop-filter:blur(7px);border-bottom:2px solid var(--orange);display:flex;align-items:center;padding:0 16px;gap:14px;text-transform:uppercase}
+.sx-brand{display:flex;align-items:center;gap:10px;min-width:max-content}
+.sx-mark{width:14px;height:14px;background:var(--mint);box-shadow:0 0 10px var(--mint);transform:rotate(45deg)}
+.sx-name{font-family:var(--cond);font-weight:700;font-size:18px;letter-spacing:.13em;color:var(--mint-hi);text-shadow:0 0 7px rgba(82,242,154,.55)}
+.sx-ver{font-size:8px;color:var(--orange);letter-spacing:.18em;border-left:1px solid var(--green-dim);padding-left:13px}
+.sx-note{margin-left:20px;font-size:9px;letter-spacing:.15em;color:var(--green-map);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sx-note b{color:var(--mint);font-weight:400}
+.sx-links{margin-left:auto;display:flex;align-items:center;gap:14px;white-space:nowrap}
+.sx-links a{font-size:9px;letter-spacing:.13em;color:var(--green-map);min-height:44px;display:flex;align-items:center}
+.sx-links a:hover{color:var(--mint)}
+
+#gl{position:fixed;inset:0;z-index:1;width:100%;height:100%;display:block;outline:none}
+#css3d{position:fixed;inset:0;z-index:2;pointer-events:none;overflow:hidden}
+#css3d > div{pointer-events:none}
+
+.sx-hud{position:fixed;inset:0;z-index:20;pointer-events:none}
+.sx-hud a,.sx-hud button{pointer-events:auto}
+.sx-corner{position:absolute;width:26px;height:26px;border-color:var(--green-dim);opacity:.9}
+.sx-corner.tl{top:calc(var(--header-h) + 14px);left:14px;border-top:1px solid;border-left:1px solid}
+.sx-corner.tr{top:calc(var(--header-h) + 14px);right:14px;border-top:1px solid;border-right:1px solid}
+.sx-corner.bl{bottom:14px;left:14px;border-bottom:1px solid;border-left:1px solid}
+.sx-corner.br{bottom:14px;right:14px;border-bottom:1px solid;border-right:1px solid}
+.sx-scan{position:absolute;left:0;right:0;height:70px;pointer-events:none;background:linear-gradient(180deg,transparent,rgba(82,242,154,.05) 55%,transparent);animation:sxsweep 9s linear infinite}
+.sx-beat{position:absolute;left:16px;bottom:64px;max-width:min(56vw,430px);padding:11px 14px;border-left:2px solid var(--orange);background:linear-gradient(90deg,rgba(10,10,10,.92),rgba(10,10,10,.55) 78%,transparent)}
+.sx-beat .idx{display:flex;align-items:center;gap:9px;font-size:8px;letter-spacing:.2em;color:var(--amber);text-transform:uppercase}
+.sx-beat .idx b{background:var(--orange);color:var(--bg);padding:2px 7px;font-family:var(--cond);font-weight:700;letter-spacing:.1em}
+.sx-beat .jp{font-family:var(--jp);font-weight:800;color:var(--orange);font-size:13px}
+.sx-beat h2{margin-top:6px;font-family:var(--cond);font-weight:700;font-size:20px;line-height:1.05;letter-spacing:.04em;color:var(--mint-hi);text-transform:uppercase}
+.sx-beat p{margin-top:5px;font-size:9px;letter-spacing:.12em;color:var(--green-map);text-transform:uppercase}
+
+.sx-rail{position:fixed;right:14px;top:calc(50% + 30px);transform:translateY(-50%);z-index:610;display:flex;flex-direction:column;gap:9px}
+.sx-rail button{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-height:26px;background:none;border:0;cursor:pointer;color:var(--green-dim);font-size:8px;letter-spacing:.13em;text-transform:uppercase;font-family:var(--mono)}
+.sx-rail .jp{font-family:var(--jp);font-size:11px;text-transform:none}
+.sx-rail .tick{width:22px;height:2px;background:currentColor}
+.sx-rail button[aria-current="true"]{color:var(--mint)}
+.sx-rail button[aria-current="true"] .tick{width:34px;box-shadow:0 0 6px var(--mint)}
+.sx-rail button:hover{color:var(--mint-hi)}
+
+.sx-readout{position:fixed;right:14px;top:calc(var(--header-h) + 16px);z-index:610;width:178px;border:1px solid var(--green-dim);background:rgba(6,10,7,.72);padding:9px 11px;opacity:.82;font-size:8px;letter-spacing:.11em;color:var(--green-map);text-transform:uppercase}
+.sx-readout div{display:flex;justify-content:space-between;gap:8px;min-height:15px}
+.sx-readout b{color:var(--mint);font-weight:400;font-variant-numeric:tabular-nums}
+.sx-hint{position:fixed;right:14px;bottom:64px;z-index:610;font-size:8px;letter-spacing:.15em;color:var(--green-dim);text-transform:uppercase;text-align:right}
+
+.sx-boot{position:fixed;left:14px;top:calc(var(--header-h) + 22px);z-index:650;width:min(80vw,258px);transition:opacity .5s ease,visibility .5s}
+.sx-boot[hidden]{opacity:0;visibility:hidden;display:block}
+.sx-boot-panel{border:1px solid var(--orange);background:rgba(6,8,6,.94)}
+.sx-boot-head{display:flex;justify-content:space-between;gap:8px;padding:7px 10px;border-bottom:1px solid var(--orange);color:var(--orange);font-size:8px;letter-spacing:.13em}
+.sx-boot-body{padding:10px}
+.sx-boot-pct{font-family:var(--cond);font-weight:700;font-size:26px;line-height:1;color:var(--mint)}
+.sx-boot-track{height:3px;margin-top:8px;background:#132015}
+.sx-boot-track i{display:block;height:100%;width:0;background:var(--mint);transition:width .18s linear}
+.sx-boot-sub{margin-top:8px;font-size:8px;letter-spacing:.12em;color:var(--green-map);text-transform:uppercase}
+.sx-boot-err{margin-top:9px;padding:9px;border:1px solid var(--red-hi);color:var(--red-hi);font-size:9px;line-height:1.55;display:none}
+.sx-boot-err.show{display:block}
+
+.sx-dbg{position:fixed;right:14px;top:calc(var(--header-h) + 22px);z-index:660;width:260px;border:1px solid var(--blue);background:rgba(4,8,12,.9);padding:9px 11px;font-size:9px;line-height:1.6;color:var(--blue);white-space:pre;display:none}
+body.dbg .sx-dbg{display:block}
+body.dbg .sx-rail{display:none}
+
+/* mode switches ------------------------------------------------------- */
+body:not(.mode-3d) #gl,body:not(.mode-3d) #css3d,body:not(.mode-3d) .sx-hud,
+body:not(.mode-3d) .sx-rail,body:not(.mode-3d) .sx-readout,body:not(.mode-3d) .sx-hint{display:none}
+body.mode-3d #scroll{position:relative;z-index:0}
+body.booting #scroll .chapter{visibility:hidden}
+body.booting .sx-flat-note{display:none}
+body.mode-3d .beat{pointer-events:none}
+body.mode-3d .sx-flat-note{display:none}
+body.mode-3d .site-footer{position:relative;z-index:30;background:var(--bg)}
+
+#scroll{padding-top:var(--header-h)}
+.beat{position:relative}
+.sx-flat-note{position:relative;z-index:5;margin:0;padding:12px var(--page-x);border-bottom:1px solid var(--green-dim);background:#060806;color:var(--amber);font-size:9px;letter-spacing:.14em;text-transform:uppercase}
+.sx-flat-note b{color:var(--mint);font-weight:400}

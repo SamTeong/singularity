@@ -1,0 +1,20 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 360-378 (line 360 is the blank boundary line before the CTA comment) */
+
+/* CTA */
+.cta{display:flex;align-items:center;text-align:center;overflow:hidden}
+.cta .chapter-inner{position:relative}
+.cta-jp{font-family:var(--jp);font-weight:800;font-size:clamp(38px,5.6vw,76px);color:var(--orange);letter-spacing:.35em;text-indent:.35em;text-shadow:0 0 8px currentColor}
+.cta h2{font-size:clamp(70px,12vw,168px);margin-top:10px}
+.cta-sub{font-family:var(--cond);font-weight:700;font-size:clamp(18px,2.4vw,32px);color:var(--mint);letter-spacing:.04em;text-transform:uppercase;margin:22px auto 0}
+.install{max-width:860px;margin:30px auto 0;border:1px solid var(--amber-dim);text-align:left}
+.install-head{display:flex;align-items:center;padding:8px 12px;border-bottom:1px solid var(--amber-dim);font-size:9px;color:var(--amber);letter-spacing:.12em}
+.install-head .spacer{flex:1}
+.copy-btn{min-height:36px;border:1px solid var(--mint);background:var(--bg);color:var(--mint);padding:0 13px;cursor:pointer;font-size:9px;letter-spacing:.1em}
+.copy-btn:hover{background:var(--mint);color:var(--bg)}
+.install code{display:block;padding:16px;color:var(--mint-hi);font-family:var(--mono);font-size:clamp(10px,1.3vw,14px);white-space:pre-wrap;word-break:break-word}
+.copy-state{min-height:24px;margin-top:9px;color:var(--green-map);font-size:9px;letter-spacing:.11em}
+.cta-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;margin-top:16px}
+.final-marquee{margin-top:26px;border-top:2px solid var(--red-hi);border-bottom:2px solid var(--red-hi);background:#170303;overflow:hidden;white-space:nowrap}
+.marquee-track{display:inline-flex;min-width:max-content;animation:march 22s linear infinite}
+.marquee-track span{padding:8px 28px;color:var(--red-hi);font-size:9px;letter-spacing:.15em}
+.marquee-track span::before{content:"◚ ";color:var(--orange)}

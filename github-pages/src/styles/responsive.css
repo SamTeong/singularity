@@ -1,0 +1,67 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 391-439 (line 391 is the blank boundary line before the first @media block). Internal "origin:" comments below are additions marking which chapter file each run of selectors overrides. */
+
+@media(max-width:1100px){
+/* origin: hero, problem, local — grid stacking */
+  .hero-grid,.problem-grid,.local-grid{grid-template-columns:1fr}
+  .hero-viz{max-width:520px;width:80%;margin:0 auto}
+/* origin: capabilities */
+  .modules{grid-template-columns:repeat(2,1fr)}
+/* origin: cockpit */
+  .view-sessions{grid-template-columns:180px 1fr;grid-template-areas:"rail main"}
+  .console-side{display:none}
+  .kanban{grid-template-columns:repeat(2,1fr)}
+  .view-automation,.view-usage{grid-template-columns:1fr}
+  .auto-main,.chart-pane{border-right:0;border-bottom:1px solid var(--orange)}
+/* origin: workflow */
+  .flow-detail-inner{grid-template-columns:90px 1fr}
+  .flow-code{grid-column:2;text-align:left}
+/* origin: chrome (sx-readout) */
+  .sx-readout{display:none}
+}
+@media(max-width:720px){
+/* origin: tokens (--header-h) */
+  :root{--header-h:48px}
+/* origin: chrome (sx-note, sx-rail) */
+  .sx-note{display:none}
+  .sx-rail{right:8px}
+/* origin: deck (.chapter base padding) */
+  .chapter{padding:60px 16px}
+/* origin: hero */
+  .hero h1{font-size:clamp(44px,13vw,68px)}
+/* origin: problem, local */
+  .problem h2,.local h2{font-size:clamp(40px,12vw,64px)}
+  .problem-stats{grid-template-columns:1fr}
+/* origin: cockpit */
+  .console{border-width:2px;padding:3px}
+  .console-head{grid-template-columns:auto 1fr;padding:8px}
+  .console-meta{display:none}
+  .console-tabs{grid-template-columns:repeat(2,1fr)}
+  .tab:nth-child(2){border-right:0}
+  .tab:nth-child(-n+2){border-bottom:1px solid var(--orange)}
+  .view-sessions{grid-template-columns:1fr;grid-template-areas:"rail" "main"}
+  .console-rail{border-right:0;border-bottom:1px solid var(--orange)}
+  .console-body,.view{min-height:0}
+  .terminal{height:270px}
+  .kanban{grid-template-columns:1fr}
+/* origin: capabilities */
+  .modules{grid-template-columns:1fr}
+/* origin: workflow */
+  .flow{grid-template-columns:1fr;gap:4px}
+  .flow::before{display:none}
+  .flow-item{display:grid;grid-template-columns:78px 1fr;text-align:left;align-items:center;min-height:82px}
+  .flow-item .num{margin:0}
+  .flow-detail-inner{grid-template-columns:1fr;text-align:center}
+  .flow-code{grid-column:auto;text-align:center}
+/* origin: local (architecture) */
+  .arch-row{grid-template-columns:1fr}
+  .arch-link{width:2px;height:26px;margin:auto}
+/* origin: cta */
+  .cta h2{font-size:clamp(56px,18vw,92px)}
+/* origin: panel (screen treatment) */
+  .chapter.as-panel{padding:18px}
+}
+@media(prefers-reduced-motion:reduce){
+/* origin: cross-cutting: tokens, chrome, cockpit, workflow, cta animation kill-switch */
+  html{scroll-behavior:auto}
+  .blink,.btn.primary,.term-cursor,.pipe-step.now .pipe-node,.taskcard.active,.marquee-track,.sx-scan{animation:none!important}
+}

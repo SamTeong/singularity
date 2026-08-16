@@ -1,0 +1,31 @@
+{
+  "name": "singularity-scanned-deck",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/copy-model.mjs",
+    "dev": "vite",
+    "prebuild": "node scripts/copy-model.mjs",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "react": "^19",
+    "react-dom": "^19",
+    "three": "0.160.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@types/three": "0.160.0",
+    "@vitejs/plugin-react": "^4",
+    "eslint": "^9",
+    "eslint-plugin-react-hooks": "^5",
+    "globals": "^15",
+    "typescript": "~5.9",
+    "typescript-eslint": "^8",
+    "vite": "^6"
+  }
+}
