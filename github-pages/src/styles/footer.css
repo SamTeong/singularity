@@ -1,0 +1,5 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 379-382 (line 379 is the blank boundary line preceding the chunk) */
+
+.site-footer{border-top:2px solid var(--orange);min-height:46px;padding:12px 16px;display:flex;align-items:center;gap:16px;color:var(--green-map);font-size:8px;letter-spacing:.12em;text-transform:uppercase;flex-wrap:wrap}
+.site-footer .good{color:var(--mint)}
+.site-footer .spacer{flex:1}

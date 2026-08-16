@@ -1,0 +1,22 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 158-178 (line 158 is the blank boundary line before the HERO comment) */
+
+/* HERO */
+.hero{display:flex;align-items:center;overflow:hidden}
+.hero-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(260px,.75fr);align-items:center;gap:clamp(28px,5vw,80px)}
+.hero-jp{font-family:var(--jp);font-weight:800;color:var(--orange);font-size:clamp(34px,5vw,66px);line-height:1;letter-spacing:.22em;text-indent:.22em;text-shadow:0 0 6px currentColor;margin-bottom:14px}
+.hero h1{font-size:clamp(64px,11vw,150px);max-width:8ch}
+.hero-sub{max-width:25ch;margin-top:26px;font-family:var(--cond);font-weight:700;font-size:clamp(20px,2.6vw,38px);line-height:1.02;letter-spacing:.015em;color:var(--mint);text-transform:uppercase}
+.hero-copy{margin-top:20px;max-width:60ch;color:var(--green-map);line-height:1.7}
+.hero-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:26px}
+.hero-viz{position:relative;aspect-ratio:1;display:grid;place-items:center;min-width:0}
+.orbit{position:absolute;border:1px solid var(--green-dim);border-radius:50%;inset:8%}
+.orbit.o2{inset:22%;border-color:var(--orange)}
+.orbit.o3{inset:36%;border-color:var(--teal);border-width:2px}
+.cross-x,.cross-y{position:absolute;background:var(--green-dim)}
+.cross-x{left:3%;right:3%;height:1px}.cross-y{top:3%;bottom:3%;width:1px}
+.core{position:relative;z-index:2;width:30%;aspect-ratio:1;display:grid;place-items:center;background:var(--mint);clip-path:polygon(50% 0,100% 50%,50% 100%,0 50%);color:var(--bg);font-family:var(--jp);font-weight:800;font-size:clamp(22px,3.4vw,46px);box-shadow:0 0 20px var(--mint)}
+.node{position:absolute;width:13px;height:13px;background:var(--node,var(--mint));box-shadow:0 0 8px var(--node,var(--mint));transform:rotate(45deg)}
+.node::after{content:attr(data-label);position:absolute;left:18px;top:-1px;transform:rotate(-45deg);font-size:8px;letter-spacing:.1em;color:var(--node,var(--mint));white-space:nowrap}
+.n1{top:10%;left:48%}.n2{right:7%;top:47%;--node:var(--blue)}.n3{bottom:8%;left:47%;--node:var(--amber)}.n4{left:6%;top:49%;--node:var(--mint)}
+.hero-meta{position:absolute;right:0;bottom:2%;font-size:9px;line-height:1.6;color:var(--amber-dim);text-transform:uppercase}
+.hero-meta b{color:var(--orange);font-weight:400}

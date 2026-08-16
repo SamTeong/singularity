@@ -1,0 +1,1695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>SINGULARITY · 特異点 — CONTROL PLANE BRIEFING</title>
+<!-- sample-gitlab-01.html — scroll-driven product presentation for Singularity.
+     Skin: JAIRUS OS / NERV-MAGI "Phosphor Console" (design-system.html + DESIGN.md).
+     Self-contained, no deps. Motion is stepped/instant only; reduced-motion aware. -->
+<style>
+/* ============================================================ TOKENS */
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+  --hud:34px; --bar:24px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:auto}
+body{background:var(--bg);color:var(--mint);font-family:var(--mono);letter-spacing:.03em;
+  overflow-x:hidden;text-transform:uppercase;font-size:13px}
+/* CRT pass — mandatory */
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:300;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 58%,rgba(0,0,0,.55) 100%)}
+a{color:inherit;text-decoration:none}
+::selection{background:var(--mint);color:#000}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:#050505}
+::-webkit-scrollbar-thumb{background:var(--green-dim)}
+
+/* ============================================================ MOTION (steps only) */
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes blinkfast{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes btnblink{0%,74%{background:var(--mint);color:#000}75%,100%{background:transparent;color:var(--mint)}}
+@keyframes flick{0%{visibility:hidden}25%{visibility:visible}50%{visibility:hidden}100%{visibility:visible}}
+@keyframes marq{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+/* border pulse — used where a whole panel must stay readable while reading "in progress" */
+@keyframes edgeblue{0%,49%{border-color:var(--blue)}50%,100%{border-color:var(--green-dim)}}
+@keyframes edgemint{0%,49%{border-color:var(--mint)}50%,100%{border-color:var(--green-dim)}}
+@keyframes caret{0%,49%{opacity:1}50%,100%{opacity:0}}
+.blink{animation:blink 1s steps(1) infinite}
+.blink-f{animation:blinkfast .5s steps(1) infinite}
+
+/* reveal grammar: visibility snap + short flicker, never a fade */
+.rv{visibility:hidden}
+.rv.on{visibility:visible;animation:flick .12s steps(1) 1}
+
+/* ============================================================ HUD CHROME */
+.hud{position:fixed;top:0;left:0;right:0;height:var(--hud);z-index:200;background:var(--bg);
+  border-bottom:2px solid var(--orange);display:flex;align-items:center;gap:14px;padding:0 14px}
+.hud .mk{width:11px;height:11px;background:var(--mint);box-shadow:0 0 8px var(--mint);transform:rotate(45deg);flex:none}
+.hud .wm{font-family:var(--cond);font-weight:700;font-size:15px;color:var(--mint-hi);letter-spacing:.1em;
+  text-shadow:0 0 6px rgba(82,242,154,.5)}
+.hud .ver{font-size:8px;color:var(--orange);letter-spacing:.16em}
+.hud .sep{width:1px;height:16px;background:var(--green-dim)}
+.hud .hnote{font-size:9px;color:var(--green-map);letter-spacing:.14em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.hud .right{margin-left:auto;display:flex;align-items:center;gap:10px}
+.timechip{display:flex;align-items:center;background:var(--paper);color:#0A0A0A;padding:3px 8px;border-radius:2px;
+  font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.06em;font-variant-numeric:tabular-nums}
+.timechip i{font-style:normal;padding:0 1px;animation:blink 1s steps(1) infinite}
+.statusbar{position:fixed;left:0;right:0;bottom:0;height:var(--bar);z-index:200;background:var(--bg);
+  border-top:1px solid var(--orange);display:flex;align-items:center;gap:16px;padding:0 14px;
+  font-size:9px;letter-spacing:.14em;color:var(--green-map)}
+.statusbar b{font-weight:400;color:var(--amber)}
+.statusbar .sp{margin-left:auto}
+.dotL{display:inline-block;width:6px;height:6px;background:var(--mint);box-shadow:0 0 5px var(--mint);margin-right:6px}
+
+/* chapter rail */
+.rail{position:fixed;right:12px;top:50%;transform:translateY(-50%);z-index:190;display:flex;flex-direction:column;gap:8px}
+.rail a{display:flex;align-items:center;gap:7px;justify-content:flex-end;font-size:8px;letter-spacing:.14em;color:var(--green-dim)}
+.rail a .k{font-family:var(--jp);font-weight:800;font-size:12px;text-transform:none;letter-spacing:.1em}
+.rail a .b{width:26px;height:3px;background:var(--green-dim)}
+.rail a.on{color:var(--mint)}
+.rail a.on .b{background:var(--mint);box-shadow:0 0 6px var(--mint)}
+.rail a .lbl{opacity:0}
+.rail a.on .lbl{opacity:1}
+.prog{position:fixed;left:0;top:var(--hud);height:2px;background:var(--mint);box-shadow:0 0 6px var(--mint);z-index:201;width:0}
+
+/* ============================================================ LAYOUT */
+main{padding-top:var(--hud)}
+.chapter{position:relative}
+.scene{min-height:calc(100vh - var(--hud) - var(--bar));display:flex;flex-direction:column;justify-content:center;
+  padding:56px clamp(16px,5vw,86px) 56px;position:relative}
+.wrap{width:100%;max-width:1180px;margin:0 auto}
+.sticky{position:sticky;top:var(--hud);height:calc(100vh - var(--hud) - var(--bar));
+  display:flex;flex-direction:column;justify-content:center;overflow:hidden;
+  padding:0 clamp(14px,4vw,72px)}
+
+/* ============================================================ TYPE */
+.mega{font-family:var(--cond);font-weight:700;font-size:clamp(56px,13.5vw,186px);line-height:.84;
+  color:var(--paper);letter-spacing:.02em;text-shadow:0 0 22px rgba(237,248,214,.22)}
+.mega.mint{color:var(--mint-hi);text-shadow:0 0 18px rgba(82,242,154,.35)}
+.h1{font-family:var(--cond);font-weight:700;font-size:clamp(28px,5.2vw,62px);line-height:1;
+  color:var(--paper);letter-spacing:.03em;text-shadow:0 0 14px rgba(237,248,214,.18)}
+.h2{font-family:var(--cond);font-weight:700;font-size:clamp(20px,2.8vw,34px);line-height:1.05;
+  color:var(--mint-hi);letter-spacing:.04em;text-shadow:0 0 8px rgba(82,242,154,.3)}
+.h3{font-family:var(--cond);font-weight:700;font-size:15px;letter-spacing:.12em;color:var(--paper)}
+.eyebrow{font-size:10px;letter-spacing:.26em;color:var(--amber)}
+.eyebrow::before{content:"◈ "}
+.lede{font-size:12px;line-height:1.7;color:var(--green-map);letter-spacing:.06em;max-width:64ch}
+.lede.mint{color:var(--mint)}
+.note{font-size:10px;letter-spacing:.14em;color:var(--green-map)}
+.jp{font-family:var(--jp);font-weight:800;text-transform:none;letter-spacing:.16em;text-indent:.16em}
+.kh{font-family:var(--jp);font-weight:800;font-size:clamp(26px,4vw,54px);color:var(--orange);
+  text-transform:none;letter-spacing:.24em;text-indent:.24em;text-shadow:0 0 8px rgba(242,100,0,.5)}
+.tabnum{font-variant-numeric:tabular-nums}
+
+/* section heading */
+.sec-head{display:flex;align-items:center;gap:14px;margin-bottom:10px}
+.sec-head .idx{font-family:var(--cond);font-weight:700;font-size:13px;color:#000;background:var(--orange);padding:3px 9px;letter-spacing:.1em}
+.sec-head .k{font-family:var(--jp);font-weight:800;font-size:20px;color:var(--orange);text-transform:none;text-shadow:0 0 4px currentColor}
+.sec-head h2{font-family:var(--cond);font-weight:700;font-size:clamp(18px,2.4vw,28px);color:var(--mint-hi);letter-spacing:.05em}
+.sec-head .rule{flex:1;height:2px;background:linear-gradient(90deg,var(--orange),transparent)}
+
+/* chapter title card */
+.chaptitle{border:2px solid var(--orange);padding:26px 30px;display:inline-flex;gap:26px;align-items:center;
+  clip-path:polygon(0 0,calc(100% - 22px) 0,100% 22px,100% 100%,22px 100%,0 calc(100% - 22px))}
+.chaptitle .n{font-family:var(--cond);font-weight:700;font-size:64px;line-height:.8;color:var(--orange)}
+.chaptitle .t{font-family:var(--cond);font-weight:700;font-size:clamp(22px,3.4vw,42px);color:var(--paper);letter-spacing:.06em}
+.chaptitle .s{font-size:10px;letter-spacing:.2em;color:var(--green-map);margin-top:6px}
+
+/* ============================================================ ATOMS */
+.stamp{display:inline-block;border:1px solid currentColor;padding:2px 9px;border-radius:2px;font-size:10px;line-height:1.4;white-space:nowrap;letter-spacing:.12em}
+.stamp.sm{font-size:8px;padding:1px 6px}
+.stamp.fill{background:currentColor}
+.stamp.fill > span{color:var(--bg);display:block}
+.c-mint{color:var(--mint)} .c-mhi{color:var(--mint-hi)} .c-amber{color:var(--amber)}
+.c-blue{color:var(--blue)} .c-red{color:var(--red-hi)} .c-orange{color:var(--orange)}
+.c-dim{color:var(--green-map)} .c-paper{color:var(--paper)}
+.row{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.sp{margin-left:auto}
+.col{display:flex;flex-direction:column}
+.gap6{gap:6px}.gap10{gap:10px}.gap14{gap:14px}.gap18{gap:18px}.gap26{gap:26px}
+.mt10{margin-top:10px}.mt18{margin-top:18px}.mt26{margin-top:26px}.mt40{margin-top:40px}
+.btn{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.12em;padding:9px 18px;
+  border:2px solid var(--mint);color:var(--mint);background:var(--bg);cursor:pointer}
+.btn.primary{animation:btnblink 1s steps(1) infinite}
+.legend{display:flex;gap:7px;flex-wrap:wrap}
+.lg{border:1px solid;padding:2px 8px;display:flex;flex-direction:column;align-items:center;min-width:52px;border-radius:2px}
+.lg .j{font-family:var(--jp);font-weight:800;font-size:12px;line-height:1.2;text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.lg .c{font-size:7px;letter-spacing:.1em}
+.lg-nominal{border-color:var(--mint);color:var(--mint)}
+.lg-run{border-color:var(--mint-hi);color:var(--mint-hi)}
+.lg-caution{border-color:var(--amber);color:var(--amber)}
+.lg-pending{border-color:var(--blue);color:var(--blue)}
+.lg-blocked{border-color:var(--red-hi);background:var(--red-hi);color:#000}
+.meta{font-size:10px;line-height:1.5;color:var(--orange);letter-spacing:.06em}
+.meta b{color:var(--amber);font-weight:400}
+.panel{border:1px solid var(--orange);background:var(--bg);padding:16px;box-shadow:inset 0 0 14px rgba(242,100,0,.06)}
+.panel.dim{border-color:var(--green-dim);box-shadow:none}
+.chamfer{clip-path:polygon(0 0,calc(100% - 18px) 0,100% 18px,100% 100%,18px 100%,0 calc(100% - 18px))}
+.zone-title{font-family:var(--cond);font-weight:700;font-size:11px;color:var(--orange);letter-spacing:.14em;
+  border-bottom:1px solid var(--green-dim);padding-bottom:4px;margin-bottom:10px;display:flex;gap:8px;align-items:baseline}
+.zone-title .j{font-family:var(--jp);font-weight:800;font-size:12px;text-transform:none;color:var(--amber)}
+.zone-title .sp{margin-left:auto;font-family:var(--mono);font-weight:400;font-size:8px;color:var(--green-map)}
+.hazard{height:12px;background:repeating-linear-gradient(-45deg,var(--crimson) 0 10px,transparent 10px 20px)}
+.scrollcue{font-size:9px;letter-spacing:.3em;color:var(--amber)}
+
+/* marquee */
+.marquee{border-top:2px solid var(--red-hi);border-bottom:2px solid var(--red-hi);background:#170303;overflow:hidden;white-space:nowrap}
+.marquee .track{display:inline-block;padding:6px 0;font-size:10px;letter-spacing:.18em;color:var(--red-hi);
+  text-shadow:0 0 6px rgba(226,40,15,.5);animation:marq 22s linear infinite}
+.marquee .track span{margin:0 22px}
+.marquee .track span::before{content:"▚ ";color:var(--orange)}
+
+/* terminal */
+.terminal{border:1px solid var(--amber-dim);background:rgba(244,159,9,.02)}
+.term-bar{display:flex;align-items:center;gap:8px;padding:5px 10px;border-bottom:1px solid var(--amber-dim);
+  font-size:8px;color:var(--amber);letter-spacing:.14em}
+.term-bar .dots{display:flex;gap:4px;margin-left:auto}
+.term-bar .dots i{width:7px;height:7px;border-radius:50%}
+.term-bar .dots i:nth-child(1){background:var(--red-hi)}
+.term-bar .dots i:nth-child(2){background:var(--amber)}
+.term-bar .dots i:nth-child(3){background:var(--mint)}
+.term-body{padding:9px 11px;font-size:11px;line-height:1.55;overflow:hidden}
+.trow{display:flex;align-items:baseline;gap:7px;white-space:nowrap;color:var(--amber-dim)}
+.trow .l{color:var(--amber);overflow:hidden;text-overflow:ellipsis}
+.trow .d{flex:1;border-bottom:1px dotted var(--amber-dim);height:0;margin-bottom:4px;min-width:8px}
+.trow .v{color:var(--amber);font-weight:700}
+.trow .v.fail{color:var(--red-hi);text-shadow:0 0 4px currentColor}
+.trow .v.wait{color:var(--blue)}
+.caret{display:inline-block;width:7px;height:11px;background:var(--amber);vertical-align:-1px;animation:caret 1s steps(1) infinite}
+
+/* meters */
+.mbar{display:flex;flex-direction:column;gap:3px}
+.mbar .t{display:flex;justify-content:space-between;font-size:8px;letter-spacing:.12em;color:var(--green-map)}
+.mbar .t b{color:var(--mint);font-weight:400}
+.mbar .seg{display:flex;gap:2px;height:9px}
+.mbar .seg i{flex:1;background:var(--green-dim);opacity:.28;border-radius:1px}
+.mbar .seg i.on{opacity:1;background:var(--mint);box-shadow:0 0 4px rgba(82,242,154,.5)}
+.mbar .seg i.on.warn{background:var(--amber);box-shadow:0 0 4px rgba(244,159,9,.5)}
+.mbar .seg i.on.hot{background:var(--red-hi);box-shadow:0 0 5px rgba(226,40,15,.6)}
+.vcols{display:flex;gap:3px;height:44px;align-items:flex-end}
+.vcol{flex:1;display:flex;flex-direction:column-reverse;gap:2px;height:100%}
+.vcol i{flex:1;background:var(--green-dim);opacity:.28;border-radius:1px}
+.vcol i.on{opacity:1;background:var(--amber);box-shadow:0 0 3px rgba(244,159,9,.5)}
+.nstat{border:1px solid var(--green-dim);padding:18px;display:flex;flex-direction:column;gap:6px;justify-content:center}
+.nstat .k{font-size:8px;color:var(--green-map);letter-spacing:.18em}
+.nstat .v{font-family:var(--cond);font-weight:700;font-size:clamp(30px,4vw,52px);line-height:.9;color:var(--mint-hi);
+  text-shadow:0 0 10px rgba(82,242,154,.32);font-variant-numeric:tabular-nums}
+.nstat .f{font-size:8px;color:var(--green-map);letter-spacing:.1em;margin-top:auto}
+
+/* stepper */
+.flow{display:flex;align-items:flex-start;gap:0;flex-wrap:nowrap}
+.fstep{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0;flex:1}
+.fstep .node{width:100%;border:2px solid var(--green-dim);color:var(--green-map);padding:10px 8px;text-align:center;
+  clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px));background:var(--bg)}
+.fstep .node .j{font-family:var(--jp);font-weight:800;font-size:15px;text-transform:none;letter-spacing:.14em;text-indent:.14em;display:block;color:inherit}
+.fstep .node .e{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.1em;display:block;margin-top:3px;color:inherit}
+.fstep .sl{font-size:8px;letter-spacing:.1em;color:var(--green-map);text-align:center}
+.fstep.done .node{background:var(--mint);border-color:var(--mint);color:#000}
+.fstep.done .node .j,.fstep.done .node .e{color:#000}
+.fstep.done .sl{color:var(--mint)}
+.fstep.now .node{color:var(--blue);animation:edgeblue 1s steps(1) infinite}
+.fstep.now .node .j,.fstep.now .node .e{color:var(--blue)}
+.fstep.now .sl{color:var(--blue)}
+.fconn{height:2px;background:var(--green-dim);flex:0 0 22px;margin-top:26px}
+.fconn.done{background:var(--mint);box-shadow:0 0 5px rgba(82,242,154,.4)}
+
+/* ============================================================ HERO CHAOS STAGE */
+.stage{position:relative;width:100%;height:100%;display:flex;flex-direction:column;justify-content:center}
+.chaos{position:relative;flex:1;min-height:0}
+.heroword{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;z-index:5;pointer-events:none}
+.heroword .mega{font-size:clamp(38px,9vw,120px)}
+.wins{position:absolute;inset:0}
+.win{position:absolute;width:clamp(150px,17vw,222px);border:1px solid var(--green-dim);background:var(--bg);
+  left:var(--x);top:var(--y);transform:rotate(var(--r));z-index:3}
+.win .wtop{display:flex;align-items:center;gap:6px;border-bottom:1px solid var(--green-dim);padding:3px 7px;font-size:8px;letter-spacing:.1em;color:var(--green-map)}
+.win .wtop b{color:var(--mint);font-weight:400;font-family:var(--cond);font-size:11px;letter-spacing:.08em}
+.win .wtop .st{margin-left:auto;font-size:7px;border:1px solid currentColor;padding:0 4px;border-radius:2px}
+.win .feed{padding:5px 7px;font-size:9px;line-height:1.5;color:var(--amber-dim);height:52px;overflow:hidden}
+.win .feed .l{color:var(--amber);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.win[data-s=WAIT]{border-color:var(--amber);color:var(--amber)}
+.win[data-s=WAIT] .st{animation:blink 1s steps(1) infinite;color:var(--amber)}
+.win[data-s=BLOCK]{border-color:var(--red-hi)}
+.win[data-s=BLOCK] .st{background:var(--red-hi);color:#000;border-color:var(--red-hi);animation:blink .5s steps(1) infinite}
+.chaos.overload .heroword .mega{color:var(--red-hi);text-shadow:0 0 18px rgba(226,40,15,.4)}
+/* organized state */
+.plane{position:absolute;inset:2% 0 2% 0;border:3px solid var(--orange);visibility:hidden;
+  clip-path:polygon(0 0,calc(100% - 26px) 0,100% 26px,100% 100%,26px 100%,0 calc(100% - 26px));z-index:1}
+.plane::before{content:"";position:absolute;inset:2px;border:1px solid var(--orange);opacity:.5}
+.plane .ptag{position:absolute;top:-1px;left:26px;background:var(--orange);color:#000;font-family:var(--cond);
+  font-weight:700;font-size:11px;letter-spacing:.14em;padding:2px 10px}
+.chaos.gridded .plane{visibility:visible}
+.chaos.gridded .heroword{position:static;transform:none;text-align:left;padding:26px 30px 8px;z-index:6}
+.chaos.gridded .heroword .mega{font-size:clamp(22px,3vw,38px);color:var(--mint-hi);text-shadow:0 0 12px rgba(82,242,154,.4)}
+.chaos.gridded{display:flex;flex-direction:column;justify-content:center}
+.chaos.gridded .wins{position:static;display:grid;grid-template-columns:repeat(4,1fr);gap:9px;padding:0 30px 26px;z-index:4}
+.chaos.gridded .win{position:relative;left:auto;top:auto;transform:none;width:auto;border-color:var(--mint);animation:flick .12s steps(1) 1}
+.chaos.gridded .win[data-s=WAIT]{border-color:var(--amber)}
+.chaos.gridded .win[data-s=BLOCK]{border-color:var(--red-hi)}
+.chaoscap{text-align:center;padding:10px 0 0;min-height:44px}
+
+/* ============================================================ APP MOCK (the product) */
+.appwrap{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:clamp(16px,3vw,44px);align-items:center;height:100%}
+.copycol{position:relative;min-height:230px}
+.copy{position:absolute;inset:0;display:none;flex-direction:column;gap:12px;justify-content:center}
+.copy .cidx{font-family:var(--cond);font-weight:700;font-size:12px;color:#000;background:var(--orange);padding:2px 8px;align-self:flex-start;letter-spacing:.14em}
+.copy .k{font-family:var(--jp);font-weight:800;font-size:22px;color:var(--orange);text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.copy h3{font-family:var(--cond);font-weight:700;font-size:clamp(20px,2.5vw,32px);line-height:1.02;color:var(--paper);letter-spacing:.03em}
+.copy .rev{font-family:var(--cond);font-weight:700;font-size:clamp(13px,1.5vw,18px);color:var(--mint-hi);letter-spacing:.06em;
+  text-shadow:0 0 8px rgba(82,242,154,.35)}
+.copy p{font-size:11px;line-height:1.7;color:var(--green-map);letter-spacing:.05em;max-width:42ch}
+
+.app{border:3px solid var(--orange);background:var(--bg);display:flex;flex-direction:column;
+  height:min(74vh,620px);position:relative;box-shadow:inset 0 0 22px rgba(242,100,0,.05)}
+.app::before{content:"";position:absolute;inset:2px;border:1px solid rgba(242,100,0,.45);pointer-events:none}
+.app-top{display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--orange);padding:5px 11px;flex:none}
+.app-top .b{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--mint-hi);letter-spacing:.14em}
+.app-top .mk{width:9px;height:9px;background:var(--mint);transform:rotate(45deg);box-shadow:0 0 6px var(--mint)}
+.app-top .u{margin-left:auto;font-size:8px;color:var(--green-map);letter-spacing:.12em}
+.app-body{flex:1;display:grid;grid-template-columns:118px 1fr 132px;min-height:0}
+.app-nav{border-right:1px solid var(--green-dim);padding:8px 6px;display:flex;flex-direction:column;gap:4px}
+.app-nav a{display:block;border:1px solid var(--green-dim);padding:5px 6px;color:var(--green-map);text-align:left}
+.app-nav a .j{font-family:var(--jp);font-weight:800;font-size:12px;text-transform:none;letter-spacing:.14em;display:block}
+.app-nav a .e{font-size:8px;letter-spacing:.12em;display:block;margin-top:1px}
+.app-main{min-width:0;overflow:hidden;padding:10px 12px;display:flex;flex-direction:column}
+.app-rail{border-left:1px solid var(--green-dim);padding:8px;display:flex;flex-direction:column;gap:10px}
+.app-foot{border-top:1px solid var(--orange);padding:3px 11px;display:flex;gap:12px;font-size:8px;
+  letter-spacing:.12em;color:var(--green-map);flex:none}
+.app-foot .sp{margin-left:auto}
+.pane{display:none;flex-direction:column;gap:9px;flex:1;min-height:0}
+.stage-app[data-pane="0"] .pane[data-i="0"],
+.stage-app[data-pane="1"] .pane[data-i="1"],
+.stage-app[data-pane="2"] .pane[data-i="2"],
+.stage-app[data-pane="3"] .pane[data-i="3"],
+.stage-app[data-pane="4"] .pane[data-i="4"]{display:flex;animation:flick .12s steps(1) 1}
+.stage-app[data-pane="0"] .copy[data-i="0"],
+.stage-app[data-pane="1"] .copy[data-i="1"],
+.stage-app[data-pane="2"] .copy[data-i="2"],
+.stage-app[data-pane="3"] .copy[data-i="3"],
+.stage-app[data-pane="4"] .copy[data-i="4"]{display:flex}
+.stage-app[data-pane="0"] .app-nav a[data-i="0"],
+.stage-app[data-pane="1"] .app-nav a[data-i="1"],
+.stage-app[data-pane="2"] .app-nav a[data-i="2"],
+.stage-app[data-pane="3"] .app-nav a[data-i="3"],
+.stage-app[data-pane="4"] .app-nav a[data-i="4"]{background:var(--mint);border-color:var(--mint);color:#000}
+
+/* sessions pane */
+.sesgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;flex:1;min-height:0}
+.ses{border:1px solid var(--green-dim);display:flex;flex-direction:column;min-height:0}
+.ses .sh{display:flex;align-items:center;gap:6px;padding:4px 7px;border-bottom:1px solid var(--green-dim);font-size:8px;color:var(--green-map)}
+.ses .sh .id{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--mint);letter-spacing:.06em}
+.ses .sh .st{margin-left:auto;border:1px solid currentColor;padding:0 5px;font-size:7px;border-radius:2px;letter-spacing:.1em}
+.ses .feed{padding:4px 7px;font-size:9px;line-height:1.5;color:var(--amber-dim);flex:1;overflow:hidden}
+.ses .feed .l{color:var(--amber);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ses .sf{display:flex;gap:8px;border-top:1px solid var(--green-dim);padding:3px 7px;font-size:8px;color:var(--green-map);letter-spacing:.08em}
+.ses .sf b{color:var(--mint);font-weight:400;font-variant-numeric:tabular-nums}
+.ses[data-s=RUN]{border-color:var(--mint-hi)}.ses[data-s=RUN] .st{color:var(--mint-hi)}
+.ses[data-s=IDLE] .st{color:var(--blue);border-color:var(--blue)}
+.ses[data-s=WAIT]{border-color:var(--amber)}.ses[data-s=WAIT] .st{color:var(--amber);animation:blink 1s steps(1) infinite}
+
+/* board pane */
+.board{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;flex:1;min-height:0}
+.bcol{border:1px solid var(--green-dim);padding:6px;display:flex;flex-direction:column;gap:6px;min-height:0}
+.bcol > .t{font-size:8px;letter-spacing:.14em;color:var(--orange);border-bottom:1px solid var(--green-dim);padding-bottom:3px;display:flex;gap:6px}
+.bcol > .t .j{font-family:var(--jp);font-weight:800;font-size:11px;text-transform:none;color:var(--amber)}
+.bcol > .t .n{margin-left:auto;color:var(--green-map)}
+.tcard{border:1px solid var(--green-dim);padding:5px 6px;display:flex;flex-direction:column;gap:3px;background:var(--bg)}
+.tcard .id{font-size:7px;color:var(--amber);letter-spacing:.12em}
+.tcard .ti{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--paper);letter-spacing:.04em;line-height:1.1}
+.tcard .m{display:flex;gap:5px;font-size:7px;color:var(--green-map);letter-spacing:.08em;flex-wrap:wrap}
+.tcard.sel{border-color:var(--mint);box-shadow:0 0 10px rgba(82,242,154,.22)}
+.tcard.pick{color:var(--blue);animation:edgeblue 1s steps(1) infinite}
+.tcard.pick .ti{color:var(--blue)}
+.chain{display:none;flex-direction:column;gap:0;margin-top:4px}
+.chain .cn{border:1px solid var(--orange);padding:3px 6px;font-size:8px;color:var(--amber);letter-spacing:.08em;background:var(--bg)}
+.chain .cn b{color:var(--mint);font-weight:400;text-transform:none}
+.chain .ar{color:var(--orange);font-size:9px;text-align:center;line-height:1.1}
+.tcard.open .chain{display:flex;animation:flick .12s steps(1) 1}
+
+/* automation pane */
+.jobs{display:flex;flex-direction:column;gap:5px}
+.jrow{display:flex;align-items:center;gap:8px;border:1px solid var(--green-dim);padding:4px 7px;font-size:9px}
+.jrow .jid{color:var(--amber);letter-spacing:.1em}
+.jrow .jn{color:var(--paper);flex:1;font-family:var(--cond);font-weight:700;letter-spacing:.06em;font-size:11px}
+.jrow .jk{font-size:7px;color:var(--green-map);letter-spacing:.1em}
+.autoflow{display:flex;align-items:center;gap:8px;margin:auto 0}
+.autoflow .slot{flex:1;border:1px dashed var(--green-dim);min-height:52px;padding:5px;display:flex;flex-direction:column;gap:4px}
+.autoflow .slot .h{font-size:7px;letter-spacing:.14em;color:var(--orange)}
+.autoflow .agentnode{border:2px solid var(--blue);color:var(--blue);padding:6px 8px;text-align:center;min-width:96px;
+  clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,9px 100%,0 calc(100% - 9px))}
+.autoflow .agentnode .j{font-family:var(--jp);font-weight:800;font-size:14px;text-transform:none;letter-spacing:.16em;text-indent:.16em}
+.autoflow .agentnode .e{font-size:7px;letter-spacing:.1em;margin-top:2px}
+.autoflow .agentnode.hot{background:var(--blue);color:#000}
+.autoflow .agentnode.hot .j,.autoflow .agentnode.hot .e{color:#000}
+.autoflow .agentnode .run{display:none;font-size:7px;letter-spacing:.14em;margin-top:3px}
+.autoflow .agentnode.hot .run{display:block;animation:blink 1s steps(1) infinite}
+.autoflow .agentnode .tcard{margin-top:6px;text-align:left;border-color:#000;background:var(--bg)}
+.autoflow .agentnode .tcard .ti{font-size:10px}
+.autoflow .ar{color:var(--orange);font-size:12px}
+
+/* context pane */
+.ctx{display:grid;grid-template-columns:1fr auto 1fr;gap:10px;align-items:center;flex:1;min-height:0}
+.cside{display:flex;flex-direction:column;gap:7px}
+.cchip{display:flex;align-items:center;gap:7px;border:1px solid var(--mint);color:var(--mint);padding:4px 7px;visibility:hidden}
+.cchip.on{visibility:visible;animation:flick .12s steps(1) 1}
+.cchip .j{font-family:var(--jp);font-weight:800;font-size:13px;text-transform:none;letter-spacing:.12em}
+.cchip .e{font-size:8px;letter-spacing:.14em}
+.cchip .ln{flex:1;height:1px;background:var(--orange);min-width:14px}
+.cside.r .cchip{flex-direction:row-reverse}
+.agentcore{border:2px solid var(--orange);padding:14px 16px;text-align:center;
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+.agentcore .j{font-family:var(--jp);font-weight:800;font-size:26px;color:var(--orange);text-transform:none;letter-spacing:.2em;text-indent:.2em;
+  text-shadow:0 0 8px rgba(242,100,0,.5)}
+.agentcore .e{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--paper);letter-spacing:.16em;margin-top:4px}
+.agentcore .c{font-size:7px;color:var(--green-map);letter-spacing:.1em;margin-top:3px}
+
+/* montage pane */
+.montage{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:1fr;gap:7px;flex:1;min-height:0}
+.tile{border:1px solid var(--green-dim);padding:6px;display:flex;flex-direction:column;gap:4px;overflow:hidden}
+.tile .th{font-size:7px;letter-spacing:.14em;color:var(--green-map);display:flex;gap:5px}
+.tile .th .j{font-family:var(--jp);font-weight:800;font-size:10px;text-transform:none;color:var(--orange)}
+.tile .tb{font-size:8px;line-height:1.5;color:var(--green-map);overflow:hidden}
+.tile .tb b{color:var(--mint);font-weight:400}
+.tile.hl{border-color:var(--mint);box-shadow:0 0 12px rgba(82,242,154,.18)}
+.tile.hl .th{color:var(--mint)}
+.spark{display:flex;gap:2px;align-items:flex-end;height:26px}
+.spark i{flex:1;background:var(--mint);opacity:.55}
+
+/* ============================================================ ZOOM-OUT / LOCALHOST */
+.zoomstage{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;gap:18px}
+.machine{border:2px solid var(--green-dim);padding:12px;position:relative;width:min(880px,92vw)}
+.machine .mlabel{position:absolute;top:-9px;left:14px;background:var(--bg);padding:0 7px;font-size:8px;letter-spacing:.16em;color:var(--green-map)}
+.machine .mfoot{margin-top:8px;height:6px;border-top:2px solid var(--teal);border-bottom:2px solid var(--teal)}
+.miniapp{border:2px solid var(--orange);padding:8px;display:grid;grid-template-columns:60px 1fr 54px;gap:6px;height:230px}
+.miniapp .c{border:1px solid var(--green-dim);display:flex;flex-direction:column;gap:4px;padding:5px}
+.miniapp .ln{height:5px;background:var(--green-dim);opacity:.5}
+.miniapp .ln.m{background:var(--mint);opacity:.75}
+.miniapp .ln.a{background:var(--amber);opacity:.6}
+.zoombox{transform:scale(var(--k,1));transform-origin:center center}
+.hostline{font-family:var(--cond);font-weight:700;font-size:clamp(40px,10vw,140px);color:var(--mint-hi);
+  letter-spacing:.06em;text-shadow:0 0 20px rgba(82,242,154,.35);font-variant-numeric:tabular-nums}
+
+/* ============================================================ DIAGRAMS */
+.diagram{display:flex;align-items:center;justify-content:center;gap:clamp(10px,3vw,40px);flex-wrap:wrap}
+.node{border:2px solid var(--orange);background:var(--bg);padding:14px 18px;text-align:center;min-width:150px;
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+.node .j{font-family:var(--jp);font-weight:800;font-size:20px;color:var(--orange);text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.node .e{font-family:var(--cond);font-weight:700;font-size:14px;color:var(--paper);letter-spacing:.1em;margin-top:3px}
+.node .s{font-size:8px;color:var(--green-map);letter-spacing:.1em;margin-top:4px}
+.node.mint{border-color:var(--mint)}.node.mint .j{color:var(--mint)}
+.node.blue{border-color:var(--blue)}.node.blue .j{color:var(--blue)}
+.node.sm{min-width:110px;padding:9px 11px}
+.node.sm .e{font-size:11px}.node.sm .j{font-size:15px}
+.link{display:flex;flex-direction:column;align-items:center;gap:3px;color:var(--orange);font-size:9px;letter-spacing:.1em;min-width:80px}
+.link .bar{width:100%;height:2px;background:var(--orange);box-shadow:0 0 5px rgba(242,100,0,.4)}
+.link .bar.mint{background:var(--mint);box-shadow:0 0 5px rgba(82,242,154,.5)}
+.link .g{font-size:8px;color:var(--amber)}
+.vlink{width:2px;height:26px;background:var(--orange);margin:0 auto}
+.tree{font-size:11px;line-height:1.75;color:var(--green-map);letter-spacing:.05em;text-transform:none}
+.tree b{color:var(--mint);font-weight:400}
+.tree .o{color:var(--orange)}
+.tree .a{color:var(--amber)}
+
+/* worktree rows */
+.wt{display:flex;align-items:center;gap:10px;border:1px solid var(--green-dim);padding:7px 10px;font-size:10px}
+.wt .n{font-family:var(--cond);font-weight:700;font-size:13px;color:var(--paper);letter-spacing:.06em;min-width:120px}
+.wt .p{color:var(--amber);letter-spacing:.04em;text-transform:none;font-size:10px}
+.wt .sp{margin-left:auto;display:flex;gap:6px}
+
+/* git graph */
+.gitbox{border:1px solid var(--green-dim);padding:10px;background:var(--bg)}
+.gitbox svg{width:100%;height:auto;display:block}
+
+/* review diff */
+.diffwrap{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,320px);gap:clamp(14px,3vw,40px);align-items:center;height:100%}
+.diff{border:1px solid var(--orange);background:var(--bg);max-height:64vh;display:flex;flex-direction:column}
+.diff .dh{display:flex;gap:8px;align-items:center;border-bottom:1px solid var(--orange);padding:5px 9px;font-size:9px;color:var(--amber);letter-spacing:.1em}
+.diff .dh b{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--paper)}
+.diff .db{overflow:hidden;padding:5px 0;font-size:10px;line-height:1.6;text-transform:none}
+.dl{display:flex;gap:8px;padding:0 9px;white-space:nowrap;color:var(--green-dim)}
+.dl .s{width:10px;flex:none}
+.dl .c{overflow:hidden;text-overflow:ellipsis;flex:1}
+.dl.add{color:var(--mint)}
+.dl.del{color:var(--red)}
+.dl .mk{font-size:7px;border:1px solid currentColor;padding:0 4px;border-radius:2px;letter-spacing:.1em;visibility:hidden;text-transform:uppercase}
+.dl .mk.on{visibility:visible}
+.dl.gone{display:none}
+.gates{display:flex;flex-direction:column;gap:8px}
+.gate{border:1px solid var(--green-dim);padding:8px 10px;color:var(--green-map);display:flex;flex-direction:column;gap:3px}
+.gate .cmd{font-size:11px;letter-spacing:.04em;text-transform:none;color:inherit}
+.gate .r{font-size:8px;letter-spacing:.12em;visibility:hidden}
+.gate.now{color:var(--blue);animation:edgeblue 1s steps(1) infinite}
+.gate .run{display:none;font-size:8px;letter-spacing:.12em}
+.gate.now .run{display:block;animation:blink 1s steps(1) infinite}
+.gate.done{border-color:var(--mint);color:var(--mint)}
+.gate.done .r{visibility:visible}
+.gate.human{border-color:var(--green-dim)}
+.gate.human.done{border-color:var(--paper);background:var(--paper);color:#0A0A0A}
+
+/* orchestration */
+.orch{display:flex;flex-direction:column;align-items:center;gap:12px}
+.orch .fanout{display:flex;gap:12px;flex-wrap:wrap;justify-content:center}
+.skillband{border:1px dashed var(--amber);padding:8px 12px;color:var(--amber);font-size:9px;letter-spacing:.14em;text-align:center}
+
+/* end scene */
+.credits{display:flex;flex-direction:column;align-items:center;gap:14px;text-align:center}
+.cmdline{border:1px solid var(--green-dim);padding:9px 16px;font-size:14px;color:var(--mint);letter-spacing:.06em;text-transform:none}
+.cmdline .p{color:var(--orange)}
+
+/* ============================================================ RESPONSIVE */
+@media(max-width:1024px){
+  .appwrap{grid-template-columns:1fr;gap:12px}
+  .copycol{min-height:auto;height:130px}
+  .app{height:min(56vh,460px)}
+  .app-body{grid-template-columns:96px 1fr}
+  .app-rail{display:none}
+  .diffwrap{grid-template-columns:1fr}
+  .rail{display:none}
+  .sesgrid{grid-template-columns:1fr}
+  .montage{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:720px){
+  body{font-size:12px}
+  .chaos.gridded .wins{grid-template-columns:repeat(2,1fr)}
+  .win{width:44vw}
+  .board{grid-template-columns:1fr}
+  .flow{flex-wrap:wrap;gap:8px}
+  .fconn{display:none}
+  .fstep{flex:1 1 40%}
+  .ctx{grid-template-columns:1fr}
+  .hud .hnote{display:none}
+  .statusbar{gap:10px;font-size:8px}
+  .statusbar span:nth-child(3),.statusbar span:nth-child(6){display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none!important}
+  .rv{visibility:visible!important}
+}
+</style>
+</head>
+<body>
+
+<!-- ===================================================== FIXED CHROME -->
+<div class="prog" id="prog"></div>
+<header class="hud">
+  <i class="mk"></i>
+  <span class="wm">SINGULARITY</span>
+  <span class="ver">v0.9 · 特異点</span>
+  <span class="sep"></span>
+  <span class="hnote" id="hnote">CH·01 起動 — ORIENTATION</span>
+  <div class="right">
+    <span class="stamp sm c-mint" id="modeStamp">LOOPBACK</span>
+    <span class="timechip"><span id="clkH">00</span><i>:</i><span id="clkM">00</span><i>:</i><span id="clkS">00</span></span>
+  </div>
+</header>
+
+<nav class="rail" id="rail" aria-label="CHAPTERS">
+  <a href="#ch1"><span class="lbl">HERO</span><span class="k">起動</span><span class="b"></span></a>
+  <a href="#ch2"><span class="lbl">PRODUCT</span><span class="k">製品</span><span class="b"></span></a>
+  <a href="#ch3"><span class="lbl">BACKEND</span><span class="k">背面</span><span class="b"></span></a>
+  <a href="#ch4"><span class="lbl">FRONTEND</span><span class="k">前面</span><span class="b"></span></a>
+</nav>
+
+<footer class="statusbar">
+  <span><i class="dotL"></i>DAEMON <b>127.0.0.1:4317</b></span>
+  <span>AGENTS <b id="sbAgents">04</b></span>
+  <span>TASKS <b id="sbTasks">07</b></span>
+  <span>TOKENS <b class="tabnum" id="sbTok">418.2K</b></span>
+  <span class="sp">SAM × JAIRUS</span>
+  <span>PRESENTATION MODE 発表</span>
+</footer>
+
+<main>
+
+<!-- ===================================================== CHAPTER 01 — HERO -->
+<section class="chapter" id="ch1" data-ch="0">
+
+  <div class="scene" data-reveal>
+    <div class="wrap col gap18">
+      <div class="rv eyebrow">JAIRUS OS · CONTROL PLANE BRIEFING · 01 起動</div>
+      <div class="rv"><span class="kh">特異点</span></div>
+      <h1 class="rv mega">SINGULARITY</h1>
+      <div class="rv h2" style="max-width:22ch">ONE CONTROL PLANE FOR YOUR WHOLE FLEET OF CODING AGENTS.</div>
+      <div class="rv row gap10 mt10">
+        <span class="stamp c-amber blink">BUILT FOR SPEC-DRIVEN DEVELOPMENT</span>
+        <span class="stamp c-orange">LOCALHOST APPLICATION</span>
+        <span class="stamp c-mint">NOT A CLOUD PLATFORM</span>
+      </div>
+      <div class="rv row gap14 mt26">
+        <span class="scrollcue blink">▼ SCROLL TO BEGIN</span>
+        <span class="note">01 / 04 CHAPTERS · 20 SCENES</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- chaos → control plane -->
+  <div style="height:340vh" data-sticky data-steps="11" id="secChaos">
+    <div class="sticky">
+      <div class="stage">
+        <div class="chaos" id="chaos">
+          <div class="plane"><span class="ptag">SINGULARITY · 制御面</span></div>
+          <div class="heroword"><div class="mega mint" id="chaosWord">SINGULARITY</div></div>
+          <div class="wins" id="wins"><!-- injected --></div>
+        </div>
+        <div class="chaoscap">
+          <div class="h3" id="chaosCap">ONE AGENT. ONE TERMINAL. FINE.</div>
+          <div class="note mt10" id="chaosSub">セッション 01 — NOMINAL</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scene" data-reveal>
+    <div class="wrap col gap18" style="align-items:center;text-align:center">
+      <div class="rv kh">一望</div>
+      <h2 class="rv mega mint" style="font-size:clamp(34px,7.5vw,104px)">ONE PLACE TO SEE EVERYTHING.</h2>
+      <div class="rv lede" style="text-align:center">MULTIPLE AGENTS. MULTIPLE TASKS. MULTIPLE REPOSITORIES. MULTIPLE WORKTREES. MULTIPLE CONTEXTS.</div>
+      <div class="rv row gap10" style="justify-content:center">
+        <span class="stamp c-orange">02 製品 — THE PRODUCT</span>
+        <span class="scrollcue blink">▼</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== CHAPTER 02 — PRODUCT -->
+<section class="chapter" id="ch2" data-ch="1">
+
+  <div class="scene" data-reveal style="min-height:70vh">
+    <div class="wrap">
+      <div class="chaptitle rv">
+        <span class="n">02</span>
+        <span>
+          <span class="t">THE PRODUCT</span>
+          <div class="s">製品 · THE APPLICATION IS THE ARGUMENT</div>
+        </span>
+      </div>
+      <div class="rv lede mt18">NO ARCHITECTURE ABSTRACTIONS YET. THIS IS THE ACTUAL INTERFACE — SESSIONS, TASKS, AUTOMATION, CONTEXT, AND EVERYTHING AROUND THE WORK.</div>
+    </div>
+  </div>
+
+  <div style="height:520vh" data-sticky data-steps="25" id="secApp">
+    <div class="sticky">
+      <div class="appwrap stage-app" id="stageApp" data-pane="0" data-sub="0">
+
+        <!-- copy column -->
+        <div class="copycol">
+          <div class="copy" data-i="0">
+            <span class="cidx">01</span>
+            <span class="k">対話</span>
+            <h3>YOUR AGENTS ARE ALREADY WORKING.</h3>
+            <div class="rev">SINGULARITY LETS YOU SEE WHAT THEY'RE DOING.</div>
+            <p>LIVE SESSIONS, ACTIVE / IDLE STATE, TOKEN AND COST TELEMETRY — READABLE, NOT CINEMATIC.</p>
+          </div>
+          <div class="copy" data-i="1">
+            <span class="cidx">02</span>
+            <span class="k">任務</span>
+            <h3>SESSIONS BECOME TASKS.</h3>
+            <div class="rev">A TASK BOARD BUILT AROUND GIT WORKTREES.</div>
+            <p>ONE TASK CAN OWN ITS OWN WORKTREE, ITS OWN BRANCH, AND ITS OWN CLAUDE SESSION. THE WORK HAS STRUCTURE — NOT JUST ANOTHER TERMINAL WINDOW.</p>
+          </div>
+          <div class="copy" data-i="2">
+            <span class="cidx">03</span>
+            <span class="k">自動</span>
+            <h3>DON'T BABYSIT EVERY AGENT.</h3>
+            <div class="rev">READY → BACKGROUND AGENT → IN PROGRESS.</div>
+            <p>SCHEDULED JOBS AND BACKGROUND JOBS SELECT TASKS BY DEFINED CRITERIA. AGENTS KEEP WORKING WITHOUT YOU OPENING ANOTHER TERMINAL.</p>
+          </div>
+          <div class="copy" data-i="3">
+            <span class="cidx">04</span>
+            <span class="k">文脈</span>
+            <h3>CONTEXT SHOULDN'T LIVE IN YOUR HEAD.</h3>
+            <div class="rev">GIVE THE ENVIRONMENT CONTEXT. NOT EVERY PROMPT.</div>
+            <p>SKILLS · RULES · MEMORY · CONFIG · HOOKS · WIKI — EACH ONE ATTACHES TO THE AGENT INSTEAD OF BEING RE-EXPLAINED.</p>
+          </div>
+          <div class="copy" data-i="4">
+            <span class="cidx">05</span>
+            <span class="k">系統</span>
+            <h3>EVERYTHING AROUND THE WORK.</h3>
+            <div class="rev">EXPLORER · TRANSCRIPTS · HISTORY · USAGE · PROCESSES · STATUS</div>
+            <p>SINGULARITY ISN'T TRYING TO REPLACE THE CODING AGENT. IT GIVES YOU THE ENVIRONMENT AROUND IT.</p>
+          </div>
+        </div>
+
+        <!-- the application -->
+        <div class="app">
+          <div class="app-top">
+            <i class="mk"></i><span class="b">SINGULARITY</span>
+            <span class="stamp sm c-mint">127.0.0.1:4317</span>
+            <span class="u">FLEET 04 · UPTIME <span class="tabnum" id="appUp">02:41:09</span></span>
+          </div>
+          <div class="app-body">
+            <nav class="app-nav">
+              <a data-i="0"><span class="j">対話</span><span class="e">SESSIONS</span></a>
+              <a data-i="1"><span class="j">任務</span><span class="e">TASKS</span></a>
+              <a data-i="2"><span class="j">自動</span><span class="e">AUTOMATION</span></a>
+              <a data-i="3"><span class="j">文脈</span><span class="e">CONTEXT</span></a>
+              <a data-i="4"><span class="j">系統</span><span class="e">SYSTEM</span></a>
+            </nav>
+
+            <div class="app-main">
+              <!-- PANE 0 — SESSIONS -->
+              <div class="pane" data-i="0">
+                <div class="zone-title"><span>LIVE SESSIONS</span><span class="j">対話</span><span class="sp">4 ACTIVE · 1 AWAITING INPUT</span></div>
+                <div class="legend" style="margin-bottom:6px">
+                  <span class="lg lg-run"><span class="j">稼働</span><span class="c">RUNNING</span></span>
+                  <span class="lg lg-pending"><span class="j">待機</span><span class="c">IDLE</span></span>
+                  <span class="lg lg-caution"><span class="j">注意</span><span class="c">INPUT</span></span>
+                  <span class="lg lg-nominal"><span class="j">正常</span><span class="c">NOMINAL</span></span>
+                </div>
+                <div class="sesgrid" id="sesGrid"><!-- injected --></div>
+              </div>
+
+              <!-- PANE 1 — TASKS -->
+              <div class="pane" data-i="1">
+                <div class="zone-title"><span>TASK BOARD</span><span class="j">任務</span><span class="sp">WORKTREE-BACKED · 7 OPEN</span></div>
+                <div class="board">
+                  <div class="bcol">
+                    <div class="t"><span class="j">準備</span><span>READY</span><span class="n">02</span></div>
+                    <div class="tcard"><span class="id">TSK·118</span><span class="ti">USAGE SPARKLINES</span><span class="m"><span>web/</span><span>P2</span></span></div>
+                    <div class="tcard"><span class="id">TSK·121</span><span class="ti">CRON EDITOR</span><span class="m"><span>server/</span><span>P3</span></span></div>
+                  </div>
+                  <div class="bcol">
+                    <div class="t"><span class="j">進行</span><span>IN PROGRESS</span><span class="n">03</span></div>
+                    <div class="tcard" id="focusCard">
+                      <span class="id">TSK·104</span>
+                      <span class="ti">IMPLEMENT SETTINGS PAGE</span>
+                      <span class="m"><span>web/features/settings</span><span>P1</span></span>
+                      <div class="chain">
+                        <div class="ar">↓</div>
+                        <div class="cn">WORKTREE <b>.worktrees/settings-page</b></div>
+                        <div class="ar">↓</div>
+                        <div class="cn">BRANCH <b>feat/settings-page</b></div>
+                        <div class="ar">↓</div>
+                        <div class="cn">SESSION <b>SES·A4C1 · CLAUDE</b></div>
+                      </div>
+                    </div>
+                    <div class="tcard"><span class="id">TSK·109</span><span class="ti">THEME TOKENS SWEEP</span><span class="m"><span>web/theme</span><span>P2</span></span></div>
+                  </div>
+                  <div class="bcol">
+                    <div class="t"><span class="j">審査</span><span>REVIEW</span><span class="n">02</span></div>
+                    <div class="tcard"><span class="id">TSK·097</span><span class="ti">PTY RESIZE FIX</span><span class="m"><span>server/pty</span><span>P1</span></span></div>
+                    <div class="tcard"><span class="id">TSK·093</span><span class="ti">SKILLS VIEWER</span><span class="m"><span>web/features</span><span>P2</span></span></div>
+                  </div>
+                </div>
+                <div class="row gap6" style="font-size:8px;color:var(--green-map);letter-spacing:.12em">
+                  <span class="stamp sm c-orange">TASK</span><span>→</span>
+                  <span class="stamp sm c-amber">WORKTREE</span><span>→</span>
+                  <span class="stamp sm c-amber">BRANCH</span><span>→</span>
+                  <span class="stamp sm c-mint">SESSION</span>
+                </div>
+              </div>
+
+              <!-- PANE 2 — AUTOMATION -->
+              <div class="pane" data-i="2">
+                <div class="zone-title"><span>AUTOMATION</span><span class="j">自動</span><span class="sp">2 SCHEDULED · 1 BACKGROUND</span></div>
+                <div class="jobs">
+                  <div class="jrow"><span class="jid">CRN·01</span><span class="jn">NIGHTLY SPEC SWEEP</span><span class="jk">0 2 * * *</span><span class="stamp sm c-mint">ARMED</span></div>
+                  <div class="jrow"><span class="jid">BGA·02</span><span class="jn">PICK READY · LABEL AGENT-OK</span><span class="jk">ON QUEUE</span><span class="stamp sm c-blue blink" id="jobStamp">WATCHING</span></div>
+                </div>
+                <div class="autoflow">
+                  <div class="slot" id="slotReady">
+                    <span class="h">READY 準備</span>
+                    <div class="tcard" id="autoCard"><span class="id">TSK·118</span><span class="ti">USAGE SPARKLINES</span></div>
+                  </div>
+                  <span class="ar">→</span>
+                  <div class="agentnode" id="agentNode"><span class="j">自動</span><div class="e">BACKGROUND AGENT</div><div class="run">処理中 · DISPATCHING</div></div>
+                  <span class="ar">→</span>
+                  <div class="slot" id="slotProg"><span class="h">IN PROGRESS 進行</span></div>
+                </div>
+                <div class="terminal" style="margin-top:auto">
+                  <div class="term-bar"><span>AUTOMATION LOG</span><span>自動記録</span><span class="dots"><i></i><i></i><i></i></span></div>
+                  <div class="term-body" id="autoLog" style="height:70px"></div>
+                </div>
+              </div>
+
+              <!-- PANE 3 — CONTEXT -->
+              <div class="pane" data-i="3">
+                <div class="zone-title"><span>AGENT CONTEXT</span><span class="j">文脈</span><span class="sp">ATTACHED SOURCES</span></div>
+                <div class="ctx" id="ctxWrap">
+                  <div class="cside">
+                    <div class="cchip" data-n="1"><span class="j">技能</span><span class="e">SKILLS</span><span class="ln"></span></div>
+                    <div class="cchip" data-n="2"><span class="j">規則</span><span class="e">RULES</span><span class="ln"></span></div>
+                    <div class="cchip" data-n="3"><span class="j">記憶</span><span class="e">MEMORY</span><span class="ln"></span></div>
+                  </div>
+                  <div class="agentcore">
+                    <div class="j">代理</div>
+                    <div class="e">AGENT</div>
+                    <div class="c">CLAUDE · SES·A4C1</div>
+                  </div>
+                  <div class="cside r">
+                    <div class="cchip" data-n="4"><span class="j">設定</span><span class="e">CONFIG</span><span class="ln"></span></div>
+                    <div class="cchip" data-n="5"><span class="j">鉤</span><span class="e">HOOKS</span><span class="ln"></span></div>
+                    <div class="cchip" data-n="6"><span class="j">知識</span><span class="e">WIKI</span><span class="ln"></span></div>
+                  </div>
+                </div>
+                <div class="row gap10" style="justify-content:center">
+                  <span class="stamp sm c-orange" id="ctxCount">0 / 6 ATTACHED</span>
+                  <span class="stamp sm c-mint rv" id="ctxDone">GIVE THE ENVIRONMENT CONTEXT — NOT EVERY PROMPT</span>
+                </div>
+              </div>
+
+              <!-- PANE 4 — SYSTEM MONTAGE -->
+              <div class="pane" data-i="4">
+                <div class="zone-title"><span>EVERYTHING AROUND THE WORK</span><span class="j">系統</span><span class="sp">MONTAGE</span></div>
+                <div class="montage" id="montage">
+                  <div class="tile">
+                    <div class="th"><span class="j">探索</span><span>EXPLORER</span></div>
+                    <div class="tb">server/<br><b>&nbsp;index.mjs</b><br>&nbsp;agents.mjs<br>web/src/features/<br><b>&nbsp;tasks/</b></div>
+                  </div>
+                  <div class="tile">
+                    <div class="th"><span class="j">記録</span><span>TRANSCRIPTS</span></div>
+                    <div class="tb">14:02 <b>USER</b> ADD CRON EDITOR<br>14:02 ASSISTANT …<br>14:03 TOOL EDIT ×4<br>14:05 <b>DONE</b></div>
+                  </div>
+                  <div class="tile">
+                    <div class="th"><span class="j">履歴</span><span>HISTORY</span></div>
+                    <div class="tb"><b>SES·A4C1</b> 41 TURNS<br>SES·77B2 18 TURNS<br>SES·1D09 06 TURNS</div>
+                  </div>
+                  <div class="tile">
+                    <div class="th"><span class="j">消費</span><span>USAGE</span></div>
+                    <div class="spark" id="spark"></div>
+                    <div class="tb">TODAY <b class="tabnum" id="usdToday">$18.42</b></div>
+                  </div>
+                  <div class="tile">
+                    <div class="th"><span class="j">工程</span><span>PROCESSES</span></div>
+                    <div class="tb">PID 4412 <b>claude</b><br>PID 4419 node<br>PID 4501 <b>pty</b></div>
+                  </div>
+                  <div class="tile">
+                    <div class="th"><span class="j">状態</span><span>STATUS</span></div>
+                    <div class="mbar"><div class="t"><span>CPU</span><b class="tabnum" id="cpuV">34%</b></div><div class="seg" id="cpuSeg"></div></div>
+                    <div class="mbar"><div class="t"><span>MEM</span><b class="tabnum" id="memV">61%</b></div><div class="seg" id="memSeg"></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <aside class="app-rail">
+              <div class="mbar"><div class="t"><span>TOKENS/MIN</span><b class="tabnum" id="tpmV">1.2K</b></div><div class="vcols" id="tpm"></div></div>
+              <div class="mbar"><div class="t"><span>CPU</span><b class="tabnum" id="cpu2V">34%</b></div><div class="seg" id="cpu2Seg"></div></div>
+              <div class="mbar"><div class="t"><span>MEM</span><b class="tabnum" id="mem2V">61%</b></div><div class="seg" id="mem2Seg"></div></div>
+              <div class="nstat" style="border:0;padding:0">
+                <span class="k">SESSION SPEND</span>
+                <span class="v tabnum" id="spendV" style="font-size:26px">$4.18</span>
+                <span class="f">GLOBAL STATUSLINE</span>
+              </div>
+              <div class="meta" style="margin-top:auto">STATE:<b>~/.singularity</b><br>TRUST:<b>REPO ROOT</b><br>BIND:<b>127.0.0.1</b></div>
+            </aside>
+          </div>
+          <div class="app-foot">
+            <span>WS <span style="color:var(--mint)">CONNECTED</span></span>
+            <span>REST <span style="color:var(--mint)">OK</span></span>
+            <span class="sp">PANE <span style="color:var(--amber)" id="paneName">SESSIONS</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- zoom out to localhost -->
+  <div style="height:280vh" data-sticky data-steps="8" id="secZoom">
+    <div class="sticky">
+      <div class="zoomstage">
+        <div class="zoombox" id="zoomBox">
+          <div class="machine" id="machine">
+            <span class="mlabel">DEVELOPER MACHINE · 開発機</span>
+            <div class="miniapp">
+              <div class="c"><div class="ln m"></div><div class="ln"></div><div class="ln"></div><div class="ln"></div><div class="ln"></div></div>
+              <div class="c"><div class="ln m"></div><div class="ln a"></div><div class="ln"></div><div class="ln m"></div><div class="ln"></div><div class="ln a"></div><div class="ln"></div><div class="ln"></div><div class="ln m"></div></div>
+              <div class="c"><div class="ln a"></div><div class="ln"></div><div class="ln m"></div><div class="ln"></div></div>
+            </div>
+            <div class="mfoot"></div>
+          </div>
+        </div>
+        <div class="col gap10" style="align-items:center;text-align:center">
+          <div class="h1" id="zoomLine1" style="visibility:hidden">AND ALL OF THIS RUNS ON LOCALHOST.</div>
+          <div class="hostline" id="zoomLine2" style="visibility:hidden">127.0.0.1</div>
+          <div class="note" id="zoomLine3" style="visibility:hidden">NO CLOUD REGION · NO TENANT · NO UPLOAD · 局所</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== CHAPTER 03 — BACKEND -->
+<section class="chapter" id="ch3" data-ch="2">
+
+  <div class="scene" data-reveal style="min-height:70vh">
+    <div class="wrap">
+      <div class="chaptitle rv">
+        <span class="n">03</span>
+        <span>
+          <span class="t">BACKEND</span>
+          <div class="s">背面 · A LOT IS HAPPENING BEHIND ONE LOCALHOST URL</div>
+        </span>
+      </div>
+      <div class="rv lede mt18">NO KUBERNETES. NO REGIONS. NO LOAD BALANCERS. A SMALL LOCAL DAEMON THAT COORDINATES REAL PROCESSES ON YOUR MACHINE.</div>
+    </div>
+  </div>
+
+  <!-- B1 daemon -->
+  <div class="scene" data-reveal>
+    <div class="wrap col gap26">
+      <div class="sec-head rv"><span class="idx">01</span><span class="k">常駐</span><h2>ONE LOCAL DAEMON.</h2><span class="rule"></span></div>
+      <div class="machine rv" style="margin:0 auto">
+        <span class="mlabel">DEVELOPER MACHINE · 開発機</span>
+        <div class="diagram" style="padding:22px 10px">
+          <div class="node mint"><div class="j">画面</div><div class="e">BROWSER</div><div class="s">PRESENTATION</div></div>
+          <div class="link">
+            <span>REST</span>
+            <span class="bar mint"></span>
+            <span class="bar"></span>
+            <span class="g">WEBSOCKET</span>
+          </div>
+          <div class="node"><div class="j">常駐</div><div class="e">SINGULARITY DAEMON</div><div class="s">FASTIFY + WS · COORDINATION</div></div>
+        </div>
+        <div class="mfoot"></div>
+      </div>
+      <div class="row gap14 rv" style="justify-content:center">
+        <span class="stamp c-mint">THE BROWSER IS PRESENTATION</span>
+        <span class="stamp c-orange">THE DAEMON IS COORDINATION</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- B2 PTY sessions -->
+  <div style="height:220vh" data-sticky data-steps="6" id="secPty">
+    <div class="sticky">
+      <div class="wrap col gap26" style="width:100%">
+        <div class="sec-head"><span class="idx">02</span><span class="k">管理</span><h2>THE DAEMON MANAGES THE AGENTS.</h2><span class="rule"></span></div>
+        <div class="diagram">
+          <div class="node mint sm"><div class="j">画面</div><div class="e">BROWSER</div></div>
+          <div class="link"><span class="bar mint"></span><span class="g">REST + WS</span></div>
+          <div class="node"><div class="j">常駐</div><div class="e">DAEMON</div><div class="s">PTY SUPERVISOR</div></div>
+          <div class="link"><span class="bar" id="ptyBar"></span><span class="g">SPAWN · PTY</span></div>
+          <div class="col gap6" id="ptyStack">
+            <div class="node sm blue" data-n="1"><div class="j">代理</div><div class="e">CLAUDE</div><div class="s">SES·A4C1</div></div>
+            <div class="node sm blue" data-n="2"><div class="j">代理</div><div class="e">CLAUDE</div><div class="s">SES·77B2</div></div>
+            <div class="node sm blue" data-n="3"><div class="j">代理</div><div class="e">CLAUDE</div><div class="s">SES·1D09</div></div>
+          </div>
+        </div>
+        <div class="terminal" style="max-width:760px;margin:0 auto;width:100%">
+          <div class="term-bar"><span>DAEMON · PTY SUPERVISOR</span><span class="dots"><i></i><i></i><i></i></span></div>
+          <div class="term-body" id="ptyLog" style="height:96px"></div>
+        </div>
+        <div class="row gap14" style="justify-content:center">
+          <span class="stamp c-orange">SINGULARITY ISN'T PRETENDING TO BE THE AGENT</span>
+          <span class="stamp c-mint">IT MANAGES THE ENVIRONMENT AROUND THEM</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- B3 task anatomy -->
+  <div style="height:230vh" data-sticky data-steps="6" id="secTask">
+    <div class="sticky">
+      <div class="wrap col gap18" style="width:100%">
+        <div class="sec-head"><span class="idx">03</span><span class="k">構造</span><h2>A TASK IS MORE THAN A CARD.</h2><span class="rule"></span></div>
+        <div class="row gap26" style="align-items:flex-start;justify-content:center">
+          <div class="col gap10" style="align-items:center">
+            <div class="node" style="min-width:190px"><div class="j">任務</div><div class="e">TASK · TSK·104</div><div class="s">IMPLEMENT SETTINGS PAGE</div></div>
+            <div class="vlink" data-n="1" style="visibility:hidden"></div>
+            <div class="row gap10" style="justify-content:center">
+              <div class="node sm" data-n="1" style="visibility:hidden"><div class="j">作業</div><div class="e">WORKTREE</div><div class="s">.worktrees/settings-page</div></div>
+              <div class="node sm" data-n="2" style="visibility:hidden"><div class="j">分岐</div><div class="e">BRANCH</div><div class="s">feat/settings-page</div></div>
+              <div class="node sm mint" data-n="3" style="visibility:hidden"><div class="j">対話</div><div class="e">SESSION</div><div class="s">SES·A4C1</div></div>
+            </div>
+          </div>
+        </div>
+        <div class="col gap6 mt18" id="wtRows">
+          <div class="wt" data-n="4" style="visibility:hidden"><span class="n">FEATURE A</span><span class="p">.worktrees/feature-a</span><span class="sp"><span class="stamp sm c-mint">SES·A4C1</span><span class="stamp sm c-amber">RUNNING</span></span></div>
+          <div class="wt" data-n="5" style="visibility:hidden"><span class="n">FEATURE B</span><span class="p">.worktrees/feature-b</span><span class="sp"><span class="stamp sm c-mint">SES·77B2</span><span class="stamp sm c-blue">IDLE</span></span></div>
+          <div class="wt" data-n="5" style="visibility:hidden"><span class="n">BUG C</span><span class="p">.worktrees/bug-c</span><span class="sp"><span class="stamp sm c-mint">SES·1D09</span><span class="stamp sm c-mint">RUNNING</span></span></div>
+        </div>
+        <div class="note" style="text-align:center">THREE AGENTS. THREE CHECKOUTS. ONE REPOSITORY. NOBODY OVERWRITES ANYBODY.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- B4 local state -->
+  <div class="scene" data-reveal>
+    <div class="wrap col gap26">
+      <div class="sec-head rv"><span class="idx">04</span><span class="k">局所</span><h2>LOCAL STATE. LOCAL MACHINE.</h2><span class="rule"></span></div>
+      <div class="row gap18" style="align-items:stretch">
+        <div class="panel rv" style="flex:1 1 300px">
+          <div class="zone-title"><span>APP HOME</span><span class="j">本拠</span><span class="sp">OWNED STATE</span></div>
+          <div class="tree">
+            <span class="o">~/.singularity</span><br>
+            &nbsp;├─ state/ <span class="a">durable</span><br>
+            &nbsp;│&nbsp;&nbsp;├─ <b>agents.json</b> <span class="a">registry</span><br>
+            &nbsp;│&nbsp;&nbsp;├─ <b>tasks.json</b><br>
+            &nbsp;│&nbsp;&nbsp;├─ <b>crons.json</b> <span class="a">scheduled jobs</span><br>
+            &nbsp;│&nbsp;&nbsp;├─ <b>background.json</b><br>
+            &nbsp;│&nbsp;&nbsp;└─ <b>*-roots.json</b> <span class="a">picker roots</span><br>
+            &nbsp;└─ cache/ <span class="a">disposable</span>
+          </div>
+        </div>
+        <div class="panel rv" style="flex:1 1 300px">
+          <div class="zone-title"><span>BESIDE YOUR CODE</span><span class="j">併設</span><span class="sp">TRUSTED ROOT</span></div>
+          <div class="tree">
+            <span class="o">your-repo/</span><br>
+            &nbsp;├─ src/<br>
+            &nbsp;├─ <b>.worktrees/</b><br>
+            &nbsp;│&nbsp;&nbsp;├─ feature-a<br>
+            &nbsp;│&nbsp;&nbsp;├─ feature-b<br>
+            &nbsp;│&nbsp;&nbsp;└─ bug-c<br>
+            &nbsp;└─ <b>.tickets/</b><br>
+            &nbsp;&nbsp;&nbsp;&nbsp;└─ TSK·104/ <span class="a">plan · spec · notes</span>
+          </div>
+        </div>
+      </div>
+      <div class="row gap14 rv" style="justify-content:center">
+        <span class="stamp c-mint">A DEVELOPER TOOL RUNNING BESIDE YOUR CODE</span>
+        <span class="stamp c-red">NOT A PLATFORM YOUR CODE HAS TO LIVE INSIDE</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- B5 loopback -->
+  <div class="scene" data-reveal>
+    <div class="wrap col gap26" style="align-items:center;text-align:center">
+      <div class="rv"><span class="hostline">127.0.0.1</span></div>
+      <div class="rv row gap10" style="justify-content:center">
+        <span class="stamp c-red blink">LOOPBACK ONLY</span>
+        <span class="stamp c-orange">局所結束</span>
+      </div>
+      <div class="rv lede" style="text-align:center;max-width:56ch">SINGULARITY BINDS LOCALLY ON PURPOSE. THE DAEMON CAN SPAWN AGENTS WITH FILESYSTEM ACCESS — SO THE CONTROL PLANE STAYS ON THE MACHINE THAT ALREADY TRUSTS THEM.</div>
+      <div class="rv h2" style="max-width:30ch">YOUR AGENTS ALREADY HAVE ACCESS TO YOUR MACHINE. THE CONTROL PLANE DOESN'T NEED TO BE ON THE INTERNET.</div>
+      <div class="rv marquee" style="width:100%;max-width:900px">
+        <div class="track"><span>ORIGIN ALLOWLIST ACTIVE</span><span>OPTIONAL TOKEN GATE</span><span>NEVER BIND 0.0.0.0</span><span>PRODUCT PRINCIPLE — NOT A SECURITY LECTURE</span><span>ORIGIN ALLOWLIST ACTIVE</span><span>OPTIONAL TOKEN GATE</span><span>NEVER BIND 0.0.0.0</span><span>PRODUCT PRINCIPLE — NOT A SECURITY LECTURE</span></div>
+      </div>
+      <div class="rv h1 mt18" style="max-width:24ch">SO WHAT DOES BUILDING THE CONTROL PLANE ITSELF LOOK LIKE?</div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== CHAPTER 04 — FRONTEND -->
+<section class="chapter" id="ch4" data-ch="3">
+
+  <div class="scene" data-reveal style="min-height:70vh">
+    <div class="wrap">
+      <div class="chaptitle rv">
+        <span class="n">04</span>
+        <span>
+          <span class="t">FRONTEND</span>
+          <div class="s">前面 · LESSONS FROM ACTUALLY BUILDING IT</div>
+        </span>
+      </div>
+      <div class="rv lede mt18">FIVE THINGS WE LEARNED SHIPPING SINGULARITY'S INTERFACE WITH AGENTS.</div>
+    </div>
+  </div>
+
+  <!-- F1 skill -->
+  <div style="height:230vh" data-sticky data-steps="6" id="secSkill">
+    <div class="sticky">
+      <div class="wrap col gap18" style="width:100%">
+        <div class="sec-head"><span class="idx">01</span><span class="k">技能</span><h2>/ZAPAC-MATERIAL-UI</h2><span class="rule"></span></div>
+        <div class="note">THE SKILL THAT TAUGHT OUR AGENT THE ZAPAC MUI THEME</div>
+        <div class="row gap26" style="justify-content:center;align-items:center">
+          <div class="node" data-n="0" style="min-width:190px"><div class="j">技能</div><div class="e">/ZAPAC-MATERIAL-UI</div><div class="s">SKILL · COMPONENT LIBRARY</div></div>
+          <div class="link"><span class="bar" id="skillBar" style="visibility:hidden"></span><span class="g" id="skillG" style="visibility:hidden">LOADED INTO CONTEXT</span></div>
+          <div class="node mint" data-n="1" style="visibility:hidden"><div class="j">代理</div><div class="e">AGENT</div><div class="s">KNOWS WHAT EXISTS + WHEN TO USE IT</div></div>
+        </div>
+        <div class="row gap6" style="justify-content:center" id="skillParts">
+          <span class="stamp c-mint" data-n="2" style="visibility:hidden">STATCARD</span>
+          <span class="stamp c-mint" data-n="2" style="visibility:hidden">PANELKIT</span>
+          <span class="stamp c-mint" data-n="3" style="visibility:hidden">CMEDITOR</span>
+          <span class="stamp c-mint" data-n="3" style="visibility:hidden">SPARKLINE</span>
+          <span class="stamp c-mint" data-n="4" style="visibility:hidden">TASKCARD</span>
+          <span class="stamp c-mint" data-n="4" style="visibility:hidden">SESSIONRAIL</span>
+        </div>
+        <div class="terminal" style="max-width:700px;margin:0 auto;width:100%">
+          <div class="term-bar"><span>SESSION</span><span class="dots"><i></i><i></i><i></i></span></div>
+          <div class="term-body" id="skillLog" style="height:74px"></div>
+        </div>
+        <div class="col gap6" style="align-items:center;text-align:center">
+          <div class="h2" data-n="5" style="visibility:hidden">YOU DON'T HAVE TO EXPLAIN THE DESIGN SYSTEM IN EVERY PROMPT ANYMORE.</div>
+          <div class="mega mint" data-n="5" style="visibility:hidden;font-size:clamp(30px,6vw,74px)">TEACH IT ONCE.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- F2 phosphor pipeline -->
+  <div style="height:300vh" data-sticky data-steps="7" id="secPhos">
+    <div class="sticky">
+      <div class="wrap col gap18" style="width:100%">
+        <div class="sec-head"><span class="idx">02</span><span class="k">燐光</span><h2>FROM EVANGELION MOOD BOARD TO PRODUCTION DARK THEME.</h2><span class="rule"></span></div>
+        <div class="note">THE PHOSPHOR PIPELINE — A SECOND THEME BESIDE THE ZAPAC MUI THEME: DARK-MODE ONLY, STYLIZED, BUILT FROM 90'S ANIME VIDEO REFERENCES.</div>
+        <div class="flow" id="phosFlow">
+          <div class="fstep"><div class="node"><span class="j">参照</span><span class="e">VIDEO REFS</span></div><div class="sl">EVANGELION, MOSTLY</div></div>
+          <div class="fconn"></div>
+          <div class="fstep"><div class="node"><span class="j">試作</span><span class="e">EXPERIMENTS</span></div><div class="sl">/FRONTEND-DESIGN · /IMPECCABLE</div></div>
+          <div class="fconn"></div>
+          <div class="fstep"><div class="node"><span class="j">見本</span><span class="e">4–5 LAYOUTS</span></div><div class="sl">SAMPLE SCREENS</div></div>
+          <div class="fconn"></div>
+          <div class="fstep"><div class="node"><span class="j">体系</span><span class="e">DESIGN SYSTEM</span></div><div class="sl">/DESIGN-SYSTEM → DESIGN-SYSTEM.HTML + DESIGN.MD</div></div>
+          <div class="fconn"></div>
+          <div class="fstep"><div class="node"><span class="j">主題</span><span class="e">MUI THEME</span></div><div class="sl">/MATERIAL-UI-THEMING</div></div>
+        </div>
+        <div class="row gap10" style="justify-content:center;margin-top:6px">
+          <span class="stamp c-amber" id="phosCmd">/FRONTEND-DESIGN</span>
+          <span class="stamp c-orange" id="phosOut">VIDEO REFERENCES → EXPERIMENTS</span>
+        </div>
+        <div class="col gap6" style="align-items:center;text-align:center;margin-top:10px">
+          <div class="h2" data-n="6" style="visibility:hidden">SAME FIVE STEPS.</div>
+          <div class="mega mint" data-n="6" style="visibility:hidden;font-size:clamp(26px,5vw,62px)">NO MATTER THE LOOK YOU'RE GOING FOR.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- F3 orchestration -->
+  <div style="height:260vh" data-sticky data-steps="6" id="secOrch">
+    <div class="sticky">
+      <div class="wrap col gap18" style="width:100%">
+        <div class="sec-head"><span class="idx">03</span><span class="k">編成</span><h2>OPUS PROPOSES. SONNET BUILDS. OPUS CHECKS.</h2><span class="rule"></span></div>
+        <div class="skillband" data-n="0">/ZAPAC-MATERIAL-UI — SHARED CONTEXT AROUND EVERY AGENT · 共有文脈</div>
+        <div class="orch">
+          <div class="row gap10" style="justify-content:center">
+            <span class="stamp c-amber" data-n="0">ONE-SHOT.HTML</span>
+            <span class="stamp c-orange" data-n="0">= THE VISUAL TARGET</span>
+          </div>
+          <div class="node" data-n="1" style="visibility:hidden;min-width:230px">
+            <div class="j">立案</div><div class="e">OPUS · PLAN</div>
+            <div class="s">/OPSX:PROPOSE MAKE THIS APPLICATION LOOK LIKE ONE-SHOT.HTML</div>
+          </div>
+          <div class="vlink" data-n="2" style="visibility:hidden"></div>
+          <div class="fanout">
+            <div class="node sm mint" data-n="2" style="visibility:hidden"><div class="j">実装</div><div class="e">SONNET</div><div class="s">SESSIONS SCREEN</div></div>
+            <div class="node sm mint" data-n="3" style="visibility:hidden"><div class="j">実装</div><div class="e">SONNET</div><div class="s">TASK BOARD</div></div>
+            <div class="node sm mint" data-n="3" style="visibility:hidden"><div class="j">実装</div><div class="e">SONNET</div><div class="s">SETTINGS + RAILS</div></div>
+          </div>
+          <div class="vlink" data-n="4" style="visibility:hidden"></div>
+          <div class="node blue" data-n="4" style="visibility:hidden;min-width:200px"><div class="j">審査</div><div class="e">OPUS · CHECK</div><div class="s">DRIFT · CONSISTENCY · TOKENS</div></div>
+        </div>
+        <div class="lede" style="text-align:center;margin:0 auto">ONE GOOD ONE-SHOT HTML MOCKUP, BASED ON THE APP'S EXISTING LAYOUT AND FUNCTIONALITY. THE DIFFICULT PART WAS APPLYING IT ACROSS MANY COMPONENTS AND SCREENS WITHOUT LETTING THE DESIGN DRIFT.</div>
+        <div class="row gap10" style="justify-content:center">
+          <span class="stamp c-mint" data-n="5" style="visibility:hidden">SONNET BUILDS THE SCREENS</span>
+          <span class="stamp c-blue" data-n="5" style="visibility:hidden">OPUS CHECKS THE WORK</span>
+          <span class="stamp c-amber" data-n="5" style="visibility:hidden">THE SKILL KEEPS EVERYTHING ON-BRAND</span>
+        </div>
+        <div class="mega mint" data-n="5" style="visibility:hidden;font-size:clamp(24px,4vw,52px);text-align:center">NOBODY DRIFTS.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- F4 git -->
+  <div style="height:300vh" data-sticky data-steps="7" id="secGit">
+    <div class="sticky">
+      <div class="wrap col gap18" style="width:100%">
+        <div class="sec-head"><span class="idx">04</span><span class="k">再結合</span><h2 id="gitHead">THE AI WRITES THE CODE.</h2><span class="rule"></span></div>
+        <div class="gitbox"><svg id="gitSvg" viewBox="0 0 620 210" preserveAspectRatio="xMidYMid meet" role="img" aria-label="GIT GRAPH"></svg></div>
+        <div class="row gap10" style="justify-content:center">
+          <span class="stamp c-mint">SAM'S CHANGES MOVE FORWARD</span>
+          <span class="stamp c-orange">MAIN MOVES UNDERNEATH</span>
+          <span class="stamp c-red" id="behindStamp" style="visibility:hidden">BEHIND · <span class="tabnum" id="behindN">4</span> COMMITS</span>
+        </div>
+        <div class="lede" style="text-align:center;margin:0 auto">SAM WAS SHIPPING FEATURES FAST, AND THE REPO KEPT MOVING UNDER ME. I FOUND MYSELF CONSTANTLY REBASING ON MAIN. TURNS OUT YOU CAN ASK CLAUDE TO REBASE FOR YOU.</div>
+        <div class="col gap6" style="align-items:center;text-align:center">
+          <div class="mega mint" id="gitEnd1" style="visibility:hidden;font-size:clamp(30px,6vw,70px)">GIT GUD.</div>
+          <div class="h2" id="gitEnd2" style="visibility:hidden">OR DON'T. JUST ASK CLAUDE TO DO IT FOR YOU.</div>
+          <div class="note" id="gitEnd3" style="visibility:hidden">IN AN ERA WHERE CODE IS CHEAP, YOUR ABILITY TO MANAGE AND MOVE IT BECOMES MORE VALUABLE.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- F5 review -->
+  <div style="height:300vh" data-sticky data-steps="7" id="secRev">
+    <div class="sticky">
+      <div class="wrap" style="width:100%">
+        <div class="sec-head"><span class="idx">05</span><span class="k">審査</span><h2 id="revHead">A FEW THOUSAND LINES.</h2><span class="rule"></span></div>
+        <div class="diffwrap">
+          <div class="diff">
+            <div class="dh"><b>MR !248</b><span>PHOSPHOR THEME ACROSS SCREENS</span><span class="sp"></span>
+              <span class="stamp sm c-mint">+3,412</span><span class="stamp sm c-red">−1,190</span></div>
+            <div class="db" id="diffBody"></div>
+          </div>
+          <div class="gates" id="gates">
+            <div class="gate" data-g="0"><span class="cmd">/code-review-expert</span><span class="run">審査中 · RUNNING</span><span class="r">4 COMMENTS · 1 BUG FLAGGED</span></div>
+            <div class="gate" data-g="1"><span class="cmd">/code-review</span><span class="run">審査中 · RUNNING</span><span class="r">6 NITS · 2 SIMPLIFICATIONS</span></div>
+            <div class="gate" data-g="2"><span class="cmd">/fullstack-dev-skills:code-reviewer</span><span class="run">審査中 · RUNNING</span><span class="r">DIFF REDUCED · 38 LINES</span></div>
+            <div class="gate human" data-g="3"><span class="cmd" style="text-transform:uppercase;font-family:var(--cond);font-weight:700;letter-spacing:.12em">人間確認 · HUMAN REVIEW</span><span class="r">EVERYTHING STOPS HERE</span></div>
+            <div class="col gap6 mt10">
+              <div class="h3" id="revEnd1" style="visibility:hidden">ANY MR SKILL WILL POLISH A DIFF.</div>
+              <div class="h2" id="revEnd2" style="visibility:hidden">NONE OF THEM REPLACE READING YOUR OWN MR BEFORE SOMEONE ELSE HAS TO.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== ENDING -->
+<section class="chapter" id="chEnd" data-ch="3">
+  <div style="height:240vh" data-sticky data-steps="6" id="secEnd">
+    <div class="sticky">
+      <div class="col gap18" style="align-items:center;width:100%">
+        <div class="machine" id="endMachine" style="width:min(760px,94vw)">
+          <span class="mlabel">127.0.0.1:4317 · SINGULARITY</span>
+          <div class="miniapp" style="height:180px">
+            <div class="c"><div class="ln m"></div><div class="ln"></div><div class="ln"></div><div class="ln"></div></div>
+            <div class="c" id="endMain"><div class="ln m"></div><div class="ln a"></div><div class="ln"></div><div class="ln m"></div><div class="ln"></div><div class="ln a"></div><div class="ln"></div></div>
+            <div class="c"><div class="ln a"></div><div class="ln"></div><div class="ln m"></div></div>
+          </div>
+          <div class="mfoot"></div>
+        </div>
+        <div class="row gap6" id="endStamps" style="justify-content:center">
+          <span class="stamp sm c-mint">4 SESSIONS PRODUCING OUTPUT</span>
+          <span class="stamp sm c-amber">TASKS MOVING</span>
+          <span class="stamp sm c-blue">USAGE UPDATING</span>
+        </div>
+        <div class="credits">
+          <div class="kh" data-n="3" style="visibility:hidden">特異点</div>
+          <div class="mega" data-n="3" style="visibility:hidden;font-size:clamp(38px,9vw,120px)">SINGULARITY</div>
+          <div class="h2" data-n="4" style="visibility:hidden;max-width:24ch">ONE CONTROL PLANE FOR YOUR WHOLE FLEET OF CODING AGENTS.</div>
+          <div class="note" data-n="4" style="visibility:hidden">SAM × JAIRUS</div>
+          <div class="cmdline" data-n="5" style="visibility:hidden"><span class="p">$</span> pnpm start<span class="caret" style="margin-left:6px"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<script>
+(function(){
+"use strict";
+var $=function(s,r){return (r||document).querySelector(s)};
+var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+var RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+var rnd=function(a,b){return a+Math.random()*(b-a)};
+var pad=function(n){return String(n).padStart(2,'0')};
+
+/* ---------------------------------------------------------- clock */
+function clock(){
+  var d=new Date();
+  $('#clkH').textContent=pad(d.getHours());
+  $('#clkM').textContent=pad(d.getMinutes());
+  $('#clkS').textContent=pad(d.getSeconds());
+}
+clock(); setInterval(clock,1000);
+
+/* ---------------------------------------------------------- reveal on enter */
+function revealScene(s){
+  var items=$$('.rv',s);
+  items.forEach(function(el,i){
+    if(RM){el.classList.add('on');return}
+    setTimeout(function(){el.classList.add('on')}, i*110);
+  });
+}
+var io=new IntersectionObserver(function(es){
+  es.forEach(function(e){ if(e.isIntersecting){ revealScene(e.target); io.unobserve(e.target); } });
+},{threshold:.28});
+$$('[data-reveal]').forEach(function(s){io.observe(s)});
+
+/* ---------------------------------------------------------- chapter rail */
+var railLinks=$$('#rail a');
+var chapNames=['CH·01 起動 — ORIENTATION','CH·02 製品 — THE PRODUCT','CH·03 背面 — THE LOCAL BACKEND','CH·04 前面 — BUILDING IT'];
+var chio=new IntersectionObserver(function(es){
+  es.forEach(function(e){
+    if(!e.isIntersecting)return;
+    var n=+e.target.dataset.ch;
+    railLinks.forEach(function(a,i){a.classList.toggle('on',i===n)});
+    $('#hnote').textContent=chapNames[n];
+  });
+},{rootMargin:'-45% 0px -45% 0px'});
+$$('.chapter').forEach(function(c){chio.observe(c)});
+
+/* ---------------------------------------------------------- sticky step engine */
+var stickies=$$('[data-sticky]');
+var handlers={};
+function onStep(id,fn){handlers[id]=fn}
+var ticking=false;
+function frame(){
+  ticking=false;
+  var vh=window.innerHeight;
+  stickies.forEach(function(s){
+    var r=s.getBoundingClientRect();
+    var span=s.offsetHeight-vh;
+    var p=span>0?(-r.top)/span:0;
+    p=Math.max(0,Math.min(1,p));
+    var steps=+s.dataset.steps||1;
+    var i=Math.max(0,Math.min(steps-1,Math.floor(p*steps)));
+    if(s.dataset.i!==String(i)){
+      s.dataset.i=String(i);
+      var h=handlers[s.id];
+      if(h)h(i,p);
+    }
+  });
+  var doc=document.documentElement;
+  var tot=doc.scrollHeight-vh;
+  $('#prog').style.width=(tot>0?(doc.scrollTop/tot)*100:0)+'%';
+}
+function onScroll(){ if(!ticking){ticking=true;requestAnimationFrame(frame)} }
+window.addEventListener('scroll',onScroll,{passive:true});
+window.addEventListener('resize',onScroll);
+
+/* ---------------------------------------------------------- feed pools */
+var LINES=[
+  {t:'READ server/index.mjs',v:'OK'},
+  {t:'READ server/agents.mjs',v:'OK'},
+  {t:'EDIT web/src/features/tasks',v:'OK'},
+  {t:'EDIT web/src/theme/phosphor.js',v:'OK'},
+  {t:'GREP "reg(" server/',v:'12'},
+  {t:'TEST server/tasks.test.mjs',v:'PASS'},
+  {t:'TEST server/pty.test.mjs',v:'PASS'},
+  {t:'BUILD web → dist',v:'OK'},
+  {t:'» pnpm test',v:'RUN'},
+  {t:'» git rebase main',v:'OK'},
+  {t:'WRITE .tickets/TSK-104/plan.md',v:'OK'},
+  {t:'SPAWN pty claude --resume',v:'OK'},
+  {t:'LINT web/src',v:'OK'},
+  {t:'DIFF 14 files',v:'OK'},
+  {t:'AWAITING INPUT',v:'WAIT'}
+];
+function feedRow(o){
+  var d=document.createElement('div');
+  d.className='trow';
+  d.innerHTML='<span class="l">'+o.t+'</span><span class="d"></span><span class="v'+(o.v==='FAIL'?' fail':(o.v==='WAIT'?' wait':''))+'">'+o.v+'</span>';
+  return d;
+}
+function pushFeed(el,max){
+  if(!el||el.offsetParent===null)return;
+  var o=LINES[(Math.random()*LINES.length)|0];
+  el.appendChild(feedRow(o));
+  while(el.children.length>max)el.removeChild(el.firstChild);
+}
+function pushPlain(el,txt,max){
+  if(!el)return;
+  var d=document.createElement('div');
+  d.className='trow';
+  d.innerHTML='<span class="l">'+txt+'</span>';
+  el.appendChild(d);
+  while(el.children.length>max)el.removeChild(el.firstChild);
+}
+
+/* ---------------------------------------------------------- HERO chaos */
+var AGENTS=[
+  {id:'AGENT 01',repo:'singularity/main',s:'RUN',x:'4%',y:'12%',r:'-2deg'},
+  {id:'AGENT 02',repo:'web/features',s:'RUN',x:'66%',y:'8%',r:'2.5deg'},
+  {id:'AGENT 03',repo:'server/pty',s:'WAIT',x:'12%',y:'56%',r:'1.5deg'},
+  {id:'AGENT 04',repo:'docs/specs',s:'RUN',x:'70%',y:'52%',r:'-3deg'},
+  {id:'AGENT 05',repo:'theme/phosphor',s:'RUN',x:'36%',y:'4%',r:'-1deg'},
+  {id:'AGENT 06',repo:'bug/pty-resize',s:'BLOCK',x:'40%',y:'62%',r:'3deg'},
+  {id:'AGENT 07',repo:'wiki/root',s:'WAIT',x:'2%',y:'34%',r:'2deg'},
+  {id:'AGENT 08',repo:'e2e/suite',s:'RUN',x:'76%',y:'30%',r:'-2deg'}
+];
+var winsEl=$('#wins');
+AGENTS.forEach(function(a,i){
+  var d=document.createElement('div');
+  d.className='win rv';
+  d.dataset.s=a.s;
+  d.style.setProperty('--x',a.x); d.style.setProperty('--y',a.y); d.style.setProperty('--r',a.r);
+  d.innerHTML='<div class="wtop"><b>'+a.id+'</b><span>'+a.repo+'</span><span class="st">'+a.s+'</span></div><div class="feed"></div>';
+  winsEl.appendChild(d);
+});
+var winEls=$$('.win',winsEl);
+var CHAOS_CAP=[
+  ['ONE AGENT. ONE TERMINAL. FINE.','セッション 01 — NOMINAL'],
+  ['TWO. STILL MANAGEABLE.','セッション 02 — NOMINAL'],
+  ['THREE. YOU START ALT-TABBING.','セッション 03 — 注意'],
+  ['FOUR. WHICH ONE ASKED A QUESTION?','セッション 04 — INPUT REQUIRED'],
+  ['FIVE. WHICH REPO WAS THAT IN?','セッション 05 — CONTEXT SPLIT'],
+  ['SIX. ONE OF THEM IS BLOCKED.','セッション 06 — BLOCKED'],
+  ['SEVEN. YOU LOST A WORKTREE.','セッション 07 — 制御困難'],
+  ['EIGHT. THIS IS NOT A WORKFLOW.','セッション 08 — 制御不能'],
+  ['THIS IS THE PROBLEM.','管理不能 — UNMANAGEABLE'],
+  ['SINGULARITY ORGANIZES THEM.','一望 — ONE VIEW'],
+  ['ONE PLACE TO SEE EVERYTHING.','制御面 — CONTROL PLANE ONLINE']
+];
+onStep('secChaos',function(i){
+  var chaos=$('#chaos');
+  var visible=Math.min(8,i+1);
+  winEls.forEach(function(w,k){ w.classList.toggle('on',k<visible); });
+  chaos.classList.toggle('overload',i===8);
+  chaos.classList.toggle('gridded',i>=9);
+  $('#chaosWord').textContent=i>=9?'SINGULARITY · CONTROL PLANE':(i===8?'TOO MANY':'SINGULARITY');
+  var c=CHAOS_CAP[Math.min(CHAOS_CAP.length-1,i)];
+  $('#chaosCap').textContent=c[0];
+  $('#chaosSub').textContent=c[1];
+  $('#sbAgents').textContent=pad(visible);
+  $('#modeStamp').textContent=i>=9?'ORGANIZED':(i>=6?'OVERLOAD':'LOOPBACK');
+  $('#modeStamp').className='stamp sm '+(i>=9?'c-mint':(i>=6?'c-red blink':'c-mint'));
+});
+
+/* ---------------------------------------------------------- APP: sessions */
+var SES=[
+  {id:'SES·A4C1',repo:'singularity · main',s:'RUN',tok:128400,usd:2.31},
+  {id:'SES·77B2',repo:'.worktrees/feature-a',s:'RUN',tok:96120,usd:1.44},
+  {id:'SES·1D09',repo:'.worktrees/bug-c',s:'WAIT',tok:41880,usd:.62},
+  {id:'SES·3F5E',repo:'.worktrees/feature-b',s:'IDLE',tok:22140,usd:.31}
+];
+var sesGrid=$('#sesGrid');
+SES.forEach(function(s){
+  var d=document.createElement('div');
+  d.className='ses'; d.dataset.s=s.s;
+  d.innerHTML='<div class="sh"><span class="id">'+s.id+'</span><span>'+s.repo+'</span><span class="st">'+s.s+'</span></div>'+
+    '<div class="feed"></div>'+
+    '<div class="sf"><span>TOKENS <b class="tk">0</b></span><span>COST <b class="cs">$0.00</b></span><span style="margin-left:auto">TURNS <b class="tn">0</b></span></div>';
+  sesGrid.appendChild(d);
+});
+var sesEls=$$('.ses',sesGrid);
+var sesState=SES.map(function(s){return {tok:s.tok,usd:s.usd,turns:(Math.random()*40|0)+8}});
+
+/* meters */
+function buildSeg(el,n){ if(!el)return; el.innerHTML=''; for(var i=0;i<n;i++){el.appendChild(document.createElement('i'))} }
+function setSeg(el,pct){
+  if(!el)return;
+  var kids=el.children, n=kids.length, lit=Math.round(pct/100*n);
+  for(var i=0;i<n;i++){
+    var c='';
+    if(i<lit){ c='on'; if(i>=n*0.75)c='on hot'; else if(i>=n*0.55)c='on warn'; }
+    kids[i].className=c;
+  }
+}
+['#cpuSeg','#memSeg','#cpu2Seg','#mem2Seg'].forEach(function(s){buildSeg($(s),16)});
+var tpmEl=$('#tpm');
+if(tpmEl){ for(var i=0;i<10;i++){ var c=document.createElement('div'); c.className='vcol'; for(var j=0;j<6;j++)c.appendChild(document.createElement('i')); tpmEl.appendChild(c);} }
+var sparkEl=$('#spark');
+if(sparkEl){ for(var i2=0;i2<16;i2++){ var b=document.createElement('i'); b.style.height=(20+Math.random()*80)+'%'; sparkEl.appendChild(b);} }
+
+/* ---------------------------------------------------------- global mechanical tick (≈4 Hz) */
+var tickN=0;
+setInterval(function(){
+  if(RM)return;
+  tickN++;
+  /* hero windows */
+  if(tickN%2===0)winEls.forEach(function(w,k){ if(w.classList.contains('on')&&Math.random()<.55){
+    var f=$('.feed',w); if(f&&f.offsetParent!==null){
+      var o=LINES[(Math.random()*LINES.length)|0];
+      var s=document.createElement('span'); s.className='l'; s.textContent=o.t+' … '+o.v;
+      f.appendChild(s); while(f.children.length>3)f.removeChild(f.firstChild);
+    }
+  }});
+  /* sessions */
+  sesEls.forEach(function(el,k){
+    if(el.offsetParent===null)return;
+    var st=sesState[k];
+    if(SES[k].s!=='IDLE'){ st.tok+=(Math.random()*900|0); st.usd+=Math.random()*0.012; if(Math.random()<.08)st.turns++; }
+    $('.tk',el).textContent=(st.tok/1000).toFixed(1)+'K';
+    $('.cs',el).textContent='$'+st.usd.toFixed(2);
+    $('.tn',el).textContent=st.turns;
+    if(SES[k].s!=='IDLE'&&Math.random()<.5){
+      var f=$('.feed',el);
+      var o=LINES[(Math.random()*LINES.length)|0];
+      var s2=document.createElement('span'); s2.className='l'; s2.textContent=o.t+' … '+o.v;
+      f.appendChild(s2); while(f.children.length>9)f.removeChild(f.firstChild);
+    }
+  });
+  /* telemetry */
+  var cpu=Math.round(28+Math.sin(tickN/7)*14+rnd(-4,4));
+  var mem=Math.round(58+Math.sin(tickN/11)*8+rnd(-2,2));
+  cpu=Math.max(4,Math.min(97,cpu)); mem=Math.max(10,Math.min(96,mem));
+  setSeg($('#cpuSeg'),cpu); setSeg($('#memSeg'),mem);
+  setSeg($('#cpu2Seg'),cpu); setSeg($('#mem2Seg'),mem);
+  var cv=$('#cpuV'); if(cv)cv.textContent=cpu+'%';
+  var mv=$('#memV'); if(mv)mv.textContent=mem+'%';
+  var cv2=$('#cpu2V'); if(cv2)cv2.textContent=cpu+'%';
+  var mv2=$('#mem2V'); if(mv2)mv2.textContent=mem+'%';
+  if(tpmEl&&tpmEl.offsetParent!==null){
+    $$('.vcol',tpmEl).forEach(function(col){
+      var lit=1+(Math.random()*6|0);
+      Array.prototype.forEach.call(col.children,function(seg,ix){ seg.className=ix<lit?'on':''; });
+    });
+    $('#tpmV').textContent=(0.8+Math.random()*1.6).toFixed(1)+'K';
+  }
+  var sp=$('#spendV'); if(sp&&sp.offsetParent!==null){ sp.textContent='$'+(4.18+tickN*0.004).toFixed(2); }
+  var ut=$('#usdToday'); if(ut&&ut.offsetParent!==null){ ut.textContent='$'+(18.42+tickN*0.01).toFixed(2); }
+  if(sparkEl&&sparkEl.offsetParent!==null&&tickN%3===0){
+    var bars=sparkEl.children;
+    for(var q=0;q<bars.length-1;q++)bars[q].style.height=bars[q+1].style.height;
+    bars[bars.length-1].style.height=(20+Math.random()*80)+'%';
+  }
+  /* status bar */
+  var tk=418.2+tickN*0.4;
+  $('#sbTok').textContent=tk.toFixed(1)+'K';
+  /* uptime */
+  var up=$('#appUp');
+  if(up){ var base=9669+tickN; up.textContent=pad((base/3600|0)%24)+':'+pad((base/60|0)%60)+':'+pad(base%60); }
+  /* logs */
+  if(tickN%3===0){ pushFeed($('#autoLog'),4); pushFeed($('#ptyLog'),6); }
+},260);
+
+/* ---------------------------------------------------------- APP step mapping */
+var PANE_NAMES=['SESSIONS','TASKS','AUTOMATION','CONTEXT','SYSTEM'];
+var stageApp=$('#stageApp');
+var montageTiles=$$('#montage .tile');
+onStep('secApp',function(i){
+  var pane=Math.min(4,Math.floor(i/5)), sub=i%5;
+  stageApp.dataset.pane=pane;
+  stageApp.dataset.sub=sub;
+  $('#paneName').textContent=PANE_NAMES[pane];
+  /* tasks pane sub-states */
+  var fc=$('#focusCard');
+  fc.classList.toggle('sel',pane===1&&sub>=1);
+  fc.classList.toggle('open',pane===1&&sub>=2&&sub<=3);
+  /* automation sub-states */
+  var card=$('#autoCard'), node=$('#agentNode');
+  if(pane===2){
+    card.classList.toggle('pick',sub===1);
+    node.classList.toggle('hot',sub>=2&&sub<=3);
+    if(sub<=1){ $('#slotReady').appendChild(card); }
+    else if(sub<=3){ node.appendChild(card); }
+    else { $('#slotProg').appendChild(card); }
+    $('#jobStamp').textContent=sub>=4?'DISPATCHED':(sub>=1?'SELECTING':'WATCHING');
+    if(sub===1)pushPlain($('#autoLog'),'MATCH status=READY label=agent-ok → TSK·118',4);
+    if(sub===4)pushPlain($('#autoLog'),'DISPATCH TSK·118 → SES·9C21 · IN PROGRESS',4);
+  }
+  /* context attach */
+  var n=pane===3?Math.min(6,sub*2):0;
+  $$('#ctxWrap .cchip').forEach(function(c){ c.classList.toggle('on', +c.dataset.n<=n) });
+  $('#ctxCount').textContent=n+' / 6 ATTACHED';
+  $('#ctxDone').classList.toggle('on',pane===3&&n>=6);
+  /* montage highlight */
+  montageTiles.forEach(function(t,k){ t.classList.toggle('hl', pane===4 && (sub>=4 ? k>=4 : k===sub)) });
+});
+
+/* ---------------------------------------------------------- zoom out / localhost */
+var ZOOM=[1,1,.78,.58,.42,.3,.22,.16];
+onStep('secZoom',function(i){
+  $('#zoomBox').style.setProperty('--k',ZOOM[i]);
+  $('#zoomLine1').style.visibility=i>=3?'visible':'hidden';
+  $('#zoomLine2').style.visibility=i>=5?'visible':'hidden';
+  $('#zoomLine3').style.visibility=i>=6?'visible':'hidden';
+});
+
+/* ---------------------------------------------------------- backend: PTY */
+onStep('secPty',function(i){
+  $$('#ptyStack .node').forEach(function(n){ n.style.visibility=(+n.dataset.n<=i)?'visible':'hidden' });
+  $('#ptyBar').style.background=i>=1?'var(--mint)':'var(--green-dim)';
+  if(i===1)pushPlain($('#ptyLog'),'SPAWN pty#1 claude · cwd=repo/ · cols=120',6);
+  if(i===2)pushPlain($('#ptyLog'),'SPAWN pty#2 claude · cwd=.worktrees/feature-a',6);
+  if(i===3)pushPlain($('#ptyLog'),'SPAWN pty#3 claude · cwd=.worktrees/bug-c',6);
+  if(i===4)pushPlain($('#ptyLog'),'EXIT pty#2 code=0 · SESSION ARCHIVED',6);
+  if(i===5)pushPlain($('#ptyLog'),'RESPAWN pty#2 · RESUME ses_77B2',6);
+});
+
+/* ---------------------------------------------------------- backend: task anatomy */
+onStep('secTask',function(i){
+  $$('#secTask [data-n]').forEach(function(n){ n.style.visibility=(+n.dataset.n<=i)?'visible':'hidden' });
+});
+
+/* ---------------------------------------------------------- frontend: skill */
+var SKILL_LOG=[
+  '» /zapac-material-ui',
+  'LOAD components/README.md … OK',
+  'INDEX 34 COMPONENTS … OK',
+  'AGENT CONTEXT UPDATED … OK',
+  '» build the settings screen'
+];
+onStep('secSkill',function(i){
+  $$('#secSkill [data-n]').forEach(function(n){ n.style.visibility=(+n.dataset.n<=i)?'visible':'hidden' });
+  $('#skillBar').style.visibility=i>=1?'visible':'hidden';
+  $('#skillG').style.visibility=i>=1?'visible':'hidden';
+  if(SKILL_LOG[i])pushPlain($('#skillLog'),SKILL_LOG[i],4);
+});
+
+/* ---------------------------------------------------------- frontend: phosphor pipeline */
+var PHOS_CMD=['/frontend-design','/impeccable','/design-system','/design-system','/material-ui-theming','/material-ui-theming','DONE'];
+var PHOS_OUT=['VIDEO REFERENCES → EXPERIMENTS','EXPERIMENTS → SAMPLE LAYOUTS','LAYOUTS → DESIGN-SYSTEM.HTML','+ DESIGN.MD EXTRACTED','DESIGN SYSTEM → MUI THEME','THEME SHIPPED · DARK-ONLY','FIVE STEPS · ANY LOOK'];
+var phosSteps=$$('#phosFlow .fstep'), phosConns=$$('#phosFlow .fconn');
+onStep('secPhos',function(i){
+  phosSteps.forEach(function(s,k){
+    s.classList.toggle('done',k<i);
+    s.classList.toggle('now',k===i&&i<5);
+  });
+  phosConns.forEach(function(c,k){ c.classList.toggle('done',k<i-0) });
+  $('#phosCmd').textContent=PHOS_CMD[i].toUpperCase();
+  $('#phosOut').textContent=PHOS_OUT[i];
+  $$('#secPhos [data-n]').forEach(function(n){ n.style.visibility=(+n.dataset.n<=i)?'visible':'hidden' });
+});
+
+/* ---------------------------------------------------------- frontend: orchestration */
+onStep('secOrch',function(i){
+  $$('#secOrch [data-n]').forEach(function(n){ n.style.visibility=(+n.dataset.n<=i)?'visible':'hidden' });
+});
+
+/* ---------------------------------------------------------- frontend: git graph */
+var MINT='#52F29A',ORANGE='#F26400',DIM='#246C3C',RED='#E2280F',AMBER='#F49F09',PAPER='#EDF8D6';
+var GIT_HEAD=[
+  'THE AI WRITES THE CODE.',
+  'YOU STILL HAVE TO MOVE IT.',
+  'MAIN MOVES UNDERNEATH.',
+  'YOUR BRANCH FALLS BEHIND.',
+  'MORE COMMITS APPEAR.',
+  'REBASE. THE HISTORIES RECONNECT.',
+  'GIT GUD. OR DON\'T.'
+];
+function gnode(x,y,c,fill){
+  return '<circle cx="'+x+'" cy="'+y+'" r="6" fill="'+(fill?c:'#0A0A0A')+'" stroke="'+c+'" stroke-width="2"/>';
+}
+function gline(x1,y1,x2,y2,c,dash){
+  return '<line x1="'+x1+'" y1="'+y1+'" x2="'+x2+'" y2="'+y2+'" stroke="'+c+'" stroke-width="2"'+(dash?' stroke-dasharray="5 5"':'')+'/>';
+}
+function gtext(x,y,t,c,size,anchor){
+  return '<text x="'+x+'" y="'+y+'" fill="'+c+'" font-family="ui-monospace,monospace" font-size="'+(size||9)+'" letter-spacing="1.6" text-anchor="'+(anchor||'start')+'">'+t+'</text>';
+}
+function renderGit(step){
+  var MY=150, BY=62, x0=48, gap=52;
+  var mainN = step<2?3:(step<4?6:(step<5?8:8));
+  var s='';
+  /* main lane */
+  s+=gtext(8,MY+22,'MAIN 本流',ORANGE,9);
+  for(var i=0;i<mainN;i++){
+    var x=x0+i*gap;
+    if(i>0)s+=gline(x-gap,MY,x,MY,DIM);
+    s+=gnode(x,MY,i<3?DIM:ORANGE,false);
+  }
+  var mainHeadX=x0+(mainN-1)*gap;
+  if(step>=1){
+    var branchAt=x0+2*gap;
+    if(step<5){
+      /* branch diverges from commit 3 */
+      var bn = step<3?2:(step<4?3:3);
+      s+=gtext(8,BY-16,'YOURS 支流',MINT,9);
+      s+=gline(branchAt,MY,branchAt+26,BY,MINT);
+      for(var j=0;j<bn;j++){
+        var bx=branchAt+26+j*gap;
+        if(j>0)s+=gline(bx-gap,BY,bx,BY,MINT);
+        s+=gnode(bx,BY,MINT,true);
+      }
+      if(step>=3){
+        s+=gline(branchAt+26+(bn-1)*gap,BY+14,mainHeadX,MY-14,RED,true);
+        s+=gtext(mainHeadX+16,(BY+MY)/2,'DIVERGED 乖離',RED,9,'start');
+      }
+    } else {
+      /* rebased: replayed onto main head */
+      s+=gtext(8,BY-16,'YOURS 支流 · REBASED',MINT,9);
+      s+=gline(mainHeadX,MY,mainHeadX+26,BY,MINT);
+      for(var k=0;k<3;k++){
+        var rx=mainHeadX+26+k*gap;
+        if(k>0)s+=gline(rx-gap,BY,rx,BY,MINT);
+        s+=gnode(rx,BY,MINT,true);
+      }
+      s+=gtext(mainHeadX+26,BY-16,'再結合 REBASED',MINT,9);
+    }
+  }
+  /* baseline dots */
+  for(var d=0;d<24;d++)s+='<circle cx="'+(14+d*25)+'" cy="200" r="1" fill="'+DIM+'"/>';
+  if(step>=6){
+    s+='<rect x="360" y="20" width="240" height="30" fill="none" stroke="'+MINT+'" stroke-width="2"/>';
+    s+=gtext(370,40,'» CLAUDE, REBASE ON MAIN',MINT,11);
+  }
+  $('#gitSvg').innerHTML=s;
+}
+renderGit(0);
+onStep('secGit',function(i){
+  renderGit(i);
+  $('#gitHead').textContent=GIT_HEAD[i];
+  var bs=$('#behindStamp');
+  bs.style.visibility=(i>=3&&i<5)?'visible':'hidden';
+  bs.className='stamp c-red'+(i>=4?' blink':'');
+  $('#behindN').textContent=i>=4?'5':'3';
+  $('#gitEnd1').style.visibility=i>=6?'visible':'hidden';
+  $('#gitEnd2').style.visibility=i>=6?'visible':'hidden';
+  $('#gitEnd3').style.visibility=i>=6?'visible':'hidden';
+});
+
+/* ---------------------------------------------------------- frontend: review */
+var DIFF=[
+  ['add','+ export function SessionRail({ items }) {'],
+  ['add','+   const theme = useTheme()'],
+  ['del','-   const bg = "#111"   // hardcoded'],
+  ['add','+   const bg = theme.nerv.bg'],
+  ['ctx','    return ('],
+  ['add','+     <Stamp tone="mint" filled={active}>'],
+  ['del','-     <span style={{border:"1px solid #52F29A"}}>'],
+  ['ctx','      {items.map(renderRow)}'],
+  ['add','+   useEffect(() => subscribe(id), [id])'],
+  ['del','-   useEffect(() => subscribe(id))'],
+  ['ctx','    )'],
+  ['add','+ const COLS = ["READY","IN PROGRESS","REVIEW"]'],
+  ['del','-   let cols = ["ready","in progress","review"]'],
+  ['add','+ export default memo(SessionRail)'],
+  ['ctx','  }']
+];
+var diffBody=$('#diffBody');
+DIFF.forEach(function(r,i){
+  var d=document.createElement('div');
+  d.className='dl '+(r[0]==='add'?'add':(r[0]==='del'?'del':''));
+  d.dataset.k=i;
+  var code=r[1].replace(/^[+\-] /,'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  d.innerHTML='<span class="s">'+(r[0]==='add'?'+':(r[0]==='del'?'−':' '))+'</span><span class="c">'+code+'</span><span class="mk"></span>';
+  diffBody.appendChild(d);
+});
+var diffRows=$$('.dl',diffBody);
+var REV_HEAD=['A FEW THOUSAND LINES.','THREE REVIEW SKILLS.','REVIEW 01 — CORRECTNESS.','REVIEW 02 — NITS + SIMPLIFY.','REVIEW 03 — FULLSTACK PASS.','ONE FINAL READ BY ME.','ONE FINAL READ BY ME.'];
+function mark(k,txt,cls){
+  var r=diffRows[k]; if(!r)return;
+  var m=$('.mk',r); m.textContent=txt; m.className='mk on'; r.style.color='var(--'+cls+')';
+}
+onStep('secRev',function(i){
+  $('#revHead').textContent=REV_HEAD[i];
+  diffRows.forEach(function(r){ r.classList.remove('gone'); var m=$('.mk',r); m.className='mk'; m.textContent=''; r.style.color=''; });
+  $$('#gates .gate').forEach(function(g,k){
+    g.classList.toggle('now', i-2===k && k<3);
+    g.classList.toggle('done', (k<3 && i-2>k) || (k===3 && i>=5));
+  });
+  if(i>=2){ mark(2,'BUG','red-hi'); mark(9,'BUG','red-hi'); }
+  if(i>=3){ mark(6,'NIT','amber'); mark(12,'NIT','amber'); }
+  if(i>=4){ diffRows[10].classList.add('gone'); diffRows[14].classList.add('gone'); mark(13,'SIMPLIFIED','mint'); }
+  $('#revEnd1').style.visibility=i>=5?'visible':'hidden';
+  $('#revEnd2').style.visibility=i>=6?'visible':'hidden';
+});
+
+/* ---------------------------------------------------------- ending */
+onStep('secEnd',function(i){
+  $$('#secEnd [data-n]').forEach(function(n){
+    var v=+n.dataset.n;
+    n.style.visibility=(v<=i)?'visible':'hidden';
+  });
+  var m=$('#endMachine');
+  m.style.visibility=i>=3?'hidden':'visible';
+  $('#endStamps').style.visibility=i>=2?'hidden':'visible';
+  $('#modeStamp').textContent=i>=5?'PNPM START':'LOOPBACK';
+});
+$$('#secEnd [data-n]').forEach(function(n){ if(+n.dataset.n>0)n.style.visibility='hidden' });
+
+/* animate the ending mini-app rows */
+setInterval(function(){
+  if(RM)return;
+  var em=$('#endMain'); if(!em||em.offsetParent===null)return;
+  var kids=em.children;
+  var k=(Math.random()*kids.length)|0;
+  kids[k].className='ln '+(Math.random()<.5?'m':(Math.random()<.5?'a':''));
+},420);
+
+/* initial paint */
+frame();
+setTimeout(frame,120);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,1128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>SINGULARITY · 特異点 — One control plane for your whole fleet of coding agents</title>
+<meta name="description" content="One control plane for your whole fleet of coding agents for spec-driven development. A local web UI over sessions, git-worktree tasks, automation, skills, rules, memory and cost. Runs on 127.0.0.1. MIT.">
+<!-- sample-gitlab-02.html — PRODUCT PAGE one-shot (target for the GitHub Pages site).
+     Skin: JAIRUS OS / NERV-MAGI "Phosphor Console" (design-system.html + DESIGN.md).
+     Companion to sample-gitlab-01.html (the scroll presentation → /story).
+     Design decisions from /office-hours: demo-first page, tagline verbatim,
+     environment claim in the support line, clone is the conversion event.
+     Self-contained, no deps. All copy is readable with JS disabled. -->
+<style>
+/* ============================================================ TOKENS */
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+  --nav:38px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:calc(var(--nav) + 14px)}
+body{background:var(--bg);color:var(--mint);font-family:var(--mono);font-size:13px;
+  letter-spacing:.03em;text-transform:uppercase;overflow-x:hidden}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:300;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.2) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 62%,rgba(0,0,0,.5) 100%)}
+a{color:inherit;text-decoration:none}
+::selection{background:var(--mint);color:#000}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:#050505}
+::-webkit-scrollbar-thumb{background:var(--green-dim)}
+:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes btnblink{0%,74%{background:var(--mint);color:#000}75%,100%{background:transparent;color:var(--mint)}}
+@keyframes edgeblue{0%,49%{border-color:var(--blue)}50%,100%{border-color:var(--green-dim)}}
+@keyframes flick{0%{visibility:hidden}25%{visibility:visible}50%{visibility:hidden}100%{visibility:visible}}
+@keyframes caret{0%,49%{opacity:1}50%,100%{opacity:0}}
+.blink{animation:blink 1s steps(1) infinite}
+
+/* ============================================================ NAV */
+.nav{position:sticky;top:0;z-index:200;height:var(--nav);background:var(--bg);
+  border-bottom:2px solid var(--orange);display:flex;align-items:center;gap:16px;padding:0 clamp(12px,3vw,28px)}
+.nav .mk{width:12px;height:12px;background:var(--mint);box-shadow:0 0 8px var(--mint);transform:rotate(45deg);flex:none}
+.nav .wm{font-family:var(--cond);font-weight:700;font-size:16px;color:var(--mint-hi);letter-spacing:.1em;
+  text-shadow:0 0 6px rgba(82,242,154,.5)}
+.nav .jpm{font-family:var(--jp);font-weight:800;font-size:12px;color:var(--orange);text-transform:none;letter-spacing:.14em}
+.nav .links{display:flex;gap:14px;margin-left:18px;font-size:10px;letter-spacing:.14em;color:var(--green-map);flex-wrap:wrap}
+.nav .links a:hover,.nav .links a:focus-visible{color:var(--mint-hi)}
+.nav .right{margin-left:auto;display:flex;align-items:center;gap:8px}
+.ghbtn{border:1px solid var(--green-dim);color:var(--mint);font-size:10px;letter-spacing:.12em;padding:5px 10px;
+  display:flex;align-items:center;gap:7px;white-space:nowrap}
+.ghbtn:hover{border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.25)}
+.ghbtn b{color:var(--amber);font-weight:400}
+
+/* ============================================================ LAYOUT */
+.wrap{width:100%;max-width:1240px;margin:0 auto;padding:0 clamp(14px,3vw,28px)}
+section{padding:clamp(38px,6vw,72px) 0;border-bottom:1px solid #141414}
+.sec-head{display:flex;align-items:center;gap:14px;margin-bottom:10px;flex-wrap:wrap}
+.sec-head .idx{font-family:var(--cond);font-weight:700;font-size:13px;color:#000;background:var(--orange);padding:3px 9px;letter-spacing:.1em}
+.sec-head .k{font-family:var(--jp);font-weight:800;font-size:20px;color:var(--orange);text-transform:none;
+  letter-spacing:.16em;text-shadow:0 0 4px currentColor}
+.sec-head h2{font-family:var(--cond);font-weight:700;font-size:clamp(20px,2.7vw,32px);color:var(--mint-hi);letter-spacing:.04em}
+.sec-head .rule{flex:1;height:2px;min-width:20px;background:linear-gradient(90deg,var(--orange),transparent)}
+.sec-note{font-size:12px;line-height:1.7;color:var(--green-map);letter-spacing:.05em;max-width:78ch;margin-bottom:24px}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:repeat(2,1fr)}
+.g3{grid-template-columns:repeat(3,1fr)}
+.g4{grid-template-columns:repeat(4,1fr)}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.col{display:flex;flex-direction:column}
+
+/* ============================================================ ATOMS */
+.stamp{display:inline-block;border:1px solid currentColor;padding:2px 9px;border-radius:2px;
+  font-size:10px;line-height:1.5;letter-spacing:.12em;white-space:nowrap}
+.stamp.sm{font-size:8px;padding:1px 6px}
+.stamp.fill{background:currentColor}
+.stamp.fill>span{color:var(--bg);display:block}
+.c-mint{color:var(--mint)}.c-mhi{color:var(--mint-hi)}.c-amber{color:var(--amber)}
+.c-blue{color:var(--blue)}.c-red{color:var(--red-hi)}.c-orange{color:var(--orange)}
+.c-dim{color:var(--green-map)}.c-paper{color:var(--paper)}
+.panel{border:1px solid var(--orange);background:var(--bg);padding:18px;box-shadow:inset 0 0 16px rgba(242,100,0,.05)}
+.panel.dim{border-color:var(--green-dim);box-shadow:none}
+.panel.mint{border-color:var(--mint);box-shadow:inset 0 0 16px rgba(82,242,154,.05)}
+.panel.red{border-color:var(--red-hi);box-shadow:inset 0 0 16px rgba(226,40,15,.06)}
+.zone-title{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--orange);letter-spacing:.14em;
+  border-bottom:1px solid var(--green-dim);padding-bottom:5px;margin-bottom:12px;display:flex;gap:9px;align-items:baseline}
+.zone-title .j{font-family:var(--jp);font-weight:800;font-size:14px;text-transform:none;color:var(--amber)}
+.zone-title .sp{margin-left:auto;font-family:var(--mono);font-weight:400;font-size:8px;color:var(--green-map)}
+.btn{font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.12em;padding:11px 22px;
+  border:2px solid var(--mint);color:var(--mint);background:var(--bg);cursor:pointer;display:inline-flex;
+  align-items:center;gap:9px}
+.btn:hover{background:var(--mint);color:#000;box-shadow:0 0 14px rgba(82,242,154,.4)}
+.btn.alt{border-color:var(--orange);color:var(--orange)}
+.btn.alt:hover{background:var(--orange);color:#000;box-shadow:0 0 14px rgba(242,100,0,.4)}
+.btn.pulse{animation:btnblink 1s steps(1) infinite}
+.btn.pulse:hover{animation:none}
+.hazard{height:10px;background:repeating-linear-gradient(-45deg,var(--crimson) 0 10px,transparent 10px 20px)}
+.tabnum{font-variant-numeric:tabular-nums}
+
+/* ============================================================ HERO */
+.hero{padding-top:clamp(24px,3.4vw,38px);padding-bottom:clamp(16px,2vw,24px);border-bottom:0}
+.eyebrow{font-size:10px;letter-spacing:.26em;color:var(--amber);margin-bottom:12px}
+.eyebrow::before{content:"◈ "}
+.hero .kh{font-family:var(--jp);font-weight:800;font-size:clamp(20px,3vw,34px);color:var(--orange);
+  text-transform:none;letter-spacing:.3em;text-indent:.3em;text-shadow:0 0 8px rgba(242,100,0,.45)}
+.hero h1{font-family:var(--cond);font-weight:700;font-size:clamp(44px,8.6vw,108px);line-height:.86;
+  color:var(--paper);letter-spacing:.02em;text-shadow:0 0 22px rgba(237,248,214,.22);margin:4px 0 14px}
+.tagline{font-family:var(--cond);font-weight:700;font-size:clamp(18px,2.3vw,29px);line-height:1.14;
+  color:var(--mint-hi);letter-spacing:.03em;text-shadow:0 0 10px rgba(82,242,154,.3);max-width:30ch}
+.support{margin-top:14px;font-size:12px;line-height:1.75;color:var(--green-map);letter-spacing:.04em;
+  max-width:68ch;text-transform:none}
+.support b{color:var(--mint);font-weight:400}
+.herogrid{display:grid;grid-template-columns:1.05fr .95fr;gap:clamp(18px,4vw,54px);align-items:start}
+/* grid children default to min-width:auto, so the nowrap clone URL below would
+   blow the column (and the whole hero) past the viewport. */
+.herogrid>*{min-width:0}
+.ctas{display:flex;gap:12px;flex-wrap:wrap;margin-top:20px}
+.trust{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+
+/* copy-able command */
+.cmd{display:flex;align-items:stretch;border:1px solid var(--green-dim);background:var(--bg);max-width:560px;min-width:0}
+.cmd .p{padding:9px 10px;color:var(--orange);border-right:1px solid var(--green-dim);font-size:13px}
+.cmd code{flex:1;min-width:0;padding:9px 11px;color:var(--mint-hi);font-family:var(--mono);font-size:13px;
+  text-transform:none;letter-spacing:.02em;overflow-x:auto;white-space:nowrap}
+.cmd button{border:0;border-left:1px solid var(--green-dim);background:rgba(242,100,0,.08);color:var(--orange);
+  font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.12em;padding:0 13px;cursor:pointer}
+.cmd button:hover{background:var(--orange);color:#000}
+.cmd.done button{background:var(--mint);color:#000}
+
+/* ============================================================ DEMO FRAME */
+.demowrap{position:relative;margin-top:clamp(24px,4vw,40px)}
+.demo-cap{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:9px;
+  font-size:10px;letter-spacing:.14em;color:var(--green-map)}
+.demo-cap b{color:var(--mint);font-weight:400}
+.demo-cap .sp{margin-left:auto}
+.app{position:relative;border:3px solid var(--orange);background:var(--bg);display:flex;flex-direction:column;
+  height:min(70vh,600px);min-height:420px;box-shadow:inset 0 0 26px rgba(242,100,0,.05)}
+.app::before{content:"";position:absolute;inset:2px;border:1px solid rgba(242,100,0,.42);pointer-events:none;z-index:5}
+.app-top{display:flex;align-items:center;gap:10px;border-bottom:2px solid var(--orange);padding:6px 12px;flex:none}
+.app-top .mk{width:10px;height:10px;background:var(--mint);transform:rotate(45deg);box-shadow:0 0 6px var(--mint)}
+.app-top .b{font-family:var(--cond);font-weight:700;font-size:13px;color:var(--mint-hi);letter-spacing:.14em}
+.app-top .u{margin-left:auto;font-size:9px;color:var(--green-map);letter-spacing:.12em}
+.app-body{flex:1;display:grid;grid-template-columns:124px 1fr 142px;min-height:0}
+.app-nav{border-right:1px solid var(--green-dim);padding:9px 7px;display:flex;flex-direction:column;gap:5px}
+.app-nav button{display:block;width:100%;text-align:left;border:1px solid var(--green-dim);background:var(--bg);
+  padding:6px 7px;color:var(--green-map);cursor:pointer;font-family:var(--mono);text-transform:uppercase}
+.app-nav button .j{font-family:var(--jp);font-weight:800;font-size:13px;text-transform:none;letter-spacing:.14em;display:block}
+.app-nav button .e{font-size:8px;letter-spacing:.12em;display:block;margin-top:1px}
+.app-nav button:hover{border-color:var(--mint);color:var(--mint)}
+.app-nav button[aria-selected="true"]{background:var(--mint);border-color:var(--mint);color:#000}
+.app-main{min-width:0;overflow:hidden;padding:11px 13px;display:flex;flex-direction:column}
+.app-rail{border-left:1px solid var(--green-dim);padding:9px;display:flex;flex-direction:column;gap:11px}
+.app-foot{border-top:1px solid var(--orange);padding:4px 12px;display:flex;gap:14px;font-size:8px;
+  letter-spacing:.12em;color:var(--green-map);flex:none}
+.app-foot .sp{margin-left:auto}
+.pane{display:none;flex-direction:column;gap:10px;flex:1;min-height:0}
+.pane.on{display:flex;animation:flick .12s steps(1) 1}
+
+/* wake overlay */
+.wake{position:absolute;inset:0;z-index:20;background:rgba(10,10,10,.92);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:14px;cursor:pointer;border:0;width:100%;font-family:var(--mono);
+  color:var(--mint);text-transform:uppercase;padding:20px}
+.wake .big{font-family:var(--cond);font-weight:700;font-size:clamp(22px,3.4vw,40px);color:var(--mint-hi);
+  letter-spacing:.08em;text-shadow:0 0 12px rgba(82,242,154,.4)}
+.wake .j{font-family:var(--jp);font-weight:800;font-size:22px;color:var(--orange);text-transform:none;letter-spacing:.3em;text-indent:.3em}
+.wake .sub{font-size:11px;letter-spacing:.14em;color:var(--green-map);text-align:center;max-width:46ch;line-height:1.7}
+.wake .go{border:2px solid var(--mint);padding:9px 20px;font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.14em}
+.wake:hover .go{background:var(--mint);color:#000}
+.app.awake .wake{display:none}
+
+/* sessions pane */
+.sesgrid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px;flex:1;min-height:0}
+.ses{border:1px solid var(--green-dim);display:flex;flex-direction:column;min-height:0}
+.ses .sh{display:flex;align-items:center;gap:7px;padding:4px 8px;border-bottom:1px solid var(--green-dim);font-size:8px;color:var(--green-map)}
+.ses .sh .id{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--mint);letter-spacing:.06em}
+.ses .sh .st{margin-left:auto;border:1px solid currentColor;padding:0 5px;font-size:7px;border-radius:2px;letter-spacing:.1em}
+.ses .feed{padding:5px 8px;font-size:9px;line-height:1.6;color:var(--amber-dim);flex:1;overflow:hidden}
+.ses .feed span{color:var(--amber);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ses .sf{display:flex;gap:9px;border-top:1px solid var(--green-dim);padding:3px 8px;font-size:8px;color:var(--green-map);letter-spacing:.08em}
+.ses .sf b{color:var(--mint);font-weight:400;font-variant-numeric:tabular-nums}
+.ses[data-s=RUN]{border-color:var(--mint-hi)}.ses[data-s=RUN] .st{color:var(--mint-hi)}
+.ses[data-s=IDLE] .st{color:var(--blue);border-color:var(--blue)}
+.ses[data-s=WAIT]{border-color:var(--amber)}.ses[data-s=WAIT] .st{color:var(--amber);animation:blink 1s steps(1) infinite}
+
+/* board pane */
+.board{display:grid;grid-template-columns:repeat(3,1fr);gap:9px;flex:1;min-height:0}
+.bcol{border:1px solid var(--green-dim);padding:7px;display:flex;flex-direction:column;gap:7px;min-height:0}
+.bcol>.t{font-size:8px;letter-spacing:.14em;color:var(--orange);border-bottom:1px solid var(--green-dim);
+  padding-bottom:4px;display:flex;gap:7px}
+.bcol>.t .j{font-family:var(--jp);font-weight:800;font-size:11px;text-transform:none;color:var(--amber)}
+.bcol>.t .n{margin-left:auto;color:var(--green-map)}
+.tcard{border:1px solid var(--green-dim);padding:6px 7px;display:flex;flex-direction:column;gap:4px;background:var(--bg)}
+.tcard .id{font-size:7px;color:var(--amber);letter-spacing:.12em}
+.tcard .ti{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--paper);letter-spacing:.04em;line-height:1.15}
+.tcard .m{display:flex;gap:6px;font-size:7px;color:var(--green-map);letter-spacing:.08em;flex-wrap:wrap;text-transform:none}
+.tcard.sel{border-color:var(--mint);box-shadow:0 0 10px rgba(82,242,154,.2)}
+.tcard .chain{display:flex;flex-direction:column;margin-top:3px}
+.tcard .chain .cn{border:1px solid var(--orange);padding:3px 6px;font-size:8px;color:var(--amber);letter-spacing:.06em}
+.tcard .chain .cn b{color:var(--mint);font-weight:400;text-transform:none}
+.tcard .chain .ar{color:var(--orange);font-size:9px;text-align:center;line-height:1.2}
+
+/* automation pane */
+.jrow{display:flex;align-items:center;gap:9px;border:1px solid var(--green-dim);padding:5px 8px;font-size:9px}
+.jrow .jid{color:var(--amber);letter-spacing:.1em}
+.jrow .jn{color:var(--paper);flex:1;font-family:var(--cond);font-weight:700;letter-spacing:.06em;font-size:11px}
+.jrow .jk{font-size:7px;color:var(--green-map);letter-spacing:.1em;text-transform:none}
+.autoflow{display:flex;align-items:center;gap:9px;margin:auto 0}
+.autoflow .slot{flex:1;border:1px dashed var(--green-dim);min-height:58px;padding:6px;display:flex;flex-direction:column;gap:5px}
+.autoflow .slot .h{font-size:7px;letter-spacing:.14em;color:var(--orange)}
+.autoflow .ar{color:var(--orange);font-size:13px}
+.agentnode{border:2px solid var(--blue);color:var(--blue);padding:7px 9px;text-align:center;min-width:104px;
+  clip-path:polygon(0 0,calc(100% - 9px) 0,100% 9px,100% 100%,9px 100%,0 calc(100% - 9px))}
+.agentnode .j{font-family:var(--jp);font-weight:800;font-size:14px;text-transform:none;letter-spacing:.16em;text-indent:.16em}
+.agentnode .e{font-size:7px;letter-spacing:.1em;margin-top:2px}
+.agentnode.hot{background:var(--blue);color:#000}
+.agentnode.hot .j,.agentnode.hot .e{color:#000}
+
+/* context pane */
+.ctx{display:grid;grid-template-columns:1fr auto 1fr;gap:12px;align-items:center;flex:1;min-height:0}
+.cside{display:flex;flex-direction:column;gap:8px}
+.cchip{display:flex;align-items:center;gap:8px;border:1px solid var(--mint);color:var(--mint);padding:5px 8px}
+.cchip .j{font-family:var(--jp);font-weight:800;font-size:13px;text-transform:none;letter-spacing:.12em}
+.cchip .e{font-size:8px;letter-spacing:.14em}
+.cchip .ln{flex:1;height:1px;background:var(--orange);min-width:12px}
+.cside.r .cchip{flex-direction:row-reverse}
+.agentcore{border:2px solid var(--orange);padding:14px 16px;text-align:center;
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+.agentcore .j{font-family:var(--jp);font-weight:800;font-size:26px;color:var(--orange);text-transform:none;
+  letter-spacing:.2em;text-indent:.2em;text-shadow:0 0 8px rgba(242,100,0,.5)}
+.agentcore .e{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--paper);letter-spacing:.16em;margin-top:4px}
+.agentcore .c{font-size:7px;color:var(--green-map);letter-spacing:.1em;margin-top:3px}
+
+/* usage pane */
+.montage{display:grid;grid-template-columns:repeat(3,1fr);grid-auto-rows:1fr;gap:8px;flex:1;min-height:0}
+.tile{border:1px solid var(--green-dim);padding:7px;display:flex;flex-direction:column;gap:5px;overflow:hidden}
+.tile .th{font-size:7px;letter-spacing:.14em;color:var(--green-map);display:flex;gap:6px}
+.tile .th .j{font-family:var(--jp);font-weight:800;font-size:11px;text-transform:none;color:var(--orange)}
+.tile .tb{font-size:8px;line-height:1.6;color:var(--green-map);overflow:hidden;text-transform:none}
+.tile .tb b{color:var(--mint);font-weight:400}
+.spark{display:flex;gap:2px;align-items:flex-end;height:30px}
+.spark i{flex:1;background:var(--mint);opacity:.55}
+
+/* meters */
+.mbar{display:flex;flex-direction:column;gap:4px}
+.mbar .t{display:flex;justify-content:space-between;font-size:8px;letter-spacing:.12em;color:var(--green-map)}
+.mbar .t b{color:var(--mint);font-weight:400}
+.mbar .seg{display:flex;gap:2px;height:9px}
+.mbar .seg i{flex:1;background:var(--green-dim);opacity:.28;border-radius:1px}
+.mbar .seg i.on{opacity:1;background:var(--mint);box-shadow:0 0 4px rgba(82,242,154,.5)}
+.mbar .seg i.on.warn{background:var(--amber)}
+.mbar .seg i.on.hot{background:var(--red-hi)}
+.vcols{display:flex;gap:3px;height:46px;align-items:flex-end}
+.vcol{flex:1;display:flex;flex-direction:column-reverse;gap:2px;height:100%}
+.vcol i{flex:1;background:var(--green-dim);opacity:.28;border-radius:1px}
+.vcol i.on{opacity:1;background:var(--amber)}
+.railstat{display:flex;flex-direction:column;gap:4px}
+.railstat .k{font-size:8px;color:var(--green-map);letter-spacing:.16em}
+.railstat .v{font-family:var(--cond);font-weight:700;font-size:26px;line-height:.9;color:var(--mint-hi);
+  text-shadow:0 0 10px rgba(82,242,154,.3);font-variant-numeric:tabular-nums}
+.railstat .f{font-size:8px;color:var(--green-map);letter-spacing:.1em}
+.meta{font-size:9px;line-height:1.6;color:var(--orange);letter-spacing:.05em;text-transform:none}
+.meta b{color:var(--amber);font-weight:400}
+
+/* ============================================================ IS / IS NOT */
+.claims{display:grid;grid-template-columns:repeat(2,1fr);gap:14px}
+.claims ul{list-style:none;display:flex;flex-direction:column;gap:9px}
+.claims li{display:flex;gap:9px;font-size:12px;line-height:1.6;letter-spacing:.03em;text-transform:none;color:var(--green-map)}
+.claims li b{color:var(--paper);font-weight:400}
+.claims .mark{flex:none;width:16px;font-family:var(--cond);font-weight:700}
+.claims .is .mark{color:var(--mint)}
+.claims .isnot .mark{color:var(--red-hi)}
+
+/* ============================================================ ZONES (features) */
+.zones{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.zone li{list-style:none;display:flex;align-items:baseline;gap:8px;padding:5px 0;border-bottom:1px dotted #1c1c1c;
+  font-size:11px;letter-spacing:.05em}
+.zone li:last-child{border-bottom:0}
+.zone li b{color:var(--paper);font-weight:400;min-width:88px;font-family:var(--cond);font-size:13px;letter-spacing:.08em}
+.zone li span{color:var(--green-map);text-transform:none;line-height:1.5}
+
+/* ============================================================ ANATOMY */
+.opsgrid{display:grid;grid-template-columns:1.28fr .9fr .9fr;gap:14px;align-items:stretch}
+.opspanel{min-height:255px;display:flex;flex-direction:column}
+.opmap{display:grid;grid-template-columns:repeat(2,1fr);gap:7px;flex:1}
+.opcmd{border:1px solid var(--green-dim);background:var(--bg);color:var(--mint);padding:8px;text-align:left;cursor:pointer;
+  font-family:var(--mono);font-size:10px;letter-spacing:.07em;display:flex;align-items:center;gap:7px}
+.opcmd .jp{font-family:var(--jp);font-weight:800;font-size:14px;color:var(--orange);text-transform:none;letter-spacing:.1em}
+.opcmd .go{margin-left:auto;color:var(--green-map)}
+.opcmd:hover,.opcmd:focus-visible{border-color:var(--mint);color:var(--mint-hi);box-shadow:inset 0 0 12px rgba(82,242,154,.08)}
+.opreadout{border-top:1px solid var(--green-dim);margin-top:9px;padding-top:8px;min-height:49px;font-size:10px;line-height:1.65;
+  color:var(--green-map);text-transform:none;letter-spacing:.03em}.opreadout b{color:var(--amber);font-weight:400}
+.shortcut{display:flex;align-items:center;gap:7px;border:1px solid var(--green-dim);padding:6px 8px;margin-bottom:7px;font-size:10px;color:var(--green-map)}
+.shortcut kbd{margin-left:auto;border:1px solid var(--orange);color:var(--orange);font-family:var(--mono);padding:1px 5px;font-size:9px;box-shadow:inset 0 0 5px rgba(242,100,0,.12)}
+.proc{display:flex;align-items:center;gap:8px;border-bottom:1px dotted #1c1c1c;padding:7px 0;font-size:10px;color:var(--green-map)}
+.proc:last-child{border-bottom:0}.proc i{width:7px;height:7px;background:var(--mint);box-shadow:0 0 6px var(--mint);flex:none}.proc b{color:var(--paper);font-weight:400}.proc .pid{margin-left:auto;color:var(--amber);font-size:9px}
+.palback{position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.64);display:none;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+.palback.on{display:flex}.palette{width:min(620px,100%);border:2px solid var(--orange);background:var(--bg);padding:11px;box-shadow:0 0 28px rgba(242,100,0,.16)}
+.palette h3{font-family:var(--cond);font-size:15px;letter-spacing:.12em;color:var(--mint-hi);margin:0 0 8px}.palette input{width:100%;background:#050505;border:1px solid var(--green-dim);color:var(--mint-hi);font:12px var(--mono);padding:10px;outline:0;text-transform:none}
+.palette input:focus{border-color:var(--mint)}.palrow{display:flex;align-items:center;gap:9px;border-bottom:1px solid #1a241d;padding:9px 5px;font-size:11px;color:var(--mint);cursor:pointer}.palrow:last-child{border-bottom:0}.palrow:hover{background:rgba(82,242,154,.1)}.palrow .group{color:var(--orange);font-size:8px;letter-spacing:.13em;margin-left:auto}.palempty{padding:13px 5px;color:var(--green-map);font-size:10px}
+.anat{display:grid;grid-template-columns:auto 1fr;gap:clamp(18px,4vw,44px);align-items:center}
+.node{border:2px solid var(--orange);background:var(--bg);padding:13px 17px;text-align:center;min-width:150px;
+  clip-path:polygon(0 0,calc(100% - 14px) 0,100% 14px,100% 100%,14px 100%,0 calc(100% - 14px))}
+.node .j{font-family:var(--jp);font-weight:800;font-size:19px;color:var(--orange);text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.node .e{font-family:var(--cond);font-weight:700;font-size:13px;color:var(--paper);letter-spacing:.1em;margin-top:3px}
+.node .s{font-size:8px;color:var(--green-map);letter-spacing:.08em;margin-top:4px;text-transform:none}
+.node.mint{border-color:var(--mint)}.node.mint .j{color:var(--mint)}
+.node.sm{min-width:118px;padding:9px 11px}.node.sm .j{font-size:15px}.node.sm .e{font-size:11px}
+.vlink{width:2px;height:22px;background:var(--orange);margin:0 auto}
+.wt{display:flex;align-items:center;gap:12px;border:1px solid var(--green-dim);padding:8px 11px;font-size:10px}
+.wt .n{font-family:var(--cond);font-weight:700;font-size:13px;color:var(--paper);letter-spacing:.06em;min-width:104px}
+.wt .p{color:var(--amber);text-transform:none;font-size:10px;letter-spacing:.02em}
+.wt .sp{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+
+/* ============================================================ LOCAL */
+.localgrid{display:grid;grid-template-columns:1fr 1fr;gap:clamp(18px,4vw,44px);align-items:center}
+.hostline{font-family:var(--cond);font-weight:700;font-size:clamp(44px,8vw,110px);line-height:.9;color:var(--mint-hi);
+  letter-spacing:.05em;text-shadow:0 0 20px rgba(82,242,154,.32);font-variant-numeric:tabular-nums}
+.seclist{list-style:none;display:flex;flex-direction:column;gap:10px;margin-top:6px}
+.seclist li{font-size:12px;line-height:1.7;color:var(--green-map);letter-spacing:.03em;text-transform:none;
+  display:flex;gap:9px}
+.seclist li::before{content:"▚";color:var(--orange);flex:none}
+.seclist li b{color:var(--mint);font-weight:400}
+
+/* ============================================================ INSTALL */
+.installgrid{display:grid;grid-template-columns:1.35fr .65fr;gap:clamp(18px,4vw,40px);align-items:start}
+.term{border:1px solid var(--amber-dim);background:rgba(244,159,9,.02)}
+.term .bar{display:flex;align-items:center;gap:9px;padding:6px 12px;border-bottom:1px solid var(--amber-dim);
+  font-size:9px;color:var(--amber);letter-spacing:.12em}
+.term .bar .dots{display:flex;gap:5px;margin-left:auto}
+.term .bar .dots i{width:8px;height:8px;border-radius:50%}
+.term .bar .dots i:nth-child(1){background:var(--red-hi)}
+.term .bar .dots i:nth-child(2){background:var(--amber)}
+.term .bar .dots i:nth-child(3){background:var(--mint)}
+.term .body{padding:14px 16px;font-size:13px;line-height:1.85;text-transform:none;letter-spacing:.02em}
+.term .body .l{color:var(--amber-dim)}
+.term .body .c{color:var(--mint-hi)}
+.term .body .c::before{content:"$ ";color:var(--orange)}
+.term .body .o{color:var(--amber)}
+.term .body .cm{color:var(--green-dim)}
+.caret{display:inline-block;width:8px;height:13px;background:var(--amber);vertical-align:-2px;animation:caret 1s steps(1) infinite}
+.req li{list-style:none;display:flex;gap:9px;padding:6px 0;border-bottom:1px dotted #1c1c1c;font-size:11px;letter-spacing:.04em}
+.req li:last-child{border-bottom:0}
+.req li b{color:var(--mint);font-weight:400;min-width:76px}
+.req li span{color:var(--green-map);text-transform:none;line-height:1.5}
+.callout{border:1px solid var(--amber);color:var(--amber);padding:11px 13px;font-size:10px;line-height:1.7;
+  letter-spacing:.05em;margin-top:14px;text-transform:none}
+.callout b{color:var(--paper);font-weight:400;text-transform:uppercase;letter-spacing:.12em;display:block;margin-bottom:4px}
+
+/* ============================================================ STORY + FOOT */
+.storycard{display:flex;gap:clamp(16px,3vw,32px);align-items:center;border:2px solid var(--orange);padding:22px 24px;
+  clip-path:polygon(0 0,calc(100% - 22px) 0,100% 22px,100% 100%,22px 100%,0 calc(100% - 22px))}
+.storycard .k{font-family:var(--jp);font-weight:800;font-size:clamp(30px,5vw,58px);color:var(--orange);
+  text-transform:none;letter-spacing:.16em;text-indent:.16em;text-shadow:0 0 10px rgba(242,100,0,.4);flex:none}
+.storycard h3{font-family:var(--cond);font-weight:700;font-size:clamp(18px,2.4vw,28px);color:var(--paper);letter-spacing:.05em}
+.storycard p{font-size:11px;line-height:1.7;color:var(--green-map);letter-spacing:.04em;margin-top:6px;max-width:62ch;text-transform:none}
+.foot{padding:26px 0 40px;display:flex;gap:16px;flex-wrap:wrap;align-items:center;font-size:10px;
+  letter-spacing:.12em;color:var(--green-map)}
+.foot .sp{margin-left:auto}
+.foot a:hover{color:var(--mint)}
+.foot b{color:var(--mint);font-weight:400}
+
+/* ============================================================ RESPONSIVE */
+.demo-mobile{display:none;border:1px solid var(--amber);color:var(--amber);padding:9px 11px;margin-bottom:9px;
+  font-size:9px;letter-spacing:.1em;line-height:1.6}
+@media(max-width:1080px){
+  .herogrid{grid-template-columns:1fr}
+  .zones{grid-template-columns:repeat(2,1fr)}
+  .opsgrid{grid-template-columns:repeat(2,1fr)}.opsgrid .opspanel:first-child{grid-column:1/-1}
+  .app-rail{display:none}
+  .app-body{grid-template-columns:110px 1fr}
+  .installgrid,.localgrid,.anat{grid-template-columns:1fr}
+  .nav .links{display:none}
+}
+@media(max-width:720px){
+  body{font-size:12px}
+  .claims,.zones,.g2,.g3,.g4{grid-template-columns:1fr}
+  .opsgrid{grid-template-columns:1fr}.opsgrid .opspanel:first-child{grid-column:auto}
+  .sesgrid,.board,.montage{grid-template-columns:1fr}
+  .ctx{grid-template-columns:1fr}
+  .app{height:auto;min-height:0}
+  .app-body{grid-template-columns:1fr}
+  .app-nav{flex-direction:row;overflow-x:auto;border-right:0;border-bottom:1px solid var(--green-dim)}
+  .app-nav button{width:auto;white-space:nowrap}
+  .demo-mobile{display:block}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ===================================================== NAV -->
+<header class="nav">
+  <i class="mk" aria-hidden="true"></i>
+  <span class="wm">SINGULARITY</span>
+  <span class="jpm">特異点</span>
+  <nav class="links" aria-label="Sections">
+    <a href="#demo">DEMO</a>
+    <a href="#what">WHAT IT IS</a>
+    <a href="#operate">OPERATE</a>
+    <a href="#tasks">TASKS</a>
+    <a href="#local">LOCAL</a>
+    <a href="#install">INSTALL</a>
+    <a href="#story">STORY</a>
+  </nav>
+  <div class="right">
+    <a class="ghbtn" href="https://github.com/SamTeong/singularity">GITHUB <b>★ 1</b></a>
+  </div>
+</header>
+
+<main>
+
+<!-- ===================================================== HERO -->
+<section class="hero">
+  <div class="wrap">
+    <div class="herogrid">
+      <div>
+        <p class="eyebrow">MIT · LOCAL-ONLY · NO ACCOUNT · NO CLOUD</p>
+        <p class="kh">特異点</p>
+        <h1>SINGULARITY</h1>
+        <p class="tagline">One control plane for your whole fleet of coding agents for spec-driven development.</p>
+        <p class="support">
+          Singularity isn't trying to replace your coding agent. It's the local environment
+          <b>around</b> it: live sessions, a task board where every card is a real git worktree,
+          scheduled and background jobs, and the skills, rules, memory, config, hooks and wiki
+          your agents read from. Plus what every run actually cost you.
+        </p>
+        <div class="ctas">
+          <a class="btn pulse" href="#demo">▶ OPEN THE LIVE DEMO</a>
+          <a class="btn alt" href="#install">INSTALL IT</a>
+        </div>
+        <div class="trust">
+          <span class="stamp c-mint">BINDS 127.0.0.1 ONLY</span>
+          <span class="stamp c-amber">USES YOUR EXISTING CLAUDE CODE</span>
+          <span class="stamp c-orange">NODE ≥ 20.12</span>
+          <span class="stamp c-dim">MACOS · WINDOWS · LINUX</span>
+        </div>
+      </div>
+
+      <div>
+        <div class="panel dim" style="padding:16px">
+          <div class="zone-title"><span>GET IT RUNNING</span><span class="j">開始</span><span class="sp">3 COMMANDS</span></div>
+          <div class="cmd" style="margin-bottom:8px">
+            <span class="p">$</span>
+            <code id="cmd1">git clone https://github.com/SamTeong/singularity.git</code>
+            <button type="button" data-copy="cmd1">COPY</button>
+          </div>
+          <div class="cmd" style="margin-bottom:8px">
+            <span class="p">$</span>
+            <code id="cmd2">cd singularity &amp;&amp; pnpm bootstrap</code>
+            <button type="button" data-copy="cmd2">COPY</button>
+          </div>
+          <div class="cmd">
+            <span class="p">$</span>
+            <code id="cmd3">pnpm start</code>
+            <button type="button" data-copy="cmd3">COPY</button>
+          </div>
+          <p style="margin-top:12px;font-size:10px;line-height:1.7;color:var(--green-map);text-transform:none;letter-spacing:.04em">
+            <span style="color:var(--orange)">bootstrap</span> writes your <span style="color:var(--amber)">.env</span>,
+            detects <span style="color:var(--amber)">CLAUDE_BIN</span>, wires the usage-report statusline, installs, and starts.
+            Then the UI is at <span style="color:var(--mint)">http://127.0.0.1:4317</span>.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== DEMO -->
+<section id="demo">
+  <div class="wrap">
+    <div class="demo-cap">
+      <span>LIVE DEMO</span><span style="font-family:var(--jp);text-transform:none;color:var(--orange)">実演</span>
+      <span>· THE REAL UI, RUNNING ON MOCK DATA, IN THIS PAGE</span>
+      <span class="sp">NOTHING INSTALLED · NOTHING SENT ANYWHERE</span>
+    </div>
+    <p class="demo-mobile">HEADS UP: SINGULARITY IS A DENSE DESKTOP CONSOLE. THE DEMO WORKS ON A PHONE BUT IT IS BUILT FOR A WIDE SCREEN.</p>
+
+    <div class="app" id="app">
+      <button class="wake" id="wake" type="button" aria-label="Start the live demo">
+        <span class="j">実演</span>
+        <span class="big">WAKE THE DEMO</span>
+        <span class="sub">Loads the real Singularity interface with seeded sessions, tasks and telemetry. No daemon, no account, no data leaves your browser.</span>
+        <span class="go">▶ START</span>
+      </button>
+
+      <div class="app-top">
+        <i class="mk" aria-hidden="true"></i><span class="b">SINGULARITY</span>
+        <span class="stamp sm c-mint">127.0.0.1:4317</span>
+        <span class="stamp sm c-amber">MOCK DATA</span>
+        <span class="u">FLEET 04 · UPTIME <span class="tabnum" id="upt">02:41:09</span></span>
+      </div>
+
+      <div class="app-body">
+        <div class="app-nav" role="tablist" aria-label="Singularity panels">
+          <button role="tab" aria-selected="true"  aria-controls="p0" id="t0"><span class="j">対話</span><span class="e">SESSIONS</span></button>
+          <button role="tab" aria-selected="false" aria-controls="p1" id="t1"><span class="j">任務</span><span class="e">TASKS</span></button>
+          <button role="tab" aria-selected="false" aria-controls="p2" id="t2"><span class="j">自動</span><span class="e">AUTOMATION</span></button>
+          <button role="tab" aria-selected="false" aria-controls="p3" id="t3"><span class="j">文脈</span><span class="e">CONTEXT</span></button>
+          <button role="tab" aria-selected="false" aria-controls="p4" id="t4"><span class="j">消費</span><span class="e">USAGE</span></button>
+        </div>
+
+        <div class="app-main">
+          <!-- SESSIONS -->
+          <div class="pane on" id="p0" role="tabpanel" aria-labelledby="t0">
+            <div class="zone-title"><span>LIVE SESSIONS</span><span class="j">対話</span><span class="sp">4 ACTIVE · 1 AWAITING INPUT</span></div>
+            <div class="sesgrid" id="sesGrid"></div>
+          </div>
+
+          <!-- TASKS -->
+          <div class="pane" id="p1" role="tabpanel" aria-labelledby="t1">
+            <div class="zone-title"><span>TASK BOARD</span><span class="j">任務</span><span class="sp">WORKTREE-BACKED · 7 OPEN</span></div>
+            <div class="board">
+              <div class="bcol">
+                <div class="t"><span class="j">準備</span><span>READY</span><span class="n">02</span></div>
+                <div class="tcard"><span class="id">TSK·118</span><span class="ti">USAGE SPARKLINES</span><span class="m"><span>web/features/usage</span><span>P2</span></span></div>
+                <div class="tcard"><span class="id">TSK·121</span><span class="ti">CRON EDITOR</span><span class="m"><span>server/crons.mjs</span><span>P3</span></span></div>
+              </div>
+              <div class="bcol">
+                <div class="t"><span class="j">進行</span><span>IN PROGRESS</span><span class="n">03</span></div>
+                <div class="tcard sel">
+                  <span class="id">TSK·104</span>
+                  <span class="ti">IMPLEMENT SETTINGS PAGE</span>
+                  <span class="m"><span>web/features/settings</span><span>P1</span></span>
+                  <div class="chain">
+                    <div class="ar">↓</div>
+                    <div class="cn">WORKTREE <b>.worktrees/settings-page</b></div>
+                    <div class="ar">↓</div>
+                    <div class="cn">BRANCH <b>feat/settings-page</b></div>
+                    <div class="ar">↓</div>
+                    <div class="cn">SESSION <b>SES·A4C1 · CLAUDE</b></div>
+                  </div>
+                </div>
+                <div class="tcard"><span class="id">TSK·109</span><span class="ti">THEME TOKEN SWEEP</span><span class="m"><span>web/theme</span><span>P2</span></span></div>
+              </div>
+              <div class="bcol">
+                <div class="t"><span class="j">審査</span><span>REVIEW</span><span class="n">02</span></div>
+                <div class="tcard"><span class="id">TSK·097</span><span class="ti">PTY RESIZE FIX</span><span class="m"><span>server/pty.mjs</span><span>P1</span></span></div>
+                <div class="tcard"><span class="id">TSK·093</span><span class="ti">SKILLS VIEWER</span><span class="m"><span>web/features/skills</span><span>P2</span></span></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- AUTOMATION -->
+          <div class="pane" id="p2" role="tabpanel" aria-labelledby="t2">
+            <div class="zone-title"><span>AUTOMATION</span><span class="j">自動</span><span class="sp">2 SCHEDULED · 1 BACKGROUND</span></div>
+            <div class="col" style="gap:6px">
+              <div class="jrow"><span class="jid">CRN·01</span><span class="jn">NIGHTLY SPEC SWEEP</span><span class="jk">0 2 * * * (UTC)</span><span class="stamp sm c-mint">ARMED</span></div>
+              <div class="jrow"><span class="jid">BGA·02</span><span class="jn">PICK READY · LABEL AGENT-OK</span><span class="jk">on queue</span><span class="stamp sm c-blue blink">WATCHING</span></div>
+            </div>
+            <div class="autoflow">
+              <div class="slot"><span class="h">READY 準備</span></div>
+              <span class="ar">→</span>
+              <div class="agentnode hot"><span class="j">自動</span><div class="e">BACKGROUND AGENT</div></div>
+              <span class="ar">→</span>
+              <div class="slot"><span class="h">IN PROGRESS 進行</span>
+                <div class="tcard"><span class="id">TSK·118</span><span class="ti">USAGE SPARKLINES</span></div>
+              </div>
+            </div>
+            <div class="term" style="margin-top:auto">
+              <div class="bar"><span>AUTOMATION LOG 自動記録</span><span class="dots"><i></i><i></i><i></i></span></div>
+              <div class="body" style="padding:8px 11px;font-size:10px;line-height:1.7" id="autoLog"></div>
+            </div>
+          </div>
+
+          <!-- CONTEXT -->
+          <div class="pane" id="p3" role="tabpanel" aria-labelledby="t3">
+            <div class="zone-title"><span>AGENT CONTEXT</span><span class="j">文脈</span><span class="sp">6 SOURCES ATTACHED</span></div>
+            <div class="ctx">
+              <div class="cside">
+                <div class="cchip"><span class="j">技能</span><span class="e">SKILLS</span><span class="ln"></span></div>
+                <div class="cchip"><span class="j">規則</span><span class="e">RULES</span><span class="ln"></span></div>
+                <div class="cchip"><span class="j">記憶</span><span class="e">MEMORY</span><span class="ln"></span></div>
+              </div>
+              <div class="agentcore">
+                <div class="j">代理</div>
+                <div class="e">AGENT</div>
+                <div class="c">CLAUDE · SES·A4C1</div>
+              </div>
+              <div class="cside r">
+                <div class="cchip"><span class="j">設定</span><span class="e">CONFIG</span><span class="ln"></span></div>
+                <div class="cchip"><span class="j">鉤</span><span class="e">HOOKS</span><span class="ln"></span></div>
+                <div class="cchip"><span class="j">知識</span><span class="e">WIKI</span><span class="ln"></span></div>
+              </div>
+            </div>
+            <p style="font-size:10px;color:var(--green-map);text-align:center;letter-spacing:.1em">
+              GIVE THE ENVIRONMENT CONTEXT. NOT EVERY PROMPT.
+            </p>
+          </div>
+
+          <!-- USAGE -->
+          <div class="pane" id="p4" role="tabpanel" aria-labelledby="t4">
+            <div class="zone-title"><span>USAGE &amp; EVERYTHING AROUND THE WORK</span><span class="j">消費</span><span class="sp">FROM THE GLOBAL STATUSLINE</span></div>
+            <div class="montage">
+              <div class="tile">
+                <div class="th"><span class="j">消費</span><span>USAGE</span></div>
+                <div class="spark" id="spark"></div>
+                <div class="tb">TODAY <b class="tabnum" id="usdToday">$18.42</b> · 5H / 7D METERS</div>
+              </div>
+              <div class="tile">
+                <div class="th"><span class="j">記録</span><span>TRANSCRIPTS</span></div>
+                <div class="tb">14:02 <b>user</b> add cron editor<br>14:02 assistant …<br>14:03 tool edit ×4<br>14:05 <b>done</b></div>
+              </div>
+              <div class="tile">
+                <div class="th"><span class="j">履歴</span><span>HISTORY</span></div>
+                <div class="tb"><b>SES·A4C1</b> 41 turns<br>SES·77B2 18 turns<br>SES·1D09 06 turns</div>
+              </div>
+              <div class="tile">
+                <div class="th"><span class="j">探索</span><span>EXPLORER</span></div>
+                <div class="tb">server/<br>&nbsp;<b>index.mjs</b><br>&nbsp;agents.mjs<br>web/src/features/<br>&nbsp;<b>tasks/</b></div>
+              </div>
+              <div class="tile">
+                <div class="th"><span class="j">工程</span><span>PROCESSES</span></div>
+                <div class="tb">pid 4412 <b>claude</b><br>pid 4419 node<br>pid 4501 <b>pty</b></div>
+              </div>
+              <div class="tile">
+                <div class="th"><span class="j">状態</span><span>STATUS</span></div>
+                <div class="mbar"><div class="t"><span>CPU</span><b class="tabnum" id="cpuV">34%</b></div><div class="seg" id="cpuSeg"></div></div>
+                <div class="mbar"><div class="t"><span>MEM</span><b class="tabnum" id="memV">61%</b></div><div class="seg" id="memSeg"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <aside class="app-rail">
+          <div class="mbar"><div class="t"><span>TOKENS/MIN</span><b class="tabnum" id="tpmV">1.2K</b></div><div class="vcols" id="tpm"></div></div>
+          <div class="mbar"><div class="t"><span>CPU</span><b class="tabnum" id="cpu2V">34%</b></div><div class="seg" id="cpu2Seg"></div></div>
+          <div class="mbar"><div class="t"><span>MEM</span><b class="tabnum" id="mem2V">61%</b></div><div class="seg" id="mem2Seg"></div></div>
+          <div class="railstat">
+            <span class="k">SESSION SPEND</span>
+            <span class="v tabnum" id="spendV">$4.18</span>
+            <span class="f">GLOBAL STATUSLINE</span>
+          </div>
+          <div class="meta" style="margin-top:auto">state:<b>~/.singularity</b><br>trust:<b>repo root</b><br>bind:<b>127.0.0.1</b></div>
+        </aside>
+      </div>
+
+      <div class="app-foot">
+        <span>WS <span style="color:var(--mint)">CONNECTED</span></span>
+        <span>REST <span style="color:var(--mint)">OK</span></span>
+        <span class="sp">PANEL <span style="color:var(--amber)" id="paneName">SESSIONS</span></span>
+      </div>
+    </div>
+
+    <p style="margin-top:10px;font-size:10px;color:var(--green-map);letter-spacing:.1em">
+      THIS IS A SOURCE-GROUNDED PRODUCT TOUR, SEEDED WITH EXAMPLE DATA AND SERVED AS A STATIC FILE.
+      THE REAL UI TALKS TO A DAEMON ON YOUR MACHINE INSTEAD OF FIXTURES.
+    </p>
+  </div>
+</section>
+
+<!-- ===================================================== WHAT IT IS -->
+<section id="what">
+  <div class="wrap">
+    <div class="sec-head"><span class="idx">01</span><span class="k">正体</span><h2>WHAT THIS IS, AND WHAT IT ISN'T</h2><span class="rule"></span></div>
+    <p class="sec-note">Every tool in this category says "orchestrate your agents." Here is the specific, checkable version, so you can decide in thirty seconds instead of installing to find out.</p>
+    <div class="claims">
+      <div class="panel mint is">
+        <div class="zone-title" style="color:var(--mint);border-color:var(--green-dim)"><span>IT IS</span><span class="j" style="color:var(--mint)">是</span></div>
+        <ul>
+          <li><span class="mark">✓</span><span><b>A local web UI plus a loopback daemon.</b> Node, Fastify and ws on 127.0.0.1. You run it, you own it, it dies when you stop it.</span></li>
+          <li><span class="mark">✓</span><span><b>A supervisor for real PTY sessions.</b> It spawns the coding agent binary you already have installed and streams it to a browser terminal.</span></li>
+          <li><span class="mark">✓</span><span><b>A task board built on git worktrees.</b> A card owns a worktree, a branch and a session, so four agents work at once without touching each other's files.</span></li>
+          <li><span class="mark">✓</span><span><b>The context layer.</b> Skills, rules, memory, config, hooks and wiki, editable in one place instead of six scattered dotfiles.</span></li>
+          <li><span class="mark">✓</span><span><b>Honest about cost.</b> Per-session turns, tokens and dollars, read from the global statusline rather than guessed from a pricing table.</span></li>
+        </ul>
+      </div>
+      <div class="panel red isnot">
+        <div class="zone-title" style="color:var(--red-hi);border-color:var(--green-dim)"><span>IT IS NOT</span><span class="j" style="color:var(--red-hi)">否</span></div>
+        <ul>
+          <li><span class="mark">✕</span><span><b>Not a cloud platform.</b> There is no tenant, no upload, no hosted runner. Nothing to sign up for, nothing to churn from.</span></li>
+          <li><span class="mark">✕</span><span><b>Not another coding agent.</b> It does not write your code and has no model of its own. It manages the environment around the agent you already chose.</span></li>
+          <li><span class="mark">✕</span><span><b>Not a terminal replacement.</b> Your terminal still works. This is for when one terminal stopped being enough.</span></li>
+          <li><span class="mark">✕</span><span><b>Not multiplayer.</b> It binds loopback on purpose: the daemon spawns agents with full filesystem access, so it stays on the machine that already trusts them.</span></li>
+          <li><span class="mark">✕</span><span><b>Not finished.</b> It is v0.9, MIT, and built in the open by two people who use it daily.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== THE ENVIRONMENT -->
+<section id="env">
+  <div class="wrap">
+    <div class="sec-head"><span class="idx">02</span><span class="k">環境</span><h2>THE ENVIRONMENT AROUND THE AGENT</h2><span class="rule"></span></div>
+    <p class="sec-note">Seventeen panels, four jobs. Nothing here is a wrapper around a prompt box: each one is a surface your agents already read from or write to, made visible and editable.</p>
+    <div class="zones">
+      <div class="panel dim zone">
+        <div class="zone-title"><span>RUN</span><span class="j">稼働</span></div>
+        <ul>
+          <li><b>SESSIONS</b><span>Live agent PTY sessions you can attach to, interrupt and resume.</span></li>
+          <li><b>PROCESSES</b><span>Task manager for the agent processes actually running on your machine.</span></li>
+          <li><b>STATUS</b><span>Polled availability of upstream provider status pages.</span></li>
+        </ul>
+      </div>
+      <div class="panel dim zone">
+        <div class="zone-title"><span>ORGANIZE</span><span class="j">整理</span></div>
+        <ul>
+          <li><b>TASKS</b><span>Kanban over git-worktree sessions. Worktree, branch and session per card.</span></li>
+          <li><b>AUTOMATION</b><span>Scheduled cron jobs (UTC) and background jobs that select tasks by criteria.</span></li>
+          <li><b>HISTORY</b><span>A core-sample of the day's work, drilled down per session, pushed live over WS.</span></li>
+        </ul>
+      </div>
+      <div class="panel dim zone">
+        <div class="zone-title"><span>CONTEXT</span><span class="j">文脈</span></div>
+        <ul>
+          <li><b>SKILLS</b><span>Browse every skill on the machine, grouped or flat.</span></li>
+          <li><b>RULES</b><span>View and edit the rules your agents load.</span></li>
+          <li><b>MEMORY</b><span>Project memory, editable in place.</span></li>
+          <li><b>CONFIG</b><span>settings.json and settings.local.json, with backup and JSON validation.</span></li>
+          <li><b>HOOKS</b><span>See and edit what fires around each run.</span></li>
+          <li><b>WIKI</b><span>Your linked notes, with wikilinks and previews.</span></li>
+        </ul>
+      </div>
+      <div class="panel dim zone">
+        <div class="zone-title"><span>ACCOUNT FOR</span><span class="j">計上</span></div>
+        <ul>
+          <li><b>USAGE</b><span>5h and 7d meters plus the full usage report.</span></li>
+          <li><b>TRANSCRIPTS</b><span>Read back any session, tool calls included.</span></li>
+          <li><b>EXPLORER</b><span>File tree with tabs: browse, edit, create, rename, delete.</span></li>
+          <li><b>APPEARANCE</b><span>Theme skin plus light and dark mode.</span></li>
+          <li><b>SETTINGS</b><span>Rebind every keyboard shortcut.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== OPERATE -->
+<section id="operate">
+  <div class="wrap">
+    <div class="sec-head"><span class="idx">03</span><span class="k">操作</span><h2>ONE FLEET. MANY WAYS IN.</h2><span class="rule"></span></div>
+    <p class="sec-note">The live console is not five tabs. The primary rail handles the work in motion; the More menu exposes the rest of the machine. A command palette crosses both without making you remember where a surface lives.</p>
+    <div class="opsgrid">
+      <div class="panel dim opspanel">
+        <div class="zone-title"><span>CONTROL SURFACES</span><span class="j">操作面</span><span class="sp">SELECT A SURFACE</span></div>
+        <div class="opmap" aria-label="Interactive product surface map">
+          <button class="opcmd" type="button" data-op="Sessions are real PTY sessions: attach, interrupt, duplicate, fork, respawn, reattach, open externally, or read the transcript."><span class="jp">対話</span><span>SESSIONS</span><span class="go">→</span></button>
+          <button class="opcmd" type="button" data-op="Tasks are a kanban view over worktrees. Selecting a card opens task detail, activity and a read-only transcript sheet."><span class="jp">任務</span><span>TASKS</span><span class="go">→</span></button>
+          <button class="opcmd" type="button" data-op="Automation combines scheduled cron jobs, evaluated in UTC, with background definitions that choose eligible tasks by criteria and usage thresholds."><span class="jp">自動</span><span>AUTOMATION</span><span class="go">→</span></button>
+          <button class="opcmd" type="button" data-op="Usage keeps the Claude 5-hour and 7-day windows visible, and opens the statusline-backed usage report when it is configured."><span class="jp">消費</span><span>USAGE</span><span class="go">→</span></button>
+          <button class="opcmd" type="button" data-op="Skills, Rules and Memory are editable files. Their editor checks for changes on disk before it overwrites a newer version."><span class="jp">文脈</span><span>CONTEXT</span><span class="go">→</span></button>
+          <button class="opcmd" type="button" data-op="The More menu adds Config, Hooks, Explorer, Transcripts, History, Wiki, Appearance, upstream Status, Settings and Processes."><span class="jp">その他</span><span>MORE MENU</span><span class="go">→</span></button>
+        </div>
+        <p class="opreadout" id="opReadout"><b>SELECT A SURFACE.</b> This tour uses names and behaviors from the application source, not a generic agent-dashboard checklist.</p>
+      </div>
+      <div class="panel dim opspanel">
+        <div class="zone-title"><span>FIND IT WITHOUT HUNTING</span><span class="j">検索</span></div>
+        <p style="font-size:11px;line-height:1.7;color:var(--green-map);text-transform:none;margin-bottom:13px">The command palette covers views and session operations: switch a session, fork it, respawn it, reattach, kill it, open a transcript, or start fresh.</p>
+        <button class="btn alt" id="paletteOpen" type="button" style="align-self:flex-start;padding:8px 13px;font-size:12px">⌘ OPEN PALETTE</button>
+        <div style="margin-top:auto;padding-top:13px">
+          <div class="shortcut"><span>COMMAND PALETTE</span><kbd>⌘ K</kbd></div>
+          <div class="shortcut"><span>NEXT / PREVIOUS VIEW</span><kbd>ALT ↑ ↓</kbd></div>
+          <div class="shortcut"><span>TERMINAL COPY</span><kbd>CTRL C</kbd></div>
+        </div>
+      </div>
+      <div class="panel dim opspanel">
+        <div class="zone-title"><span>MACHINE, NOT MYSTERY</span><span class="j">工程</span></div>
+        <p style="font-size:10px;line-height:1.65;color:var(--green-map);text-transform:none;margin-bottom:9px">The Processes view makes the processes that are actually running inspectable. Provider Status is separate: it polls upstream status pages only while that view is open.</p>
+        <div class="proc"><i></i><b>CLAUDE</b><span>feature-a</span><span class="pid">PID 8421</span></div>
+        <div class="proc"><i></i><b>CLAUDE</b><span>bug-c</span><span class="pid">PID 8538</span></div>
+        <div class="proc"><i></i><b>NODE</b><span>daemon</span><span class="pid">PID 8314</span></div>
+        <p class="opreadout"><b>NO BACKGROUND TELEMETRY.</b> Usage refreshes on demand; provider status polling stops when you leave that view.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== TASKS -->
+<section id="tasks">
+  <div class="wrap">
+    <div class="sec-head"><span class="idx">04</span><span class="k">構造</span><h2>A TASK IS A WORKTREE, A BRANCH AND A SESSION</h2><span class="rule"></span></div>
+    <p class="sec-note">This is the part that makes parallel agents safe rather than exciting. Creating a card creates the checkout, so two agents editing the same file is a thing that cannot happen by accident.</p>
+    <div class="anat">
+      <div class="col" style="align-items:center;gap:0">
+        <div class="node"><div class="j">任務</div><div class="e">TASK · TSK·104</div><div class="s">Implement settings page</div></div>
+        <div class="vlink"></div>
+        <div class="row" style="justify-content:center;gap:10px">
+          <div class="node sm"><div class="j">作業</div><div class="e">WORKTREE</div><div class="s">.worktrees/settings-page</div></div>
+          <div class="node sm"><div class="j">分岐</div><div class="e">BRANCH</div><div class="s">feat/settings-page</div></div>
+          <div class="node sm mint"><div class="j">対話</div><div class="e">SESSION</div><div class="s">SES·A4C1</div></div>
+        </div>
+      </div>
+      <div class="col" style="gap:8px">
+        <div class="wt"><span class="n">FEATURE A</span><span class="p">.worktrees/feature-a</span><span class="sp"><span class="stamp sm c-mint">SES·A4C1</span><span class="stamp sm c-mint">RUNNING</span></span></div>
+        <div class="wt"><span class="n">FEATURE B</span><span class="p">.worktrees/feature-b</span><span class="sp"><span class="stamp sm c-mint">SES·77B2</span><span class="stamp sm c-blue">IDLE</span></span></div>
+        <div class="wt"><span class="n">BUG C</span><span class="p">.worktrees/bug-c</span><span class="sp"><span class="stamp sm c-mint">SES·1D09</span><span class="stamp sm c-amber">INPUT</span></span></div>
+        <p style="font-size:11px;line-height:1.7;color:var(--green-map);letter-spacing:.04em;text-transform:none;margin-top:6px">
+          Worktrees and ticket plans (<span style="color:var(--amber)">.worktrees/</span>,
+          <span style="color:var(--amber)">.tickets/&lt;id&gt;/</span>) live at your repo root, gitignored, so your agent's
+          permission rules still apply to them. App state lives in
+          <span style="color:var(--amber)">~/.singularity</span>. Nothing is written anywhere else.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== LOCAL -->
+<section id="local">
+  <div class="wrap">
+    <div class="sec-head"><span class="idx">05</span><span class="k">局所</span><h2>LOCAL MEANS LOCAL</h2><span class="rule"></span></div>
+    <div class="localgrid">
+      <div>
+        <p class="hostline">127.0.0.1</p>
+        <div class="row" style="margin-top:14px">
+          <span class="stamp fill c-red"><span>LOOPBACK ONLY</span></span>
+          <span class="stamp c-orange">局所結束</span>
+          <span class="stamp c-mint">MIT LICENSED</span>
+        </div>
+        <div class="hazard" style="margin-top:18px"></div>
+      </div>
+      <div>
+        <p style="font-family:var(--cond);font-weight:700;font-size:clamp(17px,2.2vw,26px);line-height:1.2;color:var(--paper);letter-spacing:.04em">
+          YOUR AGENTS ALREADY HAVE ACCESS TO YOUR MACHINE. THE CONTROL PLANE DOESN'T NEED TO BE ON THE INTERNET.
+        </p>
+        <ul class="seclist">
+          <li><span>The daemon binds <b>127.0.0.1</b> and never 0.0.0.0, because it spawns agents with full filesystem access.</span></li>
+          <li><span>An <b>origin allowlist</b> blocks DNS-rebinding and drive-by browser hits to loopback.</span></li>
+          <li><span>Optional <b>SING_TOKEN</b> gates data endpoints and the WebSocket. Env var only, never persisted by the app.</span></li>
+          <li><span>Machine-specific config has <b>no baked-in defaults</b>. The daemon refuses to start rather than guess where your things are.</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== INSTALL -->
+<section id="install">
+  <div class="wrap">
+    <div class="sec-head"><span class="idx">06</span><span class="k">導入</span><h2>INSTALL</h2><span class="rule"></span></div>
+    <p class="sec-note">Two minutes if you already have a coding agent CLI installed. Singularity does not ship one and does not want to be one.</p>
+    <div class="installgrid">
+      <div>
+        <div class="term">
+          <div class="bar"><span>YOUR TERMINAL</span><span>導入手順</span><span class="dots"><i></i><i></i><i></i></span></div>
+          <div class="body">
+            <div class="c">git clone https://github.com/SamTeong/singularity.git</div>
+            <div class="c">cd singularity</div>
+            <div class="c">pnpm bootstrap</div>
+            <div class="l">→ writes .env, detects CLAUDE_BIN, wires the usage statusline,</div>
+            <div class="l">&nbsp;&nbsp;installs deps, starts the daemon</div>
+            <div class="o">&nbsp;</div>
+            <div class="o">SINGULARITY READY → http://127.0.0.1:4317<span class="caret"></span></div>
+          </div>
+        </div>
+        <div class="callout">
+          <b>IF AGENTS FAIL TO SPAWN ON MACOS OR LINUX</b>
+          <span style="color:var(--green-map)">
+            <code style="color:var(--amber)">spawn failed: posix_spawnp failed</code> means node-pty's spawn-helper lost its execute bit,
+            which pnpm's store occasionally does on extract. Run <code style="color:var(--amber)">pnpm run postinstall</code>.
+            It is not a CLAUDE_BIN problem.
+          </span>
+        </div>
+      </div>
+      <div class="panel dim">
+        <div class="zone-title"><span>REQUIREMENTS</span><span class="j">要件</span></div>
+        <ul class="req">
+          <li><b>NODE</b><span>20.12 or newer</span></li>
+          <li><b>PNPM</b><span>11.15+ (packageManager is pinned)</span></li>
+          <li><b>AGENT CLI</b><span>An existing Claude Code install. Absolute path in CLAUDE_BIN, detected by bootstrap.</span></li>
+          <li><b>OS</b><span>macOS, Windows and Linux. PowerShell is the primary Windows shell.</span></li>
+          <li><b>OPTIONAL</b><span>OLLAMA_BIN for local models, SING_TOKEN for a shared machine.</span></li>
+        </ul>
+        <div class="row" style="margin-top:16px">
+          <a class="btn alt" href="https://github.com/SamTeong/singularity">READ THE SOURCE</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================================================== STORY -->
+<section id="story">
+  <div class="wrap">
+    <a class="storycard" href="sample-gitlab-01.html">
+      <span class="k">物語</span>
+      <span>
+        <h3>HOW WE BUILT IT, AND WHAT WE LEARNED</h3>
+        <p>
+          A four-chapter scroll presentation: the fleet problem, the product, the local backend,
+          and five hard-won lessons about building a frontend with agents. Teaching a skill once instead of
+          re-explaining the design system, running one Opus plan across Sonnet subagents without letting the
+          design drift, and why three review skills still don't replace reading your own MR.
+        </p>
+        <span class="row" style="margin-top:12px">
+          <span class="stamp c-mint">OPEN THE PRESENTATION →</span>
+          <span class="stamp c-dim">20 SCENES · ~6 MIN</span>
+        </span>
+      </span>
+    </a>
+  </div>
+</section>
+
+</main>
+
+<div class="palback" id="palette" role="dialog" aria-modal="true" aria-labelledby="paletteTitle" aria-hidden="true">
+  <div class="palette">
+    <h3 id="paletteTitle">COMMAND PALETTE <span style="color:var(--orange);font-family:var(--jp);text-transform:none">命令</span></h3>
+    <input id="paletteInput" type="search" autocomplete="off" placeholder="Search views and session actions…" aria-label="Search commands">
+    <div id="paletteRows">
+      <button class="palrow" type="button" data-pal="new session sessions"><span>＋ NEW SESSION</span><span class="group">SESSIONS</span></button>
+      <button class="palrow" type="button" data-pal="tasks board kanban worktree"><span>GO TO TASKS</span><span class="group">VIEWS</span></button>
+      <button class="palrow" type="button" data-pal="usage report cost tokens"><span>OPEN USAGE</span><span class="group">VIEWS</span></button>
+      <button class="palrow" type="button" data-pal="transcript history messages"><span>VIEW TRANSCRIPT OF FEATURE-A</span><span class="group">SESSIONS</span></button>
+      <button class="palrow" type="button" data-pal="fork duplicate feature-a"><span>FORK FEATURE-A</span><span class="group">SESSIONS</span></button>
+      <button class="palrow" type="button" data-pal="status provider availability"><span>OPEN PROVIDER STATUS</span><span class="group">VIEWS</span></button>
+    </div>
+    <p class="palempty" id="palEmpty" hidden>NO MATCHING COMMANDS</p>
+    <p style="margin:9px 0 0;color:var(--green-map);font-size:9px;letter-spacing:.08em">ESC TO CLOSE · ENTER TO RUN THE FIRST MATCH</p>
+  </div>
+</div>
+
+<footer class="foot">
+  <div class="wrap row" style="width:100%">
+    <span><b>SINGULARITY</b> v0.9 · MIT</span>
+    <a href="https://github.com/SamTeong/singularity">GITHUB.COM/SAMTEONG/SINGULARITY</a>
+    <a href="#demo">LIVE DEMO</a>
+    <a href="sample-gitlab-01.html">STORY</a>
+    <span class="sp">SAM × JAIRUS</span>
+    <span>BUILT WITH THE THING IT MANAGES</span>
+  </div>
+</footer>
+
+<script>
+(function(){
+"use strict";
+var $=function(s,r){return (r||document).querySelector(s)};
+var $$=function(s,r){return Array.prototype.slice.call((r||document).querySelectorAll(s))};
+var RM=window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ---------------------------------------------------------- copy buttons */
+$$('[data-copy]').forEach(function(b){
+  b.addEventListener('click',function(){
+    var t=document.getElementById(b.dataset.copy);
+    var txt=t.textContent;
+    var done=function(){
+      b.parentNode.classList.add('done'); b.textContent='COPIED';
+      setTimeout(function(){b.parentNode.classList.remove('done');b.textContent='COPY'},1400);
+    };
+    if(navigator.clipboard&&navigator.clipboard.writeText){
+      navigator.clipboard.writeText(txt).then(done,done);
+    } else {
+      var ta=document.createElement('textarea');
+      ta.value=txt; document.body.appendChild(ta); ta.select();
+      try{document.execCommand('copy')}catch(e){}
+      document.body.removeChild(ta); done();
+    }
+  });
+});
+
+/* ---------------------------------------------------------- demo: tabs */
+var PANES=['SESSIONS','TASKS','AUTOMATION','CONTEXT','USAGE'];
+var tabs=$$('.app-nav button');
+function select(n){
+  tabs.forEach(function(t,i){t.setAttribute('aria-selected',i===n?'true':'false')});
+  $$('.pane').forEach(function(p,i){p.classList.toggle('on',i===n)});
+  $('#paneName').textContent=PANES[n];
+}
+tabs.forEach(function(t,i){
+  t.addEventListener('click',function(){select(i)});
+  t.addEventListener('keydown',function(e){
+    if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='ArrowRight'&&e.key!=='ArrowLeft')return;
+    e.preventDefault();
+    var d=(e.key==='ArrowDown'||e.key==='ArrowRight')?1:-1;
+    var n=(i+d+tabs.length)%tabs.length;
+    tabs[n].focus(); select(n);
+  });
+});
+
+/* ---------------------------------------------------------- demo: seed data */
+var SES=[
+  {id:'SES·A4C1',repo:'singularity · main',s:'RUN',tok:128400,usd:2.31,turns:41},
+  {id:'SES·77B2',repo:'.worktrees/feature-a',s:'RUN',tok:96120,usd:1.44,turns:18},
+  {id:'SES·1D09',repo:'.worktrees/bug-c',s:'WAIT',tok:41880,usd:.62,turns:6},
+  {id:'SES·3F5E',repo:'.worktrees/feature-b',s:'IDLE',tok:22140,usd:.31,turns:12}
+];
+var grid=$('#sesGrid');
+SES.forEach(function(s){
+  var d=document.createElement('div');
+  d.className='ses'; d.dataset.s=s.s;
+  d.innerHTML='<div class="sh"><span class="id">'+s.id+'</span><span>'+s.repo+'</span><span class="st">'+s.s+'</span></div>'+
+    '<div class="feed"></div>'+
+    '<div class="sf"><span>TOKENS <b class="tk">'+(s.tok/1000).toFixed(1)+'K</b></span>'+
+    '<span>COST <b class="cs">$'+s.usd.toFixed(2)+'</b></span>'+
+    '<span style="margin-left:auto">TURNS <b class="tn">'+s.turns+'</b></span></div>';
+  grid.appendChild(d);
+});
+var sesEls=$$('.ses',grid);
+var st=SES.map(function(s){return {tok:s.tok,usd:s.usd,turns:s.turns}});
+
+var LINES=[
+  'read server/index.mjs … ok','edit web/src/features/tasks … ok','grep "reg(" server/ … 12',
+  'test server/tasks.test.mjs … pass','build web → dist … ok','» pnpm test … run',
+  '» git rebase main … ok','write .tickets/TSK-104/plan.md … ok','spawn pty claude --resume … ok',
+  'lint web/src … ok','diff 14 files … ok','awaiting input …'
+];
+function feed(el,max){
+  var s=document.createElement('span');
+  s.textContent=LINES[(Math.random()*LINES.length)|0];
+  el.appendChild(s);
+  while(el.children.length>max)el.removeChild(el.firstChild);
+}
+sesEls.forEach(function(el){var f=$('.feed',el);for(var i=0;i<3;i++)feed(f,8)});
+
+/* meters */
+function build(el,n){if(!el)return;el.innerHTML='';for(var i=0;i<n;i++)el.appendChild(document.createElement('i'))}
+['#cpuSeg','#memSeg','#cpu2Seg','#mem2Seg'].forEach(function(s){build($(s),16)});
+function setSeg(el,pct){
+  if(!el)return;var k=el.children,n=k.length,lit=Math.round(pct/100*n);
+  for(var i=0;i<n;i++){var c='';if(i<lit){c='on';if(i>=n*.78)c='on hot';else if(i>=n*.58)c='on warn'}k[i].className=c}
+}
+var tpm=$('#tpm');
+for(var i=0;i<10;i++){var col=document.createElement('div');col.className='vcol';
+  for(var j=0;j<6;j++)col.appendChild(document.createElement('i'));tpm.appendChild(col)}
+var spark=$('#spark');
+for(var q=0;q<18;q++){var b=document.createElement('i');b.style.height=(20+Math.random()*80)+'%';spark.appendChild(b)}
+setSeg($('#cpuSeg'),34);setSeg($('#memSeg'),61);setSeg($('#cpu2Seg'),34);setSeg($('#mem2Seg'),61);
+$$('.vcol',tpm).forEach(function(c){
+  var lit=2+(Math.random()*4|0);
+  Array.prototype.forEach.call(c.children,function(s,ix){s.className=ix<lit?'on':''});
+});
+
+var AUTO=['match status=ready label=agent-ok → TSK·118','dispatch TSK·118 → SES·9C21','cron CRN·01 armed · next 02:00 UTC'];
+AUTO.forEach(function(t){
+  var d=document.createElement('div');d.style.color='var(--amber)';d.textContent='» '+t;
+  $('#autoLog').appendChild(d);
+});
+
+/* ---------------------------------------------------------- demo: wake */
+var timer=null,tick=0;
+function run(){
+  tick++;
+  sesEls.forEach(function(el,k){
+    if(SES[k].s==='IDLE')return;
+    st[k].tok+=(Math.random()*900|0); st[k].usd+=Math.random()*.012;
+    if(Math.random()<.07)st[k].turns++;
+    $('.tk',el).textContent=(st[k].tok/1000).toFixed(1)+'K';
+    $('.cs',el).textContent='$'+st[k].usd.toFixed(2);
+    $('.tn',el).textContent=st[k].turns;
+    if(Math.random()<.5)feed($('.feed',el),8);
+  });
+  var cpu=Math.max(6,Math.min(96,Math.round(30+Math.sin(tick/7)*14+(Math.random()*8-4))));
+  var mem=Math.max(12,Math.min(95,Math.round(58+Math.sin(tick/11)*8+(Math.random()*4-2))));
+  setSeg($('#cpuSeg'),cpu);setSeg($('#memSeg'),mem);setSeg($('#cpu2Seg'),cpu);setSeg($('#mem2Seg'),mem);
+  $('#cpuV').textContent=cpu+'%';$('#memV').textContent=mem+'%';
+  $('#cpu2V').textContent=cpu+'%';$('#mem2V').textContent=mem+'%';
+  $$('.vcol',tpm).forEach(function(c){
+    var lit=1+(Math.random()*6|0);
+    Array.prototype.forEach.call(c.children,function(s,ix){s.className=ix<lit?'on':''});
+  });
+  $('#tpmV').textContent=(0.8+Math.random()*1.6).toFixed(1)+'K';
+  $('#spendV').textContent='$'+(4.18+tick*.006).toFixed(2);
+  $('#usdToday').textContent='$'+(18.42+tick*.012).toFixed(2);
+  if(tick%3===0){
+    var bars=spark.children;
+    for(var z=0;z<bars.length-1;z++)bars[z].style.height=bars[z+1].style.height;
+    bars[bars.length-1].style.height=(20+Math.random()*80)+'%';
+  }
+  var up=9669+tick;
+  var p=function(n){return String(n).padStart(2,'0')};
+  $('#upt').textContent=p((up/3600|0)%24)+':'+p((up/60|0)%60)+':'+p(up%60);
+}
+function wake(){
+  $('#app').classList.add('awake');
+  if(!RM&&!timer)timer=setInterval(run,280);
+  var t=tabs[0]; if(t)t.focus({preventScroll:true});
+}
+$('#wake').addEventListener('click',wake);
+document.querySelectorAll('a[href="#demo"]').forEach(function(a){a.addEventListener('click',wake)});
+
+/* ---------------------------------------------------------- operations tour */
+$$('[data-op]').forEach(function(b){
+  b.addEventListener('click',function(){
+    $('#opReadout').innerHTML='<b>'+b.querySelector('span:nth-child(2)').textContent+'.</b> '+b.dataset.op;
+  });
+});
+var palette=$('#palette'),paletteInput=$('#paletteInput'),paletteRows=$$('.palrow',$('#paletteRows'));
+var lastFocus=null;
+function closePalette(){
+  palette.classList.remove('on');palette.setAttribute('aria-hidden','true');
+  if(lastFocus){lastFocus.focus();lastFocus=null;}
+}
+function filterPalette(){
+  var q=paletteInput.value.trim().toLowerCase(),shown=0;
+  paletteRows.forEach(function(row){var yes=!q||row.textContent.toLowerCase().includes(q)||row.dataset.pal.includes(q);row.hidden=!yes;if(yes)shown++;});
+  $('#palEmpty').hidden=shown!==0;
+}
+function openPalette(){
+  lastFocus=document.activeElement;palette.classList.add('on');palette.setAttribute('aria-hidden','false');
+  paletteInput.value='';filterPalette();setTimeout(function(){paletteInput.focus()},0);
+}
+$('#paletteOpen').addEventListener('click',openPalette);
+palette.addEventListener('click',function(e){if(e.target===palette)closePalette()});
+paletteInput.addEventListener('input',filterPalette);
+paletteInput.addEventListener('keydown',function(e){
+  if(e.key==='Escape')closePalette();
+  if(e.key==='Enter'){var first=paletteRows.filter(function(r){return !r.hidden})[0];if(first)first.click();}
+});
+paletteRows.forEach(function(row){row.addEventListener('click',function(){
+  $('#opReadout').innerHTML='<b>PALETTE → '+row.querySelector('span').textContent+'.</b> The real palette dispatches this action into the active application state.';
+  closePalette();document.getElementById('operate').scrollIntoView({behavior:RM?'auto':'smooth'});
+})});
+document.addEventListener('keydown',function(e){
+  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();if(palette.classList.contains('on'))closePalette();else openPalette();}
+  else if(e.key==='Escape'&&palette.classList.contains('on'))closePalette();
+});
+
+/* pause the demo when it scrolls out of view */
+if('IntersectionObserver' in window){
+  new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){ if(!RM&&!timer&&$('#app').classList.contains('awake'))timer=setInterval(run,280); }
+      else if(timer){ clearInterval(timer); timer=null; }
+    });
+  },{threshold:.12}).observe($('#app'));
+}
+})();
+</script>
+</body>
+</html>

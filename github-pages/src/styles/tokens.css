@@ -1,0 +1,27 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 22-47 */
+:root{
+  --bg:#0A0A0A;--mint:#52F29A;--mint-hi:#7CF4AB;--green-map:#3C9C6C;--green-dim:#246C3C;
+  --paper:#EDF8D6;--orange:#F26400;--amber:#F49F09;--amber-dim:#9C3C24;
+  --red:#C20C0C;--red-hi:#E2280F;--crimson:#E60225;--teal:#0C6C80;--blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+  --header-h:52px;--page-x:clamp(18px,4vw,64px);--max:1480px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:var(--bg)}
+body{background:var(--bg);color:var(--mint);font-family:var(--mono);font-size:13px;line-height:1.5;letter-spacing:.03em;overflow-x:hidden}
+a{color:inherit;text-decoration:none}
+button{font:inherit}
+::selection{background:var(--mint);color:var(--bg)}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:#030303}
+::-webkit-scrollbar-thumb{background:var(--green-dim)}
+
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes btnblink{0%,74%{background:var(--mint);color:var(--bg)}75%,100%{background:transparent;color:var(--mint)}}
+@keyframes march{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+@keyframes edgeblue{0%,49%{border-color:var(--blue)}50%,100%{border-color:var(--green-dim)}}
+@keyframes sxsweep{from{transform:translateY(-110%)}to{transform:translateY(560%)}}
+.blink{animation:blink 1s steps(1) infinite}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}

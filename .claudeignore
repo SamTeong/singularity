@@ -1,3 +1,5 @@
 # Keep deps + build output out of the agent's view.
 node_modules
 web/dist
+github-pages/node_modules
+github-pages/dist

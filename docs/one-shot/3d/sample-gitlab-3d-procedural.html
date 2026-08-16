@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="A fully procedural Three.js reconstruction of Singularity's command-room concept art — generated geometry and generated textures, no baked mesh or photo bake.">
+  <meta name="theme-color" content="#0A0A0A">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23F26400' d='M16 1 31 16 16 31 1 16z'/%3E%3Cpath fill='%230A0A0A' d='M16 5 27 16 16 27 5 16z'/%3E%3Cpath fill='%2352F29A' d='M16 10 22 16 16 22 10 16z'/%3E%3C/svg%3E">
+  <title>SINGULARITY · 特異点 — TACTICAL COMMAND ROOM (PROCEDURAL)</title>
+  <style>
+    :root{
+      color-scheme:dark;
+      --void:#0A0A0A;--panel:#101310;--panel2:#151915;--ink:#D7E0D9;--dim:#879189;--faint:#4B554E;
+      --mint:#52F29A;--mint-hi:#7CF4AB;--orange:#F26400;--blue:#4CA7FF;--amber:#F7B955;--red:#FF4D45;
+      --oline:rgba(242,100,0,.72);--mline:rgba(82,242,154,.23);
+      --mono:"SFMono-Regular","Roboto Mono","IBM Plex Mono",Menlo,Consolas,monospace;
+      --cond:"Arial Narrow","Avenir Next Condensed","Roboto Condensed",Impact,sans-serif;
+      --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+      --top:48px;
+    }
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    html{background:var(--void)}
+    body{margin:0;overflow:hidden;background:var(--void);color:var(--ink);font:13px/1.55 var(--mono);text-rendering:geometricPrecision}
+    body:before,body:after{content:"";position:fixed;inset:0;z-index:90;pointer-events:none}
+    body:before{opacity:.24;background:repeating-linear-gradient(0deg,transparent 0 3px,rgba(0,0,0,.16) 3px 4px)}
+    body:after{box-shadow:inset 0 0 120px 24px rgba(0,0,0,.7);background:radial-gradient(ellipse at center,transparent 56%,rgba(0,0,0,.22) 100%)}
+    ::selection{color:var(--void);background:var(--mint)}
+    a{color:inherit}button{color:inherit;font:inherit}button,a{-webkit-tap-highlight-color:transparent}
+    :focus-visible{outline:2px solid var(--mint-hi);outline-offset:3px}
+    .skip{position:fixed;top:8px;left:8px;z-index:220;padding:11px 15px;transform:translateY(-150%);background:var(--mint);color:#061009;font-weight:900}.skip:focus{transform:none}
+    .display{margin:0;font-family:var(--cond);font-weight:900;line-height:.86;letter-spacing:-.03em;text-transform:uppercase}
+    .jp{font-family:var(--jp);letter-spacing:.12em}.mint{color:var(--mint)}.orange{color:var(--orange)}.amber{color:var(--amber)}.blue{color:var(--blue)}.dim{color:var(--dim)}
+    .eyebrow{display:flex;align-items:center;gap:11px;margin:0 0 14px;color:var(--orange);font-size:9px;font-weight:900;letter-spacing:.17em;text-transform:uppercase}.eyebrow:before{content:"";width:30px;height:2px;background:var(--orange)}
+    .stamp{display:inline-flex;align-items:center;min-height:22px;padding:2px 8px;border:1px solid currentColor;color:var(--mint);font-size:9px;font-weight:900;letter-spacing:.08em;transform:rotate(-1deg)}
+
+    .progress{position:fixed;top:0;left:0;z-index:230;width:100%;height:2px;background:var(--mint);transform-origin:left;transform:scaleX(0);transition:transform .25s linear}
+    .topbar{position:fixed;inset:0 0 auto 0;z-index:120;height:var(--top);display:grid;grid-template-columns:auto 1fr auto;border-bottom:1px solid var(--oline);background:rgba(10,10,10,.9);backdrop-filter:blur(8px)}
+    .brand{display:flex;align-items:center;gap:11px;padding:0 16px;border-right:1px solid var(--oline);color:var(--mint);font-family:var(--cond);font-size:16px;font-weight:900;letter-spacing:.1em;text-decoration:none;white-space:nowrap}
+    .mark{position:relative;width:16px;height:16px;border:2px solid var(--orange);transform:rotate(45deg)}.mark:after{content:"";position:absolute;inset:3px;background:var(--mint)}
+    .top-meta{min-width:0;display:flex;align-items:center;gap:18px;padding:0 16px;color:var(--dim);font-size:9px;letter-spacing:.1em;white-space:nowrap;overflow:hidden}.top-meta b{color:var(--mint)}
+    .top-link{display:flex;align-items:center;gap:16px;padding:0 16px;border-left:1px solid var(--oline);white-space:nowrap}.top-link a{color:var(--dim);font-size:9px;letter-spacing:.1em;text-decoration:none}.top-link a:hover{color:var(--mint)}
+
+    .stage{position:fixed;inset:0;z-index:1}
+    #gl{position:fixed;inset:0;z-index:1;width:100%;height:100%;display:block;outline:none}
+    .hud{position:fixed;inset:0;z-index:20;pointer-events:none}
+    .hud a,.hud button{pointer-events:auto}
+
+    .hud-corner{position:absolute;width:26px;height:26px;border-color:var(--oline);opacity:.85}
+    .hud-corner.tl{top:calc(var(--top) + 14px);left:14px;border-top:1px solid;border-left:1px solid}
+    .hud-corner.tr{top:calc(var(--top) + 14px);right:14px;border-top:1px solid;border-right:1px solid}
+    .hud-corner.bl{bottom:14px;left:14px;border-bottom:1px solid;border-left:1px solid}
+    .hud-corner.br{bottom:14px;right:14px;border-bottom:1px solid;border-right:1px solid}
+
+    .hud-title{position:absolute;left:26px;bottom:120px;max-width:min(92vw,560px)}
+    .hud-title h1{font-size:clamp(32px,5.6vw,66px)}
+    .hud-title h1 span{display:block}
+    .hud-title h1 .outline{-webkit-text-stroke:1px var(--mint);color:transparent}
+    .hud-title p{max-width:480px;margin:14px 0 0;color:var(--dim);font-size:11.5px;line-height:1.6}
+    .hud-title p strong{color:var(--ink)}
+
+    .rail{position:absolute;top:calc(var(--top) + 20px);bottom:190px;width:196px;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+    .rail.left{left:14px}.rail.right{right:14px}
+    .readout{border:1px solid var(--mline);background:rgba(8,10,8,.66);padding:9px 11px;flex:0 0 auto}
+    .readout .rt-label{display:flex;justify-content:space-between;color:var(--orange);font-size:8px;letter-spacing:.1em}
+    .readout .rt-value{margin-top:6px;color:var(--mint);font-size:13px;font-family:var(--cond);letter-spacing:.03em}
+    .readout .rt-sub{margin-top:3px;color:var(--faint);font-size:8px}
+    .readout.amber .rt-value{color:var(--amber)}.readout.blue .rt-value{color:var(--blue)}
+
+    .controls-bar{position:absolute;left:auto;right:14px;top:auto;bottom:10px;width:400px;height:50px;display:flex;align-items:center;gap:6px;padding:0 8px;border:1px solid var(--oline);background:rgba(8,10,8,.86);max-width:calc(100vw - 28px);overflow-x:auto}
+    .ctl{min-height:34px;flex:0 0 auto;display:inline-flex;align-items:center;gap:7px;padding:0 10px;border:1px solid var(--mline);background:transparent;color:var(--dim);font-size:8.5px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;white-space:nowrap}
+    .ctl:hover{border-color:var(--mint);color:var(--mint)}
+    .ctl[aria-pressed="true"]{border-color:var(--mint);background:var(--mint);color:#07110a}
+    .hint{padding:0 10px;color:var(--faint);font-size:8.5px;letter-spacing:.08em;white-space:nowrap}
+
+    .caption{position:absolute;right:14px;bottom:76px;max-width:280px;text-align:right;color:var(--faint);font-size:8.5px;line-height:1.6}
+    .caption b{color:var(--dim)}
+
+    .boot-overlay{position:fixed;left:14px;top:calc(var(--top) + 68px);z-index:150;width:min(78vw,240px);pointer-events:none;transition:opacity .5s ease,visibility .5s}
+    .boot-overlay[hidden]{opacity:0;visibility:hidden}
+    .boot-panel{border:1px solid var(--oline);background:rgba(8,10,8,.86)}
+    .boot-head{display:flex;justify-content:space-between;gap:8px;padding:7px 10px;border-bottom:1px solid var(--oline);color:var(--orange);font-size:8px;letter-spacing:.1em;white-space:nowrap;overflow:hidden}
+    .boot-body{padding:9px 10px}
+    .boot-pct{font-family:var(--cond);font-size:22px;font-weight:900;color:var(--mint);line-height:1}
+    .boot-track{position:relative;height:3px;margin-top:8px;background:#1b201b}.boot-track i{display:block;height:100%;width:0%;background:var(--mint);transition:width .18s linear}
+    .boot-log{display:none}
+    .boot-err{margin-top:9px;padding:8px;border:1px solid var(--red);color:var(--red);font-size:9px;display:none;pointer-events:auto}
+    .boot-err.show{display:block}
+
+    footer{position:fixed;left:0;right:0;bottom:0;z-index:5;padding:0}
+
+    @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:0s!important}}
+    @media(max-width:1060px){
+      .rail{display:none}
+      .hud-title{bottom:76px;left:16px;right:16px}
+      .caption{display:none}
+      .top-meta{display:none}
+      .controls-bar{left:8px;right:8px;top:calc(var(--top) + 14px);bottom:auto;width:auto;height:44px;max-width:none;justify-content:flex-start;-webkit-overflow-scrolling:touch}
+      .hint{display:none}
+    }
+    @media(max-width:520px){
+      .hud-title h1{font-size:clamp(30px,10vw,44px)}
+      .hud-title p{font-size:10.5px}
+      .ctl{padding:0 9px;font-size:8px;flex:0 0 auto}
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#stage">SKIP TO SCENE</a>
+  <div class="progress" id="progress" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <a class="brand" href="https://github.com/SamTeong/singularity" aria-label="Singularity on GitHub"><span class="mark" aria-hidden="true"></span>SINGULARITY</a>
+    <div class="top-meta"><span><b>ROOM</b> CENTRAL TACTICAL</span><span>RENDER <b id="top-fps">— FPS</b></span><span>SOURCE <b>PROCEDURAL GEOMETRY + TEXTURE</b></span></div>
+    <div class="top-link"><a href="./sample-gitlab-3d.html">GLTF VERSION</a><a href="./sample-gitlab-3d-procedural-v2.html">V2 · SHAFT ATRIUM</a><a href="https://github.com/SamTeong/singularity">GITHUB ↗</a></div>
+  </header>
+
+  <main id="stage" class="stage" aria-label="Fully procedural 3D reconstruction of a tactical command room">
+    <canvas id="gl" role="img" aria-label="Procedurally generated 3D command room with a raised octagonal dais, twin staircases and catwalks, a sunken projection pit, and tiled walls of generated-texture screens"></canvas>
+
+    <div class="hud" aria-hidden="true">
+      <span class="hud-corner tl"></span><span class="hud-corner tr"></span><span class="hud-corner bl"></span><span class="hud-corner br"></span>
+
+      <div class="hud-title">
+        <p class="eyebrow">LOCAL AGENT CONTROL PLANE / 局所司令室</p>
+        <h1 class="display"><span>CENTRAL TACTICAL</span><span class="outline">COMMAND ROOM</span></h1>
+        <p><strong>Zero baked assets.</strong> Every wall, stair, truss, and screen is procedural geometry built from primitives and extrusions; every material is a generated <code>CanvasTexture</code> — no GLB, no photo bake, no downloaded art.</p>
+        <span class="stamp" style="margin-top:14px">PROCEDURAL · GENERATED TEXTURES · ZERO ASSET BYTES</span>
+      </div>
+
+      <div class="rail left">
+        <div class="readout"><div class="rt-label"><span>DAEMON</span><span>状態</span></div><div class="rt-value">NOMINAL</div><div class="rt-sub">127.0.0.1 · LOOPBACK</div></div>
+        <div class="readout amber"><div class="rt-label"><span>SESSIONS</span><span>会期</span></div><div class="rt-value">03 ACTIVE</div><div class="rt-sub">SES-7F4A · SES-2C91 · SES-A8D0</div></div>
+        <div class="readout blue"><div class="rt-label"><span>TASK QUEUE</span><span>任務</span></div><div class="rt-value">04 QUEUED</div><div class="rt-sub">SLOT 04 · TASK/08F14C2</div></div>
+        <div class="readout"><div class="rt-label"><span>5H WINDOW</span><span>使用</span></div><div class="rt-value">19%</div><div class="rt-sub">7D WINDOW 43%</div></div>
+      </div>
+
+      <div class="rail right">
+        <div class="readout"><div class="rt-label"><span>DRAW CALLS</span><span>描画</span></div><div class="rt-value" id="stat-calls">—</div><div class="rt-sub">INSTANCED SCREENS/CHAIRS/CARTS</div></div>
+        <div class="readout amber"><div class="rt-label"><span>TRIANGLES</span><span>三角形</span></div><div class="rt-value" id="stat-tris">—</div><div class="rt-sub">PROCEDURAL GEOMETRY</div></div>
+        <div class="readout"><div class="rt-label"><span>MATERIALS</span><span>材質</span></div><div class="rt-value">06 GENERATED</div><div class="rt-sub">CANVASTEXTURE, NO PHOTO BAKE</div></div>
+        <div class="readout blue"><div class="rt-label"><span>VIEWPORT</span><span>視点</span></div><div class="rt-value" id="cam-mode">ORBIT</div><div class="rt-sub">DRAG TO LOOK AROUND</div></div>
+      </div>
+
+      <p class="caption"><b>NOTE —</b> the logo/emblem and screen readouts are generic and procedurally generated, not a reproduction of the source concept art's specific mark or text. Hidden sides (true back wall, ceiling) are left open rather than invented.</p>
+    </div>
+
+    <div class="controls-bar hud">
+      <button class="ctl" id="btn-reset" type="button">RESET VIEW</button>
+      <button class="ctl" id="btn-spin" type="button" aria-pressed="true">AUTO-ORBIT</button>
+      <button class="ctl" id="btn-bloom" type="button" aria-pressed="true">SCREEN GLOW</button>
+      <button class="ctl" id="btn-wire" type="button" aria-pressed="false">WIREFRAME</button>
+      <span class="hint">DRAG ORBIT · SCROLL ZOOM · SHIFT-DRAG PAN</span>
+    </div>
+  </main>
+
+  <div class="boot-overlay" id="boot">
+    <div class="boot-panel">
+      <div class="boot-head"><span>BUILDING SCENE</span><span id="boot-tag">PROCEDURAL</span></div>
+      <div class="boot-body">
+        <div class="boot-pct"><span id="boot-num">00</span>%</div>
+        <div class="boot-track" aria-hidden="true"><i id="boot-fill"></i></div>
+        <div class="boot-err" id="boot-err">RENDER FAILED. This scene needs WebGL2 support in your browser.</div>
+      </div>
+    </div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+    import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+    import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+    import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+    import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const $ = (id) => document.getElementById(id);
+    const progressBar = $('progress');
+    const bootOverlay = $('boot');
+    const bootNum = $('boot-num');
+    const bootFill = $('boot-fill');
+    const bootErr = $('boot-err');
+
+    function setPct(pct){
+      const p = Math.max(0, Math.min(100, Math.round(pct)));
+      bootNum.textContent = String(p).padStart(2, '0');
+      bootFill.style.width = p + '%';
+      progressBar.style.transform = 'scaleX(' + (p / 100) + ')';
+    }
+
+    // ---------------------------------------------------------------------
+    // Seeded RNG (mulberry32) — every "random" jitter (screen brightness,
+    // panel-seam offsets, stair/rail counts) is deterministic per reload,
+    // matching object-sculpt-spec.json's "deterministic seeds for all
+    // procedural noise" implementation rule.
+    // ---------------------------------------------------------------------
+    function mulberry32(seed){
+      let a = seed >>> 0;
+      return function(){
+        a |= 0; a = (a + 0x6D2B79F5) | 0;
+        let t = Math.imul(a ^ (a >>> 15), 1 | a);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    }
+    const rng = mulberry32(0x5EED2026);
+
+    // ---------------------------------------------------------------------
+    // Procedural CanvasTexture generators — one per material family in
+    // object-sculpt-spec.json#materials. No photo pixels anywhere.
+    // ---------------------------------------------------------------------
+    function makeCanvas(size){
+      const c = document.createElement('canvas');
+      c.width = c.height = size;
+      return c;
+    }
+
+    function structuralSteelTexture(size = 512){
+      const c = makeCanvas(size), ctx = c.getContext('2d');
+      ctx.fillStyle = '#3A4249';
+      ctx.fillRect(0, 0, size, size);
+      // meso: tileable panel-seam grid (det-structural-column-panel-seam)
+      const cell = size / 6;
+      ctx.strokeStyle = 'rgba(10,14,10,0.55)';
+      ctx.lineWidth = 2;
+      for (let i = 0; i <= 6; i++){
+        ctx.beginPath(); ctx.moveTo(i * cell, 0); ctx.lineTo(i * cell, size); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, i * cell); ctx.lineTo(size, i * cell); ctx.stroke();
+      }
+      // micro: fine grain dither
+      for (let i = 0; i < 2200; i++){
+        const v = rng() * 14 - 7;
+        ctx.fillStyle = `rgba(${v > 0 ? 255 : 0},${v > 0 ? 255 : 0},${v > 0 ? 255 : 0},${Math.abs(v) / 90})`;
+        ctx.fillRect(rng() * size, rng() * size, 1, 1);
+      }
+      // panel highlight bevel per cell
+      ctx.strokeStyle = 'rgba(180,196,190,0.10)';
+      ctx.lineWidth = 1;
+      for (let gy = 0; gy < 6; gy++) for (let gx = 0; gx < 6; gx++){
+        ctx.strokeRect(gx * cell + 3, gy * cell + 3, cell - 6, cell - 6);
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    function accentTrimTexture(size = 256){
+      const c = makeCanvas(size), ctx = c.getContext('2d');
+      const grad = ctx.createLinearGradient(0, 0, 0, size);
+      grad.addColorStop(0, '#F6802A');
+      grad.addColorStop(0.5, '#F26400');
+      grad.addColorStop(1, '#C24E00');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 6; i++){
+        ctx.beginPath(); ctx.moveTo(0, i * (size / 6)); ctx.lineTo(size, i * (size / 6)); ctx.stroke();
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    function consoleDeckTexture(size = 512){
+      const c = makeCanvas(size), ctx = c.getContext('2d');
+      const grad = ctx.createLinearGradient(0, 0, size, size);
+      grad.addColorStop(0, '#2E6F6B');
+      grad.addColorStop(0.5, '#245450');
+      grad.addColorStop(1, '#1B403D');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+      for (let i = 0; i < 10; i++){
+        ctx.beginPath();
+        ctx.moveTo(rng() * size, 0);
+        ctx.lineTo(rng() * size, size);
+        ctx.lineWidth = 1 + rng() * 2;
+        ctx.stroke();
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    function pitGlassTexture(size = 512){
+      const c = makeCanvas(size), ctx = c.getContext('2d');
+      const grad = ctx.createRadialGradient(size / 2, size / 2, size * 0.05, size / 2, size / 2, size * 0.7);
+      grad.addColorStop(0, '#123430');
+      grad.addColorStop(1, '#04100E');
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = 'rgba(140,255,210,0.12)';
+      ctx.lineWidth = 2;
+      for (let i = 0; i < 8; i++){
+        const a = (i / 8) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(size / 2, size / 2);
+        ctx.lineTo(size / 2 + Math.cos(a) * size * 0.6, size / 2 + Math.sin(a) * size * 0.6);
+        ctx.stroke();
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return tex;
+    }
+
+    // screen readout, generated per-instance from a seed: grid lines + bars +
+    // a hotspot gradient (det-screen-hotspot-gradient) -- never literal text.
+    function screenTexture(seed, size = 128){
+      const r = mulberry32(seed);
+      const c = makeCanvas(size), ctx = c.getContext('2d');
+      ctx.fillStyle = '#050a08';
+      ctx.fillRect(0, 0, size, size);
+      const hue = 150 + r() * 20;
+      const hot = r() < 0.15;
+      const peak = hot ? 0.95 : 0.35 + r() * 0.35;
+      const grad = ctx.createRadialGradient(
+        size * (0.3 + r() * 0.4), size * (0.3 + r() * 0.4), 2,
+        size * 0.5, size * 0.5, size * 0.75
+      );
+      grad.addColorStop(0, `hsla(${hue}, 90%, ${hot ? 92 : 60}%, ${peak})`);
+      grad.addColorStop(1, `hsla(${hue}, 80%, 30%, 0.05)`);
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, size, size);
+      ctx.strokeStyle = `hsla(${hue}, 90%, 75%, 0.5)`;
+      ctx.lineWidth = 1;
+      const rows = 3 + Math.floor(r() * 4);
+      for (let i = 0; i < rows; i++){
+        const y = 8 + i * ((size - 16) / rows);
+        const w = size * (0.3 + r() * 0.5);
+        ctx.beginPath(); ctx.moveTo(8, y); ctx.lineTo(8 + w, y); ctx.stroke();
+      }
+      if (r() < 0.4){
+        ctx.fillStyle = `hsla(${hue}, 90%, 80%, 0.55)`;
+        ctx.fillRect(size * 0.1, size * 0.75, size * (0.2 + r() * 0.4), size * 0.08);
+      }
+      const tex = new THREE.CanvasTexture(c);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      return { tex, hotspot: peak };
+    }
+
+    // ---------------------------------------------------------------------
+    // Materials (mirrors object-sculpt-spec.json#materials 1:1)
+    // ---------------------------------------------------------------------
+    let materials = {};
+    function buildMaterials(){
+      materials.structuralSteel = new THREE.MeshStandardMaterial({
+        map: structuralSteelTexture(), metalness: 0.45, roughness: 0.55, color: 0xffffff, envMapIntensity: 1.1,
+      });
+      materials.accentTrim = new THREE.MeshStandardMaterial({
+        map: accentTrimTexture(), metalness: 0.25, roughness: 0.45, color: 0xffffff, envMapIntensity: 1.0,
+      });
+      materials.consoleDeck = new THREE.MeshStandardMaterial({
+        map: consoleDeckTexture(), metalness: 0.1, roughness: 0.25, color: 0xffffff,
+      });
+      materials.pitGlass = new THREE.MeshPhysicalMaterial({
+        map: pitGlassTexture(), metalness: 0.05, roughness: 0.15, clearcoat: 0.6, color: 0xffffff,
+      });
+      materials.darkMatte = new THREE.MeshStandardMaterial({ color: 0x15181a, metalness: 0.05, roughness: 0.75 });
+    }
+
+    // ---------------------------------------------------------------------
+    // Geometry helpers
+    // ---------------------------------------------------------------------
+    function octagonShape(rx, rz){
+      const shape = new THREE.Shape();
+      const n = 8;
+      for (let i = 0; i < n; i++){
+        const a = Math.PI / n + i * (2 * Math.PI / n);
+        const x = Math.cos(a) * rx, y = Math.sin(a) * rz;
+        if (i === 0) shape.moveTo(x, y); else shape.lineTo(x, y);
+      }
+      shape.closePath();
+      return shape;
+    }
+
+    function octagonRingGeometry(rOuterX, rOuterZ, rInnerX, rInnerZ, depth){
+      const outer = octagonShape(rOuterX, rOuterZ);
+      const inner = octagonShape(rInnerX, rInnerZ);
+      outer.holes.push(inner);
+      const geo = new THREE.ExtrudeGeometry(outer, { depth, bevelEnabled: true, bevelThickness: 0.05, bevelSize: 0.05, bevelSegments: 2, steps: 1 });
+      geo.rotateX(-Math.PI / 2);
+      return geo;
+    }
+
+    function daisGeometry(rx, rz, depth){
+      const shape = octagonShape(rx, rz);
+      const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: 0.12, bevelSize: 0.1, bevelSegments: 3, steps: 1 });
+      geo.rotateX(-Math.PI / 2);
+      return geo;
+    }
+
+    // ---------------------------------------------------------------------
+    // Scene builder — one function per macro component in
+    // object-sculpt-spec.json#componentTree. Transforms mirror the spec.
+    // ---------------------------------------------------------------------
+    let triCount = 0, drawCalls = 0;
+    function countMesh(mesh){
+      drawCalls++;
+      const geo = mesh.geometry;
+      const idx = geo.getIndex();
+      triCount += (idx ? idx.count : geo.getAttribute('position').count) / 3;
+    }
+
+    function addMesh(parent, geo, mat, pos, rot){
+      const mesh = new THREE.Mesh(geo, mat);
+      if (pos) mesh.position.set(pos[0], pos[1], pos[2]);
+      if (rot) mesh.rotation.set(rot[0], rot[1], rot[2]);
+      mesh.castShadow = mesh.receiveShadow = true;
+      parent.add(mesh);
+      countMesh(mesh);
+      return mesh;
+    }
+
+    function buildRoomShell(root){
+      const floor = addMesh(root, new THREE.BoxGeometry(14, 0.4, 14), materials.structuralSteel, [0, -0.2, 0]);
+      floor.receiveShadow = true;
+      floor.name = 'roomShell';
+    }
+
+    function buildCentralDais(root){
+      const dais = new THREE.Group(); dais.name = 'centralDais';
+      dais.position.set(0, 0.55, 0.6);
+      addMesh(dais, daisGeometry(3.2, 2.3, 1.1), materials.consoleDeck, [0, -0.55, 0]);
+      addMesh(dais, new THREE.BoxGeometry(1.0, 0.9, 0.6), materials.structuralSteel, [0, 0.45, -0.2]).name = 'daisConsoleCenter';
+      addMesh(dais, new THREE.BoxGeometry(1.6, 0.85, 0.9), materials.structuralSteel, [-1.9, 0.35, 0.1], [0, 0.35, 0]).name = 'daisConsoleLeft';
+      addMesh(dais, new THREE.BoxGeometry(1.6, 0.85, 0.9), materials.structuralSteel, [1.9, 0.35, 0.1], [0, -0.35, 0]).name = 'daisConsoleRight';
+      // 3 task chairs (radial repetitionSystem, matches spec: radius 1.6, startAngleDeg -35)
+      const chairMat = materials.darkMatte;
+      for (let i = 0; i < 3; i++){
+        const ang = ((-35 + i * 360 / 3) * Math.PI) / 180;
+        const x = Math.cos(ang) * 1.6, z = Math.sin(ang) * 1.6;
+        const chair = addMesh(dais, new THREE.CapsuleGeometry(0.22, 0.4, 4, 8), chairMat, [x, 0.1, z]);
+      }
+      root.add(dais);
+      return dais;
+    }
+
+    function buildLogoMonument(root){
+      const mon = new THREE.Group(); mon.name = 'logoMonument';
+      mon.position.set(0, 3.8, -3.8);
+      addMesh(mon, new THREE.BoxGeometry(2.6, 6.5, 1.4), materials.structuralSteel);
+      const emblemMat = new THREE.MeshStandardMaterial({ color: 0x0a0f0c, emissive: 0x52f29a, emissiveIntensity: 1.1, metalness: 0.4, roughness: 0.5 , side: THREE.DoubleSide });
+      addMesh(mon, new THREE.PlaneGeometry(1.6, 2.2), emblemMat, [0, 1.6, 0.73]).name = 'logoEmblemPanel';
+      addMesh(mon, new THREE.PlaneGeometry(1.8, 0.5), emblemMat, [0, 0.15, 0.73]);
+      root.add(mon);
+    }
+
+    function buildViceCommandPlatform(root, side){
+      const sx = side === 'left' ? -1 : 1;
+      const grp = new THREE.Group(); grp.name = 'viceCommandPlatform.' + side;
+      grp.position.set(sx * 5.6, 0.35, 3.6);
+      addMesh(grp, daisGeometry(1.3, 1.1, 0.7), materials.consoleDeck, [0, -0.35, 0]);
+      addMesh(grp, new THREE.BoxGeometry(1.4, 0.8, 0.7), materials.structuralSteel, [0, 0.4, 0]);
+      root.add(grp);
+    }
+
+    function buildStaircase(root, side){
+      const sx = side === 'left' ? -1 : 1;
+      const grp = new THREE.Group(); grp.name = 'staircase.' + side;
+      grp.position.set(sx * 4.4, 0, -1.2);
+      grp.rotation.y = sx * -0.12;
+      const treadCount = 10;
+      for (let i = 0; i < treadCount; i++){
+        const y = 0.25 + i * 0.5;
+        const z = -1.6 + i * 0.36;
+        addMesh(grp, new THREE.BoxGeometry(1.4, 0.12, 0.4), materials.structuralSteel, [0, y, z]);
+      }
+      // stringer
+      addMesh(grp, new THREE.BoxGeometry(0.15, 5.0, 3.6), materials.structuralSteel, [-0.75, 2.5, 0]);
+      // handrail (tube along the run) + orange trim cap
+      const rail = addMesh(grp, new THREE.CylinderGeometry(0.05, 0.05, 5.15, 8), materials.accentTrim, [0.72, 2.5, 0]);
+      rail.rotation.x = Math.atan2(3.6, 5.0);
+      root.add(grp);
+    }
+
+    function buildCatwalk(root, side){
+      const sx = side === 'left' ? -1 : 1;
+      const grp = new THREE.Group(); grp.name = 'catwalk.' + side;
+      grp.position.set(sx * 3.0, 4.6, -3.2);
+      grp.rotation.y = sx * -0.12;
+      addMesh(grp, new THREE.BoxGeometry(3.0, 0.08, 1.0), materials.structuralSteel, [0, 0.3, 0]);
+      addMesh(grp, new THREE.BoxGeometry(3.0, 0.08, 0.7), materials.structuralSteel, [0, -0.05, 0]);
+      // diagonal truss web (repeated thin boxes)
+      const webCount = 6;
+      for (let i = 0; i < webCount; i++){
+        const x = -1.4 + i * (2.8 / (webCount - 1));
+        const web = addMesh(grp, new THREE.BoxGeometry(0.06, 0.42, 0.06), materials.accentTrim, [x, 0.12, 0.4]);
+        web.rotation.z = (i % 2 === 0 ? 1 : -1) * 0.6;
+      }
+      root.add(grp);
+    }
+
+    function buildFloorPit(root){
+      const grp = new THREE.Group(); grp.name = 'floorPit';
+      grp.position.set(0, -0.7, 2.6);
+      addMesh(grp, octagonRingGeometry(2.9, 2.9, 2.4, 2.4, 0.25), materials.structuralSteel, [0, 0.68, 0]);
+      const wall = addMesh(grp, new THREE.CylinderGeometry(2.6, 1.6, 1.0, 8, 1, true), materials.pitGlass, [0, 0.2, 0]);
+      wall.material.side = THREE.DoubleSide;
+      addMesh(grp, daisGeometry(1.6, 1.6, 0.05), materials.pitGlass, [0, -0.3, 0]);
+      const emitterMat = new THREE.MeshStandardMaterial({ color: 0x0a0f0c, emissive: 0xf26400, emissiveIntensity: 1.2, metalness: 0.2, roughness: 0.4 , side: THREE.DoubleSide });
+      addMesh(grp, new THREE.BoxGeometry(1.0, 0.03, 0.2), emitterMat, [0, -0.27, 0]);
+      root.add(grp);
+    }
+
+    function buildMonitorWallTower(root, side, screenMeta){
+      const sx = side === 'left' ? -1 : 1;
+      const grp = new THREE.Group(); grp.name = 'monitorWallTower.' + side;
+      grp.position.set(sx * 6.4, 4.0, -1.0);
+      grp.rotation.set(0, sx * 0.55, sx * -0.06);
+      addMesh(grp, new THREE.BoxGeometry(0.5, 8.0, 8.0), materials.structuralSteel);
+
+      // wall-of-screens: 2D grid, hand-authored (see risks[risk-repetition-generator-radial-only])
+      const rows = 6, cols = 4;
+      const cellW = 8.0 / cols, cellH = 8.0 / rows;
+      for (let r = 0; r < rows; r++){
+        for (let c = 0; c < cols; c++){
+          if (rng() < 0.08) continue; // occasional gap, "non-uniform" per Layer 6
+          const w = cellW * (0.55 + rng() * 0.3);
+          const h = cellH * (0.55 + rng() * 0.3);
+          const { tex } = screenTexture(screenMeta.seed++, 128);
+          const mat = new THREE.MeshStandardMaterial({
+            map: tex, emissiveMap: tex, emissive: 0xffffff, side: THREE.DoubleSide,
+            emissiveIntensity: 0.35 + rng() * 0.55, metalness: 0.4, roughness: 0.5,
+          });
+          const x = -3.8 + c * cellW + (rng() - 0.5) * 0.15;
+          const y = -3.8 + r * cellH + (rng() - 0.5) * 0.15;
+          // face offset flips with sx so screens always sit on the panel's
+          // room-facing side, never occluded by the backing box (mirrored towers).
+          addMesh(grp, new THREE.PlaneGeometry(w, h), mat, [sx * -0.27, y, x], [0, Math.PI / 2, 0]);
+        }
+      }
+      const nameplateMat = new THREE.MeshStandardMaterial({ color: 0x0a0f0c, emissive: 0x52f29a, emissiveIntensity: 0.9, metalness: 0.4, roughness: 0.5 , side: THREE.DoubleSide });
+      addMesh(grp, new THREE.PlaneGeometry(0.9, 0.3), nameplateMat, [sx * -0.27, -3.2, 4.1], [0, Math.PI / 2, 0]);
+      root.add(grp);
+    }
+
+    function buildSatelliteCarts(root){
+      // radial repetitionSystem (matches spec: radius 3.4, startAngleDeg 45, count 4)
+      for (let i = 0; i < 4; i++){
+        const ang = ((45 + i * 360 / 4) * Math.PI) / 180;
+        const x = Math.cos(ang) * 3.4, z = 2.6 + Math.sin(ang) * 3.4;
+        const grp = new THREE.Group();
+        grp.name = 'satelliteCart.' + i;
+        grp.position.set(x, 0.28, z);
+        addMesh(grp, new THREE.BoxGeometry(0.35, 0.55, 0.3), materials.structuralSteel);
+        const { tex } = screenTexture(9000 + i, 64);
+        const headMat = new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: 0xffffff, emissiveIntensity: 0.6, metalness: 0.4, roughness: 0.5 , side: THREE.DoubleSide });
+        addMesh(grp, new THREE.PlaneGeometry(0.28, 0.2), headMat, [0, 0.4, 0.16]);
+        root.add(grp);
+      }
+    }
+
+    function buildCommandRoom(){
+      const root = new THREE.Group();
+      root.name = 'root';
+      buildRoomShell(root);
+      buildCentralDais(root);
+      buildLogoMonument(root);
+      buildViceCommandPlatform(root, 'left');
+      buildViceCommandPlatform(root, 'right');
+      buildStaircase(root, 'left');
+      buildStaircase(root, 'right');
+      buildCatwalk(root, 'left');
+      buildCatwalk(root, 'right');
+      buildFloorPit(root);
+      const screenMeta = { seed: 1 };
+      buildMonitorWallTower(root, 'left', screenMeta);
+      buildMonitorWallTower(root, 'right', screenMeta);
+      buildSatelliteCarts(root);
+      return root;
+    }
+
+    // ---------------------------------------------------------------------
+    // Renderer / camera / lighting / composer (same recipe as the GLTF page)
+    // ---------------------------------------------------------------------
+    let canvas, renderer, scene, camera, controls, composer, bloomPass;
+    let modelRoot, allMats = [];
+    let sceneRadius = 6;
+    let autoOrbit = true, bloomOn = true, wireOn = false;
+
+    function initRenderer(){
+      canvas = $('gl');
+      renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.25;
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x030402);
+      scene.fog = new THREE.FogExp2(0x030402, 0.012);
+
+      // Generated (not photographed) room environment so metalness>0 surfaces
+      // (structuralSteel, accentTrim) get real specular/reflection response
+      // instead of reading near-black under point+ambient light alone.
+      const pmrem = new THREE.PMREMGenerator(renderer);
+      scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+      pmrem.dispose();
+
+      camera = new THREE.PerspectiveCamera(42, window.innerWidth / window.innerHeight, 0.05, 500);
+      camera.position.set(0, 4, 12);
+
+      scene.add(new THREE.AmbientLight(0x2c3a30, 1.6));
+      const rimMint = new THREE.PointLight(0x52f29a, 18, 34, 2);
+      rimMint.position.set(-5, 4.5, -2);
+      scene.add(rimMint);
+      const rimOrange = new THREE.PointLight(0xf26400, 11, 32, 2);
+      rimOrange.position.set(5, 3.0, 3.5);
+      scene.add(rimOrange);
+      const fill = new THREE.HemisphereLight(0x5c7a68, 0x030402, 1.3);
+      scene.add(fill);
+
+      const floor = new THREE.Mesh(
+        new THREE.CircleGeometry(50, 64),
+        new THREE.MeshStandardMaterial({ color: 0x030503, roughness: 0.92, metalness: 0.05 })
+      );
+      floor.rotation.x = -Math.PI / 2;
+      floor.position.y = -0.41;
+      scene.add(floor);
+
+      const grid = new THREE.GridHelper(80, 80, 0x1c4432, 0x0a120e);
+      grid.material.transparent = true;
+      grid.material.opacity = 0.4;
+      grid.position.y = -0.4;
+      scene.add(grid);
+
+      addMotes();
+
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.minDistance = 1.5;
+      controls.maxDistance = 40;
+      controls.maxPolarAngle = Math.PI * 0.49;
+      controls.minPolarAngle = Math.PI * 0.06;
+      controls.target.set(0, 2.2, 0);
+      controls.autoRotate = !reduceMotion;
+      controls.autoRotateSpeed = 0.4;
+      controls.addEventListener('start', () => {
+        if (controls.autoRotate) {
+          controls.autoRotate = false;
+          autoOrbit = false;
+          $('btn-spin').setAttribute('aria-pressed', 'false');
+          $('cam-mode').textContent = 'MANUAL';
+        }
+      });
+
+      const size = { w: window.innerWidth, h: window.innerHeight };
+      composer = new EffectComposer(renderer);
+      composer.addPass(new RenderPass(scene, camera));
+      bloomPass = new UnrealBloomPass(new THREE.Vector2(size.w, size.h), 0.55, 0.35, 0.4);
+      composer.addPass(bloomPass);
+      composer.addPass(new OutputPass());
+
+      window.addEventListener('resize', onResize);
+    }
+
+    function addMotes(){
+      const count = reduceMotion ? 0 : 260;
+      if (!count) return;
+      const geo = new THREE.BufferGeometry();
+      const pos = new Float32Array(count * 3);
+      for (let i = 0; i < count; i++) {
+        const r = 3 + Math.random() * 9;
+        const a = Math.random() * Math.PI * 2;
+        pos[i * 3] = Math.cos(a) * r;
+        pos[i * 3 + 1] = Math.random() * 7;
+        pos[i * 3 + 2] = Math.sin(a) * r;
+      }
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      const mat = new THREE.PointsMaterial({ color: 0x7cf4ab, size: 0.012, transparent: true, opacity: 0.55, sizeAttenuation: true });
+      const pts = new THREE.Points(geo, mat);
+      pts.name = 'motes';
+      scene.add(pts);
+    }
+
+    function onResize(){
+      const w = window.innerWidth, h = window.innerHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+      composer.setSize(w, h);
+      bloomPass.setSize(w, h);
+    }
+
+    function frameModel(root){
+      root.updateMatrixWorld(true);
+      const box = new THREE.Box3().setFromObject(root);
+      const finalSize = box.getSize(new THREE.Vector3());
+      sceneRadius = box.getBoundingSphere(new THREE.Sphere()).radius;
+
+      const halfFovRad = (camera.fov * Math.PI) / 360;
+      const fitDistance = (Math.max(finalSize.y, finalSize.x / camera.aspect) / (2 * Math.tan(halfFovRad))) * 1.3;
+      camera.position.set(0, finalSize.y * 0.62, fitDistance);
+      camera.near = Math.max(0.02, sceneRadius * 0.01);
+      camera.far = sceneRadius * 40;
+      camera.updateProjectionMatrix();
+      controls.target.set(0, finalSize.y * 0.3, 0);
+      controls.minDistance = sceneRadius * 0.25;
+      controls.maxDistance = Math.max(sceneRadius * 3.2, fitDistance * 1.4);
+      controls.update();
+    }
+
+    function buildScene(){
+      setPct(20);
+      buildMaterials();
+      setPct(55);
+      modelRoot = buildCommandRoom();
+      scene.add(modelRoot);
+      setPct(85);
+      frameModel(modelRoot);
+      modelRoot.traverse((obj) => { if (obj.isMesh) allMats.push(obj.material); });
+      $('stat-calls').textContent = String(drawCalls).padStart(2, '0');
+      $('stat-tris').textContent = Math.round(triCount).toLocaleString();
+      setPct(100);
+      setTimeout(() => { bootOverlay.setAttribute('hidden', ''); }, 300);
+      animate();
+    }
+
+    let last = performance.now(), frames = 0;
+    function animate(){
+      requestAnimationFrame(animate);
+      controls.update();
+      composer.render();
+      const now = performance.now();
+      frames++;
+      if (now - last > 500) {
+        const fps = Math.round((frames * 1000) / (now - last));
+        $('top-fps').textContent = fps + ' FPS';
+        frames = 0; last = now;
+      }
+    }
+
+    function wireControls(){
+      $('btn-reset').addEventListener('click', () => { if (modelRoot) frameModel(modelRoot); });
+      $('btn-spin').addEventListener('click', (e) => {
+        autoOrbit = !autoOrbit;
+        controls.autoRotate = autoOrbit && !reduceMotion;
+        e.currentTarget.setAttribute('aria-pressed', String(autoOrbit));
+        $('cam-mode').textContent = autoOrbit ? 'ORBIT' : 'MANUAL';
+      });
+      $('btn-bloom').addEventListener('click', (e) => {
+        bloomOn = !bloomOn;
+        bloomPass.enabled = bloomOn;
+        e.currentTarget.setAttribute('aria-pressed', String(bloomOn));
+      });
+      $('btn-wire').addEventListener('click', (e) => {
+        wireOn = !wireOn;
+        allMats.forEach((m) => { m.wireframe = wireOn; });
+        e.currentTarget.setAttribute('aria-pressed', String(wireOn));
+      });
+    }
+
+    if (!window.WebGL2RenderingContext) {
+      bootErr.classList.add('show');
+    } else {
+      initRenderer();
+      wireControls();
+      requestAnimationFrame(() => requestAnimationFrame(buildScene));
+    }
+  </script>
+</body>
+</html>

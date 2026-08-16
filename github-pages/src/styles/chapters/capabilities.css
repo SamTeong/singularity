@@ -1,0 +1,13 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 322-333 (line 322 is the blank boundary line before the CAPABILITIES comment) */
+
+/* CAPABILITIES */
+.capabilities .lead{margin-bottom:28px}
+.modules{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+.module{min-height:222px;border:1px solid var(--green-dim);background:var(--bg);color:var(--mint);padding:16px;position:relative;text-align:left;cursor:pointer;clip-path:polygon(0 0,calc(100% - 17px) 0,100% 17px,100% 100%,0 100%);display:flex;flex-direction:column;text-transform:uppercase}
+.module:hover,.module[aria-pressed="true"]{border-color:var(--mint);box-shadow:0 0 12px rgba(82,242,154,.2)}
+.module[aria-pressed="true"]::after{content:"PINNED";position:absolute;right:0;top:0;background:var(--mint);color:var(--bg);padding:3px 8px;font-size:8px}
+.module .glyph{font-family:var(--jp);font-weight:800;font-size:42px;color:var(--tone,var(--mint));line-height:1;text-transform:none;text-shadow:0 0 6px currentColor}
+.module .code{font-size:8px;color:var(--orange);letter-spacing:.14em;margin-top:10px}
+.module h3{font-family:var(--cond);font-weight:700;font-size:18px;color:var(--paper);margin-top:7px;letter-spacing:.04em}
+.module p{color:var(--green-map);font-size:10px;line-height:1.6;margin-top:10px;text-transform:none}
+.module .module-foot{display:flex;align-items:center;justify-content:space-between;margin-top:auto;padding-top:12px;border-top:1px solid var(--green-dim);font-size:8px;color:var(--tone,var(--mint));letter-spacing:.11em}

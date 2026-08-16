@@ -1,0 +1,30 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 129-157 (line 129 is the blank boundary line before the PRODUCT DECK banner) */
+
+/* ============================================================ PRODUCT DECK
+   Ported verbatim from sample-gitlab-03-gpt-sol.html. These rules style the
+   seven chapter sections both as flat page (fallback) and as CSS3D screens. */
+.chapter{position:relative;padding:clamp(74px,10vw,150px) var(--page-x)}
+.chapter-inner{width:min(100%,var(--max));margin:0 auto}
+.eyebrow{display:flex;align-items:center;gap:12px;color:var(--amber);font-size:10px;letter-spacing:.22em;text-transform:uppercase;margin-bottom:22px}
+.eyebrow::before{content:"";width:28px;height:2px;background:var(--orange);box-shadow:0 0 6px rgba(242,100,0,.5)}
+.eyebrow .jp{font-family:var(--jp);font-weight:800;font-size:13px;text-transform:none;color:var(--orange)}
+.display{font-family:var(--cond);font-weight:700;line-height:.86;letter-spacing:-.025em;text-transform:uppercase;color:var(--paper);text-shadow:0 0 5px currentColor,0 0 18px rgba(82,242,154,.23)}
+.display .mint{color:var(--mint-hi)}
+.display .orange{color:var(--orange)}
+.jp{font-family:var(--jp)}
+.mint{color:var(--mint)}
+.section-head{display:grid;grid-template-columns:auto auto 1fr;align-items:center;gap:14px;margin-bottom:12px;text-transform:uppercase}
+.section-head .idx{font-family:var(--cond);font-weight:700;background:var(--orange);color:var(--bg);padding:3px 9px;letter-spacing:.1em}
+.section-head .jp{font-family:var(--jp);font-weight:800;font-size:20px;color:var(--orange);text-transform:none;letter-spacing:.08em}
+.section-head h2{font-family:var(--cond);font-weight:700;font-size:clamp(24px,4vw,48px);line-height:1;color:var(--mint-hi);letter-spacing:.02em}
+.section-head::after{content:"";grid-column:3;height:2px;background:linear-gradient(90deg,var(--orange),transparent)}
+.lead{max-width:72ch;color:var(--green-map);font-size:clamp(12px,1.25vw,15px);line-height:1.72;letter-spacing:.035em}
+.lead strong{color:var(--mint);font-weight:400}
+.stamp{display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:2px 9px;border:1px solid currentColor;border-radius:2px;font-size:9px;line-height:1;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
+.c-mint{color:var(--mint)}.c-blue{color:var(--blue)}.c-amber{color:var(--amber)}.c-red{color:var(--red-hi)}.c-orange{color:var(--orange)}
+.btn{display:inline-flex;min-height:46px;align-items:center;justify-content:center;padding:10px 20px;border:2px solid var(--mint);background:transparent;color:var(--mint);font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.13em;text-transform:uppercase;cursor:pointer}
+.btn:hover{background:var(--mint);color:var(--bg);box-shadow:0 0 12px rgba(82,242,154,.45)}
+.btn.alt{border-color:var(--orange);color:var(--orange)}
+.btn.alt:hover{background:var(--orange);color:var(--bg);box-shadow:0 0 12px rgba(242,100,0,.42)}
+.btn.primary{animation:btnblink 1s steps(1) infinite}
+.btn:focus-visible,.tab:focus-visible,.module:focus-visible,.sx-rail button:focus-visible,.sx-links a:focus-visible{outline:2px solid var(--paper);outline-offset:3px}

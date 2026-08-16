@@ -1,0 +1,20 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 179-197 (line 179 is the blank boundary line before the PROBLEM comment) */
+
+/* PROBLEM */
+.problem{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(90deg,rgba(226,40,15,.045),transparent 42%,rgba(82,242,154,.03))}
+.problem-grid{display:grid;grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:clamp(30px,5vw,80px);align-items:center}
+.problem h2{font-size:clamp(44px,6.4vw,92px);margin-top:22px}
+.problem .lead{margin-top:24px}
+.sprawl{position:relative;min-height:400px;border:2px solid var(--red-hi);padding:4px;clip-path:polygon(0 0,calc(100% - 24px) 0,100% 24px,100% 100%,24px 100%,0 calc(100% - 24px));box-shadow:0 0 12px rgba(226,40,15,.2)}
+.sprawl-inner{height:100%;min-height:392px;border:1px solid var(--red);position:relative;overflow:hidden;background:linear-gradient(rgba(194,12,12,.12) 1px,transparent 1px),linear-gradient(90deg,rgba(194,12,12,.12) 1px,transparent 1px);background-size:38px 38px}
+.hazard{height:13px;background:repeating-linear-gradient(-45deg,var(--crimson) 0 9px,var(--bg) 9px 18px)}
+.chaos-card{position:absolute;width:min(210px,43%);border:1px solid var(--tone,var(--red-hi));background:var(--bg);padding:10px;color:var(--tone,var(--red-hi));box-shadow:0 0 7px color-mix(in srgb,var(--tone,var(--red-hi)) 35%,transparent)}
+.chaos-card b{display:block;font-family:var(--cond);font-size:16px;letter-spacing:.07em}
+.chaos-card small{display:block;font-size:8px;margin-top:7px;color:var(--green-map);line-height:1.4}
+.cc1{left:7%;top:12%;transform:rotate(-2deg)}.cc2{right:6%;top:26%;--tone:var(--amber);transform:rotate(2deg)}.cc3{left:17%;top:50%;--tone:var(--blue);transform:rotate(1deg)}.cc4{right:12%;bottom:8%;--tone:var(--mint);transform:rotate(-1deg)}
+.sprawl-alert{position:absolute;top:44%;left:0;right:0;background:var(--red-hi);color:var(--bg);padding:8px;text-align:center;font-family:var(--cond);font-weight:700;font-size:clamp(18px,2.6vw,32px);letter-spacing:.06em;z-index:3}
+.problem-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:26px}
+.stat{border:1px solid var(--green-dim);padding:14px;min-height:108px;display:flex;flex-direction:column;justify-content:space-between}
+.stat .label{font-size:8px;color:var(--green-map);letter-spacing:.15em;text-transform:uppercase}
+.stat .value{font-family:var(--cond);font-weight:700;font-size:34px;line-height:1;color:var(--mint-hi);font-variant-numeric:tabular-nums}
+.stat .foot{font-size:8px;color:var(--amber);letter-spacing:.08em}

@@ -1,0 +1,21 @@
+/* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 302-321 (line 302 is the blank boundary line before the WORKFLOW comment) */
+
+/* WORKFLOW */
+.workflow{background:rgba(12,108,128,.035);border-top:2px solid var(--teal);border-bottom:2px solid var(--teal)}
+.workflow .lead{margin-bottom:38px}
+.flow{display:grid;grid-template-columns:repeat(5,1fr);position:relative;margin:0 0 36px}
+.flow::before{content:"";position:absolute;left:8%;right:8%;top:39px;height:2px;background:var(--green-dim)}
+.flow-item{position:relative;z-index:2;text-align:center;cursor:pointer;background:none;border:0;color:var(--green-map);min-height:118px;padding:0 8px}
+.flow-item .num{width:78px;height:78px;margin:0 auto 12px;background:var(--bg);border:2px solid var(--green-dim);display:grid;place-items:center;font-family:var(--cond);font-size:22px;clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+.flow-item .jp{display:block;font-family:var(--jp);font-weight:800;font-size:16px;color:inherit}
+.flow-item .en{display:block;font-size:8px;letter-spacing:.13em;margin-top:2px}
+.flow-item.done .num{background:var(--mint);border-color:var(--mint);color:var(--bg)}
+.flow-item.now{color:var(--blue)}
+.flow-item.now .num{background:var(--blue);border-color:var(--blue);color:var(--bg);box-shadow:0 0 10px rgba(80,144,208,.55)}
+.flow-detail{border:1px solid var(--orange);padding:4px;max-width:1000px;margin:0 auto}
+.flow-detail-inner{border:2px solid var(--orange);padding:clamp(16px,2.4vw,28px);display:grid;grid-template-columns:110px 1fr auto;align-items:center;gap:22px}
+.flow-kanji{font-family:var(--jp);font-weight:800;font-size:58px;color:var(--orange);text-align:center;line-height:1;text-shadow:0 0 5px currentColor}
+.flow-copy h3{font-family:var(--cond);font-weight:700;color:var(--paper);font-size:22px;letter-spacing:.05em;text-transform:uppercase}
+.flow-copy p{color:var(--green-map);margin-top:8px;line-height:1.65}
+.flow-code{font-size:9px;color:var(--amber);line-height:1.7;text-align:right}
+.flow-code b{color:var(--orange);font-weight:400}

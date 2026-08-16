@@ -1,5 +1,7 @@
 node_modules/
 web/dist/
+github-pages/dist/
+github-pages/public/*.glb
 *.log
 *.local.*
 *.bak

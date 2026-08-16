@@ -1,0 +1,1419 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="description" content="Singularity is a local control plane for coordinating coding-agent fleets across sessions, tasks, git worktrees, and review.">
+  <meta name="theme-color" content="#0A0A0A">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath fill='%23F26400' d='M16 1 31 16 16 31 1 16z'/%3E%3Cpath fill='%230A0A0A' d='M16 5 27 16 16 27 5 16z'/%3E%3Cpath fill='%2352F29A' d='M16 10 22 16 16 22 10 16z'/%3E%3C/svg%3E">
+  <title>SINGULARITY · 特異点 — COORDINATION CONTROL SURFACE</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --void: #0A0A0A;
+      --panel: #101311;
+      --panel-2: #151915;
+      --ink: #D7E0D9;
+      --dim: #879189;
+      --faint: #4B554E;
+      --mint: #52F29A;
+      --mint-hi: #7CF4AB;
+      --orange: #F26400;
+      --blue: #4CA7FF;
+      --amber: #F7B955;
+      --red: #FF4D45;
+      --line: rgba(82, 242, 154, .24);
+      --chrome: rgba(242, 100, 0, .76);
+      --mono: "SFMono-Regular", "Roboto Mono", "IBM Plex Mono", Menlo, Consolas, monospace;
+      --cond: "Arial Narrow", "Avenir Next Condensed", "Roboto Condensed", Impact, sans-serif;
+      --jp: "Hiragino Mincho ProN", "Yu Mincho", "Noto Serif JP", serif;
+      --rail: 72px;
+      --top: 48px;
+      --max: 1500px;
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; background: var(--void); }
+    body {
+      margin: 0;
+      overflow-x: hidden;
+      background:
+        linear-gradient(rgba(82,242,154,.028) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(82,242,154,.028) 1px, transparent 1px),
+        var(--void);
+      background-size: 40px 40px;
+      color: var(--ink);
+      font: 13px/1.55 var(--mono);
+      text-rendering: geometricPrecision;
+    }
+    body::before,
+    body::after {
+      content: "";
+      position: fixed;
+      inset: 0;
+      z-index: 90;
+      pointer-events: none;
+    }
+    body::before {
+      opacity: .36;
+      background: repeating-linear-gradient(0deg, transparent 0 3px, rgba(0,0,0,.18) 3px 4px);
+    }
+    body::after {
+      box-shadow: inset 0 0 130px 30px rgba(0,0,0,.88);
+      background: radial-gradient(ellipse at center, transparent 50%, rgba(0,0,0,.24) 100%);
+    }
+    ::selection { color: var(--void); background: var(--mint); }
+    a { color: inherit; }
+    button { color: inherit; font: inherit; }
+    button, a { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 2px solid var(--mint-hi); outline-offset: 4px; }
+    .skip {
+      position: fixed;
+      top: 8px;
+      left: 8px;
+      z-index: 200;
+      padding: 10px 14px;
+      transform: translateY(-140%);
+      background: var(--mint);
+      color: #061009;
+      font-weight: 900;
+    }
+    .skip:focus { transform: none; }
+    .display {
+      margin: 0;
+      font-family: var(--cond);
+      font-weight: 900;
+      font-stretch: condensed;
+      line-height: .82;
+      letter-spacing: -.045em;
+      text-transform: uppercase;
+    }
+    .jp { font-family: var(--jp); letter-spacing: .12em; }
+    .mint { color: var(--mint); }
+    .orange { color: var(--orange); }
+    .amber { color: var(--amber); }
+    .blue { color: var(--blue); }
+    .dim { color: var(--dim); }
+    .eyebrow {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin: 0 0 22px;
+      color: var(--orange);
+      font-weight: 900;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+    .eyebrow::before { content: ""; width: 38px; height: 2px; background: var(--orange); }
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0,0,0,0);
+      white-space: nowrap;
+      border: 0;
+    }
+    .topbar {
+      position: fixed;
+      inset: 0 0 auto var(--rail);
+      height: var(--top);
+      z-index: 80;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      border-bottom: 1px solid var(--chrome);
+      background: rgba(10,10,10,.94);
+      backdrop-filter: blur(8px);
+    }
+    .brand {
+      height: 100%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 0 18px;
+      border-right: 1px solid var(--chrome);
+      color: var(--mint);
+      font-family: var(--cond);
+      font-size: 18px;
+      font-weight: 900;
+      letter-spacing: .12em;
+      text-decoration: none;
+    }
+    .brand-mark {
+      width: 18px;
+      height: 18px;
+      border: 2px solid var(--orange);
+      transform: rotate(45deg);
+      position: relative;
+    }
+    .brand-mark::after { content:""; position:absolute; inset:4px; background:var(--mint); }
+    .top-status {
+      display: flex;
+      align-items: center;
+      min-width: 0;
+      gap: 18px;
+      padding: 0 18px;
+      color: var(--dim);
+      font-size: 10px;
+      letter-spacing: .11em;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+    .top-status b { color: var(--mint); }
+    .pulse {
+      display: inline-block;
+      width: 7px;
+      height: 7px;
+      margin-right: 7px;
+      background: var(--mint);
+      animation: pulse 1.5s steps(2,end) infinite;
+    }
+    .clock {
+      height: 100%;
+      min-width: 148px;
+      display: grid;
+      place-items: center;
+      padding: 0 16px;
+      border-left: 1px solid var(--chrome);
+      color: var(--amber);
+      letter-spacing: .1em;
+    }
+    .progress {
+      position: fixed;
+      top: 0;
+      left: var(--rail);
+      z-index: 100;
+      width: calc(100% - var(--rail));
+      height: 2px;
+      transform: scaleX(0);
+      transform-origin: left;
+      background: var(--mint-hi);
+    }
+    .rail {
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 85;
+      width: var(--rail);
+      border-right: 1px solid var(--chrome);
+      background: rgba(10,10,10,.98);
+    }
+    .rail-code {
+      height: var(--top);
+      display: grid;
+      place-items: center;
+      border-bottom: 1px solid var(--chrome);
+      color: var(--orange);
+      font-weight: 900;
+    }
+    .rail nav { height: calc(100% - 96px); display: flex; flex-direction: column; }
+    .rail a {
+      min-height: 58px;
+      flex: 1;
+      display: grid;
+      place-items: center;
+      border-bottom: 1px solid rgba(242,100,0,.22);
+      color: var(--faint);
+      text-decoration: none;
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      font-size: 9px;
+      letter-spacing: .17em;
+      text-transform: uppercase;
+      transition: color 0s, background 0s;
+    }
+    .rail a:hover,
+    .rail a.active {
+      color: var(--void);
+      background: var(--orange);
+    }
+    .rail-foot {
+      height: 48px;
+      display: grid;
+      place-items: center;
+      color: var(--mint);
+      font-size: 9px;
+      letter-spacing: .1em;
+    }
+    main, footer { margin-left: var(--rail); }
+    .chapter {
+      position: relative;
+      min-height: 100vh;
+      scroll-margin-top: var(--top);
+      border-bottom: 1px solid var(--chrome);
+    }
+    .wrap { width: min(calc(100% - 64px), var(--max)); margin: 0 auto; }
+    .chapter-id {
+      position: absolute;
+      top: 66px;
+      right: 28px;
+      z-index: 2;
+      color: rgba(242,100,0,.28);
+      font-family: var(--cond);
+      font-size: clamp(84px, 12vw, 190px);
+      font-weight: 900;
+      line-height: 1;
+      pointer-events: none;
+    }
+    .section-head {
+      display: grid;
+      grid-template-columns: 52px auto 1fr;
+      align-items: center;
+      gap: 14px;
+      padding: 28px 0 18px;
+      border-bottom: 1px solid var(--line);
+      text-transform: uppercase;
+    }
+    .section-head .no { color: var(--orange); font-size: 18px; font-weight: 900; }
+    .section-head .jp { color: var(--mint); font-size: 18px; }
+    .section-head .chapter-title {
+      margin: 0;
+      color: var(--ink);
+      font-family: var(--cond);
+      font-size: clamp(18px, 2vw, 30px);
+      line-height: 1;
+      letter-spacing: .035em;
+      text-align: right;
+    }
+    .hero {
+      min-height: 100svh;
+      display: grid;
+      align-items: end;
+      padding: calc(var(--top) + 64px) 0 42px;
+      overflow: hidden;
+    }
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0,1.25fr) minmax(280px,.75fr);
+      gap: clamp(28px,6vw,100px);
+      align-items: end;
+    }
+    .hero h1 { max-width: 1000px; font-size: clamp(64px,10.5vw,170px); }
+    .hero h1 .line { display: block; }
+    .hero h1 .strike { position: relative; color: var(--dim); }
+    .hero h1 .strike::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 48%;
+      width: 100%;
+      height: .055em;
+      background: var(--orange);
+    }
+    .hero-side {
+      border: 1px solid var(--chrome);
+      position: relative;
+      background: rgba(10,10,10,.76);
+      clip-path: polygon(0 0, calc(100% - 20px) 0,100% 20px,100% 100%,0 100%);
+    }
+    .hero-side::before { content:""; position:absolute; inset:5px; border:1px solid var(--line); pointer-events:none; }
+    .hero-side-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--chrome);
+      color: var(--orange);
+      font-size: 10px;
+      letter-spacing: .14em;
+    }
+    .hero-side-copy { padding: 26px 24px 18px; }
+    .hero-side-copy p { margin: 0 0 26px; color: var(--ink); font-size: clamp(14px,1.25vw,18px); }
+    .hero-facts {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-top: 1px solid var(--line);
+      margin: 0 -24px;
+    }
+    .fact { padding: 17px 24px; border-right: 1px solid var(--line); }
+    .fact:nth-child(even) { border-right: 0; }
+    .fact b { display:block; color:var(--mint); font-family:var(--cond); font-size:26px; letter-spacing:.04em; }
+    .fact span { color:var(--dim); font-size:9px; letter-spacing:.12em; }
+    .hero-actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:28px; }
+    .action {
+      min-height: 46px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      padding: 10px 18px;
+      border: 1px solid var(--orange);
+      background: transparent;
+      color: var(--orange);
+      font-weight: 900;
+      letter-spacing: .08em;
+      text-decoration: none;
+      text-transform: uppercase;
+      cursor: pointer;
+    }
+    .action.primary { background: var(--mint); border-color:var(--mint); color:#07110A; }
+    .action:hover { background: var(--orange); color:var(--void); }
+    .action.primary:hover { background:var(--mint-hi); border-color:var(--mint-hi); }
+    .hero-ticker {
+      grid-column: 1 / -1;
+      overflow:hidden;
+      border-top:1px solid var(--chrome);
+      border-bottom:1px solid var(--chrome);
+      margin-top:28px;
+      padding:9px 0;
+      color:var(--amber);
+      white-space:nowrap;
+      font-size:10px;
+      letter-spacing:.13em;
+    }
+    .hero-ticker span { display:inline-block; animation:ticker 24s linear infinite; }
+    .problem-layout {
+      display: grid;
+      grid-template-columns: minmax(260px,.68fr) minmax(0,1.32fr);
+      gap: clamp(28px,6vw,100px);
+      padding: 8vh 0 12vh;
+      align-items: start;
+    }
+    .problem-copy { position:sticky; top:calc(var(--top) + 30px); z-index:3; }
+    .problem-copy h2 { font-size:clamp(50px,7.2vw,118px); }
+    .problem-copy p { max-width:590px; margin:30px 0 0; color:var(--dim); font-size:clamp(14px,1.35vw,19px); }
+    .problem-copy strong { color:var(--ink); }
+    .signal-board {
+      border:1px solid var(--chrome);
+      background:rgba(10,10,10,.86);
+      clip-path:polygon(0 18px,18px 0,100% 0,100% calc(100% - 18px),calc(100% - 18px) 100%,0 100%);
+    }
+    .board-head {
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:16px;
+      min-height:46px;
+      padding:8px 14px;
+      border-bottom:1px solid var(--chrome);
+      color:var(--orange);
+      font-size:10px;
+      letter-spacing:.13em;
+    }
+    .stamp {
+      display:inline-flex;
+      min-height:24px;
+      align-items:center;
+      padding:2px 8px;
+      border:1px solid currentColor;
+      color:var(--blue);
+      font-weight:900;
+      transform:rotate(-1deg);
+    }
+    .streams { padding:18px; }
+    .stream {
+      display:grid;
+      grid-template-columns:72px 1fr auto;
+      align-items:center;
+      gap:12px;
+      min-height:64px;
+      border-bottom:1px solid rgba(82,242,154,.14);
+    }
+    .stream:last-child { border-bottom:0; }
+    .stream-id { color:var(--dim); font-size:10px; }
+    .stream-main { min-width:0; }
+    .stream-main b { display:block; overflow:hidden; color:var(--ink); text-overflow:ellipsis; white-space:nowrap; }
+    .stream-main small { color:var(--faint); }
+    .stream-state { min-width:78px; text-align:right; color:var(--mint); font-size:10px; }
+    .stream.wait .stream-state { color:var(--amber); }
+    .stream.risk .stream-state { color:var(--red); }
+    .segmeter { display:flex; gap:3px; margin-top:8px; }
+    .segmeter i { width:100%; height:4px; background:#222823; }
+    .segmeter i.on { background:var(--mint); }
+    .wait .segmeter i.on { background:var(--amber); }
+    .risk .segmeter i.on { background:var(--red); }
+    .convergence {
+      position:relative;
+      min-height:270px;
+      border-top:1px solid var(--chrome);
+      overflow:hidden;
+    }
+    .convergence svg { position:absolute; inset:0; width:100%; height:100%; }
+    .signal-path { fill:none; stroke:var(--faint); stroke-width:1.5; stroke-dasharray:5 7; animation:dash 8s linear infinite; }
+    .signal-path.hot { stroke:var(--orange); stroke-width:2; }
+    .operator-node {
+      position:absolute;
+      right:8%;
+      top:50%;
+      width:150px;
+      min-height:92px;
+      transform:translateY(-50%);
+      display:grid;
+      place-items:center;
+      border:2px solid var(--orange);
+      outline:1px solid var(--orange);
+      outline-offset:5px;
+      background:var(--void);
+      text-align:center;
+      color:var(--orange);
+      font-weight:900;
+    }
+    .operator-node b { display:block; color:var(--mint); font-family:var(--cond); font-size:26px; }
+    .board-alert {
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:16px;
+      padding:16px 18px;
+      border-top:1px solid var(--chrome);
+      background:rgba(247,185,85,.06);
+      color:var(--amber);
+    }
+    .trace-wrap { padding-bottom:10vh; }
+    .trace-intro {
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:40px;
+      padding:8vh 0 38px;
+      align-items:end;
+    }
+    .trace-intro h2 { font-size:clamp(52px,7.6vw,120px); }
+    .trace-intro p { max-width:640px; margin:0 0 8px auto; color:var(--dim); font-size:clamp(14px,1.25vw,18px); }
+    .trace-console {
+      display:grid;
+      grid-template-columns:270px minmax(0,1fr);
+      min-height:640px;
+      border:1px solid var(--chrome);
+      outline:1px solid rgba(242,100,0,.4);
+      outline-offset:5px;
+      background:rgba(8,10,8,.94);
+    }
+    .trace-steps { border-right:1px solid var(--chrome); }
+    .trace-label {
+      min-height:48px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      padding:8px 14px;
+      border-bottom:1px solid var(--chrome);
+      color:var(--orange);
+      font-size:10px;
+      letter-spacing:.12em;
+    }
+    .step {
+      width:100%;
+      min-height:94px;
+      display:grid;
+      grid-template-columns:42px 1fr;
+      align-items:center;
+      gap:12px;
+      padding:12px 14px;
+      border:0;
+      border-bottom:1px solid var(--line);
+      background:transparent;
+      text-align:left;
+      cursor:pointer;
+    }
+    .step:hover { background:rgba(82,242,154,.06); }
+    .step[aria-selected="true"] { color:var(--void); background:var(--mint); }
+    .step-no {
+      display:grid;
+      place-items:center;
+      width:38px;
+      height:38px;
+      border:1px solid currentColor;
+      font-weight:900;
+    }
+    .step b { display:block; font-family:var(--cond); font-size:20px; letter-spacing:.04em; }
+    .step small { color:var(--dim); font-size:9px; letter-spacing:.1em; }
+    .step[aria-selected="true"] small { color:rgba(0,0,0,.65); }
+    .trace-main { min-width:0; display:grid; grid-template-rows:auto 1fr auto; }
+    .trace-top {
+      min-height:48px;
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:14px;
+      padding:8px 16px;
+      border-bottom:1px solid var(--chrome);
+      color:var(--dim);
+      font-size:10px;
+    }
+    .trace-stage {
+      display:grid;
+      grid-template-columns:minmax(0,.88fr) minmax(300px,1.12fr);
+      min-height:0;
+    }
+    .trace-detail {
+      display:flex;
+      flex-direction:column;
+      min-width:0;
+      padding:clamp(24px,4vw,54px);
+      border-right:1px solid var(--line);
+    }
+    .trace-kanji {
+      color:rgba(82,242,154,.12);
+      font-family:var(--jp);
+      font-size:clamp(90px,12vw,180px);
+      line-height:.9;
+    }
+    .trace-detail h3 { margin:24px 0 12px; font-family:var(--cond); font-size:clamp(30px,3.3vw,52px); line-height:.92; }
+    .trace-detail p { max-width:540px; margin:0; color:var(--dim); font-size:14px; }
+    .trace-meta { margin-top:auto; padding-top:36px; }
+    .meta-row {
+      display:grid;
+      grid-template-columns:95px 1fr;
+      gap:16px;
+      padding:8px 0;
+      border-bottom:1px solid rgba(82,242,154,.12);
+      font-size:10px;
+    }
+    .meta-row span { color:var(--faint); }
+    .meta-row b { min-width:0; color:var(--mint); overflow-wrap:anywhere; }
+    .terminal { min-width:0; background:#070907; color:var(--amber); }
+    .term-head {
+      display:flex;
+      justify-content:space-between;
+      gap:12px;
+      padding:12px 14px;
+      border-bottom:1px solid rgba(247,185,85,.3);
+      color:var(--dim);
+      font-size:10px;
+    }
+    .term-body { min-height:420px; padding:18px; overflow:hidden; }
+    .term-line { margin:0 0 10px; animation:linein .25s steps(3,end) both; }
+    .term-time { color:var(--faint); }
+    .term-ok { color:var(--mint); }
+    .term-warn { color:var(--amber); }
+    .cursor { display:inline-block; width:8px; height:14px; margin-left:5px; vertical-align:-2px; background:var(--amber); animation:blink 1s steps(2,end) infinite; }
+    .trace-foot {
+      display:grid;
+      grid-template-columns:1fr 1fr 1fr;
+      border-top:1px solid var(--chrome);
+    }
+    .trace-stat { padding:13px 16px; border-right:1px solid var(--line); color:var(--dim); font-size:9px; }
+    .trace-stat:last-child { border:0; }
+    .trace-stat b { display:block; margin-top:3px; color:var(--mint); font-size:14px; }
+    .decisions { min-height:auto; padding-bottom:10vh; }
+    .decision-lead {
+      display:grid;
+      grid-template-columns:minmax(0,1fr) minmax(300px,.6fr);
+      gap:60px;
+      padding:9vh 0 44px;
+      align-items:end;
+    }
+    .decision-lead h2 { font-size:clamp(54px,8vw,126px); }
+    .decision-lead p { margin:0; color:var(--dim); font-size:16px; }
+    .queue {
+      border-top:1px solid var(--chrome);
+      border-left:1px solid var(--chrome);
+    }
+    .queue-item {
+      display:grid;
+      grid-template-columns:100px minmax(0,1fr) 190px 270px;
+      min-height:112px;
+      border-right:1px solid var(--chrome);
+      border-bottom:1px solid var(--chrome);
+      background:rgba(10,10,10,.78);
+    }
+    .queue-item > * { padding:18px; border-right:1px solid var(--line); }
+    .queue-item > *:last-child { border-right:0; }
+    .q-id { color:var(--orange); font-weight:900; }
+    .q-main b { display:block; margin-bottom:5px; color:var(--ink); font-size:14px; }
+    .q-main span, .q-evidence { color:var(--dim); font-size:10px; }
+    .q-state { display:flex; flex-direction:column; justify-content:center; color:var(--amber); }
+    .q-state b { font-family:var(--cond); font-size:20px; }
+    .q-actions { display:flex; align-items:center; gap:8px; }
+    .q-action {
+      min-width:68px;
+      min-height:44px;
+      border:1px solid var(--faint);
+      background:transparent;
+      color:var(--dim);
+      cursor:pointer;
+      font-size:10px;
+      font-weight:900;
+    }
+    .q-action:hover { border-color:var(--mint); color:var(--mint); }
+    .q-action.resolve:hover { background:var(--mint); color:var(--void); }
+    .queue-item.resolved { opacity:.62; }
+    .queue-item.resolved .q-state { color:var(--mint); }
+    .decision-log {
+      display:flex;
+      justify-content:space-between;
+      gap:20px;
+      padding:14px 18px;
+      border:1px solid var(--chrome);
+      border-top:0;
+      color:var(--dim);
+      font-size:10px;
+    }
+    .decision-log b { color:var(--mint); }
+    .systems { padding-bottom:10vh; }
+    .system-layout {
+      display:grid;
+      grid-template-columns:minmax(280px,.74fr) minmax(0,1.26fr);
+      gap:0;
+      margin-top:8vh;
+      border:1px solid var(--chrome);
+    }
+    .system-index { border-right:1px solid var(--chrome); }
+    .system-intro { padding:28px; border-bottom:1px solid var(--chrome); }
+    .system-intro h2 { font-size:clamp(42px,5vw,76px); }
+    .system-intro p { color:var(--dim); }
+    .system-tab {
+      width:100%;
+      min-height:62px;
+      display:grid;
+      grid-template-columns:34px 1fr auto;
+      align-items:center;
+      gap:10px;
+      padding:10px 16px;
+      border:0;
+      border-bottom:1px solid var(--line);
+      background:transparent;
+      text-align:left;
+      cursor:pointer;
+    }
+    .system-tab:hover { color:var(--mint); }
+    .system-tab[aria-selected="true"] { color:var(--void); background:var(--orange); }
+    .system-tab small { color:var(--faint); }
+    .system-tab[aria-selected="true"] small { color:rgba(0,0,0,.65); }
+    .system-detail { min-height:650px; display:grid; grid-template-rows:auto 1fr auto; }
+    .system-head {
+      display:flex;
+      justify-content:space-between;
+      padding:14px 18px;
+      border-bottom:1px solid var(--chrome);
+      color:var(--orange);
+      font-size:10px;
+    }
+    .system-canvas { position:relative; overflow:hidden; padding:clamp(28px,6vw,84px); }
+    .system-glyph {
+      position:absolute;
+      right:4%;
+      top:0;
+      color:rgba(82,242,154,.08);
+      font-family:var(--jp);
+      font-size:clamp(210px,35vw,520px);
+      line-height:.8;
+      pointer-events:none;
+    }
+    .system-canvas h3 { position:relative; margin:0 0 20px; max-width:650px; font-family:var(--cond); font-size:clamp(42px,6vw,88px); line-height:.86; }
+    .system-canvas p { position:relative; max-width:620px; color:var(--dim); font-size:clamp(14px,1.2vw,18px); }
+    .system-proof {
+      position:relative;
+      display:grid;
+      grid-template-columns:1fr 1fr;
+      gap:1px;
+      max-width:650px;
+      margin-top:50px;
+      background:var(--line);
+      border:1px solid var(--line);
+    }
+    .proof-cell { min-height:72px; padding:14px; background:var(--void); }
+    .proof-cell span { display:block; color:var(--faint); font-size:9px; }
+    .proof-cell b { display:block; margin-top:6px; color:var(--mint); font-size:12px; }
+    .system-foot { display:flex; justify-content:space-between; padding:14px 18px; border-top:1px solid var(--chrome); color:var(--dim); font-size:10px; }
+    .local { min-height:auto; padding-bottom:10vh; }
+    .local-grid {
+      display:grid;
+      grid-template-columns:minmax(0,.82fr) minmax(400px,1.18fr);
+      gap:clamp(38px,7vw,110px);
+      padding:9vh 0 5vh;
+      align-items:center;
+    }
+    .local-copy h2 { font-size:clamp(58px,8vw,126px); }
+    .local-copy p { max-width:590px; margin:28px 0 0; color:var(--dim); font-size:16px; }
+    .boundary {
+      position:relative;
+      min-height:560px;
+      border:1px solid var(--orange);
+      outline:1px solid rgba(242,100,0,.42);
+      outline-offset:6px;
+      padding:28px;
+      background:rgba(10,10,10,.76);
+      clip-path:polygon(0 0,calc(100% - 24px) 0,100% 24px,100% 100%,24px 100%,0 calc(100% - 24px));
+    }
+    .boundary-label { color:var(--orange); font-size:10px; letter-spacing:.13em; }
+    .arch-node {
+      position:relative;
+      z-index:2;
+      width:72%;
+      min-height:82px;
+      margin:38px auto 0;
+      display:grid;
+      grid-template-columns:52px 1fr auto;
+      align-items:center;
+      gap:14px;
+      padding:14px;
+      border:1px solid var(--line);
+      background:var(--void);
+    }
+    .arch-node + .arch-node::before {
+      content:"↓ HTTP + WEBSOCKET";
+      position:absolute;
+      left:50%;
+      top:-31px;
+      transform:translateX(-50%);
+      color:var(--amber);
+      font-size:8px;
+      white-space:nowrap;
+    }
+    .node-glyph { display:grid; place-items:center; width:42px; height:42px; border:1px solid var(--mint); color:var(--mint); font-family:var(--jp); font-size:20px; }
+    .arch-node b { display:block; color:var(--ink); }
+    .arch-node small { color:var(--dim); }
+    .arch-node .stamp { color:var(--mint); }
+    .local-facts {
+      display:grid;
+      grid-template-columns:repeat(3,1fr);
+      border:1px solid var(--chrome);
+    }
+    .local-fact { padding:18px; border-right:1px solid var(--chrome); }
+    .local-fact:last-child { border:0; }
+    .local-fact b { display:block; color:var(--mint); font-size:12px; }
+    .local-fact span { color:var(--dim); font-size:10px; }
+    .boot {
+      min-height:100svh;
+      display:grid;
+      align-items:center;
+      padding:calc(var(--top) + 60px) 0 60px;
+      overflow:hidden;
+    }
+    .boot-grid { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(330px,.9fr); gap:clamp(42px,7vw,110px); align-items:center; }
+    .boot h2 { font-size:clamp(66px,10.5vw,164px); }
+    .boot-copy > p { max-width:680px; margin:30px 0; color:var(--dim); font-size:clamp(15px,1.35vw,19px); }
+    .boot-panel {
+      border:1px solid var(--chrome);
+      outline:1px solid rgba(242,100,0,.45);
+      outline-offset:5px;
+      background:var(--void);
+    }
+    .boot-head { display:flex; justify-content:space-between; padding:13px 16px; border-bottom:1px solid var(--chrome); color:var(--orange); font-size:10px; }
+    .commands { padding:18px; color:var(--amber); overflow:auto; font-size:12px; }
+    .commands p { margin:0 0 9px; white-space:nowrap; }
+    .prompt { color:var(--mint); }
+    .boot-actions { display:grid; grid-template-columns:1fr 1fr; border-top:1px solid var(--chrome); }
+    .boot-actions .action { border:0; min-height:58px; }
+    .boot-actions .action + .action { border-left:1px solid var(--chrome); }
+    .copy-note { min-height:40px; padding:11px 16px; border-top:1px solid var(--line); color:var(--dim); font-size:10px; }
+    footer {
+      display:grid;
+      grid-template-columns:1fr auto;
+      gap:30px;
+      padding:24px 32px;
+      border-top:1px solid var(--chrome);
+      color:var(--dim);
+      font-size:10px;
+      letter-spacing:.08em;
+    }
+    footer b { color:var(--mint); }
+    @keyframes pulse { 50% { opacity:.28; } }
+    @keyframes blink { 50% { opacity:0; } }
+    @keyframes ticker { to { transform:translateX(-50%); } }
+    @keyframes dash { to { stroke-dashoffset:-48; } }
+    @keyframes linein { from { opacity:0; transform:translateY(5px); } }
+    @media (max-width: 1100px) {
+      .hero-grid { grid-template-columns:1fr; }
+      .hero-side { max-width:720px; }
+      .problem-layout, .local-grid { grid-template-columns:1fr; }
+      .problem-copy { position:relative; top:auto; }
+      .trace-intro, .decision-lead { grid-template-columns:1fr; }
+      .trace-intro p { margin:0; }
+      .trace-console { grid-template-columns:220px minmax(0,1fr); }
+      .trace-stage { grid-template-columns:1fr; }
+      .trace-detail { min-height:480px; border-right:0; border-bottom:1px solid var(--line); }
+      .queue-item { grid-template-columns:86px 1fr 160px; }
+      .q-actions { grid-column:1 / -1; border-top:1px solid var(--line); }
+      .system-layout { grid-template-columns:260px 1fr; }
+      .local-copy { max-width:850px; }
+    }
+    @media (max-width: 800px) {
+      :root { --rail: 0px; --top: 44px; }
+      body { padding-bottom:58px; }
+      .topbar { left:0; grid-template-columns:auto 1fr; }
+      .brand { height:44px; }
+      .top-status { display:none; }
+      .clock { justify-self:end; min-width:126px; border-left:1px solid var(--chrome); }
+      .progress { left:0; width:100%; }
+      .rail { inset:auto 0 0 0; width:100%; height:58px; border-top:1px solid var(--chrome); border-right:0; }
+      .rail-code, .rail-foot { display:none; }
+      .rail nav { height:100%; flex-direction:row; overflow-x:auto; }
+      .rail a { min-width:64px; min-height:56px; border-right:1px solid rgba(242,100,0,.22); border-bottom:0; writing-mode:horizontal-tb; transform:none; font-size:8px; }
+      .wrap { width:min(calc(100% - 32px),var(--max)); }
+      .chapter-id { top:58px; right:12px; }
+      .hero { padding-top:calc(var(--top) + 42px); }
+      .hero h1 { font-size:clamp(58px,15vw,108px); }
+      .hero-grid { gap:30px; }
+      .problem-layout { padding-top:7vh; }
+      .trace-console { grid-template-columns:1fr; }
+      .trace-steps { display:grid; grid-template-columns:repeat(5,1fr); border-right:0; border-bottom:1px solid var(--chrome); overflow-x:auto; }
+      .trace-label { display:none; }
+      .step { min-width:122px; min-height:82px; border-right:1px solid var(--line); border-bottom:0; grid-template-columns:34px 1fr; padding:9px; }
+      .step-no { width:30px; height:30px; }
+      .step b { font-size:16px; }
+      .system-layout { grid-template-columns:minmax(0,1fr); }
+      .system-index { min-width:0; border-right:0; border-bottom:1px solid var(--chrome); }
+      .system-tabs { display:flex; min-width:0; max-width:100%; overflow-x:auto; }
+      .system-tab { min-width:180px; border-right:1px solid var(--line); }
+      .system-intro { padding:22px; }
+      .system-detail { min-height:570px; }
+      .boot-grid { grid-template-columns:1fr; }
+      footer { grid-template-columns:1fr; }
+    }
+    @media (max-width: 560px) {
+      .brand { padding:0 12px; font-size:14px; }
+      .brand-mark { width:14px; height:14px; }
+      .clock { min-width:110px; padding:0 8px; font-size:10px; }
+      .section-head { grid-template-columns:34px auto 1fr; gap:8px; padding-top:22px; }
+      .section-head .no, .section-head .jp { font-size:14px; }
+      .section-head .chapter-title { font-size:13px; }
+      .hero { align-items:center; padding-bottom:24px; }
+      .hero h1 { font-size:clamp(43px,12vw,58px); }
+      .hero h1 .final span { display:block; }
+      .eyebrow { flex-wrap:wrap; gap:8px; font-size:9px; }
+      .hero .eyebrow { margin-top:36px; }
+      .hero-side-copy { padding:20px 18px 14px; }
+      .hero-facts { margin:0 -18px; }
+      .fact { padding:14px 18px; }
+      .hero-actions .action { width:100%; }
+      .hero-ticker { margin-top:10px; }
+      .problem-copy h2, .trace-intro h2, .decision-lead h2, .local-copy h2 { font-size:clamp(46px,16vw,78px); }
+      .streams { padding:10px; }
+      .stream { grid-template-columns:56px 1fr; min-height:72px; }
+      .stream-state { grid-column:2; text-align:left; }
+      .convergence { min-height:230px; }
+      .operator-node { right:5%; width:122px; }
+      .board-alert { grid-template-columns:1fr; }
+      .trace-intro, .decision-lead { padding-top:7vh; gap:22px; }
+      .trace-top { align-items:flex-start; flex-direction:column; }
+      .trace-detail { padding:24px 18px; min-height:450px; }
+      .trace-kanji { font-size:104px; }
+      .term-body { min-height:360px; padding:14px; font-size:10px; }
+      .trace-foot { grid-template-columns:1fr; }
+      .trace-stat { border-right:0; border-bottom:1px solid var(--line); }
+      .queue-item { grid-template-columns:76px 1fr; }
+      .q-state { grid-column:1 / -1; border-top:1px solid var(--line); }
+      .q-actions { display:grid; grid-template-columns:1fr 1fr; }
+      .q-action { width:100%; }
+      .decision-log { flex-direction:column; }
+      .system-canvas { padding:30px 18px; }
+      .system-proof { grid-template-columns:1fr; }
+      .local-grid { grid-template-columns:1fr; }
+      .boundary { min-height:520px; padding:18px 8px; }
+      .arch-node { width:88%; grid-template-columns:46px 1fr; }
+      .arch-node .stamp { grid-column:2; justify-self:start; }
+      .local-facts { grid-template-columns:1fr; }
+      .local-fact { border-right:0; border-bottom:1px solid var(--chrome); }
+      .boot h2 { font-size:clamp(62px,20vw,100px); }
+      .boot-actions { grid-template-columns:1fr; }
+      .boot-actions .action + .action { border-left:0; border-top:1px solid var(--chrome); }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior:auto; }
+      *, *::before, *::after {
+        scroll-behavior:auto !important;
+        animation-duration:.01ms !important;
+        animation-iteration-count:1 !important;
+        transition-duration:0s !important;
+      }
+      .hero-ticker span { transform:none !important; }
+      .cursor { opacity:1; }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip" href="#content">SKIP TO CONTENT</a>
+  <div class="progress" id="progress" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="brand" href="#hero" aria-label="Singularity home"><span class="brand-mark" aria-hidden="true"></span>SINGULARITY</a>
+    <div class="top-status" aria-label="Simulated system status"><span><i class="pulse" aria-hidden="true"></i><b>DAEMON NOMINAL</b></span><span>LOOPBACK 127.0.0.1</span><span>SIMULATED FLEET / 実演環境</span></div>
+    <time class="clock" id="clock" aria-label="Local time">00:00:00 SGT</time>
+  </header>
+  <aside class="rail" aria-label="Chapter navigation">
+    <div class="rail-code">05</div>
+    <nav>
+      <a href="#hero" data-chapter="hero" class="active">THESIS</a>
+      <a href="#sprawl" data-chapter="sprawl">SPRAWL</a>
+      <a href="#trace" data-chapter="trace">TRACE</a>
+      <a href="#decisions" data-chapter="decisions">DECIDE</a>
+      <a href="#systems" data-chapter="systems">SYSTEMS</a>
+      <a href="#local" data-chapter="local">LOCAL</a>
+      <a href="#boot" data-chapter="boot">BOOT</a>
+    </nav>
+    <div class="rail-foot">特異点</div>
+  </aside>
+
+  <main id="content">
+    <section class="chapter hero" id="hero" aria-labelledby="hero-title">
+      <span class="chapter-id" aria-hidden="true">00</span>
+      <div class="wrap hero-grid">
+        <div>
+          <p class="eyebrow"><span class="jp">局所制御系</span> / LOCAL AGENT CONTROL PLANE</p>
+          <h1 class="display" id="hero-title">
+            <span class="line">CODE IS</span>
+            <span class="line strike">CHEAP.</span>
+            <span class="line mint">COORDINATION</span>
+            <span class="line final"><span>IS THE</span> <span>BOTTLENECK.</span></span>
+          </h1>
+        </div>
+        <div class="hero-side">
+          <div class="hero-side-head"><span>OPERATOR BRIEF / 05</span><span>REV 2026.08</span></div>
+          <div class="hero-side-copy">
+            <p>Singularity turns a pile of terminals, branches, worktrees, and agent transcripts into one live operational record—running on your machine.</p>
+            <div class="hero-facts" aria-label="Product properties">
+              <div class="fact"><b>LOCAL</b><span>CONTROL PLANE</span></div>
+              <div class="fact"><b>LIVE</b><span>AGENT PTYs</span></div>
+              <div class="fact"><b>GIT</b><span>WORKTREE TASKS</span></div>
+              <div class="fact"><b>HUMAN</b><span>REVIEW POINT</span></div>
+            </div>
+            <div class="hero-actions">
+              <a class="action primary" href="#trace">TRACE A TASK ↓</a>
+              <a class="action" href="https://github.com/SamTeong/singularity">VIEW SOURCE ↗</a>
+            </div>
+          </div>
+        </div>
+        <div class="hero-ticker" aria-hidden="true"><span>SPEC → TASK → WORKTREE → AGENT → REVIEW　　SESSION SES-7F4A RUNNING　　TASK 9E0B59D ATTACHED　　DAEMON NOMINAL　　SPEC → TASK → WORKTREE → AGENT → REVIEW　　SESSION SES-7F4A RUNNING　　TASK 9E0B59D ATTACHED　　DAEMON NOMINAL　　</span></div>
+      </div>
+    </section>
+
+    <section class="chapter" id="sprawl" aria-labelledby="sprawl-title">
+      <span class="chapter-id" aria-hidden="true">01</span>
+      <div class="wrap">
+        <div class="section-head"><span class="no">01</span><span class="jp">分散</span><span class="chapter-title">WHEN EXECUTION MULTIPLIES</span></div>
+        <div class="problem-layout">
+          <div class="problem-copy">
+            <p class="eyebrow">THE COORDINATION TAX</p>
+            <h2 class="display" id="sprawl-title">SEVEN WINDOWS.<br>NO SHARED <span class="orange">STATE.</span></h2>
+            <p><strong>The agents can write in parallel.</strong> The operator still has to reconstruct which terminal owns which branch, which prompt is waiting, and where yesterday's reasoning went.</p>
+          </div>
+          <div class="signal-board" aria-label="Simulated fragmented fleet state">
+            <div class="board-head"><span>FRAGMENTED INPUT STREAMS / SIMULATION</span><span class="stamp">NOT A BENCHMARK</span></div>
+            <div class="streams">
+              <div class="stream"><span class="stream-id">TERM·07</span><div class="stream-main"><b>usage-gauge</b><small>task/9e0b59d · src/pages/Usage.tsx</small><div class="segmeter" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i></div></div><span class="stream-state">RUNNING</span></div>
+              <div class="stream wait"><span class="stream-id">TERM·04</span><div class="stream-main"><b>transcript-index</b><small>task/71ac03e · permission prompt</small><div class="segmeter" aria-hidden="true"><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div><span class="stream-state">WAITING</span></div>
+              <div class="stream"><span class="stream-id">GIT·12</span><div class="stream-main"><b>hooks-schema</b><small>task/b4802fa · six files changed</small><div class="segmeter" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i></div></div><span class="stream-state">REVIEW</span></div>
+              <div class="stream risk"><span class="stream-id">PROC·03</span><div class="stream-main"><b>wiki-links</b><small>task/08f14c2 · process silent</small><div class="segmeter" aria-hidden="true"><i class="on"></i><i class="on"></i><i class="on"></i><i></i><i></i><i></i><i></i><i></i></div></div><span class="stream-state">INSPECT</span></div>
+            </div>
+            <div class="convergence" aria-hidden="true">
+              <svg viewBox="0 0 800 270" preserveAspectRatio="none">
+                <path class="signal-path" d="M0 32 H190 L315 135 H600"/>
+                <path class="signal-path hot" d="M0 92 H220 L330 135 H600"/>
+                <path class="signal-path" d="M0 168 H225 L330 135 H600"/>
+                <path class="signal-path hot" d="M0 235 H190 L315 135 H600"/>
+              </svg>
+              <div class="operator-node"><span><b>04</b>CONCURRENT<br>SIGNALS</span></div>
+            </div>
+            <div class="board-alert"><span>Every new agent adds another stream of execution.</span><strong>ONE OPERATOR / 人間 01</strong></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter" id="trace" aria-labelledby="trace-title">
+      <span class="chapter-id" aria-hidden="true">02</span>
+      <div class="wrap trace-wrap">
+        <div class="section-head"><span class="no">02</span><span class="jp">連鎖</span><span class="chapter-title">A DURABLE CHAIN OF CUSTODY</span></div>
+        <div class="trace-intro">
+          <h2 class="display" id="trace-title">WORK MOVES.<br><span class="mint">CONTEXT STAYS ATTACHED.</span></h2>
+          <p>Follow one simulated task from intent to human review. Each state change updates the operational record instead of creating another disconnected artifact.</p>
+        </div>
+        <div class="trace-console">
+          <div class="trace-steps" role="tablist" aria-label="Task trace stages">
+            <div class="trace-label"><span>TRACE INDEX</span><span>05 STAGES</span></div>
+            <button class="step" role="tab" aria-selected="true" aria-controls="trace-panel" data-step="0"><span class="step-no">01</span><span><b>SPEC</b><small>仕様 · INTENT</small></span></button>
+            <button class="step" role="tab" aria-selected="false" aria-controls="trace-panel" data-step="1"><span class="step-no">02</span><span><b>TASK</b><small>任務 · QUEUE</small></span></button>
+            <button class="step" role="tab" aria-selected="false" aria-controls="trace-panel" data-step="2"><span class="step-no">03</span><span><b>WORKTREE</b><small>分岐 · ISOLATE</small></span></button>
+            <button class="step" role="tab" aria-selected="false" aria-controls="trace-panel" data-step="3"><span class="step-no">04</span><span><b>AGENT</b><small>実行 · BUILD</small></span></button>
+            <button class="step" role="tab" aria-selected="false" aria-controls="trace-panel" data-step="4"><span class="step-no">05</span><span><b>REVIEW</b><small>審査 · DECIDE</small></span></button>
+          </div>
+          <div class="trace-main" id="trace-panel" role="tabpanel" aria-live="polite">
+            <div class="trace-top"><span>TRACE / 9E0B59D / SIMULATED RECORD</span><span id="trace-state">STATE 01 OF 05</span></div>
+            <div class="trace-stage">
+              <div class="trace-detail">
+                <div class="trace-kanji" id="trace-kanji" aria-hidden="true">仕</div>
+                <h3 id="trace-heading">DEFINE THE BOUNDARY</h3>
+                <p id="trace-copy">Capture the intent and acceptance boundary before an agent starts changing files.</p>
+                <div class="trace-meta" id="trace-meta">
+                  <div class="meta-row"><span>SPEC</span><b>LOCAL-USAGE-GAUGE</b></div>
+                  <div class="meta-row"><span>ACCEPTANCE</span><b>4 / 4 DEFINED</b></div>
+                  <div class="meta-row"><span>RISK</span><b>LOW</b></div>
+                </div>
+              </div>
+              <div class="terminal" aria-label="Simulated terminal output">
+                <div class="term-head"><span>LIVE EVENT STREAM</span><span>PTY / UTF-8</span></div>
+                <div class="term-body" id="terminal-lines"></div>
+              </div>
+            </div>
+            <div class="trace-foot">
+              <div class="trace-stat">TASK ID<b>9E0B59D</b></div>
+              <div class="trace-stat">CHAIN INTEGRITY<b id="chain-count">01 / 05</b></div>
+              <div class="trace-stat">NEXT AUTHORITY<b id="next-authority">OPERATOR</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter decisions" id="decisions" aria-labelledby="decisions-title">
+      <span class="chapter-id" aria-hidden="true">03</span>
+      <div class="wrap">
+        <div class="section-head"><span class="no">03</span><span class="jp">判断</span><span class="chapter-title">HUMAN ATTENTION, ROUTED</span></div>
+        <div class="decision-lead">
+          <h2 class="display" id="decisions-title">DON'T WATCH EVERY AGENT.<br><span class="amber">WATCH THE DECISIONS.</span></h2>
+          <p>The useful control surface is not a wall of activity. It is a clear route from a signal to the task, worktree, session, and transcript that explain it.</p>
+        </div>
+        <div class="queue" aria-label="Simulated human decision queue">
+          <article class="queue-item" data-item="9E0B59D">
+            <div class="q-id">9E0B59D</div>
+            <div class="q-main"><b>USAGE GAUGE · REVIEW SIX CHANGED FILES</b><span>task/9e0b59d · tests 48 pass · transcript attached</span></div>
+            <div class="q-state"><small>AUTHORITY</small><b>REVIEW</b></div>
+            <div class="q-actions"><button class="q-action resolve" data-decision="APPROVED">APPROVE</button><button class="q-action" data-decision="HELD">HOLD</button></div>
+          </article>
+          <article class="queue-item" data-item="71AC03E">
+            <div class="q-id">71AC03E</div>
+            <div class="q-main"><b>TRANSCRIPT INDEX · FILE ACCESS REQUEST</b><span>task/71ac03e · session SES-2C91 · terminal waiting</span></div>
+            <div class="q-state"><small>AUTHORITY</small><b>PERMIT</b></div>
+            <div class="q-actions"><button class="q-action resolve" data-decision="PERMITTED">PERMIT</button><button class="q-action" data-decision="DENIED">DENY</button></div>
+          </article>
+          <article class="queue-item" data-item="B4802FA">
+            <div class="q-id">B4802FA</div>
+            <div class="q-main"><b>HOOKS SCHEMA · EDGE CASE FAILED</b><span>task/b4802fa · one test failing · diff available</span></div>
+            <div class="q-state"><small>AUTHORITY</small><b>RETURN</b></div>
+            <div class="q-actions"><button class="q-action resolve" data-decision="RETURNED">RETURN</button><button class="q-action" data-decision="HELD">HOLD</button></div>
+          </article>
+        </div>
+        <div class="decision-log" aria-live="polite"><span id="decision-message">DECISION LOG READY · SELECT AN ACTION</span><span>OPEN ITEMS <b id="open-items">03</b></span></div>
+      </div>
+    </section>
+
+    <section class="chapter systems" id="systems" aria-labelledby="systems-title">
+      <span class="chapter-id" aria-hidden="true">04</span>
+      <div class="wrap">
+        <div class="section-head"><span class="no">04</span><span class="jp">系統</span><span class="chapter-title">EVERYTHING AROUND THE AGENT</span></div>
+        <div class="system-layout">
+          <div class="system-index">
+            <div class="system-intro">
+              <p class="eyebrow">CONTROL SURFACES</p>
+              <h2 class="display" id="systems-title">THE AGENT IS ONE PROCESS.</h2>
+              <p>The work around it is the product.</p>
+            </div>
+            <div class="system-tabs" role="tablist" aria-label="Product capability groups">
+              <button class="system-tab" role="tab" aria-selected="true" data-system="0"><span>01</span><b>EXECUTION</b><small>実行</small></button>
+              <button class="system-tab" role="tab" aria-selected="false" data-system="1"><span>02</span><b>CONTEXT</b><small>記憶</small></button>
+              <button class="system-tab" role="tab" aria-selected="false" data-system="2"><span>03</span><b>RECORD</b><small>履歴</small></button>
+              <button class="system-tab" role="tab" aria-selected="false" data-system="3"><span>04</span><b>OBSERVE</b><small>状態</small></button>
+            </div>
+          </div>
+          <div class="system-detail" role="tabpanel" aria-live="polite">
+            <div class="system-head"><span id="system-code">SYS·01 / EXECUTION</span><span class="stamp">AVAILABLE</span></div>
+            <div class="system-canvas">
+              <div class="system-glyph" id="system-glyph" aria-hidden="true">実</div>
+              <h3 id="system-heading">LIVE WORK, NOT ANOTHER STATUS PAGE.</h3>
+              <p id="system-copy">Sessions expose active agent PTYs. Tasks connect queue state to worktrees and branches. Automation can schedule jobs or dispatch eligible work in the background.</p>
+              <div class="system-proof" id="system-proof">
+                <div class="proof-cell"><span>SURFACE 01</span><b>LIVE SESSIONS + PTYs</b></div>
+                <div class="proof-cell"><span>SURFACE 02</span><b>TASK KANBAN</b></div>
+                <div class="proof-cell"><span>SURFACE 03</span><b>GIT WORKTREES</b></div>
+                <div class="proof-cell"><span>SURFACE 04</span><b>CRON + BACKGROUND JOBS</b></div>
+              </div>
+            </div>
+            <div class="system-foot"><span>VERIFIED REPOSITORY SURFACES</span><span id="system-page">01 / 04</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter local" id="local" aria-labelledby="local-title">
+      <span class="chapter-id" aria-hidden="true">05</span>
+      <div class="wrap">
+        <div class="section-head"><span class="no">05</span><span class="jp">局所</span><span class="chapter-title">THE TRUST BOUNDARY</span></div>
+        <div class="local-grid">
+          <div class="local-copy">
+            <p class="eyebrow">LOCAL MEANS LOOPBACK</p>
+            <h2 class="display" id="local-title">YOUR MACHINE.<br><span class="mint">YOUR STATE.</span><br>YOUR CONTROL PLANE.</h2>
+            <p>The browser interface talks to a daemon bound to <strong class="mint">127.0.0.1</strong>. Runtime state lives beneath <strong class="mint">SINGULARITY_HOME</strong>, with optional <strong class="mint">SING_TOKEN</strong> access protection.</p>
+          </div>
+          <div class="boundary" aria-label="Singularity local architecture">
+            <div class="boundary-label">LOCAL MACHINE BOUNDARY / 局所境界</div>
+            <div class="arch-node"><span class="node-glyph">閲</span><span><b>BROWSER UI</b><small>REACT CONTROL SURFACE</small></span><span class="stamp">LOCAL</span></div>
+            <div class="arch-node"><span class="node-glyph">環</span><span><b>127.0.0.1 DAEMON</b><small>HTTP + WEBSOCKET</small></span><span class="stamp">BOUND</span></div>
+            <div class="arch-node"><span class="node-glyph">動</span><span><b>AGENT PTYs + TASK STATE</b><small>SESSIONS · WORKTREES · HISTORY</small></span><span class="stamp">ACTIVE</span></div>
+            <div class="arch-node"><span class="node-glyph">倉</span><span><b>REPOSITORY + SINGULARITY_HOME</b><small>FILES · CONFIG · LOCAL RECORDS</small></span><span class="stamp">OWNED</span></div>
+          </div>
+        </div>
+        <div class="local-facts">
+          <div class="local-fact"><b>LOOPBACK BIND</b><span>No public bind by default.</span></div>
+          <div class="local-fact"><b>OPTIONAL TOKEN</b><span>Explicit access protection via SING_TOKEN.</span></div>
+          <div class="local-fact"><b>HONEST BOUNDARY</b><span>Agent providers follow their own traffic and data policies.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="chapter boot" id="boot" aria-labelledby="boot-title">
+      <span class="chapter-id" aria-hidden="true">06</span>
+      <div class="wrap boot-grid">
+        <div class="boot-copy">
+          <p class="eyebrow">LOCAL BOOT SEQUENCE / 起動</p>
+          <h2 class="display" id="boot-title">MORE EXECUTION.<br><span class="mint">LESS RECONSTRUCTION.</span></h2>
+          <p>Clone the repository, bootstrap the workspace, and bring the coordination layer up beside the agents already doing the work.</p>
+        </div>
+        <div class="boot-panel">
+          <div class="boot-head"><span>QUICK START</span><span>PNPM / LOCAL</span></div>
+          <div class="commands" aria-label="Setup commands">
+            <p><span class="prompt">$</span> git clone git@github.com:SamTeong/singularity.git</p>
+            <p><span class="prompt">$</span> cd singularity</p>
+            <p><span class="prompt">$</span> pnpm bootstrap</p>
+            <p><span class="prompt">$</span> pnpm start<span class="cursor" aria-hidden="true"></span></p>
+          </div>
+          <div class="boot-actions">
+            <button class="action primary" id="copy-command">COPY BOOTSTRAP</button>
+            <a class="action" href="https://github.com/SamTeong/singularity">OPEN GITHUB ↗</a>
+          </div>
+          <div class="copy-note" id="copy-note" aria-live="polite">READY TO COPY · PNPM BOOTSTRAP</div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span><b>SINGULARITY / 特異点</b> · LOCAL AGENT CONTROL PLANE</span>
+    <span>SIMULATED OPERATIONAL DATA · VERIFIED PRODUCT CLAIMS</span>
+  </footer>
+
+  <script>
+    (function () {
+      "use strict";
+
+      var reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      var progress = document.getElementById("progress");
+      var clock = document.getElementById("clock");
+      var navLinks = Array.from(document.querySelectorAll("[data-chapter]"));
+      var chapters = Array.from(document.querySelectorAll(".chapter"));
+
+      function updateProgress() {
+        var height = document.documentElement.scrollHeight - window.innerHeight;
+        var value = height > 0 ? window.scrollY / height : 0;
+        progress.style.transform = "scaleX(" + Math.max(0, Math.min(1, value)) + ")";
+      }
+      window.addEventListener("scroll", updateProgress, { passive: true });
+      window.addEventListener("resize", updateProgress);
+      updateProgress();
+
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) return;
+          navLinks.forEach(function (link) {
+            var active = link.dataset.chapter === entry.target.id;
+            link.classList.toggle("active", active);
+            if (active) link.setAttribute("aria-current", "location");
+            else link.removeAttribute("aria-current");
+          });
+        });
+      }, { rootMargin: "-35% 0px -55% 0px", threshold: 0 });
+      chapters.forEach(function (chapter) { observer.observe(chapter); });
+
+      function updateClock() {
+        var now = new Date();
+        clock.textContent = new Intl.DateTimeFormat("en-GB", {
+          timeZone: "Asia/Singapore",
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: false
+        }).format(now) + " SGT";
+      }
+      updateClock();
+      if (!reduceMotion) window.setInterval(updateClock, 1000);
+
+      var traceData = [
+        {
+          kanji: "仕",
+          heading: "DEFINE THE BOUNDARY",
+          copy: "Capture the intent and acceptance boundary before an agent starts changing files.",
+          meta: [["SPEC","LOCAL-USAGE-GAUGE"],["ACCEPTANCE","4 / 4 DEFINED"],["RISK","LOW"]],
+          authority: "OPERATOR",
+          lines: [
+            ["14:31:42","SPEC LOCAL-USAGE-GAUGE CREATED","ok"],
+            ["14:31:45","ACCEPTANCE 4 / 4 DEFINED","ok"],
+            ["14:31:47","AWAITING TASK DISPATCH","warn"]
+          ]
+        },
+        {
+          kanji: "任",
+          heading: "MAKE THE WORK VISIBLE",
+          copy: "Turn the spec into a trackable unit with status, metadata, and an operator-visible position in the queue.",
+          meta: [["TASK","9E0B59D"],["STATUS","READY"],["PRIORITY","P1"]],
+          authority: "DISPATCHER",
+          lines: [
+            ["14:31:47","TASK 9E0B59D CREATED","ok"],
+            ["14:31:49","QUEUE POSITION 01","ok"],
+            ["14:31:52","ELIGIBLE FOR DISPATCH","warn"]
+          ]
+        },
+        {
+          kanji: "分",
+          heading: "ISOLATE THE CHANGE",
+          copy: "Create a dedicated git worktree and branch so concurrent agents can build without colliding with one another.",
+          meta: [["PATH",".WORKTREES/9E0B59D"],["BRANCH","TASK/9E0B59D"],["BASE","MAIN"]],
+          authority: "DAEMON",
+          lines: [
+            ["14:32:02","CREATING WORKTREE","warn"],
+            ["14:32:08",".WORKTREES/9E0B59D READY","ok"],
+            ["14:32:09","BRANCH TASK/9E0B59D ATTACHED","ok"]
+          ]
+        },
+        {
+          kanji: "実",
+          heading: "WATCH THE WORK MOVE",
+          copy: "Launch the task session and inspect live terminal output, process state, and usage signals from the same deck.",
+          meta: [["SESSION","SES-7F4A"],["STATE","RUNNING"],["PTY","ATTACHED"]],
+          authority: "AGENT",
+          lines: [
+            ["14:32:11","AGENT SESSION SES-7F4A STARTED","ok"],
+            ["14:32:27","READ SRC/PAGES/USAGE.TSX",""],
+            ["14:33:02","PATCH USAGE WINDOW METER","warn"]
+          ]
+        },
+        {
+          kanji: "審",
+          heading: "RETURN WITH THE EVIDENCE",
+          copy: "Inspect the changed files, passing tests, and attached transcript before a human decides what happens next.",
+          meta: [["FILES","06 CHANGED"],["TESTS","48 PASS"],["DECISION","HUMAN REQUIRED"]],
+          authority: "HUMAN",
+          lines: [
+            ["14:33:19","TEST 48 PASS · 0 FAIL","ok"],
+            ["14:33:20","TRANSCRIPT ATTACHED","ok"],
+            ["14:33:21","STATE REVIEW_READY","warn"]
+          ]
+        }
+      ];
+      var steps = Array.from(document.querySelectorAll(".step"));
+      var terminal = document.getElementById("terminal-lines");
+      var currentStep = 0;
+
+      function setTrace(index, focus) {
+        currentStep = index;
+        var data = traceData[index];
+        steps.forEach(function (step, i) {
+          step.setAttribute("aria-selected", String(i === index));
+          step.tabIndex = i === index ? 0 : -1;
+        });
+        document.getElementById("trace-kanji").textContent = data.kanji;
+        document.getElementById("trace-heading").textContent = data.heading;
+        document.getElementById("trace-copy").textContent = data.copy;
+        document.getElementById("trace-state").textContent = "STATE " + String(index + 1).padStart(2,"0") + " OF 05";
+        document.getElementById("chain-count").textContent = String(index + 1).padStart(2,"0") + " / 05";
+        document.getElementById("next-authority").textContent = data.authority;
+        document.getElementById("trace-meta").innerHTML = data.meta.map(function (row) {
+          return '<div class="meta-row"><span>' + row[0] + '</span><b>' + row[1] + '</b></div>';
+        }).join("");
+        terminal.innerHTML = data.lines.map(function (line, i) {
+          var cls = line[2] === "ok" ? "term-ok" : line[2] === "warn" ? "term-warn" : "";
+          var delay = reduceMotion ? 0 : i * 120;
+          return '<p class="term-line" style="animation-delay:' + delay + 'ms"><span class="term-time">[' + line[0] + ']</span> <span class="' + cls + '">' + line[1] + '</span></p>';
+        }).join("") + '<p class="term-line">&gt; TRACE CONNECTED<span class="cursor" aria-hidden="true"></span></p>';
+        if (focus) steps[index].focus();
+      }
+      steps.forEach(function (step, index) {
+        step.addEventListener("click", function () { setTrace(index, false); });
+        step.addEventListener("keydown", function (event) {
+          if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+          event.preventDefault();
+          var delta = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+          setTrace((index + delta + steps.length) % steps.length, true);
+        });
+      });
+      setTrace(0, false);
+
+      if (!reduceMotion) {
+        var traceTimer = window.setInterval(function () {
+          var traceRect = document.getElementById("trace").getBoundingClientRect();
+          if (traceRect.top < window.innerHeight * .5 && traceRect.bottom > window.innerHeight * .5) {
+            setTrace((currentStep + 1) % traceData.length, false);
+          }
+        }, 4200);
+        steps.forEach(function (step) {
+          step.addEventListener("click", function () {
+            window.clearInterval(traceTimer);
+          }, { once: true });
+        });
+      }
+
+      var openItems = 3;
+      document.querySelectorAll(".q-action").forEach(function (button) {
+        button.addEventListener("click", function () {
+          var item = button.closest(".queue-item");
+          var state = item.querySelector(".q-state b");
+          var wasOpen = !item.classList.contains("resolved");
+          item.classList.add("resolved");
+          state.textContent = button.dataset.decision;
+          item.querySelectorAll("button").forEach(function (control) { control.disabled = true; });
+          if (wasOpen) openItems -= 1;
+          document.getElementById("open-items").textContent = String(openItems).padStart(2,"0");
+          document.getElementById("decision-message").textContent = "TASK " + item.dataset.item + " · DECISION " + button.dataset.decision + " · RECORDED LOCALLY";
+        });
+      });
+
+      var systemData = [
+        {
+          code:"SYS·01 / EXECUTION", glyph:"実", heading:"LIVE WORK, NOT ANOTHER STATUS PAGE.",
+          copy:"Sessions expose active agent PTYs. Tasks connect queue state to worktrees and branches. Automation can schedule jobs or dispatch eligible work in the background.",
+          proof:[["SURFACE 01","LIVE SESSIONS + PTYs"],["SURFACE 02","TASK KANBAN"],["SURFACE 03","GIT WORKTREES"],["SURFACE 04","CRON + BACKGROUND JOBS"]]
+        },
+        {
+          code:"SYS·02 / CONTEXT", glyph:"記", heading:"KEEP THE ENVIRONMENT BESIDE THE AGENT.",
+          copy:"Configuration, hooks, skills, rules, memory, repository files, and wiki knowledge stay inspectable near the work instead of being repeatedly rediscovered or repasted.",
+          proof:[["SURFACE 01","CONFIGURATION"],["SURFACE 02","HOOKS + RULES"],["SURFACE 03","SKILLS + MEMORY"],["SURFACE 04","EXPLORER + WIKI"]]
+        },
+        {
+          code:"SYS·03 / RECORD", glyph:"履", heading:"YESTERDAY'S REASONING IS A RECORD.",
+          copy:"History organizes completed work by day and session. Transcripts preserve the conversations behind changes so an operator can inspect or resume them in context.",
+          proof:[["SURFACE 01","DAILY HISTORY"],["SURFACE 02","TRANSCRIPT SEARCH"],["SURFACE 03","SESSION DETAIL"],["SURFACE 04","RESUME CONTEXT"]]
+        },
+        {
+          code:"SYS·04 / OBSERVE", glyph:"状", heading:"KNOW WHEN TO INTERVENE.",
+          copy:"Five-hour and seven-day usage windows, provider status, daemon health, process data, and live terminal output separate healthy progress from a session waiting silently.",
+          proof:[["SURFACE 01","5H + 7D USAGE"],["SURFACE 02","PROVIDER STATUS"],["SURFACE 03","DAEMON HEALTH"],["SURFACE 04","AGENT PROCESSES"]]
+        }
+      ];
+      var systemTabs = Array.from(document.querySelectorAll(".system-tab"));
+      function setSystem(index, focus) {
+        var data = systemData[index];
+        systemTabs.forEach(function (tab, i) {
+          tab.setAttribute("aria-selected", String(i === index));
+          tab.tabIndex = i === index ? 0 : -1;
+        });
+        document.getElementById("system-code").textContent = data.code;
+        document.getElementById("system-glyph").textContent = data.glyph;
+        document.getElementById("system-heading").textContent = data.heading;
+        document.getElementById("system-copy").textContent = data.copy;
+        document.getElementById("system-page").textContent = String(index + 1).padStart(2,"0") + " / 04";
+        document.getElementById("system-proof").innerHTML = data.proof.map(function (cell) {
+          return '<div class="proof-cell"><span>' + cell[0] + '</span><b>' + cell[1] + '</b></div>';
+        }).join("");
+        if (focus) systemTabs[index].focus();
+      }
+      systemTabs.forEach(function (tab, index) {
+        tab.addEventListener("click", function () { setSystem(index, false); });
+        tab.addEventListener("keydown", function (event) {
+          if (event.key !== "ArrowRight" && event.key !== "ArrowLeft" && event.key !== "ArrowDown" && event.key !== "ArrowUp") return;
+          event.preventDefault();
+          var delta = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1 : -1;
+          setSystem((index + delta + systemTabs.length) % systemTabs.length, true);
+        });
+      });
+
+      document.getElementById("copy-command").addEventListener("click", function () {
+        var command = "pnpm bootstrap";
+        var note = document.getElementById("copy-note");
+        function success() { note.textContent = "COPIED · PNPM BOOTSTRAP"; }
+        function fallback() {
+          var area = document.createElement("textarea");
+          area.value = command;
+          area.setAttribute("readonly", "");
+          area.style.position = "fixed";
+          area.style.opacity = "0";
+          document.body.appendChild(area);
+          area.select();
+          try { document.execCommand("copy"); success(); }
+          catch (error) { note.textContent = "COPY UNAVAILABLE · COMMAND: PNPM BOOTSTRAP"; }
+          area.remove();
+        }
+        if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(command).then(success, fallback);
+        else fallback();
+      });
+    }());
+  </script>
+</body>
+</html>
