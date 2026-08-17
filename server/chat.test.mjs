@@ -5,15 +5,24 @@
 // it at a scratch temp dir before the dynamic import. Run: npm test
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-chat-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
+// claudeOauthToken() (usage.mjs) reads <homedir>/.claude/.credentials.json, not
+// SINGULARITY_HOME — redirect homedir() (checked live, not at import time) at a
+// fake one so callMessages/streamChat see a token without touching real creds.
+process.env.HOME = scratch;
+process.env.USERPROFILE = scratch;
+mkdirSync(join(scratch, '.claude'), { recursive: true });
+writeFileSync(join(scratch, '.claude', '.credentials.json'), JSON.stringify({
+  claudeAiOauth: { accessToken: 'fake-token', expiresAt: Date.now() + 3600_000 },
+}));
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { consumeStream } = await import('./chat.mjs');
+const { consumeStream, callMessages } = await import('./chat.mjs');
 
 // Queues each entry as one reader.read() resolution (string entries are
 // UTF-8 encoded), then returns {done:true} forever.
@@ -66,4 +75,29 @@ test('consumeStream: quiet stream end with no terminal event returns false and s
   const result = await consumeStream(makeBody([]), (m) => calls.push(m), 'c4', undefined);
   assert.equal(result, false);
   assert.deepEqual(calls, []);
+});
+
+// Regression: the Messages fetch has no timeout, so a hung connection (e.g. a
+// stalled TLS handshake) never settles. callMessages must (a) bound the fetch
+// with a signal and (b) turn a resulting abort/error into a clean {ok:false}
+// result rather than hanging or rejecting — and a second call afterward must
+// still go through, not join a promise wedged by the first failure.
+test('callMessages: an aborting fetch resolves cleanly, and a second call still goes through', async () => {
+  const realFetch = global.fetch;
+  let calls = 0;
+  global.fetch = async (_url, opts) => {
+    calls++;
+    assert.ok(opts.signal instanceof AbortSignal, 'fetch must be bounded by an AbortSignal');
+    throw new DOMException('The operation was aborted.', 'AbortError');
+  };
+  try {
+    for (let i = 0; i < 2; i++) {
+      const r = await callMessages({ system: 's', messages: [{ role: 'user', content: 'hi' }] });
+      assert.equal(r.ok, false);
+      assert.match(r.error, /request failed/);
+    }
+    assert.equal(calls, 2);
+  } finally {
+    global.fetch = realFetch;
+  }
 });

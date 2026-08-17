@@ -78,7 +78,7 @@ test('readConfig reports mtime per scope (0 when file missing)', () => {
   assert.equal(cfg.local.mtime, 0); // local scope file not created
 });
 
-test('writeConfig rejects a stale mtime with "changed on disk"; force overrides', () => {
+test('writeConfig rejects a stale mtime with "changed on disk"; force overrides', async () => {
   const cwd = makeRoot('{ "v": 1 }', null);
   setConfigRoots([cwd]);
   const p = join(cwd, '.claude', 'settings.json');
@@ -87,12 +87,12 @@ test('writeConfig rejects a stale mtime with "changed on disk"; force overrides'
   writeFileSync(p, '{ "v": 99 }');
   const future = (Date.now() + 5000) / 1000;
   utimesSync(p, future, future);
-  const rejected = writeConfig(cwd, 'project', '{ "v": 2 }', stale);
+  const rejected = await writeConfig(cwd, 'project', '{ "v": 2 }', stale);
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error, 'changed on disk');
   assert.equal(JSON.parse(readFileSync(p, 'utf8')).v, 99); // untouched
   // force overrides the drift.
-  const forced = writeConfig(cwd, 'project', '{ "v": 3 }', stale, true);
+  const forced = await writeConfig(cwd, 'project', '{ "v": 3 }', stale, true);
   assert.equal(forced.ok, true);
   assert.equal(typeof forced.mtime, 'number');
   assert.equal(JSON.parse(readFileSync(p, 'utf8')).v, 3);

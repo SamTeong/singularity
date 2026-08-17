@@ -43,7 +43,7 @@ import { getTokens } from '@/theme/contract.js';
 import { stroke2, surface2, chipBg, brandGrad, brandGlow, focusRing, statePill, cardTag, sectionLabel, statusColor, trackColor } from '@/shell/shellStyles.js';
 import { repoName } from '@/lib/paths.js';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
-import { KIND } from '@/lib/agentStatus.js';
+import { KIND, isLive } from '@/lib/agentStatus.js';
 import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState } from '@/lib/domainState.js';
@@ -51,8 +51,8 @@ import { insetQuery } from '@/lib/sheetInset.js';
 import { COLUMNS as STAGES, COLUMN_DOMAIN as STAGE_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
 
 // Live agent states — an "Open session" action only makes sense while a real
-// claude process is attached (mirrors TasksBoard's LIVE_STATUS).
-const LIVE_STATUS = new Set(['starting', 'running', 'idle']);
+// claude process is attached (`isLive` comes from agentStatus.js, shared with
+// TasksBoard).
 
 // STAGES/STAGE_DOMAIN are TasksBoard's COLUMNS/COLUMN_DOMAIN, aliased for this
 // file's Activity-list vocabulary — imported from the shared
@@ -247,7 +247,7 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
   const cost = fmtUsd(s?.costUsd) || '—';
   const tokens = s?.tokens > 0 ? fmtTokens(s.tokens) : '—';
   const turns = s?.turns != null ? String(s.turns) : '—';
-  const canOpenSession = !!(agent && LIVE_STATUS.has(agent.status) && task.sessionId);
+  const canOpenSession = !!(agent && isLive(agent.status) && task.sessionId);
   const reduced = prefersReducedMotion();
 
   // The task's resting domain-state — same precedence as the board's own

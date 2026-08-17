@@ -2,6 +2,7 @@ import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { matches as matchesKey } from '@/lib/keys.js';
 import { useQueryState, useUpdateQuery } from '@/hooks/useQueryState.js';
+import { usePagedList } from '@/hooks/usePagedList.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -82,7 +83,6 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const [chatInput, setChatInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [authNeeded, setAuthNeeded] = useState(false);
-  const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [stats, setStats] = useState({}); // id -> { costUsd, costSource, inputTokens, ... }
   const [loadErr, setLoadErr] = useState(null);
@@ -121,11 +121,13 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   // Poll the session list only while the Sessions view is active — avoids
   // background fetches when the panel is mounted-but-hidden behind another view.
   // Also waits for root to resolve (non-null) so this never lists against a guess.
+  // 15s (was 5s) + skip while the tab is hidden: a 5s full-corpus refetch is
+  // wasteful when nobody is looking, and a backgrounded tab would hammer the API.
   useEffect(() => {
     if (!active || root == null) return;
-    const load = () => fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.'));
+    const load = () => { if (document.hidden) return; fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.')); };
     load();
-    const iv = setInterval(load, 5000);
+    const iv = setInterval(load, 15000);
     return () => clearInterval(iv);
   }, [root, active]);
 
@@ -257,19 +259,9 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   // search results). Scope 'one' search filters the right view, not this list.
   const filteredSessions = sessions.filter((s) => tool === 'all' || (s.source || 'claude') === tool);
   const leftList = leftResults ?? filteredSessions;
-  const pageCount = Math.max(1, Math.ceil(leftList.length / pageSize));
-  const curPage = Math.min(page, pageCount);
-  const pageItems = leftList.slice((curPage - 1) * pageSize, curPage * pageSize);
-  // Jump back to page 1 whenever the search/scope/page-size changes the list
-  // being paginated. Compared against previous values during render rather
-  // than an effect (curPage's Math.min already clamps out-of-range pages, but
-  // a fresh query/scope should start back at page 1, not wherever it was).
-  const [prevPageKey, setPrevPageKey] = useState(`${q}:${scope}:${pageSize}:${tool}`);
-  const pageKeyNow = `${q}:${scope}:${pageSize}:${tool}`;
-  if (pageKeyNow !== prevPageKey) {
-    setPrevPageKey(pageKeyNow);
-    setPage(1);
-  }
+  // Jumps back to page 1 whenever the search/scope/page-size changes the list
+  // being paginated — see usePagedList for the reset-during-render mechanics.
+  const { page: curPage, pageCount, pageItems, setPage } = usePagedList(leftList, pageSize, `${q}:${scope}:${pageSize}:${tool}`);
   // Fetch cost/tokens for the visible session rows (not the per-match search rows).
   const pageKey = pageItems.map((s) => s.id).join(',');
   useEffect(() => { if (!leftResults) loadStats(pageItems); /* eslint-disable-line */ }, [pageKey, leftResults, loadStats]);

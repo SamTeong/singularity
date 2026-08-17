@@ -13,3 +13,10 @@ export const KIND = { starting: 'active', running: 'active', idle: 'review', det
 // `domainState`'s `running`; `error` covers both a hard failure and a lost
 // connection, the same meaning as `domainState`'s `failed`.
 export const KIND_TO_DOMAIN = { done: 'done', active: 'running', review: 'review', error: 'failed' };
+
+// A status that represents a live (attached) agent session — starting,
+// running, or idle (idle is at the prompt but the session still holds the pty).
+// Deduped from AppShell.jsx/commands.mjs/SessionRow.jsx and the LIVE_STATUS
+// Sets in TasksBoard.jsx/TaskDetailPanel.jsx — a new live state only needs to
+// be added here to update every caller. `detached`/`exited` are NOT live.
+export const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';

@@ -43,6 +43,8 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - run: pnpm lint
+
       - run: pnpm test
 
       # pnpm v9 supports --audit-level; fails the step only on moderate+.
@@ -50,3 +52,20 @@ jobs:
       # the build on noise.
       - run: pnpm audit --audit-level=moderate
         continue-on-error: true
+
+  e2e-mock:
+    name: E2E mock (drift alarm)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm test:e2e-mock

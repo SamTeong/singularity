@@ -35,17 +35,25 @@ const singTokenInject = {
 
 export default defineConfig(({ mode }) => ({
   root: 'web',
-  plugins: [react(), singTokenInject, ...(mode === 'mock' ? [mockAssetsPlugin()] : [])],
+  // Mock mode runs wholly in-browser (Mirage + mock-socket): there is no
+  // daemon to proxy to and no machine token/home to inject. Gating both out
+  // keeps `pnpm dev-mock` daemon- and .env-free — the mock contract in
+  // CLAUDE.md ("Nothing reads SINGULARITY_HOME, CLAUDE_BIN, or ~/.claude").
+  plugins: [react(), ...(mode !== 'mock' ? [singTokenInject] : []), ...(mode === 'mock' ? [mockAssetsPlugin()] : [])],
   resolve: { alias: { '@': srcDir } },
   server: {
     host: '127.0.0.1',
     port: vitePort,
     strictPort: true,
     open: false,
-    proxy: {
-      '/ws': { target: `ws://127.0.0.1:${backendPort}`, ws: true },
-      '/api': apiTarget,
-    },
+    ...(mode === 'mock'
+      ? {}
+      : {
+          proxy: {
+            '/ws': { target: `ws://127.0.0.1:${backendPort}`, ws: true },
+            '/api': apiTarget,
+          },
+        }),
   },
   build: {
     // mock mode emits to a sibling dir so `build:mock` can never clobber the

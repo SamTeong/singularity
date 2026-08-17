@@ -11,7 +11,7 @@
  * state that never leaves the shell (view, collapsed, dialog open flags, toast)
  * stays in the shell, not here.
  */
-import { createContext, use, useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const WS_URL = `ws://${location.host}/ws${window.__SING_TOKEN__ ? `?token=${encodeURIComponent(window.__SING_TOKEN__)}` : ''}`;
 
@@ -194,13 +194,22 @@ export function AgentsProvider({ children }) {
     fetch('/api/background').then((r) => r.json()).then(setBackground).catch(() => {});
   }, [connected]);
 
-  const value = {
+  // Stable identity: consumers put context fields in effect dep arrays, and
+  // this provider re-renders every WS frame plus on 5s/8s poll ticks — an
+  // inline object would rebind their effects on every tick.
+  const value = useMemo(() => ({
     agents, active, setActive, connected, recent,
     tasks, taskHistory, crons, background, usage, history,
     stats, subagents,
     sendMsg, reorderAgents, refreshUsage,
     registerTerminal, registerChat, registerError,
-  };
+  }), [
+    agents, active, connected, recent,
+    tasks, taskHistory, crons, background, usage, history,
+    stats, subagents,
+    sendMsg, reorderAgents, refreshUsage,
+    registerTerminal, registerChat, registerError,
+  ]);
   return <AgentsContext value={value}>{children}</AgentsContext>;
 }
 

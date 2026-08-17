@@ -32,6 +32,7 @@ import EmptyListLine from '@/components/EmptyListLine.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
 // Skills viewer: tree of roots → scopes → skills (left), editable SKILL.md +
 // supporting files (right) via CodeMirror. Each root's layout (grouped vs flat)
@@ -138,7 +139,7 @@ export default function SkillsPanel() {
       body: JSON.stringify({ root: untildify(sel.root), scope: sel.scope, skill: sel.skill, flat: sel.flat ? '1' : '0', file: file?.path || null, content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      if (confirmOverwrite()) return save(true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }

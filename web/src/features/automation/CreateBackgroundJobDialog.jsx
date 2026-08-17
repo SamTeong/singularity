@@ -136,12 +136,11 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
       editing={editing}
       createDisabled={!canSubmit}
     >
-      <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
+      <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
       <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} slotProps={{ input: { endAdornment: clearAdornment(description !== '', () => setDescription('')) } }} />
-      <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
+      <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="Working directory" />
       <ScopeSelect open={open} value={scopes} onChange={setScopes} />
-      <TextField size="small" label="Cooldown" type="number" value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
-      <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled" />
+      <TextField size="small" label="Cooldown (hours)" type="number" value={cooldownHours} onChange={(e) => setCooldownHours(e.target.value)} />
       <FormControl size="small" fullWidth>
         <InputLabel>when finished</InputLabel>
         <Select label="when finished" value={conclude} onChange={(e) => setConclude(e.target.value)}>
@@ -190,6 +189,8 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
           </Stack>
         ))}
       </Stack>
+
+      <FormControlLabel control={<Checkbox size="small" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />} label="enabled" />
 
       {error && <Typography variant="body2" color="error">{error}</Typography>}
     </CreateDialog>

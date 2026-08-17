@@ -120,13 +120,35 @@ function enqueueWrite(fn) {
 // the sessions root (sessions.mjs's client-selectable root, default
 // ~/.claude/projects) — used by tests to scan an isolated fixture tree instead
 // of the real one; production callers never pass it.
+// readSession does a full JSONL parse; scanDays calls it once per session in
+// the window on every /api/history request, re-parsing transcripts that
+// haven't changed since the last call. Cached by (mtime,size) like sessions.mjs's
+// own textCache/metaCache — transcripts are append-only, so an unchanged
+// (mtime,size) means the old parse is still correct. listSessions already
+// stat'd each row (row.mtime/row.size), so this reuses that instead of a
+// second statSync; keyed by (source,id) since that pair is one file.
+const sessionCache = new Map(); // "root:source:id" -> { mtimeMs, size, result }
+async function readSessionCached(row, root) {
+  const key = `${root}:${row.source || 'claude'}:${row.id}`;
+  const hit = sessionCache.get(key);
+  if (hit && hit.mtimeMs === row.mtime && hit.size === row.size) {
+    sessionCache.delete(key);
+    sessionCache.set(key, hit); // LRU: move hit to end
+    return hit.result;
+  }
+  const result = await readSession(row.project, row.id, root, row.source, row.file);
+  sessionCache.set(key, { mtimeMs: row.mtime, size: row.size, result });
+  if (sessionCache.size > 200) sessionCache.delete(sessionCache.keys().next().value); // evict oldest
+  return result;
+}
+
 export async function scanDays(windowStart, root) {
   const rows = (await listSessions({ cap: 5000, root })).filter((r) => r.mtime >= windowStart);
   const statsCsvCosts = readStatsCsvCosts(); // one read per scan (cached on mtime/size)
   const days = new Map();
 
   for (const row of rows) {
-    const s = await readSession(row.project, row.id, root, row.source, row.file);
+    const s = await readSessionCached(row, root);
     if (!s.ok) continue;
 
     // "Assistant turn" = one role:'assistant' kind:'text' message — the
@@ -291,15 +313,20 @@ export async function summarizeDay(digestText, sessions, { callAnthropic = defau
   const a = await callAnthropic(digestText).catch((e) => ({ ok: false, error: e.message }));
   const parsedA = a?.ok ? parseJsonSummary(a.text) : null;
   if (parsedA) return { ...parsedA, llm: { ok: true, provider: 'anthropic-oauth', model: a.model || null, inputTokens: a.inputTokens ?? null, outputTokens: a.outputTokens ?? null } };
+  // Surface the failure reason instead of swallowing it — both providers fall
+  // through to `reason: 'unavailable'` below, but `error` now carries which one
+  // failed and why, so the card isn't a bare "unavailable" with no clue.
+  const anthropicErr = !a?.ok ? (a?.error || 'anthropic call failed') : null;
 
+  let ollamaErr = null;
   if (OLLAMA_BIN) {
     let stdout;
-    try { stdout = await callOllama(digestText); } catch { stdout = null; }
+    try { stdout = await callOllama(digestText); } catch (e) { ollamaErr = e.message; stdout = null; }
     const parsedO = parseJsonSummary(stdout);
     if (parsedO) return { ...parsedO, llm: { ok: true, provider: 'ollama', model: OLLAMA_MODEL, inputTokens: null, outputTokens: null } };
   }
 
-  return { ...deterministicSummary(sessions), llm: { ok: false, provider: null, model: null, reason: 'unavailable' } };
+  return { ...deterministicSummary(sessions), llm: { ok: false, provider: null, model: null, reason: 'unavailable', error: anthropicErr || ollamaErr || null } };
 }
 
 // ---- Entry assembly ---------------------------------------------------------

@@ -19,7 +19,7 @@
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, readFileSync, appendFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, appendFileSync, rmSync, mkdtempSync, statSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -332,6 +332,53 @@ test('ensureHistory: a gap day is written once as an empty entry, not re-appende
   assert.equal(readHistory().find((e) => e.date === date).llm.reason, 'trivial', 'empty entry upgrades once work exists');
 });
 
+test('scanDays: readSession is cached by (mtime,size) — an unchanged file is not re-parsed, a touched/grown one is', async () => {
+  const cwd = 'C:\\fake\\history-cache-test';
+  const now = new Date();
+  const d1 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 13, 9, 0, 0);
+  const at = (ms) => new Date(d1.getTime() + ms).toISOString();
+  const id = 'history-cache-fixture';
+  const dir = join(SESSIONS_ROOT, encodeCwd(cwd));
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, `${id}.jsonl`);
+
+  const original = [
+    textMsg(cwd, 'user', 'q', at(0)),
+    textMsg(cwd, 'assistant', 'a1', at(1000)),
+    textMsg(cwd, 'assistant', 'a2', at(2000)),
+  ].map((e) => JSON.stringify(e)).join('\n') + '\n';
+  writeFileSync(file, original);
+  // Pin the mtime to a whole second before the first read. The cache compares
+  // mtimeMs floats exactly, and a fractional Unix-second round-trip through
+  // utimesSync doesn't land back on the same float — a whole second does, so
+  // the restore below is exact and the staleness assertion isn't luck.
+  const mtimeSec = Math.floor(Date.now() / 1000);
+  utimesSync(file, mtimeSec, mtimeSec);
+  const st1 = statSync(file);
+
+  const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 20).getTime();
+  const dateStr = localDay(d1.toISOString());
+  const before = await scanDays(windowStart, SESSIONS_ROOT);
+  assert.equal(before.get(dateStr).sessions.find((s) => s.id === id).lastAssistantText, 'a2');
+
+  // Same byte length ('a2' -> 'zz'), mtime forced back to the original — a
+  // real cache must key on (mtime,size) and serve the old parse rather than
+  // re-reading, so this proves the second call did NOT re-parse.
+  const tampered = original.replace('"a2"', '"zz"');
+  assert.equal(tampered.length, original.length, 'tamper must be size-preserving to test the cache key');
+  writeFileSync(file, tampered);
+  utimesSync(file, mtimeSec, mtimeSec);
+  assert.equal(statSync(file).mtimeMs, st1.mtimeMs, 'mtime restore must be exact for this to test the cache');
+
+  const stale = await scanDays(windowStart, SESSIONS_ROOT);
+  assert.equal(stale.get(dateStr).sessions.find((s) => s.id === id).lastAssistantText, 'a2', 'unchanged (mtime,size) served the cached parse, not the tampered content');
+
+  // Actually touch it (append -> size grows, mtime advances): must invalidate.
+  appendFileSync(file, `${JSON.stringify(textMsg(cwd, 'assistant', 'a3', at(3000)))}\n`);
+  const fresh = await scanDays(windowStart, SESSIONS_ROOT);
+  assert.equal(fresh.get(dateStr).sessions.find((s) => s.id === id).lastAssistantText, 'a3', 'a grown/touched file re-parses');
+});
+
 test('ensureHistory: two concurrent calls share one pass — one LLM call and one line per date', async () => {
   const { STATE_DIR } = await import('./app-dir.mjs');
   const rawDateLines = (d) => readFileSync(join(STATE_DIR, 'history.jsonl'), 'utf8')
@@ -362,4 +409,45 @@ test('ensureHistory: two concurrent calls share one pass — one LLM call and on
   // duplicated append would pass a readHistory-only assertion either way.
   assert.equal(rawDateLines(date).length, 1, 'exactly one line appended for the date');
   assert.deepEqual(readHistory().find((e) => e.date === date).projects[0].bullets, ['concurrent day']);
+});
+
+test('scanDays: cache key includes root — same session id under different roots must not serve each other', async () => {
+  const cwd = 'C:\\fake\\history-root-isolation-test';
+  const now = new Date();
+  const d1 = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 11, 9, 0, 0);
+  const id = 'history-root-isolation-fixture';
+  const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 20).getTime();
+  const dateStr = localDay(d1.toISOString());
+
+  // Write the same session id to two different roots with different content
+  const root1 = join(scratch, 'root1-projects');
+  const root2 = join(scratch, 'root2-projects');
+
+  writeClaudeSession(cwd, id, [
+    textMsg(cwd, 'user', 'from root1', d1.toISOString()),
+    textMsg(cwd, 'assistant', 'response1', new Date(d1.getTime() + 1000).toISOString()),
+  ]);
+  const sessions1Dir = join(root1, encodeCwd(cwd));
+  mkdirSync(sessions1Dir, { recursive: true });
+  const sessions1File = join(sessions1Dir, `${id}.jsonl`);
+  writeFileSync(sessions1File, [
+    textMsg(cwd, 'user', 'from root1', d1.toISOString()),
+    textMsg(cwd, 'assistant', 'response1', new Date(d1.getTime() + 1000).toISOString()),
+  ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+  const sessions2Dir = join(root2, encodeCwd(cwd));
+  mkdirSync(sessions2Dir, { recursive: true });
+  const sessions2File = join(sessions2Dir, `${id}.jsonl`);
+  writeFileSync(sessions2File, [
+    textMsg(cwd, 'user', 'from root2', d1.toISOString()),
+    textMsg(cwd, 'assistant', 'response2', new Date(d1.getTime() + 1000).toISOString()),
+  ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+  const days1 = await scanDays(windowStart, root1);
+  const session1 = days1.get(dateStr)?.sessions.find((s) => s.id === id);
+  assert.equal(session1?.lastAssistantText, 'response1', 'root1 returns response1');
+
+  const days2 = await scanDays(windowStart, root2);
+  const session2 = days2.get(dateStr)?.sessions.find((s) => s.id === id);
+  assert.equal(session2?.lastAssistantText, 'response2', 'root2 returns response2, not the cached response1');
 });

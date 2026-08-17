@@ -18,12 +18,11 @@ import HistoryIcon from '@mui/icons-material/History';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import CloseIcon from '@mui/icons-material/Close';
 import { StatusPill } from '@/components/StatusPill.jsx';
-import { KIND } from '@/lib/agentStatus.js';
+import { KIND, isLive } from '@/lib/agentStatus.js';
 import { isCodexModel } from '@/lib/models.js';
 import { tildify } from '@/lib/paths.js';
 import { fmtTokens } from '@/lib/format.js';
 
-const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
 // Actively mid-turn (would interrupt work to resume elsewhere). Idle is at the
 // prompt — safe to hand off, though the in-app pty still holds the session id.
 const isWorking = (s) => s === 'running' || s === 'starting';

@@ -6,7 +6,6 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
 import TextField from '@mui/material/TextField';
-import Snackbar from '@mui/material/Snackbar';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Popover from '@mui/material/Popover';
@@ -205,7 +204,7 @@ function Spine({ scrollRef, rows, activeDate, reduceMotion }) {
  * drills backwards through time. Fetches the initial window, then prefers the
  * live WS push (`history` from useAgents, full replacement) once one arrives.
  */
-export default function HistoryView({ onOpenSession }) {
+export default function HistoryView({ onOpenSession, onToast }) {
   const { history } = useAgents();
   const reduceMotion = useReducedMotion();
   const scrollRef = useRef(null);
@@ -239,7 +238,6 @@ export default function HistoryView({ onOpenSession }) {
   const updateQuery = useUpdateQuery();
   const [expanded, setExpanded] = useState(() => new Set());
   const [regenerating, setRegenerating] = useState(() => new Set());
-  const [error, setError] = useState(null);
   const [activeDate, setActiveDate] = useState(null);
   const [focusDate, setFocusDate] = useState(null); // pending keyboard-nav focus target while windowed-out
   const [winRange, setWinRange] = useState([0, Infinity]);
@@ -272,8 +270,8 @@ export default function HistoryView({ onOpenSession }) {
       setFetchedEntries(d.entries);
       setFetchedPending(d.pending);
       setLoaded(true);
-    }).catch(() => { if (mine === fetchSeq.current) setError('Could not load history.'); });
-  }, [preset, customRange.from, customRange.to]);
+    }).catch(() => { if (mine === fetchSeq.current) onToast?.('Could not load history.'); });
+  }, [preset, customRange.from, customRange.to, onToast]);
 
   // Merge: prefer the WS payload (full archive, ascending) over the initial
   // fetch (already server-filtered, descending) once a push has landed, then
@@ -420,10 +418,10 @@ export default function HistoryView({ onOpenSession }) {
     setRegenerating((s) => new Set(s).add(date));
     fetch('/api/history/regenerate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ date }) })
       .then((r) => r.json())
-      .then((d) => { if (!d.ok) setError(d.error || 'Regenerate failed.'); })
-      .catch((e) => setError(e.message))
+      .then((d) => { if (!d.ok) onToast?.(d.error || 'Regenerate failed.'); })
+      .catch((e) => onToast?.(e.message))
       .finally(() => setRegenerating((s) => { const n = new Set(s); n.delete(date); return n; }));
-  }, []);
+  }, [onToast]);
 
   // Eligible for a header-level bulk regenerate: real entries with a summary
   // (skip today — still live — and gap days).
@@ -611,7 +609,6 @@ export default function HistoryView({ onOpenSession }) {
         )}
       </Popover>
 
-      <Snackbar open={!!error} autoHideDuration={5000} onClose={() => setError(null)} message={error} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
     </Box>
   );
 }

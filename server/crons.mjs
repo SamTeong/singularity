@@ -103,9 +103,9 @@ function tick() {
 // Spawn the job's description into a fresh agent + record the run. Shared by the
 // scheduler (fire) and manual run (runCron). Does NOT touch nextFire.
 function spawnForJob(job) {
-  // reg.create's params (name/prompt) are the session-registry contract; the
+  // reg.create's params (title/prompt) are the session-registry contract; the
   // cron stores them as title/description, so map at the call site.
-  const agent = reg.create({ cwd: job.cwd, name: job.title, model: job.model, scopes: job.scopes, prompt: job.description, permissionMode: job.permissionMode });
+  const agent = reg.create({ cwd: job.cwd, title: job.title, model: job.model, scopes: job.scopes, prompt: job.description, permissionMode: job.permissionMode });
   job.lastSessionId = agent.id;
   job.lastFiredAt = Date.now();
   job.updatedAt = Date.now();

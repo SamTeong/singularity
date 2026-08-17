@@ -26,6 +26,7 @@ import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
 // Language extension per file extension: JS family → javascript(), .json → json(),
 // everything else (.ps1/.sh/…) → plain (no lang extension).
@@ -134,7 +135,7 @@ export default function HooksEditor() {
       body: JSON.stringify({ path, content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      if (confirmOverwrite()) return save(true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }

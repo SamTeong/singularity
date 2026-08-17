@@ -77,9 +77,18 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
   useEffect(() => { loadReports(); }, [bgView, loadReports]);
   const flaggedReports = reports.filter((r) => r.flagged).length;
 
+  // Shared fetch+toast: parses JSON, toasts `d.error || d.reason` on a non-ok
+  // response (runBg legitimately returns `reason`; the rest return `error`),
+  // and toasts the network error on a reject. Returns the parsed body so a
+  // caller can branch on `d.ok` (e.g. setFlag reloads reports on success).
+  const api = useCallback((url, opts) =>
+    fetch(url, opts).then((r) => r.json())
+      .then((d) => { if (!d.ok) onToast?.(d.error || d.reason); return d; })
+      .catch((e) => { onToast?.(e.message); return { ok: false }; }), [onToast]);
+
   const setFlag = (taskId, flagged) =>
-    fetch(`/api/background/reports/${taskId}/flag`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ flagged }) })
-      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); else loadReports(); }).catch((e) => onToast?.(e.message));
+    api(`/api/background/reports/${taskId}/flag`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ flagged }) })
+      .then((d) => { if (d.ok) loadReports(); });
 
   const openReport = (taskId) => {
     setSelReport(taskId);
@@ -92,27 +101,20 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
   };
 
   const toggle = (id, enabled) =>
-    fetch(`/api/crons/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) })
-      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
+    api(`/api/crons/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) });
   const run = (id) =>
-    fetch(`/api/crons/${id}/run`, { method: 'POST' })
-      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
+    api(`/api/crons/${id}/run`, { method: 'POST' });
   const remove = (id) =>
-    fetch(`/api/crons/${id}`, { method: 'DELETE' })
-      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
+    api(`/api/crons/${id}`, { method: 'DELETE' });
 
   const runBg = () =>
-    fetch('/api/background/run', { method: 'POST' })
-      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.reason || d.error); }).catch((e) => onToast?.(e.message));
+    api('/api/background/run', { method: 'POST' });
   const toggleJob = (id, enabled) =>
-    fetch(`/api/background/jobs/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) })
-      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
+    api(`/api/background/jobs/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) });
   const removeJob = (id) =>
-    fetch(`/api/background/jobs/${id}`, { method: 'DELETE' })
-      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
+    api(`/api/background/jobs/${id}`, { method: 'DELETE' });
   const saveOrder = (ids) =>
-    fetch('/api/background/reorder', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) })
-      .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
+    api('/api/background/reorder', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) });
 
   const config = background?.config;
   const lastTick = background?.lastTick;
@@ -210,7 +212,7 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
                 <TableCell>Schedule</TableCell>
                 <TableCell>Description</TableCell>
                 <TableCell>Model</TableCell>
-                <TableCell>Repo</TableCell>
+                <TableCell>Working directory</TableCell>
                 <TableCell>Last fired</TableCell>
                 <TableCell>Next</TableCell>
                 <TableCell>Status</TableCell>
@@ -374,7 +376,7 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
                     <TableCell padding="checkbox" />
                     <TableCell padding="checkbox" />
                     <TableCell sortDirection={sort?.key === 'title' ? sort.dir : false}><TableSortLabel active={sort?.key === 'title'} direction={sort?.key === 'title' ? sort.dir : 'asc'} onClick={() => changeSort('title')}>Title</TableSortLabel></TableCell>
-                    <TableCell sortDirection={sort?.key === 'cwd' ? sort.dir : false}><TableSortLabel active={sort?.key === 'cwd'} direction={sort?.key === 'cwd' ? sort.dir : 'asc'} onClick={() => changeSort('cwd')}>Working dir</TableSortLabel></TableCell>
+                    <TableCell sortDirection={sort?.key === 'cwd' ? sort.dir : false}><TableSortLabel active={sort?.key === 'cwd'} direction={sort?.key === 'cwd' ? sort.dir : 'asc'} onClick={() => changeSort('cwd')}>Working directory</TableSortLabel></TableCell>
                     <TableCell sortDirection={sort?.key === 'cooldownHours' ? sort.dir : false}><TableSortLabel active={sort?.key === 'cooldownHours'} direction={sort?.key === 'cooldownHours' ? sort.dir : 'asc'} onClick={() => changeSort('cooldownHours')}>Cooldown</TableSortLabel></TableCell>
                     <TableCell sortDirection={sort?.key === 'lastRunAt' ? sort.dir : false}><TableSortLabel active={sort?.key === 'lastRunAt'} direction={sort?.key === 'lastRunAt' ? sort.dir : 'asc'} onClick={() => changeSort('lastRunAt')}>Last run</TableSortLabel></TableCell>
                     <TableCell align="right" />

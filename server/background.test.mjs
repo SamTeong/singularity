@@ -9,15 +9,22 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-background-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
+// Cleared so a non-claude model makes reg.create's buildSpawn throw
+// synchronously ("ollama not found") instead of spawning a real process — the
+// deterministic-failure trick tasks.test.mjs uses for its "failed spawn cleans
+// up" tests, reused below for the healLiveBgTask regression test.
+delete process.env.OLLAMA_BIN;
+delete process.env.CODEX_BIN;
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { inWindow, evalGate, pickJob, pickRunnableJob, watchdogDecision, migrateLegacyConfig, createJob, updateJob, reorderJobs, snapshotBackground, listReports, getReport, setReportFlag } = await import('./background.mjs');
-const { normalizeTags, initTasks } = await import('./tasks.mjs');
+const { inWindow, evalGate, pickJob, pickRunnableJob, watchdogDecision, migrateLegacyConfig, createJob, updateJob, reorderJobs, snapshotBackground, listReports, getReport, setReportFlag, runBackgroundNow } = await import('./background.mjs');
+const { normalizeTags, initTasks, snapshotTasks } = await import('./tasks.mjs');
 const { STATE_DIR } = await import('./agents.mjs');
 
 // Full per-job config shape (window/thresholds/tokenCaps) — same values the old
@@ -322,4 +329,78 @@ test('setReportFlag: new reports default flagged; unflag/flag persists across li
 });
 test('setReportFlag: rejects an unknown report id', () => {
   assert.throws(() => setReportFlag('nope', true));
+});
+
+// ---- healLiveBgTask (dead-session single-flight escape hatch) -----------------
+// A background run's session can die (crash, kill, pty exit) without the
+// agent ever curl-ing itself off todo/inprogress, which used to leave
+// liveBgTask() latched forever. Seed a task stuck in 'inprogress' with a
+// sessionId that was never reg.create'd (so reg.isLive() is false for it) —
+// no real createTask/spawn involved — and confirm it gets released, and that
+// a subsequent run attempt is no longer refused by the single-flight guard.
+function initGitRepo() {
+  const repo = mkdtempSync(join(tmpdir(), 'sing-bg-repo-'));
+  execFileSync('git', ['-C', repo, 'init', '-q']);
+  execFileSync('git', ['-C', repo, 'config', 'user.email', 'x@x.com']);
+  execFileSync('git', ['-C', repo, 'config', 'user.name', 'x']);
+  writeFileSync(join(repo, 'f.txt'), 'x');
+  execFileSync('git', ['-C', repo, 'add', '.']);
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'init']);
+  return repo;
+}
+
+test('healLiveBgTask releases a task whose session is dead, unblocking the next run', async () => {
+  const deadSessionId = 'dead-session-does-not-exist';
+  writeFileSync(join(STATE_DIR, 'tasks.json'), JSON.stringify({
+    tasks: [
+      // live1/live3 are the background-tagged, still-'inprogress' fixtures the
+      // listReports test above seeded (initTasks only ever adds/overwrites by
+      // id, never clears) — untag them here so they don't also latch the
+      // single-flight guard and mask what this test is actually checking.
+      { id: 'live1', title: 'Live BG', tags: [], column: 'inprogress', createdAt: 1000 },
+      { id: 'live3', title: 'Live BG w/ reportDir', tags: [], column: 'inprogress', createdAt: 1500 },
+      {
+        id: 'bg-dead', title: 'Bg Job Run', tags: ['background'], column: 'inprogress',
+        state: 'working', sessionId: deadSessionId, createdAt: Date.now(),
+      },
+    ],
+    history: [],
+  }));
+  initTasks();
+  assert.equal(snapshotBackground().liveTaskId, 'bg-dead', 'sanity: latches the single-flight guard');
+
+  const repo = initGitRepo();
+  try {
+    const myJob = createJob({
+      title: 'heal-test', description: 'd', cwd: repo, enabled: true,
+      models: { claude: 'not-a-claude-model' }, // routes through the ollama branch → deterministic throw, no real spawn
+    });
+    // force:true's bypassGate path (pickJob) ignores window/gate and just
+    // takes the oldest ready job across ALL jobs — including every job the
+    // earlier createJob/updateJob/reorderJobs tests above left in config.jobs
+    // (cwd: 'C:\\x', which doesn't exist). Disable everything but myJob so
+    // pickJob can only select it.
+    for (const j of snapshotBackground().config.jobs) if (j.id !== myJob.id) updateJob(j.id, { enabled: false });
+
+    // force:true (bypassGate) skips getUsage() entirely, so the only way this
+    // can fail is the single-flight refusal ('a background run is already
+    // live') or the deterministic ollama-not-found throw from createTask.
+    // Before the fix, the dead-session task would still read as live and the
+    // run would be refused with the single-flight message instead.
+    await assert.rejects(
+      () => runBackgroundNow({ force: true }),
+      (err) => {
+        assert.doesNotMatch(err.message, /already live/);
+        assert.match(err.message, /ollama not found/);
+        return true;
+      },
+    );
+
+    const released = snapshotTasks().tasks.find((t) => t.id === 'bg-dead');
+    assert.equal(released.column, 'inreview');
+    assert.equal(released.state, 'parked — needs human');
+    assert.equal(snapshotBackground().liveTaskId, null);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
 });

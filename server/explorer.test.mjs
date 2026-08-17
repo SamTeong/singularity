@@ -76,31 +76,84 @@ test('readEntry: text, image (by ext), binary (NUL byte), toolarge', () => {
   assert.deepEqual(readEntry(p('missing.txt')), { ok: false, error: 'not found' });
 });
 
-test('writeEntry: round-trip, creates missing parent dir', () => {
+test('writeEntry: round-trip, creates missing parent dir', async () => {
   const target = p('newdir', 'sub', 'f.txt');
   assert.equal(existsSync(target), false);
-  assert.equal(writeEntry(target, 'content here').ok, true);
+  assert.equal((await writeEntry(target, 'content here')).ok, true);
   assert.equal(readEntry(target).content, 'content here');
 });
 
 // The UI has no FS watcher, so a save carries the mtime it read — an external
 // edit in between must be refused, not clobbered.
-test('writeEntry: refuses a stale mtime, accepts force and a matching mtime', () => {
+test('writeEntry: refuses a stale mtime, accepts force and a matching mtime', async () => {
   writeFileSync(p('cond.txt'), 'v1');
   const opened = readEntry(p('cond.txt'));
-  const ok = writeEntry(p('cond.txt'), 'v2', opened.mtime);
+  const ok = await writeEntry(p('cond.txt'), 'v2', opened.mtime);
   assert.equal(ok.ok, true);
   assert.equal(readFileSync(p('cond.txt'), 'utf8'), 'v2');
 
   writeFileSync(p('cond.txt'), 'notepad wrote this', { flush: true });
   utimesSync(p('cond.txt'), new Date(), new Date(opened.mtime + 5000)); // CI clock granularity can leave mtime unmoved
-  const stale = writeEntry(p('cond.txt'), 'v3', opened.mtime);
+  const stale = await writeEntry(p('cond.txt'), 'v3', opened.mtime);
   assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
   assert.equal(readFileSync(p('cond.txt'), 'utf8'), 'notepad wrote this'); // untouched
 
-  assert.equal(writeEntry(p('cond.txt'), 'v3', opened.mtime, true).ok, true);
+  assert.equal((await writeEntry(p('cond.txt'), 'v3', opened.mtime, true)).ok, true);
   assert.equal(readFileSync(p('cond.txt'), 'utf8'), 'v3');
-  assert.equal(writeEntry(p('cond.txt'), 'v4').ok, true); // no mtime supplied → unconditional
+  assert.equal((await writeEntry(p('cond.txt'), 'v4')).ok, true); // no mtime supplied → unconditional
+});
+
+// Regression test for the sync->async conversion's TOCTOU: the mtime/force
+// guard used to run once, then the function awaited backupFile + writeFile —
+// a write landing in that gap (autosave racing a manual save) slipped past
+// the guard and got silently clobbered. The synchronous mutation below lands
+// in the same tick as writeEntry's own synchronous prefix (mtime check +
+// mkdirSync), before backupFile's first internal await settles, so it's
+// guaranteed to land "during" the awaited gap rather than racing against
+// real wall-clock timing.
+test("writeEntry: a write landing during backupFile's await is caught by the recheck, not clobbered", async () => {
+  writeFileSync(p('race.txt'), 'v1');
+  const opened = readEntry(p('race.txt'));
+  const pending = writeEntry(p('race.txt'), 'stale-writer', opened.mtime); // not awaited yet
+  writeFileSync(p('race.txt'), 'concurrent writer', { flush: true });
+  utimesSync(p('race.txt'), new Date(), new Date(opened.mtime + 5000)); // CI clock granularity can leave mtime unmoved
+  const result = await pending;
+  assert.deepEqual(result, { ok: false, error: 'changed on disk' });
+  assert.equal(readFileSync(p('race.txt'), 'utf8'), 'concurrent writer'); // untouched by the stale writer
+});
+
+// Regression test for the exact breakage this ticket's async conversion risked:
+// index.mjs's PUT /api/fs/write does `const r = await writeEntry(...)` then
+// `if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400)`. Before the
+// `await` was added, writeEntry (now async) handed back a pending Promise —
+// `r.ok` read undefined, so reply.code(400) fired unconditionally regardless of
+// outcome, which breaks ExplorerPanel.jsx's "file changed underneath us" dialog
+// (it keys off a real HTTP 409). This mounts the same handler shape as index.mjs
+// (post-fix) and asserts the status code a real client would see.
+test('HTTP route shape: an awaited writeEntry reports 409 on conflict, 200 on success', async () => {
+  const Fastify = (await import('fastify')).default;
+  const app = Fastify();
+  app.put('/fs/write', async (req, reply) => {
+    const { path, content, mtime, force } = req.body || {};
+    const r = await writeEntry(path, content, mtime, force);
+    if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
+    return r;
+  });
+
+  const target = p('http-cond.txt');
+  writeFileSync(target, 'v1');
+  const opened = readEntry(target);
+  writeFileSync(target, 'notepad wrote this', { flush: true });
+  utimesSync(target, new Date(), new Date(opened.mtime + 5000));
+
+  const conflict = await app.inject({ method: 'PUT', url: '/fs/write', payload: { path: target, content: 'v2', mtime: opened.mtime } });
+  assert.equal(conflict.statusCode, 409);
+  assert.equal(JSON.parse(conflict.body).error, 'changed on disk');
+
+  const ok = await app.inject({ method: 'PUT', url: '/fs/write', payload: { path: target, content: 'v2', mtime: opened.mtime, force: true } });
+  assert.equal(ok.statusCode, 200);
+  assert.equal(JSON.parse(ok.body).ok, true);
+  await app.close();
 });
 
 test('createEntry: refuses existing path, creates dir and file', () => {
@@ -131,11 +184,11 @@ test('deleteEntry: removes a non-empty dir recursively, errors on missing', () =
   assert.deepEqual(deleteEntry(p('todelete')), { ok: false, error: 'not found' });
 });
 
-test('every mutating fn rejects bad paths: empty, null, relative', () => {
+test('every mutating fn rejects bad paths: empty, null, relative', async () => {
   for (const bad of ['', null, 'relative/path.txt']) {
     assert.equal(listEntries(bad).error, 'bad path');
     assert.equal(readEntry(bad).error, 'bad path');
-    assert.equal(writeEntry(bad, 'x').error, 'bad path');
+    assert.equal((await writeEntry(bad, 'x')).error, 'bad path');
     assert.equal(createEntry(bad, 'file').error, 'bad path');
     assert.equal(deleteEntry(bad).error, 'bad path');
     assert.equal(renameEntry(bad, p('ok.txt')).error, 'bad path');

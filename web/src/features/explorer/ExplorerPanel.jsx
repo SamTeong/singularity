@@ -27,6 +27,7 @@ import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 import { tildify, untildify } from '@/lib/paths.js';
 import FileTree from './FileTree.jsx';
 import TabStrip from './TabStrip.jsx';
@@ -108,8 +109,13 @@ export default function ExplorerPanel() {
       if (cancelled) return;
       setRoot(rt);
       setAutosave(!!st.autosave);
-      setChildrenByPath(new Map(dirResults.filter(Boolean)));
-      setExpanded(new Set(expandedPaths));
+      const okDirs = dirResults.filter(Boolean);
+      setChildrenByPath(new Map(okDirs));
+      // Restore only the dirs that still list — a saved path deleted on disk
+      // 400s here, and re-saving it would re-fire that failed request on every
+      // reload forever. Dropping it lets the debounced save below clean state.
+      const okDirPaths = new Set(okDirs.map(([p]) => p));
+      setExpanded(new Set(expandedPaths.filter((p) => okDirPaths.has(p))));
       const okTabs = tabResults.filter(Boolean);
       setTabs(okTabs.map((t) => ({ path: t.path, kind: t.kind, size: t.size, mtime: t.mtime, dirty: false })));
       setContent(new Map(okTabs.map((t) => [t.path, t.content ?? ''])));
@@ -195,7 +201,7 @@ export default function ExplorerPanel() {
     // 409: the file changed underneath us (an external editor). Ask once, then
     // re-save with force — never overwrite someone else's edit silently.
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return saveImpl(path, true);
+      if (confirmOverwrite()) return saveImpl(path, true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }

@@ -74,7 +74,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor } = await import('./agents.mjs');
+const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor } = await import('./agents.mjs');
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -364,7 +364,7 @@ test('externalLaunch: win32 wraps wt.exe with -d <cwd> + resume argv', () => {
   init();
   const r = externalLaunch(id, 'win32');
   assert.equal(r.ok, true);
-  assert.equal(r.launcher, 'wt.exe');
+  assert.match(r.launcher, /WindowsApps[\\/]wt\.exe$/);
   assert.equal(r.launcherArgs[0], '-d');
   assert.equal(r.launcherArgs[1], scratch);
   assert.ok(r.launcherArgs.includes('--session-id'), 'resume argv present');
@@ -694,4 +694,33 @@ test('writeAtomic: non-retryable error rethrows immediately, no retry', () => {
   const fakeRename = () => { calls++; const e = new Error('gone'); e.code = 'ENOENT'; throw e; };
   assert.throws(() => writeAtomic(file, 'x', fakeRename), /gone/);
   assert.equal(calls, 1);
+});
+
+// resolveWt: Store App-Execution-Alias path takes priority, PATH is the
+// fallback for winget/choco/scoop/portable installs, and a missing
+// LOCALAPPDATA must not probe a relative path.
+test('resolveWt: Store alias path present → returned, PATH not consulted', () => {
+  const localAppData = mkdtempSync(join(tmpdir(), 'sing-wt-alias-'));
+  const aliasDir = join(localAppData, 'Microsoft', 'WindowsApps');
+  mkdirSync(aliasDir, { recursive: true });
+  const alias = join(aliasDir, 'wt.exe');
+  writeFileSync(alias, '');
+  const wt = resolveWt({ LOCALAPPDATA: localAppData, PATH: 'Z:\\nonexistent' });
+  assert.equal(wt, alias);
+});
+test('resolveWt: no alias, wt.exe on PATH (winget/scoop-style install) → PATH hit returned', () => {
+  const pathDir = mkdtempSync(join(tmpdir(), 'sing-wt-path-'));
+  writeFileSync(join(pathDir, 'wt.exe'), '');
+  const wt = resolveWt({ LOCALAPPDATA: join(tmpdir(), 'sing-wt-no-such-dir'), PATH: `Z:\\nonexistent;${pathDir}` });
+  assert.equal(wt, join(pathDir, 'wt.exe'));
+});
+test('resolveWt: neither alias nor PATH has it → null', () => {
+  const wt = resolveWt({ LOCALAPPDATA: join(tmpdir(), 'sing-wt-no-such-dir'), PATH: 'Z:\\nonexistent' });
+  assert.equal(wt, null);
+});
+test('resolveWt: missing LOCALAPPDATA → skips the alias probe (no relative-path lookup), still checks PATH', () => {
+  const pathDir = mkdtempSync(join(tmpdir(), 'sing-wt-path2-'));
+  writeFileSync(join(pathDir, 'wt.exe'), '');
+  const wt = resolveWt({ PATH: pathDir });
+  assert.equal(wt, join(pathDir, 'wt.exe'));
 });

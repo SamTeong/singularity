@@ -26,6 +26,7 @@ import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
 export default function RulesPanel() {
   const { roots, shownRoots, remember, forget } = useRootList('/api/rules');
@@ -98,7 +99,7 @@ export default function RulesPanel() {
       body: JSON.stringify({ path: untildify(sel.path), content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      if (confirmOverwrite()) return save(true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }

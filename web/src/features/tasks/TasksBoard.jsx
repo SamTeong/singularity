@@ -2,6 +2,7 @@ import { getTokens } from '@/theme/contract.js';
 import { brandGrad, brandGlow, surface2, stroke2, chipBg, trackColor, statusColor, focusRing, statePill, cardTag, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
 import { useRef, useState, useMemo, useEffect } from 'react';
 import { useQueryList, useQueryState } from '@/hooks/useQueryState.js';
+import { usePagedList } from '@/hooks/usePagedList.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -26,7 +27,7 @@ import TaskDetailPanel, { DETAIL_SHEET_W } from '@/features/tasks/TaskDetailPane
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import { repoName } from '@/lib/paths.js';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
-import { KIND } from '@/lib/agentStatus.js';
+import { KIND, isLive } from '@/lib/agentStatus.js';
 import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, StatusLegend, SegmentBar, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState, DOMAIN_STATE_ORDER } from '@/lib/domainState.js';
@@ -44,6 +45,10 @@ const prefersReducedMotion = () =>
 // Column-head inner-row cap (task 1) — see the column-head comment below for
 // why this exists.
 const COL_HEAD_MAX_W = 340;
+
+// History table page size (HistoryView windows at 60). The table rendered the
+// whole corpus unbounded before.
+const HIST_PAGE_SIZE = 50;
 
 // Duration formatter — cost/token formatters live in format.js.
 const fmtMs = (ms) => {
@@ -70,7 +75,6 @@ function statsLine(s) {
 // kills the task's live agent session server-side, so that drop is confirmed.
 // Clicking a card selects its session's terminal below.
 // Header toggles to a History table (concluded tasks — completed or abandoned).
-const LIVE_STATUS = new Set(['starting', 'running', 'idle']);
 
 // layout-02 column-dot colours — a status-ish marker per column (`.col-dot`:
 // ink-3 queued · info in-progress · brand review · ok done). ZAPAC-only — the
@@ -447,7 +451,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
 
   // Live subtitle for the view topbar: task count + count of agents currently
   // in a live state (starting/running/idle).
-  const runningCount = agents.filter((a) => LIVE_STATUS.has(a.status)).length;
+  const runningCount = agents.filter((a) => isLive(a.status)).length;
 
   // Sort value per header key. Numeric fields fall back to 0; strings to ''.
   const sortValue = (h, key) => {
@@ -474,6 +478,12 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, activeTags, sort]);
+
+  // History pagination — Prev/Next under the table, disabled at bounds. Page
+  // resets to 1 when the sort or tag filter changes the paginated set.
+  const histPageKey = `${sortParam}:${[...activeTags].join(',')}`;
+  const { page: histCurPage, pageCount: histPageCount, pageItems: pagedHistory, setPage: setHistPage } =
+    usePagedList(sortedHistory, HIST_PAGE_SIZE, histPageKey);
 
   // Transcript sheet: selecting a History row — or handing off from
   // TaskDetailPanel's "View transcript" — loads its session's transcript
@@ -512,7 +522,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     if (!t || t.column === col) return;
     if (col === 'done') {
       const agent = agents.find((a) => a.id === t.sessionId);
-      if (agent && LIVE_STATUS.has(agent.status) && !window.confirm(`Move "${t.title}" to Done? This will stop the AI agent currently working on it.`)) return;
+      if (agent && isLive(agent.status) && !window.confirm(`Move "${t.title}" to Done? This will stop the AI agent currently working on it.`)) return;
     }
     onMove(t.id, col);
   };
@@ -613,62 +623,71 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
         </Stack>
       )}
       {showHistory ? (
-        <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', px: '10px', pt: '6px', pb: '12px' }}>
-          <Table size="small" stickyHeader>
-            <TableHead>
-              <TableRow>
-                <TableCell sortDirection={sort.key === 'title' ? sort.dir : false}><TableSortLabel active={sort.key === 'title'} direction={sort.dir} onClick={() => changeSort('title')}>Title</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'repo' ? sort.dir : false}><TableSortLabel active={sort.key === 'repo'} direction={sort.dir} onClick={() => changeSort('repo')}>Repo</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'branch' ? sort.dir : false}><TableSortLabel active={sort.key === 'branch'} direction={sort.dir} onClick={() => changeSort('branch')}>Branch</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'outcome' ? sort.dir : false}><TableSortLabel active={sort.key === 'outcome'} direction={sort.dir} onClick={() => changeSort('outcome')}>Outcome</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'busyMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'busyMs'} direction={sort.dir} onClick={() => changeSort('busyMs')}>Busy</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'apiMs' ? sort.dir : false}><Tooltip title="Time spent waiting for the AI model to respond" disableInteractive><TableSortLabel active={sort.key === 'apiMs'} direction={sort.dir} onClick={() => changeSort('apiMs')}>API time</TableSortLabel></Tooltip></TableCell>
-                <TableCell sortDirection={sort.key === 'costUsd' ? sort.dir : false}><TableSortLabel active={sort.key === 'costUsd'} direction={sort.dir} onClick={() => changeSort('costUsd')}>Cost</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'tokens' ? sort.dir : false}><TableSortLabel active={sort.key === 'tokens'} direction={sort.dir} onClick={() => changeSort('tokens')}>Tokens</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'concludedAt' ? sort.dir : false}><TableSortLabel active={sort.key === 'concludedAt'} direction={sort.dir} onClick={() => changeSort('concludedAt')}>Concluded</TableSortLabel></TableCell>
-                <TableCell />
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {sortedHistory.map((h) => {
-                const s = h.finalStats;
-                return (
-                  <TableRow key={h.id} hover selected={tx?.id === h.id} onClick={() => openTranscript({ id: h.id, title: h.title, sessionId: h.sessionId, worktree: h.worktree, repo: h.repo })} sx={{ cursor: 'pointer' }}>
-                    <TableCell>
-                      {h.title}
-                      {(h.tags || []).length > 0 && (
-                        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, mt: 0.5 }}>
-                          {h.tags.map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 18, fontSize: 10 }} />)}
-                        </Stack>
-                      )}
-                    </TableCell>
-                    <TableCell>{repoName(h.repo)}</TableCell>
-                    <TableCell>{h.branch || '—'}</TableCell>
-                    <TableCell><Chip size="small" label={h.outcome} sx={{ height: 20, fontSize: 11 }} /></TableCell>
-                    <TableCell>{fmtMs(s?.busyMs) || '—'}</TableCell>
-                    <TableCell>{fmtMs(s?.apiMs) || '—'}</TableCell>
-                    <TableCell>{fmtUsd(s?.costUsd) || '—'}</TableCell>
-                    <TableCell>{s?.tokens > 0 ? fmtTokens(s.tokens) : '—'}</TableCell>
-                    <TableCell>{new Date(h.concludedAt).toLocaleString()}</TableCell>
-                    <TableCell align="right">
-                      <Tooltip title="Delete permanently" disableInteractive>
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (window.confirm(`Permanently delete "${h.title}" from history?`)) onDeleteHistory(h.id);
-                          }}
-                        >
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </Box>
+        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', px: '10px', pt: '6px', pb: '12px' }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell sortDirection={sort.key === 'title' ? sort.dir : false}><TableSortLabel active={sort.key === 'title'} direction={sort.dir} onClick={() => changeSort('title')}>Title</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'repo' ? sort.dir : false}><TableSortLabel active={sort.key === 'repo'} direction={sort.dir} onClick={() => changeSort('repo')}>Working directory</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'branch' ? sort.dir : false}><TableSortLabel active={sort.key === 'branch'} direction={sort.dir} onClick={() => changeSort('branch')}>Branch</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'outcome' ? sort.dir : false}><TableSortLabel active={sort.key === 'outcome'} direction={sort.dir} onClick={() => changeSort('outcome')}>Outcome</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'busyMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'busyMs'} direction={sort.dir} onClick={() => changeSort('busyMs')}>Busy</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'apiMs' ? sort.dir : false}><Tooltip title="Time spent waiting for the AI model to respond" disableInteractive><TableSortLabel active={sort.key === 'apiMs'} direction={sort.dir} onClick={() => changeSort('apiMs')}>API time</TableSortLabel></Tooltip></TableCell>
+                  <TableCell sortDirection={sort.key === 'costUsd' ? sort.dir : false}><TableSortLabel active={sort.key === 'costUsd'} direction={sort.dir} onClick={() => changeSort('costUsd')}>Cost</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'tokens' ? sort.dir : false}><TableSortLabel active={sort.key === 'tokens'} direction={sort.dir} onClick={() => changeSort('tokens')}>Tokens</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'concludedAt' ? sort.dir : false}><TableSortLabel active={sort.key === 'concludedAt'} direction={sort.dir} onClick={() => changeSort('concludedAt')}>Concluded</TableSortLabel></TableCell>
+                  <TableCell />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {pagedHistory.map((h) => {
+                  const s = h.finalStats;
+                  return (
+                    <TableRow key={h.id} hover selected={tx?.id === h.id} onClick={() => openTranscript({ id: h.id, title: h.title, sessionId: h.sessionId, worktree: h.worktree, repo: h.repo })} sx={{ cursor: 'pointer' }}>
+                      <TableCell>
+                        {h.title}
+                        {(h.tags || []).length > 0 && (
+                          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, mt: 0.5 }}>
+                            {h.tags.map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 18, fontSize: 10 }} />)}
+                          </Stack>
+                        )}
+                      </TableCell>
+                      <TableCell>{repoName(h.repo)}</TableCell>
+                      <TableCell>{h.branch || '—'}</TableCell>
+                      <TableCell><Chip size="small" label={h.outcome} sx={{ height: 20, fontSize: 11 }} /></TableCell>
+                      <TableCell>{fmtMs(s?.busyMs) || '—'}</TableCell>
+                      <TableCell>{fmtMs(s?.apiMs) || '—'}</TableCell>
+                      <TableCell>{fmtUsd(s?.costUsd) || '—'}</TableCell>
+                      <TableCell>{s?.tokens > 0 ? fmtTokens(s.tokens) : '—'}</TableCell>
+                      <TableCell>{new Date(h.concludedAt).toLocaleString()}</TableCell>
+                      <TableCell align="right">
+                        <Tooltip title="Delete permanently" disableInteractive>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm(`Permanently delete "${h.title}" from history?`)) onDeleteHistory(h.id);
+                            }}
+                          >
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Box>
+          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center', gap: 1, py: 0.5, borderTop: (t) => `1px solid ${stroke2(t)}` }}>
+            <Button size="small" disabled={histCurPage <= 1} onClick={() => setHistPage((p) => Math.max(1, p - 1))} sx={{ textTransform: 'none' }}>Prev</Button>
+            <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: 12 }}>
+              Page {histCurPage} of {histPageCount} · {sortedHistory.length} task{sortedHistory.length === 1 ? '' : 's'}
+            </Typography>
+            <Button size="small" disabled={histCurPage >= histPageCount} onClick={() => setHistPage((p) => Math.min(histPageCount, p + 1))} sx={{ textTransform: 'none' }}>Next</Button>
+          </Stack>
+        </Stack>
       ) : (
         // layout-02 `.board`: columns now flex to fill the full board width
         // (Task 1) — px/spacing scale up at wide breakpoints so the extra
@@ -785,7 +804,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                     const line = statsLine(s);
                     const cost = fmtUsd(s?.costUsd);
                     // `.tcard.live` — a live session tints the card's edge toward info.
-                    const live = agent && LIVE_STATUS.has(agent.status);
+                    const live = agent && isLive(agent.status);
                     const activate = () => setDetailId(task.id);
                     return (
                       <Box

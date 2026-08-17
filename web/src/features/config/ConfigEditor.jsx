@@ -28,6 +28,7 @@ import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import TabStrip from '@/features/explorer/TabStrip.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 import { tildify, untildify } from '@/lib/paths.js';
 
 // Config files under a root. Claude: project + local settings JSON. Codex: a
@@ -211,7 +212,7 @@ export default function ConfigEditor() {
       body: JSON.stringify({ cwd: tab.cwd, content: contentRef.current.get(path) ?? '', mtime: tab.mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return saveImpl(path, true);
+      if (confirmOverwrite()) return saveImpl(path, true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }

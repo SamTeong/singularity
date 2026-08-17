@@ -162,6 +162,26 @@ export function snapshotBackground() {
   return { config, lastTick, liveTaskId: live ? live.id : null, nextDueAt: lastDueAt + TICK_MINUTES * 60_000 };
 }
 
+// The one liveness escape hatch for the single-flight guard: a session can die
+// (crash, kill, pty exit) without the agent ever curl-ing itself off
+// todo/inprogress, which would otherwise leave liveBgTask() latched forever —
+// refusing every later tick and stalling the watchdog. Both places that read
+// liveBgTask() as a gate (attemptRun's single-flight check, watchdog) call
+// this first instead, so a dead session can never block a new run past the
+// next read of either. Reuses the reviewer's own "needs a human" {column,
+// state} shape, so no new WS frame/mock handler is needed — updateTask's
+// normal persist+broadcast already covers it. Returns the still-live task (or
+// null), so callers can't tell a "never was live" null from a "just released"
+// null — both mean "not blocked".
+async function healLiveBgTask() {
+  const task = liveBgTask();
+  if (!task || !task.sessionId || reg.isLive(task.sessionId)) return task;
+  injectedTaskId = null; // this run is over one way or another — drop any stale wrap-up mark
+  try { await updateTask(task.id, { column: 'inreview', state: 'parked — needs human' }); emit(); }
+  catch (e) { logger?.warn({ err: e.message }, 'background dead-session release failed'); return task; }
+  return null;
+}
+
 // ---- Scheduler ------------------------------------------------------------------
 
 // Shared "go" path for the tick and manual run. Returns the created task, or
@@ -174,7 +194,7 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
     emit();
     return null;
   };
-  if (liveBgTask()) return refuse('a background run is already live');
+  if (await healLiveBgTask()) return refuse('a background run is already live');
 
   let job, backend;
   if (bypassGate) { // forced run: no gate, default to claude budget/model
@@ -212,7 +232,12 @@ function tick() {
 // Watchdog: only acts while a bg run is live. Injects the wrap-up once, then
 // hard-kills after the grace if the session is still alive.
 async function watchdog() {
-  const task = liveBgTask();
+  // healLiveBgTask is the backstop here: it catches a dead session even if
+  // the 'exited' bus event (see initBackground) never fired for it in this
+  // process — e.g. it died before the listener was registered, across a
+  // daemon restart. This runs every WATCHDOG_MS regardless of window/gate, so
+  // the guard is unlatched within one poll either way.
+  const task = await healLiveBgTask();
   if (!task) { injectedTaskId = null; return; }
   if (injectedTaskId === task.id) return; // already wrapping up this run
   let decision = 'stop'; // fail closed: a thrown poll (or a missing job) leaves the run unsupervised → stop
@@ -267,6 +292,15 @@ export function initBackground(log) {
   lastDueAt = Date.now(); // wait one TICK_MINUTES before the first run
   setInterval(tick, TICK_MS).unref();
   setInterval(() => { watchdog().catch(() => {}); }, WATCHDOG_MS).unref();
+  // Same registry exit signal crons.mjs already reacts to — releases the
+  // guard the instant the session dies instead of waiting up to WATCHDOG_MS
+  // for healLiveBgTask's own backstop (called from watchdog/attemptRun) to
+  // notice on its next read.
+  reg.bus.on('status', ({ id, status }) => {
+    if (status !== 'exited') return;
+    const task = liveBgTask();
+    if (task && task.sessionId === id) healLiveBgTask();
+  });
 }
 
 // ---- CRUD -----------------------------------------------------------------------

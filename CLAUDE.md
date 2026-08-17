@@ -6,7 +6,7 @@ Local web UI — control plane for a fleet of coding agents (spec-driven dev). B
 
 ```
 pnpm bootstrap       # first setup: generate .env (detects CLAUDE_BIN) + wire usage-report skill + install + start
-pnpm install         # installs dependencies, runs postinstall hook. @zapac/mui-theme is vendored (file:vendor/zapac-mui-theme-*.tgz)
+pnpm install         # installs dependencies, runs postinstall hook. @zapac/mui-theme + phosphor-console-theme are vendored (file:vendor/*.tgz)
 pnpm postinstall     # mac: run if agents fail with "posix_spawnp failed"
 pnpm start           # build web + serve on http://127.0.0.1:4317
 pnpm build           # build web only (vite build → web/dist); run before serving with `pnpm server`
@@ -49,8 +49,11 @@ e2e/       Playwright suite driving every UI flow against a throwaway sandbox da
 e2e-mock/  sibling Playwright suite driving the same flows against web/src/mock (parallel)
 scripts/   bootstrap.mjs (first setup), demo-tasks.mjs, fix-pty-helper.mjs (postinstall +x),
            ollama-login.mjs, reap-build-orphans.mjs (pnpm clean)
-vendor/    vendored tgz deps (@zapac/mui-theme) so install works offline
+vendor/    vendored tgz deps (@zapac/mui-theme, phosphor-console-theme) so install works offline
 assets/    screenshots
+docs/      one-shot/ — standalone HTML layout mockups (theme/report explorations), not built or served
+github-pages/  self-contained React + three.js deck (own package.json + pnpm-lock + pnpm-workspace.yaml,
+           deliberately OUTSIDE the root workspace) — install and build from inside that dir, not the root
 ```
 
 Backend modules → routes in `server/index.mjs`. Add a concern = new module + route + co-located test.
@@ -80,7 +83,7 @@ External (read-only, not owned): `~/.claude/projects` (session transcripts), `~/
 
 Daemon binds **127.0.0.1 only** — spawns `claude` with full FS access. Never bind `0.0.0.0`.
 Origin allowlist (daemon + Vite hosts) blocks DNS-rebinding / drive-by browser hits to loopback.
-Optional `SING_TOKEN` gates data endpoints + WS (`x-sing-token` header / `?token=`); shell + assets stay open. Env-var only — app never persists it. Served into `window.__SING_TOKEN__` for the shell.
+Optional `SING_TOKEN` gates data endpoints + WS + the shell itself (`x-sing-token` header / `?token=` / `sing_token` HttpOnly cookie — a `?token=` hit mints the cookie and 302s the token out of the URL); assets stay open. Env-var only — app never persists it. Served into `window.__SING_TOKEN__` for the shell.
 
 ## Working rules
 

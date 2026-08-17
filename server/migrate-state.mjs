@@ -7,6 +7,19 @@
 import { existsSync, mkdirSync, renameSync, cpSync, rmSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { APP_DIR, STATE_DIR, CACHE_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
+import { backupFileSync } from './backups.mjs';
+
+// The durable rewrites below (tasks/crons/background/agents.json) get the same
+// backup + atomic rename every runtime writer uses — a kill or full disk
+// mid-write must never truncate the board. Inlined rather than importing
+// agents.mjs:writeAtomic: that module loads node-pty and resolves CLAUDE_BIN at
+// import time, before index.mjs's requireEnv runs. backupFileSync is cycle-free.
+function writeJsonAtomic(file, raw) {
+  backupFileSync(file);
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(raw, null, 2));
+  renameSync(tmp, file);
+}
 
 // renameSync across volumes throws EXDEV — fall back to recursive copy + unlink
 // so state on a different volume than TRUSTED_ROOT (e.g. macOS external state)
@@ -93,7 +106,7 @@ for (const [name, dir] of moves) {
         changed = true;
       }
       if (changed) {
-        try { writeFileSync(tasksFile, JSON.stringify(raw, null, 2)); } catch { /* best-effort */ }
+        try { writeJsonAtomic(tasksFile, raw); } catch { /* best-effort */ }
       }
     }
   }
@@ -117,7 +130,7 @@ function migrateFile(file, transform) {
   try { raw = JSON.parse(readFileSync(file, 'utf8')); } catch { return; }
   let changed;
   try { changed = transform(raw); } catch { return; }
-  if (changed) { try { writeFileSync(file, JSON.stringify(raw, null, 2)); } catch { /* best-effort */ } }
+  if (changed) { try { writeJsonAtomic(file, raw); } catch { /* best-effort */ } }
 }
 migrateFile(join(STATE_DIR, 'crons.json'), (d) => {
   let c = false;

@@ -5,9 +5,11 @@
 // All paths server-derived from (root, scope, skill) + layout flag; the client
 // never supplies a path. Roots persist on the daemon FS (survives cache clear).
 import { existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
+import { backupFile } from './backups.mjs';
 
 const SKILLS_CAP = 200; // backstop per scope — no silent truncation
 // Bare skill/scope names only — no path separators, no all-dots names ('.',
@@ -178,7 +180,7 @@ function skillBaseDir(root, scope, skill, flat) {
 }
 
 // Write a skill's SKILL.md (raw content, frontmatter preserved as edited).
-export function writeSkill(root, scope, skill, content, flat, mtime, force) {
+export async function writeSkill(root, scope, skill, content, flat, mtime, force) {
   root = root || (getSkillsRoots()[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
@@ -189,7 +191,13 @@ export function writeSkill(root, scope, skill, content, flat, mtime, force) {
     if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    writeFileSync(p, content);
+    await backupFile(p);
+    // Re-check: backupFile's await can yield to a concurrent save of this
+    // same path landing in between, which the first check (above) can't see.
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    await writeFile(p, content);
     return { ok: true, mtime: statSync(p).mtimeMs };
   }
   catch (e) { return { ok: false, error: e.message }; }
@@ -221,7 +229,7 @@ export function readSkillFile(root, scope, skill, file, flat) {
 
 // Write a supporting file inside a skill dir. Same validation as readSkillFile;
 // image type is not writable (binary). Server-derived path, segment-validated.
-export function writeSkillFile(root, scope, skill, file, content, flat, mtime, force) {
+export async function writeSkillFile(root, scope, skill, file, content, flat, mtime, force) {
   root = root || (getSkillsRoots()[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
@@ -237,7 +245,13 @@ export function writeSkillFile(root, scope, skill, file, content, flat, mtime, f
     if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    writeFileSync(p, content);
+    await backupFile(p);
+    // Re-check: backupFile's await can yield to a concurrent save of this
+    // same path landing in between, which the first check (above) can't see.
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    await writeFile(p, content);
     return { ok: true, mtime: statSync(p).mtimeMs };
   }
   catch (e) { return { ok: false, error: e.message }; }

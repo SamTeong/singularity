@@ -34,6 +34,7 @@ import { buildCommands } from '@/features/palette/commands.mjs';
 import { isCodexModel } from '@/lib/models.js';
 import { insetQuery } from '@/lib/sheetInset.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
+import { isLive } from '@/lib/agentStatus.js';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
@@ -65,9 +66,6 @@ const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'transcr
 // 6.6) — that state lives above the remount boundary, so it survives without
 // this component needing its own Web Storage handoff (see `useThemeSkin()`'s
 // `pendingRespawn`/`clearPendingRespawn` below).
-
-const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
-
 // Glass snackbar content — MUI v9 dropped `ContentProps`, so this must go through
 // slotProps.content or SnackbarContent keeps its default (mode-inverted) colours.
 const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur });
@@ -381,7 +379,7 @@ export default function AppShell() {
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
-            {view === 'history' && <HistoryView onOpenSession={openHistorySession} />}
+            {view === 'history' && <HistoryView onOpenSession={openHistorySession} onToast={setToast} />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} onSelectSkin={onSelectSkin} />}
             {view === 'status' && <StatusView />}
             {view === 'settings' && <SettingsView />}

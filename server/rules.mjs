@@ -4,10 +4,11 @@
 // Model on wiki.mjs (recursive walk, resolveRoot, mtime line cache) + config.mjs
 // (roots persistence) + memory.mjs (write guard).
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { join, resolve, sep, normalize, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
+import { backupFile } from './backups.mjs';
 
 const RESULT_CAP = 300;
 const FILE_CAP = 2000;
@@ -137,13 +138,19 @@ export function readRuleFile(p) {
   catch (e) { return { ok: false, error: e.message }; }
 }
 
-export function writeRuleFile(p, content, mtime, force) {
+export async function writeRuleFile(p, content, mtime, force) {
   if (!isRulePath(p)) return { ok: false, error: 'path outside rule roots' };
   try {
     if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    writeFileSync(p, content);
+    await backupFile(p);
+    // Re-check: backupFile's await can yield to a concurrent save of this
+    // same path landing in between, which the first check (above) can't see.
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    await writeFile(p, content);
     return { ok: true, mtime: statSync(p).mtimeMs };
   }
   catch (e) { return { ok: false, error: e.message }; }

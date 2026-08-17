@@ -1,14 +1,15 @@
 import { VIEW_LIST } from '@/shell/views.mjs';
 import { isCodexModel } from '@/lib/models.js';
 import { nextSessionTitle } from '@/lib/sessionTitle.js';
+import { isLive } from '@/lib/agentStatus.js';
 
 // Build the Views command group from the unified view catalog (shell/views.mjs,
 // shared with the router so palette entries and valid routes cannot drift).
 // Phase 0: Views group. Phase 1: Sessions group (switch/fork/respawn/reattach/kill/external/transcript).
 
-// Mirrors SessionRow.jsx's own row-action gating (isLive/isWorking) so a command
-// only appears in the palette when the matching button would show in the dock.
-const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
+// `isWorking` mirrors SessionRow.jsx's own row-action gating (isLive now comes
+// from the canonical home in agentStatus.js) so a command only appears in the
+// palette when the matching button would show in the dock.
 const isWorking = (s) => s === 'running' || s === 'starting';
 
 // Sessions group: one 'New Session' entry + per-agent ops, gated exactly like
