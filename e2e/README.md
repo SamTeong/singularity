@@ -114,7 +114,8 @@ Seeded by `fixtures/seed.mjs`, all paths exported from `fixtures/paths.mjs`:
   markdown lives under `<project>/memory/`.
 - **Wiki** — `WIKI_DIR`: one wiki, `handbook`, three interlinked pages.
 - **Skills** — `SKILLS_DIR`: grouped layout, scopes `coding` (`lint-guard`) and
-  `design` (`color-audit`). The tree renders collapsed.
+  `design` (`color-audit`). The tree renders one level open — roots expanded,
+  scopes collapsed.
 - **Config / Hooks / Rules** — `WORKSPACE_DIR` with `.claude/settings.json`,
   `settings.local.json`, two hook scripts, two rule files.
 - **Tasks** — four cards, one per column, titled `Seeded <column> card`, tagged

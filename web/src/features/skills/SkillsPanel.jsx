@@ -51,7 +51,10 @@ export default function SkillsPanel() {
   const [picking, setPicking] = useState(false);
   const [dataByRoot, setDataByRoot] = useState({}); // root -> { flat, scopes, error }
   const [q, setQ] = useState('');
-  const [expandedRoots, setExpandedRoots] = useState(() => new Set());
+  // Roots render expanded; this tracks the ones the user closed. Inverted from
+  // the scope/skill sets below so a freshly-opened panel shows each root's
+  // scope folders without a click (scopes stay closed — one level, not all).
+  const [collapsedRoots, setCollapsedRoots] = useState(() => new Set());
   const [expandedScopes, setExpandedScopes] = useState(() => new Set()); // keys: `${root}::${scope}`
   const [expandedSkills, setExpandedSkills] = useState(() => new Set()); // keys: `${root}::${scope}::${skill}`
   const [sel, setSel] = useState(null); // { root, scope, skill, flat }
@@ -81,7 +84,7 @@ export default function SkillsPanel() {
 
   const pickRoot = (p) => { remember([untildify(p)]); setPicking(false); };
 
-  const toggleRoot = (r) => setExpandedRoots((s) => {
+  const toggleRoot = (r) => setCollapsedRoots((s) => {
     const n = new Set(s);
     if (n.has(r)) n.delete(r); else n.add(r);
     return n;
@@ -179,7 +182,7 @@ export default function SkillsPanel() {
   }).filter(Boolean);
 
   // While searching, auto-expand matching roots/scopes so hits are visible.
-  const isExpandedRoot = (r) => (query ? true : expandedRoots.has(r));
+  const isExpandedRoot = (r) => (query ? true : !collapsedRoots.has(r));
   const isExpandedScope = (r, name) => (query ? true : expandedScopes.has(`${r}::${name}`));
 
   const totalScopes = view.reduce((n, r) => n + r.scopes.length, 0);
@@ -190,11 +193,11 @@ export default function SkillsPanel() {
   const rootKeys = view.map((r) => r.root);
   const scopeKeys = view.flatMap((r) => r.scopes.map((sc) => `${r.root}::${sc.name}`));
   const allOpen = rootKeys.length > 0
-    && rootKeys.every((k) => expandedRoots.has(k))
+    && rootKeys.every((k) => !collapsedRoots.has(k))
     && scopeKeys.every((k) => expandedScopes.has(k));
   const toggleAll = () => {
-    if (allOpen) { setExpandedRoots(new Set()); setExpandedScopes(new Set()); }
-    else { setExpandedRoots(new Set(rootKeys)); setExpandedScopes(new Set(scopeKeys)); }
+    if (allOpen) { setCollapsedRoots(new Set(rootKeys)); setExpandedScopes(new Set()); }
+    else { setCollapsedRoots(new Set()); setExpandedScopes(new Set(scopeKeys)); }
   };
 
   return (
