@@ -6,6 +6,15 @@ import App from '@/App.jsx';
 import '@xterm/xterm/css/xterm.css';
 import '@/style.css';
 
+// Mock run mode: must be a *dynamic* import, and it must run before the first
+// render. Static imports above (KeysProvider, App, ...) already resolved by
+// the time this line runs, but KeysProvider's `/keys` fetch fires from a mount
+// effect, not module scope — so installing the mock here, above createRoot,
+// still beats the first request. import.meta.env.VITE_MOCK is statically
+// substituted, so Rollup eliminates this branch (and all of web/src/mock/)
+// from the production bundle.
+if (import.meta.env.VITE_MOCK) (await import('@/mock/index.js')).startMock();
+
 // Optional loopback token: if the daemon injected one, attach it to every
 // same-origin API request. No-op when the token is absent (default).
 if (window.__SING_TOKEN__) {

@@ -211,16 +211,20 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
               the left-side `.dock-list-head` above: `role="button"`, `tabIndex`,
               `toggleDock`, `focusRing`), so the user doesn't have to aim for the
               trailing chevron — the entire header band is the hit target on
-              both sides. The IconButton below keeps its own `onClick` with
-              `stopPropagation` so it doesn't double-toggle when the event
-              bubbles back up to this Stack. */}
+              both sides. Its accessible name names the surface it collapses
+              (the terminal), keeping it distinct from the session-list header's
+              "Collapse sessions dock" on the left — two controls sharing one
+              name is a strict-mode locator collision. The
+              IconButton below keeps its own `onClick` with `stopPropagation`
+              so it doesn't double-toggle when the event bubbles back up to
+              this Stack. */}
           <Stack
             direction="row"
             role="button"
             tabIndex={0}
             onClick={toggleDock}
             onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleDock(); } }}
-            aria-label="Collapse sessions dock"
+            aria-label="Collapse terminal dock"
             sx={(t) => ({ alignItems: 'center', gap: '10px', px: '16px', py: '10px', flexShrink: 0, cursor: 'pointer', userSelect: 'none', borderBottom: `1px solid ${phosphor ? t.nerv.hue.amberDim : stroke2(t)}`, '&:focus-visible': focusRing(t) })}
           >
             {activeAgent

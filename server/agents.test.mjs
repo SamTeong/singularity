@@ -446,7 +446,7 @@ test('buildSpawn: codex fresh spawn uses -C, -s workspace-write, -a on-request, 
 test('buildSpawn: codex disables skills outside selected scopes from the current manifest shape', () => {
   const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: ['coding'], tool: 'codex' });
   const config = args[args.indexOf('-c') + 1];
-  assert.ok(config.includes(`path=\"${join(harnessSkillDir, 'SKILL.md').replaceAll('\\', '/')}\"`));
+  assert.ok(config.includes(`path="${join(harnessSkillDir, 'SKILL.md').replaceAll('\\', '/')}"`));
   assert.doesNotMatch(config, /coding-skill/);
 });
 
@@ -580,7 +580,7 @@ test('buildSpawn: codex scopes → -c skills.config=[...] disables non-chosen sk
   // coding-skill is NOT disabled (its scope 'coding' is chosen).
   const harnessMd = join(harnessSkillDir, 'SKILL.md').replace(/\\/g, '/');
   const codingMd = join(codingSkillDir, 'SKILL.md').replace(/\\/g, '/');
-  assert.ok(cfg.includes(`{path=\"${harnessMd}\",enabled=false}`), 'harness-skill disabled');
+  assert.ok(cfg.includes(`{path="${harnessMd}",enabled=false}`), 'harness-skill disabled');
   assert.ok(!cfg.includes(codingMd), 'coding-skill not in disable list');
   assert.ok(!args.includes('--add-dir'), 'codex never uses --add-dir');
 });

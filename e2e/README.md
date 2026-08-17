@@ -1,15 +1,49 @@
 # e2e suite
 
 Playwright coverage of the web UI, driven against a **sandbox daemon** — its own
-port, its own `SINGULARITY_HOME`, its own trusted root, seeded fixture corpora,
-and a keepalive stub for `CLAUDE_BIN`. Nothing here can reach the user's real
-`:4317` daemon, `~/.claude`, `~/wiki`, or spawn a real `claude` turn.
+port, its own `SINGULARITY_HOME`, its own `HOME`/`USERPROFILE`, its own trusted
+root, seeded fixture corpora, and a keepalive stub for `CLAUDE_BIN`. Nothing here
+can reach the user's real `:4317` daemon, `~/.claude`, `~/wiki`, or spawn a real
+`claude` turn.
 
 ```
 pnpm test:e2e        # build web/dist, then run everything
 pnpm test:e2e:ui     # interactive, reuses the dist already on disk
 pnpm exec playwright test e2e/wiki.spec.mjs    # one spec, no rebuild
 ```
+
+## Two suites — which one gets your spec
+
+`e2e-mock/` is a sibling suite covering the same UI against the in-browser mock
+backend (`web/src/mock/`, `playwright.mock.config.mjs`). It needs no daemon and
+no `.env`, and it runs `fullyParallel` — roughly 1.5× faster than this one on the
+same box.
+
+| | `e2e/` (here) | `e2e-mock/` |
+|---|---|---|
+| backend | real daemon in a sandbox | Mirage + mock-socket in the page |
+| proves | the daemon's own behaviour and the client↔daemon contract | UI behaviour given a response |
+| execution | serial (`workers: 1`), one shared mutable sandbox | parallel, one DB per page |
+| mutations | real files under `e2e/.tmp/corpus/` | in-memory, reset per page load |
+
+**Default to `e2e-mock/`.** A spec belongs *here* only if it needs something a
+mock cannot honestly stand in for:
+
+- real filesystem effects (a Save that must land on disk as bytes)
+- daemon-side logic: path resolution, `~` handling, mtime-conflict detection,
+  state migration, spawn/env construction
+- anything under **Never drive these** below — those stay unported entirely,
+  because passing against a mock would assert nothing about them
+
+Both suites must stay green. When a flow exists in both, keep the assertions
+identical — a divergence means one of them is lying. Fixture-driven differences
+are fine when documented (History renders 6 project cards here vs 7 in the mock,
+because the mock seeds a populated *today* and these fixtures backdate every
+session).
+
+A new server route needs a mock handler as well as a dev-proxy prefix — see
+CLAUDE.md "New server route". Mirage throws on unhandled requests, so a missing
+handler fails the mock suite immediately rather than drifting silently.
 
 ## Layout
 

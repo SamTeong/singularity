@@ -464,7 +464,7 @@ export default function HistoryView({ onOpenSession }) {
         </Tooltip>
       </Stack>
 
-      <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex' }}>
+      <Box ref={scrollRef} sx={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', position: 'relative' }}>
         <Spine scrollRef={scrollRef} rows={viewRows} activeDate={activeDate} reduceMotion={reduceMotion} />
 
         <Box sx={{ flex: 1, minWidth: 0, p: 2, pl: 1 }}>

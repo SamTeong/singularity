@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import mockAssetsPlugin from './mock-assets.plugin.mjs';
 
 // `@/` → web/src, so imports are location-independent (no fragile ../../..).
 // Node's test runner does NOT resolve this alias — *.test.mjs files must keep
@@ -22,15 +23,19 @@ const singTokenInject = {
   apply: 'serve',
   transformIndexHtml(html) {
     const t = process.env.SING_TOKEN;
-    let out = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(homedir())};</script></head>`);
+    // Mirrors the daemon's displayHome() (server/index.mjs) — dev proxies /env
+    // to the daemon, so honouring the override in only one of them would leave
+    // the injected home and the route disagreeing.
+    const home = process.env.SING_HOME_DISPLAY || homedir();
+    let out = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(home)};</script></head>`);
     if (t) out = out.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(t)};</script></head>`);
     return out;
   },
 };
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   root: 'web',
-  plugins: [react(), singTokenInject],
+  plugins: [react(), singTokenInject, ...(mode === 'mock' ? [mockAssetsPlugin()] : [])],
   resolve: { alias: { '@': srcDir } },
   server: {
     host: '127.0.0.1',
@@ -72,7 +77,14 @@ export default defineConfig({
     },
   },
   build: {
-    outDir: 'dist',
+    // mock mode emits to a sibling dir so `build:mock` can never clobber the
+    // real production output (`web/dist`).
+    outDir: mode === 'mock' ? 'dist-mock' : 'dist',
+    // Default target (es2020) predates top-level await; main.jsx's guarded
+    // `await import('@/mock/index.js')` only survives esbuild's dead-code
+    // elimination in mock mode (VITE_MOCK=1), so only mock mode needs a
+    // target new enough to allow it. Production keeps Vite's default.
+    target: mode === 'mock' ? 'es2022' : undefined,
     emptyOutDir: true,
     rollupOptions: {
       output: {
@@ -88,4 +100,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

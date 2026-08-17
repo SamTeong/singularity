@@ -155,7 +155,9 @@ test('clicking a card opens the right detail panel; "View transcript" hands off 
   await card.click();
   await dialog.getByRole('button', { name: 'View transcript' }).click();
   await expect(tx).toBeVisible();
-  await page.locator('.MuiBackdrop-root').click();
+  await tx.locator('xpath=preceding-sibling::*[contains(@class, "MuiBackdrop-root")]').click({
+    position: { x: 8, y: 8 },
+  });
   await expect(tx).not.toBeVisible();
 
   // The detail panel's own Escape-to-close (independent of the handoff above)
@@ -563,8 +565,15 @@ test.describe('Tasks board — Phosphor Console', () => {
     const dialog = page.getByRole('dialog', { name: 'Task detail', exact: true });
     await expect(dialog).toBeVisible();
 
+    const viewport = await page.evaluate(() => ({ width: document.documentElement.clientWidth, height: document.documentElement.clientHeight }));
+    // Visibility is reported as soon as the Drawer starts its slide-in. Wait
+    // for that transition to settle before measuring its final bounds.
+    await expect.poll(async () => {
+      const bounds = await dialog.boundingBox();
+      return bounds ? bounds.x + bounds.width : Number.POSITIVE_INFINITY;
+    }).toBeLessThanOrEqual(viewport.width + 1);
+
     const box = await dialog.boundingBox();
-    const viewport = page.viewportSize();
     expect(box.x).toBeGreaterThanOrEqual(0);
     expect(box.y).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width).toBeLessThanOrEqual(viewport.width + 1);

@@ -534,7 +534,7 @@ export default function AppShell() {
   if (!isPhosphor) return shell;
 
   return (
-    <PhosphorFrame masthead={<PhosphorMasthead connected={connected} />}>
+    <PhosphorFrame masthead={<PhosphorMasthead />}>
       {shell}
     </PhosphorFrame>
   );

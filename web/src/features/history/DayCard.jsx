@@ -13,10 +13,10 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import PlayArrowIcon from '@mui/icons-material/PlayArrow';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
 
-// motion() over a plain motion.article: the card needs `sx` (MUI's styling
+// motion.create() over a plain motion.article: the card needs `sx` (MUI's styling
 // prop, unsupported on bare motion.<tag> primitives) alongside layout/reveal.
-const MotionArticle = motion(Box);
-const MotionBox = motion(Box);
+const MotionArticle = motion.create(Box);
+const MotionBox = motion.create(Box);
 
 export const EASE_OUT = [0.16, 1, 0.3, 1];
 const SPRING_EXPAND = { type: 'spring', stiffness: 320, damping: 34, mass: 0.9 };

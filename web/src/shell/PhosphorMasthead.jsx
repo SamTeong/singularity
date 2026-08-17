@@ -78,14 +78,7 @@ function useLocalDateLabel() {
   return label;
 }
 
-/**
- * @param {Object} props
- * @param {boolean} props.connected live daemon/WS connection state (`useAgents().connected`) —
- *   unused now (the connection stamp was removed; `Sidebar`'s `DaemonFooter`
- *   renders the same state), kept in the signature to avoid churning
- *   `AppShell`'s call site.
- */
-export default function PhosphorMasthead({ connected: _connected }) {
+export default function PhosphorMasthead() {
   const dateLabel = useLocalDateLabel();
 
   return (

@@ -18,8 +18,8 @@ function ProviderCard({ label, u }) {
   const authHelp = {
     // Browser mode (error 'no-login') vs manual-cookie mode need different fixes.
     ollama: u?.error === 'no-login'
-      ? 'Fresh auth required. Run "npm run ollama-login" in a terminal, then log in to ollama.com when the browser opens.'
-      : 'Fresh auth required. Run "npm run ollama-login" in a terminal, or paste a fresh cookie and browser ID from a logged-in ollama.com tab into state/ollama.json.',
+      ? 'Fresh auth required. Run "npm run ollama-login" in a terminal, then sign in to ollama.com when the browser opens.'
+      : 'Fresh auth required. Run "npm run ollama-login" in a terminal, or sign in to ollama.com and paste a fresh cookie and browser ID from that tab into state/ollama.json.',
     claude: 'No usage data yet — run Claude Code to update.',
     codex: 'No usage data yet — run Codex to update.',
   };
@@ -98,7 +98,7 @@ export default function UsageView({ usage, onRefresh }) {
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
       </Stack>
-      <Box sx={{ flexShrink: 0, p: 2 }}>
+      <Box sx={{ flexShrink: 1, minHeight: 0, overflowY: 'auto', p: 2 }}>
         <Collapse in={open}>
           <Stack spacing={2}>
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
@@ -111,7 +111,7 @@ export default function UsageView({ usage, onRefresh }) {
         </Collapse>
       </Box>
       {/* Usage report (harness-usage-report skill) fills the rest of the pane. */}
-      <Box sx={{ flex: 1, minHeight: 0 }}>
+      <Box sx={{ flex: '1 0 240px', minHeight: 240 }}>
         <UsageReportView />
       </Box>
     </Stack>

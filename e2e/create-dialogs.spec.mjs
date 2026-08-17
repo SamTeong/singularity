@@ -183,6 +183,12 @@ test('New task dialog: Escape and Cancel close it without POST /tasks, even subm
   let posted = false;
   page.on('request', (r) => { if (r.method() === 'POST' && r.url().endsWith('/tasks')) posted = true; });
 
+  // Filling the model field leaves ModelSelect's Autocomplete popper open, and
+  // MUI gives that popper the first Escape (it closes the list, not the dialog)
+  // — the standard nested-overlay contract. Move focus back to a plain field so
+  // this assertion is about the dialog's own Escape handling, matching the mock
+  // copy of this spec.
+  await dialog.getByLabel('description', { exact: true }).click();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
 

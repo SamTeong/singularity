@@ -311,7 +311,7 @@ function codexScopeConfig(scopes) {
     .filter((sk) => !(sk.scopes || []).some((s) => keep.has(s)))
     .map((sk) => {
       const skillMd = join(sk.refs?.[0]?.path || '', 'SKILL.md');
-      return `{path=\"${skillMd.replace(/\\/g, '/')}\",enabled=false}`;
+      return `{path="${skillMd.replace(/\\/g, '/')}",enabled=false}`;
     });
   return disable.length ? `skills.config=[${disable.join(',')}]` : null;
 }
