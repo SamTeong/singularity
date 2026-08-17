@@ -27,6 +27,11 @@ import DayCard, { DayHeader, GapSegment, ShimmerCard, EASE_OUT } from '@/feature
 
 // Recognised ?preset= values; anything else falls back to the default.
 const PRESETS = new Set(['7', '30', 'all', 'custom']);
+// ?from/?to are compared against `entry.date` as strings and forwarded to the
+// daemon, so anything that isn't an ISO day is dropped rather than filtering
+// every row out (a lexical compare puts 'garbage' after every real date).
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const isoDay = (v) => (ISO_DAY.test(v) ? v : '');
 
 // Normalize a cwd for keying: lowercase + forward slashes + stripped tail.
 // The agent records the same repo under different spellings across sessions
@@ -224,8 +229,9 @@ export default function HistoryView({ onOpenSession }) {
   // a shared link that outlives its data must still show a usable page.
   const [presetParam] = useQueryState('preset', '7');
   const preset = PRESETS.has(presetParam) ? presetParam : '7';
-  const [from] = useQueryState('from');
-  const [to] = useQueryState('to');
+  const [fromParam] = useQueryState('from');
+  const [toParam] = useQueryState('to');
+  const from = isoDay(fromParam), to = isoDay(toParam);
   const customRange = useMemo(() => ({ from, to }), [from, to]);
   // Preset and range change together, so they go out as ONE patch — two
   // setSearchParams calls in the same tick both read the same snapshot and the
@@ -241,7 +247,6 @@ export default function HistoryView({ onOpenSession }) {
   const [filterTab, setFilterTab] = useState('timeframe'); // 'timeframe' | 'projects'
   // ?project=… (repeated, never CSV — these are cwd paths). Empty = all.
   const [projectList, setProjectList] = useQueryList('project');
-  const projectFilter = useMemo(() => new Set(projectList), [projectList]);
   // Page-level exit/enter is keyed off the range itself (below) rather than a
   // counter bumped from an effect — same remount trigger, no extra render pass.
   const rangeKey = `${preset}:${customRange.from}:${customRange.to}`;
@@ -323,6 +328,14 @@ export default function HistoryView({ onOpenSession }) {
     }
     return entries.sort((a, b) => a.label.localeCompare(b.label));
   }, [rows]);
+
+  // A ?project= absent from the in-range days — a stale shared link — is dropped:
+  // the Projects tab offers no way to clear what it never lists, so keeping it
+  // would leave a blank page behind an invisible filter.
+  const projectFilter = useMemo(
+    () => new Set(projectList.filter((p) => projects.some((x) => x.key === p))),
+    [projectList, projects],
+  );
 
   // Client-side project filter: empty set passes everything through, so the
   // unfiltered path stays a plain identity (no per-row alloc).

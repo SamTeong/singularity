@@ -1,7 +1,7 @@
 import { getTokens } from '@/theme/contract.js';
 import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { matches as matchesKey } from '@/lib/keys.js';
-import { useQueryState } from '@/hooks/useQueryState.js';
+import { useQueryState, useUpdateQuery } from '@/hooks/useQueryState.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -39,6 +39,9 @@ import EmptyListLine from '@/components/EmptyListLine.jsx';
 // Transcripts root persists across sessions on the daemon FS. Default
 // ~/.claude/projects; used only as a fallback if /sessions/root fails to load.
 const DEFAULT_ROOT = '~/.claude/projects';
+// Recognised ?tool= sources. An unknown one would filter the list down to
+// nothing, so it degrades to 'all' instead — same for ?scope= below.
+const TOOLS = new Set(['all', 'claude', 'codex']);
 
 const shortModel = (id) => id.match(/opus|sonnet|haiku|fable|mythos/i)?.[0].toLowerCase() || id;
 
@@ -68,7 +71,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
   // Search + filters in the URL, so a query or a specific transcript is a link.
   const [q, setQ] = useQueryState('q');
-  const [scope, setScope] = useQueryState('scope', 'all'); // 'all' | 'one' — search + chat context
+  const [scopeParam, setScope] = useQueryState('scope', 'all'); // 'all' | 'one' — search + chat context
+  const scope = scopeParam === 'one' ? 'one' : 'all';
   const [tab, setTab] = useState('view'); // 'view' | 'chat'
   const [transcript, setTranscript] = useState(null);
   const [loadingFile, setLoadingFile] = useState(false);
@@ -90,7 +94,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   // and in the e2e sandbox, actually queried — the wrong root).
   const [root, setRoot] = useState(null);
   const [picking, setPicking] = useState(false);
-  const [tool, setTool] = useQueryState('tool', 'all'); // 'all' | 'claude' | 'codex' — filter the merged list
+  const [toolParam, setTool] = useQueryState('tool', 'all'); // 'all' | 'claude' | 'codex' — filter the merged list
+  const tool = TOOLS.has(toolParam) ? toolParam : 'all';
   // ?project=&session=(&source=) is the transcript to open — the replacement for
   // the openTx prop AppShell used to drill in. `source` is load-bearing: the
   // daemon only takes its Codex branch when it is 'codex'.
@@ -101,6 +106,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
     () => (txProject && txSession ? { project: txProject, id: txSession, ...(txSource ? { source: txSource } : null) } : null),
     [txProject, txSession, txSource],
   );
+  const updateQuery = useUpdateQuery();
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
 
@@ -145,7 +151,12 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
 
   const open = (item) => {
     if (item.project === sel?.project && item.id === sel?.id) return;
-    setSel(item); setMatches(null); setQ(''); setLoadErr(null);
+    setSel(item); setMatches(null); setLoadErr(null);
+    // The open transcript IS the URL — a click has to be as shareable as a deep
+    // link, and has to survive a reload. Clearing `q` rides the same patch: two
+    // setSearchParams in one tick both read the same snapshot, so the first
+    // write would be lost.
+    updateQuery({ q: null, project: item.project, session: item.id, source: item.source || null });
     loadStats([item]); // ensure detail-header stats even when opened from search
     setLoadingFile(true);
     const src = item.source === 'codex' ? `&source=codex${item.file ? `&file=${encodeURIComponent(item.file)}` : ''}` : '';
@@ -168,7 +179,10 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
 
   const pickRoot = (p) => {
     setRoot(p); setPicking(false);
-    setSel(null); setTranscript(null); setMatches(null); setQ(''); setPage(1);
+    // Drop the open transcript from the URL too — it belongs to the old root,
+    // and leaving it there would have the effect below re-open it immediately.
+    setSel(null); setTranscript(null); setMatches(null); setPage(1);
+    updateQuery({ q: null, project: null, session: null, source: null });
     fetch('/api/transcripts/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
   };
 

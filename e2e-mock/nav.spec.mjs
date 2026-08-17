@@ -176,3 +176,16 @@ test('a transcript URL opens that transcript on a cold load', async ({ page }) =
 
   await expect(visible(page.getByText('Backoff is capped at 30s', { exact: false })).first()).toBeVisible();
 });
+
+// The mirror of the cold load above: the URL has to be WRITTEN by a click, not
+// just read on mount, or the open transcript is neither shareable nor reloadable.
+test('clicking a transcript writes it to the URL, and a reload reopens it', async ({ page }) => {
+  await gotoView(page, 'Transcripts');
+  await page.getByRole('button', { name: /Retry backoff cap/ }).click();
+  await expect(visible(page.getByText('Backoff is capped at 30s', { exact: false })).first()).toBeVisible();
+
+  await expect(page).toHaveURL(new RegExp(`project=${PROJECT_B}&.*session=${RICH_SESSION}`));
+
+  await page.reload();
+  await expect(visible(page.getByText('Backoff is capped at 30s', { exact: false })).first()).toBeVisible();
+});

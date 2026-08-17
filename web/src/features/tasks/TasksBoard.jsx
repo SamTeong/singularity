@@ -383,6 +383,10 @@ function TranscriptSheet({ item, loading, error, transcript, onClose }) {
   );
 }
 
+// Sortable History columns — an ?sort= naming anything else falls back to the
+// default instead of sorting by a key `sortValue` has no case for.
+const SORT_KEYS = new Set(['title', 'repo', 'branch', 'outcome', 'busyMs', 'apiMs', 'costUsd', 'tokens', 'concludedAt']);
+
 export default function TasksBoard({ tasks, history, agents, stats, onSelect, onAdd, onMove, onConclude, onDeleteHistory, onSheetInset }) {
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
@@ -392,7 +396,6 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   // contain commas), ?history=1, ?sort=key:dir, ?task=<id>. All `replace: true`
   // (the hook default) so fiddling with filters doesn't fill the back stack.
   const [tagList, setTagList] = useQueryList('tag');
-  const activeTags = useMemo(() => new Set(tagList), [tagList]);
   const [historyParam, setHistoryParam] = useQueryState('history');
   const showHistory = historyParam === '1';
   const setShowHistory = (on) => setHistoryParam(on ? '1' : '');
@@ -423,7 +426,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   const [sortParam, setSortParam] = useQueryState('sort', 'concludedAt:desc');
   const sort = useMemo(() => {
     const [key, dir] = sortParam.split(':');
-    return { key, dir: dir === 'asc' ? 'asc' : 'desc' };
+    return { key: SORT_KEYS.has(key) ? key : 'concludedAt', dir: dir === 'asc' ? 'asc' : 'desc' };
   }, [sortParam]);
   const changeSort = (key) => setSortParam(key === sort.key ? `${key}:${sort.dir === 'asc' ? 'desc' : 'asc'}` : `${key}:asc`);
 
@@ -436,6 +439,9 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     for (const h of history) (h.tags || []).forEach((x) => s.add(x));
     return [...s].sort();
   }, [tasks, history]);
+  // A ?tag= no task or history row carries — a stale shared link — is dropped:
+  // it renders no pill, so keeping it would empty the board with nothing to clear.
+  const activeTags = useMemo(() => new Set(tagList.filter((t) => allTags.includes(t))), [tagList, allTags]);
   const matchesTags = (item) => activeTags.size === 0 || (item.tags || []).some((t) => activeTags.has(t));
   const toggleTag = (tag) => setTagList(activeTags.has(tag) ? tagList.filter((t) => t !== tag) : [...tagList, tag]);
 
