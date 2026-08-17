@@ -1,10 +1,9 @@
-import { NAV } from '@/shell/Sidebar.jsx';
-import { NAV_ITEMS } from '@/shell/AppMenu.jsx';
+import { VIEW_LIST } from '@/shell/views.mjs';
 import { isCodexModel } from '@/lib/models.js';
 import { nextSessionTitle } from '@/lib/sessionTitle.js';
 
-// Build the Views command group from the unified view catalog.
-// Sidebar.NAV (primary rail) + AppMenu.NAV_ITEMS (overflow) — deduped by v.
+// Build the Views command group from the unified view catalog (shell/views.mjs,
+// shared with the router so palette entries and valid routes cannot drift).
 // Phase 0: Views group. Phase 1: Sessions group (switch/fork/respawn/reattach/kill/external/transcript).
 
 // Mirrors SessionRow.jsx's own row-action gating (isLive/isWorking) so a command
@@ -94,14 +93,7 @@ function buildSessionCommands(ctx) {
 }
 
 export function buildCommands(ctx) {
-  const views = [];
-  const seen = new Set();
-  for (const item of [...NAV, ...NAV_ITEMS]) {
-    if (seen.has(item.v)) continue;
-    seen.add(item.v);
-    views.push({ v: item.v, label: item.label });
-  }
-  const viewCmds = views.map((x) => ({
+  const viewCmds = VIEW_LIST.map((x) => ({
     id: 'view:' + x.v,
     group: 'Views',
     label: x.label,

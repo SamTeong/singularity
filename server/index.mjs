@@ -178,8 +178,11 @@ function walkMtimes(dir) {
 
 if (existsSync(webDist)) {
   app.register(fastifyStatic, { root: webDist, index: false });
-  // Serve the shell via a route so the token can be injected for the client.
-  app.get('/', async (req, reply) => {
+  // The shell response lives in one place: dist/index.html plus the two
+  // serve-time injections. Both GET / and the deep-link fallback below go
+  // through it, so a fallback-served shell can never ship without
+  // window.__SING_TOKEN__ (which would 401 every call it then makes).
+  const sendShell = (reply) => {
     let html = readFileSync(join(webDist, 'index.html'), 'utf8');
     // Home dir goes in with the token: tildify/untildify (web/src/lib/paths.js)
     // used to learn it from an async GET /env, so a tab that raced or missed
@@ -190,6 +193,19 @@ if (existsSync(webDist)) {
     html = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(displayHome())};</script></head>`);
     if (TOKEN) html = html.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(TOKEN)};</script></head>`);
     reply.type('text/html').send(html);
+  };
+  // Serve the shell via a route so the token can be injected for the client.
+  app.get('/', async (req, reply) => sendShell(reply));
+  // Deep-link fallback: the UI owns the root namespace now that every data route
+  // sits under /api, so a GET navigation matching no route is a client route —
+  // serve the shell and let React Router resolve it. Everything else (an /api or
+  // /assets path, a non-GET, a non-HTML request) keeps a real 404, including
+  // inside the /api plugin, which inherits this handler.
+  app.setNotFoundHandler(async (req, reply) => {
+    const path = req.raw.url.split('?')[0];
+    const wantsHtml = (req.headers.accept || '').includes('text/html');
+    if (req.method === 'GET' && wantsHtml && !/^\/(api|assets|ws)(\/|$)/.test(path)) return sendShell(reply);
+    return reply.code(404).send({ error: 'not found' });
   });
   // Best-effort staleness check: warn if dist predates the web source it was built from.
   try {

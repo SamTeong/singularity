@@ -1,5 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
 import { useCallback, useEffect, useMemo, useRef, useState, Suspense, lazy } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { matches } from '@/lib/keys.js';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -105,9 +106,13 @@ export default function AppShell() {
   // tri-state the Automation view uses for background defs.
   const [cronOpen, setCronOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  // Persisted so the selected view survives a skin switch (which remounts the
-  // whole shell) and page reloads — otherwise switching theme bounces to Tasks.
-  const [view, setView] = useState(() => localStorage.getItem('sing-view') || 'tasks');
+  // The URL owns the selected view (App.jsx's `:view` route). Already validated
+  // at the route boundary, so `view` is always a known id here. `setView` keeps
+  // its old signature, so Sidebar, AppMenu, the palette and the page-prev/next
+  // handler below need no changes.
+  const { view } = useParams();
+  const navigate = useNavigate();
+  const setView = useCallback((v) => navigate(`/${v}`), [navigate]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
@@ -150,7 +155,8 @@ export default function AppShell() {
     setVisited((s) => new Set(s).add(view));
   }
 
-  // Remember the selected view across skin remounts + reloads.
+  // Not the source of truth any more — just the "where was I" memory that a
+  // bare `/` redirects to (App.jsx's DefaultRedirect).
   useEffect(() => { localStorage.setItem('sing-view', view); }, [view]);
   // Cycles More-menu views (xterm + cm-editor handle own focus cases).
   useEffect(() => {
@@ -254,7 +260,7 @@ export default function AppShell() {
     setOpenTx({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), id: a.id, cwd: a.cwd, mtime: Date.now() });
     setView('sessions');
     setTxPrompt(null);
-  }, []);
+  }, [setView]);
 
   // Deep-link from a History day's session row into Transcripts. Unlike
   // viewTranscript, these rows already carry the transcript-file id/project

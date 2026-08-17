@@ -66,7 +66,10 @@ export default defineConfig(({ mode }) => ({
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
           if (/[\\/]@xterm[\\/]/.test(id)) return 'xterm';
-          if (/[\\/](react|react-dom|scheduler|@mui|@emotion|@zapac)[\\/]/.test(id)) return 'vendor';
+          // `react-router(?:-dom)?`: the trailing [\\/] means a bare `react-router`
+          // alternative would miss node_modules/react-router-dom/, splitting the
+          // router across chunks — the same TDZ hazard as above.
+          if (/[\\/](react|react-dom|react-router(?:-dom)?|scheduler|@mui|@emotion|@zapac)[\\/]/.test(id)) return 'vendor';
         },
       },
     },
