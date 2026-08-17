@@ -57,6 +57,10 @@ Backend modules → routes in `server/index.mjs`. Add a concern = new module + r
 
 The HTTP API lives under `/api` (e.g. `POST /api/tasks`); `/ws`, `GET /`, and `/assets/*` stay at the root. The Vite dev proxy forwards the whole `/api` prefix in one entry, so a new route needs no proxy edit.
 
+**The root namespace belongs to the UI.** Every view is a real URL — `/tasks`, `/usage`, `/sessions` (React Router `BrowserRouter`, no basename) — so view ids and API paths no longer share a namespace. `web/src/shell/views.mjs` is the one view catalog (sidebar rail + More menu, deduped); the router validates against it and an unknown id **redirects** to `/tasks` rather than rendering Tasks under a lying URL. `AppShell`'s `view` comes from `useParams`, and `localStorage['sing-view']` is now only the "where was I" memory a bare `/` redirects to. Any GET navigation that matches no route falls to `setNotFoundHandler` in `server/index.mjs`, which serves the shell through `sendShell` (token + home injection) — never a bare `sendFile`, or a deep-link reload ships a shell with no `window.__SING_TOKEN__` and every call 401s.
+
+Per-view filters live in the query string via `web/src/hooks/useQueryState.js` (`useQueryState` / `useQueryList` / `useUpdateQuery`) — `/tasks?tag=x&history=1`, `/history?preset=30`, `/sessions?project=…&session=…&source=codex`. Repeated params, never CSV (tags and cwd paths contain commas); a param equal to its default is absent; an invalid value degrades to the default instead of breaking the view. Anything changing more than one key must go through `useUpdateQuery`'s single patch — two `setSearchParams` calls in one tick both read the same snapshot and the first write is lost.
+
 **New server route → one more edit, mandatory:**
 
 **Add a handler to `web/src/mock/routes/`.** Mirage is configured to throw on any unhandled request, so a route the client gains but the mock lacks fails the whole mock suite loudly — that's the intended drift alarm, not a flake. Match the daemon's exact response shape (several routes return bare arrays or keyed objects with no `ok`), and broadcast the matching WS frame if the daemon does.

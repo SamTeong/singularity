@@ -1,6 +1,7 @@
-// Navigation helpers. There is no router — AppShell keeps the active view in a
-// `sing-view` localStorage key, so the URL is always '/' and deep-linking means
-// seeding that key before load.
+// Navigation helpers. The URL owns the active view (`/<view-id>`, React Router),
+// so deep-linking is just a page.goto — see gotoUrl. `sing-view` in localStorage
+// is now only the "where was I" memory that a bare '/' redirects to, which is
+// what gotoView exercises.
 //
 // The two non-obvious moves are inherited from the console scanner this suite
 // replaced: press Escape before opening the More menu (a lingering menu backdrop
@@ -86,7 +87,17 @@ export async function goto(page, label) {
   return gotoMenu(page, label);
 }
 
-// Load straight into a view without clicking — seeds localStorage pre-navigation.
+// Load straight into a view by URL, optionally with query params (filters, an
+// open transcript). The click-based goto/gotoView above stay — several specs
+// test the nav chrome itself, and gotoView covers the '/' → last-view redirect.
+export async function gotoUrl(page, label, params) {
+  const id = VIEW_IDS[label] || label;
+  const qs = params ? `?${new URLSearchParams(params)}` : '';
+  await page.goto(`/${id}${qs}`);
+  await settle(page, id);
+}
+
+// Load a view via the bare-root redirect — seeds `sing-view` pre-navigation.
 export async function gotoView(page, label) {
   const id = VIEW_IDS[label] || label;
   await page.addInitScript((v) => window.localStorage.setItem('sing-view', v), id);
