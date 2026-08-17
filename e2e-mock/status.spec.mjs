@@ -41,7 +41,7 @@ test('Refresh triggers GET /status with force=1', async ({ page }) => {
   await recordFetchCalls(page);
 
   await page.getByRole('button', { name: 'Refresh' }).click();
-  await expect.poll(() => fetchCalls(page)).toContain('GET /status?force=1');
+  await expect.poll(() => fetchCalls(page)).toContain('GET /api/status?force=1');
 });
 
 test('the freshness caption renders', async ({ page }) => {

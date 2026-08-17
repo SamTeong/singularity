@@ -89,7 +89,7 @@ test('scheduled: create validates the cron expression live then POSTs /crons, Ed
   // DELETE pathname is asserted with a regex below.
   const row = page.locator('tr').filter({ hasText: CRON_TITLE });
   await expect(row).toBeVisible();
-  expect(await fetchCalls(page)).toContain('POST /crons');
+  expect(await fetchCalls(page)).toContain('POST /api/crons');
 
   // Edit reopens the dialog prefilled with the job's fields, then Cancel — no mutation.
   await row.getByRole('button', { name: 'Edit' }).click();
@@ -108,7 +108,7 @@ test('scheduled: create validates the cron expression live then POSTs /crons, Ed
   await row.getByRole('button', { name: 'Delete' }).click();
   expect(await confirmMsg).toMatch(/delete scheduled job/i);
   await expect(row).not.toBeVisible();
-  expect(await fetchCalls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^DELETE \/crons\/[^/]+$/)]));
+  expect(await fetchCalls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^DELETE \/api\/crons\/[^/]+$/)]));
 });
 
 test('scheduled: the enable Switch on a seeded (disabled) row flips via POST /crons/:id', async ({ page }) => {
@@ -122,7 +122,7 @@ test('scheduled: the enable Switch on a seeded (disabled) row flips via POST /cr
 
   await sw.click();
   await expect(sw).toBeChecked();
-  expect(await fetchCalls(page)).toContain('POST /crons/' + CRON_1_ID);
+  expect(await fetchCalls(page)).toContain('POST /api/crons/' + CRON_1_ID);
 });
 
 test('background: create POSTs /background/jobs, Edit PATCHes the title, Delete confirms then DELETEs', async ({ page }) => {
@@ -140,7 +140,7 @@ test('background: create POSTs /background/jobs, Edit PATCHes the title, Delete 
 
   const row = page.locator('tr').filter({ hasText: BGJOB_TITLE });
   await expect(row).toBeVisible();
-  expect(await fetchCalls(page)).toContain('POST /background/jobs');
+  expect(await fetchCalls(page)).toContain('POST /api/background/jobs');
 
   await row.getByRole('button', { name: 'Edit' }).click();
   const editDialog = page.getByRole('dialog');
@@ -153,13 +153,13 @@ test('background: create POSTs /background/jobs, Edit PATCHes the title, Delete 
 
   const editedRow = page.locator('tr').filter({ hasText: editedTitle });
   await expect(editedRow).toBeVisible();
-  expect(await fetchCalls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^PATCH \/background\/jobs\/[^/]+$/)]));
+  expect(await fetchCalls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^PATCH \/api\/background\/jobs\/[^/]+$/)]));
 
   const confirmMsg = onceConfirm(page, true);
   await editedRow.getByRole('button', { name: 'Delete' }).click();
   expect(await confirmMsg).toMatch(/delete background job/i);
   await expect(editedRow).not.toBeVisible();
-  expect(await fetchCalls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^DELETE \/background\/jobs\/[^/]+$/)]));
+  expect(await fetchCalls(page)).toEqual(expect.arrayContaining([expect.stringMatching(/^DELETE \/api\/background\/jobs\/[^/]+$/)]));
 });
 
 test('background: the enable Switch on a seeded (disabled) row flips via PATCH /background/jobs/:id', async ({ page }) => {
@@ -173,7 +173,7 @@ test('background: the enable Switch on a seeded (disabled) row flips via PATCH /
 
   await sw.click();
   await expect(sw).toBeChecked();
-  expect(await fetchCalls(page)).toContain('PATCH /background/jobs/' + BGJOB_1_ID);
+  expect(await fetchCalls(page)).toContain('PATCH /api/background/jobs/' + BGJOB_1_ID);
 });
 
 test('background: dragging one seeded row onto another PATCHes /background/reorder', async ({ page }) => {
@@ -189,7 +189,7 @@ test('background: dragging one seeded row onto another PATCHes /background/reord
   const handle = rowA.locator('[aria-label*="Drag to change the order"]');
 
   await html5Drag(page, handle, rowB);
-  expect(await fetchCalls(page)).toContain('PATCH /background/reorder');
+  expect(await fetchCalls(page)).toContain('PATCH /api/background/reorder');
 });
 
 test('background: Jobs<->Reports toggle switches view; Reports shows the empty state', async ({ page }) => {

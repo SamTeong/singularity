@@ -97,7 +97,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // the request settles either way, so a failed fetch still ends in a usable
   // (if possibly wrong-for-this-user) state rather than stalling forever.
   useEffect(() => {
-    fetch('/sessions/root').then((r) => r.json()).then((d) => setRoot(d.root || DEFAULT_ROOT)).catch(() => setRoot(DEFAULT_ROOT));
+    fetch('/api/sessions/root').then((r) => r.json()).then((d) => setRoot(d.root || DEFAULT_ROOT)).catch(() => setRoot(DEFAULT_ROOT));
   }, []);
 
   // Poll the session list only while the Sessions view is active — avoids
@@ -105,7 +105,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // Also waits for root to resolve (non-null) so this never lists against a guess.
   useEffect(() => {
     if (!active || root == null) return;
-    const load = () => fetch(`/sessions?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.'));
+    const load = () => fetch(`/api/sessions?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.'));
     load();
     const iv = setInterval(load, 5000);
     return () => clearInterval(iv);
@@ -116,7 +116,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   const searchAll = useCallback((query) => {
     if (!query.trim()) { setMatches(null); setCapped(false); return; }
     if (root == null) return; // root not resolved yet — don't guess
-    fetch(`/sessions/search?q=${encodeURIComponent(query.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/sessions/search?q=${encodeURIComponent(query.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setMatches(d.results || []); setCapped(!!d.capped);
     });
   }, [root]);
@@ -127,7 +127,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
     // ponytail: codex cost notional, wire stats when needed
     const list = (items || []).filter((it) => it?.project && it?.id && it.source !== 'codex').map((it) => ({ project: it.project, id: it.id }));
     if (!list.length || root == null) return; // root not resolved yet — don't guess
-    fetch('/sessions/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list, root: untildify(root) }) })
+    fetch('/api/sessions/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list, root: untildify(root) }) })
       .then((r) => r.json()).then((d) => setStats((prev) => ({ ...prev, ...(d.stats || {}) }))).catch(() => {});
   }, [root]);
 
@@ -137,7 +137,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
     loadStats([item]); // ensure detail-header stats even when opened from search
     setLoadingFile(true);
     const src = item.source === 'codex' ? `&source=codex${item.file ? `&file=${encodeURIComponent(item.file)}` : ''}` : '';
-    fetch(`/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}&root=${encodeURIComponent(untildify(root))}${src}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}&root=${encodeURIComponent(untildify(root))}${src}`).then((r) => r.json()).then((d) => {
       setTranscript(d.ok ? d : null);
     }).catch(() => { setTranscript(null); setLoadErr('Failed to load transcript.'); }).finally(() => setLoadingFile(false));
   };
@@ -147,7 +147,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   const pickRoot = (p) => {
     setRoot(p); setPicking(false);
     setSel(null); setTranscript(null); setMatches(null); setQ(''); setPage(1);
-    fetch('/sessions/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
+    fetch('/api/sessions/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
   };
 
   // Chat: stream deltas from the WS into the last assistant message.

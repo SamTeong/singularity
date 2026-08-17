@@ -103,7 +103,7 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
     setBusy(true);
     setError(null);
     try {
-      const url = editing ? `/background/jobs/${job.id}` : '/background/jobs';
+      const url = editing ? `/api/background/jobs/${job.id}` : '/api/background/jobs';
       const method = editing ? 'PATCH' : 'POST';
       const r = await fetch(url, {
         method,

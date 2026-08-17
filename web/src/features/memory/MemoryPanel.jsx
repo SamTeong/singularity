@@ -45,16 +45,16 @@ export default function MemoryPanel() {
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
   useEffect(() => {
-    fetch('/memory/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
+    fetch('/api/memory/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
   }, []);
 
   useEffect(() => {
-    fetch(`/memory/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setErr('failed to load memory files'));
+    fetch(`/api/memory/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setErr('failed to load memory files'));
   }, [root]);
 
   const search = useCallback(() => {
     if (!q.trim()) { setResults(null); return; }
-    fetch(`/memory/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/memory/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setResults(d.results || []); setCapped(!!d.capped);
     });
   }, [q, root]);
@@ -66,14 +66,14 @@ export default function MemoryPanel() {
     if (item.path === sel?.path) return;
     if (!await ensureSaved({ dirty, save })) return;
     setSel(item); setMsg(null); setLoadingFile(true); setMtime(null);
-    fetch(`/memory/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/memory/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : ''); setDirty(false); setMtime(d.ok ? (d.mtime ?? null) : null);
       if (!d.ok) setMsg({ sev: 'error', text: d.error });
     }).finally(() => setLoadingFile(false));
   };
 
   const save = async (force = false) => {
-    const r = await fetch('/memory/file', {
+    const r = await fetch('/api/memory/file', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path: untildify(sel.path), content, root: untildify(root), mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
@@ -91,7 +91,7 @@ export default function MemoryPanel() {
     mtime,
     dirty,
     refetch: async () => {
-      const d = await fetch(`/memory/file?path=${encodeURIComponent(untildify(sel.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).catch(() => ({ ok: false }));
+      const d = await fetch(`/api/memory/file?path=${encodeURIComponent(untildify(sel.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).catch(() => ({ ok: false }));
       return { ok: !!d.ok, mtime: d.mtime ?? null, content: d.content ?? '' };
     },
     onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },
@@ -100,7 +100,7 @@ export default function MemoryPanel() {
 
   const pickRoot = (p) => {
     setRoot(p); setPicking(false);
-    fetch('/memory/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
+    fetch('/api/memory/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
   };
 
   const showing = results ?? files;

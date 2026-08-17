@@ -28,7 +28,7 @@ import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 
 export default function RulesPanel() {
-  const { roots, shownRoots, remember, forget } = useRootList('/rules');
+  const { roots, shownRoots, remember, forget } = useRootList('/api/rules');
   const [files, setFiles] = useState([]);
   const [q, setQ] = useState('');
   const [searchResults, setSearchResults] = useState(null); // search hits, raw
@@ -48,7 +48,7 @@ export default function RulesPanel() {
   // than needing an explicit reset here.
   useEffect(() => {
     if (!roots.length) return;
-    fetch('/rules/files', {
+    fetch('/api/rules/files', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ roots }),
     }).then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setFiles([]));
@@ -60,7 +60,7 @@ export default function RulesPanel() {
     const term = q.trim();
     if (!term) return;
     const id = setTimeout(() => {
-      fetch('/rules/search', {
+      fetch('/api/rules/search', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ roots, q: term }),
       }).then((r) => r.json()).then((d) => setSearchResults(d.results || [])).catch(() => setSearchResults([]));
@@ -72,7 +72,7 @@ export default function RulesPanel() {
     if (item.path === sel?.path) return;
     if (!await ensureSaved({ dirty, save })) return;
     setSel(item); setMsg(null); setLoadingFile(true); setRef(null); setMtime(null);
-    fetch(`/rules/file?path=${encodeURIComponent(untildify(item.path))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/rules/file?path=${encodeURIComponent(untildify(item.path))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : ''); setDirty(false); setMtime(d.ok ? (d.mtime ?? null) : null);
       if (!d.ok) setMsg({ sev: 'error', text: d.error });
     }).finally(() => setLoadingFile(false));
@@ -84,7 +84,7 @@ export default function RulesPanel() {
   const openRef = () => {
     if (!sel) return;
     setMsg(null);
-    fetch(`/rules/reference?path=${encodeURIComponent(untildify(sel.path))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/rules/reference?path=${encodeURIComponent(untildify(sel.path))}`).then((r) => r.json()).then((d) => {
       if (d.ok) setRef({ path: d.path, content: d.content });
       else setMsg({ sev: 'error', text: d.error || 'no reference' });
     }).catch(() => setMsg({ sev: 'error', text: 'failed to load reference' }));
@@ -93,7 +93,7 @@ export default function RulesPanel() {
   const onChange = (v) => { setContent(v); setDirty(true); };
 
   const save = async (force = false) => {
-    const r = await fetch('/rules/file', {
+    const r = await fetch('/api/rules/file', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path: untildify(sel.path), content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
@@ -113,7 +113,7 @@ export default function RulesPanel() {
     mtime,
     dirty,
     refetch: async () => {
-      const d = await fetch(`/rules/file?path=${encodeURIComponent(untildify(sel.path))}`).then((r) => r.json()).catch(() => ({ ok: false }));
+      const d = await fetch(`/api/rules/file?path=${encodeURIComponent(untildify(sel.path))}`).then((r) => r.json()).catch(() => ({ ok: false }));
       return { ok: !!d.ok, mtime: d.mtime ?? null, content: d.content ?? '' };
     },
     onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },

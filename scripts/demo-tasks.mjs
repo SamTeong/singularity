@@ -46,7 +46,7 @@ async function api(path, body, method = 'POST') {
 }
 
 async function move(t, column, state) {
-  await api(`/tasks/${t.id}/status`, { column, state });
+  await api(`/api/tasks/${t.id}/status`, { column, state });
   console.log(`  [${t.id.slice(0, 8)}] ${column.padEnd(10)} ${state}`);
   await sleep(jitter(STEP_MS));
 }
@@ -55,7 +55,7 @@ async function runTask(n) {
   await sleep(Math.random() * 2000); // start jitter — stagger card creation
   const repo = mkdtempSync(join(tmpdir(), `sing-demo-${n}-`)); // non-git → kind:'plain', no worktree
   const title = `[DEMO] Sample task ${n}`;
-  const { task } = await api('/tasks', {
+  const { task } = await api('/api/tasks', {
     repo, title,
     description: `Mock demo task ${n}. No real work is performed; transitions are scripted.`,
     model: 'claude-haiku-4-5-20251001',
@@ -86,8 +86,8 @@ async function runTask(n) {
 
   await sleep(DONE_TTL_MS);
   // Delete outright: conclude pushes to history, delete-history removes it → gone.
-  await api(`/tasks/${task.id}/conclude`, { outcome: 'completed' });
-  await api(`/tasks/history/${task.id}`, null, 'DELETE');
+  await api(`/api/tasks/${task.id}/conclude`, { outcome: 'completed' });
+  await api(`/api/tasks/history/${task.id}`, null, 'DELETE');
   console.log(`  [${task.id.slice(0, 8)}] 🗑 deleted (no history)`);
 }
 

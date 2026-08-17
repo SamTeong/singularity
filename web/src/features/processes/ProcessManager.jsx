@@ -30,13 +30,13 @@ export default function ProcessManager({ onClose }) {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
-    fetch('/procs').then((r) => r.json()).then((d) => setProcs(d.procs || [])).catch(() => setProcs([]));
+    fetch('/api/procs').then((r) => r.json()).then((d) => setProcs(d.procs || [])).catch(() => setProcs([]));
   }, []);
   useEffect(() => { load(); }, [load]);
 
   const kill = async (pid) => {
     setBusy(true);
-    await fetch('/procs/kill', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pid }) }).catch(() => {});
+    await fetch('/api/procs/kill', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pid }) }).catch(() => {});
     setBusy(false);
     load();
   };

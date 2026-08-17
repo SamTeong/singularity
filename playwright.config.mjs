@@ -38,7 +38,7 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
   webServer: {
     command: 'node e2e/serve.mjs',
-    url: `${BASE_URL}/health`,
+    url: `${BASE_URL}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
     // The daemon logs every request at info level — piping it buries the

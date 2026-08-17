@@ -72,46 +72,46 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
   // Fetch on mount + on every bgView change so the unread badge shows even from
   // the Jobs view, and the list refreshes when re-entering Reports.
   const loadReports = useCallback(() =>
-    fetch('/background/reports').then((r) => r.json()).then((d) => setReports(d.reports || [])).catch(() => onToast?.('Failed to load reports.')),
+    fetch('/api/background/reports').then((r) => r.json()).then((d) => setReports(d.reports || [])).catch(() => onToast?.('Failed to load reports.')),
   [onToast]);
   useEffect(() => { loadReports(); }, [bgView, loadReports]);
   const flaggedReports = reports.filter((r) => r.flagged).length;
 
   const setFlag = (taskId, flagged) =>
-    fetch(`/background/reports/${taskId}/flag`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ flagged }) })
+    fetch(`/api/background/reports/${taskId}/flag`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ flagged }) })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); else loadReports(); }).catch((e) => onToast?.(e.message));
 
   const openReport = (taskId) => {
     setSelReport(taskId);
     setReportContent(null);
     setReportLoading(true);
-    fetch(`/background/reports/${taskId}`).then((r) => r.json())
+    fetch(`/api/background/reports/${taskId}`).then((r) => r.json())
       .then((d) => setReportContent(d.ok ? d.content : null))
       .catch(() => setReportContent(null))
       .finally(() => setReportLoading(false));
   };
 
   const toggle = (id, enabled) =>
-    fetch(`/crons/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) })
+    fetch(`/api/crons/${id}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
   const run = (id) =>
-    fetch(`/crons/${id}/run`, { method: 'POST' })
+    fetch(`/api/crons/${id}/run`, { method: 'POST' })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
   const remove = (id) =>
-    fetch(`/crons/${id}`, { method: 'DELETE' })
+    fetch(`/api/crons/${id}`, { method: 'DELETE' })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
 
   const runBg = () =>
-    fetch('/background/run', { method: 'POST' })
+    fetch('/api/background/run', { method: 'POST' })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.reason || d.error); }).catch((e) => onToast?.(e.message));
   const toggleJob = (id, enabled) =>
-    fetch(`/background/jobs/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) })
+    fetch(`/api/background/jobs/${id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ enabled: !enabled }) })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
   const removeJob = (id) =>
-    fetch(`/background/jobs/${id}`, { method: 'DELETE' })
+    fetch(`/api/background/jobs/${id}`, { method: 'DELETE' })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
   const saveOrder = (ids) =>
-    fetch('/background/reorder', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) })
+    fetch('/api/background/reorder', { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ids }) })
       .then((r) => r.json()).then((d) => { if (!d.ok) onToast?.(d.error); }).catch((e) => onToast?.(e.message));
 
   const config = background?.config;

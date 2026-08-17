@@ -220,12 +220,12 @@ export default function AppShell() {
     setRestartOpen(false);
     setRestarting(true);
     setToast('Restarting the app…');
-    const before = await fetch('/health').then((r) => r.json()).then((d) => d.pid).catch(() => null);
-    await fetch('/restart', { method: 'POST' }).catch(() => {}); // connection drops; ignore
+    const before = await fetch('/api/health').then((r) => r.json()).then((d) => d.pid).catch(() => null);
+    await fetch('/api/restart', { method: 'POST' }).catch(() => {}); // connection drops; ignore
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 800));
       try {
-        const d = await fetch('/health').then((r) => r.json());
+        const d = await fetch('/api/health').then((r) => r.json());
         if (d.ok && d.pid !== before) { location.reload(); return; }
       } catch { /* expected while the daemon is down */ }
     }
@@ -244,7 +244,7 @@ export default function AppShell() {
   // covers it. Only a genuinely unknown id lands on "Transcript not found".
   const viewTranscript = useCallback(async (a) => {
     if (a.tool === 'codex' || isCodexModel(a.model)) {
-      const threadId = await fetch(`/session/codex-thread?id=${encodeURIComponent(a.id)}`)
+      const threadId = await fetch(`/api/session/codex-thread?id=${encodeURIComponent(a.id)}`)
         .then((r) => r.json()).then((d) => (d.ok ? d.threadId : null)).catch(() => null);
       setOpenTx({ project: '<codex>', id: threadId || a.id, cwd: a.cwd, source: 'codex', mtime: Date.now() });
       setView('sessions');

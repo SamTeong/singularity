@@ -55,10 +55,11 @@ assets/    screenshots
 
 Backend modules → routes in `server/index.mjs`. Add a concern = new module + route + co-located test.
 
-**New server route → two more edits, both mandatory:**
+The HTTP API lives under `/api` (e.g. `POST /api/tasks`); `/ws`, `GET /`, and `/assets/*` stay at the root. The Vite dev proxy forwards the whole `/api` prefix in one entry, so a new route needs no proxy edit.
 
-1. **Add its prefix to the Vite dev proxy** (`web/vite.config.mjs` `server.proxy`). Dev runs on :5317 and only proxies listed prefixes to the daemon (:4317); an unlisted route (e.g. `/skills`, `/skill`) falls through to the SPA shell → `fetch().json()` throws → "failed to load X" in the browser. `apply:'serve'` keeps proxy entries dev-only (daemon serves dist directly in prod).
-2. **Add a handler to `web/src/mock/routes/`.** Mirage is configured to throw on any unhandled request, so a route the client gains but the mock lacks fails the whole mock suite loudly — that's the intended drift alarm, not a flake. Match the daemon's exact response shape (several routes return bare arrays or keyed objects with no `ok`), and broadcast the matching WS frame if the daemon does.
+**New server route → one more edit, mandatory:**
+
+**Add a handler to `web/src/mock/routes/`.** Mirage is configured to throw on any unhandled request, so a route the client gains but the mock lacks fails the whole mock suite loudly — that's the intended drift alarm, not a flake. Match the daemon's exact response shape (several routes return bare arrays or keyed objects with no `ok`), and broadcast the matching WS frame if the daemon does.
 
 ## State
 

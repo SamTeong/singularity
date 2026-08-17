@@ -40,14 +40,14 @@ const CLAUDE_LEAVES = [
 ];
 const CODEX_LEAF_NAME = 'config.toml';
 const codexScope = (cwd) => (untildify(cwd) === untildify('~') ? 'user' : 'project');
-const toolBase = (tool) => (tool === 'codex' ? '/codex-config' : '/config');
+const toolBase = (tool) => (tool === 'codex' ? '/api/codex-config' : '/api/config');
 
 export default function ConfigEditor() {
   // Roots stay separate server-side (the isKnownConfigRoot security gate is
   // per-tool), but the rail shows the union and pick/remember touch both so
   // the user curates one set.
-  const claudeRoots = useRootList('/config', { initial: ['~'] });
-  const codexRoots = useRootList('/codex-config', { initial: ['~'] });
+  const claudeRoots = useRootList('/api/config', { initial: ['~'] });
+  const codexRoots = useRootList('/api/codex-config', { initial: ['~'] });
   const { keys } = useKeys();
   const { ensureSaved, dialogEl } = useDirtyGuard();
 
@@ -118,7 +118,7 @@ export default function ConfigEditor() {
   // Restore open tabs / autosave / expanded roots from /config/state.
   useEffect(() => {
     let cancelled = false;
-    fetch('/config/state').then((r) => r.json()).then(async ({ state }) => {
+    fetch('/api/config/state').then((r) => r.json()).then(async ({ state }) => {
       const st = state || {};
       setAutosave(!!st.autosave);
       const exp = Array.isArray(st.expanded) ? st.expanded : [];
@@ -148,7 +148,7 @@ export default function ConfigEditor() {
   useEffect(() => {
     if (!loadedRef.current) return;
     const id = setTimeout(() => {
-      fetch('/config/state', {
+      fetch('/api/config/state', {
         method: 'PUT', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           tabs: tabs.map((t) => ({ cwd: t.cwd, tool: t.tool, scope: t.scope, path: t.path })),
@@ -189,8 +189,8 @@ export default function ConfigEditor() {
     if (!term) return;
     const id = setTimeout(() => {
       Promise.all([
-        fetch('/config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: claudeRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
-        fetch('/codex-config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: codexRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
+        fetch('/api/config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: claudeRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
+        fetch('/api/codex-config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: codexRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
       ]).then(([c, x]) => {
         const list = [...(c.results || []).map((h) => ({ ...h, tool: 'claude' })), ...(x.results || []).map((h) => ({ ...h, tool: 'codex' }))];
         setResults({ term, list });

@@ -21,7 +21,7 @@ export default function ScopeSelect({ open, value, onChange }) {
 
   useEffect(() => {
     if (!open) return;
-    fetch('/skill-scopes').then((r) => r.json()).then((d) => {
+    fetch('/api/skill-scopes').then((r) => r.json()).then((d) => {
       setScopeList(d.scopes || []);
       setSkillsByScope(d.skillsByScope || {});
     }).catch(() => {});

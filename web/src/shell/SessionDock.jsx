@@ -173,7 +173,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
                 onFork={() => sendMsg({ t: 'fork', id: a.id, title: nextSessionTitle(agents, a) })}
                 onRespawn={() => sendMsg({ t: 'respawn', id: a.id })}
                 onReattach={() => sendMsg({ t: 'reattach', id: a.id })}
-                onOpenExternal={() => fetch('/session/external', {
+                onOpenExternal={() => fetch('/api/session/external', {
                   method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: a.id }),
                 }).then((r) => r.json()).then((d) => { if (!d.ok && onToast) onToast(`External terminal failed: ${d.error || 'unknown'}`); }).catch(() => { if (onToast) onToast('External terminal failed: network error'); })}
                 onKill={() => sendMsg({ t: 'kill', id: a.id })}

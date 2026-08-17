@@ -65,12 +65,12 @@ export default function WikiPanel() {
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
   useEffect(() => {
-    fetch('/wiki/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
+    fetch('/api/wiki/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
   }, []);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/wiki/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/wiki/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       if (cancelled) return;
       if (d.error) { setWikis([]); setCapped(false); setErr(d.error); return; }
       setWikis(d.wikis || []); setCapped(!!d.capped); setErr(null);
@@ -80,7 +80,7 @@ export default function WikiPanel() {
 
   const search = useCallback(() => {
     if (!q.trim()) { setResults(null); return; }
-    fetch(`/wiki/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/wiki/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setResults(d.results || []); setCapped(!!d.capped);
     });
   }, [q, root]);
@@ -91,7 +91,7 @@ export default function WikiPanel() {
   const open = (item) => {
     if (item.path === sel?.path) return;
     setSel(item); setErr(null); setLoadingFile(true);
-    fetch(`/wiki/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/wiki/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : '');
       if (!d.ok) setErr(d.error);
     }).catch(() => { setContent(''); setErr('failed to load page'); }).finally(() => setLoadingFile(false));
@@ -126,7 +126,7 @@ export default function WikiPanel() {
 
   const pickRoot = (p) => {
     setRoot(p); setPicking(false); setSel(null); setContent(''); setErr(null);
-    fetch('/wiki/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
+    fetch('/api/wiki/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
   };
 
   // Distinct categories across all pages, and the tree filtered to active ones.

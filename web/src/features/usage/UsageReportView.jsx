@@ -32,7 +32,7 @@ const TOKEN = window.__SING_TOKEN__;
 // skin/theme ride along so the report's inline bootstrap (base.html) resolves the
 // right presentation on its first painted frame, before any host round-trip.
 const reportSrc = (t, skinId, theme) =>
-  `/usagereport/report?t=${t}&skin=${encodeURIComponent(skinId)}&theme=${encodeURIComponent(theme)}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}`;
+  `/api/usagereport/report?t=${t}&skin=${encodeURIComponent(skinId)}&theme=${encodeURIComponent(theme)}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}`;
 
 // The `src` is captured once per mount rather than recomputed each render, and
 // that is load-bearing: `src` is a DOM attribute, so letting it track live skin/
@@ -106,13 +106,13 @@ export default function UsageReportView() {
   useEffect(syncTheme, [syncTheme, status?.at]);
 
   useEffect(() => {
-    fetch('/usagereport/status').then((r) => r.json()).then(setStatus)
+    fetch('/api/usagereport/status').then((r) => r.json()).then(setStatus)
       .catch(() => setStatus({ exists: false, at: null }));
   }, []);
 
   const refresh = useCallback(() => {
     setBusy(true); setError(null);
-    fetch('/usagereport/refresh', { method: 'POST' })
+    fetch('/api/usagereport/refresh', { method: 'POST' })
       .then((r) => r.json())
       .then((d) => { if (d.ok) setStatus({ exists: true, at: d.at }); else setError(d.error || 'refresh failed'); })
       .catch((e) => setError(e.message))

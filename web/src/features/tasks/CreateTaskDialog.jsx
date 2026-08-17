@@ -35,7 +35,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
 
   useEffect(() => {
     if (!open) return;
-    fetch('/models').then((r) => r.json()).then((d) => setClaudeSet(new Set(d.claude || []))).catch(() => {});
+    fetch('/api/models').then((r) => r.json()).then((d) => setClaudeSet(new Set(d.claude || []))).catch(() => {});
   }, [open]);
 
   // Mirror of server isClaudeModel: empty/'claude'/known alias/claude-* id → claude.
@@ -70,7 +70,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch('/tasks', {
+      const r = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({

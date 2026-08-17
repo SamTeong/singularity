@@ -158,16 +158,6 @@ app.addHook('onRequest', async (req, reply) => {
   }
 });
 
-// Token gate: allow the app shell + assets + health through; guard everything else.
-if (TOKEN) {
-  app.addHook('onRequest', async (req, reply) => {
-    const url = req.raw.url.split('?')[0];
-    if (url === '/' || url === '/health' || url === '/capabilities' || url.startsWith('/assets')) return;
-    const t = req.headers['x-sing-token'] || req.query?.token;
-    if (t !== TOKEN) reply.code(401).send({ error: 'unauthorized' });
-  });
-}
-
 // createTask/updateTask/createCron/... funnel their state changes through a
 // persist() that now throws (flagged `.persistFailure`) on a genuine disk
 // write failure instead of silently swallowing it — surface that as 500 (the
@@ -213,6 +203,23 @@ if (existsSync(webDist)) {
 }
 
 let wss; // assigned after listen; /health reports live WS client count for dev smart-open
+
+// Every data route lives under /api, so the root namespace belongs to the SPA.
+// Route bodies are unchanged and deliberately not re-indented: this is a scope
+// change, and re-indenting ~500 lines would bury it in whitespace. The callback
+// param shadows the outer `app` on purpose, so no route line needs editing.
+await app.register(async (app) => {
+
+// Token gate: guards the whole API surface; health + capabilities stay open.
+if (TOKEN) {
+  app.addHook('onRequest', async (req, reply) => {
+    const url = req.raw.url.split('?')[0];
+    if (url === '/api/health' || url === '/api/capabilities') return;
+    const t = req.headers['x-sing-token'] || req.query?.token;
+    if (t !== TOKEN) reply.code(401).send({ error: 'unauthorized' });
+  });
+}
+
 app.get('/health', async () => ({ ok: true, pid: process.pid, clients: wss?.clients.size ?? 0 }));
 
 // Per-agent stats (turns + tokens) parsed from each session .jsonl.
@@ -736,6 +743,8 @@ app.post('/history/regenerate', async (req, reply) => {
   try { return { ok: true, entry: await regenerateDay(date) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
+
+}, { prefix: '/api' });
 
 reg.init(app.log);
 initTasks(app.log);

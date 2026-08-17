@@ -93,7 +93,7 @@ export default function CreateScheduledJobDialog({ open, onClose, job, cwd, setC
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(editing ? `/crons/${job.id}` : '/crons', {
+      const r = await fetch(editing ? `/api/crons/${job.id}` : '/api/crons', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({

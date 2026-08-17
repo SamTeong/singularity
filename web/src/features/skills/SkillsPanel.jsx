@@ -47,7 +47,7 @@ const fileIcon = (rel) => {
 };
 
 export default function SkillsPanel() {
-  const { roots, shownRoots, remember, forget, loaded } = useRootList('/skills');
+  const { roots, shownRoots, remember, forget, loaded } = useRootList('/api/skills');
   const [picking, setPicking] = useState(false);
   const [dataByRoot, setDataByRoot] = useState({}); // root -> { flat, scopes, error }
   const [q, setQ] = useState('');
@@ -71,7 +71,7 @@ export default function SkillsPanel() {
     if (!loaded) return;
     let cancelled = false;
     roots.forEach((r) => {
-      fetch(`/skills?root=${encodeURIComponent(untildify(r))}`).then((res) => res.json()).then((d) => {
+      fetch(`/api/skills?root=${encodeURIComponent(untildify(r))}`).then((res) => res.json()).then((d) => {
         if (cancelled) return;
         setDataByRoot((prev) => ({ ...prev, [r]: { flat: !!d.flat, scopes: d.scopes || [], error: d.error || null } }));
       }).catch(() => { if (!cancelled) setDataByRoot((prev) => ({ ...prev, [r]: { flat: false, scopes: [], error: 'failed to load skills' } })); });
@@ -102,7 +102,7 @@ export default function SkillsPanel() {
     if (!await ensureSaved({ dirty, save })) return;
     setSel({ root: rootPath, scope: scopeName, skill: skillName, flat: flatVal });
     setFile(null); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false); setMtime(null);
-    fetch(`/skill?root=${encodeURIComponent(untildify(rootPath))}&scope=${encodeURIComponent(scopeName)}&skill=${encodeURIComponent(skillName)}&flat=${flatVal ? '1' : '0'}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/skill?root=${encodeURIComponent(untildify(rootPath))}&scope=${encodeURIComponent(scopeName)}&skill=${encodeURIComponent(skillName)}&flat=${flatVal ? '1' : '0'}`).then((r) => r.json()).then((d) => {
       if (!d.ok) { setErr(d.error || 'failed to load skill'); }
       else { setContent(d.raw || ''); setDirty(false); setMtime(d.mtime ?? null); }
     }).catch(() => setErr('failed to load skill')).finally(() => setLoading(false));
@@ -116,7 +116,7 @@ export default function SkillsPanel() {
     if (!await ensureSaved({ dirty, save })) return;
     const name = relPath.split('/').pop();
     setFile({ path: relPath, name }); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false); setMtime(null);
-    const u = `/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}&file=${encodeURIComponent(relPath)}`;
+    const u = `/api/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}&file=${encodeURIComponent(relPath)}`;
     fetch(u).then((r) => r.json()).then((d) => {
       if (!d.ok) { setFile({ path: relPath, name, error: d.error || 'failed to load file' }); setContent(''); }
       else { setFile({ path: relPath, name: d.name || name, type: d.type }); setContent(d.content || ''); setDirty(false); setMtime(d.mtime ?? null); }
@@ -130,7 +130,7 @@ export default function SkillsPanel() {
   const save = async (force = false) => {
     if (!sel) return;
     setMsg(null);
-    const r = await fetch('/skill', {
+    const r = await fetch('/api/skill', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ root: untildify(sel.root), scope: sel.scope, skill: sel.skill, flat: sel.flat ? '1' : '0', file: file?.path || null, content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
@@ -149,7 +149,7 @@ export default function SkillsPanel() {
     mtime,
     dirty,
     refetch: async () => {
-      let u = `/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}`;
+      let u = `/api/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}`;
       if (file?.path) u += `&file=${encodeURIComponent(file.path)}`;
       const d = await fetch(u).then((r) => r.json()).catch(() => ({ ok: false }));
       const c = file?.path ? (d.content ?? '') : (d.raw ?? '');

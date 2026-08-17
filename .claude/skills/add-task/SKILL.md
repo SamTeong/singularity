@@ -20,7 +20,7 @@ The daemon must be running (default `http://127.0.0.1:$DAEMON_PORT`, `DAEMON_POR
 
 ## Create
 
-`POST /tasks` — body maps straight to `createTask`. Fields:
+`POST /api/tasks` — body maps straight to `createTask`. Fields:
 
 | field | required | meaning |
 |-------|----------|---------|
@@ -56,13 +56,13 @@ node --env-file-if-exists=.env -e '
   };
   require("fs").writeFileSync(process.env.TEMP + "/task.json", JSON.stringify(body));
 '
-curl -s -X POST "http://127.0.0.1:$DAEMON_PORT/tasks" \
+curl -s -X POST "http://127.0.0.1:$DAEMON_PORT/api/tasks" \
   -H "x-sing-token: $SING_TOKEN" \
   -H "content-type: application/json" \
   --data @"$TEMP/task.json"
 ```
 
-The card then moves itself; watch it on the Tasks page or `GET /tasks`.
+The card then moves itself; watch it on the Tasks page or `GET /api/tasks`.
 
 <!-- ponytail: thin wrapper over one POST. If task shapes proliferate, add a
      scripts/add-task.mjs helper — until then the inline node+curl is enough. -->

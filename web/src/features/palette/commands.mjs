@@ -77,7 +77,7 @@ function buildSessionCommands(ctx) {
         group: 'Sessions',
         label: 'Open ' + title + ' in external terminal',
         hint: 'session',
-        run: () => fetch('/session/external', {
+        run: () => fetch('/api/session/external', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: a.id }),
         }).catch(() => {}), // ponytail: no toast reachable from the palette
       });

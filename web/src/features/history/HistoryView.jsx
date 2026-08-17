@@ -243,7 +243,7 @@ export default function HistoryView({ onOpenSession }) {
     // Staleness guard, not an AbortController: flipping presets quickly can
     // land an older response after a newer one and stomp the right range.
     const mine = ++fetchSeq.current;
-    fetch(`/history?${params}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/history?${params}`).then((r) => r.json()).then((d) => {
       if (!d.ok || mine !== fetchSeq.current) return;
       setToday(d.today);
       setFetchedEntries(d.entries);
@@ -387,7 +387,7 @@ export default function HistoryView({ onOpenSession }) {
 
   const regenerate = useCallback((date) => {
     setRegenerating((s) => new Set(s).add(date));
-    fetch('/history/regenerate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ date }) })
+    fetch('/api/history/regenerate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ date }) })
       .then((r) => r.json())
       .then((d) => { if (!d.ok) setError(d.error || 'Regenerate failed.'); })
       .catch((e) => setError(e.message))

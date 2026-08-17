@@ -161,7 +161,7 @@ export function snapshotTasks() { return { tasks: [...tasks.values()], history }
 export function buildCodexTaskPrompt(t) {
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
-    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+    `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   const cwd = t.worktree || t.repo;
   const gitLine = t.kind === 'git'
     ? `\n- You are in a git worktree on branch ${t.branch}. ${t.mergeMode === 'auto' ? `After review, merge ${t.branch} into ${t.baseBranch} (git -C "${t.repo}" merge ${t.branch}); abort if it conflicts.` : `Leave the branch for the user to merge — do NOT merge or push.`}`
@@ -197,7 +197,7 @@ export function buildCodexBackgroundPrompt(t) {
   const cwd = t.worktree || t.repo;
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
-    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+    `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   const lastStep = t.conclude === 'done'
     ? `As your LAST action, move the card to Done:
   ${status('done', 'report ready')}`
@@ -231,7 +231,7 @@ export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
   if (t.tool === 'codex' || isCodexModel(t.model)) return buildCodexTaskPrompt(t);
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
-    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+    `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   // Subagent model routing: an ollama model runs the whole fleet on that same
   // model (saves Claude budget); a claude model splits impl=sonnet, reviewer=opus.
   const ollama = !isClaudeModel(t.model);
@@ -369,7 +369,7 @@ export function buildBackgroundPrompt(t) {
   const cwd = t.worktree || t.repo;
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
-    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+    `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   // conclude 'done' trusts the report enough to auto-conclude the card; default
   // 'inreview' hands it to a human. The watchdog's budget-kill path always
   // forces inreview regardless of this setting (see background.mjs watchdog()).

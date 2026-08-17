@@ -11,7 +11,7 @@ export function useSysStats(enabled) {
   const [sysStats, setSysStats] = useState(null);
   useEffect(() => {
     if (!enabled) return undefined;
-    const pull = () => fetch('/sysstats').then((r) => r.json()).then(setSysStats).catch(() => {});
+    const pull = () => fetch('/api/sysstats').then((r) => r.json()).then(setSysStats).catch(() => {});
     pull();
     const id = setInterval(pull, 2000);
     return () => clearInterval(id);

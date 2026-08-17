@@ -54,7 +54,7 @@ test('usage Refresh triggers GET /usage with force=1', async ({ page }) => {
   const refresh = page.getByRole('button', { name: 'Refresh', exact: true }).first();
   await expect(refresh).toBeEnabled();
   await refresh.click();
-  await expect.poll(() => fetchCalls(page)).toContain('GET /usage?force=1');
+  await expect.poll(() => fetchCalls(page)).toContain('GET /api/usage?force=1');
 });
 
 test('usage report loads the mock report document', async ({ page }) => {
