@@ -418,9 +418,9 @@ export default function ConfigEditor() {
         )}
       </Rail>
 
-      <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, pt: 1, minHeight: 0 }} spacing={1}>
+      <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, height: '100%', minHeight: 0 }}>
         {picking && <DirPicker start={untildify(activeTab?.cwd ?? shownRoots[0] ?? '~')} onPick={pick} onClose={() => setPicking(false)} />}
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0, flexShrink: 0, pr: 1 }}>
           <Box sx={{ flex: 1, minWidth: 0 }}>
             {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} />}
           </Box>
@@ -430,6 +430,7 @@ export default function ConfigEditor() {
             </IconButton>
           </Tooltip>
         </Stack>
+        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 2 }} spacing={1}>
         {activeTab ? (
           <>
             <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>
@@ -448,6 +449,7 @@ export default function ConfigEditor() {
             <EmptyState icon={<InsertDriveFileOutlinedIcon />} title="Select a config" description="Browse on the left to view or edit here." />
           </Box>
         )}
+        </Stack>
       </Stack>
       {dialogEl}
     </Box>
