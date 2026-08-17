@@ -20,7 +20,7 @@ export const SKINS = ['ZAPAC', 'Phosphor Console'];
 // view ids as stored in localStorage, keyed by the label the user clicks.
 export const VIEW_IDS = {
   Tasks: 'tasks', Automation: 'cron', Usage: 'usage', Config: 'config', Hooks: 'hooks',
-  Skills: 'skills', Rules: 'rules', Memory: 'memory', Explorer: 'explorer', Transcripts: 'sessions', Wiki: 'wiki',
+  Skills: 'skills', Rules: 'rules', Memory: 'memory', Explorer: 'explorer', Transcripts: 'transcripts', Wiki: 'wiki',
   Appearance: 'appearance', Status: 'status',
 };
 
@@ -28,7 +28,7 @@ export const VIEW_IDS = {
 // every view is lazy-loaded behind AppShell's <Suspense fallback="Loading…">,
 // so a fixed sleep after a nav click was racing that mount instead of proving
 // it happened. One stable, state-independent landmark per view id:
-//  - the rail-based panels (config/hooks/rules/memory/wiki/sessions/skills) all
+//  - the rail-based panels (config/hooks/rules/memory/wiki/transcripts/skills) all
 //    share the RailHeader toolbar, whose search box renders unconditionally —
 //    unlike an EmptyState (e.g. "Select a hook"), it's still there after a spec
 //    has made a selection, so it stays valid on a second visit in the same test.
@@ -50,7 +50,7 @@ const VIEW_LANDMARK = {
   rules: (page) => page.getByPlaceholder('Search rules…'),
   memory: (page) => page.getByPlaceholder('Search memory…'),
   explorer: (page) => page.getByPlaceholder('Search files…'),
-  sessions: (page) => page.getByPlaceholder('Search transcripts…'),
+  transcripts: (page) => page.getByPlaceholder('Search transcripts…'),
   wiki: (page) => page.getByPlaceholder('Search wiki…'),
   appearance: (page) => page.getByRole('heading', { name: 'Appearance' }),
   status: (page) => page.getByText('Provider status', { exact: true }),
@@ -115,7 +115,7 @@ export async function setSkin(page, skin) {
   await settle(page, 'appearance');
 }
 
-// PERSISTENT_VIEWS (config/hooks/rules/memory/wiki/sessions) stay mounted with
+// PERSISTENT_VIEWS (config/hooks/rules/memory/wiki/transcripts) stay mounted with
 // display:none once visited, so an unscoped text/CSS query can match a hidden
 // panel. There is no <main> landmark to scope to — prefer getByRole (display:none
 // is out of the accessibility tree, so hidden panels drop out for free), and wrap

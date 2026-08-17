@@ -493,7 +493,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     if (!item.sessionId) { setErrT('No transcript found for this task.'); return; }
     setLoadingT(true);
     const slug = (item.worktree ?? item.repo).replace(/[^a-zA-Z0-9]/g, '-');
-    fetch(`/api/session?project=${encodeURIComponent(slug)}&id=${encodeURIComponent(item.sessionId)}`)
+    fetch(`/api/transcript?project=${encodeURIComponent(slug)}&id=${encodeURIComponent(item.sessionId)}`)
       .then((r) => r.json())
       .then((d) => { if (seq !== histReqRef.current) return; if (d.ok) setTranscript(d); else setErrT('No transcript found for this task.'); })
       .catch(() => { if (seq === histReqRef.current) setErrT('No transcript found for this task.'); })

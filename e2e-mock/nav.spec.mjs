@@ -63,7 +63,7 @@ test('Memory view is reachable and renders', async ({ page }) => {
 test('Transcripts view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Transcripts');
-  await expect(page).toHaveURL(/\/sessions(\?|$)/);
+  await expect(page).toHaveURL(/\/transcripts(\?|$)/);
   // Verify the seeded transcript renders
   await expect(visible(page.getByText('Retry backoff cap', { exact: true })).first()).toBeVisible();
 });
@@ -169,7 +169,7 @@ test('a filtered Tasks URL restores its filters on a cold load', async ({ page }
 });
 
 // Cold load, not a click: the click path opens a transcript long after
-// GET /sessions/root has settled, so it cannot reproduce the race a URL-derived
+// GET /transcripts/root has settled, so it cannot reproduce the race a URL-derived
 // project/session hits on first mount.
 test('a transcript URL opens that transcript on a cold load', async ({ page }) => {
   await gotoUrl(page, 'Transcripts', { project: PROJECT_B, session: RICH_SESSION });

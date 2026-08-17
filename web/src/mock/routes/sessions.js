@@ -1,9 +1,10 @@
 // Session history routes: list, read, search, and per-session stats for the
 // Transcripts panel (SessionHistory + TranscriptView). Shapes mirror
 // server/index.mjs + server/sessions.mjs + server/stats.mjs exactly (design.md
-// D8): /sessions/root GET is a bare { root }, /sessions is a bare { sessions },
-// /session returns { ok, meta, messages } with real 400/404s, /sessions/search
-// returns { results, capped }, and /sessions/stats returns { stats } keyed by
+// D8): /transcripts/root GET is a bare { root }, /transcripts is a bare
+// { sessions }, /transcript returns { ok, meta, messages } with real 400/404s,
+// /transcripts/search returns { results, capped }, and /transcripts/stats
+// returns { stats } keyed by
 // session id. The mock has no codex sessions and no agent-registry launch
 // configs, so the codex source and scopes-merge branches are skipped.
 import { Response } from 'miragejs';
@@ -193,27 +194,27 @@ function findSession(project, id) {
 }
 
 export function registerSessions(server) {
-  // /sessions/root — the FS-persisted picker root. GET returns the bare
+  // /transcripts/root — the FS-persisted picker root. GET returns the bare
   // { root } the daemon serves; PUT stores the choice in db.roots.sessions and
   // mirrors setSessionsRoot's { ok, root } / { ok:false, error:'bad root' }.
-  server.get('/sessions/root', () => ({ root: db.roots.sessions || ROOTS.projects }));
-  server.put('/sessions/root', (schema, req) => {
+  server.get('/transcripts/root', () => ({ root: db.roots.sessions || ROOTS.projects }));
+  server.put('/transcripts/root', (schema, req) => {
     const root = parseBody(req).root;
     if (typeof root !== 'string' || !root) return { ok: false, error: 'bad root' };
     db.roots.sessions = root;
     return { ok: true, root };
   });
 
-  // /sessions — every transcript, reverse-chrono by mtime, capped. Row shape
+  // /transcripts — every transcript, reverse-chrono by mtime, capped. Row shape
   // matches listSessions: { id, project, cwd, title, blurb, mtime, size,
   // running, source }. The mock has no subagents, so no subagents field.
-  server.get('/sessions', (schema, req) => {
+  server.get('/transcripts', (schema, req) => {
     const cap = Number(req.queryParams.cap) || 5000;
     // The daemon resolves the client-supplied root to enumerate transcripts
     // (sessions.mjs listSessions). The seeded 32-session corpus lives at the
     // ROOTS.projects path and never moves — a root other than that corpus root
     // has no sessions in the mock, so return an empty list. Compare against the
-    // constant, not the mutable db.roots.sessions (PUT /sessions/root mutates
+    // constant, not the mutable db.roots.sessions (PUT /transcripts/root mutates
     // it), or the corpus would be served under any freshly-picked root.
     const root = req.queryParams.root;
     if (root && untildify(root) !== ROOTS.projects) return { sessions: [] };
@@ -239,9 +240,9 @@ export function registerSessions(server) {
     return { sessions: rows.slice(0, cap) };
   });
 
-  // /session — one transcript. 400 when project/id are missing, 404 on miss,
+  // /transcript — one transcript. 400 when project/id are missing, 404 on miss,
   // else the { ok, meta, messages } readSession shape.
-  server.get('/session', (schema, req) => {
+  server.get('/transcript', (schema, req) => {
     const { project, id } = req.queryParams || {};
     if (!project || !id) return new Response(400, {}, { ok: false, error: 'project + id required' });
     const session = findSession(project, id);
@@ -249,14 +250,14 @@ export function registerSessions(server) {
     return readSessionShape(session);
   });
 
-  // /sessions/search — substring search over session text, scoped to one
+  // /transcripts/search — substring search over session text, scoped to one
   // session when {project,id} given. Mirrors searchSessions: id matches
   // synthesize a role:'id' hit; text matches carry the line-indexed snippet.
-  server.get('/sessions/search', (schema, req) => {
+  server.get('/transcripts/search', (schema, req) => {
     const q = req.queryParams.q || '';
     const ql = q.toLowerCase();
     if (!ql) return { results: [], capped: false };
-    // Same root gate as /sessions: the corpus lives at ROOTS.projects, so any
+    // Same root gate as /transcripts: the corpus lives at ROOTS.projects, so any
     // other root (including a freshly-picked db.roots.sessions) has nothing to
     // search.
     const root = req.queryParams.root;
@@ -287,9 +288,9 @@ export function registerSessions(server) {
     return { results, capped: false };
   });
 
-  // /sessions/stats — batched per-session cost + token breakdown for the
+  // /transcripts/stats — batched per-session cost + token breakdown for the
   // visible list page. Mirrors index.mjs: { stats } keyed by session id.
-  server.post('/sessions/stats', (schema, req) => {
+  server.post('/transcripts/stats', (schema, req) => {
     const body = parseBody(req);
     const items = Array.isArray(body.items) ? body.items.slice(0, 200) : [];
     const stats = {};

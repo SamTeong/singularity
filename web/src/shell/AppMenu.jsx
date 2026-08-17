@@ -37,7 +37,7 @@ export const NAV_ITEMS = [
   { v: 'rules', icon: <GavelIcon />, label: 'Rules', jp: '規則' },
   { v: 'memory', icon: <BookIcon />, label: 'Memory', jp: '記憶' },
   { v: 'explorer', icon: <FolderOpenIcon />, label: 'Explorer', jp: '文件' },
-  { v: 'sessions', icon: <HistoryIcon />, label: 'Transcripts', jp: '記録' },
+  { v: 'transcripts', icon: <HistoryIcon />, label: 'Transcripts', jp: '記録' },
   { v: 'history', icon: <TimelineIcon />, label: 'History', jp: '履歴' },
   { v: 'wiki', icon: <MenuBookIcon />, label: 'Wiki', jp: '文庫' },
   { v: 'appearance', icon: <PaletteIcon />, label: 'Appearance', jp: '外観' },

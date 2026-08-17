@@ -62,7 +62,7 @@ test('Memory view is reachable and renders', async ({ page }) => {
 test('Transcripts view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Transcripts');
-  await expect(page).toHaveURL(/\/sessions(\?|$)/);
+  await expect(page).toHaveURL(/\/transcripts(\?|$)/);
   // Verify the seeded transcript renders
   await expect(visible(page.getByText('Retry backoff cap', { exact: true })).first()).toBeVisible();
 });

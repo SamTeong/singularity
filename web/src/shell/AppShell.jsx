@@ -55,7 +55,7 @@ const SettingsView = lazy(() => import('@/features/settings/SettingsView.jsx'));
 
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
-const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'sessions', 'explorer'];
+const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'transcripts', 'explorer'];
 
 // A skin change remounts this entire component — `AppThemeProvider` keys its
 // skin subtree by `skin.id` (see theme/AppThemeProvider.jsx), so any React
@@ -243,7 +243,7 @@ export default function AppShell() {
   // transcript survives a reload and can be pasted to someone else.
   const openTranscript = useCallback(({ project, session, source }) => {
     const qs = new URLSearchParams({ project, session, ...(source ? { source } : null) });
-    navigate(`/sessions?${qs}`);
+    navigate(`/transcripts?${qs}`);
   }, [navigate]);
 
   // Open an agent's transcript in the Transcripts view — from the scrollback-top
@@ -253,11 +253,11 @@ export default function AppShell() {
   // transcript is filed under, so resolve it server-side first (mirrors
   // buildSpawn's own discovery). That resolver only answers for agents still in
   // the registry, so fall back to the id itself — for a session resumed from
-  // this view it already IS the thread uuid, and /session's own by-id lookup
+  // this view it already IS the thread uuid, and /transcript's own by-id lookup
   // covers it. Only a genuinely unknown id lands on "Transcript not found".
   const viewTranscript = useCallback(async (a) => {
     if (a.tool === 'codex' || isCodexModel(a.model)) {
-      const threadId = await fetch(`/api/session/codex-thread?id=${encodeURIComponent(a.id)}`)
+      const threadId = await fetch(`/api/transcripts/codex-thread?id=${encodeURIComponent(a.id)}`)
         .then((r) => r.json()).then((d) => (d.ok ? d.threadId : null)).catch(() => null);
       openTranscript({ project: '<codex>', session: threadId || a.id, source: 'codex' });
       setTxPrompt(null);
@@ -375,9 +375,9 @@ export default function AppShell() {
             {visited.has('explorer') && (
               <Box sx={{ display: view === 'explorer' ? 'block' : 'none', height: '100%' }}><ExplorerPanel /></Box>
             )}
-            {visited.has('sessions') && (
-              <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>
-                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
+            {visited.has('transcripts') && (
+              <Box sx={{ display: view === 'transcripts' ? 'block' : 'none', height: '100%' }}>
+                <SessionHistory active={view === 'transcripts'} sendMsg={sendMsg} registerChat={registerChat} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}

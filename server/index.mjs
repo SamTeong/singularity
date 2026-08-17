@@ -681,20 +681,20 @@ app.put('/skill', async (req, reply) => {
 // all or one, under a client-selected root (default ~/.claude/projects).
 // FS-persisted root choice (survives browser cache clear). Chat goes over the
 // WS (streaming) — see pty-ws.mjs.
-app.get('/sessions/root', async () => ({ root: getSessionsRoot() }));
-app.put('/sessions/root', async (req) => setSessionsRoot(req.body?.root));
-app.get('/sessions', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive, root: req.query.root }) }));
+app.get('/transcripts/root', async () => ({ root: getSessionsRoot() }));
+app.put('/transcripts/root', async (req) => setSessionsRoot(req.body?.root));
+app.get('/transcripts', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive, root: req.query.root }) }));
 // Resolve a registered agent's id to its codex-minted thread uuid — the Sessions
 // dock's "View transcript" button needs this before it can open a codex agent's
 // transcript (its registry id is unrelated to the rollout's thread uuid).
-app.get('/session/codex-thread', async (req, reply) => {
+app.get('/transcripts/codex-thread', async (req, reply) => {
   const id = req.query?.id;
   if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
   const threadId = reg.codexThreadFor(id);
   if (!threadId) return reply.code(404).send({ ok: false, error: 'not found' });
   return { ok: true, threadId };
 });
-app.get('/session', async (req, reply) => {
+app.get('/transcript', async (req, reply) => {
   const { project, id, root, source, file } = req.query || {};
   if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
   const r = await readSession(project, id, root, source, file);
@@ -710,9 +710,9 @@ app.get('/session', async (req, reply) => {
   if (!r.ok) reply.code(404);
   return r;
 });
-app.get('/sessions/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id, root: req.query.root }));
+app.get('/transcripts/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id, root: req.query.root }));
 // Live subagents nested under the dock's agent rows (indicator only). Scoped to
-// live agents so it stays cheap — no full 500-session scan like /sessions.
+// live agents so it stays cheap — no full 500-session scan like /transcripts.
 app.get('/subagents', async () => {
   const out = {};
   for (const a of reg.snapshot()) {
@@ -724,7 +724,7 @@ app.get('/subagents', async () => {
 });
 // Per-session cost + token breakdown for the visible list page (batched so a
 // page flip is one request; stats.mjs caches each parse by mtime/size).
-app.post('/sessions/stats', async (req) => {
+app.post('/transcripts/stats', async (req) => {
   const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
   const root = req.body?.root;
   const stats = {};

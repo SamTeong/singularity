@@ -14,7 +14,7 @@ import { RICH_SESSION, SESSION_COUNT_A } from './fixtures/paths.mjs';
 
 const TOTAL_SESSIONS = SESSION_COUNT_A + 2; // 30 alpha + the rich session + "Fixture session 901"
 
-// SessionHistory doesn't list until GET /sessions/root resolves, so there's
+// SessionHistory doesn't list until GET /transcripts/root resolves, so there's
 // no root race to wait out here — this just waits for the (async) fetch of
 // the seeded list to land before a test starts asserting against it.
 async function openTranscripts(page) {
