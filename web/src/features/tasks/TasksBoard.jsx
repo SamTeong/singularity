@@ -1,6 +1,7 @@
 import { getTokens } from '@/theme/contract.js';
 import { brandGrad, brandGlow, surface2, stroke2, chipBg, trackColor, statusColor, focusRing, statePill, cardTag, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
 import { useRef, useState, useMemo, useEffect } from 'react';
+import { useQueryList, useQueryState } from '@/hooks/useQueryState.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -386,8 +387,15 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
   const [dragId, setDragId] = useState(null);
-  const [showHistory, setShowHistory] = useState(false);
-  const [activeTags, setActiveTags] = useState(() => new Set());
+  // Board filters live in the query string, so a filtered board is shareable and
+  // survives a reload: ?tag=… (repeated, never CSV — tags are free-form and can
+  // contain commas), ?history=1, ?sort=key:dir, ?task=<id>. All `replace: true`
+  // (the hook default) so fiddling with filters doesn't fill the back stack.
+  const [tagList, setTagList] = useQueryList('tag');
+  const activeTags = useMemo(() => new Set(tagList), [tagList]);
+  const [historyParam, setHistoryParam] = useQueryState('history');
+  const showHistory = historyParam === '1';
+  const setShowHistory = (on) => setHistoryParam(on ? '1' : '');
   // Detail panel: a card click opens the right-sliding sheet instead of the
   // transcript dock / terminal select. State is the open task's ID only — the
   // task object is re-derived from `tasks` each render, so the panel reflects
@@ -395,7 +403,8 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   // two). When the open task leaves the board (concluded, moved to history, or
   // removed) it drops out of `tasks`, so the lookup goes null and the panel
   // unmounts on its own — no closing effect, no stale snapshot to sync.
-  const [detailId, setDetailId] = useState(null);
+  // ?task=<id>: an unknown id simply finds no task and the panel stays shut.
+  const [detailId, setDetailId] = useQueryState('task');
   const liveDetailTask = useMemo(
     () => (detailId ? tasks.find((t) => t.id === detailId) ?? null : null),
     [tasks, detailId],
@@ -411,8 +420,12 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   // the one that would otherwise cover the shell.
   // History table sort: click a header to sort, click again to reverse. Numeric
   // fields compare by value, strings by localeCompare. Default = newest first.
-  const [sort, setSort] = useState({ key: 'concludedAt', dir: 'desc' });
-  const changeSort = (key) => setSort((p) => p.key === key ? { key, dir: p.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  const [sortParam, setSortParam] = useQueryState('sort', 'concludedAt:desc');
+  const sort = useMemo(() => {
+    const [key, dir] = sortParam.split(':');
+    return { key, dir: dir === 'asc' ? 'asc' : 'desc' };
+  }, [sortParam]);
+  const changeSort = (key) => setSortParam(key === sort.key ? `${key}:${sort.dir === 'asc' ? 'desc' : 'asc'}` : `${key}:asc`);
 
   // Distinct tags across live tasks + history (union, deduped, sorted). The filter
   // pill row is shared by Board and History; OR semantics — a task matches if it
@@ -424,11 +437,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     return [...s].sort();
   }, [tasks, history]);
   const matchesTags = (item) => activeTags.size === 0 || (item.tags || []).some((t) => activeTags.has(t));
-  const toggleTag = (tag) => setActiveTags((prev) => {
-    const n = new Set(prev);
-    if (n.has(tag)) n.delete(tag); else n.add(tag);
-    return n;
-  });
+  const toggleTag = (tag) => setTagList(activeTags.has(tag) ? tagList.filter((t) => t !== tag) : [...tagList, tag]);
 
   // Live subtitle for the view topbar: task count + count of agents currently
   // in a live state (starting/running/idle).
@@ -587,8 +596,8 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
               size="small"
               label="Clear all"
               variant="outlined"
-              onClick={() => setActiveTags(new Set())}
-              onDelete={() => setActiveTags(new Set())}
+              onClick={() => setTagList([])}
+              onDelete={() => setTagList([])}
               deleteIcon={<CloseIcon />}
               sx={(t) => (phosphor
                 ? { height: 22, fontSize: 10, fontWeight: 700, borderRadius: 0, letterSpacing: '.04em', fontFamily: t.nerv.fonts.mono, background: 'transparent', border: `1px solid ${t.nerv.hue.greenDim}`, color: t.nerv.hue.greenMap, ml: 0.5, '&:hover': { borderColor: t.nerv.hue.mint, color: t.nerv.hue.mint } }

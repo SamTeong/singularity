@@ -1,6 +1,7 @@
 import { getTokens } from '@/theme/contract.js';
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { matches as matchesKey } from '@/lib/keys.js';
+import { useQueryState } from '@/hooks/useQueryState.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -61,12 +62,13 @@ function PulseDot({ sx }) {
   );
 }
 
-export default function SessionHistory({ active, sendMsg, registerChat, openSession, onResume, liveSessionIds }) {
+export default function SessionHistory({ active, sendMsg, registerChat, onResume, liveSessionIds }) {
   const { keys } = useKeys();
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
-  const [q, setQ] = useState('');
-  const [scope, setScope] = useState('all'); // 'all' | 'one' — search + chat context
+  // Search + filters in the URL, so a query or a specific transcript is a link.
+  const [q, setQ] = useQueryState('q');
+  const [scope, setScope] = useQueryState('scope', 'all'); // 'all' | 'one' — search + chat context
   const [tab, setTab] = useState('view'); // 'view' | 'chat'
   const [transcript, setTranscript] = useState(null);
   const [loadingFile, setLoadingFile] = useState(false);
@@ -88,7 +90,17 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // and in the e2e sandbox, actually queried — the wrong root).
   const [root, setRoot] = useState(null);
   const [picking, setPicking] = useState(false);
-  const [tool, setTool] = useState('all'); // 'all' | 'claude' | 'codex' — filter the merged list
+  const [tool, setTool] = useQueryState('tool', 'all'); // 'all' | 'claude' | 'codex' — filter the merged list
+  // ?project=&session=(&source=) is the transcript to open — the replacement for
+  // the openTx prop AppShell used to drill in. `source` is load-bearing: the
+  // daemon only takes its Codex branch when it is 'codex'.
+  const [txProject] = useQueryState('project');
+  const [txSession] = useQueryState('session');
+  const [txSource] = useQueryState('source');
+  const openSession = useMemo(
+    () => (txProject && txSession ? { project: txProject, id: txSession, ...(txSource ? { source: txSource } : null) } : null),
+    [txProject, txSession, txSource],
+  );
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
 
@@ -142,7 +154,17 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
     }).catch(() => { setTranscript(null); setLoadErr('Failed to load transcript.'); }).finally(() => setLoadingFile(false));
   };
 
-  useEffect(() => { if (openSession) open(openSession); /* eslint-disable-line */ }, [openSession]);
+  // A URL-derived transcript is present on FIRST mount, so this races the async
+  // `root` fetch that `open()` interpolates — bail until it resolves and re-run
+  // (the same bail-and-rerun the effects above use). A click-path open lands here
+  // long after root settled, and `open()` no-ops when the item is already `sel`.
+  // The list row, when it is loaded, carries title/cwd/mtime the URL doesn't.
+  useEffect(() => {
+    if (!openSession || root == null) return;
+    const row = sessions.find((s) => s.project === openSession.project && s.id === openSession.id);
+    open(row ? { ...row, ...openSession } : openSession); // eslint-disable-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSession, root, sessions]);
 
   const pickRoot = (p) => {
     setRoot(p); setPicking(false);

@@ -21,8 +21,12 @@ import FilterAltIcon from '@mui/icons-material/FilterAlt';
 import { EmptyState } from '@/components/EmptyState.jsx';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
+import { useQueryList, useQueryState, useUpdateQuery } from '@/hooks/useQueryState.js';
 import { repoName } from '@/lib/paths.js';
 import DayCard, { DayHeader, GapSegment, ShimmerCard, EASE_OUT } from '@/features/history/DayCard.jsx';
+
+// Recognised ?preset= values; anything else falls back to the default.
+const PRESETS = new Set(['7', '30', 'all', 'custom']);
 
 // Normalize a cwd for keying: lowercase + forward slashes + stripped tail.
 // The agent records the same repo under different spellings across sessions
@@ -207,14 +211,26 @@ export default function HistoryView({ onOpenSession }) {
   // the IntersectionObserver whileInView relies on — the skip would never
   // actually land in time.
   const [keyboardNav, setKeyboardNav] = useState(false);
-  const [compact, setCompact] = useState(false); // cards stripped to header + metrics
+  // ?compact=1 — cards stripped to header + metrics.
+  const [compactParam, setCompactParam] = useQueryState('compact');
+  const compact = compactParam === '1';
 
   const [today, setToday] = useState(null);
   const [fetchedEntries, setFetchedEntries] = useState([]);
   const [fetchedPending, setFetchedPending] = useState([]);
   const [loaded, setLoaded] = useState(false);
-  const [preset, setPreset] = useState('7'); // '7' | '30' | 'all' | 'custom'
-  const [customRange, setCustomRange] = useState({ from: '', to: '' });
+  // Timeframe in the URL: ?preset=7|30|all|custom plus ?from/?to for custom. An
+  // unrecognised preset degrades to the default rather than rendering nothing —
+  // a shared link that outlives its data must still show a usable page.
+  const [presetParam] = useQueryState('preset', '7');
+  const preset = PRESETS.has(presetParam) ? presetParam : '7';
+  const [from] = useQueryState('from');
+  const [to] = useQueryState('to');
+  const customRange = useMemo(() => ({ from, to }), [from, to]);
+  // Preset and range change together, so they go out as ONE patch — two
+  // setSearchParams calls in the same tick both read the same snapshot and the
+  // first write is lost.
+  const updateQuery = useUpdateQuery();
   const [expanded, setExpanded] = useState(() => new Set());
   const [regenerating, setRegenerating] = useState(() => new Set());
   const [error, setError] = useState(null);
@@ -223,7 +239,9 @@ export default function HistoryView({ onOpenSession }) {
   const [winRange, setWinRange] = useState([0, Infinity]);
   const [filterAnchor, setFilterAnchor] = useState(null);
   const [filterTab, setFilterTab] = useState('timeframe'); // 'timeframe' | 'projects'
-  const [projectFilter, setProjectFilter] = useState(() => new Set()); // cwd keys; empty = all
+  // ?project=… (repeated, never CSV — these are cwd paths). Empty = all.
+  const [projectList, setProjectList] = useQueryList('project');
+  const projectFilter = useMemo(() => new Set(projectList), [projectList]);
   // Page-level exit/enter is keyed off the range itself (below) rather than a
   // counter bumped from an effect — same remount trigger, no extra render pass.
   const rangeKey = `${preset}:${customRange.from}:${customRange.to}`;
@@ -405,11 +423,12 @@ export default function HistoryView({ onOpenSession }) {
     for (const r of regenerableRows) regenerate(r.date);
   }, [regenerableRows, regenerate]);
 
-  const setPresetChip = (p) => { setPreset(p); setCustomRange({ from: '', to: '' }); };
+  const setPresetChip = (p) => updateQuery({ preset: p === '7' ? null : p, from: null, to: null });
+  const setCustomBound = (bound, v) => updateQuery({ preset: 'custom', [bound]: v });
 
   // Collapsing to headers closes the open session panels too — a card cut back
   // to its metrics row shouldn't still have a session list hanging off it.
-  const toggleCompact = () => setCompact((c) => { if (!c) setExpanded(new Set()); return !c; });
+  const toggleCompact = () => { if (!compact) setExpanded(new Set()); setCompactParam(compact ? '' : '1'); };
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -540,13 +559,13 @@ export default function HistoryView({ onOpenSession }) {
             <TextField
               type="date" size="small" label="From" value={customRange.from}
               slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: archiveMin, max: archiveMax } }}
-              onChange={(e) => { setPreset('custom'); setCustomRange((r) => ({ ...r, from: e.target.value })); }}
+              onChange={(e) => setCustomBound('from', e.target.value)}
               sx={{ width: '100%' }}
             />
             <TextField
               type="date" size="small" label="To" value={customRange.to}
               slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: archiveMin, max: archiveMax } }}
-              onChange={(e) => { setPreset('custom'); setCustomRange((r) => ({ ...r, to: e.target.value })); }}
+              onChange={(e) => setCustomBound('to', e.target.value)}
               sx={{ width: '100%' }}
             />
           </Stack>
@@ -561,7 +580,7 @@ export default function HistoryView({ onOpenSession }) {
                 disableCloseOnSelect
                 options={projects}
                 value={projects.filter((p) => projectFilter.has(p.key))}
-                onChange={(_, v) => setProjectFilter(new Set(v.map((p) => p.key)))}
+                onChange={(_, v) => setProjectList(v.map((p) => p.key))}
                 getOptionLabel={(p) => p.label}
                 isOptionEqualToValue={(a, b) => a.key === b.key}
                 renderOption={({ key, ...props }, option, { selected }) => (

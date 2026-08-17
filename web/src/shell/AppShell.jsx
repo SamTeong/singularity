@@ -116,7 +116,6 @@ export default function AppShell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
-  const [openTx, setOpenTx] = useState(null); // {project, id, cwd, mtime} handed to SessionHistory
   // Width (px) the open right-hand sheet wants the shell to vacate; 0 = none
   // open. A feature reports it rather than the shell knowing sheet widths, so
   // the number stays owned by the sheet that defines it (no duplicated literal,
@@ -239,6 +238,14 @@ export default function AppShell() {
     setToast("The app didn't come back — please restart it yourself.");
   };
 
+  // Opening a transcript is a navigation now, not a prop handed down: the
+  // Transcripts view reads ?project=&session=(&source=) off the URL, so the open
+  // transcript survives a reload and can be pasted to someone else.
+  const openTranscript = useCallback(({ project, session, source }) => {
+    const qs = new URLSearchParams({ project, session, ...(source ? { source } : null) });
+    navigate(`/sessions?${qs}`);
+  }, [navigate]);
+
   // Open an agent's transcript in the Transcripts view — from the scrollback-top
   // prompt or a session row's action. No title: the agent's display title is a
   // truncated id, so let SessionHistory fall back to the full session id.
@@ -252,24 +259,19 @@ export default function AppShell() {
     if (a.tool === 'codex' || isCodexModel(a.model)) {
       const threadId = await fetch(`/api/session/codex-thread?id=${encodeURIComponent(a.id)}`)
         .then((r) => r.json()).then((d) => (d.ok ? d.threadId : null)).catch(() => null);
-      setOpenTx({ project: '<codex>', id: threadId || a.id, cwd: a.cwd, source: 'codex', mtime: Date.now() });
-      setView('sessions');
+      openTranscript({ project: '<codex>', session: threadId || a.id, source: 'codex' });
       setTxPrompt(null);
       return;
     }
-    setOpenTx({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), id: a.id, cwd: a.cwd, mtime: Date.now() });
-    setView('sessions');
+    openTranscript({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), session: a.id });
     setTxPrompt(null);
-  }, [setView]);
+  }, [openTranscript]);
 
   // Deep-link from a History day's session row into Transcripts. Unlike
   // viewTranscript, these rows already carry the transcript-file id/project
   // straight from listSessions()/readSession() (not a live registry id), so
   // no codex-thread resolution is needed — a direct passthrough opens it.
-  const openHistorySession = (s) => {
-    setOpenTx({ project: s.project, id: s.id, cwd: s.cwd, source: s.source, mtime: s.mtime });
-    setView('sessions');
-  };
+  const openHistorySession = (s) => openTranscript({ project: s.project, session: s.id, source: s.source });
 
   // Resume a past session from the Transcripts view: prefill the new-agent
   // dialog with its id + cwd + last model + last skill-scopes, then create.
@@ -375,7 +377,7 @@ export default function AppShell() {
             )}
             {visited.has('sessions') && (
               <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>
-                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} openSession={openTx} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
+                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
