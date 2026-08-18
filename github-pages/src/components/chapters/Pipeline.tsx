@@ -2,10 +2,10 @@
 // (L517-539) plus its behaviour at L843-904 (track construction, selectStep).
 //
 // Section class is `.phospipe`, not `.pipeline`: `.pipeline` is already a
-// layout class inside the COCKPIT chapter (styles/chapters/cockpit.css sets
-// `display:grid;grid-template-columns:repeat(5,1fr)` on it), and putting that
-// on a <section> would blow the whole panel apart. The DOM id stays `pipeline`,
-// which is what the ledger's elementId and any in-page anchor use.
+// layout class inside the FLEET CONTROL chapter (styles/chapters/fleet-control.css
+// sets `display:grid;grid-template-columns:repeat(5,1fr)` on it), and putting
+// that on a <section> would blow the whole panel apart. The DOM id stays
+// `pipeline`, which is what the ledger's `id` and any in-page anchor use.
 //
 // Stage selection is driven by the scroll conductor (see deck/pipelineStage.ts)
 // with clicks and arrow keys as an override, so the chapter still tells its

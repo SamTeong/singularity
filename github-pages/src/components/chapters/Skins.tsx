@@ -1,10 +1,11 @@
 // Transcribed from docs/one-shot/slides/index.html, section #system (L490-515).
 //
-// The source class for a beat card is `.beat`, which is already taken here:
-// `.beat` is the conductor's own scroll-wrapper div (Beat.tsx), and
-// `body.mode-3d .beat{pointer-events:none}` would make every card inert in 3D.
-// Renamed to `.skin-card` throughout, and every rule in styles/chapters/skins.css
-// is scoped under `.skins` so nothing else can collide either.
+// The source class for a beat card is `.beat`, which collides with the
+// conductor's own scroll-wrapper div (`.chapter-spacer`, Spacer.tsx) —
+// `body.mode-3d .chapter-spacer{pointer-events:none}` would make every card
+// inert in 3D if it carried that class. Renamed to `.skin-card` throughout,
+// and every rule in styles/chapters/skins.css is scoped under `.skins` so
+// nothing else can collide either.
 import type { ReactNode } from 'react';
 import type { ChapterProps } from './types';
 
