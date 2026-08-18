@@ -413,6 +413,24 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
   await ctx.close();
 }
 
+{
+  const { ctx, p } = await page({ reducedMotion: 'reduce' });
+  await p.goto(URL_, { waitUntil: 'domcontentloaded' });
+  await waitFor3D(p);
+  await p.waitForTimeout(2500);
+  const autoBtn = 'button[aria-label="Toggle the hands-free tour"]';
+  await p.click(autoBtn);
+  const offsets = new Set();
+  for (let i = 0; i < 90; i++) {
+    offsets.add(await p.evaluate(() => Math.round(window.scrollY)));
+    await p.waitForTimeout(100);
+  }
+  check('explicit autoplay still glides when reduced motion is requested', offsets.size > 12,
+    `${offsets.size} distinct offsets sampled`);
+  check('console clean during reduced-motion autoplay', p._errors.length === 0, p._errors.slice(0, 3).join(' | '));
+  await ctx.close();
+}
+
 await browser.close();
 
 const failed = results.filter((r) => !r.pass);

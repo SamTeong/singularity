@@ -20,7 +20,6 @@
 import { useEffect } from 'react';
 import { CHAPTERS } from '../config/chapters';
 import { stepCount, stepProgress } from '../deck/useScrollStep';
-import { REDUCED_MOTION } from '../lib/env';
 import { getChapterIndex, getChapterStep, getConductor } from '../state/appStore';
 import { chapterTop, visibleChapter } from './chapterPosition';
 
@@ -86,7 +85,9 @@ export function useAutoplay(enabled: boolean, is3D: boolean): void {
     function glide(to: number, rate: number, done: () => void): void {
       const from = window.scrollY;
       const distance = Math.abs(to - from);
-      if (REDUCED_MOTION || distance < 4) {
+      // Starting AUTOPLAY explicitly opts into its motion; collapsing the glide
+      // under reduced motion turns every transition into a disorienting jump.
+      if (distance < 4) {
         window.scrollTo({ top: to, behavior: 'instant' });
         done();
         return;
