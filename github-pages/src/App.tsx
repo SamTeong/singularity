@@ -28,7 +28,13 @@ import { NARROW, REDUCED_MOTION, DEBUG } from './lib/env';
 import { clamp } from './lib/math';
 import { probeInitialMode } from './app/probe';
 import { visibleChapter } from './app/chapterPosition';
-import { useAutoplay } from './app/useAutoplay';
+import {
+  AUTOPLAY_DEFAULT_DWELL_MS,
+  AUTOPLAY_DWELL_STEP_MS,
+  AUTOPLAY_MAX_DWELL_MS,
+  AUTOPLAY_MIN_DWELL_MS,
+  useAutoplay,
+} from './app/useAutoplay';
 import { useBodyMode } from './app/useBodyMode';
 import { useElementRegistry } from './app/useElementRegistry';
 import { usePanelHitRelay } from './app/panelHitRelay';
@@ -87,7 +93,31 @@ export default function App() {
 
   // Hands-free tour — off until the reader asks for it (see useAutoplay).
   const [autoplay, setAutoplay] = useState(false);
-  useAutoplay(autoplay, !isFlat);
+  const [autoplayDwellMs, setAutoplayDwellMs] = useState(AUTOPLAY_DEFAULT_DWELL_MS);
+  useEffect(() => {
+    if (!autoplay) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        event.defaultPrevented ||
+        event.altKey ||
+        event.ctrlKey ||
+        event.metaKey ||
+        (target instanceof HTMLElement &&
+          (target.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(target.tagName)))
+      ) {
+        return;
+      }
+      const key = event.key.toLowerCase();
+      if (key !== 'd' && key !== 's') return;
+      event.preventDefault();
+      const delta = key === 'd' ? -AUTOPLAY_DWELL_STEP_MS : AUTOPLAY_DWELL_STEP_MS;
+      setAutoplayDwellMs((ms) => clamp(ms + delta, AUTOPLAY_MIN_DWELL_MS, AUTOPLAY_MAX_DWELL_MS));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [autoplay]);
+  useAutoplay(autoplay, !isFlat, autoplayDwellMs);
 
   useBodyMode(mode);
 
@@ -287,6 +317,8 @@ export default function App() {
         onToggle={toggleMode}
         autoplay={autoplay}
         onToggleAutoplay={() => setAutoplay((on) => !on)}
+        autoplayDwellMs={autoplayDwellMs}
+        onAutoplayDwellChange={setAutoplayDwellMs}
       />
       {/* Never React.lazy/Suspense — a Suspense boundary above the chapters
           would violate PANEL DOM CONTRACT invariant I1. ThreeWorld reaches

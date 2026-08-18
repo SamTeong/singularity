@@ -20,6 +20,19 @@
 .sx-mode:hover{color:var(--mint);border-color:var(--mint)}
 .sx-mode.on{color:var(--mint);border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.35)}
 .sx-mode b{color:var(--orange);font-weight:400}
+.sx-auto{height:26px;display:flex;align-items:center;padding-right:8px;border:1px solid rgba(82,242,154,.35)}
+.sx-auto:hover{border-color:var(--mint)}
+.sx-auto.on .sx-auto-toggle{color:var(--mint)}
+.sx-auto .sx-auto-toggle{height:24px;border:0;padding-right:7px}
+.sx-auto .sx-auto-toggle:hover{border:0}
+.sx-dwell{appearance:none;width:56px;height:12px;direction:rtl;background:transparent;cursor:ew-resize;opacity:.45;transition:opacity .12s ease}
+.sx-dwell:hover,.sx-dwell:focus-visible{opacity:1}
+.sx-dwell:disabled{opacity:.18;cursor:not-allowed}
+.sx-dwell:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
+.sx-dwell::-webkit-slider-runnable-track{height:1px;background:rgba(82,242,154,.35)}
+.sx-dwell::-webkit-slider-thumb{appearance:none;width:6px;height:6px;margin-top:-2.5px;border:0;background:var(--orange)}
+.sx-dwell::-moz-range-track{height:1px;background:rgba(82,242,154,.35)}
+.sx-dwell::-moz-range-thumb{width:6px;height:6px;border:0;border-radius:0;background:var(--orange)}
 
 #gl{position:fixed;inset:0;z-index:1;width:100%;height:100%;display:block;outline:none}
 #css3d{position:fixed;inset:0;z-index:2;pointer-events:none;overflow:hidden}

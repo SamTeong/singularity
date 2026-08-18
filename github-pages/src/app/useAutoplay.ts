@@ -20,11 +20,14 @@
 import { useEffect } from 'react';
 import { CHAPTERS } from '../config/chapters';
 import { stepCount, stepProgress } from '../deck/useScrollStep';
+import { useLatest } from '../hooks/useLatest';
 import { getChapterIndex, getChapterStep, getConductor } from '../state/appStore';
 import { chapterTop, visibleChapter } from './chapterPosition';
 
-/** How long the tour stands still at a stop, every stop. */
-const DWELL_MS = 2000;
+export const AUTOPLAY_DEFAULT_DWELL_MS = 2000;
+export const AUTOPLAY_MIN_DWELL_MS = 500;
+export const AUTOPLAY_MAX_DWELL_MS = 10000;
+export const AUTOPLAY_DWELL_STEP_MS = 500;
 
 /** Travel speed between stops. Deliberately unhurried: the chapters with a
  *  camera dwell (config's `steps`) pack their whole flight to the next chapter
@@ -44,7 +47,9 @@ interface Stop {
   step: number | null;
 }
 
-export function useAutoplay(enabled: boolean, is3D: boolean): void {
+export function useAutoplay(enabled: boolean, is3D: boolean, dwellMs: number): void {
+  const dwellMsRef = useLatest(dwellMs);
+
   useEffect(() => {
     if (!enabled) return;
 
@@ -116,20 +121,20 @@ export function useAutoplay(enabled: boolean, is3D: boolean): void {
       const to = targetTop(next);
       if (wrapping) {
         window.scrollTo({ top: to, behavior: 'instant' });
-        timer = window.setTimeout(tick, DWELL_MS);
+        timer = window.setTimeout(tick, dwellMsRef.current);
         return;
       }
       glide(to, GLIDE_PX_PER_SECOND, () => {
-        timer = window.setTimeout(tick, DWELL_MS);
+        timer = window.setTimeout(tick, dwellMsRef.current);
       });
     }
 
     // The first hop waits out the stop the reader is already on — they turned
     // the tour on where they were standing, so that screen gets its own beat.
-    timer = window.setTimeout(tick, DWELL_MS);
+    timer = window.setTimeout(tick, dwellMsRef.current);
     return () => {
       window.clearTimeout(timer);
       cancelAnimationFrame(frame);
     };
-  }, [enabled, is3D]);
+  }, [dwellMsRef, enabled, is3D]);
 }

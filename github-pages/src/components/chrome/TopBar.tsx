@@ -1,5 +1,10 @@
 // Transcribed from docs/one-shot/3d/sample-gitlab-3d-scan.html, source lines 446-455.
 import type { ChapterEntry } from '../../config/chapters';
+import {
+  AUTOPLAY_DWELL_STEP_MS,
+  AUTOPLAY_MAX_DWELL_MS,
+  AUTOPLAY_MIN_DWELL_MS,
+} from '../../app/useAutoplay';
 
 interface TopBarProps {
   /** null before the conductor starts and forever in flat mode — the source
@@ -17,6 +22,8 @@ interface TopBarProps {
   /** Hands-free tour running. */
   autoplay: boolean;
   onToggleAutoplay: () => void;
+  autoplayDwellMs: number;
+  onAutoplayDwellChange: (dwellMs: number) => void;
 }
 
 export function TopBar({
@@ -26,7 +33,11 @@ export function TopBar({
   onToggle,
   autoplay,
   onToggleAutoplay,
+  autoplayDwellMs,
+  onAutoplayDwellChange,
 }: TopBarProps) {
+  const dwellSeconds = (autoplayDwellMs / 1000).toFixed(1);
+
   return (
     <header className="sx-topbar">
       <span className="sx-brand">
@@ -44,15 +55,30 @@ export function TopBar({
       <nav className="sx-links" aria-label="Related scenes">
         <a href="https://github.com/SamTeong/singularity">REPOSITORY ↗</a>
       </nav>
-      <button
-        type="button"
-        className={'sx-mode' + (autoplay ? ' on' : '')}
-        onClick={onToggleAutoplay}
-        aria-pressed={autoplay}
-        aria-label="Toggle the hands-free tour"
-      >
-        AUTO <b>{autoplay ? 'ON' : 'OFF'}</b>
-      </button>
+      <div className={'sx-auto' + (autoplay ? ' on' : '')}>
+        <button
+          type="button"
+          className="sx-mode sx-auto-toggle"
+          onClick={onToggleAutoplay}
+          aria-pressed={autoplay}
+          aria-label="Toggle the hands-free tour"
+        >
+          AUTO <b>{autoplay ? 'ON' : 'OFF'}</b>
+        </button>
+        <input
+          className="sx-dwell"
+          type="range"
+          min={AUTOPLAY_MIN_DWELL_MS}
+          max={AUTOPLAY_MAX_DWELL_MS}
+          step={AUTOPLAY_DWELL_STEP_MS}
+          value={autoplayDwellMs}
+          disabled={!autoplay}
+          onChange={(event) => onAutoplayDwellChange(Number(event.currentTarget.value))}
+          aria-label="Autoplay dwell time"
+          aria-valuetext={`${dwellSeconds} seconds`}
+          title="Autoplay dwell · D decrease · S increase"
+        />
+      </div>
       {canToggle && (
         <button
           type="button"

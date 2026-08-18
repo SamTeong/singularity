@@ -366,6 +366,45 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
 
   const caption = () => p.evaluate(() => document.getElementById('sxNote')?.textContent);
   const autoBtn = 'button[aria-label="Toggle the hands-free tour"]';
+  const dwellSlider = 'input[aria-label="Autoplay dwell time"]';
+  const dwellState = () => p.evaluate(({ button, slider }) => ({
+    text: document.querySelector(button)?.textContent,
+    value: Number(document.querySelector(slider)?.value),
+    disabled: document.querySelector(slider)?.disabled,
+    valueText: document.querySelector(slider)?.getAttribute('aria-valuetext'),
+  }), { button: autoBtn, slider: dwellSlider });
+  let dwell = await dwellState();
+  check('autoplay dwell starts at 2 seconds without a visible readout',
+    dwell.value === 2000 && dwell.disabled && dwell.valueText === '2.0 seconds' && !dwell.text.includes('2.0S'),
+    JSON.stringify(dwell));
+  await p.click(autoBtn);
+  await p.keyboard.press('d');
+  dwell = await dwellState();
+  check('D reduces autoplay dwell by 500ms', dwell.value === 1500 && dwell.valueText === '1.5 seconds', JSON.stringify(dwell));
+  await p.keyboard.press('s');
+  dwell = await dwellState();
+  check('S increases autoplay dwell by 500ms', dwell.value === 2000 && dwell.valueText === '2.0 seconds', JSON.stringify(dwell));
+  const sliderBox = await p.locator(dwellSlider).boundingBox();
+  await p.mouse.click(sliderBox.x + sliderBox.width - 2, sliderBox.y + sliderBox.height / 2);
+  dwell = await dwellState();
+  check('autoplay dwell slider puts the 500ms minimum on the right', dwell.value === 500 && dwell.valueText === '0.5 seconds',
+    JSON.stringify(dwell));
+  await p.mouse.click(sliderBox.x + 2, sliderBox.y + sliderBox.height / 2);
+  dwell = await dwellState();
+  check('autoplay dwell slider puts the 10s maximum on the left', dwell.value === 10000 && dwell.valueText === '10.0 seconds',
+    JSON.stringify(dwell));
+  await p.click(autoBtn);
+  await p.keyboard.press('d');
+  dwell = await dwellState();
+  check('dwell shortcuts are inactive while autoplay is off', dwell.value === 10000 && dwell.disabled, JSON.stringify(dwell));
+  await p.reload({ waitUntil: 'domcontentloaded' });
+  await waitFor3D(p);
+  await p.waitForTimeout(2000);
+  dwell = await dwellState();
+  check('refresh resets autoplay dwell to 2 seconds',
+    dwell.value === 2000 && dwell.disabled && dwell.valueText === '2.0 seconds',
+    JSON.stringify(dwell));
+
   await railTo(0);
   const before = await caption();
   await p.click(autoBtn);
@@ -382,9 +421,10 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
   check('autoplay scrolls between stops rather than jumping', offsets.size > 12,
     `${offsets.size} distinct offsets sampled`);
   await p.click(autoBtn);
-  const stopped = await caption();
+  const stopped = await p.evaluate(() => Math.round(window.scrollY));
   await p.waitForTimeout(9000);
-  check('autoplay stops when switched off', (await caption()) === stopped, stopped);
+  const stayedAt = await p.evaluate(() => Math.round(window.scrollY));
+  check('autoplay stops when switched off', stayedAt === stopped, `${stopped} -> ${stayedAt}`);
 
   await railTo(SCREENS - 1);
   await p.click(autoBtn);
