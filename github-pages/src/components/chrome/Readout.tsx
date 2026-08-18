@@ -1,9 +1,10 @@
 // Transcribed from docs/one-shot/3d/sample-gitlab-3d-scan.html, source lines 470-476.
 //
 // #roProg is written EVERY FRAME by the world's onFrame callback (source
-// L1437), so it takes a ref, not state. #roScreens, #roFps and #sxDbg are
-// written directly by the world — they need renderer/bbox internals that never
-// cross into React. SCAN and LINK are permanently static.
+// L1437), so it takes a ref, not state. #roFps and #sxDbg are written directly
+// by the world — they need renderer internals that never cross into React, and
+// #roScreens is rewritten by it too, over the ledger-derived value rendered
+// here for flat mode. SCAN and LINK are permanently static.
 import type { Ref } from 'react';
 import { CHAPTERS } from '../../config/chapters';
 

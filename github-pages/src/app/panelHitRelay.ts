@@ -3,12 +3,12 @@
 // Measured with `document.elementsFromPoint` over the centre of every panel
 // (viewport 1440x900, one chapter at a time via the rail):
 //
-//   #chaos  #tasks  #system-design  #take-control   → the panel and its subtree are hit
-//   #orientation     #agent-harness   #fleet-control        → `#gl` comes back instead, always
+//   #chaos  #tasks  #system-design  #take-control  #stats  → the panel and its subtree are hit
+//   #orientation  #agent-harness  #fleet-control  #credits   → `#gl` comes back instead, always
 //
 // The split follows the panel's world matrix, not its content. CSS3DRenderer
-// writes `matrix3d(...)` per panel, and the three that fail are the three whose
-// yaw is near 90° — so cos(yaw) ~ 0 makes the matrix's 2D part
+// writes `matrix3d(...)` per panel, and the ones that fail are the ones whose
+// yaw is near 90° or 270° — so cos(yaw) ~ 0 makes the matrix's 2D part
 // [[m11,m21],[m12,m22]] near-singular (det 4.5e-6 for #orientation, 0 for #fleet-control,
 // against 9.1e-6 for #take-control, which works). No pointer-events / overflow /
 // preserve-3d / perspective combination changes that; it is Chromium giving up
@@ -20,9 +20,9 @@
 // click that the canvas DID receive: find the smallest visible in-panel control
 // whose rect contains the point, and click it. One listener, no per-frame work,
 // nothing added to the composition. It covers every control in every panel —
-// the orientation anchors, the six agent-harness buttons, the four fleet-control tabs and
-// the session/task rows — and is inert for the four panels Chromium hit-tests
-// itself, because there the click never reaches the canvas.
+// the orientation anchors, the six agent-harness buttons, the four fleet-control tabs,
+// the session/task rows and the credits source link — and is inert for the panels
+// Chromium hit-tests itself, because there the click never reaches the canvas.
 //
 // The rects are the axis-aligned bounds of a 3D-transformed quad, so they are
 // exact only while the panel faces the camera. It always does — the camera

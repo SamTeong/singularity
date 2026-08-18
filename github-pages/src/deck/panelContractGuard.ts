@@ -12,7 +12,7 @@
 // into a console error naming the chapter.
 
 /**
- * @param panels    the 7 chapter sections
+ * @param panels    the 9 chapter sections
  * @param isMoving  ref that the world sets true around its own DOM surgery, so
  *                  legitimate reparenting/restoration is not reported
  * @returns disposer
