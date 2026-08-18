@@ -1,4 +1,4 @@
-// Index-aligned element registries for the 7 chapters.
+// Index-aligned element registries for the 9 chapters.
 //
 // The world needs `panels: HTMLElement[]` (the <section class="chapter"> nodes
 // it adopts as CSS3DObjects) and `spacers: HTMLElement[]` (the wrappers the

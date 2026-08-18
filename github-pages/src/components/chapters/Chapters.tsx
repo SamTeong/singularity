@@ -1,5 +1,5 @@
 // Source: docs/one-shot/3d/sample-gitlab-3d-scan.html, <main id="scroll"> at
-// line 497. Renders the 7 chapters, unconditionally and in ledger order — see
+// line 497. Renders the 9 chapters, unconditionally and in ledger order — see
 // Spacer.tsx's PANEL DOM CONTRACT (invariants I1/I2) for why.
 
 import type { Ref } from 'react';

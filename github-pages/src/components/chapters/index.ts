@@ -15,7 +15,8 @@ import { Pipeline } from './Pipeline';
 import { Themes } from './Themes';
 import { OpenSpec } from './OpenSpec';
 import { TakeControl } from './TakeControl';
-import { AppendixA, AppendixB } from './Appendix';
+import { Stats } from './Stats';
+import { Credits } from './Credits';
 
 export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> = {
   orientation: Orientation,
@@ -29,6 +30,6 @@ export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> 
   themes: Themes,
   openspec: OpenSpec,
   'take-control': TakeControl,
-  'appendix-a': AppendixA,
-  'appendix-b': AppendixB,
+  stats: Stats,
+  credits: Credits,
 };

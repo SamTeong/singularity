@@ -68,7 +68,7 @@ export default function App() {
   const [registriesReady, setRegistriesReady] = useState(false);
   useEffect(() => setRegistriesReady(true), []);
 
-  // Chromium refuses to hit-test three of the seven panels — see panelHitRelay.ts.
+  // Chromium refuses to hit-test some panels — see panelHitRelay.ts.
   usePanelHitRelay();
 
   // A React SPA is an empty #root when the browser applies its saved scroll
@@ -139,7 +139,7 @@ export default function App() {
     }
     // flushSync so a webglcontextlost demotion completes inside the event
     // handler: one commit runs ThreeWorld's layout cleanup (world.destroy() →
-    // restoreDom() puts the 7 sections back in their spacers and clears
+    // restoreDom() puts the 9 sections back in their spacers and clears
     // as-panel + the inline styles + spacer heights), removes the stage div, and
     // drops body.mode-3d so the CSS reveals the flat deck.
     flushSync(() => setMode(opts.showError ? 'error' : 'flat'));

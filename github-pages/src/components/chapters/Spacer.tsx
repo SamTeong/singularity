@@ -1,6 +1,6 @@
 // PANEL DOM CONTRACT
 //
-// The 7 <section class="chapter"> nodes are reparented out of <main id="scroll">
+// The 9 <section class="chapter"> nodes are reparented out of <main id="scroll">
 // into the world-owned #css3d container by CSS3DObject. React keeps a pointer to
 // each node but no longer knows its parent. Updates (text, attributes, subtree
 // reconciliation) keep working. Structural changes do not — React would call

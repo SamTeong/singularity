@@ -31,10 +31,10 @@ export interface WorldOptions {
    *  can only ever bind one live WebGL context, so the world must own and
    *  create its own — never adopt a canvas React already rendered. */
   stage: HTMLElement;
-  /** The 7 `.chapter-spacer` wrapper `<div>`s, index-aligned with CHAPTERS. The
+  /** The 9 `.chapter-spacer` wrapper `<div>`s, index-aligned with CHAPTERS. The
    *  conductor measures/sizes these directly (conductor.ts measure()). */
   spacers: HTMLElement[];
-  /** The 7 `<section class="chapter …">` elements, index-aligned with
+  /** The 9 `<section class="chapter …">` elements, index-aligned with
    *  CHAPTERS. The world takes DOM ownership of these via CSS3DObject —
    *  see Spacer.tsx's PANEL DOM CONTRACT for the invariants this depends on. */
   panels: HTMLElement[];

@@ -41,6 +41,9 @@ export function Orientation({ sectionRef }: ChapterProps) {
               onClick={(e) => {
                 if (!conductor) return;
                 e.preventDefault();
+                // Not CHAPTERS.length - 1: the deck no longer ends on
+                // take-control (stats and credits follow it), and FULL DIVE must
+                // land on the same chapter its href names, in both modes.
                 conductor.goTo(CHAPTERS.findIndex((c) => c.id === 'take-control'));
               }}
             >

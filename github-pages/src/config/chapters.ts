@@ -23,8 +23,8 @@ export type ChapterId =
   | 'themes'
   | 'openspec'
   | 'take-control'
-  | 'appendix-a'
-  | 'appendix-b';
+  | 'stats'
+  | 'credits';
 
 export interface ChapterWorld {
   fog: number; // FogExp2 density
@@ -118,21 +118,21 @@ export interface Chapter {
 export const CHAPTERS = [
   {
     id: 'orientation', weight: 1.30, num: '01', jp: '到着', code: 'SCR·01', title: 'ORIENTATION',
-    sub: 'THE CONTROL PLANE, STATED PLAINLY',
+    sub: 'WHERE IT ALL BEGINS',
     u: [1.52, 0.53, 0.36], yaw: 78, pitch: 0, w: 5.8, px: 1240, pxm: 760,
     fill: 0.64, lift: 0.35, tone: 0x52F29A, world: { fog: 0.052, bloom: 0.62, motes: 0.85, exposure: 1.06 },
   },
 
   {
     id: 'chaos', weight: 1.10, num: '02', jp: '混沌', code: 'SCR·02', title: 'CHAOS',
-    sub: 'SEVEN TERMINALS, NO SHARED PICTURE',
+    sub: 'A JUGGLING ACT',
     u: [0.620, 0.760, 0.880], yaw: 32, pitch: -4, w: 5.6, px: 1240, pxm: 760,
     fill: 0.84, lift: 0.15, tone: 0xE2280F, world: { fog: 0.040, bloom: 0.58, motes: 0.7, exposure: 1.02 },
   },
 
   {
     id: 'agent-harness', weight: 1.75, num: '03', jp: '系統', code: 'SCR·03', title: 'AGENT HARNESS',
-    sub: 'EIGHT OPERATIONAL SURFACES AROUND THE WORK',
+    sub: 'MANAGE OPERATIONAL SURFACES',
     u: [-0.840, 0.755, 0.440], yaw: 96, pitch: 6, w: 6.2, px: 1420, pxm: 770,
     fill: 0.92, lift: 0.10, tone: 0x5090D0, world: { fog: 0.024, bloom: 0.70, motes: 0.5, exposure: 1.0 },
   },
@@ -229,26 +229,24 @@ export const CHAPTERS = [
     fill: 0.72, lift: 0.55, tone: 0x7CF4AB, world: { fog: 0.044, bloom: 0.86, motes: 0.9, exposure: 1.08 },
   },
 
-  // ─── appendix placeholders ───────────────────────────────────────────────
-  // Two reserved screens after the CTA. They carry real structure (heading,
-  // slot list, kanji plate) but no content yet — filling one in is a normal
-  // edit to its component, with no ledger or camera change needed. The camera
-  // swings out past the +X/+Z corner and settles back down (y 1.06 → 0.84 →
-  // 0.58), so the pair reads as an epilogue rather than more deck. Atmosphere
-  // cools and the bloom drops to say the same thing.
+  // ─── the closing pair ────────────────────────────────────────────────────
+  // What the build cost, then who it owes. Both sit behind the CTA, so the
+  // camera leaves the front wall: stats swings up and back past -Z, credits
+  // carries on around to -X. Bloom and motes climb through the pair — the
+  // deck brightens on the way out rather than fading.
 
   {
-    id: 'appendix-a', weight: 1.05, num: '12', jp: '附録', code: 'SCR·12', title: 'APPENDIX A',
-    sub: 'RESERVED · CONTENT PENDING',
-    u: [0.748, 0.929, 0.533], yaw: 56, pitch: -4, w: 5.4, px: 1220, pxm: 750,
-    fill: 0.76, lift: 0.26, tone: 0x5090D0, world: { fog: 0.036, bloom: 0.60, motes: 0.7, exposure: 1.0 },
+    id: 'stats', weight: 1.30, num: '12', jp: '統計', code: 'SCR·12', title: 'STATS',
+    sub: 'WHAT IT TOOK TO GET HERE',
+    u: [0.10, 1.16, -1.12], yaw: 182, pitch: -4, w: 6.0, px: 1360, pxm: 770,
+    fill: 0.80, lift: 0.20, tone: 0x5090D0, world: { fog: 0.030, bloom: 0.70, motes: 0.6, exposure: 1.02 },
   },
 
   {
-    id: 'appendix-b', weight: 1.05, num: '13', jp: '補遺', code: 'SCR·13', title: 'APPENDIX B',
-    sub: 'RESERVED · CONTENT PENDING',
-    u: [-0.142, 0.553, 0.867], yaw: 8, pitch: 0, w: 5.4, px: 1220, pxm: 750,
-    fill: 0.76, lift: 0.20, tone: 0x5090D0, world: { fog: 0.034, bloom: 0.56, motes: 0.66, exposure: 1.0 },
+    id: 'credits', weight: 1.20, num: '13', jp: '謝辞', code: 'SCR·13', title: 'CREDITS',
+    sub: 'LANDSCAPE · INSPIRATION · COUNSEL',
+    u: [-1.34, 0.92, -0.56], yaw: 272, pitch: 0, w: 5.8, px: 1300, pxm: 760,
+    fill: 0.82, lift: 0.30, tone: 0x7CF4AB, world: { fog: 0.042, bloom: 0.80, motes: 0.9, exposure: 1.06 },
   },
 ] as const satisfies readonly Chapter[];
 

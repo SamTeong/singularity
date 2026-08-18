@@ -20,8 +20,7 @@
 /* The eyebrow duplicates the section-head kanji on every one of these; at
    panel scale that is two lines of chrome before the title. Keep it, tighten it. */
 .chapter.as-panel.skins .eyebrow,.chapter.as-panel.phospipe .eyebrow,
-.chapter.as-panel.themes .eyebrow,.chapter.as-panel.openspec .eyebrow,
-.chapter.as-panel.appendix .eyebrow{margin-bottom:14px}
+.chapter.as-panel.themes .eyebrow,.chapter.as-panel.openspec .eyebrow{margin-bottom:14px}
 /* The gallery is FIXED HEIGHT in panel mode, and that is load-bearing, not
    tidying. A panel is measured once — buildPanel() reads offsetHeight and
    writes it back as an inline height — but the gallery's natural height
