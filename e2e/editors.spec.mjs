@@ -225,13 +225,16 @@ test.describe('Memory panel', () => {
 });
 
 // ------------------------------------------------------------------ Skills
-// 3-level tree (root -> scope -> skill), rendered collapsed. `SKILLS_DIR`
+// 3-level tree (root -> scope -> skill), rendered one level open — roots
+// expanded, scopes collapsed. `SKILLS_DIR`
 // holds two scopes: coding/lint-guard (with a supporting reference.md) and
 // design/color-audit.
 test.describe('Skills panel', () => {
   const COLOR_AUDIT_PATH = join(SKILLS_DIR, 'design', '.claude', 'skills', 'color-audit', 'SKILL.md');
 
-  async function expandRoot(page) {
+  // Roots render expanded, so this collapses one — the inverse of what the
+  // click used to do.
+  async function collapseRoot(page) {
     await page.getByText(SKILLS_DIR, { exact: false }).first().click();
   }
   async function openSkill(page, scope, skill) {
@@ -239,18 +242,22 @@ test.describe('Skills panel', () => {
     await page.getByRole('button', { name: skill, exact: false }).click();
   }
 
-  test('rail lists the sandbox root collapsed; expanding reveals scopes and skills', async ({ page }) => {
+  test('rail lists the sandbox root expanded one level; collapsing hides its scopes', async ({ page }) => {
     await gotoView(page, 'Skills');
     await expect(page.getByText(SKILLS_DIR, { exact: false }).first()).toBeVisible();
     await expect(page.getByText('2 scopes', { exact: false })).toBeVisible();
     await expect(page.getByText('2 skills', { exact: false })).toBeVisible();
 
-    // Collapsed by default — no scope row until the root is expanded.
-    await expect(page.getByRole('button', { name: 'coding', exact: false })).toHaveCount(0);
-    await expandRoot(page);
+    // One level by default — scope rows visible without a click, the skills
+    // inside them still hidden.
     await expect(page.getByRole('button', { name: 'coding', exact: false })).toBeVisible();
     await expect(page.getByRole('button', { name: 'design', exact: false })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'lint-guard', exact: false })).toHaveCount(0);
 
+    await collapseRoot(page);
+    await expect(page.getByRole('button', { name: 'coding', exact: false })).toHaveCount(0);
+
+    await collapseRoot(page);
     await page.getByRole('button', { name: 'coding', exact: false }).click();
     await expect(page.getByRole('button', { name: 'lint-guard', exact: false })).toBeVisible();
   });
@@ -263,13 +270,13 @@ test.describe('Skills panel', () => {
 
     await page.getByRole('button', { name: 'Clear search' }).click();
     await expect(page.getByText('2 scopes', { exact: false })).toBeVisible();
-    // Tree reverts to its (still-collapsed) prior state — nothing was ever expanded by hand.
+    // Tree reverts to its prior state — the root is open, but no scope was ever
+    // expanded by hand, so the skills under them stay hidden.
     await expect(page.getByRole('button', { name: 'color-audit', exact: false })).toHaveCount(0);
   });
 
   test('selecting a skill loads SKILL.md, and its supporting file loads too', async ({ page }) => {
     await gotoView(page, 'Skills');
-    await expandRoot(page);
     await openSkill(page, 'coding', 'lint-guard');
     await expect(cm(page)).toContainText('Run the linter before staging.');
 
@@ -279,7 +286,6 @@ test.describe('Skills panel', () => {
 
   test('typing + Save writes the skill file to disk', async ({ page }) => {
     await gotoView(page, 'Skills');
-    await expandRoot(page);
     await openSkill(page, 'design', 'color-audit');
     await expect(cm(page)).toContainText('Contrast first, hue second.');
 
@@ -295,7 +301,6 @@ test.describe('Skills panel', () => {
 
   test('dirty-nav guard: cancel keeps the unsaved skill open, discard drops it', async ({ page }) => {
     await gotoView(page, 'Skills');
-    await expandRoot(page);
     await openSkill(page, 'coding', 'lint-guard'); // expands the coding scope + opens lint-guard
     await page.getByRole('button', { name: 'design', exact: false }).click(); // expand design too, skill picked below
     await expect(cm(page)).toContainText('Run the linter before staging.');

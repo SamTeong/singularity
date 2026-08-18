@@ -27,6 +27,7 @@ export function makeServer() {
   return new Server({
     environment: 'test', // disables Mirage's artificial response latency
     routes() {
+      this.namespace = '/api';
       // Core singleton routes — registered first so the shell's boot-time
       // fetches (/health, /capabilities, /keys, /models) answer before any
       // panel-specific route group. Section 5's feature modules register after,

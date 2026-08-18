@@ -54,8 +54,10 @@ MIT
 
 Daemon binds loopback **only**. It spawns agent with full file system access. Never bind `0.0.0.0`.
 
-Optional token (defense-in-depth): set `SING_TOKEN=<secret>` — data endpoints + WS then require it
-(`x-sing-token` header / `?token=`); the daemon injects it into the served shell so the UI works transparently.
+Optional token (defense-in-depth): set `SING_TOKEN=<secret>` — data endpoints + WS + the shell itself
+then require it (`x-sing-token` header / `?token=` / `sing_token` HttpOnly cookie). Opening the shell
+with `?token=` mints the cookie and 302s the token out of the URL; the daemon then injects it into the
+served shell so the UI works transparently.
 
 ## Notes
 

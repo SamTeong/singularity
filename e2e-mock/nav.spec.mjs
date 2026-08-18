@@ -1,11 +1,11 @@
 import { test, expect } from './fixtures/test.mjs';
-import { goto, gotoView, openMenu, visible } from '../e2e/helpers/nav.mjs';
+import { goto, gotoUrl, gotoView, visible } from '../e2e/helpers/nav.mjs';
+import { PROJECT_B, RICH_SESSION } from '../web/src/mock/fixtures.js';
 
 test('Tasks view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Tasks');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('tasks');
+  await expect(page).toHaveURL(/\/tasks(\?|$)/);
   // Verify a task card renders
   await expect(visible(page.getByText('Seeded todo card')).first()).toBeVisible();
 });
@@ -13,8 +13,7 @@ test('Tasks view is reachable and renders', async ({ page }) => {
 test('Automation view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Automation');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('cron');
+  await expect(page).toHaveURL(/\/cron(\?|$)/);
   // Verify a heading renders
   await expect(visible(page.getByText('Scheduled')).first()).toBeVisible();
 });
@@ -22,15 +21,13 @@ test('Automation view is reachable and renders', async ({ page }) => {
 test('Usage view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('usage');
+  await expect(page).toHaveURL(/\/usage(\?|$)/);
 });
 
 test('Config view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Config');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('config');
+  await expect(page).toHaveURL(/\/config(\?|$)/);
   // The tree rail only renders a file leaf after a root is expanded, so assert
   // the view mounted via its stable landmark (the rail search box) rather than
   // a file name that may not be in the DOM yet.
@@ -40,15 +37,13 @@ test('Config view is reachable and renders', async ({ page }) => {
 test('Hooks view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Hooks');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('hooks');
+  await expect(page).toHaveURL(/\/hooks(\?|$)/);
 });
 
 test('Skills view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Skills');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('skills');
+  await expect(page).toHaveURL(/\/skills(\?|$)/);
   // Verify the skills tree caption renders
   await expect(visible(page.getByText('2 scopes · 2 skills')).first()).toBeVisible();
 });
@@ -56,22 +51,19 @@ test('Skills view is reachable and renders', async ({ page }) => {
 test('Rules view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Rules');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('rules');
+  await expect(page).toHaveURL(/\/rules(\?|$)/);
 });
 
 test('Memory view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Memory');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('memory');
+  await expect(page).toHaveURL(/\/memory(\?|$)/);
 });
 
 test('Transcripts view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Transcripts');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('sessions');
+  await expect(page).toHaveURL(/\/transcripts(\?|$)/);
   // Verify the seeded transcript renders
   await expect(visible(page.getByText('Retry backoff cap', { exact: true })).first()).toBeVisible();
 });
@@ -79,28 +71,23 @@ test('Transcripts view is reachable and renders', async ({ page }) => {
 test('Wiki view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Wiki');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('wiki');
+  await expect(page).toHaveURL(/\/wiki(\?|$)/);
   await expect(visible(page.getByText('handbook', { exact: true })).first()).toBeVisible();
 });
 
 test('Appearance view is reachable and renders', async ({ page }) => {
   await page.goto('/');
-  // Appearance currently renders its title as a paragraph, while the shared
-  // helper's landmark expects a heading. Keep using the shared menu helper and
-  // wait on the actual visible title rather than changing the daemon helper.
-  await openMenu(page);
-  await page.getByRole('menuitem', { name: 'Appearance', exact: true }).click();
-  await expect(page.getByText('Appearance', { exact: true })).toBeVisible();
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('appearance');
+  // Via the shared helper, whose landmark is the view's heading. An unscoped
+  // getByText('Appearance') here matched the closing More-menu item instead and
+  // resolved before the view had mounted at all.
+  await goto(page, 'Appearance');
+  await expect(page).toHaveURL(/\/appearance(\?|$)/);
 });
 
 test('Status view is reachable and renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Status');
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('status');
+  await expect(page).toHaveURL(/\/status(\?|$)/);
 });
 
 test('clicking an already-active rail item toggles the sidebar collapsed state', async ({ page }) => {
@@ -132,24 +119,73 @@ test('deep-link via gotoView lands on the correct view', async ({ page }) => {
   // Use gotoView to jump to Config
   await gotoView(page, 'Config');
 
-  const storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('config');
+  await expect(page).toHaveURL(/\/config(\?|$)/);
   await expect(page.getByPlaceholder('Search config…')).toBeVisible();
 });
 
-test('view persists across page reload via localStorage', async ({ page }) => {
+test('view survives a page reload because it is in the URL', async ({ page }) => {
   // Navigate to a non-default view
   await page.goto('/');
   await goto(page, 'Wiki');
+  await expect(page).toHaveURL(/\/wiki(\?|$)/);
 
-  let storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('wiki');
-
-  // Reloading mock mode re-seeds data, but localStorage remains intact and the
-  // Wiki fixture is part of the baseline.
+  // Reloading mock mode re-seeds data, but the Wiki fixture is part of the
+  // baseline — and the view now comes back off the URL, not localStorage.
   await page.reload();
 
-  storedView = await page.evaluate(() => window.localStorage.getItem('sing-view'));
-  expect(storedView).toBe('wiki');
+  await expect(page).toHaveURL(/\/wiki(\?|$)/);
   await expect(visible(page.getByText('handbook')).first()).toBeVisible();
+});
+
+// Assert the address bar, not just the rendered pane: rendering Tasks while
+// leaving /nonsense in the URL is the exact bug the route guard exists to stop,
+// and a render-only assertion passes straight through it.
+test('an unknown view id redirects to Tasks', async ({ page }) => {
+  await page.goto('/nonsense');
+  await expect(page).toHaveURL(/\/tasks(\?|$)/);
+  await expect(visible(page.getByText('Seeded todo card')).first()).toBeVisible();
+});
+
+test('back and forward walk the views visited', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Wiki');
+  await goto(page, 'Skills');
+
+  await page.goBack();
+  await expect(page).toHaveURL(/\/wiki(\?|$)/);
+  await page.goForward();
+  await expect(page).toHaveURL(/\/skills(\?|$)/);
+});
+
+test('a filtered Tasks URL restores its filters on a cold load', async ({ page }) => {
+  // Straight page.goto, not gotoUrl: ?history=1 replaces the board columns with
+  // the history table, so the Tasks landmark gotoUrl waits on isn't rendered.
+  await page.goto('/tasks?tag=fixture&history=1');
+
+  // ?history=1 selects the History segment, ?tag= activates the tag filter (the
+  // "Clear all" chip only renders with at least one tag active).
+  await expect(page.getByRole('button', { name: 'History' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(visible(page.getByText('Clear all', { exact: true })).first()).toBeVisible();
+});
+
+// Cold load, not a click: the click path opens a transcript long after
+// GET /transcripts/root has settled, so it cannot reproduce the race a URL-derived
+// project/session hits on first mount.
+test('a transcript URL opens that transcript on a cold load', async ({ page }) => {
+  await gotoUrl(page, 'Transcripts', { project: PROJECT_B, session: RICH_SESSION });
+
+  await expect(visible(page.getByText('Backoff is capped at 30s', { exact: false })).first()).toBeVisible();
+});
+
+// The mirror of the cold load above: the URL has to be WRITTEN by a click, not
+// just read on mount, or the open transcript is neither shareable nor reloadable.
+test('clicking a transcript writes it to the URL, and a reload reopens it', async ({ page }) => {
+  await gotoView(page, 'Transcripts');
+  await page.getByRole('button', { name: /Retry backoff cap/ }).click();
+  await expect(visible(page.getByText('Backoff is capped at 30s', { exact: false })).first()).toBeVisible();
+
+  await expect(page).toHaveURL(new RegExp(`project=${PROJECT_B}&.*session=${RICH_SESSION}`));
+
+  await page.reload();
+  await expect(visible(page.getByText('Backoff is capped at 30s', { exact: false })).first()).toBeVisible();
 });

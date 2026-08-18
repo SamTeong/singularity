@@ -114,7 +114,8 @@ Seeded by `fixtures/seed.mjs`, all paths exported from `fixtures/paths.mjs`:
   markdown lives under `<project>/memory/`.
 - **Wiki** — `WIKI_DIR`: one wiki, `handbook`, three interlinked pages.
 - **Skills** — `SKILLS_DIR`: grouped layout, scopes `coding` (`lint-guard`) and
-  `design` (`color-audit`). The tree renders collapsed.
+  `design` (`color-audit`). The tree renders one level open — roots expanded,
+  scopes collapsed.
 - **Config / Hooks / Rules** — `WORKSPACE_DIR` with `.claude/settings.json`,
   `settings.local.json`, two hook scripts, two rule files.
 - **Tasks** — four cards, one per column, titled `Seeded <column> card`, tagged
@@ -125,7 +126,7 @@ Seeded by `fixtures/seed.mjs`, all paths exported from `fixtures/paths.mjs`:
   no worktree and no branch.
 
 `CLAUDE_BIN` and `OLLAMA_BIN` both point at the keepalive stub, so
-`/capabilities` reports both backends available and neither can start a real
+`/api/capabilities` reports both backends available and neither can start a real
 turn. `SING_SCOPE_ROOT`, `SING_USAGE_SKILL` and `SING_USAGE_REPORTS` stay unset —
 skill-scopes and the usage report render their not-configured states, which the
 specs assert.
@@ -145,7 +146,7 @@ They have no safe path even in the sandbox:
 - **New session / Resume / Duplicate / Fork / Restart** on a session row — real
   `claude` spawn, and `ensureTrusted` writes the user's real `~/.claude.json`.
 - **"Run now"** on a cron or background job — starts a real agent run.
-- **Processes ✕ / "Stop all leftover"** — `POST /procs/kill` kills real machine
+- **Processes ✕ / "Stop all leftover"** — `POST /api/procs/kill` kills real machine
   PIDs by number, and the bulk button has no confirmation.
 - **Restart server** (More ▸ Restart) — kills the daemon under the test.
 - **"Open in external terminal"** — detach-spawns `wt.exe` outside the browser.

@@ -92,7 +92,7 @@ function mockAssetsMiddleware(req, res, next) {
   if (method !== 'GET' && method !== 'HEAD') return next();
 
   const url = new URL(req.url || '/', 'http://vite.local');
-  if (url.pathname === '/fs/raw') {
+  if (url.pathname === '/api/fs/raw') {
     // Mirrors explorer.mjs bad(): a non-empty absolute path. The mock's virtual
     // FS is POSIX-shaped (fixtures.js joins with '/'), so absolute means '/'.
     const path = url.searchParams.get('path');
@@ -101,7 +101,7 @@ function mockAssetsMiddleware(req, res, next) {
     if (!asset) return fail(res, method, 404, 'not found');
     return send(res, method, 200, asset.type, asset.body);
   }
-  if (url.pathname === '/usagereport/report') {
+  if (url.pathname === '/api/usagereport/report') {
     return send(res, method, 200, 'text/html; charset=utf-8', REPORT_HTML);
   }
   next();

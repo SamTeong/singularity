@@ -27,6 +27,7 @@ import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 import { tildify, untildify } from '@/lib/paths.js';
 import FileTree from './FileTree.jsx';
 import TabStrip from './TabStrip.jsx';
@@ -81,7 +82,7 @@ export default function ExplorerPanel() {
   const { ensureSaved, dialogEl } = useDirtyGuard();
 
   const relist = (dir) => {
-    fetch(`/fs/list?path=${encodeURIComponent(dir)}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/fs/list?path=${encodeURIComponent(dir)}`).then((r) => r.json()).then((d) => {
       if (!d.ok) return;
       setChildrenByPath((m) => { const n = new Map(m); n.set(dir, { entries: d.entries, capped: d.capped }); return n; });
     });
@@ -93,23 +94,28 @@ export default function ExplorerPanel() {
   // the debounced save effect below can't clobber /fs/state with a half-loaded view.
   useEffect(() => {
     let cancelled = false;
-    fetch('/fs/state').then((r) => r.json()).then(async (d) => {
+    fetch('/api/fs/state').then((r) => r.json()).then(async (d) => {
       const st = d.state || {};
       const rt = st.root || '~';
       const rootAbs = untildify(rt);
       const expandedPaths = st.expanded || [];
       const dirLoads = [rootAbs, ...expandedPaths].map((p) =>
-        fetch(`/fs/list?path=${encodeURIComponent(p)}`).then((r) => r.json())
+        fetch(`/api/fs/list?path=${encodeURIComponent(p)}`).then((r) => r.json())
           .then((dd) => (dd.ok ? [p, { entries: dd.entries, capped: dd.capped }] : null)).catch(() => null));
       const tabLoads = (st.tabs || []).map((p) =>
-        fetch(`/fs/read?path=${encodeURIComponent(p)}`).then((r) => r.json())
+        fetch(`/api/fs/read?path=${encodeURIComponent(p)}`).then((r) => r.json())
           .then((dd) => (dd.ok ? { path: p, kind: dd.kind, size: dd.size, mtime: dd.mtime, content: dd.content } : null)).catch(() => null));
       const [dirResults, tabResults] = await Promise.all([Promise.all(dirLoads), Promise.all(tabLoads)]);
       if (cancelled) return;
       setRoot(rt);
       setAutosave(!!st.autosave);
-      setChildrenByPath(new Map(dirResults.filter(Boolean)));
-      setExpanded(new Set(expandedPaths));
+      const okDirs = dirResults.filter(Boolean);
+      setChildrenByPath(new Map(okDirs));
+      // Restore only the dirs that still list — a saved path deleted on disk
+      // 400s here, and re-saving it would re-fire that failed request on every
+      // reload forever. Dropping it lets the debounced save below clean state.
+      const okDirPaths = new Set(okDirs.map(([p]) => p));
+      setExpanded(new Set(expandedPaths.filter((p) => okDirPaths.has(p))));
       const okTabs = tabResults.filter(Boolean);
       setTabs(okTabs.map((t) => ({ path: t.path, kind: t.kind, size: t.size, mtime: t.mtime, dirty: false })));
       setContent(new Map(okTabs.map((t) => [t.path, t.content ?? ''])));
@@ -126,7 +132,7 @@ export default function ExplorerPanel() {
   useEffect(() => {
     if (!loadedRef.current) return;
     const id = setTimeout(() => {
-      fetch('/fs/state', {
+      fetch('/api/fs/state', {
         method: 'PUT', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ root, expanded: [...expanded], tabs: tabs.map((t) => t.path), active, autosave }),
       });
@@ -143,7 +149,7 @@ export default function ExplorerPanel() {
   useEffect(() => {
     if (!active) return undefined;
     const onFocus = () => {
-      fetch(`/fs/read?path=${encodeURIComponent(active)}`).then((r) => r.json()).then((d) => {
+      fetch(`/api/fs/read?path=${encodeURIComponent(active)}`).then((r) => r.json()).then((d) => {
         const tab = tabsRef.current.find((t) => t.path === active);
         if (!d.ok || !tab || d.mtime === tab.mtime) return;
         if (tab.dirty) { setMsg({ sev: 'error', text: 'Changed on disk — saving will ask before overwriting' }); return; }
@@ -163,7 +169,7 @@ export default function ExplorerPanel() {
     const term = q.trim();
     if (!term) return; // stale results are gated on `term` below, so nothing to clear
     const id = setTimeout(() => {
-      fetch(`/fs/search?root=${encodeURIComponent(rootAbs)}&q=${encodeURIComponent(term)}`)
+      fetch(`/api/fs/search?root=${encodeURIComponent(rootAbs)}&q=${encodeURIComponent(term)}`)
         .then((r) => r.json()).then((d) => { if (d.ok) setResults({ term, list: d.results, capped: d.capped }); })
         .catch(() => setResults({ term, list: [], capped: false }));
     }, 250);
@@ -188,14 +194,14 @@ export default function ExplorerPanel() {
   // `save` before its useCallback assignment completes.
   const save = useCallback(async function saveImpl(path, force = false) {
     if (autosaveTimer.current?.path === path) clearAutosaveTimer();
-    const r = await fetch('/fs/write', {
+    const r = await fetch('/api/fs/write', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path, content: contentRef.current.get(path) ?? '', mtime: tabsRef.current.find((t) => t.path === path)?.mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     // 409: the file changed underneath us (an external editor). Ask once, then
     // re-save with force — never overwrite someone else's edit silently.
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return saveImpl(path, true);
+      if (confirmOverwrite()) return saveImpl(path, true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }
@@ -241,7 +247,7 @@ export default function ExplorerPanel() {
   const openFile = (path) => {
     if (path === active) return;
     if (tabs.some((t) => t.path === path)) { switchActive(path); return; }
-    fetch(`/fs/read?path=${encodeURIComponent(path)}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/fs/read?path=${encodeURIComponent(path)}`).then((r) => r.json()).then((d) => {
       if (!d.ok) return;
       setTabs((ts) => [...ts, { path, kind: d.kind, size: d.size, mtime: d.mtime, dirty: false }]);
       setContent((m) => { const n = new Map(m); n.set(path, d.content ?? ''); return n; });
@@ -305,7 +311,7 @@ export default function ExplorerPanel() {
   const createEntry = (dir, kind) => {
     const name = window.prompt(kind === 'dir' ? 'Folder name:' : 'File name:');
     if (!name) return;
-    fetch('/fs/entry', {
+    fetch('/api/fs/entry', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path: joinPath(dir, name), kind }),
     }).then((r) => r.json()).then((d) => {
@@ -319,7 +325,7 @@ export default function ExplorerPanel() {
     const name = window.prompt('Rename to:', baseOf(node.path));
     if (!name) return;
     const to = joinPath(node.parentDir, name);
-    fetch('/fs/rename', {
+    fetch('/api/fs/rename', {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ from: node.path, to }),
     }).then((r) => r.json()).then((d) => {
@@ -343,7 +349,7 @@ export default function ExplorerPanel() {
     if (!window.confirm(`Delete "${baseOf(node.path)}"?`)) return;
     const sep = sepOf(node.path);
     const under = tabs.filter((t) => t.path === node.path || t.path.startsWith(node.path + sep));
-    fetch(`/fs/entry?path=${encodeURIComponent(node.path)}`, { method: 'DELETE' }).then((r) => r.json()).then((d) => {
+    fetch(`/api/fs/entry?path=${encodeURIComponent(node.path)}`, { method: 'DELETE' }).then((r) => r.json()).then((d) => {
       if (!d.ok) { window.alert(d.error || 'Failed'); return; }
       relist(node.parentDir);
       under.forEach((t) => removeTab(t.path));
@@ -357,7 +363,7 @@ export default function ExplorerPanel() {
   const hits = searching && results?.term === q.trim() ? results : null; // gated so a stale term never shows
   const activeTab = tabs.find((t) => t.path === active);
   const lang = langFor(active);
-  const imgSrc = active ? `/fs/raw?path=${encodeURIComponent(active)}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}` : null;
+  const imgSrc = active ? `/api/fs/raw?path=${encodeURIComponent(active)}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}` : null;
 
   return (
     <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>

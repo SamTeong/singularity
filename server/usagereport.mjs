@@ -7,8 +7,8 @@ import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// Skill CLI + report output dir — no defaults; both must be set in .env
-// (index.mjs requireEnv fails the daemon fast if missing).
+// Skill CLI + report output dir — optional; absent → usage-report degrades
+// silently (daemon boots fine; /capabilities reports availability).
 const SKILL_STATS = process.env.SING_USAGE_SKILL;
 const REPORTS_DIR = process.env.SING_USAGE_REPORTS;
 

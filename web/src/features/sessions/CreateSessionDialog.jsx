@@ -57,7 +57,7 @@ export default function CreateSessionDialog({ open, onClose, connected, cwd, set
       createDisabled={!connected || !cwd.trim() || !model.trim() || sessionIdInvalid}
     >
       <TextField size="small" label="title (optional)" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') create(); }} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
-      <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
+      <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="Working directory" />
       <ModelSelect model={model} setModel={setModel} placeholder="required — claude, ollama, or gpt-*" />
       <ScopeSelect open={open} value={scopes} onChange={setScopes} />
       <TextField size="small" label="session id (optional — resumes a past session)" value={sessionId} onChange={(e) => setSessionId(e.target.value)} spellCheck={false} error={sessionIdInvalid} helperText={sessionIdInvalid ? 'Not a valid session id' : ''} slotProps={{ input: { endAdornment: clearAdornment(sessionId !== '', () => setSessionId('')) } }} />

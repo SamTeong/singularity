@@ -1,15 +1,15 @@
-import { NAV } from '@/shell/Sidebar.jsx';
-import { NAV_ITEMS } from '@/shell/AppMenu.jsx';
+import { VIEW_LIST } from '@/shell/views.mjs';
 import { isCodexModel } from '@/lib/models.js';
 import { nextSessionTitle } from '@/lib/sessionTitle.js';
+import { isLive } from '@/lib/agentStatus.js';
 
-// Build the Views command group from the unified view catalog.
-// Sidebar.NAV (primary rail) + AppMenu.NAV_ITEMS (overflow) — deduped by v.
+// Build the Views command group from the unified view catalog (shell/views.mjs,
+// shared with the router so palette entries and valid routes cannot drift).
 // Phase 0: Views group. Phase 1: Sessions group (switch/fork/respawn/reattach/kill/external/transcript).
 
-// Mirrors SessionRow.jsx's own row-action gating (isLive/isWorking) so a command
-// only appears in the palette when the matching button would show in the dock.
-const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
+// `isWorking` mirrors SessionRow.jsx's own row-action gating (isLive now comes
+// from the canonical home in agentStatus.js) so a command only appears in the
+// palette when the matching button would show in the dock.
 const isWorking = (s) => s === 'running' || s === 'starting';
 
 // Sessions group: one 'New Session' entry + per-agent ops, gated exactly like
@@ -77,7 +77,7 @@ function buildSessionCommands(ctx) {
         group: 'Sessions',
         label: 'Open ' + title + ' in external terminal',
         hint: 'session',
-        run: () => fetch('/session/external', {
+        run: () => fetch('/api/session/external', {
           method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: a.id }),
         }).catch(() => {}), // ponytail: no toast reachable from the palette
       });
@@ -94,14 +94,7 @@ function buildSessionCommands(ctx) {
 }
 
 export function buildCommands(ctx) {
-  const views = [];
-  const seen = new Set();
-  for (const item of [...NAV, ...NAV_ITEMS]) {
-    if (seen.has(item.v)) continue;
-    seen.add(item.v);
-    views.push({ v: item.v, label: item.label });
-  }
-  const viewCmds = views.map((x) => ({
+  const viewCmds = VIEW_LIST.map((x) => ({
     id: 'view:' + x.v,
     group: 'Views',
     label: x.label,

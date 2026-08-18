@@ -487,18 +487,42 @@ export function reattach(id) {
   return a;
 }
 
+// Resolve wt.exe: prefer the Store App-Execution-Alias path (unambiguous),
+// else fall back to PATH — winget/choco/scoop/portable installs put wt.exe
+// on PATH but not at the alias. node-pty does no PATH resolution, so we
+// resolve to an absolute path ourselves rather than handing it a bare name.
+export function resolveWt(env = process.env) {
+  if (env.LOCALAPPDATA) {
+    const alias = join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'wt.exe');
+    try { accessSync(alias, constants.X_OK); return alias; } catch {}
+  }
+  for (const dir of (env.PATH || '').split(';')) {
+    if (!dir) continue;
+    const candidate = join(dir, 'wt.exe');
+    try { accessSync(candidate, constants.X_OK); return candidate; } catch {}
+  }
+  return null;
+}
+
 // Launch a session in an external terminal (Windows Terminal / macOS Terminal)
 // so the user can continue it outside the dock without /exit + manual `claude
 // --resume`. Pure builder — returns the launcher + argv for the route to
 // detached-spawn (keeps node:child_process out of this module). Reuses
 // buildSpawn so the resume argv matches in-app reattach (scopes, model,
 // permission-mode, ollama wrapper). `platform` param only for testability.
-export function externalLaunch(id, platform = process.platform) {
+export function externalLaunch(id, platform = process.platform, env = process.env) {
   const a = agents.get(id);
   if (!a) return { ok: false, error: 'no such session' };
   const { bin, args } = buildSpawn(a);
-  if (platform === 'win32')
-    return { ok: true, launcher: 'wt.exe', launcherArgs: ['-d', a.cwd, bin, ...args], cwd: a.cwd };
+  if (platform === 'win32') {
+    // wt.exe is a Windows App Execution Alias: a reparse-point stub that
+    // existsSync/statSync reports as EACCES (that's the "flaky" lookup the
+    // shell:true hack used to route around). accessSync sees through it.
+    // Resolve + spawn the stub path directly — no shell, no argv concatenation.
+    const wt = resolveWt(env);
+    if (!wt) return { ok: false, error: 'wt.exe not found (checked the Store alias path and PATH)' };
+    return { ok: true, launcher: wt, launcherArgs: ['-d', a.cwd, bin, ...args], cwd: a.cwd };
+  }
   if (platform === 'darwin') {
     const sq = (s) => `'${String(s).replace(/'/g, `'"'"'`)}'`;
     const shell = `cd ${sq(a.cwd)} && exec ${sq(bin)} ${args.map(sq).join(' ')}`;

@@ -348,6 +348,7 @@ export async function listSessions({ cap = 5000, isLive = () => false, now = Dat
       } else {
         ({ cwd, title, blurb } = peekMeta(parseEvents(pk.head)));
         metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, title, blurb });
+        if (metaCache.size > 200) metaCache.delete(metaCache.keys().next().value); // FIFO cap, matches textCache/sessionCache
       }
       const id = f.slice(0, -6);
       const row = { id, project: proj.name, cwd, title, blurb, mtime: st.mtimeMs, size: st.size };
@@ -397,6 +398,7 @@ async function listSubagents(parentDir, parentId, isLive, now) {
       const peeked = peekMeta(parseEvents(pk.head));
       peekTitle = peeked.title; blurb = peeked.blurb;
       metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd: peeked.cwd, title: peeked.title, blurb: peeked.blurb });
+      if (metaCache.size > 200) metaCache.delete(metaCache.keys().next().value); // FIFO cap, matches textCache/sessionCache
     }
     out.push({
       id: `${parentId}/subagents/${agentId}`,

@@ -1,6 +1,8 @@
 import { getTokens } from '@/theme/contract.js';
 import { brandGrad, brandGlow, surface2, stroke2, chipBg, trackColor, statusColor, focusRing, statePill, cardTag, PAPER_TOOLTIP_SLOTPROPS } from '@/shell/shellStyles.js';
 import { useRef, useState, useMemo, useEffect } from 'react';
+import { useQueryList, useQueryState } from '@/hooks/useQueryState.js';
+import { usePagedList } from '@/hooks/usePagedList.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -25,7 +27,7 @@ import TaskDetailPanel, { DETAIL_SHEET_W } from '@/features/tasks/TaskDetailPane
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import { repoName } from '@/lib/paths.js';
 import { fmtUsd, fmtTokens } from '@/lib/format.js';
-import { KIND } from '@/lib/agentStatus.js';
+import { KIND, isLive } from '@/lib/agentStatus.js';
 import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, StatusLegend, SegmentBar, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState, DOMAIN_STATE_ORDER } from '@/lib/domainState.js';
@@ -43,6 +45,10 @@ const prefersReducedMotion = () =>
 // Column-head inner-row cap (task 1) — see the column-head comment below for
 // why this exists.
 const COL_HEAD_MAX_W = 340;
+
+// History table page size (HistoryView windows at 60). The table rendered the
+// whole corpus unbounded before.
+const HIST_PAGE_SIZE = 50;
 
 // Duration formatter — cost/token formatters live in format.js.
 const fmtMs = (ms) => {
@@ -69,7 +75,6 @@ function statsLine(s) {
 // kills the task's live agent session server-side, so that drop is confirmed.
 // Clicking a card selects its session's terminal below.
 // Header toggles to a History table (concluded tasks — completed or abandoned).
-const LIVE_STATUS = new Set(['starting', 'running', 'idle']);
 
 // layout-02 column-dot colours — a status-ish marker per column (`.col-dot`:
 // ink-3 queued · info in-progress · brand review · ok done). ZAPAC-only — the
@@ -382,12 +387,22 @@ function TranscriptSheet({ item, loading, error, transcript, onClose }) {
   );
 }
 
+// Sortable History columns — an ?sort= naming anything else falls back to the
+// default instead of sorting by a key `sortValue` has no case for.
+const SORT_KEYS = new Set(['title', 'repo', 'branch', 'outcome', 'busyMs', 'apiMs', 'costUsd', 'tokens', 'concludedAt']);
+
 export default function TasksBoard({ tasks, history, agents, stats, onSelect, onAdd, onMove, onConclude, onDeleteHistory, onSheetInset }) {
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
   const [dragId, setDragId] = useState(null);
-  const [showHistory, setShowHistory] = useState(false);
-  const [activeTags, setActiveTags] = useState(() => new Set());
+  // Board filters live in the query string, so a filtered board is shareable and
+  // survives a reload: ?tag=… (repeated, never CSV — tags are free-form and can
+  // contain commas), ?history=1, ?sort=key:dir, ?task=<id>. All `replace: true`
+  // (the hook default) so fiddling with filters doesn't fill the back stack.
+  const [tagList, setTagList] = useQueryList('tag');
+  const [historyParam, setHistoryParam] = useQueryState('history');
+  const showHistory = historyParam === '1';
+  const setShowHistory = (on) => setHistoryParam(on ? '1' : '');
   // Detail panel: a card click opens the right-sliding sheet instead of the
   // transcript dock / terminal select. State is the open task's ID only — the
   // task object is re-derived from `tasks` each render, so the panel reflects
@@ -395,7 +410,8 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   // two). When the open task leaves the board (concluded, moved to history, or
   // removed) it drops out of `tasks`, so the lookup goes null and the panel
   // unmounts on its own — no closing effect, no stale snapshot to sync.
-  const [detailId, setDetailId] = useState(null);
+  // ?task=<id>: an unknown id simply finds no task and the panel stays shut.
+  const [detailId, setDetailId] = useQueryState('task');
   const liveDetailTask = useMemo(
     () => (detailId ? tasks.find((t) => t.id === detailId) ?? null : null),
     [tasks, detailId],
@@ -411,8 +427,12 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   // the one that would otherwise cover the shell.
   // History table sort: click a header to sort, click again to reverse. Numeric
   // fields compare by value, strings by localeCompare. Default = newest first.
-  const [sort, setSort] = useState({ key: 'concludedAt', dir: 'desc' });
-  const changeSort = (key) => setSort((p) => p.key === key ? { key, dir: p.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' });
+  const [sortParam, setSortParam] = useQueryState('sort', 'concludedAt:desc');
+  const sort = useMemo(() => {
+    const [key, dir] = sortParam.split(':');
+    return { key: SORT_KEYS.has(key) ? key : 'concludedAt', dir: dir === 'asc' ? 'asc' : 'desc' };
+  }, [sortParam]);
+  const changeSort = (key) => setSortParam(key === sort.key ? `${key}:${sort.dir === 'asc' ? 'desc' : 'asc'}` : `${key}:asc`);
 
   // Distinct tags across live tasks + history (union, deduped, sorted). The filter
   // pill row is shared by Board and History; OR semantics — a task matches if it
@@ -423,16 +443,15 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     for (const h of history) (h.tags || []).forEach((x) => s.add(x));
     return [...s].sort();
   }, [tasks, history]);
+  // A ?tag= no task or history row carries — a stale shared link — is dropped:
+  // it renders no pill, so keeping it would empty the board with nothing to clear.
+  const activeTags = useMemo(() => new Set(tagList.filter((t) => allTags.includes(t))), [tagList, allTags]);
   const matchesTags = (item) => activeTags.size === 0 || (item.tags || []).some((t) => activeTags.has(t));
-  const toggleTag = (tag) => setActiveTags((prev) => {
-    const n = new Set(prev);
-    if (n.has(tag)) n.delete(tag); else n.add(tag);
-    return n;
-  });
+  const toggleTag = (tag) => setTagList(activeTags.has(tag) ? tagList.filter((t) => t !== tag) : [...tagList, tag]);
 
   // Live subtitle for the view topbar: task count + count of agents currently
   // in a live state (starting/running/idle).
-  const runningCount = agents.filter((a) => LIVE_STATUS.has(a.status)).length;
+  const runningCount = agents.filter((a) => isLive(a.status)).length;
 
   // Sort value per header key. Numeric fields fall back to 0; strings to ''.
   const sortValue = (h, key) => {
@@ -460,6 +479,12 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, activeTags, sort]);
 
+  // History pagination — Prev/Next under the table, disabled at bounds. Page
+  // resets to 1 when the sort or tag filter changes the paginated set.
+  const histPageKey = `${sortParam}:${[...activeTags].join(',')}`;
+  const { page: histCurPage, pageCount: histPageCount, pageItems: pagedHistory, setPage: setHistPage } =
+    usePagedList(sortedHistory, HIST_PAGE_SIZE, histPageKey);
+
   // Transcript sheet: selecting a History row — or handing off from
   // TaskDetailPanel's "View transcript" — loads its session's transcript
   // read-only into the right-sliding TranscriptSheet modal above. Driven by a
@@ -484,7 +509,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     if (!item.sessionId) { setErrT('No transcript found for this task.'); return; }
     setLoadingT(true);
     const slug = (item.worktree ?? item.repo).replace(/[^a-zA-Z0-9]/g, '-');
-    fetch(`/session?project=${encodeURIComponent(slug)}&id=${encodeURIComponent(item.sessionId)}`)
+    fetch(`/api/transcript?project=${encodeURIComponent(slug)}&id=${encodeURIComponent(item.sessionId)}`)
       .then((r) => r.json())
       .then((d) => { if (seq !== histReqRef.current) return; if (d.ok) setTranscript(d); else setErrT('No transcript found for this task.'); })
       .catch(() => { if (seq === histReqRef.current) setErrT('No transcript found for this task.'); })
@@ -497,7 +522,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     if (!t || t.column === col) return;
     if (col === 'done') {
       const agent = agents.find((a) => a.id === t.sessionId);
-      if (agent && LIVE_STATUS.has(agent.status) && !window.confirm(`Move "${t.title}" to Done? This will stop the AI agent currently working on it.`)) return;
+      if (agent && isLive(agent.status) && !window.confirm(`Move "${t.title}" to Done? This will stop the AI agent currently working on it.`)) return;
     }
     onMove(t.id, col);
   };
@@ -587,8 +612,8 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
               size="small"
               label="Clear all"
               variant="outlined"
-              onClick={() => setActiveTags(new Set())}
-              onDelete={() => setActiveTags(new Set())}
+              onClick={() => setTagList([])}
+              onDelete={() => setTagList([])}
               deleteIcon={<CloseIcon />}
               sx={(t) => (phosphor
                 ? { height: 22, fontSize: 10, fontWeight: 700, borderRadius: 0, letterSpacing: '.04em', fontFamily: t.nerv.fonts.mono, background: 'transparent', border: `1px solid ${t.nerv.hue.greenDim}`, color: t.nerv.hue.greenMap, ml: 0.5, '&:hover': { borderColor: t.nerv.hue.mint, color: t.nerv.hue.mint } }
@@ -598,62 +623,71 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
         </Stack>
       )}
       {showHistory ? (
-        <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', px: '10px', pt: '6px', pb: '12px' }}>
-          <Table size="small" stickyHeader>
-            <TableHead>
-              <TableRow>
-                <TableCell sortDirection={sort.key === 'title' ? sort.dir : false}><TableSortLabel active={sort.key === 'title'} direction={sort.dir} onClick={() => changeSort('title')}>Title</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'repo' ? sort.dir : false}><TableSortLabel active={sort.key === 'repo'} direction={sort.dir} onClick={() => changeSort('repo')}>Repo</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'branch' ? sort.dir : false}><TableSortLabel active={sort.key === 'branch'} direction={sort.dir} onClick={() => changeSort('branch')}>Branch</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'outcome' ? sort.dir : false}><TableSortLabel active={sort.key === 'outcome'} direction={sort.dir} onClick={() => changeSort('outcome')}>Outcome</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'busyMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'busyMs'} direction={sort.dir} onClick={() => changeSort('busyMs')}>Busy</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'apiMs' ? sort.dir : false}><Tooltip title="Time spent waiting for the AI model to respond" disableInteractive><TableSortLabel active={sort.key === 'apiMs'} direction={sort.dir} onClick={() => changeSort('apiMs')}>API time</TableSortLabel></Tooltip></TableCell>
-                <TableCell sortDirection={sort.key === 'costUsd' ? sort.dir : false}><TableSortLabel active={sort.key === 'costUsd'} direction={sort.dir} onClick={() => changeSort('costUsd')}>Cost</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'tokens' ? sort.dir : false}><TableSortLabel active={sort.key === 'tokens'} direction={sort.dir} onClick={() => changeSort('tokens')}>Tokens</TableSortLabel></TableCell>
-                <TableCell sortDirection={sort.key === 'concludedAt' ? sort.dir : false}><TableSortLabel active={sort.key === 'concludedAt'} direction={sort.dir} onClick={() => changeSort('concludedAt')}>Concluded</TableSortLabel></TableCell>
-                <TableCell />
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {sortedHistory.map((h) => {
-                const s = h.finalStats;
-                return (
-                  <TableRow key={h.id} hover selected={tx?.id === h.id} onClick={() => openTranscript({ id: h.id, title: h.title, sessionId: h.sessionId, worktree: h.worktree, repo: h.repo })} sx={{ cursor: 'pointer' }}>
-                    <TableCell>
-                      {h.title}
-                      {(h.tags || []).length > 0 && (
-                        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, mt: 0.5 }}>
-                          {h.tags.map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 18, fontSize: 10 }} />)}
-                        </Stack>
-                      )}
-                    </TableCell>
-                    <TableCell>{repoName(h.repo)}</TableCell>
-                    <TableCell>{h.branch || '—'}</TableCell>
-                    <TableCell><Chip size="small" label={h.outcome} sx={{ height: 20, fontSize: 11 }} /></TableCell>
-                    <TableCell>{fmtMs(s?.busyMs) || '—'}</TableCell>
-                    <TableCell>{fmtMs(s?.apiMs) || '—'}</TableCell>
-                    <TableCell>{fmtUsd(s?.costUsd) || '—'}</TableCell>
-                    <TableCell>{s?.tokens > 0 ? fmtTokens(s.tokens) : '—'}</TableCell>
-                    <TableCell>{new Date(h.concludedAt).toLocaleString()}</TableCell>
-                    <TableCell align="right">
-                      <Tooltip title="Delete permanently" disableInteractive>
-                        <IconButton
-                          size="small"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            if (window.confirm(`Permanently delete "${h.title}" from history?`)) onDeleteHistory(h.id);
-                          }}
-                        >
-                          <DeleteOutlineIcon fontSize="small" />
-                        </IconButton>
-                      </Tooltip>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </Box>
+        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0 }}>
+          <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', px: '10px', pt: '6px', pb: '12px' }}>
+            <Table size="small" stickyHeader>
+              <TableHead>
+                <TableRow>
+                  <TableCell sortDirection={sort.key === 'title' ? sort.dir : false}><TableSortLabel active={sort.key === 'title'} direction={sort.dir} onClick={() => changeSort('title')}>Title</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'repo' ? sort.dir : false}><TableSortLabel active={sort.key === 'repo'} direction={sort.dir} onClick={() => changeSort('repo')}>Working directory</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'branch' ? sort.dir : false}><TableSortLabel active={sort.key === 'branch'} direction={sort.dir} onClick={() => changeSort('branch')}>Branch</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'outcome' ? sort.dir : false}><TableSortLabel active={sort.key === 'outcome'} direction={sort.dir} onClick={() => changeSort('outcome')}>Outcome</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'busyMs' ? sort.dir : false}><TableSortLabel active={sort.key === 'busyMs'} direction={sort.dir} onClick={() => changeSort('busyMs')}>Busy</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'apiMs' ? sort.dir : false}><Tooltip title="Time spent waiting for the AI model to respond" disableInteractive><TableSortLabel active={sort.key === 'apiMs'} direction={sort.dir} onClick={() => changeSort('apiMs')}>API time</TableSortLabel></Tooltip></TableCell>
+                  <TableCell sortDirection={sort.key === 'costUsd' ? sort.dir : false}><TableSortLabel active={sort.key === 'costUsd'} direction={sort.dir} onClick={() => changeSort('costUsd')}>Cost</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'tokens' ? sort.dir : false}><TableSortLabel active={sort.key === 'tokens'} direction={sort.dir} onClick={() => changeSort('tokens')}>Tokens</TableSortLabel></TableCell>
+                  <TableCell sortDirection={sort.key === 'concludedAt' ? sort.dir : false}><TableSortLabel active={sort.key === 'concludedAt'} direction={sort.dir} onClick={() => changeSort('concludedAt')}>Concluded</TableSortLabel></TableCell>
+                  <TableCell />
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {pagedHistory.map((h) => {
+                  const s = h.finalStats;
+                  return (
+                    <TableRow key={h.id} hover selected={tx?.id === h.id} onClick={() => openTranscript({ id: h.id, title: h.title, sessionId: h.sessionId, worktree: h.worktree, repo: h.repo })} sx={{ cursor: 'pointer' }}>
+                      <TableCell>
+                        {h.title}
+                        {(h.tags || []).length > 0 && (
+                          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, mt: 0.5 }}>
+                            {h.tags.map((tag) => <Chip key={tag} size="small" label={tag} sx={{ height: 18, fontSize: 10 }} />)}
+                          </Stack>
+                        )}
+                      </TableCell>
+                      <TableCell>{repoName(h.repo)}</TableCell>
+                      <TableCell>{h.branch || '—'}</TableCell>
+                      <TableCell><Chip size="small" label={h.outcome} sx={{ height: 20, fontSize: 11 }} /></TableCell>
+                      <TableCell>{fmtMs(s?.busyMs) || '—'}</TableCell>
+                      <TableCell>{fmtMs(s?.apiMs) || '—'}</TableCell>
+                      <TableCell>{fmtUsd(s?.costUsd) || '—'}</TableCell>
+                      <TableCell>{s?.tokens > 0 ? fmtTokens(s.tokens) : '—'}</TableCell>
+                      <TableCell>{new Date(h.concludedAt).toLocaleString()}</TableCell>
+                      <TableCell align="right">
+                        <Tooltip title="Delete permanently" disableInteractive>
+                          <IconButton
+                            size="small"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (window.confirm(`Permanently delete "${h.title}" from history?`)) onDeleteHistory(h.id);
+                            }}
+                          >
+                            <DeleteOutlineIcon fontSize="small" />
+                          </IconButton>
+                        </Tooltip>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </Box>
+          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center', gap: 1, py: 0.5, borderTop: (t) => `1px solid ${stroke2(t)}` }}>
+            <Button size="small" disabled={histCurPage <= 1} onClick={() => setHistPage((p) => Math.max(1, p - 1))} sx={{ textTransform: 'none' }}>Prev</Button>
+            <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: 12 }}>
+              Page {histCurPage} of {histPageCount} · {sortedHistory.length} task{sortedHistory.length === 1 ? '' : 's'}
+            </Typography>
+            <Button size="small" disabled={histCurPage >= histPageCount} onClick={() => setHistPage((p) => Math.min(histPageCount, p + 1))} sx={{ textTransform: 'none' }}>Next</Button>
+          </Stack>
+        </Stack>
       ) : (
         // layout-02 `.board`: columns now flex to fill the full board width
         // (Task 1) — px/spacing scale up at wide breakpoints so the extra
@@ -770,7 +804,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                     const line = statsLine(s);
                     const cost = fmtUsd(s?.costUsd);
                     // `.tcard.live` — a live session tints the card's edge toward info.
-                    const live = agent && LIVE_STATUS.has(agent.status);
+                    const live = agent && isLive(agent.status);
                     const activate = () => setDetailId(task.id);
                     return (
                       <Box

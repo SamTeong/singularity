@@ -93,7 +93,7 @@ export default function CreateScheduledJobDialog({ open, onClose, job, cwd, setC
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch(editing ? `/crons/${job.id}` : '/crons', {
+      const r = await fetch(editing ? `/api/crons/${job.id}` : '/api/crons', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -122,9 +122,9 @@ export default function CreateScheduledJobDialog({ open, onClose, job, cwd, setC
       editing={editing}
       createDisabled={!canSubmit}
     >
-      <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
+      <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') submit(); }} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
       <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} slotProps={{ input: { endAdornment: clearAdornment(description !== '', () => setDescription('')) } }} />
-      <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
+      <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="Working directory" />
       <Stack spacing={0.5}>
         <TextField size="small" label="schedule (cron format, UTC)" placeholder="minute hour day month weekday — e.g. 0 * * * *" value={cronExpr} onChange={(e) => setCronExpr(e.target.value)} spellCheck={false} error={!!cronExpr.trim() && !desc.ok} />
         <Typography variant="caption" sx={{ color: desc.ok ? 'text.secondary' : 'error.main', display: 'block' }} noWrap>

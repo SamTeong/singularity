@@ -11,7 +11,7 @@
  * state that never leaves the shell (view, collapsed, dialog open flags, toast)
  * stays in the shell, not here.
  */
-import { createContext, use, useCallback, useEffect, useRef, useState } from 'react';
+import { createContext, use, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 const WS_URL = `ws://${location.host}/ws${window.__SING_TOKEN__ ? `?token=${encodeURIComponent(window.__SING_TOKEN__)}` : ''}`;
 
@@ -162,7 +162,7 @@ export function AgentsProvider({ children }) {
   const agentKey = agents.map((a) => a.id).join(',');
   useEffect(() => {
     if (!connected) return undefined;
-    const pull = () => fetch('/agent-stats').then((r) => r.json()).then((d) => setStats(d.stats || {})).catch(() => {});
+    const pull = () => fetch('/api/agent-stats').then((r) => r.json()).then((d) => setStats(d.stats || {})).catch(() => {});
     pull();
     const t = setInterval(pull, 8000);
     return () => clearInterval(t);
@@ -172,7 +172,7 @@ export function AgentsProvider({ children }) {
   // Server scopes this to live agents, so it stays cheap (no full-history scan).
   useEffect(() => {
     if (!connected) return undefined;
-    const pull = () => fetch('/subagents').then((r) => r.json()).then((d) => setSubagents(d.subagents || {})).catch(() => {});
+    const pull = () => fetch('/api/subagents').then((r) => r.json()).then((d) => setSubagents(d.subagents || {})).catch(() => {});
     pull();
     const t = setInterval(pull, 5000);
     return () => clearInterval(t);
@@ -181,7 +181,7 @@ export function AgentsProvider({ children }) {
   // Usage (Ollama Cloud + Claude 5h/7d). On-demand only — no interval poll.
   // Server caches ~60s so repeated opens are cheap; force=1 bypasses.
   const refreshUsage = useCallback((force = false) => {
-    fetch(`/usage${force ? '?force=1' : ''}`).then((r) => r.json()).then(setUsage).catch(() => {});
+    fetch(`/api/usage${force ? '?force=1' : ''}`).then((r) => r.json()).then(setUsage).catch(() => {});
   }, []);
 
   // On-demand: fetch once the socket is up (app opened / reconnected). The
@@ -191,16 +191,25 @@ export function AgentsProvider({ children }) {
   // Background snapshot: initial load on connect; live updates arrive over the WS.
   useEffect(() => {
     if (!connected) return;
-    fetch('/background').then((r) => r.json()).then(setBackground).catch(() => {});
+    fetch('/api/background').then((r) => r.json()).then(setBackground).catch(() => {});
   }, [connected]);
 
-  const value = {
+  // Stable identity: consumers put context fields in effect dep arrays, and
+  // this provider re-renders every WS frame plus on 5s/8s poll ticks — an
+  // inline object would rebind their effects on every tick.
+  const value = useMemo(() => ({
     agents, active, setActive, connected, recent,
     tasks, taskHistory, crons, background, usage, history,
     stats, subagents,
     sendMsg, reorderAgents, refreshUsage,
     registerTerminal, registerChat, registerError,
-  };
+  }), [
+    agents, active, connected, recent,
+    tasks, taskHistory, crons, background, usage, history,
+    stats, subagents,
+    sendMsg, reorderAgents, refreshUsage,
+    registerTerminal, registerChat, registerError,
+  ]);
   return <AgentsContext value={value}>{children}</AgentsContext>;
 }
 

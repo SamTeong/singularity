@@ -117,7 +117,7 @@ export default function StatusView() {
   const [loading, setLoading] = useState(true);
 
   const pull = useCallback((force = false) => {
-    fetch(`/status${force ? '?force=1' : ''}`)
+    fetch(`/api/status${force ? '?force=1' : ''}`)
       .then((r) => r.json())
       .then((d) => { setStatus(d); setLoading(false); })
       .catch(() => setLoading(false));

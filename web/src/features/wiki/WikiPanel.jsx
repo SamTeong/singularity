@@ -1,5 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
+import { useReducedMotion } from 'framer-motion';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -27,7 +28,11 @@ import DetailPane from '@/components/DetailPane.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
 import { parseFrontmatter } from '@/lib/frontmatter.js';
 import MarkdownBody from '@/components/MarkdownBody.jsx';
-import WikiGraph from '@/features/wiki/WikiGraph.jsx';
+// Lazy: cytoscape + cytoscape-fcose are heavy and only needed when the graph
+// pane is toggled on. Statically importing WikiGraph pulled them in whenever
+// WikiPanel mounted (graph is off by default) — lazy keeps them out of the
+// initial Wiki chunk.
+const WikiGraph = lazy(() => import('@/features/wiki/WikiGraph.jsx'));
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
@@ -43,7 +48,10 @@ const folder = (rel) => { const i = rel.lastIndexOf('/'); return i < 0 ? '' : re
 const category = (rel) => { const i = rel.indexOf('/'); return i < 0 ? '' : rel.slice(0, i); };
 
 export default function WikiPanel() {
-  const [root, setRoot] = useState(DEFAULT_ROOT);
+  // null until /wiki/root resolves — keeps the file list from being fetched
+  // against a guessed root on first render (mirrors SessionHistory:95).
+  const [root, setRoot] = useState(null);
+  const reduceMotion = useReducedMotion();
   const [picking, setPicking] = useState(false);
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null); // search hits
@@ -64,13 +72,16 @@ export default function WikiPanel() {
   const wikiHint = caps?.wiki?.hint;
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
+  // Falls back to DEFAULT_ROOT either way so a failed fetch still resolves to a
+  // usable state rather than stalling at null forever (matches SessionHistory:118).
   useEffect(() => {
-    fetch('/wiki/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
+    fetch('/api/wiki/root').then((r) => r.json()).then((d) => setRoot(d.root || DEFAULT_ROOT)).catch(() => setRoot(DEFAULT_ROOT));
   }, []);
 
   useEffect(() => {
+    if (root == null) return;
     let cancelled = false;
-    fetch(`/wiki/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/wiki/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       if (cancelled) return;
       if (d.error) { setWikis([]); setCapped(false); setErr(d.error); return; }
       setWikis(d.wikis || []); setCapped(!!d.capped); setErr(null);
@@ -80,7 +91,7 @@ export default function WikiPanel() {
 
   const search = useCallback(() => {
     if (!q.trim()) { setResults(null); return; }
-    fetch(`/wiki/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/wiki/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setResults(d.results || []); setCapped(!!d.capped);
     });
   }, [q, root]);
@@ -91,7 +102,7 @@ export default function WikiPanel() {
   const open = (item) => {
     if (item.path === sel?.path) return;
     setSel(item); setErr(null); setLoadingFile(true);
-    fetch(`/wiki/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/wiki/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : '');
       if (!d.ok) setErr(d.error);
     }).catch(() => { setContent(''); setErr('failed to load page'); }).finally(() => setLoadingFile(false));
@@ -124,9 +135,12 @@ export default function WikiPanel() {
     return n;
   });
 
-  const pickRoot = (p) => {
-    setRoot(p); setPicking(false); setSel(null); setContent(''); setErr(null);
-    fetch('/wiki/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
+  const pickRoot = async (p) => {
+    setPicking(false);
+    const r = await fetch('/api/wiki/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) })
+      .then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    if (!r.ok) { setErr(r.error || 'failed to set wiki root'); return; }
+    setRoot(p); setSel(null); setContent(''); setErr(null);
   };
 
   // Distinct categories across all pages, and the tree filtered to active ones.
@@ -177,7 +191,7 @@ export default function WikiPanel() {
               }
               onCollapse={collapse}
             >
-              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tildify(root)}</Typography>
+              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{root ? tildify(root) : ''}</Typography>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
                 {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${viewWikis.length} wiki${viewWikis.length === 1 ? '' : 's'} · ${pageCount}${capped ? '+' : ''} page${pageCount === 1 ? '' : 's'}`}
               </Typography>
@@ -211,7 +225,7 @@ export default function WikiPanel() {
                         <ListItemText primary={w.name} slotProps={{ primary: { variant: 'subtitle2', noWrap: true } }} />
                         <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{w.pages.length}</Typography>
                       </ListItemButton>
-                      <Collapse in={open2} timeout="auto" unmountOnExit>
+                      <Collapse in={open2} timeout={reduceMotion ? 0 : 'auto'} unmountOnExit>
                         <List dense disablePadding>
                           {w.pages.map((p) => {
                             const f = folder(p.rel);
@@ -246,7 +260,7 @@ export default function WikiPanel() {
                     <IconButton size="small" onClick={() => setGraphView(null)}><CloseIcon sx={{ fontSize: 16 }} /></IconButton>
                   </Tooltip>
                 </Stack>
-                <WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} />
+                <Suspense fallback={<Box sx={{ p: 2, color: 'text.secondary' }}>Loading graph…</Box>}><WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} /></Suspense>
               </Stack>
             )}
           </>
@@ -266,7 +280,7 @@ export default function WikiPanel() {
                 <IconButton size="small" onClick={() => setGraphView(null)}><CloseIcon sx={{ fontSize: 16 }} /></IconButton>
               </Tooltip>
             </Stack>
-            <WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} />
+            <Suspense fallback={<Box sx={{ p: 2, color: 'text.secondary' }}>Loading graph…</Box>}><WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} /></Suspense>
           </>
         ) : (
           <DetailPane

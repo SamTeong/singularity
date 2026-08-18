@@ -79,7 +79,7 @@ export const flowData: readonly FlowStep[] = [
   {
     kanji: '分岐',
     title: 'ISOLATE THE CHANGE',
-    text: 'Singularity creates a dedicated git worktree and branch for the task, so parallel agents can build without colliding with one another or contaminating main.',
+    text: 'Singularity creates a dedicated git worktree and branch for the task, so parallel agents can build without conflicting with one another or contaminating main.',
     code: [
       ['PATH:', '.WORKTREES/9E0B59D'],
       ['BRANCH:', 'TASK/9E0B59D'],

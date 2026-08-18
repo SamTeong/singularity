@@ -35,46 +35,25 @@ const singTokenInject = {
 
 export default defineConfig(({ mode }) => ({
   root: 'web',
-  plugins: [react(), singTokenInject, ...(mode === 'mock' ? [mockAssetsPlugin()] : [])],
+  // Mock mode runs wholly in-browser (Mirage + mock-socket): there is no
+  // daemon to proxy to and no machine token/home to inject. Gating both out
+  // keeps `pnpm dev-mock` daemon- and .env-free — the mock contract in
+  // CLAUDE.md ("Nothing reads SINGULARITY_HOME, CLAUDE_BIN, or ~/.claude").
+  plugins: [react(), ...(mode !== 'mock' ? [singTokenInject] : []), ...(mode === 'mock' ? [mockAssetsPlugin()] : [])],
   resolve: { alias: { '@': srcDir } },
   server: {
     host: '127.0.0.1',
     port: vitePort,
     strictPort: true,
     open: false,
-    proxy: {
-      '/ws': { target: `ws://127.0.0.1:${backendPort}`, ws: true },
-      '/health': apiTarget,
-      '/agent-stats': apiTarget,
-      '/sysstats': apiTarget,
-      '/fs': apiTarget,
-      '/procs': apiTarget,
-      '/restart': apiTarget,
-      '/models': apiTarget,
-      '/env': apiTarget,
-      '/skill-scopes': apiTarget,
-      '/skills': apiTarget,
-      '/skill': apiTarget,
-      '/config': apiTarget,
-      '/codex-config': apiTarget,
-      '/capabilities': apiTarget,
-      '/hooks': apiTarget,
-      '/rules': apiTarget,
-      '/memory': apiTarget,
-      '/wiki': apiTarget,
-      '/sessions': apiTarget,
-      '/subagents': apiTarget,
-      '/session': apiTarget,
-      '/usage': apiTarget,
-      '/status': apiTarget,
-      '/claude': apiTarget,
-      '/usagereport': apiTarget,
-      '/tasks': apiTarget,
-      '/crons': apiTarget,
-      '/background': apiTarget,
-      '/history': apiTarget,
-      '/keys': apiTarget,
-    },
+    ...(mode === 'mock'
+      ? {}
+      : {
+          proxy: {
+            '/ws': { target: `ws://127.0.0.1:${backendPort}`, ws: true },
+            '/api': apiTarget,
+          },
+        }),
   },
   build: {
     // mock mode emits to a sibling dir so `build:mock` can never clobber the
@@ -95,7 +74,10 @@ export default defineConfig(({ mode }) => ({
         manualChunks(id) {
           if (!id.includes('node_modules')) return;
           if (/[\\/]@xterm[\\/]/.test(id)) return 'xterm';
-          if (/[\\/](react|react-dom|scheduler|@mui|@emotion|@zapac)[\\/]/.test(id)) return 'vendor';
+          // `react-router(?:-dom)?`: the trailing [\\/] means a bare `react-router`
+          // alternative would miss node_modules/react-router-dom/, splitting the
+          // router across chunks — the same TDZ hazard as above.
+          if (/[\\/](react|react-dom|react-router(?:-dom)?|scheduler|@mui|@emotion|@zapac)[\\/]/.test(id)) return 'vendor';
         },
       },
     },

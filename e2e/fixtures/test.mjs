@@ -64,11 +64,11 @@ const isPath = (p) => (url) => new URL(url).pathname === p;
 export const test = base.extend({
   stubNetwork: [async ({ page }, use) => {
     let on = true;
-    await page.route(isPath('/status'), async (route) => {
+    await page.route(isPath('/api/status'), async (route) => {
       if (!on) return route.fallback();
       await route.fulfill({ json: STATUS_STUB });
     });
-    await page.route(isPath('/usage'), async (route) => {
+    await page.route(isPath('/api/usage'), async (route) => {
       if (!on) return route.fallback();
       await route.fulfill({ json: USAGE_STUB });
     });

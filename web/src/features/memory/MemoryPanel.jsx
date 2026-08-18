@@ -21,13 +21,16 @@ import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
 // Memory root persists across sessions on the daemon FS (survives browser cache
 // clear). Default ~/.claude/projects; loaded from /memory/root on mount.
 const DEFAULT_ROOT = '~/.claude/projects';
 
 export default function MemoryPanel() {
-  const [root, setRoot] = useState(DEFAULT_ROOT);
+  // null until /memory/root resolves — keeps the file list from being fetched
+  // against a guessed root on first render (mirrors SessionHistory:95).
+  const [root, setRoot] = useState(null);
   const [picking, setPicking] = useState(false);
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null); // search hits
@@ -44,17 +47,20 @@ export default function MemoryPanel() {
   const { ensureSaved, dialogEl } = useDirtyGuard();
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
+  // Falls back to DEFAULT_ROOT either way so a failed fetch still resolves to a
+  // usable state rather than stalling at null forever (matches SessionHistory:118).
   useEffect(() => {
-    fetch('/memory/root').then((r) => r.json()).then((d) => { if (d.root) setRoot(d.root); }).catch(() => {});
+    fetch('/api/memory/root').then((r) => r.json()).then((d) => setRoot(d.root || DEFAULT_ROOT)).catch(() => setRoot(DEFAULT_ROOT));
   }, []);
 
   useEffect(() => {
-    fetch(`/memory/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setErr('failed to load memory files'));
+    if (root == null) return;
+    fetch(`/api/memory/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setErr('failed to load memory files'));
   }, [root]);
 
   const search = useCallback(() => {
     if (!q.trim()) { setResults(null); return; }
-    fetch(`/memory/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/memory/search?q=${encodeURIComponent(q.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setResults(d.results || []); setCapped(!!d.capped);
     });
   }, [q, root]);
@@ -66,19 +72,19 @@ export default function MemoryPanel() {
     if (item.path === sel?.path) return;
     if (!await ensureSaved({ dirty, save })) return;
     setSel(item); setMsg(null); setLoadingFile(true); setMtime(null);
-    fetch(`/memory/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/memory/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : ''); setDirty(false); setMtime(d.ok ? (d.mtime ?? null) : null);
       if (!d.ok) setMsg({ sev: 'error', text: d.error });
     }).finally(() => setLoadingFile(false));
   };
 
   const save = async (force = false) => {
-    const r = await fetch('/memory/file', {
+    const r = await fetch('/api/memory/file', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path: untildify(sel.path), content, root: untildify(root), mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      if (confirmOverwrite()) return save(true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }
@@ -91,16 +97,19 @@ export default function MemoryPanel() {
     mtime,
     dirty,
     refetch: async () => {
-      const d = await fetch(`/memory/file?path=${encodeURIComponent(untildify(sel.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).catch(() => ({ ok: false }));
+      const d = await fetch(`/api/memory/file?path=${encodeURIComponent(untildify(sel.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).catch(() => ({ ok: false }));
       return { ok: !!d.ok, mtime: d.mtime ?? null, content: d.content ?? '' };
     },
     onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },
     onWarn: () => setMsg({ sev: 'error', text: 'Changed on disk — saving will ask before overwriting' }),
   });
 
-  const pickRoot = (p) => {
-    setRoot(p); setPicking(false);
-    fetch('/memory/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
+  const pickRoot = async (p) => {
+    setPicking(false);
+    const r = await fetch('/api/memory/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) })
+      .then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
+    if (!r.ok) { setErr(r.error || 'failed to set memory root'); return; }
+    setRoot(p);
   };
 
   const showing = results ?? files;
@@ -139,7 +148,7 @@ export default function MemoryPanel() {
               onPickFolder={() => setPicking(true)}
               onCollapse={collapse}
             >
-              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tildify(root)}</Typography>
+              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{root ? tildify(root) : ''}</Typography>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
                 {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${files.length} file${files.length === 1 ? '' : 's'}`}
               </Typography>

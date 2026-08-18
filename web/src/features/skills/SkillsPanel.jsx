@@ -32,6 +32,7 @@ import EmptyListLine from '@/components/EmptyListLine.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
 // Skills viewer: tree of roots → scopes → skills (left), editable SKILL.md +
 // supporting files (right) via CodeMirror. Each root's layout (grouped vs flat)
@@ -47,11 +48,14 @@ const fileIcon = (rel) => {
 };
 
 export default function SkillsPanel() {
-  const { roots, shownRoots, remember, forget, loaded } = useRootList('/skills');
+  const { roots, shownRoots, remember, forget, loaded } = useRootList('/api/skills');
   const [picking, setPicking] = useState(false);
   const [dataByRoot, setDataByRoot] = useState({}); // root -> { flat, scopes, error }
   const [q, setQ] = useState('');
-  const [expandedRoots, setExpandedRoots] = useState(() => new Set());
+  // Roots render expanded; this tracks the ones the user closed. Inverted from
+  // the scope/skill sets below so a freshly-opened panel shows each root's
+  // scope folders without a click (scopes stay closed — one level, not all).
+  const [collapsedRoots, setCollapsedRoots] = useState(() => new Set());
   const [expandedScopes, setExpandedScopes] = useState(() => new Set()); // keys: `${root}::${scope}`
   const [expandedSkills, setExpandedSkills] = useState(() => new Set()); // keys: `${root}::${scope}::${skill}`
   const [sel, setSel] = useState(null); // { root, scope, skill, flat }
@@ -71,7 +75,7 @@ export default function SkillsPanel() {
     if (!loaded) return;
     let cancelled = false;
     roots.forEach((r) => {
-      fetch(`/skills?root=${encodeURIComponent(untildify(r))}`).then((res) => res.json()).then((d) => {
+      fetch(`/api/skills?root=${encodeURIComponent(untildify(r))}`).then((res) => res.json()).then((d) => {
         if (cancelled) return;
         setDataByRoot((prev) => ({ ...prev, [r]: { flat: !!d.flat, scopes: d.scopes || [], error: d.error || null } }));
       }).catch(() => { if (!cancelled) setDataByRoot((prev) => ({ ...prev, [r]: { flat: false, scopes: [], error: 'failed to load skills' } })); });
@@ -81,7 +85,7 @@ export default function SkillsPanel() {
 
   const pickRoot = (p) => { remember([untildify(p)]); setPicking(false); };
 
-  const toggleRoot = (r) => setExpandedRoots((s) => {
+  const toggleRoot = (r) => setCollapsedRoots((s) => {
     const n = new Set(s);
     if (n.has(r)) n.delete(r); else n.add(r);
     return n;
@@ -102,7 +106,7 @@ export default function SkillsPanel() {
     if (!await ensureSaved({ dirty, save })) return;
     setSel({ root: rootPath, scope: scopeName, skill: skillName, flat: flatVal });
     setFile(null); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false); setMtime(null);
-    fetch(`/skill?root=${encodeURIComponent(untildify(rootPath))}&scope=${encodeURIComponent(scopeName)}&skill=${encodeURIComponent(skillName)}&flat=${flatVal ? '1' : '0'}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/skill?root=${encodeURIComponent(untildify(rootPath))}&scope=${encodeURIComponent(scopeName)}&skill=${encodeURIComponent(skillName)}&flat=${flatVal ? '1' : '0'}`).then((r) => r.json()).then((d) => {
       if (!d.ok) { setErr(d.error || 'failed to load skill'); }
       else { setContent(d.raw || ''); setDirty(false); setMtime(d.mtime ?? null); }
     }).catch(() => setErr('failed to load skill')).finally(() => setLoading(false));
@@ -116,7 +120,7 @@ export default function SkillsPanel() {
     if (!await ensureSaved({ dirty, save })) return;
     const name = relPath.split('/').pop();
     setFile({ path: relPath, name }); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false); setMtime(null);
-    const u = `/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}&file=${encodeURIComponent(relPath)}`;
+    const u = `/api/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}&file=${encodeURIComponent(relPath)}`;
     fetch(u).then((r) => r.json()).then((d) => {
       if (!d.ok) { setFile({ path: relPath, name, error: d.error || 'failed to load file' }); setContent(''); }
       else { setFile({ path: relPath, name: d.name || name, type: d.type }); setContent(d.content || ''); setDirty(false); setMtime(d.mtime ?? null); }
@@ -130,12 +134,12 @@ export default function SkillsPanel() {
   const save = async (force = false) => {
     if (!sel) return;
     setMsg(null);
-    const r = await fetch('/skill', {
+    const r = await fetch('/api/skill', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ root: untildify(sel.root), scope: sel.scope, skill: sel.skill, flat: sel.flat ? '1' : '0', file: file?.path || null, content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      if (confirmOverwrite()) return save(true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }
@@ -149,7 +153,7 @@ export default function SkillsPanel() {
     mtime,
     dirty,
     refetch: async () => {
-      let u = `/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}`;
+      let u = `/api/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}`;
       if (file?.path) u += `&file=${encodeURIComponent(file.path)}`;
       const d = await fetch(u).then((r) => r.json()).catch(() => ({ ok: false }));
       const c = file?.path ? (d.content ?? '') : (d.raw ?? '');
@@ -179,7 +183,7 @@ export default function SkillsPanel() {
   }).filter(Boolean);
 
   // While searching, auto-expand matching roots/scopes so hits are visible.
-  const isExpandedRoot = (r) => (query ? true : expandedRoots.has(r));
+  const isExpandedRoot = (r) => (query ? true : !collapsedRoots.has(r));
   const isExpandedScope = (r, name) => (query ? true : expandedScopes.has(`${r}::${name}`));
 
   const totalScopes = view.reduce((n, r) => n + r.scopes.length, 0);
@@ -190,11 +194,11 @@ export default function SkillsPanel() {
   const rootKeys = view.map((r) => r.root);
   const scopeKeys = view.flatMap((r) => r.scopes.map((sc) => `${r.root}::${sc.name}`));
   const allOpen = rootKeys.length > 0
-    && rootKeys.every((k) => expandedRoots.has(k))
+    && rootKeys.every((k) => !collapsedRoots.has(k))
     && scopeKeys.every((k) => expandedScopes.has(k));
   const toggleAll = () => {
-    if (allOpen) { setExpandedRoots(new Set()); setExpandedScopes(new Set()); }
-    else { setExpandedRoots(new Set(rootKeys)); setExpandedScopes(new Set(scopeKeys)); }
+    if (allOpen) { setCollapsedRoots(new Set(rootKeys)); setExpandedScopes(new Set()); }
+    else { setCollapsedRoots(new Set()); setExpandedScopes(new Set(scopeKeys)); }
   };
 
   return (

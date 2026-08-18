@@ -1,6 +1,8 @@
 import { getTokens } from '@/theme/contract.js';
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useMemo, useState, useCallback, useRef } from 'react';
 import { matches as matchesKey } from '@/lib/keys.js';
+import { useQueryState, useUpdateQuery } from '@/hooks/useQueryState.js';
+import { usePagedList } from '@/hooks/usePagedList.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -38,6 +40,9 @@ import EmptyListLine from '@/components/EmptyListLine.jsx';
 // Transcripts root persists across sessions on the daemon FS. Default
 // ~/.claude/projects; used only as a fallback if /sessions/root fails to load.
 const DEFAULT_ROOT = '~/.claude/projects';
+// Recognised ?tool= sources. An unknown one would filter the list down to
+// nothing, so it degrades to 'all' instead — same for ?scope= below.
+const TOOLS = new Set(['all', 'claude', 'codex']);
 
 const shortModel = (id) => id.match(/opus|sonnet|haiku|fable|mythos/i)?.[0].toLowerCase() || id;
 
@@ -61,12 +66,14 @@ function PulseDot({ sx }) {
   );
 }
 
-export default function SessionHistory({ active, sendMsg, registerChat, openSession, onResume, liveSessionIds }) {
+export default function SessionHistory({ active, sendMsg, registerChat, onResume, liveSessionIds }) {
   const { keys } = useKeys();
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
-  const [q, setQ] = useState('');
-  const [scope, setScope] = useState('all'); // 'all' | 'one' — search + chat context
+  // Search + filters in the URL, so a query or a specific transcript is a link.
+  const [q, setQ] = useQueryState('q');
+  const [scopeParam, setScope] = useQueryState('scope', 'all'); // 'all' | 'one' — search + chat context
+  const scope = scopeParam === 'one' ? 'one' : 'all';
   const [tab, setTab] = useState('view'); // 'view' | 'chat'
   const [transcript, setTranscript] = useState(null);
   const [loadingFile, setLoadingFile] = useState(false);
@@ -76,7 +83,6 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   const [chatInput, setChatInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [authNeeded, setAuthNeeded] = useState(false);
-  const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
   const [stats, setStats] = useState({}); // id -> { costUsd, costSource, inputTokens, ... }
   const [loadErr, setLoadErr] = useState(null);
@@ -88,7 +94,19 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // and in the e2e sandbox, actually queried — the wrong root).
   const [root, setRoot] = useState(null);
   const [picking, setPicking] = useState(false);
-  const [tool, setTool] = useState('all'); // 'all' | 'claude' | 'codex' — filter the merged list
+  const [toolParam, setTool] = useQueryState('tool', 'all'); // 'all' | 'claude' | 'codex' — filter the merged list
+  const tool = TOOLS.has(toolParam) ? toolParam : 'all';
+  // ?project=&session=(&source=) is the transcript to open — the replacement for
+  // the openTx prop AppShell used to drill in. `source` is load-bearing: the
+  // daemon only takes its Codex branch when it is 'codex'.
+  const [txProject] = useQueryState('project');
+  const [txSession] = useQueryState('session');
+  const [txSource] = useQueryState('source');
+  const openSession = useMemo(
+    () => (txProject && txSession ? { project: txProject, id: txSession, ...(txSource ? { source: txSource } : null) } : null),
+    [txProject, txSession, txSource],
+  );
+  const updateQuery = useUpdateQuery();
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
 
@@ -97,17 +115,19 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // the request settles either way, so a failed fetch still ends in a usable
   // (if possibly wrong-for-this-user) state rather than stalling forever.
   useEffect(() => {
-    fetch('/sessions/root').then((r) => r.json()).then((d) => setRoot(d.root || DEFAULT_ROOT)).catch(() => setRoot(DEFAULT_ROOT));
+    fetch('/api/transcripts/root').then((r) => r.json()).then((d) => setRoot(d.root || DEFAULT_ROOT)).catch(() => setRoot(DEFAULT_ROOT));
   }, []);
 
   // Poll the session list only while the Sessions view is active — avoids
   // background fetches when the panel is mounted-but-hidden behind another view.
   // Also waits for root to resolve (non-null) so this never lists against a guess.
+  // 15s (was 5s) + skip while the tab is hidden: a 5s full-corpus refetch is
+  // wasteful when nobody is looking, and a backgrounded tab would hammer the API.
   useEffect(() => {
     if (!active || root == null) return;
-    const load = () => fetch(`/sessions?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.'));
+    const load = () => { if (document.hidden) return; fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.')); };
     load();
-    const iv = setInterval(load, 5000);
+    const iv = setInterval(load, 15000);
     return () => clearInterval(iv);
   }, [root, active]);
 
@@ -116,7 +136,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   const searchAll = useCallback((query) => {
     if (!query.trim()) { setMatches(null); setCapped(false); return; }
     if (root == null) return; // root not resolved yet — don't guess
-    fetch(`/sessions/search?q=${encodeURIComponent(query.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/transcripts/search?q=${encodeURIComponent(query.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setMatches(d.results || []); setCapped(!!d.capped);
     });
   }, [root]);
@@ -127,27 +147,45 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
     // ponytail: codex cost notional, wire stats when needed
     const list = (items || []).filter((it) => it?.project && it?.id && it.source !== 'codex').map((it) => ({ project: it.project, id: it.id }));
     if (!list.length || root == null) return; // root not resolved yet — don't guess
-    fetch('/sessions/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list, root: untildify(root) }) })
+    fetch('/api/transcripts/stats', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ items: list, root: untildify(root) }) })
       .then((r) => r.json()).then((d) => setStats((prev) => ({ ...prev, ...(d.stats || {}) }))).catch(() => {});
   }, [root]);
 
   const open = (item) => {
     if (item.project === sel?.project && item.id === sel?.id) return;
-    setSel(item); setMatches(null); setQ(''); setLoadErr(null);
+    setSel(item); setMatches(null); setLoadErr(null);
+    // The open transcript IS the URL — a click has to be as shareable as a deep
+    // link, and has to survive a reload. Clearing `q` rides the same patch: two
+    // setSearchParams in one tick both read the same snapshot, so the first
+    // write would be lost.
+    updateQuery({ q: null, project: item.project, session: item.id, source: item.source || null });
     loadStats([item]); // ensure detail-header stats even when opened from search
     setLoadingFile(true);
     const src = item.source === 'codex' ? `&source=codex${item.file ? `&file=${encodeURIComponent(item.file)}` : ''}` : '';
-    fetch(`/session?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}&root=${encodeURIComponent(untildify(root))}${src}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/transcript?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}&root=${encodeURIComponent(untildify(root))}${src}`).then((r) => r.json()).then((d) => {
       setTranscript(d.ok ? d : null);
     }).catch(() => { setTranscript(null); setLoadErr('Failed to load transcript.'); }).finally(() => setLoadingFile(false));
   };
 
-  useEffect(() => { if (openSession) open(openSession); /* eslint-disable-line */ }, [openSession]);
+  // A URL-derived transcript is present on FIRST mount, so this races the async
+  // `root` fetch that `open()` interpolates — bail until it resolves and re-run
+  // (the same bail-and-rerun the effects above use). A click-path open lands here
+  // long after root settled, and `open()` no-ops when the item is already `sel`.
+  // The list row, when it is loaded, carries title/cwd/mtime the URL doesn't.
+  useEffect(() => {
+    if (!openSession || root == null) return;
+    const row = sessions.find((s) => s.project === openSession.project && s.id === openSession.id);
+    open(row ? { ...row, ...openSession } : openSession); // eslint-disable-line react-hooks/set-state-in-effect
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSession, root, sessions]);
 
   const pickRoot = (p) => {
     setRoot(p); setPicking(false);
-    setSel(null); setTranscript(null); setMatches(null); setQ(''); setPage(1);
-    fetch('/sessions/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
+    // Drop the open transcript from the URL too — it belongs to the old root,
+    // and leaving it there would have the effect below re-open it immediately.
+    setSel(null); setTranscript(null); setMatches(null); setPage(1);
+    updateQuery({ q: null, project: null, session: null, source: null });
+    fetch('/api/transcripts/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
   };
 
   // Chat: stream deltas from the WS into the last assistant message.
@@ -221,19 +259,9 @@ export default function SessionHistory({ active, sendMsg, registerChat, openSess
   // search results). Scope 'one' search filters the right view, not this list.
   const filteredSessions = sessions.filter((s) => tool === 'all' || (s.source || 'claude') === tool);
   const leftList = leftResults ?? filteredSessions;
-  const pageCount = Math.max(1, Math.ceil(leftList.length / pageSize));
-  const curPage = Math.min(page, pageCount);
-  const pageItems = leftList.slice((curPage - 1) * pageSize, curPage * pageSize);
-  // Jump back to page 1 whenever the search/scope/page-size changes the list
-  // being paginated. Compared against previous values during render rather
-  // than an effect (curPage's Math.min already clamps out-of-range pages, but
-  // a fresh query/scope should start back at page 1, not wherever it was).
-  const [prevPageKey, setPrevPageKey] = useState(`${q}:${scope}:${pageSize}:${tool}`);
-  const pageKeyNow = `${q}:${scope}:${pageSize}:${tool}`;
-  if (pageKeyNow !== prevPageKey) {
-    setPrevPageKey(pageKeyNow);
-    setPage(1);
-  }
+  // Jumps back to page 1 whenever the search/scope/page-size changes the list
+  // being paginated — see usePagedList for the reset-during-render mechanics.
+  const { page: curPage, pageCount, pageItems, setPage } = usePagedList(leftList, pageSize, `${q}:${scope}:${pageSize}:${tool}`);
   // Fetch cost/tokens for the visible session rows (not the per-match search rows).
   const pageKey = pageItems.map((s) => s.id).join(',');
   useEffect(() => { if (!leftResults) loadStats(pageItems); /* eslint-disable-line */ }, [pageKey, leftResults, loadStats]);

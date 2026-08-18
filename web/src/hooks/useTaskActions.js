@@ -13,9 +13,9 @@ export function useTaskActions(onError) {
     const report = (p) => p.then((r) => r.json()).then((d) => { if (!d.ok) onError(d.error); }).catch((e) => onError(e.message));
     const json = (body) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
     return {
-      moveTask: (id, column) => report(fetch(`/tasks/${id}/status`, json({ column }))),
-      concludeTask: (id, outcome) => report(fetch(`/tasks/${id}/conclude`, json({ outcome }))),
-      deleteHistory: (id) => report(fetch(`/tasks/history/${id}`, { method: 'DELETE' })),
+      moveTask: (id, column) => report(fetch(`/api/tasks/${id}/status`, json({ column }))),
+      concludeTask: (id, outcome) => report(fetch(`/api/tasks/${id}/conclude`, json({ outcome }))),
+      deleteHistory: (id) => report(fetch(`/api/tasks/history/${id}`, { method: 'DELETE' })),
     };
   }, [onError]);
 }

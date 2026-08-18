@@ -70,42 +70,42 @@ test('findConfigRoots finds nested dirs holding .codex/config.toml, skips others
   assert.deepEqual(roots, [join(root, 'nested', 'a'), join(root, 'nested', 'b', 'deep')]);
 });
 
-test('writeConfig valid TOML writes + backup', () => {
+test('writeConfig valid TOML writes + backup', async () => {
   const cwd = makeRoot('model = "x"\n');
   setConfigRoots([cwd]); // writeConfig requires isKnownConfigRoot(cwd)
-  const r = writeConfig(cwd, 'project', 'model = "y"\n');
+  const r = await writeConfig(cwd, 'project', 'model = "y"\n');
   assert.equal(r.ok, true);
   assert.equal(r.path, join(cwd, '.codex', 'config.toml'));
   assert.equal(readFileSync(join(cwd, '.codex', 'config.toml'), 'utf8'), 'model = "y"\n');
   assert.equal(existsSync(r.backup), true);
 });
 
-test('writeConfig invalid TOML returns ok:false and does not write', () => {
+test('writeConfig invalid TOML returns ok:false and does not write', async () => {
   const cwd = makeRoot('model = "x"\n');
   setConfigRoots([cwd]);
   const orig = readFileSync(join(cwd, '.codex', 'config.toml'), 'utf8');
-  const r = writeConfig(cwd, 'project', 'model = "unterminated\n');
+  const r = await writeConfig(cwd, 'project', 'model = "unterminated\n');
   assert.equal(r.ok, false);
   assert.match(r.error, /TOML/);
   assert.equal(readFileSync(join(cwd, '.codex', 'config.toml'), 'utf8'), orig);
 });
 
-test('writeConfig rejects cwd outside config roots', () => {
+test('writeConfig rejects cwd outside config roots', async () => {
   const cwd = makeRoot('model = "x"\n');
   setConfigRoots([mkdtempSync(join(tmpdir(), 'sing-other-'))]); // a different root
-  const r = writeConfig(cwd, 'project', 'model = "y"\n');
+  const r = await writeConfig(cwd, 'project', 'model = "y"\n');
   assert.equal(r.ok, false);
   assert.match(r.error, /outside config roots/);
 });
 
-test('writeConfig enforces cwd<->scope invariant', () => {
+test('writeConfig enforces cwd<->scope invariant', async () => {
   const cwd = makeRoot('model = "x"\n');
   setConfigRoots([cwd]);
   // user scope requires cwd ~ (home); a project cwd is not home.
-  assert.equal(writeConfig(cwd, 'user', 'model = "y"\n').ok, false);
+  assert.equal((await writeConfig(cwd, 'user', 'model = "y"\n')).ok, false);
   // project scope requires a non-home cwd; home (untildified ~) is home.
   setConfigRoots(['~']);
-  const rp = writeConfig(homedir(), 'project', 'model = "y"\n');
+  const rp = await writeConfig(homedir(), 'project', 'model = "y"\n');
   assert.equal(rp.ok, false);
   assert.match(rp.error, /non-home/);
 });
@@ -134,7 +134,7 @@ test('readConfig reports mtime on existing scopes', () => {
   assert.ok(cfg.project.mtime > 0);
 });
 
-test('writeConfig rejects a stale mtime with "changed on disk"; force overrides', () => {
+test('writeConfig rejects a stale mtime with "changed on disk"; force overrides', async () => {
   const cwd = makeRoot('model = "x"\n');
   setConfigRoots([cwd]);
   const p = join(cwd, '.codex', 'config.toml');
@@ -143,12 +143,12 @@ test('writeConfig rejects a stale mtime with "changed on disk"; force overrides'
   writeFileSync(p, 'model = "ext"\n');
   const future = (Date.now() + 5000) / 1000;
   utimesSync(p, future, future);
-  const rejected = writeConfig(cwd, 'project', 'model = "y"\n', stale);
+  const rejected = await writeConfig(cwd, 'project', 'model = "y"\n', stale);
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error, 'changed on disk');
   assert.equal(readFileSync(p, 'utf8'), 'model = "ext"\n'); // untouched
   // force overrides the drift.
-  const forced = writeConfig(cwd, 'project', 'model = "forced"\n', stale, true);
+  const forced = await writeConfig(cwd, 'project', 'model = "forced"\n', stale, true);
   assert.equal(forced.ok, true);
   assert.equal(typeof forced.mtime, 'number');
   assert.equal(readFileSync(p, 'utf8'), 'model = "forced"\n');

@@ -57,7 +57,7 @@ export default function WikiGraph({ root, wiki, selected, onOpenPage }) {
   useEffect(() => {
     let cy;
     let cancelled = false;
-    fetch(`/wiki/graph?root=${encodeURIComponent(untildify(root))}&wiki=${encodeURIComponent(wiki)}`)
+    fetch(`/api/wiki/graph?root=${encodeURIComponent(untildify(root))}&wiki=${encodeURIComponent(wiki)}`)
       .then((r) => r.json()).then((d) => {
         if (cancelled) return;
         if (d.error) { setState({ loading: false, error: d.error, empty: false }); return; }

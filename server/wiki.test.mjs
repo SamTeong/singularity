@@ -2,14 +2,14 @@
 // boundary. Run: npm test  (node --test server/)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
 
 // wiki.mjs imports app-dir.mjs (STATE_DIR), which throws without SINGULARITY_HOME.
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
-const { isWikiPath, getWikiRoot, setWikiRoot } = await import('./wiki.mjs');
+const { isWikiPath, readWikiFile, getWikiRoot, setWikiRoot } = await import('./wiki.mjs');
 
 const ROOT = join(homedir(), 'wiki');
 const w = (...parts) => join(ROOT, ...parts);
@@ -28,6 +28,16 @@ test('rejects non-.md, outside root, escapes, and empty', () => {
   assert.equal(isWikiPath('', ROOT), false);
   assert.equal(isWikiPath(null, ROOT), false);
   assert.equal(isWikiPath(w('a.md'), null), false); // no root
+});
+
+// isWikiPath must accept only the server-persisted root — a caller-invented
+// root (e.g. the drive root) trivially "contains" any path, so it must not
+// be enough to pass the guard on its own.
+test('rejects a caller-supplied root that is not the persisted one, even the drive root', () => {
+  const driveRoot = ROOT.slice(0, ROOT.indexOf(sep) + 1) || sep; // e.g. "C:\" or "/"
+  const evil = join(homedir(), 'secret.md'); // shape-valid (.md), just outside ROOT
+  assert.equal(isWikiPath(evil, driveRoot), false);
+  assert.equal(readWikiFile(evil, driveRoot).ok, false);
 });
 
 test('wiki root persists to FS: default, roundtrip, bad input', () => {

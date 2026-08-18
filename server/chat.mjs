@@ -17,6 +17,13 @@ const IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 2048;
 const ALL_CAP = 60000;   // scope 'all' context cap (chars)
+// Ceiling on the outbound Messages API call — an unbounded fetch (a hung TLS
+// handshake is the classic case) must never block forever: history.mjs awaits
+// callMessages inside ensureHistory's single-flight promise, which only clears
+// in a .finally(), so a fetch that never settles wedges History until restart.
+// Deliberately far above any real latency — the signal aborts the streamed body
+// too, so a tighter bound would cut a legitimately long answer mid-stream.
+const FETCH_TIMEOUT_MS = 120_000;
 
 // Shared between the streaming session-chat path (streamChat) and the plain
 // batched path (callMessages, used by history.mjs's day summarizer).
@@ -104,7 +111,9 @@ export async function streamChat({ chatId, question, scope = 'one', project, id,
   try {
     resp = await fetch(MESSAGES_URL, {
       method: 'POST',
-      signal,
+      // Combine the caller's cancel signal (new chat supersedes this one) with a
+      // hard ceiling, so a stalled connection or stream can't wedge forever.
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: messagesHeaders(oauth.accessToken),
       body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system, messages, stream: true }),
     });
@@ -146,6 +155,7 @@ export async function callMessages({ system, messages, maxTokens = 1024 }) {
   try {
     resp = await fetch(MESSAGES_URL, {
       method: 'POST',
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: messagesHeaders(oauth.accessToken),
       body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system: `${IDENTITY}\n\n${system}`, messages, stream: false }),
     });

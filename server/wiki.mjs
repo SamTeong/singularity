@@ -7,6 +7,7 @@ import { readdir, readFile, stat } from 'node:fs/promises';
 import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
+import { norm, contains } from './path-containment.mjs';
 
 // Wiki root choice, FS-persisted (survives browser cache clear). Single value —
 // the root holds one dir per wiki. Defaults to ~/wiki.
@@ -78,13 +79,17 @@ async function walk(wikiRoot, dir, out) {
 }
 
 // Path guard: must resolve to <root>/<...>.md, no escape via .. or symlink abs.
-// root may arrive in ~ form — expand it the same way resolveRoot does.
+// root may arrive in ~ form — expand it the same way resolveRoot does. root
+// must equal the server-persisted wiki root (getWikiRoot): trusting whatever
+// root the caller/request supplies would let it invent a root that trivially
+// "contains" any path, defeating containment (path-traversal via ?root=).
 export function isWikiPath(p, root) {
   if (!p || !root) return false;
   const abs = resolve(p);
   const r = resolveRoot(root);
-  if (!r) return false;
-  if (abs !== r && !abs.startsWith(r + sep)) return false;
+  const persisted = resolveRoot(getWikiRoot());
+  if (!r || !persisted || norm(r) !== norm(persisted)) return false;
+  if (!contains(r, abs)) return false;
   return abs.toLowerCase().endsWith('.md');
 }
 

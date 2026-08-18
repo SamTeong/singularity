@@ -3,7 +3,8 @@
 // the task's own agent (curl, prompt-instructed) or by a UI drag. Emits
 // 'tasks' on the shared agents bus; pty-ws fans it out.
 import { randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
+import { promisify } from 'node:util';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -30,12 +31,15 @@ const STATES = {
   done: ['complete', 'report ready'],
 };
 const OVERLAY_STATES = ['rate-limited'];
-const PORT = Number(process.env.PORT);
+// Same var index.mjs listens on — the prompts below embed it in the status-curl
+// URL every task agent posts to, so a mismatch here is a silent NaN port.
+const PORT = Number(process.env.DAEMON_PORT);
 const MAX_REVIEW_REJECTS = 3;
 const RETENTION_MS = 7 * 24 * 3600 * 1000; // Done cards auto-conclude to history after this long.
 export const RATE_LIMIT_RE = /reached your session usage limit|Request rejected \(429\)/;
 
 const tasks = new Map(); // id -> task record (plain object, see plan/data model)
+const taskBySession = new Map(); // sessionId -> taskId: reverse index so the output-listener rate-limit scan is O(1), not a linear find over all tasks per PTY chunk. Set where a task's sessionId is assigned (createTask), dropped where the session leaves the board for good (done-transition, conclude).
 let history = []; // concluded tasks: task fields + outcome, concludedAt, finalStats
 let logger = null;
 // Rolling output tail per session id, for rate-limit detection (see initTasks).
@@ -43,12 +47,42 @@ let logger = null;
 // conclude) so this never grows across a daemon's lifetime.
 const tails = new Map();
 
-function git(repo, ...args) {
-  return execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+const execFileP = promisify(execFile);
+// Hard timeout + non-interactive flags on every git call: this runs on the
+// request path (route handlers, awaited below), and a hung subprocess — a
+// credential-helper prompt is the classic case — must never block forever.
+// GIT_TERMINAL_PROMPT/GIT_ASKPASS/core.askpass cover *nix-style prompts;
+// GCM_INTERACTIVE is Windows Git Credential Manager, what this machine uses.
+// Overridable via SING_GIT_TIMEOUT_MS for tests that need a short bound.
+const GIT_TIMEOUT_MS = Number(process.env.SING_GIT_TIMEOUT_MS) || 10_000;
+const GIT_OPTS = {
+  encoding: 'utf8', timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL',
+  env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: 'echo' },
+};
+
+// Async — used by every request-path caller so a slow/hung git process can't
+// block the event loop (and freeze live PTY agents + WS clients).
+export async function git(repo, ...args) {
+  try {
+    return (await execFileP('git', ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS)).stdout.trim();
+  } catch (e) {
+    throw new Error(`git ${args.join(' ')} failed: ${e.message}`, { cause: e });
+  }
+}
+
+// Sync variant, for createTask only: its callers (the POST /tasks route,
+// background.mjs) call it un-awaited, so it can't become async without
+// changing those call sites. Same timeout/non-interactive guards as git().
+export function gitSync(repo, ...args) {
+  try {
+    return execFileSync('git', ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS).trim();
+  } catch (e) {
+    throw new Error(`git ${args.join(' ')} failed: ${e.message}`, { cause: e });
+  }
 }
 
 function isGitWorkTree(repo) {
-  try { return git(repo, 'rev-parse', '--is-inside-work-tree') === 'true'; }
+  try { return gitSync(repo, 'rev-parse', '--is-inside-work-tree') === 'true'; }
   catch { return false; }
 }
 
@@ -73,15 +107,15 @@ function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 export async function cleanupGitTask(t) {
   if (t.kind === 'plain') return;
   if (existsSync(t.worktree)) {
-    try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
+    try { await git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
     catch (e) {
       logger?.warn({ err: e.message }, 'worktree remove failed — retrying once');
       await sleep(1000);
-      try { git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
+      try { await git(t.repo, 'worktree', 'remove', '--force', t.worktree); }
       catch (e2) { logger?.warn({ err: e2.message }, 'worktree remove retry failed (already gone?)'); }
     }
   }
-  try { git(t.repo, 'branch', '-d', t.branch); }
+  try { await git(t.repo, 'branch', '-d', t.branch); }
   catch { /* unmerged — keep the branch */ }
 }
 
@@ -89,13 +123,13 @@ export async function cleanupGitTask(t) {
 // moved back). Reuse the branch if it still exists (unmerged work kept), else
 // branch fresh off the current base — a clean slate on top of the merged work.
 // No-op if the worktree is already present.
-export function ensureWorktree(t) {
+export async function ensureWorktree(t) {
   if (t.kind === 'plain' || existsSync(t.worktree)) return;
   mkdirSync(WORKTREE_ROOT, { recursive: true });
   let branchExists = true;
-  try { git(t.repo, 'rev-parse', '--verify', `refs/heads/${t.branch}`); } catch { branchExists = false; }
-  if (branchExists) git(t.repo, 'worktree', 'add', t.worktree, t.branch);
-  else git(t.repo, 'worktree', 'add', t.worktree, '-b', t.branch, t.baseBranch);
+  try { await git(t.repo, 'rev-parse', '--verify', `refs/heads/${t.branch}`); } catch { branchExists = false; }
+  if (branchExists) await git(t.repo, 'worktree', 'add', t.worktree, t.branch);
+  else await git(t.repo, 'worktree', 'add', t.worktree, '-b', t.branch, t.baseBranch);
 }
 
 // Caveman plugin (user scope) ships compressed cavecrew subagents — usable from
@@ -125,6 +159,7 @@ export function initTasks(log) {
     if (existsSync(TASKS_FILE)) {
       const data = JSON.parse(readFileSync(TASKS_FILE, 'utf8'));
       for (const t of data.tasks || []) tasks.set(t.id, t);
+      for (const t of tasks.values()) if (t.sessionId) taskBySession.set(t.sessionId, t.id);
       history = data.history || []; // old tasks.json shape { tasks } has no history — defaults []
       log?.info({ tasks: tasks.size, history: history.length }, 'loaded tasks.json');
     }
@@ -143,12 +178,13 @@ export function initTasks(log) {
   setInterval(sweepRetention, 3600_000).unref();
   // Ollama 429s surface only in the pty stream — flag the card so it doesn't
   // sit looking idle. Rolling tail absorbs chunk splits.
-  reg.bus.on('output', ({ id, data }) => {
-    const t = [...tasks.values()].find((x) => x.sessionId === id && x.column !== 'done');
-    if (!t || t.state === 'rate-limited') return;
+  reg.bus.on('output', async ({ id, data }) => {
+    const tid = taskBySession.get(id);
+    const t = tid ? tasks.get(tid) : null;
+    if (!t || t.column === 'done' || t.state === 'rate-limited') return;
     const tail = ((tails.get(id) || '') + data).slice(-400);
     tails.set(id, tail);
-    if (RATE_LIMIT_RE.test(tail)) updateTask(t.id, { state: 'rate-limited' });
+    if (RATE_LIMIT_RE.test(tail)) await updateTask(t.id, { state: 'rate-limited' }).catch((e) => logger?.warn({ err: e.message, id }, 'rate-limit update failed'));
   });
 }
 
@@ -161,7 +197,7 @@ export function snapshotTasks() { return { tasks: [...tasks.values()], history }
 export function buildCodexTaskPrompt(t) {
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
-    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+    `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   const cwd = t.worktree || t.repo;
   const gitLine = t.kind === 'git'
     ? `\n- You are in a git worktree on branch ${t.branch}. ${t.mergeMode === 'auto' ? `After review, merge ${t.branch} into ${t.baseBranch} (git -C "${t.repo}" merge ${t.branch}); abort if it conflicts.` : `Leave the branch for the user to merge — do NOT merge or push.`}`
@@ -197,7 +233,7 @@ export function buildCodexBackgroundPrompt(t) {
   const cwd = t.worktree || t.repo;
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
-    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+    `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   const lastStep = t.conclude === 'done'
     ? `As your LAST action, move the card to Done:
   ${status('done', 'report ready')}`
@@ -231,7 +267,7 @@ export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
   if (t.tool === 'codex' || isCodexModel(t.model)) return buildCodexTaskPrompt(t);
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
-    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+    `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   // Subagent model routing: an ollama model runs the whole fleet on that same
   // model (saves Claude budget); a claude model splits impl=sonnet, reviewer=opus.
   const ollama = !isClaudeModel(t.model);
@@ -369,7 +405,7 @@ export function buildBackgroundPrompt(t) {
   const cwd = t.worktree || t.repo;
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
-    `curl -s -X POST http://127.0.0.1:${PORT}/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
+    `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   // conclude 'done' trusts the report enough to auto-conclude the card; default
   // 'inreview' hands it to a human. The watchdog's budget-kill path always
   // forces inreview regardless of this setting (see background.mjs watchdog()).
@@ -411,11 +447,11 @@ export function createTask({ repo, title, description, model, implModel, reviewe
   const short = id.slice(0, 8);
   let baseBranch = null, branch = null, worktree = null, cwd = repo;
   if (kind === 'git') {
-    baseBranch = git(repo, 'rev-parse', '--abbrev-ref', 'HEAD');
+    baseBranch = gitSync(repo, 'rev-parse', '--abbrev-ref', 'HEAD');
     branch = `task/${short}`;
     worktree = join(WORKTREE_ROOT, short);
     mkdirSync(WORKTREE_ROOT, { recursive: true });
-    git(repo, 'worktree', 'add', worktree, '-b', branch);
+    gitSync(repo, 'worktree', 'add', worktree, '-b', branch);
     cwd = worktree;
   }
   // Everything from here on can fail (disk, spawn, ...) after `git worktree
@@ -449,12 +485,13 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     const prompt = mock ? undefined : (promptOverride ?? (background ? buildBackgroundPrompt(t) : buildTaskPrompt(t)));
     const agent = reg.create({ cwd, title: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs, mock, tool });
     t.sessionId = agent.id;
+    taskBySession.set(agent.id, id);
     tasks.set(id, t);
     persist();
     emitTasks();
     return t;
   } catch (e) {
-    if (kind === 'git') { try { git(repo, 'worktree', 'remove', '--force', worktree); git(repo, 'branch', '-D', branch); } catch {} }
+    if (kind === 'git') { try { gitSync(repo, 'worktree', 'remove', '--force', worktree); gitSync(repo, 'branch', '-D', branch); } catch {} }
     throw e;
   }
 }
@@ -489,6 +526,7 @@ async function updateTaskInner(id, { column, state }) {
       // Done ⟹ merged & terminal: drop the session (stops cost) and reclaim the
       // worktree + branch now. Wait for the pty to die first (Windows file locks).
       if (t.sessionId) {
+        taskBySession.delete(t.sessionId);
         const wasLive = reg.isLive(t.sessionId);
         reg.remove(t.sessionId);
         tails.delete(t.sessionId); // session leaving the board for good — stop tracking its rate-limit tail
@@ -497,7 +535,7 @@ async function updateTaskInner(id, { column, state }) {
       await cleanupGitTask(t);
     } else if (column !== 'done' && wasDone) {
       delete t.doneAt;
-      ensureWorktree(t); // moved back out of Done → give it a working tree again
+      await ensureWorktree(t); // moved back out of Done → give it a working tree again
     }
   }
   if (state !== undefined) {
@@ -517,10 +555,25 @@ async function updateTaskInner(id, { column, state }) {
 // with a stats snapshot. Replaces the old hard-delete for board cards:
 // 'abandoned' from any column, 'completed' when removing a Done card (or via
 // the retention sweep).
+// Routed through the same serialized() chain as updateTask: this mutates task
+// state across several `await`s (stats lookup, pty-death wait, worktree
+// removal). Two concurrent conclusions on the same id would otherwise
+// interleave — cleanupGitTask running twice, history getting a half-applied
+// snapshot. serialized() makes the second call wait for the first to fully
+// finish, then re-reads task state below and no-ops instead of double-cleaning.
 export async function concludeTask(id, outcome) {
+  return serialized(() => concludeTaskInner(id, outcome));
+}
+
+async function concludeTaskInner(id, outcome) {
   if (outcome !== 'completed' && outcome !== 'abandoned') throw new Error('bad outcome (expected completed|abandoned)');
   const t = tasks.get(id);
-  if (!t) throw new Error('no such task');
+  if (!t) {
+    // Already concluded by a call that ran earlier in this same chain — the
+    // first caller's result stands, so this is a no-op, not an error.
+    if (history.some((h) => h.id === id)) return;
+    throw new Error('no such task');
+  }
   const finalStats = t.sessionId ? (await statsFor([{ id: t.sessionId, cwd: t.worktree ?? t.repo }]))[t.sessionId] : null;
   const wasLive = reg.isLive(t.sessionId);
   if (wasLive) reg.kill(t.sessionId);
@@ -530,6 +583,7 @@ export async function concludeTask(id, outcome) {
   // `git worktree remove` fails and orphans the dir.
   for (let waited = 0; wasLive && reg.isLive(t.sessionId) && waited < 3000; waited += 200) await sleep(200);
   await cleanupGitTask(t);
+  if (t.sessionId) taskBySession.delete(t.sessionId);
   tasks.delete(id);
   history.push({ ...t, outcome, concludedAt: Date.now(), finalStats });
   persist();

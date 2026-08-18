@@ -28,6 +28,7 @@ import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import TabStrip from '@/features/explorer/TabStrip.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 import { tildify, untildify } from '@/lib/paths.js';
 
 // Config files under a root. Claude: project + local settings JSON. Codex: a
@@ -40,14 +41,14 @@ const CLAUDE_LEAVES = [
 ];
 const CODEX_LEAF_NAME = 'config.toml';
 const codexScope = (cwd) => (untildify(cwd) === untildify('~') ? 'user' : 'project');
-const toolBase = (tool) => (tool === 'codex' ? '/codex-config' : '/config');
+const toolBase = (tool) => (tool === 'codex' ? '/api/codex-config' : '/api/config');
 
 export default function ConfigEditor() {
   // Roots stay separate server-side (the isKnownConfigRoot security gate is
   // per-tool), but the rail shows the union and pick/remember touch both so
   // the user curates one set.
-  const claudeRoots = useRootList('/config', { initial: ['~'] });
-  const codexRoots = useRootList('/codex-config', { initial: ['~'] });
+  const claudeRoots = useRootList('/api/config', { initial: ['~'] });
+  const codexRoots = useRootList('/api/codex-config', { initial: ['~'] });
   const { keys } = useKeys();
   const { ensureSaved, dialogEl } = useDirtyGuard();
 
@@ -118,7 +119,7 @@ export default function ConfigEditor() {
   // Restore open tabs / autosave / expanded roots from /config/state.
   useEffect(() => {
     let cancelled = false;
-    fetch('/config/state').then((r) => r.json()).then(async ({ state }) => {
+    fetch('/api/config/state').then((r) => r.json()).then(async ({ state }) => {
       const st = state || {};
       setAutosave(!!st.autosave);
       const exp = Array.isArray(st.expanded) ? st.expanded : [];
@@ -148,7 +149,7 @@ export default function ConfigEditor() {
   useEffect(() => {
     if (!loadedRef.current) return;
     const id = setTimeout(() => {
-      fetch('/config/state', {
+      fetch('/api/config/state', {
         method: 'PUT', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           tabs: tabs.map((t) => ({ cwd: t.cwd, tool: t.tool, scope: t.scope, path: t.path })),
@@ -189,8 +190,8 @@ export default function ConfigEditor() {
     if (!term) return;
     const id = setTimeout(() => {
       Promise.all([
-        fetch('/config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: claudeRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
-        fetch('/codex-config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: codexRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
+        fetch('/api/config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: claudeRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
+        fetch('/api/codex-config/search', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ roots: codexRoots.roots, q: term }) }).then((r) => r.json()).catch(() => ({ results: [] })),
       ]).then(([c, x]) => {
         const list = [...(c.results || []).map((h) => ({ ...h, tool: 'claude' })), ...(x.results || []).map((h) => ({ ...h, tool: 'codex' }))];
         setResults({ term, list });
@@ -211,7 +212,7 @@ export default function ConfigEditor() {
       body: JSON.stringify({ cwd: tab.cwd, content: contentRef.current.get(path) ?? '', mtime: tab.mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return saveImpl(path, true);
+      if (confirmOverwrite()) return saveImpl(path, true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }

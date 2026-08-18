@@ -84,32 +84,32 @@ test('readSkillFile: flat resolves <root>/<skill>/<file>', () => {
   assert.equal(r.type, 'code');
 });
 
-test('writeSkill: round-trips raw content (frontmatter preserved)', () => {
-  const r = writeSkill(root, 'coding', 'noisy', '# rewritten\n\nnew body');
+test('writeSkill: round-trips raw content (frontmatter preserved)', async () => {
+  const r = await writeSkill(root, 'coding', 'noisy', '# rewritten\n\nnew body');
   assert.equal(r.ok, true);
   const back = readSkill(root, 'coding', 'noisy');
   assert.equal(back.ok, true);
   assert.equal(back.raw, '# rewritten\n\nnew body');
 });
 
-test('writeSkill: rejects bad names + non-string content', () => {
-  assert.equal(writeSkill(root, '..', 'x', 'y').ok, false);
-  assert.equal(writeSkill(root, 'coding', '..', 'y').ok, false);
-  assert.equal(writeSkill(root, 'coding', 'nope', null).ok, false, 'non-string content');
+test('writeSkill: rejects bad names + non-string content', async () => {
+  assert.equal((await writeSkill(root, '..', 'x', 'y')).ok, false);
+  assert.equal((await writeSkill(root, 'coding', '..', 'y')).ok, false);
+  assert.equal((await writeSkill(root, 'coding', 'nope', null)).ok, false, 'non-string content');
 });
 
-test('writeSkillFile: writes + round-trips a supporting file', () => {
-  const r = writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', "console.log('new')");
+test('writeSkillFile: writes + round-trips a supporting file', async () => {
+  const r = await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', "console.log('new')");
   assert.equal(r.ok, true);
   const back = readSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs');
   assert.equal(back.content, "console.log('new')");
 });
 
-test('writeSkillFile: rejects traversal, image edit, bad content', () => {
-  assert.equal(writeSkillFile(root, 'coding', 'freeze', '../SKILL.md', 'x').ok, false, 'traversal');
-  assert.equal(writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 42).ok, false, 'non-string content');
+test('writeSkillFile: rejects traversal, image edit, bad content', async () => {
+  assert.equal((await writeSkillFile(root, 'coding', 'freeze', '../SKILL.md', 'x')).ok, false, 'traversal');
+  assert.equal((await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 42)).ok, false, 'non-string content');
   // image ext → not editable
-  assert.equal(writeSkillFile(root, 'coding', 'freeze', 'a.png', 'x').ok, false, 'image not editable');
+  assert.equal((await writeSkillFile(root, 'coding', 'freeze', 'a.png', 'x')).ok, false, 'image not editable');
 });
 
 test('listSkills: flat — root is a .claude/skills dir, one scope', () => {
@@ -195,39 +195,39 @@ test('readSkill + readSkillFile report mtime as a number', () => {
   assert.ok(f.mtime > 0);
 });
 
-test('writeSkill rejects a stale mtime with "changed on disk"; force overrides', () => {
+test('writeSkill rejects a stale mtime with "changed on disk"; force overrides', async () => {
   const skillPath = join(root, 'coding', '.claude', 'skills', 'noisy', 'SKILL.md');
-  writeSkill(root, 'coding', 'noisy', 'v1');
+  await writeSkill(root, 'coding', 'noisy', 'v1');
   const stale = readSkill(root, 'coding', 'noisy').mtime;
   // Externally rewrite + bump mtime past the 1ms guard window.
   writeFileSync(skillPath, 'v-external');
   const future = (Date.now() + 5000) / 1000;
   utimesSync(skillPath, future, future);
-  const rejected = writeSkill(root, 'coding', 'noisy', 'v2', false, stale);
+  const rejected = await writeSkill(root, 'coding', 'noisy', 'v2', false, stale);
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error, 'changed on disk');
   assert.equal(readFileSync(skillPath, 'utf8'), 'v-external');
   // force overrides the drift.
-  const forced = writeSkill(root, 'coding', 'noisy', 'v-forced', false, stale, true);
+  const forced = await writeSkill(root, 'coding', 'noisy', 'v-forced', false, stale, true);
   assert.equal(forced.ok, true);
   assert.equal(typeof forced.mtime, 'number');
   assert.equal(readFileSync(skillPath, 'utf8'), 'v-forced');
 });
 
-test('writeSkillFile rejects a stale mtime with "changed on disk"; force overrides', () => {
+test('writeSkillFile rejects a stale mtime with "changed on disk"; force overrides', async () => {
   const fp = join(root, 'coding', '.claude', 'skills', 'freeze', 'scripts', 'run.mjs');
-  writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v1');
+  await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v1');
   const stale = readSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs').mtime;
   // Externally rewrite + bump mtime past the 1ms guard window.
   writeFileSync(fp, 'v-external');
   const future = (Date.now() + 5000) / 1000;
   utimesSync(fp, future, future);
-  const rejected = writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v2', false, stale);
+  const rejected = await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v2', false, stale);
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error, 'changed on disk');
   assert.equal(readFileSync(fp, 'utf8'), 'v-external');
   // force overrides the drift.
-  const forced = writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v-forced', false, stale, true);
+  const forced = await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v-forced', false, stale, true);
   assert.equal(forced.ok, true);
   assert.equal(typeof forced.mtime, 'number');
   assert.equal(readFileSync(fp, 'utf8'), 'v-forced');

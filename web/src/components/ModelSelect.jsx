@@ -45,7 +45,7 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
 
   useEffect(() => {
     let alive = true;
-    fetch('/models').then((r) => r.json()).then((d) => {
+    fetch('/api/models').then((r) => r.json()).then((d) => {
       if (!alive) return;
       const claude = (d.claude || []).map((m) => ({ label: m, group: 'claude' }));
       const ollama = ollamaUnavailable ? [] : (d.ollama || []).map((m) => ({ label: m, group: 'ollama' }));

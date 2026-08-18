@@ -6,9 +6,10 @@
 // is bad(p): must be a non-empty absolute path. Tildify/untildify is the
 // client's job (like DirPicker) — paths here are absolute only.
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, renameSync } from 'node:fs';
-import { readdir } from 'node:fs/promises';
+import { readdir, writeFile } from 'node:fs/promises';
 import { join, dirname, parse as parsePath, isAbsolute, extname } from 'node:path';
 import { STATE_DIR } from './app-dir.mjs';
+import { backupFile } from './backups.mjs';
 
 const ENTRY_CAP = 2000;
 const SEARCH_CAP = 300;
@@ -99,14 +100,20 @@ export function readEntry(path) {
 // mtime (the value the client got from readEntry) makes the save conditional:
 // if something else rewrote the file meanwhile, refuse instead of clobbering it
 // silently. The client re-sends with force after asking.
-export function writeEntry(path, content, mtime, force) {
+export async function writeEntry(path, content, mtime, force) {
   if (bad(path)) return { ok: false, error: 'bad path' };
   try {
     if (mtime != null && !force && existsSync(path) && Math.abs(statSync(path).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
     mkdirSync(dirname(path), { recursive: true });
-    writeFileSync(path, content);
+    await backupFile(path);
+    // Re-check: backupFile's await can yield to a concurrent save of this
+    // same path landing in between, which the first check (above) can't see.
+    if (mtime != null && !force && existsSync(path) && Math.abs(statSync(path).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    await writeFile(path, content);
     return { ok: true, mtime: statSync(path).mtimeMs };
   } catch (e) { return { ok: false, error: e.message }; }
 }

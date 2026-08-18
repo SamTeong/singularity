@@ -1,6 +1,7 @@
 // Transcribed from docs/one-shot/3d/sample-gitlab-3d-scan.html, source lines 695-710.
 import type { ChapterProps } from './types';
 import { useCopyCommand } from '../../deck';
+import { useConductor } from '../../state/appStore';
 
 // Source lines 702-704. Hoisted to a module constant (rather than inline JSX
 // text) so the exact three-line string is never re-transcribed: JSX would
@@ -20,6 +21,7 @@ const COPY_STATE_TEXT: Record<'idle' | 'copied' | 'blocked', string> = {
 
 export function Cta({ sectionRef }: ChapterProps) {
   const { status, copy } = useCopyCommand(INSTALL_COMMAND);
+  const conductor = useConductor();
 
   return (
     // className/id are constant literals and this section never receives a
@@ -33,7 +35,7 @@ export function Cta({ sectionRef }: ChapterProps) {
         <h2 className="display" id="boot-title">
           TAKE <span className="mint">CONTROL.</span>
         </h2>
-        <p className="cta-sub">FROM ONE TERMINAL TO ONE OPERATIONAL PICTURE.</p>
+        <p className="cta-sub">FROM ONE TERMINAL TO ONE CONTROL PLANE.</p>
         <div className="install">
           <div className="install-head">
             <span>BOOT SEQUENCE · FIRST RUN</span>
@@ -51,7 +53,21 @@ export function Cta({ sectionRef }: ChapterProps) {
           <a className="btn primary" href="https://github.com/SamTeong/singularity">
             OPEN REPOSITORY
           </a>
-          <a className="btn alt" href="#hero">
+          {/* This panel IS hit-testable (unlike the hero's — see Hud.tsx), so the
+              click lands here. Only the href is useless in 3D mode: #hero lives
+              in #css3d at position:fixed, so fragment navigation scrolls
+              nowhere. Keep it for the flat page, where conductor is null, and
+              hand 3D mode to the conductor instead. */}
+          <a
+            className="btn alt"
+            id="ctaReturn"
+            href="#hero"
+            onClick={(e) => {
+              if (!conductor) return;
+              e.preventDefault();
+              conductor.goTo(0);
+            }}
+          >
             RETURN TO ORIENTATION
           </a>
         </div>

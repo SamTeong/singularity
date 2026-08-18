@@ -22,7 +22,7 @@ export default function DirPicker({ start, onPick, onClose }) {
   const [err, setErr] = useState(null);
 
   const load = (p) => {
-    fetch(`/fs/browse?path=${encodeURIComponent(p)}`)
+    fetch(`/api/fs/browse?path=${encodeURIComponent(p)}`)
       .then(async (r) => {
         const ct = r.headers.get('content-type') || '';
         if (!ct.includes('application/json')) throw new Error(`Can't reach the app (error ${r.status})`);

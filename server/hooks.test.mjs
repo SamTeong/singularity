@@ -35,19 +35,19 @@ test('searchHooks returns matching line + snippet', () => {
   assert.deepEqual(searchHooks([cwd], ''), []); // empty query → nothing
 });
 
-test('writeHook writes a backup on second write; guard rejects non-hooks path', () => {
+test('writeHook writes a backup on second write; guard rejects non-hooks path', async () => {
   const cwd = makeRoot({ 'w.mjs': 'v1' });
   setHookRoots(['~', cwd]); // register cwd so guard's root-containment check allows it
   try {
     const p = join(cwd, '.claude', 'hooks', 'w.mjs');
-    const first = writeHook(p, 'v2');
+    const first = await writeHook(p, 'v2');
     assert.equal(first.ok, true);
     assert.equal(existsSync(first.backup), true);
-    const second = writeHook(p, 'v3');
+    const second = await writeHook(p, 'v3');
     assert.equal(second.ok, true);
     assert.equal(existsSync(second.backup), true);
     // Guard: a path outside .claude/hooks is rejected.
-    const bad = writeHook(join(cwd, 'evil.txt'), 'x');
+    const bad = await writeHook(join(cwd, 'evil.txt'), 'x');
     assert.equal(bad.ok, false);
     assert.match(bad.error, /bad path/);
   } finally {
@@ -72,13 +72,13 @@ test('readHook reads back real hook content; missing file → exists:false', () 
   }
 });
 
-test('guard rejects a hooks-shaped path outside any configured hook root', () => {
+test('guard rejects a hooks-shaped path outside any configured hook root', async () => {
   const registered = makeRoot({ 'ok.mjs': 'v1' });
   const outside = makeRoot({ 'sneaky.mjs': 'v1' }); // valid .claude/hooks/ shape, but never registered
   setHookRoots(['~', registered]);
   try {
     const p = join(outside, '.claude', 'hooks', 'sneaky.mjs');
-    const w = writeHook(p, 'pwned');
+    const w = await writeHook(p, 'pwned');
     assert.equal(w.ok, false);
     assert.match(w.error, /bad path/);
     assert.equal(readFileSync(p, 'utf8'), 'v1'); // untouched
@@ -90,13 +90,13 @@ test('guard rejects a hooks-shaped path outside any configured hook root', () =>
   }
 });
 
-test('guard rejects traversal that climbs out of .claude/hooks (resolved, not raw)', () => {
+test('guard rejects traversal that climbs out of .claude/hooks (resolved, not raw)', async () => {
   const cwd = makeRoot({ 'w.mjs': 'v1' });
   const hooksDir = join(cwd, '.claude', 'hooks');
   // Raw string: contains the segment but climbs out via `..`. Built by hand (not
   // path.join, which would normalize `..` away and mask the bug).
   const evil = `${hooksDir}${sep}..${sep}..${sep}escape.txt`;
-  const w = writeHook(evil, 'x');
+  const w = await writeHook(evil, 'x');
   assert.equal(w.ok, false);
   assert.match(w.error, /bad path/);
   assert.equal(existsSync(join(cwd, 'escape.txt')), false); // nothing written outside
@@ -133,13 +133,13 @@ test('readHook returns mtime as a number', () => {
   }
 });
 
-test('writeHook rejects a stale mtime with "changed on disk"; force overrides', () => {
+test('writeHook rejects a stale mtime with "changed on disk"; force overrides', async () => {
   const cwd = makeRoot({ 'g.mjs': 'v1' });
   setHookRoots(['~', cwd]);
   try {
     const p = join(cwd, '.claude', 'hooks', 'g.mjs');
     // First write establishes a baseline mtime.
-    writeHook(p, 'v2');
+    await writeHook(p, 'v2');
     const r = readHook(p);
     const stale = r.mtime;
     // Externally rewrite the file + bump mtime well past the 1ms guard window.
@@ -147,12 +147,12 @@ test('writeHook rejects a stale mtime with "changed on disk"; force overrides', 
     const future = (Date.now() + 5000) / 1000;
     utimesSync(p, future, future);
     // Stale mtime → refused, file untouched, no backup made.
-    const rejected = writeHook(p, 'v3', stale);
+    const rejected = await writeHook(p, 'v3', stale);
     assert.equal(rejected.ok, false);
     assert.equal(rejected.error, 'changed on disk');
     assert.equal(readFileSync(p, 'utf8'), 'v-external');
     // force:true overwrites despite the drift.
-    const forced = writeHook(p, 'v-forced', stale, true);
+    const forced = await writeHook(p, 'v-forced', stale, true);
     assert.equal(forced.ok, true);
     assert.equal(typeof forced.mtime, 'number');
     assert.equal(readFileSync(p, 'utf8'), 'v-forced');

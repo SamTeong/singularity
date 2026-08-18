@@ -49,10 +49,11 @@
     "mermaid": "^11.16.1",
     "node-pty": "^1.1.0",
     "phosphor-console-theme": "file:vendor\\phosphor-console-theme-0.1.0.tgz",
-    "playwright-core": "^1.62.1",
+    "playwright-core": "1.61.1",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-markdown": "^10.1.0",
+    "react-router-dom": "^7.18.2",
     "remark-gfm": "^4.0.1",
     "ws": "^8.21.2"
   },

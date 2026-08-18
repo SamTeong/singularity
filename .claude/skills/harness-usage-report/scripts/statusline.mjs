@@ -173,6 +173,7 @@ const p2 = [dirDisplay];
 if (worktree) p2.push(worktree);
 p2.push(gitStr);
 if (scopes.length) p2.push(scopes.join(","));
+if (sid) p2.push(sid);
 const line2 = p2.join(" | ");
 
 process.stdout.write(line1 + "\n" + line2);

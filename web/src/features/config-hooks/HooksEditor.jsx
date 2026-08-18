@@ -26,6 +26,7 @@ import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
+import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
 // Language extension per file extension: JS family → javascript(), .json → json(),
 // everything else (.ps1/.sh/…) → plain (no lang extension).
@@ -37,7 +38,7 @@ function langFor(path) {
 }
 
 export default function HooksEditor() {
-  const { roots, remember, forget } = useRootList('/hooks', { initial: ['~'] });
+  const { roots, remember, forget } = useRootList('/api/hooks', { initial: ['~'] });
   const [picking, setPicking] = useState(false);
   const [groups, setGroups] = useState([]); // [{ cwd, files:[{path,rel,name}] }]
   const [path, setPath] = useState(null); // selected file path
@@ -53,7 +54,7 @@ export default function HooksEditor() {
 
   // Fetch grouped hook files whenever the root list changes.
   useEffect(() => {
-    fetch('/hooks/list', {
+    fetch('/api/hooks/list', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ roots: roots.map(untildify) }),
     }).then((r) => r.json()).then((d) => setGroups(d.groups || [])).catch(() => setGroups([]));
@@ -94,7 +95,7 @@ export default function HooksEditor() {
 
   const loadFile = async (p) => {
     if (!await ensureSaved({ dirty, save })) return;
-    fetch(`/hooks/file?path=${encodeURIComponent(p)}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/hooks/file?path=${encodeURIComponent(p)}`).then((r) => r.json()).then((d) => {
       setPath(p);
       setContent(d.content ?? '');
       setMtime(d.mtime ?? null);
@@ -109,7 +110,7 @@ export default function HooksEditor() {
     const term = q.trim();
     if (!term) return;
     const id = setTimeout(() => {
-      fetch('/hooks/search', {
+      fetch('/api/hooks/search', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ roots: roots.map(untildify), q: term }),
       }).then((r) => r.json()).then((d) => setResults(d.results || [])).catch(() => setResults([]));
@@ -129,12 +130,12 @@ export default function HooksEditor() {
   const toggleAll = () => setCollapsed(allOpen ? new Set(groupKeys) : new Set());
 
   const save = async (force = false) => {
-    const r = await fetch('/hooks/file', {
+    const r = await fetch('/api/hooks/file', {
       method: 'PUT', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path, content, mtime, force }),
     }).then((x) => x.json()).catch((e) => ({ ok: false, error: String(e) }));
     if (r.error === 'changed on disk') {
-      if (window.confirm('This file changed on disk since it was opened. Overwrite it?')) return save(true);
+      if (confirmOverwrite()) return save(true);
       setMsg({ sev: 'error', text: 'Not saved — file changed on disk' });
       return;
     }
@@ -147,7 +148,7 @@ export default function HooksEditor() {
     mtime,
     dirty,
     refetch: async () => {
-      const d = await fetch(`/hooks/file?path=${encodeURIComponent(path)}`).then((r) => r.json()).catch(() => ({ ok: false }));
+      const d = await fetch(`/api/hooks/file?path=${encodeURIComponent(path)}`).then((r) => r.json()).catch(() => ({ ok: false }));
       return { ok: !!d.ok, mtime: d.mtime ?? null, content: d.content ?? '' };
     },
     onChanged: (c, m) => { setContent(c); setMtime(m); setDirty(false); setMsg({ sev: 'success', text: 'Reloaded from disk' }); },

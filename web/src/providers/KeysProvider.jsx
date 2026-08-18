@@ -13,7 +13,7 @@ import { DEFAULTS } from '@/lib/keys.js';
 /** @type {React.Context<any>} */
 const KeysContext = createContext(null);
 
-const putOverrides = (patch) => fetch('/keys', {
+const putOverrides = (patch) => fetch('/api/keys', {
   method: 'PUT',
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify(patch),
@@ -23,7 +23,7 @@ export function KeysProvider({ children }) {
   const [overrides, setOverrides] = useState({});
 
   useEffect(() => {
-    fetch('/keys').then((r) => r.json()).then((d) => setOverrides(d.keys || {})).catch(() => {});
+    fetch('/api/keys').then((r) => r.json()).then((d) => setOverrides(d.keys || {})).catch(() => {});
   }, []);
 
   const setKey = useCallback((id, binding) => {

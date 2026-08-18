@@ -1,5 +1,6 @@
 import { getTokens } from '@/theme/contract.js';
 import { useCallback, useEffect, useMemo, useRef, useState, Suspense, lazy } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { matches } from '@/lib/keys.js';
 import Box from '@mui/material/Box';
 import Typography from '@mui/material/Typography';
@@ -33,6 +34,7 @@ import { buildCommands } from '@/features/palette/commands.mjs';
 import { isCodexModel } from '@/lib/models.js';
 import { insetQuery } from '@/lib/sheetInset.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
+import { isLive } from '@/lib/agentStatus.js';
 
 // Lazy: these carry CodeMirror (the biggest non-xterm dep) or only render off the
 // terminal view — split them out of the initial (terminal) bundle.
@@ -54,7 +56,7 @@ const SettingsView = lazy(() => import('@/features/settings/SettingsView.jsx'));
 
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
-const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'sessions', 'explorer'];
+const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'transcripts', 'explorer'];
 
 // A skin change remounts this entire component — `AppThemeProvider` keys its
 // skin subtree by `skin.id` (see theme/AppThemeProvider.jsx), so any React
@@ -64,9 +66,6 @@ const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'session
 // 6.6) — that state lives above the remount boundary, so it survives without
 // this component needing its own Web Storage handoff (see `useThemeSkin()`'s
 // `pendingRespawn`/`clearPendingRespawn` below).
-
-const isLive = (s) => s === 'running' || s === 'idle' || s === 'starting';
-
 // Glass snackbar content — MUI v9 dropped `ContentProps`, so this must go through
 // slotProps.content or SnackbarContent keeps its default (mode-inverted) colours.
 const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur });
@@ -105,13 +104,16 @@ export default function AppShell() {
   // tri-state the Automation view uses for background defs.
   const [cronOpen, setCronOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
-  // Persisted so the selected view survives a skin switch (which remounts the
-  // whole shell) and page reloads — otherwise switching theme bounces to Tasks.
-  const [view, setView] = useState(() => localStorage.getItem('sing-view') || 'tasks');
+  // The URL owns the selected view (App.jsx's `:view` route). Already validated
+  // at the route boundary, so `view` is always a known id here. `setView` keeps
+  // its old signature, so Sidebar, AppMenu, the palette and the page-prev/next
+  // handler below need no changes.
+  const { view } = useParams();
+  const navigate = useNavigate();
+  const setView = useCallback((v) => navigate(`/${v}`), [navigate]);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
-  const [openTx, setOpenTx] = useState(null); // {project, id, cwd, mtime} handed to SessionHistory
   // Width (px) the open right-hand sheet wants the shell to vacate; 0 = none
   // open. A feature reports it rather than the shell knowing sheet widths, so
   // the number stays owned by the sheet that defines it (no duplicated literal,
@@ -150,7 +152,8 @@ export default function AppShell() {
     setVisited((s) => new Set(s).add(view));
   }
 
-  // Remember the selected view across skin remounts + reloads.
+  // Not the source of truth any more — just the "where was I" memory that a
+  // bare `/` redirects to (App.jsx's DefaultRedirect).
   useEffect(() => { localStorage.setItem('sing-view', view); }, [view]);
   // Cycles More-menu views (xterm + cm-editor handle own focus cases).
   useEffect(() => {
@@ -220,18 +223,26 @@ export default function AppShell() {
     setRestartOpen(false);
     setRestarting(true);
     setToast('Restarting the app…');
-    const before = await fetch('/health').then((r) => r.json()).then((d) => d.pid).catch(() => null);
-    await fetch('/restart', { method: 'POST' }).catch(() => {}); // connection drops; ignore
+    const before = await fetch('/api/health').then((r) => r.json()).then((d) => d.pid).catch(() => null);
+    await fetch('/api/restart', { method: 'POST' }).catch(() => {}); // connection drops; ignore
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 800));
       try {
-        const d = await fetch('/health').then((r) => r.json());
+        const d = await fetch('/api/health').then((r) => r.json());
         if (d.ok && d.pid !== before) { location.reload(); return; }
       } catch { /* expected while the daemon is down */ }
     }
     setRestarting(false);
     setToast("The app didn't come back — please restart it yourself.");
   };
+
+  // Opening a transcript is a navigation now, not a prop handed down: the
+  // Transcripts view reads ?project=&session=(&source=) off the URL, so the open
+  // transcript survives a reload and can be pasted to someone else.
+  const openTranscript = useCallback(({ project, session, source }) => {
+    const qs = new URLSearchParams({ project, session, ...(source ? { source } : null) });
+    navigate(`/transcripts?${qs}`);
+  }, [navigate]);
 
   // Open an agent's transcript in the Transcripts view — from the scrollback-top
   // prompt or a session row's action. No title: the agent's display title is a
@@ -240,30 +251,25 @@ export default function AppShell() {
   // transcript is filed under, so resolve it server-side first (mirrors
   // buildSpawn's own discovery). That resolver only answers for agents still in
   // the registry, so fall back to the id itself — for a session resumed from
-  // this view it already IS the thread uuid, and /session's own by-id lookup
+  // this view it already IS the thread uuid, and /transcript's own by-id lookup
   // covers it. Only a genuinely unknown id lands on "Transcript not found".
   const viewTranscript = useCallback(async (a) => {
     if (a.tool === 'codex' || isCodexModel(a.model)) {
-      const threadId = await fetch(`/session/codex-thread?id=${encodeURIComponent(a.id)}`)
+      const threadId = await fetch(`/api/transcripts/codex-thread?id=${encodeURIComponent(a.id)}`)
         .then((r) => r.json()).then((d) => (d.ok ? d.threadId : null)).catch(() => null);
-      setOpenTx({ project: '<codex>', id: threadId || a.id, cwd: a.cwd, source: 'codex', mtime: Date.now() });
-      setView('sessions');
+      openTranscript({ project: '<codex>', session: threadId || a.id, source: 'codex' });
       setTxPrompt(null);
       return;
     }
-    setOpenTx({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), id: a.id, cwd: a.cwd, mtime: Date.now() });
-    setView('sessions');
+    openTranscript({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), session: a.id });
     setTxPrompt(null);
-  }, []);
+  }, [openTranscript]);
 
   // Deep-link from a History day's session row into Transcripts. Unlike
   // viewTranscript, these rows already carry the transcript-file id/project
   // straight from listSessions()/readSession() (not a live registry id), so
   // no codex-thread resolution is needed — a direct passthrough opens it.
-  const openHistorySession = (s) => {
-    setOpenTx({ project: s.project, id: s.id, cwd: s.cwd, source: s.source, mtime: s.mtime });
-    setView('sessions');
-  };
+  const openHistorySession = (s) => openTranscript({ project: s.project, session: s.id, source: s.source });
 
   // Resume a past session from the Transcripts view: prefill the new-agent
   // dialog with its id + cwd + last model + last skill-scopes, then create.
@@ -367,13 +373,13 @@ export default function AppShell() {
             {visited.has('explorer') && (
               <Box sx={{ display: view === 'explorer' ? 'block' : 'none', height: '100%' }}><ExplorerPanel /></Box>
             )}
-            {visited.has('sessions') && (
-              <Box sx={{ display: view === 'sessions' ? 'block' : 'none', height: '100%' }}>
-                <SessionHistory active={view === 'sessions'} sendMsg={sendMsg} registerChat={registerChat} openSession={openTx} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
+            {visited.has('transcripts') && (
+              <Box sx={{ display: view === 'transcripts' ? 'block' : 'none', height: '100%' }}>
+                <SessionHistory active={view === 'transcripts'} sendMsg={sendMsg} registerChat={registerChat} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
               </Box>
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
-            {view === 'history' && <HistoryView onOpenSession={openHistorySession} />}
+            {view === 'history' && <HistoryView onOpenSession={openHistorySession} onToast={setToast} />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} onSelectSkin={onSelectSkin} />}
             {view === 'status' && <StatusView />}
             {view === 'settings' && <SettingsView />}

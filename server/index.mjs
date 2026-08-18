@@ -40,7 +40,10 @@ const HOST = '127.0.0.1';
 const PORT = Number(process.env.DAEMON_PORT);
 const VITE_PORT = Number(process.env.VITE_PORT ?? 5317);
 // Optional loopback token (defense-in-depth on top of the 127.0.0.1 bind).
-// Set SING_TOKEN to require it on data endpoints + WS; the shell/assets stay open.
+// Set SING_TOKEN to require it on data endpoints + WS + the shell itself — a
+// bare `curl /` used to be unauthenticated yet still inject
+// window.__SING_TOKEN__, handing back the very token the gate enforces.
+// Static assets stay open (no secret in them).
 const TOKEN = process.env.SING_TOKEN || null;
 // The home the *client* collapses paths against (pure presentation — the backend
 // always deals in full paths). SING_HOME_DISPLAY optionally overrides it so a
@@ -80,6 +83,17 @@ requireEnv();
 // only `url` is transformed.
 function redactTokenParam(url) {
   return url.replace(/([?&]token=)[^&]*/i, '$1[redacted]');
+}
+// Pulls one cookie value out of the raw Cookie header. No @fastify/cookie —
+// the whole app only ever needs to read back the one cookie it sets below.
+function getCookie(req, name) {
+  const header = req.headers.cookie;
+  if (!header) return null;
+  for (const part of header.split(';')) {
+    const i = part.indexOf('=');
+    if (i !== -1 && part.slice(0, i).trim() === name) return decodeURIComponent(part.slice(i + 1).trim());
+  }
+  return null;
 }
 const app = Fastify({
   logger: {
@@ -132,6 +146,22 @@ process.on('SIGINT', shutdown);
 // from this daemon and Vite never runs. Same signal the static-serving branch
 // below already uses to tell dev from prod.
 const webDist = join(__dirname, '..', 'web', 'dist');
+const hasShell = existsSync(webDist);
+
+// True for exactly the requests sendShell (below) ends up answering: GET / itself,
+// and the deep-link fallback's HTML-navigation-to-an-unknown-client-route case.
+// Shared by the onRequest hook (to gate it) and setNotFoundHandler (to serve it),
+// so the two can never drift apart — the one thing this function decides is also
+// the one thing that determines whether a request needs auth.
+function isShellRequest(req) {
+  // GET and HEAD both count: Fastify's exposeHeadRoutes (on by default) answers
+  // `HEAD /` with the same app.get('/') handler, so a HEAD-only carve-out here
+  // would let it through this gate while still getting sendShell's response.
+  if (req.method !== 'GET' && req.method !== 'HEAD') return false;
+  const path = req.raw.url.split('?')[0];
+  if (path === '/') return true;
+  return (req.headers.accept || '').includes('text/html') && !/^\/(api|assets|ws)(\/|$)/.test(path);
+}
 
 // Browser cross-origin guard (DNS rebinding / drive-by pages hitting loopback).
 // The 127.0.0.1 bind does not stop the user's own browser acting as a confused
@@ -142,6 +172,15 @@ const webDist = join(__dirname, '..', 'web', 'dist');
 // `pnpm dev` can leave a stale dist around → DEV=false → the proxied Vite WS
 // Origin would 403 and the shell shows "disconnected". Loopback-only bind makes
 // trusting the dev port unconditionally free.
+// The Origin check alone misses browser *subresource* GETs — an <img>/<link>/
+// <script src> on an attacker page carries no Origin header, so it would sail
+// through to a real handler (burning Messages API quota via /api/history,
+// launching Playwright via /api/usage?force=1). Sec-Fetch-Site is sent by
+// every modern browser on every request, same-origin or not, and no local CLI
+// tool sets it — so gate on it too: same-origin/no-value (curl, the e2e
+// harness) pass, anything else 403s. sec-fetch-dest is deliberately not used —
+// the app legitimately loads same-origin /api/fs/raw in an <img> and
+// /api/usagereport/report in an <iframe>.
 const SELF_HOSTS = new Set(
   [PORT, VITE_PORT].flatMap((p) => [`127.0.0.1:${p}`, `localhost:${p}`, `[::1]:${p}`]),
 );
@@ -149,24 +188,55 @@ function originAllowed(origin) {
   if (!origin) return true;
   try { return SELF_HOSTS.has(new URL(origin).host); } catch { return false; }
 }
+// Origin and Sec-Fetch-Site are two verdicts on the same question ("is this
+// request from us?") — they must not be free to disagree, or a request the
+// Origin policy above was written to trust (SELF_HOSTS deliberately includes
+// the Vite dev port) can still get 403'd by Sec-Fetch-Site, since a *direct*
+// browser request from :VITE_PORT to :PORT is a different port and so is not
+// same-origin/same-site — a real browser tags it Sec-Fetch-Site: cross-site.
+// SELF_HOSTS stays the single source of truth: Origin decides whenever it's
+// present (it names the actual origin, which the coarse Sec-Fetch-Site value
+// can't override either way). Sec-Fetch-Site alone decides only when Origin
+// is absent — a same-origin simple GET, or a no-cors subresource load like
+// <img>/<script src> that omits Origin but still carries Sec-Fetch-Site —
+// which is exactly what catches a drive-by tag on an attacker page.
+function requestAllowed(req) {
+  const origin = req.headers.origin;
+  if (origin) return originAllowed(origin);
+  const site = req.headers['sec-fetch-site'];
+  return !site || site === 'same-origin' || site === 'none';
+}
 app.addHook('onRequest', async (req, reply) => {
   if (req.headers.host && !SELF_HOSTS.has(req.headers.host)) {
     return reply.code(403).send({ error: 'forbidden host' });
   }
-  if (!originAllowed(req.headers.origin)) {
+  if (!requestAllowed(req)) {
     return reply.code(403).send({ error: 'forbidden origin' });
   }
+  // Gates the shell itself when TOKEN is set — sendShell (below) injects the
+  // real token, so serving it unauthenticated (as GET / used to) hands an
+  // attacker the token the /api gate exists to check. Structural on purpose:
+  // this covers isShellRequest(req) for *every* route, present or future, the
+  // same way the /api plugin's own onRequest hook (further down) covers every
+  // /api route — a new HTML-serving GET route gets this gate automatically,
+  // with nothing to remember to call at the route itself. Accepts ?token=,
+  // but only to mint an HttpOnly cookie and redirect it out of the URL (so it
+  // doesn't linger in the address bar/history); the cookie authenticates
+  // every reload after that.
+  if (TOKEN && hasShell && isShellRequest(req)) {
+    if (req.query?.token === TOKEN) {
+      const url = new URL(req.raw.url, 'http://x');
+      url.searchParams.delete('token');
+      reply.header('Set-Cookie', `sing_token=${TOKEN}; HttpOnly; SameSite=Strict; Path=/`);
+      const qs = url.searchParams.toString();
+      // Fastify 5 signature is redirect(url, code) — the v4 (code, url) order is gone.
+      return reply.redirect(url.pathname + (qs ? `?${qs}` : ''), 302);
+    }
+    if (getCookie(req, 'sing_token') !== TOKEN) {
+      return reply.code(401).type('text/plain').send('Unauthorized — open this URL with ?token=<your SING_TOKEN>');
+    }
+  }
 });
-
-// Token gate: allow the app shell + assets + health through; guard everything else.
-if (TOKEN) {
-  app.addHook('onRequest', async (req, reply) => {
-    const url = req.raw.url.split('?')[0];
-    if (url === '/' || url === '/health' || url === '/capabilities' || url.startsWith('/assets')) return;
-    const t = req.headers['x-sing-token'] || req.query?.token;
-    if (t !== TOKEN) reply.code(401).send({ error: 'unauthorized' });
-  });
-}
 
 // createTask/updateTask/createCron/... funnel their state changes through a
 // persist() that now throws (flagged `.persistFailure`) on a genuine disk
@@ -186,10 +256,13 @@ function walkMtimes(dir) {
   return out;
 }
 
-if (existsSync(webDist)) {
+if (hasShell) {
   app.register(fastifyStatic, { root: webDist, index: false });
-  // Serve the shell via a route so the token can be injected for the client.
-  app.get('/', async (req, reply) => {
+  // The shell response lives in one place: dist/index.html plus the two
+  // serve-time injections. Both GET / and the deep-link fallback below go
+  // through it, so a fallback-served shell can never ship without
+  // window.__SING_TOKEN__ (which would 401 every call it then makes).
+  const sendShell = (reply) => {
     let html = readFileSync(join(webDist, 'index.html'), 'utf8');
     // Home dir goes in with the token: tildify/untildify (web/src/lib/paths.js)
     // used to learn it from an async GET /env, so a tab that raced or missed
@@ -200,6 +273,19 @@ if (existsSync(webDist)) {
     html = html.replace('</head>', `<script>window.__SING_HOME__=${JSON.stringify(displayHome())};</script></head>`);
     if (TOKEN) html = html.replace('</head>', `<script>window.__SING_TOKEN__=${JSON.stringify(TOKEN)};</script></head>`);
     reply.type('text/html').send(html);
+  };
+  // Serve the shell via a route so the token can be injected for the client.
+  // Auth already happened in the top-level onRequest hook above (isShellRequest
+  // covers this route and the fallback below) — nothing to check here.
+  app.get('/', async (req, reply) => { sendShell(reply); });
+  // Deep-link fallback: the UI owns the root namespace now that every data route
+  // sits under /api, so a GET navigation matching no route is a client route —
+  // serve the shell and let React Router resolve it. Everything else (an /api or
+  // /assets path, a non-GET, a non-HTML request) keeps a real 404, including
+  // inside the /api plugin, which inherits this handler.
+  app.setNotFoundHandler(async (req, reply) => {
+    if (isShellRequest(req)) { sendShell(reply); return; }
+    return reply.code(404).send({ error: 'not found' });
   });
   // Best-effort staleness check: warn if dist predates the web source it was built from.
   try {
@@ -213,6 +299,23 @@ if (existsSync(webDist)) {
 }
 
 let wss; // assigned after listen; /health reports live WS client count for dev smart-open
+
+// Every data route lives under /api, so the root namespace belongs to the SPA.
+// Route bodies are unchanged and deliberately not re-indented: this is a scope
+// change, and re-indenting ~500 lines would bury it in whitespace. The callback
+// param shadows the outer `app` on purpose, so no route line needs editing.
+await app.register(async (app) => {
+
+// Token gate: guards the whole API surface; health + capabilities stay open.
+if (TOKEN) {
+  app.addHook('onRequest', async (req, reply) => {
+    const url = req.raw.url.split('?')[0];
+    if (url === '/api/health' || url === '/api/capabilities') return;
+    const t = req.headers['x-sing-token'] || req.query?.token || getCookie(req, 'sing_token');
+    if (t !== TOKEN) reply.code(401).send({ error: 'unauthorized' });
+  });
+}
+
 app.get('/health', async () => ({ ok: true, pid: process.pid, clients: wss?.clients.size ?? 0 }));
 
 // Per-agent stats (turns + tokens) parsed from each session .jsonl.
@@ -277,6 +380,13 @@ app.get('/fs/read', async (req, reply) => {
 app.get('/fs/raw', async (req, reply) => {
   const r = rawEntry(req.query.path);
   if (!r.ok) return reply.code(r.error === 'not found' ? 404 : 400).send(r);
+  // An on-disk .svg served as image/svg+xml is same-origin script (and the
+  // token is already in this URL): nosniff stops a browser upgrading a
+  // mismatched type, and the CSP sandbox directive puts the response in an
+  // opaque origin so any embedded <script> can't reach the app origin —
+  // <img src> previews still render under both.
+  reply.header('X-Content-Type-Options', 'nosniff');
+  reply.header('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; sandbox");
   return reply.type(r.mime).send(r.buf);
 });
 // bodyLimit: readEntry serves text up to 2 MB, so the save of one must fit —
@@ -284,7 +394,7 @@ app.get('/fs/raw', async (req, reply) => {
 app.put('/fs/write', { bodyLimit: 4 * 1024 * 1024 }, async (req, reply) => {
   const { path, content, mtime, force } = req.body || {};
   if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = writeEntry(path, content, mtime, force);
+  const r = await writeEntry(path, content, mtime, force);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
@@ -392,13 +502,9 @@ app.post('/session/external', async (req, reply) => {
   const r = reg.externalLaunch(id);
   if (!r.ok) return reply.code(400).send(r);
   try {
-    // wt.exe is a Windows App Execution Alias; spawning it directly is flaky
-    // (cold-start no-op). shell:true routes through cmd, which resolves the
-    // alias reliably. osascript on macOS needs no shell.
-    spawn(r.launcher, r.launcherArgs, {
-      detached: true, stdio: 'ignore', cwd: r.cwd,
-      shell: process.platform === 'win32',
-    }).unref();
+    // r.launcher is an absolute path (agents.mjs resolves the wt.exe alias
+    // stub under WindowsApps on Windows) — argv stays a real array, no shell.
+    spawn(r.launcher, r.launcherArgs, { detached: true, stdio: 'ignore', cwd: r.cwd }).unref();
   } catch (e) { return reply.code(500).send({ ok: false, error: e.message }); }
   // Hand-off: drop the session from the dock (kills the in-app pty if live via
   // removeOnExit, else drops the detached entry). The on-disk session log
@@ -430,7 +536,7 @@ app.post('/config/search', async (req) => {
 app.put('/config/:scope', async (req, reply) => {
   const { cwd, content, mtime, force } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
-  const r = writeConfig(cwd, req.params.scope, content, mtime, force);
+  const r = await writeConfig(cwd, req.params.scope, content, mtime, force);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
@@ -461,7 +567,7 @@ app.post('/codex-config/search', async (req) => {
 app.put('/codex-config/:scope', async (req, reply) => {
   const { cwd, content, mtime, force } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
-  const r = writeCodexConfig(cwd, req.params.scope, content, mtime, force);
+  const r = await writeCodexConfig(cwd, req.params.scope, content, mtime, force);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
@@ -485,7 +591,7 @@ app.get('/hooks/file', async (req, reply) => {
 app.put('/hooks/file', async (req, reply) => {
   const { path, content, mtime, force } = req.body || {};
   if (!path || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = writeHook(path, content, mtime, force);
+  const r = await writeHook(path, content, mtime, force);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
@@ -578,7 +684,7 @@ app.get('/memory/file', async (req, reply) => {
 app.put('/memory/file', async (req, reply) => {
   const { path, content, root, mtime, force } = req.body || {};
   if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = writeMemoryFile(path, content, root, mtime, force);
+  const r = await writeMemoryFile(path, content, root, mtime, force);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
@@ -600,7 +706,7 @@ app.get('/rules/file', async (req, reply) => {
 app.put('/rules/file', async (req, reply) => {
   const { path, content, mtime, force } = req.body || {};
   if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = writeRuleFile(path, content, mtime, force);
+  const r = await writeRuleFile(path, content, mtime, force);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
@@ -648,8 +754,8 @@ app.put('/skill', async (req, reply) => {
   const b = req.body || {};
   const flat = b.flat === true || b.flat === '1';
   const r = b.file
-    ? writeSkillFile(b.root, b.scope, b.skill, b.file, b.content, flat, b.mtime, b.force)
-    : writeSkill(b.root, b.scope, b.skill, b.content, flat, b.mtime, b.force);
+    ? await writeSkillFile(b.root, b.scope, b.skill, b.file, b.content, flat, b.mtime, b.force)
+    : await writeSkill(b.root, b.scope, b.skill, b.content, flat, b.mtime, b.force);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
@@ -658,20 +764,20 @@ app.put('/skill', async (req, reply) => {
 // all or one, under a client-selected root (default ~/.claude/projects).
 // FS-persisted root choice (survives browser cache clear). Chat goes over the
 // WS (streaming) — see pty-ws.mjs.
-app.get('/sessions/root', async () => ({ root: getSessionsRoot() }));
-app.put('/sessions/root', async (req) => setSessionsRoot(req.body?.root));
-app.get('/sessions', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive, root: req.query.root }) }));
+app.get('/transcripts/root', async () => ({ root: getSessionsRoot() }));
+app.put('/transcripts/root', async (req) => setSessionsRoot(req.body?.root));
+app.get('/transcripts', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive, root: req.query.root }) }));
 // Resolve a registered agent's id to its codex-minted thread uuid — the Sessions
 // dock's "View transcript" button needs this before it can open a codex agent's
 // transcript (its registry id is unrelated to the rollout's thread uuid).
-app.get('/session/codex-thread', async (req, reply) => {
+app.get('/transcripts/codex-thread', async (req, reply) => {
   const id = req.query?.id;
   if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
   const threadId = reg.codexThreadFor(id);
   if (!threadId) return reply.code(404).send({ ok: false, error: 'not found' });
   return { ok: true, threadId };
 });
-app.get('/session', async (req, reply) => {
+app.get('/transcript', async (req, reply) => {
   const { project, id, root, source, file } = req.query || {};
   if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
   const r = await readSession(project, id, root, source, file);
@@ -687,9 +793,9 @@ app.get('/session', async (req, reply) => {
   if (!r.ok) reply.code(404);
   return r;
 });
-app.get('/sessions/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id, root: req.query.root }));
+app.get('/transcripts/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id, root: req.query.root }));
 // Live subagents nested under the dock's agent rows (indicator only). Scoped to
-// live agents so it stays cheap — no full 500-session scan like /sessions.
+// live agents so it stays cheap — no full 500-session scan like /transcripts.
 app.get('/subagents', async () => {
   const out = {};
   for (const a of reg.snapshot()) {
@@ -701,7 +807,7 @@ app.get('/subagents', async () => {
 });
 // Per-session cost + token breakdown for the visible list page (batched so a
 // page flip is one request; stats.mjs caches each parse by mtime/size).
-app.post('/sessions/stats', async (req) => {
+app.post('/transcripts/stats', async (req) => {
   const items = Array.isArray(req.body?.items) ? req.body.items.slice(0, 200) : [];
   const root = req.body?.root;
   const stats = {};
@@ -736,6 +842,8 @@ app.post('/history/regenerate', async (req, reply) => {
   try { return { ok: true, entry: await regenerateDay(date) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
+
+}, { prefix: '/api' });
 
 reg.init(app.log);
 initTasks(app.log);

@@ -5,7 +5,7 @@
 // on disk.
 import { defineConfig } from '@playwright/test';
 import { join } from 'node:path';
-import { BASE_URL, TMP } from './e2e/fixtures/paths.mjs';
+import { BASE_URL, TMP, TOKEN } from './e2e/fixtures/paths.mjs';
 
 // A run with E2E_PORT set is a parallel side-run (one spec under development).
 // Keep its artifacts inside its own sandbox dir and off the shared html report.
@@ -28,6 +28,14 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   use: {
     baseURL: BASE_URL,
+    // The sandbox daemon runs with SING_TOKEN set, and the shell itself is now
+    // gated (a bare GET / used to hand out window.__SING_TOKEN__ to anyone).
+    // Seeding the cookie the daemon would mint from ?token= keeps every spec's
+    // plain `page.goto('/')` working without a token in 100+ call sites.
+    storageState: {
+      cookies: [{ name: 'sing_token', value: TOKEN, domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Strict' }],
+      origins: [],
+    },
     viewport: { width: 1600, height: 1000 },
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
@@ -38,7 +46,7 @@ export default defineConfig({
   projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
   webServer: {
     command: 'node e2e/serve.mjs',
-    url: `${BASE_URL}/health`,
+    url: `${BASE_URL}/api/health`,
     reuseExistingServer: false,
     timeout: 60_000,
     // The daemon logs every request at info level — piping it buries the

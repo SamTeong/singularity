@@ -35,7 +35,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
 
   useEffect(() => {
     if (!open) return;
-    fetch('/models').then((r) => r.json()).then((d) => setClaudeSet(new Set(d.claude || []))).catch(() => {});
+    fetch('/api/models').then((r) => r.json()).then((d) => setClaudeSet(new Set(d.claude || []))).catch(() => {});
   }, [open]);
 
   // Mirror of server isClaudeModel: empty/'claude'/known alias/claude-* id → claude.
@@ -70,7 +70,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
     setBusy(true);
     setError(null);
     try {
-      const r = await fetch('/tasks', {
+      const r = await fetch('/api/tasks', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
@@ -102,9 +102,9 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
       onCreate={create}
       createDisabled={busy || !cwd.trim() || !title.trim() || !description.trim() || !model.trim()}
     >
-      <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
+      <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') create(); }} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
       <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} slotProps={{ input: { endAdornment: clearAdornment(description !== '', () => setDescription('')) } }} />
-      <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="working directory" />
+      <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="Working directory" />
       <Stack spacing={1}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
           <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" placeholder="required — claude, ollama, or gpt-*" /></Box>

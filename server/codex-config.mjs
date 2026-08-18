@@ -5,6 +5,7 @@
 // client never supplies a path. Writes validate TOML (via @iarna/toml) and back
 // up the existing file (backups.mjs) before overwriting.
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join, dirname, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as tomlParse } from '@iarna/toml';
@@ -132,7 +133,7 @@ function isKnownConfigRoot(cwd) {
   });
 }
 
-export function writeConfig(cwd, scope, content, mtime, force) {
+export async function writeConfig(cwd, scope, content, mtime, force) {
   if (!EDIT_SCOPES.includes(scope)) return { ok: false, error: 'bad scope' };
   if (!isKnownConfigRoot(cwd)) return { ok: false, error: 'cwd outside config roots' };
   // Enforce the client's cwd→scope mapping: 'user' only for cwd ~ (home),
@@ -148,9 +149,14 @@ export function writeConfig(cwd, scope, content, mtime, force) {
     if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    const backup = backupFile(p);
+    const backup = await backupFile(p);
     if (!backup) mkdirSync(dirname(p), { recursive: true }); // first write of a project scope
-    writeFileSync(p, content);
+    // Re-check: backupFile's await can yield to a concurrent save of this
+    // same path landing in between, which the first check (above) can't see.
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    await writeFile(p, content);
     return { ok: true, backup, path: p, mtime: statSync(p).mtimeMs };
   } catch (e) {
     return { ok: false, error: e.message };

@@ -16,7 +16,7 @@ export function Workflow({ sectionRef }: ChapterProps) {
     // className or a style prop would fight that and drop the class.
     <section className="chapter workflow" id="workflow" aria-labelledby="workflow-title" ref={sectionRef}>
       <div className="chapter-inner">
-        <div className="section-head"><span className="idx">02</span><span className="jp">流程</span><h2 id="workflow-title">WORK MOVES. CONTEXT STAYS ATTACHED.</h2></div>
+        <div className="section-head"><span className="idx">05</span><span className="jp">流程</span><h2 id="workflow-title">WORK MOVES. CONTEXT STAYS ATTACHED.</h2></div>
         <p className="lead">A task is not just a card. It binds the requirement, branch, worktree, live session, transcript, and final review into one operational record.</p>
         <div className="flow" role="group" aria-label="Task workflow">
           <button className={flowItemClass(0, index)} data-step="0" onClick={() => show(0, true)}>

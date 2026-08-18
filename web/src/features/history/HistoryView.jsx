@@ -6,7 +6,6 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
 import TextField from '@mui/material/TextField';
-import Snackbar from '@mui/material/Snackbar';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Popover from '@mui/material/Popover';
@@ -21,8 +20,17 @@ import FilterAltIcon from '@mui/icons-material/FilterAlt';
 import { EmptyState } from '@/components/EmptyState.jsx';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
+import { useQueryList, useQueryState, useUpdateQuery } from '@/hooks/useQueryState.js';
 import { repoName } from '@/lib/paths.js';
 import DayCard, { DayHeader, GapSegment, ShimmerCard, EASE_OUT } from '@/features/history/DayCard.jsx';
+
+// Recognised ?preset= values; anything else falls back to the default.
+const PRESETS = new Set(['7', '30', 'all', 'custom']);
+// ?from/?to are compared against `entry.date` as strings and forwarded to the
+// daemon, so anything that isn't an ISO day is dropped rather than filtering
+// every row out (a lexical compare puts 'garbage' after every real date).
+const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
+const isoDay = (v) => (ISO_DAY.test(v) ? v : '');
 
 // Normalize a cwd for keying: lowercase + forward slashes + stripped tail.
 // The agent records the same repo under different spellings across sessions
@@ -196,7 +204,7 @@ function Spine({ scrollRef, rows, activeDate, reduceMotion }) {
  * drills backwards through time. Fetches the initial window, then prefers the
  * live WS push (`history` from useAgents, full replacement) once one arrives.
  */
-export default function HistoryView({ onOpenSession }) {
+export default function HistoryView({ onOpenSession, onToast }) {
   const { history } = useAgents();
   const reduceMotion = useReducedMotion();
   const scrollRef = useRef(null);
@@ -207,23 +215,36 @@ export default function HistoryView({ onOpenSession }) {
   // the IntersectionObserver whileInView relies on — the skip would never
   // actually land in time.
   const [keyboardNav, setKeyboardNav] = useState(false);
-  const [compact, setCompact] = useState(false); // cards stripped to header + metrics
+  // ?compact=1 — cards stripped to header + metrics.
+  const [compactParam, setCompactParam] = useQueryState('compact');
+  const compact = compactParam === '1';
 
   const [today, setToday] = useState(null);
   const [fetchedEntries, setFetchedEntries] = useState([]);
   const [fetchedPending, setFetchedPending] = useState([]);
   const [loaded, setLoaded] = useState(false);
-  const [preset, setPreset] = useState('7'); // '7' | '30' | 'all' | 'custom'
-  const [customRange, setCustomRange] = useState({ from: '', to: '' });
+  // Timeframe in the URL: ?preset=7|30|all|custom plus ?from/?to for custom. An
+  // unrecognised preset degrades to the default rather than rendering nothing —
+  // a shared link that outlives its data must still show a usable page.
+  const [presetParam] = useQueryState('preset', '7');
+  const preset = PRESETS.has(presetParam) ? presetParam : '7';
+  const [fromParam] = useQueryState('from');
+  const [toParam] = useQueryState('to');
+  const from = isoDay(fromParam), to = isoDay(toParam);
+  const customRange = useMemo(() => ({ from, to }), [from, to]);
+  // Preset and range change together, so they go out as ONE patch — two
+  // setSearchParams calls in the same tick both read the same snapshot and the
+  // first write is lost.
+  const updateQuery = useUpdateQuery();
   const [expanded, setExpanded] = useState(() => new Set());
   const [regenerating, setRegenerating] = useState(() => new Set());
-  const [error, setError] = useState(null);
   const [activeDate, setActiveDate] = useState(null);
   const [focusDate, setFocusDate] = useState(null); // pending keyboard-nav focus target while windowed-out
   const [winRange, setWinRange] = useState([0, Infinity]);
   const [filterAnchor, setFilterAnchor] = useState(null);
   const [filterTab, setFilterTab] = useState('timeframe'); // 'timeframe' | 'projects'
-  const [projectFilter, setProjectFilter] = useState(() => new Set()); // cwd keys; empty = all
+  // ?project=… (repeated, never CSV — these are cwd paths). Empty = all.
+  const [projectList, setProjectList] = useQueryList('project');
   // Page-level exit/enter is keyed off the range itself (below) rather than a
   // counter bumped from an effect — same remount trigger, no extra render pass.
   const rangeKey = `${preset}:${customRange.from}:${customRange.to}`;
@@ -243,14 +264,14 @@ export default function HistoryView({ onOpenSession }) {
     // Staleness guard, not an AbortController: flipping presets quickly can
     // land an older response after a newer one and stomp the right range.
     const mine = ++fetchSeq.current;
-    fetch(`/history?${params}`).then((r) => r.json()).then((d) => {
+    fetch(`/api/history?${params}`).then((r) => r.json()).then((d) => {
       if (!d.ok || mine !== fetchSeq.current) return;
       setToday(d.today);
       setFetchedEntries(d.entries);
       setFetchedPending(d.pending);
       setLoaded(true);
-    }).catch(() => { if (mine === fetchSeq.current) setError('Could not load history.'); });
-  }, [preset, customRange.from, customRange.to]);
+    }).catch(() => { if (mine === fetchSeq.current) onToast?.('Could not load history.'); });
+  }, [preset, customRange.from, customRange.to, onToast]);
 
   // Merge: prefer the WS payload (full archive, ascending) over the initial
   // fetch (already server-filtered, descending) once a push has landed, then
@@ -305,6 +326,14 @@ export default function HistoryView({ onOpenSession }) {
     }
     return entries.sort((a, b) => a.label.localeCompare(b.label));
   }, [rows]);
+
+  // A ?project= absent from the in-range days — a stale shared link — is dropped:
+  // the Projects tab offers no way to clear what it never lists, so keeping it
+  // would leave a blank page behind an invisible filter.
+  const projectFilter = useMemo(
+    () => new Set(projectList.filter((p) => projects.some((x) => x.key === p))),
+    [projectList, projects],
+  );
 
   // Client-side project filter: empty set passes everything through, so the
   // unfiltered path stays a plain identity (no per-row alloc).
@@ -387,12 +416,12 @@ export default function HistoryView({ onOpenSession }) {
 
   const regenerate = useCallback((date) => {
     setRegenerating((s) => new Set(s).add(date));
-    fetch('/history/regenerate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ date }) })
+    fetch('/api/history/regenerate', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ date }) })
       .then((r) => r.json())
-      .then((d) => { if (!d.ok) setError(d.error || 'Regenerate failed.'); })
-      .catch((e) => setError(e.message))
+      .then((d) => { if (!d.ok) onToast?.(d.error || 'Regenerate failed.'); })
+      .catch((e) => onToast?.(e.message))
       .finally(() => setRegenerating((s) => { const n = new Set(s); n.delete(date); return n; }));
-  }, []);
+  }, [onToast]);
 
   // Eligible for a header-level bulk regenerate: real entries with a summary
   // (skip today — still live — and gap days).
@@ -405,11 +434,12 @@ export default function HistoryView({ onOpenSession }) {
     for (const r of regenerableRows) regenerate(r.date);
   }, [regenerableRows, regenerate]);
 
-  const setPresetChip = (p) => { setPreset(p); setCustomRange({ from: '', to: '' }); };
+  const setPresetChip = (p) => updateQuery({ preset: p === '7' ? null : p, from: null, to: null });
+  const setCustomBound = (bound, v) => updateQuery({ preset: 'custom', [bound]: v });
 
   // Collapsing to headers closes the open session panels too — a card cut back
   // to its metrics row shouldn't still have a session list hanging off it.
-  const toggleCompact = () => setCompact((c) => { if (!c) setExpanded(new Set()); return !c; });
+  const toggleCompact = () => { if (!compact) setExpanded(new Set()); setCompactParam(compact ? '' : '1'); };
 
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -540,13 +570,13 @@ export default function HistoryView({ onOpenSession }) {
             <TextField
               type="date" size="small" label="From" value={customRange.from}
               slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: archiveMin, max: archiveMax } }}
-              onChange={(e) => { setPreset('custom'); setCustomRange((r) => ({ ...r, from: e.target.value })); }}
+              onChange={(e) => setCustomBound('from', e.target.value)}
               sx={{ width: '100%' }}
             />
             <TextField
               type="date" size="small" label="To" value={customRange.to}
               slotProps={{ inputLabel: { shrink: true }, htmlInput: { min: archiveMin, max: archiveMax } }}
-              onChange={(e) => { setPreset('custom'); setCustomRange((r) => ({ ...r, to: e.target.value })); }}
+              onChange={(e) => setCustomBound('to', e.target.value)}
               sx={{ width: '100%' }}
             />
           </Stack>
@@ -561,7 +591,7 @@ export default function HistoryView({ onOpenSession }) {
                 disableCloseOnSelect
                 options={projects}
                 value={projects.filter((p) => projectFilter.has(p.key))}
-                onChange={(_, v) => setProjectFilter(new Set(v.map((p) => p.key)))}
+                onChange={(_, v) => setProjectList(v.map((p) => p.key))}
                 getOptionLabel={(p) => p.label}
                 isOptionEqualToValue={(a, b) => a.key === b.key}
                 renderOption={({ key, ...props }, option, { selected }) => (
@@ -579,7 +609,6 @@ export default function HistoryView({ onOpenSession }) {
         )}
       </Popover>
 
-      <Snackbar open={!!error} autoHideDuration={5000} onClose={() => setError(null)} message={error} anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }} />
     </Box>
   );
 }

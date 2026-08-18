@@ -2,9 +2,12 @@
 // (<root>/<encoded-cwd>/memory/*.md, default root ~/.claude/projects). Writes are
 // confined to those dirs — a path outside any project's memory/ is rejected.
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'node:fs';
+import { writeFile } from 'node:fs/promises';
 import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
+import { backupFile } from './backups.mjs';
+import { norm, contains } from './path-containment.mjs';
 
 const DEFAULT_ROOT = join(homedir(), '.claude', 'projects');
 const RESULT_CAP = 300;
@@ -55,11 +58,18 @@ function memoryDirs(root) {
 }
 
 // Path guard: must resolve to <root>/<project>/memory/<...>.md, no escape.
+// root must equal the server-persisted memory root (getMemoryRoot): trusting
+// whatever root the caller/request supplies would let it invent a root that
+// trivially "contains" any path, defeating containment (path-traversal via
+// ?root=). resolveRoot already falls back to the persisted root when rootRaw
+// is empty, so an omitted root still matches.
 export function isMemoryPath(p, rootRaw) {
   if (!p) return false;
   const abs = resolve(p);
   const root = resolveRoot(rootRaw);
-  if (abs !== root && !abs.startsWith(root + sep)) return false;
+  const persisted = resolveRoot(getMemoryRoot());
+  if (norm(root) !== norm(persisted)) return false;
+  if (!contains(root, abs)) return false;
   const rel = abs.slice(root.length);
   const re = new RegExp(`^\\${sep}[^\\${sep}]+\\${sep}memory\\${sep}.+\\.md$`, 'i');
   return re.test(rel);
@@ -102,13 +112,19 @@ export function readMemoryFile(p, rootRaw) {
   catch (e) { return { ok: false, error: e.message }; }
 }
 
-export function writeMemoryFile(p, content, rootRaw, mtime, force) {
+export async function writeMemoryFile(p, content, rootRaw, mtime, force) {
   if (!isMemoryPath(p, rootRaw)) return { ok: false, error: 'path outside memory dirs' };
   try {
     if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    writeFileSync(p, content);
+    await backupFile(p);
+    // Re-check: backupFile's await can yield to a concurrent save of this
+    // same path landing in between, which the first check (above) can't see.
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    await writeFile(p, content);
     return { ok: true, mtime: statSync(p).mtimeMs };
   }
   catch (e) { return { ok: false, error: e.message }; }

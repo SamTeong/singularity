@@ -6,7 +6,7 @@ Local web UI — control plane for a fleet of coding agents (spec-driven dev). B
 
 ```
 pnpm bootstrap       # first setup: generate .env (detects CLAUDE_BIN) + wire usage-report skill + install + start
-pnpm install         # installs dependencies, runs postinstall hook. @zapac/mui-theme is vendored (file:vendor/zapac-mui-theme-*.tgz)
+pnpm install         # installs dependencies, runs postinstall hook. @zapac/mui-theme + phosphor-console-theme are vendored (file:vendor/*.tgz)
 pnpm postinstall     # mac: run if agents fail with "posix_spawnp failed"
 pnpm start           # build web + serve on http://127.0.0.1:4317
 pnpm build           # build web only (vite build → web/dist); run before serving with `pnpm server`
@@ -49,16 +49,24 @@ e2e/       Playwright suite driving every UI flow against a throwaway sandbox da
 e2e-mock/  sibling Playwright suite driving the same flows against web/src/mock (parallel)
 scripts/   bootstrap.mjs (first setup), demo-tasks.mjs, fix-pty-helper.mjs (postinstall +x),
            ollama-login.mjs, reap-build-orphans.mjs (pnpm clean)
-vendor/    vendored tgz deps (@zapac/mui-theme) so install works offline
+vendor/    vendored tgz deps (@zapac/mui-theme, phosphor-console-theme) so install works offline
 assets/    screenshots
+docs/      one-shot/ — standalone HTML layout mockups (theme/report explorations), not built or served
+github-pages/  self-contained React + three.js deck (own package.json + pnpm-lock + pnpm-workspace.yaml,
+           deliberately OUTSIDE the root workspace) — install and build from inside that dir, not the root
 ```
 
 Backend modules → routes in `server/index.mjs`. Add a concern = new module + route + co-located test.
 
-**New server route → two more edits, both mandatory:**
+The HTTP API lives under `/api` (e.g. `POST /api/tasks`); `/ws`, `GET /`, and `/assets/*` stay at the root. The Vite dev proxy forwards the whole `/api` prefix in one entry, so a new route needs no proxy edit.
 
-1. **Add its prefix to the Vite dev proxy** (`web/vite.config.mjs` `server.proxy`). Dev runs on :5317 and only proxies listed prefixes to the daemon (:4317); an unlisted route (e.g. `/skills`, `/skill`) falls through to the SPA shell → `fetch().json()` throws → "failed to load X" in the browser. `apply:'serve'` keeps proxy entries dev-only (daemon serves dist directly in prod).
-2. **Add a handler to `web/src/mock/routes/`.** Mirage is configured to throw on any unhandled request, so a route the client gains but the mock lacks fails the whole mock suite loudly — that's the intended drift alarm, not a flake. Match the daemon's exact response shape (several routes return bare arrays or keyed objects with no `ok`), and broadcast the matching WS frame if the daemon does.
+**The root namespace belongs to the UI.** Every view is a real URL — `/tasks`, `/usage`, `/transcripts` (React Router `BrowserRouter`, no basename) — so view ids and API paths no longer share a namespace. `web/src/shell/views.mjs` is the one view catalog (sidebar rail + More menu, deduped); the router validates against it and an unknown id **redirects** to `/tasks` rather than rendering Tasks under a lying URL. `AppShell`'s `view` comes from `useParams`, and `localStorage['sing-view']` is now only the "where was I" memory a bare `/` redirects to. Any GET navigation that matches no route falls to `setNotFoundHandler` in `server/index.mjs`, which serves the shell through `sendShell` (token + home injection) — never a bare `sendFile`, or a deep-link reload ships a shell with no `window.__SING_TOKEN__` and every call 401s.
+
+Per-view filters live in the query string via `web/src/hooks/useQueryState.js` (`useQueryState` / `useQueryList` / `useUpdateQuery`) — `/tasks?tag=x&history=1`, `/history?preset=30`, `/transcripts?project=…&session=…&source=codex`. Repeated params, never CSV (tags and cwd paths contain commas); a param equal to its default is absent; an invalid value degrades to the default instead of breaking the view. Anything changing more than one key must go through `useUpdateQuery`'s single patch — two `setSearchParams` calls in one tick both read the same snapshot and the first write is lost.
+
+**New server route → one more edit, mandatory:**
+
+**Add a handler to `web/src/mock/routes/`.** Mirage is configured to throw on any unhandled request, so a route the client gains but the mock lacks fails the whole mock suite loudly — that's the intended drift alarm, not a flake. Match the daemon's exact response shape (several routes return bare arrays or keyed objects with no `ok`), and broadcast the matching WS frame if the daemon does.
 
 ## State
 
@@ -75,7 +83,7 @@ External (read-only, not owned): `~/.claude/projects` (session transcripts), `~/
 
 Daemon binds **127.0.0.1 only** — spawns `claude` with full FS access. Never bind `0.0.0.0`.
 Origin allowlist (daemon + Vite hosts) blocks DNS-rebinding / drive-by browser hits to loopback.
-Optional `SING_TOKEN` gates data endpoints + WS (`x-sing-token` header / `?token=`); shell + assets stay open. Env-var only — app never persists it. Served into `window.__SING_TOKEN__` for the shell.
+Optional `SING_TOKEN` gates data endpoints + WS + the shell itself (`x-sing-token` header / `?token=` / `sing_token` HttpOnly cookie — a `?token=` hit mints the cookie and 302s the token out of the URL); assets stay open. Env-var only — app never persists it. Served into `window.__SING_TOKEN__` for the shell.
 
 ## Working rules
 

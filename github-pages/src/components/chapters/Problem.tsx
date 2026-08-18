@@ -11,7 +11,7 @@ export function Problem({ sectionRef }: ChapterProps) {
         <div>
           <div className="eyebrow"><span className="jp">混沌</span>AGENT SPRAWL DETECTED</div>
           <h2 className="display" id="problem-title">ONE TERMINAL WAS <span className="orange">FINE.</span><br />THEN THERE WERE SEVEN.</h2>
-          <p className="lead">Sessions multiply. Branches drift. Reviews wait in windows you forgot were open. <strong>The problem is no longer writing code. It is knowing what every agent is doing, what it costs, and what needs your decision.</strong></p>
+          <p className="lead">Sessions multiply. Branches drift. Reviews wait in windows you forgot were open. <strong>The problem is no longer writing code. It is knowing what each agent is doing, what it costs, and what needs your decision.</strong></p>
           <div className="problem-stats" aria-label="Example fleet status">
             <div className="stat"><span className="label">LIVE SESSIONS</span><span className="value">04</span><span className="foot">2 RUN · 1 IDLE · 1 REVIEW</span></div>
             <div className="stat"><span className="label">OPEN WORKTREES</span><span className="value">07</span><span className="foot">3 READY FOR RULING</span></div>

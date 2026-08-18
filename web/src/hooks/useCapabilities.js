@@ -12,7 +12,7 @@ export function useCapabilities() {
   const [caps, setCaps] = useState(cache);
   useEffect(() => {
     if (!promise) {
-      promise = fetch('/capabilities')
+      promise = fetch('/api/capabilities')
         .then((r) => r.json())
         .then((d) => { cache = d; return d; })
         .catch(() => null);

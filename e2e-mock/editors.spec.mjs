@@ -200,7 +200,9 @@ test.describe('Memory panel', () => {
 });
 
 test.describe('Skills panel', () => {
-  async function expandRoot(page) {
+  // Roots render expanded, so this collapses one — the inverse of what the
+  // click used to do.
+  async function collapseRoot(page) {
     await page.getByText(SKILLS_LABEL, { exact: false }).first().click();
   }
   async function openSkill(page, scope, skill) {
@@ -208,17 +210,22 @@ test.describe('Skills panel', () => {
     await page.getByRole('button', { name: skill, exact: false }).click();
   }
 
-  test('rail lists the mock root collapsed; expanding reveals scopes and skills', async ({ page }) => {
+  test('rail lists the mock root expanded one level; collapsing hides its scopes', async ({ page }) => {
     await gotoView(page, 'Skills');
     await expect(page.getByText(SKILLS_LABEL, { exact: false }).first()).toBeVisible();
     await expect(page.getByText('2 scopes', { exact: false })).toBeVisible();
     await expect(page.getByText('2 skills', { exact: false })).toBeVisible();
 
-    await expect(page.getByRole('button', { name: 'coding', exact: false })).toHaveCount(0);
-    await expandRoot(page);
+    // One level only: the root's scope folders are visible without a click, the
+    // skills inside them are not.
     await expect(page.getByRole('button', { name: 'coding', exact: false })).toBeVisible();
     await expect(page.getByRole('button', { name: 'design', exact: false })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'lint-guard', exact: false })).toHaveCount(0);
 
+    await collapseRoot(page);
+    await expect(page.getByRole('button', { name: 'coding', exact: false })).toHaveCount(0);
+
+    await collapseRoot(page);
     await page.getByRole('button', { name: 'coding', exact: false }).click();
     await expect(page.getByRole('button', { name: 'lint-guard', exact: false })).toBeVisible();
   });
@@ -236,7 +243,6 @@ test.describe('Skills panel', () => {
 
   test('selecting a skill loads SKILL.md, and its supporting file loads too', async ({ page }) => {
     await gotoView(page, 'Skills');
-    await expandRoot(page);
     await openSkill(page, 'coding', 'lint-guard');
     await expect(cm(page)).toContainText('Run the linter before staging.');
 
@@ -246,7 +252,6 @@ test.describe('Skills panel', () => {
 
   test('typing + Save reopens the skill with the saved content', async ({ page }) => {
     await gotoView(page, 'Skills');
-    await expandRoot(page);
     await openSkill(page, 'design', 'color-audit');
     await expect(cm(page)).toContainText('Contrast first, hue second.');
 
@@ -264,7 +269,6 @@ test.describe('Skills panel', () => {
 
   test('dirty-nav guard: cancel keeps the unsaved skill open, discard drops it', async ({ page }) => {
     await gotoView(page, 'Skills');
-    await expandRoot(page);
     await openSkill(page, 'coding', 'lint-guard');
     await page.getByRole('button', { name: 'design', exact: false }).click();
     await expect(cm(page)).toContainText('Run the linter before staging.');

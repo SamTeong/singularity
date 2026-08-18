@@ -4,7 +4,7 @@
 // caveman plugin enabled) the cavecrew fallback.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync, readdirSync, chmodSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -20,8 +20,17 @@ process.env.SINGULARITY_HOME = join(scratch, 'sing');
 // the suite.
 delete process.env.OLLAMA_BIN;
 delete process.env.CODEX_BIN;
+// tasks.mjs captures the daemon port at load, from the same DAEMON_PORT
+// index.mjs listens on. Pin it (before the import) so the status-curl assertion
+// below is decisive rather than dependent on the machine's .env.
+process.env.DAEMON_PORT = '4999';
+// Shrinks git()'s hard timeout (default 10s in prod) so the hang-detection
+// test below stays cheap; real git calls in this file finish in well under
+// 3s, so this doesn't make the other git-backed tests flaky.
+process.env.SING_GIT_TIMEOUT_MS = '3000';
 
-const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, createTask, updateTask, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree } = await import('./tasks.mjs');
+const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, buildCodexBackgroundPrompt, createTask, updateTask, concludeTask, snapshotTasks, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree, git } = await import('./tasks.mjs');
+const reg = await import('./agents.mjs');
 
 function initRepo() {
   const repo = mkdtempSync(join(tmpdir(), 'sing-repo-'));
@@ -32,6 +41,17 @@ function initRepo() {
   execFileSync('git', ['-C', repo, 'add', '.']);
   execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'init']);
   return repo;
+}
+
+// git writes loose objects read-only (mode 444), and rmSync won't clear that —
+// on win32 it fails EPERM. Make everything writable first, then delete.
+function rmRepo(dir) {
+  for (const e of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, e.name);
+    if (e.isDirectory()) rmRepo(p);
+    else chmodSync(p, 0o666);
+  }
+  rmSync(dir, { recursive: true, force: true });
 }
 
 const baseTask = {
@@ -169,6 +189,25 @@ test('buildTaskPrompt terminal column: mergeMode "manual" never reaches done', (
   rmSync(cwd, { recursive: true, force: true });
 });
 
+// Every builder embeds the status-curl URL the agent posts its column moves to.
+// Read the wrong env var and the port interpolates as NaN — nothing throws, the
+// prompt still looks right, and every card silently stops moving.
+test('every prompt builder embeds the daemon port in the status-curl URL', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'sing-port-'));
+  const bg = { ...baseTask, kind: 'plain', repo: cwd, worktree: null, prompt: 'do it' };
+  const prompts = [
+    buildTaskPrompt({ ...baseTask, worktree: cwd }, false),
+    buildBackgroundPrompt(bg),
+    buildCodexTaskPrompt({ ...baseTask, worktree: cwd, tool: 'codex' }),
+    buildCodexBackgroundPrompt({ ...bg, tool: 'codex' }),
+  ];
+  for (const p of prompts) {
+    assert.match(p, /http:\/\/127\.0\.0\.1:4999\/api\/tasks\/t1\/status/);
+    assert.doesNotMatch(p, /127\.0\.0\.1:NaN/);
+  }
+  rmSync(cwd, { recursive: true, force: true });
+});
+
 test('RATE_LIMIT_RE matches 429 + usage-limit strings', () => {
   assert.match('API Error: Request rejected (429) · you (x) have reached your session usage limit', RATE_LIMIT_RE);
   assert.match('reached your session usage limit', RATE_LIMIT_RE);
@@ -196,6 +235,39 @@ test('updateTask: state validated against the per-column STATES map', async () =
 
   const overlay = await updateTask('seed-1', { state: 'rate-limited' });
   assert.equal(overlay.state, 'rate-limited');
+});
+
+// concludeTask mutates task state across several awaits (statsFor, the pty-death
+// wait, cleanupGitTask). Before it was routed through serialized(), two
+// concurrent conclusions both read tasks.get(id) as present and both ran to
+// completion — cleanupGitTask twice, two history rows for one task. The second
+// caller must now see the first's result and no-op.
+test('concludeTask: concurrent calls on the same task conclude it exactly once', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'seed-cc', title: 'seed', description: 'd', column: 'done', state: 'complete', kind: 'plain', repo: '/r' }],
+    history: [],
+  }));
+  initTasks(null);
+
+  await Promise.all([concludeTask('seed-cc', 'completed'), concludeTask('seed-cc', 'completed')]);
+
+  const snap = snapshotTasks();
+  assert.equal(snap.history.filter((h) => h.id === 'seed-cc').length, 1);
+  assert.equal(snap.tasks.some((t) => t.id === 'seed-cc'), false);
+});
+
+// git() runs on the request path, so a subprocess that never returns (the
+// classic case is a credential-helper prompt) used to wedge the daemon forever.
+// `hash-object --stdin` blocks reading a stdin that execFile never closes —
+// a portable stand-in for that hang. It must lose to the timeout, not hang.
+test('git: a hung subprocess loses to the hard timeout instead of blocking forever', async () => {
+  const repo = initRepo();
+  try {
+    await assert.rejects(() => git(repo, 'hash-object', '--stdin'), /git hash-object --stdin failed/);
+  } finally {
+    rmRepo(repo);
+  }
 });
 
 test('buildBackgroundPrompt: conclude "done" moves the card to done as the last action', () => {
@@ -316,9 +388,9 @@ test('cleanupGitTask: unmerged branch → worktree removed, branch kept', async 
   assert.match(list, /task\/y/);
 });
 
-test('ensureWorktree: recreates when missing, reusing the existing branch; no-op once present', () => {
+test('ensureWorktree: recreates when missing, reusing the existing branch; no-op once present', async () => {
   try {
-    ensureWorktree({ kind: 'git', repo: sharedRepo, worktree: sharedWt, branch: 'task/y', baseBranch: sharedBase });
+    await ensureWorktree({ kind: 'git', repo: sharedRepo, worktree: sharedWt, branch: 'task/y', baseBranch: sharedBase });
     assert.equal(existsSync(sharedWt), true);
     const wtList = execFileSync('git', ['-C', sharedRepo, 'worktree', 'list'], { encoding: 'utf8' });
     // Normalize both sides: the Windows CI runner's tmpdir() is an 8.3 short
@@ -328,9 +400,34 @@ test('ensureWorktree: recreates when missing, reusing the existing branch; no-op
     const slash = (s) => s.replace(/\\/g, '/').toLowerCase();
     const wanted = slash(realpathSync.native(sharedWt));
     assert.ok(slash(wtList).includes(wanted), 'worktree list includes the recreated worktree');
-    assert.doesNotThrow(() => ensureWorktree({ kind: 'git', repo: sharedRepo, worktree: sharedWt, branch: 'task/y', baseBranch: sharedBase }));
+    // ensureWorktree is async now — doesNotThrow can't see a rejection, so await it directly.
+    await ensureWorktree({ kind: 'git', repo: sharedRepo, worktree: sharedWt, branch: 'task/y', baseBranch: sharedBase });
   } finally {
     rmSync(sharedRepo, { recursive: true, force: true });
     rmSync(sharedWtParent, { recursive: true, force: true });
   }
+});
+
+// initTasks must rebuild taskBySession reverse index from tasks.json so the
+// rate-limit detection listener (reg.bus 'output') can find tasks by sessionId
+// after a daemon restart. Without the fix, taskBySession.get(id) returns
+// undefined for all persisted tasks, and rate-limited state never fires.
+test('initTasks: rebuilds taskBySession reverse index from tasks.json for rate-limit detection', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  const sessionId = 'session-persist-123';
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'persist-1', title: 'Persisted', description: 'd', column: 'inprogress', state: 'working', kind: 'plain', repo: '/r', sessionId }],
+    history: [],
+  }));
+  initTasks(null);
+
+  // Verify the reverse index is populated: emit rate-limit output and check
+  // that the task state transitions to 'rate-limited' (the listener uses
+  // taskBySession to find the task, so this only works if the index was rebuilt).
+  let stateAfterOutput = null;
+  reg.bus.once('tasks', () => { stateAfterOutput = snapshotTasks().tasks[0]?.state; });
+  reg.bus.emit('output', { id: sessionId, data: 'reached your session usage limit' });
+  await new Promise((r) => setImmediate(r)); // let the async listener run
+
+  assert.equal(stateAfterOutput, 'rate-limited', 'taskBySession reverse index was rebuilt, rate-limit listener fired');
 });

@@ -11,7 +11,9 @@ import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
+import { alpha } from '@mui/material/styles';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
+import EditIcon from '@mui/icons-material/Edit';
 import { ACTIONS, DEFAULTS, formatBinding, bindingFromEvent } from '@/lib/keys.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 import { getTokens } from '@/theme/contract.js';
@@ -54,7 +56,7 @@ function ShortcutRow({ action, binding, recording, conflict, onRecord, onCancelR
           </span>
         </Tooltip>
       }
-      sx={{ pr: 6 }}
+      sx={{ pr: 6, py: 1.25, borderBottom: (t) => `1px solid ${alpha(t.palette.glass.stroke, 0.1)}` }}
     >
       <ListItemText
         primary={action.label}
@@ -69,9 +71,11 @@ function ShortcutRow({ action, binding, recording, conflict, onRecord, onCancelR
         ) : (
           <>
             <Chip label={recording ? 'Press a key… (Esc cancels)' : formatBinding(binding)} size="small" color={conflict ? 'warning' : 'default'} />
-            <Button ref={btnRef} size="small" variant="secondary" onClick={onRecord} onBlur={() => recording && onCancelRecord()}>
-              Record
-            </Button>
+            <Tooltip title="Update binding">
+              <IconButton ref={btnRef} size="small" onClick={onRecord} onBlur={() => recording && onCancelRecord()}>
+                <EditIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
           </>
         )}
       </Stack>

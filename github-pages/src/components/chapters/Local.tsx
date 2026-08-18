@@ -21,11 +21,11 @@ export function Local({ sectionRef }: ChapterProps) {
             <br />
             YOUR AGENTS.
           </h2>
-          <p className="lead">The daemon binds to <strong>127.0.0.1 only</strong>. It serves the browser shell, manages agent PTYs, and keeps owned state under your configured Singularity home. There is no hosted control plane and no cloud tenant.</p>
+          <p className="lead">The daemon binds to <strong>localhost only</strong>. It serves the browser shell, manages agent PTYs, and keeps owned state under your configured Singularity home.</p>
           <div className="security-list">
             <div className="security-row">
               <span className="key">BIND</span>
-              <span className="val">127.0.0.1 · LOOPBACK ONLY</span>
+              <span className="val">localhost · LOOPBACK ONLY</span>
               <span className="stamp c-mint">LOCKED</span>
             </div>
             <div className="security-row">
@@ -61,7 +61,7 @@ export function Local({ sectionRef }: ChapterProps) {
                 <small>LIVE STATE CHANNEL</small>
               </div>
             </div>
-            <div className="loopback">127.0.0.1:4317 · LOOPBACK BOUND</div>
+            <div className="loopback">localhost:4317 · LOOPBACK BOUND</div>
             <div className="daemon-core">
               <span className="wire" />
               <div className="daemon">
