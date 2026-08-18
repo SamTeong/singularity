@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { REDUCED_MOTION } from '../lib/env';
+import { useConductor } from '../state/appStore';
+import { seekStep, useScrollStep } from './useScrollStep';
 import { flowData } from './data';
 import type { FlowStep } from './data';
 
@@ -38,8 +40,19 @@ export function useFlowStepper(): UseFlowStepperResult {
   // timer on a click but NOT when autoplay advances itself.
   const [armToken, setArmToken] = useState(0);
 
+  // In 3D the reader's scroll position picks the step (see useScrollStep):
+  // one band of the tasks chapter's local progress per stage. A live
+  // conductor is exactly the "scroll is driving this" test.
+  const scrollDriven = useConductor() !== null;
+  const scrollStep = useScrollStep('tasks');
+  useEffect(() => {
+    if (scrollStep !== null) setIndex(scrollStep);
+  }, [scrollStep]);
+
   const show = useCallback((next: number, user = false) => {
-    setIndex(next);
+    // Scroll owns the step in 3D, so a click scrolls to that stage's band and
+    // the effect above applies it. seekStep is false in flat mode.
+    if (!seekStep('tasks', next)) setIndex(next);
     if (user && !REDUCED_MOTION) setArmToken((t) => t + 1);
   }, []);
 
@@ -52,16 +65,21 @@ export function useFlowStepper(): UseFlowStepperResult {
   );
   useEffect(() => {
     if (externalReset === 0) return; // no reset requested yet
+    // Scroll-driven: entering the chapter already puts the reader in band 0,
+    // and calling show() here would scroll the page out from under them.
+    if (scrollDriven) return;
     show(0, true);
-  }, [externalReset, show]);
+  }, [externalReset, scrollDriven, show]);
 
   useEffect(() => {
-    if (REDUCED_MOTION) return; // source L1004: `if (!RM) flowTimer = setInterval(...)`
+    // Autoplay is the flat-mode driver only — under scroll it would advance
+    // past the reader's band and get yanked back at the next crossing.
+    if (REDUCED_MOTION || scrollDriven) return; // source L1004: `if (!RM) flowTimer = setInterval(...)`
     const id = window.setInterval(() => {
       setIndex((current) => (current + 1) % flowData.length);
     }, AUTOPLAY_MS);
     return () => window.clearInterval(id);
-  }, [armToken]);
+  }, [armToken, scrollDriven]);
 
   return { index, step: flowData[index], show };
 }

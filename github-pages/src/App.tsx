@@ -27,6 +27,8 @@ import { CHAPTERS } from './config/chapters';
 import { NARROW, REDUCED_MOTION, DEBUG } from './lib/env';
 import { clamp } from './lib/math';
 import { probeInitialMode } from './app/probe';
+import { visibleChapter } from './app/chapterPosition';
+import { useAutoplay } from './app/useAutoplay';
 import { useBodyMode } from './app/useBodyMode';
 import { useElementRegistry } from './app/useElementRegistry';
 import { usePanelHitRelay } from './app/panelHitRelay';
@@ -37,6 +39,7 @@ import { requestFlowReset } from './deck/useFlowStepper';
 import { driveFromScroll, resetStage } from './deck/pipelineStage';
 import { runThemeTerminals } from './deck/useThemeTerminals';
 import { closeLightbox } from './deck/lightbox';
+import { stepAt } from './deck/useScrollStep';
 import type { ConductorState, Mode, World } from './world/types';
 
 /** Source L803: fail(showError) auto-hides the boot box after 9s. */
@@ -81,6 +84,10 @@ export default function App() {
   const [bootHidden, setBootHidden] = useState(false);
 
   const isFlat = mode === 'flat' || mode === 'error';
+
+  // Hands-free tour — off until the reader asks for it (see useAutoplay).
+  const [autoplay, setAutoplay] = useState(false);
+  useAutoplay(autoplay, !isFlat);
 
   useBodyMode(mode);
 
@@ -152,7 +159,51 @@ export default function App() {
     // every frame: the store only notifies when the integer stage changes
     // (~5 times per traversal), so this is not a 60fps setState.
     if (PIPELINE_INDEX >= 0) driveFromScroll(state.smooth, PIPELINE_INDEX);
+    // The one exception to "ref writes only": the in-chapter step (fleet
+    // control's tabs, the tasks flow) is a scroll band, and the components
+    // that render it are React. Safe because the signal is written ONLY when
+    // the quantised band changes — a few times per chapter, not per frame.
+    const step = stepAt(state.index, state.localExact);
+    if (step !== null) {
+      const current = appStore.getChapterStep();
+      if (!current || current.chapter !== state.index || current.step !== step) {
+        appStore.setChapterStep({ chapter: state.index, step });
+      }
+    }
   }, []);
+
+  // Set while a mode toggle is in flight. Toggling rebuilds the document
+  // height from scratch — 3D sizes the spacers by chapter weight, flat uses
+  // the deck's natural height — so a raw scrollY means nothing across the
+  // switch. The chapter the reader was on does, so that is what is carried.
+  const pendingChapter = useRef<number | null>(null);
+
+  const toggleMode = useCallback(() => {
+    setMode((current) => {
+      if (current === 'flat') {
+        // In flat mode nothing tracks the chapter (the world owns that signal
+        // and is not running), so it is measured off the layout instead.
+        pendingChapter.current = visibleChapter();
+        setBootHidden(false);
+        setBootShowError(false);
+        setBootProgress(0);
+        setBootStatus('FETCHING GEOMETRY BUFFER…');
+        return 'loading';
+      }
+      pendingChapter.current = appStore.getChapterIndex() ?? 0;
+      return 'flat';
+    });
+  }, []);
+
+  // Landing side of a 3D → flat toggle. The sections are back in their spacers
+  // by now (world.destroy() → restoreDom() runs in the same mutation phase),
+  // so the chapter the reader was on can simply be scrolled to.
+  useEffect(() => {
+    if (!isFlat || pendingChapter.current === null) return;
+    const id = CHAPTERS[pendingChapter.current]?.id;
+    pendingChapter.current = null;
+    document.getElementById(id ?? '')?.scrollIntoView({ block: 'start', behavior: 'instant' });
+  }, [isFlat]);
 
   const onChapter = useCallback((index: number) => {
     // Source updateDom() at L1440-1452. The HUD/rail writes are React state;
@@ -160,6 +211,14 @@ export default function App() {
     // never imports src/deck/.
     setChapterIndexState(index);
     appStore.setChapterIndex(index);
+    // Landing side of a flat → 3D toggle. This is the first callback after
+    // conductor.start() (createWorld's enter3D tail), which is the earliest
+    // point goTo() is not a no-op.
+    if (pendingChapter.current !== null) {
+      const target = pendingChapter.current;
+      pendingChapter.current = null;
+      if (target !== index) worldRef.current?.goTo(target);
+    }
     const c = CHAPTERS[index];
     if (!c) return;
     if (c.id === 'fleet-control') renderTerminal(); // L1450
@@ -175,7 +234,11 @@ export default function App() {
     worldRef.current = world;
     // Makes the rail buttons live. Null in flat mode, which is what keeps them
     // inert there — the source's `conductor && conductor.goTo(i)` guard.
-    appStore.setConductor({ goTo: (i: number) => world.goTo(i) });
+    appStore.setConductor({
+      goTo: (i: number) => world.goTo(i),
+      seek: (p: number) => world.seek(p),
+      topAt: (p: number) => world.topAt(p),
+    });
   }, []);
 
   // Dismiss the boot panel shortly after the deck mounts (source L1642).
@@ -191,6 +254,7 @@ export default function App() {
     worldRef.current = null;
     appStore.setConductor(null);
     appStore.setChapterIndex(null);
+    appStore.setChapterStep(null);
     setChapterIndexState(null);
     // Nothing is driving these any more. The pipeline stage falls back to
     // stage 01 and becomes click-only. The teletypes get run once here rather
@@ -216,7 +280,14 @@ export default function App() {
     <>
       <SkipLink />
       <ScrollProgress barRef={progressBarRef} />
-      <TopBar chapter={activeChapter} />
+      <TopBar
+        chapter={activeChapter}
+        is3D={!isFlat}
+        canToggle={mode !== 'error' && !NARROW}
+        onToggle={toggleMode}
+        autoplay={autoplay}
+        onToggleAutoplay={() => setAutoplay((on) => !on)}
+      />
       {/* Never React.lazy/Suspense — a Suspense boundary above the chapters
           would violate PANEL DOM CONTRACT invariant I1. ThreeWorld reaches
           Three.js only through a dynamic import(), so flat mode never fetches

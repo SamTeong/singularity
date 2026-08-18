@@ -7,9 +7,26 @@ interface TopBarProps {
    *  For chapter 0 the computed string happens to be identical, but the two
    *  states are still distinct and are reproduced as such. */
   chapter: ChapterEntry | null;
+  /** 3D walkthrough active or booting. */
+  is3D: boolean;
+  /** False where 3D is not an option at all — narrow viewports and machines
+   *  without WebGL2 — so the toggle is absent rather than offering a mode the
+   *  reader cannot have. */
+  canToggle: boolean;
+  onToggle: () => void;
+  /** Hands-free tour running. */
+  autoplay: boolean;
+  onToggleAutoplay: () => void;
 }
 
-export function TopBar({ chapter }: TopBarProps) {
+export function TopBar({
+  chapter,
+  is3D,
+  canToggle,
+  onToggle,
+  autoplay,
+  onToggleAutoplay,
+}: TopBarProps) {
   return (
     <header className="sx-topbar">
       <span className="sx-brand">
@@ -27,6 +44,26 @@ export function TopBar({ chapter }: TopBarProps) {
       <nav className="sx-links" aria-label="Related scenes">
         <a href="https://github.com/SamTeong/singularity">REPOSITORY ↗</a>
       </nav>
+      <button
+        type="button"
+        className={'sx-mode' + (autoplay ? ' on' : '')}
+        onClick={onToggleAutoplay}
+        aria-pressed={autoplay}
+        aria-label="Toggle the hands-free tour"
+      >
+        AUTO <b>{autoplay ? 'ON' : 'OFF'}</b>
+      </button>
+      {canToggle && (
+        <button
+          type="button"
+          className="sx-mode"
+          onClick={onToggle}
+          aria-pressed={is3D}
+          aria-label="Toggle the 3D walkthrough"
+        >
+          MODE <b>{is3D ? '3D' : '2D'}</b>
+        </button>
+      )}
     </header>
   );
 }
