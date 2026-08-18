@@ -32,8 +32,15 @@ export interface ScrollConductor {
   getState(): ConductorState;
   goTo(index: number): void;
   /** Inverse of progressAt — lets a resize restore the same story position
-   *  after the spacers are re-measured against the new viewport height. */
-  setProgress(p: number): void;
+   *  after the spacers are re-measured against the new viewport height, and
+   *  lets in-chapter step controls move the scroll position that drives them.
+   *  `smooth` is for the latter only: a resize must land instantly, before
+   *  the next measure. */
+  setProgress(p: number, smooth?: boolean): void;
+  /** The scroll offset a story position sits at — what setProgress would
+   *  scroll to. Public so a caller that animates the scroll itself (the
+   *  autoplay tour) can aim at the same place. */
+  topAt(p: number): number;
 }
 
 export function createScrollConductor(opts: ScrollConductorOptions): ScrollConductor {
@@ -203,13 +210,22 @@ export function createScrollConductor(opts: ScrollConductorOptions): ScrollCondu
     scrollTo({ top: anchors[i], behavior: reducedMotion ? 'auto' : 'smooth' });
   }
 
-  function setProgress(p: number): void {
+  function topAt(p: number): number {
+    if (!anchors.length) measure();
     p = clamp(p, 0, anchors.length - 1);
     const i = clamp(Math.floor(p), 0, anchors.length - 2);
-    const top = anchors.length < 2 ? 0 : anchors[i] + (p - i) * (anchors[i + 1] - anchors[i]);
-    scrollTo({ top: Math.round(top), behavior: 'instant' });
-    readScroll();
+    return anchors.length < 2 ? 0 : Math.round(anchors[i] + (p - i) * (anchors[i + 1] - anchors[i]));
   }
 
-  return { start, stop, measure, getState: state, goTo, setProgress };
+  function setProgress(p: number, smooth = false): void {
+    const top = topAt(p);
+    const animate = smooth && !reducedMotion;
+    scrollTo({ top, behavior: animate ? 'smooth' : 'instant' });
+    // A smooth scroll is still animating here, so scrollY is the pre-animation
+    // value — the passive scroll listener picks up the real position frame by
+    // frame. Reading it now would only rewind `exact` to where we started.
+    if (!animate) readScroll();
+  }
+
+  return { start, stop, measure, getState: state, goTo, setProgress, topAt };
 }

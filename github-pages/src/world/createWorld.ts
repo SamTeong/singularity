@@ -9,7 +9,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
-import { CHAPTERS } from '../config/chapters';
+import { CHAPTERS, STEPS_BY_INDEX, STEP_BAND_SPAN } from '../config/chapters';
 import { clamp, damp, lerp, pad } from '../lib/math';
 import { createScrollConductor, type ScrollConductor } from './conductor';
 import { anchorOf, framingDistance } from './cameraPath';
@@ -270,14 +270,35 @@ export function createWorld(o: WorldOptions): World {
     if (moteMat) moteMat.opacity = 0.55 * worldState.motes;
   }
 
+  /** Scroll progress with the stepped chapters' dwell taken out of it. */
+  function dwellProgress(s: number): number {
+    const i = Math.floor(s);
+    const steps = STEPS_BY_INDEX[i] ?? 0;
+    if (!steps) return s;
+    const local = s - i;
+    if (local <= STEP_BAND_SPAN) return i;
+    return i + (local - STEP_BAND_SPAN) / (1 - STEP_BAND_SPAN);
+  }
+
   function updateWorld(state: ConductorState): void {
     lastState = state;
+    // Story position, not scroll position: a chapter with in-chapter steps
+    // (see config's `steps`) holds the camera still for the first
+    // STEP_BAND_SPAN of its segment, which is exactly the stretch its steps
+    // are read on — the panel being stepped through must not sail past while
+    // the reader is working the tabs. The remaining scroll carries the whole
+    // journey to the next chapter. Everything downstream of here — camera,
+    // atmosphere, panel opacity — reads this, so the dwell is total. The dwell
+    // is taken out BEFORE the easing: easeSettle shapes the approach to a
+    // chapter, and there is nothing to shape while the camera is parked.
+    const story = dwellProgress(state.smooth);
+
     // CatmullRomCurve3.getPoint(t) maps t to SEGMENT INDEX, so dividing by
     // (N-1) lands chapter i exactly on waypoint i — that correspondence is
     // what makes every composition reproducible, and it must survive the
     // easing below.
     const last = CHAPTERS.length - 1;
-    const eased = easeSettle(state.smooth);
+    const eased = easeSettle(story);
     const qi = clamp(Math.floor(eased), 0, last);
     const qj = Math.min(last, qi + 1);
     const t = clamp(eased - qi, 0, 1);
@@ -310,7 +331,7 @@ export function createWorld(o: WorldOptions): World {
       // trustworthy (antiparallel framings have no well-defined halfway
       // orientation — that is what this exists to replace).
     }
-    resolveWorld(state.smooth);
+    resolveWorld(story);
 
     // Relevance window: only the current chapter and its neighbours stay
     // mounted, and only while they are actually in front of the camera.
@@ -319,7 +340,7 @@ export function createWorld(o: WorldOptions): World {
     // object must be flagged too.
     forwardVec.set(0, 0, -1).applyQuaternion(pathRig!.quaternion);
     panels.forEach((panel, i) => {
-      const near = 1 - Math.abs(i - state.smooth);
+      const near = 1 - Math.abs(i - story);
       const toPanel = panel.group.position.clone().sub(tmpPos);
       const on = near > 0.001 && toPanel.dot(forwardVec) > 0;
       panel.group.visible = on;
@@ -714,5 +735,15 @@ export function createWorld(o: WorldOptions): World {
     conductor.goTo(index);
   }
 
-  return { boot, goTo, destroy };
+  function seek(progress: number): void {
+    if (!ready || !conductor) return;
+    conductor.setProgress(progress, true);
+  }
+
+  function topAt(progress: number): number {
+    if (!ready || !conductor) return 0;
+    return conductor.topAt(progress);
+  }
+
+  return { boot, goTo, seek, topAt, destroy };
 }

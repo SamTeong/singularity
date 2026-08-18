@@ -70,6 +70,14 @@ export interface World {
   boot(): void;
   /** Rail buttons; no-op before ready. */
   goTo(index: number): void;
+  /** Scrolls to a fractional story position (chapter index + local 0..1) —
+   *  the inverse of ConductorState.exact. Used by the in-chapter step
+   *  controls (fleet-control tabs, tasks flow) so a click moves the scroll
+   *  position that drives them instead of fighting it. No-op before ready. */
+  seek(progress: number): void;
+  /** The scroll offset a story position sits at; 0 before ready. Lets the
+   *  autoplay tour animate the scroll there itself instead of jumping. */
+  topAt(progress: number): number;
   /** Idempotent; restores DOM before disposing GPU resources. */
   destroy(): void;
 }

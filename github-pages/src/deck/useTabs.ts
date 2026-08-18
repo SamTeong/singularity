@@ -1,7 +1,8 @@
 // Source L890-917 — the console's roving-tabindex tablist.
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
+import { seekStep, useScrollStep } from './useScrollStep';
 
 export type FleetControlView = 'sessions' | 'tasks' | 'automation' | 'usage';
 
@@ -24,8 +25,18 @@ export function useTabs(): UseTabsResult {
     usage: null,
   });
 
+  // In 3D the reader's scroll position picks the view (see useScrollStep):
+  // one band of the fleet-control chapter's local progress per tab.
+  const scrollStep = useScrollStep('fleet-control');
+  useEffect(() => {
+    if (scrollStep !== null) setView(VIEWS[scrollStep]);
+  }, [scrollStep]);
+
   const select = useCallback((next: FleetControlView, focus = false) => {
-    setView(next);
+    // Scroll owns the view in 3D, so a click scrolls to that tab's band and
+    // the effect above applies it — setting state here too would only be
+    // undone at the next band crossing. seekStep is false in flat mode.
+    if (!seekStep('fleet-control', VIEWS.indexOf(next))) setView(next);
     // Source L896: `if (on && focus) tab.focus()`, called synchronously in
     // the handler. The target element already exists in the DOM (all four
     // tabs render unconditionally) and `tabIndex={-1}` elements stay

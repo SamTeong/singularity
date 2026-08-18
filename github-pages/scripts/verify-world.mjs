@@ -306,6 +306,113 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
   await ctx.close();
 }
 
+// ── 9: scroll-driven in-chapter steps, the 2D/3D toggle, the autoplay tour ─
+{
+  const { ctx, p } = await page();
+  await p.goto(URL_, { waitUntil: 'domcontentloaded' });
+  await waitFor3D(p);
+  await p.waitForTimeout(2000);
+
+  // Longer than the other blocks' rail waits on purpose: this one measures the
+  // panel's box, and easeSettle's approach is still creeping in at 2.5s.
+  const railTo = async (i) => {
+    await p.evaluate((n) => document.querySelectorAll('.sx-rail button')[n].click(), i);
+    await p.waitForTimeout(4000);
+  };
+  // Walks a chapter's scroll and records the step sequence it produces. Small
+  // hops on purpose: one that clears a whole chapter would pass while skipping
+  // every band in between, which is the regression worth catching.
+  const walk = async (read, hops) => {
+    const seen = [await read()];
+    for (let i = 0; i < hops; i++) {
+      await p.evaluate(() => window.scrollBy(0, 240));
+      await p.waitForTimeout(220);
+      const now = await read();
+      if (now !== seen[seen.length - 1]) seen.push(now);
+    }
+    return seen;
+  };
+
+  // The panel's own on-screen box, which is where the camera shows up: the
+  // CSS3D transform is what moving/receding looks like in the DOM.
+  const panelBox = (id) => p.evaluate((s) => {
+    const r = document.getElementById(s).getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top) };
+  }, id);
+
+  await railTo(3);
+  const parkedBefore = await panelBox('fleet-control');
+  const tabs = await walk(() => p.evaluate(() =>
+    document.querySelector('.console-tabs .tab[aria-selected="true"]')?.dataset.view), 7);
+  check('scroll walks the fleet-control tabs in order',
+    JSON.stringify(tabs) === JSON.stringify(['sessions', 'tasks', 'automation', 'usage']),
+    JSON.stringify(tabs));
+
+  // The whole point of the dwell (createWorld's dwellProgress): stepping the
+  // sub-views must not sail the panel being read out of frame.
+  const parkedAfter = await panelBox('fleet-control');
+  const drift = Math.max(Math.abs(parkedAfter.w - parkedBefore.w), Math.abs(parkedAfter.top - parkedBefore.top));
+  const opacity = await p.evaluate(() => document.getElementById('fleet-control').style.opacity);
+  // A few px of residual camera damping is expected; a chapter's worth of
+  // travel is hundreds.
+  check('camera parks while the sub-views are stepped', drift <= 20 && Number(opacity) > 0.95,
+    `drift=${drift}px opacity=${opacity} ${JSON.stringify(parkedBefore)} -> ${JSON.stringify(parkedAfter)}`);
+
+  await railTo(4);
+  const steps = await walk(() => p.evaluate(() =>
+    document.querySelector('.flow .flow-item.now')?.dataset.step), 7);
+  check('scroll walks the tasks flow in order',
+    JSON.stringify(steps) === JSON.stringify(['0', '1', '2', '3', '4']), JSON.stringify(steps));
+
+  const caption = () => p.evaluate(() => document.getElementById('sxNote')?.textContent);
+  const autoBtn = 'button[aria-label="Toggle the hands-free tour"]';
+  await railTo(0);
+  const before = await caption();
+  await p.click(autoBtn);
+  // Sampled, not just start-vs-end: the tour must SCROLL between stops, and a
+  // jump would land in one or two frames. Anything animated leaves a trail of
+  // distinct offsets behind it.
+  const offsets = new Set();
+  for (let i = 0; i < 90; i++) {
+    offsets.add(await p.evaluate(() => Math.round(window.scrollY)));
+    await p.waitForTimeout(100);
+  }
+  check('autoplay advances the chapter unattended', before !== (await caption()),
+    `${before} -> ${await caption()}`);
+  check('autoplay scrolls between stops rather than jumping', offsets.size > 12,
+    `${offsets.size} distinct offsets sampled`);
+  await p.click(autoBtn);
+  const stopped = await caption();
+  await p.waitForTimeout(9000);
+  check('autoplay stops when switched off', (await caption()) === stopped, stopped);
+
+  const modeBtn = 'button[aria-label="Toggle the 3D walkthrough"]';
+  await p.click(modeBtn);
+  await p.waitForTimeout(600);
+  const flat = await p.evaluate(() => ({
+    mode3d: document.body.classList.contains('mode-3d'),
+    inScroll: document.querySelectorAll('#scroll .chapter').length,
+    canvas: document.querySelectorAll('canvas#gl').length,
+    label: document.querySelector('button[aria-label="Toggle the 3D walkthrough"] b')?.textContent,
+  }));
+  check('MODE 2D restores the flat deck',
+    !flat.mode3d && flat.inScroll === SCREENS && flat.canvas === 0 && flat.label === '2D',
+    JSON.stringify(flat));
+
+  await p.click(modeBtn);
+  await waitFor3D(p);
+  await p.waitForTimeout(2500);
+  const back = await p.evaluate(() => ({
+    panels: document.querySelectorAll('#css3d .chapter.as-panel').length,
+    canvas: document.querySelectorAll('canvas#gl').length,
+    label: document.querySelector('button[aria-label="Toggle the 3D walkthrough"] b')?.textContent,
+  }));
+  check('MODE 3D rebuilds the world', back.panels === SCREENS && back.canvas === 1 && back.label === '3D',
+    JSON.stringify(back));
+  check('console clean across toggles and the tour', p._errors.length === 0, p._errors.slice(0, 3).join(' | '));
+  await ctx.close();
+}
+
 await browser.close();
 
 const failed = results.filter((r) => !r.pass);

@@ -12,6 +12,8 @@ import { useSyncExternalStore } from 'react';
 
 export interface Conductor {
   goTo(index: number): void;
+  seek(progress: number): void;
+  topAt(progress: number): number;
 }
 
 type Listener = () => void;
@@ -40,6 +42,20 @@ export const getChapterIndex = chapterIndexSignal.get;
 export const subscribeChapterIndex = chapterIndexSignal.subscribe;
 export function useChapterIndex(): number | null {
   return useSyncExternalStore(subscribeChapterIndex, getChapterIndex);
+}
+
+// The scroll-driven step inside a chapter that has in-chapter steps (the
+// fleet-control tabs, the tasks flow) — see deck/useScrollStep.ts for the
+// band maths. Written from App's onFrame, but ONLY when the quantised step
+// actually changes, so subscribers re-render on step changes and never per
+// frame. `null` until the first stepped chapter is reached, and forever in
+// flat mode — which is what keeps the steppers self-driven there.
+const chapterStepSignal = createSignal<{ chapter: number; step: number } | null>(null);
+export const setChapterStep = chapterStepSignal.set;
+export const getChapterStep = chapterStepSignal.get;
+export const subscribeChapterStep = chapterStepSignal.subscribe;
+export function useChapterStep(): { chapter: number; step: number } | null {
+  return useSyncExternalStore(subscribeChapterStep, getChapterStep);
 }
 
 // Registered by the world once the scroll conductor is running. `null` in

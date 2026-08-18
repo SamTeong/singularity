@@ -23,6 +23,7 @@ export { useTelemetryEngine } from './useTelemetryEngine';
 export { useUsageChart } from './useUsageChart';
 export { useTabs } from './useTabs';
 export type { FleetControlView, UseTabsResult } from './useTabs';
+export { stepAt, stepCount, stepProgress, useScrollStep, seekStep } from './useScrollStep';
 export { useFlowStepper } from './useFlowStepper';
 export type { UseFlowStepperResult } from './useFlowStepper';
 export { useCopyCommand } from './useCopyCommand';

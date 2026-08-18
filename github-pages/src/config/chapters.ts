@@ -33,9 +33,19 @@ export interface ChapterWorld {
   exposure: number; // renderer.toneMappingExposure
 }
 
+// How much of a stepped chapter's own scroll goes to its steps. The camera
+// parks for that stretch (see createWorld's dwellProgress) and the bands are
+// cut from it (see deck/useScrollStep.ts) — one constant, or the panel would
+// start sailing away mid-step.
+export const STEP_BAND_SPAN = 0.55;
+
 export interface Chapter {
   id: ChapterId;
   weight: number; // spacer height in viewport heights
+  /** Sub-views the chapter's own scroll steps through — the fleet-control
+   *  tabs, the tasks flow. Omitted for the chapters that have none. Budget
+   *  ~0.7 of `weight` per step, or the bands fly past. */
+  steps?: number;
   num: string;
   jp: string;
   code: string;
@@ -128,7 +138,7 @@ export const CHAPTERS = [
   },
 
   {
-    id: 'fleet-control', weight: 1.85, num: '04', jp: '制御', code: 'SCR·04', title: 'FLEET CONTROL',
+    id: 'fleet-control', weight: 3.40, steps: 4, num: '04', jp: '制御', code: 'SCR·04', title: 'FLEET CONTROL',
     sub: 'ONE LIVE DECK · SESSIONS · TASKS · AUTOMATION · USAGE',
     // Sits LOW on the -X wall on purpose. `agent-harness` is on the same wall
     // facing the same way (near-coplanar, 0.4 units apart in depth), and the two
@@ -162,7 +172,7 @@ export const CHAPTERS = [
   //    rather than re-deriving a look-at every frame, which is what removes the
   //    singularity itself — here and at every other seam.
   {
-    id: 'tasks', weight: 1.20, num: '05', jp: '流程', code: 'SCR·05', title: 'GET TASKS DONE',
+    id: 'tasks', weight: 4.20, steps: 5, num: '05', jp: '流程', code: 'SCR·05', title: 'GET TASKS DONE',
     sub: 'SPEC → TASK → WORKTREE → AGENT → REVIEW',
     u: [0.640, 0.300, 0.850], yaw: 47, pitch: 0, w: 5.9, px: 1340, pxm: 760,
     fill: 0.90, lift: 0.10, tone: 0x0C6C80, world: { fog: 0.028, bloom: 0.66, motes: 0.55, exposure: 1.0 },
@@ -243,3 +253,8 @@ export const CHAPTERS = [
 ] as const satisfies readonly Chapter[];
 
 export type ChapterEntry = (typeof CHAPTERS)[number];
+
+// `as const` keeps the entries at their literal types, which have no `steps`
+// property at all on the chapters that omit it — so the lookup is derived once
+// here, through the wider interface, rather than cast at each call site.
+export const STEPS_BY_INDEX: readonly number[] = CHAPTERS.map((c: Chapter) => c.steps ?? 0);

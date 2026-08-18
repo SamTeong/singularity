@@ -16,6 +16,10 @@
 .sx-links{margin-left:auto;display:flex;align-items:center;gap:14px;white-space:nowrap}
 .sx-links a{font-size:9px;letter-spacing:.13em;color:var(--green-map);min-height:44px;display:flex;align-items:center}
 .sx-links a:hover{color:var(--mint)}
+.sx-mode{font-family:var(--cond);font-size:9px;letter-spacing:.13em;text-transform:uppercase;color:var(--green-map);background:transparent;border:1px solid rgba(82,242,154,.35);padding:0 10px;height:26px;display:flex;align-items:center;gap:6px;cursor:pointer}
+.sx-mode:hover{color:var(--mint);border-color:var(--mint)}
+.sx-mode.on{color:var(--mint);border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.35)}
+.sx-mode b{color:var(--orange);font-weight:400}
 
 #gl{position:fixed;inset:0;z-index:1;width:100%;height:100%;display:block;outline:none}
 #css3d{position:fixed;inset:0;z-index:2;pointer-events:none;overflow:hidden}

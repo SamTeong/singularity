@@ -212,6 +212,19 @@ Everything *inside* a slide is normal React. Update it freely.
 - Per-slide simulated content (terminals, telemetry, charts) lives in
   `src/deck/`. Reuse `Segments`, `Metric`, `TerminalPane`, `UsageChart` rather
   than writing new imperative DOM.
+- **A slide with sub-views is driven by its own scroll**, not by a second
+  interaction: `src/deck/useScrollStep.ts` splits the first 55% of the slide's
+  scroll into one band per sub-view (fleet control's 4 tabs, the tasks flow's 5
+  stages), and its buttons scroll to a band rather than setting state. That is
+  why those two entries carry a much larger `weight` — give a stepped slide
+  roughly 0.7vh of `weight` per step, or the bands fly past.
+- The top bar's two toggles (`MODE 2D/3D`, `AUTO`) are plain App state:
+  `MODE` flips the mode machine, which unmounts `<ThreeWorld/>` and lets the
+  flat fallback stand; `AUTO` (`src/app/useAutoplay.ts`) tours the stops —
+  slides, plus each stepped slide's bands — looping after the last one. Its two
+  durations are independent: a fixed dwell at each stop, and a glide between
+  them whose length is only distance ÷ speed. Never cap the glide; the cap
+  becomes the speed and a rushed glide is what reads as a jump.
 - Reduced motion is sampled once at load and gates typing delays, autoplay, the
   telemetry tick and camera smoothing. Honour `REDUCED_MOTION` from
   `src/lib/env.ts` in anything you animate.
