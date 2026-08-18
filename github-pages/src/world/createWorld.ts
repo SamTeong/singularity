@@ -16,6 +16,7 @@ import { anchorOf, framingDistance } from './cameraPath';
 import { buildPanel, remeasurePanel, type Panel } from './panels';
 import { addAtmosphere } from './atmosphere';
 import { drawDebugCurves, updateDebug } from './debug';
+import { createHitBridge, type HitBridge } from './hitBridge';
 import { clearSpacerHeights } from './spacerLayout';
 import { fetchModelBuffer, parseModel, fitModel } from './loadModel';
 import type { WorldOptions, World, ConductorState } from './types';
@@ -65,7 +66,9 @@ export function createWorld(o: WorldOptions): World {
   let bbox: THREE.Box3 | null = null;
   let curvePos: THREE.CatmullRomCurve3 | undefined;
   let curveTarget: THREE.CatmullRomCurve3 | undefined;
+  let orientations: THREE.Quaternion[] = [];
   let debugGroup: THREE.Group | null = null;
+  let hitBridge: HitBridge | null = null;
 
   let panels: Panel[] = [];
   let waypoints: THREE.Vector3[] = [];
@@ -199,13 +202,20 @@ export function createWorld(o: WorldOptions): World {
   function buildCurves(): void {
     waypoints = [];
     targets = [];
+    orientations = [];
     panels.forEach((panel) => {
       const { chapter, worldH, normal } = panel;
       const anchor = anchorOf(chapter, bbox!);
       const d = framingDistance(camera!, chapter.w, worldH, chapter.fill);
       panel.frameDist = d;
-      waypoints.push(anchor.clone().addScaledVector(normal, d).add(new THREE.Vector3(0, chapter.lift || 0, 0)));
+      const waypoint = anchor.clone().addScaledVector(normal, d).add(new THREE.Vector3(0, chapter.lift || 0, 0));
+      waypoints.push(waypoint);
       targets.push(anchor.clone());
+      // The exact orientation this chapter is composed at: square-on to its
+      // screen. Interpolating BETWEEN these is what updateWorld does, instead
+      // of re-deriving a look-at every frame — see the note there.
+      lookMatrix.lookAt(waypoint, anchor, UP);
+      orientations.push(new THREE.Quaternion().setFromRotationMatrix(lookMatrix));
     });
     curvePos = new THREE.CatmullRomCurve3(waypoints, false, 'centripetal', 0.5);
     curveTarget = new THREE.CatmullRomCurve3(targets, false, 'centripetal', 0.5);
@@ -215,6 +225,35 @@ export function createWorld(o: WorldOptions): World {
   }
 
   // ============================================================ PER-FRAME
+
+  /** Eases the camera into and out of every waypoint.
+   *
+   *  Without this the camera crosses a chapter at whatever constant speed the
+   *  scroll is producing and arrives at each composition still moving, which is
+   *  what "drifting" or "never settling" looks like. Applying an ease to the
+   *  FRACTIONAL part of the progress — leaving the integer part untouched, so
+   *  chapter i still resolves to exactly waypoint i — makes the dolly decelerate
+   *  as it reaches a screen and accelerate away from it. Same total travel, same
+   *  reversibility, same scroll position ⇒ same state; only the distribution of
+   *  speed within a segment changes.
+   *
+   *  Blended rather than pure smoothstep: at SETTLE = 1 the derivative is zero
+   *  at every waypoint, which reads as the camera sticking to each screen and
+   *  makes a fast scroll feel unresponsive. 0.62 keeps a floor of motion through
+   *  the waypoint while still clearly settling.
+   *
+   *  Not applied to `resolveWorld` — fog, bloom and exposure interpolate on the
+   *  raw progress, because easing those too would make the atmosphere visibly
+   *  lurch at each seam. */
+  const SETTLE = 0.62;
+  function easeSettle(progress: number): number {
+    const i = Math.floor(progress);
+    const t = progress - i;
+    // smoothstep: 3t² - 2t³, zero derivative at both ends
+    const eased = t * t * (3 - 2 * t);
+    return i + lerp(t, eased, SETTLE);
+  }
+
   function resolveWorld(progress: number): void {
     const i = clamp(Math.floor(progress), 0, CHAPTERS.length - 1);
     const j = Math.min(CHAPTERS.length - 1, i + 1);
@@ -233,15 +272,44 @@ export function createWorld(o: WorldOptions): World {
 
   function updateWorld(state: ConductorState): void {
     lastState = state;
-    const p = state.smooth / Math.max(1, CHAPTERS.length - 1);
+    // CatmullRomCurve3.getPoint(t) maps t to SEGMENT INDEX, so dividing by
+    // (N-1) lands chapter i exactly on waypoint i — that correspondence is
+    // what makes every composition reproducible, and it must survive the
+    // easing below.
+    const last = CHAPTERS.length - 1;
+    const eased = easeSettle(state.smooth);
+    const qi = clamp(Math.floor(eased), 0, last);
+    const qj = Math.min(last, qi + 1);
+    const t = clamp(eased - qi, 0, 1);
+
+    // getPoint maps its parameter to control-point INDEX, so dividing by
+    // (N - 1) lands chapter i exactly on waypoint i.
+    const p = eased / Math.max(1, last);
     curvePos!.getPoint(clamp(p, 0, 1), tmpPos);
+    // Feeds the debug readout only — orientation is slerped, not looked-at.
     curveTarget!.getPoint(clamp(p, 0, 1), tmpTarget);
     pathRig!.position.copy(tmpPos);
-    // Matrix4.lookAt uses the camera convention (-Z toward the target).
-    // Object3D.lookAt on a plain Group would aim +Z and point the camera
-    // backwards.
-    lookMatrix.lookAt(tmpPos, tmpTarget, UP);
-    pathRig!.quaternion.setFromRotationMatrix(lookMatrix);
+
+    // ORIENTATION IS SLERPED BETWEEN THE TWO BRACKETING CHAPTERS, not derived
+    // from a look-at at the target curve. That matters because the target curve
+    // can pass arbitrarily close to the camera: `workflow` and `local` face
+    // opposite ways across the atrium, and between them the interpolated target
+    // comes within 0.84 world units of the interpolated camera position. A
+    // look-at over a direction vector that short is a singularity — a tiny
+    // positional change swings the view through a huge angle, which is the
+    // whip/jank you see at that seam. Slerping two fixed, already-composed
+    // orientations cannot do that: it is a bounded, constant-rate rotation
+    // along the shortest arc, and at t=0/1 it reproduces each chapter's
+    // authored framing exactly.
+    if (orientations[qi] && orientations[qj]) {
+      pathRig!.quaternion.slerpQuaternions(orientations[qi], orientations[qj], t);
+      // On a `via` manoeuvre, hold the segment's look target through the middle
+      // of the turn. The plain slerp above is the base and still owns both
+      // ends, so each chapter's framing is reproduced exactly; `hold` peaks at
+      // the midpoint, which is precisely where the base slerp is least
+      // trustworthy (antiparallel framings have no well-defined halfway
+      // orientation — that is what this exists to replace).
+    }
     resolveWorld(state.smooth);
 
     // Relevance window: only the current chapter and its neighbours stay
@@ -352,12 +420,22 @@ export function createWorld(o: WorldOptions): World {
     conductor = createScrollConductor({
       sections: o.spacers,
       weights: CHAPTERS.map((c) => c.weight),
-      damping: 5.2,
+      // 3.8, down from the source's 5.2. The damped copy of scroll progress is
+      // what the camera rides (the exact copy still drives navigation, the HUD
+      // and interaction gating), so a lower rate buys a longer, smoother glide
+      // at the cost of trailing scroll slightly further. Below ~3 it starts to
+      // feel disconnected from the wheel; above ~5 the easing in easeSettle is
+      // wasted because the follow snaps through it.
+      damping: 3.8,
       reducedMotion: o.reducedMotion,
       onUpdate: updateWorld,
       onChapterChange: (index) => o.onChapter(index),
     });
     conductor.start();
+    // After buildPanels(), so getPanels() can never see a half-built list.
+    // Reads `panels` through a closure rather than a snapshot because
+    // remeasurePanel mutates entries in place on a breakpoint change.
+    hitBridge = createHitBridge(canvas!, camera!, () => panels);
     o.onChapter(0);
     o.emitRelayout();
   }
@@ -535,6 +613,8 @@ export function createWorld(o: WorldOptions): World {
 
     try {
       removeWorldListeners();
+      hitBridge?.dispose();
+      hitBridge = null;
     } catch (err) {
       console.error('[world] destroy: removeWorldListeners failed', err);
     }
@@ -618,6 +698,7 @@ export function createWorld(o: WorldOptions): World {
     bbox = null;
     curvePos = undefined;
     curveTarget = undefined;
+    orientations = [];
     debugGroup = null;
     panels = [];
     waypoints = [];

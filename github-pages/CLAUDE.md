@@ -1,6 +1,6 @@
 # CLAUDE.md — editing the deck
 
-This app is a **slide deck**: seven chapters ("slides") mounted as real DOM
+This app is a **slide deck**: thirteen chapters ("slides") mounted as real DOM
 inside one persistent Three.js world, toured by a scroll-driven camera on rails.
 Adding, removing, and reordering slides is the routine edit, and this file is the
 runbook for it.
@@ -127,6 +127,19 @@ normal, in degrees) and `fill` until it sits comfortably in frame.
 `pitch` is optional and usually `0` — use it only for screens above or below eye
 level. The Euler order is `'YXZ'` for a reason: under the default order a pitch
 on a yawed screen becomes a roll.
+
+**Two rules the ledger's header comment spells out, worth knowing before you
+start.** Both were learned by shipping the wrong thing:
+
+- **Keep anchors on the building.** The camera is derived, `anchor + normal *
+  framingDistance`, and that distance is already 6-8 units. An anchor pushed out
+  to radius 14 "for room" puts the camera at 22, where the scan is a speck.
+- **Never let a slide's view direction end up antiparallel to a neighbour's.**
+  A 180° seam has no graceful execution: the camera pivots on the spot, the
+  look-at target passes through the camera (a singularity), the relevance window
+  culls *both* panels at the midpoint so you get an empty room, and even slerped
+  orientations are undefined halfway. Stay ≥30° off antiparallel, and check both
+  neighbours — it's a chain.
 
 ---
 
