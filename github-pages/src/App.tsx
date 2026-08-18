@@ -12,14 +12,14 @@ import { flushSync } from 'react-dom';
 import { SkipLink } from './components/chrome/SkipLink'; // source L443
 import { ScrollProgress } from './components/chrome/ScrollProgress'; // L444
 import { TopBar } from './components/chrome/TopBar'; // L446-455
-import { Hud, HudCta, ScrollHint } from './components/chrome/Hud'; // L460-468, L479
+import { Hud, ScrollHint } from './components/chrome/Hud'; // L460-468, L479
 import { Readout } from './components/chrome/Readout'; // L470-476
 import { ChapterRail } from './components/chrome/ChapterRail'; // L478
 import { DebugPanel } from './components/chrome/DebugPanel'; // L481
 import { BootPanel } from './components/chrome/BootPanel'; // L483-493
 import { FlatNote } from './components/chrome/FlatNote'; // L495
 import { SiteFooter } from './components/chrome/SiteFooter'; // L715
-import { Deck } from './components/chapters/Deck'; // L497-713
+import { Chapters } from './components/chapters/Chapters'; // L497-713
 import { ThreeWorld } from './world/ThreeWorld';
 
 import { CHAPTERS } from './config/chapters';
@@ -28,6 +28,7 @@ import { clamp } from './lib/math';
 import { probeInitialMode } from './app/probe';
 import { useBodyMode } from './app/useBodyMode';
 import { useElementRegistry } from './app/useElementRegistry';
+import { usePanelHitRelay } from './app/panelHitRelay';
 import { armScrollRestore, restoreScroll } from './app/scrollRestore';
 import * as appStore from './state/appStore';
 import { renderTerminal } from './deck/useTerminal';
@@ -46,20 +47,23 @@ export default function App() {
   const [mode, setMode] = useState<Mode>(probeInitialMode);
   const [chapterIndex, setChapterIndexState] = useState<number | null>(null);
 
-  // <ThreeWorld/> sits before <Deck/> in the tree (source body order: #gl and
+  // <ThreeWorld/> sits before <Chapters/> in the tree (source body order: #gl and
   // #css3d are at L457-458, the deck at L497). React attaches refs and runs
   // layout effects in one tree-order pass, so on the first commit ThreeWorld's
-  // effect would run before Deck's section/beat refs exist. Deferring its mount
+  // effect would run before Chapters' section/spacer refs exist. Deferring its mount
   // by exactly one commit keeps the source's DOM order AND lets destroy() stay
   // a layout-effect cleanup, which it must be.
   const [registriesReady, setRegistriesReady] = useState(false);
   useEffect(() => setRegistriesReady(true), []);
 
+  // Chromium refuses to hit-test three of the seven panels — see panelHitRelay.ts.
+  usePanelHitRelay();
+
   // A React SPA is an empty #root when the browser applies its saved scroll
   // offset, so the browser's own restoration always lands at 0 — see
   // scrollRestore.ts. We record the position and re-apply it ourselves once the
   // document is at its final height: ThreeWorld does that right after sizing
-  // the beats; in flat mode the deck's natural height is final at first paint.
+  // the spacers; in flat mode the deck's natural height is final at first paint.
   useEffect(() => armScrollRestore(), []);
 
   const [bootProgress, setBootProgress] = useState(0);
@@ -85,7 +89,7 @@ export default function App() {
   const progReadoutRef = useRef<HTMLElement | null>(null);
 
   const sections = useElementRegistry();
-  const beats = useElementRegistry();
+  const spacers = useElementRegistry();
 
   const worldRef = useRef<World | null>(null);
   const bootTimer = useRef<number | undefined>(undefined);
@@ -119,8 +123,8 @@ export default function App() {
     }
     // flushSync so a webglcontextlost demotion completes inside the event
     // handler: one commit runs ThreeWorld's layout cleanup (world.destroy() →
-    // restoreDom() puts the 7 sections back in their beats and clears
-    // as-panel + the inline styles + beat heights), removes the stage div, and
+    // restoreDom() puts the 7 sections back in their spacers and clears
+    // as-panel + the inline styles + spacer heights), removes the stage div, and
     // drops body.mode-3d so the CSS reveals the flat deck.
     flushSync(() => setMode(opts.showError ? 'error' : 'flat'));
   }, []);
@@ -145,8 +149,8 @@ export default function App() {
     appStore.setChapterIndex(index);
     const c = CHAPTERS[index];
     if (!c) return;
-    if (c.id === 'control') renderTerminal(); // L1450
-    if (c.id === 'workflow') requestFlowReset(); // L1451 (itself gated on !RM)
+    if (c.id === 'fleet-control') renderTerminal(); // L1450
+    if (c.id === 'tasks') requestFlowReset(); // L1451 (itself gated on !RM)
   }, []);
 
   const onReady = useCallback((world: World) => {
@@ -193,7 +197,7 @@ export default function App() {
       {!isFlat && registriesReady && (
         <ThreeWorld
           {...worldProps}
-          getBeats={beats.ordered}
+          getSpacers={spacers.ordered}
           getPanels={sections.ordered}
           setMode={setModeSync}
           onStatus={onStatus}
@@ -208,7 +212,6 @@ export default function App() {
       <Hud chapter={activeChapter} />
       <Readout progRef={progReadoutRef} />
       <ChapterRail />
-      <HudCta />
       <ScrollHint />
       <DebugPanel />
       <BootPanel
@@ -218,7 +221,7 @@ export default function App() {
         hidden={bootHidden}
       />
       <FlatNote visible={isFlat} variant={NARROW ? 'narrow' : 'default'} />
-      <Deck sectionRefs={sections.refs} beatRefs={beats.refs} />
+      <Chapters sectionRefs={sections.refs} spacerRefs={spacers.refs} />
       <SiteFooter />
     </>
   );

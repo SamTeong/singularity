@@ -1,4 +1,4 @@
-// The `<canvas id="usageChart">` (source L936 / cockpit UsageView) plus the
+// The `<canvas id="usageChart">` (source L936 / fleet-control UsageView) plus the
 // ref wiring for useUsageChart.ts.
 
 import { useRef } from 'react';

@@ -35,7 +35,7 @@ Three Fiber. The conductor connects them.
 
 | Directory | Holds |
 |---|---|
-| `src/config/chapters.ts` | the chapter ledger — the single source of truth for order, DOM ids, camera anchors, screen geometry, HUD copy and per-chapter atmosphere |
+| `src/config/chapters.ts` | the chapter ledger — the single source of truth for order, ids (one kebab-case key per chapter, reused as the DOM id, the `.chapter` modifier class and the stylesheet name), camera anchors, screen geometry, HUD copy and per-chapter atmosphere |
 | `src/components/` | the deck markup, converted near-mechanically from the one-shot |
 | `src/deck/` | the deck's *simulation* (terminal typewriter, 4 Hz telemetry, usage canvas, tabs, flow stepper, copy button) |
 | `src/world/` | the imperative Three.js world + scroll conductor. The **only** place allowed to import `three` (enforced by ESLint) |
@@ -44,7 +44,7 @@ Three Fiber. The conductor connects them.
 
 ### Two rules worth knowing before editing
 
-**The panel DOM contract** (`src/components/chapters/Beat.tsx`). `CSS3DObject`
+**The panel DOM contract** (`src/components/chapters/Spacer.tsx`). `CSS3DObject`
 reparents the seven `<section class="chapter">` nodes out of `<main id="scroll">`.
 React keeps a pointer to each but no longer knows its parent, so subtree updates
 are fine and *structural* changes are not. The chapters must stay rendered
@@ -64,7 +64,7 @@ ordinary scrollable page. Flat mode never downloads the ~590 kB Three.js chunk.
 ## Verification
 
 ```bash
-node scripts/verify-world.mjs   # drives the real 3D experience headlessly (26 checks)
+node scripts/verify-world.mjs   # drives the real 3D experience headlessly (32 checks)
 node scripts/parity.mjs         # diffs the flat deck against the original one-shot
 ```
 

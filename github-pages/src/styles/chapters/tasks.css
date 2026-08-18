@@ -1,8 +1,8 @@
 /* SOURCE: docs/one-shot/3d/sample-gitlab-3d-scan.html lines 302-321 (line 302 is the blank boundary line before the WORKFLOW comment) */
 
-/* WORKFLOW */
-.workflow{background:rgba(12,108,128,.035);border-top:2px solid var(--teal);border-bottom:2px solid var(--teal)}
-.workflow .lead{margin-bottom:38px}
+/* TASKS */
+.tasks{background:rgba(12,108,128,.035);border-top:2px solid var(--teal);border-bottom:2px solid var(--teal)}
+.tasks .lead{margin-bottom:38px}
 .flow{display:grid;grid-template-columns:repeat(5,1fr);position:relative;margin:0 0 36px}
 .flow::before{content:"";position:absolute;left:8%;right:8%;top:39px;height:2px;background:var(--green-dim)}
 .flow-item{position:relative;z-index:2;text-align:center;cursor:pointer;background:none;border:0;color:var(--green-map);min-height:118px;padding:0 8px}

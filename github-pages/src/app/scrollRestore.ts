@@ -9,13 +9,13 @@
 //
 // A React SPA cannot inherit that: at parse time the document is an empty
 // <div id="root">, so when the browser applies its saved scroll offset there is
-// nothing to scroll. By the time React has rendered and the beats are sized,
+// nothing to scroll. By the time React has rendered and the spacers are sized,
 // the browser has already given up. Measured: a reload at y=5351 lands at 0.
 //
 // So we take over. `scrollRestoration = 'manual'` stops the browser's own
 // (useless here) attempt, and we re-apply the offset ourselves at the one
 // moment the document is guaranteed to be its final height — right after
-// applyBeatHeights() in 3D, or after first paint in flat mode.
+// applySpacerHeights() in 3D, or after first paint in flat mode.
 
 const KEY = 'sx:scroll:' + location.pathname;
 
@@ -56,7 +56,7 @@ export function armScrollRestore(): () => void {
 
 /**
  * Re-apply the saved offset. Call once the document has its FINAL height —
- * in 3D that means after the beats are sized, not before, or the target is
+ * in 3D that means after the spacers are sized, not before, or the target is
  * clamped to a short document exactly like the browser's own attempt was.
  *
  * Must also run before the conductor starts: its start() seeds `prevY` and

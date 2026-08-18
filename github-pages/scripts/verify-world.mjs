@@ -44,7 +44,7 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
     css3dHosts: document.querySelectorAll('div#css3d').length,
     panelsInCss3d: document.querySelectorAll('#css3d .chapter.as-panel').length,
     panelsInScroll: document.querySelectorAll('#scroll .chapter').length,
-    beatHeights: [...document.querySelectorAll('#scroll .beat')].map((b) => b.style.height),
+    spacerHeights: [...document.querySelectorAll('#scroll .chapter-spacer')].map((b) => b.style.height),
     screens: document.getElementById('roScreens')?.textContent,
     railCurrent: [...document.querySelectorAll('.sx-rail button')].map((b) => b.getAttribute('aria-current')),
   }));
@@ -65,13 +65,105 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
   const after = await p.evaluate(() => document.getElementById('roProg')?.textContent);
   check('scroll drives the conductor', before !== after, `roProg ${before} -> ${after}`);
 
-  const chapterNow = await p.evaluate(() => document.getElementById('sxBeatTitle')?.textContent);
-  check('HUD beat caption follows the chapter', chapterNow !== 'ORIENTATION', `title=${chapterNow}`);
+  const chapterNow = await p.evaluate(() => document.getElementById('sxChapterTitle')?.textContent);
+  check('HUD chapter caption follows the chapter', chapterNow !== 'ORIENTATION', `title=${chapterNow}`);
   check('console clean in 3D', p._errors.length === 0, p._errors.slice(0, 3).join(' | '));
   await ctx.close();
 }
 
-// ── 4: pre-boot beat sizing (optimistic boot) ─────────────────────────────
+// ── 3b: in-panel controls are clickable in 3D (the panel hit relay) ────────
+// Chromium refuses to hit-test #orientation/#agent-harness/#fleet-control, so the four fleet-control
+// tabs and orientation's two anchors only respond via src/app/panelHitRelay.ts.
+// Real mouse clicks at real screen coordinates are the only way to catch a
+// regression here — all of these pass a DOM `.click()` assertion even when the
+// page is completely dead to the pointer.
+{
+  const { ctx, p } = await page();
+  await p.goto(URL_, { waitUntil: 'domcontentloaded' });
+  await waitFor3D(p);
+  await p.waitForTimeout(2000);
+
+  const goTo = async (i) => {
+    await p.evaluate((n) => [...document.querySelectorAll('.sx-rail button')][n].click(), i);
+    await p.waitForTimeout(2800);
+  };
+  const clickCentre = async (sel) => {
+    const c = await p.evaluate((s) => {
+      const r = document.querySelector(s).getBoundingClientRect();
+      return [r.left + r.width / 2, r.top + r.height / 2];
+    }, sel);
+    await p.mouse.click(c[0], c[1]);
+    await p.waitForTimeout(400);
+  };
+
+  await goTo(3);
+  const switched = [];
+  for (const v of ['tasks', 'automation', 'usage', 'sessions']) {
+    await clickCentre('#tab-' + v);
+    switched.push(await p.evaluate((n) => document.getElementById('tab-' + n).getAttribute('aria-selected'), v));
+  }
+  check('all 4 fleet-control tabs switch on a real click in 3D', switched.every((v) => v === 'true'),
+    JSON.stringify(switched));
+
+  const probe = await p.evaluate(() => {
+    const r = document.getElementById('tab-usage').getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2];
+  });
+  await p.mouse.move(probe[0], probe[1]);
+  const on = await p.evaluate(() => ({
+    cursor: document.getElementById('gl').style.cursor,
+    marked: document.getElementById('tab-usage').classList.contains('hit-hover'),
+  }));
+  await p.mouse.move(14, 886);
+  const off = await p.evaluate(() => ({
+    cursor: document.getElementById('gl').style.cursor,
+    marked: document.querySelectorAll('.hit-hover').length,
+  }));
+  check('canvas shows a pointer cursor over relayed controls only',
+    on.cursor === 'pointer' && off.cursor === '', `over=${on.cursor || 'none'} off=${off.cursor || 'none'}`);
+  // :hover cannot be forced from script, so the relay marks its pick instead —
+  // and must un-mark it, or a control stays lit after the pointer leaves.
+  check('relayed hover is marked on the control and cleared on leave',
+    on.marked && off.marked === 0, `marked=${on.marked} strandedAfterLeave=${off.marked}`);
+
+  // Derived from each anchor's own href rather than hardcoded, so re-pointing
+  // one of them (they have been re-pointed and relabelled before) does not fail
+  // this check — what is under test is that the click lands at all.
+  const expectedNum = (sel) => p.evaluate((s) => {
+    const target = document.querySelector(s).getAttribute('href').slice(1);
+    const panels = [...document.querySelectorAll('#css3d .chapter.as-panel')];
+    return String(panels.findIndex((el) => el.id === target) + 1).padStart(2, '0');
+  }, sel);
+  const jump = async (sel) => {
+    await goTo(0);
+    const want = await expectedNum(sel);
+    await clickCentre(sel);
+    await p.waitForTimeout(2400);
+    const got = await p.evaluate(() => document.getElementById('sxChapterNum').textContent);
+    return { sel, want, got };
+  };
+  const jumps = [await jump('#orientation .btn.primary'), await jump('#orientationCta')];
+  check('orientation anchors jump the conductor, not the URL fragment',
+    jumps.every((j) => j.want !== '00' && j.got === j.want),
+    jumps.map((j) => `${j.sel} -> ${j.got} (want ${j.want})`).join(', '));
+
+  await goTo(4);
+  const wf = await p.evaluate(() => {
+    const b = [...document.querySelectorAll('#tasks .flow-item')][3];
+    const r = b.getBoundingClientRect();
+    return [r.left + r.width / 2, r.top + r.height / 2, document.querySelector('#tasks .flow-item.now')?.dataset.step];
+  });
+  await p.mouse.click(wf[0], wf[1]);
+  await p.waitForTimeout(500);
+  const stepAfter = await p.evaluate(() => document.querySelector('#tasks .flow-item.now')?.dataset.step);
+  check('a panel Chromium DOES hit-test is untouched by the relay', wf[2] === '0' && stepAfter === '3',
+    `now step ${wf[2]} -> ${stepAfter}`);
+
+  check('console clean while relaying clicks', p._errors.length === 0, p._errors.slice(0, 3).join(' | '));
+  await ctx.close();
+}
+
+// ── 4: pre-boot spacer sizing (optimistic boot) ─────────────────────────────
 {
   const { ctx, p } = await page();
   // Stall the model so we can observe the loading state.
@@ -80,12 +172,12 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
   await p.waitForTimeout(1200);
   const s = await p.evaluate(() => ({
     booting: document.body.classList.contains('booting'),
-    heights: [...document.querySelectorAll('#scroll .beat')].map((b) => b.style.height),
+    heights: [...document.querySelectorAll('#scroll .chapter-spacer')].map((b) => b.style.height),
     docHeight: document.documentElement.scrollHeight,
     vh: window.innerHeight,
   }));
   const sized = s.heights.every((h) => h && h.endsWith('px'));
-  check('beats sized BEFORE the model loads (optimistic boot)', s.booting && sized,
+  check('spacers sized BEFORE the model loads (optimistic boot)', s.booting && sized,
     `booting=${s.booting} heights=${JSON.stringify(s.heights)}`);
   check('document claims full scroll length while loading', s.docHeight > s.vh * 7,
     `docHeight=${s.docHeight} vh=${s.vh}`);
@@ -103,21 +195,21 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
     booting: document.body.classList.contains('booting'),
     flatNote: !document.getElementById('sxFlatNote')?.hidden,
     headings: document.querySelectorAll('#scroll .chapter').length,
-    beatHeights: [...document.querySelectorAll('#scroll .beat')].map((b) => b.style.height),
+    spacerHeights: [...document.querySelectorAll('#scroll .chapter-spacer')].map((b) => b.style.height),
     err: document.getElementById('sxBootErr')?.className,
   }));
   check('model 404 → flat deck, 7 chapters back in #scroll',
     !s.mode3d && !s.booting && s.headings === 7, JSON.stringify(s));
   check('flat note revealed + error banner shown', s.flatNote && s.err?.includes('show'), `${s.flatNote} ${s.err}`);
-  check('beat heights unwound on failure', s.beatHeights.every((h) => !h), JSON.stringify(s.beatHeights));
-  // cockpit tabs still work in flat mode
+  check('spacer heights unwound on failure', s.spacerHeights.every((h) => !h), JSON.stringify(s.spacerHeights));
+  // fleet-control tabs still work in flat mode
   await p.click('#tab-tasks');
   await p.waitForTimeout(200);
   const tabs = await p.evaluate(() => ({
     sel: document.getElementById('tab-tasks')?.getAttribute('aria-selected'),
     vis: !document.getElementById('view-tasks')?.hidden,
   }));
-  check('cockpit tabs work in flat mode', tabs.sel === 'true' && tabs.vis, JSON.stringify(tabs));
+  check('fleet-control tabs work in flat mode', tabs.sel === 'true' && tabs.vis, JSON.stringify(tabs));
   await ctx.close();
 }
 
@@ -137,16 +229,16 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
     inScroll: document.querySelectorAll('#scroll .chapter').length,
     asPanel: document.querySelectorAll('.chapter.as-panel').length,
     inlineStyles: [...document.querySelectorAll('#scroll .chapter')].map((e) => e.getAttribute('style') || ''),
-    beatHeights: [...document.querySelectorAll('#scroll .beat')].map((b) => b.style.height),
+    spacerHeights: [...document.querySelectorAll('#scroll .chapter-spacer')].map((b) => b.style.height),
     canvas: document.querySelectorAll('canvas#gl').length,
     flatNote: !document.getElementById('sxFlatNote')?.hidden,
     order: [...document.querySelectorAll('#scroll .chapter')].map((e) => e.id),
-    heroBox: (() => { const r = document.getElementById('hero').getBoundingClientRect();
+    orientationBox: (() => { const r = document.getElementById('orientation').getBoundingClientRect();
       return { w: Math.round(r.width), h: Math.round(r.height) }; })(),
   }));
   check('context loss demotes to flat', !s.mode3d, `mode3d=${s.mode3d}`);
   check('all 7 sections restored into #scroll in order',
-    s.inScroll === 7 && s.order.join(',') === 'hero,problem,systems,control,workflow,local,boot', s.order.join(','));
+    s.inScroll === 7 && s.order.join(',') === 'orientation,chaos,agent-harness,fleet-control,tasks,system-design,take-control', s.order.join(','));
   // Assert the style attribute is EMPTY, not merely free of a listed subset —
   // the first version of this check whitelisted width/height/display/opacity
   // and sailed past a leftover CSS3DRenderer `transform: matrix3d(...)` that
@@ -154,13 +246,13 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
   check('every world-owned inline style cleared (style attr empty)',
     s.asPanel === 0 && s.inlineStyles.every((v) => v.trim() === ''),
     `asPanel=${s.asPanel} styles=${JSON.stringify(s.inlineStyles)}`);
-  check('beat heights cleared on demotion', s.beatHeights.every((h) => !h), JSON.stringify(s.beatHeights));
+  check('spacer heights cleared on demotion', s.spacerHeights.every((h) => !h), JSON.stringify(s.spacerHeights));
   check('canvas removed on demotion', s.canvas === 0, `canvas=${s.canvas}`);
   check('flat note revealed after demotion', s.flatNote, String(s.flatNote));
   // The restored deck must occupy real layout space. A leftover CSS3D
   // transform collapses this to a few pixels while every DOM check still passes.
   check('restored deck has real on-screen geometry',
-    s.heroBox.w > 800 && s.heroBox.h > 300, JSON.stringify(s.heroBox));
+    s.orientationBox.w > 800 && s.orientationBox.h > 300, JSON.stringify(s.orientationBox));
   const bad = p._errors.filter((e) => /NotFoundError|removeChild|insertBefore|panel-contract/.test(e));
   check('no NotFoundError / contract violation during demotion', bad.length === 0, bad.join(' | '));
   await ctx.close();

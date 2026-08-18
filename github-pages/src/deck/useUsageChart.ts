@@ -1,6 +1,6 @@
 // Source L931-976. Sizing rule for every canvas/geometry read anywhere in
 // src/deck/: use `offsetWidth`/`offsetHeight`, never `getBoundingClientRect()`.
-// Once the cockpit section is mounted as a CSS3DObject (Phase 4), an
+// Once the fleet control section is mounted as a CSS3DObject (Phase 4), an
 // ancestor carries a `matrix3d` transform, and getBoundingClientRect() would
 // return the CSS3D-projected screen bounds — which change every frame and
 // collapse toward zero at oblique camera angles. offsetWidth/offsetHeight

@@ -1,7 +1,7 @@
 // Index-aligned element registries for the 7 chapters.
 //
 // The world needs `panels: HTMLElement[]` (the <section class="chapter"> nodes
-// it adopts as CSS3DObjects) and `beats: HTMLElement[]` (the wrappers the
+// it adopts as CSS3DObjects) and `spacers: HTMLElement[]` (the wrappers the
 // conductor measures), both in CHAPTERS order.
 
 import { useCallback, useMemo, useRef } from 'react';
@@ -33,7 +33,7 @@ export function useElementRegistry(): ElementRegistry {
   }, []);
 
   // NOT safe to call during render, nor from a layout effect that runs before
-  // <Deck/> has committed. React attaches refs and runs layout effects in a
+  // <Chapters/> has committed. React attaches refs and runs layout effects in a
   // single tree-order pass, so a component EARLIER in the tree (which is where
   // <ThreeWorld/> sits, matching the source's body order) has its layout effect
   // invoked before a LATER sibling's refs exist. App therefore defers mounting
@@ -47,7 +47,7 @@ export function useElementRegistry(): ElementRegistry {
     () =>
       CHAPTERS.map((c) => {
         const el = map.current.get(c.id);
-        if (!el) throw new Error(`[registry] chapter "${c.id}" never registered — see Beat.tsx PANEL DOM CONTRACT`);
+        if (!el) throw new Error(`[registry] chapter "${c.id}" never registered — see Spacer.tsx PANEL DOM CONTRACT`);
         return el;
       }),
     [],

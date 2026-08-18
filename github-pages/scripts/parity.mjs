@@ -17,7 +17,12 @@ const { chromium } = require('playwright-core');
 
 const ORIG = 'http://127.0.0.1:8080/one-shot/3d/sample-gitlab-3d-scan.html';
 const PORT = 'http://localhost:4319/';
-const CHAPTERS = ['hero', 'problem', 'control', 'workflow', 'systems', 'local', 'boot'];
+// The port renamed every chapter after its title (one kebab-case key per
+// chapter, used as id + `.chapter` modifier + stylesheet name), so the two
+// sides no longer share ids: fingerprint/box diffs on those names are
+// expected, and the screenshot walk needs one list per side.
+const ORIG_CHAPTERS = ['hero', 'problem', 'control', 'workflow', 'systems', 'local', 'boot'];
+const PORT_CHAPTERS = ['orientation', 'chaos', 'fleet-control', 'tasks', 'agent-harness', 'system-design', 'take-control'];
 const OUT = 'scripts/.parity';
 
 /* Both pages must be put into the same visual state before comparing:
@@ -82,7 +87,7 @@ async function capture(browser, url, label, width, height, { abortGlb = false } 
   mkdirSync(dir, { recursive: true });
 
   const shots = [];
-  for (const id of CHAPTERS) {
+  for (const id of label === 'orig' ? ORIG_CHAPTERS : PORT_CHAPTERS) {
     await page.evaluate((i) => document.getElementById(i)?.scrollIntoView({ block: 'center', behavior: 'instant' }), id);
     await page.waitForTimeout(150);
     const f = `${dir}/${label}-${id}.png`;
@@ -118,7 +123,8 @@ async function capture(browser, url, label, width, height, { abortGlb = false } 
       return Object.fromEntries(set.map((g) => [g, (t.match(new RegExp(g, 'g')) || []).length]));
     })(),
     chapterCount: document.querySelectorAll('#scroll .chapter').length,
-    beatCount: document.querySelectorAll('#scroll .beat').length,
+    // `.beat` is the original's name for the wrapper the port calls `.chapter-spacer`.
+    spacerCount: document.querySelectorAll('#scroll .chapter-spacer, #scroll .beat').length,
   }));
 
   await ctx.close();

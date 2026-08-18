@@ -3,7 +3,7 @@ import { useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ChapterProps } from './types';
 
-export function Capabilities({ sectionRef }: ChapterProps) {
+export function AgentHarness({ sectionRef }: ChapterProps) {
   // Source L925-929: clicking the pinned module unpins it; clicking another
   // moves the pin. `aria-pressed` drives both the styling and the
   // `::after{content:"PINNED"}` badge.
@@ -16,12 +16,12 @@ export function Capabilities({ sectionRef }: ChapterProps) {
     // width/height/display/opacity directly on this node every frame. A
     // React-driven className rewrite would silently drop `.as-panel` and
     // collapse the panel mid-scroll.
-    <section className="chapter capabilities" id="systems" aria-labelledby="systems-title" ref={sectionRef}>
+    <section className="chapter agent-harness" id="agent-harness" aria-labelledby="agent-harness-title" ref={sectionRef}>
       <div className="chapter-inner">
         <div className="section-head">
           <span className="idx">03</span>
           <span className="jp">系統</span>
-          <h2 id="systems-title">EVERYTHING AROUND THE WORK.</h2>
+          <h2 id="agent-harness-title">MORE THAN JUST AGENTS AND MODELS.</h2>
         </div>
         <p className="lead">
           Agents need more than a terminal. Singularity keeps the operational surfaces around them visible, editable,
@@ -52,7 +52,7 @@ export function Capabilities({ sectionRef }: ChapterProps) {
             <span className="glyph">設</span>
             <span className="code">SYS·02</span>
             <h3>CONFIG + HOOKS</h3>
-            <p>Inspect and edit project or local settings, hooks, rules, and agent skill scopes.</p>
+            <p>Inspect and edit project or local settings, hooks, and rules.</p>
             <span className="module-foot">
               <span>VALIDATED EDITS</span>
               <span className="stamp c-mint">READY</span>
@@ -64,7 +64,7 @@ export function Capabilities({ sectionRef }: ChapterProps) {
             <h3>MEMORY + SKILLS</h3>
             <p>Keep project memory and reusable instructions discoverable instead of repasting context.</p>
             <span className="module-foot">
-              <span>LOCAL FILES</span>
+              <span>EXPERIENCE + BEHAVIOR</span>
               <span className="stamp c-mint">INDEXED</span>
             </span>
           </button>
@@ -77,9 +77,9 @@ export function Capabilities({ sectionRef }: ChapterProps) {
             <span className="glyph">消</span>
             <span className="code">SYS·04</span>
             <h3>USAGE</h3>
-            <p>Read five-hour and seven-day windows, per-session tokens, turns, and cost reporting.</p>
+            <p>Understand insights, per-session tokens, turns, and cost reporting.</p>
             <span className="module-foot">
-              <span>FLEET METRICS</span>
+              <span>METRICS</span>
               <span className="stamp c-amber">19%</span>
             </span>
           </button>
@@ -117,7 +117,7 @@ export function Capabilities({ sectionRef }: ChapterProps) {
             <span className="glyph">文</span>
             <span className="code">SYS·07</span>
             <h3>WIKI + EXPLORER</h3>
-            <p>Browse linked documentation and edit repository files in the same operational shell.</p>
+            <p>Browse linked documentation and edit local files in the same operational shell.</p>
             <span className="module-foot">
               <span>GRAPH + TREE</span>
               <span className="stamp c-mint">OPEN</span>

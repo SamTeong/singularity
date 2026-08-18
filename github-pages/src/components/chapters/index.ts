@@ -4,20 +4,20 @@
 import type { ComponentType } from 'react';
 import type { ChapterId } from '../../config/chapters';
 import type { ChapterProps } from './types';
-import { Hero } from './Hero';
-import { Problem } from './Problem';
-import { Workflow } from './Workflow';
-import { Cockpit } from './cockpit/Cockpit';
-import { Capabilities } from './Capabilities';
-import { Local } from './Local';
-import { Cta } from './Cta';
+import { Orientation } from './Orientation';
+import { Chaos } from './Chaos';
+import { Tasks } from './Tasks';
+import { FleetControl } from './FleetControl/FleetControl';
+import { AgentHarness } from './AgentHarness';
+import { SystemDesign } from './SystemDesign';
+import { TakeControl } from './TakeControl';
 
 export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> = {
-  arrival: Hero,
-  problem: Problem,
-  control: Cockpit,
-  workflow: Workflow,
-  systems: Capabilities,
-  local: Local,
-  boot: Cta,
+  orientation: Orientation,
+  chaos: Chaos,
+  'fleet-control': FleetControl,
+  tasks: Tasks,
+  'agent-harness': AgentHarness,
+  'system-design': SystemDesign,
+  'take-control': TakeControl,
 };

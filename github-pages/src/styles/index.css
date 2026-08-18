@@ -8,13 +8,13 @@
 @import './tokens.css';
 @import './chrome.css';
 @import './deck.css';
-@import './chapters/hero.css';
-@import './chapters/problem.css';
-@import './chapters/cockpit.css';
-@import './chapters/workflow.css';
-@import './chapters/capabilities.css';
-@import './chapters/local.css';
-@import './chapters/cta.css';
+@import './chapters/orientation.css';
+@import './chapters/chaos.css';
+@import './chapters/fleet-control.css';
+@import './chapters/tasks.css';
+@import './chapters/agent-harness.css';
+@import './chapters/system-design.css';
+@import './chapters/take-control.css';
 /*
  * footer.css is its own file rather than a second chunk of chrome.css so that
  * every stylesheet here is a single contiguous source range AND the emitted

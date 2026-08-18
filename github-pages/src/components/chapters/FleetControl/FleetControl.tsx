@@ -9,8 +9,8 @@ import { useTabs, useUptime, useTelemetryEngine, renderTerminal, requestChartRed
 
 // Merges the external `sectionRef` (populated by Phase 4/5 once the world
 // adopts this node as a CSS3DObject) with a ref local to this component
-// (needed so useTelemetryEngine can read `#control`'s inline `style.display`
-// — see the comment there). Deck.tsx does not currently pass `sectionRef` at
+// (needed so useTelemetryEngine can read `#fleet-control`'s inline `style.display`
+// — see the comment there). Chapters.tsx does not currently pass `sectionRef` at
 // all (Phase 2 left it wired but unused), so the local ref is what makes the
 // engine's guard functional today; it keeps working once Phase 4/5 start
 // passing a real ref through too.
@@ -24,7 +24,7 @@ function mergeRefs<T>(...refs: Array<Ref<T> | undefined>): RefCallback<T> {
   };
 }
 
-export function Cockpit({ sectionRef }: ChapterProps) {
+export function FleetControl({ sectionRef }: ChapterProps) {
   const localSectionRef = useRef<HTMLElement | null>(null);
   const mergedSectionRef = useMemo(() => mergeRefs(sectionRef, localSectionRef), [sectionRef]);
 
@@ -51,12 +51,12 @@ export function Cockpit({ sectionRef }: ChapterProps) {
     // opacity to its style every frame. A dynamic className would be rewritten
     // wholesale by React on every render and silently drop `.as-panel`,
     // collapsing the panel mid-scroll.
-    <section className="chapter cockpit" id="control" aria-labelledby="control-title" ref={mergedSectionRef}>
+    <section className="chapter fleet-control" id="fleet-control" aria-labelledby="fleet-control-title" ref={mergedSectionRef}>
       <div className="intro">
         <div className="section-head">
           <span className="idx">04</span>
           <span className="jp">制御</span>
-          <h2 id="control-title">THE WHOLE FLEET. ONE CONTROL PLANE.</h2>
+          <h2 id="fleet-control-title">THE WHOLE FLEET. ONE CONTROL PLANE.</h2>
         </div>
         <p className="lead">
           The control plane does not replace your tools. It connects them. Switch between sessions, tasks,
