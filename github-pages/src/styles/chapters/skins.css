@@ -1,0 +1,34 @@
+/* SOURCE: docs/one-shot/slides/index.html lines 135-154 (the "01 · one system,
+   two skins" block).
+
+   Every selector is scoped under `.skins`. Two renames were forced, and the
+   rest follow them for consistency:
+     .beat       -> .skin-card   `.beat` is the conductor's own scroll wrapper
+                                 (chrome.css) and carries pointer-events:none
+                                 in 3D, which would kill every card.
+     .num/.bh    -> .sc-num/.sc-head   `.num` is already the flow node in
+                                 workflow.css.
+   `.system` -> `.skins` on the section itself, so it cannot be confused with
+   the SYSTEMS chapter (Capabilities.tsx), which is a different screen. */
+
+.skins{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(180deg,rgba(242,100,0,.03),transparent)}
+.skins .eyebrow .jp{letter-spacing:.14em}
+
+.skins .skin-beats{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(10px,1.4vw,20px);margin-top:clamp(30px,4.4vw,52px)}
+.skins .skin-card{border:1px solid var(--green-dim);border-top:2px solid var(--orange);padding:clamp(18px,2vw,26px) clamp(18px,2vw,26px) clamp(22px,2.4vw,30px);background:linear-gradient(180deg,rgba(242,100,0,.055),transparent 62%);display:flex;flex-direction:column}
+.skins .skin-card:hover{border-color:var(--mint)}
+.skins .sc-head{display:flex;align-items:center;gap:11px;margin-bottom:13px;border-bottom:1px dotted var(--green-dim);padding-bottom:11px}
+.skins .sc-num{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.1em;background:var(--orange);color:var(--bg);padding:1px 8px}
+.skins .sc-head .jp{font-family:var(--jp);font-weight:800;font-size:clamp(22px,2.2vw,30px);color:var(--orange);text-shadow:0 0 5px currentColor;line-height:1;margin-left:auto}
+.skins .skin-card h3{font-family:var(--cond);font-weight:700;font-size:clamp(19px,2.1vw,30px);line-height:1.02;letter-spacing:.04em;text-transform:uppercase;color:var(--paper);text-shadow:0 0 6px rgba(237,248,214,.16)}
+.skins .skin-card p{margin-top:12px;color:var(--green-map);font-size:clamp(12px,1.15vw,15px);line-height:1.72}
+.skins .skin-card p b{color:var(--mint);font-weight:400}
+
+.skins .skin-card.warm{border-top-color:var(--red-hi);background:linear-gradient(180deg,rgba(226,40,15,.06),transparent 62%)}
+.skins .skin-card.warm .sc-num{background:var(--red-hi)}
+.skins .skin-card.cool{border-top-color:var(--mint);background:linear-gradient(180deg,rgba(82,242,154,.06),transparent 62%)}
+.skins .skin-card.cool .sc-num{background:var(--mint)}
+.skins .skin-card.cool .sc-head .jp{color:var(--mint)}
+
+.skins .skin-kicker{margin-top:clamp(18px,2vw,26px);border-left:2px solid var(--orange);padding:3px 0 3px 15px;color:var(--amber);font-size:clamp(11px,1.05vw,13px);line-height:1.7;letter-spacing:.05em;max-width:96ch}
+.skins .skin-kicker b{color:var(--paper);font-weight:400}

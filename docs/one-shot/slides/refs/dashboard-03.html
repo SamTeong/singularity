@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DASHBOARD-03 · JAIRUS OS — AUTOMATION CENTRAL</title>
+<style>
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:#000}
+body{font-family:var(--mono);color:var(--mint);text-transform:uppercase;letter-spacing:.03em;overflow:hidden}
+button{font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)}
+
+.frame{
+  position:relative;margin:14px;height:calc(100vh - 28px);background:var(--bg);
+  border:3px solid var(--orange);
+  clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));
+  box-shadow:0 0 10px rgba(242,100,0,.4),inset 0 0 12px rgba(242,100,0,.14);
+  display:grid;
+  grid-template-columns:1fr 1fr 330px;
+  grid-template-rows:86px auto 1fr 44px;
+  grid-template-areas:
+    "head head head"
+    "trig trig sinks"
+    "feed feed routines"
+    "foot foot foot";
+}
+.frame::before{content:"";position:absolute;inset:6px;border:1px solid var(--orange);
+  opacity:.4;pointer-events:none;z-index:0}
+.frame.alarm{border-color:var(--red-hi)}
+.hazard{grid-area:head;height:6px;align-self:start;display:none;
+  background:repeating-linear-gradient(45deg,var(--crimson) 0 10px,#000 10px 20px)}
+.frame.alarm .hazard{display:block}
+
+.zone-title{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--orange);
+  letter-spacing:.12em;border-bottom:1px solid var(--green-dim);padding-bottom:4px;margin-bottom:8px}
+.stamp{display:inline-block;border:1px solid currentColor;padding:2px 8px;border-radius:2px;
+  font-size:11px;line-height:1.4;white-space:nowrap}
+.stamp.fill{background:currentColor}
+.stamp.fill>span{color:var(--bg);display:block}
+.blink{animation:blink 1s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes btnblink{0%,74%{background:var(--orange);color:var(--bg)}75%,100%{background:var(--bg);color:var(--orange)}}
+
+/* ============ header ============ */
+.head{grid-area:head;display:flex;align-items:center;gap:18px;padding:14px 22px 10px;
+  border-bottom:1px solid var(--orange);position:relative;z-index:1}
+.head h1{font-family:var(--cond);font-weight:700;font-size:28px;color:var(--paper);
+  letter-spacing:.02em;text-shadow:0 0 4px currentColor,0 0 12px rgba(82,242,154,.3)}
+.head .crumb{font-size:10px;letter-spacing:.18em;color:var(--amber)}
+.enginestamp{color:var(--mint)}
+.head-right{margin-left:auto;display:flex;align-items:center;gap:12px}
+.btn{border:1px solid var(--orange);background:var(--bg);color:var(--orange);padding:8px 16px;
+  font-size:11px;cursor:pointer}
+.btn:hover{background:var(--orange);color:var(--bg)}
+.btn:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.btn.hot{font-weight:700;animation:btnblink 1s steps(1) infinite}
+/* uptime 7-seg chip (black on mint) */
+.timewrap{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.timechip{display:flex;align-items:center;gap:2px;background:var(--paper);
+  padding:5px 9px 4px;border-radius:2px;
+  box-shadow:0 0 10px rgba(237,248,214,.4),inset 0 0 4px rgba(10,10,10,.15)}
+.timechip .tc-colon{display:flex;flex-direction:column;gap:5px;margin:0 2px}
+.timechip .tc-colon i{width:3px;height:3px;background:#0A0A0A;display:block}
+.timecap{font-size:9px;color:var(--amber);letter-spacing:.16em}
+
+/* ============ triggers: three gauge geometries ============ */
+.trig{grid-area:trig;padding:12px 20px 16px;position:relative;z-index:1;border-right:1px solid var(--orange)}
+.lgrow{display:flex;gap:8px;margin-bottom:10px}
+.lg{border:1px solid;padding:2px 9px;display:flex;flex-direction:column;align-items:center;
+  min-width:54px;border-radius:2px}
+.lg .jp{font-family:var(--jp);font-weight:800;font-size:13px;line-height:1.2;text-transform:none;
+  letter-spacing:.2em;text-indent:.2em}
+.lg .cap{font-size:8px;letter-spacing:.1em}
+.lg-cron{border-color:var(--mint);color:var(--mint)}
+.lg-watch{border-color:var(--blue);color:var(--blue)}
+.lg-event{border-color:var(--amber);color:var(--amber)}
+.gaugegrid{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+.gcard{border:1px solid var(--green-dim);padding:12px;display:flex;flex-direction:column;
+  align-items:center;gap:8px;
+  clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%)}
+.gcard .g-kind{font-size:9px;letter-spacing:.16em}
+.gcard .g-name{font-family:var(--cond);font-weight:700;font-size:16px;color:var(--paper)}
+.gcard .g-sub{font-size:9px;color:var(--green-map);letter-spacing:.1em}
+.gcard .g-read{font-size:11px}
+.gcard .g-read b{font-family:var(--cond);font-size:19px;font-weight:700}
+/* radial arc */
+.radial{position:relative;width:118px;height:118px}
+.radial svg{width:100%;height:100%;overflow:visible}
+.radial .r-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;pointer-events:none}
+.radial .r-center b{font-family:var(--cond);font-size:24px;color:var(--mint-hi);
+  text-shadow:0 0 4px currentColor}
+.radial .r-center span{font-size:8px;color:var(--green-map);letter-spacing:.14em}
+/* horizontal bar */
+.hbar{display:flex;gap:3px;height:36px;width:100%;align-items:stretch}
+.hbar i{flex:1;border-radius:2px;background:var(--green-dim);opacity:.3}
+.hbar i.on{opacity:1;background:var(--blue);box-shadow:0 0 5px rgba(80,144,208,.5)}
+/* vertical column */
+.vcol{display:flex;flex-direction:column-reverse;gap:3px;width:44px;height:104px}
+.vcol i{flex:1;border-radius:2px;background:var(--green-dim);opacity:.3}
+.vcol i.on{opacity:1;background:var(--amber);box-shadow:0 0 5px rgba(244,159,9,.5)}
+.vcol i.on.hot{background:var(--red-hi);box-shadow:0 0 6px rgba(226,40,15,.6)}
+
+/* ============ sinks ============ */
+.sinks{grid-area:sinks;padding:12px 16px;position:relative;z-index:1}
+.sink{display:flex;align-items:center;gap:10px;border-bottom:1px dotted var(--green-dim);padding:8px 0}
+.sink .s-name{color:var(--paper);font-size:12px;flex:1}
+.sink .s-name small{display:block;font-size:9px;letter-spacing:.12em;margin-top:2px}
+.sink .s-ping{font-size:10px;color:var(--amber)}
+.sink[data-s="ACTIVE"] small{color:var(--mint)}
+.sink[data-s="CONNECTED"] small{color:var(--blue)}
+.sink[data-s="OFFLINE"]{opacity:.9}
+.sink[data-s="OFFLINE"] small{color:var(--red-hi)}
+.sink[data-s="OFFLINE"] .s-stamp{color:var(--red-hi);background:var(--red-hi)}
+.sink[data-s="OFFLINE"] .s-stamp span{color:#000}
+.sink .s-stamp{font-size:9px}
+.sink[data-s="ACTIVE"] .s-stamp{color:var(--mint)}
+.sink[data-s="CONNECTED"] .s-stamp{color:var(--blue)}
+
+/* ============ live exec feed ============ */
+.feed{grid-area:feed;padding:12px 20px;display:flex;flex-direction:column;min-height:0;
+  position:relative;z-index:1;border-right:1px solid var(--orange)}
+.termbar{display:flex;justify-content:space-between;font-size:10px;color:var(--amber);
+  letter-spacing:.12em;border:1px solid var(--amber-dim);border-bottom:none;padding:6px 12px}
+.term{flex:1;overflow-y:auto;border:1px solid var(--amber-dim);padding:10px 14px;
+  background:rgba(244,159,9,.02);font-size:12px;line-height:1.55;color:var(--amber-dim)}
+.trow{display:flex;gap:10px;white-space:nowrap}
+.trow .ts{flex:none;color:var(--amber-dim)}
+.trow .msg{color:var(--amber);text-transform:none}
+.trow .msg b{color:var(--mint);font-weight:400}
+.trow .msg .file{color:var(--paper)}
+.trow.okrow .msg{color:var(--green-map)}
+.trow.warnrow .msg{color:var(--red-hi)}
+.promptrow{border:1px solid var(--amber-dim);border-top:none;color:var(--amber);
+  font-size:11px;padding:6px 12px}
+.cursor{display:inline-block;width:7px;height:11px;background:var(--amber);vertical-align:-1px;
+  animation:blink 1s steps(1) infinite}
+
+/* ============ routines ============ */
+.routines{grid-area:routines;padding:12px 16px;position:relative;z-index:1;display:flex;
+  flex-direction:column;min-height:0}
+.filterrail{display:flex;gap:5px;margin-bottom:9px}
+.filterrail button{border:1px solid var(--orange);background:var(--bg);color:var(--orange);
+  font-size:10px;padding:5px 10px;cursor:pointer}
+.filterrail button.active{background:var(--orange);color:var(--bg);font-weight:700;
+  animation:btnblink 1s steps(1) infinite}
+.filterrail button:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.rt-table{flex:1;overflow-y:auto}
+.rt{display:flex;align-items:center;gap:8px;border:1px solid var(--green-dim);padding:8px 10px;
+  margin-bottom:6px}
+.rt .rt-id{color:var(--amber);font-size:10px;white-space:nowrap}
+.rt .rt-name{color:var(--paper);font-size:11px;flex:1;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.rt .rt-kind{font-size:8px;color:var(--green-map);letter-spacing:.12em}
+.rt .rt-stat{font-size:9px}
+.rt .rt-stat.s-pending{color:var(--blue)}
+.rt .rt-stat.s-success{color:var(--mint)}
+.rt .rt-stat.s-retried{color:var(--red-hi);animation:blink 1s steps(1) infinite}
+.rt.dim{opacity:.25;filter:grayscale(.6)}
+.rt-run{border-color:var(--mint);color:var(--mint);font-size:9px;padding:3px 8px}
+.rt-run:hover{background:var(--mint);color:var(--bg)}
+
+/* ============ footer status bar ============ */
+.foot{grid-area:foot;border-top:1px solid var(--orange);display:flex;align-items:center;gap:20px;
+  padding:0 22px;font-size:10px;letter-spacing:.1em;color:var(--green-map);position:relative;z-index:1}
+.foot .agent i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--mint);
+  margin-right:6px;vertical-align:0}
+.foot .agent.busy i{background:var(--amber)}
+.foot .agent.busy{color:var(--amber)}
+.foot .spacer{flex:1}
+.foot b{color:var(--mint);font-weight:400}
+
+@media (prefers-reduced-motion:reduce){
+  .blink,.cursor,.btn.hot,.filterrail button.active,.rt .rt-stat.s-retried{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="frame" id="frame">
+  <div class="hazard"></div>
+
+  <!-- ================= header ================= -->
+  <header class="head">
+    <div>
+      <div class="crumb">AUTOMATION / ENGINE ROOM · 自動化中枢</div>
+      <h1>AUTOMATION CENTRAL</h1>
+    </div>
+    <span class="stamp enginestamp blink" id="enginestamp">● ENGINE ACTIVE</span>
+    <div class="head-right">
+      <button class="btn" id="pausebtn">PAUSE ALL</button>
+      <button class="btn hot" id="reloadbtn">FORCE RELOAD</button>
+      <div class="timewrap">
+        <span class="timechip" id="timechip" role="img" aria-label="Engine uptime"></span>
+        <span class="timecap">ENGINE UPTIME</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= triggers ================= -->
+  <section class="trig" aria-label="Active triggers">
+    <div class="zone-title">ACTIVE TRIGGERS · 発動 <span style="float:right;color:var(--mint)" id="listeners">38 LISTENERS UP</span></div>
+    <div class="lgrow" role="img" aria-label="Trigger type key">
+      <span class="lg lg-cron"><span class="jp">定時</span><span class="cap">CRON</span></span>
+      <span class="lg lg-watch"><span class="jp">監視</span><span class="cap">WATCHER</span></span>
+      <span class="lg lg-event"><span class="jp">事象</span><span class="cap">EVENT</span></span>
+    </div>
+    <div class="gaugegrid">
+
+      <div class="gcard" style="border-color:var(--mint)">
+        <span class="g-kind" style="color:var(--mint)">CRON · 定時</span>
+        <span class="g-name">NIGHTLY REVIEW</span>
+        <div class="radial">
+          <svg id="radial" viewBox="0 0 120 120"></svg>
+          <div class="r-center"><b id="radial-val">98%</b><span>ARMED</span></div>
+        </div>
+        <span class="g-sub">NEXT: 02:00:00</span>
+      </div>
+
+      <div class="gcard" style="border-color:var(--blue)">
+        <span class="g-kind" style="color:var(--blue)">WATCHER · 監視</span>
+        <span class="g-name">MEDIA WATCHER</span>
+        <div class="hbar" id="hbar" style="margin-top:14px"></div>
+        <span class="g-read" style="color:var(--blue)"><b id="hbar-val">45</b>% BUFFER</span>
+        <span class="g-sub">POLLING: 10S</span>
+      </div>
+
+      <div class="gcard" style="border-color:var(--amber)">
+        <span class="g-kind" style="color:var(--amber)">EVENT · 事象</span>
+        <span class="g-name">GITLAB POLL</span>
+        <div class="vcol" id="vcol"></div>
+        <span class="g-read" style="color:var(--amber)"><b id="vcol-val">100</b>% FRESH</span>
+        <span class="g-sub">LAST: <span id="lastpoll">1M AGO</span></span>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ================= sinks ================= -->
+  <aside class="sinks" aria-label="Notification sinks">
+    <div class="zone-title">NOTIF SINKS · 送達</div>
+    <div class="sink" data-s="ACTIVE">
+      <span class="s-name">NTFY GATEWAY<small>ACTIVE</small></span>
+      <span class="s-ping">PING: <span id="ping-0">14</span>MS</span>
+      <span class="stamp s-stamp">LIVE</span>
+    </div>
+    <div class="sink" data-s="CONNECTED">
+      <span class="s-name">SLACK INTERNAL<small>CONNECTED</small></span>
+      <span class="s-ping">PING: <span id="ping-1">82</span>MS</span>
+      <span class="stamp s-stamp">LIVE</span>
+    </div>
+    <div class="sink" data-s="OFFLINE">
+      <span class="s-name">SMTP RELAY<small>OFFLINE · IDLE</small></span>
+      <span class="s-ping">—</span>
+      <span class="stamp s-stamp fill"><span>DOWN</span></span>
+    </div>
+  </aside>
+
+  <!-- ================= live exec feed ================= -->
+  <section class="feed" aria-label="Live execution feed">
+    <div class="termbar">
+      <span>STDOUT: /VAR/LOG/JAIRUS/AUTOMATION.LOG</span>
+      <span style="color:var(--mint)" id="feedstate">TAILING</span>
+    </div>
+    <div class="term" id="term" role="log" aria-live="polite"></div>
+    <div class="promptrow">AUTOMATION&gt; <span class="cursor"></span></div>
+  </section>
+
+  <!-- ================= routines ================= -->
+  <aside class="routines" aria-label="Routine manager">
+    <div class="zone-title">ROUTINE MANAGER · 手順</div>
+    <div class="filterrail" role="group" aria-label="Filter routines by trigger type">
+      <button class="active" data-k="ALL">ALL</button>
+      <button data-k="CRON">CRON</button>
+      <button data-k="WATCHER">WATCHER</button>
+      <button data-k="EVENT">EVENT</button>
+    </div>
+    <div class="rt-table" id="rtable"></div>
+  </aside>
+
+  <!-- ================= footer ================= -->
+  <footer class="foot">
+    <span class="agent" id="ag-0"><i></i>AGENT·01: NOMINAL</span>
+    <span class="agent" id="ag-1"><i></i>AGENT·02: NOMINAL</span>
+    <span class="agent busy" id="ag-2"><i></i>AGENT·03: BUSY</span>
+    <span class="spacer"></span>
+    <span>CPU: <b id="cpu">12.4%</b></span>
+    <span>MEM: <b id="mem">2.1GB/32GB</b></span>
+    <span style="color:var(--mint)">SYNC OK</span>
+  </footer>
+
+</div>
+
+<script>
+"use strict";
+/* if loaded in a hidden/zero-size viewport, re-init once it has real size */
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $=id=>document.getElementById(id);
+const pad2=n=>String(n).padStart(2,"0");
+
+/* ---------- uptime 7-seg chip ---------- */
+const SVGNS="http://www.w3.org/2000/svg";
+const SEGMAP={0:"abcdef",1:"bc",2:"abged",3:"abgcd",4:"fgbc",5:"afgcd",6:"afgedc",7:"abc",8:"abcdefg",9:"abcfgd"};
+const SEGPTS={
+  a:"7,4 10.5,0.5 29.5,0.5 33,4 29.5,7.5 10.5,7.5",
+  b:"36,7 39.5,10.5 39.5,27.5 36,31 32.5,27.5 32.5,10.5",
+  c:"36,33 39.5,36.5 39.5,53.5 36,57 32.5,53.5 32.5,36.5",
+  d:"7,60 10.5,56.5 29.5,56.5 33,60 29.5,63.5 10.5,63.5",
+  e:"4,33 7.5,36.5 7.5,53.5 4,57 0.5,53.5 0.5,36.5",
+  f:"4,7 7.5,10.5 7.5,27.5 4,31 0.5,27.5 0.5,10.5",
+  g:"7,32 10.5,28.5 29.5,28.5 33,32 29.5,35.5 10.5,35.5"};
+function makeDigit(w,h,on,off){
+  const svg=document.createElementNS(SVGNS,"svg");
+  svg.setAttribute("width",w);svg.setAttribute("height",h);
+  svg.setAttribute("viewBox","0 0 46 64");
+  svg.dataset.on=on;svg.dataset.off=off;
+  for(const k of "abcdefg"){
+    const p=document.createElementNS(SVGNS,"polygon");
+    p.setAttribute("points",SEGPTS[k]);p.setAttribute("data-seg",k);
+    p.setAttribute("transform","translate(6,0) skewX(-6)");p.setAttribute("fill",off);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+function renderDigit(svg,val){
+  const lit=SEGMAP[val];
+  for(const p of svg.children)
+    p.setAttribute("fill",lit.includes(p.getAttribute("data-seg"))?svg.dataset.on:svg.dataset.off);
+}
+const chip=$("timechip"),chipDigits=[];
+for(let i=0;i<6;i++){
+  const d=makeDigit(13,20,"#0A0A0A","rgba(10,10,10,.12)");
+  chipDigits.push(d);chip.appendChild(d);
+  if(i===1||i===3){
+    const c=document.createElement("span");c.className="tc-colon";
+    c.innerHTML="<i></i><i></i>";chip.appendChild(c);
+  }
+}
+let uptime=142*3600+22*60+9, chipBlink=true;
+function tickChip(){
+  uptime++;
+  const h=Math.floor(uptime/3600)%100,m=Math.floor(uptime/60)%60,s=uptime%60;
+  const str=pad2(h)+pad2(m)+pad2(s);
+  chipDigits.forEach((dg,i)=>renderDigit(dg,+str[i]));
+  chipBlink=!chipBlink;
+  chip.querySelectorAll(".tc-colon").forEach(c=>c.style.opacity=(chipBlink||REDUCED)?1:.25);
+}
+
+/* ---------- radial arc gauge (cron: charge toward next fire) ---------- */
+function polar(cx,cy,r,deg){const a=(deg-90)*Math.PI/180;return{x:cx+r*Math.cos(a),y:cy+r*Math.sin(a)};}
+function annularSeg(cx,cy,rO,rI,a0,a1){
+  const p1=polar(cx,cy,rO,a1),p2=polar(cx,cy,rO,a0),p3=polar(cx,cy,rI,a0),p4=polar(cx,cy,rI,a1);
+  return `M${p1.x} ${p1.y} A${rO} ${rO} 0 0 0 ${p2.x} ${p2.y} L${p3.x} ${p3.y} A${rI} ${rI} 0 0 1 ${p4.x} ${p4.y}Z`;
+}
+const RSEG=22,radialSegs=[];
+{
+  const svg=$("radial"),cx=60,cy=60,rO=54,rI=40,start=-135,end=135,gap=1.8;
+  const span=(end-start-gap*RSEG)/RSEG;
+  for(let i=0;i<RSEG;i++){
+    const a0=start+i*(span+gap),a1=a0+span;
+    const p=document.createElementNS(SVGNS,"path");
+    p.setAttribute("d",annularSeg(cx,cy,rO,rI,a0,a1));
+    p.setAttribute("fill","var(--green-dim)");p.setAttribute("opacity",".3");
+    svg.appendChild(p);radialSegs.push(p);
+  }
+}
+let cronPct=98;
+function paintRadial(){
+  const lit=Math.round(cronPct/100*RSEG);
+  radialSegs.forEach((p,i)=>{
+    if(i<lit){p.setAttribute("fill","var(--mint)");p.setAttribute("opacity","1");}
+    else{p.setAttribute("fill","var(--green-dim)");p.setAttribute("opacity",".3");}
+  });
+  $("radial-val").textContent=Math.round(cronPct)+"%";
+}
+
+/* ---------- watcher horizontal bar ---------- */
+const hbar=$("hbar"),HB=18;
+for(let i=0;i<HB;i++){const s=document.createElement("i");hbar.appendChild(s);}
+let watchPct=45;
+function paintHbar(){
+  [...hbar.children].forEach((s,i)=>s.classList.toggle("on",i<Math.round(watchPct/100*HB)));
+  $("hbar-val").textContent=Math.round(watchPct);
+}
+
+/* ---------- event vertical column (freshness decays, poll resets) ---------- */
+const vcol=$("vcol"),VB=14;
+for(let i=0;i<VB;i++){const s=document.createElement("i");vcol.appendChild(s);}
+let fresh=100,lastPoll=0;
+function paintVcol(){
+  const lit=Math.round(fresh/100*VB);
+  [...vcol.children].forEach((s,i)=>{
+    s.className="";
+    if(i<lit)s.className= fresh<35?"on hot":"on";
+  });
+  $("vcol-val").textContent=Math.round(fresh);
+  $("lastpoll").textContent= lastPoll<60? lastPoll+"S AGO" : Math.floor(lastPoll/60)+"M AGO";
+}
+
+/* ---------- routines + scope filter ---------- */
+const ROUTINES=[
+  {id:"RT·01",name:"NIGHTLY ROUTINE",kind:"CRON",stat:"PENDING"},
+  {id:"RT·02",name:"JOURNAL SYNC",kind:"CRON",stat:"SUCCESS"},
+  {id:"RT·03",name:"SYSTEM BACKUP",kind:"CRON",stat:"RETRIED"},
+  {id:"RT·04",name:"MEDIA PIPELINE",kind:"WATCHER",stat:"SUCCESS"},
+  {id:"RT·05",name:"TICKET INGEST",kind:"EVENT",stat:"SUCCESS"},
+  {id:"RT·06",name:"CACHE CLEANUP",kind:"WATCHER",stat:"PENDING"},
+  {id:"RT·07",name:"PR AUTO-LABEL",kind:"EVENT",stat:"SUCCESS"},
+];
+const rtable=$("rtable");
+ROUTINES.forEach((r,i)=>{
+  const el=document.createElement("div");
+  el.className="rt";el.dataset.kind=r.kind;el.id="rt-"+i;
+  el.innerHTML='<span class="rt-id">'+r.id+'</span>'+
+    '<span class="rt-name">'+r.name+'</span>'+
+    '<span class="rt-kind">'+r.kind+'</span>'+
+    '<span class="stamp rt-stat s-'+r.stat.toLowerCase()+'">'+r.stat+'</span>'+
+    '<button class="btn rt-run" data-run="'+i+'">RUN</button>';
+  rtable.appendChild(el);
+});
+document.querySelector(".filterrail").addEventListener("click",e=>{
+  const b=e.target.closest("button");if(!b)return;
+  document.querySelectorAll(".filterrail button").forEach(x=>x.classList.toggle("active",x===b));
+  const k=b.dataset.k;
+  ROUTINES.forEach((r,i)=>$("rt-"+i).classList.toggle("dim",k!=="ALL"&&r.kind!==k));
+  flog("Filter scope set: "+k,"ok");
+});
+rtable.addEventListener("click",e=>{
+  const b=e.target.closest(".rt-run");if(!b)return;
+  const r=ROUTINES[+b.dataset.run];
+  const st=$("rt-"+b.dataset.run).querySelector(".rt-stat");
+  st.className="stamp rt-stat s-pending";st.textContent="PENDING";
+  flog("Manual dispatch: '"+r.name.toLowerCase()+"' queued.");
+  setTimeout(()=>{
+    const ok=Math.random()<.85;
+    st.className="stamp rt-stat "+(ok?"s-success":"s-retried");
+    st.textContent=ok?"SUCCESS":"RETRIED";
+    flog("Routine '"+r.name.toLowerCase()+"' "+(ok?"finished.":"failed — retry scheduled."),ok?"ok":"warn");
+    updateAlarm();
+  },1800+Math.random()*1800);
+});
+function updateAlarm(){
+  const anyRetried=[...document.querySelectorAll(".rt-stat")].some(s=>s.textContent==="RETRIED");
+  $("frame").classList.toggle("alarm",anyRetried);
+}
+
+/* ---------- live exec feed ---------- */
+const term=$("term");
+function flog(msg,kind){
+  const d=new Date();
+  const row=document.createElement("div");
+  row.className="trow"+(kind==="ok"?" okrow":kind==="warn"?" warnrow":"");
+  row.innerHTML='<span class="ts">'+[d.getHours(),d.getMinutes(),d.getSeconds()].map(pad2).join(":")+'</span>'+
+    '<span class="msg">'+msg+'</span>';
+  term.appendChild(row);
+  while(term.children.length>60)term.removeChild(term.firstChild);
+  term.scrollTop=term.scrollHeight;
+}
+const FEED=[
+  ["Triggered <b>'gitlab-poll'</b> → 3 new tickets ingested into Knowledge OS.",""],
+  ["Routine 'Daily Cleanup' finished. Cleared 424MB cache.","ok"],
+  ["File watcher detected <span class='file'>'Trip_Photos.zip'</span> → initializing content pipeline…",""],
+  ["└─ Thread [772] started: decompressing archive…",""],
+  ["CRON [OK] System health check passed. No anomalies detected.","ok"],
+  ["Executing loop: Observe → Understand → Decide…","ok"],
+  ["Webhook received from GitHub: PR #442 merged.",""],
+  ["ntfy push delivered in 14ms.",""],
+  ["SMTP relay unreachable — queued 2 messages.","warn"],
+  ["Media watcher: buffer at threshold, flushing to vault.",""],
+];
+let fi=0;
+function tickFeed(){
+  const f=FEED[fi%FEED.length];fi++;
+  flog(f[0],f[1]);
+}
+
+/* ---------- ambient ticks ---------- */
+function tickGauges(){
+  cronPct=Math.min(100,cronPct+ (Math.random()<.3?1:0));
+  watchPct=Math.max(5,Math.min(96,watchPct+(Math.random()-.45)*9));
+  fresh=Math.max(4,fresh-2.5);lastPoll+=2;
+  if(Math.random()<.18){fresh=100;lastPoll=0;flog("GitLab poll complete — index fresh.","ok");}
+  paintRadial();paintHbar();paintVcol();
+  $("listeners").textContent=(36+Math.floor(Math.random()*4))+" LISTENERS UP";
+}
+function tickFooter(){
+  $("cpu").textContent=(9+Math.random()*9).toFixed(1)+"%";
+  $("mem").textContent=(1.8+Math.random()*.7).toFixed(1)+"GB/32GB";
+  $("ping-0").textContent=10+Math.floor(Math.random()*12);
+  $("ping-1").textContent=70+Math.floor(Math.random()*30);
+  const busy=Math.random()<.5?2:Math.floor(Math.random()*3);
+  [0,1,2].forEach(i=>{
+    const el=$("ag-"+i);
+    el.classList.toggle("busy",i===busy);
+    el.innerHTML="<i></i>AGENT·0"+(i+1)+": "+(i===busy?"BUSY":"NOMINAL");
+  });
+}
+
+/* ---------- header controls ---------- */
+let paused=false;
+$("pausebtn").addEventListener("click",()=>{
+  paused=!paused;
+  $("pausebtn").textContent=paused?"RESUME ALL":"PAUSE ALL";
+  $("enginestamp").textContent=paused?"● ENGINE PAUSED":"● ENGINE ACTIVE";
+  $("enginestamp").style.color=paused?"var(--amber)":"var(--mint)";
+  $("feedstate").textContent=paused?"PAUSED":"TAILING";
+  flog(paused?"Engine paused — triggers held.":"Engine resumed — listeners re-armed.",paused?"warn":"ok");
+});
+$("reloadbtn").addEventListener("click",()=>{
+  flog("Force reload: re-reading trigger manifest…");
+  setTimeout(()=>flog("Manifest reloaded. 38 listeners re-armed.","ok"),700);
+});
+
+/* ---- START ---- */
+paintRadial();paintHbar();paintVcol();updateAlarm();
+["Automation engine attached. Tailing /var/log/jairus/automation.log",
+ "38 listeners up. 3 sinks registered (1 offline)."].forEach((m,i)=>setTimeout(()=>flog(m,i?"":"ok"),i*150));
+tickChip();tickFooter();
+setInterval(tickChip,1000);
+setInterval(()=>{if(!paused)tickFeed();},2600);
+setInterval(()=>{if(!paused)tickGauges();},2000);
+setInterval(tickFooter,3000);
+</script>
+</body>
+</html>

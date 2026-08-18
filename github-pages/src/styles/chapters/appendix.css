@@ -1,0 +1,39 @@
+/* The two reserved screens after the CTA. Not ported from anything — authored
+   in the deck's own grammar so a placeholder reads as "held open", never as
+   "broken". Blue is the tell: no other chapter uses it as its section accent,
+   so an appendix is identifiable at a glance from the frame colour alone (the
+   ledger's `tone` matches).
+
+   Both sections share these rules; `.appendix-a` / `.appendix-b` exist only so
+   a filled-in appendix can diverge later without touching the other. */
+
+.appendix{border-top:1px solid var(--blue);border-bottom:1px solid var(--blue);background:linear-gradient(180deg,rgba(80,144,208,.035),transparent)}
+.appendix .eyebrow{color:var(--blue)}
+.appendix .eyebrow::before{background:var(--blue);box-shadow:0 0 6px rgba(80,144,208,.5)}
+.appendix .eyebrow .jp{color:var(--blue)}
+.appendix .section-head .idx{background:var(--blue)}
+.appendix .section-head .jp{color:var(--blue)}
+.appendix .section-head::after{background:linear-gradient(90deg,var(--blue),transparent)}
+
+.appendix .ax-grid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,.85fr);gap:clamp(24px,4vw,64px);align-items:center;margin-top:clamp(18px,2.4vw,34px)}
+
+.appendix .ax-slots{margin-top:clamp(18px,2.2vw,28px);display:grid;gap:8px}
+.appendix .ax-slot{display:grid;grid-template-columns:96px 1fr auto;align-items:center;gap:14px;
+  border:1px dashed var(--green-dim);padding:12px 14px;background:rgba(80,144,208,.02)}
+.appendix .ax-key{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.14em;color:var(--paper);text-transform:uppercase}
+.appendix .ax-hint{font-size:9.5px;letter-spacing:.13em;color:var(--green-map);text-transform:uppercase;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* the reserved plate — a boxed kanji + screen number, deliberately empty */
+.appendix .ax-plate{position:relative;display:grid;place-items:center;gap:12px;
+  border:3px solid var(--blue);padding:clamp(18px,2.6vw,34px);
+  clip-path:polygon(0 0,calc(100% - 22px) 0,100% 22px,100% 100%,22px 100%,0 calc(100% - 22px));
+  box-shadow:0 0 12px rgba(80,144,208,.18);background:repeating-linear-gradient(135deg,rgba(80,144,208,.05) 0 10px,transparent 10px 20px)}
+.appendix .ax-plate-inner{display:grid;place-items:center;gap:6px}
+.appendix .ax-plate-jp{font-family:var(--jp);font-weight:800;font-size:clamp(46px,7vw,86px);line-height:1;color:var(--blue);text-shadow:0 0 10px rgba(80,144,208,.5)}
+.appendix .ax-plate-num{font-family:var(--cond);font-weight:700;font-size:clamp(20px,2.4vw,30px);letter-spacing:.3em;color:var(--paper);text-indent:.3em}
+.appendix .ax-plate-cap{font-size:9px;letter-spacing:.28em;color:var(--green-map);text-transform:uppercase}
+
+.appendix .ax-foot{margin-top:clamp(18px,2.2vw,28px);border-top:1px solid var(--blue);display:flex;align-items:center;gap:14px;flex-wrap:wrap;
+  padding-top:10px;font-size:8.5px;letter-spacing:.12em;color:var(--green-map);text-transform:uppercase}
+.appendix .ax-good{color:var(--blue)}
+.appendix .ax-spacer{flex:1}

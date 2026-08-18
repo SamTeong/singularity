@@ -11,7 +11,20 @@
 //    spacers and chapters positionally — keeping the order in two places lets
 //    them silently drift.
 
-export type ChapterId = 'orientation' | 'chaos' | 'fleet-control' | 'tasks' | 'agent-harness' | 'system-design' | 'take-control';
+export type ChapterId =
+  | 'orientation'
+  | 'chaos'
+  | 'agent-harness'
+  | 'fleet-control'
+  | 'tasks'
+  | 'system-design'
+  | 'skins'
+  | 'pipeline'
+  | 'themes'
+  | 'openspec'
+  | 'take-control'
+  | 'appendix-a'
+  | 'appendix-b';
 
 export interface ChapterWorld {
   fog: number; // FogExp2 density
@@ -45,10 +58,57 @@ export interface Chapter {
 // u: [x as fraction of half-width, y as fraction of height, z as fraction of
 // half-depth]. yaw: degrees; the screen's normal is (sin yaw, 0, cos yaw) and
 // the camera always parks on that side.
+//
+// ─── HOW THESE ANCHORS WERE CHOSEN, AND TWO WAYS TO GET IT WRONG ────────────
+// The tour is a WALK, not an orbit: exterior approach, two interior shots down
+// the -X wall, a long interior shot, then across the +X wall, up to +Z, over to
+// -X, and back outside for the CTA and the appendices. Every screen faces a
+// different way, at a different height. Both failure modes below were actually
+// built and thrown away, so they are worth stating:
+//
+//  1. DON'T PUSH ANCHORS OUT INTO SPACE "to give them room". The camera is
+//     DERIVED, never authored: `cam = anchor + normal * framingDistance`, and
+//     that distance is already 6-8 units. Anchors belong on or near the
+//     building's surface — the fitted bbox is halfX 5.615, height 9.043,
+//     halfZ 6.000. An anchor at radius 14 puts the camera at 22, where the scan
+//     is a speck and the screen floats in a black void.
+//  2. DON'T EVEN OUT THE CAMERA STEPS BY SWEEPING A CONSTANT BEARING with every
+//     screen facing radially outward. It does produce beautifully uniform steps
+//     — and it reads as a carousel, the panels visibly revolving around the
+//     building instead of being placed in it. Even spacing and varied placement
+//     are independent goals; do not buy one with the other.
+//
+// So the steps here are deliberately uneven (1.3 to 12.3 world units) because
+// the placement is what matters. SMOOTHNESS OF THE MOTION IS SOLVED ELSEWHERE:
+// `easeSettle` in createWorld.ts eases the camera into and out of every
+// waypoint, and the conductor's damping is 3.8. That is the right place for it
+// — those two change how the camera moves, not where the screens are.
+//
+// The numbers to check an edit against. The fitted bbox is halfX 5.615,
+// height 9.043, halfZ 6.000, so an anchor's world position is
+// (u.x * 5.615, u.y * 9.043, u.z * 6.000), and `framingDistance` puts the
+// camera 6-8 units out along the screen's normal:
+//
+//   fill        <= 0.82. Above ~0.84 of the frame a panel slides under the fixed
+//               chapter rail on the right. Tall panels are governed by the
+//               vertical term instead and land well under this anyway.
+//   view angle  keep a chapter's view direction >= ~30° away from antiparallel
+//               to EITHER neighbour's. See the note on `tasks` for what
+//               happens otherwise, and remember it is a chain: rotating a
+//               chapter to fix one seam can hand the same problem to the other.
+//   separation  only ADJACENT chapters are ever mounted together (updateWorld
+//               culls on `1 - |i - smooth| > 0.001`), so only neighbours can
+//               collide. Two near-coplanar neighbours facing the same way need
+//               either half their combined width apart across the wall, or half
+//               their combined height apart vertically — see `fleet-control`.
+//
+// `pnpm dev` then http://localhost:5173/?debug draws both spline curves, boxes
+// every anchor, and prints live camera/target/bbox values. That overlay is the
+// supported way to eyeball an edit; the rules above are what to eyeball it for.
 export const CHAPTERS = [
   {
     id: 'orientation', weight: 1.30, num: '01', jp: '到着', code: 'SCR·01', title: 'ORIENTATION',
-    sub: 'WHERE IT ALL BEGINS',
+    sub: 'THE CONTROL PLANE, STATED PLAINLY',
     u: [1.52, 0.53, 0.36], yaw: 78, pitch: 0, w: 5.8, px: 1240, pxm: 760,
     fill: 0.64, lift: 0.35, tone: 0x52F29A, world: { fog: 0.052, bloom: 0.62, motes: 0.85, exposure: 1.06 },
   },
@@ -56,43 +116,129 @@ export const CHAPTERS = [
   {
     id: 'chaos', weight: 1.10, num: '02', jp: '混沌', code: 'SCR·02', title: 'CHAOS',
     sub: 'SEVEN TERMINALS, NO SHARED PICTURE',
-    u: [0.62, 0.76, 0.88], yaw: 32, pitch: -4, w: 5.6, px: 1240, pxm: 760,
+    u: [0.620, 0.760, 0.880], yaw: 32, pitch: -4, w: 5.6, px: 1240, pxm: 760,
     fill: 0.84, lift: 0.15, tone: 0xE2280F, world: { fog: 0.040, bloom: 0.58, motes: 0.7, exposure: 1.02 },
   },
 
   {
     id: 'agent-harness', weight: 1.75, num: '03', jp: '系統', code: 'SCR·03', title: 'AGENT HARNESS',
     sub: 'EIGHT OPERATIONAL SURFACES AROUND THE WORK',
-    u: [-0.84, 0.755, 0.44], yaw: 96, pitch: 6, w: 6.2, px: 1420, pxm: 770,
+    u: [-0.840, 0.755, 0.440], yaw: 96, pitch: 6, w: 6.2, px: 1420, pxm: 770,
     fill: 0.92, lift: 0.10, tone: 0x5090D0, world: { fog: 0.024, bloom: 0.70, motes: 0.5, exposure: 1.0 },
   },
 
   {
     id: 'fleet-control', weight: 1.85, num: '04', jp: '制御', code: 'SCR·04', title: 'FLEET CONTROL',
     sub: 'ONE LIVE DECK · SESSIONS · TASKS · AUTOMATION · USAGE',
-    u: [-0.87, 0.475, -0.10], yaw: 90, pitch: 0, w: 6.4, px: 1460, pxm: 780,
+    // Sits LOW on the -X wall on purpose. `agent-harness` is on the same wall
+    // facing the same way (near-coplanar, 0.4 units apart in depth), and the two
+    // panels are ~4.3 and ~4.6 world units tall — so anything less than ~4.5
+    // units of vertical separation has them overlapping in frame during the
+    // seam. At y-fraction 0.255 the gap is 4.52. Do not raise this without
+    // lowering `agent-harness` or pushing one of them along the wall in Z.
+    u: [-0.870, 0.255, -0.180], yaw: 90, pitch: 0, w: 6.4, px: 1460, pxm: 780,
     fill: 0.92, lift: 0.05, tone: 0xF26400, world: { fog: 0.026, bloom: 0.74, motes: 0.5, exposure: 1.0 },
   },
 
+  // THE tasks -> system-design SEAM — the worst transition in the deck, fixed
+  // in three parts. `tasks` faces +Z from the far wall and `system-design`
+  // faces +Z from the near one, so the camera has to end up pointing the
+  // opposite way. Left alone that is a 180° pivot almost on the spot: the two
+  // waypoints are only 4.8 units apart, the look-at target curve passed within
+  // 0.69 units of the camera (a singularity — rotation peaked at 2125 deg per
+  // chapter of scroll, against ~120 for a normal seam), and at the midpoint
+  // the camera stared at bare wall with BOTH panels culled by the relevance
+  // window's `dot(forward) > 0` test. An empty room for 1.5 viewport-heights.
+  //
+  //  - `system-design.via` gives the segment a THREE-POINT TURN: reverse out
+  //    past the +X side, swing across, then come in facing the other way. The
+  //    camera now travels while it rotates, which is what makes the
+  //    reorientation read as a manoeuvre rather than a spin, and it keeps
+  //    geometry in frame throughout instead of sweeping past nothing.
+  //  - Both weights are padded past what their content needs (1.20 / 1.30
+  //    originally) so the move has room: the conductor spaces anchors by half of
+  //    each spacer's height, so this widens the segment ~26%.
+  //  - createWorld's updateWorld slerps orientation between composed framings
+  //    rather than re-deriving a look-at every frame, which is what removes the
+  //    singularity itself — here and at every other seam.
   {
     id: 'tasks', weight: 1.20, num: '05', jp: '流程', code: 'SCR·05', title: 'GET TASKS DONE',
     sub: 'SPEC → TASK → WORKTREE → AGENT → REVIEW',
-    u: [0.64, 0.42, 0.85], yaw: 176, pitch: 0, w: 5.9, px: 1340, pxm: 760,
+    u: [0.640, 0.300, 0.850], yaw: 47, pitch: 0, w: 5.9, px: 1340, pxm: 760,
     fill: 0.90, lift: 0.10, tone: 0x0C6C80, world: { fog: 0.028, bloom: 0.66, motes: 0.55, exposure: 1.0 },
   },
 
   {
     id: 'system-design', weight: 1.30, num: '06', jp: '局所', code: 'SCR·06', title: 'SYSTEM DESIGN',
     sub: 'YOUR MACHINE · YOUR STATE · YOUR AGENTS',
-    u: [0.04, 0.40, -0.80], yaw: 4, pitch: 0, w: 5.8, px: 1320, pxm: 760,
+    u: [0.040, 0.400, -0.800], yaw: 4, pitch: 0, w: 5.8, px: 1320, pxm: 760,
     fill: 0.78, lift: 0.30, tone: 0x52F29A, world: { fog: 0.032, bloom: 0.68, motes: 0.7, exposure: 1.02 },
   },
 
+  // ─── the frontend debrief, sections 01-04 ────────────────────────────────
+  // Transcribed from docs/one-shot/slides/index.html (sections #system,
+  // #pipeline, #skill, #spec). Placed to continue the walk from `local` rather
+  // than to sit a fixed sweep away from it: across the +X wall low (skins), up
+  // to the +Z wall (pipeline), over to -X (themes), then back outside to +X for
+  // the spec ledger. `pipeline` and `themes` carry the most content, so they
+  // take the widest `fill` — both are tall enough that the vertical framing
+  // term wins and they still land at ~0.66 of the frame, well clear of the rail.
+
   {
-    id: 'take-control', weight: 1.30, num: '07', jp: '開始', code: 'SCR·07', title: 'TAKE CONTROL',
+    id: 'skins', weight: 1.25, num: '07', jp: '体系', code: 'SCR·07', title: 'ONE SYSTEM, TWO SKINS',
+    sub: 'ZAPAC BY DEFAULT · PHOSPHOR FOR NOSTALGIA',
+    u: [0.801, 0.332, 0.250], yaw: 270, pitch: 0, w: 5.9, px: 1340, pxm: 760,
+    fill: 0.80, lift: 0.16, tone: 0xF26400, world: { fog: 0.030, bloom: 0.66, motes: 0.62, exposure: 1.02 },
+  },
+
+  {
+    id: 'pipeline', weight: 2.10, num: '08', jp: '経路', code: 'SCR·08', title: 'THE PHOSPHOR PIPELINE',
+    sub: '08 PAGES · 34 EXPERIMENTS · 23 REFERENCES',
+    u: [-0.178, 0.796, 0.833], yaw: 182, pitch: 4, w: 6.5, px: 1500, pxm: 780,
+    fill: 0.94, lift: 0.10, tone: 0x0C6C80, world: { fog: 0.022, bloom: 0.72, motes: 0.48, exposure: 1.0 },
+  },
+
+  {
+    id: 'themes', weight: 1.95, num: '09', jp: '技能', code: 'SCR·09', title: 'TWO THEMES, TWO SKILLS',
+    sub: 'TEACH IT ONCE, NOT EVERY PROMPT',
+    u: [-0.819, 0.730, -0.200], yaw: 88, pitch: 0, w: 6.5, px: 1500, pxm: 780,
+    fill: 0.94, lift: 0.12, tone: 0x52F29A, world: { fog: 0.026, bloom: 0.78, motes: 0.55, exposure: 1.04 },
+  },
+
+  {
+    id: 'openspec', weight: 1.70, num: '10', jp: '仕様', code: 'SCR·10', title: 'OPENSPEC SHIPS THE ONE-SHOT',
+    sub: 'PROPOSAL → DESIGN → SPEC → TASKS',
+    u: [0.890, 0.575, -0.933], yaw: 120, pitch: 0, w: 6.2, px: 1440, pxm: 770,
+    fill: 0.80, lift: 0.08, tone: 0x0C6C80, world: { fog: 0.028, bloom: 0.70, motes: 0.58, exposure: 1.02 },
+  },
+
+  {
+    id: 'take-control', weight: 1.30, num: '11', jp: '開始', code: 'SCR·11', title: 'TAKE CONTROL',
     sub: 'CLONE · BOOTSTRAP · START',
-    u: [1.16, 1.08, -0.42], yaw: 116, pitch: -6, w: 5.2, px: 1140, pxm: 750,
+    u: [1.160, 1.080, -0.420], yaw: 116, pitch: -6, w: 5.2, px: 1140, pxm: 750,
     fill: 0.72, lift: 0.55, tone: 0x7CF4AB, world: { fog: 0.044, bloom: 0.86, motes: 0.9, exposure: 1.08 },
+  },
+
+  // ─── appendix placeholders ───────────────────────────────────────────────
+  // Two reserved screens after the CTA. They carry real structure (heading,
+  // slot list, kanji plate) but no content yet — filling one in is a normal
+  // edit to its component, with no ledger or camera change needed. The camera
+  // swings out past the +X/+Z corner and settles back down (y 1.06 → 0.84 →
+  // 0.58), so the pair reads as an epilogue rather than more deck. Atmosphere
+  // cools and the bloom drops to say the same thing.
+
+  {
+    id: 'appendix-a', weight: 1.05, num: '12', jp: '附録', code: 'SCR·12', title: 'APPENDIX A',
+    sub: 'RESERVED · CONTENT PENDING',
+    u: [0.748, 0.929, 0.533], yaw: 56, pitch: -4, w: 5.4, px: 1220, pxm: 750,
+    fill: 0.76, lift: 0.26, tone: 0x5090D0, world: { fog: 0.036, bloom: 0.60, motes: 0.7, exposure: 1.0 },
+  },
+
+  {
+    id: 'appendix-b', weight: 1.05, num: '13', jp: '補遺', code: 'SCR·13', title: 'APPENDIX B',
+    sub: 'RESERVED · CONTENT PENDING',
+    u: [-0.142, 0.553, 0.867], yaw: 8, pitch: 0, w: 5.4, px: 1220, pxm: 750,
+    fill: 0.76, lift: 0.20, tone: 0x5090D0, world: { fog: 0.034, bloom: 0.56, motes: 0.66, exposure: 1.0 },
   },
 ] as const satisfies readonly Chapter[];
 

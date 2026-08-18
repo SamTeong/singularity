@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DASHBOARD-02 · JAIRUS OS — PROJECT DEEP DIVE</title>
+<style>
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:#000}
+body{font-family:var(--mono);color:var(--mint);text-transform:uppercase;letter-spacing:.03em;overflow:hidden}
+button{font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)}
+
+.frame{
+  position:relative;margin:14px;height:calc(100vh - 28px);background:var(--bg);
+  border:3px solid var(--orange);
+  clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));
+  box-shadow:0 0 10px rgba(242,100,0,.4),inset 0 0 12px rgba(242,100,0,.14);
+  display:grid;
+  grid-template-columns:280px 1fr;
+  grid-template-rows:84px 96px 1fr;
+  grid-template-areas:
+    "head head"
+    "wave wave"
+    "left work";
+}
+.frame::before{content:"";position:absolute;inset:6px;border:1px solid var(--orange);
+  opacity:.4;pointer-events:none;z-index:0}
+
+.zone-title{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--orange);
+  letter-spacing:.12em;border-bottom:1px solid var(--green-dim);padding-bottom:4px;margin-bottom:8px}
+.stamp{display:inline-block;border:1px solid currentColor;padding:2px 8px;border-radius:2px;
+  font-size:11px;line-height:1.4;white-space:nowrap}
+.blink{animation:blink 1s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes btnblink{0%,74%{background:var(--mint);color:var(--bg)}75%,100%{background:var(--bg);color:var(--mint)}}
+
+/* ============ header ============ */
+.head{grid-area:head;display:flex;align-items:center;gap:18px;padding:12px 22px;
+  border-bottom:1px solid var(--orange);position:relative;z-index:1}
+.crumb{font-size:10px;letter-spacing:.18em;color:var(--amber)}
+.head h1{font-family:var(--cond);font-weight:700;font-size:27px;color:var(--paper);
+  letter-spacing:.02em;text-shadow:0 0 4px currentColor,0 0 12px rgba(82,242,154,.3);margin-top:2px}
+.sprintchip{color:var(--mint)}
+.uptime{color:var(--green-map);font-size:10px;letter-spacing:.12em}
+.uptime b{color:var(--mint);font-weight:400}
+.head-right{margin-left:auto;display:flex;align-items:center;gap:16px}
+/* health mini-columns (sonnet-12 grammar, shrunk) */
+.health{display:flex;gap:5px;align-items:flex-end;height:40px}
+.hcol{width:9px;display:flex;flex-direction:column-reverse;gap:2px}
+.hcol i{height:4px;border-radius:1px;background:var(--green-dim);opacity:.35}
+.hcol i.on{opacity:1;background:var(--mint);box-shadow:0 0 4px rgba(82,242,154,.5)}
+.hcol i.on.hot{background:var(--amber);box-shadow:0 0 4px rgba(244,159,9,.5)}
+.healthcap{font-size:9px;color:var(--green-map);letter-spacing:.1em;text-align:right}
+.healthcap b{display:block;color:var(--mint);font-family:var(--cond);font-size:14px;letter-spacing:.06em}
+/* 7-seg chip */
+.timechip{display:flex;align-items:center;gap:2px;background:var(--paper);
+  padding:5px 9px 4px;border-radius:2px;
+  box-shadow:0 0 10px rgba(237,248,214,.4),inset 0 0 4px rgba(10,10,10,.15)}
+.timechip .tc-colon{display:flex;flex-direction:column;gap:5px;margin:0 2px}
+.timechip .tc-colon i{width:3px;height:3px;background:#0A0A0A;display:block}
+.timechip .ampm{font-weight:700;font-size:10px;color:#0A0A0A;margin-left:5px;letter-spacing:.08em}
+
+/* ============ wave separator (exp-06 improved: no bricks, no + marks) ============ */
+.wave{grid-area:wave;position:relative;border-bottom:1px solid var(--orange);z-index:1;overflow:hidden}
+.wave canvas{position:absolute;inset:0;width:100%;height:100%}
+.wave .wcap{position:absolute;left:22px;top:8px;font-size:9px;letter-spacing:.2em;color:var(--green-map)}
+.wave .wcap b{color:var(--mint);font-weight:400}
+.wave .wstamp{position:absolute;right:22px;top:8px;font-size:9px;color:var(--green-map);letter-spacing:.14em}
+
+/* ============ left rail ============ */
+.left{grid-area:left;border-right:1px solid var(--orange);padding:14px 16px;overflow-y:auto;
+  display:flex;flex-direction:column;gap:16px;position:relative;z-index:1}
+.recall{border-left:3px solid var(--teal);padding:7px 10px;background:rgba(12,108,128,.06);margin-bottom:8px}
+.recall .rid{font-size:9px;color:var(--amber);letter-spacing:.14em}
+.recall .rtext{font-size:11px;color:var(--paper);text-transform:none;line-height:1.5;margin-top:3px}
+/* agents: sonnet-37 card grammar + legend */
+.legend{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px}
+.lg{border:1px solid;padding:2px 8px;display:flex;flex-direction:column;align-items:center;min-width:48px;border-radius:2px}
+.lg .jp{font-family:var(--jp);font-weight:800;font-size:12px;line-height:1.2;text-transform:none;
+  letter-spacing:.2em;text-indent:.2em}
+.lg .cap{font-size:8px;letter-spacing:.1em}
+.lg-active{border-color:var(--mint);color:var(--mint)}
+.lg-review{border-color:var(--blue);color:var(--blue)}
+.lg-idle{border-color:var(--green-dim);color:var(--green-map)}
+/* agents: sonnet-37 boxed card grammar, 3-col grid, click to view console */
+.agentgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.agent{font-family:var(--mono);text-transform:uppercase;cursor:pointer;text-align:left;width:100%;
+  background:var(--bg);border:1px solid var(--green-dim);color:var(--mint);
+  padding:9px 11px;display:flex;flex-direction:column;gap:7px;position:relative;transition:none}
+.agent:focus-visible{outline:2px dashed var(--amber);outline-offset:2px}
+.agent .a-row{display:flex;justify-content:space-between;align-items:baseline;gap:6px}
+.agent .a-name{font-family:var(--cond);font-weight:700;font-size:15px;letter-spacing:.02em}
+.agent .a-task{font-size:9px;letter-spacing:.06em;opacity:.85}
+.agent .stamp{align-self:flex-start;border:1px solid currentColor;padding:1px 6px;font-size:9px;letter-spacing:.06em}
+.agent[data-s="ACTIVE"]{border-color:var(--mint);color:var(--mint)}
+.agent[data-s="REVIEWING"]{border-color:var(--blue);color:var(--blue)}
+.agent[data-s="IDLE"]{border-color:var(--green-dim);color:var(--green-map)}
+/* selected = the console currently shown (aria-pressed) */
+.agent[aria-pressed="true"]{border-width:2px;box-shadow:inset 0 0 12px color-mix(in srgb,currentColor 16%,transparent)}
+.agent.flicker{visibility:hidden}
+
+/* ============ work column ============ */
+.work{grid-area:work;padding:14px 20px;overflow-y:auto;position:relative;z-index:1;
+  display:flex;flex-direction:column;gap:14px;min-height:0}
+
+/* loop synchronizer task cards with OODA stepper */
+.task{border:1px solid var(--green-dim);padding:10px 14px}
+.task .t-head{display:flex;align-items:baseline;gap:12px}
+.task .t-id{color:var(--amber);font-size:11px;white-space:nowrap}
+.task .t-title{color:var(--paper);font-size:13px}
+.task .t-act{margin-left:auto}
+.task .t-act .btn{font-size:10px;padding:5px 12px}
+.stepper{display:flex;align-items:center;gap:0;margin-top:12px}
+.step{display:flex;flex-direction:column;align-items:center;gap:4px;width:72px}
+.step .node{width:26px;height:26px;border:2px solid var(--green-dim);display:flex;align-items:center;
+  justify-content:center;font-size:10px;color:var(--green-map);
+  clip-path:polygon(0 0,calc(100% - 7px) 0,100% 7px,100% 100%,7px 100%,0 calc(100% - 7px))}
+.step .slbl{font-size:8px;letter-spacing:.1em;color:var(--green-map)}
+.step.done .node{background:var(--mint);border-color:var(--mint);color:var(--bg)}
+.step.done .slbl{color:var(--mint)}
+.step.now .node{background:var(--blue);border-color:var(--blue);color:var(--bg);animation:blink 1s steps(1) infinite}
+.step.now .slbl{color:var(--blue)}
+.connector{flex:1;height:2px;background:var(--green-dim);min-width:14px;margin-bottom:14px}
+.connector.done{background:var(--mint)}
+.t-progress{display:flex;align-items:center;gap:10px;margin-top:10px;font-size:10px;color:var(--green-map)}
+.t-progress .bar{flex:1;display:flex;gap:2px;height:8px}
+.t-progress .bar i{flex:1;background:var(--green-dim);opacity:.3;border-radius:1px}
+.t-progress .bar i.on{opacity:1;background:var(--mint);box-shadow:0 0 4px rgba(82,242,154,.4)}
+.t-progress b{color:var(--mint);font-weight:400}
+
+.btn{border:1px solid var(--orange);background:var(--bg);color:var(--orange);padding:8px 16px;
+  font-size:11px;cursor:pointer}
+.btn:hover{background:var(--orange);color:var(--bg)}
+.btn:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.btn.approve{border-color:var(--mint);color:var(--mint);font-weight:700;
+  animation:btnblink 1s steps(1) infinite}
+.btn.deny{border-color:var(--red-hi);color:var(--red-hi)}
+.btn.deny:hover{background:var(--red-hi);color:var(--bg)}
+.btn:disabled{opacity:.35;cursor:default;animation:none}
+
+/* stdout terminal — sonnet-20 grammar */
+.stdout{flex:1;display:flex;flex-direction:column;min-height:220px}
+.termbar{display:flex;justify-content:space-between;align-items:center;font-size:10px;
+  color:var(--amber);letter-spacing:.12em;border:1px solid var(--amber-dim);border-bottom:none;
+  padding:6px 12px}
+.termbar .conn{color:var(--mint)}
+.term{flex:1;overflow-y:auto;border:1px solid var(--amber-dim);padding:10px 14px;
+  background:rgba(244,159,9,.02);font-size:12px;line-height:1.5;color:var(--amber-dim)}
+.trow{display:flex;gap:10px;white-space:nowrap}
+.trow .ts{color:var(--amber-dim);flex:none}
+.trow .tag{flex:none;font-weight:700}
+.trow .tag.info{color:var(--amber)}
+.trow .tag.warn{color:var(--red-hi);text-shadow:0 0 4px rgba(226,40,15,.4)}
+.trow .tag.git{color:var(--green-map)}
+.trow .tag.gate{color:var(--mint);text-shadow:0 0 4px rgba(82,242,154,.4)}
+.trow .msg{color:var(--amber);text-transform:none}
+.trow.dimrow .msg{color:var(--amber-dim)}
+.promptrow{color:var(--amber);padding-top:4px}
+.cursor{display:inline-block;width:7px;height:11px;background:var(--amber);vertical-align:-1px;
+  animation:blink 1s steps(1) infinite}
+/* pending approval bar — the human gate */
+.gatebar{display:flex;align-items:center;gap:12px;border:1px solid var(--amber-dim);border-top:none;
+  padding:10px 12px}
+.gatebar .gb-label{font-size:9px;letter-spacing:.16em;color:var(--amber)}
+.gatebar .gb-item{font-size:12px;color:var(--paper)}
+.gatebar .spacer{flex:1}
+.gatebar .verdict{font-size:11px}
+.gatebar .verdict.ok{color:var(--mint)}
+.gatebar .verdict.no{color:var(--red-hi)}
+
+/* scroll style (experiment-sonnet-20): themed amber scrollbars */
+.left,.work,.term{scrollbar-width:thin;scrollbar-color:var(--amber-dim) rgba(242,100,0,.05)}
+.left::-webkit-scrollbar,.work::-webkit-scrollbar,.term::-webkit-scrollbar{width:9px;height:9px}
+.left::-webkit-scrollbar-track,.work::-webkit-scrollbar-track,.term::-webkit-scrollbar-track{background:rgba(242,100,0,.05)}
+.left::-webkit-scrollbar-thumb,.work::-webkit-scrollbar-thumb,.term::-webkit-scrollbar-thumb{background:var(--amber-dim);border:1px solid var(--green-dim)}
+.left::-webkit-scrollbar-thumb:hover,.work::-webkit-scrollbar-thumb:hover,.term::-webkit-scrollbar-thumb:hover{background:var(--amber)}
+
+@media (prefers-reduced-motion:reduce){
+  .blink,.cursor,.btn.approve,.step.now .node{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <!-- ================= header ================= -->
+  <header class="head">
+    <div>
+      <div class="crumb">ENGINEERING / ACTIVE SPRINT / PRJ·402 · 深掘</div>
+      <h1>NEURAL PIPELINE V3</h1>
+    </div>
+    <span class="stamp sprintchip">[ ACTIVE_SPRINT ]</span>
+    <span class="uptime">UPTIME <b id="uptime">00:00:00</b> · <b>98.2%</b></span>
+    <div class="head-right">
+      <div class="health" id="health" role="img" aria-label="System health columns"></div>
+      <div class="healthcap">SYSTEM HEALTH<b id="healthword">OPTIMAL</b></div>
+      <span class="timechip" id="timechip" role="img" aria-label="Local time"></span>
+    </div>
+  </header>
+
+  <!-- ================= wave separator ================= -->
+  <div class="wave" aria-hidden="true">
+    <canvas id="wavecv"></canvas>
+    <span class="wcap">INFERENCE FIELD · <b>RESONANCE STABLE</b></span>
+    <span class="wstamp">共振 / RESONANCE</span>
+  </div>
+
+  <!-- ================= left rail ================= -->
+  <aside class="left" aria-label="Architecture recall and agents">
+    <section>
+      <div class="zone-title">ARCHITECTURE RECALL · 記憶</div>
+      <div class="recall">
+        <div class="rid">DECISION_LOG_32</div>
+        <div class="rtext">Use Bun runtime for CI pipelines to reduce overhead by 40%.</div>
+      </div>
+      <div class="recall">
+        <div class="rid">PATTERN_REF_11</div>
+        <div class="rtext">Unified error handling: standard Result wrapper for all async agents.</div>
+      </div>
+      <div class="recall">
+        <div class="rid">MEMORY_FRAGMENT</div>
+        <div class="rtext">Avoid direct database writes from edge agents; route through the central Sync Gate.</div>
+      </div>
+    </section>
+  </aside>
+
+  <!-- ================= work column ================= -->
+  <main class="work">
+
+    <section aria-label="Loop synchronizer">
+      <div class="zone-title">LOOP SYNCHRONIZER · 環 <span style="float:right;color:var(--mint)" id="loopcount">[ 2 EXECUTING ]</span></div>
+
+      <div class="task" style="margin-bottom:10px">
+        <div class="t-head">
+          <span class="t-id">TASK·882</span>
+          <span class="t-title">OPTIMIZE LATENCY — REFACTOR POSTGRES CONNECTION POOL LOGIC</span>
+          <span class="t-act"><button class="btn approve" id="archbtn">APPROVE ARCH</button></span>
+        </div>
+        <div class="stepper" id="stepper-882"></div>
+        <div class="t-progress"><span>PROGRESS</span><span class="bar" id="bar-882"></span><b id="pct-882">62%</b></div>
+      </div>
+
+      <div class="task">
+        <div class="t-head">
+          <span class="t-id">TASK·884</span>
+          <span class="t-title">CI/CD MIGRATION — PORT GITHUB ACTIONS TO BUN-BASED RUNNERS</span>
+          <span class="t-act"><span class="stamp" style="color:var(--amber)">[ GATE: START ]</span></span>
+        </div>
+        <div class="stepper" id="stepper-884"></div>
+        <div class="t-progress"><span>PROGRESS</span><span class="bar" id="bar-884"></span><b id="pct-884">8%</b></div>
+      </div>
+    </section>
+
+    <!-- active agents + their console (moved here, together) -->
+    <section aria-label="Active agents">
+      <div class="zone-title">ACTIVE AGENTS · 部隊 <span style="float:right;color:var(--green-map)">SELECT TO VIEW CONSOLE</span></div>
+      <div class="legend" role="img" aria-label="Agent status key">
+        <span class="lg lg-active"><span class="jp">稼働</span><span class="cap">ACTIVE</span></span>
+        <span class="lg lg-review"><span class="jp">審査</span><span class="cap">REVIEW</span></span>
+        <span class="lg lg-idle"><span class="jp">待機</span><span class="cap">IDLE</span></span>
+      </div>
+      <div class="agentgrid" id="agents" role="group" aria-label="Agents — select one to view its console"></div>
+    </section>
+
+    <!-- stdout terminal for the selected agent + human gate -->
+    <section class="stdout" aria-label="Agent console">
+      <div class="termbar">
+        <span id="termtitle">STDOUT // AGENT</span>
+        <span class="conn" id="connstate">CONNECTED: OK</span>
+      </div>
+      <div class="term" id="term" role="log" aria-live="polite"></div>
+      <div class="gatebar" id="gatebar">
+        <span class="gb-label">PENDING APPROVAL ·</span>
+        <span class="gb-item">MERGE [PR·442] — OPTIMIZATION PACK</span>
+        <span class="spacer"></span>
+        <button class="btn approve" id="gate-approve">APPROVE GATE · 承認</button>
+        <button class="btn deny" id="gate-deny">DENY · 否認</button>
+      </div>
+    </section>
+
+  </main>
+
+</div>
+
+<script>
+"use strict";
+/* if loaded in a hidden/zero-size viewport, re-init once it has real size */
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $=id=>document.getElementById(id);
+const pad2=n=>String(n).padStart(2,"0");
+
+/* ---------- 7-seg chip ---------- */
+const SVGNS="http://www.w3.org/2000/svg";
+const SEGMAP={0:"abcdef",1:"bc",2:"abged",3:"abgcd",4:"fgbc",5:"afgcd",6:"afgedc",7:"abc",8:"abcdefg",9:"abcfgd"};
+const SEGPTS={
+  a:"7,4 10.5,0.5 29.5,0.5 33,4 29.5,7.5 10.5,7.5",
+  b:"36,7 39.5,10.5 39.5,27.5 36,31 32.5,27.5 32.5,10.5",
+  c:"36,33 39.5,36.5 39.5,53.5 36,57 32.5,53.5 32.5,36.5",
+  d:"7,60 10.5,56.5 29.5,56.5 33,60 29.5,63.5 10.5,63.5",
+  e:"4,33 7.5,36.5 7.5,53.5 4,57 0.5,53.5 0.5,36.5",
+  f:"4,7 7.5,10.5 7.5,27.5 4,31 0.5,27.5 0.5,10.5",
+  g:"7,32 10.5,28.5 29.5,28.5 33,32 29.5,35.5 10.5,35.5"};
+function makeDigit(w,h,on,off){
+  const svg=document.createElementNS(SVGNS,"svg");
+  svg.setAttribute("width",w);svg.setAttribute("height",h);
+  svg.setAttribute("viewBox","0 0 46 64");
+  svg.dataset.on=on;svg.dataset.off=off;
+  for(const k of "abcdefg"){
+    const p=document.createElementNS(SVGNS,"polygon");
+    p.setAttribute("points",SEGPTS[k]);p.setAttribute("data-seg",k);
+    p.setAttribute("transform","translate(6,0) skewX(-6)");p.setAttribute("fill",off);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+function renderDigit(svg,val){
+  const lit=SEGMAP[val];
+  for(const p of svg.children)
+    p.setAttribute("fill",lit.includes(p.getAttribute("data-seg"))?svg.dataset.on:svg.dataset.off);
+}
+const chip=$("timechip"),chipDigits=[];
+for(let i=0;i<6;i++){
+  const d=makeDigit(13,20,"#0A0A0A","rgba(10,10,10,.12)");
+  chipDigits.push(d);chip.appendChild(d);
+  if(i===1||i===3){
+    const c=document.createElement("span");c.className="tc-colon";
+    c.innerHTML="<i></i><i></i>";chip.appendChild(c);
+  }
+}
+const ampm=document.createElement("span");ampm.className="ampm";chip.appendChild(ampm);
+let chipBlink=true;
+function tickChip(){
+  const d=new Date();
+  let h=d.getHours();
+  ampm.textContent=h<12?"AM":"PM";h=h%12||12;
+  const str=pad2(h)+pad2(d.getMinutes())+pad2(d.getSeconds());
+  chipDigits.forEach((dg,i)=>renderDigit(dg,+str[i]));
+  chipBlink=!chipBlink;
+  chip.querySelectorAll(".tc-colon").forEach(c=>c.style.opacity=(chipBlink||REDUCED)?1:.25);
+}
+
+/* ---------- health mini columns ---------- */
+const health=$("health");
+const hcols=[];
+for(let c=0;c<4;c++){
+  const col=document.createElement("div");col.className="hcol";
+  const cells=[];
+  for(let r=0;r<7;r++){const i=document.createElement("i");col.appendChild(i);cells.push(i);}
+  health.appendChild(col);hcols.push(cells);
+}
+function tickHealth(){
+  let total=0;
+  hcols.forEach(cells=>{
+    const lvl=3+Math.floor(Math.random()*4);
+    total+=lvl;
+    cells.forEach((el,i)=>{
+      el.className= i<lvl ? (i>=6?"on hot":"on") : "";
+    });
+  });
+  $("healthword").textContent = total>=18 ? "OPTIMAL" : "STABLE";
+}
+
+/* ---------- wave separator: horizontal braided bundle, no bricks, no + marks ---------- */
+const cv=$("wavecv");
+let wctx=null,wt=0;
+function sizeWave(){
+  const r=cv.getBoundingClientRect(),dpr=devicePixelRatio||1;
+  cv.width=Math.max(1,r.width*dpr);cv.height=Math.max(1,r.height*dpr);
+  wctx=cv.getContext("2d");wctx.scale(dpr,dpr);
+}
+function drawWave(){
+  if(!wctx)return;
+  const w=cv.getBoundingClientRect().width,h=cv.getBoundingClientRect().height;
+  wctx.clearRect(0,0,w,h);
+  /* center axis rule */
+  wctx.strokeStyle="rgba(36,108,60,.5)";wctx.lineWidth=1;
+  wctx.beginPath();wctx.moveTo(0,h/2);wctx.lineTo(w,h/2);wctx.stroke();
+  const NL=12;
+  wctx.lineWidth=1.2;
+  wctx.shadowColor="#52F29A";wctx.shadowBlur=4;
+  for(let i=0;i<NL;i++){
+    const ph=i/NL*Math.PI*2;
+    wctx.strokeStyle=i%3===0?"#52F29A":"#3C9C6C";
+    wctx.globalAlpha=i%3===0?.9:.45;
+    wctx.beginPath();
+    for(let x=0;x<=w;x+=8){
+      const xn=x/w;
+      const env=Math.sin(xn*Math.PI);                       /* taper at edges */
+      const y=h/2 + Math.sin(xn*7+ph+wt)*Math.cos(xn*2.2-wt*.6)*(h*.36)*env;
+      x===0?wctx.moveTo(x,y):wctx.lineTo(x,y);
+    }
+    wctx.stroke();
+  }
+  wctx.globalAlpha=1;wctx.shadowBlur=0;
+  wt+=.18;
+}
+
+/* ---------- agents (sonnet-37 boxed cards) + per-agent consoles ---------- */
+const nowts=()=>{const d=new Date();return [d.getHours(),d.getMinutes(),d.getSeconds()].map(pad2).join(":");};
+let sel=0;
+const AGENTS=[
+  {name:"AGENT·ORION", s:"ACTIVE", task:"REFACTOR AUTH FLOW",
+   seed:[["info","Reading auth middleware /api/v3/session."],["warn","N+1 query found in token refresh."]],
+   pool:[["git",'commit -m "fix: batch token lookups"'],["info","Auth suite green — 214 tests."],["info","Rate limiter tuned to 60 rpm."]]},
+  {name:"AGENT·LYRA", s:"REVIEWING", task:"REVIEW PR·442",
+   seed:[["info","Opened PR-442 — optimization pack."],["git","running eslint + typecheck…"]],
+   pool:[["info","3 review comments posted."],["warn","Coverage dropped 1.2% on pool.ts."],["info","Holding for human gate on merge."]]},
+  {name:"AGENT·VEGA", s:"ACTIVE", task:"INDEX VECTOR STORE",
+   seed:[["info","Scrubbing vector index shard 4/8."],["info","2,482 nodes verified stable."]],
+   pool:[["git","push origin chore/index-rebuild"],["info","Recall latency 48ms p95."],["info","Shard 6/8 rebuilt."]]},
+  {name:"AGENT·CYGNUS", s:"IDLE", task:"STANDBY",
+   seed:[["info","Heartbeat OK — awaiting dispatch."]],
+   pool:[["info","Heartbeat OK."]]},
+  {name:"AGENT·DRACO", s:"ACTIVE", task:"PORT CI RUNNERS", latest:true,
+   seed:[["info","Porting GitHub Actions → Bun runners."],["info","Bun runner warm — cold start 118ms."]],
+   pool:[["warn","Retry storm on relay K-22 suppressed."],["git","rebase feature/ci-migration onto main"],["info","Pipeline green on bun-1.1."]]},
+];
+const agentsEl=$("agents");
+AGENTS.forEach((a,i)=>{
+  a.task0=a.task;
+  a.log=a.seed.map(([tag,msg])=>({ts:nowts(),tag,msg}));
+  const el=document.createElement("button");
+  el.type="button";el.className="agent";el.dataset.s=a.s;el.id="agent-"+i;el.setAttribute("aria-pressed","false");
+  el.innerHTML='<div class="a-row"><span class="a-name">'+a.name+'</span><span class="stamp">'+a.s+'</span></div>'+
+    '<div class="a-task">'+a.task+'</div>';
+  el.addEventListener("click",()=>setSel(i));
+  agentsEl.appendChild(el);
+});
+function tickAgents(){
+  const i=Math.floor(Math.random()*AGENTS.length);
+  const a=AGENTS[i],el=$("agent-"+i);
+  const roll=Math.random();
+  const next= roll<.6?"ACTIVE":roll<.85?"REVIEWING":"IDLE";
+  if(next===a.s)return;
+  const apply=()=>{a.s=next;el.dataset.s=next;el.querySelector(".stamp").textContent=next;
+    el.querySelector(".a-task").textContent=next==="IDLE"?"STANDBY":a.task0;};
+  if(REDUCED){apply();return;}
+  el.classList.add("flicker");
+  setTimeout(()=>{el.classList.remove("flicker");apply();},60);
+}
+
+/* ---------- OODA steppers ---------- */
+const STEPS=["OBS","UND","DEC","EXE","LRN"];
+const SLBL=["OBSERVE","UNDERSTAND","DECIDE","EXECUTE","LEARN"];
+function buildStepper(id,state){ /* state: index of current step */
+  const host=$(id);
+  STEPS.forEach((s,i)=>{
+    if(i>0){
+      const c=document.createElement("div");
+      c.className="connector"+(i<=state?" done":"");
+      host.appendChild(c);
+    }
+    const st=document.createElement("div");
+    st.className="step"+(i<state?" done":i===state?" now":"");
+    st.innerHTML='<div class="node">'+s+'</div><div class="slbl">'+SLBL[i]+'</div>';
+    host.appendChild(st);
+  });
+}
+function buildBar(id,pct){
+  const host=$(id);
+  for(let i=0;i<20;i++){const s=document.createElement("i");host.appendChild(s);}
+  [...host.children].forEach((s,i)=>s.classList.toggle("on",i<Math.round(pct/100*20)));
+}
+
+/* ---------- stdout terminal: per-agent buffers, selectable console ---------- */
+const term=$("term");
+function appendRow(ts,tag,msg){
+  const row=document.createElement("div");row.className="trow";
+  row.innerHTML='<span class="ts">'+ts+'</span><span class="tag '+tag+'">['+tag.toUpperCase()+']</span><span class="msg">'+msg+'</span>';
+  term.appendChild(row);
+  while(term.children.length>44)term.removeChild(term.firstChild);
+}
+function pushLog(idx,tag,msg){
+  const a=AGENTS[idx],ts=nowts();
+  a.log.push({ts,tag,msg});if(a.log.length>44)a.log.shift();
+  if(idx===sel){appendRow(ts,tag,msg);term.scrollTop=term.scrollHeight;}
+}
+function tlog(tag,msg){pushLog(sel,tag,msg);}   /* system events → the open console */
+function renderTerm(){
+  term.innerHTML="";
+  AGENTS[sel].log.forEach(e=>appendRow(e.ts,e.tag,e.msg));
+  term.scrollTop=term.scrollHeight;
+  $("termtitle").textContent="STDOUT // "+AGENTS[sel].name;
+}
+function setSel(i){
+  sel=i;
+  [...agentsEl.children].forEach((c,x)=>c.setAttribute("aria-pressed",x===i?"true":"false"));
+  renderTerm();
+}
+function tickFeed(){
+  const cand=AGENTS.map((a,i)=>i).filter(i=>AGENTS[i].s!=="IDLE");
+  if(!cand.length)return;
+  const i=cand[Math.floor(Math.random()*cand.length)];
+  const p=AGENTS[i].pool[Math.floor(Math.random()*AGENTS[i].pool.length)];
+  pushLog(i,p[0],p[1]);
+}
+
+/* ---------- human gate ---------- */
+let gateDecided=false;
+function decideGate(ok){
+  if(gateDecided)return;
+  gateDecided=true;
+  $("gate-approve").disabled=true;$("gate-deny").disabled=true;
+  const v=document.createElement("span");
+  v.className="verdict "+(ok?"ok":"no");
+  v.textContent= ok?"承認 · MERGED TO MAIN":"否認 · RETURNED TO AGENT";
+  $("gatebar").appendChild(v);
+  setSel(1);   /* surface AGENT·LYRA — owner of PR-442 */
+  pushLog(1,"gate", ok?"Human approval granted — merging PR-442 to main.":"Merge denied — PR-442 returned to Agent_Lyra.");
+  if(ok)setTimeout(()=>pushLog(1,"git","merge PR-442 → main (fast-forward)"),900);
+}
+$("gate-approve").addEventListener("click",()=>decideGate(true));
+$("gate-deny").addEventListener("click",()=>decideGate(false));
+$("archbtn").addEventListener("click",()=>{
+  $("archbtn").disabled=true;
+  $("archbtn").textContent="ARCH APPROVED";
+  tlog("gate","Architecture gate cleared for TASK-882 (DECIDE → EXECUTE).");
+  /* advance stepper 882: DEC done, EXE now */
+  const host=$("stepper-882");host.innerHTML="";buildStepper("stepper-882",3);
+});
+
+/* ---------- uptime ---------- */
+let up=51.2*3600;
+function tickUp(){
+  up++;
+  $("uptime").textContent=pad2(Math.floor(up/3600))+":"+pad2(Math.floor(up/60)%60)+":"+pad2(Math.floor(up%60));
+}
+
+/* ---- START ---- */
+buildStepper("stepper-882",2);   /* DECIDE current */
+buildStepper("stepper-884",0);   /* OBSERVE current */
+buildBar("bar-882",62);buildBar("bar-884",8);
+sizeWave();
+tickChip();tickHealth();tickUp();
+sel=AGENTS.findIndex(a=>a.latest);if(sel<0)sel=AGENTS.length-1;
+setSel(sel);                     /* default: latest agent's console */
+setInterval(tickChip,500);
+setInterval(tickUp,1000);
+setInterval(tickHealth,1400);
+setInterval(tickFeed,2400);
+setInterval(tickAgents,3600);
+if(!REDUCED)setInterval(drawWave,83);else drawWave();
+addEventListener("resize",()=>{sizeWave();drawWave();});
+</script>
+</body>
+</html>

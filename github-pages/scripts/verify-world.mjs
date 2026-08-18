@@ -11,6 +11,16 @@ const { chromium } = require('playwright-core');
 const URL_ = process.env.APP_URL ?? 'http://localhost:4319/';
 const GL = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
 
+// The deck's shape, mirrored from src/config/chapters.ts. This script cannot
+// import the TS ledger, so these two are the one place it is restated — update
+// them together with CHAPTERS, and every check below follows.
+const ORDER = [
+  'orientation', 'chaos', 'agent-harness', 'fleet-control', 'tasks', 'system-design',
+  'skins', 'pipeline', 'themes', 'openspec', 'take-control', 'appendix-a', 'appendix-b',
+];
+const SCREENS = ORDER.length;
+const PAD = String(SCREENS).padStart(2, '0');
+
 const results = [];
 const check = (name, pass, detail) => {
   results.push({ name, pass, detail });
@@ -49,11 +59,11 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
     railCurrent: [...document.querySelectorAll('.sx-rail button')].map((b) => b.getAttribute('aria-current')),
   }));
   check('world boots into mode-3d', s.mode3d && !s.booting, `mode3d=${s.mode3d} booting=${s.booting}`);
-  check('all 7 sections adopted as CSS3D panels', s.panelsInCss3d === 7 && s.panelsInScroll === 0,
+  check(`all ${SCREENS} sections adopted as CSS3D panels`, s.panelsInCss3d === SCREENS && s.panelsInScroll === 0,
     `#css3d=${s.panelsInCss3d} #scroll=${s.panelsInScroll}`);
   check('exactly one canvas + one css3d host', s.canvases === 1 && s.css3dHosts === 1,
     `canvas=${s.canvases} css3d=${s.css3dHosts}`);
-  check('roScreens reports 07', s.screens === '07', String(s.screens));
+  check(`roScreens reports ${PAD}`, s.screens === PAD, String(s.screens));
   check('rail aria-current populated once 3D is live',
     s.railCurrent.filter((v) => v === 'true').length === 1 && s.railCurrent.every((v) => v !== null),
     JSON.stringify(s.railCurrent));
@@ -179,7 +189,7 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
   const sized = s.heights.every((h) => h && h.endsWith('px'));
   check('spacers sized BEFORE the model loads (optimistic boot)', s.booting && sized,
     `booting=${s.booting} heights=${JSON.stringify(s.heights)}`);
-  check('document claims full scroll length while loading', s.docHeight > s.vh * 7,
+  check('document claims full scroll length while loading', s.docHeight > s.vh * SCREENS,
     `docHeight=${s.docHeight} vh=${s.vh}`);
   await ctx.close();
 }
@@ -198,8 +208,8 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
     spacerHeights: [...document.querySelectorAll('#scroll .chapter-spacer')].map((b) => b.style.height),
     err: document.getElementById('sxBootErr')?.className,
   }));
-  check('model 404 → flat deck, 7 chapters back in #scroll',
-    !s.mode3d && !s.booting && s.headings === 7, JSON.stringify(s));
+  check(`model 404 → flat deck, ${SCREENS} chapters back in #scroll`,
+    !s.mode3d && !s.booting && s.headings === SCREENS, JSON.stringify(s));
   check('flat note revealed + error banner shown', s.flatNote && s.err?.includes('show'), `${s.flatNote} ${s.err}`);
   check('spacer heights unwound on failure', s.spacerHeights.every((h) => !h), JSON.stringify(s.spacerHeights));
   // fleet-control tabs still work in flat mode
@@ -237,8 +247,8 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
       return { w: Math.round(r.width), h: Math.round(r.height) }; })(),
   }));
   check('context loss demotes to flat', !s.mode3d, `mode3d=${s.mode3d}`);
-  check('all 7 sections restored into #scroll in order',
-    s.inScroll === 7 && s.order.join(',') === 'orientation,chaos,agent-harness,fleet-control,tasks,system-design,take-control', s.order.join(','));
+  check(`all ${SCREENS} sections restored into #scroll in order`,
+    s.inScroll === SCREENS && s.order.join(',') === ORDER.join(','), s.order.join(','));
   // Assert the style attribute is EMPTY, not merely free of a listed subset —
   // the first version of this check whitelisted width/height/display/opacity
   // and sailed past a leftover CSS3DRenderer `transform: matrix3d(...)` that

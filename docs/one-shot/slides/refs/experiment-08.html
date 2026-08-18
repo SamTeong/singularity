@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPERIMENT-08 · ARCHIVE SWEEP OVERLAY</title>
+<style>
+:root{
+  --bg:#0A0A0A;--mint:#52F29A;--paper:#EDF8D6;--gdim:#246C3C;
+  --red:#E2280F;--redpink:#F87070;--orange:#F26400;--amber:#F49F09;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);overflow:hidden;font-family:var(--mono);text-transform:uppercase}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.25) 0 1px,transparent 1px 3px)}
+
+/* ---- data-wall backdrop (the thing being scanned) ---- */
+#wall{position:absolute;inset:0}
+#wall canvas{width:100%;height:100%}
+
+/* ---- the overlay grid ---- */
+#overlay{
+  position:absolute;inset:0;display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+  align-content:start;gap:2vh 0;padding:1vh 0;
+  mix-blend-mode:screen;
+}
+.unit{display:flex;align-items:center;justify-content:center;gap:12px;height:23vh}
+/* folder glyph — geometric single-weight outline */
+.folder{width:44px;height:34px;position:relative;flex:none;
+  border:2.5px solid var(--fol,#C24010);border-radius:2px}
+.folder::before{content:"";position:absolute;top:-9px;left:-2.5px;width:20px;height:7px;
+  border:2.5px solid var(--fol,#C24010);border-bottom:none;border-radius:2px 2px 0 0}
+/* label bar with rotated mono text */
+.bar{
+  width:34px;height:100%;background:var(--bar,rgba(82,242,154,.8));
+  display:flex;align-items:center;justify-content:center;flex:none;
+  box-shadow:0 0 10px var(--barglow,rgba(82,242,154,.35));
+}
+.bar span{
+  transform:rotate(90deg);white-space:nowrap;font-size:11px;letter-spacing:.15em;
+  color:#06130b;font-weight:700;
+}
+
+/* alert colorway — same structure, hue swap only */
+body.alert .bar{--bar:rgba(226,40,15,.82);--barglow:rgba(226,40,15,.4)}
+body.alert .folder{--fol:#E2280F}
+body.alert .bar span{color:#1a0404}
+
+/* ---- HUD ---- */
+.hud{
+  position:absolute;left:0;right:0;bottom:0;z-index:10;display:flex;align-items:center;gap:18px;
+  background:var(--bg);border-top:2px solid var(--orange);padding:10px 18px;
+}
+.hud .count{font-family:var(--cond);font-weight:700;font-size:26px;color:var(--mint);
+  text-shadow:0 0 6px rgba(82,242,154,.5);min-width:220px}
+body.alert .hud .count{color:var(--red);text-shadow:0 0 6px rgba(226,40,15,.5)}
+.hud .label{font-size:11px;color:var(--amber);letter-spacing:.18em;line-height:1.4}
+.hud button{
+  margin-left:auto;background:transparent;border:2px solid var(--orange);color:var(--orange);
+  font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.14em;
+  text-transform:uppercase;padding:8px 22px;cursor:pointer;
+}
+.hud button:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.stamp{border:1px solid var(--mint);color:var(--mint);padding:2px 8px;border-radius:2px;
+  font-weight:700;font-size:11px;animation:blink 1s steps(1) infinite}
+body.alert .stamp{border-color:var(--red);color:var(--red)}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.stamp{animation:none}}
+</style>
+</head>
+<body>
+
+<div id="wall"><canvas id="wallcv"></canvas></div>
+<div id="overlay" aria-hidden="true"></div>
+
+<div class="hud">
+  <span class="count" id="count">000000 / 262144</span>
+  <span class="label">ARCHIVE SWEEP · SECTOR K<br>MODE:<span id="modelabel">INDEX</span></span>
+  <span class="stamp" id="stamp">走査中 · SCANNING</span>
+  <button id="toggle">RAISE ALERT</button>
+</div>
+
+<script>
+"use strict";
+/* if loaded in a hidden/zero-size viewport, re-init once it has real size */
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+/* Scan-overlay: repeating folder+label units at screen blend over a
+   procedural data wall. One class flip recolors the entire subsystem
+   (mint sweep -> red alarm) with zero layout change. */
+
+/* ---- data wall: blocky green noise, redrawn in chunks ---- */
+const cv=document.getElementById("wallcv");
+const dpr=devicePixelRatio||1;
+cv.width=innerWidth*dpr; cv.height=innerHeight*dpr;
+const ctx=cv.getContext("2d");
+ctx.scale(dpr,dpr);
+const BW=26,BH=16;
+function wallChunk(){
+  for(let i=0;i<160;i++){
+    const x=Math.floor(Math.random()*innerWidth/BW)*BW;
+    const y=Math.floor(Math.random()*innerHeight/BH)*BH;
+    const v=Math.random();
+    ctx.fillStyle = v<.55 ? "#0A0A0A" : v<.8 ? "#0E2416" : v<.95 ? "#246C3C" : "#3C9C6C";
+    ctx.fillRect(x,y,BW-2,BH-2);
+  }
+}
+for(let i=0;i<400;i++) wallChunk();
+
+/* ---- overlay units ---- */
+const overlay=document.getElementById("overlay");
+const NUNIT=Math.ceil(innerWidth/150)*4;
+const units=[];
+const rid=()=>{
+  const a="ACGT";
+  return Array.from({length:8},()=>a[Math.floor(Math.random()*4)]).join("")
+    + String(Math.floor(Math.random()*100)).padStart(2,"0");
+};
+for(let i=0;i<NUNIT;i++){
+  const u=document.createElement("div");u.className="unit";
+  u.innerHTML=`<div class="folder"></div><div class="bar"><span>${rid()}</span></div>`;
+  u.style.visibility=Math.random()<.8?"visible":"hidden";
+  overlay.appendChild(u);units.push(u);
+}
+
+/* ---- stepped animation ---- */
+let scanned=0;
+const TOTAL=262144;
+const count=document.getElementById("count");
+setInterval(()=>{
+  wallChunk();
+  /* units pop in/out — files entering/leaving the sweep */
+  for(let i=0;i<3;i++){
+    const u=units[Math.floor(Math.random()*units.length)];
+    u.style.visibility = u.style.visibility==="hidden"?"visible":"hidden";
+    if(Math.random()<.4) u.querySelector(".bar span").textContent=rid();
+  }
+  scanned=(scanned+Math.floor(800+Math.random()*900))%TOTAL;
+  count.textContent=String(scanned).padStart(6,"0")+" / "+TOTAL;
+},160);
+
+/* vertical crawl of the whole grid — mechanical, wraps */
+let oy=0;
+setInterval(()=>{
+  oy=(oy+4)%(innerHeight*.25);
+  overlay.style.transform=`translateY(${-oy}px)`;
+},80);
+
+/* ---- colorway flip ---- */
+const btn=document.getElementById("toggle");
+const stamp=document.getElementById("stamp");
+const modelabel=document.getElementById("modelabel");
+btn.addEventListener("click",()=>{
+  const alert=document.body.classList.toggle("alert");
+  btn.textContent=alert?"STAND DOWN":"RAISE ALERT";
+  stamp.textContent=alert?"汚染 · CONTAMINATED":"走査中 · SCANNING";
+  modelabel.textContent=alert?"QUARANTINE":"INDEX";
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPERIMENT-05 · RELAY LATTICE LOADER</title>
+<style>
+:root{
+  --bg:#0A0A0A;--red:#C20C0C;--red-hi:#E2280F;--mint:#52F29A;
+  --orange:#F26400;--amber:#F49F09;--crimson:#E60225;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);overflow:hidden;font-family:var(--mono);text-transform:uppercase}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
+svg{position:absolute;inset:0;width:100%;height:100%}
+
+.readout{
+  position:absolute;left:24px;bottom:20px;z-index:10;color:var(--amber);
+  font-size:12px;line-height:1.4;letter-spacing:.08em;
+}
+.readout .pct{font-family:var(--cond);font-weight:700;font-size:64px;line-height:1;
+  color:var(--orange);text-shadow:0 0 8px rgba(242,100,0,.5)}
+.readout b{color:var(--orange);font-weight:400}
+
+.borderline{
+  position:absolute;right:8%;top:38%;z-index:10;transform:rotate(-11deg);
+  border:2px solid var(--red-hi);color:var(--red-hi);background:var(--bg);
+  font-family:var(--cond);font-weight:700;font-size:20px;letter-spacing:.2em;
+  padding:5px 34px;text-shadow:0 0 6px currentColor;
+}
+.borderline::before,.borderline::after{content:"";position:absolute;top:-2px;bottom:-2px;width:16px;
+  background:repeating-linear-gradient(-45deg,var(--crimson) 0 5px,#000 5px 10px)}
+.borderline::before{left:-18px}.borderline::after{right:-18px}
+.borderline.hot{animation:blink .5s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.borderline.hot{animation:none}}
+</style>
+</head>
+<body>
+
+<svg id="lat" aria-label="Relay lattice loader"></svg>
+
+<div class="readout">
+  <div class="pct" id="pct">0</div>
+  RELAY IGNITION SEQUENCE<br>
+  PHASE:<b id="phase">CHARGE</b> &nbsp; NODES:<b id="nodes">0/0</b>
+</div>
+
+<div class="borderline" id="bline">BORDER·LINE</div>
+
+<script>
+"use strict";
+/* if loaded in a hidden/zero-size viewport, re-init once it has real size */
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+/* Full-screen node-link chevron lattice.
+   Bars ignite outward from an origin in stepped waves (red majority,
+   mint minority), traces light before their bars, teardown is a
+   reverse cascade to black. Loops forever. */
+
+const NS="http://www.w3.org/2000/svg";
+const svg=document.getElementById("lat");
+const W=innerWidth,H=innerHeight;
+svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+const el=(n,a,p=svg)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);p.appendChild(e);return e;};
+
+/* build lattice columns of chevron bars connected by orthogonal traces */
+const COLW=112, ROWH=46, BARW=74, BARH=13, SLANT=17;
+const cols=Math.ceil(W/COLW), rows=Math.ceil(H/ROWH);
+const cells=[];
+const originC=Math.floor(cols/2), originR=Math.floor(rows/2);
+
+for(let c=0;c<cols;c++){
+  for(let r=0;r<rows;r++){
+    const x=c*COLW+((r%2)*26)+18, y=r*ROWH+14;
+    const dir=(c%2? -1:1);
+    const pts=`${x},${y+BARH} ${x+SLANT*dir<0?x:x} 0`; /* placeholder replaced below */
+    const p1=`${x},${y+BARH*2} ${x+SLANT},${y} ${x+SLANT+BARW},${y} ${x+BARW},${y+BARH*2}`;
+    const bar=el("polygon",{points:p1,fill:"none"});
+    /* trace: L-shaped connector to next column */
+    const tx=x+BARW+SLANT, ty=y+BARH;
+    const trace=el("path",{d:`M${tx} ${ty} h${COLW-BARW-SLANT-8} v${(r%3-1)*ROWH}`,
+      fill:"none",stroke:"none","stroke-width":1});
+    /* notch tab */
+    const tab=el("rect",{x:x+6,y:y+BARH-4,width:10,height:6,fill:"none"});
+    /* ID label at some joints */
+    let label=null;
+    if(Math.random()<.22){
+      label=el("text",{x:x+8,y:y+BARH*2+13,fill:"#9C3C24","font-size":"9",
+        "font-family":"ui-monospace,Menlo,monospace"});
+      label.textContent=(Math.random()<.5?"MT-":"A0")+String(Math.floor(Math.random()*9000)+1000);
+    }
+    const dist=Math.hypot(c-originC,r-originR);
+    cells.push({bar,trace,tab,label,dist,ok:Math.random()<.18,on:false});
+  }
+}
+cells.sort((a,b)=>a.dist-b.dist);
+const maxDist=cells[cells.length-1].dist;
+document.getElementById("nodes").textContent="0/"+cells.length;
+
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const bline=document.getElementById("bline");
+const pctEl=document.getElementById("pct");
+const phaseEl=document.getElementById("phase");
+const nodesEl=document.getElementById("nodes");
+
+let front=0, phase="CHARGE";   /* CHARGE → HOLD → TEARDOWN */
+let holdTicks=0;
+
+function setCell(cell,on){
+  cell.on=on;
+  if(on){
+    const col=cell.ok?"#52F29A":"#C20C0C";
+    cell.bar.setAttribute("fill",col);
+    cell.bar.setAttribute("stroke",col);
+    cell.bar.setAttribute("filter","");
+    cell.trace.setAttribute("stroke","#F26400");
+    cell.tab.setAttribute("fill","#F26400");
+  }else{
+    cell.bar.setAttribute("fill","none");
+    cell.bar.setAttribute("stroke","none");
+    cell.trace.setAttribute("stroke","none");
+    cell.tab.setAttribute("fill","none");
+  }
+}
+
+setInterval(()=>{
+  if(phase==="CHARGE"){
+    front+=maxDist/46;                       /* wave advances in fixed steps */
+    let lit=0;
+    for(const cell of cells){
+      if(cell.dist<=front && !cell.on && Math.random()>.06) setCell(cell,true);
+      if(cell.on) lit++;
+    }
+    const pct=Math.min(100,Math.round(lit/cells.length*100));
+    pctEl.textContent=pct;
+    nodesEl.textContent=lit+"/"+cells.length;
+    if(pct>=72 && !REDUCED) bline.classList.add("hot");
+    if(pct>=100){phase="HOLD";phaseEl.textContent="HOLD";holdTicks=0;}
+  }
+  else if(phase==="HOLD"){
+    holdTicks++;
+    /* flicker random cells while holding */
+    for(let i=0;i<6;i++){
+      const cell=cells[Math.floor(Math.random()*cells.length)];
+      setCell(cell,!cell.on);
+    }
+    if(holdTicks>24){phase="TEARDOWN";phaseEl.textContent="RELEASE";bline.classList.remove("hot");}
+  }
+  else{ /* TEARDOWN — reverse cascade to black */
+    front-=maxDist/26;
+    let lit=0;
+    for(const cell of cells){
+      if(cell.dist>front && cell.on) setCell(cell,false);
+      if(cell.on) lit++;
+    }
+    pctEl.textContent=Math.round(lit/cells.length*100);
+    nodesEl.textContent=lit+"/"+cells.length;
+    if(lit===0){phase="CHARGE";phaseEl.textContent="CHARGE";front=0;
+      /* reshuffle the mint minority each cycle */
+      for(const cell of cells) cell.ok=Math.random()<.18;
+    }
+  }
+},130);
+</script>
+</body>
+</html>

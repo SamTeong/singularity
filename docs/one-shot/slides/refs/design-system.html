@@ -1,0 +1,782 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JAIRUS OS · DESIGN SYSTEM</title>
+<!-- design-system.html — living style guide. Self-contained, no deps.
+     Extracted from references-chosen, the 34 experiments, and the shipped pages.
+     Companion to design-system.md. -->
+<style>
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0; --blueprint:#B4B4B4;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--mint);font-family:var(--mono);letter-spacing:.03em;overflow-x:hidden}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:300;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.2) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 62%,rgba(0,0,0,.5) 100%)}
+a{color:inherit;text-decoration:none}
+::selection{background:var(--mint);color:#000}
+
+.blink{animation:blink 1s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes btnblink{0%,74%{background:var(--mint);color:#000}75%,100%{background:transparent;color:var(--mint)}}
+@keyframes modeblink{0%,74%{background:var(--orange);color:#000}75%,100%{background:transparent;color:var(--orange)}}
+
+/* ============ shell ============ */
+.shell{display:grid;grid-template-columns:214px 1fr;min-height:100vh}
+.railL{position:sticky;top:0;height:100vh;overflow-y:auto;border-right:2px solid var(--orange);
+  background:rgba(10,10,10,.97);box-shadow:2px 0 14px rgba(242,100,0,.14);padding:16px 12px;z-index:5}
+.railL::-webkit-scrollbar{width:7px}.railL::-webkit-scrollbar-thumb{background:var(--green-dim)}
+.brand{display:flex;align-items:center;gap:8px;font-family:var(--cond);font-weight:700;margin-bottom:2px}
+.brand .mk{width:14px;height:14px;background:var(--mint);box-shadow:0 0 8px var(--mint);transform:rotate(45deg)}
+.brand b{font-size:17px;color:var(--mint-hi);text-shadow:0 0 6px rgba(82,242,154,.5);letter-spacing:.03em}
+.brand-v{font-size:8px;color:var(--orange);letter-spacing:.14em;margin:2px 0 16px 22px}
+.toc a{display:flex;align-items:center;gap:9px;font-size:11px;padding:6px 9px;color:var(--mint);opacity:.66;
+  border-left:2px solid transparent;text-transform:uppercase;letter-spacing:.04em}
+.toc a .k{font-family:var(--jp);font-size:13px;width:16px;text-transform:none}
+.toc a:hover{opacity:1;background:rgba(82,242,154,.05)}
+.toc a.on{opacity:1;color:var(--mint-hi);border-left-color:var(--mint);background:rgba(82,242,154,.08)}
+.railL .rmeta{margin-top:16px;font-size:9px;color:var(--amber);line-height:1.5;letter-spacing:.06em;
+  border-top:1px solid var(--green-dim);padding-top:12px}
+.railL .rmeta b{color:var(--orange);font-weight:400}
+
+.main{min-width:0;padding:0 clamp(18px,4vw,52px) 90px}
+
+/* masthead */
+.masthead{padding:38px 0 26px;border-bottom:2px solid var(--orange);margin-bottom:6px;position:relative}
+.masthead .mono{border:1px solid var(--orange);color:var(--orange);font-family:var(--jp);font-weight:800;
+  font-size:34px;line-height:1;padding:8px 11px;text-align:center;display:inline-block;letter-spacing:.1em;
+  text-shadow:0 0 5px currentColor;vertical-align:middle}
+.masthead .mono small{display:block;font-family:var(--cond);font-weight:700;font-size:8px;letter-spacing:.16em;margin-top:5px}
+.masthead h1{display:inline-block;vertical-align:middle;margin-left:18px;font-family:var(--cond);font-weight:700;
+  font-size:clamp(30px,5vw,54px);color:var(--paper);letter-spacing:.02em;
+  text-shadow:0 0 5px currentColor,0 0 16px rgba(82,242,154,.3)}
+.masthead .eyebrow{font-size:10px;letter-spacing:.24em;color:var(--amber);margin-bottom:16px}
+.masthead .eyebrow::before{content:"◈ "}
+.masthead .lede{margin-top:18px;font-size:13px;line-height:1.7;color:var(--mint);opacity:.78;max-width:74ch;
+  text-transform:none;letter-spacing:.02em}
+
+/* section scaffolding */
+.section{padding:44px 0 8px;scroll-margin-top:12px}
+.sec-head{display:flex;align-items:center;gap:14px;margin-bottom:8px}
+.sec-head .idx{font-family:var(--cond);font-weight:700;font-size:13px;color:#000;background:var(--orange);padding:3px 9px;letter-spacing:.1em}
+.sec-head h2{font-family:var(--cond);font-weight:700;font-size:clamp(20px,2.6vw,30px);color:var(--mint-hi);letter-spacing:.03em;
+  text-shadow:0 0 8px rgba(82,242,154,.28)}
+.sec-head .k{font-family:var(--jp);font-weight:800;font-size:20px;color:var(--orange);text-shadow:0 0 4px currentColor}
+.sec-head .rule{flex:1;height:2px;background:linear-gradient(90deg,var(--orange),transparent)}
+.sec-note{font-size:11px;color:var(--green-map);letter-spacing:.06em;margin-bottom:22px;text-transform:none;max-width:80ch;line-height:1.6}
+
+/* spec card grid */
+.grid{display:grid;gap:16px}
+.g2{grid-template-columns:repeat(2,1fr)} .g3{grid-template-columns:repeat(3,1fr)} .g4{grid-template-columns:repeat(4,1fr)}
+.spec{border:1px solid var(--green-dim);background:#0A0A0A;padding:0;display:flex;flex-direction:column;position:relative}
+.spec:hover{border-color:var(--orange);box-shadow:0 0 12px rgba(242,100,0,.12)}
+.spec .demo{padding:20px 18px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:center;flex:1;min-height:96px}
+.spec .demo.col{flex-direction:column;align-items:stretch}
+.spec .cap{border-top:1px solid var(--green-dim);padding:7px 12px;display:flex;justify-content:space-between;
+  align-items:baseline;gap:8px;font-size:9px;letter-spacing:.08em;color:var(--green-map)}
+.spec .cap b{color:var(--mint);font-weight:400;letter-spacing:.04em}
+.spec .cap .src{color:var(--amber);opacity:.8}
+.verdict{position:absolute;top:8px;right:8px;font-size:8px;border:1px solid var(--mint);color:var(--mint);
+  padding:1px 6px;letter-spacing:.08em;z-index:2}
+.verdict.warn{border-color:var(--amber);color:var(--amber)}
+
+.zone-title{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--orange);letter-spacing:.12em;
+  border-bottom:1px solid var(--green-dim);padding-bottom:4px;margin:26px 0 14px}
+
+/* ============ ATOM DEMOS ============ */
+.stamp{display:inline-block;border:1px solid currentColor;padding:2px 9px;border-radius:2px;font-size:11px;line-height:1.4;white-space:nowrap}
+.stamp.fill{background:currentColor}.stamp.fill>span{color:var(--bg);display:block}
+.c-mint{color:var(--mint)} .c-amber{color:var(--amber)} .c-blue{color:var(--blue)} .c-red{color:var(--red-hi)} .c-orange{color:var(--orange)}
+
+.btn{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.12em;padding:10px 20px;
+  border:2px solid var(--mint);color:var(--mint);background:transparent;cursor:pointer;text-transform:uppercase}
+.btn:hover{background:var(--mint);color:#000;box-shadow:0 0 12px rgba(82,242,154,.4)}
+.btn.alt{border-color:var(--orange);color:var(--orange)} .btn.alt:hover{background:var(--orange);color:#000}
+.btn.ghost{border:1px solid var(--green-dim);color:var(--green-map);font-family:var(--mono);font-weight:400;font-size:11px}
+.btn.ghost:hover{background:var(--green-dim);color:var(--paper);box-shadow:none}
+.btn.primary{animation:btnblink 1s steps(1) infinite}
+.btn:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+
+/* legend */
+.legend{display:flex;gap:8px;flex-wrap:wrap}
+.lg{border:1px solid;padding:2px 9px;display:flex;flex-direction:column;align-items:center;min-width:54px;border-radius:2px}
+.lg .jp{font-family:var(--jp);font-weight:800;font-size:13px;line-height:1.2;text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.lg .cl{font-size:8px;letter-spacing:.1em}
+.lg-nominal{border-color:var(--mint);color:var(--mint)} .lg-caution{border-color:var(--amber);color:var(--amber)}
+.lg-pending{border-color:var(--blue);color:var(--blue)} .lg-blocked{border-color:var(--red-hi);background:var(--red-hi);color:#000}
+
+/* clock chips */
+.timechip{display:flex;align-items:center;gap:2px;background:var(--paper);padding:5px 9px 4px;border-radius:2px;
+  box-shadow:0 0 10px rgba(237,248,214,.4),inset 0 0 4px rgba(10,10,10,.15)}
+.timechip .tc-colon{display:flex;flex-direction:column;gap:5px;margin:0 2px}
+.timechip .tc-colon i{width:3px;height:3px;background:#0A0A0A;display:block}
+.timechip .ampm{font-weight:700;font-size:10px;color:#0A0A0A;margin-left:5px;letter-spacing:.08em}
+.timecd{display:flex;align-items:center;gap:4px}
+.timecd svg{filter:drop-shadow(0 0 3px rgba(242,100,0,.85)) drop-shadow(0 0 8px rgba(242,100,0,.4))}
+.timecd .cd-colon{display:flex;flex-direction:column;gap:6px;margin:0 1px}
+.timecd .cd-colon i{width:4px;height:4px;background:var(--orange);box-shadow:0 0 4px var(--orange);display:block}
+
+/* metadata + divider */
+.meta{font-size:11px;line-height:1.4;color:var(--orange);letter-spacing:.05em}
+.meta b{color:var(--amber-dim);font-weight:400}
+.sdiv{display:flex;align-items:center;gap:12px;width:100%}
+.sdiv .num{font-family:var(--cond);font-weight:700;font-size:13px;color:#000;background:var(--orange);padding:2px 8px}
+.sdiv .k{font-family:var(--jp);font-weight:800;font-size:18px;color:var(--orange);text-transform:none;letter-spacing:.1em}
+.sdiv h3{font-family:var(--cond);font-weight:700;font-size:15px;color:var(--paper);letter-spacing:.1em}
+.sdiv .line{flex:1;height:2px;background:linear-gradient(90deg,var(--orange),transparent)}
+
+/* ============ FORM DEMOS ============ */
+.fld{width:100%}
+.fld label{display:flex;align-items:baseline;gap:8px;font-size:10px;letter-spacing:.14em;color:var(--orange);margin-bottom:6px}
+.fld label .jp{font-family:var(--jp);font-weight:800;font-size:13px;text-transform:none;color:var(--orange)}
+input[type=text],textarea{width:100%;background:var(--bg);border:1px solid var(--green-dim);color:var(--mint);
+  font-family:var(--mono);font-size:13px;letter-spacing:.05em;padding:9px 11px;border-radius:0;caret-color:var(--mint);text-transform:uppercase}
+input::placeholder,textarea::placeholder{color:var(--green-dim)}
+input:hover,textarea:hover{border-color:var(--green-map)}
+input:focus-visible,textarea:focus-visible{outline:none;border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.35),inset 0 0 6px rgba(82,242,154,.12)}
+textarea{resize:vertical;min-height:60px;text-transform:none;line-height:1.5}
+/* dropdown */
+.dd{position:relative;width:100%}
+.dd-trigger{width:100%;display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--green-dim);
+  color:var(--mint);font-family:var(--mono);font-size:13px;padding:9px 11px;cursor:pointer;text-align:left}
+.dd-trigger:hover{border-color:var(--green-map)}
+.dd.open .dd-trigger{border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.35)}
+.dd-value .jp{font-family:var(--jp);font-weight:800;text-transform:none;color:var(--green-map);margin-left:8px}
+.dd-chevron{margin-left:auto;font-size:10px;color:var(--orange)}.dd.open .dd-chevron{transform:rotate(180deg)}
+.dd-list{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;list-style:none;background:var(--bg);
+  border:1px solid var(--mint);padding:4px;display:none;box-shadow:0 0 12px rgba(82,242,154,.3);
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%)}
+.dd.open .dd-list{display:block}
+.dd-list li{display:flex;align-items:baseline;gap:10px;padding:7px 9px;cursor:pointer;color:var(--mint);font-size:12px;border:1px solid transparent}
+.dd-list li .jp{font-family:var(--jp);font-weight:800;text-transform:none;margin-left:auto;color:var(--green-map)}
+.dd-list li.active{background:var(--mint);color:#000;font-weight:700}.dd-list li.active .jp{color:#000}
+.dd-list li+li{border-top:1px dotted var(--green-dim)}
+/* radio chips */
+.chiprow{display:flex;gap:8px;flex-wrap:wrap;border:0}
+.chip{position:relative}.chip input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.chipface{display:flex;flex-direction:column;align-items:center;min-width:82px;cursor:pointer;border:1px solid var(--pc);color:var(--pc);padding:6px 12px 5px;border-radius:2px}
+.chipface .jp{font-family:var(--jp);font-weight:800;font-size:14px;text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.chipface .en{font-size:9px;letter-spacing:.14em;margin-top:2px}
+.chip input:checked+.chipface{background:var(--pc);color:#000;font-weight:700;box-shadow:0 0 9px color-mix(in srgb,var(--pc) 55%,transparent)}
+.chip input:focus-visible+.chipface{outline:2px solid var(--paper);outline-offset:2px}
+.p-routine{--pc:var(--green-map)}.p-elevated{--pc:var(--amber)}.p-critical{--pc:var(--red-hi)}
+/* checkbox */
+.check{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:12px;color:var(--mint);text-transform:none}
+.check input{position:absolute;opacity:0;width:0;height:0}
+.check .box{width:18px;height:18px;border:1px solid var(--green-map);position:relative;flex:none}
+.check input:checked+.box{background:var(--mint);border-color:var(--mint);box-shadow:0 0 6px rgba(82,242,154,.5)}
+.check input:checked+.box::after{content:"✓";position:absolute;inset:0;color:#000;font-size:13px;display:flex;align-items:center;justify-content:center;font-weight:700}
+.check input:focus-visible+.box{outline:2px solid var(--paper);outline-offset:2px}
+/* switch */
+.switch{display:flex;align-items:center;gap:10px;cursor:pointer;font-size:11px;color:var(--mint);text-transform:none}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch .track{width:50px;height:23px;border:1px solid var(--green-dim);position:relative;flex:none}
+.switch .track::after{content:"";position:absolute;top:2px;left:2px;width:17px;height:17px;background:var(--green-map)}
+.switch input:checked+.track{border-color:var(--mint)}
+.switch input:checked+.track::after{left:auto;right:2px;background:var(--mint);box-shadow:0 0 7px var(--mint)}
+.switch input:focus-visible+.track{outline:2px solid var(--paper);outline-offset:2px}
+/* slider */
+input[type=range]{--fill:40%;-webkit-appearance:none;appearance:none;width:100%;height:24px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:12px;border:1px solid var(--green-dim);background:linear-gradient(90deg,var(--mint) 0 var(--fill),rgba(255,255,255,.05) var(--fill) 100%)}
+input[type=range]::-moz-range-track{height:12px;border:1px solid var(--green-dim);background:linear-gradient(90deg,var(--mint) 0 var(--fill),rgba(255,255,255,.05) var(--fill) 100%)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:22px;margin-top:-6px;background:var(--mint-hi);border:0;box-shadow:0 0 8px var(--mint)}
+input[type=range]::-moz-range-thumb{width:12px;height:22px;background:var(--mint-hi);border:0;border-radius:0;box-shadow:0 0 8px var(--mint)}
+.sval{font-family:var(--cond);font-weight:700;font-size:18px;color:var(--mint-hi);min-width:64px;text-align:right;font-variant-numeric:tabular-nums}
+/* stepper */
+.stepper{display:flex;align-items:stretch;width:150px;border:1px solid var(--green-dim)}
+.stepper button{width:38px;background:rgba(242,100,0,.1);border:0;color:var(--orange);font-size:17px;cursor:pointer;font-family:var(--cond)}
+.stepper button:hover{background:var(--orange);color:#000}
+.stepper input{border:0;background:var(--bg);color:var(--mint);text-align:center;font-family:var(--mono);width:100%;-moz-appearance:textfield}
+.stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+/* segmented toggle */
+.seggroup{display:flex;border:1px solid var(--orange);width:100%}
+.seggroup .sg{position:relative;flex:1}.seggroup .sg input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.seggroup .sg label{display:block;text-align:center;padding:9px 6px;cursor:pointer;color:var(--mint);font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.1em}
+.seggroup .sg+.sg{border-left:1px solid var(--orange)}
+.seggroup .sg input:checked+label{background:var(--mint);color:#000}
+.seggroup .sg input:focus-visible+label{outline:2px solid var(--paper);outline-offset:-2px}
+/* rating */
+.rating{display:flex;gap:5px}.rating .rblk{position:relative;width:34px}
+.rating .rblk input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.rating .rblk label{display:block;height:28px;border:1px solid var(--rc,var(--green-dim));cursor:pointer;background:repeating-linear-gradient(-45deg,transparent 0 4px,rgba(255,255,255,.04) 4px 8px)}
+.rating.lit-1 .rblk:nth-child(-n+1) label,.rating.lit-2 .rblk:nth-child(-n+2) label,.rating.lit-3 .rblk:nth-child(-n+3) label,.rating.lit-4 .rblk:nth-child(-n+4) label,.rating.lit-5 .rblk:nth-child(-n+5) label{background:var(--rc);box-shadow:0 0 6px color-mix(in srgb,var(--rc) 50%,transparent)}
+.rating .rblk input:focus-visible+label{outline:2px solid var(--paper);outline-offset:2px}
+/* tags */
+.tags{border:1px solid var(--green-dim);padding:6px;display:flex;flex-wrap:wrap;gap:6px}
+.tag{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--mint);color:var(--mint);font-size:11px;padding:3px 4px 3px 8px}
+.tag button{background:none;border:0;color:var(--mint);cursor:pointer}.tag button:hover{color:var(--red-hi)}
+/* date */
+.segdate{display:flex;align-items:center;gap:6px}
+.segdate .cell{border:1px solid var(--green-dim);background:var(--bg);color:var(--mint-hi);font-family:var(--mono);font-size:16px;text-align:center;padding:7px 6px;letter-spacing:.14em;text-shadow:0 0 5px rgba(82,242,154,.4);width:48px}
+.segdate .sep{color:var(--orange);font-size:16px}
+
+/* ============ DATA DEMOS ============ */
+/* segmented meter */
+.meter{display:flex;gap:12px;height:150px}
+.meter .axis{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;font-size:9px;color:var(--orange);border-right:1px solid var(--orange);padding-right:5px}
+.meter .field{flex:1;display:flex;gap:16px;position:relative}
+.bar{flex:1;display:flex;flex-direction:column-reverse;gap:3px}
+.bar .seg{flex:1;border-radius:2px;background:var(--green-dim);opacity:.3}
+.bar .seg.on{opacity:1;background:var(--mint);box-shadow:0 0 5px rgba(82,242,154,.45)}
+.bar .seg.on.warn{background:var(--amber);box-shadow:0 0 5px rgba(244,159,9,.45)}
+.bar .seg.on.hot{background:var(--red-hi);box-shadow:0 0 6px rgba(226,40,15,.55)}
+.threshold{position:absolute;left:-6px;right:-6px;height:2px;background:var(--orange);box-shadow:0 0 6px rgba(242,100,0,.6);z-index:2}
+.threshold span{position:absolute;right:0;top:-10px;background:var(--bg);border:1px solid var(--orange);color:var(--orange);font-size:8px;padding:1px 5px}
+.barlabels{display:flex;gap:16px;margin-top:6px}.barlabels span{flex:1;text-align:center;font-size:9px;color:var(--green-map)}
+/* gauges */
+.radial{position:relative;width:120px;height:120px}.radial svg{width:100%;height:100%}
+.radial .rc{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.radial .rc b{font-family:var(--cond);font-size:22px;color:var(--mint-hi);text-shadow:0 0 4px currentColor}
+.radial .rc span{font-size:8px;color:var(--green-map);letter-spacing:.12em}
+.hbar{display:flex;gap:3px;height:34px;width:100%}
+.hbar i{flex:1;background:var(--green-dim);opacity:.3}.hbar i.on{opacity:1;background:var(--blue);box-shadow:0 0 5px rgba(80,144,208,.5)}
+.vcols{display:flex;gap:6px;height:110px;align-items:flex-end;width:100%}
+.vcol{flex:1;display:flex;flex-direction:column-reverse;gap:2px;height:100%}
+.vcol .seg{flex:1;background:var(--green-dim);opacity:.3;border-radius:2px}
+.vcol .seg.on{opacity:1;background:var(--amber);box-shadow:0 0 4px rgba(244,159,9,.5)}
+.vcol .seg.on.hot{background:var(--red-hi)}
+/* negative-space stat */
+.nstat{border:1px solid var(--green-dim);padding:22px;display:flex;flex-direction:column;gap:8px;min-height:150px;justify-content:center}
+.nstat .k{font-size:9px;color:var(--green-map);letter-spacing:.16em}
+.nstat .v{font-family:var(--cond);font-weight:700;font-size:58px;line-height:.9;color:var(--mint-hi);text-shadow:0 0 10px rgba(82,242,154,.35)}
+.nstat .foot{font-size:9px;color:var(--green-map);letter-spacing:.1em;margin-top:auto}
+/* line/trend + wave + scan use canvas/svg */
+.chartbox{position:relative;height:150px;border:1px solid var(--green-dim);overflow:hidden}
+.chartbox canvas{position:absolute;inset:0;width:100%;height:100%}
+.chartbox .lbl{position:absolute;left:10px;top:8px;font-size:9px;color:var(--green-map);letter-spacing:.12em;z-index:2}
+.chartbox .lbl b{color:var(--mint)}
+.wavebox{position:relative;height:96px;border:1px solid var(--green-dim);overflow:hidden}
+.wavebox canvas{position:absolute;inset:0;width:100%;height:100%}
+.wavebox .wl{position:absolute;left:12px;top:8px;font-size:9px;color:var(--green-map);letter-spacing:.14em}
+.wavebox .wr{position:absolute;right:12px;top:8px;font-size:9px;color:var(--green-map)}
+.scanbox{height:110px;border:1px solid var(--green-dim);overflow:hidden}
+.scanbox svg{width:100%;height:100%;display:block}
+/* terminal */
+.terminal{border:1px solid var(--amber-dim);background:rgba(244,159,9,.02)}
+.term-bar{display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--amber-dim);font-size:9px;color:var(--amber);letter-spacing:.1em}
+.term-bar .dots{display:flex;gap:5px;margin-left:auto}.term-bar .dots i{width:8px;height:8px;border-radius:50%}
+.term-bar .dots i:nth-child(1){background:var(--red-hi)}.term-bar .dots i:nth-child(2){background:var(--amber)}.term-bar .dots i:nth-child(3){background:var(--mint)}
+.term-body{padding:12px 14px;font-size:12px;line-height:1.5;min-height:150px;max-height:190px;overflow-y:auto}
+.trow{display:flex;align-items:baseline;gap:8px;white-space:nowrap;color:var(--amber-dim)}
+.trow .lbl2{color:var(--amber)}.trow .dots2{flex:1;border-bottom:1px dotted var(--amber-dim);height:0;margin-bottom:4px;min-width:12px}
+.trow .val{color:var(--amber);font-weight:700}.trow .val.fail{color:var(--red-hi);text-shadow:0 0 4px currentColor}
+.trow.rule2{color:var(--amber-dim)}.trow.note2{color:var(--red-hi);font-size:11px}
+.term-cursor{display:inline-block;width:8px;height:13px;background:var(--amber);vertical-align:-2px}
+/* marquee */
+.marquee{border-top:2px solid var(--red-hi);border-bottom:2px solid var(--red-hi);background:#170303;overflow:hidden;white-space:nowrap}
+.marquee .track{display:inline-block;padding:8px 0;font-size:11px;letter-spacing:.16em;color:var(--red-hi);text-shadow:0 0 6px rgba(226,40,15,.5)}
+.marquee .track span{margin:0 24px}.marquee .track span::before{content:"▚ ";color:var(--orange)}
+/* roster */
+.roster{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+.unit{border:1px solid var(--green-dim);color:var(--mint);padding:8px 9px;cursor:pointer;display:flex;flex-direction:column;gap:5px;text-align:left;background:var(--bg);font-family:var(--mono);text-transform:uppercase}
+.unit:focus-visible{outline:2px dashed var(--amber);outline-offset:2px}
+.unit .u-top{display:flex;justify-content:space-between;font-size:10px}
+.unit .u-id{font-family:var(--cond);font-weight:700;font-size:14px}
+.unit .u-stamp{align-self:flex-start;border:1px solid currentColor;padding:1px 6px;font-size:9px;border-radius:2px}
+.unit[data-s=NOMINAL]{border-color:var(--mint);color:var(--mint)}
+.unit[data-s=CAUTION]{border-color:var(--amber);color:var(--amber)}.unit[data-s=CAUTION] .u-stamp{animation:blink 1s steps(1) infinite}
+.unit[data-s=STANDBY]{border-color:var(--blue);color:var(--blue)}
+.unit[data-s=OFFLINE]{background:var(--red-hi);border-color:var(--red-hi);color:#000}
+.unit[data-s=OFFLINE] .u-stamp{border-color:#000;background:#000;color:var(--red-hi)}
+.unit[aria-pressed=true]{border-width:2px}
+/* stepper OODA */
+.ooda{display:flex;align-items:center}
+.ostep{display:flex;flex-direction:column;align-items:center;gap:4px;width:70px}
+.ostep .node{width:26px;height:26px;border:2px solid var(--green-dim);display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--green-map);
+  clip-path:polygon(0 0,calc(100% - 7px) 0,100% 7px,100% 100%,7px 100%,0 calc(100% - 7px))}
+.ostep .sl{font-size:8px;color:var(--green-map);letter-spacing:.08em}
+.ostep.done .node{background:var(--mint);border-color:var(--mint);color:#000}.ostep.done .sl{color:var(--mint)}
+.ostep.now .node{background:var(--blue);border-color:var(--blue);color:#000;animation:blink 1s steps(1) infinite}.ostep.now .sl{color:var(--blue)}
+.oconn{flex:1;height:2px;background:var(--green-dim);min-width:12px;margin-bottom:14px}.oconn.done{background:var(--mint)}
+
+/* ============ FEEDBACK DEMOS ============ */
+.filterrail{display:flex;gap:5px;margin-bottom:10px}
+.filterrail button{border:1px solid var(--orange);background:var(--bg);color:var(--orange);font-size:10px;padding:5px 11px;cursor:pointer;font-family:var(--mono)}
+.filterrail button.active{background:var(--orange);color:#000;font-weight:700}
+.filterrail button:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.frow2{display:flex;align-items:center;gap:8px;border:1px solid var(--green-dim);padding:7px 10px;margin-bottom:6px;font-size:11px}
+.frow2 .fid{color:var(--amber);white-space:nowrap}.frow2 .fname{color:var(--paper);flex:1}
+.frow2 .fkind{font-size:8px;color:var(--green-map);letter-spacing:.1em}
+.frow2.dim{opacity:.25;filter:grayscale(.6)}
+/* mini alert */
+.miniAlert{position:relative;border:2px solid var(--red-hi);background:var(--red-hi);height:150px;overflow:hidden;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:8px;cursor:pointer}
+.miniAlert .strip{position:absolute;left:0;right:0;height:14px;background:repeating-linear-gradient(-45deg,#000 0 10px,transparent 10px 20px)}
+.miniAlert .strip.t{top:0}.miniAlert .strip.b{bottom:0}
+.miniAlert .jp{font-family:var(--jp);font-weight:800;font-size:20px;color:#000;border:2px solid #000;padding:1px 12px;text-transform:none;letter-spacing:.4em;text-indent:.4em}
+.miniAlert .band{background:#000;width:100%;text-align:center;padding:4px 0}
+.miniAlert .word{font-family:var(--cond);font-weight:700;font-size:44px;line-height:1;color:var(--red-hi)}
+/* modal preview */
+.modalcard{border:1px solid var(--orange);padding:4px;background:var(--bg)}
+.modalcard .mi{border:2px solid var(--orange);padding:14px 16px;clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,0 100%)}
+.modalcard .mh{display:flex;justify-content:space-between;border-bottom:2px solid var(--orange);padding-bottom:8px;margin-bottom:10px}
+.modalcard .mh .k{font-family:var(--jp);font-weight:800;font-size:26px;color:var(--orange);text-shadow:0 0 4px currentColor}
+.modalcard .mh .k small{display:block;font-family:var(--cond);font-size:8px;letter-spacing:.2em;color:var(--amber)}
+.modalcard .teal{height:7px;border-top:2px solid var(--teal);border-bottom:2px solid var(--teal);margin:10px 0}
+
+/* footer */
+.foot{margin-top:60px;border-top:2px solid var(--orange);padding:18px 0;display:flex;flex-wrap:wrap;gap:16px;font-size:10px;color:var(--green-map);letter-spacing:.08em}
+.foot .g{color:var(--mint)}.foot .sp{margin-left:auto}
+
+/* swatch grid */
+.swatches{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.sw{border:1px solid var(--green-dim);overflow:hidden}
+.sw .chip2{height:52px}.sw .info{padding:6px 8px;font-size:9px;line-height:1.5;color:var(--green-map)}
+.sw .info b{display:block;color:var(--mint);font-size:11px;letter-spacing:.04em}
+.sw .info code{color:var(--amber);font-size:9px}
+.typerow{display:flex;align-items:baseline;gap:16px;border-bottom:1px dotted var(--green-dim);padding:12px 0}
+.typerow .tag2{font-size:9px;color:var(--green-map);width:120px;flex:none;letter-spacing:.08em}
+
+@media(max-width:1000px){.shell{grid-template-columns:1fr}.railL{position:static;height:auto;border-right:0;border-bottom:2px solid var(--orange);box-shadow:none}
+  .g4,.g3{grid-template-columns:repeat(2,1fr)}.roster{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:600px){.g4,.g3,.g2{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}
+  .blink,.btn.primary,.unit[data-s=CAUTION] .u-stamp,.ostep.now .node,.term-cursor{animation:none}}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ============ NAV ============ -->
+  <aside class="railL">
+    <div class="brand"><span class="mk"></span><b>JAIRUS_OS</b></div>
+    <div class="brand-v">DESIGN SYSTEM · v1</div>
+    <nav class="toc" id="toc">
+      <a href="#foundations" class="on"><span class="k">基</span>FOUNDATIONS</a>
+      <a href="#atoms"><span class="k">原</span>ATOMS</a>
+      <a href="#forms"><span class="k">申</span>FORM CONTROLS</a>
+      <a href="#data"><span class="k">図</span>DATA DISPLAY</a>
+      <a href="#feedback"><span class="k">応</span>FEEDBACK</a>
+      <a href="#nav"><span class="k">案</span>NAVIGATION</a>
+      <a href="#patterns"><span class="k">構</span>PATTERNS</a>
+    </nav>
+    <div class="rmeta">
+      <div><b>SOURCE:</b> 8 PAGES · 34 EXP · 23 GIF</div>
+      <div><b>DRIFT:</b> 0 · <b>SCORE:</b> 92/100</div>
+      <div><b>DOC:</b> design-system.md</div>
+    </div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <main class="main">
+
+    <header class="masthead">
+      <div class="eyebrow">NERV/MAGI TACTICAL DESIGN SYSTEM</div>
+      <span class="mono">磁<small>MAGI</small></span>
+      <h1>JAIRUS OS</h1>
+      <p class="lede">A black CRT command console where information glows in phosphor mint, safety orange, and blood red — dense, all-caps, hard-edged, bilingual, animated in abrupt mechanical steps. Every element below is live and reads from the same token block. ✅ = confirmed keep · ⚠️ = kept with a refinement.</p>
+    </header>
+
+    <!-- ======== FOUNDATIONS ======== -->
+    <section class="section" id="foundations">
+      <div class="sec-head"><span class="idx">01</span><span class="k">基盤</span><h2>FOUNDATIONS</h2><span class="rule"></span></div>
+      <p class="sec-note">Tokens are CSS custom properties, identical across every file. Color = state, orange = chrome, black = the only surface.</p>
+
+      <div class="zone-title">COLOR TOKENS</div>
+      <div class="swatches" id="swatches"></div>
+
+      <div class="zone-title">TYPE ROLES</div>
+      <div>
+        <div class="typerow"><span class="tag2">DISPLAY · COND</span><span style="font-family:var(--cond);font-weight:700;font-size:34px;color:var(--paper)">TACTICAL DISPLAY 0847</span></div>
+        <div class="typerow"><span class="tag2">MONO · DATA</span><span style="font-family:var(--mono);font-size:15px;color:var(--mint)">CODE:0771 · FILE:GATE_INTAKE · OK</span></div>
+        <div class="typerow"><span class="tag2">JP · MINCHO 800</span><span style="font-family:var(--jp);font-weight:800;font-size:30px;color:var(--orange);letter-spacing:.1em">警戒 起動 承認</span></div>
+        <div class="typerow"><span class="tag2">BIMODAL PAIR</span><span><span style="font-family:var(--jp);font-weight:800;font-size:40px;color:var(--mint)">内部</span> <span style="font-size:10px;color:var(--green-map);letter-spacing:.2em">/ INTERNAL</span></span></div>
+      </div>
+
+      <div class="zone-title">BORDERS · CHAMFER · GLOW</div>
+      <div class="grid g4">
+        <div class="spec"><div class="demo"><div style="width:80px;height:56px;border:1px solid var(--green-dim)"></div></div><div class="cap"><b>1PX IDLE</b><span class="src">green-dim</span></div></div>
+        <div class="spec"><div class="demo"><div style="width:80px;height:56px;border:2px solid var(--orange);box-shadow:0 0 8px rgba(242,100,0,.4)"></div></div><div class="cap"><b>2PX + GLOW</b><span class="src">orange</span></div></div>
+        <div class="spec"><div class="demo"><div style="width:80px;height:56px;border:2px solid var(--orange);clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))"></div></div><div class="cap"><b>CHAMFER</b><span class="src">clip-path</span></div></div>
+        <div class="spec"><div class="demo"><div style="width:96px;height:10px;border-top:3px solid var(--teal);border-bottom:3px solid var(--teal)"></div></div><div class="cap"><b>TEAL DOUBLE-RULE</b><span class="src">header</span></div></div>
+      </div>
+    </section>
+
+    <!-- ======== ATOMS ======== -->
+    <section class="section" id="atoms">
+      <div class="sec-head"><span class="idx">02</span><span class="k">原子</span><h2>ATOMS</h2><span class="rule"></span></div>
+      <p class="sec-note">Stamps, buttons, legends, clocks — the smallest reusable pieces. Everything important is boxed; blinking = in-progress; solid fill = active.</p>
+      <div class="grid g3">
+
+        <div class="spec"><div class="demo">
+          <span class="stamp c-mint">NOMINAL</span>
+          <span class="stamp c-blue blink">審査中</span>
+          <span class="stamp fill c-red-hi" style="color:var(--red-hi)"><span>DOWN</span></span>
+        </div><div class="cap"><b>STAMP / CHIP</b><span class="src">universal</span></div></div>
+
+        <div class="spec"><span class="verdict">✅ MUST HAVE</span><div class="demo">
+          <span class="legend">
+            <span class="lg lg-nominal"><span class="jp">正常</span><span class="cl">NOMINAL</span></span>
+            <span class="lg lg-caution"><span class="jp">注意</span><span class="cl">CAUTION</span></span>
+            <span class="lg lg-pending"><span class="jp">待機</span><span class="cl">PENDING</span></span>
+            <span class="lg lg-blocked"><span class="jp">阻止</span><span class="cl">BLOCKED</span></span>
+          </span>
+        </div><div class="cap"><b>LEGEND</b><span class="src">sonnet-37</span></div></div>
+
+        <div class="spec"><span class="verdict">✅ CLOCK</span><div class="demo col" style="align-items:center">
+          <span class="timechip" id="timechip"></span>
+          <span class="timecd" id="timecd"></span>
+        </div><div class="cap"><b>7-SEG CLOCK · 2 SKINS</b><span class="src">exp-01</span></div></div>
+
+        <div class="spec"><span class="verdict">✅ BUTTONS</span><div class="demo">
+          <button class="btn primary">FILE GATE</button>
+          <button class="btn alt">DOCS</button>
+          <button class="btn ghost">RESET</button>
+        </div><div class="cap"><b>BUTTON · SELECTED=BLINK</b><span class="src">exp-01</span></div></div>
+
+        <div class="spec"><div class="demo col">
+          <div class="meta">CODE:<b>0771</b><br>FILE:<b>GATE_INTAKE</b><br>EX_MODE:<b>MANUAL</b><br>PRIORITY:<b>AA-</b></div>
+        </div><div class="cap"><b>METADATA BLOCK</b><span class="src">universal</span></div></div>
+
+        <div class="spec"><div class="demo"><div class="sdiv"><span class="num">01</span><span class="k">個体</span><h3>IDENTITY</h3><span class="line"></span></div></div><div class="cap"><b>SECTION DIVIDER</b><span class="src">form-02</span></div></div>
+
+      </div>
+    </section>
+
+    <!-- ======== FORMS ======== -->
+    <section class="section" id="forms">
+      <div class="sec-head"><span class="idx">03</span><span class="k">申請</span><h2>FORM CONTROLS</h2><span class="rule"></span></div>
+      <p class="sec-note">The full MUI-equivalent set from form-01/02. Shared field grammar: black field, dim-green idle border → mint glow on focus, checked = colorway inversion.</p>
+      <div class="grid g3">
+
+        <div class="spec"><div class="demo col"><div class="fld"><label><span class="jp">件名</span>TEXT INPUT</label><input type="text" placeholder="API SECURITY GATEWAY"></div></div><div class="cap"><b>TEXT INPUT</b><span class="src">form-01</span></div></div>
+
+        <div class="spec"><div class="demo col"><div class="fld"><label><span class="jp">理由</span>TEXTAREA</label><textarea placeholder="What happens if nobody decides?"></textarea></div></div><div class="cap"><b>TEXTAREA</b><span class="src">form-01</span></div></div>
+
+        <div class="spec"><span class="verdict">✅ CUSTOM</span><div class="demo col"><div class="fld"><label><span class="jp">部門</span>DROPDOWN</label>
+          <div class="dd" id="dd">
+            <button type="button" class="dd-trigger" id="ddbtn" aria-haspopup="listbox" aria-expanded="false">
+              <span class="dd-value" id="ddval">ENGINEERING<span class="jp">工学</span></span><span class="dd-chevron">▼</span></button>
+            <ul class="dd-list" id="ddlist" role="listbox">
+              <li class="active" data-v="ENGINEERING" data-jp="工学">ENGINEERING<span class="jp">工学</span></li>
+              <li data-v="KNOWLEDGE" data-jp="知識">KNOWLEDGE<span class="jp">知識</span></li>
+              <li data-v="AUTOMATION" data-jp="自動">AUTOMATION<span class="jp">自動</span></li>
+              <li data-v="LEARNING" data-jp="学習">LEARNING<span class="jp">学習</span></li>
+            </ul>
+          </div></div></div><div class="cap"><b>DROPDOWN (LISTBOX)</b><span class="src">form-01</span></div></div>
+
+        <div class="spec"><div class="demo"><div class="chiprow" role="radiogroup" aria-label="priority demo">
+          <span class="chip p-routine"><input type="radio" name="pr" id="pr1" checked><label class="chipface" for="pr1"><span class="jp">通常</span><span class="en">B++</span></label></span>
+          <span class="chip p-elevated"><input type="radio" name="pr" id="pr2"><label class="chipface" for="pr2"><span class="jp">優先</span><span class="en">AA-</span></label></span>
+          <span class="chip p-critical"><input type="radio" name="pr" id="pr3"><label class="chipface" for="pr3"><span class="jp">緊急</span><span class="en">AAA</span></label></span>
+        </div></div><div class="cap"><b>RADIO CHIPS</b><span class="src">form-01</span></div></div>
+
+        <div class="spec"><div class="demo col" style="gap:10px">
+          <label class="check"><input type="checkbox" checked><span class="box"></span>Auto-approve routine gates</label>
+          <label class="check"><input type="checkbox"><span class="box"></span>Voice interface</label>
+        </div><div class="cap"><b>CHECKBOX</b><span class="src">form-02</span></div></div>
+
+        <div class="spec"><div class="demo col" style="gap:12px">
+          <label class="switch"><input type="checkbox" checked><span class="track"></span>Push notifications</label>
+          <label class="switch"><input type="checkbox"><span class="track"></span>Silent running</label>
+        </div><div class="cap"><b>SWITCH</b><span class="src">form-02</span></div></div>
+
+        <div class="spec"><div class="demo" style="gap:14px"><input type="range" id="rng" min="1" max="32" value="8" style="flex:1"><span class="sval" id="rngv">08 GB</span></div><div class="cap"><b>SLIDER</b><span class="src">form-02</span></div></div>
+
+        <div class="spec"><div class="demo"><div class="stepper"><button type="button" id="wm">−</button><input type="number" id="wn" value="4" min="1" max="16"><button type="button" id="wp">+</button></div></div><div class="cap"><b>NUMBER STEPPER</b><span class="src">form-02</span></div></div>
+
+        <div class="spec"><div class="demo"><div class="seggroup" role="radiogroup" aria-label="model demo">
+          <span class="sg"><input type="radio" name="mdl" id="md1"><label for="md1">NANO</label></span>
+          <span class="sg"><input type="radio" name="mdl" id="md2" checked><label for="md2">CORE</label></span>
+          <span class="sg"><input type="radio" name="mdl" id="md3"><label for="md3">MAX</label></span>
+        </div></div><div class="cap"><b>SEGMENTED TOGGLE</b><span class="src">form-02</span></div></div>
+
+        <div class="spec"><div class="demo col"><div class="rating lit-3" id="rating" style="--rc:var(--mint)" role="radiogroup" aria-label="rating demo">
+          <span class="rblk"><input type="radio" name="rt" id="rt1" aria-label="1"><label for="rt1"></label></span>
+          <span class="rblk"><input type="radio" name="rt" id="rt2" aria-label="2"><label for="rt2"></label></span>
+          <span class="rblk"><input type="radio" name="rt" id="rt3" checked aria-label="3"><label for="rt3"></label></span>
+          <span class="rblk"><input type="radio" name="rt" id="rt4" aria-label="4"><label for="rt4"></label></span>
+          <span class="rblk"><input type="radio" name="rt" id="rt5" aria-label="5"><label for="rt5"></label></span>
+        </div></div><div class="cap"><b>RATING (HAZARD)</b><span class="src">form-02</span></div></div>
+
+        <div class="spec"><div class="demo col"><div class="tags"><span class="tag">CODE_REVIEW<button aria-label="remove">✕</button></span><span class="tag">VECTOR_SEARCH<button aria-label="remove">✕</button></span></div></div><div class="cap"><b>TAG INPUT</b><span class="src">form-02</span></div></div>
+
+        <div class="spec"><div class="demo"><div class="segdate"><span class="cell" style="width:66px">2026</span><span class="sep">/</span><span class="cell">07</span><span class="sep">/</span><span class="cell">18</span></div></div><div class="cap"><b>DATE SEGMENTS</b><span class="src">form-02</span></div></div>
+
+      </div>
+    </section>
+
+    <!-- ======== DATA DISPLAY ======== -->
+    <section class="section" id="data">
+      <div class="sec-head"><span class="idx">04</span><span class="k">図表</span><h2>DATA DISPLAY</h2><span class="rule"></span></div>
+      <p class="sec-note">Meters use discrete LED segments (never continuous fill). Thresholds are drawn objects. Terminal is amber, two brightness levels, dot-leader status.</p>
+
+      <div class="grid g3">
+        <div class="spec"><span class="verdict">✅ BAR</span><div class="demo col"><div class="meter">
+          <div class="axis"><span>+100</span><span>±0</span><span>-100</span></div>
+          <div class="field"><div class="bar" id="b1"></div><div class="bar" id="b2"></div><div class="bar" id="b3"></div><div class="bar" id="b4"></div>
+            <div class="threshold" style="bottom:70%"><span>LIMIT · 70</span></div></div>
+        </div><div class="barlabels"><span>A</span><span>B</span><span>C</span><span>D</span></div></div><div class="cap"><b>SEGMENTED METER + THRESHOLD</b><span class="src">sonnet-12</span></div></div>
+
+        <div class="spec"><span class="verdict">✅ GAUGE</span><div class="demo"><div class="radial"><svg id="radial" viewBox="0 0 120 120"></svg><div class="rc"><b id="radv">98%</b><span>ARMED</span></div></div></div><div class="cap"><b>RADIAL ARC</b><span class="src">sonnet-32</span></div></div>
+
+        <div class="spec"><span class="verdict">✅ GAUGE</span><div class="demo col" style="gap:14px"><div class="hbar" id="hbar"></div><div class="vcols" id="vcols"></div></div><div class="cap"><b>BAR + COLUMN GAUGE</b><span class="src">sonnet-32</span></div></div>
+
+        <div class="spec"><span class="verdict">✅ SPACE</span><div class="demo col" style="padding:0"><div class="nstat"><span class="k">MEMORY NODES</span><span class="v">2,482</span><span class="foot">98.4% RETENTION · STABLE</span></div></div><div class="cap"><b>NEGATIVE-SPACE STAT</b><span class="src">sonnet-15</span></div></div>
+
+        <div class="spec"><span class="verdict warn">⚠️ REFINED</span><div class="demo col" style="padding:0"><div class="chartbox"><canvas id="linecv"></canvas><span class="lbl">RESONANCE · <b>STABLE</b></span></div></div><div class="cap"><b>LINE / TREND CHART</b><span class="src">sonnet-18 refined</span></div></div>
+
+        <div class="spec"><span class="verdict">✅ TERMINAL</span><div class="demo col" style="padding:0"><div class="terminal">
+          <div class="term-bar">STDOUT // DIAGNOSTIC<span class="dots"><i></i><i></i><i></i></span></div>
+          <div class="term-body" id="term"></div>
+        </div></div><div class="cap"><b>TERMINAL / LOG</b><span class="src">sonnet-20</span></div></div>
+      </div>
+
+      <div class="zone-title">SECTION SEPARATORS</div>
+      <div class="grid g2">
+        <div class="spec"><span class="verdict warn">⚠️ NO BRICKS</span><div class="demo col" style="padding:0"><div class="wavebox"><canvas id="wavecv"></canvas><span class="wl">INFERENCE FIELD</span><span class="wr">共振 / RESONANCE</span></div></div><div class="cap"><b>WAVEFORM SEPARATOR</b><span class="src">exp-06 → dashboard-02</span></div></div>
+        <div class="spec"><span class="verdict">✅ SEP</span><div class="demo col" style="padding:0"><div class="scanbox"><svg id="scan" viewBox="0 0 600 110" preserveAspectRatio="none"></svg></div></div><div class="cap"><b>SCAN-LATTICE SEPARATOR</b><span class="src">exp-04</span></div></div>
+      </div>
+
+      <div class="zone-title">ROSTER · MARQUEE · STEPPER</div>
+      <div class="grid g2">
+        <div class="spec"><span class="verdict">✅ MUST HAVE</span><div class="demo col"><div class="roster" id="roster"></div></div><div class="cap"><b>UNIT ROSTER GRID</b><span class="src">sonnet-37</span></div></div>
+        <div class="spec"><div class="demo col" style="gap:16px">
+          <div class="ooda" id="ooda"></div>
+          <div class="marquee"><div class="track" id="marq"><span>V2.4.0-STABLE DEPLOYED</span><span>38 LISTENERS UP</span><span>NO ANOMALIES</span></div></div>
+        </div><div class="cap"><b>OODA STEPPER · MARQUEE</b><span class="src">dashboard-02 · sonnet-28</span></div></div>
+      </div>
+    </section>
+
+    <!-- ======== FEEDBACK ======== -->
+    <section class="section" id="feedback">
+      <div class="sec-head"><span class="idx">05</span><span class="k">応答</span><h2>FEEDBACK</h2><span class="rule"></span></div>
+      <p class="sec-note">Alerts are tri-channel (EN word + JP stamp + hazard pattern) and always give the operator a response. Modals keep one focal job.</p>
+      <div class="grid g2">
+        <div class="spec"><span class="verdict">✅ Y/N</span><div class="demo col" style="padding:0">
+          <div class="miniAlert" id="alert" role="button" tabindex="0" aria-label="alert demo">
+            <div class="strip t"></div>
+            <div class="jp">裁定</div>
+            <div class="band"><div class="word">DECIDE</div></div>
+            <div class="strip b"></div>
+          </div>
+        </div><div class="cap"><b>ALERT / Y-N PROMPT</b><span class="src">exp-02 · dashboard-01</span></div></div>
+
+        <div class="spec"><span class="verdict warn">⚠️ ONE JOB</span><div class="demo col" style="padding:0"><div class="modalcard"><div class="mi">
+          <div class="mh"><span class="k">申請<small>FILING</small></span><span class="meta">CODE:<b>0771</b><br>EX_MODE:<b>MANUAL</b></span></div>
+          <div style="font-family:var(--cond);font-weight:700;font-size:18px;color:var(--paper)">FILE A GATE</div>
+          <div class="teal"></div>
+          <div style="font-size:11px;color:var(--green-map);text-transform:none;line-height:1.5">A gate is a decision that waits for you. Route it, set priority, submit for arbitration.</div>
+        </div></div></div><div class="cap"><b>MODAL (DOUBLE FRAME)</b><span class="src">exp-10</span></div></div>
+      </div>
+    </section>
+
+    <!-- ======== NAVIGATION ======== -->
+    <section class="section" id="nav">
+      <div class="sec-head"><span class="idx">06</span><span class="k">案内</span><h2>NAVIGATION</h2><span class="rule"></span></div>
+      <p class="sec-note">Filter rails dim non-matching rows rather than hiding them. Sidebar current item uses the figure/ground inversion.</p>
+      <div class="grid g2">
+        <div class="spec"><span class="verdict">✅ FILTER</span><div class="demo col">
+          <div class="filterrail" id="filterrail"><button class="active" data-k="ALL">ALL</button><button data-k="CRON">CRON</button><button data-k="EVENT">EVENT</button></div>
+          <div id="rows">
+            <div class="frow2" data-kind="CRON"><span class="fid">RT·01</span><span class="fname">NIGHTLY REVIEW</span><span class="fkind">CRON</span></div>
+            <div class="frow2" data-kind="EVENT"><span class="fid">RT·05</span><span class="fname">TICKET INGEST</span><span class="fkind">EVENT</span></div>
+            <div class="frow2" data-kind="CRON"><span class="fid">RT·02</span><span class="fname">JOURNAL SYNC</span><span class="fkind">CRON</span></div>
+          </div>
+        </div><div class="cap"><b>FILTER RAIL (DIM)</b><span class="src">sonnet-35</span></div></div>
+
+        <div class="spec"><span class="verdict">✅ SIDEBAR</span><div class="demo col" style="gap:5px">
+          <button class="unit" data-s="NOMINAL" style="border-color:var(--mint);background:var(--mint);color:#000"><span class="u-id">工学 ENGINEERING</span></button>
+          <button class="unit" style="border-color:var(--green-dim);color:var(--mint)"><span class="u-id">記憶 KNOWLEDGE</span></button>
+          <button class="unit" style="border-color:var(--green-dim);color:var(--mint)"><span class="u-id">自動 AUTOMATION</span></button>
+        </div><div class="cap"><b>SIDEBAR NAV (INVERSION)</b><span class="src">dashboard-01 · sonnet-34</span></div></div>
+      </div>
+      <div class="zone-title">BREADCRUMB · WIKILINK</div>
+      <div class="grid g2">
+        <div class="spec"><div class="demo col" style="align-items:flex-start"><div style="font-size:12px;color:var(--green-map);letter-spacing:.1em">KNOWLEDGE <span style="color:var(--orange)">›</span> CONCEPTS <span style="color:var(--orange)">›</span> <span style="color:var(--mint-hi)">FEEDBACK LOOPS</span></div></div><div class="cap"><b>BREADCRUMB</b><span class="src">wiki</span></div></div>
+        <div class="spec"><div class="demo"><span style="font-size:13px;color:var(--mint);text-transform:none">learns from the <button style="color:var(--mint-hi);border:0;border-bottom:1px dashed var(--mint);background:none;cursor:pointer;font:inherit" onmouseover="this.style.background='var(--mint)';this.style.color='#000'" onmouseout="this.style.background='none';this.style.color='var(--mint-hi)'">[[MEMORY_VAULT]]</button> archive</span></div><div class="cap"><b>WIKILINK</b><span class="src">wiki</span></div></div>
+      </div>
+    </section>
+
+    <!-- ======== PATTERNS ======== -->
+    <section class="section" id="patterns">
+      <div class="sec-head"><span class="idx">07</span><span class="k">構造</span><h2>PATTERNS</h2><span class="rule"></span></div>
+      <p class="sec-note">One chamfered double-frame per screen; internal zones divided by rules, not floating cards. See the shipped pages for full assemblies.</p>
+      <div class="grid g4">
+        <a class="spec" href="dashboard-01.html"><div class="demo col"><div style="border:2px solid var(--orange);height:70px;display:grid;grid-template-columns:20px 1fr 24px;grid-template-rows:14px 1fr;gap:2px;padding:2px;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))"><div style="grid-column:1/-1;background:rgba(242,100,0,.25)"></div><div style="background:rgba(82,242,154,.15)"></div><div style="background:rgba(82,242,154,.05)"></div><div style="background:rgba(80,144,208,.15)"></div></div></div><div class="cap"><b>MORNING BRIEF ↗</b><span class="src">dashboard-01</span></div></a>
+        <a class="spec" href="dashboard-03.html"><div class="demo col"><div style="border:2px solid var(--orange);height:70px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;padding:4px;clip-path:polygon(0 0,calc(100% - 10px) 0,100% 10px,100% 100%,10px 100%,0 calc(100% - 10px))"><div style="background:rgba(82,242,154,.15)"></div><div style="background:rgba(80,144,208,.15)"></div><div style="background:rgba(244,159,9,.15)"></div></div></div><div class="cap"><b>AUTOMATION ↗</b><span class="src">dashboard-03</span></div></a>
+        <a class="spec" href="form-02.html"><div class="demo col"><div style="border:1px solid var(--orange);height:70px;padding:5px;display:flex;flex-direction:column;gap:4px"><div style="height:8px;background:rgba(242,100,0,.3);width:60%"></div><div style="height:6px;border:1px solid var(--green-dim)"></div><div style="height:6px;border:1px solid var(--green-dim)"></div><div style="height:8px;background:var(--mint);width:40%"></div></div></div><div class="cap"><b>PROVISION FORM ↗</b><span class="src">form-02</span></div></a>
+        <a class="spec" href="wiki.html"><div class="demo col"><div style="height:70px;display:grid;grid-template-columns:14px 1fr 14px;gap:3px"><div style="background:rgba(242,100,0,.2)"></div><div style="border-left:3px solid var(--mint);background:rgba(82,242,154,.06)"></div><div style="background:rgba(242,100,0,.2)"></div></div></div><div class="cap"><b>WIKI ARTICLE ↗</b><span class="src">wiki</span></div></a>
+      </div>
+    </section>
+
+    <footer class="foot">
+      <span class="g">◉ TOKENS: 14 COLOR · 3 TYPE</span><span>◉ 0 DRIFT</span><span>◉ DARK-ONLY</span>
+      <span class="sp">design-system.md</span><span class="g">© JAIRUS_OS · KESTREL·4</span>
+    </footer>
+
+  </main>
+</div>
+
+<script>
+"use strict";
+if(innerWidth<2||innerHeight<2){const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);}
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const NS="http://www.w3.org/2000/svg";
+const el=(n,a,p)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;};
+const $=id=>document.getElementById(id);
+const pad2=n=>String(n).padStart(2,"0");
+
+/* ---- swatches ---- */
+const SW=[["--bg","BG / VOID","#0A0A0A"],["--mint","MINT · PRIMARY","#52F29A"],["--mint-hi","MINT-HI","#7CF4AB"],
+["--green-map","GREEN-MAP","#3C9C6C"],["--green-dim","GREEN-DIM","#246C3C"],["--paper","PAPER","#EDF8D6"],
+["--orange","ORANGE · CHROME","#F26400"],["--amber","AMBER · TERM","#F49F09"],["--amber-dim","AMBER-DIM","#9C3C24"],
+["--red","RED","#C20C0C"],["--red-hi","RED-HI · ERROR","#E2280F"],["--crimson","CRIMSON · STRIPE","#E60225"],
+["--teal","TEAL","#0C6C80"],["--blue","BLUE · PENDING","#5090D0"]];
+SW.forEach(([v,n,hex])=>{const d=document.createElement("div");d.className="sw";
+  d.innerHTML='<div class="chip2" style="background:var('+v+');box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)"></div>'+
+  '<div class="info"><b>'+n+'</b><code>'+hex+' · '+v+'</code></div>';$("swatches").appendChild(d);});
+
+/* ---- 7-seg factory (shared) ---- */
+const SEGMAP={0:"abcdef",1:"bc",2:"abged",3:"abgcd",4:"fgbc",5:"afgcd",6:"afgedc",7:"abc",8:"abcdefg",9:"abcfgd"};
+const SEGPTS={a:"7,4 10.5,0.5 29.5,0.5 33,4 29.5,7.5 10.5,7.5",b:"36,7 39.5,10.5 39.5,27.5 36,31 32.5,27.5 32.5,10.5",
+c:"36,33 39.5,36.5 39.5,53.5 36,57 32.5,53.5 32.5,36.5",d:"7,60 10.5,56.5 29.5,56.5 33,60 29.5,63.5 10.5,63.5",
+e:"4,33 7.5,36.5 7.5,53.5 4,57 0.5,53.5 0.5,36.5",f:"4,7 7.5,10.5 7.5,27.5 4,31 0.5,27.5 0.5,10.5",g:"7,32 10.5,28.5 29.5,28.5 33,32 29.5,35.5 10.5,35.5"};
+function makeDigit(w,h,on,off){const svg=document.createElementNS(NS,"svg");svg.setAttribute("width",w);svg.setAttribute("height",h);
+  svg.setAttribute("viewBox","0 0 46 64");svg.dataset.on=on;svg.dataset.off=off;
+  for(const k of "abcdefg"){const p=document.createElementNS(NS,"polygon");p.setAttribute("points",SEGPTS[k]);
+    p.setAttribute("data-seg",k);p.setAttribute("transform","translate(6,0) skewX(-6)");p.setAttribute("fill",off);svg.appendChild(p);}return svg;}
+function renderDigit(svg,val){const lit=SEGMAP[val];for(const p of svg.children)p.setAttribute("fill",lit.includes(p.getAttribute("data-seg"))?svg.dataset.on:svg.dataset.off);}
+/* mint timestamp chip */
+const chip=$("timechip"),cD=[];
+for(let i=0;i<6;i++){const d=makeDigit(13,20,"#0A0A0A","rgba(10,10,10,.12)");cD.push(d);chip.appendChild(d);
+  if(i===1||i===3){const c=document.createElement("span");c.className="tc-colon";c.innerHTML="<i></i><i></i>";chip.appendChild(c);}}
+const ampm=document.createElement("span");ampm.className="ampm";chip.appendChild(ampm);
+/* orange countdown */
+const cd=$("timecd"),oD=[];
+for(let i=0;i<6;i++){const d=makeDigit(20,30,"#F26400","rgba(242,100,0,.07)");oD.push(d);cd.appendChild(d);
+  if(i===1||i===3){const c=document.createElement("span");c.className="cd-colon";c.innerHTML="<i></i><i></i>";cd.appendChild(c);}}
+let cb=true;
+function tickClock(){const d=new Date();let h=d.getHours();ampm.textContent=h<12?"AM":"PM";const h12=h%12||12;
+  const s=pad2(h12)+pad2(d.getMinutes())+pad2(d.getSeconds());cD.forEach((dg,i)=>renderDigit(dg,+s[i]));
+  const s2=pad2(h)+pad2(d.getMinutes())+pad2(d.getSeconds());oD.forEach((dg,i)=>renderDigit(dg,+s2[i]));
+  cb=!cb;const o=(cb||REDUCED)?1:.25;chip.querySelectorAll(".tc-colon").forEach(c=>c.style.opacity=o);cd.querySelectorAll(".cd-colon").forEach(c=>c.style.opacity=o);}
+tickClock();setInterval(tickClock,500);
+
+/* ---- dropdown ---- */
+(function(){const dd=$("dd"),btn=$("ddbtn"),list=$("ddlist"),val=$("ddval");const items=[...list.querySelectorAll("li")];let idx=0;
+  const paint=()=>items.forEach((li,i)=>li.classList.toggle("active",i===idx));
+  const close=()=>{dd.classList.remove("open");btn.setAttribute("aria-expanded","false");};
+  btn.addEventListener("click",()=>{const o=dd.classList.toggle("open");btn.setAttribute("aria-expanded",o);if(o){paint();list.focus&&list.focus();}});
+  items.forEach((li,i)=>li.addEventListener("click",()=>{idx=i;val.innerHTML=li.dataset.v+'<span class="jp">'+li.dataset.jp+'</span>';close();}));
+  document.addEventListener("click",e=>{if(!dd.contains(e.target))close();});})();
+
+/* ---- slider ---- */
+(function(){const s=$("rng"),o=$("rngv");const u=()=>{const p=(s.value-s.min)/(s.max-s.min)*100;s.style.setProperty("--fill",p+"%");o.textContent=pad2(s.value)+" GB";};s.addEventListener("input",u);u();})();
+/* ---- stepper ---- */
+(function(){const n=$("wn");const c=v=>Math.max(1,Math.min(16,v|0||1));$("wm").onclick=()=>n.value=c(+n.value-1);$("wp").onclick=()=>n.value=c(+n.value+1);})();
+/* ---- rating hover ---- */
+(function(){const r=$("rating");r.querySelectorAll("input").forEach(inp=>inp.addEventListener("change",()=>r.className="rating lit-"+inp.value));})();
+
+/* ---- segmented meter ---- */
+const bars=["b1","b2","b3","b4"].map(id=>{const host=$(id);const segs=[];for(let i=0;i<20;i++){const s=document.createElement("div");s.className="seg";host.appendChild(s);segs.push(s);}return{segs,lvl:8+Math.floor(Math.random()*6),tgt:10};});
+function paintBars(){bars.forEach(b=>{b.segs.forEach((s,i)=>{s.className="seg";if(i<b.lvl){const p=(i+1)/20*100;s.classList.add("on",p>70?"hot":p>50?"warn":"on");if(p>70)s.classList.add("hot");else if(p>50)s.classList.add("warn");}});});}
+paintBars();
+if(!REDUCED)setInterval(()=>{bars.forEach(b=>{if(Math.random()<.4)b.tgt=4+Math.floor(Math.random()*15);b.lvl+=b.lvl<b.tgt?1:b.lvl>b.tgt?-1:0;});paintBars();},600);
+
+/* ---- radial gauge ---- */
+(function(){const svg=$("radial");function polar(cx,cy,r,d){const a=(d-90)*Math.PI/180;return[cx+r*Math.cos(a),cy+r*Math.sin(a)];}
+  const RS=22,segs=[],cx=60,cy=60,rO=54,rI=40,st=-135,en=135,gap=1.8,span=(en-st-gap*RS)/RS;
+  for(let i=0;i<RS;i++){const a0=st+i*(span+gap),a1=a0+span;const[p1x,p1y]=polar(cx,cy,rO,a1),[p2x,p2y]=polar(cx,cy,rO,a0),[p3x,p3y]=polar(cx,cy,rI,a0),[p4x,p4y]=polar(cx,cy,rI,a1);
+    const p=el("path",{d:`M${p1x} ${p1y} A${rO} ${rO} 0 0 0 ${p2x} ${p2y} L${p3x} ${p3y} A${rI} ${rI} 0 0 1 ${p4x} ${p4y}Z`,fill:"var(--green-dim)",opacity:".3"},svg);segs.push(p);}
+  let pct=98;const paint=()=>{const lit=Math.round(pct/100*RS);segs.forEach((p,i)=>{p.setAttribute("fill",i<lit?"var(--mint)":"var(--green-dim)");p.setAttribute("opacity",i<lit?"1":".3");});$("radv").textContent=Math.round(pct)+"%";};paint();
+  if(!REDUCED)setInterval(()=>{pct=90+Math.random()*10;paint();},1400);})();
+
+/* ---- hbar + vcols ---- */
+(function(){const hb=$("hbar");for(let i=0;i<18;i++){const x=document.createElement("i");hb.appendChild(x);}
+  const vc=$("vcols");const cols=[];for(let c=0;c<6;c++){const col=document.createElement("div");col.className="vcol";const segs=[];for(let s=0;s<10;s++){const x=document.createElement("div");x.className="seg";col.appendChild(x);segs.push(x);}vc.appendChild(col);cols.push(segs);}
+  function paint(){const hv=Math.round((.35+Math.random()*.25)*18);[...hb.children].forEach((x,i)=>x.className=i<hv?"on":"");
+    cols.forEach(segs=>{const v=3+Math.floor(Math.random()*7);segs.forEach((s,i)=>{s.className="seg"+(i<v?((i+1)/10>.8?" on hot":" on"):"");});});}
+  paint();if(!REDUCED)setInterval(paint,900);})();
+
+/* ---- line/trend chart (refined sonnet-18: sparse marks, area fill, leading dot) ----
+   canvas IIFEs are wrapped so a transient 0-size throw at first paint can't cascade
+   and kill the interactive builders that follow. */
+(function(){try{const cv=$("linecv");let ctx,W,H,data=[];function size(){const r=cv.getBoundingClientRect(),dpr=devicePixelRatio||1;cv.width=Math.max(1,r.width*dpr);cv.height=Math.max(1,r.height*dpr);ctx=cv.getContext("2d");ctx.scale(dpr,dpr);W=r.width;H=r.height;}
+  size();for(let i=0;i<48;i++)data.push(50+Math.sin(i/4)*18);
+  function draw(){if(!ctx||!W||!H)return;ctx.clearRect(0,0,W,H);
+    /* sparse baseline dots (NOT a dense + grid) */
+    ctx.fillStyle="rgba(60,156,108,.4)";for(let x=30;x<W;x+=60)for(let y=H*.25;y<H;y+=H*.28){ctx.fillRect(x,y,1.5,1.5);}
+    /* midline */ ctx.strokeStyle="rgba(36,108,60,.5)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();
+    const stepX=W/(data.length-1);const pts=data.map((v,i)=>[i*stepX,H-(v/100)*H]);
+    /* area fill */ const grad=ctx.createLinearGradient(0,0,0,H);grad.addColorStop(0,"rgba(82,242,154,.28)");grad.addColorStop(1,"rgba(82,242,154,0)");
+    ctx.beginPath();ctx.moveTo(0,H);pts.forEach(([x,y])=>ctx.lineTo(x,y));ctx.lineTo(W,H);ctx.closePath();ctx.fillStyle=grad;ctx.fill();
+    /* glowing line */ ctx.strokeStyle="#52F29A";ctx.lineWidth=2;ctx.shadowColor="#52F29A";ctx.shadowBlur=6;ctx.beginPath();pts.forEach(([x,y],i)=>i?ctx.lineTo(x,y):ctx.moveTo(x,y));ctx.stroke();ctx.shadowBlur=0;
+    /* leading dot */ const[lx,ly]=pts[pts.length-1];ctx.fillStyle="#7CF4AB";ctx.beginPath();ctx.arc(lx-1,ly,3,0,7);ctx.fill();}
+  draw();if(!REDUCED)setInterval(()=>{if(!W||!H)size();data.push(Math.max(12,Math.min(88,data[data.length-1]+(Math.random()-.5)*16)));data.shift();draw();},140);
+  addEventListener("resize",()=>{size();draw();});}catch(e){}})();
+
+/* ---- waveform separator (refined: edge-tapered braid, no bricks) ---- */
+(function(){try{const cv=$("wavecv");let ctx,W,H,t=0;function size(){const r=cv.getBoundingClientRect(),dpr=devicePixelRatio||1;cv.width=Math.max(1,r.width*dpr);cv.height=Math.max(1,r.height*dpr);ctx=cv.getContext("2d");ctx.scale(dpr,dpr);W=r.width;H=r.height;}size();
+  function draw(){if(!ctx||!W||!H)return;ctx.clearRect(0,0,W,H);ctx.strokeStyle="rgba(36,108,60,.5)";ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,H/2);ctx.lineTo(W,H/2);ctx.stroke();
+    const NL=10;ctx.lineWidth=1.2;ctx.shadowColor="#52F29A";ctx.shadowBlur=4;
+    for(let i=0;i<NL;i++){const ph=i/NL*Math.PI*2;ctx.strokeStyle=i%3===0?"#52F29A":"#3C9C6C";ctx.globalAlpha=i%3===0?.9:.45;ctx.beginPath();
+      for(let x=0;x<=W;x+=8){const xn=x/W,env=Math.sin(xn*Math.PI);const y=H/2+Math.sin(xn*7+ph+t)*Math.cos(xn*2.2-t*.6)*(H*.36)*env;x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.stroke();}
+    ctx.globalAlpha=1;ctx.shadowBlur=0;t+=.18;}
+  draw();if(!REDUCED)setInterval(()=>{if(!W||!H)size();draw();},83);addEventListener("resize",()=>{size();draw();});}catch(e){}})();
+
+/* ---- scan-lattice separator ---- */
+(function(){const svg=$("scan");for(let x=20;x<600;x+=42)el("line",{x1:x,y1:0,x2:x,y2:110,stroke:"#246C3C","stroke-width":1,opacity:.5},svg);
+  for(let y=14;y<110;y+=26)el("line",{x1:0,y1:y,x2:600,y2:y,stroke:"#246C3C","stroke-width":1,opacity:.35},svg);
+  for(let i=0;i<7;i++)el("rect",{x:44+i*80,y:26+((i%3)*20),width:34,height:28,rx:5,fill:"none",stroke:"#3C9C6C","stroke-width":1.4,opacity:.8},svg);
+  const cx=300,cy=55;el("circle",{cx,cy,r:24,fill:"none",stroke:"#F26400","stroke-width":1.5},svg);el("circle",{cx,cy,r:4,fill:"#F26400"},svg);
+  el("line",{x1:cx-38,y1:cy,x2:cx+38,y2:cy,stroke:"#F26400","stroke-width":1},svg);el("line",{x1:cx,y1:cy-38,x2:cx,y2:cy+38,stroke:"#F26400","stroke-width":1},svg);
+  const t=el("text",{x:cx+30,y:cy-12,fill:"#E2280F","font-size":9,"font-family":"monospace"},svg);t.textContent="NODE·0x512";})();
+
+/* ---- terminal ---- */
+(function(){const term=$("term");const ROWS=[
+  {k:"line",t:"KESTREL·4 DIAGNOSTIC MODULE REV 4.02"},{k:"rule",t:"---- SYSTEM CONFIGURATION ----"},
+  {k:"chk",l:"CONTROL BUS LINK",ok:1},{k:"chk",l:"NVRAM CHECKSUM",ok:1},{k:"chk",l:"VEGA·1 UPLINK",ok:1},
+  {k:"chk",l:"PUMP·B SECONDARY DRIVE",ok:0},{k:"note",t:"» VIBRATION 3.8G — EXCEEDS TOLERANCE"},
+  {k:"chk",l:"THERMAL SENSOR RING",ok:1},{k:"chk",l:"RESERVOIR LEVEL 88%",ok:1},{k:"sum",t:"7 CHECKS · 6 PASS · 1 FLAGGED"}];
+  let i=0;function add(){if(i>=ROWS.length){const c=document.createElement("span");c.className="term-cursor";if(!REDUCED)c.classList.add("blink");term.appendChild(c);return;}
+    const r=ROWS[i++];const row=document.createElement("div");
+    if(r.k==="chk"){row.className="trow";row.innerHTML='<span class="lbl2">'+r.l+'</span><span class="dots2"></span><span class="val'+(r.ok?"":" fail")+'">'+(r.ok?"OK":"FAIL")+'</span>';}
+    else if(r.k==="rule"){row.className="trow rule2";row.textContent=r.t;}
+    else if(r.k==="note"){row.className="trow note2";row.textContent=r.t;}
+    else if(r.k==="sum"){row.className="trow";row.style.color="var(--mint)";row.textContent=r.t;}
+    else{row.className="trow";row.style.color="var(--amber)";row.textContent=r.t;}
+    term.appendChild(row);term.scrollTop=term.scrollHeight;setTimeout(add,REDUCED?0:130);}add();})();
+
+/* ---- marquee ---- */
+(function(){const m=$("marq");if(REDUCED)return;m.innerHTML+=m.innerHTML;let mx=0;const half=()=>m.scrollWidth/2;setInterval(()=>{mx-=1.2;if(-mx>=half())mx=0;m.style.transform="translateX("+mx+"px)";},40);})();
+
+/* ---- roster ---- */
+(function(){const host=$("roster");const UNITS=[["UNIT-07","NOMINAL"],["LYRA·4","CAUTION"],["CYGNUS·7","STANDBY"],["AQUILA·11","OFFLINE"]];
+  UNITS.forEach(([id,s])=>{const b=document.createElement("button");b.className="unit";b.dataset.s=s;b.setAttribute("aria-pressed","false");
+    b.innerHTML='<span class="u-top"><span class="u-id">'+id+'</span></span><span class="u-stamp">'+s+'</span>';
+    b.addEventListener("click",()=>{const on=b.getAttribute("aria-pressed")==="true";host.querySelectorAll(".unit").forEach(u=>u.setAttribute("aria-pressed","false"));b.setAttribute("aria-pressed",on?"false":"true");});
+    host.appendChild(b);});})();
+
+/* ---- OODA stepper ---- */
+(function(){const host=$("ooda");const S=["OBS","UND","DEC","EXE","LRN"],L=["OBSERVE","UNDERSTAND","DECIDE","EXECUTE","LEARN"],now=2;
+  S.forEach((s,i)=>{if(i>0){const c=document.createElement("div");c.className="oconn"+(i<=now?" done":"");host.appendChild(c);}
+    const st=document.createElement("div");st.className="ostep"+(i<now?" done":i===now?" now":"");st.innerHTML='<div class="node">'+s+'</div><div class="sl">'+L[i]+'</div>';host.appendChild(st);});})();
+
+/* ---- filter rail ---- */
+(function(){const rail=$("filterrail");rail.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+  rail.querySelectorAll("button").forEach(x=>x.classList.toggle("active",x===b));const k=b.dataset.k;
+  $("rows").querySelectorAll(".frow2").forEach(r=>r.classList.toggle("dim",k!=="ALL"&&r.dataset.kind!==k));});})();
+
+/* ---- mini alert interaction ---- */
+(function(){const a=$("alert");const flash=()=>{a.style.filter="invert(1)";setTimeout(()=>a.style.filter="",120);};
+  a.addEventListener("click",flash);a.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();flash();}});})();
+
+/* ---- TOC scroll-spy ---- */
+(function(){const links=[...document.querySelectorAll("#toc a")];const secs=[...document.querySelectorAll(".section")];
+  if(!("IntersectionObserver"in window))return;
+  const io=new IntersectionObserver(es=>{es.forEach(e=>{if(e.isIntersecting)links.forEach(a=>a.classList.toggle("on",a.getAttribute("href")==="#"+e.target.id));});},{rootMargin:"-15% 0px -75% 0px"});
+  secs.forEach(s=>io.observe(s));})();
+</script>
+</body>
+</html>

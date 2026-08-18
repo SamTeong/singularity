@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPERIMENT-03 · MAINTENANCE TERMINAL</title>
+<style>
+:root{
+  --bg:#0A0A0A;--amber:#F49F09;--amber-dim:#9C3C24;--red:#E2280F;
+  --mint:#52F29A;--paper:#EDF8D6;--orange:#F26400;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  background:var(--bg);color:var(--amber);font-family:var(--mono);
+  font-size:15px;line-height:1.5;letter-spacing:.04em;text-transform:uppercase;
+  padding:26px 34px 70px;overflow:hidden;
+}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.25) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.5) 100%)}
+#screen{white-space:pre-wrap;text-shadow:0 0 4px rgba(244,159,9,.55),0 0 10px rgba(244,159,9,.2)}
+.dim{color:var(--amber-dim)}
+.purged{
+  display:inline-block;border:1px solid var(--red);border-radius:3px;color:var(--red);
+  background:rgba(226,40,15,.12);padding:0 7px;font-weight:700;
+  text-shadow:0 0 4px currentColor,0 0 10px rgba(226,40,15,.4);
+}
+.cursor{display:inline-block;width:9px;height:15px;background:var(--amber);vertical-align:-2px;
+  animation:blink 1s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.clockchip{
+  position:fixed;left:26px;bottom:16px;background:var(--paper);color:#0A0A0A;
+  font-weight:700;font-size:17px;letter-spacing:.1em;padding:3px 12px;border-radius:2px;
+  box-shadow:0 0 8px rgba(237,248,214,.35);
+}
+.hint{position:fixed;right:26px;bottom:18px;font-size:11px;color:var(--amber-dim);letter-spacing:.2em}
+@media (prefers-reduced-motion:reduce){.cursor{animation:none}}
+</style>
+</head>
+<body>
+<div id="screen"></div><span class="cursor" id="cursor"></span>
+<div class="clockchip" id="clock">00:00:00</div>
+<div class="hint">[P] PURGE ARCHIVE &nbsp; [R] REBOOT</div>
+
+<script>
+"use strict";
+/* Teletype terminal — amber CRT, two brightness levels, dash rules,
+   right-column OK status, destructive PURGED cascade. */
+
+const screen = document.getElementById("screen");
+const pad = (s,n)=>String(s).padEnd(n," ");
+
+const BOOT = [
+ "COPYRIGHT(C) 2214,2215 KESTREL HEAVY ORBITAL WORKS",
+ "",
+ ["CO-CPU","CHECK","256SEG","OK"],
+ ["I/O VECTORS","CHECK","","OK"],
+ ["CONSOLE DRIVERS","CHECK","","OK"],
+ ["ROUTING TABLES","CHECK","","OK"],
+ ["STATUS ANALYZER","CHECK","RELAY","OK"],
+ ["HULL SENSOR NET","CHECK","GREEN","OK"],
+ ["ARCHIVE INTEGRITY","CHECK","LOCKED","OK"],
+ "",
+ "-----      SYSTEM CONFIGURATION      -----",
+ "ADDR   OWNER    BLKS      SIZE   PARAMETERS",
+ "----   -----    ----      ----   ----------",
+ ["D0E0","SYS","1","5296","HELMCTL"],
+ ["D22C","SYS","1","2416","STARFIX"],
+ ["D2C4","2081","1","16384","RELAYDRV"],
+ ["D6C5","DBFE","1","21392","<FREE>"],
+ ["0586","SYS","1","2144","LIFEBUS"],
+ ["066D","SYS","1","13968","CARGO386"],
+ ["07ED","SYS","1","13568","ADAM8B CON"],
+ ["0C18","SYS","4","65424","<CONFIG>"],
+ "",
+ "----- UMB TOTAL:  53 TB -----",
+ "",
+ "ARCHIVE VER 14.0 (FRAME: C000H)",
+ "HANDLE  PAGES     SIZE   NAME",
+ "------  -----     ----   ----",
+ [" FREE","116","1856T",""],
+ [" TOTAL","128","2048T",""],
+ "",
+ "READY.",
+];
+
+function rowText(r){
+  if(typeof r==="string") return r;
+  return pad(r[0],22)+pad(r[1],8)+pad(r[2],9)+(r[3]||"");
+}
+
+let lines = [];
+function render(){
+  screen.innerHTML = lines.map(l=>l.html).join("\n");
+}
+function addLine(html){
+  lines.push({html});
+  if(lines.length>34) lines.shift();
+  render();
+}
+
+/* boot teletype — rows print in chunks */
+let bi = 0;
+const bootTimer = setInterval(()=>{
+  if(bi>=BOOT.length){clearInterval(bootTimer);startChatter();return;}
+  const r = BOOT[bi++];
+  const txt = rowText(r);
+  const cls = (typeof r!=="string" && r[3]==="OK") ? "" : "dim";
+  const okTag = (typeof r!=="string" && r[3]==="OK") ? "" : "";
+  addLine(cls ? `<span class="dim">${txt}</span>` : txt);
+},110);
+
+/* ambient log after boot */
+const CHATTER = [
+ ["ARCHIVE SWEEP","SECTOR 12","","OK"],
+ ["CARRIER LOCK","K-BAND","53TB","OK"],
+ ["THERMAL TRIM","+0.4 DEG","","OK"],
+ ["WATCHDOG","HEARTBEAT","","OK"],
+ ["CACHE SCRUB","BANK C","","OK"],
+];
+let chatterTimer = null;
+function startChatter(){
+  chatterTimer = setInterval(()=>{
+    if(purging) return;
+    const r = CHATTER[Math.floor(Math.random()*CHATTER.length)];
+    addLine(rowText(r));
+  },2200);
+}
+
+/* PURGE — destructive stamp cascade over the buffer */
+let purging = false;
+function purge(){
+  if(purging) return;
+  purging = true;
+  addLine(`<span class="purged">ARCHIVE PURGE ORDERED .... AUTH LEVEL 3</span>`);
+  let i = lines.length-2;
+  const stampRow = ()=>{
+    if(i<0){
+      addLine(`<span class="purged">PURGE COMPLETE</span>`);
+      purging = false;
+      return;
+    }
+    /* replace row content with a wall of PURGED stamps, row-major cascade */
+    const n = 4+Math.floor(Math.random()*3);
+    lines[i].html = Array.from({length:n},()=>`<span class="purged">PURGED</span>`).join("  ");
+    render();
+    i--;
+    setTimeout(stampRow, 70);            /* stepped, accelication not eased */
+  };
+  stampRow();
+}
+
+function reboot(){
+  if(purging) return;
+  lines = [];render();
+  bi = 0;
+  clearInterval(chatterTimer);
+  const t = setInterval(()=>{
+    if(bi>=BOOT.length){clearInterval(t);startChatter();return;}
+    const r = BOOT[bi++];
+    const txt = rowText(r);
+    addLine((typeof r==="string")?txt:`<span>${txt}</span>`);
+  },110);
+}
+
+addEventListener("keydown",e=>{
+  if(e.key==="p"||e.key==="P") purge();
+  if(e.key==="r"||e.key==="R") reboot();
+});
+
+/* clock chip */
+const clock = document.getElementById("clock");
+function tick(){
+  const d = new Date();
+  clock.textContent = [d.getHours(),d.getMinutes(),d.getSeconds()].map(n=>String(n).padStart(2,"0")).join(":");
+}
+tick();setInterval(tick,1000);
+</script>
+</body>
+</html>

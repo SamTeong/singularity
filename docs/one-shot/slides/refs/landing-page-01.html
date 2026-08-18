@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JAIRUS OS · COMMAND CENTER</title>
+<!-- landing-page-01 — Direction A: "COMMAND CENTER" (dashboard-forward)
+     Jairus OS marketing homepage, NERV tactical palette, elements adapted from
+     experiment-01 (header/cards/clock/blinking buttons), sonnet-37 (module cards+legend),
+     sonnet-32 (gauge trio), sonnet-20 (terminal), sonnet-28 (marquee), exp-02 (Y/N CTA). -->
+<style>
+:root{
+  --bg:#0A0A0A; --panel:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg);color:var(--mint);font-family:var(--mono);text-transform:uppercase;
+  letter-spacing:.03em;overflow-x:hidden;
+}
+/* CRT pass */
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:200;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)}
+a{color:inherit;text-decoration:none}
+::selection{background:var(--mint);color:#000}
+.wrap{max-width:1180px;margin:0 auto;padding:0 24px}
+
+/* ---------- top nav (exp-01 header) ---------- */
+.topnav{position:sticky;top:0;z-index:100;background:rgba(10,10,10,.94);
+  border-bottom:2px solid var(--orange);box-shadow:0 0 14px rgba(242,100,0,.25)}
+.topnav .row{display:flex;align-items:center;gap:24px;height:60px}
+.brand{display:flex;align-items:baseline;gap:8px;font-family:var(--cond);font-weight:700}
+.brand .mk{width:16px;height:16px;background:var(--mint);box-shadow:0 0 8px var(--mint);
+  transform:rotate(45deg);align-self:center}
+.brand b{font-size:20px;color:var(--mint-hi);text-shadow:0 0 6px rgba(82,242,154,.6);letter-spacing:.04em}
+.brand span{font-size:10px;color:var(--orange);letter-spacing:.14em}
+.navlinks{display:flex;gap:20px;margin-left:auto;font-size:11px;letter-spacing:.12em}
+.navlinks a{color:var(--mint);opacity:.7;border-bottom:1px solid transparent;padding-bottom:2px}
+.navlinks a:hover{opacity:1;border-color:var(--mint)}
+.clock{font-variant-numeric:tabular-nums;font-size:20px;color:var(--orange);
+  text-shadow:0 0 6px rgba(242,100,0,.7);letter-spacing:.06em}
+.clock .cl{animation:blink1 1s steps(1) infinite}
+.statchip{border:1px solid var(--mint);color:var(--mint);font-size:10px;padding:3px 8px;
+  letter-spacing:.1em;white-space:nowrap}
+@keyframes blink1{50%{opacity:0}}
+
+/* ---------- hero ---------- */
+.hero{padding:64px 0 40px;position:relative}
+.hero .grid{display:grid;grid-template-columns:1.15fr .85fr;gap:40px;align-items:center}
+.eyebrow{font-size:11px;letter-spacing:.24em;color:var(--orange);margin-bottom:18px}
+.eyebrow::before{content:"◈ "}
+h1.head{font-family:var(--cond);font-weight:700;font-size:clamp(38px,6vw,76px);line-height:.94;
+  color:var(--mint-hi);text-shadow:0 0 12px rgba(82,242,154,.35);letter-spacing:.01em}
+h1.head em{font-style:normal;color:var(--orange);text-shadow:0 0 12px rgba(242,100,0,.4)}
+.sub{margin-top:22px;font-size:14px;line-height:1.7;color:var(--mint);opacity:.78;max-width:44ch;
+  letter-spacing:.04em;text-transform:none;font-family:var(--mono)}
+.cta-row{display:flex;gap:14px;margin-top:30px;flex-wrap:wrap}
+.btn{font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.14em;padding:13px 24px;
+  border:2px solid var(--mint);color:var(--mint);background:transparent;cursor:pointer;
+  text-transform:uppercase;transition:none}
+.btn:hover{background:var(--mint);color:#000;box-shadow:0 0 14px rgba(82,242,154,.5)}
+.btn.alt{border-color:var(--orange);color:var(--orange)}
+.btn.alt:hover{background:var(--orange);color:#000;box-shadow:0 0 14px rgba(242,100,0,.5)}
+.btn:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+.btn.blink{animation:btnblink 1s steps(1) infinite}
+@keyframes btnblink{50%{background:var(--mint);color:#000}}
+
+/* hero command cluster — chamfered live panel */
+.cluster{border:2px solid var(--orange);background:#0A0A0A;padding:18px;position:relative;
+  box-shadow:0 0 16px rgba(242,100,0,.25),inset 0 0 22px rgba(242,100,0,.06);
+  clip-path:polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 22px 100%, 0 calc(100% - 22px))}
+.cluster .ch{display:flex;justify-content:space-between;align-items:center;font-size:10px;
+  color:var(--orange);letter-spacing:.1em;border-bottom:1px solid var(--green-dim);padding-bottom:8px;margin-bottom:12px}
+.cluster .ch .dot{color:var(--mint)}
+.mstat{display:flex;align-items:center;gap:10px;padding:7px 0;font-size:11px;border-bottom:1px dashed rgba(60,156,108,.25)}
+.mstat:last-child{border-bottom:0}
+.mstat .nm{flex:1;color:var(--mint);letter-spacing:.06em}
+.mstat .bar{width:74px;height:6px;background:rgba(255,255,255,.06);position:relative;overflow:hidden}
+.mstat .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--mint);box-shadow:0 0 6px var(--mint)}
+.mstat .pct{width:34px;text-align:right;color:var(--mint);font-variant-numeric:tabular-nums}
+.tag{border:1px solid currentColor;font-size:9px;padding:1px 5px;letter-spacing:.08em}
+.tag.ok{color:var(--mint)} .tag.busy{color:var(--amber)} .tag.blk{color:var(--red-hi)}
+.integrity{margin-top:14px;display:flex;justify-content:space-between;align-items:center;
+  border:1px solid var(--mint);padding:8px 10px}
+.integrity b{color:var(--mint-hi);font-family:var(--cond);font-size:16px}
+
+/* ---------- marquee (sonnet-28) ---------- */
+.marquee{border-top:2px solid var(--red-hi);border-bottom:2px solid var(--red-hi);
+  background:#170303;overflow:hidden;white-space:nowrap;position:relative}
+.marquee .track{display:inline-block;padding:9px 0;font-size:12px;letter-spacing:.16em;color:var(--red-hi);
+  text-shadow:0 0 6px rgba(226,40,15,.5);will-change:transform}
+.marquee .track span{margin:0 26px}
+.marquee .track span::before{content:"▚ ";color:var(--orange)}
+
+/* ---------- section frame ---------- */
+.section{padding:66px 0}
+.sec-head{display:flex;align-items:center;gap:14px;margin-bottom:28px}
+.sec-head .idx{font-family:var(--cond);font-weight:700;font-size:13px;color:#000;background:var(--orange);
+  padding:3px 8px;letter-spacing:.1em}
+.sec-head h2{font-family:var(--cond);font-weight:700;font-size:clamp(22px,3vw,34px);color:var(--mint-hi);
+  letter-spacing:.03em;text-shadow:0 0 8px rgba(82,242,154,.3)}
+.sec-head .rule{flex:1;height:2px;background:linear-gradient(90deg,var(--orange),transparent)}
+.sec-head .note{font-size:10px;color:var(--orange);letter-spacing:.12em;white-space:nowrap}
+
+/* ---------- module cards + legend (sonnet-37) ---------- */
+.legend{display:flex;gap:18px;flex-wrap:wrap;font-size:10px;letter-spacing:.1em;margin-bottom:18px;
+  border:1px solid var(--green-dim);padding:9px 14px;color:var(--mint)}
+.legend b{color:var(--orange);margin-right:10px}
+.legend .lg{display:flex;align-items:center;gap:6px}
+.legend .sw{width:10px;height:10px;border:1px solid currentColor}
+.legend .sw.ok{background:var(--mint);border-color:var(--mint)}
+.legend .sw.busy{background:var(--amber);border-color:var(--amber)}
+.legend .sw.watch{background:transparent;border-color:var(--blue);box-shadow:inset 0 0 0 2px #0A0A0A,0 0 0 1px var(--blue)}
+.legend .lg.watch .sw{background:var(--blue)}
+.mods{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.mod{border:1px solid var(--orange);background:#0A0A0A;padding:16px;position:relative;cursor:default;
+  transition:none;min-height:150px;display:flex;flex-direction:column}
+.mod:hover{box-shadow:0 0 14px rgba(242,100,0,.35),inset 0 0 16px rgba(242,100,0,.06)}
+.mod .top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+.mod .jp{font-family:var(--jp);font-weight:800;font-size:26px;color:var(--mint-hi);text-transform:none;line-height:1;
+  text-shadow:0 0 8px rgba(82,242,154,.3)}
+.mod .code{font-size:9px;color:var(--orange);letter-spacing:.1em;text-align:right}
+.mod h3{font-family:var(--cond);font-weight:700;font-size:19px;color:var(--mint);letter-spacing:.04em;margin-bottom:6px}
+.mod p{font-size:11px;line-height:1.55;color:var(--mint);opacity:.7;text-transform:none;font-family:var(--mono);flex:1}
+.mod .foot{margin-top:12px;display:flex;justify-content:space-between;align-items:center;font-size:9px;color:var(--green-map)}
+.mod .stamp{border:1px solid currentColor;padding:2px 6px;letter-spacing:.08em}
+.mod.s-ok .stamp{color:var(--mint)} .mod.s-busy .stamp{color:var(--amber)}
+.mod.s-watch .stamp{color:var(--blue)}
+.mod.active{border-color:var(--mint);box-shadow:0 0 16px rgba(82,242,154,.4)}
+
+/* ---------- separator scan graphic (exp-04) ---------- */
+.sep{padding:20px 0}
+.sep svg{width:100%;height:110px;display:block}
+
+/* ---------- gauge trio (sonnet-32) ---------- */
+.gauges{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.gcard{border:1px solid var(--orange);background:#0A0A0A;padding:18px;position:relative}
+.gcard .gh{display:flex;justify-content:space-between;font-size:10px;color:var(--orange);letter-spacing:.1em;
+  border-bottom:1px solid var(--green-dim);padding-bottom:8px;margin-bottom:16px}
+.gcard .gval{font-family:var(--cond);font-weight:700;font-size:34px;color:var(--mint-hi);
+  text-shadow:0 0 10px rgba(82,242,154,.35);line-height:1}
+.gcard .glab{font-size:10px;color:var(--mint);opacity:.6;margin-top:4px;letter-spacing:.1em}
+.gcard .gfoot{margin-top:14px;font-size:9px;color:var(--green-map);display:flex;justify-content:space-between}
+.radial{display:flex;justify-content:center;align-items:center;margin:6px 0}
+.hbar{display:flex;gap:3px;height:26px;margin:8px 0}
+.hbar i{flex:1;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08)}
+.hbar i.lit{background:var(--mint);border-color:transparent;box-shadow:0 0 5px var(--mint)}
+.hbar i.lit.warn{background:var(--amber);box-shadow:0 0 5px var(--amber)}
+.vcols{display:flex;gap:8px;height:120px;align-items:flex-end;margin:6px 0}
+.vcol{flex:1;display:flex;flex-direction:column-reverse;gap:2px;height:100%}
+.vcol .seg{flex:1;background:rgba(255,255,255,.05);border-radius:2px}
+.vcol .seg.lit{background:var(--mint);box-shadow:0 0 4px var(--mint)}
+.vcol .seg.lit.warn{background:var(--amber);box-shadow:0 0 4px var(--amber)}
+
+/* ---------- terminal (sonnet-20) ---------- */
+.terminal{border:2px solid var(--orange);background:#060606;position:relative;
+  box-shadow:0 0 18px rgba(242,100,0,.2),inset 0 0 30px rgba(0,0,0,.8)}
+.term-bar{display:flex;align-items:center;gap:10px;padding:8px 14px;border-bottom:1px solid var(--green-dim);
+  font-size:10px;color:var(--amber);letter-spacing:.1em}
+.term-bar .dots{display:flex;gap:6px;margin-left:auto}
+.term-bar .dots i{width:9px;height:9px;border-radius:50%}
+.term-bar .dots i:nth-child(1){background:var(--red-hi)}
+.term-bar .dots i:nth-child(2){background:var(--amber)}
+.term-bar .dots i:nth-child(3){background:var(--mint)}
+.term-body{padding:16px 18px;font-size:12.5px;line-height:1.75;color:var(--amber);min-height:280px;
+  text-transform:none;letter-spacing:.02em}
+.term-body .ln{white-space:pre-wrap}
+.term-body .t{color:var(--amber-dim)}
+.term-body .g{color:var(--mint)} .term-body .o{color:var(--orange)} .term-body .r{color:var(--red-hi)}
+.term-body .cur{display:inline-block;width:9px;height:15px;background:var(--amber);vertical-align:-2px;
+  animation:blink1 1s steps(1) infinite;margin-left:2px}
+
+/* ---------- CTA (exp-02 Y/N) ---------- */
+.cta{background:#0A0A0A;border-top:2px solid var(--orange);padding:80px 0 30px;position:relative;overflow:hidden}
+.cta .kj{font-family:var(--jp);font-weight:800;font-size:clamp(70px,17vw,220px);line-height:.8;color:var(--red-hi);
+  text-transform:none;text-shadow:0 0 30px rgba(226,40,15,.35);opacity:.9;letter-spacing:-.02em;
+  transform:translateX(-2%)}
+.cta .kj .off{display:inline-block;transform:translateY(-14%)}
+.cta .prompt{font-family:var(--cond);font-weight:700;font-size:clamp(26px,4vw,46px);color:var(--mint-hi);
+  margin-top:6px;letter-spacing:.02em}
+.cta .psub{font-size:13px;color:var(--mint);opacity:.75;text-transform:none;font-family:var(--mono);margin-top:14px;max-width:52ch}
+.yn{display:flex;gap:16px;margin-top:30px}
+.yn button{font-family:var(--cond);font-weight:700;font-size:22px;letter-spacing:.1em;padding:14px 46px;cursor:pointer;
+  background:transparent}
+.yn .y{border:2px solid var(--mint);color:var(--mint)}
+.yn .y:hover,.yn .y.sel{background:var(--mint);color:#000;box-shadow:0 0 16px rgba(82,242,154,.5)}
+.yn .n{border:2px solid var(--red-hi);color:var(--red-hi)}
+.yn .n:hover,.yn .n.sel{background:var(--red-hi);color:#000;box-shadow:0 0 16px rgba(226,40,15,.5)}
+.yn button:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+.resp{margin-top:20px;font-size:12px;color:var(--amber);letter-spacing:.1em;min-height:18px}
+
+/* footer meta bar */
+.footer{border-top:2px solid var(--orange);background:rgba(10,10,10,.96)}
+.footer .row{display:flex;flex-wrap:wrap;gap:18px;align-items:center;padding:12px 0;font-size:10px;
+  color:var(--green-map);letter-spacing:.08em}
+.footer .row .g{color:var(--mint)}
+.footer .row .sp{margin-left:auto}
+
+@media(max-width:820px){
+  .hero .grid,.mods,.gauges{grid-template-columns:1fr}
+  .navlinks{display:none}
+  .clock{font-size:16px}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .clock .cl,.btn.blink,.term-body .cur{animation:none}
+  .btn.blink{background:var(--mint);color:#000}
+}
+</style>
+</head>
+<body>
+
+<!-- ============ TOP NAV ============ -->
+<header class="topnav">
+  <div class="wrap row">
+    <div class="brand"><span class="mk"></span><b>JAIRUS_OS</b><span>v2.4.0-STABLE</span></div>
+    <nav class="navlinks">
+      <a href="#modules">SYSTEMS</a>
+      <a href="#telemetry">TELEMETRY</a>
+      <a href="#feed">LIVE_FEED</a>
+      <a href="#deploy">DEPLOY</a>
+    </nav>
+    <div class="clock" id="clock" aria-label="system clock">00<span class="cl">:</span>00<span class="cl">:</span>00</div>
+    <div class="statchip" id="topstat">◉ INTEGRITY: NOMINAL</div>
+  </div>
+</header>
+
+<!-- ============ HERO ============ -->
+<section class="hero">
+  <div class="wrap grid">
+    <div>
+      <div class="eyebrow">PERSONAL AGENTIC OPERATING SYSTEM</div>
+      <h1 class="head">RUN YOUR LIFE FROM ONE <em>COMMAND CENTER</em></h1>
+      <p class="sub">Six systems — engineering, knowledge, automation, learning, content, and personal — under a single operator console. Jairus OS observes, decides, and acts, and never ships past a gate you didn't approve.</p>
+      <div class="cta-row">
+        <button class="btn blink" onclick="document.getElementById('deploy').scrollIntoView()">INITIALIZE PROTOCOL</button>
+        <button class="btn alt" onclick="document.getElementById('modules').scrollIntoView()">VIEW SYSTEMS ▾</button>
+      </div>
+    </div>
+    <!-- live command cluster -->
+    <div class="cluster" role="group" aria-label="live system cluster">
+      <div class="ch"><span>ACTIVE_PIPELINE</span><span class="dot" id="clusterUp">UPTIME 142:22:09</span></div>
+      <div class="mstat"><span class="nm">ENG-398 // CORE</span><span class="bar"><i style="width:62%"></i></span><span class="pct">62%</span></div>
+      <div class="mstat"><span class="nm">MEMORY INGEST</span><span class="tag busy">IMPL</span><span class="pct">88%</span><span class="bar"><i style="width:88%"></i></span></div>
+      <div class="mstat"><span class="nm">ARCH_GATE_04</span><span class="tag blk">BLOCKED</span></div>
+      <div class="mstat"><span class="nm">VISUAL REGRESSION</span><span class="tag ok">PASS</span></div>
+      <div class="integrity"><span>SYSTEM INTEGRITY</span><b>NOMINAL</b></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ MARQUEE ============ -->
+<div class="marquee" aria-hidden="true"><div class="track" id="marq">
+  <span>V2.4.0-STABLE DEPLOYED</span><span>MEMORY VAULT 98.4% RETENTION</span><span>38 LISTENERS UP</span>
+  <span>6 SYSTEMS ONLINE</span><span>AGENT_03 BUSY</span><span>NO ANOMALIES DETECTED</span>
+</div></div>
+
+<!-- ============ MODULES (sonnet-37) ============ -->
+<section class="section" id="modules">
+  <div class="wrap">
+    <div class="sec-head"><span class="idx">01</span><h2>SIX SYSTEMS, ONE OPERATOR</h2><span class="rule"></span><span class="note">SELECT TO PIN</span></div>
+    <div class="legend">
+      <b>LEGEND</b>
+      <span class="lg"><span class="sw ok"></span>NOMINAL</span>
+      <span class="lg"><span class="sw busy"></span>WORKING</span>
+      <span class="lg watch"><span class="sw watch"></span>WATCHING</span>
+      <span class="lg" style="margin-left:auto;color:var(--orange)">6 / 6 ONLINE</span>
+    </div>
+    <div class="mods" id="mods">
+      <button class="mod s-ok" data-k="eng"><div class="top"><span class="jp">工学</span><span class="code">SYS·01<br>ENGINEERING</span></div><h3>ENGINEERING</h3><p>Pipelines, tickets, and autonomous debugging. Ship through approval gates instead of chaos.</p><div class="foot"><span class="stamp">NOMINAL</span><span>ENG-402 · ENG-398</span></div></button>
+      <button class="mod s-ok" data-k="know"><div class="top"><span class="jp">記憶</span><span class="code">SYS·02<br>KNOWLEDGE</span></div><h3>KNOWLEDGE</h3><p>A memory vault that never forgets — 2,482 nodes of decisions, patterns, and mistakes, linked.</p><div class="foot"><span class="stamp">NOMINAL</span><span>2,482 NODES</span></div></button>
+      <button class="mod s-busy" data-k="auto"><div class="top"><span class="jp">自動</span><span class="code">SYS·03<br>AUTOMATION</span></div><h3>AUTOMATION</h3><p>Triggers that watch so you don't. Cron, watchers, events → observe · understand · decide · execute.</p><div class="foot"><span class="stamp">WORKING</span><span>38 LISTENERS</span></div></button>
+      <button class="mod s-ok" data-k="learn"><div class="top"><span class="jp">学習</span><span class="code">SYS·04<br>LEARNING</span></div><h3>LEARNING</h3><p>Spaced review and live voice sessions. Every mistake becomes recall you keep.</p><div class="foot"><span class="stamp">NOMINAL</span><span>12 DUE</span></div></button>
+      <button class="mod s-watch" data-k="content"><div class="top"><span class="jp">制作</span><span class="code">SYS·05<br>CONTENT</span></div><h3>CONTENT</h3><p>From raw capture to finished reel. The content pipeline runs itself and hands you the cut.</p><div class="foot"><span class="stamp">WATCHING</span><span>1 IN QUEUE</span></div></button>
+      <button class="mod s-ok" data-k="personal"><div class="top"><span class="jp">個人</span><span class="code">SYS·06<br>PERSONAL</span></div><h3>PERSONAL</h3><p>Morning brief to night sync. Weather, reminders, and inbox — the day, initialized.</p><div class="foot"><span class="stamp">NOMINAL</span><span>08 ITEMS</span></div></button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ SEPARATOR (exp-04 scan graphic) ============ -->
+<div class="sep wrap" aria-hidden="true">
+  <svg id="sepgfx" viewBox="0 0 1120 110" preserveAspectRatio="none"></svg>
+</div>
+
+<!-- ============ TELEMETRY (sonnet-32) ============ -->
+<section class="section" id="telemetry">
+  <div class="wrap">
+    <div class="sec-head"><span class="idx">02</span><h2>SYSTEM TELEMETRY</h2><span class="rule"></span><span class="note">LIVE · 1HZ</span></div>
+    <div class="gauges">
+      <div class="gcard">
+        <div class="gh"><span>◐ VAULT RETENTION</span><span>ARC</span></div>
+        <div class="radial"><svg id="radial" width="180" height="120" viewBox="0 0 180 120"></svg></div>
+        <div class="gval" id="rval">98.4%</div><div class="glab">MEMORY HELD ACROSS 2,482 NODES</div>
+        <div class="gfoot"><span>THRESHOLD 90%</span><span>STABLE</span></div>
+      </div>
+      <div class="gcard">
+        <div class="gh"><span>▮ ENGINE LOAD</span><span>BAR</span></div>
+        <div class="gval" id="hval">42%</div><div class="glab">AGENT COMPUTE · 4 CORES</div>
+        <div class="hbar" id="hbar"></div>
+        <div class="gfoot"><span>CEILING 80%</span><span id="hstate">NOMINAL</span></div>
+      </div>
+      <div class="gcard">
+        <div class="gh"><span>▊ THROUGHPUT</span><span>COL</span></div>
+        <div class="vcols" id="vcols"></div>
+        <div class="gval" id="vval" style="font-size:24px">1.4K/S</div><div class="glab">TICKETS INGESTED PER CYCLE</div>
+        <div class="gfoot"><span>WINDOW 6</span><span>RISING</span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ LIVE FEED / TERMINAL (sonnet-20) ============ -->
+<section class="section" id="feed">
+  <div class="wrap">
+    <div class="sec-head"><span class="idx">03</span><h2>WATCH IT THINK</h2><span class="rule"></span><span class="note">LIVE_EXEC_FEED</span></div>
+    <div class="terminal">
+      <div class="term-bar">STDOUT : /var/log/jairus/automation.log<span class="dots"><i></i><i></i><i></i></span></div>
+      <div class="term-body" id="term"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ============ CTA (exp-02 Y/N) ============ -->
+<section class="cta" id="deploy">
+  <div class="wrap">
+    <div class="kj">開始<span class="off">。</span></div>
+    <div class="prompt">DEPLOY JAIRUS OS TO YOUR STACK?</div>
+    <p class="psub">One operator. Every system. Approve the first gate and the console initializes — no card required for the pilot.</p>
+    <div class="yn" role="group" aria-label="deploy decision">
+      <button class="y" id="yBtn">YES</button>
+      <button class="n" id="nBtn">NO</button>
+    </div>
+    <div class="resp" id="resp" aria-live="polite"></div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="wrap row">
+    <span class="g">◉ AGENT_01: NOMINAL</span><span class="g">◉ AGENT_02: NOMINAL</span>
+    <span style="color:var(--amber)">◉ AGENT_03: BUSY</span>
+    <span class="sp">CPU 12.4%</span><span>MEM 2.1GB/32GB</span><span class="g">SYNC_OK</span>
+    <span>© JAIRUS_OS · KESTREL·4</span>
+  </div>
+</footer>
+
+<script>
+"use strict";
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+/* Motion is mechanical: setInterval ticks + CSS steps(), no easing. */
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const NS="http://www.w3.org/2000/svg";
+const el=(n,a,p)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;};
+
+/* ---- clock (7-seg-ish mono, blinking colons) ---- */
+const clock=document.getElementById("clock");
+function tick(){
+  const d=new Date();
+  const p=n=>String(n).padStart(2,"0");
+  clock.innerHTML=p(d.getHours())+'<span class="cl">:</span>'+p(d.getMinutes())+'<span class="cl">:</span>'+p(d.getSeconds());
+}
+tick();setInterval(tick,1000);
+
+/* ---- marquee stepped scroll (discrete px steps, not CSS transition) ---- */
+const marq=document.getElementById("marq");
+if(!REDUCED){
+  marq.innerHTML+=marq.innerHTML; /* duplicate for seamless wrap */
+  let mx=0;const half=()=>marq.scrollWidth/2;
+  setInterval(()=>{mx-=1.4;if(-mx>=half())mx=0;marq.style.transform="translateX("+mx+"px)";},40);
+}
+
+/* ---- module pin (blinking selected state, figure/ground snap) ---- */
+document.querySelectorAll("#mods .mod").forEach(m=>{
+  m.addEventListener("click",()=>{
+    const on=m.classList.contains("active");
+    document.querySelectorAll("#mods .mod").forEach(x=>x.classList.remove("active"));
+    if(!on)m.classList.add("active");
+  });
+});
+
+/* ---- separator scan graphic (exp-04 style: rounded-diamond street lattice + crosshair) ---- */
+(function(){
+  const svg=document.getElementById("sepgfx");
+  for(let x=20;x<1120;x+=54){
+    el("line",{x1:x,y1:0,x2:x,y2:110,stroke:"#246C3C","stroke-width":1,opacity:.5},svg);
+  }
+  for(let y=14;y<110;y+=28){
+    el("line",{x1:0,y1:y,x2:1120,y2:y,stroke:"#246C3C","stroke-width":1,opacity:.35},svg);
+  }
+  /* a few rounded blocks */
+  for(let i=0;i<9;i++){
+    const bx=60+i*118, by=28+((i%3)*22);
+    el("rect",{x:bx,y:by,width:40,height:34,rx:6,fill:"none",stroke:"#3C9C6C","stroke-width":1.5,opacity:.8},svg);
+  }
+  /* orange crosshair target */
+  const cx=560,cy=55;
+  el("circle",{cx,cy,r:26,fill:"none",stroke:"#F26400","stroke-width":1.5},svg);
+  el("circle",{cx,cy,r:5,fill:"#F26400"},svg);
+  el("line",{x1:cx-40,y1:cy,x2:cx+40,y2:cy,stroke:"#F26400","stroke-width":1},svg);
+  el("line",{x1:cx,y1:cy-40,x2:cx,y2:cy+40,stroke:"#F26400","stroke-width":1},svg);
+  const t=el("text",{x:cx+34,y:cy-14,fill:"#E2280F","font-size":10,"font-family":"monospace","letter-spacing":"1"},svg);
+  t.textContent="NODE·0x512";
+})();
+
+/* ---- radial gauge (SVG arc segments) ---- */
+(function(){
+  const svg=document.getElementById("radial");
+  const cx=90,cy=100,r=74,segs=28,lit=Math.round(.984*segs);
+  for(let i=0;i<segs;i++){
+    const a0=Math.PI+(i/segs)*Math.PI, a1=Math.PI+((i+.72)/segs)*Math.PI;
+    const on=i<lit;
+    const col=on?(i/segs>0.9?"#E2280F":"#52F29A"):"rgba(255,255,255,.06)";
+    const x1=cx+Math.cos(a0)*r,y1=cy+Math.sin(a0)*r,x2=cx+Math.cos(a1)*r,y2=cy+Math.sin(a1)*r;
+    const x3=cx+Math.cos(a1)*(r-14),y3=cy+Math.sin(a1)*(r-14),x4=cx+Math.cos(a0)*(r-14),y4=cy+Math.sin(a0)*(r-14);
+    const pth=el("path",{d:`M${x1} ${y1} L${x2} ${y2} L${x3} ${y3} L${x4} ${y4} Z`,fill:col},svg);
+    if(on)pth.setAttribute("filter","drop-shadow(0 0 3px #52F29A)");
+  }
+  el("line",{x1:cx-r-4,y1:cy,x2:cx-r+8,y2:cy,stroke:"#F26400","stroke-width":1.5},svg);
+})();
+
+/* ---- horizontal segmented bar ---- */
+(function(){
+  const bar=document.getElementById("hbar");const N=20;
+  for(let i=0;i<N;i++){const i2=document.createElement("i");bar.appendChild(i2);}
+  const segs=bar.children;
+  let val=0,target=42;
+  const paint=v=>{const lit=Math.round(v/100*segs.length);
+    for(let i=0;i<segs.length;i++){segs[i].className="";if(i<lit)segs[i].className=((i+1)/segs.length>0.8?"lit warn":"lit");}
+    document.getElementById("hval").textContent=Math.round(v)+"%";
+    document.getElementById("hstate").textContent=v>80?"CAUTION":"NOMINAL";};
+  if(REDUCED){paint(target);}
+  else{const iv=setInterval(()=>{val+=3;if(val>=target){val=target;clearInterval(iv);
+    /* idle drift */ setInterval(()=>{target=38+Math.floor(Math.random()*14);const d=setInterval(()=>{val+=(target>val?2:-2);paint(val);if(Math.abs(target-val)<=2){val=target;paint(val);clearInterval(d);}},80);},3200);}
+    paint(val);},70);}
+})();
+
+/* ---- vertical throughput columns ---- */
+(function(){
+  const wrap=document.getElementById("vcols");const COLS=6,SEG=10;
+  const cols=[];
+  for(let c=0;c<COLS;c++){const col=document.createElement("div");col.className="vcol";
+    for(let s=0;s<SEG;s++){const seg=document.createElement("div");seg.className="seg";col.appendChild(seg);}
+    wrap.appendChild(col);cols.push(col);}
+  const paint=vals=>{cols.forEach((col,c)=>{const lit=vals[c];
+    [...col.children].forEach((seg,i)=>{seg.className="seg";if(i<lit)seg.className=((i+1)/SEG>0.8?"seg lit warn":"seg lit");});});};
+  let vals=[4,6,5,7,6,8];paint(vals);
+  if(!REDUCED)setInterval(()=>{vals=vals.map(()=>3+Math.floor(Math.random()*7));paint(vals);
+    document.getElementById("vval").textContent=(1.0+Math.random()*0.9).toFixed(1)+"K/S";},900);
+})();
+
+/* ---- terminal teletype (sonnet-20) ---- */
+(function(){
+  const term=document.getElementById("term");
+  const rows=[
+    ['<span class="t">14:22:01</span> Triggered <span class="g">\'gitlab-poll\'</span> → <span class="g">3 new tickets</span> ingested into KNOWLEDGE_OS'],
+    ['<span class="t">13:45:12</span> Routine <span class="g">\'Daily Cleanup\'</span> finished. Cleared <span class="o">424MB</span> cache.'],
+    ['<span class="t">12:10:45</span> File Watcher detected <span class="o">\'Trip_Photos.zip\'</span> → Initializing CONTENT pipeline...'],
+    ['<span class="t">12:10:47</span>  └ Thread [772] started: decompressing archive...'],
+    ['<span class="t">10:00:00</span> CRON <span class="g">[OK]</span> System health check passed. <span class="g">No anomalies detected.</span>'],
+    ['<span class="t">09:55:21</span> Executing loop: <span class="g">Observe → Understand → Decide → Execute</span>'],
+    ['<span class="t">09:12:00</span> <span class="o">[DECISION]</span> Approved production deploy for J-OS Core v2.4.0 after 12h stability.'],
+    ['<span class="t">08:40:15</span> <span class="r">[MISTAKE]</span> Inefficient vector search in ENG-392 → rectifying via indexing.'],
+  ];
+  let i=0;
+  function add(){
+    if(i>=rows.length){const c=document.createElement("span");c.className="cur";term.appendChild(c);return;}
+    const div=document.createElement("div");div.className="ln";div.innerHTML=rows[i][0];term.appendChild(div);
+    i++;setTimeout(add,REDUCED?0:130);
+  }
+  add();
+})();
+
+/* ---- Y/N CTA (exp-02 footer response) ---- */
+const resp=document.getElementById("resp");
+document.getElementById("yBtn").addEventListener("click",()=>{
+  document.getElementById("nBtn").classList.remove("sel");
+  document.getElementById("yBtn").classList.add("sel");
+  resp.style.color="var(--mint)";
+  resp.textContent="◉ PROTOCOL ACCEPTED — INITIALIZING OPERATOR SESSION...";
+});
+document.getElementById("nBtn").addEventListener("click",()=>{
+  document.getElementById("yBtn").classList.remove("sel");
+  document.getElementById("nBtn").classList.add("sel");
+  resp.style.color="var(--red-hi)";
+  resp.textContent="✕ DEPLOY DEFERRED — THE CONSOLE WILL BE HERE WHEN YOU RETURN, OPERATOR.";
+});
+</script>
+</body>
+</html>

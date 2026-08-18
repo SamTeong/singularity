@@ -1,0 +1,81 @@
+/* SOURCE: docs/one-shot/slides/index.html lines 208-262 (the "the phosphor
+   pipeline" block).
+
+   Section class is `.phospipe`, not `.pipeline`: cockpit.css already declares
+   `.pipeline{display:grid;grid-template-columns:repeat(5,1fr)}` for the console's
+   five-node strip, and that landing on a <section> would flatten the whole
+   panel. Every child selector is prefixed `pp-` and scoped under `.phospipe`,
+   because the source's generic names (.track .step .card .shot .cap .badge .sw
+   .chip .val .en) are exactly the kind that collide silently across a deck. */
+
+.phospipe{background:rgba(12,108,128,.035);border-top:2px solid var(--teal);border-bottom:2px solid var(--teal)}
+.phospipe .lead{margin-bottom:clamp(22px,3vw,44px)}
+
+/* ---- the five-stage track ---------------------------------------------- */
+.phospipe .pp-track{position:relative;display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:clamp(18px,2.4vw,34px)}
+.phospipe .pp-track::before{content:"";position:absolute;left:10%;right:10%;top:39px;height:2px;background:var(--green-dim)}
+.phospipe .pp-step{position:relative;z-index:2;text-align:center;cursor:pointer;color:var(--green-map);padding:0 8px;background:transparent;border:0;font-family:var(--mono);letter-spacing:.03em}
+.phospipe .pp-node{width:78px;height:78px;margin:0 auto 12px;background:var(--bg);border:2px solid var(--green-dim);display:grid;place-items:center;
+  font-family:var(--cond);font-weight:700;font-size:22px;clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
+.phospipe .pp-step[data-done="1"] .pp-node{background:var(--mint);border-color:var(--mint);color:var(--bg)}
+.phospipe .pp-step[data-done="0"] .pp-node{border-color:var(--orange);color:var(--orange)}
+.phospipe .pp-step .jp{display:block;font-family:var(--jp);font-weight:800;font-size:16px;color:inherit}
+.phospipe .pp-en{display:block;font-size:8.5px;letter-spacing:.13em;margin-top:3px;text-transform:uppercase}
+.phospipe .pp-val{display:block;margin-top:7px;font-family:var(--cond);font-weight:700;font-size:20px;color:var(--mint-hi);line-height:1;font-variant-numeric:tabular-nums}
+.phospipe .pp-val small{display:block;font-family:var(--mono);font-weight:400;font-size:7.5px;letter-spacing:.12em;color:var(--amber);margin-top:3px}
+.phospipe .pp-step[aria-selected="true"]{color:var(--mint-hi)}
+.phospipe .pp-step[aria-selected="true"] .pp-node{border-color:var(--mint);box-shadow:0 0 12px rgba(82,242,154,.4)}
+.phospipe .pp-here{position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:var(--bg);z-index:3}
+.phospipe .pp-step:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+
+/* ---- the selected stage ------------------------------------------------ */
+.phospipe .pp-stagebar{border:1px solid var(--orange);padding:4px;margin-bottom:20px}
+.phospipe .pp-stagebar-inner{border:2px solid var(--orange);padding:clamp(12px,1.6vw,24px);display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:clamp(14px,2vw,24px)}
+.phospipe .pp-stage-jp{font-family:var(--jp);font-weight:800;font-size:clamp(34px,3.6vw,48px);color:var(--orange);text-align:center;line-height:1;white-space:nowrap;text-shadow:0 0 5px currentColor}
+.phospipe .pp-stagebar h3{font-family:var(--cond);font-weight:700;color:var(--paper);font-size:clamp(17px,2vw,24px);letter-spacing:.05em;text-transform:uppercase}
+.phospipe .pp-stagebar p{color:var(--green-map);margin-top:7px;line-height:1.65;max-width:88ch}
+.phospipe .pp-stagebar p code{color:var(--mint);letter-spacing:0}
+.phospipe .pp-hint{font-size:9px;color:var(--amber);line-height:1.7;text-align:right;letter-spacing:.1em;text-transform:uppercase}
+.phospipe .pp-hint b{color:var(--orange);font-weight:400}
+
+/* ---- the artefact gallery ----------------------------------------------
+   `--card` is the min column width. The source sets it inline per stage
+   (L869: 400 / 250 / 320 / default 265); here it is keyed off the stage
+   number instead, so panel mode can override all five to one value — see
+   styles/panel.css. Keep these in sync with PIPELINE_STEPS' order. */
+.phospipe .pp-gallery{--card:265px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,var(--card)),1fr));gap:clamp(9px,1.1vw,15px);align-content:start}
+.phospipe .pp-gallery[data-stage="01"]{--card:400px}
+.phospipe .pp-gallery[data-stage="02"]{--card:250px}
+.phospipe .pp-gallery[data-stage="03"]{--card:320px}
+.phospipe .pp-card{position:relative;border:1px solid var(--green-dim);background:#050505;display:flex;flex-direction:column;text-align:left;overflow:hidden;cursor:pointer;padding:0;font-family:var(--mono)}
+.phospipe .pp-card:hover,.phospipe .pp-card:focus-visible{border-color:var(--mint);box-shadow:0 0 12px rgba(82,242,154,.2)}
+.phospipe .pp-card:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+.phospipe .pp-shot{position:relative;display:block;aspect-ratio:16/10;overflow:hidden;background:#000;border-bottom:1px solid var(--green-dim)}
+.phospipe .pp-shot img{width:100%;height:100%;object-fit:cover;object-position:top center;filter:saturate(1.05) contrast(1.03)}
+.phospipe .pp-card:hover .pp-shot img{filter:saturate(1.15) contrast(1.08) brightness(1.06)}
+.phospipe .pp-shot::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.16) 0 1px,transparent 1px 3px)}
+/* Stand-in when public/refs is absent — see scripts/copy-model.mjs. Reads as a
+   deliberate plate, never a broken-image glyph. */
+.phospipe .pp-plate{position:absolute;inset:0;display:grid;place-items:center;background:repeating-linear-gradient(135deg,#070907 0 8px,#0b0f0c 8px 16px);color:var(--green-dim);font-size:11px;letter-spacing:.28em}
+.phospipe .pp-badge{position:absolute;top:6px;left:6px;z-index:2;background:rgba(10,10,10,.85);font-size:8px;letter-spacing:.1em;padding:1px 6px;border:1px solid currentColor;text-transform:uppercase}
+.phospipe .pp-cap{display:flex;align-items:center;gap:8px;padding:7px 9px;font-size:9.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--green-map)}
+.phospipe .pp-cap b{font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.06em;color:var(--paper);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.phospipe .pp-card:hover .pp-cap b{color:var(--mint-hi)}
+.phospipe .pp-open{color:var(--green-dim);flex:none}
+.phospipe .pp-card:hover .pp-open{color:var(--mint)}
+.phospipe .pp-card.playable .pp-shot::before{content:"▶";position:absolute;z-index:2;left:50%;top:50%;transform:translate(-50%,-50%);
+  width:44px;height:44px;display:grid;place-items:center;border:1px solid var(--mint);color:var(--mint);
+  background:rgba(10,10,10,.65);font-size:15px;text-shadow:0 0 6px currentColor}
+.phospipe .pp-card.wide{grid-column:1/-1;max-width:900px}
+.phospipe .pp-card.wide .pp-shot{aspect-ratio:16/9}
+
+/* ---- stage 05: the token inventory ------------------------------------- */
+.phospipe .pp-younote{grid-column:1/-1;border:1px solid var(--orange);padding:15px 17px;display:flex;gap:15px;align-items:center;background:rgba(242,100,0,.05);margin-bottom:15px}
+.phospipe .pp-younote .jp{font-family:var(--jp);font-weight:800;font-size:32px;color:var(--orange);text-shadow:0 0 6px currentColor;flex:none}
+.phospipe .pp-younote p{color:var(--green-map);font-size:13px;line-height:1.6}
+.phospipe .pp-younote p b{color:var(--mint)}
+.phospipe .pp-swatches{grid-column:1/-1;display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:9px}
+.phospipe .pp-sw{border:1px solid var(--green-dim);padding-bottom:7px}
+.phospipe .pp-chip{height:52px;border-bottom:1px solid var(--green-dim)}
+.phospipe .pp-sw-n{display:block;padding:6px 9px 0;font-size:9px;letter-spacing:.09em;color:var(--paper);text-transform:uppercase}
+.phospipe .pp-sw-h{display:block;padding:2px 9px 0;font-size:9px;color:var(--green-map)}
