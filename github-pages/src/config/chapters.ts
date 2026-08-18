@@ -72,7 +72,7 @@ export interface Chapter {
 // ─── HOW THESE ANCHORS WERE CHOSEN, AND TWO WAYS TO GET IT WRONG ────────────
 // The tour is a WALK, not an orbit: exterior approach, two interior shots down
 // the -X wall, a long interior shot, then across the +X wall, up to +Z, over to
-// -X, and back outside for the CTA and the appendices. Every screen faces a
+// -X, and back outside for the CTA and the closing pair. Every screen faces a
 // different way, at a different height. Both failure modes below were actually
 // built and thrown away, so they are worth stating:
 //
