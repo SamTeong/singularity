@@ -17,6 +17,11 @@ export function Stats({ sectionRef }: ChapterProps) {
           <span className="jp">統計</span>
           <h2 id="stats-title">STATS</h2>
         </div>
+        <p className="lead">
+          These numbers capture what it took to get here. In the 38+ days since the initial commit,
+          two developers ran 450+ agent sessions across three harnesses and nine inference models
+          to ship 17 pages.
+        </p>
         <div className="stats-hero">
           <div className="stats-figure">
             <b className="c-blue">$3.9K+</b>
@@ -28,7 +33,7 @@ export function Stats({ sectionRef }: ChapterProps) {
           </div>
           <div className="stats-figure">
             <b className="c-orange">38+</b>
-            <small>DAYS OF EFFORT</small>
+            <small>DAYS SINCE INITIAL COMMIT</small>
           </div>
           <div className="stats-figure">
             <b className="c-red">2</b>
