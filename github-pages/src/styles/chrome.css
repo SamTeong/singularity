@@ -11,8 +11,7 @@
 .sx-brand{display:flex;align-items:center;gap:10px;min-width:max-content}
 .sx-mark{width:14px;height:14px;background:var(--mint);box-shadow:0 0 10px var(--mint);transform:rotate(45deg)}
 .sx-name{font-family:var(--cond);font-weight:700;font-size:18px;letter-spacing:.13em;color:var(--mint-hi);text-shadow:0 0 7px rgba(82,242,154,.55)}
-.sx-ver{font-size:8px;color:var(--orange);letter-spacing:.18em;border-left:1px solid var(--green-dim);padding-left:13px}
-.sx-note{margin-left:20px;font-size:9px;letter-spacing:.15em;color:var(--green-map);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sx-note{margin-left:20px;font-size:9px;letter-spacing:.15em;color:var(--orange);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .sx-note b{color:var(--mint);font-weight:400}
 .sx-links{margin-left:auto;display:flex;align-items:center;gap:14px;white-space:nowrap}
 .sx-links a{font-size:9px;letter-spacing:.13em;color:var(--green-map);min-height:44px;display:flex;align-items:center}

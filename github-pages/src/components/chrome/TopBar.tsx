@@ -16,7 +16,6 @@ export function TopBar({ chapter }: TopBarProps) {
         <span className="sx-mark" aria-hidden="true" />
         <span className="sx-name">SINGULARITY</span>
       </span>
-      <span className="sx-ver">走査甲板 · SCANNED DECK</span>
       <span className="sx-note" id="sxNote">
         {/* source L1443: 'CH·' + c.num + ' ' + c.jp + ' — ' + c.title */}
         {chapter ? `CH·${chapter.num} ${chapter.jp} — ${chapter.title}` : 'CH·01 到着 — ORIENTATION'}
