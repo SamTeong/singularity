@@ -2,7 +2,7 @@
 
 /* ============================================================ PRODUCT DECK
    Ported verbatim from sample-gitlab-03-gpt-sol.html. These rules style the
-   seven chapter sections both as flat page (fallback) and as CSS3D screens. */
+   chapter sections both as flat page (fallback) and as CSS3D screens. */
 .chapter{position:relative;padding:clamp(74px,10vw,150px) var(--page-x)}
 .chapter-inner{width:min(100%,var(--max));margin:0 auto}
 .eyebrow{display:flex;align-items:center;gap:12px;color:var(--amber);font-size:10px;letter-spacing:.22em;text-transform:uppercase;margin-bottom:22px}

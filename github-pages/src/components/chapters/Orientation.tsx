@@ -41,7 +41,7 @@ export function Orientation({ sectionRef }: ChapterProps) {
               onClick={(e) => {
                 if (!conductor) return;
                 e.preventDefault();
-                conductor.goTo(CHAPTERS.length - 1);
+                conductor.goTo(CHAPTERS.findIndex((c) => c.id === 'take-control'));
               }}
             >
               FULL DIVE
