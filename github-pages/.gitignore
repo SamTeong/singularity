@@ -1,5 +1,10 @@
 node_modules/
 dist/
+# Both are produced by scripts/copy-model.mjs from the single tracked copy
+# under docs/one-shot/ — never commit a second copy here.
 public/*.glb
+public/refs/
 *.local
 scripts/.parity/
+scripts/.bbox.mjs
+scripts/.place.mjs

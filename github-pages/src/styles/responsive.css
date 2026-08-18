@@ -17,6 +17,16 @@
   .flow-code{grid-column:2;text-align:left}
 /* origin: chrome (sx-readout) */
   .sx-readout{display:none}
+/* origin: themes — the source stacks .duo at 1100px and turns the vertical
+   rule into a horizontal one (slides/index.html L394-395) */
+  .themes .tc-duo{grid-template-columns:1fr}
+  .themes .tc-divider{width:100%;height:2px;background:linear-gradient(90deg,transparent,var(--orange),transparent)}
+/* origin: pipeline — source L396-398 */
+  .phospipe .pp-stagebar-inner{grid-template-columns:auto 1fr}
+  .phospipe .pp-hint{grid-column:2;text-align:left}
+  .phospipe .pp-stage-jp{font-size:40px}
+/* origin: openspec, appendix — two-column bodies stack */
+  .openspec .os-grid,.appendix .ax-grid{grid-template-columns:1fr}
 }
 @media(max-width:720px){
 /* origin: tokens (--header-h) */
@@ -57,6 +67,21 @@
   .arch-link{width:2px;height:26px;margin:auto}
 /* origin: take-control */
   .take-control h2{font-size:clamp(56px,18vw,92px)}
+/* origin: skins — source L401 */
+  .skins .skin-beats{grid-template-columns:1fr}
+/* origin: pipeline — the track goes vertical, with the connector rotated to
+   run down the left of the node column (source L402-407) */
+  .phospipe .pp-track{grid-template-columns:1fr;gap:4px}
+  .phospipe .pp-track::before{left:38px;right:auto;top:36px;bottom:36px;width:2px;height:auto}
+  .phospipe .pp-step{display:grid;grid-template-columns:78px 1fr;text-align:left;align-items:center;gap:0 14px;padding:6px 0}
+  .phospipe .pp-node{margin:0}
+  .phospipe .pp-step .jp,.phospipe .pp-en,.phospipe .pp-val{grid-column:2}
+  .phospipe .pp-here{position:static;transform:none;justify-self:start;margin-bottom:4px}
+  .phospipe .pp-stagebar-inner{grid-template-columns:1fr;text-align:center}
+  .phospipe .pp-hint{grid-column:auto;text-align:center}
+/* origin: appendix */
+  .appendix .ax-slot{grid-template-columns:1fr auto;gap:6px 12px}
+  .appendix .ax-hint{grid-column:1/-1}
 /* origin: panel (screen treatment) */
   .chapter.as-panel{padding:18px}
 }

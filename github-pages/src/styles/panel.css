@@ -7,3 +7,29 @@
 .chapter.as-panel.fleet-control{padding:20px 22px}
 .chapter.as-panel.fleet-control .intro{padding:0;margin-bottom:16px}
 .chapter.as-panel.orientation{padding:34px 40px}
+
+/* ---- panel-mode trims for the frontend-debrief chapters ----------------
+   These four carry noticeably more content than the original seven, and a
+   panel's height is whatever offsetHeight measures — which feeds straight into
+   framingDistance(), so an over-tall panel does not overflow, it pushes the
+   camera back until the type is unreadable. Everything below buys height back
+   without cutting content: tighter panel padding, and a lead that stops
+   wrapping to five lines at 1500px. */
+.chapter.as-panel.phospipe,.chapter.as-panel.themes,.chapter.as-panel.openspec{padding:22px 26px}
+.chapter.as-panel.phospipe .lead,.chapter.as-panel.themes .lead,.chapter.as-panel.openspec .lead{max-width:104ch}
+/* The eyebrow duplicates the section-head kanji on every one of these; at
+   panel scale that is two lines of chrome before the title. Keep it, tighten it. */
+.chapter.as-panel.skins .eyebrow,.chapter.as-panel.phospipe .eyebrow,
+.chapter.as-panel.themes .eyebrow,.chapter.as-panel.openspec .eyebrow,
+.chapter.as-panel.appendix .eyebrow{margin-bottom:14px}
+/* The gallery is FIXED HEIGHT in panel mode, and that is load-bearing, not
+   tidying. A panel is measured once — buildPanel() reads offsetHeight and
+   writes it back as an inline height — but the gallery's natural height
+   changes with the selected stage (6 clips, 10 experiments, 8 layouts, 1 wide
+   sheet, 14 swatches). Left alone, every stage after the one that happened to
+   be showing at measure time would either overflow into `.as-panel`'s
+   overflow:hidden or leave a hole. One height, one --card, all five stages.
+   380px + a 240px column fits the tallest (two rows of ten) with the
+   1500px panel's 1448px of usable width giving six columns. */
+.chapter.as-panel.phospipe .pp-gallery{--card:240px;height:380px;overflow:hidden}
+.chapter.as-panel.phospipe .pp-card.wide{max-width:620px}

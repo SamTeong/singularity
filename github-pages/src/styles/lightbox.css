@@ -1,0 +1,29 @@
+/* SOURCE: docs/one-shot/slides/index.html lines 367-387.
+
+   App-level chrome, not chapter CSS — the viewer is a sibling of <Deck/>
+   (see components/chrome/Lightbox.tsx). Its z-index sits above every sx- layer
+   (the topbar is 600, the boot panel 650, the debug panel 660), because it is
+   the one surface that is modal over the entire experience.
+
+   Only `.lb-path` and `.lb-spacer` are renamed from the source's `.path` /
+   `.spacer`; the rest are already `lb-` prefixed and cannot collide. */
+
+.lb{position:fixed;inset:0;z-index:800;background:rgba(0,0,0,.9);display:flex;align-items:center;justify-content:center;padding:clamp(12px,2.4vw,36px)}
+.lb-frame{position:relative;width:min(1440px,100%);height:100%;border:2px solid var(--orange);background:var(--bg);
+  clip-path:polygon(0 0,calc(100% - 24px) 0,100% 24px,100% 100%,24px 100%,0 calc(100% - 24px));
+  display:grid;grid-template-rows:auto 1fr auto;box-shadow:0 0 30px rgba(242,100,0,.28)}
+.lb-head{display:flex;align-items:center;gap:12px;padding:9px clamp(12px,1.6vw,22px);border-bottom:1px solid var(--green-dim)}
+.lb-head .jp{font-family:var(--jp);font-weight:800;font-size:17px;color:var(--orange);flex:none}
+.lb-head h2{font-family:var(--cond);font-weight:700;font-size:clamp(13px,1.5vw,19px);color:var(--paper);letter-spacing:.06em;text-transform:uppercase;flex:none}
+.lb-path{flex:1;min-width:0;font-size:10px;color:var(--green-map);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+.lb-body{position:relative;min-height:0;background:#000;display:grid;place-items:stretch}
+.lb-body iframe{width:100%;height:100%;border:0;background:#000}
+.lb-body video{width:100%;height:100%;object-fit:contain;background:#000}
+.lb-foot{display:flex;align-items:center;gap:10px;padding:7px clamp(12px,1.6vw,22px);border-top:1px solid var(--orange);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--green-map)}
+.lb-spacer{flex:1}
+.lb-btn{border:1px solid var(--green-dim);background:transparent;padding:3px 11px;font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:var(--green-map);cursor:pointer}
+.lb-btn:hover:not(:disabled){border-color:var(--mint);color:var(--mint)}
+.lb-btn:disabled{opacity:.35;cursor:default}
+.lb-btn.hot{border-color:var(--orange);color:var(--orange)}
+.lb-btn.hot:hover{border-color:var(--mint);color:var(--mint)}
+.lb-btn:focus-visible{outline:2px solid var(--paper);outline-offset:3px}

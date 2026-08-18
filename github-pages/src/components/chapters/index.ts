@@ -10,14 +10,25 @@ import { Tasks } from './Tasks';
 import { FleetControl } from './FleetControl/FleetControl';
 import { AgentHarness } from './AgentHarness';
 import { SystemDesign } from './SystemDesign';
+import { Skins } from './Skins';
+import { Pipeline } from './Pipeline';
+import { Themes } from './Themes';
+import { OpenSpec } from './OpenSpec';
 import { TakeControl } from './TakeControl';
+import { AppendixA, AppendixB } from './Appendix';
 
 export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> = {
   orientation: Orientation,
   chaos: Chaos,
+  'agent-harness': AgentHarness,
   'fleet-control': FleetControl,
   tasks: Tasks,
-  'agent-harness': AgentHarness,
   'system-design': SystemDesign,
+  skins: Skins,
+  pipeline: Pipeline,
+  themes: Themes,
+  openspec: OpenSpec,
   'take-control': TakeControl,
+  'appendix-a': AppendixA,
+  'appendix-b': AppendixB,
 };
