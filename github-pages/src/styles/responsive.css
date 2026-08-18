@@ -30,6 +30,13 @@
 /* origin: stats */
   .stats-hero{grid-template-columns:repeat(2,1fr)}
   .stats-body{grid-template-columns:1fr}
+/* origin: alternatives */
+  .alternatives .ac-grid{grid-template-columns:1fr}
+  .alternatives .ac-desc{min-height:0}
+/* origin: inspiration */
+  .inspiration .in-lineup{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .inspiration .in-person:nth-child(odd){border-left:0}
+  .inspiration .in-person:nth-child(n+3){border-top:1px solid var(--green-dim)}
 }
 @media(max-width:720px){
 /* origin: tokens (--header-h) */
@@ -86,8 +93,16 @@
   .chapter.as-panel{padding:18px}
 /* origin: stats */
   .stats-hero{grid-template-columns:1fr}
-/* origin: credits */
-  .credits-row,.credits-row-plain{grid-template-columns:1fr}
+/* origin: inspiration */
+  .inspiration .in-lineup{grid-template-columns:1fr}
+  .inspiration .in-person{display:grid;grid-template-columns:132px 1fr;gap:16px}
+  .inspiration .in-person+.in-person{border-left:0;border-top:1px solid var(--green-dim)}
+  .inspiration .in-portrait{aspect-ratio:1}
+  .inspiration .in-record{padding-top:0}
+  .inspiration .in-record p{min-height:0}
+/* origin: advisors */
+  .advisors-lineup{grid-template-columns:1fr}
+  .advisors-person+.advisors-person{border-left:0;border-top:1px solid var(--green-dim)}
 }
 @media(prefers-reduced-motion:reduce){
 /* origin: cross-cutting: tokens, chrome, fleet-control, tasks, take-control animation kill-switch */

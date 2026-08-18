@@ -16,7 +16,7 @@ const GL = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swifts
 // them together with CHAPTERS, and every check below follows.
 const ORDER = [
   'orientation', 'chaos', 'agent-harness', 'fleet-control', 'tasks', 'system-design',
-  'skins', 'pipeline', 'themes', 'openspec', 'take-control', 'stats', 'credits',
+  'skins', 'pipeline', 'themes', 'openspec', 'take-control', 'stats', 'alternatives', 'inspiration', 'advisors',
 ];
 const SCREENS = ORDER.length;
 const PAD = String(SCREENS).padStart(2, '0');

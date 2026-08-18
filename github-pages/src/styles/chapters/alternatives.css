@@ -1,0 +1,28 @@
+/* ALTERNATIVES — three comparative product cards, following the Themes chapter. */
+.alternatives{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(180deg,rgba(80,144,208,.04),transparent)}
+.alternatives .lead{margin-bottom:clamp(22px,3vw,40px)}
+.alternatives .ac-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:clamp(14px,1.8vw,28px);align-items:stretch}
+.alternatives .ac-card{--ac-accent:var(--orange);border:1px solid var(--ac-accent);border-radius:14px;padding:clamp(15px,1.6vw,24px);display:flex;flex-direction:column;min-width:0}
+.alternatives .ac-card:hover{box-shadow:0 0 16px color-mix(in srgb,var(--ac-accent) 22%,transparent)}
+.alternatives .ac-card.buzz{--ac-accent:var(--blue)}
+.alternatives .ac-card.grokbot{--ac-accent:var(--mint)}
+.alternatives .ac-head{display:flex;align-items:center;gap:11px;margin-bottom:13px}
+.alternatives .ac-mark{width:25px;height:25px;flex:none;border:2px solid var(--ac-accent);border-radius:50%;box-shadow:0 0 9px color-mix(in srgb,var(--ac-accent) 45%,transparent)}
+.alternatives .ac-head h3{font-family:var(--mono);font-size:clamp(18px,1.7vw,24px);color:var(--mint-hi);letter-spacing:.02em}
+.alternatives .ac-jp{font-family:var(--jp);font-weight:800;font-size:17px;color:var(--ac-accent);margin-left:auto;text-shadow:0 0 4px currentColor}
+.alternatives .ac-desc{color:var(--paper);font-size:clamp(12px,1.1vw,15px);line-height:1.58;min-height:4.75em}
+.alternatives .ac-shot{position:relative;display:block;margin-top:15px;border:1px solid var(--ac-accent);border-radius:8px;overflow:hidden;background:#000}
+.alternatives .ac-shot img{display:block;width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top center}
+.alternatives .ac-shot::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.12) 0 1px,transparent 1px 3px)}
+.alternatives .ac-plate{display:grid;place-items:center;width:100%;aspect-ratio:16/10;background:repeating-linear-gradient(135deg,#070907 0 8px,#0b0f0c 8px 16px);color:var(--green-dim);font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.2em}
+.alternatives .ac-peek{position:absolute;z-index:2;right:8px;bottom:8px;background:rgba(10,10,10,.88);border:1px solid var(--ac-accent);color:var(--ac-accent);font-size:8.5px;letter-spacing:.12em;padding:3px 8px}
+.alternatives .ac-shot:hover img{filter:brightness(1.08) saturate(1.08)}
+.alternatives .ac-shot:hover .ac-peek{background:var(--ac-accent);color:var(--bg)}
+.alternatives .ac-shot:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+.alternatives .ac-spec{margin-top:15px;border-top:1px dotted var(--green-dim)}
+.alternatives .ac-row{display:grid;grid-template-columns:82px 1fr;gap:10px;padding:8px 0;border-bottom:1px dotted var(--green-dim)}
+.alternatives .ac-row dt{font-size:8px;letter-spacing:.12em;color:var(--amber);text-transform:uppercase}
+.alternatives .ac-row dd{margin:0;color:var(--green-map);font-size:10px;line-height:1.5}
+.alternatives .ac-cta{margin-top:auto;padding-top:17px;display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.alternatives .ac-cta .btn{width:100%}
+.alternatives .ac-cta>span{width:100%;overflow:hidden;text-overflow:ellipsis;color:var(--green-map);font-size:8px;letter-spacing:.08em;text-transform:uppercase;white-space:nowrap}
