@@ -17,7 +17,6 @@ const GL = ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swifts
 const ORDER = [
   'orientation', 'chaos', 'agent-harness', 'fleet-control', 'tasks', 'system-design',
   'skins', 'pipeline', 'themes', 'openspec', 'take-control', 'stats', 'credits',
-  'appendix-a', 'appendix-b',
 ];
 const SCREENS = ORDER.length;
 const PAD = String(SCREENS).padStart(2, '0');

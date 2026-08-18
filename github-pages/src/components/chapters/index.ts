@@ -17,7 +17,6 @@ import { OpenSpec } from './OpenSpec';
 import { TakeControl } from './TakeControl';
 import { Stats } from './Stats';
 import { Credits } from './Credits';
-import { AppendixA, AppendixB } from './Appendix';
 
 export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> = {
   orientation: Orientation,
@@ -33,6 +32,4 @@ export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> 
   'take-control': TakeControl,
   stats: Stats,
   credits: Credits,
-  'appendix-a': AppendixA,
-  'appendix-b': AppendixB,
 };

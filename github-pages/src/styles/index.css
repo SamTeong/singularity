@@ -15,15 +15,15 @@
 @import './chapters/agent-harness.css';
 @import './chapters/system-design.css';
 /*
- * The four chapters ported from docs/one-shot/slides/index.html, and the two
- * appendix placeholders. These have no position in the original single-file
- * source order, so they are listed in LEDGER order instead — before
+ * The four chapters ported from docs/one-shot/slides/index.html, and the
+ * closing pair. These have no position in the original single-file source
+ * order, so they are listed in LEDGER order instead — the ported four before
  * take-control.css because they sit before `take-control` in CHAPTERS,
- * appendix.css after it because the two appendices sit after it. Keep that
+ * stats.css and credits.css after it because they sit after it. Keep that
  * correspondence when adding more: it is the only ordering rule a future
  * editor can check against the ledger.
  *
- * Every rule in these five files is scoped under its own section class, so
+ * Every rule in these six files is scoped under its own section class, so
  * their position here is not load-bearing the way the files above are. That
  * scoping is deliberate — see the header of each file for the specific
  * collisions it avoids.
@@ -35,7 +35,6 @@
 @import './chapters/take-control.css';
 @import './chapters/stats.css';
 @import './chapters/credits.css';
-@import './chapters/appendix.css';
 /*
  * footer.css is its own file rather than a second chunk of chrome.css so that
  * every stylesheet here is a single contiguous source range AND the emitted

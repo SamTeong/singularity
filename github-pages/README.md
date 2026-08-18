@@ -3,7 +3,7 @@
 React + Vite + TypeScript port of `docs/one-shot/3d/sample-gitlab-3d-scan.html`.
 
 One persistent Three.js world built around a photogrammetry scan
-(`scan-atrium.glb`), with the fifteen product-deck chapters mounted inside it as
+(`scan-atrium.glb`), with the thirteen product-deck chapters mounted inside it as
 `CSS3DObject` screens and a scroll conductor driving the camera on rails.
 
 ## Run
@@ -45,7 +45,7 @@ Three Fiber. The conductor connects them.
 ### Two rules worth knowing before editing
 
 **The panel DOM contract** (`src/components/chapters/Spacer.tsx`). `CSS3DObject`
-reparents the fifteen `<section class="chapter">` nodes out of `<main id="scroll">`.
+reparents the thirteen `<section class="chapter">` nodes out of `<main id="scroll">`.
 React keeps a pointer to each but no longer knows its parent, so subtree updates
 are fine and *structural* changes are not. The chapters must stay rendered
 unconditionally, in fixed order, with constant-literal `className`/`id` and no

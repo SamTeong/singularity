@@ -24,9 +24,7 @@ export type ChapterId =
   | 'openspec'
   | 'take-control'
   | 'stats'
-  | 'credits'
-  | 'appendix-a'
-  | 'appendix-b';
+  | 'credits';
 
 export interface ChapterWorld {
   fog: number; // FogExp2 density
@@ -249,28 +247,6 @@ export const CHAPTERS = [
     sub: 'LANDSCAPE · INSPIRATION · COUNSEL',
     u: [-1.34, 0.92, -0.56], yaw: 272, pitch: 0, w: 5.8, px: 1300, pxm: 760,
     fill: 0.82, lift: 0.30, tone: 0x7CF4AB, world: { fog: 0.042, bloom: 0.80, motes: 0.9, exposure: 1.06 },
-  },
-
-  // ─── appendix placeholders ───────────────────────────────────────────────
-  // Two reserved screens after the credits. They carry real structure (heading,
-  // slot list, kanji plate) but no content yet — filling one in is a normal
-  // edit to its component, with no ledger or camera change needed. The camera
-  // settles back down across the pair (y 0.93 → 0.55), so it reads as an
-  // epilogue rather than more deck. Atmosphere cools and the bloom drops to say
-  // the same thing.
-
-  {
-    id: 'appendix-a', weight: 1.05, num: '14', jp: '附録', code: 'SCR·14', title: 'APPENDIX A',
-    sub: 'RESERVED · CONTENT PENDING',
-    u: [0.748, 0.929, 0.533], yaw: 56, pitch: -4, w: 5.4, px: 1220, pxm: 750,
-    fill: 0.76, lift: 0.26, tone: 0x5090D0, world: { fog: 0.036, bloom: 0.60, motes: 0.7, exposure: 1.0 },
-  },
-
-  {
-    id: 'appendix-b', weight: 1.05, num: '15', jp: '補遺', code: 'SCR·15', title: 'APPENDIX B',
-    sub: 'RESERVED · CONTENT PENDING',
-    u: [-0.142, 0.553, 0.867], yaw: 8, pitch: 0, w: 5.4, px: 1220, pxm: 750,
-    fill: 0.76, lift: 0.20, tone: 0x5090D0, world: { fog: 0.034, bloom: 0.56, motes: 0.66, exposure: 1.0 },
   },
 ] as const satisfies readonly Chapter[];
 

@@ -1,6 +1,6 @@
 # CLAUDE.md — editing the deck
 
-This app is a **slide deck**: fifteen chapters ("slides") mounted as real DOM
+This app is a **slide deck**: thirteen chapters ("slides") mounted as real DOM
 inside one persistent Three.js world, toured by a scroll-driven camera on rails.
 Adding, removing, and reordering slides is the routine edit, and this file is the
 runbook for it.
