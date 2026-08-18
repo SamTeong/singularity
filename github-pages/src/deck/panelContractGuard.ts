@@ -1,4 +1,4 @@
-// Dev-only tripwire for the PANEL DOM CONTRACT (see Beat.tsx).
+// Dev-only tripwire for the PANEL DOM CONTRACT (see Spacer.tsx).
 //
 // Once a <section class="chapter"> has been adopted by a CSS3DObject it lives
 // under #css3d, not under <main id="scroll">. React still holds a stateNode
@@ -35,7 +35,7 @@ export function guardPanelContract(panels: HTMLElement[], isMoving: { current: b
         if (node instanceof HTMLElement && watched.has(node)) {
           console.error(
             `[panel-contract] chapter #${node.id} was removed by React, not by the world. ` +
-              'This breaks the CSS3D adoption contract — see Beat.tsx invariants I1-I5.',
+              'This breaks the CSS3D adoption contract — see Spacer.tsx invariants I1-I5.',
             record,
           );
         }

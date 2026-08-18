@@ -4,6 +4,6 @@
 .chapter.as-panel{padding:26px 30px;overflow:hidden;background:rgba(10,10,10,.955);border:1px solid var(--green-dim);display:flex;flex-direction:column;justify-content:center;backface-visibility:hidden}
 .chapter.as-panel::after{content:"";position:absolute;inset:0;pointer-events:none;z-index:400;background:repeating-linear-gradient(0deg,rgba(0,0,0,.20) 0 1px,transparent 1px 3px),radial-gradient(ellipse at center,transparent 58%,rgba(0,0,0,.5) 100%)}
 .chapter.as-panel .chapter-inner{width:100%;max-width:none}
-.chapter.as-panel.cockpit{padding:20px 22px}
-.chapter.as-panel.cockpit .intro{padding:0;margin-bottom:16px}
-.chapter.as-panel.hero{padding:34px 40px}
+.chapter.as-panel.fleet-control{padding:20px 22px}
+.chapter.as-panel.fleet-control .intro{padding:0;margin-bottom:16px}
+.chapter.as-panel.orientation{padding:34px 40px}

@@ -16,7 +16,7 @@ derived:
 src/config/chapters.ts   ← the ledger. Order, ids, camera placement, HUD copy,
                             per-slide atmosphere. THE source of truth.
         │
-        ├──► Deck.tsx renders one <Beat> + <Section> per entry, in ledger order
+        ├──► Chapters.tsx renders one <Spacer> + <Section> per entry, in ledger
         ├──► the scroll conductor derives anchors from each entry's `weight`
         ├──► the world derives camera waypoints from `u` / `yaw` / `pitch` /
         │      `fill` / `lift` — you never author a camera position
@@ -37,18 +37,19 @@ the camera.
 Four files, in this order. TypeScript will fail the build if you miss one — the
 unions and the `Record<ChapterId, …>` map are exhaustive on purpose.
 
-**1. `src/config/chapters.ts`** — add the id to *both* unions, then add the entry
+**1. `src/config/chapters.ts`** — add the id to the union, then add the entry
 at the position in the array where you want it to appear.
 
 ```ts
-export type ChapterId = … | 'pricing';   // ledger key + the beat's data-chapter
-export type SectionId = … | 'pricing';   // the <section> id / in-page anchor
+// One kebab-case key per slide. It is the ledger key, the spacer's
+// data-chapter, the <section> id / in-page anchor, the `.chapter` modifier
+// class and the stylesheet name — keep all five spellings identical.
+export type ChapterId = … | 'pricing';
 ```
 
 ```ts
 {
   id: 'pricing',
-  elementId: 'pricing',
   weight: 1.30,            // slide length in viewport heights — dwell time
   num: '08', jp: '価格', code: 'SCR·08',
   title: 'PRICING',        // HUD caption
@@ -64,18 +65,20 @@ export type SectionId = … | 'pricing';   // the <section> id / in-page anchor
 }
 ```
 
-`id` and `elementId` are separate on purpose — chapter 1 is `arrival` / `hero`.
-Keep them the same for new slides unless you have a reason.
+Name the id after the slide's title, in kebab-case, and give the component and
+the stylesheet the same name (`take-control` → `TakeControl.tsx` →
+`chapters/take-control.css`). There is no second id field to keep in sync.
 
-**2. `src/components/chapters/Pricing.tsx`** — copy the shape of `Local.tsx`
-(a simple one; `Cockpit.tsx` is the complex one).
+**2. `src/components/chapters/Pricing.tsx`** — copy the shape of
+`SystemDesign.tsx` (a simple one; `FleetControl/FleetControl.tsx` is the
+complex one).
 
 ```tsx
 import type { ChapterProps } from './types';
 
 export function Pricing({ sectionRef }: ChapterProps) {
   // className and id MUST be constant literals, and this element must never
-  // receive a `style` prop — see the PANEL DOM CONTRACT in Beat.tsx.
+  // receive a `style` prop — see the PANEL DOM CONTRACT in Spacer.tsx.
   return (
     <section className="chapter pricing" id="pricing" aria-labelledby="pricing-title" ref={sectionRef}>
       <div className="chapter-inner">
@@ -129,12 +132,12 @@ on a yawed screen becomes a roll.
 
 ## Remove a slide
 
-1. Delete its entry from `CHAPTERS` and its id from both unions.
+1. Delete its entry from `CHAPTERS` and its id from the `ChapterId` union.
 2. Delete the component and its entry in `index.ts`.
 3. Delete its CSS file and the `@import`.
 4. **Check for in-page anchors pointing at it.** These exist today:
-   - `Hero.tsx` → `href="#control"` and `href="#boot"`
-   - `Cta.tsx` → `href="#hero"`
+   - `Orientation.tsx` → `href="#chaos"` and `href="#take-control"`
+   - `TakeControl.tsx` → `href="#orientation"`
 
    A dangling `href="#removed"` fails silently — the click just does nothing.
    `grep -rn 'href="#' src` after any removal.
@@ -147,9 +150,9 @@ waypoints; a single point has no curve to travel along.
 
 ## Reorder slides
 
-Move the entry within the `CHAPTERS` array. That's the whole edit — beats,
-panels, camera path and rail all read the array in order, and `Deck.tsx` renders
-from it.
+Move the entry within the `CHAPTERS` array. That's the whole edit — spacers,
+panels, camera path and rail all read the array in order, and `Chapters.tsx`
+renders from it.
 
 Renumber `num` / `code` to match, or the HUD will read `05` on the third slide.
 
@@ -174,7 +177,7 @@ className string whenever the prop value changes, which would silently delete
 `.as-panel` and collapse the slide's layout mid-scroll — with no error. Put any
 dynamic state on a descendant or a `data-*` attribute.
 
-The full contract is at the top of `src/components/chapters/Beat.tsx`. A dev-only
+The full contract is at the top of `src/components/chapters/Spacer.tsx`. A dev-only
 `MutationObserver` shouts in the console if either is violated.
 
 Everything *inside* a slide is normal React. Update it freely.
@@ -204,7 +207,7 @@ Everything *inside* a slide is normal React. Update it freely.
 
 ```bash
 pnpm build && pnpm lint          # the unions and the component map are exhaustive
-node scripts/verify-world.mjs    # 26 checks: boots, panels mount, scroll drives
+node scripts/verify-world.mjs    # 32 checks: boots, panels mount, scroll drives
                                  # the camera, fallback + teardown are clean
 ```
 

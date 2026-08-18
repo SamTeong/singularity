@@ -2,26 +2,26 @@
 import type { CSSProperties } from 'react';
 import type { ChapterProps } from './types';
 
-export function Local({ sectionRef }: ChapterProps) {
+export function SystemDesign({ sectionRef }: ChapterProps) {
   return (
     // className/id are constant literals and this section never receives a
     // `style` prop — Phase 4 adds `.as-panel` to classList and writes
     // width/height/display/opacity directly on this node every frame. A
     // React-driven className rewrite would silently drop `.as-panel` and
     // collapse the panel mid-scroll.
-    <section className="chapter local" id="local" aria-labelledby="local-title" ref={sectionRef}>
-      <div className="chapter-inner local-grid">
+    <section className="chapter system-design" id="system-design" aria-labelledby="system-design-title" ref={sectionRef}>
+      <div className="chapter-inner system-design-grid">
         <div>
           <div className="eyebrow">
-            <span className="jp">局所</span>LOCAL-FIRST ARCHITECTURE
+            <span className="jp">局所</span>SYSTEM DESIGN
           </div>
-          <h2 className="display" id="local-title">
+          <h2 className="display" id="system-design-title">
             YOUR MACHINE.<br />
             <span className="mint">YOUR STATE.</span>
             <br />
             YOUR AGENTS.
           </h2>
-          <p className="lead">The daemon binds to <strong>localhost only</strong>. It serves the browser shell, manages agent PTYs, and keeps owned state under your configured Singularity home.</p>
+          <p className="lead">The daemon binds to <strong>localhost only</strong>. It serves the browser shell, manages agent terminals, and keeps owned state under your configured Singularity home.</p>
           <div className="security-list">
             <div className="security-row">
               <span className="key">BIND</span>

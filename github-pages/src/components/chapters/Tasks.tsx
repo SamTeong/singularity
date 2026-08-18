@@ -6,7 +6,7 @@ function flowItemClass(i: number, current: number): string {
   return 'flow-item' + (i < current ? ' done' : i === current ? ' now' : '');
 }
 
-export function Workflow({ sectionRef }: ChapterProps) {
+export function Tasks({ sectionRef }: ChapterProps) {
   const { index, step, show } = useFlowStepper();
 
   return (
@@ -14,9 +14,9 @@ export function Workflow({ sectionRef }: ChapterProps) {
     // is passed here — Phase 4 adds `.as-panel` to this element's classList
     // and writes width/height/display/opacity on it every frame; a computed
     // className or a style prop would fight that and drop the class.
-    <section className="chapter workflow" id="workflow" aria-labelledby="workflow-title" ref={sectionRef}>
+    <section className="chapter tasks" id="tasks" aria-labelledby="tasks-title" ref={sectionRef}>
       <div className="chapter-inner">
-        <div className="section-head"><span className="idx">05</span><span className="jp">流程</span><h2 id="workflow-title">WORK MOVES. CONTEXT STAYS ATTACHED.</h2></div>
+        <div className="section-head"><span className="idx">05</span><span className="jp">流程</span><h2 id="tasks-title">GET TASKS DONE. CONTEXT STAYS ATTACHED.</h2></div>
         <p className="lead">A task is not just a card. It binds the requirement, branch, worktree, live session, transcript, and final review into one operational record.</p>
         <div className="flow" role="group" aria-label="Task workflow">
           <button className={flowItemClass(0, index)} data-step="0" onClick={() => show(0, true)}>

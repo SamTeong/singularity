@@ -9,7 +9,7 @@ const AUTOPLAY_MS = 4200;
 const INITIAL_INDEX = 2; // source L986: `let flowIndex = 2`
 
 // Module-level seam for the source's `updateDom` side effect at L1451:
-//   if (c.id === 'workflow' && !RM) { showFlow(0, true); }
+//   if (c.id === 'tasks' && !RM) { showFlow(0, true); }
 // The world calls onChapter(index); App translates that into requestFlowReset()
 // so src/world/ never has to import deck code. Mirrors renderTerminal(), which
 // is module-level imperative for the same reason (L1450).

@@ -3,28 +3,28 @@
 import { useCallback, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 
-export type CockpitView = 'sessions' | 'tasks' | 'automation' | 'usage';
+export type FleetControlView = 'sessions' | 'tasks' | 'automation' | 'usage';
 
-const VIEWS: readonly CockpitView[] = ['sessions', 'tasks', 'automation', 'usage'];
+const VIEWS: readonly FleetControlView[] = ['sessions', 'tasks', 'automation', 'usage'];
 
 export interface UseTabsResult {
-  view: CockpitView;
-  views: readonly CockpitView[];
-  select: (view: CockpitView, focus?: boolean) => void;
-  registerTab: (view: CockpitView) => (el: HTMLButtonElement | null) => void;
-  handleKeyDown: (event: KeyboardEvent<HTMLButtonElement>, view: CockpitView) => void;
+  view: FleetControlView;
+  views: readonly FleetControlView[];
+  select: (view: FleetControlView, focus?: boolean) => void;
+  registerTab: (view: FleetControlView) => (el: HTMLButtonElement | null) => void;
+  handleKeyDown: (event: KeyboardEvent<HTMLButtonElement>, view: FleetControlView) => void;
 }
 
 export function useTabs(): UseTabsResult {
-  const [view, setView] = useState<CockpitView>('sessions');
-  const tabRefs = useRef<Record<CockpitView, HTMLButtonElement | null>>({
+  const [view, setView] = useState<FleetControlView>('sessions');
+  const tabRefs = useRef<Record<FleetControlView, HTMLButtonElement | null>>({
     sessions: null,
     tasks: null,
     automation: null,
     usage: null,
   });
 
-  const select = useCallback((next: CockpitView, focus = false) => {
+  const select = useCallback((next: FleetControlView, focus = false) => {
     setView(next);
     // Source L896: `if (on && focus) tab.focus()`, called synchronously in
     // the handler. The target element already exists in the DOM (all four
@@ -35,14 +35,14 @@ export function useTabs(): UseTabsResult {
   }, []);
 
   const registerTab = useCallback(
-    (id: CockpitView) => (el: HTMLButtonElement | null) => {
+    (id: FleetControlView) => (el: HTMLButtonElement | null) => {
       tabRefs.current[id] = el;
     },
     [],
   );
 
   const handleKeyDown = useCallback(
-    (event: KeyboardEvent<HTMLButtonElement>, id: CockpitView) => {
+    (event: KeyboardEvent<HTMLButtonElement>, id: FleetControlView) => {
       const i = VIEWS.indexOf(id);
       if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
         event.preventDefault();

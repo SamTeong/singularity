@@ -19,7 +19,7 @@ const COPY_STATE_TEXT: Record<'idle' | 'copied' | 'blocked', string> = {
   blocked: 'COPY BLOCKED · SELECT THE COMMAND MANUALLY',
 };
 
-export function Cta({ sectionRef }: ChapterProps) {
+export function TakeControl({ sectionRef }: ChapterProps) {
   const { status, copy } = useCopyCommand(INSTALL_COMMAND);
   const conductor = useConductor();
 
@@ -29,13 +29,13 @@ export function Cta({ sectionRef }: ChapterProps) {
     // width/height/display/opacity directly on this node every frame. A
     // React-driven className rewrite would silently drop `.as-panel` and
     // collapse the panel mid-scroll.
-    <section className="chapter cta" id="boot" aria-labelledby="boot-title" ref={sectionRef}>
+    <section className="chapter take-control" id="take-control" aria-labelledby="take-control-title" ref={sectionRef}>
       <div className="chapter-inner">
-        <div className="cta-jp">開始</div>
-        <h2 className="display" id="boot-title">
+        <div className="take-control-jp">開始</div>
+        <h2 className="display" id="take-control-title">
           TAKE <span className="mint">CONTROL.</span>
         </h2>
-        <p className="cta-sub">FROM ONE TERMINAL TO ONE CONTROL PLANE.</p>
+        <p className="take-control-sub">FROM ONE TERMINAL TO ONE CONTROL PLANE.</p>
         <div className="install">
           <div className="install-head">
             <span>BOOT SEQUENCE · FIRST RUN</span>
@@ -49,19 +49,19 @@ export function Cta({ sectionRef }: ChapterProps) {
         <div className="copy-state" id="copyState" role="status" aria-live="polite">
           {COPY_STATE_TEXT[status]}
         </div>
-        <div className="cta-actions">
+        <div className="take-control-actions">
           <a className="btn primary" href="https://github.com/SamTeong/singularity">
             OPEN REPOSITORY
           </a>
-          {/* This panel IS hit-testable (unlike the hero's — see Hud.tsx), so the
-              click lands here. Only the href is useless in 3D mode: #hero lives
+          {/* This panel IS hit-testable (unlike orientation's — see Hud.tsx), so the
+              click lands here. Only the href is useless in 3D mode: #orientation lives
               in #css3d at position:fixed, so fragment navigation scrolls
               nowhere. Keep it for the flat page, where conductor is null, and
               hand 3D mode to the conductor instead. */}
           <a
             className="btn alt"
-            id="ctaReturn"
-            href="#hero"
+            id="takeControlReturn"
+            href="#orientation"
             onClick={(e) => {
               if (!conductor) return;
               e.preventDefault();

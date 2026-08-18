@@ -16,7 +16,7 @@ import { anchorOf, framingDistance } from './cameraPath';
 import { buildPanel, remeasurePanel, type Panel } from './panels';
 import { addAtmosphere } from './atmosphere';
 import { drawDebugCurves, updateDebug } from './debug';
-import { clearBeatHeights } from './beatLayout';
+import { clearSpacerHeights } from './spacerLayout';
 import { fetchModelBuffer, parseModel, fitModel } from './loadModel';
 import type { WorldOptions, World, ConductorState } from './types';
 
@@ -350,7 +350,7 @@ export function createWorld(o: WorldOptions): World {
     buildCurves();
     ready = true; // before start() — updateWorld fires on the first tick
     conductor = createScrollConductor({
-      sections: o.beats,
+      sections: o.spacers,
       weights: CHAPTERS.map((c) => c.weight),
       damping: 5.2,
       reducedMotion: o.reducedMotion,
@@ -490,7 +490,7 @@ export function createWorld(o: WorldOptions): World {
       // style attribute, drop it wholesale rather than leaving `style=""`.
       if (el.getAttribute('style')?.trim() === '') el.removeAttribute('style');
     });
-    clearBeatHeights(o.beats);
+    clearSpacerHeights(o.spacers);
   }
 
   function disposeSceneObjects(): void {

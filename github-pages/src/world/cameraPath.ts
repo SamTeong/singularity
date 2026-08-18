@@ -2,7 +2,7 @@
 import * as THREE from 'three';
 import type { ChapterEntry } from '../config/chapters';
 
-/** Top bar + beat caption own ~16% of the viewport height, so a screen only
+/** Top bar + chapter caption own ~16% of the viewport height, so a screen only
  *  gets to "fill" 84% of it before it's considered framed. Recomputed on
  *  resize via framingDistance(), so framing survives any aspect — including
  *  portrait phones. */

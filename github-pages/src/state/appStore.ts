@@ -55,7 +55,7 @@ export function useConductor(): Conductor | null {
 
 // Fired by the world at the end of buildPanels() and onResize() — the two
 // places the source calls drawChart() directly (L1487, L1599). Required,
-// not belt-and-braces: buildPanels() resizes the cockpit section from
+// not belt-and-braces: buildPanels() resizes the fleet control section from
 // viewport-wide to a fixed 1460px panel with no window `resize` event, so
 // without this signal the usage chart would size itself for the flat layout
 // forever. `useUsageChart` subscribes to this AND to window `resize` — the

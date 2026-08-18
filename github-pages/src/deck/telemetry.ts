@@ -1,4 +1,4 @@
-// Shared telemetry store. `useTelemetryEngine` (mounted once, in Cockpit) is
+// Shared telemetry store. `useTelemetryEngine` (mounted once, in FleetControl) is
 // the sole writer; leaf components (Metric, the three live spans, #usdToday,
 // #tpmValue) are readers via `useTelemetryField`, subscribed individually so
 // a tick re-renders ~7 tiny components instead of the whole console.

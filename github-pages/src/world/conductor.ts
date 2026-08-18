@@ -6,14 +6,14 @@
 // Two deliberate additions over the source, both required by this port's
 // React lifecycle (the source never tore itself down):
 //
-//  - `weights`/`applyBeatHeights`: the source's standalone `sizeBeats()` is
-//    folded into measure() so beat-height-setting and anchor measurement
+//  - `weights`/`applySpacerHeights`: the source's standalone `sizeBeats()` is
+//    folded into measure() so spacer-height-setting and anchor measurement
 //    always share one `innerHeight` snapshot — see measure() below.
 //  - `stop()`: a real teardown the source never needed. Order matters at
 //    call time (see createWorld.ts's destroy()) — stop() must run before
 //    the DOM the conductor's listeners/ResizeObserver reference is touched.
 import { clamp, damp } from '../lib/math';
-import { applyBeatHeights } from './beatLayout';
+import { applySpacerHeights } from './spacerLayout';
 import type { ConductorState } from './types';
 
 export interface ScrollConductorOptions {
@@ -32,7 +32,7 @@ export interface ScrollConductor {
   getState(): ConductorState;
   goTo(index: number): void;
   /** Inverse of progressAt — lets a resize restore the same story position
-   *  after the beats are re-measured against the new viewport height. */
+   *  after the spacers are re-measured against the new viewport height. */
   setProgress(p: number): void;
 }
 
@@ -55,11 +55,11 @@ export function createScrollConductor(opts: ScrollConductorOptions): ScrollCondu
   const maxScroll = (): number => Math.max(1, document.documentElement.scrollHeight - innerHeight);
 
   function measure(): void {
-    // ONE innerHeight snapshot drives both the beat heights and the anchor
+    // ONE innerHeight snapshot drives both the spacer heights and the anchor
     // maths below — reading it twice risks the layout shifting between the
-    // two reads (the beat heights themselves change scrollHeight).
+    // two reads (the spacer heights themselves change scrollHeight).
     const vh = innerHeight;
-    applyBeatHeights(els, weights, vh);
+    applySpacerHeights(els, weights, vh);
     const max = Math.max(1, document.documentElement.scrollHeight - vh);
     widthAtMeasure = innerWidth;
     anchors = els.map((el, i) => {

@@ -31,12 +31,12 @@ export interface WorldOptions {
    *  can only ever bind one live WebGL context, so the world must own and
    *  create its own — never adopt a canvas React already rendered. */
   stage: HTMLElement;
-  /** The 7 `.beat` wrapper `<div>`s, index-aligned with CHAPTERS. The
+  /** The 7 `.chapter-spacer` wrapper `<div>`s, index-aligned with CHAPTERS. The
    *  conductor measures/sizes these directly (conductor.ts measure()). */
-  beats: HTMLElement[];
+  spacers: HTMLElement[];
   /** The 7 `<section class="chapter …">` elements, index-aligned with
    *  CHAPTERS. The world takes DOM ownership of these via CSS3DObject —
-   *  see Beat.tsx's PANEL DOM CONTRACT for the invariants this depends on. */
+   *  see Spacer.tsx's PANEL DOM CONTRACT for the invariants this depends on. */
   panels: HTMLElement[];
   reducedMotion: boolean;
   debug: boolean;
@@ -56,7 +56,7 @@ export interface WorldOptions {
   onFrame(state: ConductorState): void;
   /** Chapter change only — setState is fine. Also the hook for chapter-id
    *  conditional side effects the source's updateDom() ran inline (L1450-51:
-   *  renderTerminal() for 'control', showFlow(0,true) for 'workflow') —
+   *  renderTerminal() for 'fleet-control', showFlow(0,true) for 'tasks') —
    *  those are src/deck/-owned and must be triggered from here, not from
    *  inside src/world/. */
   onChapter(index: number): void;

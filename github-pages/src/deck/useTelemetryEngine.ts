@@ -1,5 +1,5 @@
 // Source L1538-1579 — the 4Hz (260ms) mechanical pulse that makes the
-// cockpit read as a live console instead of a screenshot.
+// fleet control read as a live console instead of a screenshot.
 
 import { useEffect } from 'react';
 import type { RefObject } from 'react';
@@ -10,14 +10,14 @@ import { setTelemetry } from './telemetry';
 import { pushTerm } from './useTerminal';
 import { pushChartSample } from './chartData';
 import { liveRows } from './data';
-import type { CockpitView } from './useTabs';
+import type { FleetControlView } from './useTabs';
 
 interface TelemetryEngineOptions {
-  /** Ref to the `<section id="control">` DOM node — see the guard below. */
+  /** Ref to the `<section id="fleet-control">` DOM node — see the guard below. */
   sectionRef: RefObject<HTMLElement | null>;
   /** Currently active console tab; read through a ref so it never restarts
    *  this effect (see the dependency-array note below). */
-  view: CockpitView;
+  view: FleetControlView;
 }
 
 export function useTelemetryEngine({ sectionRef, view }: TelemetryEngineOptions): void {
@@ -39,8 +39,8 @@ export function useTelemetryEngine({ sectionRef, view }: TelemetryEngineOptions)
     let today = 18.42;
 
     const id = window.setInterval(() => {
-      // `#control`'s inline `style.display` is the exact property Phase 4's
-      // culling loop writes every frame once the cockpit section is mounted
+      // `#fleet-control`'s inline `style.display` is the exact property Phase 4's
+      // culling loop writes every frame once the fleet control section is mounted
       // as a CSS3DObject (source L1423, `panel.el.style.display = on ? '' :
       // 'none'`) — reading it here is how the tick learns to stop while the
       // panel is off-screen. Read through a ref to the real node, and via
@@ -48,8 +48,8 @@ export function useTelemetryEngine({ sectionRef, view }: TelemetryEngineOptions)
       // force a layout 4x/sec and, more importantly, is not the property
       // Phase 4 actually writes. Cross-layer dependency: do not change what
       // Phase 4 writes without updating this read, and vice versa.
-      const cockpit = sectionRef.current;
-      if (!cockpit || cockpit.style.display === 'none') return;
+      const fleetControl = sectionRef.current;
+      if (!fleetControl || fleetControl.style.display === 'none') return;
       tickN++;
 
       const cpu = clamp(Math.round(34 + Math.sin(tickN / 7) * 15 + (Math.random() - 0.5) * 8), 5, 97);

@@ -1,6 +1,6 @@
 // Barrel for src/deck/ — the deck's simulation logic (data, telemetry
 // store, hooks, and the small presentational components that read them).
-// Consumed by src/components/chapters/{cockpit/*,Workflow,Capabilities,Cta}.tsx.
+// Consumed by src/components/chapters/{FleetControl/*,Tasks,AgentHarness,TakeControl}.tsx.
 
 export { TONES, termRows, liveRows, flowData, seedChartData } from './data';
 export type { ToneName, TermKind, TermRowSeed, FlowStep } from './data';
@@ -22,7 +22,7 @@ export { useUptime } from './useUptime';
 export { useTelemetryEngine } from './useTelemetryEngine';
 export { useUsageChart } from './useUsageChart';
 export { useTabs } from './useTabs';
-export type { CockpitView, UseTabsResult } from './useTabs';
+export type { FleetControlView, UseTabsResult } from './useTabs';
 export { useFlowStepper } from './useFlowStepper';
 export type { UseFlowStepperResult } from './useFlowStepper';
 export { useCopyCommand } from './useCopyCommand';

@@ -16,7 +16,8 @@
 //      state goes on a descendant or a data-* attribute. React rewrites the whole
 //      className string on change and would silently delete `.as-panel`,
 //      collapsing the panel's layout mid-scroll with no error.
-//  I5  No sibling may be inserted into <main> adjacent to a .beat after mount.
+//  I5  No sibling may be inserted into <main> adjacent to a .chapter-spacer after
+//      mount.
 //  I6  World-owned mutations on the <section>, exclusively:
 //          classList: 'as-panel'
 //          style:     width, height, display, opacity
@@ -26,20 +27,20 @@
 import type { ReactNode, Ref } from 'react';
 import type { ChapterEntry } from '../../config/chapters';
 
-interface BeatProps {
+interface SpacerProps {
   chapter: ChapterEntry;
   children: ReactNode;
   /** The conductor measures these wrappers and owns their inline height. */
-  beatRef?: Ref<HTMLDivElement>;
+  spacerRef?: Ref<HTMLDivElement>;
 }
 
-export function Beat({ chapter, children, beatRef }: BeatProps) {
+export function Spacer({ chapter, children, spacerRef }: SpacerProps) {
   // data-weight={chapter.weight} renders as e.g. "1.3" for a weight of 1.30 —
   // that's fine, parseFloat is identical either way, and the DOM attribute is
   // decorative. The conductor reads CHAPTERS[i].weight, not the attribute.
   // Do not "fix" this by stringifying with trailing zeros.
   return (
-    <div className="beat" data-chapter={chapter.id} data-weight={chapter.weight} ref={beatRef}>
+    <div className="chapter-spacer" data-chapter={chapter.id} data-weight={chapter.weight} ref={spacerRef}>
       {children}
     </div>
   );

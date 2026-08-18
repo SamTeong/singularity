@@ -23,8 +23,8 @@
 .stamp{display:inline-flex;align-items:center;justify-content:center;min-height:24px;padding:2px 9px;border:1px solid currentColor;border-radius:2px;font-size:9px;line-height:1;letter-spacing:.12em;text-transform:uppercase;white-space:nowrap}
 .c-mint{color:var(--mint)}.c-blue{color:var(--blue)}.c-amber{color:var(--amber)}.c-red{color:var(--red-hi)}.c-orange{color:var(--orange)}
 .btn{display:inline-flex;min-height:46px;align-items:center;justify-content:center;padding:10px 20px;border:2px solid var(--mint);background:transparent;color:var(--mint);font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.13em;text-transform:uppercase;cursor:pointer}
-.btn:hover{background:var(--mint);color:var(--bg);box-shadow:0 0 12px rgba(82,242,154,.45)}
+.btn:is(:hover,.hit-hover){background:var(--mint);color:var(--bg);box-shadow:0 0 12px rgba(82,242,154,.45)}
 .btn.alt{border-color:var(--orange);color:var(--orange)}
-.btn.alt:hover{background:var(--orange);color:var(--bg);box-shadow:0 0 12px rgba(242,100,0,.42)}
+.btn.alt:is(:hover,.hit-hover){background:var(--orange);color:var(--bg);box-shadow:0 0 12px rgba(242,100,0,.42)}
 .btn.primary{animation:btnblink 1s steps(1) infinite}
 .btn:focus-visible,.tab:focus-visible,.module:focus-visible,.sx-rail button:focus-visible,.sx-links a:focus-visible{outline:2px solid var(--paper);outline-offset:3px}

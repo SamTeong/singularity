@@ -9,16 +9,16 @@ import { useLayoutEffect, useRef } from 'react';
 import { CHAPTERS } from '../config/chapters';
 import { restoreScroll } from '../app/scrollRestore';
 import { guardPanelContract } from '../deck/panelContractGuard';
-import { applyBeatHeights, clearBeatHeights } from './beatLayout';
+import { applySpacerHeights, clearSpacerHeights } from './spacerLayout';
 import type { World, WorldOptions } from './types';
 
-export interface ThreeWorldProps extends Omit<WorldOptions, 'stage' | 'beats' | 'panels'> {
+export interface ThreeWorldProps extends Omit<WorldOptions, 'stage' | 'spacers' | 'panels'> {
   /** Getters, not arrays: the registries are populated by ref callbacks during
    *  the SAME commit that renders this component, so the arrays do not exist
    *  yet at render time. React attaches every ref in a commit before running
    *  any effect in that commit, so calling these from the layout effect below
-   *  is safe and has no mount-order coupling with <Deck/>. */
-  getBeats: () => HTMLElement[];
+   *  is safe and has no mount-order coupling with <Chapters/>. */
+  getSpacers: () => HTMLElement[];
   getPanels: () => HTMLElement[];
   /** Fires once the World instance exists, before boot() is called — lets the
    *  owner wire the chapter rail's onClick to world.goTo(). */
@@ -45,7 +45,7 @@ export function ThreeWorld(props: ThreeWorldProps) {
     const stage = stageRef.current;
     if (!stage) return;
 
-    const beats = props.getBeats();
+    const spacers = props.getSpacers();
     const panels = props.getPanels();
 
     // Captured ONCE, here. destroy() must never re-read the registry: React 19
@@ -58,7 +58,7 @@ export function ThreeWorld(props: ThreeWorldProps) {
     // so a mid-page reload can restore the reader's position. Without this the
     // page is at flat height for the whole download and the browser scrolls to
     // the top. fail()/restoreDom() unwind it.
-    applyBeatHeights(beats, WEIGHTS, window.innerHeight);
+    applySpacerHeights(spacers, WEIGHTS, window.innerHeight);
     // The document now has its final height, so a saved offset can actually be
     // applied. Must be here — before boot(), and therefore long before
     // conductor.start() seeds itself from the live scrollY.
@@ -74,7 +74,7 @@ export function ThreeWorld(props: ThreeWorldProps) {
       try {
         const { createWorld } = await import('./createWorld');
         if (!alive) return;
-        world = createWorld({ stage, beats, panels, ...props });
+        world = createWorld({ stage, spacers, panels, ...props });
         props.onReady?.(world);
         world.boot();
       } catch (err) {
@@ -91,7 +91,7 @@ export function ThreeWorld(props: ThreeWorldProps) {
       unguard();
       // Covers the case where the world was never created (unmounted during
       // the dynamic import) and therefore never ran restoreDom().
-      clearBeatHeights(beats);
+      clearSpacerHeights(spacers);
     };
     // Deliberately empty: this effect is a mount-once bridge (see comment
     // above), not a reaction to `props`.
