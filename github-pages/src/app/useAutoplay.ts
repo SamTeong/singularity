@@ -22,7 +22,7 @@ import { CHAPTERS } from '../config/chapters';
 import { stepCount, stepProgress } from '../deck/useScrollStep';
 import { REDUCED_MOTION } from '../lib/env';
 import { getChapterIndex, getChapterStep, getConductor } from '../state/appStore';
-import { visibleChapter } from './chapterPosition';
+import { chapterTop, visibleChapter } from './chapterPosition';
 
 /** How long the tour stands still at a stop, every stop. */
 const DWELL_MS = 5000;
@@ -80,8 +80,7 @@ export function useAutoplay(enabled: boolean, is3D: boolean): void {
         const at = stop.step === null ? stop.chapter : stepProgress(stop.chapter, stop.step);
         return conductor.topAt(at);
       }
-      const el = document.getElementById(CHAPTERS[stop.chapter].id);
-      return el ? Math.round(el.getBoundingClientRect().top + window.scrollY) : 0;
+      return chapterTop(stop.chapter);
     }
 
     function glide(to: number, rate: number, done: () => void): void {
