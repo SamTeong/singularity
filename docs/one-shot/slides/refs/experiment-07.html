@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPERIMENT-07 · COUNTDOWN WALL</title>
+<style>
+:root{
+  --bg:#0A0A0A;--orange:#F26400;--amber:#F49F09;--red:#E2280F;--crimson:#E60225;
+  --mint:#52F29A;--board:#101008;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:#000;overflow:hidden;font-family:var(--mono);text-transform:uppercase;
+  display:flex;align-items:center;justify-content:center}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,.6) 100%)}
+
+/* the board — a physical plate, slightly rotated */
+.board{
+  width:min(94vw,1240px);background:var(--bg);
+  border:3px solid #2a2a1c;outline:1px solid #1a1a10;
+  transform:rotate(-1.6deg);position:relative;
+  padding:34px 40px 0;
+  box-shadow:0 0 60px rgba(242,100,0,.08),inset 0 0 40px rgba(0,0,0,.8);
+}
+/* bolts */
+.board i{position:absolute;width:7px;height:7px;border-radius:50%;background:#3a3a28}
+.board i:nth-child(1){top:8px;left:10px}.board i:nth-child(2){top:8px;right:10px}
+.board i:nth-child(3){bottom:8px;left:10px}.board i:nth-child(4){bottom:8px;right:10px}
+
+.hazard{position:absolute;top:0;right:0;width:120px;height:56px;
+  background:repeating-linear-gradient(-45deg,var(--crimson) 0 12px,#000 12px 24px);
+  clip-path:polygon(100% 0,100% 100%,0 0)}
+
+.toprow{display:flex;justify-content:space-between;align-items:flex-start;gap:30px}
+.caption{color:var(--orange);font-size:13px;letter-spacing:.2em;
+  text-shadow:0 0 5px rgba(242,100,0,.5)}
+.caption .jpv{font-family:var(--jp);font-weight:800;font-size:17px;letter-spacing:.4em;text-transform:none}
+
+.plates{display:flex;gap:12px}
+.plate{border:2px solid var(--orange);padding:5px 18px;text-align:center;color:var(--orange)}
+.plate .jp{font-family:var(--jp);font-weight:800;font-size:30px;letter-spacing:.3em;text-transform:none;line-height:1.15}
+.plate .en{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.3em}
+.plate.dim{opacity:.25}
+
+.segrow{display:flex;align-items:center;justify-content:center;gap:2vw;padding:5vh 0 4vh}
+.segrow svg{filter:drop-shadow(0 0 5px rgba(242,100,0,.9)) drop-shadow(0 0 18px rgba(242,100,0,.35))}
+.colon{display:flex;flex-direction:column;gap:5vh}
+.colon b{width:1.4vw;height:1.4vw;background:var(--orange);display:block}
+
+.moderail{display:flex;border-top:2px solid var(--orange);margin:0 -40px;padding:14px 40px;gap:10px;
+  background:rgba(242,100,0,.04)}
+.mode{flex:1;border:2px solid var(--orange);background:transparent;color:var(--orange);
+  font-family:var(--cond);font-weight:700;font-size:16px;letter-spacing:.16em;text-transform:uppercase;
+  padding:9px 0;cursor:pointer}
+.mode.active{background:var(--orange);color:#000}
+.mode:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+
+.zero .segrow svg{filter:drop-shadow(0 0 5px rgba(226,40,15,.9)) drop-shadow(0 0 18px rgba(226,40,15,.5))}
+.zerostamp{
+  position:absolute;left:50%;top:46%;transform:translate(-50%,-50%) rotate(-7deg);z-index:5;
+  border:3px solid var(--red);color:var(--red);background:var(--bg);display:none;
+  font-family:var(--cond);font-weight:700;font-size:44px;letter-spacing:.2em;padding:6px 40px;
+  text-shadow:0 0 8px currentColor;animation:blink .5s steps(1) infinite;
+}
+.zero .zerostamp{display:block}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.zerostamp{animation:none}}
+</style>
+</head>
+<body>
+
+<div class="board" id="board">
+  <i></i><i></i><i></i><i></i>
+  <div class="hazard"></div>
+
+  <div class="toprow">
+    <div class="caption">
+      <span class="jpv">残存活動時間</span><br><br>
+      ACTIVE TIME REMAINING:
+    </div>
+    <div class="plates">
+      <div class="plate" id="pl-int"><div class="jp">内部</div><div class="en">Internal</div></div>
+      <div class="plate dim" id="pl-ext"><div class="jp">外部</div><div class="en">External</div></div>
+    </div>
+  </div>
+
+  <div class="segrow" id="segrow"></div>
+  <div class="zerostamp">LIMIT REACHED</div>
+
+  <div class="moderail" role="group" aria-label="Burn rate">
+    <button class="mode" data-r="0">STOP</button>
+    <button class="mode" data-r="0.25">SLOW</button>
+    <button class="mode active" data-r="1">NORMAL</button>
+    <button class="mode" data-r="10">RACING</button>
+    <button class="mode" data-r="reset" style="border-color:var(--mint);color:var(--mint)">RESET</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+/* if loaded in a hidden/zero-size viewport, re-init once it has real size */
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+/* Giant 7-seg countdown. Digits are inline SVG polygons (no fonts).
+   Mode rail changes burn rate; zero state flips the wall red. */
+
+const SEGMAP={0:"abcdef",1:"bc",2:"abged",3:"abgcd",4:"fgbc",5:"afgcd",6:"afgedc",7:"abc",8:"abcdefg",9:"abcfgd"};
+/* proper hexagonal LED segments in a 46x64 box, italic slant via skew */
+const SEGPTS={
+  a:"7,4 10.5,0.5 29.5,0.5 33,4 29.5,7.5 10.5,7.5",
+  b:"36,7 39.5,10.5 39.5,27.5 36,31 32.5,27.5 32.5,10.5",
+  c:"36,33 39.5,36.5 39.5,53.5 36,57 32.5,53.5 32.5,36.5",
+  d:"7,60 10.5,56.5 29.5,56.5 33,60 29.5,63.5 10.5,63.5",
+  e:"4,33 7.5,36.5 7.5,53.5 4,57 0.5,53.5 0.5,36.5",
+  f:"4,7 7.5,10.5 7.5,27.5 4,31 0.5,27.5 0.5,10.5",
+  g:"7,32 10.5,28.5 29.5,28.5 33,32 29.5,35.5 10.5,35.5"
+};
+const NS="http://www.w3.org/2000/svg";
+const segrow=document.getElementById("segrow");
+const DIGW=Math.min(innerWidth*.11,150);
+
+function makeDigit(){
+  const svg=document.createElementNS(NS,"svg");
+  svg.setAttribute("width",DIGW);svg.setAttribute("height",DIGW*1.6);
+  svg.setAttribute("viewBox","0 0 46 64");
+  for(const k of "abcdefg"){
+    const p=document.createElementNS(NS,"polygon");
+    p.setAttribute("points",SEGPTS[k]);
+    p.setAttribute("data-seg",k);
+    p.setAttribute("transform","translate(6,0) skewX(-6)");
+    svg.appendChild(p);
+  }
+  segrow.appendChild(svg);
+  return svg;
+}
+function addColon(){
+  const c=document.createElement("span");c.className="colon";
+  c.innerHTML="<b></b><b></b>";segrow.appendChild(c);return c;
+}
+const d0=makeDigit(),c1=addColon(),d1=makeDigit(),d2=makeDigit(),c2=addColon(),d3=makeDigit(),d4=makeDigit();
+const digits=[d0,d1,d2,d3,d4];
+
+let remaining=5*60+0, burn=1, acc=0, colonOn=true, zero=false;
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const board=document.getElementById("board");
+
+function color(){return zero?"#E2280F":"#F26400";}
+function renderDigit(svg,val){
+  const lit=SEGMAP[val];
+  for(const p of svg.children){
+    p.setAttribute("fill",lit.includes(p.getAttribute("data-seg"))?color():"rgba(242,100,0,.06)");
+  }
+}
+function render(){
+  const h=Math.floor(remaining/3600),m=Math.floor(remaining%3600/60),s=Math.floor(remaining%60);
+  renderDigit(d0,h%10);
+  renderDigit(d1,Math.floor(m/10));renderDigit(d2,m%10);
+  renderDigit(d3,Math.floor(s/10));renderDigit(d4,s%10);
+  document.querySelectorAll(".colon b").forEach(b=>b.style.background=color());
+}
+render();
+
+/* 100ms burn quantum — RACING visibly chews seconds; render only on change */
+setInterval(()=>{
+  if(external) return;                      /* dark digits = safe, hold state */
+  acc+=burn*.1;
+  let changed=false;
+  while(acc>=1&&remaining>0){remaining--;acc--;changed=true;}
+  if(remaining<=0&&!zero){zero=true;board.classList.add("zero");changed=true;}
+  if(changed) render();
+},100);
+setInterval(()=>{
+  if(external) return;
+  colonOn=!colonOn;
+  c1.style.opacity=c2.style.opacity=(REDUCED||zero)?1:(colonOn?1:0);
+},500);
+
+document.querySelectorAll(".mode").forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    if(btn.dataset.r==="reset"){
+      remaining=5*60;zero=false;board.classList.remove("zero");render();return;
+    }
+    document.querySelectorAll(".mode").forEach(b=>{if(b.dataset.r!=="reset")b.classList.remove("active")});
+    btn.classList.add("active");
+    burn=parseFloat(btn.dataset.r);
+  });
+});
+
+/* supply swap every 40s: external = digits dark = safe */
+let external=false;
+setInterval(()=>{
+  external=!external;
+  document.getElementById("pl-int").classList.toggle("dim",external);
+  document.getElementById("pl-ext").classList.toggle("dim",!external);
+  if(external){
+    digits.forEach(svg=>{for(const p of svg.children)p.setAttribute("fill","rgba(242,100,0,.06)")});
+    c1.style.opacity=c2.style.opacity=.1;
+    burn=0;
+  }else{
+    burn=parseFloat(document.querySelector(".mode.active").dataset.r);
+    render();
+  }
+},40000);
+</script>
+</body>
+</html>

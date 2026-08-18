@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPERIMENT-06 · RESONANCE COMPARISON</title>
+<style>
+:root{
+  --bg:#0A0A0A;--mint:#52F29A;--red:#E2280F;--orange:#F26400;--amber:#F49F09;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);overflow:hidden;font-family:var(--mono);text-transform:uppercase;
+  display:grid;grid-template-columns:1fr 118px 1fr}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.24) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.5) 100%)}
+
+.chart{position:relative;overflow:hidden}
+.chart canvas{position:absolute;inset:0;width:100%;height:100%}
+.titlebar{position:absolute;left:0;right:0;top:0;padding:10px 16px 6px;z-index:5}
+.titlebar h1{
+  font-family:var(--cond);font-weight:700;font-size:19px;letter-spacing:.06em;color:var(--orange);
+  border-bottom:2px solid var(--orange);padding-bottom:4px;display:inline-block;
+  text-shadow:0 0 5px rgba(242,100,0,.4);
+}
+.titlebar .obj{display:block;font-size:11px;color:var(--amber);margin-top:4px;letter-spacing:.1em}
+
+.axis{
+  position:relative;border-left:2px solid var(--orange);border-right:2px solid var(--orange);
+  color:var(--orange);font-size:11px;display:flex;flex-direction:column;
+  justify-content:space-between;align-items:center;padding:14px 4px;text-align:center;z-index:5;
+}
+.axis .fieldlabel{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.12em;line-height:1.3}
+.axis .tick{letter-spacing:.05em}
+
+.stamp{
+  position:absolute;right:16px;top:14px;z-index:6;border:2px solid var(--red);color:var(--red);
+  font-weight:700;font-size:12px;padding:2px 10px;border-radius:2px;display:none;
+  text-shadow:0 0 5px currentColor;animation:blink .5s steps(1) infinite;
+}
+.stamp.show{display:block}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@media (prefers-reduced-motion:reduce){.stamp{animation:none}}
+</style>
+</head>
+<body>
+
+<section class="chart" aria-label="Reference channel">
+  <div class="titlebar">
+    <h1>RESONANCE PATTERN B⁺</h1>
+    <span class="obj">OBJECT: DRIVE CORE / REFERENCE</span>
+  </div>
+  <canvas id="cv-l"></canvas>
+</section>
+
+<div class="axis">
+  <span class="tick">-100<br>+100</span>
+  <span class="fieldlabel">FIELD<br>NEGATIVE</span>
+  <span class="tick">±0</span>
+  <span class="fieldlabel">FIELD<br>POSITIVE</span>
+  <span class="tick">+100<br>-100</span>
+</div>
+
+<section class="chart" aria-label="Live channel">
+  <div class="titlebar">
+    <h1>RESONANCE PATTERN B⁻</h1>
+    <span class="obj">OBJECT: DRIVE CORE / LIVE FEED</span>
+  </div>
+  <canvas id="cv-r"></canvas>
+  <div class="stamp" id="divergence">乖離 · DIVERGENCE</div>
+</section>
+
+<script>
+"use strict";
+/* if loaded in a hidden/zero-size viewport, re-init once it has real size */
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+/* Mirrored green/red interference waveforms drawn as dense line bundles,
+   scrolling in fixed steps. The red channel intermittently diverges,
+   raising a boxed blinking stamp — hue = subject, geometry identical. */
+
+function setup(canvas){
+  const dpr = devicePixelRatio||1;
+  const w = canvas.clientWidth, h = canvas.clientHeight;
+  canvas.width = w*dpr; canvas.height = h*dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.scale(dpr,dpr);
+  return {ctx,w,h};
+}
+const L = setup(document.getElementById("cv-l"));
+const R = setup(document.getElementById("cv-r"));
+
+/* grid of + marks, drawn once per frame under the wave */
+function drawGrid(ctx,w,h){
+  ctx.strokeStyle = "#F26400";
+  ctx.globalAlpha = .55;
+  ctx.lineWidth = 1;
+  const s = 6;
+  for(let x=40;x<w;x+=110){
+    for(let y=60;y<h;y+=96){
+      ctx.beginPath();
+      ctx.moveTo(x-s,y);ctx.lineTo(x+s,y);
+      ctx.moveTo(x,y-s);ctx.lineTo(x,y+s);
+      ctx.stroke();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* the wave: a bundle of NLINE phase-shifted sinusoids braided into an S */
+const NLINE = 26;
+let t = 0, divergence = 0;
+const stamp = document.getElementById("divergence");
+
+function drawWave(o,color,diverge){
+  const {ctx,w,h} = o;
+  ctx.clearRect(0,0,w,h);
+  drawGrid(ctx,w,h);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 1.4;
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 5;
+  for(let i=0;i<NLINE;i++){
+    const ph = i/NLINE*Math.PI*2;
+    ctx.beginPath();
+    ctx.globalAlpha = .5 + .5*(i%3===0);
+    for(let y=0;y<=h;y+=10){
+      const yn = y/h;
+      const envelope = Math.sin(yn*Math.PI);                       /* S-mass */
+      const braid = Math.sin(yn*9 + ph + t) * 34;
+      const drift = Math.sin(yn*2.4 - t*.6 + ph*.4) * w*.22 * envelope;
+      const noise = diverge * Math.sin(yn*31 + t*5 + i) * 46 * envelope;
+      const x = w/2 + drift + braid + noise;
+      y===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.shadowBlur = 0;
+  /* block glyphs riding the wave — tetromino-ish solid marks */
+  ctx.fillStyle = color;
+  for(let k=0;k<3;k++){
+    const yn = ((t*.05 + k*.33)%1);
+    const y = yn*h;
+    const x = w/2 + Math.sin(yn*2.4 - t*.6)*w*.22*Math.sin(yn*Math.PI) - 20;
+    ctx.fillRect(x,y,26,10);
+    ctx.fillRect(x+8,y+10,26,10);
+  }
+}
+
+/* stepped clock: 12 fps, mechanical */
+setInterval(()=>{
+  t += .22;
+  /* divergence events on the live channel */
+  if(divergence<=0 && Math.random()<.012) divergence = 40;   /* ~5s episode */
+  if(divergence>0) divergence--;
+  const dv = divergence>0 ? Math.min(1,divergence/12) : 0;
+  drawWave(L,"#52F29A",0);
+  drawWave(R,"#E2280F",dv);
+  stamp.classList.toggle("show",divergence>0);
+},83);
+
+addEventListener("resize",()=>location.reload());
+</script>
+</body>
+</html>

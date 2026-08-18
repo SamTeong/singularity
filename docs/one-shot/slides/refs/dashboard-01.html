@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DASHBOARD-01 · JAIRUS OS — MORNING BRIEF</title>
+<style>
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;background:#000}
+body{font-family:var(--mono);color:var(--mint);text-transform:uppercase;letter-spacing:.03em;overflow:hidden}
+button{font-family:var(--mono);text-transform:uppercase;letter-spacing:.06em}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)}
+
+/* ============ one chamfered frame — header full width, sidebar below ============ */
+.frame{
+  position:relative;margin:14px;height:calc(100vh - 28px);background:var(--bg);
+  border:3px solid var(--orange);
+  clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));
+  box-shadow:0 0 10px rgba(242,100,0,.4),inset 0 0 12px rgba(242,100,0,.14);
+  display:grid;
+  grid-template-columns:198px 1fr 292px;
+  grid-template-rows:100px 1fr;
+  grid-template-areas:
+    "head head head"
+    "side main rail";
+}
+.frame::before{content:"";position:absolute;inset:6px;border:1px solid var(--orange);
+  opacity:.4;pointer-events:none;z-index:0}
+
+.zone-title{font-family:var(--cond);font-weight:700;font-size:12px;color:var(--orange);
+  letter-spacing:.12em;border-bottom:1px solid var(--green-dim);padding-bottom:4px;margin-bottom:8px}
+.tiny{font-size:10px;letter-spacing:.08em;color:var(--green-map);line-height:1.35}
+
+.stamp{display:inline-block;border:1px solid currentColor;padding:2px 8px;border-radius:2px;
+  font-size:11px;line-height:1.4;white-space:nowrap}
+.blink{animation:blink 1s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+/* ============ sidebar (below the header) ============ */
+.side{grid-area:side;border-right:1px solid var(--orange);padding:16px 14px;
+  display:flex;flex-direction:column;gap:8px;position:relative;z-index:1;min-height:0}
+/* stacked, boxed nav: kanji on top line, english below */
+.nav{display:flex;flex-direction:column;gap:6px;flex:1;min-height:0;overflow-y:auto}
+.nav button{display:flex;flex-direction:column;align-items:flex-start;gap:2px;background:var(--bg);
+  border:1px solid var(--green-dim);color:var(--mint);padding:7px 10px;cursor:pointer;text-align:left}
+.nav button .jp{font-family:var(--jp);font-weight:800;font-size:16px;line-height:1;text-transform:none;letter-spacing:.14em}
+.nav button .en{font-family:var(--cond);font-weight:700;font-size:10px;letter-spacing:.12em;opacity:.85}
+.nav button[aria-current="true"]{background:var(--mint);border-color:var(--mint);color:var(--bg);font-weight:700}
+.nav button[aria-current="true"] .en{opacity:1}
+.nav button:not([aria-current="true"]):hover{border-color:var(--mint)}
+.nav button:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+.initbtn{border:2px solid var(--orange);background:var(--orange);color:var(--bg);font-family:var(--cond);
+  font-weight:700;font-size:13px;letter-spacing:.14em;padding:10px 4px;cursor:pointer;
+  box-shadow:0 0 12px rgba(242,100,0,.5)}
+.initbtn:hover{background:var(--bg);color:var(--orange)}
+@keyframes modeblink{0%,74%{background:var(--orange);color:var(--bg)}75%,100%{background:var(--bg);color:var(--orange)}}
+.initbtn:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.side .foot-links{display:flex;gap:10px;font-size:10px;color:var(--green-map);margin-top:8px}
+
+/* ============ header (sonnet-18 kanji-left masthead) ============ */
+.head{grid-area:head;display:flex;align-items:center;gap:16px;
+  padding:10px 20px;border-bottom:1px solid var(--orange);position:relative;z-index:1}
+.mon-stamp{border:1px solid var(--orange);color:var(--orange);font-family:var(--jp);font-weight:800;
+  font-size:26px;line-height:1;padding:7px 9px;text-align:center;flex:none;text-transform:none;
+  letter-spacing:.1em;text-shadow:0 0 4px currentColor}
+.mon-stamp small{display:block;font-family:var(--cond);font-weight:700;font-size:8px;
+  letter-spacing:.16em;margin-top:4px;text-transform:uppercase}
+.ttl h1{font-family:var(--cond);font-weight:700;font-size:24px;color:var(--paper);
+  letter-spacing:.02em;text-shadow:0 0 4px currentColor,0 0 12px rgba(82,242,154,.3)}
+.ttl .eyebrow{font-size:10px;letter-spacing:.2em;color:var(--amber);margin-top:3px}
+.sysstamp{color:var(--mint);text-shadow:0 0 4px currentColor;flex:none}
+.sysstamp.caution{color:var(--amber)}
+/* corner metadata block — canonical NERV KEY:VALUE (REFERENCE-ANALYSIS §A6/§4) */
+.meta{margin-left:auto;flex:none;text-align:right;font-family:var(--mono);font-size:10px;line-height:1.35;
+  letter-spacing:.06em;color:var(--amber)}
+.meta b{color:var(--orange);font-weight:400}
+
+/* RESERVE POWER card (exp-01 panel grammar) holding the stylized orange clock */
+.respanel{flex:none;display:flex;align-items:center;gap:24px}
+/* system-health mini columns (from dashboard-02, sonnet-12 grammar) */
+.health{display:flex;gap:5px;align-items:flex-end;height:40px}
+.hcol{width:9px;display:flex;flex-direction:column-reverse;gap:2px}
+.hcol i{height:4px;border-radius:1px;background:var(--green-dim);opacity:.35}
+.hcol i.on{opacity:1;background:var(--mint);box-shadow:0 0 4px rgba(82,242,154,.5)}
+.hcol i.on.hot{background:var(--amber);box-shadow:0 0 4px rgba(244,159,9,.5)}
+.clockstack{display:flex;flex-direction:column;align-items:flex-end;gap:3px}
+/* stylized orange 7-seg clock (experiment-01 countdown grammar) */
+.timechip{display:flex;align-items:center;gap:4px;padding:2px 0}
+.timechip svg{filter:drop-shadow(0 0 3px rgba(242,100,0,.85)) drop-shadow(0 0 8px rgba(242,100,0,.4))}
+.timechip .tc-colon{display:flex;flex-direction:column;gap:6px;margin:0 1px}
+.timechip .tc-colon i{width:4px;height:4px;background:var(--orange);display:block;box-shadow:0 0 4px var(--orange)}
+.dateline{font-size:10px;color:var(--amber);letter-spacing:.14em}
+
+/* ============ main column ============ */
+.main{grid-area:main;padding:14px 20px;overflow-y:auto;position:relative;z-index:1;
+  display:flex;flex-direction:column;gap:16px;min-height:0}
+
+.legend{display:flex;gap:8px;flex-wrap:wrap}
+.lg{border:1px solid;padding:2px 9px;display:flex;flex-direction:column;align-items:center;min-width:54px;border-radius:2px}
+.lg .jp{font-family:var(--jp);font-weight:800;font-size:13px;line-height:1.2;text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.lg .cap{font-size:8px;letter-spacing:.1em}
+.lg-nominal{border-color:var(--mint);color:var(--mint)}
+.lg-caution{border-color:var(--amber);color:var(--amber)}
+.lg-pending{border-color:var(--blue);color:var(--blue)}
+.lg-blocked{border-color:var(--red-hi);background:var(--red-hi);color:#000}
+
+.hero{display:flex;align-items:center;gap:26px;border:1px solid var(--green-dim);padding:16px 22px;min-height:132px}
+.hero .jpgiant{font-family:var(--jp);font-weight:800;font-size:72px;line-height:1;color:var(--mint);
+  text-transform:none;letter-spacing:.06em;text-shadow:0 0 6px rgba(82,242,154,.5),0 0 26px rgba(82,242,154,.25)}
+.hero .jpcap{font-size:10px;letter-spacing:.24em;color:var(--green-map);margin-top:6px;text-align:center}
+.hero .vitals{display:flex;gap:34px;margin-left:auto}
+.vital .k{font-size:10px;color:var(--green-map);letter-spacing:.14em}
+.vital .v{font-family:var(--cond);font-weight:700;font-size:27px;color:var(--paper);margin-top:3px;letter-spacing:.02em}
+.vital .v.mint{color:var(--mint);text-shadow:0 0 5px rgba(82,242,154,.5)}
+
+.objective{border:2px solid var(--mint);padding:14px 18px;position:relative;
+  clip-path:polygon(0 0,calc(100% - 20px) 0,100% 20px,100% 100%,0 100%);
+  box-shadow:0 0 8px rgba(82,242,154,.25),inset 0 0 10px rgba(82,242,154,.08)}
+.objective .eyebrow{font-size:10px;letter-spacing:.2em;color:var(--mint)}
+.obj-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-top:4px}
+.obj-head h2{font-family:var(--cond);font-weight:700;font-size:21px;color:var(--paper);letter-spacing:.02em}
+.obj-id{color:var(--orange)}
+.meterwrap{position:relative;margin:13px 0 4px;padding-top:2px}
+.hmeter{display:flex;gap:3px;height:18px}
+.hmeter .seg{flex:1;border-radius:2px;background:var(--green-dim);opacity:.35}
+.hmeter .seg.on{opacity:1;background:var(--mint);box-shadow:0 0 5px rgba(82,242,154,.45)}
+.gate-line{position:absolute;top:-4px;bottom:-4px;width:2px;background:var(--amber);box-shadow:0 0 6px rgba(244,159,9,.6)}
+.gate-line .stamp{position:absolute;top:-11px;left:50%;transform:translate(-50%,-100%);color:var(--amber);background:var(--bg);font-size:9px;padding:1px 6px}
+.meter-read{display:flex;justify-content:space-between;font-size:10px;color:var(--green-map);margin-top:6px}
+.meter-read b{color:var(--mint);font-weight:400}
+.obj-copy{font-size:11px;line-height:1.6;color:var(--green-map);margin:10px 0 12px;max-width:64ch}
+.obj-copy b{color:var(--mint);font-weight:400}
+.btnrow{display:flex;gap:10px}
+.btn{border:1px solid var(--orange);background:var(--bg);color:var(--orange);padding:8px 16px;font-size:11px;cursor:pointer}
+.btn:hover{background:var(--orange);color:var(--bg)}
+.btn:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.btn.primary{border-color:var(--mint);color:var(--mint);font-weight:700;animation:btnblink 1s steps(1) infinite}
+@keyframes btnblink{0%,74%{background:var(--mint);color:var(--bg)}75%,100%{background:var(--bg);color:var(--mint)}}
+
+.gates .g-row{display:flex;align-items:center;gap:10px;border:1px solid var(--green-dim);
+  border-left:3px solid var(--red-hi);padding:9px 12px;margin-bottom:7px}
+.g-row .gid{color:var(--amber);white-space:nowrap;font-size:11px}
+.g-row .gtitle{color:var(--paper);white-space:nowrap;font-size:12px}
+.g-row .dots{flex:1;overflow:hidden;white-space:nowrap;color:var(--green-dim);letter-spacing:2px}
+.g-row .dots::after{content:"................................................................"}
+.g-row .gsub{color:var(--green-map);font-size:10px;white-space:nowrap}
+.g-row .stamp.v-approved{color:var(--mint)}
+.g-row .stamp.v-denied{color:var(--red-hi)}
+.g-row .stamp.v-deferred{color:var(--blue)}
+.g-row .gp{font-size:9px;padding:2px 7px;letter-spacing:.08em;flex:none}
+.g-row .gp-crit{color:var(--red-hi);border-color:var(--red-hi)}
+.g-row .gp-elev{color:var(--amber);border-color:var(--amber)}
+.g-row .gp-rout{color:var(--green-map);border-color:var(--green-map)}
+.g-row .review{border-color:var(--red-hi);color:var(--red-hi);padding:5px 12px;font-size:10px}
+.g-row .review:hover{background:var(--red-hi);color:var(--bg)}
+.g-row.decided{border-left-color:var(--green-dim)}
+
+/* ============ right rail ============ */
+.rail{grid-area:rail;border-left:1px solid var(--orange);padding:14px 16px;overflow-y:auto;
+  display:flex;flex-direction:column;gap:16px;position:relative;z-index:1}
+.r-item{display:flex;justify-content:space-between;gap:8px;border-bottom:1px dotted var(--green-dim);padding:5px 0;font-size:11px}
+.r-item .t{color:var(--paper);line-height:1.4}
+.r-item .t small{display:block;color:var(--green-map);font-size:9px;letter-spacing:.1em;margin-top:2px}
+.r-item .when{color:var(--amber);white-space:nowrap;font-size:10px}
+.r-item.done .t{color:var(--green-dim);text-decoration:line-through}
+.duechip{color:var(--amber);float:right}
+.quiz{border:1px solid var(--green-dim);padding:10px 12px;margin-top:4px}
+.quiz .q-topic{font-size:9px;color:var(--amber);letter-spacing:.14em}
+.quiz .q-text{font-size:11px;color:var(--paper);line-height:1.55;text-transform:none;margin:6px 0 10px}
+.quiz .answer{font-size:11px;color:var(--mint);line-height:1.5;text-transform:none;margin-bottom:10px;display:none}
+.quiz.revealed .answer{display:block}
+
+/* ============ scroll style (from experiment-sonnet-20) ============ */
+.main,.rail,.nav{scrollbar-width:thin;scrollbar-color:var(--amber-dim) rgba(242,100,0,.05)}
+.main::-webkit-scrollbar,.rail::-webkit-scrollbar,.nav::-webkit-scrollbar{width:9px;height:9px}
+.main::-webkit-scrollbar-track,.rail::-webkit-scrollbar-track,.nav::-webkit-scrollbar-track{background:rgba(242,100,0,.05)}
+.main::-webkit-scrollbar-thumb,.rail::-webkit-scrollbar-thumb,.nav::-webkit-scrollbar-thumb{background:var(--amber-dim);border:1px solid var(--green-dim)}
+.main::-webkit-scrollbar-thumb:hover,.rail::-webkit-scrollbar-thumb:hover,.nav::-webkit-scrollbar-thumb:hover{background:var(--amber)}
+
+/* ============ gate decision prompt ============ */
+.overlay{position:fixed;inset:0;z-index:200;display:none;flex-direction:column;background:var(--red-hi)}
+.overlay.show{display:flex}
+.ov-stripes{height:22px;flex:none;background:repeating-linear-gradient(-45deg,#000 0 14px,transparent 14px 28px)}
+.ov-mid{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2.4vh}
+.ov-chip{position:absolute;border:3px solid #fff;color:#fff;font-family:var(--cond);font-weight:700;font-size:22px;letter-spacing:.12em;padding:1px 14px}
+.ov-chip.tl{top:36px;left:26px}.ov-chip.br{bottom:110px;right:26px}
+.ov-jp{font-family:var(--jp);font-weight:800;font-size:4.2vh;color:#000;border:3px solid #000;padding:2px 24px;text-transform:none;letter-spacing:.5em;text-indent:.5em}
+.ov-band{background:#000;width:100%;text-align:center;padding:1vh 0}
+.ov-word{font-family:var(--cond);font-weight:700;font-size:11vw;line-height:1;color:var(--red-hi);letter-spacing:0}
+.ov-item{font-size:13px;color:#000;letter-spacing:.2em;font-weight:700}
+.ov-item b{background:#000;color:var(--red-hi);padding:2px 10px;font-weight:700}
+.ov-rail{flex:none;display:flex;gap:10px;align-items:stretch;background:var(--bg);border-top:2px solid var(--orange);padding:12px 16px}
+.ov-rail .tag{display:flex;align-items:center;font-size:10px;color:var(--amber);letter-spacing:.18em}
+.ov-rail button{flex:1;border:2px solid;background:var(--bg);font-family:var(--cond);font-weight:700;font-size:15px;letter-spacing:.12em;padding:11px 4px;cursor:pointer}
+.ov-rail button .jp{font-family:var(--jp);font-weight:800;text-transform:none;margin-right:8px;letter-spacing:.2em}
+.ov-approve{border-color:var(--mint);color:var(--mint)}
+.ov-approve:hover{background:var(--mint);color:var(--bg)}
+.ov-deny{border-color:var(--red-hi);color:var(--red-hi)}
+.ov-deny:hover{background:var(--red-hi);color:var(--bg)}
+.ov-defer{border-color:var(--blue);color:var(--blue)}
+.ov-defer:hover{background:var(--blue);color:var(--bg)}
+.ov-rail button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
+
+@media (prefers-reduced-motion:reduce){
+  .blink,.initbtn,.btn.primary{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="frame">
+
+  <!-- ================= header (full width) ================= -->
+  <header class="head">
+    <div class="mon-stamp">統制<small>COMMAND</small></div>
+    <div class="ttl">
+      <h1>WELCOME BACK, OPERATOR.</h1>
+      <div class="eyebrow">STATUS: MORNING INITIALIZATION · 朝礼</div>
+    </div>
+    <div class="meta">CODE:<b>0902</b><br>FILE:<b>MORNING_BRIEF</b><br>EX_MODE:<b>MANUAL</b><br>PRIORITY:<b>AA-</b></div>
+    <span class="stamp sysstamp" id="sysstamp">SYS:NOMINAL</span>
+    <div class="respanel" aria-label="Local time">
+      <div class="health" id="health" role="img" aria-label="System health columns"><div class="hcol"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></div><div class="hcol"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></div><div class="hcol"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></div><div class="hcol"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i></div></div>
+      <div class="clockstack">
+        <span class="timechip" id="timechip" role="img" aria-label="Local time"></span>
+        <span class="dateline" id="dateline">— — —</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- ================= sidebar (below header) ================= -->
+  <aside class="side" aria-label="Jairus OS navigation">
+    <nav class="nav" aria-label="Sections">
+      <button aria-current="true"><span class="jp">工学</span><span class="en">ENGINEERING</span></button>
+      <button aria-current="false"><span class="jp">知識</span><span class="en">KNOWLEDGE</span></button>
+      <button aria-current="false"><span class="jp">自動</span><span class="en">AUTOMATION</span></button>
+      <button aria-current="false"><span class="jp">学習</span><span class="en">LEARNING</span></button>
+      <button aria-current="false"><span class="jp">記録</span><span class="en">CONTENT</span></button>
+      <button aria-current="false"><span class="jp">個人</span><span class="en">PERSONAL</span></button>
+    </nav>
+    <button class="initbtn" id="initbtn">INITIALIZE PROTOCOL</button>
+    <div class="foot-links"><span>SETTINGS</span><span>SUPPORT</span></div>
+  </aside>
+
+  <!-- ================= main ================= -->
+  <main class="main">
+
+    <div class="legend" role="img" aria-label="Status key">
+      <span class="lg lg-nominal"><span class="jp">正常</span><span class="cap">NOMINAL</span></span>
+      <span class="lg lg-caution"><span class="jp">注意</span><span class="cap">CAUTION</span></span>
+      <span class="lg lg-pending"><span class="jp">待機</span><span class="cap">PENDING</span></span>
+      <span class="lg lg-blocked"><span class="jp">阻止</span><span class="cap">BLOCKED</span></span>
+    </div>
+
+    <section class="hero" aria-label="System state">
+      <div>
+        <div class="jpgiant">起動</div>
+        <div class="jpcap">INITIALIZATION</div>
+      </div>
+      <div class="vitals">
+        <div class="vital"><div class="k">SYSTEM INTEGRITY</div><div class="v mint" id="integrity">NOMINAL</div></div>
+        <div class="vital"><div class="k">GATES WAITING</div><div class="v" id="gatecount">3</div></div>
+        <div class="vital"><div class="k">MEMORY NODES</div><div class="v">2,482</div></div>
+      </div>
+    </section>
+
+    <section class="objective" aria-label="Primary objective">
+      <div class="eyebrow">PRIMARY OBJECTIVE · 主目標</div>
+      <div class="obj-head">
+        <h2>ARCHITECTURE REFACTOR: NEURAL PIPELINE V3</h2>
+        <span class="stamp obj-id">JRS·902</span>
+      </div>
+      <div class="meterwrap">
+        <div class="hmeter" id="hmeter"></div>
+        <div class="gate-line" style="left:80%"><span class="stamp">REVIEW GATE · 80</span></div>
+      </div>
+      <div class="meter-read"><span><b id="pct">0%</b> COMPLETE</span><span>REVIEW OPENS AT 80% · ETA NOON SYNC</span></div>
+      <p class="obj-copy">CURRENT STATE: MODULARIZING THE INFERENCE ENGINE FOR DISTRIBUTED LOW-LATENCY
+        NODES. FOCUS ON THE <b>COREDISPATCHER</b> INTERFACE LOGIC BEFORE NOON SYNC.</p>
+      <div class="btnrow">
+        <button class="btn primary" id="resumebtn">RESUME SESSION</button>
+        <button class="btn">TECHNICAL DOCS</button>
+      </div>
+    </section>
+
+    <section class="gates" aria-label="Blocked on you">
+      <div class="zone-title">BLOCKED ON YOU · 裁定待ち</div>
+      <div id="gatelist"></div>
+    </section>
+
+  </main>
+
+  <!-- ================= right rail ================= -->
+  <aside class="rail" aria-label="Reminders, inbox and learning">
+    <section>
+      <div class="zone-title">VAULT REMINDERS <span class="duechip" id="remcount"></span></div>
+      <div class="r-item"><span class="t">RENEW SERVER CLUSTER CERTS<small>SYSTEM · NODE 01-09</small></span><span class="when">14:00</span></div>
+      <div class="r-item done"><span class="t">COFFEE WITH UNIT·731<small>PERSONAL</small></span><span class="when">08:30</span></div>
+      <div class="r-item"><span class="t">NOON SYNC — PIPELINE V3<small>ENGINEERING</small></span><span class="when">12:00</span></div>
+    </section>
+    <section>
+      <div class="zone-title">INBOX (K-OS) <span class="duechip">8 ITEMS</span></div>
+      <div class="r-item"><span class="t">THE FUTURE OF RISC-V ORBITS<small>LINK · UNREAD</small></span><span class="when">2H</span></div>
+      <div class="r-item"><span class="t">WHITEPAPER: LLAMA CONSENSUS<small>DOC · UNREAD</small></span><span class="when">6H</span></div>
+      <div class="r-item"><span class="t">PR-442 REVIEW THREAD<small>GIT · 3 REPLIES</small></span><span class="when">9H</span></div>
+    </section>
+    <section>
+      <div class="zone-title">LEARNING REVIEW <span class="duechip">12 DUE</span></div>
+      <div class="quiz" id="quiz">
+        <div class="q-topic">TOPIC: KUBERNETES OPERATORS</div>
+        <div class="q-text">Explain the reconciliation loop pattern in custom controllers.</div>
+        <div class="answer">Observe cluster state, diff against the declared spec, then act to
+          converge — repeating until observed == desired. The controller never assumes success;
+          it re-reads and re-diffs every cycle.</div>
+        <button class="btn" id="answerbtn">SHOW ANSWER</button>
+      </div>
+    </section>
+  </aside>
+
+</div>
+
+<!-- ================= gate decision prompt ================= -->
+<div class="overlay" id="overlay" role="alertdialog" aria-modal="true" aria-label="Gate decision required">
+  <div class="ov-stripes"></div>
+  <span class="ov-chip tl blink">GATE</span>
+  <div class="ov-mid">
+    <div class="ov-jp">裁定</div>
+    <div class="ov-band"><div class="ov-word">DECIDE</div></div>
+    <div class="ov-item" id="ov-item">ITEM: <b>—</b></div>
+  </div>
+  <span class="ov-chip br blink">GATE</span>
+  <div class="ov-rail">
+    <span class="tag">RESPONSE REQUIRED:</span>
+    <button class="ov-approve" id="ov-approve"><span class="jp">承認</span>APPROVE</button>
+    <button class="ov-deny" id="ov-deny"><span class="jp">否認</span>DENY</button>
+    <button class="ov-defer" id="ov-defer"><span class="jp">保留</span>DEFER</button>
+  </div>
+</div>
+
+<script>
+"use strict";
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $=id=>document.getElementById(id);
+const pad2=n=>String(n).padStart(2,"0");
+
+/* ---------- stylized orange 7-seg clock (experiment-01) ---------- */
+const SVGNS="http://www.w3.org/2000/svg";
+const SEGMAP={0:"abcdef",1:"bc",2:"abged",3:"abgcd",4:"fgbc",5:"afgcd",6:"afgedc",7:"abc",8:"abcdefg",9:"abcfgd"};
+const SEGPTS={
+  a:"7,4 10.5,0.5 29.5,0.5 33,4 29.5,7.5 10.5,7.5",
+  b:"36,7 39.5,10.5 39.5,27.5 36,31 32.5,27.5 32.5,10.5",
+  c:"36,33 39.5,36.5 39.5,53.5 36,57 32.5,53.5 32.5,36.5",
+  d:"7,60 10.5,56.5 29.5,56.5 33,60 29.5,63.5 10.5,63.5",
+  e:"4,33 7.5,36.5 7.5,53.5 4,57 0.5,53.5 0.5,36.5",
+  f:"4,7 7.5,10.5 7.5,27.5 4,31 0.5,27.5 0.5,10.5",
+  g:"7,32 10.5,28.5 29.5,28.5 33,32 29.5,35.5 10.5,35.5"};
+function makeDigit(w,h,on,off){
+  const svg=document.createElementNS(SVGNS,"svg");
+  svg.setAttribute("width",w);svg.setAttribute("height",h);svg.setAttribute("viewBox","0 0 46 64");
+  svg.dataset.on=on;svg.dataset.off=off;
+  for(const k of "abcdefg"){
+    const p=document.createElementNS(SVGNS,"polygon");
+    p.setAttribute("points",SEGPTS[k]);p.setAttribute("data-seg",k);
+    p.setAttribute("transform","translate(6,0) skewX(-6)");p.setAttribute("fill",off);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+function renderDigit(svg,val){
+  const lit=SEGMAP[val];
+  for(const p of svg.children)
+    p.setAttribute("fill",lit.includes(p.getAttribute("data-seg"))?svg.dataset.on:svg.dataset.off);
+}
+const chip=$("timechip");
+const chipDigits=[];
+for(let i=0;i<6;i++){
+  const d=makeDigit(22,32,"#F26400","rgba(242,100,0,.08)");   /* orange 7-seg — exp-01 countdown */
+  chipDigits.push(d);chip.appendChild(d);
+  if(i===1||i===3){
+    const c=document.createElement("span");c.className="tc-colon";
+    c.innerHTML="<i></i><i></i>";chip.appendChild(c);
+  }
+}
+let chipBlink=true;
+function tickChip(){
+  const d=new Date();
+  const str=pad2(d.getHours())+pad2(d.getMinutes())+pad2(d.getSeconds());   /* 24h */
+  chipDigits.forEach((dg,i)=>renderDigit(dg,+str[i]));
+  chipBlink=!chipBlink;
+  chip.querySelectorAll(".tc-colon").forEach(c=>c.style.opacity=(chipBlink||REDUCED)?1:.25);
+}
+const MONTHS=["JAN","FEB","MAR","APR","MAY","JUN","JUL","AUG","SEP","OCT","NOV","DEC"];
+function tickDate(){
+  const d=new Date();
+  $("dateline").textContent=MONTHS[d.getMonth()]+" "+pad2(d.getDate())+" "+d.getFullYear();
+}
+
+/* ---------- objective meter: discrete segments, stepped fill ---------- */
+const MSEG=25,TARGET=68;
+const hmeter=$("hmeter");
+for(let i=0;i<MSEG;i++){const s=document.createElement("div");s.className="seg";hmeter.appendChild(s);}
+const msegs=[...hmeter.children];
+let mfill=0;
+const mtimer=setInterval(()=>{
+  const targetSegs=Math.round(TARGET/100*MSEG);
+  if(mfill>=targetSegs){clearInterval(mtimer);return;}
+  msegs[mfill].classList.add("on");mfill++;
+  $("pct").textContent=Math.round(mfill/MSEG*100)+"%";
+},REDUCED?0:90);
+if(REDUCED){msegs.slice(0,Math.round(TARGET/100*MSEG)).forEach(s=>s.classList.add("on"));$("pct").textContent=TARGET+"%";}
+
+/* ---------- gates: list + decision prompt ---------- */
+const GATES=[
+  {id:"GATE·04",title:"API SECURITY GATEWAY",sub:"ARCHITECTURE · 3 PRS WAITING",prio:"AAA"},
+  {id:"GATE·07",title:"INITIALIZATION PROTOCOL 03",sub:"START · READY FOR REVIEW",prio:"B++"},
+  {id:"GATE·11",title:"MEMORY INGESTION SCHEMA",sub:"KNOWLEDGE · MIGRATION PLAN",prio:"AA-"},
+];
+const PRIOCLS={AAA:"crit","AA-":"elev","B++":"rout"};
+const VERDICTS={approve:{label:"承認 APPROVED",cls:"v-approved"},
+                deny:{label:"否認 DENIED",cls:"v-denied"},
+                defer:{label:"保留 DEFERRED",cls:"v-deferred"}};
+const gatelist=$("gatelist");
+let activeGate=null,lastFocus=null;
+GATES.forEach((g,i)=>{
+  const row=document.createElement("div");
+  row.className="g-row";row.id="grow-"+i;
+  row.innerHTML='<span class="gid">'+g.id+'</span><span class="gtitle">'+g.title+'</span>'+
+    '<span class="dots"></span><span class="gsub">'+g.sub+'</span>'+
+    '<span class="stamp gp gp-'+PRIOCLS[g.prio]+'">'+g.prio+'</span>'+
+    '<button class="btn review" data-gate="'+i+'">REVIEW</button>';
+  gatelist.appendChild(row);
+});
+function pendingCount(){return GATES.filter(g=>!g.verdict).length;}
+function updateGateCount(){$("gatecount").textContent=pendingCount();logLine("GATES PENDING",String(pendingCount()));}
+gatelist.addEventListener("click",e=>{
+  const b=e.target.closest(".review");
+  if(!b)return;
+  activeGate=+b.dataset.gate;lastFocus=b;
+  $("ov-item").innerHTML="ITEM: <b>"+GATES[activeGate].id+" — "+GATES[activeGate].title+"</b>";
+  $("overlay").classList.add("show");$("ov-approve").focus();
+});
+function decide(kind){
+  if(activeGate===null)return;
+  const g=GATES[activeGate];g.verdict=kind;
+  const row=$("grow-"+activeGate);const v=VERDICTS[kind];
+  row.querySelector(".review").remove();
+  const st=document.createElement("span");st.className="stamp "+v.cls;st.textContent=v.label;row.appendChild(st);
+  if(kind!=="defer")row.classList.add("decided");
+  $("overlay").classList.remove("show");
+  logLine(g.id+" "+kind.toUpperCase()+"D","LOGGED");
+  updateGateCount();
+  if(lastFocus&&document.contains(lastFocus))lastFocus.focus();
+  activeGate=null;
+}
+$("ov-approve").addEventListener("click",()=>decide("approve"));
+$("ov-deny").addEventListener("click",()=>decide("deny"));
+$("ov-defer").addEventListener("click",()=>decide("defer"));
+addEventListener("keydown",e=>{if($("overlay").classList.contains("show")&&e.key==="Escape")decide("defer");});
+
+/* ---------- log sink (footer terminal removed) — gate/session events log silently ---------- */
+const term=$("term");
+function logLine(lbl,val,warn){
+  if(!term)return;
+  const row=document.createElement("div");row.className="row";
+  row.innerHTML='<span class="lbl">'+lbl+'</span><span class="dots"></span>'+
+    '<span class="val'+(warn?" warn":"")+'">'+val+'</span>';
+  term.appendChild(row);
+  while(term.children.length>60)term.removeChild(term.firstChild);
+  term.scrollTop=term.scrollHeight;
+}
+
+/* ---------- small ticks ---------- */
+$("answerbtn").addEventListener("click",()=>{
+  const q=$("quiz");const on=q.classList.toggle("revealed");
+  $("answerbtn").textContent=on?"HIDE ANSWER":"SHOW ANSWER";
+});
+$("resumebtn").addEventListener("click",()=>logLine("SESSION JRS·902","RESUMED"));
+$("initbtn").addEventListener("click",()=>{logLine("MORNING PROTOCOL","INITIALIZED");});
+setInterval(()=>{
+  const bad=Math.random()<.08;
+  $("integrity").textContent=bad?"CAUTION":"NOMINAL";
+  $("integrity").classList.toggle("mint",!bad);
+  $("integrity").style.color=bad?"var(--amber)":"";
+  const st=$("sysstamp");st.textContent=bad?"SYS:CAUTION":"SYS:NOMINAL";st.classList.toggle("caution",bad);
+},7000);
+
+/* ---------- system-health columns: live, stepped, biased-nominal ---------- */
+(function(){
+  const health=$("health");
+  if(!health)return;
+  const cols=[...health.querySelectorAll(".hcol")];
+  function paint(){
+    cols.forEach(col=>{
+      const cells=[...col.children];
+      const lit=3+Math.floor(Math.random()*3);        /* mostly 3–5 of 7 = nominal */
+      const hot=Math.random()<0.16;                    /* occasional amber peak */
+      cells.forEach((c,i)=>{c.className=i<lit?((hot&&i===lit-1)?"on hot":"on"):"";});
+    });
+  }
+  paint();
+  if(!REDUCED)setInterval(paint,700);                  /* discrete step, no easing */
+})();
+
+/* ---- START ---- */
+tickChip();tickDate();updateGateCount();
+setInterval(tickChip,500);
+setInterval(tickDate,60000);
+</script>
+</body>
+</html>

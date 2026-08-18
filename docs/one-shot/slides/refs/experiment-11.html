@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPERIMENT-11 · AIRLOCK STATE BOARD</title>
+<!-- exp-11 -->
+
+<style>
+:root{
+  --bg:#0A0A0A;--mint:#52F29A;--mint-hi:#7CF4AB;--gdim:#246C3C;
+  --orange:#F26400;--amber:#F49F09;--red:#E2280F;--bezel:#23262b;--bezel2:#31353c;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:#000;overflow:hidden;font-family:var(--mono);text-transform:uppercase;
+  display:flex;align-items:center;justify-content:center;gap:34px}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:radial-gradient(ellipse at center,transparent 50%,rgba(0,0,0,.65) 100%)}
+
+/* hardware bezel around the readout screen */
+.bezel{
+  background:var(--bezel);border:2px solid var(--bezel2);padding:26px;
+  width:min(66vw,820px);position:relative;
+  box-shadow:inset 0 0 30px rgba(0,0,0,.7);
+}
+.bezel .bolt{position:absolute;width:8px;height:8px;border-radius:50%;background:#4a4f58}
+.bolt.b1{top:9px;left:11px}.bolt.b2{top:9px;right:11px}
+.bolt.b3{bottom:9px;left:11px}.bolt.b4{bottom:9px;right:11px}
+.bezel .id{position:absolute;top:6px;right:34px;color:#5c626d;font-size:10px;letter-spacing:.2em}
+
+.screen{
+  background:var(--bg);padding:30px 34px;min-height:52vh;
+  display:flex;flex-direction:column;justify-content:center;
+  box-shadow:inset 0 0 26px rgba(0,0,0,.9);
+  position:relative;overflow:hidden;
+}
+.screen::after{content:"";position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.3) 0 1px,transparent 1px 3px)}
+
+.scr-title{color:var(--mint);font-size:15px;letter-spacing:.12em;
+  border-bottom:2px solid var(--mint);padding-bottom:6px;
+  text-shadow:0 0 5px rgba(82,242,154,.5)}
+.scr-sub{color:var(--mint);opacity:.75;font-size:13px;margin-top:10px;letter-spacing:.1em}
+.stateword{
+  font-family:var(--cond);font-weight:700;text-align:center;line-height:1;
+  font-size:15vw;color:var(--mint-hi);letter-spacing:.02em;margin:2vh 0;
+  text-shadow:0 0 8px rgba(82,242,154,.7),0 0 30px rgba(82,242,154,.3);
+}
+.stateword.warnc{color:var(--amber);text-shadow:0 0 8px rgba(244,159,9,.7),0 0 30px rgba(244,159,9,.3)}
+.stateword.dangerc{color:var(--red);text-shadow:0 0 8px rgba(226,40,15,.7),0 0 30px rgba(226,40,15,.35)}
+.scr-note{color:var(--mint);font-size:13px;text-align:left;letter-spacing:.08em;
+  border-top:2px solid var(--mint);padding-top:8px;
+  text-shadow:0 0 4px rgba(82,242,154,.4)}
+
+/* side column: hardware plates + indicator */
+.side{display:flex;flex-direction:column;gap:16px;width:220px}
+.plate{
+  border:2px solid var(--orange);text-align:center;padding:8px 6px;color:var(--orange);
+  background:var(--bg);
+}
+.plate .jp{font-family:var(--jp);font-weight:800;font-size:26px;letter-spacing:.3em;
+  text-transform:none;line-height:1.2}
+.plate .en{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.28em}
+.plate--em{background:var(--orange);color:#000}
+.plate--em .jp{letter-spacing:.15em}
+
+.indicator{display:flex;align-items:center;gap:10px;color:var(--amber);font-size:11px;letter-spacing:.15em}
+.led{width:0;height:0;border-left:8px solid transparent;border-right:8px solid transparent;
+  border-top:13px solid var(--red);filter:drop-shadow(0 0 4px var(--red))}
+.led.blink{animation:blink .5s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+.cyclebtn{
+  border:2px solid var(--mint);background:transparent;color:var(--mint);cursor:pointer;
+  font-family:var(--cond);font-weight:700;font-size:15px;letter-spacing:.18em;
+  text-transform:uppercase;padding:12px 0;
+}
+.cyclebtn:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+@media (prefers-reduced-motion:reduce){.led.blink{animation:none}}
+</style>
+</head>
+<body>
+
+<div class="bezel">
+  <span class="bolt b1"></span><span class="bolt b2"></span>
+  <span class="bolt b3"></span><span class="bolt b4"></span>
+  <span class="id">CNT-7</span>
+  <div class="screen">
+    <div class="scr-title">COOLANT PLANT: CL3 SEG.</div>
+    <div class="scr-sub" id="sysline">PRESSURE EQUALIZING SYSTEM</div>
+    <div class="stateword" id="stateword">SEALED</div>
+    <div class="scr-note" id="note">HATCH SECURE — NO ACTION REQUIRED</div>
+  </div>
+</div>
+
+<div class="side">
+  <div class="plate">
+    <div class="jp" id="plate-jp">密閉</div>
+    <div class="en" id="plate-en">Sealed</div>
+  </div>
+  <div class="indicator">
+    <span class="led" id="led"></span> <span id="ledlabel">LOCK ENGAGED</span>
+  </div>
+  <div class="plate plate--em">
+    <div class="jp">非常</div>
+    <div class="en">Emergency</div>
+  </div>
+  <button class="cyclebtn" id="cycle">CYCLE AIRLOCK</button>
+</div>
+
+<script>
+"use strict";
+/* Single-word state display: the giant word IS the interface.
+   States snap through a mechanical sequence; instruction lines and
+   plates recolor with it. Bimodal type scale: 15vw word, 13px captions. */
+
+const STATES=[
+  {word:"SEALED",  cls:"",        jp:"密閉",jpen:"Sealed",
+   note:"HATCH SECURE — NO ACTION REQUIRED",
+   sys:"PRESSURE EQUALIZING SYSTEM", led:false, label:"LOCK ENGAGED", dwell:0},
+  {word:"PURGE",   cls:"warnc",   jp:"排気",jpen:"Venting",
+   note:"STAND CLEAR OF HATCH RING — VENTING GAS",
+   sys:"PRESSURE EQUALIZING SYSTEM : ACTIVE", led:true, label:"VENT OPEN", dwell:3600},
+  {word:"OPEN",    cls:"",        jp:"開放",jpen:"Open",
+   note:"ENTER AND LOCK AGAIN IMMEDIATELY",
+   sys:"RECOGNIZING SYSTEM : CLEAR", led:true, label:"HATCH FREE", dwell:5200},
+  {word:"CLOSING", cls:"dangerc", jp:"閉鎖",jpen:"Closing",
+   note:"KEEP LIMBS CLEAR — DOOR IN MOTION",
+   sys:"DRIVE MOTOR : ENGAGED", led:true, label:"DOOR MOVING", dwell:2800},
+];
+
+const word=document.getElementById("stateword");
+const note=document.getElementById("note");
+const sys=document.getElementById("sysline");
+const pjp=document.getElementById("plate-jp");
+const pen=document.getElementById("plate-en");
+const led=document.getElementById("led");
+const ledlabel=document.getElementById("ledlabel");
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+let idx=0, cycling=false;
+
+function apply(i){
+  const s=STATES[i];
+  word.textContent=s.word;
+  word.className="stateword "+s.cls;
+  note.textContent=s.note;
+  sys.textContent=s.sys;
+  pjp.textContent=s.jp;
+  pen.textContent=s.jpen;
+  led.classList.toggle("blink",s.led&&!REDUCED);
+  ledlabel.textContent=s.label;
+  /* hard 2-frame flicker on entry — no fades */
+  if(!REDUCED){
+    word.style.visibility="hidden";
+    setTimeout(()=>word.style.visibility="visible",50);
+    setTimeout(()=>word.style.visibility="hidden",100);
+    setTimeout(()=>word.style.visibility="visible",150);
+  }
+}
+
+function runCycle(){
+  if(cycling) return;
+  cycling=true;
+  let i=1, t=0;
+  const seq=[1,2,3,0];
+  const step=()=>{
+    if(t>=seq.length){cycling=false;idx=0;return;}
+    idx=seq[t];
+    apply(idx);
+    const dwell=STATES[idx].dwell||1000;
+    t++;
+    if(idx===0){cycling=false;return;}
+    setTimeout(step,dwell);
+  };
+  step();
+}
+
+document.getElementById("cycle").addEventListener("click",runCycle);
+apply(0);
+</script>
+</body>
+</html>

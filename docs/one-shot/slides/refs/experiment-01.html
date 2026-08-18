@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPERIMENT-01 · ORBITAL TACTICAL CONSOLE</title>
+<style>
+/* ============================================================
+   TOKENS — from REFERENCE-ANALYSIS.md §B
+   ============================================================ */
+:root{
+  --bg-void:#0A0A0A;
+  --green-phosphor:#52F29A;
+  --green-phosphor-hi:#7CF4AB;
+  --green-map:#3C9C6C;
+  --green-map-dim:#246C3C;
+  --mint-paper:#EDF8D6;
+  --red-nerv:#C20C0C;
+  --red-bright:#E2280F;
+  --red-crimson:#E60225;
+  --orange-safety:#F26400;
+  --orange-amber:#F49F09;
+  --orange-amber-dim:#9C3C24;
+  --teal-surface:#0C6C80;
+  --blue-pending:#5090D0;
+
+  --font-mono:ui-monospace,"SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --font-cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --font-jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+
+  --glow-text:0 0 4px currentColor,0 0 12px;
+  --border-hairline:1px;
+  --border-standard:2px;
+}
+
+*{margin:0;padding:0;box-sizing:border-box}
+
+html,body{background:#000;min-height:100%}
+body{
+  background:var(--bg-void);
+  color:var(--green-phosphor);
+  font-family:var(--font-mono);
+  font-size:13px;
+  letter-spacing:.05em;
+  text-transform:uppercase;
+  overflow-x:auto;
+  padding:14px;
+}
+
+/* CRT scanlines + vignette */
+body::after{
+  content:"";position:fixed;inset:0;pointer-events:none;z-index:90;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%);
+}
+
+.glow-g{text-shadow:0 0 4px currentColor,0 0 12px rgba(82,242,154,.4)}
+.glow-o{text-shadow:0 0 4px currentColor,0 0 10px rgba(242,100,0,.45)}
+.glow-r{text-shadow:0 0 5px currentColor,0 0 14px rgba(226,40,15,.6)}
+
+/* ============================================================
+   BOXED STAMP / CHIP — "everything important is boxed"
+   ============================================================ */
+.stamp{
+  display:inline-block;border:var(--border-hairline) solid currentColor;
+  padding:2px 8px;border-radius:2px;font-weight:700;white-space:nowrap;
+}
+.stamp--fill{background:currentColor;border-radius:2px}
+.stamp--fill>span{color:var(--bg-void);text-shadow:none;display:block;padding:2px 8px;font-weight:700}
+.blink{animation:blink 1s steps(1,end) infinite}
+.blink-fast{animation:blink .5s steps(1,end) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+/* ============================================================
+   FRAME — double border (thin outer + thick inner)
+   ============================================================ */
+.console{
+  min-width:1180px;max-width:1560px;margin:0 auto;
+  border:1px solid var(--orange-safety);
+  padding:3px;
+  box-shadow:0 0 10px rgba(242,100,0,.35),inset 0 0 8px rgba(242,100,0,.12);
+}
+.console-inner{
+  border:3px solid var(--orange-safety);
+  padding:14px;
+  display:grid;
+  grid-template-columns:340px 1fr 330px;
+  grid-template-rows:auto 1fr 250px;
+  gap:14px;
+}
+
+/* ============================================================
+   HEADER
+   ============================================================ */
+header{
+  grid-column:1/-1;
+  display:grid;grid-template-columns:auto auto 1fr auto auto;gap:24px;align-items:start;
+  color:var(--orange-safety);
+}
+.masthead .jp{
+  font-family:var(--font-jp);font-weight:800;font-size:38px;line-height:1;
+  letter-spacing:.12em;color:var(--orange-safety);
+}
+.masthead .rules{height:9px;margin:5px 0 3px;border-top:3px solid var(--teal-surface);border-bottom:3px solid var(--teal-surface)}
+.masthead .en{font-family:var(--font-cond);font-weight:700;font-size:13px;letter-spacing:.28em;color:var(--orange-safety)}
+
+.meta{font-size:12px;line-height:1.2;color:var(--orange-amber)}
+.meta b{color:var(--orange-safety);font-weight:400}
+
+.header-status{display:flex;flex-direction:column;gap:6px;align-items:flex-end}
+/* black-on-mint 7-seg timestamp chip (terminal-color.gif reference) */
+.timechip{
+  display:flex;align-items:center;gap:2px;background:var(--mint-paper);
+  padding:5px 9px 4px;border-radius:2px;
+  box-shadow:0 0 10px rgba(237,248,214,.4),inset 0 0 4px rgba(10,10,10,.15);
+}
+.timechip .tc-colon{display:flex;flex-direction:column;gap:5px;margin:0 2px}
+.timechip .tc-colon i{width:3px;height:3px;background:#0A0A0A;display:block}
+.timechip .ampm{font-weight:700;font-size:10px;color:#0A0A0A;margin-left:5px;letter-spacing:.08em}
+
+/* ============================================================
+   PANEL
+   ============================================================ */
+.panel{
+  border:1px solid var(--orange-safety);
+  background:var(--bg-void);
+  padding:12px;
+  position:relative;
+  box-shadow:inset 0 0 8px rgba(242,100,0,.08);
+  display:flex;flex-direction:column;min-height:0;min-width:0;
+}
+.panel--chamfer{
+  clip-path:polygon(0 0,calc(100% - 22px) 0,100% 22px,100% 100%,0 100%);
+}
+.panel-title{
+  display:flex;justify-content:space-between;align-items:baseline;gap:10px;
+  border-bottom:2px solid var(--orange-safety);
+  padding-bottom:6px;margin-bottom:10px;
+  font-family:var(--font-cond);font-weight:700;font-size:15px;letter-spacing:.14em;
+  color:var(--orange-safety);
+}
+.panel-title .sub{font-family:var(--font-mono);font-size:11px;color:var(--orange-amber);letter-spacing:.05em}
+
+/* ============================================================
+   TRIAD CONSENSUS — chamfered status nodes + connectors
+   ============================================================ */
+.triad{position:relative;flex:1;min-height:330px}
+.triad svg{position:absolute;inset:0;width:100%;height:100%}
+.triad .hub{
+  position:absolute;left:50%;top:52%;transform:translate(-50%,-50%);
+  font-family:var(--font-cond);font-weight:700;font-size:17px;letter-spacing:.3em;
+  color:var(--orange-safety);
+}
+.node{
+  position:absolute;width:150px;height:104px;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:6px;
+  font-family:var(--font-cond);font-weight:700;font-size:17px;letter-spacing:.02em;
+  border:2px solid var(--orange-safety);color:var(--orange-safety);
+  background:var(--bg-void);
+  transition:none;
+}
+.node small{font-family:var(--font-mono);font-size:9px;font-weight:400;letter-spacing:.1em}
+.n1{left:50%;top:0;transform:translateX(-50%);clip-path:polygon(0 0,100% 0,100% 62%,72% 100%,28% 100%,0 62%)}
+.n2{left:0;bottom:12px;clip-path:polygon(0 0,74% 0,100% 34%,100% 100%,26% 100%,0 66%)}
+.n3{right:0;bottom:12px;clip-path:polygon(26% 0,100% 0,100% 66%,74% 100%,0 100%,0 34%)}
+.node--pending{background:var(--blue-pending);border-color:var(--blue-pending);color:var(--bg-void)}
+.node--yes{background:var(--green-phosphor);border-color:var(--green-phosphor);color:var(--bg-void)}
+.node--no{background:var(--red-nerv);border-color:var(--red-nerv);color:var(--bg-void)}
+.node .verdict{
+  display:none;border:2px solid var(--bg-void);padding:1px 8px;
+  font-family:var(--font-jp);font-weight:800;font-size:15px;text-transform:none;
+}
+.node--yes .verdict,.node--no .verdict{display:inline-block}
+.triad-meta{margin-top:8px;font-size:11px;line-height:1.25;color:var(--orange-amber)}
+.triad-result{position:absolute;right:0;top:0;color:var(--red-bright)}
+
+/* ============================================================
+   SEGMENTED METER + THRESHOLD
+   ============================================================ */
+.meterwrap{flex:1;display:flex;gap:10px;min-height:0}
+.meter-axis{
+  display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;
+  color:var(--orange-safety);font-size:10px;padding:2px 4px 2px 0;
+  border-right:2px solid var(--orange-safety);width:44px;flex:none;
+}
+.meter-field{flex:1;position:relative;display:flex;gap:26px;align-items:flex-end;padding:0 18px}
+.bar{flex:1;display:flex;flex-direction:column-reverse;gap:3px;height:100%}
+.seg{
+  height:9px;flex:none;border-radius:3px;background:transparent;
+}
+.seg.on{
+  background:var(--red-bright);
+  box-shadow:0 0 5px rgba(226,40,15,.8),0 0 14px rgba(226,40,15,.35);
+}
+.seg.on.cool{
+  background:var(--green-phosphor);
+  box-shadow:0 0 5px rgba(82,242,154,.7),0 0 12px rgba(82,242,154,.3);
+}
+.threshold{
+  position:absolute;left:0;right:0;height:0;border-top:2px solid var(--orange-amber);
+  box-shadow:0 0 6px rgba(244,159,9,.6);z-index:2;
+}
+.threshold .stamp{
+  position:absolute;left:6px;top:-9px;background:var(--bg-void);
+  color:var(--orange-amber);font-size:10px;padding:1px 6px;
+}
+.bar-labels{display:flex;gap:26px;padding:6px 18px 0;flex:none}
+.bar-labels span{flex:1;text-align:center;font-size:10px;color:var(--orange-safety)}
+.meter-badge{
+  position:absolute;top:-2px;right:10px;z-index:3;
+  font-family:var(--font-cond);font-weight:700;font-size:18px;letter-spacing:.08em;
+  color:var(--red-bright);border:2px solid currentColor;border-radius:5px;padding:2px 12px;
+  text-shadow:0 0 6px currentColor,0 0 16px rgba(226,40,15,.7);
+  box-shadow:0 0 8px rgba(226,40,15,.5),inset 0 0 8px rgba(226,40,15,.25);
+  background:var(--bg-void);
+}
+
+/* ============================================================
+   COUNTDOWN — 7-seg SVG + mode rail
+   ============================================================ */
+.count-caption{font-size:10px;color:var(--orange-amber);margin-bottom:4px}
+.sevenseg{display:flex;align-items:center;justify-content:center;gap:6px;padding:10px 0 14px}
+.sevenseg svg{filter:drop-shadow(0 0 3px rgba(242,100,0,.9)) drop-shadow(0 0 9px rgba(242,100,0,.4))}
+.colon{display:flex;flex-direction:column;gap:14px}
+.colon i{width:7px;height:7px;background:var(--orange-safety);display:block}
+.plates{display:flex;flex-direction:column;gap:8px;margin:2px 0 12px}
+.plate{
+  border:2px solid var(--orange-safety);padding:6px 10px;text-align:center;color:var(--orange-safety);
+}
+.plate .jp{font-family:var(--font-jp);font-weight:800;font-size:24px;letter-spacing:.35em;text-transform:none;line-height:1.1}
+.plate .en{font-family:var(--font-cond);font-weight:700;font-size:11px;letter-spacing:.3em}
+.plate--dim{opacity:.28}
+.moderail{display:flex;gap:6px;margin-top:auto}
+.mode{
+  flex:1;border:2px solid var(--orange-safety);background:var(--bg-void);
+  color:var(--orange-safety);font-family:var(--font-cond);font-weight:700;font-size:12px;
+  letter-spacing:.1em;text-transform:uppercase;padding:7px 2px;cursor:pointer;border-radius:0;
+}
+.mode:focus-visible{outline:2px solid var(--green-phosphor);outline-offset:2px}
+.mode.active{background:var(--orange-safety);color:var(--bg-void)}
+.mode.active.blinkable{animation:modeblink 1s steps(1,end) infinite}
+@keyframes modeblink{0%,74%{background:var(--orange-safety);color:var(--bg-void)}75%,100%{background:var(--bg-void);color:var(--orange-safety)}}
+.hazard-corner{
+  position:absolute;top:0;right:0;width:64px;height:34px;
+  background:repeating-linear-gradient(-45deg,var(--red-crimson) 0 9px,#000 9px 18px);
+  clip-path:polygon(100% 0,100% 100%,0 0);opacity:.9;
+}
+
+/* ============================================================
+   TERMINAL
+   ============================================================ */
+.terminal{grid-column:1/3}
+.termbody{
+  flex:1;overflow:hidden;font-size:12px;line-height:1.45;letter-spacing:.04em;
+  color:var(--orange-amber);min-height:0;
+}
+.termbody .row{white-space:pre;display:block}
+.termbody .dim{color:var(--orange-amber-dim)}
+.termbody .ok{color:var(--orange-amber)}
+.termbody .purged{
+  display:inline-block;border:1px solid var(--red-bright);border-radius:3px;
+  color:var(--red-bright);background:rgba(226,40,15,.12);padding:0 6px;margin:1px 0;
+  font-weight:700;text-shadow:0 0 4px currentColor;
+}
+.cursor{display:inline-block;width:8px;height:13px;background:var(--orange-amber);vertical-align:-2px}
+
+/* ============================================================
+   UPLINK LATTICE — chevron cascade
+   ============================================================ */
+.lattice{flex:1;display:flex;gap:14px;align-items:stretch;overflow:hidden;position:relative}
+.lat-col{flex:1;display:flex;flex-direction:column;justify-content:space-between;gap:5px;position:relative}
+.lat-col::before{content:"";position:absolute;left:50%;top:0;bottom:0;border-left:1px solid rgba(242,100,0,.5)}
+.chev{
+  height:11px;background:transparent;transform:skewX(-38deg);border-radius:1px;position:relative;z-index:1;
+}
+.chev.on{background:var(--red-nerv);box-shadow:0 0 6px rgba(194,12,12,.7)}
+.chev.on.ok{background:var(--green-phosphor);box-shadow:0 0 6px rgba(82,242,154,.6)}
+.lat-plate{
+  position:absolute;left:50%;top:50%;z-index:5;transform:translate(-50%,-50%) rotate(-9deg);
+  border:2px solid var(--red-bright);color:var(--red-bright);background:var(--bg-void);
+  font-family:var(--font-cond);font-weight:700;font-size:14px;letter-spacing:.18em;
+  padding:3px 26px;text-shadow:0 0 5px currentColor;
+}
+.lat-plate::before,.lat-plate::after{
+  content:"";position:absolute;top:-2px;bottom:-2px;width:12px;
+  background:repeating-linear-gradient(-45deg,var(--red-crimson) 0 4px,#000 4px 8px);
+}
+.lat-plate::before{left:-14px}
+.lat-plate::after{right:-14px}
+
+/* ============================================================
+   ALERT OVERLAY — tri-channel alarm
+   ============================================================ */
+.overlay{
+  position:fixed;inset:0;z-index:200;display:none;
+  background:var(--red-bright);
+  flex-direction:column;justify-content:center;align-items:center;
+}
+.overlay.show{display:flex}
+.overlay.strobe{animation:strobe .5s steps(1,end) infinite}
+@keyframes strobe{0%,49%{filter:none}50%,100%{filter:invert(12%) saturate(3)}}
+.ov-band{
+  background:#000;width:100vw;padding:2vh 0;text-align:center;
+}
+.ov-word{
+  font-family:var(--font-cond);font-weight:700;font-size:17vw;line-height:.95;
+  color:var(--red-bright);letter-spacing:-.01em;
+}
+.ov-jp{
+  font-family:var(--font-jp);font-weight:800;font-size:34px;color:#000;text-transform:none;
+  border:3px solid #000;padding:2px 22px;letter-spacing:.4em;margin:3vh 0;
+}
+.ov-chip{
+  position:absolute;border:3px solid #fff;color:#fff;font-family:var(--font-cond);
+  font-weight:700;font-size:26px;letter-spacing:.12em;padding:2px 16px;
+}
+.ov-chip.tl{top:22px;left:22px}
+.ov-chip.br{bottom:22px;right:22px}
+.ov-stripes{position:absolute;left:0;right:0;height:26px;background:repeating-linear-gradient(-45deg,#000 0 16px,transparent 16px 32px)}
+.ov-stripes.top{top:0}.ov-stripes.bot{bottom:0}
+.ov-hint{position:absolute;bottom:60px;font-size:11px;color:#000;letter-spacing:.2em}
+
+/* ============================================================
+   REDUCED MOTION — keep final states, kill blinks/strobes
+   ============================================================ */
+@media (prefers-reduced-motion:reduce){
+  .blink,.blink-fast,.mode.active.blinkable,.overlay.strobe{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="console">
+  <div class="console-inner">
+
+    <!-- ================= HEADER ================= -->
+    <header>
+      <div class="masthead">
+        <div class="jp">軌道戦術</div>
+        <div class="rules"></div>
+        <div class="en">Orbital Tactical Console</div>
+      </div>
+      <div class="meta">
+        CODE:<b>771</b><br>
+        FILE:<b>ORB_TAC</b><br>
+        EXTENTION:<b>0143</b><br>
+        EX_MODE:<b>ON</b><br>
+        PRIORITY:<b>AA-</b>
+      </div>
+      <div></div>
+      <div class="header-status">
+        <span id="watch-stamp" class="stamp blink glow-r" style="color:var(--red-bright)">監視中 · WATCH</span>
+        <span class="stamp" style="color:var(--orange-safety)">STATION KESTREL·4</span>
+      </div>
+      <div class="header-status">
+        <span class="timechip" id="timechip" role="img" aria-label="Shipboard time"></span>
+        <span style="font-size:10px;color:var(--orange-amber)">SHIPBOARD TIME</span>
+      </div>
+    </header>
+
+    <!-- ================= TRIAD CONSENSUS ================= -->
+    <section class="panel panel--chamfer" aria-label="Triad consensus">
+      <div class="panel-title">TRIAD CONSENSUS <span class="sub">OBJECT: FIRE SOLUTION</span></div>
+      <div class="triad">
+        <svg viewBox="0 0 316 330" preserveAspectRatio="none" aria-hidden="true">
+          <circle cx="158" cy="172" r="66" fill="none" stroke="#F26400" stroke-width="1"/>
+          <line x1="158" y1="104" x2="158" y2="128" stroke="#F26400" stroke-width="2"/>
+          <line x1="112" y1="220" x2="78"  y2="248" stroke="#F26400" stroke-width="2"/>
+          <line x1="204" y1="220" x2="238" y2="248" stroke="#F26400" stroke-width="2"/>
+        </svg>
+        <div class="hub">TRIAD</div>
+        <div class="node n1" id="node-0"><span>VEGA·1</span><small>LOGIC CORE</small><span class="verdict"></span></div>
+        <div class="node n2" id="node-1"><span>ALTAIR·2</span><small>ETHICS CORE</small><span class="verdict"></span></div>
+        <div class="node n3" id="node-2"><span>DENEB·3</span><small>INSTINCT CORE</small><span class="verdict"></span></div>
+        <div class="triad-result"><span id="triad-stamp" class="stamp blink">審議中 · VOTING</span></div>
+      </div>
+      <div class="triad-meta">
+        MOTION:<b id="motion-name" style="color:var(--orange-safety)">WEAPONS FREE</b><br>
+        QUORUM:3/3 &nbsp; RULE:UNANIMOUS &nbsp; SEQ:<b id="motion-seq" style="color:var(--orange-safety)">0001</b>
+      </div>
+    </section>
+
+    <!-- ================= REACTOR METER ================= -->
+    <section class="panel" aria-label="Reactor output meters">
+      <div class="panel-title">REACTOR OUTPUT <span class="sub">OBJECT: DRIVE CORES A–D</span></div>
+      <div class="meterwrap">
+        <div class="meter-axis"><span>+100</span><span>+50</span><span>±0</span><span>-50</span><span>-100</span></div>
+        <div style="flex:1;display:flex;flex-direction:column;min-height:0;position:relative">
+          <div class="meter-badge glow-r">LOAD</div>
+          <div class="meter-field" id="meter-field">
+            <div class="threshold" id="threshold"><span class="stamp">LIMIT LINE</span></div>
+          </div>
+          <div class="bar-labels"><span>CORE·A</span><span>CORE·B</span><span>CORE·C</span><span>CORE·D</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= COUNTDOWN ================= -->
+    <section class="panel" aria-label="Countdown">
+      <div class="hazard-corner"></div>
+      <div class="panel-title">RESERVE POWER <span class="sub" style="padding-right:56px">BUS·7</span></div>
+      <div class="count-caption">ACTIVE TIME REMAINING:</div>
+      <div class="sevenseg" id="sevenseg"></div>
+      <div class="plates">
+        <div class="plate" id="plate-int"><div class="jp">内部</div><div class="en">Internal</div></div>
+        <div class="plate plate--dim" id="plate-ext"><div class="jp">外部</div><div class="en">External</div></div>
+      </div>
+      <div class="moderail" role="group" aria-label="Burn rate">
+        <button class="mode" data-rate="0">STOP</button>
+        <button class="mode" data-rate="0.25">SLOW</button>
+        <button class="mode active blinkable" data-rate="1">NORMAL</button>
+        <button class="mode" data-rate="6">RACING</button>
+      </div>
+    </section>
+
+    <!-- ================= TERMINAL ================= -->
+    <section class="panel terminal" aria-label="System log">
+      <div class="panel-title">SYSTEM LOG <span class="sub">BUS:MAINT · 128SEG</span></div>
+      <div class="termbody" id="termbody"></div>
+    </section>
+
+    <!-- ================= UPLINK LATTICE ================= -->
+    <section class="panel" aria-label="Uplink lattice">
+      <div class="panel-title">UPLINK LATTICE <span class="sub">RELAY GRID</span></div>
+      <div class="lattice" id="lattice">
+        <div class="lat-plate">BORDER·LINE</div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<!-- ================= ALERT OVERLAY ================= -->
+<div class="overlay" id="overlay" role="alertdialog" aria-label="Overload alert">
+  <div class="ov-stripes top"></div>
+  <span class="ov-chip tl">ALERT</span>
+  <div class="ov-jp">過負荷</div>
+  <div class="ov-band"><div class="ov-word">OVERLOAD</div></div>
+  <div class="ov-jp">過負荷</div>
+  <span class="ov-chip br">ALERT</span>
+  <div class="ov-hint">CLICK TO ACKNOWLEDGE</div>
+  <div class="ov-stripes bot"></div>
+</div>
+
+<script>
+"use strict";
+/* Motion grammar: everything below runs on setInterval ticks —
+   stepped, mechanical, no easing anywhere. */
+
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---------- 7-SEG DISPLAY (shared factory) ---------- */
+const SVGNS = "http://www.w3.org/2000/svg";
+const SEGMAP = {
+  0:"abcdef",1:"bc",2:"abged",3:"abgcd",4:"fgbc",
+  5:"afgcd",6:"afgedc",7:"abc",8:"abcdefg",9:"abcfgd"
+};
+/* proper hexagonal LED segments in a 46x64 box, italic slant via skew */
+const SEGPTS = {
+  a:"7,4 10.5,0.5 29.5,0.5 33,4 29.5,7.5 10.5,7.5",
+  b:"36,7 39.5,10.5 39.5,27.5 36,31 32.5,27.5 32.5,10.5",
+  c:"36,33 39.5,36.5 39.5,53.5 36,57 32.5,53.5 32.5,36.5",
+  d:"7,60 10.5,56.5 29.5,56.5 33,60 29.5,63.5 10.5,63.5",
+  e:"4,33 7.5,36.5 7.5,53.5 4,57 0.5,53.5 0.5,36.5",
+  f:"4,7 7.5,10.5 7.5,27.5 4,31 0.5,27.5 0.5,10.5",
+  g:"7,32 10.5,28.5 29.5,28.5 33,32 29.5,35.5 10.5,35.5"
+};
+function makeDigit(w,h,on,off){
+  const svg = document.createElementNS(SVGNS,"svg");
+  svg.setAttribute("width",w);svg.setAttribute("height",h);
+  svg.setAttribute("viewBox","0 0 46 64");
+  svg.dataset.on = on; svg.dataset.off = off;
+  for(const k of "abcdefg"){
+    const p = document.createElementNS(SVGNS,"polygon");
+    p.setAttribute("points",SEGPTS[k]);
+    p.setAttribute("data-seg",k);
+    p.setAttribute("transform","translate(6,0) skewX(-6)");
+    p.setAttribute("fill",off);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+function renderDigit(svg,val,dark){
+  const lit = dark ? "" : SEGMAP[val];
+  for(const poly of svg.children){
+    const on = lit.includes(poly.getAttribute("data-seg"));
+    poly.setAttribute("fill", on ? svg.dataset.on : svg.dataset.off);
+  }
+}
+
+/* ---------- SHIPBOARD CLOCK — black-on-mint 7-seg timestamp chip ---------- */
+const chip = document.getElementById("timechip");
+const chipDigits = [];
+for(let i=0;i<6;i++){
+  const d = makeDigit(13,20,"#0A0A0A","rgba(10,10,10,.12)");
+  chipDigits.push(d);chip.appendChild(d);
+  if(i===1||i===3){
+    const c = document.createElement("span");c.className="tc-colon";
+    c.innerHTML = "<i></i><i></i>";chip.appendChild(c);
+  }
+}
+const ampm = document.createElement("span");
+ampm.className = "ampm";chip.appendChild(ampm);
+let chipBlink = true;
+function tickChip(){
+  const d = new Date();
+  let h = d.getHours();
+  ampm.textContent = h<12 ? "AM" : "PM";
+  h = h%12 || 12;
+  const str = String(h).padStart(2,"0")
+    + String(d.getMinutes()).padStart(2,"0")
+    + String(d.getSeconds()).padStart(2,"0");
+  chipDigits.forEach((dg,i)=>renderDigit(dg,+str[i]));
+  chipBlink = !chipBlink;
+  chip.querySelectorAll(".tc-colon").forEach(c=>c.style.opacity=(chipBlink||REDUCED)?1:.25);
+}
+tickChip(); setInterval(tickChip,500);
+
+/* ---------- 7-SEGMENT COUNTDOWN ---------- */
+const mkCD = ()=>makeDigit(40,64,"#F26400","rgba(242,100,0,.07)");
+const segWrap = document.getElementById("sevenseg");
+const digits = [];
+function addColon(){
+  const c = document.createElement("span");c.className="colon";
+  c.innerHTML="<i></i><i></i>";segWrap.appendChild(c);return c;
+}
+digits.push(mkCD()); segWrap.appendChild(digits[0]);
+const colon1 = addColon();
+digits.push(mkCD(),mkCD());
+segWrap.appendChild(digits[1]);segWrap.appendChild(digits[2]);
+const colon2 = addColon();
+digits.push(mkCD(),mkCD());
+segWrap.appendChild(digits[3]);segWrap.appendChild(digits[4]);
+
+let remaining = 1*3600 + 4*60 + 30;   // 1:04:30
+let burnRate = 1;
+let external = false;
+let acc = 0, colonOn = true;
+
+function renderCountdown(){
+  if(external){ digits.forEach(d=>renderDigit(d,0,true)); return; }
+  const h = Math.floor(remaining/3600),
+        m = Math.floor(remaining%3600/60),
+        s = Math.floor(remaining%60);
+  renderDigit(digits[0],h%10);
+  renderDigit(digits[1],Math.floor(m/10)); renderDigit(digits[2],m%10);
+  renderDigit(digits[3],Math.floor(s/10)); renderDigit(digits[4],s%10);
+}
+setInterval(()=>{
+  colonOn = !colonOn;
+  const vis = (external||REDUCED) ? (external?0:1) : (colonOn?1:0);
+  colon1.style.opacity = colon2.style.opacity = vis;
+  acc += burnRate*0.5;
+  while(acc>=1 && remaining>0){remaining--;acc--;}
+  if(remaining<=0){remaining=0;}
+  renderCountdown();
+},500);
+renderCountdown();
+
+/* mode rail */
+const modes = [...document.querySelectorAll(".mode")];
+modes.forEach(btn=>{
+  btn.addEventListener("click",()=>{
+    modes.forEach(b=>b.classList.remove("active","blinkable"));
+    btn.classList.add("active","blinkable");
+    burnRate = parseFloat(btn.dataset.rate);
+    logLine(`BURN RATE SET .......... ${btn.textContent}`,true);
+  });
+});
+/* internal/external swap every ~45s — absence of digits = safe */
+setInterval(()=>{
+  external = !external;
+  document.getElementById("plate-int").classList.toggle("plate--dim",external);
+  document.getElementById("plate-ext").classList.toggle("plate--dim",!external);
+  logLine(external?"SUPPLY BUS .............. EXTERNAL":"SUPPLY BUS .............. INTERNAL",true);
+  if(!external) remaining = 1*3600+4*60+30;
+},45000);
+
+/* ---------- SEGMENTED METERS ---------- */
+const NSEG = 22, NBAR = 4, THRESH = 14;  // segment index of limit line
+const field = document.getElementById("meter-field");
+const bars = [];
+for(let b=0;b<NBAR;b++){
+  const col = document.createElement("div"); col.className="bar";
+  const segs = [];
+  for(let s=0;s<NSEG;s++){
+    const el = document.createElement("div"); el.className="seg";
+    col.appendChild(el); segs.push(el);
+  }
+  field.appendChild(col);
+  bars.push({segs, level: 6+Math.floor(Math.random()*6), target: 8});
+}
+/* place threshold line at segment THRESH */
+function placeThreshold(){
+  const pct = (THRESH*(9+3)-1.5) / (NSEG*(9+3)) * 100;
+  document.getElementById("threshold").style.bottom = pct+"%";
+}
+placeThreshold();
+
+let overloadTicks = 0, overlayLock = false;
+setInterval(()=>{                          // stepped random walk, 8Hz
+  let above = 0;
+  for(const bar of bars){
+    if(Math.random()<.3) bar.target = 4+Math.floor(Math.random()*(NSEG-4));
+    if(bar.level<bar.target) bar.level++;
+    else if(bar.level>bar.target) bar.level--;
+    if(bar.level>THRESH) above++;
+    bar.segs.forEach((s,i)=>{
+      const on = i<bar.level;
+      s.classList.toggle("on",on);
+      s.classList.toggle("cool",on && bar.level<=THRESH);
+    });
+  }
+  if(above>=3 && !overlayLock){ overloadTicks++; } else if(above<3){ overloadTicks=0; }
+  if(overloadTicks>10 && !overlayLock) triggerOverload();
+},125);
+
+/* ---------- ALERT OVERLAY ---------- */
+const overlay = document.getElementById("overlay");
+const watchStamp = document.getElementById("watch-stamp");
+function triggerOverload(){
+  overlayLock = true; overloadTicks = 0;
+  overlay.classList.add("show");
+  if(!REDUCED) overlay.classList.add("strobe");
+  watchStamp.textContent = "警告 · ALARM";
+  logLine("!! CORE OVERLOAD ........ LIMIT LINE EXCEEDED",false,true);
+  bars.forEach(b=>b.target=5);             // vent pressure after alarm
+  if(REDUCED) setTimeout(dismissOverlay,2000);
+}
+function dismissOverlay(){
+  overlay.classList.remove("show","strobe");
+  watchStamp.textContent = "監視中 · WATCH";
+  logLine("OVERLOAD ACKNOWLEDGED ... VENTING CORES",true);
+  setTimeout(()=>{overlayLock=false;},8000);
+}
+overlay.addEventListener("click",dismissOverlay);
+addEventListener("keydown",e=>{if(e.key==="Escape"&&overlay.classList.contains("show"))dismissOverlay();});
+
+/* ---------- TRIAD CONSENSUS ---------- */
+const MOTIONS = ["WEAPONS FREE","COURSE CHANGE","SILENT RUNNING","PURGE ARCHIVE","DOCK CLEARANCE","AUTONOMY LEVEL 3"];
+const nodes = [0,1,2].map(i=>document.getElementById("node-"+i));
+const triadStamp = document.getElementById("triad-stamp");
+let seq = 1;
+
+function setNode(el,state,verdict){
+  el.classList.remove("node--pending","node--yes","node--no");
+  if(state) el.classList.add(state);
+  el.querySelector(".verdict").textContent = verdict||"";
+}
+function runVote(){
+  const motion = MOTIONS[Math.floor(Math.random()*MOTIONS.length)];
+  document.getElementById("motion-name").textContent = motion;
+  document.getElementById("motion-seq").textContent = String(seq++).padStart(4,"0");
+  triadStamp.textContent = "審議中 · VOTING";
+  triadStamp.style.color = "var(--red-bright)";
+  triadStamp.classList.add("blink");
+  nodes.forEach(n=>setNode(n,null));
+  logLine(`TRIAD MOTION ............ ${motion}`,true);
+
+  const order = [0,1,2].sort(()=>Math.random()-.5);
+  const votes = [];
+  order.forEach((idx,k)=>{
+    setTimeout(()=>setNode(nodes[idx],"node--pending"), 700+k*1400);
+    setTimeout(()=>{
+      const yes = Math.random()<.78;
+      votes.push(yes);
+      /* snap with a 3-frame flicker before settling */
+      const el = nodes[idx];
+      const final = yes?"node--yes":"node--no";
+      const verdict = yes?"承認":"否定";
+      if(REDUCED){ setNode(el,final,verdict); }
+      else{
+        setNode(el,final,verdict);
+        setTimeout(()=>setNode(el,"node--pending"),60);
+        setTimeout(()=>setNode(el,final,verdict),120);
+      }
+      logLine(`  ${el.querySelector("span").textContent} VOTE .......... ${yes?"APPROVE":"DENY"}`,yes);
+      if(votes.length===3){
+        const passed = votes.every(v=>v);
+        setTimeout(()=>{
+          triadStamp.classList.remove("blink");
+          triadStamp.textContent = passed ? "可決 · PASSED" : "否決 · REJECTED";
+          triadStamp.style.color = passed ? "var(--green-phosphor)" : "var(--red-bright)";
+          logLine(`TRIAD RESULT ............ ${passed?"PASSED":"REJECTED"}`,passed,!passed);
+        },900);
+      }
+    }, 1500+k*1400);
+  });
+}
+/* ---------- TERMINAL ---------- */
+const term = document.getElementById("termbody");
+const BOOT = [
+  ["CO-CPU .................. CHECK","OK"],
+  ["I/O VECTORS ............. CHECK","OK"],
+  ["CONSOLE DRIVERS ......... CHECK","OK"],
+  ["ROUTING TABLES .......... CHECK","OK"],
+  ["STATUS ANALYZER ......... CHECK","OK"],
+  ["HULL SENSOR NET ......... CHECK","OK"],
+  ["VIRUS PROTECTION ........ GREEN","OK"],
+];
+const CHATTER = [
+  "RELAY K-22 HANDSHAKE .... 53TB/S",
+  "COOLANT LOOP B .......... NOMINAL",
+  "STARFIX QUORUM .......... 14 SATS",
+  "DEBRIS TRACK 0114 ....... FADED",
+  "CREW BAY PRESSURE ....... 101 KPA",
+  "ANTENNA TRIM ............ +0.4 DEG",
+  "BATTERY BUS ............. FLOAT",
+  "TELEMETRY FRAME ......... 128 SEG",
+  "NAV DRIFT ............... 0.002 AU",
+  "HEAT RADIATORS .......... 62 PCT",
+];
+let maxRows = 60;
+function logLine(text, ok, danger){
+  const row = document.createElement("span");
+  row.className = "row " + (danger?"":"dim");
+  if(danger){
+    const stamp = document.createElement("span");
+    stamp.className="purged";
+    stamp.textContent = text;
+    row.appendChild(stamp);
+  } else {
+    row.textContent = text;
+    if(ok!==undefined){
+      const tail = document.createElement("span");
+      tail.className = ok ? "ok" : "purged";
+      tail.textContent = ok ? "  OK" : "  FAIL";
+      row.appendChild(tail);
+    }
+  }
+  term.appendChild(row);
+  while(term.children.length>maxRows) term.removeChild(term.firstChild);
+  term.scrollTop = term.scrollHeight;
+}
+/* teletype boot, then ambient chatter */
+BOOT.forEach((l,i)=>setTimeout(()=>logLine(l[0],true), 150*i));
+setInterval(()=>{
+  const msg = CHATTER[Math.floor(Math.random()*CHATTER.length)];
+  logLine(msg, Math.random()<.94);
+}, 1800);
+
+/* ---------- UPLINK LATTICE ---------- */
+const lattice = document.getElementById("lattice");
+const NCOL=7, NROW=13;
+const cells=[];
+for(let c=0;c<NCOL;c++){
+  const col=document.createElement("div");col.className="lat-col";
+  const arr=[];
+  for(let r=0;r<NROW;r++){
+    const ch=document.createElement("div");ch.className="chev";
+    col.appendChild(ch);arr.push(ch);
+  }
+  lattice.appendChild(col);cells.push(arr);
+}
+let wave = 0;
+setInterval(()=>{                        // ignition propagates column by column
+  wave = (wave+1) % (NCOL+6);
+  for(let c=0;c<NCOL;c++){
+    for(let r=0;r<NROW;r++){
+      const el = cells[c][r];
+      const lit = c<=wave && Math.random()>.12;
+      const isOk = (c+r)%4===0;          // minority green
+      el.classList.toggle("on", lit && c<=wave);
+      el.classList.toggle("ok", isOk);
+    }
+  }
+  if(wave===NCOL+5){                     // teardown: reverse cascade to black
+    let c = NCOL-1;
+    const down = setInterval(()=>{
+      if(c<0){clearInterval(down);return;}
+      cells[c].forEach(el=>el.classList.remove("on"));
+      c--;
+    },70);
+  }
+},260);
+
+/* ---------- START ---------- */
+runVote();
+setInterval(runVote, 13000);
+</script>
+</body>
+</html>

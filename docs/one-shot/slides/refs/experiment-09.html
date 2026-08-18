@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPERIMENT-09 · CHARGE DISTRIBUTION (BLUEPRINT)</title>
+<style>
+/* The one light-mode screen in the reference set: pale gray field,
+   hairline traces, solid red cells. Blueprint theme variant. */
+:root{
+  --paper:#B4B4B4;--ink:#141414;--cell:#E40C0C;--cell-dim:#8E0808;
+  --trace:#7A4A4A;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--paper);overflow:hidden;font-family:var(--mono);text-transform:uppercase}
+/* film grain instead of scanlines for the print look */
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;opacity:.5;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.05) 0 1px,transparent 1px 4px)}
+
+svg{position:absolute;inset:0;width:100%;height:100%}
+
+.hud{
+  position:absolute;left:24px;top:20px;color:var(--ink);font-size:12px;line-height:1.5;z-index:5;
+}
+.hud .title{font-family:var(--cond);font-weight:700;font-size:20px;letter-spacing:.1em;
+  border-bottom:2px solid var(--ink);display:inline-block;padding-bottom:2px;margin-bottom:6px}
+.hud b{font-weight:700}
+
+.legend{
+  position:absolute;right:24px;bottom:20px;color:var(--ink);font-size:11px;z-index:5;
+  border:2px solid var(--ink);padding:8px 12px;background:rgba(180,180,180,.9);line-height:1.7;
+}
+.legend i{display:inline-block;width:22px;height:9px;margin-right:8px;vertical-align:middle}
+.legend .full{background:var(--cell)}
+.legend .empty{background:var(--ink)}
+</style>
+</head>
+<body>
+
+<svg id="diag" aria-label="Charge distribution diagram"></svg>
+
+<div class="hud">
+  <span class="title">CHARGE DISTRIBUTION</span><br>
+  ROOT:<b>UNIT-07 MAIN BUS</b><br>
+  STAGE:<b id="stage">1/4</b> &nbsp; LOAD:<b id="load">0%</b>
+</div>
+
+<div class="legend">
+  <i class="full"></i>CELL CHARGED<br>
+  <i class="empty"></i>CELL EMPTY
+</div>
+
+<script>
+"use strict";
+/* if loaded in a hidden/zero-size viewport, re-init once it has real size */
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+/* Fan-out: one root chip -> hairline traces -> columns of cells,
+   branching 1:2 per stage. Cells charge in stepped propagation
+   left -> right; drains and restarts. */
+
+const NS="http://www.w3.org/2000/svg";
+const svg=document.getElementById("diag");
+const W=innerWidth,H=innerHeight;
+svg.setAttribute("viewBox",`0 0 ${W} ${H}`);
+const el=(n,a,p=svg)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);p.appendChild(e);return e;};
+
+/* root chip */
+const rootX=90,rootY=H/2;
+el("rect",{x:rootX-58,y:rootY-16,width:116,height:32,fill:"#141414"});
+const t=el("text",{x:rootX,y:rootY+5,fill:"#EDEDED","text-anchor":"middle",
+  "font-family":"ui-monospace,Menlo,monospace","font-size":"14","letter-spacing":"2"});
+t.textContent="UNIT-07";
+
+/* stages: columns of cells, each cell in stage n feeds 2 in stage n+1 */
+const STAGES=4, CW=46, CH=15, GAP=7;
+const colX=i=>220+i*((W-300)/(STAGES-.5));
+const stages=[];
+let prev=[{x:rootX+58,y:rootY}];
+for(let s=0;s<STAGES;s++){
+  const n=Math.min(2**(s+3), Math.floor(H/(CH+GAP))-2);
+  const cells=[];
+  const totalH=n*(CH+GAP);
+  for(let i=0;i<n;i++){
+    const x=colX(s), y=H/2-totalH/2+i*(CH+GAP);
+    /* trace from a parent in previous column */
+    const parent=prev[Math.floor(i*prev.length/n)];
+    el("path",{d:`M${parent.x} ${parent.y} L${x-24} ${y+CH/2} L${x} ${y+CH/2}`,
+      fill:"none",stroke:"#7A4A4A","stroke-width":.8});
+    const rect=el("rect",{x,y,width:CW,height:CH,fill:"#141414"});
+    cells.push({rect,charged:false,x});
+  }
+  stages.push(cells);
+  prev=cells.map(c=>({x:c.x+CW,y:+c.rect.getAttribute("y")+CH/2}));
+}
+const all=stages.flat();
+
+/* stepped charge propagation */
+let front=0, dir=1;                    /* front sweeps right then resets */
+const maxX=W+100;
+const stageEl=document.getElementById("stage");
+const loadEl=document.getElementById("load");
+
+setInterval(()=>{
+  front+=dir*38;
+  let charged=0;
+  for(const c of all){
+    if(c.x<front && !c.charged && Math.random()>.05){
+      c.charged=true; c.rect.setAttribute("fill","#E40C0C");
+    }
+    if(c.charged) charged++;
+  }
+  const pct=Math.round(charged/all.length*100);
+  loadEl.textContent=pct+"%";
+  const st=Math.min(STAGES,1+Math.floor(front/((W-300)/(STAGES-.5)+1)));
+  stageEl.textContent=Math.max(1,st)+"/"+STAGES;
+
+  if(front>maxX && dir===1){
+    /* hold, then drain in one hard step per column, right to left */
+    dir=0;
+    let s=STAGES-1;
+    const drain=setInterval(()=>{
+      if(s<0){clearInterval(drain);front=0;dir=1;return;}
+      for(const c of stages[s]){c.charged=false;c.rect.setAttribute("fill","#141414");}
+      s--;
+    },240);
+  }
+},150);
+</script>
+</body>
+</html>

@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JAIRUS OS · OPERATOR MANIFEST</title>
+<!-- landing-page-02 — Direction B: "OPERATOR MANIFEST" (editorial app-shell)
+     Jairus OS homepage framed inside the running OS: dual sidebars (sonnet-34),
+     agentic-loop hero, exp-06 wave separator, sonnet-15 negative-space card + bar graph,
+     sonnet-35 filterable memory list, sonnet-18 cleaned chart, sonnet-17 dark doc block,
+     sonnet-38 simplified access modal. NERV tactical palette. -->
+<style>
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--mint);font-family:var(--mono);text-transform:uppercase;
+  letter-spacing:.03em;overflow-x:hidden}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:300;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 58%,rgba(0,0,0,.5) 100%)}
+a{color:inherit;text-decoration:none}
+::selection{background:var(--mint);color:#000}
+
+/* ---------- shell: dual sidebars (sonnet-34) ---------- */
+.shell{display:grid;grid-template-columns:230px 1fr 268px;min-height:100vh}
+.rail{position:sticky;top:0;height:100vh;overflow-y:auto;background:rgba(10,10,10,.96);
+  display:flex;flex-direction:column;padding:18px 16px}
+.railL{border-right:2px solid var(--orange);box-shadow:2px 0 14px rgba(242,100,0,.15)}
+.railR{border-left:2px solid var(--orange);box-shadow:-2px 0 14px rgba(242,100,0,.15)}
+.brand{display:flex;align-items:baseline;gap:7px;font-family:var(--cond);font-weight:700;margin-bottom:2px}
+.brand .mk{width:15px;height:15px;background:var(--mint);box-shadow:0 0 8px var(--mint);transform:rotate(45deg);align-self:center}
+.brand b{font-size:18px;color:var(--mint-hi);text-shadow:0 0 6px rgba(82,242,154,.6)}
+.brand-v{font-size:9px;color:var(--orange);letter-spacing:.14em;margin-bottom:26px;padding-left:22px}
+.navrail{display:flex;flex-direction:column;gap:3px}
+.navrail a{display:flex;align-items:center;gap:10px;font-size:12px;padding:9px 10px;color:var(--mint);
+  opacity:.72;border-left:2px solid transparent;letter-spacing:.05em}
+.navrail a .k{font-family:var(--jp);font-size:14px;text-transform:none;opacity:.8;width:16px}
+.navrail a:hover{opacity:1;background:rgba(82,242,154,.06);border-left-color:var(--green-dim)}
+.navrail a.on{opacity:1;color:var(--mint-hi);border-left-color:var(--mint);background:rgba(82,242,154,.08);
+  box-shadow:inset 0 0 12px rgba(82,242,154,.08)}
+.gate{margin-top:auto}
+.gatebtn{width:100%;font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.12em;
+  padding:12px;background:var(--mint);color:#000;border:0;cursor:pointer;box-shadow:0 0 12px rgba(82,242,154,.4)}
+.gatebtn:hover{background:var(--mint-hi)}
+.railL .sub{display:flex;flex-direction:column;gap:2px;margin-top:14px;font-size:11px;color:var(--green-map)}
+.railL .sub a{padding:5px 10px}
+
+/* right rail live status */
+.rlabel{font-size:9px;color:var(--orange);letter-spacing:.14em;margin:6px 0 10px;
+  border-bottom:1px solid var(--green-dim);padding-bottom:6px}
+.rmeter{margin-bottom:16px}
+.rmeter .l{display:flex;justify-content:space-between;font-size:10px;color:var(--mint);margin-bottom:4px}
+.rmeter .l b{color:var(--mint-hi)}
+.rmeter .bar{height:5px;background:rgba(255,255,255,.06);position:relative}
+.rmeter .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--mint);box-shadow:0 0 6px var(--mint)}
+.rmeter .bar i.warn{background:var(--amber);box-shadow:0 0 6px var(--amber)}
+.feed{font-size:10px;line-height:1.6;color:var(--amber);text-transform:none;letter-spacing:.02em;
+  border:1px solid var(--green-dim);padding:9px;margin-top:6px;max-height:230px;overflow:hidden}
+.feed .t{color:var(--amber-dim)}
+.feed .d{color:var(--orange)} .feed .m{color:var(--red-hi)} .feed .g{color:var(--mint)}
+.agents{margin-top:auto;font-size:10px;color:var(--green-map);letter-spacing:.06em;display:flex;flex-direction:column;gap:4px}
+.agents .b{color:var(--amber)}
+
+/* ---------- center column ---------- */
+.center{min-width:0;padding:0 clamp(20px,4vw,56px)}
+.inner{max-width:820px;margin:0 auto}
+
+/* hero */
+.hero{padding:72px 0 40px}
+.eyebrow{font-size:11px;letter-spacing:.24em;color:var(--orange);margin-bottom:20px}
+.eyebrow::before{content:"◈ "}
+.hero .kj{font-family:var(--jp);font-weight:800;font-size:clamp(56px,10vw,120px);line-height:.82;color:var(--mint-hi);
+  text-transform:none;text-shadow:0 0 24px rgba(82,242,154,.3);letter-spacing:.02em}
+.hero .kj small{display:block;font-family:var(--cond);font-weight:700;font-size:clamp(28px,4.4vw,52px);
+  color:var(--orange);text-transform:uppercase;letter-spacing:.02em;text-shadow:0 0 14px rgba(242,100,0,.35);margin-top:10px}
+.hero .lede{margin-top:26px;font-size:15px;line-height:1.75;color:var(--mint);opacity:.8;max-width:60ch;
+  text-transform:none;font-family:var(--mono)}
+.hero .lede b{color:var(--mint-hi);font-weight:400}
+.hbtns{display:flex;gap:14px;margin-top:28px;flex-wrap:wrap}
+.btn{font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.14em;padding:13px 26px;cursor:pointer;
+  border:2px solid var(--mint);color:var(--mint);background:transparent}
+.btn:hover{background:var(--mint);color:#000;box-shadow:0 0 14px rgba(82,242,154,.5)}
+.btn.alt{border-color:var(--orange);color:var(--orange)}
+.btn.alt:hover{background:var(--orange);color:#000}
+.btn:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+
+/* agentic loop diagram */
+.loop{margin-top:48px;border:1px solid var(--green-dim);padding:26px 20px 20px;position:relative}
+.loop .cap{position:absolute;top:-9px;left:16px;background:var(--bg);padding:0 8px;font-size:10px;color:var(--orange);letter-spacing:.14em}
+.loopnodes{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.lnode{flex:1;text-align:center;border:1px solid var(--green-dim);padding:14px 6px;position:relative;
+  background:#0A0A0A}
+.lnode .k{font-family:var(--jp);font-weight:800;font-size:22px;color:var(--green-map);text-transform:none;line-height:1}
+.lnode .e{font-size:9px;color:var(--mint);opacity:.6;letter-spacing:.08em;margin-top:6px}
+.lnode.on{border-color:var(--mint);box-shadow:0 0 14px rgba(82,242,154,.4)}
+.lnode.on .k{color:var(--mint-hi);text-shadow:0 0 10px rgba(82,242,154,.5)}
+.lnode.on .e{color:var(--mint);opacity:1}
+.larrow{color:var(--orange);font-size:14px;flex:0 0 auto}
+
+/* wave separator (exp-06) */
+.wavewrap{padding:26px 0}
+.wavewrap svg{width:100%;height:90px;display:block}
+
+/* generic section head */
+.shead{display:flex;align-items:baseline;gap:12px;margin:8px 0 22px}
+.shead .n{font-family:var(--cond);font-weight:700;font-size:12px;color:#000;background:var(--orange);padding:2px 8px}
+.shead h2{font-family:var(--cond);font-weight:700;font-size:clamp(22px,3.4vw,32px);color:var(--mint-hi);letter-spacing:.03em}
+.shead .r{flex:1;height:1px;background:var(--green-dim)}
+.section{padding:40px 0}
+
+/* memory vault feature (sonnet-15: negative-space card + bar graph) */
+.vault{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.nscard{border:1px solid var(--orange);background:#0A0A0A;padding:22px;position:relative;min-height:230px;
+  display:flex;flex-direction:column;
+  clip-path:polygon(0 0, calc(100% - 20px) 0, 100% 20px, 100% 100%, 20px 100%, 0 calc(100% - 20px))}
+.nscard .meta{font-size:9px;color:var(--orange);letter-spacing:.1em;line-height:1.5}
+.nscard .big{margin-top:auto;font-family:var(--cond);font-weight:700;font-size:64px;color:var(--mint-hi);line-height:.9;
+  text-shadow:0 0 14px rgba(82,242,154,.3)}
+.nscard .big small{font-size:22px;color:var(--orange)}
+.nscard .cap{font-size:11px;color:var(--mint);opacity:.7;text-transform:none;margin-top:8px;max-width:26ch}
+.bargraph{border:1px solid var(--green-dim);background:#0A0A0A;padding:18px;display:flex;flex-direction:column}
+.bargraph .gh{font-size:10px;color:var(--orange);letter-spacing:.1em;margin-bottom:14px;
+  display:flex;justify-content:space-between}
+.bars{display:flex;gap:6px;align-items:flex-end;flex:1;min-height:150px}
+.bars .col{flex:1;display:flex;flex-direction:column-reverse;gap:2px;height:100%}
+.bars .col .s{flex:0 0 7px;background:rgba(255,255,255,.05);border-radius:2px}
+.bars .col .s.on{background:var(--mint);box-shadow:0 0 4px var(--mint)}
+.bars .col .s.on.hot{background:var(--red-hi);box-shadow:0 0 5px var(--red-hi)}
+.bargraph .gx{display:flex;gap:6px;margin-top:8px;font-size:8px;color:var(--green-map)}
+.bargraph .gx span{flex:1;text-align:center}
+
+/* filterable memory list (sonnet-35) */
+.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+.filters button{font-family:var(--mono);font-size:10px;letter-spacing:.08em;padding:6px 12px;cursor:pointer;
+  background:transparent;border:1px solid var(--green-dim);color:var(--mint);text-transform:uppercase}
+.filters button:hover{border-color:var(--mint)}
+.filters button.on{background:var(--mint);color:#000;border-color:var(--mint)}
+.filters button:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+.memlist{display:flex;flex-direction:column;gap:8px}
+.mem{border:1px solid var(--green-dim);background:#0A0A0A;padding:12px 14px;display:flex;align-items:center;gap:14px}
+.mem:hover{border-color:var(--orange)}
+.mem .id{font-size:9px;color:var(--green-map);width:120px;flex:0 0 auto;letter-spacing:.06em}
+.mem .ti{flex:1;font-size:12px;color:var(--mint);text-transform:none;letter-spacing:.02em}
+.mem .kind{font-size:9px;padding:2px 7px;border:1px solid currentColor;letter-spacing:.08em;flex:0 0 auto}
+.mem[data-k="decision"] .kind{color:var(--amber)}
+.mem[data-k="pattern"] .kind{color:var(--mint)}
+.mem[data-k="mistake"] .kind{color:var(--red-hi)}
+.mem[data-k="learning"] .kind{color:var(--blue)}
+.mem.hide{display:none}
+.mcount{font-size:10px;color:var(--orange);margin-top:12px;letter-spacing:.1em}
+
+/* chart (sonnet-18 cleaned) */
+.chartcard{border:1px solid var(--orange);background:#0A0A0A;padding:18px}
+.chartcard .gh{font-size:10px;color:var(--orange);letter-spacing:.1em;margin-bottom:6px;display:flex;justify-content:space-between}
+.chartcard .obj{font-size:10px;color:var(--mint);opacity:.6;text-transform:none;margin-bottom:12px}
+.chartcard svg{width:100%;height:220px;display:block}
+
+/* doc / spec (sonnet-17, dark) */
+.doc{border:1px solid var(--green-dim);background:#0A0A0A;padding:26px 30px;position:relative}
+.doc::before{content:"PRELIMINARY";position:absolute;top:14px;right:-2px;transform:rotate(4deg);
+  border:2px solid var(--red-hi);color:var(--red-hi);font-family:var(--cond);font-weight:700;font-size:13px;
+  padding:3px 12px;letter-spacing:.14em;opacity:.85}
+.doc .dh{font-family:var(--cond);font-weight:700;font-size:20px;color:var(--mint-hi);letter-spacing:.03em;
+  border-bottom:2px solid var(--teal);padding-bottom:10px;margin-bottom:6px}
+.doc .dh2{border-bottom:2px solid var(--teal);width:60%;height:2px;margin-bottom:18px}
+.doc .drow{display:grid;grid-template-columns:170px 1fr;gap:10px;font-size:11px;padding:7px 0;
+  border-bottom:1px dashed rgba(60,156,108,.25);text-transform:none}
+.doc .drow .k{color:var(--orange);letter-spacing:.06em;text-transform:uppercase;font-size:10px}
+.doc .drow .v{color:var(--mint);opacity:.85}
+.doc .drow .v b{color:var(--mint-hi);font-weight:400}
+.doc .sig{margin-top:22px;display:flex;justify-content:space-between;align-items:flex-end;gap:20px}
+.doc .sig .line{flex:1;border-top:1px solid var(--green-map);padding-top:6px;font-size:9px;color:var(--green-map);letter-spacing:.1em}
+.doc .stamp{border:1px solid var(--mint);color:var(--mint);font-size:10px;padding:4px 10px;letter-spacing:.1em}
+
+/* footer */
+.foot{border-top:2px solid var(--orange);margin-top:40px;padding:22px 0 40px;font-size:10px;color:var(--green-map);
+  display:flex;flex-wrap:wrap;gap:16px;letter-spacing:.08em}
+.foot .g{color:var(--mint)} .foot .sp{margin-left:auto}
+
+/* modal (sonnet-38, simplified) */
+.backdrop{position:fixed;inset:0;background:rgba(0,0,0,.86);z-index:400;display:none;align-items:center;justify-content:center;padding:20px}
+.backdrop.open{display:flex}
+.modal{border:2px solid var(--orange);background:#0A0A0A;max-width:440px;width:100%;position:relative;
+  box-shadow:0 0 30px rgba(242,100,0,.3)}
+.modal .frame{border:1px solid var(--orange);margin:6px;padding:26px 24px}
+.modal .mk{font-family:var(--jp);font-weight:800;font-size:38px;color:var(--mint-hi);text-transform:none;line-height:1;
+  text-shadow:0 0 14px rgba(82,242,154,.4);border-bottom:2px solid var(--teal);padding-bottom:12px;margin-bottom:4px}
+.modal .mk small{display:block;font-family:var(--cond);font-size:12px;color:var(--orange);text-transform:uppercase;
+  letter-spacing:.14em;margin-top:6px}
+.modal .mmeta{font-size:9px;color:var(--orange);letter-spacing:.08em;line-height:1.5;margin:16px 0}
+.modal .field{display:block;margin-bottom:12px}
+.modal label{font-size:9px;color:var(--mint);letter-spacing:.1em;display:block;margin-bottom:5px}
+.modal input{width:100%;background:#060606;border:1px solid var(--green-dim);color:var(--mint);
+  font-family:var(--mono);font-size:12px;padding:9px 10px;text-transform:none}
+.modal input:focus{outline:none;border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.3)}
+.modal .mstamp{display:inline-block;border:1px solid var(--red-hi);color:var(--red-hi);font-size:9px;padding:2px 7px;
+  letter-spacing:.1em;margin-bottom:14px;animation:bl .9s steps(1) infinite}
+@keyframes bl{50%{opacity:0}}
+.modal .mbtns{display:flex;gap:10px;margin-top:6px}
+.modal .mbtns button{flex:1;font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.1em;padding:11px;cursor:pointer}
+.modal .go{background:var(--mint);color:#000;border:0}
+.modal .go:hover{background:var(--mint-hi);box-shadow:0 0 12px rgba(82,242,154,.5)}
+.modal .cx{background:transparent;border:1px solid var(--green-dim);color:var(--mint)}
+.modal .cx:hover{border-color:var(--red-hi);color:var(--red-hi)}
+.modal button:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
+.modal .mresp{font-size:10px;color:var(--mint);letter-spacing:.06em;margin-top:12px;min-height:14px;text-transform:none}
+
+/* responsive: collapse rails */
+@media(max-width:980px){
+  .shell{grid-template-columns:1fr}
+  .rail{display:none}
+  .center{padding:0 20px}
+  .vault{grid-template-columns:1fr}
+}
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  .modal .mstamp{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="shell">
+  <!-- ===== LEFT RAIL ===== -->
+  <aside class="rail railL" aria-label="module navigation">
+    <div class="brand"><span class="mk"></span><b>JAIRUS_OS</b></div>
+    <div class="brand-v">v2.4.0-STABLE</div>
+    <nav class="navrail">
+      <a class="on" href="#top"><span class="k">工</span>ENGINEERING</a>
+      <a href="#vault"><span class="k">記</span>KNOWLEDGE</a>
+      <a href="#loop"><span class="k">自</span>AUTOMATION</a>
+      <a href="#chart"><span class="k">学</span>LEARNING</a>
+      <a href="#spec"><span class="k">制</span>CONTENT</a>
+      <a href="#top"><span class="k">個</span>PERSONAL</a>
+    </nav>
+    <div class="gate">
+      <button class="gatebtn" onclick="openModal()">+ NEW_GATE</button>
+      <div class="sub">
+        <a href="#spec">⚙ SETTINGS</a>
+        <a href="#spec">🗎 LOGS</a>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== CENTER ===== -->
+  <main class="center" id="top">
+    <div class="inner">
+      <!-- HERO -->
+      <section class="hero">
+        <div class="eyebrow">THE OPERATOR MANIFEST · SYSTEM INTEGRITY NOMINAL</div>
+        <div class="kj">記憶する<small>AN OS THAT REMEMBERS WHY</small></div>
+        <p class="lede">Jairus OS runs your work as one loop — <b>observe, understand, decide, execute, learn</b> — and writes every decision, pattern, and mistake into a memory vault that outlives the task. You stay the operator. The system keeps the receipts.</p>
+        <div class="hbtns">
+          <button class="btn" onclick="openModal()">REQUEST ACCESS</button>
+          <button class="btn alt" onclick="document.getElementById('vault').scrollIntoView()">READ THE VAULT ▾</button>
+        </div>
+
+        <!-- agentic loop -->
+        <div class="loop" id="loop">
+          <span class="cap">ACTIVE_LOOP : AUTONOMOUS_LEARN</span>
+          <div class="loopnodes" id="loopnodes">
+            <div class="lnode" data-i="0"><div class="k">観測</div><div class="e">OBSERVE</div></div>
+            <span class="larrow">→</span>
+            <div class="lnode" data-i="1"><div class="k">理解</div><div class="e">UNDERSTAND</div></div>
+            <span class="larrow">→</span>
+            <div class="lnode" data-i="2"><div class="k">決定</div><div class="e">DECIDE</div></div>
+            <span class="larrow">→</span>
+            <div class="lnode" data-i="3"><div class="k">実行</div><div class="e">EXECUTE</div></div>
+            <span class="larrow">→</span>
+            <div class="lnode" data-i="4"><div class="k">学習</div><div class="e">LEARN</div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- WAVE SEPARATOR (exp-06) -->
+      <div class="wavewrap" aria-hidden="true"><svg id="wave" viewBox="0 0 820 90" preserveAspectRatio="none"></svg></div>
+
+      <!-- MEMORY VAULT (sonnet-15) -->
+      <section class="section" id="vault">
+        <div class="shead"><span class="n">01</span><h2>THE MEMORY VAULT</h2><span class="r"></span></div>
+        <div class="vault">
+          <div class="nscard">
+            <div class="meta">MEMORY_VAULT<br>SOURCE : /systems/knowledge<br>MODULE : OS_CORE</div>
+            <div class="big">2,482<small> NODES</small></div>
+            <div class="cap">Decisions, patterns, and mistakes — linked, queryable, and never overwritten.</div>
+          </div>
+          <div class="bargraph">
+            <div class="gh"><span>RETENTION / 12 CYCLES</span><span id="retpct">98.4%</span></div>
+            <div class="bars" id="bars"></div>
+            <div class="gx"><span>-11</span><span>-8</span><span>-5</span><span>-2</span><span>NOW</span></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- FILTERABLE MEMORY LIST (sonnet-35) -->
+      <section class="section">
+        <div class="shead"><span class="n">02</span><h2>QUERY MEMORY STORAGE</h2><span class="r"></span></div>
+        <div class="filters" id="filters" role="group" aria-label="memory filters">
+          <button class="on" data-f="all">ALL</button>
+          <button data-f="decision">DECISIONS</button>
+          <button data-f="pattern">PATTERNS</button>
+          <button data-f="mistake">MISTAKES</button>
+          <button data-f="learning">LEARNINGS</button>
+        </div>
+        <div class="memlist" id="memlist">
+          <div class="mem" data-k="pattern"><span class="id">MEM-2024-0512</span><span class="ti">Recursive feedback loop optimization in Node v1.2</span><span class="kind">PATTERN</span></div>
+          <div class="mem" data-k="decision"><span class="id">MEM-2024-0511</span><span class="ti">Switch to Argon2id for vault hashing</span><span class="kind">DECISION</span></div>
+          <div class="mem" data-k="mistake"><span class="id">MEM-2024-0508</span><span class="ti">Post-mortem: thread starvation in global scheduler</span><span class="kind">MISTAKE</span></div>
+          <div class="mem" data-k="learning"><span class="id">MEM-2024-0505</span><span class="ti">User preference for high-density UI</span><span class="kind">LEARNING</span></div>
+          <div class="mem" data-k="decision"><span class="id">MEM-2024-0501</span><span class="ti">Adopt Bun runtime for local CI — 40% faster feedback</span><span class="kind">DECISION</span></div>
+          <div class="mem" data-k="pattern"><span class="id">MEM-2024-0498</span><span class="ti">Memoization layer prevents redundant agent compute</span><span class="kind">PATTERN</span></div>
+          <div class="mem" data-k="mistake"><span class="id">MEM-2024-0495</span><span class="ti">Inefficient vector search detected in ENG-392</span><span class="kind">MISTAKE</span></div>
+          <div class="mem" data-k="learning"><span class="id">MEM-2024-0491</span><span class="ti">Emergent agent collaboration under token pressure</span><span class="kind">LEARNING</span></div>
+        </div>
+        <div class="mcount" id="mcount">SHOWING 8 / 8 NODES</div>
+      </section>
+
+      <!-- CHART (sonnet-18 cleaned) -->
+      <section class="section" id="chart">
+        <div class="shead"><span class="n">03</span><h2>THROUGHPUT SIGNAL</h2><span class="r"></span></div>
+        <div class="chartcard">
+          <div class="gh"><span>◑ TASK CHAINS / HOUR</span><span>OBJECT : CORE_DISPATCHER</span></div>
+          <div class="obj">field negative ← baseline → field positive · window 48h</div>
+          <svg id="chart" viewBox="0 0 780 220" preserveAspectRatio="none"></svg>
+        </div>
+      </section>
+
+      <!-- DOC / SPEC (sonnet-17 dark) -->
+      <section class="section" id="spec">
+        <div class="shead"><span class="n">04</span><h2>DEPLOYMENT SPEC</h2><span class="r"></span></div>
+        <div class="doc">
+          <div class="dh">JAIRUS_OS · CORE v2.4.0 — OPERATOR DOSSIER</div>
+          <div class="dh2"></div>
+          <div class="drow"><span class="k">Doc</span><span class="v"><b>J-OS/DOSSIER/2024-0512</b> · classification: OPERATOR</span></div>
+          <div class="drow"><span class="k">Systems</span><span class="v">Engineering · Knowledge · Automation · Learning · Content · Personal</span></div>
+          <div class="drow"><span class="k">Loop</span><span class="v">Observe → Understand → Decide → Execute → Learn (autonomous, gated)</span></div>
+          <div class="drow"><span class="k">Memory</span><span class="v"><b>2,482 nodes</b> · 98.4% retention · Obsidian-compatible export</span></div>
+          <div class="drow"><span class="k">Integrations</span><span class="v">GitLab poll · file watchers · ntfy · Slack · Gemini voice</span></div>
+          <div class="drow"><span class="k">Runtime</span><span class="v">Bun · 32GB budget · 4 agents · uptime 142:22:09</span></div>
+          <div class="sig">
+            <div class="line">OPERATOR SIGNATURE</div>
+            <div class="line">DATE : OCT 24 202X</div>
+            <span class="stamp">◉ NOMINAL</span>
+          </div>
+        </div>
+      </section>
+
+      <footer class="foot">
+        <span class="g">◉ AGENT_01 NOMINAL</span><span class="g">◉ AGENT_02 NOMINAL</span><span class="b">◉ AGENT_03 BUSY</span>
+        <span class="sp">© JAIRUS_OS</span><span>KESTREL·4</span><span class="g">SYNC_OK</span>
+      </footer>
+    </div>
+  </main>
+
+  <!-- ===== RIGHT RAIL ===== -->
+  <aside class="rail railR" aria-label="live system status">
+    <div class="rlabel">◉ SYSTEM STATUS</div>
+    <div class="rmeter"><div class="l"><span>CPU</span><b id="cpu">12.4%</b></div><div class="bar"><i id="cpuBar" style="width:12%"></i></div></div>
+    <div class="rmeter"><div class="l"><span>MEMORY</span><b id="memv">2.1 / 32GB</b></div><div class="bar"><i id="memBar" style="width:7%"></i></div></div>
+    <div class="rmeter"><div class="l"><span>VAULT LOAD</span><b>98.4%</b></div><div class="bar"><i class="warn" style="width:98%"></i></div></div>
+    <div class="rlabel">◉ GLOBAL MEMORY FEED</div>
+    <div class="feed" id="rfeed"></div>
+    <div class="agents">
+      <span>OBSERVE ✓  UNDERSTAND ✓</span>
+      <span>DECIDE ✓  <span class="b">LEARN ⟳ ACTIVE</span></span>
+      <span style="color:var(--orange);margin-top:8px">LAST_SYNC : NOW</span>
+    </div>
+  </aside>
+</div>
+
+<!-- ===== ACCESS MODAL (sonnet-38 simplified) ===== -->
+<div class="backdrop" id="backdrop">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="request access">
+    <div class="frame">
+      <div class="mk">審査<small>ACCESS REQUEST</small></div>
+      <div class="mmeta">GATE : ENROLLMENT_01<br>PRIORITY : AAA · EX_MODE : PILOT</div>
+      <span class="mstamp">◉ AWAITING OPERATOR</span>
+      <label class="field"><label for="opmail">OPERATOR HANDLE</label><input id="opmail" type="text" placeholder="operator@station" autocomplete="off"></label>
+      <div class="mbtns">
+        <button class="go" id="submitBtn">SUBMIT GATE</button>
+        <button class="cx" id="closeBtn">DISMISS</button>
+      </div>
+      <div class="mresp" id="mresp" aria-live="polite"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+/* Mechanical motion: setInterval ticks + CSS steps(), never eased. */
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const NS="http://www.w3.org/2000/svg";
+const el=(n,a,p)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;};
+
+/* ---- agentic loop: stepped ignition cycling through the 5 nodes ---- */
+(function(){
+  const nodes=[...document.querySelectorAll("#loopnodes .lnode")];
+  let i=0;
+  const light=()=>{nodes.forEach((n,x)=>n.classList.toggle("on",x===i));i=(i+1)%nodes.length;};
+  light();
+  if(!REDUCED)setInterval(light,900);
+})();
+
+/* ---- wave separator (exp-06, clean sine — no tetris blocks) ---- */
+(function(){
+  const svg=document.getElementById("wave");const W=820,H=90,mid=H/2;
+  /* baseline */
+  el("line",{x1:0,y1:mid,x2:W,y2:mid,stroke:"#246C3C","stroke-width":1,"stroke-dasharray":"4 6"},svg);
+  let phase=0;
+  const path=el("path",{fill:"none",stroke:"#52F29A","stroke-width":2,filter:"drop-shadow(0 0 4px #52F29A)"},svg);
+  const path2=el("path",{fill:"none",stroke:"#F26400","stroke-width":1,opacity:.5},svg);
+  const build=(ph,amp,k)=>{let d="M0 "+mid;for(let x=0;x<=W;x+=8){const y=mid+Math.sin((x/W)*Math.PI*k+ph)*amp*Math.sin(x/W*Math.PI);d+=" L"+x+" "+y.toFixed(1);}return d;};
+  const draw=()=>{path.setAttribute("d",build(phase,26,6));path2.setAttribute("d",build(phase*0.6+1,16,9));};
+  draw();
+  if(!REDUCED)setInterval(()=>{phase+=0.35;draw();},90); /* stepped redraw ~11fps */
+})();
+
+/* ---- retention bar graph (sonnet-15) ---- */
+(function(){
+  const wrap=document.getElementById("bars");const COLS=12,SEG=16;
+  const heights=[11,12,10,13,12,14,13,15,14,15,15,16];
+  for(let c=0;c<COLS;c++){
+    const col=document.createElement("div");col.className="col";
+    for(let s=0;s<SEG;s++){const seg=document.createElement("div");seg.className="s";col.appendChild(seg);}
+    wrap.appendChild(col);
+  }
+  const cols=[...wrap.children];
+  const paint=()=>{cols.forEach((col,c)=>{const lit=heights[c];
+    [...col.children].forEach((s,i)=>{s.className="s";if(i<lit)s.className=(c===COLS-1&&i>=14?"s on hot":"s on");});});};
+  if(REDUCED){paint();}
+  else{let step=0;const iv=setInterval(()=>{ /* stepped fill left→right */
+    if(step>=COLS){clearInterval(iv);return;}
+    const target=heights[step];let cur=0;const c=cols[step];
+    const fill=setInterval(()=>{cur++;[...c.children].forEach((s,i)=>{if(i<cur)s.className=(step===COLS-1&&i>=14?"s on hot":"s on");});
+      if(cur>=target)clearInterval(fill);},22);
+    step++;},70);}
+})();
+
+/* ---- filterable memory list (sonnet-35) ---- */
+(function(){
+  const btns=[...document.querySelectorAll("#filters button")];
+  const mems=[...document.querySelectorAll("#memlist .mem")];
+  const count=document.getElementById("mcount");
+  const apply=f=>{let shown=0;mems.forEach(m=>{const ok=(f==="all"||m.dataset.k===f);m.classList.toggle("hide",!ok);if(ok)shown++;});
+    count.textContent="SHOWING "+shown+" / "+mems.length+" NODES";};
+  btns.forEach(b=>b.addEventListener("click",()=>{
+    btns.forEach(x=>x.classList.remove("on"));b.classList.add("on");apply(b.dataset.f);}));
+})();
+
+/* ---- throughput chart (sonnet-18 cleaned: one clean line, sparse ticks) ---- */
+(function(){
+  const svg=document.getElementById("chart");const W=780,H=220,pad=10;
+  /* sparse crosshair marks instead of a full + grid */
+  for(let gx=120;gx<W;gx+=160){for(let gy=50;gy<H;gy+=70){
+    el("line",{x1:gx-4,y1:gy,x2:gx+4,y2:gy,stroke:"#246C3C","stroke-width":1},svg);
+    el("line",{x1:gx,y1:gy-4,x2:gx,y2:gy+4,stroke:"#246C3C","stroke-width":1},svg);
+  }}
+  el("line",{x1:pad,y1:H-pad,x2:W-pad,y2:H-pad,stroke:"#F26400","stroke-width":1},svg);
+  el("line",{x1:pad,y1:pad,x2:pad,y2:H-pad,stroke:"#F26400","stroke-width":1},svg);
+  /* smooth-ish data line via quadratic segments */
+  const pts=[];const N=24;
+  for(let i=0;i<N;i++){const x=pad+ (i/(N-1))*(W-2*pad);
+    const base=H*0.6 - Math.sin(i/2.2)*40 - (i/N)*46 + (i%3?0:8);
+    pts.push([x, Math.max(pad+6,Math.min(H-pad-6,base))]);}
+  let d="M"+pts[0][0]+" "+pts[0][1];
+  for(let i=1;i<pts.length;i++){const [x,y]=pts[i];const [px,py]=pts[i-1];const cx=(px+x)/2;
+    d+=" Q"+px+" "+py+" "+cx+" "+((py+y)/2);}
+  /* area fill under line */
+  el("path",{d:d+" L"+pts[N-1][0]+" "+(H-pad)+" L"+pts[0][0]+" "+(H-pad)+" Z",fill:"rgba(82,242,154,.08)"},svg);
+  el("path",{d,fill:"none",stroke:"#52F29A","stroke-width":2,filter:"drop-shadow(0 0 4px #52F29A)"},svg);
+  /* end marker */
+  const last=pts[N-1];el("circle",{cx:last[0],cy:last[1],r:4,fill:"#7CF4AB"},svg);
+  const t=el("text",{x:last[0]-70,y:last[1]-10,fill:"#F26400","font-size":11,"font-family":"monospace"},svg);t.textContent="+34% PEAK";
+})();
+
+/* ---- right-rail live memory feed (terminal echo) ---- */
+(function(){
+  const feed=document.getElementById("rfeed");
+  const rows=[
+    '<span class="t">14:22</span> <span class="d">[DEC]</span> Bun runtime for local CI',
+    '<span class="t">12:10</span> <span class="m">[MIS]</span> Vector search in ENG-392',
+    '<span class="t">10:05</span> <span class="g">[LRN]</span> Emergent agent collab',
+    '<span class="t">09:12</span> <span class="d">[DEC]</span> Deploy J-OS core v2.4.0',
+    '<span class="t">08:40</span> <span class="g">[LRN]</span> High-density UI preferred',
+  ];
+  feed.innerHTML=rows.map(r=>"<div>"+r+"</div>").join("");
+  /* live CPU/MEM tick, biased nominal */
+  if(!REDUCED)setInterval(()=>{
+    const cpu=(9+Math.random()*8).toFixed(1),mem=(1.8+Math.random()*0.8).toFixed(1);
+    document.getElementById("cpu").textContent=cpu+"%";
+    document.getElementById("cpuBar").style.width=cpu+"%";
+    document.getElementById("memv").textContent=mem+" / 32GB";
+    document.getElementById("memBar").style.width=(mem/32*100)+"%";
+  },1500);
+})();
+
+/* ---- access modal (sonnet-38) ---- */
+const backdrop=document.getElementById("backdrop");
+function openModal(){backdrop.classList.add("open");setTimeout(()=>document.getElementById("opmail").focus(),30);}
+function closeModal(){backdrop.classList.remove("open");}
+window.openModal=openModal;
+document.getElementById("closeBtn").addEventListener("click",closeModal);
+document.getElementById("submitBtn").addEventListener("click",()=>{
+  const v=document.getElementById("opmail").value.trim();
+  const r=document.getElementById("mresp");
+  if(!v){r.style.color="var(--red-hi)";r.textContent="✕ HANDLE REQUIRED — GATE HELD.";return;}
+  r.style.color="var(--mint)";r.textContent="◉ GATE QUEUED — WELCOME ABOARD, OPERATOR.";
+});
+backdrop.addEventListener("click",e=>{if(e.target===backdrop)closeModal();});
+addEventListener("keydown",e=>{if(e.key==="Escape")closeModal();});
+</script>
+</body>
+</html>

@@ -1,0 +1,877 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FORM-02 · JAIRUS OS — COMMISSION AN AGENT</title>
+<!-- form-02 — long provisioning form. Reuses form-01's NERV tactical grammar and
+     tokens, and adds the Material UI form controls form-01 lacked: checkbox (single +
+     group), switch, slider, dual-thumb range slider, autocomplete tag input, rating,
+     segmented toggle-button group, number stepper, date + time pickers, password w/
+     reveal, and input adornments. Signature: a live COMMISSION READINESS meter. -->
+<style>
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{min-height:100%;background:#000}
+body{
+  font-family:var(--mono);color:var(--mint);text-transform:uppercase;letter-spacing:.03em;
+  display:flex;align-items:flex-start;justify-content:center;padding:32px 14px;min-height:100vh;
+}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)}
+
+.blink{animation:blink 1s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes btnblink{0%,74%{background:var(--mint);color:var(--bg)}75%,100%{background:var(--bg);color:var(--mint)}}
+.stamp{display:inline-block;border:1px solid currentColor;padding:2px 9px;border-radius:2px;
+  font-size:11px;line-height:1.45;white-space:nowrap}
+
+/* ============ double-frame card ============ */
+.card{width:min(96vw,880px);border:1px solid var(--orange);padding:4px;background:var(--bg);
+  box-shadow:0 0 14px rgba(242,100,0,.35)}
+.card-inner{border:3px solid var(--orange);padding:22px 28px 26px;position:relative;
+  clip-path:polygon(0 0,calc(100% - 26px) 0,100% 26px,100% 100%,0 100%)}
+
+/* header */
+.hdr{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;
+  border-bottom:2px solid var(--orange);padding-bottom:12px}
+.hdr .jp{font-family:var(--jp);font-weight:800;font-size:40px;line-height:1;color:var(--orange);
+  text-transform:none;letter-spacing:.14em;text-indent:.14em;
+  text-shadow:0 0 5px currentColor,0 0 14px rgba(242,100,0,.4)}
+.hdr .cap{font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.26em;color:var(--amber);margin-top:5px}
+.hdr h1{font-family:var(--cond);font-weight:700;font-size:22px;color:var(--paper);letter-spacing:.03em;
+  text-shadow:0 0 4px currentColor,0 0 10px rgba(82,242,154,.3);margin-top:2px}
+.hdr .sub{font-size:10px;color:var(--green-map);letter-spacing:.12em;margin-top:4px;line-height:1.5}
+.meta{font-size:10px;line-height:1.4;color:var(--orange);text-align:right;flex:none}
+.meta b{color:var(--amber-dim);font-weight:400}
+.meta .statestamp{margin-top:6px;color:var(--red-hi)}
+.meta .statestamp.ok{color:var(--mint)}
+
+/* ---- SIGNATURE: commission readiness meter ---- */
+.readiness{display:flex;align-items:center;gap:14px;border-top:1px solid var(--green-dim);
+  border-bottom:1px solid var(--green-dim);padding:10px 0;margin:14px 0 4px}
+.readiness .rlab{font-size:10px;color:var(--orange);letter-spacing:.16em;white-space:nowrap}
+.readiness .rlab .jp{font-family:var(--jp);font-weight:800;text-transform:none;margin-right:6px}
+.readbar{display:flex;gap:3px;flex:1}
+.readbar .seg{flex:1;height:16px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.09)}
+.readbar .seg.on{background:var(--mint);border-color:transparent;box-shadow:0 0 5px var(--mint)}
+.readbar .seg.on.hot{background:var(--amber);box-shadow:0 0 5px var(--amber)}
+.readbar .seg.on.go{background:var(--mint-hi);box-shadow:0 0 7px var(--mint-hi)}
+.readpct{font-family:var(--cond);font-weight:700;font-size:26px;color:var(--mint-hi);
+  min-width:74px;text-align:right;text-shadow:0 0 8px rgba(82,242,154,.4);font-variant-numeric:tabular-nums}
+
+.teal-rule{height:9px;border-top:3px solid var(--teal);border-bottom:3px solid var(--teal);
+  margin:16px 0 2px;opacity:.85}
+
+/* ============ section dividers (provisioning is a real sequence) ============ */
+.sdiv{display:flex;align-items:center;gap:12px;margin:26px 0 14px}
+.sdiv .num{font-family:var(--cond);font-weight:700;font-size:13px;color:var(--bg);background:var(--orange);
+  padding:2px 8px;letter-spacing:.08em}
+.sdiv .jp{font-family:var(--jp);font-weight:800;font-size:18px;color:var(--orange);text-transform:none;letter-spacing:.14em}
+.sdiv h2{font-family:var(--cond);font-weight:700;font-size:17px;color:var(--paper);letter-spacing:.1em}
+.sdiv .line{flex:1;height:2px;background:linear-gradient(90deg,var(--orange),transparent)}
+
+/* ============ base fields (from form-01) ============ */
+form{display:flex;flex-direction:column;gap:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.field{margin-bottom:16px}
+fieldset.field{border:0;padding:0}
+.field label,.field legend{display:flex;align-items:baseline;gap:8px;font-size:10px;
+  letter-spacing:.16em;color:var(--orange);margin-bottom:6px}
+.field label .jp,.field legend .jp{font-family:var(--jp);font-weight:800;font-size:13px;text-transform:none;color:var(--orange)}
+.field label .req,.field legend .req{color:var(--red-hi)}
+.field .hint{margin-left:auto;font-size:9px;color:var(--green-map);letter-spacing:.1em}
+
+input[type="text"],input[type="password"],input[type="number"],textarea,select{
+  width:100%;background:var(--bg);border:1px solid var(--green-dim);color:var(--mint);
+  font-family:var(--mono);font-size:14px;letter-spacing:.05em;padding:10px 12px;border-radius:0;caret-color:var(--mint)}
+input[type="text"]{text-transform:uppercase}
+input::placeholder,textarea::placeholder{color:var(--green-dim);text-transform:uppercase}
+input:hover,textarea:hover,select:hover{border-color:var(--green-map)}
+input:focus-visible,textarea:focus-visible,select:focus-visible{outline:none;border-color:var(--mint);
+  box-shadow:0 0 8px rgba(82,242,154,.35),inset 0 0 6px rgba(82,242,154,.12)}
+.field.error input,.field.error textarea{border-color:var(--red-hi);box-shadow:0 0 8px rgba(226,40,15,.35)}
+.err{display:none;margin-top:6px;font-size:10px;color:var(--red-hi);letter-spacing:.1em;text-shadow:0 0 4px rgba(226,40,15,.4)}
+.err::before{content:"» "}
+.field.error .err{display:block}
+
+/* ---- input adornment (prefix/suffix) ---- */
+.adorn{display:flex;align-items:stretch;border:1px solid var(--green-dim)}
+.adorn:focus-within{border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.35),inset 0 0 6px rgba(82,242,154,.12)}
+.adorn .fix{display:flex;align-items:center;padding:0 11px;background:rgba(242,100,0,.1);color:var(--orange);
+  font-size:13px;letter-spacing:.08em;border-right:1px solid var(--green-dim);white-space:nowrap}
+.adorn .fix.suf{border-right:0;border-left:1px solid var(--green-dim)}
+.adorn input{border:0!important;box-shadow:none!important}
+
+/* ---- password reveal ---- */
+.pw .fix.rev{cursor:pointer;border-left:1px solid var(--green-dim);border-right:0;color:var(--mint);
+  font-size:10px;letter-spacing:.1em;user-select:none}
+.pw .fix.rev:hover{background:rgba(82,242,154,.12)}
+.pw input{text-transform:none;letter-spacing:.2em}
+
+/* ---- custom dropdown (from form-01) ---- */
+.dd{position:relative}
+.dd-trigger{width:100%;display:flex;align-items:center;gap:10px;background:var(--bg);border:1px solid var(--green-dim);
+  color:var(--mint);font-family:var(--mono);font-size:14px;letter-spacing:.05em;padding:10px 12px;cursor:pointer;text-align:left}
+.dd-trigger:hover{border-color:var(--green-map)}
+.dd-trigger:focus-visible,.dd.open .dd-trigger{outline:none;border-color:var(--mint);
+  box-shadow:0 0 8px rgba(82,242,154,.35),inset 0 0 6px rgba(82,242,154,.12)}
+.dd-value .jp{font-family:var(--jp);font-weight:800;text-transform:none;color:var(--green-map);margin-left:8px}
+.dd-chevron{margin-left:auto;font-size:10px;color:var(--orange)}
+.dd.open .dd-chevron{transform:rotate(180deg)}
+.dd-list{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;list-style:none;background:var(--bg);
+  border:1px solid var(--mint);padding:4px;display:none;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%);
+  box-shadow:0 0 12px rgba(82,242,154,.3),inset 0 0 8px rgba(82,242,154,.08)}
+.dd.open .dd-list{display:block}
+.dd-list li{display:flex;align-items:baseline;gap:10px;padding:8px 10px;cursor:pointer;color:var(--mint);
+  font-size:13px;border:1px solid transparent}
+.dd-list li .jp{font-family:var(--jp);font-weight:800;text-transform:none;margin-left:auto;color:var(--green-map)}
+.dd-list li .mark{width:14px;color:var(--orange);font-size:10px;visibility:hidden}
+.dd-list li[aria-selected="true"] .mark{visibility:visible}
+.dd-list li.active{background:var(--mint);color:var(--bg);font-weight:700}
+.dd-list li.active .jp{color:var(--bg)}
+.dd-list li.active .mark{color:var(--bg)}
+.dd-list li+li{border-top:1px dotted var(--green-dim)}
+
+/* ---- autocomplete tag input ---- */
+.tags{border:1px solid var(--green-dim);padding:6px;display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.tags:focus-within{border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.35)}
+.tag{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--mint);color:var(--mint);
+  font-size:11px;padding:3px 4px 3px 8px;letter-spacing:.06em}
+.tag button{background:none;border:0;color:var(--mint);cursor:pointer;font-size:12px;line-height:1;padding:0 3px}
+.tag button:hover{color:var(--red-hi)}
+.tags input{flex:1;min-width:120px;border:0!important;box-shadow:none!important;padding:5px 4px;background:transparent}
+.acwrap{position:relative}
+.aclist{position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:20;list-style:none;background:var(--bg);
+  border:1px solid var(--mint);padding:4px;display:none;max-height:180px;overflow:auto;
+  box-shadow:0 0 12px rgba(82,242,154,.25)}
+.aclist.show{display:block}
+.aclist li{padding:7px 10px;cursor:pointer;color:var(--mint);font-size:12px;border-bottom:1px dotted var(--green-dim)}
+.aclist li:last-child{border-bottom:0}
+.aclist li.on,.aclist li:hover{background:var(--mint);color:var(--bg)}
+
+/* ---- radio priority chips (from form-01) ---- */
+.chiprow{display:flex;gap:8px;flex-wrap:wrap;border:0}
+.chip{position:relative}
+.chip input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.chipface{display:flex;flex-direction:column;align-items:center;min-width:92px;cursor:pointer;
+  border:1px solid var(--pc);color:var(--pc);padding:6px 12px 5px;border-radius:2px}
+.chipface .jp{font-family:var(--jp);font-weight:800;font-size:15px;line-height:1.2;text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.chipface .en{font-size:9px;letter-spacing:.14em;margin-top:2px}
+.chip input:checked + .chipface{background:var(--pc);color:var(--bg);font-weight:700;
+  box-shadow:0 0 9px color-mix(in srgb,var(--pc) 55%,transparent)}
+.chip input:focus-visible + .chipface{outline:2px solid var(--paper);outline-offset:2px}
+.chip.p-routine{--pc:var(--green-map)}
+.chip.p-elevated{--pc:var(--amber)}
+.chip.p-critical{--pc:var(--red-hi)}
+
+/* ---- segmented toggle-button group ---- */
+.seggroup{display:flex;border:1px solid var(--orange)}
+.seggroup .seg{position:relative;flex:1}
+.seggroup .seg input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.seggroup .seg label{display:block;text-align:center;padding:9px 6px;cursor:pointer;color:var(--mint);
+  font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.1em}
+.seggroup .seg+.seg{border-left:1px solid var(--orange)}
+.seggroup .seg input:checked + label{background:var(--mint);color:var(--bg);box-shadow:inset 0 0 12px rgba(0,0,0,.3)}
+.seggroup .seg input:focus-visible + label{outline:2px solid var(--paper);outline-offset:-2px}
+.seggroup .seg label small{display:block;font-family:var(--mono);font-size:8px;opacity:.75;letter-spacing:.08em;margin-top:2px}
+
+/* ---- number stepper ---- */
+.stepper{display:flex;align-items:stretch;width:170px;border:1px solid var(--green-dim)}
+.stepper:focus-within{border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.35)}
+.stepper button{width:40px;background:rgba(242,100,0,.1);border:0;color:var(--orange);font-size:18px;cursor:pointer;font-family:var(--cond)}
+.stepper button:hover{background:var(--orange);color:var(--bg)}
+.stepper button:focus-visible{outline:2px solid var(--paper);outline-offset:-2px}
+.stepper input{border:0!important;box-shadow:none!important;text-align:center;
+  -moz-appearance:textfield}
+.stepper input::-webkit-outer-spin-button,.stepper input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+
+/* ---- sliders (native range, tactical restyle) ---- */
+.sliderrow{display:flex;align-items:center;gap:14px}
+input[type="range"]{--fill:0%;-webkit-appearance:none;appearance:none;width:100%;height:26px;background:transparent;cursor:pointer}
+input[type="range"]::-webkit-slider-runnable-track{height:12px;border:1px solid var(--green-dim);
+  background:linear-gradient(90deg,var(--mint) 0 var(--fill),rgba(255,255,255,.05) var(--fill) 100%)}
+input[type="range"]::-moz-range-track{height:12px;border:1px solid var(--green-dim);
+  background:linear-gradient(90deg,var(--mint) 0 var(--fill),rgba(255,255,255,.05) var(--fill) 100%)}
+input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:24px;margin-top:-7px;
+  background:var(--mint-hi);border:0;box-shadow:0 0 8px var(--mint)}
+input[type="range"]::-moz-range-thumb{width:12px;height:24px;background:var(--mint-hi);border:0;border-radius:0;box-shadow:0 0 8px var(--mint)}
+input[type="range"]:focus-visible::-webkit-slider-thumb{outline:2px solid var(--paper);outline-offset:2px}
+input[type="range"]:focus-visible::-moz-range-thumb{outline:2px solid var(--paper);outline-offset:2px}
+.sval{font-family:var(--cond);font-weight:700;font-size:22px;color:var(--mint-hi);min-width:104px;text-align:right;
+  font-variant-numeric:tabular-nums;text-shadow:0 0 6px rgba(82,242,154,.35)}
+.ticks{display:flex;justify-content:space-between;font-size:8px;color:var(--green-map);margin-top:2px;letter-spacing:.06em}
+
+/* dual-thumb range */
+.rangewrap{position:relative;height:26px;margin-top:2px}
+.rangewrap .rtrack{position:absolute;left:0;right:0;top:8px;height:12px;border:1px solid var(--green-dim);background:rgba(255,255,255,.05)}
+.rangewrap .rfill{position:absolute;top:8px;height:12px;background:var(--mint);box-shadow:0 0 6px var(--mint)}
+.rangewrap input[type="range"]{position:absolute;left:0;top:0;width:100%;pointer-events:none;background:transparent;height:26px}
+.rangewrap input[type="range"]::-webkit-slider-runnable-track{background:transparent;border:0}
+.rangewrap input[type="range"]::-moz-range-track{background:transparent;border:0}
+.rangewrap input[type="range"]::-webkit-slider-thumb{pointer-events:auto}
+.rangewrap input[type="range"]::-moz-range-thumb{pointer-events:auto}
+
+/* ---- switches ---- */
+.switchset{display:flex;flex-direction:column;gap:10px}
+.switch{display:flex;align-items:center;gap:12px;cursor:pointer}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.switch .track{width:52px;height:24px;border:1px solid var(--green-dim);background:var(--bg);position:relative;flex:none}
+.switch .track::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;background:var(--green-map)}
+.switch input:checked + .track{border-color:var(--mint)}
+.switch input:checked + .track::after{left:auto;right:2px;background:var(--mint);box-shadow:0 0 7px var(--mint)}
+.switch input:focus-visible + .track{outline:2px solid var(--paper);outline-offset:2px}
+.switch .lab{font-size:12px;color:var(--mint);letter-spacing:.05em;text-transform:none}
+.switch .lab b{color:var(--green-map);font-weight:400;font-size:10px;display:block;letter-spacing:.06em}
+.switch .state{margin-left:auto;font-size:10px;letter-spacing:.12em;color:var(--green-map)}
+.switch input:checked ~ .state{color:var(--mint)}
+
+/* ---- rating (hazard blocks) ---- */
+.rating{display:flex;gap:5px}
+.rating .rblk{position:relative;width:38px}
+.rating .rblk input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.rating .rblk label{display:block;height:30px;border:1px solid var(--rc,var(--green-dim));cursor:pointer;
+  background:repeating-linear-gradient(-45deg,transparent 0 4px,rgba(255,255,255,.04) 4px 8px)}
+.rating.lit-1 .rblk:nth-child(-n+1) label,.rating.lit-2 .rblk:nth-child(-n+2) label,
+.rating.lit-3 .rblk:nth-child(-n+3) label,.rating.lit-4 .rblk:nth-child(-n+4) label,
+.rating.lit-5 .rblk:nth-child(-n+5) label{background:var(--rc);box-shadow:0 0 6px color-mix(in srgb,var(--rc) 50%,transparent)}
+.rating .rblk input:focus-visible + label{outline:2px solid var(--paper);outline-offset:2px}
+.rating-wrap{display:flex;align-items:center;gap:14px}
+.rating-read{font-family:var(--cond);font-weight:700;font-size:14px;color:var(--rc,var(--mint));letter-spacing:.06em}
+
+/* ---- date + time segmented pickers ---- */
+.segdate{display:flex;align-items:center;gap:6px}
+.segdate .cell{border:1px solid var(--green-dim);background:var(--bg);color:var(--mint-hi);
+  font-family:var(--mono);font-size:18px;text-align:center;padding:8px 6px;letter-spacing:.14em;
+  text-shadow:0 0 5px rgba(82,242,154,.4);-moz-appearance:textfield}
+.segdate .cell::-webkit-outer-spin-button,.segdate .cell::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.segdate .cell.y{width:74px} .segdate .cell.d,.segdate .cell.m,.segdate .cell.h,.segdate .cell.mi{width:52px}
+.segdate .cell:focus-visible{outline:none;border-color:var(--mint);box-shadow:0 0 8px rgba(82,242,154,.35)}
+.segdate .sep{color:var(--orange);font-size:18px}
+.segdate .clab{font-size:8px;color:var(--green-map);letter-spacing:.1em;margin-left:8px}
+
+/* ---- file upload / dropzone ---- */
+.drop{border:1px dashed var(--green-map);padding:22px 16px;text-align:center;cursor:pointer;position:relative;background:rgba(60,156,108,.04)}
+.drop:hover,.drop.drag{border-color:var(--mint);background:rgba(82,242,154,.06);box-shadow:inset 0 0 14px rgba(82,242,154,.08)}
+.drop input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.drop .big{font-family:var(--jp);font-weight:800;font-size:26px;color:var(--orange);text-transform:none;letter-spacing:.1em}
+.drop .txt{font-size:11px;color:var(--mint);margin-top:6px;letter-spacing:.08em}
+.drop .txt b{color:var(--mint-hi);text-decoration:underline}
+.filelist{display:flex;flex-direction:column;gap:5px;margin-top:8px}
+.filelist .frow{display:flex;align-items:center;gap:8px;font-size:11px;color:var(--amber);border:1px solid var(--green-dim);padding:6px 9px}
+.filelist .frow .fx{color:var(--green-map)}
+.filelist .frow button{margin-left:auto;background:none;border:0;color:var(--green-map);cursor:pointer;font-size:12px}
+.filelist .frow button:hover{color:var(--red-hi)}
+
+/* ---- checkboxes (single + group) ---- */
+.checkset{display:flex;flex-direction:column;gap:9px}
+.check{display:flex;align-items:flex-start;gap:10px;cursor:pointer}
+.check input{position:absolute;opacity:0;width:0;height:0}
+.check .box{width:18px;height:18px;border:1px solid var(--green-map);flex:none;position:relative;margin-top:1px}
+.check input:checked + .box{background:var(--mint);border-color:var(--mint);box-shadow:0 0 6px rgba(82,242,154,.5)}
+.check input:checked + .box::after{content:"✓";position:absolute;inset:0;color:var(--bg);font-size:13px;
+  display:flex;align-items:center;justify-content:center;font-weight:700}
+.check input:focus-visible + .box{outline:2px solid var(--paper);outline-offset:2px}
+.check .lab{font-size:12px;color:var(--mint);letter-spacing:.04em;text-transform:none;line-height:1.45}
+.check .lab b{color:var(--green-map);font-weight:400}
+.check-inline{display:flex;flex-wrap:wrap;gap:16px}
+.check-inline .check{align-items:center}
+.field.error .checkset .box{border-color:var(--red-hi);box-shadow:0 0 6px rgba(226,40,15,.4)}
+
+/* textarea + counter (from form-01) */
+textarea{resize:vertical;min-height:88px;text-transform:none;line-height:1.55}
+.counter{display:flex;justify-content:flex-end;gap:6px;margin-top:5px;font-size:9px;color:var(--green-map);letter-spacing:.14em}
+.counter b{color:var(--mint);font-weight:400}
+.counter.hot b{color:var(--amber)} .counter.over b{color:var(--red-hi)}
+
+/* actions + receipt (from form-01) */
+.actions{display:flex;align-items:center;gap:12px;border-top:1px solid var(--green-dim);padding-top:18px;margin-top:24px}
+.btn{border:1px solid var(--orange);background:var(--bg);color:var(--orange);font-family:var(--cond);font-weight:700;
+  font-size:14px;letter-spacing:.12em;text-transform:uppercase;padding:11px 22px;cursor:pointer}
+.btn:hover{background:var(--orange);color:var(--bg)}
+.btn:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.btn.primary{border:2px solid var(--mint);color:var(--mint);animation:btnblink 1s steps(1) infinite}
+.btn.primary:disabled{animation:none;opacity:.4;cursor:default;background:var(--bg);color:var(--mint)}
+.btn.ghost{border-color:var(--green-dim);color:var(--green-map);font-family:var(--mono);font-weight:400;font-size:11px}
+.btn.ghost:hover{background:var(--green-dim);color:var(--paper)}
+.actions .queue{margin-left:auto;font-size:9px;color:var(--green-map);letter-spacing:.12em;text-align:right;line-height:1.5}
+.actions .queue b{color:var(--mint);font-weight:400}
+.receipt{margin-top:14px;display:none}
+.receipt.show{display:block}
+.receipt .r-row{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--amber-dim);white-space:nowrap;overflow:hidden}
+.receipt .r-row .lbl{color:var(--amber)}
+.receipt .r-row .dots{flex:1;border-bottom:1px dotted var(--amber-dim);height:0;margin-bottom:3px}
+.receipt .r-row .val{color:var(--amber);font-weight:700}
+.receipt .r-row .val.mint{color:var(--mint);text-shadow:0 0 4px rgba(82,242,154,.4)}
+
+@media (prefers-reduced-motion:reduce){.blink,.btn.primary{animation:none}}
+@media (max-width:600px){
+  .hdr{flex-wrap:wrap}.meta{text-align:left}
+  .grid2{grid-template-columns:1fr}
+  .readpct{min-width:56px;font-size:20px}
+  .card-inner{padding:18px 16px 20px}
+}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-inner">
+
+    <header class="hdr">
+      <div>
+        <div class="jp">任命</div>
+        <div class="cap">Commission</div>
+      </div>
+      <div style="flex:1">
+        <h1>COMMISSION AN AGENT</h1>
+        <div class="sub">AN AGENT IS AN OPERATOR YOU DELEGATE TO.<br>
+          NAME IT, SCOPE ITS RUNTIME, SET HOW FAR IT MAY ACT ALONE — THEN DEPLOY IT INTO THE STATION.</div>
+      </div>
+      <div class="meta">
+        <div><b>CODE:</b>1140</div>
+        <div><b>FILE:</b>AGENT_PROVISION</div>
+        <div><b>EX_MODE:</b>SETUP</div>
+        <div><b>SLOTS:</b>2 FREE / 8</div>
+        <div class="stamp statestamp blink" id="statestamp">編成中 · DRAFT</div>
+      </div>
+    </header>
+
+    <!-- SIGNATURE: live readiness meter -->
+    <div class="readiness" aria-hidden="true">
+      <span class="rlab"><span class="jp">準備</span>COMMISSION READINESS</span>
+      <div class="readbar" id="readbar"></div>
+      <span class="readpct" id="readpct">00%</span>
+    </div>
+    <div class="teal-rule"></div>
+
+    <form id="agentform" novalidate>
+
+      <!-- ========== 01 IDENTITY ========== -->
+      <div class="sdiv"><span class="num">01</span><span class="jp">個体</span><h2>IDENTITY</h2><span class="line"></span></div>
+
+      <div class="grid2">
+        <div class="field" id="f-name">
+          <label for="agentname"><span class="jp">名称</span>AGENT DESIGNATION <span class="req">*</span></label>
+          <input type="text" id="agentname" name="agentname" maxlength="40" placeholder="VEGA·1 SENTINEL" autocomplete="off" data-signal>
+          <div class="err" id="err-name">DESIGNATION REQUIRED — EVERY AGENT ANSWERS TO A NAME.</div>
+        </div>
+        <div class="field">
+          <label for="handle"><span class="jp">呼称</span>CALLSIGN HANDLE</label>
+          <div class="adorn">
+            <span class="fix">@</span>
+            <input type="text" id="handle" name="handle" maxlength="24" placeholder="SENTINEL_01" autocomplete="off" data-signal>
+          </div>
+        </div>
+      </div>
+
+      <div class="field pw">
+        <label for="akey"><span class="jp">鍵</span>ACCESS KEY <span class="hint">GRANTS THE AGENT ITS PERMISSIONS</span></label>
+        <div class="adorn pw">
+          <span class="fix">▚</span>
+          <input type="password" id="akey" name="akey" placeholder="••••••••••••" autocomplete="new-password" data-signal>
+          <span class="fix rev" id="pwtoggle" role="button" tabindex="0" aria-label="Show access key">SHOW</span>
+        </div>
+      </div>
+
+      <!-- ========== 02 ASSIGNMENT ========== -->
+      <div class="sdiv"><span class="num">02</span><span class="jp">配属</span><h2>ASSIGNMENT</h2><span class="line"></span></div>
+
+      <div class="grid2">
+        <div class="field">
+          <label for="ddbtn" id="ddlabel"><span class="jp">部門</span>HOST SECTION</label>
+          <div class="dd" id="dd">
+            <button type="button" class="dd-trigger" id="ddbtn" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="ddlist">
+              <span class="dd-value" id="ddvalue">ENGINEERING<span class="jp">工学</span></span>
+              <span class="dd-chevron" aria-hidden="true">▼</span>
+            </button>
+            <ul class="dd-list" id="ddlist" role="listbox" aria-labelledby="ddlabel" tabindex="-1">
+              <li role="option" data-v="ENGINEERING" data-jp="工学" aria-selected="true"><span class="mark">▸</span>ENGINEERING<span class="jp">工学</span></li>
+              <li role="option" data-v="KNOWLEDGE" data-jp="知識" aria-selected="false"><span class="mark">▸</span>KNOWLEDGE<span class="jp">知識</span></li>
+              <li role="option" data-v="AUTOMATION" data-jp="自動" aria-selected="false"><span class="mark">▸</span>AUTOMATION<span class="jp">自動</span></li>
+              <li role="option" data-v="LEARNING" data-jp="学習" aria-selected="false"><span class="mark">▸</span>LEARNING<span class="jp">学習</span></li>
+              <li role="option" data-v="CONTENT" data-jp="記録" aria-selected="false"><span class="mark">▸</span>CONTENT<span class="jp">記録</span></li>
+              <li role="option" data-v="PERSONAL" data-jp="個人" aria-selected="false"><span class="mark">▸</span>PERSONAL<span class="jp">個人</span></li>
+            </ul>
+            <input type="hidden" name="section" id="section" value="ENGINEERING">
+          </div>
+        </div>
+
+        <fieldset class="field">
+          <legend><span class="jp">優先</span>CLEARANCE</legend>
+          <div class="chiprow" role="radiogroup" aria-label="Clearance priority">
+            <span class="chip p-routine"><input type="radio" name="prio" id="p1" value="B++" checked><label class="chipface" for="p1"><span class="jp">通常</span><span class="en">B++ ROUTINE</span></label></span>
+            <span class="chip p-elevated"><input type="radio" name="prio" id="p2" value="AA-"><label class="chipface" for="p2"><span class="jp">優先</span><span class="en">AA- ELEVATED</span></label></span>
+            <span class="chip p-critical"><input type="radio" name="prio" id="p3" value="AAA"><label class="chipface" for="p3"><span class="jp">緊急</span><span class="en">AAA CRITICAL</span></label></span>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="field">
+        <label for="capinput"><span class="jp">技能</span>CAPABILITIES <span class="hint">TYPE TO SEARCH · ENTER TO ADD</span></label>
+        <div class="acwrap">
+          <div class="tags" id="tagbox">
+            <span class="tag" data-v="CODE_REVIEW">CODE_REVIEW<button type="button" aria-label="Remove">✕</button></span>
+            <span class="tag" data-v="VECTOR_SEARCH">VECTOR_SEARCH<button type="button" aria-label="Remove">✕</button></span>
+            <input type="text" id="capinput" placeholder="ADD CAPABILITY…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="aclist">
+          </div>
+          <ul class="aclist" id="aclist" role="listbox"></ul>
+        </div>
+      </div>
+
+      <!-- ========== 03 RUNTIME ========== -->
+      <div class="sdiv"><span class="num">03</span><span class="jp">実行</span><h2>RUNTIME</h2><span class="line"></span></div>
+
+      <div class="grid2">
+        <div class="field">
+          <label for="workers"><span class="jp">系統</span>WORKER THREADS</label>
+          <div class="stepper">
+            <button type="button" id="wminus" aria-label="Fewer threads">−</button>
+            <input type="number" id="workers" name="workers" value="4" min="1" max="16" inputmode="numeric" data-signal>
+            <button type="button" id="wplus" aria-label="More threads">+</button>
+          </div>
+        </div>
+        <div class="field">
+          <label for="model" id="modellabel"><span class="jp">機種</span>MODEL CLASS</label>
+          <div class="seggroup" role="radiogroup" aria-labelledby="modellabel">
+            <span class="seg"><input type="radio" name="model" id="m-nano" value="NANO"><label for="m-nano">NANO<small>FAST · CHEAP</small></label></span>
+            <span class="seg"><input type="radio" name="model" id="m-core" value="CORE" checked><label for="m-core">CORE<small>BALANCED</small></label></span>
+            <span class="seg"><input type="radio" name="model" id="m-max" value="MAX"><label for="m-max">MAX<small>DEEP · SLOW</small></label></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label for="memory"><span class="jp">記憶</span>MEMORY BUDGET</label>
+        <div class="sliderrow">
+          <input type="range" id="memory" name="memory" min="1" max="32" step="1" value="8" data-signal aria-describedby="memval">
+          <span class="sval" id="memval">08 GB</span>
+        </div>
+        <div class="ticks"><span>1</span><span>8</span><span>16</span><span>24</span><span>32 GB</span></div>
+      </div>
+
+      <!-- ========== 04 BEHAVIOR ========== -->
+      <div class="sdiv"><span class="num">04</span><span class="jp">挙動</span><h2>BEHAVIOR</h2><span class="line"></span></div>
+
+      <fieldset class="field">
+        <legend><span class="jp">設定</span>OPERATING SWITCHES</legend>
+        <div class="switchset">
+          <label class="switch"><input type="checkbox" id="sw-approve" checked><span class="track"></span>
+            <span class="lab">Auto-approve routine gates<b>SKIPS YOUR REVIEW FOR B++ WORK ONLY</b></span><span class="state">ON</span></label>
+          <label class="switch"><input type="checkbox" id="sw-voice"><span class="track"></span>
+            <span class="lab">Voice interface<b>REPLY OVER THE GEMINI VOICE CHANNEL</b></span><span class="state">OFF</span></label>
+          <label class="switch"><input type="checkbox" id="sw-notify" checked><span class="track"></span>
+            <span class="lab">Push notifications<b>PING YOU ON MISTAKES AND BLOCKED GATES</b></span><span class="state">ON</span></label>
+        </div>
+      </fieldset>
+
+      <div class="grid2">
+        <fieldset class="field">
+          <legend><span class="jp">自律</span>AUTONOMY LEVEL</legend>
+          <div class="rating-wrap">
+            <div class="rating" id="autonomy" style="--rc:var(--mint)" role="radiogroup" aria-label="Autonomy level">
+              <span class="rblk"><input type="radio" name="autonomy" id="a1" value="1" aria-label="Level 1"><label for="a1"></label></span>
+              <span class="rblk"><input type="radio" name="autonomy" id="a2" value="2" aria-label="Level 2"><label for="a2"></label></span>
+              <span class="rblk"><input type="radio" name="autonomy" id="a3" value="3" checked aria-label="Level 3"><label for="a3"></label></span>
+              <span class="rblk"><input type="radio" name="autonomy" id="a4" value="4" aria-label="Level 4"><label for="a4"></label></span>
+              <span class="rblk"><input type="radio" name="autonomy" id="a5" value="5" aria-label="Level 5"><label for="a5"></label></span>
+            </div>
+            <span class="rating-read" id="autoread" style="--rc:var(--mint)">3 · SUPERVISED</span>
+          </div>
+        </fieldset>
+
+        <fieldset class="field">
+          <legend><span class="jp">危険</span>RISK TOLERANCE</legend>
+          <div class="rating-wrap">
+            <div class="rating" id="risk" style="--rc:var(--amber)" role="radiogroup" aria-label="Risk tolerance">
+              <span class="rblk"><input type="radio" name="risk" id="r1" value="1" checked aria-label="Level 1"><label for="r1"></label></span>
+              <span class="rblk"><input type="radio" name="risk" id="r2" value="2" aria-label="Level 2"><label for="r2"></label></span>
+              <span class="rblk"><input type="radio" name="risk" id="r3" value="3" aria-label="Level 3"><label for="r3"></label></span>
+              <span class="rblk"><input type="radio" name="risk" id="r4" value="4" aria-label="Level 4"><label for="r4"></label></span>
+              <span class="rblk"><input type="radio" name="risk" id="r5" value="5" aria-label="Level 5"><label for="r5"></label></span>
+            </div>
+            <span class="rating-read" id="riskread" style="--rc:var(--amber)">1 · CAUTIOUS</span>
+          </div>
+        </fieldset>
+      </div>
+
+      <div class="field">
+        <label><span class="jp">稼働</span>ACTIVE HOURS <span class="hint">WHEN THE AGENT MAY ACT UNPROMPTED</span></label>
+        <div class="rangewrap" id="hours">
+          <div class="rtrack"></div><div class="rfill" id="rfill"></div>
+          <input type="range" id="hstart" min="0" max="24" step="1" value="8" aria-label="Active from (hour)">
+          <input type="range" id="hend" min="0" max="24" step="1" value="18" aria-label="Active until (hour)">
+        </div>
+        <div class="ticks"><span>00:00</span><span id="hoursread" style="color:var(--mint)">08:00 → 18:00</span><span>24:00</span></div>
+      </div>
+
+      <!-- ========== 05 SCHEDULE ========== -->
+      <div class="sdiv"><span class="num">05</span><span class="jp">予定</span><h2>SCHEDULE</h2><span class="line"></span></div>
+
+      <div class="grid2">
+        <div class="field">
+          <label><span class="jp">起動日</span>ACTIVATION DATE</label>
+          <div class="segdate" role="group" aria-label="Activation date">
+            <input class="cell y" id="dy" type="number" min="2024" max="2099" value="2026" aria-label="Year" data-signal>
+            <span class="sep">/</span>
+            <input class="cell m" id="dm" type="number" min="1" max="12" value="07" aria-label="Month" data-signal>
+            <span class="sep">/</span>
+            <input class="cell d" id="dd2" type="number" min="1" max="31" value="18" aria-label="Day" data-signal>
+            <span class="clab">YYYY / MM / DD</span>
+          </div>
+        </div>
+        <div class="field">
+          <label><span class="jp">同期時刻</span>SYNC TIME</label>
+          <div class="segdate" role="group" aria-label="Sync time">
+            <input class="cell h" id="th" type="number" min="0" max="23" value="09" aria-label="Hour" data-signal>
+            <span class="sep">:</span>
+            <input class="cell mi" id="tm" type="number" min="0" max="59" value="00" aria-label="Minute" data-signal>
+            <span class="clab">UTC · 24H</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ========== 06 PAYLOAD & CONSENT ========== -->
+      <div class="sdiv"><span class="num">06</span><span class="jp">承認</span><h2>PAYLOAD &amp; CONSENT</h2><span class="line"></span></div>
+
+      <div class="field">
+        <label for="seed"><span class="jp">初期</span>SEED CONFIG <span class="hint">.YAML / .JSON · DROP OR BROWSE</span></label>
+        <div class="drop" id="drop">
+          <input type="file" id="seed" name="seed" multiple accept=".yaml,.yml,.json,.md">
+          <div class="big">投入</div>
+          <div class="txt">DROP FILES HERE OR <b>BROWSE</b> — GIVE THE AGENT SOMETHING TO START FROM</div>
+        </div>
+        <div class="filelist" id="filelist"></div>
+      </div>
+
+      <div class="field" id="f-notes">
+        <label for="notes"><span class="jp">指令</span>STANDING ORDERS <span class="hint">WHAT SHOULD IT DO FIRST?</span></label>
+        <textarea id="notes" name="notes" maxlength="280" data-signal
+          placeholder="TRIAGE THE ENGINEERING GATE QUEUE EVERY MORNING. APPROVE ONLY B++ WORK WITH PASSING TESTS. ESCALATE ANYTHING TOUCHING AUTH."></textarea>
+        <div class="counter" id="counter"><b id="charcount">000</b>/280</div>
+      </div>
+
+      <fieldset class="field">
+        <legend><span class="jp">通知</span>NOTIFY CHANNELS</legend>
+        <div class="check-inline">
+          <label class="check"><input type="checkbox" name="notify" value="NTFY" checked><span class="box"></span><span class="lab">ntfy gateway</span></label>
+          <label class="check"><input type="checkbox" name="notify" value="SLACK" checked><span class="box"></span><span class="lab">Slack</span></label>
+          <label class="check"><input type="checkbox" name="notify" value="EMAIL"><span class="box"></span><span class="lab">Email digest</span></label>
+          <label class="check"><input type="checkbox" name="notify" value="SMS"><span class="box"></span><span class="lab">SMS (critical only)</span></label>
+        </div>
+      </fieldset>
+
+      <fieldset class="field" id="f-consent">
+        <legend><span class="jp">署名</span>OPERATOR SIGN-OFF <span class="req">*</span></legend>
+        <div class="checkset">
+          <label class="check"><input type="checkbox" id="consent" data-signal><span class="box"></span>
+            <span class="lab">I authorize this agent to act within the scope above, and I remain accountable for its gates. <b>YOU CAN REVOKE IT ANY TIME FROM THE ROSTER.</b></span></label>
+        </div>
+        <div class="err" id="err-consent">SIGN-OFF REQUIRED — AN AGENT DOESN'T DEPLOY WITHOUT AN OPERATOR BEHIND IT.</div>
+      </fieldset>
+
+      <div class="actions">
+        <button type="submit" class="btn primary" id="deploybtn">COMMISSION AGENT · 任命</button>
+        <button type="button" class="btn ghost" id="resetbtn">RESET DRAFT</button>
+        <div class="queue">ROSTER: <b id="roster">6 AGENTS</b><br>EST. WARM-UP: <b>&lt; 90S</b></div>
+      </div>
+
+    </form>
+
+    <div class="receipt" id="receipt" role="status" aria-live="polite"></div>
+
+  </div>
+</div>
+
+<script>
+"use strict";
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $=id=>document.getElementById(id);
+
+/* ---------- SIGNATURE: readiness meter (12 segments) ---------- */
+const SEGN=12;
+(function(){const rb=$("readbar");for(let i=0;i<SEGN;i++){const s=document.createElement("div");s.className="seg";rb.appendChild(s);}})();
+function computeReadiness(){
+  /* weight required signals heavier; count meaningful completion */
+  let score=0,total=0;
+  const add=(w,done)=>{total+=w;if(done)score+=w;};
+  add(3,$("agentname").value.trim().length>0);       /* required */
+  add(3,$("consent").checked);                        /* required */
+  add(1,$("handle").value.trim().length>0);
+  add(1,$("akey").value.length>=6);
+  add(1,tagValues().length>0);
+  add(1,$("notes").value.trim().length>0);
+  add(1,fileCount>0);
+  add(1,true); /* section always set */
+  add(1,true); /* runtime defaults set */
+  const pct=Math.round(score/total*100);
+  $("readpct").textContent=String(pct).padStart(2,"0")+"%";
+  const on=Math.round(pct/100*SEGN);
+  [...$("readbar").children].forEach((s,i)=>{
+    s.className="seg";
+    if(i<on)s.className="seg on"+(pct>=100?" go":(pct>=60?"":" hot"));
+  });
+  const ready=$("agentname").value.trim()&&$("consent").checked;
+  const st=$("statestamp");
+  if(ready&&!filing){st.textContent="準備完了 · READY";st.classList.add("ok");}
+  else if(!filing){st.textContent="編成中 · DRAFT";st.classList.remove("ok");}
+}
+/* recompute on any signal field */
+document.addEventListener("input",e=>{if(e.target.matches("[data-signal],input[name=notify]"))computeReadiness();});
+document.addEventListener("change",e=>{if(e.target.matches("[data-signal],input[name=notify]"))computeReadiness();});
+
+/* ---------- password reveal ---------- */
+(function(){
+  const t=$("pwtoggle"),inp=$("akey");
+  const flip=()=>{const show=inp.type==="password";inp.type=show?"text":"password";
+    t.textContent=show?"HIDE":"SHOW";t.setAttribute("aria-label",(show?"Hide":"Show")+" access key");};
+  t.addEventListener("click",flip);
+  t.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();flip();}});
+})();
+
+/* ---------- custom dropdown (from form-01, keyboard-capable) ---------- */
+(function(){
+  const dd=$("dd"),btn=$("ddbtn"),list=$("ddlist"),val=$("ddvalue"),hidden=$("section");
+  const items=[...list.querySelectorAll("li")];let idx=items.findIndex(li=>li.getAttribute("aria-selected")==="true");
+  const open=()=>{dd.classList.add("open");btn.setAttribute("aria-expanded","true");paint();list.focus();};
+  /* refocus the trigger ONLY on keyboard close — never on outside-click/mouse,
+     or the global click listener steals focus and scrolls the page to the top. */
+  const close=(refocus)=>{dd.classList.remove("open");btn.setAttribute("aria-expanded","false");if(refocus)btn.focus();};
+  const paint=()=>items.forEach((li,i)=>li.classList.toggle("active",i===idx));
+  const choose=i=>{items.forEach(li=>li.setAttribute("aria-selected","false"));
+    items[i].setAttribute("aria-selected","true");idx=i;
+    val.innerHTML=items[i].dataset.v+'<span class="jp">'+items[i].dataset.jp+'</span>';hidden.value=items[i].dataset.v;};
+  btn.addEventListener("click",()=>dd.classList.contains("open")?close():open());
+  items.forEach((li,i)=>li.addEventListener("click",()=>{choose(i);close();}));
+  list.addEventListener("keydown",e=>{
+    if(e.key==="ArrowDown"){e.preventDefault();idx=(idx+1)%items.length;paint();}
+    else if(e.key==="ArrowUp"){e.preventDefault();idx=(idx-1+items.length)%items.length;paint();}
+    else if(e.key==="Enter"||e.key===" "){e.preventDefault();choose(idx);close(true);}
+    else if(e.key==="Escape"){close(true);}
+  });
+  document.addEventListener("click",e=>{if(!dd.contains(e.target))close();});
+})();
+
+/* ---------- autocomplete tag input ---------- */
+const CAP_POOL=["CODE_REVIEW","VECTOR_SEARCH","GATE_TRIAGE","SUMMARIZE","WEB_FETCH","SHELL_EXEC",
+  "IMAGE_GEN","VOICE_REPLY","SCHEDULE","REFACTOR","TEST_GEN","LOG_PARSE","RAG_QUERY","DEPLOY","MONITOR"];
+function tagValues(){return [...$("tagbox").querySelectorAll(".tag")].map(t=>t.dataset.v);}
+(function(){
+  const box=$("tagbox"),input=$("capinput"),list=$("aclist");let hi=-1;
+  const addTag=v=>{v=v.trim().toUpperCase().replace(/\s+/g,"_");if(!v||tagValues().includes(v))return;
+    const t=document.createElement("span");t.className="tag";t.dataset.v=v;
+    t.innerHTML=v+'<button type="button" aria-label="Remove '+v+'">✕</button>';
+    box.insertBefore(t,input);input.value="";render();computeReadiness();};
+  const removeTag=el=>{el.remove();computeReadiness();};
+  box.addEventListener("click",e=>{if(e.target.tagName==="BUTTON")removeTag(e.target.closest(".tag"));else input.focus();});
+  const render=()=>{
+    const q=input.value.trim().toUpperCase();
+    const opts=CAP_POOL.filter(c=>!tagValues().includes(c)&&(!q||c.includes(q))).slice(0,6);
+    list.innerHTML="";hi=-1;
+    if(!opts.length||document.activeElement!==input){list.classList.remove("show");input.setAttribute("aria-expanded","false");return;}
+    opts.forEach(o=>{const li=document.createElement("li");li.textContent=o;li.setAttribute("role","option");
+      li.addEventListener("mousedown",e=>{e.preventDefault();addTag(o);});list.appendChild(li);});
+    list.classList.add("show");input.setAttribute("aria-expanded","true");
+  };
+  input.addEventListener("input",render);
+  input.addEventListener("focus",render);
+  input.addEventListener("blur",()=>setTimeout(()=>{list.classList.remove("show");input.setAttribute("aria-expanded","false");},120));
+  input.addEventListener("keydown",e=>{
+    const lis=[...list.querySelectorAll("li")];
+    if(e.key==="Enter"){e.preventDefault();if(hi>=0&&lis[hi])addTag(lis[hi].textContent);else if(input.value.trim())addTag(input.value);}
+    else if(e.key==="ArrowDown"){e.preventDefault();hi=Math.min(hi+1,lis.length-1);lis.forEach((l,i)=>l.classList.toggle("on",i===hi));}
+    else if(e.key==="ArrowUp"){e.preventDefault();hi=Math.max(hi-1,0);lis.forEach((l,i)=>l.classList.toggle("on",i===hi));}
+    else if(e.key==="Backspace"&&!input.value){const tags=box.querySelectorAll(".tag");if(tags.length)removeTag(tags[tags.length-1]);}
+    else if(e.key==="Escape"){list.classList.remove("show");}
+  });
+})();
+
+/* ---------- number stepper ---------- */
+(function(){
+  const inp=$("workers"),lo=1,hi=16;
+  const clamp=v=>Math.max(lo,Math.min(hi,v|0||lo));
+  $("wminus").addEventListener("click",()=>{inp.value=clamp(+inp.value-1);computeReadiness();});
+  $("wplus").addEventListener("click",()=>{inp.value=clamp(+inp.value+1);computeReadiness();});
+  inp.addEventListener("change",()=>inp.value=clamp(+inp.value));
+})();
+
+/* ---------- single slider (memory) ---------- */
+(function(){
+  const s=$("memory"),out=$("memval");
+  const upd=()=>{const pct=(s.value-s.min)/(s.max-s.min)*100;s.style.setProperty("--fill",pct+"%");
+    out.textContent=String(s.value).padStart(2,"0")+" GB";};
+  s.addEventListener("input",upd);upd();
+})();
+
+/* ---------- dual-thumb range (active hours) ---------- */
+(function(){
+  const a=$("hstart"),b=$("hend"),fill=$("rfill"),read=$("hoursread"),wrap=$("hours");
+  const pad=n=>String(n).padStart(2,"0")+":00";
+  const upd=()=>{
+    let lo=+a.value,hiv=+b.value;
+    if(lo>hiv){[lo,hiv]=[hiv,lo];}          /* keep ordered, no crossover */
+    const W=wrap.clientWidth||600, l=lo/24*100, r=hiv/24*100;
+    fill.style.left=l+"%";fill.style.width=(r-l)+"%";
+    read.textContent=pad(lo)+" → "+pad(hiv);
+  };
+  a.addEventListener("input",upd);b.addEventListener("input",upd);
+  addEventListener("resize",upd);upd();
+})();
+
+/* ---------- switches: reflect ON/OFF text ---------- */
+document.querySelectorAll(".switch input").forEach(sw=>{
+  const state=sw.parentElement.querySelector(".state");
+  sw.addEventListener("change",()=>state.textContent=sw.checked?"ON":"OFF");
+});
+
+/* ---------- ratings (autonomy + risk) ---------- */
+function wireRating(id,readId,labels){
+  const wrap=$(id),read=$(readId);
+  const paint=v=>{wrap.className="rating lit-"+v;read.textContent=v+" · "+labels[v-1];};
+  wrap.querySelectorAll("input").forEach(r=>r.addEventListener("change",()=>paint(+r.value)));
+  const cur=wrap.querySelector("input:checked");paint(cur?+cur.value:1);
+}
+wireRating("autonomy","autoread",["OBSERVE","SUGGEST","SUPERVISED","TRUSTED","FULL"]);
+wireRating("risk","riskread",["CAUTIOUS","GUARDED","BALANCED","BOLD","AGGRESSIVE"]);
+
+/* ---------- date/time segments: numeric only, auto-advance ---------- */
+document.querySelectorAll(".segdate .cell").forEach(c=>{
+  c.addEventListener("input",()=>{
+    const max=c.max?+c.max:9999;
+    if(+c.value>max)c.value=max;
+    const len=c.classList.contains("y")?4:2;
+    if(c.value.length>=len){const cells=[...document.querySelectorAll(".segdate .cell")];
+      const i=cells.indexOf(c);if(i>=0&&i<cells.length-1&&c.value.length>=len&&c.closest(".segdate")===cells[i+1].closest(".segdate"))cells[i+1].focus();}
+  });
+  c.addEventListener("blur",()=>{if(!c.classList.contains("y")&&c.value.length===1)c.value="0"+c.value;});
+});
+
+/* ---------- file dropzone ---------- */
+let fileCount=0;const chosen=[];
+(function(){
+  const drop=$("drop"),input=$("seed"),listEl=$("filelist");
+  const render=()=>{
+    listEl.innerHTML="";fileCount=chosen.length;
+    chosen.forEach((f,i)=>{const row=document.createElement("div");row.className="frow";
+      row.innerHTML='<span class="fx">▤</span><span>'+f.name.toUpperCase()+'</span>'+
+        '<span class="fx">'+(f.size?Math.max(1,Math.round(f.size/1024))+" KB":"")+'</span>'+
+        '<button type="button" aria-label="Remove file">✕</button>';
+      row.querySelector("button").addEventListener("click",()=>{chosen.splice(i,1);render();computeReadiness();});
+      listEl.appendChild(row);});
+    computeReadiness();
+  };
+  const take=files=>{[...files].forEach(f=>chosen.push(f));render();};
+  input.addEventListener("change",()=>take(input.files));
+  ["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("drag");}));
+  ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("drag");}));
+  drop.addEventListener("drop",e=>{if(e.dataTransfer&&e.dataTransfer.files)take(e.dataTransfer.files);});
+})();
+
+/* ---------- textarea counter ---------- */
+const notes=$("notes"),counter=$("counter"),charcount=$("charcount");
+notes.addEventListener("input",()=>{const n=notes.value.length;charcount.textContent=String(n).padStart(3,"0");
+  counter.classList.toggle("hot",n>=220&&n<280);counter.classList.toggle("over",n>=280);});
+
+/* ---------- validation ---------- */
+function validate(){
+  let ok=true;
+  const name=$("agentname").value.trim();
+  $("f-name").classList.toggle("error",!name);if(!name)ok=false;
+  const consent=$("consent").checked;
+  $("f-consent").classList.toggle("error",!consent);if(!consent)ok=false;
+  return ok;
+}
+$("agentname").addEventListener("input",()=>$("f-name").classList.remove("error"));
+$("consent").addEventListener("change",()=>$("f-consent").classList.remove("error"));
+
+/* ---------- commission sequence (teletype receipt, from form-01) ---------- */
+const receipt=$("receipt");
+function rrow(lbl,val,mint){const row=document.createElement("div");row.className="r-row";
+  row.innerHTML='<span class="lbl">'+lbl+'</span><span class="dots"></span><span class="val'+(mint?" mint":"")+'">'+val+'</span>';
+  receipt.appendChild(row);}
+let filing=false,agentNum=7,roster=6;
+$("agentform").addEventListener("submit",e=>{
+  e.preventDefault();
+  if(filing)return;
+  if(!validate()){const first=document.querySelector(".field.error input,.field.error textarea,.field.error #consent");
+    (first||$("agentname")).focus();
+    const fe=document.querySelector(".field.error");if(fe)fe.scrollIntoView({block:"center"});return;}
+  filing=true;
+  const btn=$("deploybtn");btn.disabled=true;btn.textContent="COMMISSIONING…";
+  const st=$("statestamp");st.textContent="配備中 · DEPLOYING";st.classList.remove("ok");if(!REDUCED)st.classList.add("blink");
+  const id="UNIT-"+String(agentNum).padStart(2,"0");
+  const data={
+    name:$("agentname").value.trim().toUpperCase(),
+    section:$("section").value,
+    model:document.querySelector('input[name="model"]:checked').value,
+    mem:$("memory").value,
+    workers:$("workers").value,
+    caps:tagValues().length,
+    autonomy:$("autoread").textContent,
+    files:fileCount,
+  };
+  receipt.innerHTML="";receipt.classList.add("show");
+  const seq=[
+    ()=>rrow("PROVISION "+id,"ACCEPTED"),
+    ()=>rrow("DESIGNATION",data.name),
+    ()=>rrow("HOST SECTION",data.section+" DESK"),
+    ()=>rrow("RUNTIME",data.model+" · "+data.workers+"T · "+String(data.mem).padStart(2,"0")+"GB"),
+    ()=>rrow("CAPABILITIES",data.caps+" LOADED"),
+    ()=>rrow("AUTONOMY",data.autonomy),
+    ()=>rrow("SEED CONFIG",data.files?data.files+" FILE(S)":"NONE — COLD START"),
+    ()=>{rrow("STATUS","起動 · ONLINE",true);
+      st.textContent="起動 · ONLINE";st.classList.add("ok");st.classList.remove("blink");
+      roster++;agentNum++;$("roster").textContent=roster+" AGENTS";
+      btn.disabled=false;btn.textContent="COMMISSION ANOTHER · 任命";filing=false;},
+  ];
+  if(REDUCED){seq.forEach(f=>f());return;}
+  seq.forEach((f,i)=>setTimeout(f,250+i*240));
+});
+
+/* ---------- reset ---------- */
+$("resetbtn").addEventListener("click",()=>{
+  if(filing)return;
+  $("agentform").reset();
+  /* clear tags to default two */
+  $("tagbox").querySelectorAll(".tag").forEach(t=>t.remove());
+  [["CODE_REVIEW"],["VECTOR_SEARCH"]].forEach(([v])=>{const t=document.createElement("span");t.className="tag";t.dataset.v=v;
+    t.innerHTML=v+'<button type="button" aria-label="Remove '+v+'">✕</button>';$("tagbox").insertBefore(t,$("capinput"));});
+  chosen.length=0;$("filelist").innerHTML="";fileCount=0;
+  ["f-name","f-consent"].forEach(id=>$(id).classList.remove("error"));
+  receipt.classList.remove("show");receipt.innerHTML="";
+  charcount.textContent="000";counter.className="counter";
+  /* re-sync derived UI */
+  $("memory").dispatchEvent(new Event("input"));
+  $("hstart").dispatchEvent(new Event("input"));
+  document.querySelectorAll(".switch input").forEach(sw=>sw.parentElement.querySelector(".state").textContent=sw.checked?"ON":"OFF");
+  wireReset();
+  const st=$("statestamp");st.textContent="編成中 · DRAFT";st.classList.remove("ok");if(!REDUCED)st.classList.add("blink");
+  $("deploybtn").textContent="COMMISSION AGENT · 任命";
+  computeReadiness();$("agentname").focus();
+});
+function wireReset(){
+  /* repaint ratings to their reset (checked) values */
+  const a=$("autonomy").querySelector("input:checked"),r=$("risk").querySelector("input:checked");
+  $("autonomy").className="rating lit-"+(a?a.value:3);
+  $("risk").className="rating lit-"+(r?r.value:1);
+}
+
+/* ---- START ---- */
+computeReadiness();
+wireReset();
+</script>
+</body>
+</html>

@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FORM-01 · JAIRUS OS — FILE A GATE</title>
+<style>
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{min-height:100%;background:#000}
+body{
+  font-family:var(--mono);color:var(--mint);text-transform:uppercase;letter-spacing:.03em;
+  display:flex;align-items:center;justify-content:center;padding:26px 14px;min-height:100vh;
+}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%)}
+
+.blink{animation:blink 1s steps(1) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+@keyframes btnblink{0%,74%{background:var(--mint);color:var(--bg)}75%,100%{background:var(--bg);color:var(--mint)}}
+.stamp{display:inline-block;border:1px solid currentColor;padding:2px 9px;border-radius:2px;
+  font-size:11px;line-height:1.45;white-space:nowrap}
+
+/* ============ double-frame card (exp-10 modal grammar) ============ */
+.card{
+  width:min(94vw,660px);border:1px solid var(--orange);padding:4px;background:var(--bg);
+  box-shadow:0 0 14px rgba(242,100,0,.35);
+}
+.card-inner{
+  border:3px solid var(--orange);padding:22px 26px 24px;position:relative;
+  clip-path:polygon(0 0,calc(100% - 22px) 0,100% 22px,100% 100%,0 100%);
+}
+
+/* header: kanji pair + metadata */
+.hdr{display:flex;align-items:flex-start;justify-content:space-between;gap:18px;
+  border-bottom:2px solid var(--orange);padding-bottom:12px;margin-bottom:4px}
+.hdr .jp{font-family:var(--jp);font-weight:800;font-size:40px;line-height:1;color:var(--orange);
+  text-transform:none;letter-spacing:.14em;text-indent:.14em;
+  text-shadow:0 0 5px currentColor,0 0 14px rgba(242,100,0,.4)}
+.hdr .cap{font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.26em;
+  color:var(--amber);margin-top:5px}
+.hdr h1{font-family:var(--cond);font-weight:700;font-size:22px;color:var(--paper);
+  letter-spacing:.03em;text-shadow:0 0 4px currentColor,0 0 10px rgba(82,242,154,.3);margin-top:2px}
+.hdr .sub{font-size:10px;color:var(--green-map);letter-spacing:.12em;margin-top:4px;line-height:1.5}
+.meta{font-size:10px;line-height:1.4;color:var(--orange);text-align:right;flex:none}
+.meta b{color:var(--amber-dim);font-weight:400}
+.meta .statestamp{margin-top:6px;color:var(--red-hi)}
+.meta .statestamp.ok{color:var(--mint)}
+
+/* teal double rule under header */
+.rule{height:9px;border-top:3px solid var(--teal);border-bottom:3px solid var(--teal);
+  margin-bottom:18px;opacity:.85}
+
+/* ============ fields ============ */
+form{display:flex;flex-direction:column;gap:16px}
+fieldset.field{border:0;padding:0;margin:0}
+.field label,.field legend{display:flex;align-items:baseline;gap:8px;font-size:10px;
+  letter-spacing:.16em;color:var(--orange);margin-bottom:6px}
+.field label .jp,.field legend .jp{font-family:var(--jp);font-weight:800;font-size:13px;
+  text-transform:none;color:var(--orange)}
+.field label .req,.field legend .req{color:var(--red-hi)}
+.field .hint{margin-left:auto;font-size:9px;color:var(--green-map);letter-spacing:.1em}
+
+input[type="text"],textarea,select{
+  width:100%;background:var(--bg);border:1px solid var(--green-dim);color:var(--mint);
+  font-family:var(--mono);font-size:14px;letter-spacing:.05em;padding:10px 12px;
+  border-radius:0;caret-color:var(--mint);
+}
+input[type="text"]{text-transform:uppercase}
+input[type="text"]::placeholder,textarea::placeholder{color:var(--green-dim);text-transform:uppercase}
+input[type="text"]:hover,textarea:hover,select:hover{border-color:var(--green-map)}
+input[type="text"]:focus-visible,textarea:focus-visible,select:focus-visible{
+  outline:none;border-color:var(--mint);
+  box-shadow:0 0 8px rgba(82,242,154,.35),inset 0 0 6px rgba(82,242,154,.12);
+}
+.field.error input[type="text"],.field.error textarea{border-color:var(--red-hi);
+  box-shadow:0 0 8px rgba(226,40,15,.35)}
+.err{display:none;margin-top:6px;font-size:10px;color:var(--red-hi);letter-spacing:.1em;
+  text-shadow:0 0 4px rgba(226,40,15,.4)}
+.err::before{content:"» "}
+.field.error .err{display:block}
+
+/* custom dropdown — trigger + listbox, native popup replaced entirely */
+.dd{position:relative}
+.dd-trigger{
+  width:100%;display:flex;align-items:center;gap:10px;background:var(--bg);
+  border:1px solid var(--green-dim);color:var(--mint);font-family:var(--mono);
+  font-size:14px;letter-spacing:.05em;padding:10px 12px;cursor:pointer;text-align:left;
+}
+.dd-trigger:hover{border-color:var(--green-map)}
+.dd-trigger:focus-visible,.dd.open .dd-trigger{
+  outline:none;border-color:var(--mint);
+  box-shadow:0 0 8px rgba(82,242,154,.35),inset 0 0 6px rgba(82,242,154,.12);
+}
+.dd-value .jp{font-family:var(--jp);font-weight:800;text-transform:none;color:var(--green-map);
+  margin-left:8px}
+.dd-chevron{margin-left:auto;font-size:10px;color:var(--orange)}
+.dd.open .dd-chevron{transform:rotate(180deg)}
+.dd-tag{font-size:9px;color:var(--green-map);letter-spacing:.14em}
+.dd.open .dd-tag{color:var(--mint)}
+
+.dd-list{
+  position:absolute;left:0;right:0;top:calc(100% + 4px);z-index:30;list-style:none;
+  background:var(--bg);border:1px solid var(--mint);padding:4px;display:none;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 14px),calc(100% - 14px) 100%,0 100%);
+  box-shadow:0 0 12px rgba(82,242,154,.3),inset 0 0 8px rgba(82,242,154,.08);
+}
+.dd.open .dd-list{display:block}
+.dd-list li{
+  display:flex;align-items:baseline;gap:10px;padding:8px 10px;cursor:pointer;
+  color:var(--mint);font-size:13px;border:1px solid transparent;
+}
+.dd-list li .jp{font-family:var(--jp);font-weight:800;text-transform:none;
+  margin-left:auto;color:var(--green-map)}
+.dd-list li .mark{width:14px;color:var(--orange);font-size:10px;visibility:hidden}
+.dd-list li[aria-selected="true"] .mark{visibility:visible}
+/* active row = figure/ground inversion, no hover fade */
+.dd-list li.active{background:var(--mint);color:var(--bg);font-weight:700}
+.dd-list li.active .jp{color:var(--bg)}
+.dd-list li.active .mark{color:var(--bg)}
+.dd-list li+li{border-top:1px dotted var(--green-dim)}
+.dd-list li.active+li{border-top-color:transparent}
+
+/* textarea + character telemetry */
+textarea{resize:vertical;min-height:96px;text-transform:none;line-height:1.55}
+.counter{display:flex;justify-content:flex-end;gap:6px;margin-top:5px;font-size:9px;
+  color:var(--green-map);letter-spacing:.14em}
+.counter b{color:var(--mint);font-weight:400}
+.counter.hot b{color:var(--amber)}
+.counter.over b{color:var(--red-hi)}
+
+/* radio chips: real radios, boxed-stamp presentation, checked = inversion */
+.prio{display:flex;gap:8px;flex-wrap:wrap;border:0}
+.prio .chip{position:relative}
+.prio input{position:absolute;inset:0;opacity:0;cursor:pointer}
+.prio .chipface{
+  display:flex;flex-direction:column;align-items:center;min-width:88px;cursor:pointer;
+  border:1px solid var(--pc);color:var(--pc);padding:6px 12px 5px;border-radius:2px;
+}
+.prio .chipface .jp{font-family:var(--jp);font-weight:800;font-size:15px;line-height:1.2;
+  text-transform:none;letter-spacing:.2em;text-indent:.2em}
+.prio .chipface .en{font-size:9px;letter-spacing:.14em;margin-top:2px}
+.prio input:checked + .chipface{background:var(--pc);color:var(--bg);font-weight:700;
+  box-shadow:0 0 9px color-mix(in srgb,var(--pc) 55%,transparent)}
+.prio input:focus-visible + .chipface{outline:2px solid var(--paper);outline-offset:2px}
+.chip.p-routine{--pc:var(--green-map)}
+.chip.p-elevated{--pc:var(--amber)}
+.chip.p-critical{--pc:var(--red-hi)}
+
+/* ============ actions + receipt ============ */
+.actions{display:flex;align-items:center;gap:12px;border-top:1px solid var(--green-dim);
+  padding-top:16px;margin-top:2px}
+.btn{border:1px solid var(--orange);background:var(--bg);color:var(--orange);
+  font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.12em;
+  text-transform:uppercase;padding:11px 22px;cursor:pointer}
+.btn:hover{background:var(--orange);color:var(--bg)}
+.btn:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.btn.primary{border:2px solid var(--mint);color:var(--mint);
+  animation:btnblink 1s steps(1) infinite}
+.btn.primary:disabled{animation:none;opacity:.4;cursor:default;background:var(--bg);color:var(--mint)}
+.btn.ghost{border-color:var(--green-dim);color:var(--green-map);font-family:var(--mono);
+  font-weight:400;font-size:11px}
+.btn.ghost:hover{background:var(--green-dim);color:var(--paper)}
+.actions .queue{margin-left:auto;font-size:9px;color:var(--green-map);letter-spacing:.12em;
+  text-align:right;line-height:1.5}
+.actions .queue b{color:var(--mint);font-weight:400}
+
+/* receipt: teletype rows appended below actions */
+.receipt{margin-top:14px;display:none}
+.receipt.show{display:block}
+.receipt .r-row{display:flex;gap:8px;align-items:baseline;font-size:11px;color:var(--amber-dim);
+  white-space:nowrap;overflow:hidden}
+.receipt .r-row .lbl{color:var(--amber)}
+.receipt .r-row .dots{flex:1;border-bottom:1px dotted var(--amber-dim);height:0;margin-bottom:3px}
+.receipt .r-row .val{color:var(--amber);font-weight:700}
+.receipt .r-row .val.mint{color:var(--mint);text-shadow:0 0 4px rgba(82,242,154,.4)}
+
+@media (prefers-reduced-motion:reduce){
+  .blink,.btn.primary{animation:none}
+}
+@media (max-width:560px){
+  .hdr{flex-wrap:wrap}
+  .meta{text-align:left}
+}
+</style>
+</head>
+<body>
+
+<div class="card">
+  <div class="card-inner">
+
+    <header class="hdr">
+      <div>
+        <div class="jp">申請</div>
+        <div class="cap">Filing</div>
+      </div>
+      <div style="flex:1">
+        <h1>FILE A GATE</h1>
+        <div class="sub">A GATE IS A DECISION THAT WAITS FOR YOU.<br>
+          ROUTE IT TO A SECTION, SET ITS PRIORITY, AND THE ARBITER QUEUES IT FOR REVIEW.</div>
+      </div>
+      <div class="meta">
+        <div><b>CODE:</b>0771</div>
+        <div><b>FILE:</b>GATE_INTAKE</div>
+        <div><b>EX_MODE:</b>MANUAL</div>
+        <div><b>PRIORITY:</b>SET BELOW</div>
+        <div class="stamp statestamp blink" id="statestamp">受付中 · OPEN</div>
+      </div>
+    </header>
+    <div class="rule"></div>
+
+    <form id="gateform" novalidate>
+
+      <div class="field" id="f-title">
+        <label for="title"><span class="jp">件名</span>GATE DESIGNATION <span class="req">*</span>
+          <span class="hint">SHORT, RECOGNIZABLE NAME</span></label>
+        <input type="text" id="title" name="title" maxlength="60"
+          placeholder="API SECURITY GATEWAY" autocomplete="off">
+        <div class="err" id="err-title">DESIGNATION REQUIRED — NAME THE DECISION YOU ARE FILING.</div>
+      </div>
+
+      <div class="field">
+        <label for="ddbtn" id="ddlabel"><span class="jp">部門</span>ROUTE TO SECTION</label>
+        <div class="dd" id="dd">
+          <button type="button" class="dd-trigger" id="ddbtn" role="combobox"
+            aria-haspopup="listbox" aria-expanded="false" aria-controls="ddlist">
+            <span class="dd-value" id="ddvalue">ENGINEERING<span class="jp">工学</span></span>
+            <span class="dd-tag" id="ddtag">DESK 1/6</span>
+            <span class="dd-chevron" aria-hidden="true">▼</span>
+          </button>
+          <ul class="dd-list" id="ddlist" role="listbox" aria-labelledby="ddlabel" tabindex="-1">
+            <li role="option" data-v="ENGINEERING" data-jp="工学" aria-selected="true"><span class="mark">▸</span>ENGINEERING<span class="jp">工学</span></li>
+            <li role="option" data-v="KNOWLEDGE" data-jp="知識" aria-selected="false"><span class="mark">▸</span>KNOWLEDGE<span class="jp">知識</span></li>
+            <li role="option" data-v="AUTOMATION" data-jp="自動" aria-selected="false"><span class="mark">▸</span>AUTOMATION<span class="jp">自動</span></li>
+            <li role="option" data-v="LEARNING" data-jp="学習" aria-selected="false"><span class="mark">▸</span>LEARNING<span class="jp">学習</span></li>
+            <li role="option" data-v="CONTENT" data-jp="記録" aria-selected="false"><span class="mark">▸</span>CONTENT<span class="jp">記録</span></li>
+            <li role="option" data-v="PERSONAL" data-jp="個人" aria-selected="false"><span class="mark">▸</span>PERSONAL<span class="jp">個人</span></li>
+          </ul>
+          <input type="hidden" name="section" id="section" value="ENGINEERING">
+        </div>
+      </div>
+
+      <fieldset class="field">
+        <legend><span class="jp">優先</span>PRIORITY</legend>
+        <div class="prio" role="radiogroup" aria-label="Gate priority">
+          <span class="chip p-routine">
+            <input type="radio" name="prio" id="p1" value="B++" checked>
+            <label class="chipface" for="p1"><span class="jp">通常</span><span class="en">B++ ROUTINE</span></label>
+          </span>
+          <span class="chip p-elevated">
+            <input type="radio" name="prio" id="p2" value="AA-">
+            <label class="chipface" for="p2"><span class="jp">優先</span><span class="en">AA- ELEVATED</span></label>
+          </span>
+          <span class="chip p-critical">
+            <input type="radio" name="prio" id="p3" value="AAA">
+            <label class="chipface" for="p3"><span class="jp">緊急</span><span class="en">AAA CRITICAL</span></label>
+          </span>
+        </div>
+      </fieldset>
+
+      <div class="field" id="f-just">
+        <label for="just"><span class="jp">理由</span>JUSTIFICATION <span class="req">*</span>
+          <span class="hint">WHAT HAPPENS IF NOBODY DECIDES?</span></label>
+        <textarea id="just" name="just" maxlength="280"
+          placeholder="THREE PRS ARE WAITING ON THE ARCHITECTURE CALL. WITHOUT A RULING, THE AUTH REFACTOR SLIPS PAST NOON SYNC."></textarea>
+        <div class="counter" id="counter"><b id="charcount">000</b>/280</div>
+        <div class="err" id="err-just">JUSTIFICATION REQUIRED — THE ARBITER RULES ON CONSEQUENCES, NOT TITLES.</div>
+      </div>
+
+      <div class="actions">
+        <button type="submit" class="btn primary" id="filebtn">FILE GATE · 申請</button>
+        <button type="button" class="btn ghost" id="clearbtn">CLEAR FORM</button>
+        <div class="queue">ARBITER QUEUE: <b id="queuedepth">3 GATES</b><br>EST. RULING: <b>&lt; 4H</b></div>
+      </div>
+
+    </form>
+
+    <div class="receipt" id="receipt" role="status" aria-live="polite"></div>
+
+  </div>
+</div>
+
+<script>
+"use strict";
+/* if loaded in a hidden/zero-size viewport, re-init once it has real size */
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const $=id=>document.getElementById(id);
+
+/* ---------- custom dropdown: open/select/close, mouse + keyboard ---------- */
+(function(){
+  const dd=$("dd"),btn=$("ddbtn"),list=$("ddlist"),val=$("ddvalue"),tag=$("ddtag"),hidden=$("section");
+  const items=[...list.querySelectorAll("li")];
+  let idx=Math.max(0,items.findIndex(li=>li.getAttribute("aria-selected")==="true"));
+  const paint=()=>items.forEach((li,i)=>li.classList.toggle("active",i===idx));
+  const open=()=>{dd.classList.add("open");btn.setAttribute("aria-expanded","true");paint();list.focus();};
+  const close=()=>{dd.classList.remove("open");btn.setAttribute("aria-expanded","false");};
+  const choose=i=>{
+    items.forEach(li=>li.setAttribute("aria-selected","false"));
+    items[i].setAttribute("aria-selected","true");idx=i;
+    val.innerHTML=items[i].dataset.v+'<span class="jp">'+items[i].dataset.jp+'</span>';
+    if(tag)tag.textContent="DESK "+(i+1)+"/"+items.length;
+    hidden.value=items[i].dataset.v;
+  };
+  btn.addEventListener("click",()=>dd.classList.contains("open")?close():open());
+  items.forEach((li,i)=>li.addEventListener("click",()=>{choose(i);close();btn.focus();}));
+  list.addEventListener("keydown",e=>{
+    if(e.key==="ArrowDown"){e.preventDefault();idx=(idx+1)%items.length;paint();}
+    else if(e.key==="ArrowUp"){e.preventDefault();idx=(idx-1+items.length)%items.length;paint();}
+    else if(e.key==="Enter"||e.key===" "){e.preventDefault();choose(idx);close();btn.focus();}
+    else if(e.key==="Escape"){e.preventDefault();close();btn.focus();}
+  });
+  btn.addEventListener("keydown",e=>{
+    if(e.key==="ArrowDown"||e.key==="Enter"||e.key===" "){e.preventDefault();open();}
+  });
+  document.addEventListener("click",e=>{if(!dd.contains(e.target))close();});
+})();
+
+/* ---------- character telemetry ---------- */
+const just=$("just"),counter=$("counter"),charcount=$("charcount");
+function tickCount(){
+  const n=just.value.length;
+  charcount.textContent=String(n).padStart(3,"0");
+  counter.classList.toggle("hot",n>=220&&n<280);
+  counter.classList.toggle("over",n>=280);
+}
+just.addEventListener("input",tickCount);
+
+/* ---------- validation: direction, not apology ---------- */
+function validate(){
+  let ok=true;
+  const title=$("title").value.trim();
+  $("f-title").classList.toggle("error",!title);
+  if(!title)ok=false;
+  const j=just.value.trim();
+  $("f-just").classList.toggle("error",!j);
+  if(!j)ok=false;
+  return ok;
+}
+$("title").addEventListener("input",()=>$("f-title").classList.remove("error"));
+just.addEventListener("input",()=>$("f-just").classList.remove("error"));
+
+/* ---------- receipt teletype ---------- */
+const receipt=$("receipt");
+function rrow(lbl,val,mint){
+  const row=document.createElement("div");
+  row.className="r-row";
+  row.innerHTML='<span class="lbl">'+lbl+'</span><span class="dots"></span>'+
+    '<span class="val'+(mint?" mint":"")+'">'+val+'</span>';
+  receipt.appendChild(row);
+}
+
+/* ---------- filing sequence ---------- */
+let filing=false,gateNum=12,queued=3;
+$("gateform").addEventListener("submit",e=>{
+  e.preventDefault();
+  if(filing)return;
+  if(!validate()){
+    const firstErr=document.querySelector(".field.error input,.field.error textarea");
+    if(firstErr)firstErr.focus();
+    return;
+  }
+  filing=true;
+  const btn=$("filebtn");
+  btn.disabled=true;btn.textContent="FILING…";
+  const st=$("statestamp");
+  st.textContent="審査中 · REVIEW";st.classList.remove("ok");
+  if(!REDUCED)st.classList.add("blink");
+
+  const id="GATE·"+String(gateNum).padStart(2,"0");
+  const data={
+    title:$("title").value.trim().toUpperCase(),
+    section:$("section").value,
+    prio:document.querySelector('input[name="prio"]:checked').value,
+  };
+  receipt.innerHTML="";receipt.classList.add("show");
+  const seq=[
+    ()=>rrow("INTAKE "+id,"RECEIVED"),
+    ()=>rrow("DESIGNATION",data.title),
+    ()=>rrow("ROUTE",data.section+" DESK"),
+    ()=>rrow("PRIORITY",data.prio),
+    ()=>rrow("ARBITER QUEUE","POSITION "+(queued+1)),
+    ()=>{
+      rrow("STATUS","受理 · ACCEPTED",true);
+      st.textContent="受理 · ACCEPTED";
+      st.classList.add("ok");st.classList.remove("blink");
+      queued++;gateNum++;
+      $("queuedepth").textContent=queued+" GATES";
+      btn.disabled=false;btn.textContent="FILE ANOTHER · 申請";
+      filing=false;
+    },
+  ];
+  if(REDUCED){seq.forEach(f=>f());return;}
+  seq.forEach((f,i)=>setTimeout(f,250+i*260));   /* teletype cadence, stepped */
+});
+
+/* ---------- clear ---------- */
+$("clearbtn").addEventListener("click",()=>{
+  if(filing)return;
+  $("gateform").reset();
+  tickCount();
+  ["f-title","f-just"].forEach(id=>$(id).classList.remove("error"));
+  receipt.classList.remove("show");receipt.innerHTML="";
+  const st=$("statestamp");
+  st.textContent="受付中 · OPEN";st.classList.remove("ok");
+  if(!REDUCED)st.classList.add("blink");
+  $("filebtn").textContent="FILE GATE · 申請";
+  $("title").focus();
+});
+
+/* ---- START ---- */
+tickCount();
+</script>
+</body>
+</html>

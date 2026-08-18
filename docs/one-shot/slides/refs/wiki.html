@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>JAIRUS OS · KNOWLEDGE — RECURSIVE FEEDBACK LOOPS</title>
+<!-- wiki.html — Knowledge Vault article view. NERV tactical grammar, consistent with
+     landing-page-02 / form-01 / form-02. 3-column shell: left (backlinks, related
+     entities, ingestion pipeline), center (article w/ [[wikilinks]]), right (TOC,
+     status, AI insight, concept graph). Signature: wikilink hover/focus preview cards. -->
+<style>
+:root{
+  --bg:#0A0A0A; --mint:#52F29A; --mint-hi:#7CF4AB; --green-map:#3C9C6C; --green-dim:#246C3C;
+  --paper:#EDF8D6; --red:#C20C0C; --red-hi:#E2280F; --crimson:#E60225; --orange:#F26400;
+  --amber:#F49F09; --amber-dim:#9C3C24; --teal:#0C6C80; --blue:#5090D0;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --jp:"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{background:var(--bg);color:var(--mint);font-family:var(--mono);letter-spacing:.02em;overflow-x:hidden}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:300;
+  background:
+    repeating-linear-gradient(0deg,rgba(0,0,0,.2) 0 1px,transparent 1px 3px),
+    radial-gradient(ellipse at center,transparent 60%,rgba(0,0,0,.5) 100%)}
+a{color:inherit;text-decoration:none}
+::selection{background:var(--mint);color:#000}
+.caps{text-transform:uppercase}
+
+/* ---------- shell ---------- */
+.shell{display:grid;grid-template-columns:252px 1fr 292px;min-height:100vh}
+.rail{position:sticky;top:0;height:100vh;overflow-y:auto;background:rgba(10,10,10,.96);padding:18px 16px;text-transform:uppercase}
+.railL{border-right:2px solid var(--orange);box-shadow:2px 0 14px rgba(242,100,0,.14)}
+.railR{border-left:2px solid var(--orange);box-shadow:-2px 0 14px rgba(242,100,0,.14)}
+.rail::-webkit-scrollbar{width:8px}.rail::-webkit-scrollbar-thumb{background:var(--green-dim)}
+
+.brand{display:flex;align-items:baseline;gap:7px;font-family:var(--cond);font-weight:700}
+.brand .mk{width:15px;height:15px;background:var(--mint);box-shadow:0 0 8px var(--mint);transform:rotate(45deg);align-self:center}
+.brand b{font-size:18px;color:var(--mint-hi);text-shadow:0 0 6px rgba(82,242,154,.6)}
+.brand-v{font-size:9px;color:var(--orange);letter-spacing:.14em;margin:2px 0 22px 22px}
+.navrail{display:flex;flex-direction:column;gap:3px;margin-bottom:22px}
+.navrail a{display:flex;align-items:center;gap:10px;font-size:12px;padding:8px 10px;color:var(--mint);opacity:.7;
+  border-left:2px solid transparent;letter-spacing:.05em}
+.navrail a .k{font-family:var(--jp);font-size:14px;opacity:.8;width:16px}
+.navrail a:hover{opacity:1;background:rgba(82,242,154,.06);border-left-color:var(--green-dim)}
+.navrail a.on{opacity:1;color:var(--mint-hi);border-left-color:var(--mint);background:rgba(82,242,154,.08)}
+
+.rlabel{font-size:9px;color:var(--orange);letter-spacing:.16em;margin:18px 0 10px;border-bottom:1px solid var(--green-dim);padding-bottom:6px}
+.rlabel:first-of-type{margin-top:4px}
+
+/* backlink cards */
+.blink{border:1px solid var(--green-dim);background:#0A0A0A;padding:10px 11px;margin-bottom:8px;display:block}
+.blink:hover{border-color:var(--orange);box-shadow:0 0 10px rgba(242,100,0,.15)}
+.blink .row1{display:flex;justify-content:space-between;font-size:9px;color:var(--orange);letter-spacing:.08em;margin-bottom:5px}
+.blink .row1 .dt{color:var(--green-map)}
+.blink .t{font-size:11px;color:var(--mint);line-height:1.4;text-transform:none;letter-spacing:.02em}
+
+/* related entities */
+.ent{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px dotted rgba(60,156,108,.3)}
+.ent:last-child{border-bottom:0}
+.ent .glyph{width:30px;height:30px;border:1px solid var(--orange);display:flex;align-items:center;justify-content:center;
+  font-family:var(--jp);font-size:15px;color:var(--orange);flex:none}
+.ent .nm{font-size:12px;color:var(--mint);letter-spacing:.04em}
+.ent .kd{font-size:8px;color:var(--green-map);letter-spacing:.1em;margin-top:2px}
+
+/* ingestion pipeline (numbered — real sequence) */
+.pipe{list-style:none;position:relative;margin-left:4px}
+.pipe li{display:flex;align-items:center;gap:12px;padding:7px 0;position:relative}
+.pipe li .n{width:26px;height:26px;border:1px solid var(--green-dim);border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-size:10px;color:var(--green-map);background:var(--bg);flex:none;z-index:2}
+.pipe li .lb{font-size:11px;color:var(--green-map);letter-spacing:.05em}
+.pipe li::before{content:"";position:absolute;left:12px;top:-7px;bottom:50%;width:1px;background:var(--green-dim)}
+.pipe li:first-child::before{display:none}
+.pipe li.done .n{border-color:var(--mint);color:var(--mint)}
+.pipe li.done .lb{color:var(--mint)}
+.pipe li.active .n{background:var(--mint);color:#000;border-color:var(--mint);box-shadow:0 0 10px rgba(82,242,154,.5)}
+.pipe li.active .lb{color:var(--mint-hi);font-weight:700}
+
+/* ---------- center article ---------- */
+.center{min-width:0;padding:26px clamp(20px,4vw,60px) 70px}
+.article{max-width:760px;margin:0 auto}
+.crumb{font-size:11px;letter-spacing:.1em;color:var(--green-map);margin-bottom:22px;text-transform:uppercase}
+.crumb a:hover{color:var(--mint)}
+.crumb .sep{color:var(--orange);margin:0 8px}
+.crumb .here{color:var(--mint-hi)}
+
+.arthead{border-left:3px solid var(--mint);padding-left:20px;margin-bottom:22px;box-shadow:-1px 0 12px rgba(82,242,154,.15)}
+.reltag{display:inline-block;border:1px solid var(--teal);color:var(--teal);font-size:10px;padding:2px 9px;letter-spacing:.14em;
+  text-transform:uppercase;vertical-align:middle}
+.updated{font-size:10px;color:var(--green-map);letter-spacing:.06em;margin-left:12px;text-transform:uppercase}
+.artjp{font-family:var(--jp);font-weight:800;font-size:20px;color:var(--orange);margin:14px 0 2px;letter-spacing:.14em}
+.artjp small{font-family:var(--cond);font-size:11px;color:var(--amber);letter-spacing:.24em;margin-left:10px;text-transform:uppercase}
+h1.title{font-family:var(--cond);font-weight:700;font-size:clamp(34px,5.4vw,60px);line-height:.96;color:var(--mint-hi);
+  letter-spacing:.01em;text-shadow:0 0 14px rgba(82,242,154,.28);text-transform:uppercase;margin-top:6px}
+.tags{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px}
+.tags .tg{border:1px solid var(--green-dim);color:var(--green-map);font-size:10px;padding:3px 10px;letter-spacing:.08em;border-radius:2px}
+.tags .tg:hover{border-color:var(--mint);color:var(--mint)}
+
+.body{margin-top:8px}
+.body h2{font-family:var(--cond);font-weight:700;font-size:22px;color:var(--paper);letter-spacing:.05em;margin:38px 0 12px;
+  padding-bottom:8px;border-bottom:1px solid var(--green-dim);text-transform:uppercase;scroll-margin-top:20px}
+.body h2 .idx{color:var(--orange);font-size:14px;margin-right:10px}
+.body p{font-size:15px;line-height:1.72;color:var(--mint);opacity:.9;margin:14px 0;max-width:64ch}
+.body p b{color:var(--mint-hi);font-weight:400}
+
+/* SIGNATURE: wikilinks */
+.wl{color:var(--mint-hi);border-bottom:1px dashed var(--mint);cursor:pointer;padding:0 1px;white-space:nowrap;
+  text-transform:uppercase;letter-spacing:.02em;background:none;border-left:0;border-right:0;border-top:0;font:inherit}
+.wl::before{content:"[[";color:var(--green-map)}
+.wl::after{content:"]]";color:var(--green-map)}
+.wl:hover,.wl:focus-visible{background:var(--mint);color:#000;outline:none}
+.wl:hover::before,.wl:hover::after,.wl:focus-visible::before,.wl:focus-visible::after{color:#000}
+
+/* wikilink preview popcard */
+.preview{position:fixed;z-index:200;width:250px;border:1px solid var(--mint);background:#060606;padding:12px 13px;display:none;
+  box-shadow:0 0 18px rgba(82,242,154,.3),inset 0 0 12px rgba(82,242,154,.06);
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%)}
+.preview.show{display:block}
+.preview .pk{font-size:9px;letter-spacing:.12em;padding:2px 7px;border:1px solid currentColor;display:inline-block;text-transform:uppercase}
+.preview .pt{font-family:var(--cond);font-weight:700;font-size:16px;color:var(--mint-hi);margin:8px 0 6px;letter-spacing:.03em;text-transform:uppercase}
+.preview .ps{font-size:11px;line-height:1.5;color:var(--mint);opacity:.8;text-transform:none}
+.preview .pf{font-size:9px;color:var(--green-map);letter-spacing:.1em;margin-top:9px;border-top:1px dotted var(--green-dim);padding-top:7px}
+
+/* comparison two-up */
+.compare{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:22px 0}
+.cmp{border:1px solid var(--green-dim);background:#0A0A0A;padding:16px}
+.cmp.bad{border-color:var(--amber-dim)}
+.cmp.good{border-color:var(--mint);box-shadow:0 0 12px rgba(82,242,154,.12)}
+.cmp .ch{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.12em;margin-bottom:10px;text-transform:uppercase}
+.cmp.bad .ch{color:var(--amber)} .cmp.good .ch{color:var(--mint)}
+.cmp ul{list-style:none;font-size:12px;line-height:1.5;text-transform:none}
+.cmp li{padding:5px 0 5px 16px;position:relative;color:var(--mint);opacity:.85}
+.cmp.bad li::before{content:"−";position:absolute;left:0;color:var(--amber)}
+.cmp.good li::before{content:"+";position:absolute;left:0;color:var(--mint)}
+
+/* log extract */
+.logx{border:1px solid var(--green-dim);background:#060606;padding:14px 16px;margin:20px 0;font-size:12px;line-height:1.7;
+  text-transform:none;letter-spacing:.02em}
+.logx .lh{color:var(--orange);font-size:10px;letter-spacing:.1em;text-transform:uppercase;margin-bottom:8px}
+.logx .info{color:var(--mint)} .logx .warn{color:var(--amber)} .logx .t{color:var(--amber-dim)}
+
+/* footer edit line */
+.artfoot{margin-top:44px;border-top:1px solid var(--green-dim);padding-top:16px;display:flex;flex-wrap:wrap;gap:14px;
+  font-size:10px;color:var(--green-map);letter-spacing:.08em;text-transform:uppercase}
+.artfoot .g{color:var(--mint)}
+.editbtn{margin-left:auto;border:1px solid var(--orange);color:var(--orange);background:transparent;font-family:var(--cond);
+  font-weight:700;font-size:12px;letter-spacing:.1em;padding:8px 18px;cursor:pointer;text-transform:uppercase}
+.editbtn:hover{background:var(--orange);color:#000}
+.editbtn:focus-visible{outline:2px solid var(--paper);outline-offset:2px}
+
+/* ---------- right rail ---------- */
+.toc{list-style:none}
+.toc li a{display:block;font-size:11px;color:var(--mint);opacity:.6;padding:7px 10px;border-left:2px solid transparent;letter-spacing:.05em}
+.toc li a:hover{opacity:1}
+.toc li a.on{opacity:1;color:var(--mint-hi);border-left-color:var(--mint);background:rgba(82,242,154,.07)}
+.strow{display:flex;justify-content:space-between;align-items:baseline;font-size:11px;padding:8px 0;border-bottom:1px dotted rgba(60,156,108,.3)}
+.strow .k{color:var(--mint);opacity:.7;letter-spacing:.05em}
+.strow .v{font-family:var(--cond);font-weight:700;letter-spacing:.04em}
+.strow .v.hi{color:var(--amber)} .strow .v.ok{color:var(--mint-hi)} .strow .v.pub{color:var(--blue)}
+.insight{border:1px solid var(--green-dim);background:#0A0A0A;padding:13px;margin-top:6px}
+.insight .ih{display:flex;align-items:center;gap:7px;font-size:9px;color:var(--orange);letter-spacing:.12em;margin-bottom:8px}
+.insight .ih .b{width:12px;height:12px;border:1px solid var(--orange);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:8px}
+.insight p{font-size:11px;line-height:1.55;color:var(--mint);opacity:.85;font-style:italic;text-transform:none}
+.mapcard{border:1px solid var(--orange);background:#060606;margin-top:16px;padding:8px}
+.mapcard .mh{font-size:9px;color:var(--orange);letter-spacing:.1em;padding:2px 4px 8px}
+.mapcard svg{width:100%;height:180px;display:block}
+.mapcard .mf{font-size:9px;color:var(--green-map);letter-spacing:.08em;text-align:center;padding:8px 0 2px}
+
+/* top search bar (spans, sticky within center on small) */
+.topbar{display:none}
+
+@media(max-width:1080px){
+  .shell{grid-template-columns:1fr}
+  .rail{position:static;height:auto;border:0;box-shadow:none;overflow:visible;
+    border-bottom:2px solid var(--orange);padding:16px 20px}
+  .railR{border-top:2px solid var(--orange);border-bottom:0}
+  .center{order:-1}
+  .compare{grid-template-columns:1fr}
+  .mapcard svg{height:220px}
+}
+@media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- ===== LEFT RAIL ===== -->
+  <aside class="rail railL">
+    <div class="brand"><span class="mk"></span><b>JAIRUS_OS</b></div>
+    <div class="brand-v">v2.4.0-STABLE</div>
+    <nav class="navrail" aria-label="Modules">
+      <a href="#"><span class="k">工</span>ENGINEERING</a>
+      <a class="on" href="#"><span class="k">記</span>KNOWLEDGE</a>
+      <a href="#"><span class="k">自</span>AUTOMATION</a>
+      <a href="#"><span class="k">学</span>LEARNING</a>
+      <a href="#"><span class="k">制</span>CONTENT</a>
+      <a href="#"><span class="k">個</span>PERSONAL</a>
+    </nav>
+
+    <div class="rlabel">◂ BACKLINKS · 2</div>
+    <a class="blink wl-src" href="#" data-note="ENG_LOG">
+      <div class="row1"><span>JRS-402</span><span class="dt">2026-07-15</span></div>
+      <div class="t">Engineering log: feedback loop integration</div>
+    </a>
+    <a class="blink wl-src" href="#" data-note="EDU_11">
+      <div class="row1"><span>EDU-11</span><span class="dt">2026-07-12</span></div>
+      <div class="t">Learning session: vault self-optimization</div>
+    </a>
+
+    <div class="rlabel">◂ RELATED ENTITIES</div>
+    <div class="ent"><span class="glyph">炉</span><div><div class="nm">VEGA·1</div><div class="kd">CONSENSUS CORE</div></div></div>
+    <div class="ent"><span class="glyph">個</span><div><div class="nm">JAIRUS</div><div class="kd">LEAD OPERATOR</div></div></div>
+    <div class="ent"><span class="glyph">審</span><div><div class="nm">ARBITER</div><div class="kd">GATE RESOLVER</div></div></div>
+
+    <div class="rlabel">◂ KNOWLEDGE PIPELINE</div>
+    <ol class="pipe" aria-label="Ingestion pipeline">
+      <li class="done"><span class="n">01</span><span class="lb">Raw input</span></li>
+      <li class="done"><span class="n">02</span><span class="lb">Wiki structuring</span></li>
+      <li class="active"><span class="n">03</span><span class="lb">Entities extracted</span></li>
+      <li><span class="n">04</span><span class="lb">Concept mapping</span></li>
+      <li><span class="n">05</span><span class="lb">Relationships</span></li>
+    </ol>
+  </aside>
+
+  <!-- ===== CENTER ARTICLE ===== -->
+  <main class="center">
+    <article class="article">
+      <nav class="crumb" aria-label="Breadcrumb">
+        <a href="#">KNOWLEDGE</a><span class="sep">›</span><a href="#">CONCEPTS</a><span class="sep">›</span><span class="here">RECURSIVE FEEDBACK LOOPS</span>
+      </nav>
+
+      <header class="arthead">
+        <span class="reltag">STABLE_REL · V1.2</span><span class="updated">UPDATED 2026-08-01 · 14:32:01</span>
+        <div class="artjp">帰還<small>FEEDBACK</small></div>
+        <h1 class="title">RECURSIVE FEEDBACK LOOPS</h1>
+        <div class="tags">
+          <span class="tg">#MEMORY</span><span class="tg">#AGENTIC</span><span class="tg">#SELF-OPTIMIZATION</span><span class="tg">#TIER-4</span>
+        </div>
+      </header>
+
+      <div class="body">
+        <h2 id="summary"><span class="idx">01</span>SUMMARY</h2>
+        <p>A <b>recursive feedback loop</b> is how the <button class="wl" data-note="MEMORY_VAULT">MEMORY_VAULT</button> learns from its own rulings. Every time the <button class="wl" data-note="ARBITER">ARBITER</button> resolves a gate, the outcome — approved, denied, or reversed — is written back as a node and fed into the next decision. The vault stops being a passive archive and starts shaping what it decides next.</p>
+        <p>In the manual paradigm, an operator re-reads the same context on every review. That repetition is a cognitive tax, and a single missed precedent can send a decision the wrong way. The loop removes the tax by caching judgment the way <button class="wl" data-note="MEMOIZATION">MEMOIZATION</button> caches computation.</p>
+
+        <h2 id="mechanism"><span class="idx">02</span>MECHANISM</h2>
+        <p>Each ruling is decomposed during ingestion — see the pipeline at left — into entities and a relationship to prior nodes. When a new gate arrives, the <button class="wl" data-note="AGENTIC_LOOP">AGENTIC_LOOP</button> queries the vault for the closest precedents before it reaches the decide phase. Confidence rises with every consistent outcome and drops sharply after a reversal, which is the system practicing <button class="wl" data-note="CALCULATED_INTENT">CALCULATED_INTENT</button> — inferring the goal behind a request rather than matching its surface.</p>
+
+        <div class="logx" aria-label="Process log extract">
+          <div class="lh">// PROCESS_LOG_EXTRACT</div>
+          <div><span class="t">[INFO]</span> <span class="info">Observation phase initialized (gate 0x512)</span></div>
+          <div><span class="t">[WARN]</span> <span class="warn">Duplicate precedent detected at node 0x512</span></div>
+          <div><span class="t">[INFO]</span> <span class="info">Execution redirected → cached ruling reused</span></div>
+          <div><span class="t">[INFO]</span> <span class="info">Latency reduced from 450ms → 48ms</span></div>
+        </div>
+
+        <h2 id="tradeoffs"><span class="idx">03</span>TRADE-OFFS</h2>
+        <p>Cached judgment is fast but it can calcify. The loop's guardrail is <button class="wl" data-note="GATE_LOGIC">GATE_LOGIC</button>: any precedent older than its policy window is re-opened, not trusted blindly.</p>
+        <div class="compare">
+          <div class="cmp bad">
+            <div class="ch">MANUAL REVIEW</div>
+            <ul>
+              <li>Re-reads full context every pass</li>
+              <li>Precedent lives in the operator's head</li>
+              <li>One missed case flips the ruling</li>
+              <li>~450ms per decision</li>
+            </ul>
+          </div>
+          <div class="cmp good">
+            <div class="ch">FEEDBACK LOOP</div>
+            <ul>
+              <li>Reuses cached judgment, re-checks on drift</li>
+              <li>Precedent lives in the vault, linked</li>
+              <li>Reversals lower confidence automatically</li>
+              <li>~48ms per decision</li>
+            </ul>
+          </div>
+        </div>
+
+        <h2 id="benchmarks"><span class="idx">04</span>BENCHMARKS</h2>
+        <p>Across complex task chains the loop improved throughput <b>14%</b> while holding memory flat. Vault retention sits at <b>98.4%</b> over 2,482 nodes. The full study is linked from <button class="wl" data-note="ENG_LOG">ENG_LOG</button> and the reversal audit in <button class="wl" data-note="EDU_11">EDU_11</button>.</p>
+
+        <div class="artfoot">
+          <span>NODE <span class="g">MEM-2024-0512</span></span>
+          <span>AUTHOR <span class="g">JAIRUS</span></span>
+          <span>REVISIONS <span class="g">7</span></span>
+          <button class="editbtn" id="editbtn">✎ EDIT NOTE</button>
+        </div>
+      </div>
+    </article>
+  </main>
+
+  <!-- ===== RIGHT RAIL ===== -->
+  <aside class="rail railR">
+    <div class="rlabel">QUICK NAVIGATION ▸</div>
+    <ul class="toc" id="toc">
+      <li><a href="#summary" class="on">Summary</a></li>
+      <li><a href="#mechanism">Mechanism</a></li>
+      <li><a href="#tradeoffs">Trade-offs</a></li>
+      <li><a href="#benchmarks">Benchmarks</a></li>
+    </ul>
+
+    <div class="rlabel">STATUS INFORMATION ▸</div>
+    <div class="strow"><span class="k">COMPLEXITY</span><span class="v hi">HIGH · TIER 4</span></div>
+    <div class="strow"><span class="k">CONFIDENCE</span><span class="v ok">98.4%</span></div>
+    <div class="strow"><span class="k">READ ACCESS</span><span class="v pub">OPERATOR</span></div>
+    <div class="strow"><span class="k">LINKS OUT</span><span class="v" style="color:var(--mint)">6</span></div>
+
+    <div class="rlabel">AI INSIGHT ▸</div>
+    <div class="insight">
+      <div class="ih"><span class="b">◈</span>ARBITER NOTE</div>
+      <p>"A vault that remembers its reversals decides less like a filing cabinet and more like an operator who has seen this call go wrong before."</p>
+    </div>
+
+    <div class="mapcard">
+      <div class="mh">◉ CONCEPT DEPENDENCY MAP</div>
+      <svg id="cmap" viewBox="0 0 260 180" preserveAspectRatio="xMidYMid meet" aria-label="Concept graph"></svg>
+      <div class="mf">6 LINKED NODES · CENTER = THIS NOTE</div>
+    </div>
+  </aside>
+
+</div>
+
+<!-- shared wikilink preview -->
+<div class="preview" id="preview" role="tooltip"></div>
+
+<script>
+"use strict";
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+const NS="http://www.w3.org/2000/svg";
+const el=(n,a,p)=>{const e=document.createElementNS(NS,n);for(const k in a)e.setAttribute(k,a[k]);if(p)p.appendChild(e);return e;};
+
+/* ---------- note graph (previews + concept map share this data) ---------- */
+const NOTES={
+  MEMORY_VAULT:{kind:"SYSTEM",c:"--mint",s:"2,482 linked nodes of decisions, patterns, and mistakes. Queryable, never overwritten.",meta:"98.4% RETENTION"},
+  ARBITER:{kind:"AGENT",c:"--orange",s:"The process that resolves a pending gate against policy and precedent.",meta:"UNIT-04 · ACTIVE"},
+  MEMOIZATION:{kind:"PATTERN",c:"--mint",s:"Compute a result once and reuse it, instead of recomputing on every pass.",meta:"12 BACKLINKS"},
+  AGENTIC_LOOP:{kind:"CONCEPT",c:"--blue",s:"Observe → Understand → Decide → Execute → Learn. The core operating cycle.",meta:"TIER 3"},
+  CALCULATED_INTENT:{kind:"CONCEPT",c:"--amber",s:"When the system infers the goal behind a request rather than matching its surface.",meta:"EMERGING"},
+  GATE_LOGIC:{kind:"DECISION",c:"--amber",s:"Rules that govern how a precedent expires and when a gate must re-open.",meta:"POLICY v3"},
+  ENG_LOG:{kind:"LOG",c:"--green-map",s:"Engineering log JRS-402 — feedback loop integration and rollout notes.",meta:"2026-07-15"},
+  EDU_11:{kind:"SESSION",c:"--green-map",s:"Learning session EDU-11 — auditing reversals and confidence decay.",meta:"2026-07-12"},
+};
+
+/* ---------- SIGNATURE: wikilink hover/focus preview ---------- */
+(function(){
+  const pv=document.getElementById("preview");
+  let hideT=null;
+  function show(link){
+    const key=link.dataset.note, d=NOTES[key];
+    if(!d)return;
+    clearTimeout(hideT);
+    pv.innerHTML='<span class="pk" style="color:var('+d.c+')">'+d.kind+'</span>'+
+      '<div class="pt">'+key.replace(/_/g," ")+'</div>'+
+      '<div class="ps">'+d.s+'</div>'+
+      '<div class="pf">'+d.meta+' · ENTER TO OPEN</div>';
+    pv.classList.add("show");
+    const r=link.getBoundingClientRect(), pw=250, ph=pv.offsetHeight||150;
+    let x=r.left, y=r.bottom+8;
+    if(x+pw>innerWidth-12)x=innerWidth-pw-12;
+    if(y+ph>innerHeight-12)y=r.top-ph-8;          /* flip above if no room below */
+    pv.style.left=Math.max(12,x)+"px";pv.style.top=Math.max(12,y)+"px";
+  }
+  function hide(){hideT=setTimeout(()=>pv.classList.remove("show"),80);}
+  document.querySelectorAll(".wl").forEach(link=>{
+    link.addEventListener("mouseenter",()=>show(link));
+    link.addEventListener("mouseleave",hide);
+    link.addEventListener("focus",()=>show(link));
+    link.addEventListener("blur",hide);
+    link.addEventListener("click",e=>{e.preventDefault();flashOpen(link);});
+    link.addEventListener("keydown",e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();flashOpen(link);}});
+  });
+  pv.addEventListener("mouseenter",()=>clearTimeout(hideT));
+  pv.addEventListener("mouseleave",hide);
+})();
+/* clicking a wikilink "opens" it — here we flash the concept-map node (mechanical, stepped) */
+function flashOpen(link){
+  const key=link.dataset.note;
+  const node=document.querySelector('#cmap [data-k="'+key+'"]');
+  if(!node){return;}
+  if(REDUCED){return;}
+  let n=0;const id=setInterval(()=>{node.setAttribute("opacity",n%2?"1":"0.2");if(++n>5){clearInterval(id);node.setAttribute("opacity","1");}},90);
+}
+
+/* ---------- concept dependency map (node-link graph) ---------- */
+(function(){
+  const svg=document.getElementById("cmap");
+  const cx=130,cy=90;
+  const ring=[["MEMORY_VAULT",-70,-46],["ARBITER",78,-40],["MEMOIZATION",-92,20],
+    ["AGENTIC_LOOP",92,26],["CALCULATED_INTENT",-44,60],["GATE_LOGIC",50,64]];
+  const cssv=v=>getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  /* connectors first */
+  ring.forEach(([k,dx,dy])=>el("line",{x1:cx,y1:cy,x2:cx+dx,y2:cy+dy,stroke:cssv("--green-dim"),"stroke-width":1},svg));
+  /* satellite nodes */
+  ring.forEach(([k,dx,dy])=>{
+    const col=cssv(NOTES[k].c);
+    const g=el("g",{"data-k":k,style:"cursor:pointer"},svg);
+    el("circle",{cx:cx+dx,cy:cy+dy,r:5,fill:cssv("--bg"),stroke:col,"stroke-width":1.5},g);
+    el("circle",{cx:cx+dx,cy:cy+dy,r:2,fill:col},g);
+    const t=el("text",{x:cx+dx,y:cy+dy+(dy<0?-9:15),fill:col,"font-size":7,"font-family":"monospace",
+      "text-anchor":"middle","letter-spacing":".5"},g);
+    t.textContent=k.split("_")[0];
+    g.addEventListener("mouseenter",()=>{g.querySelector("circle").setAttribute("r",7);});
+    g.addEventListener("mouseleave",()=>{g.querySelector("circle").setAttribute("r",5);});
+  });
+  /* center node = this note */
+  const cg=el("g",{},svg);
+  el("circle",{cx,cy,r:11,fill:cssv("--bg"),stroke:cssv("--mint"),"stroke-width":2,filter:"drop-shadow(0 0 5px "+cssv("--mint")+")"},cg);
+  const ct=el("text",{x:cx,y:cy+3,fill:cssv("--mint-hi"),"font-size":8,"font-family":"monospace","text-anchor":"middle","font-weight":"700"},cg);
+  ct.textContent="帰還";
+  /* stepped ambient twinkle on one random satellite per tick */
+  if(!REDUCED){
+    const nodes=[...svg.querySelectorAll("g[data-k] > circle:first-child")];
+    let i=0;setInterval(()=>{nodes.forEach(n=>n.setAttribute("opacity","1"));
+      const pick=nodes[i%nodes.length];pick.setAttribute("opacity",".35");i++;},600);
+  }
+})();
+
+/* ---------- TOC scroll-spy ---------- */
+(function(){
+  const links=[...document.querySelectorAll("#toc a")];
+  const map={};links.forEach(a=>map[a.getAttribute("href").slice(1)]=a);
+  const heads=[...document.querySelectorAll(".body h2")];
+  const setActive=id=>links.forEach(a=>a.classList.toggle("on",a.getAttribute("href")==="#"+id));
+  if("IntersectionObserver" in window){
+    const io=new IntersectionObserver(ents=>{
+      ents.forEach(e=>{if(e.isIntersecting)setActive(e.target.id);});
+    },{rootMargin:"-10% 0px -70% 0px",threshold:0});
+    heads.forEach(h=>io.observe(h));
+  }
+  links.forEach(a=>a.addEventListener("click",()=>setActive(a.getAttribute("href").slice(1))));
+})();
+
+/* ---------- edit button (empty-state-as-invitation copy) ---------- */
+document.getElementById("editbtn").addEventListener("click",function(){
+  this.textContent="✎ DRAFT MODE — VERSION 8 OPEN";
+  this.style.borderColor="var(--mint)";this.style.color="var(--mint)";
+});
+</script>
+</body>
+</html>

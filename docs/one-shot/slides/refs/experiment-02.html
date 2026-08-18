@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EXPERIMENT-02 · ALARM SUITE</title>
+<style>
+:root{
+  --bg:#0A0A0A;--red:#E2280F;--red-deep:#C20C0C;--crimson:#E60225;
+  --orange:#F26400;--amber:#F49F09;--mint:#52F29A;
+  --cond:"Arial Narrow","Avenir Next Condensed","Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --jp:"Hiragino Mincho ProN","Yu Mincho",serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{background:var(--bg);font-family:var(--mono);text-transform:uppercase;overflow:hidden}
+body::after{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.2) 0 1px,transparent 1px 3px)}
+.stage{position:absolute;inset:0 0 64px 0;overflow:hidden}
+.scene{position:absolute;inset:0;display:none;flex-direction:column;justify-content:center;align-items:center}
+.scene.show{display:flex}
+
+/* -------- SCENE 1 : IMPACT SPLASH -------- */
+.s-impact{background:var(--red)}
+.s-impact.inv{background:#000}
+.imp-band{background:#000;width:100%;padding:1vh 0;text-align:center}
+.s-impact.inv .imp-band{background:var(--red)}
+.imp-word{font-family:var(--cond);font-weight:700;font-size:16vw;line-height:.95;color:var(--red);letter-spacing:-.01em}
+.s-impact.inv .imp-word{color:#000}
+.imp-jp{font-family:var(--jp);font-weight:800;font-size:4.4vh;color:#000;border:3px solid #000;
+  padding:2px 26px;letter-spacing:.5em;text-transform:none;margin:3.5vh 0}
+.s-impact.inv .imp-jp{color:var(--red);border-color:var(--red)}
+.corner{position:absolute;border:3px solid #fff;color:#fff;font-family:var(--cond);font-weight:700;
+  font-size:3.4vh;letter-spacing:.12em;padding:1px 16px}
+.corner.tl{top:20px;left:20px}.corner.br{bottom:20px;right:20px}
+
+/* -------- SCENE 2 : CAUTION BARRICADE -------- */
+.s-caution{background:#000}
+.cb-chev{width:100%;height:16vh;flex:none;
+  background:repeating-linear-gradient(-45deg,var(--red-deep) 0 42px,#000 42px 84px);
+  animation:march 1.2s linear infinite}
+@keyframes march{to{background-position:118px 0}}
+.cb-band{width:100%;height:13vh;flex:none;background:var(--red)}
+.cb-gap{width:100%;height:6vh;flex:none;display:flex;align-items:center;justify-content:center}
+.cb-label{font-family:var(--mono);font-size:2.6vh;letter-spacing:.6em;color:var(--red);
+  text-shadow:0 0 6px currentColor}
+
+/* -------- SCENE 3 : EVACUATE MARQUEE -------- */
+.s-evac{background:#000;justify-content:space-between}
+.ev-zone{width:100%;height:26vh;flex:none;position:relative;display:flex;align-items:center;justify-content:center;
+  background:repeating-linear-gradient(-45deg,var(--crimson) 0 34px,#000 34px 68px)}
+.ev-jp{font-family:var(--jp);font-weight:800;font-size:5.5vh;color:var(--crimson);background:#000;
+  border:3px solid var(--crimson);padding:2px 30px;letter-spacing:.5em;text-transform:none;
+  animation:blink 1s steps(1) infinite}
+.ev-track{width:100%;flex:1;display:flex;align-items:center;overflow:hidden}
+.ev-word{font-family:var(--cond);font-weight:700;font-size:22vh;line-height:1;color:var(--orange);
+  white-space:nowrap;text-shadow:0 0 10px rgba(242,100,0,.5);will-change:transform}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+/* -------- RAIL -------- */
+.rail{position:absolute;left:0;right:0;bottom:0;height:64px;display:flex;gap:8px;align-items:stretch;
+  padding:10px 14px;background:var(--bg);border-top:2px solid var(--orange);z-index:100}
+.rail button{flex:1;background:var(--bg);border:2px solid var(--orange);color:var(--orange);
+  font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.14em;text-transform:uppercase;cursor:pointer}
+.rail button.active{background:var(--orange);color:#000}
+.rail button:focus-visible{outline:2px solid var(--mint);outline-offset:2px}
+.rail .tag{display:flex;align-items:center;padding:0 14px;color:var(--amber);font-size:11px;letter-spacing:.2em}
+@media (prefers-reduced-motion:reduce){
+  .cb-chev{animation:none}.ev-jp{animation:none}
+}
+</style>
+</head>
+<body>
+
+<div class="stage">
+
+  <section class="scene s-impact show" id="scene-0" aria-label="Impact alarm">
+    <span class="corner tl">ALERT</span>
+    <div class="imp-jp">衝撃</div>
+    <div class="imp-band"><div class="imp-word">IMPACT</div></div>
+    <div class="imp-jp">衝撃</div>
+    <span class="corner br">ALERT</span>
+  </section>
+
+  <section class="scene s-caution" id="scene-1" aria-label="Caution barricade">
+    <div class="cb-chev"></div>
+    <div class="cb-band"></div>
+    <div class="cb-gap"><div class="cb-label">CAUTION · 注意 · CAUTION</div></div>
+    <div class="cb-band"></div>
+    <div class="cb-gap"></div>
+    <div class="cb-band"></div>
+    <div class="cb-chev"></div>
+  </section>
+
+  <section class="scene s-evac" id="scene-2" aria-label="Evacuate marquee">
+    <div class="ev-zone"><div class="ev-jp">退避</div></div>
+    <div class="ev-track"><div class="ev-word" id="marquee">EVACUATE&nbsp;·&nbsp;EVACUATE&nbsp;·&nbsp;EVACUATE&nbsp;·&nbsp;</div></div>
+    <div class="ev-zone"><div class="ev-jp">退避</div></div>
+  </section>
+
+</div>
+
+<div class="rail" role="group" aria-label="Alarm selector">
+  <span class="tag">EXP-02 / ALARM SUITE</span>
+  <button class="active" data-s="0">IMPACT 衝撃</button>
+  <button data-s="1">CAUTION 注意</button>
+  <button data-s="2">EVACUATE 退避</button>
+  <span class="tag" id="cycle-tag">AUTO CYCLE : ON</span>
+</div>
+
+<script>
+"use strict";
+/* if loaded in a hidden/zero-size viewport, re-init once it has real size */
+if(innerWidth<2||innerHeight<2){
+  const _p=setInterval(()=>{if(innerWidth>1&&innerHeight>1){clearInterval(_p);location.reload();}},250);
+}
+const REDUCED = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const scenes = [0,1,2].map(i=>document.getElementById("scene-"+i));
+const btns = [...document.querySelectorAll(".rail button")];
+let current = 0, auto = true;
+
+function showScene(i){
+  current = i;
+  scenes.forEach((s,k)=>s.classList.toggle("show",k===i));
+  btns.forEach((b,k)=>b.classList.toggle("active",k===i));
+}
+btns.forEach(b=>b.addEventListener("click",()=>{
+  auto=false;
+  document.getElementById("cycle-tag").textContent="AUTO CYCLE : OFF";
+  showScene(+b.dataset.s);
+}));
+
+/* strobe on impact scene — hard figure/ground inversion, no fades */
+setInterval(()=>{
+  if(current===0 && !REDUCED) scenes[0].classList.toggle("inv");
+},500);
+
+/* marquee — linear ticker, wraps seamlessly */
+const mq = document.getElementById("marquee");
+let mx = 0;
+const third = ()=> mq.scrollWidth/3;
+setInterval(()=>{
+  if(REDUCED) return;
+  mx -= 18;                       /* stepped 18px jumps, mechanical */
+  if(-mx >= third()) mx += third();
+  mq.style.transform = `translateX(${mx}px)`;
+},50);
+
+/* auto cycle */
+setInterval(()=>{ if(auto) showScene((current+1)%3); },5000);
+</script>
+</body>
+</html>
