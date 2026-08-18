@@ -16,7 +16,9 @@ import { Themes } from './Themes';
 import { OpenSpec } from './OpenSpec';
 import { TakeControl } from './TakeControl';
 import { Stats } from './Stats';
-import { Credits } from './Credits';
+import { Alternatives } from './Alternatives';
+import { Inspiration } from './Inspiration';
+import { Advisors } from './Advisors';
 
 export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> = {
   orientation: Orientation,
@@ -31,5 +33,7 @@ export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> 
   openspec: OpenSpec,
   'take-control': TakeControl,
   stats: Stats,
-  credits: Credits,
+  alternatives: Alternatives,
+  inspiration: Inspiration,
+  advisors: Advisors,
 };

@@ -15,12 +15,13 @@
    camera back until the type is unreadable. Everything below buys height back
    without cutting content: tighter panel padding, and a lead that stops
    wrapping to five lines at 1500px. */
-.chapter.as-panel.phospipe,.chapter.as-panel.themes,.chapter.as-panel.openspec{padding:22px 26px}
-.chapter.as-panel.phospipe .lead,.chapter.as-panel.themes .lead,.chapter.as-panel.openspec .lead{max-width:104ch}
+.chapter.as-panel.phospipe,.chapter.as-panel.themes,.chapter.as-panel.openspec,.chapter.as-panel.alternatives,.chapter.as-panel.inspiration{padding:22px 26px}
+.chapter.as-panel.phospipe .lead,.chapter.as-panel.themes .lead,.chapter.as-panel.openspec .lead,.chapter.as-panel.alternatives .lead,.chapter.as-panel.inspiration .lead{max-width:104ch}
 /* The eyebrow duplicates the section-head kanji on every one of these; at
    panel scale that is two lines of chrome before the title. Keep it, tighten it. */
 .chapter.as-panel.skins .eyebrow,.chapter.as-panel.phospipe .eyebrow,
-.chapter.as-panel.themes .eyebrow,.chapter.as-panel.openspec .eyebrow{margin-bottom:14px}
+.chapter.as-panel.themes .eyebrow,.chapter.as-panel.openspec .eyebrow,
+.chapter.as-panel.alternatives .eyebrow,.chapter.as-panel.inspiration .eyebrow{margin-bottom:14px}
 /* The gallery is FIXED HEIGHT in panel mode, and that is load-bearing, not
    tidying. A panel is measured once — buildPanel() reads offsetHeight and
    writes it back as an inline height — but the gallery's natural height

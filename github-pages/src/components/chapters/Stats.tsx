@@ -2,7 +2,6 @@
 // has 7 slides); it reports on building this deck, so the figures below are the project's own
 // numbers, not transcribed from source markup.
 import type { ChapterProps } from './types';
-import { Metric } from '../../deck';
 
 export function Stats({ sectionRef }: ChapterProps) {
   return (
@@ -18,10 +17,6 @@ export function Stats({ sectionRef }: ChapterProps) {
           <span className="jp">統計</span>
           <h2 id="stats-title">STATS</h2>
         </div>
-        <p className="lead">
-          Nine screens, three harnesses, one deck — built the same way as the product it demos:
-          spec, task, worktree, agent, review.
-        </p>
         <div className="stats-hero">
           <div className="stats-figure">
             <b className="c-blue">$3.9K+</b>
@@ -32,6 +27,14 @@ export function Stats({ sectionRef }: ChapterProps) {
             <small>AGENT SESSIONS</small>
           </div>
           <div className="stats-figure">
+            <b className="c-orange">38+</b>
+            <small>DAYS OF EFFORT</small>
+          </div>
+          <div className="stats-figure">
+            <b className="c-red">2</b>
+            <small>DEVELOPERS WITH PASSION</small>
+          </div>
+          <div className="stats-figure">
             <b className="c-amber">3</b>
             <small>AGENT HARNESSES</small>
           </div>
@@ -39,34 +42,9 @@ export function Stats({ sectionRef }: ChapterProps) {
             <b className="c-mint">9</b>
             <small>INFERENCE MODELS</small>
           </div>
-        </div>
-        <div className="stats-body">
-          {/* Authored totals, not the live 260ms telemetry tick — no `liveKey`, so
-              these never get overwritten by useTelemetryField. The split is the
-              measured share of metered spend across the two paid harnesses;
-              Ollama runs local weights, so its share of *spend* is zero however
-              many sessions it serves — hence the label rather than a stray 0%. */}
-          <div className="stats-meters">
-            <Metric label="CLAUDE CODE · SPEND SHARE" pct={93} seg={15} tone="mint" />
-            <Metric label="CODEX · SPEND SHARE" pct={7} seg={1} tone="blue" />
-            <div className="stats-note">
-              <span className="stamp c-amber">OLLAMA</span>
-              <span>LOCAL WEIGHTS · UNMETERED SPEND</span>
-            </div>
-          </div>
-          <div className="stats-roster">
-            <div className="roster-group">
-              <span className="stamp c-mint">CLAUDE CODE</span>
-              <p>OPUS · SONNET · HAIKU</p>
-            </div>
-            <div className="roster-group">
-              <span className="stamp c-blue">CODEX</span>
-              <p>SOL · TERRA · LUNA</p>
-            </div>
-            <div className="roster-group">
-              <span className="stamp c-amber">OLLAMA</span>
-              <p>GLM-5.2 · KIMI-K2.7 · DEEPSEEK-V4-FLASH</p>
-            </div>
+          <div className="stats-figure">
+            <b className="c-blue">17</b>
+            <small>PAGES SHIPPED</small>
           </div>
         </div>
       </div>

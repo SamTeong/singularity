@@ -24,7 +24,9 @@ export type ChapterId =
   | 'openspec'
   | 'take-control'
   | 'stats'
-  | 'credits';
+  | 'alternatives'
+  | 'inspiration'
+  | 'advisors';
 
 export interface ChapterWorld {
   fog: number; // FogExp2 density
@@ -229,11 +231,9 @@ export const CHAPTERS = [
     fill: 0.72, lift: 0.55, tone: 0x7CF4AB, world: { fog: 0.044, bloom: 0.86, motes: 0.9, exposure: 1.08 },
   },
 
-  // ─── the closing pair ────────────────────────────────────────────────────
-  // What the build cost, then who it owes. Both sit behind the CTA, so the
-  // camera leaves the front wall: stats swings up and back past -Z, credits
-  // carries on around to -X. Bloom and motes climb through the pair — the
-  // deck brightens on the way out rather than fading.
+  // ─── the closing sequence ────────────────────────────────────────────────
+  // What the build cost, the alternatives around it, the work behind it, then
+  // who it owes. These sit behind the CTA, carrying the camera from -Z to -X.
 
   {
     id: 'stats', weight: 1.30, num: '12', jp: '統計', code: 'SCR·12', title: 'STATS',
@@ -243,8 +243,22 @@ export const CHAPTERS = [
   },
 
   {
-    id: 'credits', weight: 1.20, num: '13', jp: '謝辞', code: 'SCR·13', title: 'CREDITS',
-    sub: 'LANDSCAPE · INSPIRATION · COUNSEL',
+    id: 'alternatives', weight: 1.70, num: '13', jp: '比較', code: 'SCR·13', title: 'ALTERNATIVES',
+    sub: 'CONDUCTOR · BUZZ · GROKBOT',
+    u: [-0.72, 1.05, -0.92], yaw: 212, pitch: -2, w: 6.5, px: 1500, pxm: 780,
+    fill: 0.90, lift: 0.24, tone: 0xF26400, world: { fog: 0.034, bloom: 0.74, motes: 0.72, exposure: 1.03 },
+  },
+
+  {
+    id: 'inspiration', weight: 1.45, num: '14', jp: '源泉', code: 'SCR·14', title: 'INSPIRATION',
+    sub: 'KARPATHY · POCOCK · HERK · HANNEGAN',
+    u: [-1.04, 0.54, -0.74], yaw: 242, pitch: 0, w: 6.5, px: 1500, pxm: 780,
+    fill: 0.90, lift: 0.18, tone: 0x52F29A, world: { fog: 0.038, bloom: 0.78, motes: 0.82, exposure: 1.04 },
+  },
+
+  {
+    id: 'advisors', weight: 1.20, num: '15', jp: '謝辞', code: 'SCR·15', title: 'SPECIAL THANKS',
+    sub: 'KEVIN LIN · MIN SOE ZAN',
     u: [-1.34, 0.92, -0.56], yaw: 272, pitch: 0, w: 5.8, px: 1300, pxm: 760,
     fill: 0.82, lift: 0.30, tone: 0x7CF4AB, world: { fog: 0.042, bloom: 0.80, motes: 0.9, exposure: 1.06 },
   },

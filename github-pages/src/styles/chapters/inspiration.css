@@ -1,0 +1,24 @@
+/* INSPIRATION — a source dossier, not a generic profile-card grid. */
+.inspiration{border-top:1px solid var(--mint);border-bottom:1px solid var(--mint);background:linear-gradient(180deg,rgba(82,242,154,.035),transparent)}
+.inspiration .lead{margin-bottom:clamp(22px,3vw,38px)}
+.inspiration .in-lineup{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border-top:1px solid var(--green-dim);border-bottom:1px solid var(--green-dim)}
+.inspiration .in-person{display:flex;flex-direction:column;min-width:0;padding:clamp(14px,1.5vw,24px)}
+.inspiration .in-person+.in-person{border-left:1px solid var(--green-dim)}
+.inspiration .in-portrait{position:relative;display:block;overflow:hidden;aspect-ratio:4/5;background:#050705}
+.inspiration .in-portrait img{display:block;width:100%;height:100%;object-fit:cover;object-position:center;filter:saturate(.82) contrast(1.04)}
+.inspiration .in-person.pocock .in-portrait img{object-fit:contain;object-position:center bottom}
+.inspiration .in-person.hannegan .in-portrait img{object-position:18% center}
+.inspiration .in-portrait::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.13) 0 1px,transparent 1px 3px)}
+.inspiration .in-portrait:hover img{filter:saturate(1) contrast(1.05)}
+.inspiration .in-portrait:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+.inspiration .in-index{position:absolute;z-index:2;top:8px;left:8px;padding:3px 7px;border:1px solid var(--mint);background:rgba(10,10,10,.86);color:var(--mint);font-size:8px;letter-spacing:.12em}
+.inspiration .in-plate{display:grid;place-items:center;width:100%;height:100%;padding:24px;color:var(--green-dim);font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.18em;text-align:center}
+.inspiration .in-record{display:flex;flex:1;flex-direction:column;padding-top:14px}
+.inspiration .in-record h3{font-family:var(--mono);font-size:clamp(16px,1.55vw,22px);line-height:1.15;color:var(--mint-hi);text-wrap:balance}
+.inspiration .in-record p{min-height:3em;margin:9px 0 16px;color:var(--paper);font-size:9px;line-height:1.55;letter-spacing:.08em}
+.inspiration .in-record a{margin-top:auto;color:var(--amber);font-family:var(--cond);font-weight:700;font-size:10px;letter-spacing:.12em;text-decoration:none}
+.inspiration .in-source-link{display:inline-flex;align-items:center;align-self:flex-start;gap:7px}
+.inspiration .in-source-link svg{width:15px;height:15px;flex:none;fill:currentColor}
+.inspiration .in-record a:hover{text-decoration:underline;text-underline-offset:4px}
+.inspiration .in-record a:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
+.inspiration .in-record>span{margin-top:6px;overflow:hidden;color:var(--green-map);font-size:8px;letter-spacing:.08em;text-overflow:ellipsis;white-space:nowrap}

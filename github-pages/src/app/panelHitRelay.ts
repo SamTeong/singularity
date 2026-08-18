@@ -4,7 +4,7 @@
 // (viewport 1440x900, one chapter at a time via the rail):
 //
 //   #chaos  #tasks  #system-design  #take-control  #stats  → the panel and its subtree are hit
-//   #orientation  #agent-harness  #fleet-control  #credits   → `#gl` comes back instead, always
+//   #orientation  #agent-harness  #fleet-control  #advisors   → `#gl` comes back instead, always
 //
 // The split follows the panel's world matrix, not its content. CSS3DRenderer
 // writes `matrix3d(...)` per panel, and the ones that fail are the ones whose
@@ -21,7 +21,7 @@
 // whose rect contains the point, and click it. One listener, no per-frame work,
 // nothing added to the composition. It covers every control in every panel —
 // the orientation anchors, the six agent-harness buttons, the four fleet-control tabs,
-// the session/task rows and the credits source link — and is inert for the panels
+// the session/task rows and the advisor profile links — and is inert for the panels
 // Chromium hit-tests itself, because there the click never reaches the canvas.
 //
 // The rects are the axis-aligned bounds of a 3D-transformed quad, so they are
