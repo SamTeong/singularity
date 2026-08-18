@@ -146,7 +146,7 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
   }));
   check('context loss demotes to flat', !s.mode3d, `mode3d=${s.mode3d}`);
   check('all 7 sections restored into #scroll in order',
-    s.inScroll === 7 && s.order.join(',') === 'hero,problem,control,workflow,systems,local,boot', s.order.join(','));
+    s.inScroll === 7 && s.order.join(',') === 'hero,problem,systems,control,workflow,local,boot', s.order.join(','));
   // Assert the style attribute is EMPTY, not merely free of a listed subset —
   // the first version of this check whitelisted width/height/display/opacity
   // and sailed past a leftover CSS3DRenderer `transform: matrix3d(...)` that

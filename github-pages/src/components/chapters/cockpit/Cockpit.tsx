@@ -54,12 +54,12 @@ export function Cockpit({ sectionRef }: ChapterProps) {
     <section className="chapter cockpit" id="control" aria-labelledby="control-title" ref={mergedSectionRef}>
       <div className="intro">
         <div className="section-head">
-          <span className="idx">01</span>
+          <span className="idx">04</span>
           <span className="jp">制御</span>
-          <h2 id="control-title">THE WHOLE FLEET. ONE LIVE DECK.</h2>
+          <h2 id="control-title">THE WHOLE FLEET. ONE CONTROL PLANE.</h2>
         </div>
         <p className="lead">
-          The cockpit does not replace your tools. It connects them. Switch the live preview between sessions, tasks,
+          The control plane does not replace your tools. It connects them. Switch between sessions, tasks,
           automation, and usage.
         </p>
       </div>
@@ -70,7 +70,7 @@ export function Cockpit({ sectionRef }: ChapterProps) {
             SINGULARITY · FLEET CONTROL<small>LOCAL WEB SHELL // LOOPBACK NODE DAEMON</small>
           </div>
           <div className="console-meta">
-            <b>LINK:</b> 127.0.0.1<br />
+            <b>LINK:</b> localhost<br />
             <b>PORT:</b> 4317<br />
             <b>UPTIME:</b> <span id="uptime">{uptime}</span>
           </div>

@@ -62,24 +62,24 @@ export const CHAPTERS = [
   },
 
   {
-    id: 'control', elementId: 'control', weight: 1.85, num: '03', jp: '制御', code: 'SCR·03', title: 'FLEET CONTROL',
+    id: 'systems', elementId: 'systems', weight: 1.75, num: '03', jp: '系統', code: 'SCR·03', title: 'THE SURROUNDING SYSTEMS',
+    sub: 'EIGHT OPERATIONAL SURFACES AROUND THE WORK',
+    u: [-0.84, 0.755, 0.44], yaw: 96, pitch: 6, w: 6.2, px: 1420, pxm: 770,
+    fill: 0.92, lift: 0.10, tone: 0x5090D0, world: { fog: 0.024, bloom: 0.70, motes: 0.5, exposure: 1.0 },
+  },
+
+  {
+    id: 'control', elementId: 'control', weight: 1.85, num: '04', jp: '制御', code: 'SCR·04', title: 'FLEET CONTROL',
     sub: 'ONE LIVE DECK · SESSIONS · TASKS · AUTOMATION · USAGE',
     u: [-0.87, 0.475, -0.10], yaw: 90, pitch: 0, w: 6.4, px: 1460, pxm: 780,
     fill: 0.92, lift: 0.05, tone: 0xF26400, world: { fog: 0.026, bloom: 0.74, motes: 0.5, exposure: 1.0 },
   },
 
   {
-    id: 'workflow', elementId: 'workflow', weight: 1.20, num: '04', jp: '流程', code: 'SCR·04', title: 'WORK MOVES',
+    id: 'workflow', elementId: 'workflow', weight: 1.20, num: '05', jp: '流程', code: 'SCR·05', title: 'WORK MOVES',
     sub: 'SPEC → TASK → WORKTREE → AGENT → REVIEW',
     u: [0.64, 0.42, 0.85], yaw: 176, pitch: 0, w: 5.9, px: 1340, pxm: 760,
     fill: 0.90, lift: 0.10, tone: 0x0C6C80, world: { fog: 0.028, bloom: 0.66, motes: 0.55, exposure: 1.0 },
-  },
-
-  {
-    id: 'systems', elementId: 'systems', weight: 1.75, num: '05', jp: '系統', code: 'SCR·05', title: 'THE SURROUNDING SYSTEMS',
-    sub: 'EIGHT OPERATIONAL SURFACES AROUND THE WORK',
-    u: [-0.84, 0.755, 0.44], yaw: 96, pitch: 6, w: 6.2, px: 1420, pxm: 770,
-    fill: 0.92, lift: 0.10, tone: 0x5090D0, world: { fog: 0.024, bloom: 0.70, motes: 0.5, exposure: 1.0 },
   },
 
   {

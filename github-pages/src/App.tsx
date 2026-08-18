@@ -12,7 +12,7 @@ import { flushSync } from 'react-dom';
 import { SkipLink } from './components/chrome/SkipLink'; // source L443
 import { ScrollProgress } from './components/chrome/ScrollProgress'; // L444
 import { TopBar } from './components/chrome/TopBar'; // L446-455
-import { Hud, ScrollHint } from './components/chrome/Hud'; // L460-468, L479
+import { Hud, HudCta, ScrollHint } from './components/chrome/Hud'; // L460-468, L479
 import { Readout } from './components/chrome/Readout'; // L470-476
 import { ChapterRail } from './components/chrome/ChapterRail'; // L478
 import { DebugPanel } from './components/chrome/DebugPanel'; // L481
@@ -208,6 +208,7 @@ export default function App() {
       <Hud chapter={activeChapter} />
       <Readout progRef={progReadoutRef} />
       <ChapterRail />
+      <HudCta />
       <ScrollHint />
       <DebugPanel />
       <BootPanel

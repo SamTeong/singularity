@@ -1,6 +1,9 @@
 import type { ChapterProps } from './types';
+import { CHAPTERS } from '../../config/chapters';
+import { useConductor } from '../../state/appStore';
 
 export function Hero({ sectionRef }: ChapterProps) {
+  const conductor = useConductor();
   return (
     // className and id are constant literals on purpose, and no style prop
     // is passed here — Phase 4 adds `.as-panel` to this element's classList
@@ -13,10 +16,24 @@ export function Hero({ sectionRef }: ChapterProps) {
           <div className="hero-jp">特異点</div>
           <h1 className="display" id="hero-title">SINGU<span className="mint">LARITY</span></h1>
           <p className="hero-sub">ONE CONTROL PLANE FOR YOUR WHOLE FLEET OF CODING AGENTS.</p>
-          <p className="hero-copy">Run live sessions. Turn specs into worktree-backed tasks. Dispatch background jobs. Keep usage, context, transcripts, and the state of every agent in one local command deck.</p>
+          <p className="hero-copy">Run live sessions. Turn specs into worktree-backed tasks. Dispatch background jobs. Keep usage, context, transcripts, and the state of every agent in one local control plane.</p>
           <div className="hero-actions">
             <a className="btn primary" href="#control">ENTER CONTROL</a>
-            <a className="btn alt" href="#boot">BOOT SEQUENCE</a>
+            {/* Chromium does not hit-test this panel, so in 3D mode the click
+                arrives via HudCta's proxy instead and this handler never runs.
+                It is what makes the anchor work on the flat page. */}
+            <a
+              className="btn alt"
+              id="heroCta"
+              href="#boot"
+              onClick={(e) => {
+                if (!conductor) return;
+                e.preventDefault();
+                conductor.goTo(CHAPTERS.length - 1);
+              }}
+            >
+              GET STARTED
+            </a>
           </div>
         </div>
         <div className="hero-viz" aria-label="Four agent nodes connected to the Singularity control plane" role="img">
@@ -24,7 +41,7 @@ export function Hero({ sectionRef }: ChapterProps) {
           <span className="cross-x"></span><span className="cross-y"></span>
           <span className="node n1" data-label="SESSION·04"></span><span className="node n2" data-label="TASK·118"></span><span className="node n3" data-label="CRON·02"></span><span className="node n4" data-label="REVIEW·07"></span>
           <span className="core">統</span>
-          <div className="hero-meta"><b>DAEMON:</b> 127.0.0.1:4317<br /><b>CHANNEL:</b> WS + REST<br /><b>STATE:</b> NOMINAL</div>
+          <div className="hero-meta"><b>DAEMON:</b> localhost:4317<br /><b>CHANNEL:</b> WS + REST<br /><b>STATE:</b> NOMINAL</div>
         </div>
       </div>
     </section>

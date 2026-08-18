@@ -27,7 +27,7 @@ export function Readout({ progRef }: { progRef?: Ref<HTMLElement> }) {
       </div>
       <div>
         <span>LINK</span>
-        <b>127.0.0.1</b>
+        <b>localhost</b>
       </div>
     </div>
   );
