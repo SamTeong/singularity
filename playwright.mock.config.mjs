@@ -9,7 +9,11 @@ const baseURL = `http://127.0.0.1:${port}`;
 export default defineConfig({
   testDir: 'e2e-mock',
   fullyParallel: true,
-  workers: process.env.CI ? 2 : 4,
+  // CI runner shares one box; workers:2 + tight timeouts turned into a steady
+  // drip of unrelated tests tipping over 30s (same failure mode the e2e
+  // daemon suite hit — see playwright.config.mjs). Serial + generous budget
+  // fixes it.
+  workers: process.env.CI ? 1 : 4,
   forbidOnly: !!process.env.CI,
   retries: 0,
   reporter: [
@@ -17,7 +21,7 @@ export default defineConfig({
     ['html', { outputFolder: join('playwright-report', 'mock'), open: 'never' }],
   ],
   outputDir: join('test-results', 'mock'),
-  timeout: 30_000,
+  timeout: 60_000,
   expect: { timeout: 15_000 },
   use: {
     baseURL,
