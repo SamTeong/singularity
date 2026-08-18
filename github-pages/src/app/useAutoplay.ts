@@ -24,17 +24,13 @@ import { getChapterIndex, getChapterStep, getConductor } from '../state/appStore
 import { chapterTop, visibleChapter } from './chapterPosition';
 
 /** How long the tour stands still at a stop, every stop. */
-const DWELL_MS = 5000;
+const DWELL_MS = 2000;
 
 /** Travel speed between stops. Deliberately unhurried: the chapters with a
  *  camera dwell (config's `steps`) pack their whole flight to the next chapter
  *  into the back 45% of their scroll, so a fast glide crosses that flight in
  *  barely a second and reads as a lurch rather than a journey. */
 const GLIDE_PX_PER_SECOND = 420;
-/** The loop back from the last chapter to the first crosses the entire deck.
- *  It is a rewind, not a hop, and runs at its own speed — but still scrolls,
- *  so the reader sees where the tour is taking them. */
-const REWIND_PX_PER_SECOND = 1800;
 /** A floor only, for hops of a few dozen pixels. There is deliberately no
  *  ceiling: a capped glide is a rushed glide. */
 const MIN_GLIDE_MS = 350;
@@ -112,12 +108,18 @@ export function useAutoplay(enabled: boolean, is3D: boolean): void {
     }
 
     function tick(): void {
-      // `% stops.length` is the loop: past the last stop the tour scrolls back
-      // to chapter 01 and starts over.
+      // `% stops.length` is the loop: past the last stop the tour resets to
+      // chapter 01 and starts over.
       const at = currentStop();
       const wrapping = at === stops.length - 1;
       const next = stops[(at + 1) % stops.length];
-      glide(targetTop(next), wrapping ? REWIND_PX_PER_SECOND : GLIDE_PX_PER_SECOND, () => {
+      const to = targetTop(next);
+      if (wrapping) {
+        window.scrollTo({ top: to, behavior: 'instant' });
+        timer = window.setTimeout(tick, DWELL_MS);
+        return;
+      }
+      glide(to, GLIDE_PX_PER_SECOND, () => {
         timer = window.setTimeout(tick, DWELL_MS);
       });
     }

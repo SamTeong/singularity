@@ -386,6 +386,19 @@ const waitFor3D = (p) => p.waitForFunction(() => document.body.classList.contain
   await p.waitForTimeout(9000);
   check('autoplay stops when switched off', (await caption()) === stopped, stopped);
 
+  await railTo(SCREENS - 1);
+  await p.click(autoBtn);
+  const wrapOffsets = new Set();
+  for (let i = 0; i < 60; i++) {
+    wrapOffsets.add(await p.evaluate(() => Math.round(window.scrollY)));
+    await p.waitForTimeout(50);
+  }
+  const wrappedTop = await p.evaluate(() => Math.round(window.scrollY));
+  check('autoplay resets instantly from the last chapter to the first',
+    wrappedTop < 4 && wrapOffsets.size <= 3,
+    `top=${wrappedTop} offsets=${wrapOffsets.size}`);
+  await p.click(autoBtn);
+
   const modeBtn = 'button[aria-label="Toggle the 3D walkthrough"]';
   await p.click(modeBtn);
   await p.waitForTimeout(600);
