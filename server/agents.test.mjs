@@ -362,7 +362,12 @@ test('externalLaunch: win32 wraps wt.exe with -d <cwd> + resume argv', () => {
     recentRepos: [],
   }));
   init();
-  const r = externalLaunch(id, 'win32');
+  const localAppData = mkdtempSync(join(tmpdir(), 'sing-wt-extlaunch-'));
+  const aliasDir = join(localAppData, 'Microsoft', 'WindowsApps');
+  mkdirSync(aliasDir, { recursive: true });
+  writeFileSync(join(aliasDir, 'wt.exe'), '');
+  chmodSync(join(aliasDir, 'wt.exe'), 0o755);
+  const r = externalLaunch(id, 'win32', { LOCALAPPDATA: localAppData, PATH: '' });
   assert.equal(r.ok, true);
   assert.match(r.launcher, /WindowsApps[\\/]wt\.exe$/);
   assert.equal(r.launcherArgs[0], '-d');
@@ -705,12 +710,14 @@ test('resolveWt: Store alias path present → returned, PATH not consulted', () 
   mkdirSync(aliasDir, { recursive: true });
   const alias = join(aliasDir, 'wt.exe');
   writeFileSync(alias, '');
+  chmodSync(alias, 0o755);
   const wt = resolveWt({ LOCALAPPDATA: localAppData, PATH: 'Z:\\nonexistent' });
   assert.equal(wt, alias);
 });
 test('resolveWt: no alias, wt.exe on PATH (winget/scoop-style install) → PATH hit returned', () => {
   const pathDir = mkdtempSync(join(tmpdir(), 'sing-wt-path-'));
   writeFileSync(join(pathDir, 'wt.exe'), '');
+  chmodSync(join(pathDir, 'wt.exe'), 0o755);
   const wt = resolveWt({ LOCALAPPDATA: join(tmpdir(), 'sing-wt-no-such-dir'), PATH: `Z:\\nonexistent;${pathDir}` });
   assert.equal(wt, join(pathDir, 'wt.exe'));
 });
@@ -721,6 +728,7 @@ test('resolveWt: neither alias nor PATH has it → null', () => {
 test('resolveWt: missing LOCALAPPDATA → skips the alias probe (no relative-path lookup), still checks PATH', () => {
   const pathDir = mkdtempSync(join(tmpdir(), 'sing-wt-path2-'));
   writeFileSync(join(pathDir, 'wt.exe'), '');
+  chmodSync(join(pathDir, 'wt.exe'), 0o755);
   const wt = resolveWt({ PATH: pathDir });
   assert.equal(wt, join(pathDir, 'wt.exe'));
 });

@@ -510,7 +510,7 @@ export function resolveWt(env = process.env) {
 // detached-spawn (keeps node:child_process out of this module). Reuses
 // buildSpawn so the resume argv matches in-app reattach (scopes, model,
 // permission-mode, ollama wrapper). `platform` param only for testability.
-export function externalLaunch(id, platform = process.platform) {
+export function externalLaunch(id, platform = process.platform, env = process.env) {
   const a = agents.get(id);
   if (!a) return { ok: false, error: 'no such session' };
   const { bin, args } = buildSpawn(a);
@@ -519,7 +519,7 @@ export function externalLaunch(id, platform = process.platform) {
     // existsSync/statSync reports as EACCES (that's the "flaky" lookup the
     // shell:true hack used to route around). accessSync sees through it.
     // Resolve + spawn the stub path directly — no shell, no argv concatenation.
-    const wt = resolveWt();
+    const wt = resolveWt(env);
     if (!wt) return { ok: false, error: 'wt.exe not found (checked the Store alias path and PATH)' };
     return { ok: true, launcher: wt, launcherArgs: ['-d', a.cwd, bin, ...args], cwd: a.cwd };
   }
