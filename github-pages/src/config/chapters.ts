@@ -118,21 +118,21 @@ export interface Chapter {
 export const CHAPTERS = [
   {
     id: 'orientation', weight: 1.30, num: '01', jp: '到着', code: 'SCR·01', title: 'ORIENTATION',
-    sub: 'THE CONTROL PLANE, STATED PLAINLY',
+    sub: 'WHERE IT ALL BEGINS',
     u: [1.52, 0.53, 0.36], yaw: 78, pitch: 0, w: 5.8, px: 1240, pxm: 760,
     fill: 0.64, lift: 0.35, tone: 0x52F29A, world: { fog: 0.052, bloom: 0.62, motes: 0.85, exposure: 1.06 },
   },
 
   {
     id: 'chaos', weight: 1.10, num: '02', jp: '混沌', code: 'SCR·02', title: 'CHAOS',
-    sub: 'SEVEN TERMINALS, NO SHARED PICTURE',
+    sub: 'A JUGGLING ACT',
     u: [0.620, 0.760, 0.880], yaw: 32, pitch: -4, w: 5.6, px: 1240, pxm: 760,
     fill: 0.84, lift: 0.15, tone: 0xE2280F, world: { fog: 0.040, bloom: 0.58, motes: 0.7, exposure: 1.02 },
   },
 
   {
     id: 'agent-harness', weight: 1.75, num: '03', jp: '系統', code: 'SCR·03', title: 'AGENT HARNESS',
-    sub: 'EIGHT OPERATIONAL SURFACES AROUND THE WORK',
+    sub: 'MANAGE OPERATIONAL SURFACES',
     u: [-0.840, 0.755, 0.440], yaw: 96, pitch: 6, w: 6.2, px: 1420, pxm: 770,
     fill: 0.92, lift: 0.10, tone: 0x5090D0, world: { fog: 0.024, bloom: 0.70, motes: 0.5, exposure: 1.0 },
   },
