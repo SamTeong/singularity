@@ -33,6 +33,8 @@
 @import './chapters/themes.css';
 @import './chapters/openspec.css';
 @import './chapters/take-control.css';
+@import './chapters/stats.css';
+@import './chapters/credits.css';
 @import './chapters/appendix.css';
 /*
  * footer.css is its own file rather than a second chunk of chrome.css so that

@@ -27,6 +27,9 @@
   .phospipe .pp-stage-jp{font-size:40px}
 /* origin: openspec, appendix — two-column bodies stack */
   .openspec .os-grid,.appendix .ax-grid{grid-template-columns:1fr}
+/* origin: stats */
+  .stats-hero{grid-template-columns:repeat(2,1fr)}
+  .stats-body{grid-template-columns:1fr}
 }
 @media(max-width:720px){
 /* origin: tokens (--header-h) */
@@ -84,6 +87,10 @@
   .appendix .ax-hint{grid-column:1/-1}
 /* origin: panel (screen treatment) */
   .chapter.as-panel{padding:18px}
+/* origin: stats */
+  .stats-hero{grid-template-columns:1fr}
+/* origin: credits */
+  .credits-row,.credits-row-plain{grid-template-columns:1fr}
 }
 @media(prefers-reduced-motion:reduce){
 /* origin: cross-cutting: tokens, chrome, fleet-control, tasks, take-control animation kill-switch */

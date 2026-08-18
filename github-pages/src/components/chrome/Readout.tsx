@@ -5,6 +5,7 @@
 // written directly by the world — they need renderer/bbox internals that never
 // cross into React. SCAN and LINK are permanently static.
 import type { Ref } from 'react';
+import { CHAPTERS } from '../../config/chapters';
 
 export function Readout({ progRef }: { progRef?: Ref<HTMLElement> }) {
   return (
@@ -15,7 +16,11 @@ export function Readout({ progRef }: { progRef?: Ref<HTMLElement> }) {
       </div>
       <div>
         <span>SCREENS</span>
-        <b id="roScreens">07</b>
+        {/* Pre-3D value: the world rewrites this with panels.length once the
+            model is fitted, but flat mode never boots the world, so derive it
+            from the ledger rather than hardcoding a count that goes stale the
+            next time a chapter is added. */}
+        <b id="roScreens">{String(CHAPTERS.length).padStart(2, '0')}</b>
       </div>
       <div>
         <span>RENDER</span>

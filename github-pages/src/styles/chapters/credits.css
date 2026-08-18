@@ -1,0 +1,11 @@
+/* CREDITS */
+.credits{border-top:1px solid var(--green-dim)}
+.credits-groups{margin-top:26px;display:grid;gap:20px}
+.credits-label{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.16em;text-transform:uppercase;margin-bottom:8px}
+.credits-rows{display:grid;gap:7px}
+.credits-row{display:grid;grid-template-columns:200px 1fr;gap:10px;align-items:center;border:1px solid var(--green-dim);padding:9px 10px;font-size:9px;letter-spacing:.04em;text-transform:uppercase}
+.credits-name{color:var(--paper);font-weight:700}
+.credits-desc{color:var(--green-map)}
+.credits-row-plain{grid-template-columns:repeat(2,1fr)}
+.credits-note{color:var(--green-map);font-size:9px;letter-spacing:.05em;margin-bottom:8px;text-transform:uppercase}
+.credits-actions{margin-top:26px}
