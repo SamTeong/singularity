@@ -1,6 +1,7 @@
 /* STATS — new chapter, not part of the original one-shot scan; sized to the
    deck's existing card/meter idioms (deck.css, fleet-control.css's
    .metric/.segments) rather than introducing new ones. */
+.stats{border-top:1px solid var(--green-dim)}
 .stats-hero{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:26px 0 34px}
 .stats-figure{border:1px solid var(--green-dim);padding:18px 14px;text-align:center}
 .stats-figure b{display:block;font-family:var(--cond);font-weight:700;font-size:clamp(28px,4vw,44px);line-height:1;text-shadow:0 0 6px currentColor}
