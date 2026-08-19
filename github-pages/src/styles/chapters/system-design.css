@@ -3,7 +3,7 @@
 /* SYSTEM DESIGN */
 .system-design{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(180deg,rgba(82,242,154,.03),transparent)}
 .system-design-grid{display:grid;grid-template-columns:minmax(0,.8fr) minmax(0,1.2fr);gap:clamp(30px,5vw,72px);align-items:center}
-.system-design h2{font-size:clamp(44px,6.4vw,88px);margin-top:20px}
+.system-design h2{font-size:clamp(38px,4.4vw,64px);margin-top:20px}
 .system-design .lead{margin-top:22px}
 .security-list{margin-top:24px;display:grid;gap:7px}
 .security-row{display:grid;grid-template-columns:105px 1fr auto;gap:10px;align-items:center;border:1px solid var(--green-dim);padding:9px 10px;font-size:9px}
