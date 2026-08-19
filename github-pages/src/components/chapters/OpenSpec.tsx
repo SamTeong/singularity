@@ -37,14 +37,14 @@ const ARTIFACTS: readonly Artifact[] = [
  *  Eight groups, 46 tasks, all closed. One fixed-width tick per task, so a
  *  longer bar genuinely means more work. */
 const GROUPS: readonly (readonly [string, string, number])[] = [
-  ['1', 'Theme contract and semantic foundation', 6],
-  ['2', 'Skin-neutral shared presentation primitives', 5],
-  ['3', 'Phosphor application frame and masthead', 5],
-  ['4', 'Sidebar and overflow navigation', 5],
-  ['5', 'Tasks board and task dossier', 6],
-  ['6', 'Session dock, terminal, and transcripts', 7],
-  ['7', 'Cross-view quality audit', 6],
-  ['8', 'Automated and visual verification', 6],
+  ['1', 'Lorem ipsum dolor sit amet', 6],
+  ['2', 'consectetur adipiscing elit', 5],
+  ['3', 'Donec metus nisl blandit id magna', 5],
+  ['4', 'viverra luctus pellentesque eros', 5],
+  ['5', 'Fusce neque sapien facilisis', 6],
+  ['6', 'A justo ac tincidunt pretium lacus', 7],
+  ['7', 'Pellentesque risus lectus eleifend', 6],
+  ['8', 'In dolor eu tincidunt viverra', 6],
 ];
 
 const TOTAL = GROUPS.reduce((n, [, , count]) => n + count, 0);
@@ -61,12 +61,10 @@ export function OpenSpec({ sectionRef }: ChapterProps) {
         <div className="section-head">
           <span className="idx">10</span>
           <span className="jp">仕様</span>
-          <h2 id="openspec-title">OPENSPEC SHIPS THE ONE-SHOT</h2>
+          <h2 id="openspec-title">OPENSPEC KEEPS THE IMPLEMENTATION ON-TRACK</h2>
         </div>
         <p className="lead">
-          A one-shot is a picture of the idea — one afternoon, one file. Landing it in the app is a different job:{' '}
-          <strong>many files, many sittings, and it has to be checked.</strong> OpenSpec writes that down before the
-          code.
+          We used OpenSpec to turn the theme from a one-shot into an implementation plan the agent could follow without drifting. <strong>It lives in the repo, survives token limits and session resets, and can be handed off to other, cheaper agents.</strong> The plan persists even when the agent doesn't.
         </p>
 
         <div className="os-grid">
@@ -82,16 +80,16 @@ export function OpenSpec({ sectionRef }: ChapterProps) {
                       {a.file}
                       <small>{a.kind}</small>
                     </div>
-                    <p>{a.body}</p>
+                    {/* <p>{a.body}</p> */}
                   </div>
                 </article>
               ))}
             </div>
-            <p className="os-kicker">
+            {/* <p className="os-kicker">
               This one is real, and archived: <b>{TOTAL} tasks · {GROUPS.length} groups · 2 spec deltas</b>. Twelve of
               them are audit and verification — and the final task is a side-by-side against{' '}
               <b>the one-shot that started it.</b>
-            </p>
+            </p> */}
           </div>
 
           <div>
@@ -116,7 +114,7 @@ export function OpenSpec({ sectionRef }: ChapterProps) {
                         ✓
                       </span>
                       <span className="os-name">
-                        <b>{n}.</b>
+                        {/* <b>{n}.</b> */}
                         {name}
                       </span>
                       <span className="os-segments" aria-hidden="true">
@@ -130,14 +128,14 @@ export function OpenSpec({ sectionRef }: ChapterProps) {
                     </div>
                   ))}
                 </div>
-                <div className="os-ledger-foot">
+                {/* <div className="os-ledger-foot">
                   <span className="os-good">◉ ARCHIVED · ALL GROUPS CLOSED</span>
                   <span>
                     {GROUPS.length} GROUPS · {TOTAL} TASKS
                   </span>
                   <span className="os-spacer" />
                   <span>0 REMAINING</span>
-                </div>
+                </div> */}
               </div>
             </div>
           </div>
