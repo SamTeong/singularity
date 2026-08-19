@@ -112,8 +112,8 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
       { text: ' extracts a design-system.html and a DESIGN-SYSTEM.md from whichever layouts survive. Tokens, atoms, patterns — one source' },
     ],
     items: [
-      { label: 'DESIGN-SYSTEM.HTML', img: `${THUMBS}design-system.jpg`, src: `${REFS}design-system.html`, kind: 'page', tag: 'SYS', wide: true },
-      { label: 'DESIGN-SYSTEM.MD', img: `${THUMBS}design-system.jpg`, src: `${REFS}design-system-spec.html`, kind: 'page', tag: 'SYS', wide: true },
+      { label: 'DESIGN-SYSTEM.HTML', img: `${THUMBS}design-system.jpg`, src: `${REFS}design-system.html`, kind: 'page', tag: 'SYS' },
+      { label: 'DESIGN-SYSTEM.MD', img: `${THUMBS}design-system-spec.jpg`, src: `${REFS}design-system-spec.html`, kind: 'page', tag: 'SYS' },
     ],
   },
   {
@@ -123,7 +123,7 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
       { text: ' turns the design system into Phosphor — dark-mode only. These are the tokens that came out the other end.' },
     ],
     items: [
-      { label: 'PHOSPHOR MUI', img: `${THUMBS}mui-theme.jpg`, src: `${REFS}mui-theme.html`, kind: 'page', tag: 'MUI', wide: true },
+      { label: 'PHOSPHOR MUI', img: `${THUMBS}mui-theme.jpg`, src: 'https://shocknawe.github.io/evangelion-mui-theme', kind: 'page', tag: 'MUI', wide: true },
     ],
     swatches: false,
   },
