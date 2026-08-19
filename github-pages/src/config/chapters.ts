@@ -26,6 +26,7 @@ export type ChapterId =
   | 'stats'
   | 'alternatives'
   | 'inspiration'
+  | 'developed-by'
   | 'advisors';
 
 export interface ChapterWorld {
@@ -262,11 +263,31 @@ export const CHAPTERS = [
     fill: 0.90, lift: 0.18, tone: 0x52F29A, world: { fog: 0.038, bloom: 0.78, motes: 0.82, exposure: 1.04 },
   },
 
+  // `x`/`z` interpolated between `inspiration` and the original `advisors`
+  // anchor; yaw 257 is 15° off each neighbour, nowhere near the antiparallel
+  // danger zone. `y` is NOT the midpoint, though — see below.
+  //
+  // These three (inspiration, developed-by, advisors) are near-coplanar, all
+  // stacked in roughly the same corner, same as agent-harness/fleet-control —
+  // so per that seam's rule they need HEIGHT-based separation, not just a
+  // different yaw. The original two-chapter ledger had inspiration at
+  // u.y=0.54 and advisors at u.y=0.92, a proven-safe 0.38 gap (~3.44 world
+  // units, since height=9.043). Inserting developed-by at the linear y
+  // midpoint (0.73) would have HALVED that clearance on both sides to ~1.72
+  // units each — which is exactly what overlapped in practice. Fix: stack the
+  // same proven 0.38 gap upward twice instead of splitting it once.
   {
-    id: 'advisors', weight: 1.20, num: '15', jp: '謝辞', code: 'SCR·15', title: 'SPECIAL THANKS',
+    id: 'developed-by', weight: 1.60, num: '15', jp: '開発', code: 'SCR·15', title: 'DEVELOPED BY',
+    sub: 'SAM TEONG · JAIRUS ARAGON',
+    u: [-1.19, 0.92, -0.65], yaw: 257, pitch: 0, w: 6.0, px: 1360, pxm: 760,
+    fill: 0.86, lift: 0.34, tone: 0xF49F09, world: { fog: 0.040, bloom: 0.79, motes: 0.86, exposure: 1.05 },
+  },
+
+  {
+    id: 'advisors', weight: 1.55, num: '16', jp: '謝辞', code: 'SCR·16', title: 'SPECIAL THANKS',
     sub: 'KEVIN LIN · MIN SOE ZAN',
-    u: [-1.34, 0.92, -0.56], yaw: 272, pitch: 0, w: 5.8, px: 1300, pxm: 760,
-    fill: 0.82, lift: 0.30, tone: 0x7CF4AB, world: { fog: 0.042, bloom: 0.80, motes: 0.9, exposure: 1.06 },
+    u: [-1.34, 1.30, -0.56], yaw: 272, pitch: 0, w: 5.8, px: 1300, pxm: 760,
+    fill: 0.82, lift: 0.40, tone: 0x7CF4AB, world: { fog: 0.042, bloom: 0.80, motes: 0.9, exposure: 1.06 },
   },
 ] as const satisfies readonly Chapter[];
 

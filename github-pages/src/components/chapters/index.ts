@@ -18,6 +18,7 @@ import { TakeControl } from './TakeControl';
 import { Stats } from './Stats';
 import { Alternatives } from './Alternatives';
 import { Inspiration } from './Inspiration';
+import { DevelopedBy } from './DevelopedBy';
 import { Advisors } from './Advisors';
 
 export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> = {
@@ -35,5 +36,6 @@ export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> 
   stats: Stats,
   alternatives: Alternatives,
   inspiration: Inspiration,
+  'developed-by': DevelopedBy,
   advisors: Advisors,
 };

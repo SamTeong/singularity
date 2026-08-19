@@ -21,7 +21,7 @@ const ADVISORS: readonly Advisor[] = [
   },
   {
     name: 'MIN SOE ZAN',
-    contribution: 'UI DESIGN · UX',
+    contribution: 'UI DESIGN',
     href: 'https://www.linkedin.com/in/minsoezan/',
     portrait: `${PORTRAITS}advisor-min-soe-zan.jpg`,
     index: '02',
@@ -63,7 +63,7 @@ export function Advisors({ sectionRef }: ChapterProps) {
     <section className="chapter advisors" id="advisors" aria-labelledby="advisors-title" ref={sectionRef}>
       <div className="chapter-inner">
         <div className="section-head">
-          <span className="idx">15</span>
+          <span className="idx">16</span>
           <span className="jp">謝辞</span>
           <h2 id="advisors-title">SPECIAL THANKS</h2>
         </div>
