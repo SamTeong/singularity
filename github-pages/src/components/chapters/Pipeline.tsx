@@ -7,15 +7,16 @@
 // that on a <section> would blow the whole panel apart. The DOM id stays
 // `pipeline`, which is what the ledger's `id` and any in-page anchor use.
 //
-// Stage selection is driven by the scroll conductor (see deck/pipelineStage.ts)
-// with clicks and arrow keys as an override, so the chapter still tells its
-// story when Chromium refuses to hit-test the CSS3D panel.
-import { useCallback, useRef, useState } from 'react';
+// Stage selection is driven by the scroll conductor's step bands (see
+// deck/useScrollStep.ts) — the same system fleet-control's tabs and the tasks
+// flow use — with clicks and arrow keys as an override, so the chapter still
+// tells its story when Chromium refuses to hit-test the CSS3D panel.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { ChapterProps } from './types';
 import { PIPELINE_STEPS, PHOSPHOR_TOKENS } from '../../deck/pipelineData';
 import type { DescRun, PipelineItem } from '../../deck/pipelineData';
-import { usePipelineStage, selectStage } from '../../deck/pipelineStage';
+import { useScrollStep, seekStep } from '../../deck/useScrollStep';
 import { openLightbox } from '../../deck/lightbox';
 
 /** Renders the stage blurb's [text | code] runs — the source sets this with
@@ -46,9 +47,27 @@ function Thumb({ item }: { item: PipelineItem }) {
 }
 
 export function Pipeline({ sectionRef }: ChapterProps) {
-  const stage = usePipelineStage();
+  // In 3D the reader's scroll position picks the stage (see useScrollStep):
+  // one band of the pipeline chapter's local progress per stage. In flat mode
+  // there is no conductor, so a local state fallback keeps the stage
+  // click-driven exactly as before — the same shape useTabs uses for the
+  // fleet-control tabs.
+  const [stage, setStage] = useState(0);
+  const scrollStep = useScrollStep('pipeline');
+  useEffect(() => {
+    if (scrollStep !== null) setStage(scrollStep);
+  }, [scrollStep]);
+
   const step = PIPELINE_STEPS[stage];
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  const select = useCallback((next: number, focus = false) => {
+    // Scroll owns the stage in 3D, so a click scrolls to that stage's band and
+    // the effect above applies it — setting state here too would only be
+    // undone at the next band crossing. seekStep is false in flat mode.
+    if (!seekStep('pipeline', next)) setStage(next);
+    if (focus) tabRefs.current[next]?.focus();
+  }, []);
 
   const onKeyDown = useCallback((event: KeyboardEvent<HTMLButtonElement>, i: number) => {
     const last = PIPELINE_STEPS.length - 1;
@@ -59,9 +78,8 @@ export function Pipeline({ sectionRef }: ChapterProps) {
     else if (event.key === 'End') next = last;
     if (next < 0) return;
     event.preventDefault();
-    selectStage(next);
-    tabRefs.current[next]?.focus();
-  }, []);
+    select(next, true);
+  }, [select]);
 
   return (
     // className/id are constant literals and this section never receives a
@@ -96,7 +114,7 @@ export function Pipeline({ sectionRef }: ChapterProps) {
               ref={(el) => {
                 tabRefs.current[i] = el;
               }}
-              onClick={() => selectStage(i)}
+              onClick={() => select(i)}
               onKeyDown={(e) => onKeyDown(e, i)}
             >
               {s.here && <span className="stamp c-mint blink pp-here">YOU ARE HERE</span>}

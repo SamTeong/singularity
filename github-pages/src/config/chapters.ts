@@ -203,8 +203,14 @@ export const CHAPTERS = [
     fill: 0.80, lift: 0.16, tone: 0xF26400, world: { fog: 0.030, bloom: 0.66, motes: 0.62, exposure: 1.02 },
   },
 
+  // Stepped like `fleet-control` and `tasks`: the camera parks on this panel
+  // for the first STEP_BAND_SPAN of its segment while the reader scrolls the
+  // five stages as bands (see deck/useScrollStep.ts), and the autoplay tour
+  // stops on each stage. Weight 3.50 gives the five bands ~0.7 vh each — the
+  // budget below which bands fly past. Stage selection moved off the old
+  // continuous ±0.45 sweep (driveFromScroll) onto the band system to match.
   {
-    id: 'pipeline', weight: 2.10, num: '08', jp: '経路', code: 'SCR·08', title: 'THE PHOSPHOR PIPELINE',
+    id: 'pipeline', weight: 3.50, steps: 5, num: '08', jp: '経路', code: 'SCR·08', title: 'THE PHOSPHOR PIPELINE',
     sub: '08 PAGES · 34 EXPERIMENTS · 23 REFERENCES',
     u: [-0.178, 0.796, 0.833], yaw: 182, pitch: 4, w: 6.5, px: 1500, pxm: 780,
     fill: 0.94, lift: 0.10, tone: 0x0C6C80, world: { fog: 0.022, bloom: 0.72, motes: 0.48, exposure: 1.0 },
