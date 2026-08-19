@@ -199,7 +199,7 @@ export const CHAPTERS = [
 
   {
     id: 'skins', weight: 1.25, num: '07', jp: '体系', code: 'SCR·07', title: 'ONE SYSTEM, TWO SKINS',
-    sub: 'ZAPAC BY DEFAULT · PHOSPHOR FOR NOSTALGIA',
+    sub: 'SWAP THE TOKENS. KEEP THE SYSTEM.',
     u: [0.801, 0.332, 0.250], yaw: 270, pitch: 0, w: 5.9, px: 1340, pxm: 760,
     fill: 0.80, lift: 0.16, tone: 0xF26400, world: { fog: 0.030, bloom: 0.66, motes: 0.62, exposure: 1.02 },
   },

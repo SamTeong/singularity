@@ -1,34 +1,71 @@
-/* SOURCE: docs/one-shot/slides/index.html lines 135-154 (the "01 · one system,
-   two skins" block).
+/* Reworked slide — see the header comment in Skins.tsx for why this is no
+   longer three equal cards. Every child selector stays scoped under `.skins`
+   and prefixed `sp-` (skins-proof), the pattern themes.css established for
+   its own `tc-` prefix: `.num`, `.arrow` and `.divider` all already mean
+   something else, unscoped, elsewhere in this deck. */
 
-   Every selector is scoped under `.skins`. Two renames were forced, and the
-   rest follow them for consistency:
-     .beat       -> .skin-card   `.beat` is the conductor's own scroll wrapper
-                                 (chrome.css) and carries pointer-events:none
-                                 in 3D, which would kill every card.
-     .num/.bh    -> .sc-num/.sc-head   `.num` is already the flow node in
-                                 workflow.css.
-   `.system` -> `.skins` on the section itself, so it cannot be confused with
-   the SYSTEMS chapter (Capabilities.tsx), which is a different screen. */
-
-.skins{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(180deg,rgba(242,100,0,.03),transparent)}
+.skins{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(90deg,rgba(242,100,0,.045),transparent 45%,rgba(82,242,154,.03))}
 .skins .eyebrow .jp{letter-spacing:.14em}
 
-.skins .skin-beats{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(10px,1.4vw,20px);margin-top:clamp(30px,4.4vw,52px)}
-.skins .skin-card{border:1px solid var(--green-dim);border-top:2px solid var(--orange);padding:clamp(18px,2vw,26px) clamp(18px,2vw,26px) clamp(22px,2.4vw,30px);background:linear-gradient(180deg,rgba(242,100,0,.055),transparent 62%);display:flex;flex-direction:column}
-.skins .skin-card:hover{border-color:var(--mint)}
-.skins .sc-head{display:flex;align-items:center;gap:11px;margin-bottom:13px;border-bottom:1px dotted var(--green-dim);padding-bottom:11px}
-.skins .sc-num{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.1em;background:var(--orange);color:var(--bg);padding:1px 8px}
-.skins .sc-head .jp{font-family:var(--jp);font-weight:800;font-size:clamp(22px,2.2vw,30px);color:var(--orange);text-shadow:0 0 5px currentColor;line-height:1;margin-left:auto}
-.skins .skin-card h3{font-family:var(--cond);font-weight:700;font-size:clamp(19px,2.1vw,30px);line-height:1.02;letter-spacing:.04em;text-transform:uppercase;color:var(--paper);text-shadow:0 0 6px rgba(237,248,214,.16)}
-.skins .skin-card p{margin-top:12px;color:var(--green-map);font-size:clamp(12px,1.15vw,15px);line-height:1.72}
-.skins .skin-card p b{color:var(--mint);font-weight:400}
+/* the proof, left to right: no system -> ZAPAC -> (pivot) -> Phosphor -> the
+   business conclusion. `auto` lets the pivot column shrink to its own text;
+   the conclusion carries the most weight on purpose — it's the point. */
+.skins .skins-proof{display:grid;grid-template-columns:.85fr 1fr auto 1fr 1.4fr;gap:clamp(14px,1.8vw,26px);align-items:stretch;margin-top:clamp(28px,3.8vw,48px)}
 
-.skins .skin-card.warm{border-top-color:var(--red-hi);background:linear-gradient(180deg,rgba(226,40,15,.06),transparent 62%)}
-.skins .skin-card.warm .sc-num{background:var(--red-hi)}
-.skins .skin-card.cool{border-top-color:var(--mint);background:linear-gradient(180deg,rgba(82,242,154,.06),transparent 62%)}
-.skins .skin-card.cool .sc-num{background:var(--mint)}
-.skins .skin-card.cool .sc-head .jp{color:var(--mint)}
+.skins .sp-col{display:flex;flex-direction:column;align-items:center;text-align:center;gap:14px}
+.skins .sp-tag{display:flex;align-items:center;gap:8px}
+.skins .sp-num{font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.1em;background:var(--orange);color:var(--bg);padding:1px 7px}
+.skins .sp-tag .jp{font-family:var(--jp);font-weight:800;font-size:17px;color:var(--orange);line-height:1}
+.skins .sp-caption{margin-top:auto;font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--green-map)}
 
-.skins .skin-kicker{margin-top:clamp(18px,2vw,26px);border-left:2px solid var(--orange);padding:3px 0 3px 15px;color:var(--amber);font-size:clamp(11px,1.05vw,13px);line-height:1.7;letter-spacing:.05em;max-width:96ch}
+/* 01 — fragmented UI, no system: four chips that clash on purpose (different
+   font stack, radius and colour each), loosely rotated like the chaos slide's
+   scattered terminal cards. */
+.skins .sp-frag{display:flex;flex-wrap:wrap;justify-content:center;align-content:center;gap:8px;width:100%;max-width:170px}
+.skins .sp-chip{padding:8px 12px;border:1px solid currentColor;font-size:10px;letter-spacing:.08em}
+.skins .sp-chip.red{color:var(--red-hi);font-family:var(--cond);border-radius:0;transform:rotate(-3deg)}
+.skins .sp-chip.blue{color:var(--blue);font-family:ui-sans-serif,system-ui,sans-serif;border-radius:10px;transform:rotate(2deg)}
+.skins .sp-chip.amber{color:var(--amber);font-family:var(--jp);border-radius:999px;transform:rotate(-1deg)}
+.skins .sp-chip.teal{color:var(--teal);font-family:var(--mono);border-radius:3px;transform:rotate(3deg)}
+
+/* 02/03 — the same mini application, rendered twice from identical markup
+   (MiniApp in Skins.tsx). `--tone` is the only thing either variant sets;
+   everything else — border, dots, nav, stat row, button — reads it. Phosphor
+   deliberately resolves to the same condensed/orange language as the rest of
+   this deck (it IS this deck's own skin); ZAPAC deliberately does not. */
+.skins .sp-mini{width:100%;max-width:210px;border:1px solid var(--tone);display:flex;flex-direction:column;overflow:hidden}
+.skins .sp-mini-head{display:flex;align-items:center;gap:5px;padding:7px 9px;border-bottom:1px solid var(--tone)}
+.skins .sp-mini-dot{width:6px;height:6px;border-radius:50%;background:var(--tone)}
+.skins .sp-mini-label{margin-left:auto;font-size:8px;letter-spacing:.12em;color:var(--tone)}
+.skins .sp-mini-nav{display:flex;gap:6px;padding:8px 9px 0;font-size:8px;letter-spacing:.05em;color:var(--green-map)}
+.skins .sp-mini-nav span:first-child{color:var(--tone)}
+.skins .sp-mini-stat{display:flex;justify-content:space-between;align-items:baseline;padding:10px 9px 4px;font-size:8px;letter-spacing:.1em;color:var(--green-map)}
+.skins .sp-mini-stat b{font-family:var(--cond);font-size:20px;color:var(--paper)}
+.skins .sp-mini-btn{margin:9px;padding:6px;text-align:center;font-size:9px;font-weight:700;letter-spacing:.1em;background:var(--tone);color:var(--bg)}
+
+.skins .sp-mini.zapac{--tone:var(--blue);border-radius:12px;font-family:ui-sans-serif,system-ui,sans-serif}
+.skins .sp-mini.zapac .sp-mini-btn{border-radius:999px}
+.skins .sp-mini.phosphor{--tone:var(--orange);border-radius:0;font-family:var(--cond);text-transform:uppercase}
+.skins .sp-mini.phosphor .sp-mini-btn{box-shadow:0 0 8px rgba(242,100,0,.4)}
+
+/* the pivot: same components, same behaviour, different tokens */
+.skins .sp-arrow{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px}
+.skins .sp-arrow-glyph{font-size:22px;line-height:1;color:var(--orange);text-shadow:0 0 8px currentColor}
+.skins .sp-arrow ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.skins .sp-arrow li{font-family:var(--mono);font-size:8px;letter-spacing:.1em;color:var(--green-map);white-space:nowrap}
+.skins .sp-arrow li:last-child{color:var(--amber)}
+
+/* the business conclusion — deliberately the widest column and the largest
+   type on the slide */
+.skins .sp-claim{display:flex;flex-direction:column;justify-content:center;text-align:left}
+.skins .sp-claim h3{font-size:clamp(26px,3vw,42px);margin:0}
+.skins .sp-claim .orange{color:var(--orange)}
+.skins .sp-claim .mint{color:var(--mint-hi)}
+.skins .sp-tagline{margin-top:14px;color:var(--amber);font-size:12px;letter-spacing:.05em}
+.skins .sp-flow{margin-top:18px;display:flex;flex-direction:column;gap:5px;font-family:var(--mono);font-size:9px;letter-spacing:.08em;color:var(--green-map)}
+.skins .sp-flow-arrow{color:var(--orange)}
+.skins .sp-flow-tokens{color:var(--mint)}
+
+.skins .skin-kicker{margin-top:clamp(20px,2.4vw,32px);border-left:2px solid var(--orange);padding:3px 0 3px 15px;color:var(--amber);font-size:clamp(11px,1.05vw,13px);line-height:1.7;letter-spacing:.05em;max-width:96ch}
 .skins .skin-kicker b{color:var(--paper);font-weight:400}
+.skins .skin-kicker-sub{display:block;margin-top:4px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:lowercase;color:var(--green-map)}

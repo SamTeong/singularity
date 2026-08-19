@@ -37,6 +37,13 @@
   .inspiration .in-lineup{grid-template-columns:repeat(2,minmax(0,1fr))}
   .inspiration .in-person:nth-child(odd){border-left:0}
   .inspiration .in-person:nth-child(n+3){border-top:1px solid var(--green-dim)}
+/* origin: skins — the five-column proof stacks; the pivot's arrow turns to
+   point down instead of right, and the conclusion re-centers with the rest
+   of the stacked columns instead of staying left-aligned */
+  .skins .skins-proof{grid-template-columns:1fr}
+  .skins .sp-arrow{flex-direction:row}
+  .skins .sp-arrow-glyph{transform:rotate(90deg)}
+  .skins .sp-claim{align-items:center;text-align:center}
 }
 @media(max-width:720px){
 /* origin: tokens (--header-h) */
@@ -77,8 +84,6 @@
   .arch-link{width:2px;height:26px;margin:auto}
 /* origin: take-control */
   .take-control h2{font-size:clamp(56px,18vw,92px)}
-/* origin: skins — source L401 */
-  .skins .skin-beats{grid-template-columns:1fr}
 /* origin: pipeline — the track goes vertical, with the connector rotated to
    run down the left of the node column (source L402-407) */
   .phospipe .pp-track{grid-template-columns:1fr;gap:4px}
