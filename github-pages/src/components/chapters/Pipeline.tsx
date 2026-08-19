@@ -15,21 +15,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import type { ChapterProps } from './types';
 import { PIPELINE_STEPS, PHOSPHOR_TOKENS } from '../../deck/pipelineData';
-import type { DescRun, PipelineItem } from '../../deck/pipelineData';
+import type { PipelineItem } from '../../deck/pipelineData';
 import { useScrollStep, seekStep } from '../../deck/useScrollStep';
 import { openLightbox } from '../../deck/lightbox';
-
-/** Renders the stage blurb's [text | code] runs — the source sets this with
- *  innerHTML, which this port does not use anywhere. */
-function Desc({ runs }: { runs: readonly DescRun[] }) {
-  return (
-    <>
-      {runs.map((run, i) =>
-        'code' in run ? <code key={i}>{run.code}</code> : <span key={i}>{run.text}</span>,
-      )}
-    </>
-  );
-}
 
 /** The gallery thumbnails are copied into public/refs by scripts/copy-model.mjs.
  *  A checkout without them must not render a row of broken-image glyphs, so a
@@ -142,9 +130,6 @@ export function Pipeline({ sectionRef }: ChapterProps) {
                 {/* {step.n} ·  */}
                 {step.title}
               </h3>
-              {/* <p>
-                <Desc runs={step.desc} />
-              </p> */}
             </div>
             <div className="pp-hint">
               <b>CLICK A CARD</b>
