@@ -63,9 +63,9 @@
 .sx-rail button{display:flex;align-items:center;justify-content:flex-end;gap:9px;min-height:clamp(20px,3vh,26px);background:none;border:0;cursor:pointer;color:var(--green-dim);font-size:8px;letter-spacing:.13em;text-transform:uppercase;font-family:var(--mono);white-space:nowrap}
 .sx-rail .title{color:var(--green-map);opacity:.35;transition:opacity .2s ease}
 .sx-rail .num{color:inherit;font-variant-numeric:tabular-nums}
-.sx-rail .tick{width:22px;height:2px;background:currentColor}
+.sx-rail .tick{width:calc(22px + var(--boost,0) * 20px);height:2px;background:currentColor;transition:width .38s cubic-bezier(.34,1.56,.64,1)}
 .sx-rail button[aria-current="true"]{color:var(--mint)}
-.sx-rail button[aria-current="true"] .tick{width:34px;box-shadow:0 0 6px var(--mint)}
+.sx-rail button[aria-current="true"] .tick{box-shadow:0 0 6px var(--mint)}
 .sx-rail button[aria-current="true"] .title{opacity:1}
 .sx-rail button:hover{color:var(--mint-hi)}
 .sx-rail button:hover .title{opacity:1}

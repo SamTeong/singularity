@@ -2,13 +2,33 @@
 // Source markup (L478): `<nav class="sx-rail" id="sxRail" aria-label="Walkthrough
 // chapters"></nav>` is empty; the JS at L1026-1035 builds one button per chapter
 // from the chapter ledger, and L1449 sets aria-current on chapter change.
-import { useEffect } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { CHAPTERS } from '../../config/chapters';
 import { useChapterIndex, useConductor } from '../../state/appStore';
+
+// How many items either side of the hovered one join the wave. Beyond this the
+// boost is 0, so the wave has a finite ripple length rather than perturbing the
+// whole rail.
+const WAVE_RANGE = 2;
 
 export function ChapterRail() {
   const active = useChapterIndex();
   const conductor = useConductor();
+  // Index of the item the pointer is over, or null when the pointer has left
+  // the rail. Drives the magnification wave: the hovered tick is tallest, its
+  // neighbours decay with distance, and the CSS bounce easing makes the ripple
+  // settle like a spring.
+  const [hover, setHover] = useState<number | null>(null);
+
+  // 1 at the hovered item, decaying linearly to 0 over WAVE_RANGE neighbours.
+  // The active slide also carries a resting boost so its tick stays long even
+  // when the pointer is elsewhere; the wave's value wins when it is larger.
+  const boostFor = (i: number): number => {
+    const d = hover === null ? WAVE_RANGE + 1 : Math.abs(i - hover);
+    const wave = d > WAVE_RANGE ? 0 : 1 - d / (WAVE_RANGE + 1);
+    const rest = active === i ? 2 / 3 : 0;
+    return Math.max(wave, rest);
+  };
 
   // Arrow-key chapter nav. Mirrors the rail buttons' `conductor?.goTo(i)`
   // guard: inert in flat mode (conductor === null), and bounded to the
@@ -28,12 +48,17 @@ export function ChapterRail() {
   }, [conductor, active]);
 
   return (
-    <nav className="sx-rail" id="sxRail" aria-label="Walkthrough chapters">
+    <nav className="sx-rail" id="sxRail" aria-label="Walkthrough chapters" onMouseLeave={() => setHover(null)}>
       {CHAPTERS.map((c, i) => (
         <button
           key={c.id}
           type="button"
           aria-label={`${c.title} ${c.num}`}
+          onMouseEnter={() => setHover(i)}
+          // `--boost` (0..1) is the wave amplitude for this item; the tick's
+          // width is derived from it in chrome.css. Cast because React's
+          // CSSProperties type does not include custom properties.
+          style={{ '--boost': boostFor(i) } as CSSProperties}
           // Deliberately three-valued. The source creates these buttons with no
           // aria-current at all (L1028-1033) and only ever sets it inside
           // updateDom via String(i === index) (L1449) — so before enter3D(), and
