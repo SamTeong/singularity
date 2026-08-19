@@ -3,7 +3,13 @@
 /* FLEET CONTROL */
 .fleet-control{padding-left:clamp(10px,2vw,28px);padding-right:clamp(10px,2vw,28px)}
 .fleet-control .intro{padding:0 max(8px,calc((100% - var(--max))/2));margin-bottom:26px}
-.console{max-width:1560px;margin:0 auto;border:3px solid var(--orange);padding:5px;position:relative;background:var(--bg);clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));box-shadow:0 0 14px rgba(242,100,0,.25),inset 0 0 12px rgba(242,100,0,.09)}
+/* `.console` is a flex item of `.chapter.as-panel` (flex-direction:column) in
+   3D panel mode. `width:auto` there shrink-wraps to whichever tab's content is
+   widest instead of stretching to the panel, so the console visibly resizes
+   as `.view.active` swaps between the sessions/tasks/automation/usage grids.
+   `width:100%` (capped by max-width) pins it to the panel's width regardless
+   of which tab is active. */
+.console{width:100%;max-width:1560px;margin:0 auto;border:3px solid var(--orange);padding:5px;position:relative;background:var(--bg);clip-path:polygon(0 0,calc(100% - 28px) 0,100% 28px,100% 100%,28px 100%,0 calc(100% - 28px));box-shadow:0 0 14px rgba(242,100,0,.25),inset 0 0 12px rgba(242,100,0,.09)}
 .console::before{content:"";position:absolute;inset:7px;border:1px solid var(--orange);pointer-events:none;clip-path:inherit}
 .console-head{position:relative;z-index:2;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:14px;border-bottom:2px solid var(--teal);padding:10px 14px;margin:3px 3px 0}
 .console-mono{font-family:var(--jp);font-weight:800;font-size:24px;line-height:1;color:var(--orange);border:1px solid var(--orange);padding:6px 8px;letter-spacing:.14em;text-indent:.14em}

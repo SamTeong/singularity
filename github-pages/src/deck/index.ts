@@ -31,7 +31,6 @@ export type { CopyStatus, UseCopyCommandResult } from './useCopyCommand';
 
 export { PIPELINE_STEPS, PHOSPHOR_TOKENS } from './pipelineData';
 export type { PipelineStep, PipelineItem, DescRun } from './pipelineData';
-export { usePipelineStage, selectStage, driveFromScroll, resetStage } from './pipelineStage';
 export { useLightbox, openLightbox, closeLightbox, stepLightbox } from './lightbox';
 export type { LightboxState } from './lightbox';
 export { useThemeTerminal, runThemeTerminals, resetThemeTerminals } from './useThemeTerminals';

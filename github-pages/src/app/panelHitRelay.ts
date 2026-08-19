@@ -3,8 +3,12 @@
 // Measured with `document.elementsFromPoint` over the centre of every panel
 // (viewport 1440x900, one chapter at a time via the rail):
 //
-//   #chaos  #tasks  #system-design  #take-control  #stats  → the panel and its subtree are hit
-//   #orientation  #agent-harness  #fleet-control  #advisors   → `#gl` comes back instead, always
+//   #chaos  #tasks  #system-design  #take-control  #developed-by  → the panel and its subtree are hit
+//   #orientation  #agent-harness  #fleet-control  #inspiration   → `#gl` comes back instead, always
+//
+// (Those last two are named per SLOT, not per slide: the closing sequence was
+// reordered later, and what matters is the yaw at that slot — 182 works, 272
+// does not — so the ids follow whichever slide now sits there.)
 //
 // The split follows the panel's world matrix, not its content. CSS3DRenderer
 // writes `matrix3d(...)` per panel, and the ones that fail are the ones whose

@@ -42,7 +42,6 @@ import { armScrollRestore, restoreScroll } from './app/scrollRestore';
 import * as appStore from './state/appStore';
 import { renderTerminal } from './deck/useTerminal';
 import { requestFlowReset } from './deck/useFlowStepper';
-import { driveFromScroll, resetStage } from './deck/pipelineStage';
 import { runThemeTerminals } from './deck/useThemeTerminals';
 import { closeLightbox } from './deck/lightbox';
 import { stepAt } from './deck/useScrollStep';
@@ -52,11 +51,6 @@ import type { ConductorState, Mode, World } from './world/types';
 const BOOT_ERROR_LINGER_MS = 9000;
 /** Source L1642: on success the box is dismissed 700ms after the deck mounts. */
 const BOOT_SUCCESS_LINGER_MS = 700;
-
-/** The PIPELINE chapter's ledger position. Resolved once from CHAPTERS rather
- *  than written as a literal, so reordering the deck cannot silently point the
- *  scroll-driven stage selector at the wrong chapter. */
-const PIPELINE_INDEX = CHAPTERS.findIndex((c) => c.id === 'pipeline');
 
 export default function App() {
   // Lazy initializer: the probe MUST run before the first paint, because
@@ -117,7 +111,7 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [autoplay]);
-  useAutoplay(autoplay, !isFlat, autoplayDwellMs);
+  useAutoplay(autoplay, !isFlat, autoplayDwellMs, () => setAutoplay(false));
 
   useBodyMode(mode);
 
@@ -185,14 +179,11 @@ export default function App() {
     if (progReadoutRef.current) {
       progReadoutRef.current.textContent = state.exact.toFixed(2);
     }
-    // Scroll drives the pipeline chapter's five-stage selector. Safe to call
-    // every frame: the store only notifies when the integer stage changes
-    // (~5 times per traversal), so this is not a 60fps setState.
-    if (PIPELINE_INDEX >= 0) driveFromScroll(state.smooth, PIPELINE_INDEX);
     // The one exception to "ref writes only": the in-chapter step (fleet
-    // control's tabs, the tasks flow) is a scroll band, and the components
-    // that render it are React. Safe because the signal is written ONLY when
-    // the quantised band changes — a few times per chapter, not per frame.
+    // control's tabs, the tasks flow, the pipeline stages) is a scroll band,
+    // and the components that render it are React. Safe because the signal is
+    // written ONLY when the quantised band changes — a few times per chapter,
+    // not per frame.
     const step = stepAt(state.index, state.localExact);
     if (step !== null) {
       const current = appStore.getChapterStep();
@@ -286,13 +277,11 @@ export default function App() {
     appStore.setChapterIndex(null);
     appStore.setChapterStep(null);
     setChapterIndexState(null);
-    // Nothing is driving these any more. The pipeline stage falls back to
-    // stage 01 and becomes click-only. The teletypes get run once here rather
-    // than reset: flat mode has no chapter changes to trigger them, and two
-    // permanently empty terminal panes would be missing content, not a
+    // Nothing is driving these any more. The teletypes get run once here
+    // rather than reset: flat mode has no chapter changes to trigger them, and
+    // two permanently empty terminal panes would be missing content, not a
     // degraded animation. The lightbox must close — it owns `body.overflow`,
     // and leaving it locked on a demotion makes the flat deck unscrollable.
-    resetStage();
     runThemeTerminals();
     closeLightbox();
   }, [mode]);

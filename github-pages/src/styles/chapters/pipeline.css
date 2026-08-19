@@ -17,14 +17,13 @@
 .phospipe .pp-step{position:relative;z-index:2;text-align:center;cursor:pointer;color:var(--green-map);padding:0 8px;background:transparent;border:0;font-family:var(--mono);letter-spacing:.03em}
 .phospipe .pp-node{width:78px;height:78px;margin:0 auto 12px;background:var(--bg);border:2px solid var(--green-dim);display:grid;place-items:center;
   font-family:var(--cond);font-weight:700;font-size:22px;clip-path:polygon(0 0,calc(100% - 16px) 0,100% 16px,100% 100%,16px 100%,0 calc(100% - 16px))}
-.phospipe .pp-step[data-done="1"] .pp-node{background:var(--mint);border-color:var(--mint);color:var(--bg)}
-.phospipe .pp-step[data-done="0"] .pp-node{border-color:var(--orange);color:var(--orange)}
+.phospipe .pp-step[data-state="done"] .pp-node{background:var(--mint);border-color:var(--mint);color:var(--bg)}
 .phospipe .pp-step .jp{display:block;font-family:var(--jp);font-weight:800;font-size:16px;color:inherit}
 .phospipe .pp-en{display:block;font-size:8.5px;letter-spacing:.13em;margin-top:3px;text-transform:uppercase}
 .phospipe .pp-val{display:block;margin-top:7px;font-family:var(--cond);font-weight:700;font-size:20px;color:var(--mint-hi);line-height:1;font-variant-numeric:tabular-nums}
 .phospipe .pp-val small{display:block;font-family:var(--mono);font-weight:400;font-size:7.5px;letter-spacing:.12em;color:var(--amber);margin-top:3px}
 .phospipe .pp-step[aria-selected="true"]{color:var(--mint-hi)}
-.phospipe .pp-step[aria-selected="true"] .pp-node{border-color:var(--mint);box-shadow:0 0 12px rgba(82,242,154,.4)}
+.phospipe .pp-step[data-state="now"] .pp-node{background:var(--blue);border-color:var(--blue);color:var(--bg)}
 .phospipe .pp-here{position:absolute;top:-14px;left:50%;transform:translateX(-50%);background:var(--bg);z-index:3}
 .phospipe .pp-step:focus-visible{outline:2px solid var(--paper);outline-offset:3px}
 
@@ -47,6 +46,7 @@
 .phospipe .pp-gallery[data-stage="01"]{--card:400px}
 .phospipe .pp-gallery[data-stage="02"]{--card:250px}
 .phospipe .pp-gallery[data-stage="03"]{--card:320px}
+.phospipe .pp-gallery[data-stage="04"]{--card:450px}
 .phospipe .pp-card{position:relative;border:1px solid var(--green-dim);background:#050505;display:flex;flex-direction:column;text-align:left;overflow:hidden;cursor:pointer;padding:0;font-family:var(--mono)}
 .phospipe .pp-card:hover,.phospipe .pp-card:focus-visible{border-color:var(--mint);box-shadow:0 0 12px rgba(82,242,154,.2)}
 .phospipe .pp-card:focus-visible{outline:2px solid var(--paper);outline-offset:3px}

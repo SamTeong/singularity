@@ -1,34 +1,129 @@
-/* SOURCE: docs/one-shot/slides/index.html lines 135-154 (the "01 · one system,
-   two skins" block).
+/* Reworked slide — see the header comment in Skins.tsx for the layout and why
+   the three stages are cells of ONE bevelled frame rather than loose columns.
+   Every child selector stays scoped under `.skins` and prefixed `sp-`
+   (skins-proof), the pattern themes.css established for its own `tc-` prefix:
+   `.num`, `.stage`, `.mini` and `.hazard` all already mean, or could mean,
+   something else, unscoped, elsewhere in this deck.
 
-   Every selector is scoped under `.skins`. Two renames were forced, and the
-   rest follow them for consistency:
-     .beat       -> .skin-card   `.beat` is the conductor's own scroll wrapper
-                                 (chrome.css) and carries pointer-events:none
-                                 in 3D, which would kill every card.
-     .num/.bh    -> .sc-num/.sc-head   `.num` is already the flow node in
-                                 workflow.css.
-   `.system` -> `.skins` on the section itself, so it cannot be confused with
-   the SYSTEMS chapter (Capabilities.tsx), which is a different screen. */
+   The frame vocabulary (3px orange border, 5px gutter, inner hairline, 26px
+   bevel via clip-path, teal-ruled head, status strip along the bottom) is
+   deliberately the same as `.architecture` in system-design.css and `.console`
+   in fleet-control.css — this deck has one way of drawing a device, and a
+   fourth invented treatment would just look like a different slide. */
 
-.skins{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(180deg,rgba(242,100,0,.03),transparent)}
+.skins{border-top:1px solid var(--orange);border-bottom:1px solid var(--orange);background:linear-gradient(90deg,rgba(226,40,15,.05),transparent 38%,rgba(82,242,154,.03))}
 .skins .eyebrow .jp{letter-spacing:.14em}
 
-.skins .skin-beats{display:grid;grid-template-columns:repeat(3,1fr);gap:clamp(10px,1.4vw,20px);margin-top:clamp(30px,4.4vw,52px)}
-.skins .skin-card{border:1px solid var(--green-dim);border-top:2px solid var(--orange);padding:clamp(18px,2vw,26px) clamp(18px,2vw,26px) clamp(22px,2.4vw,30px);background:linear-gradient(180deg,rgba(242,100,0,.055),transparent 62%);display:flex;flex-direction:column}
-.skins .skin-card:hover{border-color:var(--mint)}
-.skins .sc-head{display:flex;align-items:center;gap:11px;margin-bottom:13px;border-bottom:1px dotted var(--green-dim);padding-bottom:11px}
-.skins .sc-num{font-family:var(--cond);font-weight:700;font-size:13px;letter-spacing:.1em;background:var(--orange);color:var(--bg);padding:1px 8px}
-.skins .sc-head .jp{font-family:var(--jp);font-weight:800;font-size:clamp(22px,2.2vw,30px);color:var(--orange);text-shadow:0 0 5px currentColor;line-height:1;margin-left:auto}
-.skins .skin-card h3{font-family:var(--cond);font-weight:700;font-size:clamp(19px,2.1vw,30px);line-height:1.02;letter-spacing:.04em;text-transform:uppercase;color:var(--paper);text-shadow:0 0 6px rgba(237,248,214,.16)}
-.skins .skin-card p{margin-top:12px;color:var(--green-map);font-size:clamp(12px,1.15vw,15px);line-height:1.72}
-.skins .skin-card p b{color:var(--mint);font-weight:400}
+/* evidence left, conclusion right. The rig takes ~62% because it holds three
+   stages plus the pivot; the claim gets the rest and the largest type. */
+.skins .sp-grid{display:grid;grid-template-columns:minmax(0,1.62fr) minmax(300px,1fr);gap:clamp(20px,2.6vw,44px);align-items:stretch;margin-top:clamp(20px,2.6vw,34px)}
 
-.skins .skin-card.warm{border-top-color:var(--red-hi);background:linear-gradient(180deg,rgba(226,40,15,.06),transparent 62%)}
-.skins .skin-card.warm .sc-num{background:var(--red-hi)}
-.skins .skin-card.cool{border-top-color:var(--mint);background:linear-gradient(180deg,rgba(82,242,154,.06),transparent 62%)}
-.skins .skin-card.cool .sc-num{background:var(--mint)}
-.skins .skin-card.cool .sc-head .jp{color:var(--mint)}
+/* ── the rig ─────────────────────────────────────────────────────────────── */
+.skins .sp-rig{border:3px solid var(--orange);padding:5px;position:relative;background:var(--bg);
+  clip-path:polygon(0 0,calc(100% - 26px) 0,100% 26px,100% 100%,26px 100%,0 calc(100% - 26px));
+  box-shadow:0 0 14px rgba(242,100,0,.22),inset 0 0 12px rgba(242,100,0,.07);display:flex;flex-direction:column}
+.skins .sp-rig::before{content:"";position:absolute;inset:7px;border:1px solid var(--orange);pointer-events:none;clip-path:inherit}
+.skins .sp-rig-head{position:relative;z-index:2;display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:12px;
+  border-bottom:2px solid var(--teal);padding:8px 12px;margin:3px 3px 0}
+.skins .sp-rig-mono{font-weight:800;font-size:21px;line-height:1;color:var(--orange);border:1px solid var(--orange);padding:5px 7px;letter-spacing:.14em;text-indent:.14em}
+.skins .sp-rig-title{font-family:var(--cond);font-weight:700;font-size:16px;color:var(--paper);letter-spacing:.1em;text-transform:uppercase}
 
-.skins .skin-kicker{margin-top:clamp(18px,2vw,26px);border-left:2px solid var(--orange);padding:3px 0 3px 15px;color:var(--amber);font-size:clamp(11px,1.05vw,13px);line-height:1.7;letter-spacing:.05em;max-width:96ch}
+/* Three stages and the pivot as cells of the frame, divided by its own rules.
+   The three viewports below STRETCH to one height rather than carrying a fixed
+   one (`--body` is only their floor): the rig's height is set by the taller
+   claim column beside it, and a fixed body height left ~90px of dead frame
+   under the stage feet. Nothing in here changes with state, so there is no
+   measure-once hazard in letting them flex — cf. the pipeline gallery, which
+   does need a fixed height (see panel.css). */
+.skins .sp-stages{--body:200px;position:relative;z-index:2;flex:1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0 3px}
+.skins .sp-stage{padding:12px 13px 11px;display:flex;flex-direction:column;min-width:0}
+/* 01 is the BEFORE, so it is fenced off from 02/03 by a full-weight rule and a
+   red wash; 03 gets the same weight of rule to divide it from 02. */
+.skins .sp-stage-broken{border-right:1px solid var(--orange);background:linear-gradient(180deg,rgba(226,40,15,.06),transparent 70%)}
+.skins .sp-stages > .sp-stage:last-child{border-left:1px solid var(--orange)}
+.skins .sp-stage-head{display:flex;align-items:center;gap:7px;margin-bottom:10px}
+.skins .sp-num{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.1em;background:var(--orange);color:var(--bg);padding:1px 6px}
+.skins .sp-stage-head .jp{font-family:var(--jp);font-weight:800;font-size:15px;line-height:1;color:var(--orange)}
+.skins .sp-stage-head b{font-family:var(--cond);font-weight:700;font-size:12px;letter-spacing:.09em;color:var(--paper);text-transform:uppercase;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.skins .sp-stage-broken .sp-stage-head .sp-num{background:var(--red-hi)}
+.skins .sp-stage-broken .sp-stage-head .jp{color:var(--red-hi)}
+.skins .sp-stage-foot{margin-top:9px;font-size:8px;letter-spacing:.13em;text-transform:uppercase;color:var(--green-map)}
+.skins .sp-stage-broken .sp-stage-foot{color:var(--red-hi)}
+
+/* 01 — no system: four fragments that agree on nothing, over the reference
+   sprawl's red grid, with its hazard stripe across the bottom. Positioned
+   absolutely (like .chaos-card) so they can overlap and tilt; the box owns the
+   shared --body height. */
+.skins .sp-sprawl{position:relative;height:var(--body);border:1px solid var(--red);overflow:hidden;
+  background:linear-gradient(rgba(194,12,12,.13) 1px,transparent 1px),linear-gradient(90deg,rgba(194,12,12,.13) 1px,transparent 1px);background-size:26px 26px}
+.skins .sp-frag{position:absolute;border:1px solid currentColor;background:var(--bg);padding:6px 8px;max-width:76%;
+  box-shadow:0 0 6px color-mix(in srgb,currentColor 30%,transparent)}
+.skins .sp-frag b{display:block;font-size:11px;line-height:1.1;letter-spacing:.04em}
+.skins .sp-frag small{display:block;margin-top:3px;font-size:7px;letter-spacing:.06em;color:var(--green-map)}
+.skins .sp-frag.f1{left:5%;top:7%;color:var(--red-hi);font-family:var(--cond);border-radius:0;transform:rotate(-3deg)}
+.skins .sp-frag.f2{right:4%;top:26%;color:var(--blue);font-family:ui-sans-serif,system-ui,sans-serif;border-radius:12px;transform:rotate(2.5deg)}
+.skins .sp-frag.f3{left:8%;top:47%;color:var(--amber);font-family:var(--jp);border-radius:3px;transform:rotate(-1.5deg)}
+.skins .sp-frag.f4{right:9%;bottom:19%;color:var(--teal);font-family:var(--mono);border-radius:999px;transform:rotate(3deg)}
+.skins .sp-hazard{position:absolute;left:0;right:0;bottom:0;height:9px;background:repeating-linear-gradient(-45deg,var(--crimson) 0 7px,var(--bg) 7px 14px)}
+
+/* 02/03 — the same mini application from identical markup (MiniApp in
+   Skins.tsx). `--tone` and the type stack are ALL either variant sets;
+   everything inside reads them. Phosphor resolves to this deck's own condensed
+   orange language on purpose (it IS this deck's skin); ZAPAC deliberately does
+   not — rounded, sans, blue, calm. */
+.skins .sp-mini{--tone:var(--blue);height:var(--body);border:1px solid var(--tone);display:flex;flex-direction:column;overflow:hidden;position:relative}
+.skins .sp-mini-head{display:flex;align-items:center;gap:6px;padding:6px 8px;border-bottom:1px solid var(--tone)}
+.skins .sp-mini-dots{display:flex;gap:4px}
+.skins .sp-mini-dots i{width:5px;height:5px;border-radius:50%;background:var(--tone);opacity:.75}
+.skins .sp-mini-label{margin-left:auto;font-size:7.5px;letter-spacing:.14em;color:var(--tone)}
+.skins .sp-mini-nav{display:flex;gap:9px;padding:7px 8px 6px;font-size:8px;letter-spacing:.03em;color:var(--green-map);border-bottom:1px solid rgba(60,156,108,.25)}
+.skins .sp-mini-nav .on{color:var(--tone)}
+.skins .sp-mini-body{flex:1;padding:8px}
+.skins .sp-mini-stat{display:flex;justify-content:space-between;align-items:baseline}
+.skins .sp-mini-k{font-size:8px;letter-spacing:.08em;color:var(--green-map)}
+.skins .sp-mini-stat b{font-family:var(--cond);font-weight:700;font-size:19px;line-height:1;color:var(--paper)}
+.skins .sp-mini-bar{display:flex;gap:3px;height:5px;margin:7px 0 9px}
+.skins .sp-mini-bar i{flex:1;background:var(--green-dim);opacity:.35}
+.skins .sp-mini-bar i.on{background:var(--tone);opacity:1}
+.skins .sp-mini-row{display:flex;justify-content:space-between;align-items:baseline;font-size:8px;letter-spacing:.05em;color:var(--green-map);padding:4px 0;border-top:1px dotted rgba(60,156,108,.4)}
+.skins .sp-mini-row em{font-style:normal;color:var(--tone)}
+.skins .sp-mini-btn{margin:0 8px 8px;padding:5px;text-align:center;font-size:8.5px;font-weight:700;letter-spacing:.1em;background:var(--tone);color:var(--bg)}
+
+.skins .sp-mini.zapac{border-radius:12px;font-family:ui-sans-serif,system-ui,sans-serif}
+.skins .sp-mini.zapac .sp-mini-btn,.skins .sp-mini.zapac .sp-mini-bar i{border-radius:999px}
+.skins .sp-mini.zapac .sp-mini-label,.skins .sp-mini.zapac .sp-mini-btn{text-transform:uppercase}
+.skins .sp-mini.phosphor{--tone:var(--orange);border-radius:0;font-family:var(--cond);letter-spacing:.06em;text-transform:uppercase;
+  box-shadow:0 0 10px rgba(242,100,0,.22),inset 0 0 10px rgba(242,100,0,.06)}
+/* the scanline wash is the one treatment ZAPAC has no equivalent of — it is
+   what makes "pushed to the edge" legible at this size */
+.skins .sp-mini.phosphor::after{content:"";position:absolute;inset:0;pointer-events:none;background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px)}
+.skins .sp-mini.phosphor .sp-mini-btn{box-shadow:0 0 9px rgba(242,100,0,.5)}
+.skins .sp-mini.phosphor .sp-mini-stat b{color:var(--mint-hi)}
+
+/* ── the conclusion ──────────────────────────────────────────────────────── */
+.skins .sp-claim{display:flex;flex-direction:column;justify-content:center;min-width:0}
+.skins .sp-claim-tag{display:flex;align-items:center;gap:9px;margin-bottom:12px}
+.skins .sp-claim-tag .jp{font-family:var(--jp);font-weight:800;font-size:15px;color:var(--orange)}
+.skins .sp-claim h3{font-size:clamp(28px,3.2vw,46px);margin:0}
+.skins .sp-tagline{margin-top:13px;font-family:var(--cond);font-weight:700;font-size:clamp(12px,1.2vw,15px);letter-spacing:.09em;text-transform:uppercase;color:var(--amber)}
+
+/* the token pipeline, drawn with system-design's arch-box/arch-link grammar:
+   your tokens in, the five axes they cover, the same system out */
+.skins .sp-pipe{margin-top:clamp(14px,1.8vw,22px);display:flex;flex-direction:column;align-items:stretch}
+.skins .sp-pipe-box{border:2px solid var(--tone,var(--mint));color:var(--tone,var(--mint));padding:9px 12px;text-align:center;
+  clip-path:polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))}
+.skins .sp-pipe-in{--tone:var(--paper)}
+.skins .sp-pipe-out{--tone:var(--mint)}
+.skins .sp-pipe-box .jp{display:block;font-family:var(--jp);font-weight:800;font-size:15px;line-height:1;margin-bottom:4px}
+.skins .sp-pipe-box b{display:block;font-family:var(--cond);font-weight:700;font-size:14px;letter-spacing:.1em;text-transform:uppercase}
+.skins .sp-pipe-box small{display:block;margin-top:3px;font-size:7.5px;letter-spacing:.11em;color:var(--green-map)}
+.skins .sp-pipe-link{width:2px;height:16px;margin:0 auto;background:var(--orange);position:relative}
+.skins .sp-pipe-link::after{content:"▼";position:absolute;left:-4px;bottom:-4px;font-size:9px;line-height:1;color:var(--orange)}
+.skins .sp-pipe-axes{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin-top:8px;padding:8px 6px;border:1px dashed var(--green-dim)}
+.skins .sp-pipe-axes span{border:1px solid var(--mint);color:var(--mint);padding:2px 6px;font-size:7.5px;letter-spacing:.11em}
+
+/* ── the footer line ─────────────────────────────────────────────────────── */
+.skins .skin-kicker{margin-top:clamp(16px,2vw,26px);border-left:2px solid var(--orange);padding:3px 0 3px 15px;color:var(--amber);
+  font-size:clamp(11px,1.05vw,13px);line-height:1.7;letter-spacing:.05em;max-width:96ch}
 .skins .skin-kicker b{color:var(--paper);font-weight:400}
+.skins .skin-kicker-sub{display:block;margin-top:3px;font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:lowercase;color:var(--green-map)}

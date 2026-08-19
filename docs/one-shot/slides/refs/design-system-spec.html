@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DESIGN-SYSTEM.md</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    /* Phosphor design-system tokens — see design-system.html :root */
+    :root {
+      --bg: #0A0A0A; --mint: #52F29A; --mint-hi: #7CF4AB; --green-map: #3C9C6C; --green-dim: #246C3C;
+      --paper: #EDF8D6; --red: #C20C0C; --red-hi: #E2280F; --crimson: #E60225; --orange: #F26400;
+      --amber: #F49F09; --amber-dim: #9C3C24; --teal: #0C6C80; --blue: #5090D0; --blueprint: #B4B4B4;
+      --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --cond: "Arial Narrow", "Avenir Next Condensed", "Helvetica Neue", Arial, sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: var(--mono);
+      letter-spacing: .03em;
+      line-height: 1.6;
+      color: var(--mint);
+      background-color: var(--bg);
+      margin: 0;
+      padding: 45px;
+      max-width: 850px;
+      margin: 0 auto;
+    }
+    h1, h2, h3 {
+      margin-top: 24px;
+      margin-bottom: 16px;
+      font-family: var(--cond);
+      font-weight: 700;
+      line-height: 1.25;
+      letter-spacing: .03em;
+      border-bottom: 1px solid var(--orange);
+      padding-bottom: 0.3em;
+      color: var(--mint-hi);
+      text-shadow: 0 0 8px rgba(82,242,154,.28);
+    }
+    h1 { font-size: 2em; }
+    h2 { font-size: 1.5em; }
+    h3 { font-size: 1.25em; border-bottom: none; color: var(--amber); text-shadow: none; }
+    p, ul, ol { margin-bottom: 16px; }
+    li { margin-bottom: 4px; }
+    code {
+      padding: 0.2em 0.4em;
+      margin: 0;
+      font-size: 85%;
+      background-color: rgba(82,242,154,0.08);
+      border-radius: 2px;
+      font-family: var(--mono);
+      color: var(--orange);
+    }
+    pre {
+      padding: 16px;
+      overflow: auto;
+      font-size: 85%;
+      line-height: 1.45;
+      background-color: #050505;
+      border-radius: 0;
+      margin-bottom: 16px;
+      border: 1px solid var(--green-dim);
+    }
+    pre code {
+      background: none;
+      padding: 0;
+      font-size: 100%;
+      color: var(--mint);
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      margin-bottom: 16px;
+    }
+    table th, table td {
+      padding: 6px 13px;
+      border: 1px solid var(--green-dim);
+    }
+    table th {
+      background-color: rgba(242,100,0,.08);
+      color: var(--amber);
+      font-family: var(--cond);
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+    table tr:nth-child(2n) {
+      background-color: rgba(82,242,154,.04);
+    }
+    blockquote {
+      padding: 0 1em;
+      color: var(--green-map);
+      border-left: 0.25em solid var(--orange);
+      margin: 0 0 16px 0;
+    }
+    hr {
+      height: 2px;
+      padding: 0;
+      margin: 24px 0;
+      background: linear-gradient(90deg, var(--orange), transparent);
+      border: 0;
+    }
+    #content {
+      opacity: 0;
+      transition: opacity 0.2s ease-in;
+    }
+    #content.loaded {
+      opacity: 1;
+    }
+    a {
+      color: var(--blue);
+      text-decoration: none;
+    }
+    a:hover {
+      color: var(--mint-hi);
+      text-decoration: underline;
+    }
+    ::selection { background: var(--mint); color: var(--bg); }
+  </style>
+</head>
+<body>
+  <div id="content">Loading documentation...</div>
+
+  <script>
+    async function loadMarkdown() {
+      const contentDiv = document.getElementById('content');
+      try {
+        // Path relative to the file in public/refs/ — must match the file's
+        // exact case (GitHub Pages is case-sensitive).
+        const response = await fetch('DESIGN-SYSTEM.md');
+        if (!response.ok) throw new Error(`Failed to fetch MD: ${response.statusText}`);
+        const markdown = await response.text();
+        contentDiv.innerHTML = marked.parse(markdown);
+        contentDiv.classList.add('loaded');
+      } catch (err) {
+        contentDiv.innerHTML = `<p style="color: var(--red-hi);">Error loading DESIGN-SYSTEM.md: ${err.message}</p>`;
+        // Surface the error instead of leaving the div invisible at opacity:0.
+        contentDiv.classList.add('loaded');
+      }
+    }
+    loadMarkdown();
+  </script>
+</body>
+</html>

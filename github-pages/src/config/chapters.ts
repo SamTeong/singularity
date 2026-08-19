@@ -23,10 +23,11 @@ export type ChapterId =
   | 'themes'
   | 'openspec'
   | 'take-control'
+  | 'developed-by'
+  | 'advisors'
   | 'stats'
   | 'alternatives'
-  | 'inspiration'
-  | 'advisors';
+  | 'inspiration';
 
 export interface ChapterWorld {
   fog: number; // FogExp2 density
@@ -198,13 +199,19 @@ export const CHAPTERS = [
 
   {
     id: 'skins', weight: 1.25, num: '07', jp: '体系', code: 'SCR·07', title: 'ONE SYSTEM, TWO SKINS',
-    sub: 'ZAPAC BY DEFAULT · PHOSPHOR FOR NOSTALGIA',
+    sub: 'SWAP THE TOKENS. KEEP THE SYSTEM.',
     u: [0.801, 0.332, 0.250], yaw: 270, pitch: 0, w: 5.9, px: 1340, pxm: 760,
     fill: 0.80, lift: 0.16, tone: 0xF26400, world: { fog: 0.030, bloom: 0.66, motes: 0.62, exposure: 1.02 },
   },
 
+  // Stepped like `fleet-control` and `tasks`: the camera parks on this panel
+  // for the first STEP_BAND_SPAN of its segment while the reader scrolls the
+  // five stages as bands (see deck/useScrollStep.ts), and the autoplay tour
+  // stops on each stage. Weight 3.50 gives the five bands ~0.7 vh each — the
+  // budget below which bands fly past. Stage selection moved off the old
+  // continuous ±0.45 sweep (driveFromScroll) onto the band system to match.
   {
-    id: 'pipeline', weight: 2.10, num: '08', jp: '経路', code: 'SCR·08', title: 'THE PHOSPHOR PIPELINE',
+    id: 'pipeline', weight: 3.50, steps: 5, num: '08', jp: '経路', code: 'SCR·08', title: 'THE PHOSPHOR PIPELINE',
     sub: '08 PAGES · 34 EXPERIMENTS · 23 REFERENCES',
     u: [-0.178, 0.796, 0.833], yaw: 182, pitch: 4, w: 6.5, px: 1500, pxm: 780,
     fill: 0.94, lift: 0.10, tone: 0x0C6C80, world: { fog: 0.022, bloom: 0.72, motes: 0.48, exposure: 1.0 },
@@ -218,7 +225,7 @@ export const CHAPTERS = [
   },
 
   {
-    id: 'openspec', weight: 1.70, num: '10', jp: '仕様', code: 'SCR·10', title: 'OPENSPEC SHIPS THE ONE-SHOT',
+    id: 'openspec', weight: 1.70, num: '10', jp: '仕様', code: 'SCR·10', title: 'OPENSPEC',
     sub: 'PROPOSAL → DESIGN → SPEC → TASKS',
     u: [0.890, 0.575, -0.933], yaw: 120, pitch: 0, w: 6.2, px: 1440, pxm: 770,
     fill: 0.80, lift: 0.08, tone: 0x0C6C80, world: { fog: 0.028, bloom: 0.70, motes: 0.58, exposure: 1.02 },
@@ -232,35 +239,63 @@ export const CHAPTERS = [
   },
 
   // ─── the closing sequence ────────────────────────────────────────────────
-  // What the build cost, the alternatives around it, the work behind it, then
-  // who it owes. These sit behind the CTA, carrying the camera from -Z to -X.
+  // Who built it, who it owes, what it cost, the alternatives around it, then
+  // what it was built from. These sit behind the CTA, carrying the camera from
+  // -Z to -X.
+  //
+  // The five anchors below belong to the SLOTS, not to the slides sitting in
+  // them: they are one continuous sweep (yaw 182 → 272, x +0.10 → -1.34) with
+  // its clearances tuned as a chain. Reordering the closing slides means moving
+  // the content fields — id/jp/title/sub/weight and the panel's w/px/pxm/
+  // fill/lift/tone — between these entries, and leaving u/yaw/pitch/world/num/
+  // code where they are. Carrying an anchor along with its slide instead makes
+  // the camera double back mid-sequence.
 
   {
-    id: 'stats', weight: 1.30, num: '12', jp: '統計', code: 'SCR·12', title: 'STATS',
-    sub: 'WHAT IT TOOK TO GET HERE',
-    u: [0.10, 1.16, -1.12], yaw: 182, pitch: -4, w: 6.0, px: 1360, pxm: 770,
-    fill: 0.80, lift: 0.20, tone: 0x5090D0, world: { fog: 0.030, bloom: 0.70, motes: 0.6, exposure: 1.02 },
+    id: 'developed-by', weight: 1.60, num: '12', jp: '開発', code: 'SCR·12', title: 'DEVELOPED BY',
+    sub: 'SAM TEONG · JAIRUS ARAGON',
+    u: [0.10, 1.16, -1.12], yaw: 182, pitch: -4, w: 6.0, px: 1360, pxm: 760,
+    fill: 0.86, lift: 0.34, tone: 0xF49F09, world: { fog: 0.030, bloom: 0.70, motes: 0.6, exposure: 1.02 },
   },
 
   {
-    id: 'alternatives', weight: 1.70, num: '13', jp: '比較', code: 'SCR·13', title: 'ALTERNATIVES',
-    sub: 'CONDUCTOR · BUZZ · GROKBOT',
-    u: [-0.72, 1.05, -0.92], yaw: 212, pitch: -2, w: 6.5, px: 1500, pxm: 780,
-    fill: 0.90, lift: 0.24, tone: 0xF26400, world: { fog: 0.034, bloom: 0.74, motes: 0.72, exposure: 1.03 },
-  },
-
-  {
-    id: 'inspiration', weight: 1.45, num: '14', jp: '源泉', code: 'SCR·14', title: 'INSPIRATION',
-    sub: 'KARPATHY · POCOCK · HERK · HANNEGAN',
-    u: [-1.04, 0.54, -0.74], yaw: 242, pitch: 0, w: 6.5, px: 1500, pxm: 780,
-    fill: 0.90, lift: 0.18, tone: 0x52F29A, world: { fog: 0.038, bloom: 0.78, motes: 0.82, exposure: 1.04 },
-  },
-
-  {
-    id: 'advisors', weight: 1.20, num: '15', jp: '謝辞', code: 'SCR·15', title: 'SPECIAL THANKS',
+    id: 'advisors', weight: 1.55, num: '13', jp: '謝辞', code: 'SCR·13', title: 'SPECIAL THANKS',
     sub: 'KEVIN LIN · MIN SOE ZAN',
-    u: [-1.34, 0.92, -0.56], yaw: 272, pitch: 0, w: 5.8, px: 1300, pxm: 760,
-    fill: 0.82, lift: 0.30, tone: 0x7CF4AB, world: { fog: 0.042, bloom: 0.80, motes: 0.9, exposure: 1.06 },
+    u: [-0.72, 1.05, -0.92], yaw: 212, pitch: -2, w: 5.8, px: 1300, pxm: 760,
+    fill: 0.82, lift: 0.40, tone: 0x7CF4AB, world: { fog: 0.034, bloom: 0.74, motes: 0.72, exposure: 1.03 },
+  },
+
+  {
+    id: 'stats', weight: 1.30, num: '14', jp: '統計', code: 'SCR·14', title: 'STATS',
+    sub: 'WHAT IT TOOK TO GET HERE',
+    u: [-1.04, 0.54, -0.74], yaw: 242, pitch: 0, w: 6.0, px: 1360, pxm: 770,
+    fill: 0.80, lift: 0.20, tone: 0x5090D0, world: { fog: 0.038, bloom: 0.78, motes: 0.82, exposure: 1.04 },
+  },
+
+  // `x`/`z` interpolated between the slot above and the slot below; yaw 257 is
+  // 15° off each neighbour, nowhere near the antiparallel danger zone. `y` is
+  // NOT the midpoint, though — see below.
+  //
+  // These last three slots are near-coplanar, all stacked in roughly the same
+  // corner, same as agent-harness/fleet-control — so per that seam's rule they
+  // need HEIGHT-based separation, not just a different yaw. The original
+  // two-slot ledger had u.y=0.54 and u.y=0.92, a proven-safe 0.38 gap (~3.44
+  // world units, since height=9.043). Inserting a third slot at the linear y
+  // midpoint (0.73) would have HALVED that clearance on both sides to ~1.72
+  // units each — which is exactly what overlapped in practice. Fix: stack the
+  // same proven 0.38 gap upward twice instead of splitting it once.
+  {
+    id: 'alternatives', weight: 1.70, num: '15', jp: '比較', code: 'SCR·15', title: 'ALTERNATIVES',
+    sub: 'CONDUCTOR · BUZZ · GROKBOT',
+    u: [-1.19, 0.92, -0.65], yaw: 257, pitch: 0, w: 6.5, px: 1500, pxm: 780,
+    fill: 0.90, lift: 0.24, tone: 0xF26400, world: { fog: 0.040, bloom: 0.79, motes: 0.86, exposure: 1.05 },
+  },
+
+  {
+    id: 'inspiration', weight: 1.45, num: '16', jp: '源泉', code: 'SCR·16', title: 'INSPIRATION',
+    sub: 'KARPATHY · POCOCK · HERK · HANNEGAN',
+    u: [-1.34, 1.30, -0.56], yaw: 272, pitch: 0, w: 6.5, px: 1500, pxm: 780,
+    fill: 0.90, lift: 0.18, tone: 0x52F29A, world: { fog: 0.042, bloom: 0.80, motes: 0.9, exposure: 1.06 },
   },
 ] as const satisfies readonly Chapter[];
 

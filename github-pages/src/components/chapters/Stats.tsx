@@ -13,7 +13,7 @@ export function Stats({ sectionRef }: ChapterProps) {
     <section className="chapter stats" id="stats" aria-labelledby="stats-title" ref={sectionRef}>
       <div className="chapter-inner">
         <div className="section-head">
-          <span className="idx">08</span>
+          <span className="idx">14</span>
           <span className="jp">統計</span>
           <h2 id="stats-title">STATS</h2>
         </div>

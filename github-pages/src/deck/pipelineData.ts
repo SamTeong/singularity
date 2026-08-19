@@ -80,7 +80,7 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
     ],
   },
   {
-    n: '02', jp: '実験', title: 'EXPERIMENTS', done: 1, v: '34', k: 'GENERATED',
+    n: '02', jp: '実験', title: 'EXPERIMENTS', done: 1, v: '34', k: 'HTML PAGES',
     desc: [
       { code: '/frontend-design' },
       { text: ' and ' },
@@ -90,7 +90,7 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
     items: [1, 2, 3, 4, 5, 6, 7, 8, 9, 11].map(experiment),
   },
   {
-    n: '03', jp: '配置', title: 'SAMPLE LAYOUTS', done: 1, v: '08', k: 'BUILT OUT',
+    n: '03', jp: '配置', title: 'SAMPLE LAYOUTS', done: 1, v: '08', k: 'ONE-SHOTS',
     desc: [
       { text: 'Eight layouts, built far enough to see which direction was actually working — dashboards, forms, landing pages, a wiki.' },
     ],
@@ -112,7 +112,8 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
       { text: ' extracts a design-system.html and a DESIGN-SYSTEM.md from whichever layouts survive. Tokens, atoms, patterns — one source' },
     ],
     items: [
-      { label: 'DESIGN-SYSTEM.HTML', img: `${THUMBS}design-system.jpg`, src: `${REFS}design-system.html`, kind: 'page', tag: 'SYS', wide: true },
+      { label: 'DESIGN-SYSTEM.HTML', img: `${THUMBS}design-system.jpg`, src: `${REFS}design-system.html`, kind: 'page', tag: 'SYS' },
+      { label: 'DESIGN-SYSTEM.MD', img: `${THUMBS}design-system-spec.jpg`, src: `${REFS}design-system-spec.html`, kind: 'page', tag: 'SYS' },
     ],
   },
   {
@@ -121,8 +122,10 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
       { code: '/material-ui-theming' },
       { text: ' turns the design system into Phosphor — dark-mode only. These are the tokens that came out the other end.' },
     ],
-    items: [],
-    swatches: true,
+    items: [
+      { label: 'PHOSPHOR MUI', img: `${THUMBS}mui-theme.jpg`, src: 'https://shocknawe.github.io/evangelion-mui-theme', kind: 'page', tag: 'MUI', wide: true },
+    ],
+    swatches: false,
   },
 ];
 
