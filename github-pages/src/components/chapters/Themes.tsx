@@ -96,7 +96,7 @@ function Terminal({ id, label }: { id: ThemeTerminalId; label: string }) {
   return (
     <div className="tc-term" aria-label={label}>
       <div className="tc-term-head">
-        TERMINAL
+        CHAT
         <span className="tc-dots" aria-hidden="true">
           <i />
           <i />
@@ -107,7 +107,7 @@ function Terminal({ id, label }: { id: ThemeTerminalId; label: string }) {
         <div className="term-row ">
           <span className="prompt">›</span>
           <span>{text}</span>
-          {cursor && <span className="term-cursor" />}
+          {cursor && <span className="term-cursor" style={{ marginTop: '2px' }} />}
         </div>
       </div>
     </div>
@@ -130,7 +130,7 @@ function Card({ card }: { card: ThemeCard }) {
 
       <Shot card={card} />
 
-      <div className="tc-spec">
+      {/* <div className="tc-spec">
         <div className="tc-row">
           <span className="tc-k">Theme</span>
           <span className="tc-v">
@@ -144,7 +144,7 @@ function Card({ card }: { card: ThemeCard }) {
             <code>{card.skill}</code>
           </span>
         </div>
-      </div>
+      </div> */}
 
       <Terminal id={card.id} label={`${card.name} skill in use`} />
 
@@ -173,8 +173,7 @@ export function Themes({ sectionRef }: ChapterProps) {
           <h2 id="themes-title">TWO THEMES, TWO SKILLS</h2>
         </div>
         <p className="lead">
-          A theme is a library someone has to know how to use. <strong>An AI skill is that same know-how, taught to the
-          agent</strong> — so staying on-brand stops taking effort. Both themes ship this way: run the skill, and the
+          We used <strong>two theme specific AI skills</strong> to skin the system — so staying on-brand stops taking effort. Both theme ship this way: run the skill, and the
           agent already knows the component library.
         </p>
 
