@@ -80,7 +80,7 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
     ],
   },
   {
-    n: '02', jp: '実験', title: 'EXPERIMENTS', done: 1, v: '34', k: 'GENERATED',
+    n: '02', jp: '実験', title: 'EXPERIMENTS', done: 1, v: '34', k: 'HTML PAGES',
     desc: [
       { code: '/frontend-design' },
       { text: ' and ' },
@@ -90,7 +90,7 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
     items: [1, 2, 3, 4, 5, 6, 7, 8, 9, 11].map(experiment),
   },
   {
-    n: '03', jp: '配置', title: 'SAMPLE LAYOUTS', done: 1, v: '08', k: 'BUILT OUT',
+    n: '03', jp: '配置', title: 'SAMPLE LAYOUTS', done: 1, v: '08', k: 'ONE-SHOTS',
     desc: [
       { text: 'Eight layouts, built far enough to see which direction was actually working — dashboards, forms, landing pages, a wiki.' },
     ],

@@ -95,8 +95,9 @@ export function Pipeline({ sectionRef }: ChapterProps) {
           <h2 id="pipeline-title">THE PHOSPHOR PIPELINE</h2>
         </div>
         <p className="lead">
-          From an Evangelion mood board to a production dark theme, in five stages. Every stage below still has its
-          artifacts — <strong>scroll through the stages, then open the real thing.</strong>
+          From a mood board to a production dark theme, in five stages. 
+          {/* Every stage below still has its
+          artifacts — <strong>scroll through the stages, then open the real thing.</strong> */}
         </p>
 
         <div className="pp-track" role="tablist" aria-label="Five-stage design pipeline">
@@ -122,13 +123,12 @@ export function Pipeline({ sectionRef }: ChapterProps) {
               onClick={() => select(i)}
               onKeyDown={(e) => onKeyDown(e, i)}
             >
-              {s.here && <span className="stamp c-mint pp-here">YOU ARE HERE</span>}
+              {/* {s.here && <span className="stamp c-mint pp-here">YOU ARE HERE</span>} */}
               <span className="pp-node">{s.n}</span>
               <span className="jp">{s.jp}</span>
               <span className="pp-en">{s.title}</span>
               <span className="pp-val">
-                {s.v}
-                <small>{s.k}</small>
+                <small>{s.v} {s.k}</small>
               </span>
             </button>
           ))}
@@ -139,11 +139,12 @@ export function Pipeline({ sectionRef }: ChapterProps) {
             <span className="pp-stage-jp">{step.jp}</span>
             <div>
               <h3>
-                {step.n} · {step.title}
+                {/* {step.n} ·  */}
+                {step.title}
               </h3>
-              <p>
+              {/* <p>
                 <Desc runs={step.desc} />
-              </p>
+              </p> */}
             </div>
             <div className="pp-hint">
               <b>CLICK A CARD</b>
