@@ -37,13 +37,13 @@
   .inspiration .in-lineup{grid-template-columns:repeat(2,minmax(0,1fr))}
   .inspiration .in-person:nth-child(odd){border-left:0}
   .inspiration .in-person:nth-child(n+3){border-top:1px solid var(--green-dim)}
-/* origin: skins — the five-column proof stacks; the pivot's arrow turns to
-   point down instead of right, and the conclusion re-centers with the rest
-   of the stacked columns instead of staying left-aligned */
-  .skins .skins-proof{grid-template-columns:1fr}
-  .skins .sp-arrow{flex-direction:row}
-  .skins .sp-arrow-glyph{transform:rotate(90deg)}
-  .skins .sp-claim{align-items:center;text-align:center}
+/* origin: skins — the conclusion drops under the rig, and inside the rig the
+   two skins sit beside each other with 01 above them (four cells in one row is
+   too narrow to render a mini app below ~900px of rig) */
+  .skins .sp-grid{grid-template-columns:1fr}
+  .skins .sp-stages{grid-template-columns:minmax(0,1fr) auto minmax(0,1fr)}
+  .skins .sp-stage-broken{grid-column:1/-1;border-right:0;border-bottom:1px solid var(--orange)}
+  .skins .sp-stage-broken .sp-sprawl{height:150px}
 }
 @media(max-width:720px){
 /* origin: tokens (--header-h) */
@@ -84,6 +84,15 @@
   .arch-link{width:2px;height:26px;margin:auto}
 /* origin: take-control */
   .take-control h2{font-size:clamp(56px,18vw,92px)}
+/* origin: skins — one stage per row, so the pivot's arrow turns to point down
+   between ZAPAC and Phosphor and its rail runs vertically */
+  .skins .sp-stages{grid-template-columns:1fr}
+  .skins .sp-stage-broken{grid-column:auto}
+  .skins .sp-pivot{width:auto;flex-direction:row;justify-content:flex-start;gap:14px;padding:10px 13px}
+  .skins .sp-pivot-rail{left:50%;right:auto;top:0;bottom:0;height:auto;width:1px;background:repeating-linear-gradient(180deg,var(--orange) 0 5px,transparent 5px 10px)}
+  .skins .sp-pivot-glyph{transform:rotate(90deg)}
+  .skins .sp-rig-status{flex-wrap:wrap;gap:8px}
+  .skins .sp-spacer{display:none}
 /* origin: pipeline — the track goes vertical, with the connector rotated to
    run down the left of the node column (source L402-407) */
   .phospipe .pp-track{grid-template-columns:1fr;gap:4px}
