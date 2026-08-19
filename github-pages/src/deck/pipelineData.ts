@@ -113,6 +113,7 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
     ],
     items: [
       { label: 'DESIGN-SYSTEM.HTML', img: `${THUMBS}design-system.jpg`, src: `${REFS}design-system.html`, kind: 'page', tag: 'SYS', wide: true },
+      { label: 'DESIGN-SYSTEM.MD', img: `${THUMBS}design-system.jpg`, src: `${REFS}design-system-spec.html`, kind: 'page', tag: 'SYS', wide: true },
     ],
   },
   {
@@ -121,8 +122,10 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
       { code: '/material-ui-theming' },
       { text: ' turns the design system into Phosphor — dark-mode only. These are the tokens that came out the other end.' },
     ],
-    items: [],
-    swatches: true,
+    items: [
+      { label: 'PHOSPHOR MUI', img: `${THUMBS}mui-theme.jpg`, src: `${REFS}mui-theme.html`, kind: 'page', tag: 'MUI', wide: true },
+    ],
+    swatches: false,
   },
 ];
 
