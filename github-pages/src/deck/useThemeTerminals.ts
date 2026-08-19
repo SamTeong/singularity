@@ -19,8 +19,8 @@ export type ThemeTerminalId = 'zapac' | 'phosphor';
 /** Source L805-808. Each transcript is one prompt row; the leading '›' is
  *  rendered as its own `.prompt` span, exactly as typeTerminal() does. */
 const TRANSCRIPTS: Record<ThemeTerminalId, string> = {
-  zapac: '/zapac-material-ui create a form using this style',
-  phosphor: '/evangelion-mui-theme create a form using this style',
+  zapac: '/zapac-material-ui create a form using this theme',
+  phosphor: '/evangelion-mui-theme create a form using this theme',
 };
 
 const IDS: readonly ThemeTerminalId[] = ['zapac', 'phosphor'];

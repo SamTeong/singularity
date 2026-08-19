@@ -57,11 +57,12 @@ export function OpenSpec({ sectionRef }: ChapterProps) {
               <span className="jp">仕様</span>ONE-SHOT → SPEC → SHIPPED
             </div>
             <div className="section-head">
-              <h2 id="openspec-title">OPENSPEC KEEPS THE IMPLEMENTATION <br />ON-TRACK</h2>
+              <h2 id="openspec-title">OPENSPEC KEEPS THE AGENT ON-TRACK</h2>
             </div>
             <p className="lead">
-              We used <strong>OpenSpec</strong> to turn the theme from a one-shot into an implementation plan the agent could follow without drifting. <strong>It lives in the repo, survives token limits and session resets, and can be handed off to other, cheaper agents.</strong> The plan persists even when the agent doesn't.
+              We used <strong>OpenSpec</strong> to turn the theme from a one-shot into an implementation plan the agent could follow without drifting. <strong>It lives in the repo, survives token limits and session resets, and can be handed off to other, cheaper agents.</strong>
             </p>
+            <p className="lead">The plan persists even when the agent won't.</p>
             <div className="os-artifacts">
               {/* No more artifacts on the left - they all moved to the ledger */}
             </div>
