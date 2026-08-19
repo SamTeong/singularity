@@ -63,7 +63,7 @@ export function DevelopedBy({ sectionRef }: ChapterProps) {
     <section className="chapter developed-by" id="developed-by" aria-labelledby="developed-by-title" ref={sectionRef}>
       <div className="chapter-inner">
         <div className="section-head">
-          <span className="idx">15</span>
+          <span className="idx">12</span>
           <span className="jp">開発</span>
           <h2 id="developed-by-title">DEVELOPED BY</h2>
         </div>

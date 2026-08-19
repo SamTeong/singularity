@@ -23,11 +23,11 @@ export type ChapterId =
   | 'themes'
   | 'openspec'
   | 'take-control'
+  | 'developed-by'
+  | 'advisors'
   | 'stats'
   | 'alternatives'
-  | 'inspiration'
-  | 'developed-by'
-  | 'advisors';
+  | 'inspiration';
 
 export interface ChapterWorld {
   fog: number; // FogExp2 density
@@ -239,55 +239,63 @@ export const CHAPTERS = [
   },
 
   // ─── the closing sequence ────────────────────────────────────────────────
-  // What the build cost, the alternatives around it, the work behind it, then
-  // who it owes. These sit behind the CTA, carrying the camera from -Z to -X.
-
-  {
-    id: 'stats', weight: 1.30, num: '12', jp: '統計', code: 'SCR·12', title: 'STATS',
-    sub: 'WHAT IT TOOK TO GET HERE',
-    u: [0.10, 1.16, -1.12], yaw: 182, pitch: -4, w: 6.0, px: 1360, pxm: 770,
-    fill: 0.80, lift: 0.20, tone: 0x5090D0, world: { fog: 0.030, bloom: 0.70, motes: 0.6, exposure: 1.02 },
-  },
-
-  {
-    id: 'alternatives', weight: 1.70, num: '13', jp: '比較', code: 'SCR·13', title: 'ALTERNATIVES',
-    sub: 'CONDUCTOR · BUZZ · GROKBOT',
-    u: [-0.72, 1.05, -0.92], yaw: 212, pitch: -2, w: 6.5, px: 1500, pxm: 780,
-    fill: 0.90, lift: 0.24, tone: 0xF26400, world: { fog: 0.034, bloom: 0.74, motes: 0.72, exposure: 1.03 },
-  },
-
-  {
-    id: 'inspiration', weight: 1.45, num: '14', jp: '源泉', code: 'SCR·14', title: 'INSPIRATION',
-    sub: 'KARPATHY · POCOCK · HERK · HANNEGAN',
-    u: [-1.04, 0.54, -0.74], yaw: 242, pitch: 0, w: 6.5, px: 1500, pxm: 780,
-    fill: 0.90, lift: 0.18, tone: 0x52F29A, world: { fog: 0.038, bloom: 0.78, motes: 0.82, exposure: 1.04 },
-  },
-
-  // `x`/`z` interpolated between `inspiration` and the original `advisors`
-  // anchor; yaw 257 is 15° off each neighbour, nowhere near the antiparallel
-  // danger zone. `y` is NOT the midpoint, though — see below.
+  // Who built it, who it owes, what it cost, the alternatives around it, then
+  // what it was built from. These sit behind the CTA, carrying the camera from
+  // -Z to -X.
   //
-  // These three (inspiration, developed-by, advisors) are near-coplanar, all
-  // stacked in roughly the same corner, same as agent-harness/fleet-control —
-  // so per that seam's rule they need HEIGHT-based separation, not just a
-  // different yaw. The original two-chapter ledger had inspiration at
-  // u.y=0.54 and advisors at u.y=0.92, a proven-safe 0.38 gap (~3.44 world
-  // units, since height=9.043). Inserting developed-by at the linear y
+  // The five anchors below belong to the SLOTS, not to the slides sitting in
+  // them: they are one continuous sweep (yaw 182 → 272, x +0.10 → -1.34) with
+  // its clearances tuned as a chain. Reordering the closing slides means moving
+  // the content fields — id/jp/title/sub/weight and the panel's w/px/pxm/
+  // fill/lift/tone — between these entries, and leaving u/yaw/pitch/world/num/
+  // code where they are. Carrying an anchor along with its slide instead makes
+  // the camera double back mid-sequence.
+
+  {
+    id: 'developed-by', weight: 1.60, num: '12', jp: '開発', code: 'SCR·12', title: 'DEVELOPED BY',
+    sub: 'SAM TEONG · JAIRUS ARAGON',
+    u: [0.10, 1.16, -1.12], yaw: 182, pitch: -4, w: 6.0, px: 1360, pxm: 760,
+    fill: 0.86, lift: 0.34, tone: 0xF49F09, world: { fog: 0.030, bloom: 0.70, motes: 0.6, exposure: 1.02 },
+  },
+
+  {
+    id: 'advisors', weight: 1.55, num: '13', jp: '謝辞', code: 'SCR·13', title: 'SPECIAL THANKS',
+    sub: 'KEVIN LIN · MIN SOE ZAN',
+    u: [-0.72, 1.05, -0.92], yaw: 212, pitch: -2, w: 5.8, px: 1300, pxm: 760,
+    fill: 0.82, lift: 0.40, tone: 0x7CF4AB, world: { fog: 0.034, bloom: 0.74, motes: 0.72, exposure: 1.03 },
+  },
+
+  {
+    id: 'stats', weight: 1.30, num: '14', jp: '統計', code: 'SCR·14', title: 'STATS',
+    sub: 'WHAT IT TOOK TO GET HERE',
+    u: [-1.04, 0.54, -0.74], yaw: 242, pitch: 0, w: 6.0, px: 1360, pxm: 770,
+    fill: 0.80, lift: 0.20, tone: 0x5090D0, world: { fog: 0.038, bloom: 0.78, motes: 0.82, exposure: 1.04 },
+  },
+
+  // `x`/`z` interpolated between the slot above and the slot below; yaw 257 is
+  // 15° off each neighbour, nowhere near the antiparallel danger zone. `y` is
+  // NOT the midpoint, though — see below.
+  //
+  // These last three slots are near-coplanar, all stacked in roughly the same
+  // corner, same as agent-harness/fleet-control — so per that seam's rule they
+  // need HEIGHT-based separation, not just a different yaw. The original
+  // two-slot ledger had u.y=0.54 and u.y=0.92, a proven-safe 0.38 gap (~3.44
+  // world units, since height=9.043). Inserting a third slot at the linear y
   // midpoint (0.73) would have HALVED that clearance on both sides to ~1.72
   // units each — which is exactly what overlapped in practice. Fix: stack the
   // same proven 0.38 gap upward twice instead of splitting it once.
   {
-    id: 'developed-by', weight: 1.60, num: '15', jp: '開発', code: 'SCR·15', title: 'DEVELOPED BY',
-    sub: 'SAM TEONG · JAIRUS ARAGON',
-    u: [-1.19, 0.92, -0.65], yaw: 257, pitch: 0, w: 6.0, px: 1360, pxm: 760,
-    fill: 0.86, lift: 0.34, tone: 0xF49F09, world: { fog: 0.040, bloom: 0.79, motes: 0.86, exposure: 1.05 },
+    id: 'alternatives', weight: 1.70, num: '15', jp: '比較', code: 'SCR·15', title: 'ALTERNATIVES',
+    sub: 'CONDUCTOR · BUZZ · GROKBOT',
+    u: [-1.19, 0.92, -0.65], yaw: 257, pitch: 0, w: 6.5, px: 1500, pxm: 780,
+    fill: 0.90, lift: 0.24, tone: 0xF26400, world: { fog: 0.040, bloom: 0.79, motes: 0.86, exposure: 1.05 },
   },
 
   {
-    id: 'advisors', weight: 1.55, num: '16', jp: '謝辞', code: 'SCR·16', title: 'SPECIAL THANKS',
-    sub: 'KEVIN LIN · MIN SOE ZAN',
-    u: [-1.34, 1.30, -0.56], yaw: 272, pitch: 0, w: 5.8, px: 1300, pxm: 760,
-    fill: 0.82, lift: 0.40, tone: 0x7CF4AB, world: { fog: 0.042, bloom: 0.80, motes: 0.9, exposure: 1.06 },
+    id: 'inspiration', weight: 1.45, num: '16', jp: '源泉', code: 'SCR·16', title: 'INSPIRATION',
+    sub: 'KARPATHY · POCOCK · HERK · HANNEGAN',
+    u: [-1.34, 1.30, -0.56], yaw: 272, pitch: 0, w: 6.5, px: 1500, pxm: 780,
+    fill: 0.90, lift: 0.18, tone: 0x52F29A, world: { fog: 0.042, bloom: 0.80, motes: 0.9, exposure: 1.06 },
   },
 ] as const satisfies readonly Chapter[];
 

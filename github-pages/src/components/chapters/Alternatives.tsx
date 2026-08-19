@@ -117,7 +117,7 @@ export function Alternatives({ sectionRef }: ChapterProps) {
           <span className="jp">比較</span>THREE TAKES ON AGENT COORDINATION
         </div>
         <div className="section-head">
-          <span className="idx">13</span>
+          <span className="idx">15</span>
           <span className="jp">比較</span>
           <h2 id="alternatives-title">ALTERNATIVES</h2>
         </div>

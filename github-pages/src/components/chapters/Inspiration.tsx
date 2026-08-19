@@ -122,7 +122,7 @@ export function Inspiration({ sectionRef }: ChapterProps) {
           <span className="jp">源泉</span>THE WORK BEHIND THE WORK
         </div>
         <div className="section-head">
-          <span className="idx">14</span>
+          <span className="idx">16</span>
           <span className="jp">源泉</span>
           <h2 id="inspiration-title">INSPIRATION</h2>
         </div>

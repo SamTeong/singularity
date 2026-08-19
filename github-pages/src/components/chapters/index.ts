@@ -15,11 +15,11 @@ import { Pipeline } from './Pipeline';
 import { Themes } from './Themes';
 import { OpenSpec } from './OpenSpec';
 import { TakeControl } from './TakeControl';
+import { DevelopedBy } from './DevelopedBy';
+import { Advisors } from './Advisors';
 import { Stats } from './Stats';
 import { Alternatives } from './Alternatives';
 import { Inspiration } from './Inspiration';
-import { DevelopedBy } from './DevelopedBy';
-import { Advisors } from './Advisors';
 
 export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> = {
   orientation: Orientation,
@@ -33,9 +33,9 @@ export const CHAPTER_COMPONENTS: Record<ChapterId, ComponentType<ChapterProps>> 
   themes: Themes,
   openspec: OpenSpec,
   'take-control': TakeControl,
+  'developed-by': DevelopedBy,
+  advisors: Advisors,
   stats: Stats,
   alternatives: Alternatives,
   inspiration: Inspiration,
-  'developed-by': DevelopedBy,
-  advisors: Advisors,
 };

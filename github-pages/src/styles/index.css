@@ -19,10 +19,10 @@
  * closing sequence. These have no position in the original single-file source
  * order, so they are listed in LEDGER order instead — the ported four before
  * take-control.css because they sit before `take-control` in CHAPTERS,
- * stats.css, alternatives.css, inspiration.css, developed-by.css and
- * advisors.css after it because they sit after it. Keep that
- * correspondence when adding more: it is the only ordering rule a future
- * editor can check against the ledger.
+ * developed-by.css, advisors.css, stats.css, alternatives.css and
+ * inspiration.css after it because they sit after it. Keep that
+ * correspondence when adding more, and when reordering the closing sequence:
+ * it is the only ordering rule a future editor can check against the ledger.
  *
  * Every rule in these chapter files is scoped under its own section class, so
  * their position here is not load-bearing the way the files above are. That
@@ -34,11 +34,11 @@
 @import './chapters/themes.css';
 @import './chapters/openspec.css';
 @import './chapters/take-control.css';
+@import './chapters/developed-by.css';
+@import './chapters/advisors.css';
 @import './chapters/stats.css';
 @import './chapters/alternatives.css';
 @import './chapters/inspiration.css';
-@import './chapters/developed-by.css';
-@import './chapters/advisors.css';
 /*
  * footer.css is its own file rather than a second chunk of chrome.css so that
  * every stylesheet here is a single contiguous source range AND the emitted

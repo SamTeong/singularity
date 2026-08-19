@@ -42,7 +42,7 @@ export function Orientation({ sectionRef }: ChapterProps) {
                 if (!conductor) return;
                 e.preventDefault();
                 // Not CHAPTERS.length - 1: the deck no longer ends on
-                // take-control (stats and the closing chapters follow it), and FULL DIVE must
+                // take-control (the closing sequence follows it), and FULL DIVE must
                 // land on the same chapter its href names, in both modes.
                 conductor.goTo(CHAPTERS.findIndex((c) => c.id === 'take-control'));
               }}
