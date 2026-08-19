@@ -50,7 +50,7 @@ export function TakeControl({ sectionRef }: ChapterProps) {
           {COPY_STATE_TEXT[status]}
         </div>
         <div className="take-control-actions">
-          <a className="btn primary" href="https://github.com/SamTeong/singularity">
+          <a className="btn primary" href="https://github.com/SamTeong/singularity" target="_blank" rel="noopener noreferrer">
             OPEN REPOSITORY
           </a>
           {/* This panel IS hit-testable (unlike orientation's — see Hud.tsx), so the
