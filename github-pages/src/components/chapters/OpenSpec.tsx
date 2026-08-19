@@ -38,13 +38,9 @@ const ARTIFACTS: readonly Artifact[] = [
  *  longer bar genuinely means more work. */
 const GROUPS: readonly (readonly [string, string, number])[] = [
   ['1', 'Lorem ipsum dolor sit amet', 6],
-  ['2', 'consectetur adipiscing elit', 5],
-  ['3', 'Donec metus nisl blandit id magna', 5],
-  ['4', 'viverra luctus pellentesque eros', 5],
-  ['5', 'Fusce neque sapien facilisis', 6],
-  ['6', 'A justo ac tincidunt pretium lacus', 7],
-  ['7', 'Pellentesque risus lectus eleifend', 6],
-  ['8', 'In dolor eu tincidunt viverra', 6],
+  ['2', 'consectetur adipiscing elit', 7],
+  ['3', 'Donec metus nisl blandit id magna', 6],
+  ['4', 'viverra luctus pellentesque eros', 6],
 ];
 
 const TOTAL = GROUPS.reduce((n, [, , count]) => n + count, 0);
@@ -55,44 +51,23 @@ export function OpenSpec({ sectionRef }: ChapterProps) {
   return (
     <section className="chapter openspec" id="openspec" aria-labelledby="openspec-title" ref={sectionRef}>
       <div className="chapter-inner">
-        <div className="eyebrow">
-          <span className="jp">仕様</span>ONE-SHOT → SPEC → SHIPPED
-        </div>
-        <div className="section-head">
-          <span className="idx">10</span>
-          <span className="jp">仕様</span>
-          <h2 id="openspec-title">OPENSPEC KEEPS THE IMPLEMENTATION ON-TRACK</h2>
-        </div>
-        <p className="lead">
-          We used OpenSpec to turn the theme from a one-shot into an implementation plan the agent could follow without drifting. <strong>It lives in the repo, survives token limits and session resets, and can be handed off to other, cheaper agents.</strong> The plan persists even when the agent doesn't.
-        </p>
-
         <div className="os-grid">
-          <div>
-            <div className="os-artifacts">
-              {ARTIFACTS.map((a) => (
-                <article className={`os-artifact${a.now ? ' now' : ''}`} key={a.file}>
-                  <span className="os-glyph" aria-hidden="true">
-                    {a.glyph}
-                  </span>
-                  <div>
-                    <div className="os-f">
-                      {a.file}
-                      <small>{a.kind}</small>
-                    </div>
-                    {/* <p>{a.body}</p> */}
-                  </div>
-                </article>
-              ))}
+          <div className="os-left">
+            <div className="eyebrow">
+              <span className="jp">仕様</span>ONE-SHOT → SPEC → SHIPPED
             </div>
-            {/* <p className="os-kicker">
-              This one is real, and archived: <b>{TOTAL} tasks · {GROUPS.length} groups · 2 spec deltas</b>. Twelve of
-              them are audit and verification — and the final task is a side-by-side against{' '}
-              <b>the one-shot that started it.</b>
-            </p> */}
+            <div className="section-head">
+              <h2 id="openspec-title">OPENSPEC KEEPS THE IMPLEMENTATION <br />ON-TRACK</h2>
+            </div>
+            <p className="lead">
+              We used <strong>OpenSpec</strong> to turn the theme from a one-shot into an implementation plan the agent could follow without drifting. <strong>It lives in the repo, survives token limits and session resets, and can be handed off to other, cheaper agents.</strong> The plan persists even when the agent doesn't.
+            </p>
+            <div className="os-artifacts">
+              {/* No more artifacts on the left - they all moved to the ledger */}
+            </div>
           </div>
 
-          <div>
+          <div className="os-right">
             <div className="os-ledger">
               <div className="os-ledger-inner">
                 <div className="os-ledger-head">
@@ -107,6 +82,14 @@ export function OpenSpec({ sectionRef }: ChapterProps) {
                     {TOTAL} / {TOTAL}
                   </span>
                 </div>
+                <div className="os-ledger-artifacts">
+                  {ARTIFACTS.map((a) => (
+                    <div className="os-ledger-art" key={a.file}>
+                      <span className="os-glyph" aria-hidden="true">{a.glyph}</span>
+                      <span className="os-f">{a.file} <small>{a.kind}</small></span>
+                    </div>
+                  ))}
+                </div>
                 <div className="os-ledger-body">
                   {GROUPS.map(([n, name, count]) => (
                     <div className="os-grp" key={n}>
@@ -114,7 +97,6 @@ export function OpenSpec({ sectionRef }: ChapterProps) {
                         ✓
                       </span>
                       <span className="os-name">
-                        {/* <b>{n}.</b> */}
                         {name}
                       </span>
                       <span className="os-segments" aria-hidden="true">
@@ -128,14 +110,6 @@ export function OpenSpec({ sectionRef }: ChapterProps) {
                     </div>
                   ))}
                 </div>
-                {/* <div className="os-ledger-foot">
-                  <span className="os-good">◉ ARCHIVED · ALL GROUPS CLOSED</span>
-                  <span>
-                    {GROUPS.length} GROUPS · {TOTAL} TASKS
-                  </span>
-                  <span className="os-spacer" />
-                  <span>0 REMAINING</span>
-                </div> */}
               </div>
             </div>
           </div>
