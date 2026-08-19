@@ -2,12 +2,30 @@
 // Source markup (L478): `<nav class="sx-rail" id="sxRail" aria-label="Walkthrough
 // chapters"></nav>` is empty; the JS at L1026-1035 builds one button per chapter
 // from the chapter ledger, and L1449 sets aria-current on chapter change.
+import { useEffect } from 'react';
 import { CHAPTERS } from '../../config/chapters';
 import { useChapterIndex, useConductor } from '../../state/appStore';
 
 export function ChapterRail() {
   const active = useChapterIndex();
   const conductor = useConductor();
+
+  // Arrow-key chapter nav. Mirrors the rail buttons' `conductor?.goTo(i)`
+  // guard: inert in flat mode (conductor === null), and bounded to the
+  // chapter ledger so the edges are no-ops rather than wrapping.
+  useEffect(() => {
+    if (!conductor) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      const base = active ?? 0;
+      const next =
+        e.key === 'ArrowLeft' ? base - 1 : base + 1;
+      if (next < 0 || next >= CHAPTERS.length) return;
+      conductor.goTo(next);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [conductor, active]);
 
   return (
     <nav className="sx-rail" id="sxRail" aria-label="Walkthrough chapters">
