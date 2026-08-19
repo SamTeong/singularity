@@ -218,7 +218,7 @@ export const CHAPTERS = [
   },
 
   {
-    id: 'openspec', weight: 1.70, num: '10', jp: '仕様', code: 'SCR·10', title: 'OPENSPEC SHIPS THE ONE-SHOT',
+    id: 'openspec', weight: 1.70, num: '10', jp: '仕様', code: 'SCR·10', title: 'OPENSPEC',
     sub: 'PROPOSAL → DESIGN → SPEC → TASKS',
     u: [0.890, 0.575, -0.933], yaw: 120, pitch: 0, w: 6.2, px: 1440, pxm: 770,
     fill: 0.80, lift: 0.08, tone: 0x0C6C80, world: { fog: 0.028, bloom: 0.70, motes: 0.58, exposure: 1.02 },

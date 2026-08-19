@@ -117,7 +117,7 @@ export default function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [autoplay]);
-  useAutoplay(autoplay, !isFlat, autoplayDwellMs);
+  useAutoplay(autoplay, !isFlat, autoplayDwellMs, () => setAutoplay(false));
 
   useBodyMode(mode);
 

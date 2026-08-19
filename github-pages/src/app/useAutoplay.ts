@@ -1,5 +1,6 @@
-// Hands-free tour: scroll the deck on its own, looping back to chapter 01
-// after the last one.
+// Hands-free tour: scroll the deck on its own, and STOP at the last slide
+// rather than looping — a teleport back to chapter 01 reads as a glitch, and
+// a reverse glide through the whole deck is worse.
 //
 // It scrolls rather than jumps. The reader is watching a camera on rails, and
 // a teleport between stops throws away the part of the story that happens
@@ -47,8 +48,14 @@ interface Stop {
   step: number | null;
 }
 
-export function useAutoplay(enabled: boolean, is3D: boolean, dwellMs: number): void {
+export function useAutoplay(
+  enabled: boolean,
+  is3D: boolean,
+  dwellMs: number,
+  onComplete?: () => void,
+): void {
   const dwellMsRef = useLatest(dwellMs);
+  const onCompleteRef = useLatest(onComplete);
 
   useEffect(() => {
     if (!enabled) return;
@@ -113,17 +120,16 @@ export function useAutoplay(enabled: boolean, is3D: boolean, dwellMs: number): v
     }
 
     function tick(): void {
-      // `% stops.length` is the loop: past the last stop the tour resets to
-      // chapter 01 and starts over.
+      // Past the last stop the tour ENDS. The reader has already dwelled on
+      // the final slide (the dwell runs before tick fires), so hand control
+      // back instead of teleporting to chapter 01.
       const at = currentStop();
-      const wrapping = at === stops.length - 1;
-      const next = stops[(at + 1) % stops.length];
-      const to = targetTop(next);
-      if (wrapping) {
-        window.scrollTo({ top: to, behavior: 'instant' });
-        timer = window.setTimeout(tick, dwellMsRef.current);
+      if (at >= stops.length - 1) {
+        onCompleteRef.current?.();
         return;
       }
+      const next = stops[at + 1];
+      const to = targetTop(next);
       glide(to, GLIDE_PX_PER_SECOND, () => {
         timer = window.setTimeout(tick, dwellMsRef.current);
       });
@@ -136,5 +142,5 @@ export function useAutoplay(enabled: boolean, is3D: boolean, dwellMs: number): v
       window.clearTimeout(timer);
       cancelAnimationFrame(frame);
     };
-  }, [dwellMsRef, enabled, is3D]);
+  }, [dwellMsRef, onCompleteRef, enabled, is3D]);
 }

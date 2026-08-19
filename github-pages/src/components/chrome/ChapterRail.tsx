@@ -33,7 +33,7 @@ export function ChapterRail() {
         <button
           key={c.id}
           type="button"
-          aria-label={`${c.num} ${c.title}`}
+          aria-label={`${c.title} ${c.num}`}
           // Deliberately three-valued. The source creates these buttons with no
           // aria-current at all (L1028-1033) and only ever sets it inside
           // updateDom via String(i === index) (L1449) — so before enter3D(), and
@@ -47,8 +47,8 @@ export function ChapterRail() {
           // null in flat mode, which is what makes the buttons inert there.
           onClick={() => conductor?.goTo(i)}
         >
-          <span>{c.code}</span>
-          <span className="jp">{c.jp}</span>
+          <span className="title">{c.title}</span>
+          <span className="num">{c.num}</span>
           <span className="tick" />
         </button>
       ))}
