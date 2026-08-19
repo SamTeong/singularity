@@ -53,7 +53,7 @@ export function TopBar({
           that do not exist on the deployed site, so only REPOSITORY is kept.
           Do not "restore" the other two; they would 404. */}
       <nav className="sx-links" aria-label="Related scenes">
-        <a href="https://github.com/SamTeong/singularity">REPOSITORY ↗</a>
+        <a href="https://github.com/SamTeong/singularity" target="_blank" rel="noopener noreferrer">REPOSITORY ↗</a>
       </nav>
       <div className={'sx-auto' + (autoplay ? ' on' : '')}>
         <button
