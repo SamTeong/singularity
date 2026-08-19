@@ -3,8 +3,7 @@
 // business point this slide has to make is narrower than that: ZAPAC and
 // Phosphor are not two products, they are one component system proven twice —
 // so the slide is a left-to-right proof rather than three peers. Read it in one
-// pass: 01 no system → 02 ZAPAC → (same components, different tokens) → 03
-// Phosphor → the conclusion on the right.
+// pass: 01 no system → 02 ZAPAC → 03 Phosphor → the conclusion on the right.
 //
 // LAYOUT — why the three stages live inside one framed rig rather than sitting
 // loose in a five-column grid (which is what the first pass did, and it read as
@@ -21,18 +20,17 @@
 //                 statement ABOUT the evidence, not another piece of it.
 //
 // COPY IS DELIBERATELY THIN. This is a slide read in about five seconds from
-// across a room, so each element gets one label and no second sentence: the
-// pivot's three lines are the only prose in the rig, and the mini-app text is
-// interface furniture, not reading matter. Earlier passes also carried per-stage
-// footnotes, token specs on every fragment, a rig-head meta block and a
-// duplicate kicker sub-line — all of it said again what the diagram already
-// showed. If something here needs explaining in a sentence, the diagram is
-// wrong; fix the diagram.
+// across a room, so each element gets one label and no second sentence — the
+// mini-app text is interface furniture, not reading matter. Earlier passes
+// also carried per-stage footnotes, a pivot list between 02/03, token specs on
+// every fragment, a rig-head meta block and a duplicate kicker sub-line — all
+// of it said again what the diagram already showed. If something here needs
+// explaining in a sentence, the diagram is wrong; fix the diagram.
 //
 // Every child class is prefixed `sp-` (skins-proof) and scoped under `.skins`,
 // the same collision-avoidance the `themes` chapter uses for its own
 // generic-sounding names (see the note at the top of themes.css) — bare
-// `.num`/`.stage`/`.mini`/`.pivot` all mean, or could mean, something unrelated
+// `.num`/`.stage`/`.mini` all mean, or could mean, something unrelated
 // elsewhere in the deck.
 import type { ChapterProps } from './types';
 
@@ -41,14 +39,6 @@ import type { ChapterProps } from './types';
  *  so they are positioned by class (`f1`-`f4`) like the reference sprawl's
  *  chaos-cards rather than flowed. */
 const FRAGMENTS = ['BUTTON', 'Card', 'NAV', 'form'] as const;
-
-/** The pivot between 02 and 03. `=` for what survives the swap, `≠` for the one
- *  thing that changes — the whole slide in three rows. */
-const PIVOT = [
-  { op: '=', text: 'SAME COMPONENTS', diff: false },
-  { op: '=', text: 'SAME BEHAVIOUR', diff: false },
-  { op: '≠', text: 'DIFFERENT TOKENS', diff: true },
-] as const;
 
 const TOKEN_AXES = ['COLOR', 'TYPE', 'SPACING', 'RADIUS', 'EFFECTS'] as const;
 
@@ -71,7 +61,6 @@ function MiniApp({ variant, label }: { variant: 'zapac' | 'phosphor'; label: str
       <div className="sp-mini-nav">
         <span className="on">Overview</span>
         <span>Tasks</span>
-        <span>Usage</span>
       </div>
       <div className="sp-mini-body">
         <div className="sp-mini-stat">
@@ -89,12 +78,8 @@ function MiniApp({ variant, label }: { variant: 'zapac' | 'phosphor'; label: str
           <span>Task 118</span>
           <em>Running</em>
         </div>
-        <div className="sp-mini-row">
-          <span>Task 119</span>
-          <em>Review</em>
-        </div>
       </div>
-      <span className="sp-mini-btn">Run skill</span>
+      <span className="sp-mini-btn">Add tasks</span>
     </div>
   );
 }
@@ -105,27 +90,18 @@ export function Skins({ sectionRef }: ChapterProps) {
   // width/height/display/opacity on this node every frame. See the PANEL DOM
   // CONTRACT at the top of Spacer.tsx.
   return (
-    <section className="chapter skins" id="skins" aria-labelledby="skins-title" ref={sectionRef}>
+    <section className="chapter skins" id="skins" aria-label="One system, two skins" ref={sectionRef}>
       <div className="chapter-inner">
         <div className="eyebrow">
           <span className="jp">乱 → 意匠 → 燐光</span>ONE SYSTEM, PROVEN TWICE
         </div>
-        <div className="section-head">
-          <span className="idx">07</span>
-          <span className="jp">体系</span>
-          <h2 id="skins-title">ONE SYSTEM, TWO SKINS</h2>
-        </div>
-
         <div className="sp-grid">
           <div className="sp-rig" aria-label="One component system rendered three ways" role="group">
             <div className="sp-rig-head">
               <span className="sp-rig-mono jp" aria-hidden="true">
                 証
               </span>
-              <span className="sp-rig-title">
-                SKIN PROOF RIG
-                <small>ONE COMPONENT TREE · THREE RENDERS</small>
-              </span>
+              <span className="sp-rig-title">ONE SYSTEM, TWO SKINS</span>
             </div>
 
             <div className="sp-stages">
@@ -154,25 +130,8 @@ export function Skins({ sectionRef }: ChapterProps) {
                     意匠
                   </span>
                   <b>ZAPAC</b>
-                  <span className="sp-stage-role">THE DEFAULT</span>
                 </div>
                 <MiniApp variant="zapac" label="ZAPAC" />
-              </div>
-
-              <div className="sp-pivot" aria-hidden="true">
-                {/* the dashed connector is drawn on the track, not the column,
-                    so it runs THROUGH the arrow and stops clear of the list */}
-                <span className="sp-pivot-track">
-                  <span className="sp-pivot-glyph">→</span>
-                </span>
-                <ul>
-                  {PIVOT.map((p) => (
-                    <li className={p.diff ? 'diff' : undefined} key={p.text}>
-                      <i>{p.op}</i>
-                      {p.text}
-                    </li>
-                  ))}
-                </ul>
               </div>
 
               <div className="sp-stage">
@@ -182,15 +141,9 @@ export function Skins({ sectionRef }: ChapterProps) {
                     燐光
                   </span>
                   <b>PHOSPHOR</b>
-                  <span className="sp-stage-role">THE STRESS TEST</span>
                 </div>
                 <MiniApp variant="phosphor" label="PHOSPHOR" />
               </div>
-            </div>
-
-            <div className="sp-rig-status">
-              <span className="good">COMPONENT DIFF: 0</span>
-              <span className="warn">TOKEN DIFF: TOTAL</span>
             </div>
           </div>
 
@@ -202,32 +155,27 @@ export function Skins({ sectionRef }: ChapterProps) {
               </span>
             </div>
             <h3 className="display">
-              IF WE CAN
+              IF WE CAN <span className="orange">SKIN THIS</span>
               <br />
-              <span className="orange">SKIN THIS,</span>
-              <br />
-              WE CAN SKIN
-              <br />
-              <span className="mint">YOURS.</span>
+              WE CAN SKIN <span className="mint">YOURS.</span>
             </h3>
             <p className="sp-tagline">SWAP THE DESIGN TOKENS. KEEP THE SYSTEM.</p>
 
-            <div className="sp-pipe" aria-label="Your design tokens applied to the same component system" role="img">
+            <div className="sp-pipe" aria-label="Your design tokens applied to the same system" role="img">
               <div className="sp-pipe-box sp-pipe-in">
                 <span className="jp" aria-hidden="true">
                   貴社
                 </span>
                 <b>YOUR DESIGN TOKENS</b>
-              </div>
-              <span className="sp-pipe-link" />
-              <div className="sp-pipe-axes">
-                {TOKEN_AXES.map((axis) => (
-                  <span key={axis}>{axis}</span>
-                ))}
+                <div className="sp-pipe-axes">
+                  {TOKEN_AXES.map((axis) => (
+                    <span key={axis}>{axis}</span>
+                  ))}
+                </div>
               </div>
               <span className="sp-pipe-link" />
               <div className="sp-pipe-box sp-pipe-out">
-                <b>SAME COMPONENT SYSTEM</b>
+                <b>SAME SYSTEM</b>
                 <small>NO APPLICATION REWRITE</small>
               </div>
             </div>

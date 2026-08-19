@@ -27,9 +27,6 @@
   border-bottom:2px solid var(--teal);padding:8px 12px;margin:3px 3px 0}
 .skins .sp-rig-mono{font-weight:800;font-size:21px;line-height:1;color:var(--orange);border:1px solid var(--orange);padding:5px 7px;letter-spacing:.14em;text-indent:.14em}
 .skins .sp-rig-title{font-family:var(--cond);font-weight:700;font-size:16px;color:var(--paper);letter-spacing:.1em;text-transform:uppercase}
-.skins .sp-rig-title small{display:block;font-family:var(--mono);font-weight:400;font-size:8px;color:var(--green-map);letter-spacing:.12em;margin-top:3px}
-.skins .sp-rig-meta{text-align:right;font-size:8px;color:var(--amber);line-height:1.6;letter-spacing:.1em}
-.skins .sp-rig-meta b{color:var(--orange);font-weight:400}
 
 /* Three stages and the pivot as cells of the frame, divided by its own rules.
    The three viewports below STRETCH to one height rather than carrying a fixed
@@ -38,11 +35,12 @@
    under the stage feet. Nothing in here changes with state, so there is no
    measure-once hazard in letting them flex — cf. the pipeline gallery, which
    does need a fixed height (see panel.css). */
-.skins .sp-stages{--body:200px;position:relative;z-index:2;flex:1;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto minmax(0,1fr);margin:0 3px}
+.skins .sp-stages{--body:200px;position:relative;z-index:2;flex:1;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));margin:0 3px}
 .skins .sp-stage{padding:12px 13px 11px;display:flex;flex-direction:column;min-width:0}
 /* 01 is the BEFORE, so it is fenced off from 02/03 by a full-weight rule and a
-   red wash; the pivot supplies the divider between 02 and 03 itself. */
+   red wash; 03 gets the same weight of rule to divide it from 02. */
 .skins .sp-stage-broken{border-right:1px solid var(--orange);background:linear-gradient(180deg,rgba(226,40,15,.06),transparent 70%)}
+.skins .sp-stages > .sp-stage:last-child{border-left:1px solid var(--orange)}
 .skins .sp-stage-head{display:flex;align-items:center;gap:7px;margin-bottom:10px}
 .skins .sp-num{font-family:var(--cond);font-weight:700;font-size:11px;letter-spacing:.1em;background:var(--orange);color:var(--bg);padding:1px 6px}
 .skins .sp-stage-head .jp{font-family:var(--jp);font-weight:800;font-size:15px;line-height:1;color:var(--orange)}
@@ -102,24 +100,6 @@
 .skins .sp-mini.phosphor .sp-mini-btn{box-shadow:0 0 9px rgba(242,100,0,.5)}
 .skins .sp-mini.phosphor .sp-mini-stat b{color:var(--mint-hi)}
 
-/* the pivot: what survives the swap (=) and the one thing that doesn't (≠),
-   over a dashed rail that carries the eye from 02 to 03 */
-.skins .sp-pivot{position:relative;width:clamp(96px,8vw,128px);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:9px;padding:0 6px}
-.skins .sp-pivot-rail{position:absolute;left:0;right:0;top:50%;height:1px;background:repeating-linear-gradient(90deg,var(--orange) 0 5px,transparent 5px 10px);opacity:.5}
-.skins .sp-pivot-glyph{position:relative;z-index:2;width:26px;height:26px;display:grid;place-items:center;background:var(--bg);border:1px solid var(--orange);
-  font-size:14px;line-height:1;color:var(--orange);text-shadow:0 0 8px currentColor}
-.skins .sp-pivot ul{position:relative;z-index:2;list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:5px;background:var(--bg)}
-.skins .sp-pivot li{display:flex;align-items:baseline;gap:5px;font-size:7.5px;letter-spacing:.09em;color:var(--green-map);white-space:nowrap}
-.skins .sp-pivot li i{font-style:normal;font-size:10px;line-height:1;color:var(--mint)}
-.skins .sp-pivot li.diff{color:var(--amber)}
-.skins .sp-pivot li.diff i{color:var(--amber)}
-
-.skins .sp-rig-status{position:relative;z-index:2;margin:0 3px 3px;border-top:1px solid var(--orange);display:flex;align-items:center;gap:14px;
-  padding:6px 11px;font-size:8px;color:var(--green-map);letter-spacing:.11em;text-transform:uppercase}
-.skins .sp-rig-status .good{color:var(--mint)}
-.skins .sp-rig-status .warn{color:var(--amber)}
-.skins .sp-spacer{flex:1}
-
 /* ── the conclusion ──────────────────────────────────────────────────────── */
 .skins .sp-claim{display:flex;flex-direction:column;justify-content:center;min-width:0}
 .skins .sp-claim-tag{display:flex;align-items:center;gap:9px;margin-bottom:12px}
@@ -139,7 +119,7 @@
 .skins .sp-pipe-box small{display:block;margin-top:3px;font-size:7.5px;letter-spacing:.11em;color:var(--green-map)}
 .skins .sp-pipe-link{width:2px;height:16px;margin:0 auto;background:var(--orange);position:relative}
 .skins .sp-pipe-link::after{content:"▼";position:absolute;left:-4px;bottom:-4px;font-size:9px;line-height:1;color:var(--orange)}
-.skins .sp-pipe-axes{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;padding:8px 6px;border:1px dashed var(--green-dim)}
+.skins .sp-pipe-axes{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin-top:8px;padding:8px 6px;border:1px dashed var(--green-dim)}
 .skins .sp-pipe-axes span{border:1px solid var(--mint);color:var(--mint);padding:2px 6px;font-size:7.5px;letter-spacing:.11em}
 
 /* ── the footer line ─────────────────────────────────────────────────────── */
