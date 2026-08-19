@@ -105,7 +105,12 @@ export function Pipeline({ sectionRef }: ChapterProps) {
               key={s.n}
               type="button"
               className="pp-step"
-              data-done={s.done}
+              // Node state is derived from the reader's position, not the
+              // static `done` flag: stages already scrolled past are finished
+              // (green filled), the current stage is blue, upcoming stages are
+              // idle (green outline) — the same three states as the fleet
+              // control automation pipeline.
+              data-state={i < stage ? 'done' : i === stage ? 'now' : 'idle'}
               role="tab"
               id={`pp-tab-${s.n}`}
               aria-controls="pp-gallery"
@@ -117,7 +122,7 @@ export function Pipeline({ sectionRef }: ChapterProps) {
               onClick={() => select(i)}
               onKeyDown={(e) => onKeyDown(e, i)}
             >
-              {s.here && <span className="stamp c-mint blink pp-here">YOU ARE HERE</span>}
+              {s.here && <span className="stamp c-mint pp-here">YOU ARE HERE</span>}
               <span className="pp-node">{s.n}</span>
               <span className="jp">{s.jp}</span>
               <span className="pp-en">{s.title}</span>
