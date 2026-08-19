@@ -107,13 +107,17 @@
     async function loadMarkdown() {
       const contentDiv = document.getElementById('content');
       try {
-        const response = await fetch('design-system.md');
+        // Path relative to the file in public/refs/ — must match the file's
+        // exact case (GitHub Pages is case-sensitive).
+        const response = await fetch('DESIGN-SYSTEM.md');
         if (!response.ok) throw new Error(`Failed to fetch MD: ${response.statusText}`);
         const markdown = await response.text();
         contentDiv.innerHTML = marked.parse(markdown);
         contentDiv.classList.add('loaded');
       } catch (err) {
-        contentDiv.innerHTML = `<p style="color: #ff7b72;">Error loading design-system.md: ${err.message}</p>`;
+        contentDiv.innerHTML = `<p style="color: #ff7b72;">Error loading DESIGN-SYSTEM.md: ${err.message}</p>`;
+        // Surface the error instead of leaving the div invisible at opacity:0.
+        contentDiv.classList.add('loaded');
       }
     }
     loadMarkdown();

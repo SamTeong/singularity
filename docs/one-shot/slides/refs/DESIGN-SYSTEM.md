@@ -80,7 +80,7 @@ box-shadow:0 0 6px <edge>@50%, inset 0 0 6px <edge>@25%;
 | **JP display** | `--jp` → `"Hiragino Mincho ProN","Yu Mincho","Noto Serif JP",serif` | Weight 800, `text-transform:none`, letter-spacing .1–.5em + matching `text-indent` to re-center. Target: **Shippori Mincho B1** (≈ Eva's Matisse EB). |
 | **Numerals / clock** | 7-segment SVG polygons (not a font) | See `.timechip`; orange glow (countdown) or black-on-mint (timestamp). |
 
-**Scale** (bimodal — cluster at the ends): `8 / 9 / 10 / 11 / 12 / 13 / 14` (labels & data) … `18 / 22 / 26 / 34 / 40 / 60 / 72+ / clamp() hero` (display). Leading 1.1–1.2 for chrome, 1.5–1.72 for prose. `font-variant-numeric:tabular-nums` on any changing number.
+**Scale** (bimodal — cluster at the ends): `8 / 9 / 10 / 11 / 12 / 13 / 14` (labels & data) … `18 / 22 / 26 / 34 / 40 / 60 / 72+ / clamp() hero`. Leading 1.1–1.2 for chrome, 1.5–1.72 for prose. `font-variant-numeric:tabular-nums` on any changing number.
 
 **Conventions:** no lowercase in UI chrome; interpunct in IDs (`VEGA·1`, `GATE·04`, `ENG-402`); `KEY:VALUE` metadata blocks (`CODE:`, `FILE:`, `EXTENTION:` — the canonical misspelling, `EX_MODE:`, `PRIORITY:`).
 
@@ -229,7 +229,7 @@ All share: `--bg` field, 1px `--green-dim` idle border → `--mint` glow on focu
 | Two clock implementations | dashboard-01 (orange 7-seg) vs dashboard-02/03 (black-on-mint chip) | Both are valid **skins** of one component — document as `timechip[data-skin]`, share the SVG factory. |
 | Line chart `+` grid too dense; line too plain | sonnet-18 | Ship the refined version (sparse marks + area-fill glow) — done in gallery. |
 | Wave "tetris bricks" | exp-06 | Removed in dashboard-02 refined wave — make that the canonical separator. |
-| Modal busyness | sonnet-38 | Cap modals at one focal job. |
+| Modal busyness | sonnet-38 | Cap modals at one focal job, push secondary data to a rail. |
 | Marquee vs alert overload | sonnet-28 | Marquee = ambient status only; true alarms use the overlay. |
 | Light "document" theme orphaned | sonnet-17 | User confirmed it clashes (reads dark-mode-only). Keep the system **dark-only** unless a `--blueprint` variant is formally specced. |
 
@@ -278,5 +278,3 @@ All share: `--bg` field, 1px `--green-dim` idle border → `--mint` glow on focu
 | marquee | `experiment-sonnet-28.html` |
 | sidebar (L/R rails) | `experiment-sonnet-34.html`, `wiki.html` |
 | wikilink + preview | `wiki.html` |
-
-Live, browsable render of all of the above: **[design-system.html](design-system.html)**.
