@@ -22,6 +22,7 @@ import { useEffect } from 'react';
 import { CHAPTERS } from '../config/chapters';
 import { stepCount, stepProgress } from '../deck/useScrollStep';
 import { useLatest } from '../hooks/useLatest';
+import { scrollGlide } from '../lib/scrollGlide';
 import { getChapterIndex, getChapterStep, getConductor } from '../state/appStore';
 import { chapterTop, visibleChapter } from './chapterPosition';
 
@@ -33,11 +34,13 @@ export const AUTOPLAY_DWELL_STEP_MS = 500;
 /** Travel speed between stops. Deliberately unhurried: the chapters with a
  *  camera dwell (config's `steps`) pack their whole flight to the next chapter
  *  into the back 45% of their scroll, so a fast glide crosses that flight in
- *  barely a second and reads as a lurch rather than a journey. */
-const GLIDE_PX_PER_SECOND = 420;
+ *  barely a second and reads as a lurch rather than a journey. The glide is
+ *  shaped by `easeInOut` (smootherstep), so the camera leaves and arrives at
+ *  near-zero velocity — the lurch is gone without any ceiling on the travel. */
+const GLIDE_PX_PER_SECOND = 360;
 /** A floor only, for hops of a few dozen pixels. There is deliberately no
  *  ceiling: a capped glide is a rushed glide. */
-const MIN_GLIDE_MS = 350;
+const MIN_GLIDE_MS = 450;
 /** How far the page may drift from where the glide put it before the glide
  *  concedes — the reader grabbing the scroll wins over the tour. */
 const HANDOVER_PX = 40;
@@ -68,7 +71,7 @@ export function useAutoplay(
     });
 
     let timer = 0;
-    let frame = 0;
+    let cancelGlide: (() => void) | null = null;
 
     // Read live rather than kept as a cursor, so a reader who scrolls or clicks
     // mid-tour resumes from where they actually are, not from where the tour
@@ -90,32 +93,18 @@ export function useAutoplay(
       return chapterTop(stop.chapter);
     }
 
-    function glide(to: number, rate: number, done: () => void): void {
-      const from = window.scrollY;
-      const distance = Math.abs(to - from);
-      // Starting AUTOPLAY explicitly opts into its motion; collapsing the glide
-      // under reduced motion turns every transition into a disorienting jump.
-      if (distance < 4) {
-        window.scrollTo({ top: to, behavior: 'instant' });
-        done();
-        return;
-      }
-      const ms = Math.max(MIN_GLIDE_MS, (distance / rate) * 1000);
-      const started = performance.now();
-      let written = from;
-      frame = requestAnimationFrame(function step(now) {
-        // Checked before this frame writes, so what it sees is the reader's own
-        // scrolling and not the glide's own last write.
-        if (Math.abs(window.scrollY - written) > HANDOVER_PX) {
-          done();
-          return;
-        }
-        const t = Math.min(1, (now - started) / ms);
-        const eased = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-        written = Math.round(from + (to - from) * eased);
-        window.scrollTo({ top: written, behavior: 'instant' });
-        if (t < 1) frame = requestAnimationFrame(step);
-        else done();
+    function glide(to: number, done: () => void): void {
+      // smootherstep easing (see lib/scrollGlide) leaves and arrives at
+      // near-zero velocity, so the tour eases away from a slide and settles
+      // onto the next instead of lurching into motion the moment the dwell
+      // ends. Starting AUTOPLAY explicitly opts into its motion; collapsing
+      // the glide under reduced motion turns every transition into a
+      // disorienting jump, so the glide runs regardless of that preference.
+      cancelGlide = scrollGlide(to, {
+        rate: GLIDE_PX_PER_SECOND,
+        minMs: MIN_GLIDE_MS,
+        handoverPx: HANDOVER_PX,
+        onDone: done,
       });
     }
 
@@ -130,7 +119,7 @@ export function useAutoplay(
       }
       const next = stops[at + 1];
       const to = targetTop(next);
-      glide(to, GLIDE_PX_PER_SECOND, () => {
+      glide(to, () => {
         timer = window.setTimeout(tick, dwellMsRef.current);
       });
     }
@@ -140,7 +129,7 @@ export function useAutoplay(
     timer = window.setTimeout(tick, dwellMsRef.current);
     return () => {
       window.clearTimeout(timer);
-      cancelAnimationFrame(frame);
+      cancelGlide?.();
     };
   }, [dwellMsRef, onCompleteRef, enabled, is3D]);
 }

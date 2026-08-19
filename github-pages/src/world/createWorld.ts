@@ -239,13 +239,16 @@ export function createWorld(o: WorldOptions): World {
    *
    *  Blended rather than pure smoothstep: at SETTLE = 1 the derivative is zero
    *  at every waypoint, which reads as the camera sticking to each screen and
-   *  makes a fast scroll feel unresponsive. 0.62 keeps a floor of motion through
-   *  the waypoint while still clearly settling.
+   *  makes a fast scroll feel unresponsive. 0.8 leans further into the settle
+   *  than the source's 0.62 — the camera more clearly decelerates into and
+   *  accelerates out of each screen, which reads as a short pause on each slide
+   *  (the deck's "more delay per slide" feel) — while keeping a floor of motion
+   *  through the waypoint so a fast scroll still responds.
    *
    *  Not applied to `resolveWorld` — fog, bloom and exposure interpolate on the
    *  raw progress, because easing those too would make the atmosphere visibly
    *  lurch at each seam. */
-  const SETTLE = 0.62;
+  const SETTLE = 0.8;
   function easeSettle(progress: number): number {
     const i = Math.floor(progress);
     const t = progress - i;

@@ -10,3 +10,10 @@ export const lerp = (a: number, b: number, t: number): number => a + (b - a) * t
 // exactly — it is what makes the damping rate `l` independent of frame rate.
 export const damp = (c: number, t: number, l: number, dt: number): number =>
   c + (t - c) * (1 - Math.exp(-l * dt));
+
+// Smootherstep (6t⁵ − 15t⁴ + 10t³). Zero velocity AND zero acceleration at both
+// ends, so motion lingers at the start and end of a transition — the camera
+// leaves and arrives almost stationary, which reads as a short pause on each
+// slide rather than a pass-through. Used by scrollGlide for every "go to slide"
+// hop (autoplay + manual nav).
+export const easeInOut = (t: number): number => t * t * t * (t * (t * 6 - 15) + 10);

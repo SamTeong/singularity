@@ -13,6 +13,7 @@
 //    call time (see createWorld.ts's destroy()) — stop() must run before
 //    the DOM the conductor's listeners/ResizeObserver reference is touched.
 import { clamp, damp } from '../lib/math';
+import { scrollGlide } from '../lib/scrollGlide';
 import { applySpacerHeights } from './spacerLayout';
 import type { ConductorState } from './types';
 
@@ -43,6 +44,17 @@ export interface ScrollConductor {
   topAt(p: number): number;
 }
 
+// Manual "go to slide" (rail click, arrow keys) used to lean on the browser's
+// native smooth-scroll, which decelerates INTO a slide but accelerates OUT of
+// one instantly — a lurch on departure. scrollGlide gives it the same
+// smootherstep ease-in/out the autoplay tour uses, so both legs are gentle.
+// A ceiling caps cross-deck jumps so a click from chapter 01 to the last screen
+// doesn't take whole seconds; the floor keeps short hops unhurried.
+const GO_TO_PX_PER_SECOND = 700;
+const GO_TO_MIN_MS = 450;
+const GO_TO_MAX_MS = 1200;
+const GO_TO_HANDOVER_PX = 40;
+
 export function createScrollConductor(opts: ScrollConductorOptions): ScrollConductor {
   const { sections: els, weights, damping, reducedMotion, onUpdate, onChapterChange } = opts;
 
@@ -56,6 +68,7 @@ export function createScrollConductor(opts: ScrollConductorOptions): ScrollCondu
   let frame = 0;
   let lastTime = 0;
   let dirty = true;
+  let activeGlide: (() => void) | null = null;
   let widthAtMeasure = 0;
   let ro: ResizeObserver | null = null;
 
@@ -189,6 +202,8 @@ export function createScrollConductor(opts: ScrollConductorOptions): ScrollCondu
 
   function stop(): void {
     running = false;
+    activeGlide?.();
+    activeGlide = null;
     if (frame) {
       cancelAnimationFrame(frame);
       frame = 0;
@@ -207,7 +222,26 @@ export function createScrollConductor(opts: ScrollConductorOptions): ScrollCondu
 
   function goTo(i: number): void {
     i = clamp(Math.round(i), 0, anchors.length - 1);
-    scrollTo({ top: anchors[i], behavior: reducedMotion ? 'auto' : 'smooth' });
+    const to = anchors[i];
+    if (reducedMotion) {
+      activeGlide?.();
+      activeGlide = null;
+      scrollTo({ top: to, behavior: 'auto' });
+      return;
+    }
+    // Cancel any in-flight glide before starting the next — a rapid sequence
+    // of rail clicks would otherwise stack competing rAF loops on the same
+    // scroll position. scrollGlide's ease-in/out means the camera leaves and
+    // arrives at near-zero velocity (see lib/scrollGlide); the passive scroll
+    // listener still feeds `exact` frame by frame, so the damped camera
+    // follows this the same way it followed the native smooth-scroll.
+    activeGlide?.();
+    activeGlide = scrollGlide(to, {
+      rate: GO_TO_PX_PER_SECOND,
+      minMs: GO_TO_MIN_MS,
+      maxMs: GO_TO_MAX_MS,
+      handoverPx: GO_TO_HANDOVER_PX,
+    });
   }
 
   function topAt(p: number): number {
