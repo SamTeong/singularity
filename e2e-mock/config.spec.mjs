@@ -5,12 +5,31 @@ import { gotoView } from '../e2e/helpers/nav.mjs';
 import { ROOTS } from '../web/src/mock/fixtures.js';
 
 const SETTINGS_PATH = `${ROOTS.workspace}/.claude/settings.json`;
+const LOCAL_PATH = `${ROOTS.workspace}/.claude/settings.local.json`;
 const CODEX_PATH = `${ROOTS.workspace}/.codex/config.toml`;
 const WORKSPACE_LABEL = '~/workspace';
 const cm = (page) => page.locator('.cm-content');
 const uniq = (label) => `${label}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`;
 const escAttr = (s) => s.replace(/[\\"]/g, '\\$&');
 const tab = (page, path) => page.locator(`[title="${escAttr(path)}"]`);
+// Playwright returns matches in DOM order, so this is the on-screen tab order.
+// `:has(> button)` keeps it to tab-strip entries (each carries a close button) —
+// a rail search hit renders the same path in a bare `title=` span.
+const tabOrder = (page, paths) =>
+  page.locator(paths.map((p) => `[title="${escAttr(p)}"]:has(> button)`).join(', ')).evaluateAll((els) => els.map((el) => el.title));
+
+// Playwright's dragTo()/mouse.down+move+up did not reliably fire React's
+// onDragStart/onDragOver/onDrop for these HTML5-draggable elements under
+// headless Chromium (no real OS-level drag). Dispatching the drag events
+// directly with a shared DataTransfer — Playwright's documented recipe for
+// HTML5 DnD — does.
+async function html5Drag(page, source, target) {
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await source.dispatchEvent('dragstart', { dataTransfer });
+  await target.dispatchEvent('dragover', { dataTransfer });
+  await target.dispatchEvent('drop', { dataTransfer });
+  await source.dispatchEvent('dragend', { dataTransfer });
+}
 
 async function expandRoot(page) {
   await gotoView(page, 'Config');
@@ -56,6 +75,22 @@ test('opening settings.json (project) and settings.local.json (local) switches t
 
   await page.getByRole('button', { name: 'settings.json', exact: true }).click();
   await expect(cm(page)).toContainText('Bash(git status)');
+});
+
+test('dragging a tab reorders the strip without changing the active editor', async ({ page }) => {
+  await expandRoot(page);
+  await page.getByRole('button', { name: 'settings.json', exact: true }).click();
+  await page.getByRole('button', { name: 'settings.local.json', exact: true }).click();
+  // expect.poll, not expect(await …): the tabs land via an async readConfig, and
+  // the suite runs with retries: 0, so a one-shot read would be a race.
+  await expect.poll(() => tabOrder(page, [SETTINGS_PATH, LOCAL_PATH])).toEqual([SETTINGS_PATH, LOCAL_PATH]);
+  await expect(cm(page)).toContainText('"local"');
+
+  await html5Drag(page, tab(page, LOCAL_PATH), tab(page, SETTINGS_PATH));
+
+  await expect.poll(() => tabOrder(page, [SETTINGS_PATH, LOCAL_PATH])).toEqual([LOCAL_PATH, SETTINGS_PATH]);
+  // The dragged tab was and stays the active one — reorder must not switch tabs.
+  await expect(cm(page)).toContainText('"local"');
 });
 
 test('typing invalid JSON shows the inline error and disables Save', async ({ page }) => {

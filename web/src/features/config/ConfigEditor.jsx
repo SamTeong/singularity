@@ -291,6 +291,20 @@ export default function ConfigEditor() {
     if (autosaveTimer.current?.path === path) clearTimer();
   };
 
+  // Drag-to-reorder the tab strip. Only the order of `tabs` moves — active tab,
+  // contents, dirty flags and any pending autosave stay put. The debounced
+  // PUT /api/config/state below keys off tab order, so this persists itself.
+  const reorderTabs = useCallback((fromPath, overPath) => {
+    setTabs((ts) => {
+      const from = ts.findIndex((t) => t.path === fromPath);
+      const to = ts.findIndex((t) => t.path === overPath);
+      if (from < 0 || to < 0 || from === to) return ts;
+      const next = ts.slice();
+      next.splice(to, 0, next.splice(from, 1)[0]);
+      return next;
+    });
+  }, []);
+
   const closeTab = async (path) => {
     const tab = tabs.find((t) => t.path === path);
     if (tab?.dirty) {
@@ -423,7 +437,7 @@ export default function ConfigEditor() {
         {picking && <DirPicker start={untildify(activeTab?.cwd ?? shownRoots[0] ?? '~')} onPick={pick} onClose={() => setPicking(false)} />}
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0, flexShrink: 0, pr: 1 }}>
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} />}
+            {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} onReorder={reorderTabs} />}
           </Box>
           <Tooltip title={autosave ? 'Autosave on (5s)' : 'Autosave off'} placement="bottom" disableInteractive>
             <IconButton size="small" onClick={toggleAutosave} color={autosave ? 'primary' : 'default'}>
