@@ -106,7 +106,7 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
     ],
   },
   {
-    n: '04', jp: '体系', title: 'DESIGN SYSTEM', done: 1, v: '2', k: 'ARTIFACTS',
+    n: '04', jp: '体系', title: 'DESIGN SYSTEM', done: 1, v: '3', k: 'ARTIFACTS',
     desc: [
       { code: '/design-system' },
       { text: ' extracts a design-system.html and a DESIGN-SYSTEM.md from whichever layouts survive. Tokens, atoms, patterns — one source' },
@@ -114,6 +114,7 @@ export const PIPELINE_STEPS: readonly PipelineStep[] = [
     items: [
       { label: 'DESIGN-SYSTEM.HTML', img: `${THUMBS}design-system.jpg`, src: `${REFS}design-system.html`, kind: 'page', tag: 'SYS' },
       { label: 'DESIGN-SYSTEM.MD', img: `${THUMBS}design-system-spec.jpg`, src: `${REFS}design-system-spec.html`, kind: 'page', tag: 'SYS' },
+      { label: 'DESIGN.MD', img: `${THUMBS}design.jpg`, src: `${REFS}design.html`, kind: 'page', tag: 'SYS' },
     ],
   },
   {

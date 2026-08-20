@@ -48,9 +48,10 @@
 @media(max-width:720px){
 /* origin: tokens (--header-h) */
   :root{--header-h:48px}
-/* origin: chrome (sx-note, sx-rail) */
+/* origin: chrome (sx-note, sx-rail, sx-boot-panel) */
   .sx-note{display:none}
   .sx-rail{right:8px}
+  .sx-boot-panel{display:none}
 /* origin: deck (.chapter base padding) */
   .chapter{padding:60px 16px}
 /* origin: orientation */
