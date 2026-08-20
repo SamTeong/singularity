@@ -13,8 +13,10 @@ const uniq = (label) => `${label}-${Date.now()}-${Math.floor(Math.random() * 1e6
 const escAttr = (s) => s.replace(/[\\"]/g, '\\$&');
 const tab = (page, path) => page.locator(`[title="${escAttr(path)}"]`);
 // Playwright returns matches in DOM order, so this is the on-screen tab order.
+// `:has(> button)` keeps it to tab-strip entries (each carries a close button) —
+// a rail search hit renders the same path in a bare `title=` span.
 const tabOrder = (page, paths) =>
-  page.locator(paths.map((p) => `[title="${escAttr(p)}"]`).join(', ')).evaluateAll((els) => els.map((el) => el.title));
+  page.locator(paths.map((p) => `[title="${escAttr(p)}"]:has(> button)`).join(', ')).evaluateAll((els) => els.map((el) => el.title));
 
 // Playwright's dragTo()/mouse.down+move+up did not reliably fire React's
 // onDragStart/onDragOver/onDrop for these HTML5-draggable elements under
@@ -79,12 +81,14 @@ test('dragging a tab reorders the strip without changing the active editor', asy
   await expandRoot(page);
   await page.getByRole('button', { name: 'settings.json', exact: true }).click();
   await page.getByRole('button', { name: 'settings.local.json', exact: true }).click();
-  expect(await tabOrder(page, [SETTINGS_PATH, LOCAL_PATH])).toEqual([SETTINGS_PATH, LOCAL_PATH]);
+  // expect.poll, not expect(await …): the tabs land via an async readConfig, and
+  // the suite runs with retries: 0, so a one-shot read would be a race.
+  await expect.poll(() => tabOrder(page, [SETTINGS_PATH, LOCAL_PATH])).toEqual([SETTINGS_PATH, LOCAL_PATH]);
   await expect(cm(page)).toContainText('"local"');
 
   await html5Drag(page, tab(page, LOCAL_PATH), tab(page, SETTINGS_PATH));
 
-  expect(await tabOrder(page, [SETTINGS_PATH, LOCAL_PATH])).toEqual([LOCAL_PATH, SETTINGS_PATH]);
+  await expect.poll(() => tabOrder(page, [SETTINGS_PATH, LOCAL_PATH])).toEqual([LOCAL_PATH, SETTINGS_PATH]);
   // The dragged tab was and stays the active one — reorder must not switch tabs.
   await expect(cm(page)).toContainText('"local"');
 });
