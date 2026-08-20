@@ -101,7 +101,7 @@ export function Skins({ sectionRef }: ChapterProps) {
               <span className="sp-rig-mono jp" aria-hidden="true">
                 証
               </span>
-              <span className="sp-rig-title">ONE SYSTEM, TWO SKINS</span>
+              <span className="sp-rig-title">ONE SYSTEM, TWO THEMES</span>
             </div>
 
             <div className="sp-stages">
@@ -155,9 +155,7 @@ export function Skins({ sectionRef }: ChapterProps) {
               </span>
             </div>
             <h3 className="display">
-              IF WE CAN <span className="orange">SKIN THIS</span>
-              <br />
-              WE CAN SKIN <span className="mint">YOURS.</span>
+              MAKE IT <span className="mint">YOURS</span> TODAY
             </h3>
             <p className="sp-tagline">SWAP THE DESIGN TOKENS. KEEP THE SYSTEM.</p>
 
