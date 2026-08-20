@@ -5,6 +5,7 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { CHAPTERS } from '../../config/chapters';
 import { useChapterIndex, useConductor } from '../../state/appStore';
+import { useLightbox } from '../../deck/lightbox';
 
 // How many items either side of the hovered one join the wave. Beyond this the
 // boost is 0, so the wave has a finite ripple length rather than perturbing the
@@ -30,11 +31,16 @@ export function ChapterRail() {
     return Math.max(wave, rest);
   };
 
+  // The pipeline slide's lightbox (see Lightbox.tsx) uses the same two keys
+  // to browse artefacts within the popup. Without this guard every ← / →
+  // there would also page the chapter underneath it.
+  const { open: lightboxOpen } = useLightbox();
+
   // Arrow-key chapter nav. Mirrors the rail buttons' `conductor?.goTo(i)`
   // guard: inert in flat mode (conductor === null), and bounded to the
   // chapter ledger so the edges are no-ops rather than wrapping.
   useEffect(() => {
-    if (!conductor) return;
+    if (!conductor || lightboxOpen) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
       const base = active ?? 0;
@@ -45,7 +51,7 @@ export function ChapterRail() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [conductor, active]);
+  }, [conductor, active, lightboxOpen]);
 
   return (
     <nav className="sx-rail" id="sxRail" aria-label="Walkthrough chapters" onMouseLeave={() => setHover(null)}>
