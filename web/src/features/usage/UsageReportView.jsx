@@ -58,11 +58,10 @@ function ReportFrame({ at, skinId, mode, onLoad, ref }) {
 
 // Usage report: renders the harness-usage-report skill's self-contained HTML
 // in a sandboxed iframe. Generate/Refresh spawns the skill server-side.
-export default function UsageReportView() {
+export default function UsageReportView({ open, onToggle }) {
   const [status, setStatus] = useState(null); // { exists, at } | null while loading
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const [open, setOpen] = useState(true);
   const { resolved } = useColorMode(); // 'light' | 'dark' — the app's active mode
   const { skinId } = useThemeSkin();
   const iframeRef = useRef(null);
@@ -124,7 +123,7 @@ export default function UsageReportView() {
       <Stack direction="row" spacing={1} sx={{ px: 3, py: 1.25, alignItems: 'center', flexShrink: 0 }}>
         <IconButton
           size="small"
-          onClick={() => setOpen((o) => !o)}
+          onClick={onToggle}
           aria-label={open ? 'Collapse usage report' : 'Expand usage report'}
           sx={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .2s' }}
         >
