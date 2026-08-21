@@ -82,6 +82,7 @@ function ProviderCard({ label, u }) {
 // Full usage view (main pane). Both providers side by side, manual force-refresh.
 export default function UsageView({ usage, onRefresh }) {
   const [open, setOpen] = useState(true);
+  const [reportOpen, setReportOpen] = useState(true);
   const caps = useCapabilities();
   return (
     <Stack sx={{ height: '100%', minHeight: 0 }}>
@@ -98,7 +99,7 @@ export default function UsageView({ usage, onRefresh }) {
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
       </Stack>
-      <Box sx={{ flexShrink: 1, minHeight: 0, overflowY: 'auto', p: 2 }}>
+      <Box sx={{ flexShrink: 1, minHeight: 0, overflowY: 'auto', p: 2, flexGrow: reportOpen ? 0 : 1 }}>
         <Collapse in={open}>
           <Stack spacing={2}>
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
@@ -110,9 +111,9 @@ export default function UsageView({ usage, onRefresh }) {
           </Stack>
         </Collapse>
       </Box>
-      {/* Usage report (harness-usage-report skill) fills the rest of the pane. */}
-      <Box sx={{ flex: '1 0 240px', minHeight: 240 }}>
-        <UsageReportView />
+      {/* Usage report (harness-usage-report skill) fills the rest of the pane, but only while expanded. */}
+      <Box sx={{ flex: reportOpen ? '1 0 240px' : '0 0 auto', minHeight: reportOpen ? 240 : 0 }}>
+        <UsageReportView open={reportOpen} onToggle={() => setReportOpen((o) => !o)} />
       </Box>
     </Stack>
   );
