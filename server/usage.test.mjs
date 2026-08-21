@@ -28,9 +28,16 @@ const rolloutLines = [
 writeFileSync(join(codexDay, 'rollout-2026-07-20T00-00-00-abc123.jsonl'), `${rolloutLines.join('\n')}\n`);
 process.env.CODEX_HOME = join(scratch, 'codex-home');
 
+// Point the OAuth refresh at scratch credentials, never the real ~/.claude — a
+// live refresh_token grant here would rotate the developer's own token.
+const claudeCfg = join(scratch, 'claude-home');
+mkdirSync(claudeCfg, { recursive: true });
+process.env.CLAUDE_CONFIG_DIR = claudeCfg;
+const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json'), JSON.stringify({ claudeAiOauth: oauth }));
+
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, fetchCodex } = await import('./usage.mjs');
+const { parseOllamaHtml, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, fetchCodex, refreshClaudeAuth, refreshOauthGrant } = await import('./usage.mjs');
 
 // Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
 // response: plan badge, Session then Weekly meter (aria-label + segment buttons),
@@ -204,4 +211,24 @@ test('fetchCodex: newest rollout has no rate_limits yet → falls back to older 
   const u = await fetchCodex();
   assert.equal(u.ok, true);
   assert.equal(u.weekly.pctUsed, 87);
+});
+
+// The access token expires overnight, so the usage fetch renews it itself via
+// the refresh_token grant. These cover the pre-network guards (no request is
+// made — a real grant here would rotate the developer's own token) and the
+// throttle that stops a signed-out user costing a request + spawn per pull.
+test('refreshOauthGrant: no refresh token → no request', async () => {
+  writeCreds({ accessToken: 'stale', expiresAt: Date.now() - 1000 });
+  assert.equal(await refreshOauthGrant(), false);
+});
+
+test('refreshOauthGrant: dead refresh token → no request', async () => {
+  writeCreds({ accessToken: 'stale', refreshToken: 'rt', refreshTokenExpiresAt: Date.now() - 1000 });
+  assert.equal(await refreshOauthGrant(), false);
+});
+
+test('refreshClaudeAuth: falls back to the CLI once, then throttles', async () => {
+  process.env.CLAUDE_BIN = process.execPath; // real exe; `auth status` args just make it exit
+  assert.equal(await refreshClaudeAuth(), true);
+  assert.equal(await refreshClaudeAuth(), false);
 });

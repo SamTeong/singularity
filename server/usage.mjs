@@ -5,10 +5,10 @@
 // small in-memory cache per source is enough — no cross-session file needed.
 // SECURITY: reads full account creds (cookie / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
 
 const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
@@ -29,7 +29,10 @@ export async function pwHideWebdriver(ctx) {
     Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
   });
 }
-const CREDENTIALS_PATH = join(homedir(), '.claude', '.credentials.json');
+// CLAUDE_CONFIG_DIR is Claude Code's own override for ~/.claude — honour it so
+// the refresh below reads and rewrites the same file the CLI does (and so tests
+// can point at a scratch dir instead of the real credentials).
+const CREDENTIALS_PATH = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), '.credentials.json');
 const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
 const USAGE_API_BETA = 'oauth-2025-04-20'; // schema ref: stats.mjs L34
 const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
@@ -320,8 +323,83 @@ function readKeychainOnDarwin() {
   } catch { return null; }
 }
 
-async function fetchClaude() {
-  const oauth = claudeOauthToken();
+// ---- Keeping the OAuth token alive ------------------------------------------
+// The access token lives ~8h and nothing but a Claude Code run renews it, so an
+// idle night leaves the Usage page dark until the user starts (and kills) a
+// session purely to trigger a refresh. Do the refresh here instead: same
+// refresh_token grant Claude Code uses, then persist the (rotated) pair back to
+// .credentials.json so the CLI keeps working off the same file. `claude auth
+// status` is the fallback for what the grant can't cover — macOS Keychain
+// storage, or a refresh token the server has already retired.
+const OAUTH_TOKEN_URL = 'https://console.anthropic.com/v1/oauth/token';
+const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'; // Claude Code's public client
+const AUTH_REFRESH_THROTTLE_MS = 5 * 60_000;
+let lastAuthRefresh = 0;
+
+// Merge a fresh token response into ~/.claude/.credentials.json, preserving
+// every field we didn't get back (subscriptionType, rateLimitTier, …) and any
+// sibling keys the file holds. tmp+rename so a crash can't truncate the file;
+// a plain write is the last resort because losing a just-rotated refresh token
+// costs the user a full re-login, which is worse than a non-atomic write.
+function persistOauth(fresh) {
+  let file = {};
+  try { file = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
+  file.claudeAiOauth = { ...file.claudeAiOauth, ...fresh };
+  const data = JSON.stringify(file);
+  const tmp = `${CREDENTIALS_PATH}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, data, { mode: 0o600 });
+    renameSync(tmp, CREDENTIALS_PATH);
+  } catch {
+    try { writeFileSync(CREDENTIALS_PATH, data, { mode: 0o600 }); } catch { return false; }
+  }
+  return true;
+}
+
+// POST the refresh_token grant. Returns true only when a new access token was
+// obtained AND persisted — a false sends the caller on to the CLI fallback.
+export async function refreshOauthGrant() {
+  const cur = readCredentialsFile(); // file only: the darwin Keychain path is the CLI's job
+  if (!cur?.refreshToken) return false;
+  if (cur.refreshTokenExpiresAt && Number(cur.refreshTokenExpiresAt) < Date.now()) return false;
+  let resp;
+  try {
+    resp = await fetchWithTimeout(OAUTH_TOKEN_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: cur.refreshToken, client_id: OAUTH_CLIENT_ID }),
+    });
+  } catch { return false; }
+  if (resp.status !== 200) return false;
+  let body;
+  try { body = await resp.json(); } catch { return false; }
+  if (!body.access_token) return false;
+  return persistOauth({
+    accessToken: body.access_token,
+    refreshToken: body.refresh_token ?? cur.refreshToken, // rotation is optional server-side
+    expiresAt: body.expires_in ? Date.now() + Number(body.expires_in) * 1000 : cur.expiresAt,
+    scopes: body.scope ? body.scope.split(' ') : cur.scopes,
+  });
+}
+
+// Grant first (no spawn, keeps the CLI's own file as the store), CLI second.
+// Throttled as a pair so a genuinely signed-out user doesn't get a request +
+// spawn on every usage pull.
+export async function refreshClaudeAuth() {
+  if (Date.now() - lastAuthRefresh < AUTH_REFRESH_THROTTLE_MS) return false;
+  lastAuthRefresh = Date.now();
+  if (await refreshOauthGrant()) return true;
+  const bin = process.env.CLAUDE_BIN;
+  if (!bin) return false;
+  return new Promise((resolve) => {
+    execFile(bin, ['auth', 'status'], { timeout: REQ_TIMEOUT_MS, windowsHide: true }, () => resolve(true));
+  });
+}
+
+async function fetchClaude(retry = true) {
+  let oauth = claudeOauthToken();
+  // Expired token → renew it here rather than making the user open a session.
+  if (!oauth && retry && await refreshClaudeAuth()) oauth = claudeOauthToken();
   if (!oauth) {
     // Distinguish no-creds vs expired for the UI's auth prompt.
     let err;
@@ -341,7 +419,11 @@ async function fetchClaude() {
   } catch (e) {
     return { ok: false, source: 'claude', error: `request failed: ${e.message}` };
   }
-  if (resp.status === 401) return { ok: false, source: 'claude', needsAuth: true, error: 'auth-expired' };
+  if (resp.status === 401) {
+    // Token looked valid locally but the server rejected it — same cure, once.
+    if (retry && await refreshClaudeAuth()) return fetchClaude(false);
+    return { ok: false, source: 'claude', needsAuth: true, error: 'auth-expired' };
+  }
   if (resp.status === 429) return { ok: false, source: 'claude', error: 'rate-limited' };
   if (resp.status !== 200) return { ok: false, source: 'claude', error: `HTTP ${resp.status}` };
   try {
