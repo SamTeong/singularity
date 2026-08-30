@@ -4,7 +4,7 @@
 // aliases are convenience defaults, not a closed set. Any typed string is passed
 // through; isClaudeModel() routes it to the claude bin or the ollama wrapper.
 export const CLAUDE_ALIASES = ['claude', 'best', 'fable', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]', 'opusplan'];
-export const OLLAMA_PRESETS = ['deepseek-v4-flash:cloud', 'glm-5.2:cloud', 'kimi-k2.7-code:cloud'];
+export const OLLAMA_PRESETS = ['deepseek-v4-flash:cloud', 'glm-5.3:cloud', 'glm-5.3-flash:cloud', 'kimi-k2.7-code:cloud'];
 // Codex presets (gpt-* family). Convenience defaults like the claude aliases —
 // free-text still passes any gpt-* id through to the codex bin. Every entry must
 // be a gpt-* id: web/src/lib/models.js mirrors isCodexModel() with a bare prefix
