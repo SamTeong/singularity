@@ -201,7 +201,7 @@ test('history view: toggle, every sortable column header, and delete a row', asy
   // title becomes the wrapped element's aria-label — which replaces "API
   // time" as that header's computed accessible name entirely, so a
   // name-based query would miss it.
-  const headerNames = ['Title', 'Repo', 'Branch', 'Outcome', 'Busy', 'API time', 'Cost', 'Tokens', 'Concluded'];
+  const headerNames = ['Title', 'Working directory', 'Branch', 'Outcome', 'Busy', 'API time', 'Cost', 'Tokens', 'Concluded'];
   for (let i = 0; i < headerNames.length; i++) {
     const col = page.locator('thead th').nth(i);
     // Activate via keyboard (Enter), not a mouse click on the label text — the

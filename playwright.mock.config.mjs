@@ -12,16 +12,18 @@ export default defineConfig({
   // CI runner shares one box; workers:2 + tight timeouts turned into a steady
   // drip of unrelated tests tipping over 30s (same failure mode the e2e
   // daemon suite hit — see playwright.config.mjs). Serial + generous budget
-  // fixes it.
+  // fixes it. Even serial, a 2-core runner leaves the heaviest tests over
+  // 60s, and a rotating second test tips with them — so CI gets a doubled
+  // per-test budget plus one retry for the load-induced stragglers.
   workers: process.env.CI ? 1 : 4,
   forbidOnly: !!process.env.CI,
-  retries: 0,
+  retries: process.env.CI ? 1 : 0,
   reporter: [
     ['list'],
     ['html', { outputFolder: join('playwright-report', 'mock'), open: 'never' }],
   ],
   outputDir: join('test-results', 'mock'),
-  timeout: 60_000,
+  timeout: process.env.CI ? 120_000 : 60_000,
   expect: { timeout: 15_000 },
   use: {
     baseURL,
