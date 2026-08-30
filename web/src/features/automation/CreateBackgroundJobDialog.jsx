@@ -23,7 +23,7 @@ const DEFAULT_THRESHOLDS = {
   codex: { start: 50, stop: 75, weeklyMax: 50 },
   ollama: { start: 50, stop: 75, weeklyMax: 50 },
 };
-const DEFAULT_MODELS = { claude: 'opus', codex: 'gpt-5.6-luna', ollama: 'glm-5.2:cloud' };
+const DEFAULT_MODELS = { claude: 'opus', codex: 'gpt-5.6-luna', ollama: 'glm-5.3:cloud' };
 const DEFAULT_TOKEN_CAPS = { claude: 15_000_000, codex: 15_000_000, ollama: 15_000_000 };
 const BACKEND_LABEL = { claude: 'Claude', codex: 'Codex', ollama: 'Ollama' };
 

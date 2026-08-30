@@ -39,7 +39,7 @@ export function registerCore(server) {
   // the daemon (models.mjs) so the dropdowns render their real options.
   server.get('/models', () => ({
     claude: ['claude', 'best', 'fable', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]', 'opusplan'],
-    ollama: ['deepseek-v4-flash:cloud', 'glm-5.2:cloud', 'kimi-k2.7-code:cloud'],
+    ollama: ['deepseek-v4-flash:cloud', 'glm-5.3:cloud', 'glm-5.3-flash:cloud', 'kimi-k2.7-code:cloud'],
     codex: ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-pro'],
   }));
 

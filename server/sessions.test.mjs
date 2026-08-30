@@ -68,12 +68,12 @@ test('readSession: ollama model logged with :tag stripped is restored to the ful
   const project = 'sessions-test-ollama-tag';
   const id = 'fixture-ollama-tag';
   const dir = writeSession(project, id, [
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], model: 'glm-5.2' }, timestamp: '2026-07-15T00:00:00Z' }),
+    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], model: 'glm-5.3' }, timestamp: '2026-07-15T00:00:00Z' }),
   ]);
   try {
     const s = await readSession(project, id);
     assert.equal(s.ok, true);
-    assert.equal(s.meta.model, 'glm-5.2:cloud');
+    assert.equal(s.meta.model, 'glm-5.3:cloud');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

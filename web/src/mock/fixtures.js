@@ -233,7 +233,7 @@ function bgJob(i, title) {
     // CreateBackgroundJobDialog renders thresholds[b].start for b in
     // ['claude','codex','ollama'], so a seeded job missing `codex` crashes Edit.
     thresholds: { claude: { start: 50, stop: 75, weeklyMax: 50 }, codex: { start: 50, stop: 75, weeklyMax: 50 }, ollama: { start: 50, stop: 75, weeklyMax: 50 } },
-    models: { claude: 'opus', codex: 'gpt-5.6-luna', ollama: 'glm-5.2:cloud' },
+    models: { claude: 'opus', codex: 'gpt-5.6-luna', ollama: 'glm-5.3:cloud' },
     tokenCaps: { claude: 15_000_000, codex: 15_000_000, ollama: 15_000_000 },
     scopes: [], conclude: 'inreview', lastRunAt: null, lastTaskId: null,
   };

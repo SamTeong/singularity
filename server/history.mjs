@@ -25,7 +25,7 @@ const USER_TRUNC = 400;
 const ASSISTANT_TRUNC = 800;
 const BULLET_TRUNC = 120;           // one card line — longer just wraps into a wall of text
 const DIGEST_CAP = 48_000;          // assembled per-day digest hard cap (chars)
-const OLLAMA_MODEL = OLLAMA_PRESETS[0]; // 'glm-5.2:cloud'
+const OLLAMA_MODEL = OLLAMA_PRESETS[0]; // 'deepseek-v4-flash:cloud'
 const OLLAMA_TIMEOUT_MS = 120_000;
 const OLLAMA_MAX_BUFFER = 8 * 1024 * 1024;
 
