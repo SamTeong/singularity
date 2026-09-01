@@ -43,4 +43,5 @@ Companion to `harness-usage-report` (single responsibility: that skill *collects
 
 ## Notes
 - Read-only until the user approves an edit. Never run `backfill` without backing up `stats.csv` first (it rewrites the file; a join bug can drop live-recorded cost).
+- Never propose dropping "unused" `stats.csv` columns, trimming the archived raw statusline payload (`state/sessions.jsonl`, `_archive` in `stats.mjs`), or projecting persisted JSON down to the fields the UI currently consumes. Statusline/OAuth data is live-only and not backfillable from transcripts — trimming is irreversible loss. Surface already-captured fields instead. Schema-driven row-builder refactors (keep all columns, centralize the build) and stderr drop-diagnostics are fine.
 - Keep `harness-usage-report` lean — implementation edits land in its files, not new responsibilities here.

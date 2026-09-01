@@ -20,6 +20,7 @@ import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import { useFocusTick } from '@/components/panelkit/useFocusTick.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
@@ -45,6 +46,7 @@ export default function MemoryPanel() {
   const onChange = (v) => { setContent(v); setDirty(true); };
   const [err, setErr] = useState(null);
   const { ensureSaved, dialogEl } = useDirtyGuard();
+  const focusTick = useFocusTick();
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
   // Falls back to DEFAULT_ROOT either way so a failed fetch still resolves to a
@@ -56,7 +58,7 @@ export default function MemoryPanel() {
   useEffect(() => {
     if (root == null) return;
     fetch(`/api/memory/files?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setErr('failed to load memory files'));
-  }, [root]);
+  }, [root, focusTick]);
 
   const search = useCallback(() => {
     if (!q.trim()) { setResults(null); return; }

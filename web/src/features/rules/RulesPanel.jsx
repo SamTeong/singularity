@@ -25,6 +25,7 @@ import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import { useFocusTick } from '@/components/panelkit/useFocusTick.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
@@ -43,6 +44,7 @@ export default function RulesPanel() {
   const [msg, setMsg] = useState(null);
   const [ref, setRef] = useState(null); // {path, content} when viewing the companion reference (read-only)
   const { ensureSaved, dialogEl } = useDirtyGuard();
+  const focusTick = useFocusTick();
 
   // Refresh the browse list whenever the root list changes. shownRoots (derived
   // from roots) is already empty when roots is, so files goes unused rather
@@ -53,7 +55,7 @@ export default function RulesPanel() {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ roots }),
     }).then((r) => r.json()).then((d) => setFiles(d.files || [])).catch(() => setFiles([]));
-  }, [roots]);
+  }, [roots, focusTick]);
 
   // Debounced content search across rule roots (empty q → browse list, derived
   // above rather than reset here).
