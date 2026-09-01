@@ -31,6 +31,7 @@ import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import { useFocusTick } from '@/components/panelkit/useFocusTick.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
@@ -68,6 +69,7 @@ export default function SkillsPanel() {
   const [err, setErr] = useState(null);
 
   const { ensureSaved, dialogEl } = useDirtyGuard();
+  const focusTick = useFocusTick();
 
   // Fetch each root's skills independently — one root's slow/failed fetch
   // doesn't block the others.
@@ -81,7 +83,7 @@ export default function SkillsPanel() {
       }).catch(() => { if (!cancelled) setDataByRoot((prev) => ({ ...prev, [r]: { flat: false, scopes: [], error: 'failed to load skills' } })); });
     });
     return () => { cancelled = true; };
-  }, [roots, loaded]);
+  }, [roots, loaded, focusTick]);
 
   const pickRoot = (p) => { remember([untildify(p)]); setPicking(false); };
 

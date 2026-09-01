@@ -25,6 +25,7 @@ import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
+import { useFocusTick } from '@/components/panelkit/useFocusTick.js';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
 import { confirmOverwrite } from '@/components/panelkit/confirmOverwrite.js';
 
@@ -51,6 +52,7 @@ export default function HooksEditor() {
   // null when q is empty (browse the file list), the last fetched hits otherwise.
   const showResults = q.trim() ? results : null;
   const { ensureSaved, dialogEl } = useDirtyGuard();
+  const focusTick = useFocusTick();
 
   // Fetch grouped hook files whenever the root list changes.
   useEffect(() => {
@@ -58,7 +60,7 @@ export default function HooksEditor() {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ roots: roots.map(untildify) }),
     }).then((r) => r.json()).then((d) => setGroups(d.groups || [])).catch(() => setGroups([]));
-  }, [roots]);
+  }, [roots, focusTick]);
 
   // Dedup groups on normalized cwd (~ vs expanded home, / vs \) — picking home
   // while ~ is present otherwise renders two identical groups. First-seen wins,
