@@ -38,7 +38,7 @@ function claudeIdToAlias(model) {
 // The claude bin logs an ollama model on assistant events with its `:tag`
 // stripped; restore the full preset when the stripped base uniquely matches
 // (models.mjs restoreOllamaTag). No-op for the seeded claude models.
-const OLLAMA_PRESETS = ['deepseek-v4-flash:cloud', 'glm-5.3:cloud', 'glm-5.3-flash:cloud', 'kimi-k2.7-code:cloud'];
+const OLLAMA_PRESETS = ['deepseek-v4-flash:cloud', 'glm-5.2:cloud', 'glm-5.3:cloud', 'glm-5.3-flash:cloud', 'kimi-k2.7-code:cloud', 'kimi-k3:cloud'];
 function restoreOllamaTag(model) {
   if (!model || model.includes(':')) return model;
   const hits = OLLAMA_PRESETS.filter((p) => p.split(':')[0] === model);
