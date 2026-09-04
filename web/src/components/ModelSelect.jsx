@@ -33,13 +33,12 @@ const CLAUDE_NAMES = {
 export default function ModelSelect({ model, setModel, label = 'model', placeholder = 'claude (default)' }) {
   const [options, setOptions] = useState([]);
   const caps = useCapabilities();
-  // OLLAMA_PRESETS is a static list the server always returns — gate the ollama
-  // group on OLLAMA_BIN actually being set so the picker doesn't suggest models
-  // that would fail at spawn. Free-text still lets a user type an ollama name.
+  // Gate the ollama group on OLLAMA_BIN actually being set so the picker doesn't
+  // suggest models that would fail at spawn. Free-text still lets a user type an
+  // ollama name.
   const ollamaUnavailable = caps && caps.ollama?.available === false;
   const ollamaHint = caps?.ollama?.hint;
-  // Codex group gates on CODEX_BIN (codexSpawn capability), same convention as
-  // ollama — the static CODEX_PRESETS list is always returned by /models.
+  // Codex group gates on CODEX_BIN (codexSpawn capability), same convention as ollama.
   const codexUnavailable = caps && caps.codexSpawn?.available === false;
   const codexHint = caps?.codexSpawn?.hint;
 
@@ -47,10 +46,15 @@ export default function ModelSelect({ model, setModel, label = 'model', placehol
     let alive = true;
     fetch('/api/models').then((r) => r.json()).then((d) => {
       if (!alive) return;
-      const claude = (d.claude || []).map((m) => ({ label: m, group: 'claude' }));
-      const ollama = ollamaUnavailable ? [] : (d.ollama || []).map((m) => ({ label: m, group: 'ollama' }));
-      const codex = codexUnavailable ? [] : (d.codex || []).map((m) => ({ label: m, group: 'codex' }));
-      setOptions([...claude, ...ollama, ...codex]);
+      // /models is the whole store document: every entry, in user order, with a
+      // stored group. Show only enabled ones, and keep the concat-by-group order
+      // so Autocomplete's groupBy never emits a repeated group header.
+      const inGroup = (g) => (d.models || []).filter((m) => m.enabled && m.group === g).map((m) => ({ label: m.id, group: g }));
+      setOptions([
+        ...inGroup('claude'),
+        ...(ollamaUnavailable ? [] : inGroup('ollama')),
+        ...(codexUnavailable ? [] : inGroup('codex')),
+      ]);
     }).catch(() => {});
     return () => { alive = false; };
   }, [ollamaUnavailable, codexUnavailable]);

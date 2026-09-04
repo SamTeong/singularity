@@ -10,7 +10,8 @@ import { readdir, stat, readFile, open } from 'node:fs/promises';
 import { join, resolve, sep, normalize, basename, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd } from './agents.mjs';
-import { OLLAMA_PRESETS, claudeIdToAlias } from './models.mjs';
+import { claudeIdToAlias } from './models.mjs';
+import { getModels } from './model-store.mjs';
 import { STATE_DIR } from './app-dir.mjs';
 import { CODEX_HOME } from './usage.mjs';
 
@@ -20,12 +21,14 @@ const DEFAULT_ROOT = join(homedir(), '.claude', 'projects');
 // stripped (glm-5.2:cloud -> glm-5.2). That stripped name is what readSession()
 // would otherwise return as meta.model, and what the Transcripts Resume button
 // prefills — but ollama rejects it at spawn. Restore the full preset when the
-// stripped base uniquely matches a known ollama preset. No match → pass through
+// stripped base uniquely matches exactly one ollama entry in the model store.
+// Two entries sharing a base (glm-5.3:cloud + glm-5.3:local) decline to guess.
+// No match → pass through
 // (free-text model, a future preset, or a claude alias/id unchanged).
 function restoreOllamaTag(model) {
   if (!model || model.includes(':')) return model;
-  const hits = OLLAMA_PRESETS.filter((p) => p.split(':')[0] === model);
-  return hits.length === 1 ? hits[0] : model;
+  const hits = getModels().models.filter((m) => m.group === 'ollama' && m.id.split(':')[0] === model);
+  return hits.length === 1 ? hits[0].id : model;
 }
 const PEEK_BYTES = 65536;     // list only peeks the head — full MB reads are deferred to open
 const RESULT_CAP = 200;

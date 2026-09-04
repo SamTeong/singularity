@@ -35,7 +35,11 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
 
   useEffect(() => {
     if (!open) return;
-    fetch('/api/models').then((r) => r.json()).then((d) => setClaudeSet(new Set(d.claude || []))).catch(() => {});
+    // Classifier, not a picker: disabled entries are still claude models, so this
+    // deliberately does not filter on `enabled`.
+    fetch('/api/models').then((r) => r.json())
+      .then((d) => setClaudeSet(new Set((d.models || []).filter((m) => m.group === 'claude').map((m) => m.id))))
+      .catch(() => {});
   }, [open]);
 
   // Mirror of server isClaudeModel: empty/'claude'/known alias/claude-* id → claude.

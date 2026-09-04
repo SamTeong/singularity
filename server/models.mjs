@@ -1,30 +1,37 @@
-// Model picker source of truth: claude aliases (mirror /model) + ollama presets.
-// /model's list is built into the claude binary and shifts with version/account/env
-// (no CLI flag exposes it), so the picker is free-text-with-suggestions — these
-// aliases are convenience defaults, not a closed set. Any typed string is passed
-// through; isClaudeModel() routes it to the claude bin or the ollama wrapper.
-export const CLAUDE_ALIASES = ['claude', 'best', 'fable', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]', 'opusplan'];
-export const OLLAMA_PRESETS = ['deepseek-v4-flash:cloud', 'glm-5.2:cloud', 'glm-5.3:cloud', 'glm-5.3-flash:cloud', 'kimi-k2.7-code:cloud', 'kimi-k3:cloud'];
-// Codex presets (gpt-* family). Convenience defaults like the claude aliases —
-// free-text still passes any gpt-* id through to the codex bin. Every entry must
-// be a gpt-* id: web/src/lib/models.js mirrors isCodexModel() with a bare prefix
-// check (it can't fetch this list — it runs before /models resolves), so a
-// non-gpt preset would route wrong client-side. models.test.mjs enforces it.
-export const CODEX_PRESETS = ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-pro'];
-const ALIAS_SET = new Set(CLAUDE_ALIASES);
+// Model routing. The suggestion lists themselves are user-managed runtime state
+// now — they live in model-store.mjs (STATE_DIR/models.json), seeded from the
+// shipped defaults on first boot. This module only answers "which bin does this
+// model string spawn under".
+//
+// The picker stays free-text-with-suggestions: /model's list is built into the
+// claude binary and shifts with version/account/env (no CLI flag exposes it), so
+// any typed string is passed through. A string that is not in the store falls
+// back to the prefix heuristics below.
+//
+// Every lookup goes through the store per call, never a module-level snapshot —
+// a Settings edit must take effect without a daemon restart.
+// ponytail: groupFor() re-reads models.json each call (read-on-every-get, same
+// as config-state.mjs). Fine at the call rates here (per spawn / per session
+// open); memoize on mtime if a hot loop ever appears.
+import { groupFor } from './model-store.mjs';
 
 // true → run via the `claude` bin (optional --model); false → ollama wrapper.
-// 'claude' is the default alias (no --model). Known aliases and full claude-*
-// ids resolve to the claude bin; everything else is treated as an ollama model.
+// 'claude' is the default alias (no --model). The stored group wins; for a
+// free-text id that is not in the store, full claude-* ids resolve to the claude
+// bin and everything else is treated as an ollama model.
 export function isClaudeModel(model) {
-  return !model || model === 'claude' || ALIAS_SET.has(model) || model.startsWith('claude-');
+  const group = groupFor(model);
+  if (group) return group === 'claude';
+  return !model || model === 'claude' || model.startsWith('claude-');
 }
 
-// true → run via the `codex` bin. Every codex preset is a gpt-* id, so this is
-// just the prefix check. Checked after isClaudeModel
-// (claude ids never start with gpt-), so a model is claude | codex | ollama
-// in that order.
+// true → run via the `codex` bin. The stored group wins; free-text falls back to
+// the gpt-* prefix check (the store enforces that every codex entry is a gpt-*
+// id, so the two agree). Checked after isClaudeModel (claude ids never start
+// with gpt-), so a model is claude | codex | ollama in that order.
 export function isCodexModel(model) {
+  const group = groupFor(model);
+  if (group) return group === 'codex';
   return !!model && model.startsWith('gpt-');
 }
 
@@ -50,6 +57,9 @@ export function validateToolModel(tool, model) {
 // opus[1m]); for ids that drop it (claude-opus-5 from opus[1m]) it is
 // unrecoverable, so the base alias is the safe fallback. Non-claude ids and
 // already-alias input pass through unchanged.
+//
+// This table stays hardcoded on purpose: it maps resolved claude-* ids back to
+// alias families, which is claude-binary behaviour, not user configuration.
 const CLAUDE_ID_TO_ALIAS = [
   [/^claude-(opus)-[0-9].*\[1m\]$/, 'opus[1m]'],
   [/^claude-(sonnet)-[0-9].*\[1m\]$/, 'sonnet[1m]'],
@@ -59,7 +69,9 @@ const CLAUDE_ID_TO_ALIAS = [
   [/^claude-fable-/, 'fable'],
 ];
 export function claudeIdToAlias(model) {
-  if (!model || ALIAS_SET.has(model) || !model.startsWith('claude-')) return model;
+  // A model the user has stored as a claude entry is already a picker option —
+  // pass it through rather than folding it into a family alias.
+  if (!model || groupFor(model) === 'claude' || !model.startsWith('claude-')) return model;
   for (const [re, alias] of CLAUDE_ID_TO_ALIAS) if (re.test(model)) return alias;
   return model;
 }
