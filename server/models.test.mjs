@@ -110,3 +110,16 @@ test('routing follows a store edit with no restart, and free-text still falls ba
   assert.equal(setModels(before).ok, true);
   assert.equal(isClaudeModel('zephyr-9'), false, 'reverting the store reverts routing');
 });
+
+// The floor set: deleting a shipped claude alias in Settings must not reroute
+// it to the ollama wrapper — tasks.mjs hardcodes 'sonnet'/'opus' as the
+// subagent-split defaults.
+test('deleted shipped claude aliases keep routing to the claude bin', () => {
+  const before = getModels();
+  const w = setModels({ ...before, models: before.models.filter((m) => m.id !== 'sonnet' && m.id !== 'opus') });
+  assert.equal(w.ok, true, w.error);
+  assert.equal(isClaudeModel('sonnet'), true);
+  assert.equal(isClaudeModel('opus'), true);
+  assert.equal(isCodexModel('sonnet'), false);
+  assert.equal(setModels(before).ok, true);
+});

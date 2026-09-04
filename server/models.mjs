@@ -15,14 +15,21 @@
 // open); memoize on mtime if a hot loop ever appears.
 import { groupFor } from './model-store.mjs';
 
+// Floor set of the shipped claude alias ids (model-store.mjs SEED's claude
+// group): tasks.mjs hardcodes 'sonnet'/'opus' as the subagent-split defaults,
+// so a user who deletes those entries in Settings must still route them to the
+// claude bin, not silently reroute them to the ollama wrapper.
+const SHIPPED_CLAUDE_ALIASES = new Set(['claude', 'best', 'fable', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]', 'opusplan']);
+
 // true → run via the `claude` bin (optional --model); false → ollama wrapper.
 // 'claude' is the default alias (no --model). The stored group wins; for a
-// free-text id that is not in the store, full claude-* ids resolve to the claude
-// bin and everything else is treated as an ollama model.
+// free-text id that is not in the store, the shipped aliases and full claude-*
+// ids resolve to the claude bin and everything else is treated as an ollama
+// model.
 export function isClaudeModel(model) {
   const group = groupFor(model);
   if (group) return group === 'claude';
-  return !model || model === 'claude' || model.startsWith('claude-');
+  return !model || SHIPPED_CLAUDE_ALIASES.has(model) || model.startsWith('claude-');
 }
 
 // true → run via the `codex` bin. The stored group wins; free-text falls back to

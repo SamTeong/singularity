@@ -39,7 +39,9 @@ const MODEL_SEED = {
   summariserModel: 'deepseek-v4-flash:cloud',
 };
 
-const modelsDoc = () => (db.ui.models ||= JSON.parse(JSON.stringify(MODEL_SEED)));
+// Exported so sibling route modules (sessions.js restoreOllamaTag) read the
+// same editable document instead of a private literal copy.
+export const modelsDoc = () => (db.ui.models ||= JSON.parse(JSON.stringify(MODEL_SEED)));
 
 // Mirror of model-store.mjs's validate().
 function validateModels(doc) {
