@@ -6,6 +6,7 @@ import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import MenuItem from '@mui/material/MenuItem';
+import ListSubheader from '@mui/material/ListSubheader';
 import Radio from '@mui/material/Radio';
 import Select from '@mui/material/Select';
 import Switch from '@mui/material/Switch';
@@ -35,6 +36,7 @@ export default function ModelsPanel() {
   const { models, defaultModel, summariserModel, error: loadError, reload } = useModels();
   const caps = useCapabilities();
   const ollamaUnavailable = caps && caps.ollama?.available === false;
+  const codexUnavailable = caps && caps.codexSpawn?.available === false;
   // Memoized identity is load-bearing: the draft-sync guard below compares doc
   // across renders, so a doc rebuilt per render would loop forever.
   const doc = useMemo(() => (models ? { models, defaultModel, summariserModel } : null), [models, defaultModel, summariserModel]);
@@ -60,7 +62,7 @@ export default function ModelsPanel() {
   const normalize = (next) => ({
     ...next,
     defaultModel: next.models.some((m) => m.id === next.defaultModel && m.enabled) ? next.defaultModel : '',
-    summariserModel: next.models.some((m) => m.id === next.summariserModel && m.group === 'ollama') ? next.summariserModel : '',
+    summariserModel: next.models.some((m) => m.id === next.summariserModel && m.enabled) ? next.summariserModel : '',
   });
 
   const save = async (next) => {
@@ -250,15 +252,32 @@ export default function ModelsPanel() {
         size="small"
         label="History summariser"
         value={draft.summariserModel}
-        disabled={ollamaUnavailable}
         onChange={(e) => save({ ...draft, summariserModel: e.target.value })}
-        helperText={ollamaUnavailable ? caps?.ollama?.hint : 'Ollama model that summarises the History view.'}
+        helperText={
+          'Model that summarises the History view — from any group. Empty means no LLM summary, '
+          + 'deterministic bullets only. A claude or codex model spends real quota (up to 7 calls on a first run).'
+          + [ollamaUnavailable && caps.ollama.hint, codexUnavailable && caps.codexSpawn.hint]
+            .filter(Boolean).map((h) => ` ${h}`).join('')
+        }
         sx={{ width: 280, mt: 3 }}
       >
         <MenuItem value="">None</MenuItem>
-        {draft.models.filter((m) => m.group === 'ollama').map((m) => (
-          <MenuItem key={m.id} value={m.id}>{m.label || m.id}</MenuItem>
-        ))}
+        {GROUPS.flatMap((g) => {
+          const opts = draft.models.filter((m) => m.group === g && m.enabled);
+          if (!opts.length) return [];
+          return [
+            <ListSubheader key={`${g}-header`}>{g}</ListSubheader>,
+            ...opts.map((m) => (
+              <MenuItem
+                key={m.id}
+                value={m.id}
+                disabled={(g === 'ollama' && ollamaUnavailable) || (g === 'codex' && codexUnavailable)}
+              >
+                {m.label || m.id}
+              </MenuItem>
+            )),
+          ];
+        })}
       </TextField>
     </Box>
   );

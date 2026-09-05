@@ -148,7 +148,9 @@ export function DayHeader({ entry, expanded, onToggle, onRegenerate, regeneratin
             <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>
               {entry.llm?.ok
                 ? `summarized by: ${entry.llm.provider === 'anthropic-oauth' ? 'claude' : entry.llm.provider ?? 'auto'}`
-                : entry.llm?.reason === 'trivial' ? 'summarized by: auto — trivial day' : 'summary unavailable'}
+                : entry.llm?.reason === 'trivial' ? 'summarized by: auto — trivial day'
+                : entry.llm?.reason === 'no-summariser' ? 'no summariser configured — see Settings ▸ Models'
+                : 'summary unavailable'}
             </Typography>
             {!!entry.llm?.dropped?.length && (
               <Tooltip title={`Dropped from digest: ${entry.llm.dropped.join(', ')}`} disableInteractive>

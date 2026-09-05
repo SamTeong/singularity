@@ -75,6 +75,24 @@ async function html5Drag(page, source, target) {
   await source.dispatchEvent('dragend', { dataTransfer });
 }
 
+test('Settings: History summariser accepts a claude-group model and persists it', async ({ page }) => {
+  await page.goto('/settings?tab=models');
+  await expect(page.getByText('Restore defaults')).toBeVisible();
+
+  // The summariser select now lists every enabled entry across groups
+  // (claude/ollama/codex), not just ollama — pick a claude-group option.
+  const summariser = page.getByLabel('History summariser', { exact: true });
+  await summariser.click();
+  await page.getByRole('option', { name: 'Best available' }).click();
+  await expect(summariser).toHaveText('Best available');
+
+  // Round trip: the PUT landed in the mock's document, not just local draft
+  // state — GET /api/models directly. (A page.reload() would reset Mirage's
+  // in-memory db, which is not the contract under test here.)
+  const doc = await page.evaluate(() => fetch('/api/models').then((r) => r.json()));
+  expect(doc.summariserModel).toBe('best');
+});
+
 test('Settings: dragging a model onto a lower row moves it there', async ({ page }) => {
   await page.goto('/settings?tab=models');
   await expect(page.getByText('Restore defaults')).toBeVisible();
