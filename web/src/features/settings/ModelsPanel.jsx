@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -33,10 +33,12 @@ const EMPTY_ADD = { id: '', label: '', group: 'claude' };
  * optimistic update; a 400 shows the server error and refetches.
  */
 export default function ModelsPanel() {
-  const { models, defaultModel, summariserModel, reload } = useModels();
+  const { models, defaultModel, summariserModel, error: loadError, reload } = useModels();
   const caps = useCapabilities();
   const ollamaUnavailable = caps && caps.ollama?.available === false;
-  const doc = models ? { models, defaultModel, summariserModel } : null;
+  // Memoized identity is load-bearing: the draft-sync guard below compares doc
+  // across renders, so a doc rebuilt per render would loop forever.
+  const doc = useMemo(() => (models ? { models, defaultModel, summariserModel } : null), [models, defaultModel, summariserModel]);
   const [draft, setDraft] = useState(null);
   const [prevDoc, setPrevDoc] = useState(null);
   const [error, setError] = useState(null);
@@ -84,6 +86,17 @@ export default function ModelsPanel() {
     } catch (e) { setError(e.message); reload(); }
   };
 
+  // A failed GET must not leave the tab silently blank — show the load error
+  // with a Retry (also rendered under the draft when a post-save refetch fails,
+  // so the draft can't keep showing an optimistic invalid doc unnoticed).
+  if (!draft && loadError) {
+    return (
+      <Box sx={{ p: 2 }}>
+        <Typography variant="body2" color="error">Could not load models — {loadError}</Typography>
+        <Button size="small" onClick={reload} sx={{ mt: 1 }}>Retry</Button>
+      </Box>
+    );
+  }
   if (!draft) return null;
   const replace = (i, patch) => ({ ...draft, models: draft.models.map((m, j) => (j === i ? { ...m, ...patch } : m)) });
 
@@ -119,6 +132,12 @@ export default function ModelsPanel() {
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
         Suggestions for the free-text model pickers, grouped by which bin the daemon routes them to.
       </Typography>
+
+      {loadError && (
+        <Typography variant="body2" color="error" sx={{ mb: 2 }}>
+          Reload failed — {loadError}
+        </Typography>
+      )}
 
       {error && (
         <Typography variant="body2" color="error" sx={{ mb: 2 }}>

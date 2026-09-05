@@ -22,8 +22,9 @@ const MAX_LABEL = 80;
 // Shipped defaults: the claude aliases (mirror /model) + ollama presets + codex
 // presets, with the friendly claude names that used to live client-side in
 // ModelSelect.jsx's CLAUDE_NAMES map. Non-claude entries render their id bare,
-// which is what an empty label means.
-const SEED = {
+// which is what an empty label means. Exported: models.mjs derives its
+// free-text floor set (the shipped claude ids) from this one copy of the list.
+export const SEED = {
   models: [
     { id: 'claude', group: 'claude', label: 'Default', enabled: true },
     { id: 'best', group: 'claude', label: 'Best available', enabled: true },

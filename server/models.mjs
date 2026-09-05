@@ -13,13 +13,14 @@
 // ponytail: groupFor() re-reads models.json each call (read-on-every-get, same
 // as config-state.mjs). Fine at the call rates here (per spawn / per session
 // open); memoize on mtime if a hot loop ever appears.
-import { groupFor } from './model-store.mjs';
+import { groupFor, SEED } from './model-store.mjs';
 
-// Floor set of the shipped claude alias ids (model-store.mjs SEED's claude
-// group): tasks.mjs hardcodes 'sonnet'/'opus' as the subagent-split defaults,
-// so a user who deletes those entries in Settings must still route them to the
-// claude bin, not silently reroute them to the ollama wrapper.
-const SHIPPED_CLAUDE_ALIASES = new Set(['claude', 'best', 'fable', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]', 'opusplan']);
+// Floor set of the shipped claude alias ids — derived from model-store.mjs's
+// SEED so the list exists in one place: tasks.mjs hardcodes 'sonnet'/'opus' as
+// the subagent-split defaults, so a user who deletes those entries in Settings
+// must still route them to the claude bin, not silently reroute them to the
+// ollama wrapper.
+const SHIPPED_CLAUDE_ALIASES = new Set(SEED.models.filter((m) => m.group === 'claude').map((m) => m.id));
 
 // true → run via the `claude` bin (optional --model); false → ollama wrapper.
 // 'claude' is the default alias (no --model). The stored group wins; for a

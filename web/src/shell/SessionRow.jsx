@@ -41,7 +41,7 @@ const TERMINAL_NAME = PLATFORM.includes('mac') ? 'Terminal'
  * arrives as callbacks.
  */
 export default function SessionRow({
-  agent, selected, onSelect, stats, subagents = [], dragging, dragHandlers,
+  agent, models, selected, onSelect, stats, subagents = [], dragging, dragHandlers,
   onViewTranscript, onDuplicate, onFork, onRespawn, onReattach, onOpenExternal, onKill,
 }) {
   const a = agent;
@@ -57,7 +57,7 @@ export default function SessionRow({
   // reg.fork). Codex writes its own rollout and mints its own thread uuid — no
   // log to clone, no id to pin — so forking one silently degrades to Duplicate.
   // Hide the action rather than offer one that doesn't fork.
-  const codex = a.tool === 'codex' || isCodexModel(a.model);
+  const codex = a.tool === 'codex' || isCodexModel(a.model, models);
   return (
     <React.Fragment>
       <ListItemButton

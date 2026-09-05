@@ -48,7 +48,7 @@ const sessionLed = (t, status) => {
  * locally; fleet state + actions come from {@link useAgents}. Dock size/minimise
  * state is shell-owned and passed in (shared with the create dialogs).
  */
-export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandDock, onTopReached, onViewTranscript, onToast }) {
+export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandDock, models, onTopReached, onViewTranscript, onToast }) {
   const { agents, active, setActive, subagents, stats, sendMsg, reorderAgents, registerTerminal } = useAgents();
   const { skinId } = useThemeSkin();
   // Composition-owner branch (design.md D1): the dock header/terminal-bar
@@ -157,6 +157,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
               <SessionRow
                 key={a.id}
                 agent={a}
+                models={models}
                 selected={a.id === active}
                 onSelect={() => setActive(a.id)}
                 stats={stats[a.id]}

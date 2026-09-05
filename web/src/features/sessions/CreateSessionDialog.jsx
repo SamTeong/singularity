@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import TextField from '@mui/material/TextField';
 import ModelSelect from '@/components/ModelSelect.jsx';
 import CwdPicker from '@/components/CwdPicker.jsx';
@@ -6,6 +6,7 @@ import ScopeSelect from '@/components/ScopeSelect.jsx';
 import CreateDialog, { clearAdornment } from '@/components/CreateDialog.jsx';
 import { untildify } from '@/lib/paths.js';
 import { toolForModel } from '@/lib/models.js';
+import { useModels } from '@/hooks/useModels.js';
 
 // New-session dialog: owns the form fields (title/model/scopes/session id); cwd is
 // lifted to App (shared with the dir picker + config fallback). Emits `create`
@@ -17,6 +18,10 @@ export default function CreateSessionDialog({ open, onClose, connected, cwd, set
   const [scopes, setScopes] = useState([]);
   const [sessionId, setSessionId] = useState('');
   const sessionIdInvalid = sessionId.trim() !== '' && !UUID_RE.test(sessionId.trim());
+  const { models, defaultModel, reload } = useModels();
+  // The dialog stays mounted with the shell — refetch on each open so the D5
+  // prefill sees the current store (ModelSelect refetches per open anyway).
+  useEffect(() => { if (open) reload(); }, [open, reload]);
 
   // Prefill the session id + last model + last skill-scopes when opened for a
   // resume (e.g. from the Transcripts view). Fires only on the false→true open
@@ -24,13 +29,22 @@ export default function CreateSessionDialog({ open, onClose, connected, cwd, set
   // previous `open`) rather than an effect that would setState on every commit.
   // AppShell always closes this dialog before starting another resume, so
   // `initialSessionId` never changes while `open` stays true.
+  // D5 default prefill: with nothing else to prefill, a fresh open shows the
+  // store's defaultModel — Resume's initialModel still wins, and a model the
+  // user already typed (Escape keeps dialog state across reopen) is never
+  // clobbered. Re-fires if the store document arrives after the dialog opened.
   const [prevOpen, setPrevOpen] = useState(open);
-  if (open !== prevOpen) {
+  const [prevDefault, setPrevDefault] = useState(defaultModel);
+  if (open !== prevOpen || defaultModel !== prevDefault) {
     setPrevOpen(open);
+    setPrevDefault(defaultModel);
     if (open && initialSessionId) {
       setSessionId(initialSessionId);
       if (initialModel) setModel(initialModel);
+      else if (!model) setModel(defaultModel || '');
       if (initialScopes?.length) setScopes(initialScopes);
+    } else if (open && !model) {
+      setModel(defaultModel || '');
     }
   }
 
@@ -38,7 +52,7 @@ export default function CreateSessionDialog({ open, onClose, connected, cwd, set
 
   const create = () => {
     if (!connected || !cwd.trim() || !model.trim()) return;
-    sendMsg({ t: 'create', cwd: untildify(cwd.trim()), title: title.trim(), model: model.trim(), scopes, sessionId: sessionId.trim(), tool: toolForModel(model.trim()) });
+    sendMsg({ t: 'create', cwd: untildify(cwd.trim()), title: title.trim(), model: model.trim(), scopes, sessionId: sessionId.trim(), tool: toolForModel(model.trim(), models) });
     onSessionCreated?.();
     reset();
     onClose();
