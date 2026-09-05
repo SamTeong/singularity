@@ -43,3 +43,51 @@ test('Settings: an added model appears in the New session dropdown without a rel
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
+
+test('Settings: the drag handle reorders a model with the keyboard', async ({ page }) => {
+  await page.goto('/settings?tab=models');
+  await expect(page.getByText('Restore defaults')).toBeVisible();
+
+  // Two textboxes per row (id, label) — the add row's pair comes after them.
+  const boxes = () => page.getByRole('textbox');
+  const first = await boxes().nth(0).inputValue();
+  const second = await boxes().nth(2).inputValue();
+  expect(first).not.toBe(second);
+
+  // Drag-and-drop is the primary gesture; the handle's ArrowUp/ArrowDown is the
+  // keyboard path over the same reorder(), so this covers both.
+  await page.getByRole('button', { name: 'Reorder' }).nth(0).focus();
+  await page.keyboard.press('ArrowDown');
+
+  await expect(boxes().nth(0)).toHaveValue(second);
+  await expect(boxes().nth(2)).toHaveValue(first);
+});
+
+// Playwright's dragTo()/mouse.down+move+up does not reliably fire React's
+// onDragStart/onDragOver/onDrop under headless Chromium (no real OS-level
+// drag). Dispatching the events with a shared DataTransfer does. (Copied
+// verbatim from e2e-mock/automation.spec.mjs.)
+async function html5Drag(page, source, target) {
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await source.dispatchEvent('dragstart', { dataTransfer });
+  await target.dispatchEvent('dragover', { dataTransfer });
+  await target.dispatchEvent('drop', { dataTransfer });
+  await source.dispatchEvent('dragend', { dataTransfer });
+}
+
+test('Settings: dragging a model onto a lower row moves it there', async ({ page }) => {
+  await page.goto('/settings?tab=models');
+  await expect(page.getByText('Restore defaults')).toBeVisible();
+
+  const boxes = () => page.getByRole('textbox');
+  const [a, b, c] = [await boxes().nth(0).inputValue(), await boxes().nth(2).inputValue(), await boxes().nth(4).inputValue()];
+
+  // Non-adjacent drop: the row moves to the target slot, it is not swapped
+  // with it — so the two rows it passed shift up rather than jumping.
+  const handle = page.getByRole('button', { name: 'Reorder' }).nth(0);
+  await html5Drag(page, handle, boxes().nth(4));
+
+  await expect(boxes().nth(0)).toHaveValue(b);
+  await expect(boxes().nth(2)).toHaveValue(c);
+  await expect(boxes().nth(4)).toHaveValue(a);
+});

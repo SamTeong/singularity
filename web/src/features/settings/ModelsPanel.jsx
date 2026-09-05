@@ -12,9 +12,8 @@ import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
 import { alpha } from '@mui/material/styles';
 import AddIcon from '@mui/icons-material/Add';
-import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
-import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
 import DeleteIcon from '@mui/icons-material/Delete';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useModels } from '@/hooks/useModels.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
@@ -43,6 +42,10 @@ export default function ModelsPanel() {
   const [prevDoc, setPrevDoc] = useState(null);
   const [error, setError] = useState(null);
   const [add, setAdd] = useState(EMPTY_ADD);
+  // Only the handle is draggable — a draggable row would break text selection
+  // inside its id/label fields.
+  const [dragIndex, setDragIndex] = useState(null);
+  const [overIndex, setOverIndex] = useState(null);
 
   // Sync the draft from the fetched document — during render, guarded on doc
   // identity (the React-documented "adjust state when a prop changes" pattern;
@@ -108,13 +111,15 @@ export default function ModelsPanel() {
     models: d.models.map((m, j) => (j === i ? { ...m, id } : m)),
   }));
 
-  // Swap with the adjacent row — the up/down buttons are disabled at a group
-  // boundary, so this never moves an entry across groups.
-  const move = (i, dir) => {
-    const j = i + dir;
-    if (j < 0 || j >= draft.models.length || draft.models[j].group !== draft.models[i].group) return;
+  // Move a row to another slot in the same group — a cross-group drop is
+  // rejected rather than reinterpreted as a group change (the group Select does
+  // that). Native HTML5 DnD, committed on drop like SessionDock's dock reorder;
+  // the handle also takes ArrowUp/ArrowDown so reordering stays keyboard-usable.
+  const reorder = (from, to) => {
+    if (to < 0 || to >= draft.models.length || draft.models[to].group !== draft.models[from].group) return;
     const models = [...draft.models];
-    [models[i], models[j]] = [models[j], models[i]];
+    const [row] = models.splice(from, 1);
+    models.splice(to, 0, row);
     save({ ...draft, models });
   };
 
@@ -145,13 +150,53 @@ export default function ModelsPanel() {
         </Typography>
       )}
 
+      {/* Column headers — widths mirror the row controls below so they line up. */}
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', pb: 0.5, '& > *': { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary' } }}>
+        <Typography sx={{ width: 30 }} />
+        <Tooltip title="Prefilled in the new session / task dialogs">
+          <Typography sx={{ width: 28 }}>Def</Typography>
+        </Tooltip>
+        <Typography sx={{ width: 210 }}>Model id</Typography>
+        <Typography sx={{ width: 170 }}>Label</Typography>
+        <Typography sx={{ width: 96 }}>Group</Typography>
+        <Tooltip title="Show this model in the pickers">
+          <Typography sx={{ width: 40 }}>On</Typography>
+        </Tooltip>
+        <Typography sx={{ width: 30 }} />
+      </Stack>
+
       {draft.models.map((m, i) => (
         <Stack
           key={i}
           direction="row"
           spacing={1}
-          sx={{ alignItems: 'center', py: 0.75, borderBottom: (t) => `1px solid ${alpha(t.palette.glass.stroke, 0.1)}` }}
+          onDragOver={(e) => { if (dragIndex !== null && draft.models[dragIndex].group === m.group) { e.preventDefault(); setOverIndex(i); } }}
+          onDrop={(e) => { e.preventDefault(); if (dragIndex !== null) reorder(dragIndex, i); setDragIndex(null); setOverIndex(null); }}
+          sx={{
+            alignItems: 'center',
+            py: 0.75,
+            borderBottom: (t) => `1px solid ${alpha(t.palette.glass.stroke, 0.1)}`,
+            opacity: dragIndex === i ? 0.4 : 1,
+            bgcolor: overIndex === i && dragIndex !== i ? 'action.hover' : 'transparent',
+          }}
         >
+          <Tooltip title="Drag to reorder within the group (or focus and press ↑ / ↓)">
+            <IconButton
+              size="small"
+              aria-label="Reorder"
+              draggable
+              onDragStart={(e) => { setDragIndex(i); e.dataTransfer.effectAllowed = 'move'; }}
+              onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
+              onKeyDown={(e) => {
+                if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+                e.preventDefault();
+                reorder(i, i + (e.key === 'ArrowUp' ? -1 : 1));
+              }}
+              sx={{ cursor: 'grab' }}
+            >
+              <DragIndicatorIcon fontSize="small" />
+            </IconButton>
+          </Tooltip>
           <Tooltip title={m.enabled ? 'Mark as default' : 'Enable to mark as default'}>
             <Radio
               size="small"
@@ -182,12 +227,6 @@ export default function ModelsPanel() {
           <Tooltip title="Enabled in the picker">
             <Switch size="small" checked={m.enabled} onChange={(e) => save(replace(i, { enabled: e.target.checked }))} />
           </Tooltip>
-          <IconButton size="small" onClick={() => move(i, -1)} disabled={i === 0 || draft.models[i - 1].group !== m.group}>
-            <ArrowUpwardIcon fontSize="small" />
-          </IconButton>
-          <IconButton size="small" onClick={() => move(i, 1)} disabled={i === draft.models.length - 1 || draft.models[i + 1].group !== m.group}>
-            <ArrowDownwardIcon fontSize="small" />
-          </IconButton>
           <Tooltip title="Delete">
             <IconButton size="small" onClick={() => save({ ...draft, models: draft.models.filter((_, j) => j !== i) })}>
               <DeleteIcon fontSize="small" />
@@ -197,6 +236,7 @@ export default function ModelsPanel() {
       ))}
 
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 2 }}>
+        <Box sx={{ width: 66 }} />
         <TextField size="small" placeholder="id — e.g. sonnet[1m]" value={add.id} onChange={(e) => setAdd({ ...add, id: e.target.value })} sx={{ width: 210 }} />
         <TextField size="small" placeholder="label" value={add.label} onChange={(e) => setAdd({ ...add, label: e.target.value })} sx={{ width: 170 }} />
         <Select size="small" value={add.group} onChange={(e) => setAdd({ ...add, group: e.target.value })} sx={{ width: 96 }}>
