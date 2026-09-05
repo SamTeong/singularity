@@ -71,8 +71,10 @@ Per-view filters live in the query string via `web/src/hooks/useQueryState.js` (
 ## State
 
 Owned app state → `SINGULARITY_HOME` (required, no default — set in `.env`; `APP_DIR`):
-- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `background.json`, `ollama.json`, plus per-user picker roots — `config-roots.json`, `hook-roots.json`, `memory-root.json`, `rules-roots.json`, `sessions-root.json`, `skills-roots.json` (+ legacy `skills-root.json`), `wiki-root.json`
+- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `background.json`, `models.json`, `ollama.json`, plus per-user picker roots — `config-roots.json`, `hook-roots.json`, `memory-root.json`, `rules-roots.json`, `sessions-root.json`, `skills-roots.json` (+ legacy `skills-root.json`), `wiki-root.json`
 - `cache/` (disposable): `usage-cache.json`, `pw-ollama-profile/`
+
+Model lists are runtime config, not code: `state/models.json` (edited in Settings ▸ Models) drives the picker suggestions, client-side spawn classification (`web/src/lib/models.js`), server spawn routing (`server/models.mjs` via `model-store.mjs`), and the History summariser. `model-store.mjs` seeds it from the shipped arrays on first boot; Restore defaults re-merges missing shipped ids.
 
 `.worktrees/` + `.tickets/<id>/` live at `TRUSTED_ROOT` (default = this clone; override via `SING_TRUSTED_ROOT` in `.env`), NOT under `APP_DIR` — Claude only honors repo-controllable permissions (allow-rules/hooks) for paths inside the trusted project root; external paths fire Task-permission prompts.
 Single source = `server/app-dir.mjs` (`APP_DIR`/`STATE_DIR`/`CACHE_DIR`/`WORKTREES_DIR`/`TICKETS_DIR`). Route all new state through `reg` from `agents.mjs` — never hardcode `~/.singularity`. `migrate-state.mjs` (imported by `index.mjs`) moves the pre-split flat layout into `state/`+`cache/` once.

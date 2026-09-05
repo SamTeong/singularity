@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -12,6 +12,7 @@ import ScopeSelect from '@/components/ScopeSelect.jsx';
 import CreateDialog, { clearAdornment } from '@/components/CreateDialog.jsx';
 import { untildify } from '@/lib/paths.js';
 import { isCodexModel, toolForModel } from '@/lib/models.js';
+import { useModels } from '@/hooks/useModels.js';
 
 // New-task dialog: CreateSessionDialog minus session id, plus title/description
 // (the requirements), plan-approval gate and merge policy. Submits POST /tasks
@@ -26,17 +27,33 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
   const [orchTurns, setOrchTurns] = useState('');
   const [implTurns, setImplTurns] = useState('');
   const [revTurns, setRevTurns] = useState('');
-  const [claudeSet, setClaudeSet] = useState(null);
   const [scopes, setScopes] = useState([]);
   const [requireApproval, setRequireApproval] = useState(false);
   const [mergeMode, setMergeMode] = useState('manual');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const { models, defaultModel, reload } = useModels();
 
-  useEffect(() => {
-    if (!open) return;
-    fetch('/api/models').then((r) => r.json()).then((d) => setClaudeSet(new Set(d.claude || []))).catch(() => {});
-  }, [open]);
+  // Classifier, not a picker: disabled entries are still claude models, so this
+  // deliberately does not filter on `enabled`. The dialog stays mounted with the
+  // shell — refetch on each open so the classification and the D5 prefill see
+  // the current store.
+  useEffect(() => { if (open) reload(); }, [open, reload]);
+  const claudeSet = useMemo(
+    () => (models ? new Set(models.filter((m) => m.group === 'claude').map((m) => m.id)) : null),
+    [models],
+  );
+
+  // D5 default prefill: a fresh open shows the store's defaultModel, but a
+  // model the user already typed (Escape keeps dialog state across reopen) is
+  // never clobbered. Re-fires if the store document arrives after the open.
+  const [prevOpen, setPrevOpen] = useState(open);
+  const [prevDefault, setPrevDefault] = useState(defaultModel);
+  if (open !== prevOpen || defaultModel !== prevDefault) {
+    setPrevOpen(open);
+    setPrevDefault(defaultModel);
+    if (open && !model) setModel(defaultModel || '');
+  }
 
   // Mirror of server isClaudeModel: empty/'claude'/known alias/claude-* id → claude.
   const isClaude = (m) => !m || (claudeSet ? claudeSet.has(m) : m === 'claude') || m.startsWith('claude-');
@@ -51,7 +68,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
     setPrevModel(model);
     setPrevClaudeSet(claudeSet);
     if (isClaude(model)) { setImplModel('sonnet'); setReviewerModel('opus'); }
-    else if (isCodexModel(model)) { /* codex is single-agent — impl/reviewer hidden, leave as-is */ }
+    else if (isCodexModel(model, models)) { /* codex is single-agent — impl/reviewer hidden, leave as-is */ }
     else { setImplModel(model); setReviewerModel(model); }
   }
 
@@ -77,7 +94,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
           repo: untildify(cwd.trim()), title: title.trim(), description: description.trim(),
           model: model.trim(), implModel: implModel.trim(), reviewerModel: reviewerModel.trim(),
           orchestratorMaxTurns: posNum(orchTurns), implMaxTurns: posNum(implTurns), reviewerMaxTurns: posNum(revTurns),
-          scopes, tags, requirePlanApproval: requireApproval, mergeMode, tool: toolForModel(model.trim()),
+          scopes, tags, requirePlanApproval: requireApproval, mergeMode, tool: toolForModel(model.trim(), models),
         }),
       });
       const d = await r.json();
@@ -110,7 +127,7 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
           <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" placeholder="required — claude, ollama, or gpt-*" /></Box>
           <TextField size="small" type="number" label="turn limit" placeholder="—" value={orchTurns} onChange={(e) => setOrchTurns(e.target.value)} sx={{ width: 110 }} />
         </Stack>
-        {!isCodexModel(model) && (
+        {!isCodexModel(model, models) && (
           <>
             <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
               <Box sx={{ flex: 1 }}><ModelSelect model={implModel} setModel={setImplModel} label="implementor model" /></Box>

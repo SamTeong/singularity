@@ -33,7 +33,7 @@ import { reportStatus, latestReportHtml, generateReport } from './usagereport.mj
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
-import { CLAUDE_ALIASES, OLLAMA_PRESETS, CODEX_PRESETS } from './models.mjs';
+import { getModels, setModels, restoreDefaults } from './model-store.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -423,9 +423,22 @@ app.put('/keys', async (req) => setKeys(req.body));
 // Task manager: list claude.exe + this repo's dev-tooling processes, kill a stale/orphaned one by PID.
 app.get('/procs', async () => ({ procs: await scanClaude() }));
 
-// Model picker source: claude aliases (mirror /model) + ollama presets. Free-text
-// in the UI — these are suggestions; any typed value is passed through verbatim.
-app.get('/models', async () => ({ claude: CLAUDE_ALIASES, ollama: OLLAMA_PRESETS, codex: CODEX_PRESETS }));
+// Model picker source, now user-managed state (STATE_DIR/models.json). Returns
+// ALL entries including disabled ones — Settings needs to render them; the
+// picker filters on `enabled`. Free-text in the UI — these are suggestions; any
+// typed value is passed through verbatim.
+app.get('/models', async () => getModels());
+
+// Whole-document replace (add / remove / edit / reorder / enable / default all
+// go through this one route, like PUT /keys). Validation lives in the store.
+app.put('/models', async (req, reply) => {
+  const r = setModels(req.body);
+  if (!r.ok) reply.code(400);
+  return r;
+});
+
+// Re-add any shipped default the user deleted; keeps their additions and edits.
+app.post('/models/restore-defaults', async () => ({ ok: true, state: restoreDefaults() }));
 
 // Home dir, for the client to collapse full paths to `~` on display. Same
 // source as the window.__SING_HOME__ injection above — see displayHome().

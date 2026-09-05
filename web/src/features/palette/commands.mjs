@@ -26,7 +26,7 @@ function buildSessionCommands(ctx) {
   }];
   for (const a of ctx.agents) {
     const title = a.title || a.id.slice(0, 8);
-    const codex = a.tool === 'codex' || isCodexModel(a.model);
+    const codex = a.tool === 'codex' || isCodexModel(a.model, ctx.models);
     if (a.status !== 'detached') {
       cmds.push({
         id: 'session:switch:' + a.id,

@@ -32,6 +32,7 @@ import { useDoubleTap } from '@/features/palette/useDoubleTap.js';
 import CommandPalette from '@/features/palette/CommandPalette.jsx';
 import { buildCommands } from '@/features/palette/commands.mjs';
 import { isCodexModel } from '@/lib/models.js';
+import { useModels } from '@/hooks/useModels.js';
 import { insetQuery } from '@/lib/sheetInset.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 import { isLive } from '@/lib/agentStatus.js';
@@ -81,6 +82,10 @@ export default function AppShell() {
     agents, setActive, connected, tasks, taskHistory, crons, background, recent,
     usage, stats, sendMsg, refreshUsage, registerChat, registerError,
   } = useAgents();
+  // Stored model list — needed by the codex/claude classification below (transcript
+  // routing, palette, dock rows); a claude-group entry whose id starts with gpt-
+  // would otherwise misclassify client-side.
+  const { models } = useModels();
   const { keys } = useKeys();
   const { toggle: toggleColorMode } = useColorMode();
   // The active skin optionally paints a full-bleed background behind the shell.
@@ -254,7 +259,7 @@ export default function AppShell() {
   // this view it already IS the thread uuid, and /transcript's own by-id lookup
   // covers it. Only a genuinely unknown id lands on "Transcript not found".
   const viewTranscript = useCallback(async (a) => {
-    if (a.tool === 'codex' || isCodexModel(a.model)) {
+    if (a.tool === 'codex' || isCodexModel(a.model, models)) {
       const threadId = await fetch(`/api/transcripts/codex-thread?id=${encodeURIComponent(a.id)}`)
         .then((r) => r.json()).then((d) => (d.ok ? d.threadId : null)).catch(() => null);
       openTranscript({ project: '<codex>', session: threadId || a.id, source: 'codex' });
@@ -263,7 +268,7 @@ export default function AppShell() {
     }
     openTranscript({ project: (a.cwd || '').replace(/[^a-zA-Z0-9]/g, '-'), session: a.id });
     setTxPrompt(null);
-  }, [openTranscript]);
+  }, [openTranscript, models]);
 
   // Deep-link from a History day's session row into Transcripts. Unlike
   // viewTranscript, these rows already carry the transcript-file id/project
@@ -294,10 +299,10 @@ export default function AppShell() {
   // Command palette: Views (Phase 0) + Sessions (Phase 1) groups. ctx carries
   // everything a session op needs — mirrors what SessionDock/SessionRow use.
   const paletteCtx = useMemo(() => ({
-    setView, view, agents, setActive, sendMsg,
+    setView, view, agents, setActive, sendMsg, models,
     onNewSession: () => setCreateOpen(true),
     viewTranscript, expandDock,
-  }), [setView, view, agents, setActive, sendMsg, viewTranscript, expandDock]);
+  }), [setView, view, agents, setActive, sendMsg, models, viewTranscript, expandDock]);
   const commands = useMemo(() => buildCommands(paletteCtx), [paletteCtx]);
   useDoubleTap(keys.paletteOpen, () => setPaletteOpen(true));
 
@@ -425,6 +430,7 @@ export default function AppShell() {
         dockH={dockH}
         listW={listW}
         expandDock={expandDock}
+        models={models}
         onTopReached={setTxPrompt}
         onViewTranscript={viewTranscript}
         onToast={setToast}

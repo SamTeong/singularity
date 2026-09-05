@@ -14,7 +14,7 @@ import { STATE_DIR, bus, writeAtomic, OLLAMA_BIN } from './agents.mjs';
 import { listSessions, readSession } from './sessions.mjs';
 import { parseSession, readCostFile, readStatsCsvCosts } from './stats.mjs';
 import { callMessages } from './chat.mjs';
-import { OLLAMA_PRESETS } from './models.mjs';
+import { getSummariserModel } from './model-store.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -25,7 +25,6 @@ const USER_TRUNC = 400;
 const ASSISTANT_TRUNC = 800;
 const BULLET_TRUNC = 120;           // one card line — longer just wraps into a wall of text
 const DIGEST_CAP = 48_000;          // assembled per-day digest hard cap (chars)
-const OLLAMA_MODEL = OLLAMA_PRESETS[0]; // 'deepseek-v4-flash:cloud'
 const OLLAMA_TIMEOUT_MS = 120_000;
 const OLLAMA_MAX_BUFFER = 8 * 1024 * 1024;
 
@@ -303,7 +302,7 @@ async function defaultCallAnthropic(digestText) {
   return callMessages({ system: SUMMARY_SYSTEM, messages: [{ role: 'user', content: digestText }], maxTokens: 1500 });
 }
 async function defaultCallOllama(digestText) {
-  const { stdout } = await execFileP(OLLAMA_BIN, ['run', OLLAMA_MODEL, `${SUMMARY_SYSTEM}\n\n${digestText}`], { maxBuffer: OLLAMA_MAX_BUFFER, timeout: OLLAMA_TIMEOUT_MS });
+  const { stdout } = await execFileP(OLLAMA_BIN, ['run', getSummariserModel(), `${SUMMARY_SYSTEM}\n\n${digestText}`], { maxBuffer: OLLAMA_MAX_BUFFER, timeout: OLLAMA_TIMEOUT_MS });
   return stdout;
 }
 
@@ -319,11 +318,14 @@ export async function summarizeDay(digestText, sessions, { callAnthropic = defau
   const anthropicErr = !a?.ok ? (a?.error || 'anthropic call failed') : null;
 
   let ollamaErr = null;
-  if (OLLAMA_BIN) {
+  // No summariser model configured in Settings -> skip the ollama rung entirely,
+  // exactly as an absent OLLAMA_BIN does.
+  const summariser = getSummariserModel();
+  if (OLLAMA_BIN && summariser) {
     let stdout;
     try { stdout = await callOllama(digestText); } catch (e) { ollamaErr = e.message; stdout = null; }
     const parsedO = parseJsonSummary(stdout);
-    if (parsedO) return { ...parsedO, llm: { ok: true, provider: 'ollama', model: OLLAMA_MODEL, inputTokens: null, outputTokens: null } };
+    if (parsedO) return { ...parsedO, llm: { ok: true, provider: 'ollama', model: summariser, inputTokens: null, outputTokens: null } };
   }
 
   return { ...deterministicSummary(sessions), llm: { ok: false, provider: null, model: null, reason: 'unavailable', error: anthropicErr || ollamaErr || null } };

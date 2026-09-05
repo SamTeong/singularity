@@ -104,10 +104,21 @@ test('New task dialog: Create stays disabled until title + description are fille
   await expect(create).toBeDisabled(); // description still empty
 
   await dialog.getByLabel('description', { exact: true }).fill('Never actually submitted.');
-  await expect(create).toBeDisabled(); // orchestrator model still empty — now required
+  // D5: the store's defaultModel ('claude' in the sandbox seed) prefills the
+  // orchestrator field, so the dialog is already submit-ready here. Clear it to
+  // prove the model is still required, then fill a real one.
+  await expect(create).toBeEnabled();
+
+  await dialog.getByLabel('orchestrator model').fill('');
+  await expect(create).toBeDisabled(); // model required — the prefill was cleared
 
   await dialog.getByLabel('orchestrator model').fill('sonnet');
   await expect(create).toBeEnabled();
+
+  // Filling the model field leaves ModelSelect's popper open — unfiltered now
+  // (suggestions, not a filter), so it covers the footer and would intercept
+  // this click. Move focus off it first, as the Escape/Cancel guard test does.
+  await dialog.getByLabel('description', { exact: true }).click();
 
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -123,7 +134,9 @@ test('New task dialog: three ModelSelects derive from the orchestrator model, pl
   const orch = dialog.getByLabel('orchestrator model');
   const impl = dialog.getByLabel('implementor model');
   const rev = dialog.getByLabel('reviewer model');
-  await expect(orch).toHaveValue('');
+  // D5: the orchestrator field opens prefilled with the store's defaultModel;
+  // impl/reviewer keep their hardcoded claude sonnet/opus split.
+  await expect(orch).toHaveValue('claude');
   await expect(impl).toHaveValue('sonnet');
   await expect(rev).toHaveValue('opus');
 
@@ -137,6 +150,11 @@ test('New task dialog: three ModelSelects derive from the orchestrator model, pl
   await orch.fill('glm-5.2:cloud');
   await expect(impl).toHaveValue('glm-5.2:cloud');
   await expect(rev).toHaveValue('glm-5.2:cloud');
+
+  // Filling the model field leaves ModelSelect's popper open — unfiltered now
+  // (suggestions, not a filter), so it covers the footer and would intercept
+  // this click. Move focus off it first.
+  await dialog.getByLabel('description', { exact: true }).click();
 
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);

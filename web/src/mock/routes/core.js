@@ -4,8 +4,69 @@
 // task dialog, /health is polled for restart detection. These shapes mirror
 // server/index.mjs exactly (design.md D8): bare objects with no `ok` wrapper
 // (the daemon has no `ok` on any of these).
+import { Response } from 'miragejs';
 import { db } from '../db.js';
 import { FAKE_HOME } from '../fixtures.js';
+
+// Shipped model defaults — a verbatim mirror of server/model-store.mjs's SEED.
+// Mirage throws on unhandled requests, so this file is the mock suite's only
+// copy of the model list; keep it in step with the daemon's.
+const MODEL_SEED = {
+  models: [
+    { id: 'claude', group: 'claude', label: 'Default', enabled: true },
+    { id: 'best', group: 'claude', label: 'Best available', enabled: true },
+    { id: 'fable', group: 'claude', label: 'Fable', enabled: true },
+    { id: 'opus', group: 'claude', label: 'Opus', enabled: true },
+    { id: 'sonnet', group: 'claude', label: 'Sonnet', enabled: true },
+    { id: 'haiku', group: 'claude', label: 'Haiku', enabled: true },
+    { id: 'opus[1m]', group: 'claude', label: 'Opus (1M context)', enabled: true },
+    { id: 'sonnet[1m]', group: 'claude', label: 'Sonnet (1M context)', enabled: true },
+    { id: 'opusplan', group: 'claude', label: 'Opus in plan mode, Sonnet after', enabled: true },
+    { id: 'deepseek-v4-flash:cloud', group: 'ollama', label: '', enabled: true },
+    { id: 'glm-5.2:cloud', group: 'ollama', label: '', enabled: true },
+    { id: 'glm-5.3:cloud', group: 'ollama', label: '', enabled: true },
+    { id: 'glm-5.3-flash:cloud', group: 'ollama', label: '', enabled: true },
+    { id: 'kimi-k2.7-code:cloud', group: 'ollama', label: '', enabled: true },
+    { id: 'kimi-k3:cloud', group: 'ollama', label: '', enabled: true },
+    { id: 'gpt-5.6-luna', group: 'codex', label: '', enabled: true },
+    { id: 'gpt-5.6-sol', group: 'codex', label: '', enabled: true },
+    { id: 'gpt-5.6-terra', group: 'codex', label: '', enabled: true },
+    { id: 'gpt-5.4', group: 'codex', label: '', enabled: true },
+    { id: 'gpt-5.4-mini', group: 'codex', label: '', enabled: true },
+    { id: 'gpt-5.4-pro', group: 'codex', label: '', enabled: true },
+  ],
+  defaultModel: 'claude',
+  summariserModel: 'deepseek-v4-flash:cloud',
+};
+
+// Exported so sibling route modules (sessions.js restoreOllamaTag) read the
+// same editable document instead of a private literal copy.
+export const modelsDoc = () => (db.ui.models ||= JSON.parse(JSON.stringify(MODEL_SEED)));
+
+// Mirror of model-store.mjs's validate().
+function validateModels(doc) {
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.models)) return { ok: false, error: 'models must be an array' };
+  if (doc.models.length > 200) return { ok: false, error: 'too many models (max 200)' };
+  const models = [];
+  const seen = new Set();
+  for (const m of doc.models) {
+    if (!m || typeof m.id !== 'string') return { ok: false, error: 'every model needs a string id' };
+    const id = m.id.trim();
+    if (!id) return { ok: false, error: 'model id must not be empty' };
+    if (seen.has(id)) return { ok: false, error: `duplicate model id '${id}'` };
+    seen.add(id);
+    if (!['claude', 'ollama', 'codex'].includes(m.group)) return { ok: false, error: `unknown group '${m.group}' for '${id}'` };
+    if (m.group === 'codex' && !id.startsWith('gpt-')) return { ok: false, error: `codex model '${id}' must be a gpt-* id` };
+    const label = typeof m.label === 'string' ? m.label : '';
+    if (label.length > 80) return { ok: false, error: `label too long for '${id}' (max 80)` };
+    models.push({ id, group: m.group, label, enabled: m.enabled !== false });
+  }
+  const defaultModel = typeof doc.defaultModel === 'string' ? doc.defaultModel.trim() : '';
+  if (defaultModel && !models.some((m) => m.id === defaultModel && m.enabled)) return { ok: false, error: `defaultModel '${defaultModel}' is not an enabled model` };
+  const summariserModel = typeof doc.summariserModel === 'string' ? doc.summariserModel.trim() : '';
+  if (summariserModel && !models.some((m) => m.id === summariserModel && m.group === 'ollama')) return { ok: false, error: `summariserModel '${summariserModel}' is not an ollama model` };
+  return { ok: true, state: { models, defaultModel, summariserModel } };
+}
 
 export function registerCore(server) {
   // /health — { ok, pid, clients }. The daemon reports live WS client count; the
@@ -34,14 +95,30 @@ export function registerCore(server) {
   // doesn't hit an unhandled route. Returns FAKE_HOME, matching index.js.
   server.get('/env', () => ({ home: FAKE_HOME }));
 
-  // /models — claude aliases + ollama presets + codex presets. ModelSelect and
-  // CreateTaskDialog fetch this on first open; the mock ships the same lists as
-  // the daemon (models.mjs) so the dropdowns render their real options.
-  server.get('/models', () => ({
-    claude: ['claude', 'best', 'fable', 'opus', 'sonnet', 'haiku', 'opus[1m]', 'sonnet[1m]', 'opusplan'],
-    ollama: ['deepseek-v4-flash:cloud', 'glm-5.2:cloud', 'glm-5.3:cloud', 'glm-5.3-flash:cloud', 'kimi-k2.7-code:cloud', 'kimi-k3:cloud'],
-    codex: ['gpt-5.6-luna', 'gpt-5.6-sol', 'gpt-5.6-terra', 'gpt-5.4', 'gpt-5.4-mini', 'gpt-5.4-pro'],
-  }));
+  // /models — the user-managed model list. Mirrors server/model-store.mjs: the
+  // daemon persists STATE_DIR/models.json, the mock keeps the same document in
+  // db.ui.models for the page lifetime (the lazy db.ui.keys pattern). Returns
+  // every entry incl. disabled ones — Settings needs them, the picker filters.
+  server.get('/models', () => modelsDoc());
+
+  // Whole-document replace, validated like model-store.mjs so the panel's
+  // error path is exercisable under the mock.
+  server.put('/models', (schema, req) => {
+    let body = {};
+    try { body = JSON.parse(req.requestBody || '{}') || {}; } catch {}
+    const r = validateModels(body);
+    if (!r.ok) return new Response(400, {}, r);
+    db.ui.models = r.state;
+    return r;
+  });
+
+  // Re-add any shipped default the user deleted, appended in seed order.
+  server.post('/models/restore-defaults', () => {
+    const doc = modelsDoc();
+    const have = new Set(doc.models.map((m) => m.id));
+    db.ui.models = { ...doc, models: [...doc.models, ...MODEL_SEED.models.filter((m) => !have.has(m.id)).map((m) => ({ ...m }))] };
+    return { ok: true, state: db.ui.models };
+  });
 
   // /keys — rebindable shortcut overrides. The mock persists nothing to disk,
   // so this starts empty and setKeys below mutates db.ui.keys in memory for the

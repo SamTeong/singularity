@@ -536,10 +536,22 @@ const PRICE = {
   // K2.7 Code both bill cache_read = the cache-hit discount, no separate
   // cache-write fee. K3 cache_read=0.30 (90% off $3.00); K2.7 cache_read=0.19
   // (80% off $0.95). Bump if promos end.
+  // GLM-5.3 family added 2026-09-04 (docs.z.ai/guides/overview/pricing). Same
+  // rates as 5.2/5.1. "glm-5.3-flash" MUST precede "glm-5.3" — the latter is a
+  // substring of the former. glm-5.3-flash carries a 50%-off promo through
+  // 2026-09-09 (UTC+8); the discounted rate is what the page lists today, so it
+  // is what's encoded — bump it when the promo lapses.
+  "glm-5.3-flash": [0.075, 0.25, 0.015, 0.0],
+  "glm-5.3": [1.4, 4.4, 0.26, 0.0],
   "glm-5.2": [1.4, 4.4, 0.26, 0.0], // docs.z.ai/guides/overview/pricing
   "glm-5.1": [1.4, 4.4, 0.26, 0.0], // docs.z.ai
   "glm-5": [1.0, 3.2, 0.2, 0.0], // docs.z.ai
   "kimi-k3": [3.0, 15.0, 0.30, 0.0], // kimi.com/resources/kimi-k3-pricing
+  // Highspeed MUST precede the standard key — "kimi-k2.7-code-highspeed"
+  // includes "kimi-k2.7-code", so the bare key listed first would shadow it and
+  // bill highspeed usage at half rate. 2x the standard row across the board
+  // (~180 tok/s output). Re-verified 2026-09-04.
+  "kimi-k2.7-code-highspeed": [1.90, 8.0, 0.38, 0.0], // kimi.ai/resources/kimi-k2-7-code-pricing
   "kimi-k2.7-code": [0.95, 4.0, 0.19, 0.0], // kimi.com/resources/kimi-k2-7-code-pricing
   // DeepSeek V4 (api-docs.deepseek.com/quick_start/pricing; via agentic-coding
   // wiki sources/deepseek-pricing-src, fetched 2026-08-09). Routed through CC via
@@ -550,11 +562,24 @@ const PRICE = {
   // BELOW these.
   "deepseek-v4-flash": [0.14, 0.28, 0.0028, 0.0], // DeepSeek-V4-Flash-0731
   "deepseek-v4-pro": [0.435, 0.87, 0.003625, 0.0],
+  // GPT-6 Astra (developers.openai.com/api/docs/pricing, verified 2026-09-04;
+  // released 2026-09-03). cache_read=0.1×in, cache_create=1.25×in — same shape as
+  // GPT-5.6, and it DOES have a long-context tier (see PRICE_ABOVE).
+  // Substring keys: "gpt-6" does NOT collide with any "gpt-5.6-*" key.
+  "gpt-6-astra": [10.0, 50.0, 1.0, 12.5],
+  // Bare "gpt-6" MUST stay below "gpt-6-astra" — "gpt-6-astra".includes("gpt-6")
+  // is true, so listing it first would shadow the suffixed key (same trap the
+  // gpt-5.6 / gpt-5.4 families document below). Priced as an Astra alias: Astra
+  // is the only GPT-6 tier that exists today (no Sol/Terra/Luna suffixes in the
+  // GPT-6 generation — the tier name was replaced by a codename).
+  "gpt-6": [10.0, 50.0, 1.0, 12.5],
   // GPT-5.6 (openai.com/api/pricing; via claude-code wiki sources/openai-api-pricing
   // #flagship-models). 3 tiers only — no pro/mini/nano. cache_read=0.1×in,
   // cache_create=1.25×in. Substring match: keep the 3 specific keys here; a
   // generic "gpt-5.6" key added later must go BELOW these or it shadows them.
-  "gpt-5.6-sol": [5.0, 30.0, 0.50, 6.25],
+  // Sol repriced $5/$30 → $4/$20 (re-verified against developers.openai.com/api/docs/pricing
+  // 2026-09-04; the cut was effective 2026-08-21).
+  "gpt-5.6-sol": [4.0, 20.0, 0.40, 5.0],
   "gpt-5.6-terra": [2.0, 12.0, 0.20, 2.50],
   "gpt-5.6-luna": [0.20, 1.20, 0.02, 0.25],
   // codex-auto-review is Codex CLI's internal reviewer thread (see codex.mjs) —
@@ -594,7 +619,17 @@ let LONG_CTX_THRESHOLD = 200000;
 // input/output, cache_read=0.1×in, cache_create=1.25×in. Applied per request in
 // _msg_cost_tiered when i+cr+cc > LONG_CTX_THRESHOLD (200k, OpenAI's cutoff).
 const PRICE_ABOVE = {
-  "gpt-5.6-sol": [10.0, 45.0, 1.0, 12.5],
+  // GPT-6 Astra long-context row (developers.openai.com/api/docs/pricing,
+  // verified 2026-09-04): 2× short input/cache, 1.5× short output — same ratio
+  // pattern as GPT-5.6. ⚠️ Astra's window is 1,050,000 tokens and OpenAI does not
+  // publish where its long-context tier starts, so this reuses the single global
+  // LONG_CTX_THRESHOLD (200k, GPT-5.6's cutoff) as the lazy default. Bare "gpt-6"
+  // mirrors it, and must stay BELOW "gpt-6-astra" for the same substring reason
+  // as in PRICE.
+  "gpt-6-astra": [20.0, 75.0, 2.0, 25.0],
+  "gpt-6": [20.0, 75.0, 2.0, 25.0],
+  // Sol long-context repriced $10/$45 → $8/$30 alongside its short-context cut.
+  "gpt-5.6-sol": [8.0, 30.0, 0.80, 10.0],
   "gpt-5.6-terra": [4.0, 18.0, 0.40, 5.0],
   "gpt-5.6-luna": [0.40, 1.80, 0.04, 0.50],
   // codex-auto-review aliases gpt-5.6-terra here too — same no-public-rate
@@ -609,7 +644,9 @@ const PRICE_ABOVE = {
   // today since no gpt-5.4 rows exist on disk yet. ponytail: revisit the
   // threshold if/when real gpt-5.4 usage shows up and OpenAI publishes its cutoff.
   "gpt-5.6": [4.0, 18.0, 0.40, 5.0],
-  "gpt-5.4-pro": [30.0, 135.0, 0.0, 0.0],
+  // gpt-5.4-pro long-context was wrong (30/135); the pricing page lists $60 in /
+  // $270 out. Corrected against developers.openai.com/api/docs/pricing 2026-09-04.
+  "gpt-5.4-pro": [60.0, 270.0, 0.0, 0.0],
   "gpt-5.4": [5.0, 22.50, 0.50, 0.0],
 };
 
