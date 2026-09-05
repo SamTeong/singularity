@@ -15,6 +15,7 @@ import { alpha } from '@mui/material/styles';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useModels } from '@/hooks/useModels.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
@@ -247,38 +248,48 @@ export default function ModelsPanel() {
         <Button size="small" startIcon={<AddIcon />} disabled={!add.id.trim()} onClick={addModel}>Add</Button>
       </Stack>
 
-      <TextField
-        select
-        size="small"
-        label="History summariser"
-        value={draft.summariserModel}
-        onChange={(e) => save({ ...draft, summariserModel: e.target.value })}
-        helperText={
-          'Model that summarises the History view — from any group. Empty means no LLM summary, '
-          + 'deterministic bullets only. A claude or codex model spends real quota (up to 7 calls on a first run).'
-          + [ollamaUnavailable && caps.ollama.hint, codexUnavailable && caps.codexSpawn.hint]
-            .filter(Boolean).map((h) => ` ${h}`).join('')
-        }
-        sx={{ width: 280, mt: 3 }}
-      >
-        <MenuItem value="">None</MenuItem>
-        {GROUPS.flatMap((g) => {
-          const opts = draft.models.filter((m) => m.group === g && m.enabled);
-          if (!opts.length) return [];
-          return [
-            <ListSubheader key={`${g}-header`}>{g}</ListSubheader>,
-            ...opts.map((m) => (
-              <MenuItem
-                key={m.id}
-                value={m.id}
-                disabled={(g === 'ollama' && ollamaUnavailable) || (g === 'codex' && codexUnavailable)}
-              >
-                {m.label || m.id}
-              </MenuItem>
-            )),
-          ];
-        })}
-      </TextField>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 3 }}>
+        <TextField
+          select
+          size="small"
+          label="History summariser"
+          value={draft.summariserModel}
+          onChange={(e) => save({ ...draft, summariserModel: e.target.value })}
+          sx={{ width: 280 }}
+        >
+          <MenuItem value="">None</MenuItem>
+          {GROUPS.flatMap((g) => {
+            const opts = draft.models.filter((m) => m.group === g && m.enabled);
+            if (!opts.length) return [];
+            return [
+              <ListSubheader key={`${g}-header`}>{g}</ListSubheader>,
+              ...opts.map((m) => (
+                <MenuItem
+                  key={m.id}
+                  value={m.id}
+                  disabled={(g === 'ollama' && ollamaUnavailable) || (g === 'codex' && codexUnavailable)}
+                >
+                  {m.label || m.id}
+                </MenuItem>
+              )),
+            ];
+          })}
+        </TextField>
+        <Tooltip
+          disableInteractive
+          title={
+            <Box component="div" sx={{ fontSize: 12 }}>
+              Model that summarises the History view — from any group.<br />
+              Empty means no LLM summary, deterministic bullets only.<br />
+              A claude or codex model spends real quota (up to 7 calls on a first run).
+              {[ollamaUnavailable && caps.ollama.hint, codexUnavailable && caps.codexSpawn.hint]
+                .filter(Boolean).map((h) => <Box component="div" key={h} sx={{ mt: 0.5 }}>{h}</Box>)}
+            </Box>
+          }
+        >
+          <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.secondary', cursor: 'help' }} />
+        </Tooltip>
+      </Stack>
     </Box>
   );
 }
