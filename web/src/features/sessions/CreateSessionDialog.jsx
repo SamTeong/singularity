@@ -35,9 +35,8 @@ export default function CreateSessionDialog({ open, onClose, connected, cwd, set
   // clobbered. Re-fires if the store document arrives after the dialog opened.
   const [prevOpen, setPrevOpen] = useState(open);
   const [prevDefault, setPrevDefault] = useState(defaultModel);
-  if (open !== prevOpen || defaultModel !== prevDefault) {
+  if (open !== prevOpen) {
     setPrevOpen(open);
-    setPrevDefault(defaultModel);
     if (open && initialSessionId) {
       setSessionId(initialSessionId);
       if (initialModel) setModel(initialModel);
@@ -46,6 +45,12 @@ export default function CreateSessionDialog({ open, onClose, connected, cwd, set
     } else if (open && !model) {
       setModel(defaultModel || '');
     }
+  }
+  // Late store arrival only fills an empty model — never re-runs the resume
+  // re-init, which would clobber session-id/scopes edits made since the open.
+  if (defaultModel !== prevDefault) {
+    setPrevDefault(defaultModel);
+    if (open && !model) setModel(defaultModel || '');
   }
 
   const reset = () => { setTitle(''); setScopes([]); setSessionId(''); setModel(''); };
