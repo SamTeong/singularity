@@ -181,7 +181,8 @@ export function DayHeader({ entry, expanded, onToggle, onRegenerate, regeneratin
 
       {!!entry.topics?.length && (
         <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', mt: 0.5 }}>
-          {entry.topics.map((topic) => <Chip key={topic} label={topic} size="small" variant="outlined" sx={{ height: 20, fontSize: 11 }} />)}
+          {/* deduped: a repeated topic from an LLM rung would render twice and collide on key */}
+          {[...new Set(entry.topics)].map((topic) => <Chip key={topic} label={topic} size="small" variant="outlined" sx={{ height: 20, fontSize: 11 }} />)}
         </Stack>
       )}
     </MotionBox>
