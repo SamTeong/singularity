@@ -100,7 +100,10 @@ async function listCodexSessions({ isLive = () => false, now = Date.now() } = {}
       ({ cwd, sessionId, title } = hit);
     } else {
       ({ cwd, sessionId, title } = peekCodexMeta(parseEvents(pk.head)));
-      if (!title) title = `Codex ${id.slice(0, 8)}`;
+      // Slice the tail, not the head: a codex thread uuid is time-ordered, so
+      // its first 8 chars are a timestamp prefix shared by every thread started
+      // in the same window — 69 of 246 rollouts here collide on it.
+      if (!title) title = `Codex ${id.slice(-8)}`;
       codexMetaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, sessionId, title });
       if (codexMetaCache.size > 200) codexMetaCache.delete(codexMetaCache.keys().next().value);
     }
