@@ -148,7 +148,9 @@ export function DayHeader({ entry, expanded, onToggle, onRegenerate, regeneratin
             <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>
               {entry.llm?.ok
                 ? `summarized by: ${entry.llm.provider === 'anthropic-oauth' ? 'claude' : entry.llm.provider ?? 'auto'}`
-                : entry.llm?.reason === 'trivial' ? 'summarized by: auto — trivial day' : 'summary unavailable'}
+                : entry.llm?.reason === 'trivial' ? 'summarized by: auto — trivial day'
+                : entry.llm?.reason === 'no-summariser' ? 'no summariser configured — see Settings ▸ Models'
+                : 'summary unavailable'}
             </Typography>
             {!!entry.llm?.dropped?.length && (
               <Tooltip title={`Dropped from digest: ${entry.llm.dropped.join(', ')}`} disableInteractive>
@@ -179,7 +181,8 @@ export function DayHeader({ entry, expanded, onToggle, onRegenerate, regeneratin
 
       {!!entry.topics?.length && (
         <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', mt: 0.5 }}>
-          {entry.topics.map((topic) => <Chip key={topic} label={topic} size="small" variant="outlined" sx={{ height: 20, fontSize: 11 }} />)}
+          {/* deduped: a repeated topic from an LLM rung would render twice and collide on key */}
+          {[...new Set(entry.topics)].map((topic) => <Chip key={topic} label={topic} size="small" variant="outlined" sx={{ height: 20, fontSize: 11 }} />)}
         </Stack>
       )}
     </MotionBox>
@@ -299,8 +302,10 @@ export default function DayCard({ card, date, expanded, onToggle, onOpenSession,
         {/* 0.7em ≈ half a 1.45 line — bullets read as separate points, not a block */}
         {!compact && !!bullets.length && (
           <Box component="ul" sx={{ m: 0, mt: 0.5, pl: 2, '& li + li': { mt: '0.7em' } }}>
-            {bullets.map((b) => (
-              <Typography key={b} component="li" sx={{ fontSize: 13, lineHeight: 1.45, color: 'text.secondary', '&::marker': { color: 'text.disabled' } }}>{b}</Typography>
+            {/* index key: bullets are positional strings, and two sessions with
+                the same title (or an LLM repeating itself) collide on value */}
+            {bullets.map((b, i) => (
+              <Typography key={i} component="li" sx={{ fontSize: 13, lineHeight: 1.45, color: 'text.secondary', '&::marker': { color: 'text.disabled' } }}>{b}</Typography>
             ))}
           </Box>
         )}

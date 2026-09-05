@@ -7,7 +7,7 @@ import { join } from 'node:path';
 // model-store.mjs imports app-dir.mjs (STATE_DIR), which throws without
 // SINGULARITY_HOME. Point it at a scratch temp dir before a dynamic import.
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-modelstore-'));
-const { getModels, setModels, restoreDefaults, groupFor, listEnabled, getSummariserModel, getDefaultModel } =
+const { getModels, setModels, restoreDefaults, groupFor, listEnabled, getSummariserModel, getSummariser, getDefaultModel } =
   await import('./model-store.mjs');
 
 const FILE = join(process.env.SINGULARITY_HOME, 'state', 'models.json');
@@ -59,6 +59,19 @@ test('setModels round-trips, normalizes and persists', () => {
   assert.equal(getSummariserModel(), '');
 });
 
+test('summariserModel accepts any enabled group', () => {
+  const claude = setModels({ models: [{ id: 'opus', group: 'claude', label: '' }], defaultModel: '', summariserModel: 'opus' });
+  assert.equal(claude.ok, true);
+  assert.deepEqual(getSummariser(), { id: 'opus', group: 'claude' });
+
+  const codex = setModels({ models: [{ id: 'gpt-5.4', group: 'codex', label: '' }], defaultModel: '', summariserModel: 'gpt-5.4' });
+  assert.equal(codex.ok, true);
+  assert.deepEqual(getSummariser(), { id: 'gpt-5.4', group: 'codex' });
+
+  setModels({ models: [{ id: 'gpt-5.4', group: 'codex', label: '' }], defaultModel: '', summariserModel: '' });
+  assert.equal(getSummariser(), null);
+});
+
 test('validation rejects bad documents without touching the file', () => {
   const before = readFileSync(FILE, 'utf8');
   const bad = (doc) => {
@@ -78,7 +91,8 @@ test('validation rejects bad documents without touching the file', () => {
   bad({ models: Array.from({ length: 201 }, (_, i) => ({ id: `m${i}`, group: 'claude' })) }); // 200 cap
   bad({ models: one({ id: 'sonnet', group: 'claude' }), defaultModel: 'ghost' });            // default missing
   bad({ models: one({ id: 'sonnet', group: 'claude', enabled: false }), defaultModel: 'sonnet' }); // default disabled
-  bad({ models: one({ id: 'gpt-5.4', group: 'codex' }), summariserModel: 'gpt-5.4' });       // summariser not ollama
+  bad({ models: one({ id: 'gpt-5.4', group: 'codex', enabled: false }), summariserModel: 'gpt-5.4' }); // summariser disabled
+  bad({ models: one({ id: 'gpt-5.4', group: 'codex' }), summariserModel: 'ghost' });          // summariser unknown
 
   assert.equal(readFileSync(FILE, 'utf8'), before);
 });

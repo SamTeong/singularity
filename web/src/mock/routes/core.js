@@ -64,7 +64,7 @@ function validateModels(doc) {
   const defaultModel = typeof doc.defaultModel === 'string' ? doc.defaultModel.trim() : '';
   if (defaultModel && !models.some((m) => m.id === defaultModel && m.enabled)) return { ok: false, error: `defaultModel '${defaultModel}' is not an enabled model` };
   const summariserModel = typeof doc.summariserModel === 'string' ? doc.summariserModel.trim() : '';
-  if (summariserModel && !models.some((m) => m.id === summariserModel && m.group === 'ollama')) return { ok: false, error: `summariserModel '${summariserModel}' is not an ollama model` };
+  if (summariserModel && !models.some((m) => m.id === summariserModel && m.enabled)) return { ok: false, error: `summariserModel '${summariserModel}' is not an enabled model` };
   return { ok: true, state: { models, defaultModel, summariserModel } };
 }
 

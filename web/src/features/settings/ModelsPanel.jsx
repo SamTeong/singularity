@@ -6,6 +6,7 @@ import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import MenuItem from '@mui/material/MenuItem';
+import ListSubheader from '@mui/material/ListSubheader';
 import Radio from '@mui/material/Radio';
 import Select from '@mui/material/Select';
 import Switch from '@mui/material/Switch';
@@ -14,6 +15,7 @@ import { alpha } from '@mui/material/styles';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useModels } from '@/hooks/useModels.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
@@ -35,6 +37,7 @@ export default function ModelsPanel() {
   const { models, defaultModel, summariserModel, error: loadError, reload } = useModels();
   const caps = useCapabilities();
   const ollamaUnavailable = caps && caps.ollama?.available === false;
+  const codexUnavailable = caps && caps.codexSpawn?.available === false;
   // Memoized identity is load-bearing: the draft-sync guard below compares doc
   // across renders, so a doc rebuilt per render would loop forever.
   const doc = useMemo(() => (models ? { models, defaultModel, summariserModel } : null), [models, defaultModel, summariserModel]);
@@ -60,7 +63,7 @@ export default function ModelsPanel() {
   const normalize = (next) => ({
     ...next,
     defaultModel: next.models.some((m) => m.id === next.defaultModel && m.enabled) ? next.defaultModel : '',
-    summariserModel: next.models.some((m) => m.id === next.summariserModel && m.group === 'ollama') ? next.summariserModel : '',
+    summariserModel: next.models.some((m) => m.id === next.summariserModel && m.enabled) ? next.summariserModel : '',
   });
 
   const save = async (next) => {
@@ -245,21 +248,48 @@ export default function ModelsPanel() {
         <Button size="small" startIcon={<AddIcon />} disabled={!add.id.trim()} onClick={addModel}>Add</Button>
       </Stack>
 
-      <TextField
-        select
-        size="small"
-        label="History summariser"
-        value={draft.summariserModel}
-        disabled={ollamaUnavailable}
-        onChange={(e) => save({ ...draft, summariserModel: e.target.value })}
-        helperText={ollamaUnavailable ? caps?.ollama?.hint : 'Ollama model that summarises the History view.'}
-        sx={{ width: 280, mt: 3 }}
-      >
-        <MenuItem value="">None</MenuItem>
-        {draft.models.filter((m) => m.group === 'ollama').map((m) => (
-          <MenuItem key={m.id} value={m.id}>{m.label || m.id}</MenuItem>
-        ))}
-      </TextField>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 3 }}>
+        <TextField
+          select
+          size="small"
+          label="History summariser"
+          value={draft.summariserModel}
+          onChange={(e) => save({ ...draft, summariserModel: e.target.value })}
+          sx={{ width: 280 }}
+        >
+          <MenuItem value="">None</MenuItem>
+          {GROUPS.flatMap((g) => {
+            const opts = draft.models.filter((m) => m.group === g && m.enabled);
+            if (!opts.length) return [];
+            return [
+              <ListSubheader key={`${g}-header`}>{g}</ListSubheader>,
+              ...opts.map((m) => (
+                <MenuItem
+                  key={m.id}
+                  value={m.id}
+                  disabled={(g === 'ollama' && ollamaUnavailable) || (g === 'codex' && codexUnavailable)}
+                >
+                  {m.label || m.id}
+                </MenuItem>
+              )),
+            ];
+          })}
+        </TextField>
+        <Tooltip
+          disableInteractive
+          title={
+            <Box component="div" sx={{ fontSize: 12 }}>
+              Model that summarises the History view — from any group.<br />
+              Empty means no LLM summary, deterministic bullets only.<br />
+              A claude or codex model spends real quota (up to 7 calls on a first run).
+              {[ollamaUnavailable && caps.ollama.hint, codexUnavailable && caps.codexSpawn.hint]
+                .filter(Boolean).map((h) => <Box component="div" key={h} sx={{ mt: 0.5 }}>{h}</Box>)}
+            </Box>
+          }
+        >
+          <InfoOutlinedIcon sx={{ fontSize: 16, color: 'text.secondary', cursor: 'help' }} />
+        </Tooltip>
+      </Stack>
     </Box>
   );
 }

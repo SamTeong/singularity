@@ -90,8 +90,8 @@ function validate(doc) {
     return { ok: false, error: `defaultModel '${defaultModel}' is not an enabled model` };
   }
   const summariserModel = typeof doc.summariserModel === 'string' ? doc.summariserModel.trim() : '';
-  if (summariserModel && !models.some((m) => m.id === summariserModel && m.group === 'ollama')) {
-    return { ok: false, error: `summariserModel '${summariserModel}' is not an ollama model` };
+  if (summariserModel && !models.some((m) => m.id === summariserModel && m.enabled)) {
+    return { ok: false, error: `summariserModel '${summariserModel}' is not an enabled model` };
   }
   return { ok: true, state: { models, defaultModel, summariserModel } };
 }
@@ -143,6 +143,15 @@ export function listEnabled() {
 
 export function getSummariserModel() {
   return getModels().summariserModel;
+}
+
+// { id, group } for the configured summariser, or null when unset or when the
+// id no longer resolves to an entry in the store.
+export function getSummariser() {
+  const { summariserModel, models } = getModels();
+  if (!summariserModel) return null;
+  const m = models.find((m) => m.id === summariserModel);
+  return m ? { id: m.id, group: m.group } : null;
 }
 
 export function getDefaultModel() {
