@@ -6,15 +6,15 @@
 // still in progress has no "closing" message to summarize yet.
 //
 // Harness transcripts only — no git log, no project folders (see plan.md).
-import { mkdirSync, readFileSync, appendFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, appendFileSync, unlinkSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
-import { STATE_DIR, bus, writeAtomic, OLLAMA_BIN } from './agents.mjs';
+import { STATE_DIR, bus, writeAtomic, CLAUDE_BIN, OLLAMA_BIN, CODEX_BIN } from './agents.mjs';
 import { listSessions, readSession } from './sessions.mjs';
 import { parseSession, readCostFile, readStatsCsvCosts } from './stats.mjs';
-import { callMessages } from './chat.mjs';
-import { getSummariserModel } from './model-store.mjs';
+import { getSummariser } from './model-store.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -25,8 +25,8 @@ const USER_TRUNC = 400;
 const ASSISTANT_TRUNC = 800;
 const BULLET_TRUNC = 120;           // one card line — longer just wraps into a wall of text
 const DIGEST_CAP = 48_000;          // assembled per-day digest hard cap (chars)
-const OLLAMA_TIMEOUT_MS = 120_000;
-const OLLAMA_MAX_BUFFER = 8 * 1024 * 1024;
+const SUMMARISER_TIMEOUT_MS = 120_000;
+const SUMMARISER_MAX_BUFFER = 8 * 1024 * 1024;
 
 // Bullets are read at a glance by someone who is not in the code — so the
 // prompt bans the jargon and comma-stacked clauses an agent transcript is full
@@ -263,7 +263,7 @@ export function buildDigest(sessions) {
   return { text: kept.join('\n\n'), dropped };
 }
 
-// ---- Summarizer + fallback chain: anthropic -> ollama -> deterministic ----
+// ---- Summarizer: configured model (any group) -> deterministic ------------
 
 function parseJsonSummary(text) {
   const m = typeof text === 'string' && text.match(/\{[\s\S]*\}/);
@@ -295,40 +295,81 @@ function deterministicSummary(sessions) {
   return { projects, topics: [] };
 }
 
-async function defaultCallAnthropic(digestText) {
-  // Per-project bullets need far more room than the old one-paragraph summary:
-  // a day spanning 7 repos is ~7x3 bullets, and a truncated reply is invalid
-  // JSON — which silently drops the whole day to the deterministic rung.
-  return callMessages({ system: SUMMARY_SYSTEM, messages: [{ role: 'user', content: digestText }], maxTokens: 1500 });
-}
-async function defaultCallOllama(digestText) {
-  const { stdout } = await execFileP(OLLAMA_BIN, ['run', getSummariserModel(), `${SUMMARY_SYSTEM}\n\n${digestText}`], { maxBuffer: OLLAMA_MAX_BUFFER, timeout: OLLAMA_TIMEOUT_MS });
-  return stdout;
+// group -> its binary path, or null when that binary isn't configured.
+function binFor(group) {
+  if (group === 'claude') return CLAUDE_BIN;
+  if (group === 'ollama') return OLLAMA_BIN;
+  if (group === 'codex') return CODEX_BIN;
+  return null;
 }
 
-// callAnthropic/callOllama are injectable — tests stub them so no network call
-// ever happens. Each rung must produce a valid entry and never throw.
-export async function summarizeDay(digestText, sessions, { callAnthropic = defaultCallAnthropic, callOllama = defaultCallOllama } = {}) {
-  const a = await callAnthropic(digestText).catch((e) => ({ ok: false, error: e.message }));
-  const parsedA = a?.ok ? parseJsonSummary(a.text) : null;
-  if (parsedA) return { ...parsedA, llm: { ok: true, provider: 'anthropic-oauth', model: a.model || null, inputTokens: a.inputTokens ?? null, outputTokens: a.outputTokens ?? null } };
-  // Surface the failure reason instead of swallowing it — both providers fall
-  // through to `reason: 'unavailable'` below, but `error` now carries which one
-  // failed and why, so the card isn't a bare "unavailable" with no clue.
-  const anthropicErr = !a?.ok ? (a?.error || 'anthropic call failed') : null;
+async function callClaudeSummariser(digestText, id) {
+  // --no-session-persistence is load-bearing: without it this call writes a
+  // transcript under ~/.claude/projects that tomorrow's History scan would
+  // then read and summarise — a self-referential feedback loop.
+  // --output-format json returns a single envelope ({ result, usage: {
+  // input_tokens, output_tokens }, ... }); parseJsonSummary runs over `result`.
+  const { stdout } = await execFileP(CLAUDE_BIN, [
+    '-p', `${SUMMARY_SYSTEM}\n\n${digestText}`,
+    '--model', id,
+    '--output-format', 'json',
+    '--no-session-persistence',
+    '--bare',
+  ], { maxBuffer: SUMMARISER_MAX_BUFFER, timeout: SUMMARISER_TIMEOUT_MS });
+  const env = JSON.parse(stdout);
+  return { text: env.result, inputTokens: env.usage?.input_tokens ?? null, outputTokens: env.usage?.output_tokens ?? null };
+}
 
-  let ollamaErr = null;
-  // No summariser model configured in Settings -> skip the ollama rung entirely,
-  // exactly as an absent OLLAMA_BIN does.
-  const summariser = getSummariserModel();
-  if (OLLAMA_BIN && summariser) {
-    let stdout;
-    try { stdout = await callOllama(digestText); } catch (e) { ollamaErr = e.message; stdout = null; }
-    const parsedO = parseJsonSummary(stdout);
-    if (parsedO) return { ...parsedO, llm: { ok: true, provider: 'ollama', model: summariser, inputTokens: null, outputTokens: null } };
+async function callOllamaSummariser(digestText, id) {
+  const { stdout } = await execFileP(OLLAMA_BIN, ['run', id, `${SUMMARY_SYSTEM}\n\n${digestText}`], { maxBuffer: SUMMARISER_MAX_BUFFER, timeout: SUMMARISER_TIMEOUT_MS });
+  return { text: stdout, inputTokens: null, outputTokens: null };
+}
+
+async function callCodexSummariser(digestText, id) {
+  // Codex writes agent chatter to stdout, so the answer channel is the
+  // --output-last-message file, not stdout (else reasoning text could match
+  // parseJsonSummary's brace regex). -s read-only + --skip-git-repo-check: the
+  // summariser only reads a prompt string, it must never be able to write.
+  // --ephemeral is the codex counterpart to the claude rung's
+  // --no-session-persistence: a persisted rollout under CODEX_HOME/sessions is
+  // a transcript the next History scan reads and summarises.
+  const tmpFile = join(STATE_DIR, `.summariser-${randomUUID()}.txt`);
+  try {
+    await execFileP(CODEX_BIN, [
+      'exec', '-m', id,
+      '-s', 'read-only',
+      '--skip-git-repo-check',
+      '--ephemeral',
+      '-C', STATE_DIR,
+      '-o', tmpFile,
+      `${SUMMARY_SYSTEM}\n\n${digestText}`,
+    ], { maxBuffer: SUMMARISER_MAX_BUFFER, timeout: SUMMARISER_TIMEOUT_MS });
+    return { text: readFileSync(tmpFile, 'utf8'), inputTokens: null, outputTokens: null };
+  } finally {
+    try { unlinkSync(tmpFile); } catch { /* best-effort cleanup */ }
   }
+}
 
-  return { ...deterministicSummary(sessions), llm: { ok: false, provider: null, model: null, reason: 'unavailable', error: anthropicErr || ollamaErr || null } };
+async function defaultCallSummariser(digestText, { id, group }) {
+  if (group === 'claude') return callClaudeSummariser(digestText, id);
+  if (group === 'codex') return callCodexSummariser(digestText, id);
+  return callOllamaSummariser(digestText, id);
+}
+
+// callSummariser is injectable — tests stub it so no network/process call ever
+// happens. Every rung must produce a valid entry and never throw.
+export async function summarizeDay(digestText, sessions, { callSummariser = defaultCallSummariser } = {}) {
+  const summariser = getSummariser();
+  // No configured model, or its group's binary isn't available: same outcome
+  // as no summariser at all — deterministic, no throw, no call attempted.
+  if (!summariser || !binFor(summariser.group)) {
+    return { ...deterministicSummary(sessions), llm: { ok: false, provider: null, model: null, reason: 'no-summariser', error: null } };
+  }
+  let out = null, err = null;
+  try { out = await callSummariser(digestText, summariser); } catch (e) { err = e.message; }
+  const parsed = parseJsonSummary(out?.text);
+  if (parsed) return { ...parsed, llm: { ok: true, provider: summariser.group, model: summariser.id, inputTokens: out.inputTokens ?? null, outputTokens: out.outputTokens ?? null } };
+  return { ...deterministicSummary(sessions), llm: { ok: false, provider: null, model: null, reason: 'unavailable', error: err } };
 }
 
 // ---- Entry assembly ---------------------------------------------------------
@@ -374,7 +415,7 @@ async function buildDayEntry(date, dayAgg, deps) {
 // resolves out of `pending` instead of shimmering forever; an empty entry stays
 // re-checkable (rescanned, never re-appended while still empty) so a day that
 // does turn out to have work gets upgraded on a later call.
-async function _ensureHistory({ days = BACKFILL_DAYS, callAnthropic, callOllama, root } = {}) {
+async function _ensureHistory({ days = BACKFILL_DAYS, callSummariser, root } = {}) {
   const today = localDay();
   const wanted = [];
   for (let i = 1; i <= days; i++) wanted.push(localDay(Date.now() - i * 86_400_000));
@@ -393,7 +434,7 @@ async function _ensureHistory({ days = BACKFILL_DAYS, callAnthropic, callOllama,
   for (const date of missing) {
     const agg = scanned.get(date);
     if (!agg && prior.has(date)) continue; // still empty, and already on disk — no second empty line
-    const entry = await buildDayEntry(date, agg || emptyDayAgg(), { callAnthropic, callOllama });
+    const entry = await buildDayEntry(date, agg || emptyDayAgg(), { callSummariser });
     await enqueueWrite(() => appendEntry(entry));
     built.push(entry);
     pending = pending.filter((d) => d !== date);
@@ -416,10 +457,10 @@ export async function ensureHistory(opts = {}) {
 }
 
 // ---- Regenerate: atomic rewrite of the whole file --------------------------
-export async function regenerateDay(date, { callAnthropic, callOllama, root } = {}) {
+export async function regenerateDay(date, { callSummariser, root } = {}) {
   const windowStart = startOfLocalDay(new Date(`${date}T00:00:00`)).getTime();
   const scanned = await scanDays(windowStart, root);
-  const entry = await buildDayEntry(date, scanned.get(date) || emptyDayAgg(), { callAnthropic, callOllama });
+  const entry = await buildDayEntry(date, scanned.get(date) || emptyDayAgg(), { callSummariser });
   return enqueueWrite(() => {
     const all = readHistory().filter((e) => e.date !== date);
     all.push(entry);

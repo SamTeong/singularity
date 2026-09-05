@@ -1,7 +1,7 @@
 // Unit tests for the History backend: day bucketing + cost proration,
 // ensureHistory's backfill/idempotency, the last-wins reader, the trivial-day
-// gate, the anthropic->ollama->deterministic fallback chain, the digest cap,
-// and "today is never persisted". LLM calls are injected stubs — no network.
+// gate, the configured-summariser->deterministic chain, the digest cap, and
+// "today is never persisted". LLM calls are injected stubs — no network.
 //
 // history.mjs imports agents.mjs/app-dir.mjs (STATE_DIR), which throws without
 // SINGULARITY_HOME. Point SINGULARITY_HOME, CODEX_HOME (nonexistent — no real
@@ -12,10 +12,11 @@
 // through to listSessions/readSession) rather than the real ~/.claude/projects
 // — this daemon and this very Claude Code session write there live, so an
 // unscoped scan would sweep in real, unrelated activity and make day-turn
-// assertions (e.g. the trivial-day gate) flaky. OLLAMA_BIN points at an
-// existing (but unused) path so the ollama rung is attempted in the
-// fallback-chain test — agents.mjs only checks existsSync() at module load;
-// the real binary is never invoked (callOllama is stubbed).
+// assertions (e.g. the trivial-day gate) flaky. CLAUDE_BIN/OLLAMA_BIN point at
+// an existing (but unused) path so those rungs' bin check passes; CODEX_BIN is
+// deliberately left unset (resolves to null) — that's this file's "group
+// binary is absent" fixture. agents.mjs only checks existsSync() at module
+// load; no real binary is ever invoked (callSummariser is stubbed).
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,12 +28,17 @@ const scratch = mkdtempSync(join(tmpdir(), 'sing-history-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 process.env.CODEX_HOME = join(scratch, 'codex-nonexistent');
 process.env.USAGE_REPORT_STATE = join(scratch, 'usage-skill-state');
-process.env.OLLAMA_BIN = scratch; // existsSync-true, never actually executed (callOllama is stubbed)
+process.env.CLAUDE_BIN = scratch; // existsSync-true, never actually executed (callSummariser is stubbed)
+process.env.OLLAMA_BIN = scratch; // existsSync-true, never actually executed (callSummariser is stubbed)
+// process.env.CODEX_BIN intentionally left unset.
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 const { encodeCwd } = await import('./agents.mjs');
 const { USAGE_SKILL_STATE } = await import('./app-dir.mjs');
+const { getModels, setModels } = await import('./model-store.mjs');
 const { readHistory, ensureHistory, regenerateDay, liveToday, scanDays, buildDigest, summarizeDay, localDay } = await import('./history.mjs');
+const DEFAULT_SUMMARISER = getModels().summariserModel; // seed default ('deepseek-v4-flash:cloud', ollama)
+function setSummariser(id) { setModels({ ...getModels(), summariserModel: id }); }
 
 const SESSIONS_ROOT = join(scratch, 'claude-projects');
 
@@ -130,45 +136,76 @@ test('ensureHistory: a trivial day (<3 assistant turns) is deterministic, llm.ok
     textMsg(cwd, 'user', 'quick question', d1.toISOString()),
     textMsg(cwd, 'assistant', 'quick answer', new Date(d1.getTime() + 1000).toISOString()),
   ]); // 1 assistant turn -> trivial
-  let calledAnthropic = false, calledOllama = false;
+  let calledSummariser = false;
   await ensureHistory({
     days: 4,
     root: SESSIONS_ROOT,
-    callAnthropic: async () => { calledAnthropic = true; return { ok: true, text: '{}' }; },
-    callOllama: async () => { calledOllama = true; return '{}'; },
+    callSummariser: async () => { calledSummariser = true; return { text: '{}' }; },
   });
   const entry = readHistory().find((e) => e.date === localDay(d1.toISOString()));
   assert.ok(entry, 'entry written for the trivial day');
   assert.equal(entry.llm.ok, false);
   assert.equal(entry.llm.reason, 'trivial');
-  assert.equal(calledAnthropic, false, 'anthropic must not be called for a trivial day');
-  assert.equal(calledOllama, false, 'ollama must not be called for a trivial day');
+  assert.equal(calledSummariser, false, 'the summariser must not be called for a trivial day');
 });
 
-test('summarizeDay: 429 falls to the ollama stub, an ollama failure falls to deterministic — each rung valid, never throws', async () => {
+test('summarizeDay: a configured model (claude group) returning valid JSON -> llm.ok true, provider/model from the store', async () => {
   const sessions = [{ id: 's1', title: 'fix flaky test', turns: 5, cwd: 'C:\\fake\\x', project: 'p', source: 'claude' }];
+  setSummariser('opus'); // seed claude-group entry
+  try {
+    const r = await summarizeDay('digest', sessions, {
+      callSummariser: async (text, summariser) => {
+        assert.deepEqual(summariser, { id: 'opus', group: 'claude' });
+        return { text: JSON.stringify({ projects: [{ path: 'C:\\fake\\x', bullets: ['did X'] }], topics: ['x'] }), inputTokens: 10, outputTokens: 20 };
+      },
+    });
+    assert.equal(r.llm.ok, true);
+    assert.equal(r.llm.provider, 'claude');
+    assert.equal(r.llm.model, 'opus');
+    assert.deepEqual(r.projects, [{ path: 'C:\\fake\\x', bullets: ['did X'] }]);
+  } finally {
+    setSummariser(DEFAULT_SUMMARISER);
+  }
+});
 
-  const r1 = await summarizeDay('digest', sessions, {
-    callAnthropic: async () => ({ ok: true, text: JSON.stringify({ projects: [{ path: 'C:\\fake\\x', bullets: ['did X'] }], topics: ['x'] }), model: 'claude-haiku-4-5' }),
+test('summarizeDay: a configured model that throws -> deterministic, llm.ok false, reason unavailable, error set', async () => {
+  const sessions = [{ id: 's1', title: 'fix flaky test', turns: 5, cwd: 'C:\\fake\\x', project: 'p', source: 'claude' }];
+  setSummariser(DEFAULT_SUMMARISER); // seed ollama-group entry
+  const r = await summarizeDay('digest', sessions, {
+    callSummariser: async () => { throw new Error('ollama down'); },
   });
-  assert.equal(r1.llm.ok, true);
-  assert.equal(r1.llm.provider, 'anthropic-oauth');
-  assert.deepEqual(r1.projects, [{ path: 'C:\\fake\\x', bullets: ['did X'] }]);
+  assert.equal(r.llm.ok, false);
+  assert.equal(r.llm.reason, 'unavailable');
+  assert.equal(r.llm.error, 'ollama down');
+  assert.deepEqual(r.projects, [{ path: 'C:\\fake\\x', bullets: ['fix flaky test'] }], 'deterministic rung still produces per-project bullets');
+});
 
-  const r2 = await summarizeDay('digest', sessions, {
-    callAnthropic: async () => ({ ok: false, status: 429, error: 'rate-limited' }),
-    callOllama: async () => JSON.stringify({ projects: [{ path: 'C:\\fake\\x', bullets: ['did Y', 'and Z', 'and W', 'over cap'] }], topics: ['y'] }),
-  });
-  assert.equal(r2.llm.ok, true);
-  assert.equal(r2.llm.provider, 'ollama');
-  assert.deepEqual(r2.projects[0].bullets, ['did Y', 'and Z', 'and W'], 'capped at 3 bullets per project');
+test('summarizeDay: no configured model -> deterministic, reason no-summariser, the stub is never called', async () => {
+  const sessions = [{ id: 's1', title: 'fix flaky test', turns: 5, cwd: 'C:\\fake\\x', project: 'p', source: 'claude' }];
+  setSummariser('');
+  let called = false;
+  try {
+    const r = await summarizeDay('digest', sessions, { callSummariser: async () => { called = true; return { text: '{}' }; } });
+    assert.equal(r.llm.ok, false);
+    assert.equal(r.llm.reason, 'no-summariser');
+    assert.equal(called, false, 'the stub must never be called when nothing is configured');
+  } finally {
+    setSummariser(DEFAULT_SUMMARISER);
+  }
+});
 
-  const r3 = await summarizeDay('digest', sessions, {
-    callAnthropic: async () => ({ ok: false, status: 429 }),
-    callOllama: async () => { throw new Error('ollama down'); },
-  });
-  assert.equal(r3.llm.ok, false);
-  assert.deepEqual(r3.projects, [{ path: 'C:\\fake\\x', bullets: ['fix flaky test'] }], 'deterministic rung still produces per-project bullets');
+test('summarizeDay: a configured model whose group binary is absent (codex, CODEX_BIN unset) behaves exactly like no configured model', async () => {
+  const sessions = [{ id: 's1', title: 'fix flaky test', turns: 5, cwd: 'C:\\fake\\x', project: 'p', source: 'claude' }];
+  setSummariser('gpt-5.6-luna'); // seed codex-group entry
+  let called = false;
+  try {
+    const r = await summarizeDay('digest', sessions, { callSummariser: async () => { called = true; return { text: '{}' }; } });
+    assert.equal(r.llm.ok, false);
+    assert.equal(r.llm.reason, 'no-summariser');
+    assert.equal(called, false, 'the stub must never be called when the group binary is missing');
+  } finally {
+    setSummariser(DEFAULT_SUMMARISER);
+  }
 });
 
 test('noise rows (subagent system prompts, caveat blocks) stay out of the digest and the session list, but still count in metrics', async () => {
@@ -197,9 +234,9 @@ test('noise rows (subagent system prompts, caveat blocks) stay out of the digest
   let digest = '';
   const entry = await regenerateDay(localDay(d1.toISOString()), {
     root: SESSIONS_ROOT,
-    callAnthropic: async (text) => {
+    callSummariser: async (text) => {
       digest = text;
-      return { ok: true, text: JSON.stringify({ projects: [{ path: cwd, bullets: ['added the retry cap'] }], topics: ['t'] }) };
+      return { text: JSON.stringify({ projects: [{ path: cwd, bullets: ['added the retry cap'] }], topics: ['t'] }) };
     },
   });
 
@@ -400,7 +437,7 @@ test('ensureHistory: two concurrent calls share one pass — one LLM call and on
   const opts = {
     days: 9,
     root: SESSIONS_ROOT,
-    callAnthropic: async () => { calls++; return { ok: true, text: JSON.stringify({ projects: [{ path: cwd, bullets: ['concurrent day'] }], topics: ['t'] }) }; },
+    callSummariser: async () => { calls++; return { text: JSON.stringify({ projects: [{ path: cwd, bullets: ['concurrent day'] }], topics: ['t'] }) }; },
   };
   await Promise.all([ensureHistory(opts), ensureHistory(opts)]);
 

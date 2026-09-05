@@ -18,15 +18,11 @@ const MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOKENS = 2048;
 const ALL_CAP = 60000;   // scope 'all' context cap (chars)
 // Ceiling on the outbound Messages API call — an unbounded fetch (a hung TLS
-// handshake is the classic case) must never block forever: history.mjs awaits
-// callMessages inside ensureHistory's single-flight promise, which only clears
-// in a .finally(), so a fetch that never settles wedges History until restart.
-// Deliberately far above any real latency — the signal aborts the streamed body
-// too, so a tighter bound would cut a legitimately long answer mid-stream.
+// handshake is the classic case) must never block forever, and the signal
+// aborts the streamed body too, so a tighter bound would cut a legitimately
+// long answer mid-stream.
 const FETCH_TIMEOUT_MS = 120_000;
 
-// Shared between the streaming session-chat path (streamChat) and the plain
-// batched path (callMessages, used by history.mjs's day summarizer).
 function messagesHeaders(accessToken) {
   return {
     authorization: `Bearer ${accessToken}`,
@@ -140,36 +136,4 @@ export async function streamChat({ chatId, question, scope = 'one', project, id,
   }
   // Non-abort exit without an explicit message_stop (e.g. network end) → done.
   if (!sentTerminal && !signal?.aborted) send({ t: 'chat:done', chatId });
-}
-
-// Non-streaming Messages API call — same OAuth token, identity prefix, and
-// model as streamChat, but stream:false and returns the full text instead of
-// pushing deltas over a WS. Used by history.mjs's day summarizer, where a
-// plain batched call fits better than a stream. Never throws — HTTP/network
-// failures come back as {ok:false, error, status?} so callers can fall
-// through to their own next rung.
-export async function callMessages({ system, messages, maxTokens = 1024 }) {
-  const oauth = claudeOauthToken();
-  if (!oauth) return { ok: false, error: 'not signed in' };
-  let resp;
-  try {
-    resp = await fetch(MESSAGES_URL, {
-      method: 'POST',
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-      headers: messagesHeaders(oauth.accessToken),
-      body: JSON.stringify({ model: MODEL, max_tokens: maxTokens, system: `${IDENTITY}\n\n${system}`, messages, stream: false }),
-    });
-  } catch (e) {
-    return { ok: false, error: `request failed: ${e.message}` };
-  }
-  if (resp.status === 401) return { ok: false, error: 'auth expired', status: 401 };
-  if (resp.status === 429) return { ok: false, error: 'rate-limited', status: 429 };
-  if (!resp.ok) {
-    let msg = `HTTP ${resp.status}`;
-    try { const j = await resp.json(); msg = j.error?.message || msg; } catch {}
-    return { ok: false, error: msg, status: resp.status };
-  }
-  const data = await resp.json();
-  const text = (data.content || []).filter((b) => b.type === 'text').map((b) => b.text).join('');
-  return { ok: true, text, model: data.model || MODEL, inputTokens: data.usage?.input_tokens ?? null, outputTokens: data.usage?.output_tokens ?? null };
 }
