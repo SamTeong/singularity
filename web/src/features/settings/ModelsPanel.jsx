@@ -11,7 +11,7 @@ import Radio from '@mui/material/Radio';
 import Select from '@mui/material/Select';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
-import { alpha } from '@mui/material/styles';
+import { stroke2 } from '@/shell/shellStyles.js';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
@@ -19,6 +19,8 @@ import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useModels } from '@/hooks/useModels.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
+import useMediaQuery from '@mui/material/useMediaQuery';
+import { PHONE_QUERY } from '@/shell/breakpoints.js';
 
 const GROUPS = ['claude', 'ollama', 'codex'];
 const EMPTY_ADD = { id: '', label: '', group: 'claude' };
@@ -36,6 +38,12 @@ const EMPTY_ADD = { id: '', label: '', group: 'claude' };
 export default function ModelsPanel() {
   const { models, defaultModel, summariserModel, error: loadError, reload } = useModels();
   const caps = useCapabilities();
+  // Phone: the fixed-width model columns (210/170/96 + controls ≈ 650px) cannot
+  // shrink into a ~340px pane without crushing every field — the same outcome
+  // Phase 3 chose for dense tables. Below 600px the list keeps its legible
+  // minimum width inside a labelled, keyboard-focusable horizontal scroll
+  // region instead. Tablet+ fits the columns without one.
+  const isPhone = useMediaQuery(PHONE_QUERY);
   const ollamaUnavailable = caps && caps.ollama?.available === false;
   const codexUnavailable = caps && caps.codexSpawn?.available === false;
   // Memoized identity is load-bearing: the draft-sync guard below compares doc
@@ -131,28 +139,11 @@ export default function ModelsPanel() {
     setAdd(EMPTY_ADD);
   };
 
-  return (
-    <Box sx={{ p: 2 }}>
-      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 1, flexWrap: 'wrap' }}>
-        <Typography sx={{ fontSize: 16, fontWeight: 600, flex: 1 }}>Models</Typography>
-        <Button size="small" startIcon={<RestartAltIcon />} onClick={restoreDefaults}>Restore defaults</Button>
-      </Stack>
-      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
-        Suggestions for the free-text model pickers, grouped by which bin the daemon routes them to.
-      </Typography>
-
-      {loadError && (
-        <Typography variant="body2" color="error" sx={{ mb: 2 }}>
-          Reload failed — {loadError}
-        </Typography>
-      )}
-
-      {error && (
-        <Typography variant="body2" color="error" sx={{ mb: 2 }}>
-          {error}
-        </Typography>
-      )}
-
+  // Column headers + rows + add-row: one block so the phone scroll region
+  // below can give them a single legible minimum width — headers and rows
+  // then scroll together and stay aligned. Desktop renders it unwrapped.
+  const listBody = (
+    <>
       {/* Column headers — widths mirror the row controls below so they line up. */}
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', pb: 0.5, '& > *': { fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'text.secondary' } }}>
         <Typography sx={{ width: 30 }} />
@@ -178,7 +169,10 @@ export default function ModelsPanel() {
           sx={{
             alignItems: 'center',
             py: 0.75,
-            borderBottom: (t) => `1px solid ${alpha(t.palette.glass.stroke, 0.1)}`,
+            // `stroke2` = skin-agnostic faint hairline (glass.stroke read
+            // through alpha() crashed Phosphor and can never work: tokens are
+            // CSS-var strings, which MUI's alpha() rejects).
+            borderBottom: (t) => `1px solid ${stroke2(t)}`,
             opacity: dragIndex === i ? 0.4 : 1,
             bgcolor: overIndex === i && dragIndex !== i ? 'action.hover' : 'transparent',
           }}
@@ -247,6 +241,41 @@ export default function ModelsPanel() {
         </Select>
         <Button size="small" startIcon={<AddIcon />} disabled={!add.id.trim()} onClick={addModel}>Add</Button>
       </Stack>
+    </>
+  );
+
+  return (
+    <Box sx={{ p: 2 }}>
+      <Stack direction="row" spacing={1.5} sx={{ alignItems: 'center', mb: 1, flexWrap: 'wrap' }}>
+        <Typography sx={{ fontSize: 16, fontWeight: 600, flex: 1 }}>Models</Typography>
+        <Button size="small" startIcon={<RestartAltIcon />} onClick={restoreDefaults}>Restore defaults</Button>
+      </Stack>
+      <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
+        Suggestions for the free-text model pickers, grouped by which bin the daemon routes them to.
+      </Typography>
+
+      {loadError && (
+        <Typography variant="body2" color="error" sx={{ mb: 2 }}>
+          Reload failed — {loadError}
+        </Typography>
+      )}
+
+      {error && (
+        <Typography variant="body2" color="error" sx={{ mb: 2 }}>
+          {error}
+        </Typography>
+      )}
+
+      {isPhone ? (
+        <Box
+          role="region"
+          aria-label="Model list (scrolls horizontally)"
+          tabIndex={0}
+          sx={{ maxWidth: '100%', flexShrink: 0, overflowX: 'auto' }}
+        >
+          <Box sx={{ minWidth: 680 }}>{listBody}</Box>
+        </Box>
+      ) : listBody}
 
       <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 3 }}>
         <TextField

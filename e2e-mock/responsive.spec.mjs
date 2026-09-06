@@ -17,29 +17,24 @@ expect(ROUTES).toHaveLength(15);
 
 for (const skin of RESPONSIVE_SKINS) {
   for (const route of ROUTES) {
-    test(`responsive baseline: ${skin} / ${route}`, async ({ page, consoleGuard }, testInfo) => {
-      // Existing Phosphor Settings throws while reading an absent skin role.
-      // Retain this as a non-blocking baseline signal until its owning phase.
-      if (skin === 'Phosphor Console' && route === 'settings') {
-        consoleGuard.allow(/Cannot read properties of undefined \(reading 'stroke'\)/);
-      }
+    test(`responsive baseline: ${skin} / ${route}`, async ({ page }, testInfo) => {
       await seedSkin(page, skin);
       await page.goto(`/${route}`);
       await expect(page).toHaveURL(new RegExp(`/${route}(\\?|$)`));
 
-      const viewport = page.viewportSize();
+      // The pre-existing Phosphor Settings crash (t.palette.glass absent under
+      // that skin) was fixed in Phase 5 of the responsive plan
+      // (features/settings/*.jsx now read stroke2(t) from shellStyles.js,
+      // skin-agnostic), so every
+      // route/skin case takes the normal root-mounted contract; the old
+      // `toHaveCount(0)` exception was removed with its cause.
       const appRoot = page.locator('#root > *').first();
-      const knownSettingsCrash = skin === 'Phosphor Console' && route === 'settings';
-      if (knownSettingsCrash) {
-        await expect(appRoot, 'known Phosphor Settings baseline crash leaves no app root').toHaveCount(0);
-      } else {
-        await expect(appRoot, 'route should mount the application root').toBeVisible();
-      }
+      await expect(appRoot, 'route should mount the application root').toBeVisible();
 
       const overflow = await pageOverflow(page);
       await testInfo.attach('responsive-baseline.json', {
         body: JSON.stringify({
-          route, skin, viewport, rootMounted: !knownSettingsCrash, knownSettingsCrash, ...overflow,
+          route, skin, viewport: page.viewportSize(), rootMounted: true, ...overflow,
         }, null, 2),
         contentType: 'application/json',
       });
