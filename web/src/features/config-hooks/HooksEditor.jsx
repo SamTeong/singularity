@@ -21,6 +21,7 @@ import ListItemText from '@mui/material/ListItemText';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import { usePhonePane, PhonePaneSwitcher } from '@/components/panelkit/PhonePane.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
@@ -53,6 +54,9 @@ export default function HooksEditor() {
   const showResults = q.trim() ? results : null;
   const { ensureSaved, dialogEl } = useDirtyGuard();
   const focusTick = useFocusTick();
+  // Phone: one pane at a time (see PhonePane.jsx) — opening a hook file on
+  // phone switches to it.
+  const { isPhone, phonePane, setPhonePane } = usePhonePane(!!path);
 
   // Fetch grouped hook files whenever the root list changes.
   useEffect(() => {
@@ -102,6 +106,7 @@ export default function HooksEditor() {
       setContent(d.content ?? '');
       setMtime(d.mtime ?? null);
       setDirty(false); setMsg(null);
+      if (isPhone) setPhonePane('detail');
     }).catch((e) => setMsg({ sev: 'error', text: String(e) }));
   };
 
@@ -163,77 +168,95 @@ export default function HooksEditor() {
     remember([p]);
   };
 
-  return (
-    <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>
-      <Rail storageKey="sing-hooks-w" defaultWidth={300} collapsedTitle="Show hook files">
-        {({ collapse }) => (
-          <>
-            <RailHeader
-              searchPlaceholder="Search hooks…"
-              searchValue={q}
-              onSearchChange={setQ}
-              allOpen={allOpen}
-              onToggleAll={toggleAll}
-              onPickFolder={async () => { if (!await ensureSaved({ dirty, save })) return; setPicking(true); }}
-              onCollapse={collapse}
-            />
-            <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {(showResults ? searchGroups : shownGroups.map((g) => ({ cwd: g.cwd, items: g.files }))).map((g) => {
-                const isCol = collapsed.has(normKey(g.cwd));
-                const count = g.items.length;
-                return (
-                  <Box key={g.cwd}>
-                    <ListItemButton sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.cwd)}>
-                        {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
-                        <FolderOpenIcon fontSize="small" color="action" />
-                        <Typography variant="code" noWrap title={g.cwd} sx={{ flex: 1, minWidth: 0, fontSize: 11, color: 'text.secondary' }}>{tildify(g.cwd)}</Typography>
-                        <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
-                      </Stack>
-                      {!showResults && (
-                        <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
-                          onClick={(e) => { e.stopPropagation(); forget(g.cwd); }} sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
-                          <ClearIcon fontSize="small" />
-                        </IconButton>
-                      )}
-                    </ListItemButton>
-                    {!isCol && g.items.map((it, i) => showResults ? (
-                      <ListItemButton key={`${it.path}:${i}`} selected={it.path === path} onClick={() => loadFile(it.path)}
-                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, mb: 0.25, pl: 4 }}>
-                        <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                        <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
-                      </ListItemButton>
-                    ) : (
-                      <ListItemButton key={it.path} selected={it.path === path} onClick={() => loadFile(it.path)}
-                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, mb: 0.25, pl: 4 }}>
-                        <ListItemText primary={it.rel} slotProps={{ primary: { noWrap: true, title: it.path, variant: 'code', sx: { fontSize: 12 } } }} />
-                      </ListItemButton>
-                    ))}
-                    {!isCol && count === 0 && <Typography color="text.secondary" sx={{ fontSize: 11, px: 2, py: 0.5 }}>No hooks.</Typography>}
-                  </Box>
-                );
-              })}
-              {showResults && (showResults.length === 0) && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
-              {!showResults && shownGroups.length === 0 && <EmptyListLine>No hooks.</EmptyListLine>}
-            </List>
-          </>
-        )}
-      </Rail>
+  // Rail pane content — shared between the tablet/desktop Rail and the phone
+  // single-pane layout (no collapse chevron there; see RailHeader).
+  const listPane = (collapse) => (
+    <>
+      <RailHeader
+        searchPlaceholder="Search hooks…"
+        searchValue={q}
+        onSearchChange={setQ}
+        allOpen={allOpen}
+        onToggleAll={toggleAll}
+        onPickFolder={async () => { if (!await ensureSaved({ dirty, save })) return; setPicking(true); }}
+        onCollapse={collapse}
+      />
+      <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
+        {(showResults ? searchGroups : shownGroups.map((g) => ({ cwd: g.cwd, items: g.files }))).map((g) => {
+          const isCol = collapsed.has(normKey(g.cwd));
+          const count = g.items.length;
+          return (
+            <Box key={g.cwd}>
+              <ListItemButton sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.cwd)}>
+                  {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
+                  <FolderOpenIcon fontSize="small" color="action" />
+                  <Typography variant="code" noWrap title={g.cwd} sx={{ flex: 1, minWidth: 0, fontSize: 11, color: 'text.secondary' }}>{tildify(g.cwd)}</Typography>
+                  <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
+                </Stack>
+                {!showResults && (
+                  <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
+                    onClick={(e) => { e.stopPropagation(); forget(g.cwd); }} sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                )}
+              </ListItemButton>
+              {!isCol && g.items.map((it, i) => showResults ? (
+                <ListItemButton key={`${it.path}:${i}`} selected={it.path === path} onClick={() => loadFile(it.path)}
+                  sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, mb: 0.25, pl: 4 }}>
+                  <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
+                  <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
+                </ListItemButton>
+              ) : (
+                <ListItemButton key={it.path} selected={it.path === path} onClick={() => loadFile(it.path)}
+                  sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, mb: 0.25, pl: 4 }}>
+                  <ListItemText primary={it.rel} slotProps={{ primary: { noWrap: true, title: it.path, variant: 'code', sx: { fontSize: 12 } } }} />
+                </ListItemButton>
+              ))}
+              {!isCol && count === 0 && <Typography color="text.secondary" sx={{ fontSize: 11, px: 2, py: 0.5 }}>No hooks.</Typography>}
+            </Box>
+          );
+        })}
+        {showResults && (showResults.length === 0) && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
+        {!showResults && shownGroups.length === 0 && <EmptyListLine>No hooks.</EmptyListLine>}
+      </List>
+    </>
+  );
 
-    <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
+  return (
+    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, flexDirection: isPhone ? 'column' : 'row' }}>
+      {isPhone && (
+        <Box sx={(t) => ({ p: 1, flexShrink: 0, borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
+          <PhonePaneSwitcher pane={phonePane} onSwitch={setPhonePane} detailDisabled={!path} />
+        </Box>
+      )}
+
+      {(!isPhone || phonePane === 'list') && (
+        isPhone ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{listPane()}</Box>
+        ) : (
+          <Rail storageKey="sing-hooks-w" defaultWidth={300} collapsedTitle="Show hook files">
+            {({ collapse }) => listPane(collapse)}
+          </Rail>
+        )
+      )}
+
+      {(!isPhone || phonePane === 'detail') && (
+        <Stack sx={{ flex: 1, minWidth: 0, height: '100%', p: 2, minHeight: 0 }} spacing={1.5}>
+          <DetailPane empty={!path && <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Browse on the left to view or edit here." />}>
+            <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }} title={tildify(path)}>{tildify(path)}</Typography>
+            {/* key={path}: @uiw's typing latch defers a `value` prop change that
+                lands while the user was just typing, and on a dirty "discard and
+                navigate" that deferred update is never applied — the editor keeps
+                showing the previous file plus the unsaved edit. Remounting on path
+                makes the new file's content the initial doc, sidestepping the latch. */}
+            <CmEditor key={path} value={content} onChange={onChange} extensions={lang ? [lang] : []} deps={[path]} />
+            <SaveBar msg={msg} disabled={!dirty} onSave={save} />
+          </DetailPane>
+        </Stack>
+      )}
       {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
-      <DetailPane empty={!path && <EmptyState icon={<WebhookIcon />} title="Select a hook" description="Browse on the left to view or edit here." />}>
-        <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>{tildify(path)}</Typography>
-        {/* key={path}: @uiw's typing latch defers a `value` prop change that
-            lands while the user was just typing, and on a dirty "discard and
-            navigate" that deferred update is never applied — the editor keeps
-            showing the previous file plus the unsaved edit. Remounting on path
-            makes the new file's content the initial doc, sidestepping the latch. */}
-        <CmEditor key={path} value={content} onChange={onChange} extensions={lang ? [lang] : []} deps={[path]} />
-        <SaveBar msg={msg} disabled={!dirty} onSave={save} />
-      </DetailPane>
-    </Stack>
-    {dialogEl}
+      {dialogEl}
     </Box>
   );
 }

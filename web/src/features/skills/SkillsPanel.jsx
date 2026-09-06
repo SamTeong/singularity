@@ -28,6 +28,7 @@ import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import { usePhonePane, PhonePaneSwitcher } from '@/components/panelkit/PhonePane.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import { useRootList } from '@/components/panelkit/useRootList.js';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
@@ -70,6 +71,9 @@ export default function SkillsPanel() {
 
   const { ensureSaved, dialogEl } = useDirtyGuard();
   const focusTick = useFocusTick();
+  // Phone: one pane at a time (see PhonePane.jsx) — opening a skill or a
+  // supporting file on phone switches to it.
+  const { isPhone, phonePane, setPhonePane } = usePhonePane(!!sel);
 
   // Fetch each root's skills independently — one root's slow/failed fetch
   // doesn't block the others.
@@ -108,6 +112,7 @@ export default function SkillsPanel() {
     if (!await ensureSaved({ dirty, save })) return;
     setSel({ root: rootPath, scope: scopeName, skill: skillName, flat: flatVal });
     setFile(null); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false); setMtime(null);
+    if (isPhone) setPhonePane('detail');
     fetch(`/api/skill?root=${encodeURIComponent(untildify(rootPath))}&scope=${encodeURIComponent(scopeName)}&skill=${encodeURIComponent(skillName)}&flat=${flatVal ? '1' : '0'}`).then((r) => r.json()).then((d) => {
       if (!d.ok) { setErr(d.error || 'failed to load skill'); }
       else { setContent(d.raw || ''); setDirty(false); setMtime(d.mtime ?? null); }
@@ -122,6 +127,7 @@ export default function SkillsPanel() {
     if (!await ensureSaved({ dirty, save })) return;
     const name = relPath.split('/').pop();
     setFile({ path: relPath, name }); setErr(null); setMsg(null); setLoading(true); setContent(''); setDirty(false); setMtime(null);
+    if (isPhone) setPhonePane('detail');
     const u = `/api/skill?root=${encodeURIComponent(untildify(sel.root))}&scope=${encodeURIComponent(sel.scope)}&skill=${encodeURIComponent(sel.skill)}&flat=${sel.flat ? '1' : '0'}&file=${encodeURIComponent(relPath)}`;
     fetch(u).then((r) => r.json()).then((d) => {
       if (!d.ok) { setFile({ path: relPath, name, error: d.error || 'failed to load file' }); setContent(''); }
@@ -203,155 +209,174 @@ export default function SkillsPanel() {
     else { setCollapsedRoots(new Set()); setExpandedScopes(new Set(scopeKeys)); }
   };
 
+  // Rail pane content — shared between the tablet/desktop Rail and the phone
+  // single-pane layout (no collapse chevron there; see RailHeader).
+  const listPane = (collapse) => (
+    <>
+      <RailHeader
+        searchPlaceholder="Search skills…"
+        searchValue={q}
+        onSearchChange={setQ}
+        allOpen={allOpen}
+        onToggleAll={toggleAll}
+        groupToggleDisabled={!!query}
+        onPickFolder={() => setPicking(true)}
+        onCollapse={collapse}
+      >
+        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
+          {totalScopes} scope{totalScopes === 1 ? '' : 's'} · {totalSkills} skill{totalSkills === 1 ? '' : 's'}
+        </Typography>
+      </RailHeader>
+      <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
+        {view.map((r) => {
+          const rOpen = isExpandedRoot(r.root);
+          return (
+            <Box key={r.root}>
+              <ListItemButton onClick={() => toggleRoot(r.root)}
+                sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
+                <ListItemIcon sx={{ minWidth: 28 }}>{rOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
+                <ListItemIcon sx={{ minWidth: 24 }}>{rOpen ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
+                <ListItemText primary={tildify(r.root)} slotProps={{ primary: { variant: 'subtitle2', noWrap: true, title: r.root } }} />
+                <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mr: 0.5 }}>{r.error || r.scopes.length}</Typography>
+                <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
+                  onClick={(e) => { e.stopPropagation(); forget(r.root); }}
+                  sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
+                  <ClearIcon fontSize="small" />
+                </IconButton>
+              </ListItemButton>
+              <Collapse in={rOpen} timeout="auto" unmountOnExit>
+                <List dense disablePadding>
+                  {r.scopes.map((sc) => {
+                    const scopeKey = `${r.root}::${sc.name}`;
+                    const scOpen = isExpandedScope(r.root, sc.name);
+                    const label = r.flat ? '(flat)' : sc.name;
+                    return (
+                      <Box key={scopeKey}>
+                        <ListItemButton onClick={() => toggleScope(scopeKey)}
+                          sx={{ pl: 3, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}>
+                          <ListItemIcon sx={{ minWidth: 28 }}>{scOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
+                          <ListItemIcon sx={{ minWidth: 24 }}>{scOpen ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
+                          <ListItemText primary={label} slotProps={{ primary: { variant: 'subtitle2', noWrap: true } }} />
+                          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{sc.skills.length}</Typography>
+                        </ListItemButton>
+                        <Collapse in={scOpen} timeout="auto" unmountOnExit>
+                          <List dense disablePadding>
+                            {sc.skills.map((sk) => {
+                              const skKey = `${r.root}::${sc.name}::${sk.name}`;
+                              const isSel = sel?.root === r.root && sel?.scope === sc.name && sel?.skill === sk.name;
+                              const skOpen = expandedSkills.has(skKey);
+                              const hasFiles = sk.files && sk.files.length > 0;
+                              return (
+                                <Box key={sk.name}>
+                                  <ListItemButton selected={isSel && !file}
+                                    onClick={() => { open(r.root, sc.name, sk.name, r.flat); if (hasFiles) toggleSkill(skKey); }}
+                                    sx={{ pl: 7, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}
+                                    title={sk.description || sk.name}
+                                  >
+                                    <ListItemIcon sx={{ minWidth: 20, '& .MuiSvgIcon-root': { fontSize: 16 }, color: 'text.secondary' }}>
+                                      {hasFiles ? (skOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />) : <Box sx={{ width: 16 }} />}
+                                    </ListItemIcon>
+                                    <Typography variant="code" sx={{ fontSize: 12 }} noWrap>{sk.name}</Typography>
+                                  </ListItemButton>
+                                  {hasFiles && (
+                                    <Collapse in={skOpen} timeout="auto" unmountOnExit>
+                                      <List dense disablePadding>
+                                        {sk.files.map((rel) => {
+                                          const isFileSel = isSel && file?.path === rel;
+                                          return (
+                                            <ListItemButton key={rel} selected={isFileSel} onClick={() => openFile(rel)}
+                                              sx={{ pl: 10, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}
+                                              title={rel}
+                                            >
+                                              <ListItemIcon sx={{ minWidth: 24, color: 'text.secondary' }}>{fileIcon(rel)}</ListItemIcon>
+                                              <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }} noWrap>{rel}</Typography>
+                                            </ListItemButton>
+                                          );
+                                        })}
+                                      </List>
+                                    </Collapse>
+                                  )}
+                                </Box>
+                              );
+                            })}
+                            {sc.capped && <Typography sx={{ pl: 7, py: 0.5, color: 'text.secondary', fontSize: 11 }}>(showing first 200)</Typography>}
+                            {sc.skills.length === 0 && <Typography sx={{ pl: 7, py: 1, color: 'text.secondary', fontSize: 12 }}>(no skills)</Typography>}
+                          </List>
+                        </Collapse>
+                      </Box>
+                    );
+                  })}
+                  {r.error && <Typography sx={{ pl: 3, py: 1, color: 'text.secondary', fontSize: 12 }}>{r.error}</Typography>}
+                  {!r.error && r.scopes.length === 0 && <Typography sx={{ pl: 3, py: 1, color: 'text.secondary', fontSize: 12 }}>Nothing found here.</Typography>}
+                </List>
+              </Collapse>
+            </Box>
+          );
+        })}
+        {view.length === 0 && <EmptyListLine>{query ? 'No matches.' : 'No skills.'}</EmptyListLine>}
+      </List>
+    </>
+  );
+
   return (
-    <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
-      {/* left: root → scope → skill tree (collapsible) */}
-      <Rail storageKey="sing-skills-w" defaultWidth={300} collapsedTitle="Show skill paths">
-        {({ collapse }) => (
-          <>
-        <RailHeader
-          searchPlaceholder="Search skills…"
-          searchValue={q}
-          onSearchChange={setQ}
-          allOpen={allOpen}
-          onToggleAll={toggleAll}
-          groupToggleDisabled={!!query}
-          onPickFolder={() => setPicking(true)}
-          onCollapse={collapse}
-        >
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
-            {totalScopes} scope{totalScopes === 1 ? '' : 's'} · {totalSkills} skill{totalSkills === 1 ? '' : 's'}
-          </Typography>
-        </RailHeader>
-        <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
-          {view.map((r) => {
-            const rOpen = isExpandedRoot(r.root);
-            return (
-              <Box key={r.root}>
-                <ListItemButton onClick={() => toggleRoot(r.root)}
-                  sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25, '&:hover .del': { opacity: 1 } }}>
-                  <ListItemIcon sx={{ minWidth: 28 }}>{rOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
-                  <ListItemIcon sx={{ minWidth: 24 }}>{rOpen ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
-                  <ListItemText primary={tildify(r.root)} slotProps={{ primary: { variant: 'subtitle2', noWrap: true, title: r.root } }} />
-                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mr: 0.5 }}>{r.error || r.scopes.length}</Typography>
-                  <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
-                    onClick={(e) => { e.stopPropagation(); forget(r.root); }}
-                    sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
-                    <ClearIcon fontSize="small" />
-                  </IconButton>
-                </ListItemButton>
-                <Collapse in={rOpen} timeout="auto" unmountOnExit>
-                  <List dense disablePadding>
-                    {r.scopes.map((sc) => {
-                      const scopeKey = `${r.root}::${sc.name}`;
-                      const scOpen = isExpandedScope(r.root, sc.name);
-                      const label = r.flat ? '(flat)' : sc.name;
-                      return (
-                        <Box key={scopeKey}>
-                          <ListItemButton onClick={() => toggleScope(scopeKey)}
-                            sx={{ pl: 3, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}>
-                            <ListItemIcon sx={{ minWidth: 28 }}>{scOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
-                            <ListItemIcon sx={{ minWidth: 24 }}>{scOpen ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
-                            <ListItemText primary={label} slotProps={{ primary: { variant: 'subtitle2', noWrap: true } }} />
-                            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{sc.skills.length}</Typography>
-                          </ListItemButton>
-                          <Collapse in={scOpen} timeout="auto" unmountOnExit>
-                            <List dense disablePadding>
-                              {sc.skills.map((sk) => {
-                                const skKey = `${r.root}::${sc.name}::${sk.name}`;
-                                const isSel = sel?.root === r.root && sel?.scope === sc.name && sel?.skill === sk.name;
-                                const skOpen = expandedSkills.has(skKey);
-                                const hasFiles = sk.files && sk.files.length > 0;
-                                return (
-                                  <Box key={sk.name}>
-                                    <ListItemButton selected={isSel && !file}
-                                      onClick={() => { open(r.root, sc.name, sk.name, r.flat); if (hasFiles) toggleSkill(skKey); }}
-                                      sx={{ pl: 7, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}
-                                      title={sk.description || sk.name}
-                                    >
-                                      <ListItemIcon sx={{ minWidth: 20, '& .MuiSvgIcon-root': { fontSize: 16 }, color: 'text.secondary' }}>
-                                        {hasFiles ? (skOpen ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />) : <Box sx={{ width: 16 }} />}
-                                      </ListItemIcon>
-                                      <Typography variant="code" sx={{ fontSize: 12 }} noWrap>{sk.name}</Typography>
-                                    </ListItemButton>
-                                    {hasFiles && (
-                                      <Collapse in={skOpen} timeout="auto" unmountOnExit>
-                                        <List dense disablePadding>
-                                          {sk.files.map((rel) => {
-                                            const isFileSel = isSel && file?.path === rel;
-                                            return (
-                                              <ListItemButton key={rel} selected={isFileSel} onClick={() => openFile(rel)}
-                                                sx={{ pl: 10, borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}
-                                                title={rel}
-                                              >
-                                                <ListItemIcon sx={{ minWidth: 24, color: 'text.secondary' }}>{fileIcon(rel)}</ListItemIcon>
-                                                <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }} noWrap>{rel}</Typography>
-                                              </ListItemButton>
-                                            );
-                                          })}
-                                        </List>
-                                      </Collapse>
-                                    )}
-                                  </Box>
-                                );
-                              })}
-                              {sc.capped && <Typography sx={{ pl: 7, py: 0.5, color: 'text.secondary', fontSize: 11 }}>(showing first 200)</Typography>}
-                              {sc.skills.length === 0 && <Typography sx={{ pl: 7, py: 1, color: 'text.secondary', fontSize: 12 }}>(no skills)</Typography>}
-                            </List>
-                          </Collapse>
-                        </Box>
-                      );
-                    })}
-                    {r.error && <Typography sx={{ pl: 3, py: 1, color: 'text.secondary', fontSize: 12 }}>{r.error}</Typography>}
-                    {!r.error && r.scopes.length === 0 && <Typography sx={{ pl: 3, py: 1, color: 'text.secondary', fontSize: 12 }}>Nothing found here.</Typography>}
-                  </List>
-                </Collapse>
-              </Box>
-            );
-          })}
-          {view.length === 0 && <EmptyListLine>{query ? 'No matches.' : 'No skills.'}</EmptyListLine>}
-        </List>
-          </>
-        )}
-      </Rail>
+    <Box sx={{ height: '100%', display: 'flex', minHeight: 0, flexDirection: isPhone ? 'column' : 'row' }}>
+      {isPhone && (
+        <Box sx={(t) => ({ p: 1, flexShrink: 0, borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
+          <PhonePaneSwitcher pane={phonePane} onSwitch={setPhonePane} detailDisabled={!sel} />
+        </Box>
+      )}
+
+      {/* left: root → scope → skill tree — full width behind the switcher on
+          phone, collapsible Rail on tablet/desktop. */}
+      {(!isPhone || phonePane === 'list') && (
+        isPhone ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{listPane()}</Box>
+        ) : (
+          <Rail storageKey="sing-skills-w" defaultWidth={300} collapsedTitle="Show skill paths">
+            {({ collapse }) => listPane(collapse)}
+          </Rail>
+        )
+      )}
 
       {/* right: editable SKILL.md / supporting files (CodeMirror) */}
-      <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
-        <DetailPane
-          empty={!sel && <EmptyState icon={<SchoolIcon />} title="Select a skill" description="Browse on the left to view or edit here." />}
-          loading={loading}
-          error={err}
-        >
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>
-            {tildify(sel?.root)} / {sel?.flat ? '(flat)' : sel?.scope} / {sel?.skill}
-            {file && (
-              <>
-                {' · '}
-                <Box component="span" sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
-                  onClick={async () => { if (await ensureSaved({ dirty, save })) { setFile(null); setMtime(null); } }}>SKILL.md</Box>
-                {' / '}{file.name}
-              </>
-            )}
-          </Typography>
-          {file?.error ? (
-            <Typography sx={{ color: 'error.main', fontSize: 13 }}>{file.error}</Typography>
-          ) : file?.type === 'image' ? (
-            <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>
-              This image can't be edited here. Open the file directly:
-              <Typography variant="code" component="span" sx={{ ml: 1, color: 'text.primary' }}>{file.path}</Typography>
+      {(!isPhone || phonePane === 'detail') && (
+        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
+          <DetailPane
+            empty={!sel && <EmptyState icon={<SchoolIcon />} title="Select a skill" description="Browse on the left to view or edit here." />}
+            loading={loading}
+            error={err}
+          >
+            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>
+              {tildify(sel?.root)} / {sel?.flat ? '(flat)' : sel?.scope} / {sel?.skill}
+              {file && (
+                <>
+                  {' · '}
+                  <Box component="span" sx={{ color: 'primary.main', cursor: 'pointer', '&:hover': { textDecoration: 'underline' } }}
+                    onClick={async () => { if (await ensureSaved({ dirty, save })) { setFile(null); setMtime(null); } }}>SKILL.md</Box>
+                  {' / '}{file.name}
+                </>
+              )}
             </Typography>
-          ) : (
-            <CmEditor
-              key={file ? file.path : 'skill'}
-              value={content}
-              onChange={onChange}
-              extensions={(!file || file.type === 'markdown') ? [markdown()] : []}
-              deps={[file ? `f:${file.path}` : 'skill']}
-            />
-          )}
-          {(!file || file.type !== 'image') && !file?.error && <SaveBar msg={msg} disabled={!dirty} onSave={save} />}
-        </DetailPane>
-      </Stack>
+            {file?.error ? (
+              <Typography sx={{ color: 'error.main', fontSize: 13 }}>{file.error}</Typography>
+            ) : file?.type === 'image' ? (
+              <Typography sx={{ color: 'text.secondary', fontSize: 13 }}>
+                This image can't be edited here. Open the file directly:
+                <Typography variant="code" component="span" sx={{ ml: 1, color: 'text.primary' }}>{file.path}</Typography>
+              </Typography>
+            ) : (
+              <CmEditor
+                key={file ? file.path : 'skill'}
+                value={content}
+                onChange={onChange}
+                extensions={(!file || file.type === 'markdown') ? [markdown()] : []}
+                deps={[file ? `f:${file.path}` : 'skill']}
+              />
+            )}
+            {(!file || file.type !== 'image') && !file?.error && <SaveBar msg={msg} disabled={!dirty} onSave={save} />}
+          </DetailPane>
+        </Stack>
+      )}
 
       {picking && <DirPicker start={untildify(roots[roots.length - 1] || '~')} onPick={pickRoot} onClose={() => setPicking(false)} />}
       {dialogEl}

@@ -21,6 +21,7 @@ import DirPicker from '@/components/DirPicker.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import { usePhonePane, PhonePaneSwitcher } from '@/components/panelkit/PhonePane.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRootList, normKey } from '@/components/panelkit/useRootList.js';
@@ -45,6 +46,9 @@ export default function RulesPanel() {
   const [ref, setRef] = useState(null); // {path, content} when viewing the companion reference (read-only)
   const { ensureSaved, dialogEl } = useDirtyGuard();
   const focusTick = useFocusTick();
+  // Phone: one pane at a time (see PhonePane.jsx) — opening a rule on phone
+  // switches to it.
+  const { isPhone, phonePane, setPhonePane } = usePhonePane(!!sel);
 
   // Refresh the browse list whenever the root list changes. shownRoots (derived
   // from roots) is already empty when roots is, so files goes unused rather
@@ -75,6 +79,7 @@ export default function RulesPanel() {
     if (item.path === sel?.path) return;
     if (!await ensureSaved({ dirty, save })) return;
     setSel(item); setMsg(null); setLoadingFile(true); setRef(null); setMtime(null);
+    if (isPhone) setPhonePane('detail');
     fetch(`/api/rules/file?path=${encodeURIComponent(untildify(item.path))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : ''); setDirty(false); setMtime(d.ok ? (d.mtime ?? null) : null);
       if (!d.ok) setMsg({ sev: 'error', text: d.error });
@@ -161,92 +166,110 @@ export default function RulesPanel() {
   const allOpen = groupKeys.length > 0 && groupKeys.every((k) => !collapsed.has(k));
   const toggleAll = () => setCollapsed(allOpen ? new Set(groupKeys) : new Set());
 
-  return (
-    <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>
-      <Rail storageKey="sing-rules-w" defaultWidth={300} collapsedTitle="Show rule paths">
-        {({ collapse }) => (
-          <>
-            <RailHeader
-              searchPlaceholder="Search rules…"
-              searchValue={q}
-              onSearchChange={setQ}
-              allOpen={allOpen}
-              onToggleAll={toggleAll}
-              onPickFolder={async () => { if (!await ensureSaved({ dirty, save })) return; setPicking(true); }}
-              onCollapse={collapse}
-            />
-            <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {(results ? searchGroups : shownRoots.map((root) => ({ root, items: filesByRoot(root) }))).map((g) => {
-                const isCol = collapsed.has(normKey(g.root));
-                const count = g.items.length;
-                return (
-                  <Box key={g.root} sx={{ mb: 0.5 }}>
-                    <ListItemButton sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, '&:hover .del': { opacity: 1 } }}>
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.root)}>
-                        {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
-                        <FolderOpenIcon fontSize="small" color="action" />
-                        <ListItemText primary={tildify(g.root)} slotProps={{ primary: { noWrap: true, title: g.root, variant: 'code', sx: { fontSize: 12 } } }} />
-                        <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
-                      </Stack>
-                      {!results && (
-                        <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
-                          onClick={(e) => { e.stopPropagation(); forget(g.root); }}
-                          sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
-                          <ClearIcon fontSize="small" />
-                        </IconButton>
-                      )}
-                    </ListItemButton>
-                    {!isCol && g.items.map((it, i) => results ? (
-                      <ListItemButton key={`${it.path}:${it.line}:${i}`} selected={sel?.path === it.path} onClick={() => open(it)}
-                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, pl: 4, mb: 0.25 }}>
-                        <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                        <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
-                      </ListItemButton>
-                    ) : (
-                      <ListItemButton key={it.path} selected={sel?.path === it.path} onClick={() => open(it)}
-                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, pl: 4, mb: 0.25 }}>
-                        <ListItemText primary={tildify(it.rel)} slotProps={{ primary: { noWrap: true, title: it.path, sx: { fontSize: 12 } } }} />
-                      </ListItemButton>
-                    ))}
-                  </Box>
-                );
-              })}
-              {results && results.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
-              {!results && shownRoots.length === 0 && <EmptyListLine>No rules.</EmptyListLine>}
-            </List>
-          </>
-        )}
-      </Rail>
+  // Rail pane content — shared between the tablet/desktop Rail and the phone
+  // single-pane layout (no collapse chevron there; see RailHeader).
+  const listPane = (collapse) => (
+    <>
+      <RailHeader
+        searchPlaceholder="Search rules…"
+        searchValue={q}
+        onSearchChange={setQ}
+        allOpen={allOpen}
+        onToggleAll={toggleAll}
+        onPickFolder={async () => { if (!await ensureSaved({ dirty, save })) return; setPicking(true); }}
+        onCollapse={collapse}
+      />
+      <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
+        {(results ? searchGroups : shownRoots.map((root) => ({ root, items: filesByRoot(root) }))).map((g) => {
+          const isCol = collapsed.has(normKey(g.root));
+          const count = g.items.length;
+          return (
+            <Box key={g.root} sx={{ mb: 0.5 }}>
+              <ListItemButton sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, '&:hover .del': { opacity: 1 } }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }} onClick={() => toggleGroup(g.root)}>
+                  {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
+                  <FolderOpenIcon fontSize="small" color="action" />
+                  <ListItemText primary={tildify(g.root)} slotProps={{ primary: { noWrap: true, title: g.root, variant: 'code', sx: { fontSize: 12 } } }} />
+                  <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary' }}>{count}</Typography>
+                </Stack>
+                {!results && (
+                  <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
+                    onClick={(e) => { e.stopPropagation(); forget(g.root); }}
+                    sx={{ opacity: 0, ml: 0.5, p: 0.25 }}>
+                    <ClearIcon fontSize="small" />
+                  </IconButton>
+                )}
+              </ListItemButton>
+              {!isCol && g.items.map((it, i) => results ? (
+                <ListItemButton key={`${it.path}:${it.line}:${i}`} selected={sel?.path === it.path} onClick={() => open(it)}
+                  sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', py: 0.5, pl: 4, mb: 0.25 }}>
+                  <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
+                  <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
+                </ListItemButton>
+              ) : (
+                <ListItemButton key={it.path} selected={sel?.path === it.path} onClick={() => open(it)}
+                  sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, py: 0.25, pl: 4, mb: 0.25 }}>
+                  <ListItemText primary={tildify(it.rel)} slotProps={{ primary: { noWrap: true, title: it.path, sx: { fontSize: 12 } } }} />
+                </ListItemButton>
+              ))}
+            </Box>
+          );
+        })}
+        {results && results.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
+        {!results && shownRoots.length === 0 && <EmptyListLine>No rules.</EmptyListLine>}
+      </List>
+    </>
+  );
 
-      <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
-        {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
-        <DetailPane
-          empty={!sel && <EmptyState icon={<GavelIcon />} title="Select a rule" description="Browse on the left to view or edit here." />}
-          loading={loadingFile}
-        >
-          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
-            {ref ? (
-              <>
-                <Box component="span" sx={(t) => ({ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: getTokens(t).fonts.mono, '&:hover': { textDecoration: 'underline' } })} onClick={() => setRef(null)}>← rule</Box>
-                <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(ref.path)}</Typography>
-              </>
-            ) : (
-              <>
-                <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.path)}</Typography>
-                <Box component="span" onClick={openRef} sx={(t) => ({ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: getTokens(t).fonts.mono, '&:hover': { textDecoration: 'underline' } })}>rules-reference ↗</Box>
-              </>
-            )}
-          </Stack>
-          <CmEditor
-            key={ref ? ref.path : sel?.path}
-            value={ref ? ref.content : content}
-            onChange={ref ? () => {} : onChange}
-            extensions={ref ? [markdown(), EditorView.editable.of(false)] : [markdown()]}
-            deps={ref ? [ref.path] : []}
-          />
-          {!ref && <SaveBar msg={msg} disabled={!dirty} onSave={save} />}
-        </DetailPane>
-      </Stack>
+  return (
+    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, flexDirection: isPhone ? 'column' : 'row' }}>
+      {isPhone && (
+        <Box sx={(t) => ({ p: 1, flexShrink: 0, borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
+          <PhonePaneSwitcher pane={phonePane} onSwitch={setPhonePane} detailDisabled={!sel} />
+        </Box>
+      )}
+
+      {(!isPhone || phonePane === 'list') && (
+        isPhone ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{listPane()}</Box>
+        ) : (
+          <Rail storageKey="sing-rules-w" defaultWidth={300} collapsedTitle="Show rule paths">
+            {({ collapse }) => listPane(collapse)}
+          </Rail>
+        )
+      )}
+
+      {(!isPhone || phonePane === 'detail') && (
+        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
+          <DetailPane
+            empty={!sel && <EmptyState icon={<GavelIcon />} title="Select a rule" description="Browse on the left to view or edit here." />}
+            loading={loadingFile}
+          >
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', gap: 1 }}>
+              {ref ? (
+                <>
+                  <Box component="span" sx={(t) => ({ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: getTokens(t).fonts.mono, '&:hover': { textDecoration: 'underline' } })} onClick={() => setRef(null)}>← rule</Box>
+                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} title={tildify(ref.path)} noWrap>{tildify(ref.path)}</Typography>
+                </>
+              ) : (
+                <>
+                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} title={tildify(sel?.path)} noWrap>{tildify(sel?.path)}</Typography>
+                  <Box component="span" onClick={openRef} sx={(t) => ({ color: 'primary.main', cursor: 'pointer', fontSize: 11, fontFamily: getTokens(t).fonts.mono, '&:hover': { textDecoration: 'underline' } })}>rules-reference ↗</Box>
+                </>
+              )}
+            </Stack>
+            <CmEditor
+              key={ref ? ref.path : sel?.path}
+              value={ref ? ref.content : content}
+              onChange={ref ? () => {} : onChange}
+              extensions={ref ? [markdown(), EditorView.editable.of(false)] : [markdown()]}
+              deps={ref ? [ref.path] : []}
+            />
+            {!ref && <SaveBar msg={msg} disabled={!dirty} onSave={save} />}
+          </DetailPane>
+        </Stack>
+      )}
+      {picking && <DirPicker start={untildify(roots[0] || '~')} onPick={pick} onClose={() => setPicking(false)} />}
       {dialogEl}
     </Box>
   );

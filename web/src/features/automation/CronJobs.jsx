@@ -1,6 +1,9 @@
 import { getTokens } from '@/theme/contract.js';
 import { useState, useEffect, useCallback } from 'react';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -31,6 +34,8 @@ import FlagIcon from '@mui/icons-material/Flag';
 import FlagOutlinedIcon from '@mui/icons-material/FlagOutlined';
 import { StatusPill } from '@/components/StatusPill.jsx';
 import { EmptyState } from '@/components/EmptyState.jsx';
+import TableScroller from '@/components/TableScroller.jsx';
+import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 import CreateBackgroundJobDialog from '@/features/automation/CreateBackgroundJobDialog.jsx';
 import MarkdownBody from '@/components/MarkdownBody.jsx';
 import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
@@ -68,6 +73,16 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
   const [reportContent, setReportContent] = useState(null);
   const [reportLoading, setReportLoading] = useState(false);
   const railW = useResizable('sing-cron-w', 260);
+  // Shell viewport contract (literal queries — the two skins ship different
+  // breakpoint pixels; see web/src/shell/breakpoints.js). `isPhone` drives the
+  // single-column reports layout; `narrow` (< 900px, i.e. every touch-sized
+  // viewport) drives both the tap/keyboard reorder that replaces the drag grip
+  // AND the narrow table representation — at 768px the scheduled table is 948px
+  // wide inside a 666px pane, so its Status / Run now / Edit / Delete cells sat
+  // off-screen with no scroll affordance of their own.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const isTablet = useMediaQuery(TABLET_QUERY);
+  const narrow = isPhone || isTablet;
 
   // Fetch on mount + on every bgView change so the unread badge shows even from
   // the Jobs view, and the list refreshes when re-entering Reports.
@@ -169,6 +184,21 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
     });
   })();
 
+  // The one reorder seam both paths (drag and the narrow-viewport Move buttons)
+  // go through. A manual order and a column sort are two different orderings of
+  // the same list and `sortedRows` gives the sort priority, so applying a move
+  // under an active sort used to render as a no-op while still PATCHing the
+  // sorted order over the user's stored one — one tap silently discarding the
+  // manual order. Dropping the sort here rather than disabling the controls:
+  // below 900px these buttons are the ONLY reorder affordance, so a disabled
+  // pair would leave a touch user with no way to reorder at all until they
+  // discovered they had to un-sort first, and a reorder is itself an explicit
+  // statement that the manual order is the one that matters.
+  const applyOrder = (next) => {
+    setSort(null);
+    setLocalJobs(next);
+  };
+
   const onDragOverRow = (e, overId) => {
     e.preventDefault();
     if (!dragId || dragId === overId) return;
@@ -177,11 +207,22 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
     if (from < 0 || to < 0) return;
     const next = sortedRows.slice();
     next.splice(to, 0, next.splice(from, 1)[0]);
-    setLocalJobs(next);
+    applyOrder(next);
   };
   const onDrop = () => {
     setDragId(null);
     if (localJobs) saveOrder(localJobs.map((d) => d.id));
+  };
+  // Touch/keyboard equivalent of the drag grip (below 900px it replaces it):
+  // move one row by one position, through the same seam as a drop.
+  const moveJob = (id, delta) => {
+    const from = sortedRows.findIndex((d) => d.id === id);
+    const to = from + delta;
+    if (from < 0 || to < 0 || to >= sortedRows.length) return;
+    const next = sortedRows.slice();
+    next.splice(to, 0, next.splice(from, 1)[0]);
+    applyOrder(next);
+    saveOrder(next.map((d) => d.id));
   };
 
   return (
@@ -193,7 +234,7 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
       </Stack>
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', display: 'flex', flexDirection: 'column', p: 2 }}>
         {/* Scheduled (cron) section */}
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 1 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1, mb: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Scheduled</Typography>
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>times in UTC</Typography>
           <Box sx={{ flex: 1 }} />
@@ -204,6 +245,11 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
             <EmptyState icon={<ScheduleIcon />} title="No scheduled jobs" description="Add one to run a prompt on a schedule." />
           </Box>
         ) : (
+          // Ten columns cannot be crushed into a phone or a tablet;
+          // TableScroller gives the table a legible minimum width inside its
+          // own labelled, focusable horizontal scroll region instead of
+          // clipping (no change at 900px and up).
+          <TableScroller narrow={narrow} label="Scheduled jobs" minWidth={900}>
           <Table size="small" stickyHeader>
             <TableHead>
               <TableRow>
@@ -269,10 +315,11 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
               })}
             </TableBody>
           </Table>
+          </TableScroller>
         )}
 
         {/* Background (quota-soak) section */}
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mt: 3, mb: 1 }}>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1, mt: 3, mb: 1 }}>
           <Typography sx={{ fontWeight: 700, fontSize: 15 }}>Background</Typography>
           <Tooltip
             disableInteractive
@@ -312,8 +359,15 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
               <EmptyState icon={<DescriptionOutlinedIcon />} title="No reports yet" description="Background runs write a report when they finish — it will show up here." />
             </Box>
           ) : (
-            <Stack direction="row" sx={{ flex: 1, minHeight: 0, border: (t) => `1px solid ${getTokens(t).glass.stroke}`, borderRadius: (t) => `${getTokens(t).radius.sm}px` }}>
-              <List dense sx={(t) => ({ width: railW.width, flexShrink: 0, borderRight: `1px solid ${getTokens(t).glass.stroke}`, overflow: 'auto', py: 0 })}>
+            // Phone: the 260px report rail plus a reading pane beside it leaves
+            // neither usable, so the two stack — a bounded, scrollable report
+            // list above the report itself — and the drag handle is removed
+            // (not hidden: an unreachable focusable separator is worse than
+            // none, same call as the Phase 2 dock).
+            <Stack direction={isPhone ? 'column' : 'row'} sx={{ flex: 1, minHeight: 0, border: (t) => `1px solid ${getTokens(t).glass.stroke}`, borderRadius: (t) => `${getTokens(t).radius.sm}px` }}>
+              <List dense sx={(t) => (isPhone
+                ? { width: '100%', flexShrink: 0, maxHeight: '38vh', borderBottom: `1px solid ${getTokens(t).glass.stroke}`, overflow: 'auto', py: 0 }
+                : { width: railW.width, flexShrink: 0, borderRight: `1px solid ${getTokens(t).glass.stroke}`, overflow: 'auto', py: 0 })}>
                 {reports.map((r) => (
                   <ListItemButton key={r.taskId} selected={selReport === r.taskId} onClick={() => openReport(r.taskId)} sx={{ display: 'block' }}>
                     <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
@@ -332,19 +386,21 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
                   </ListItemButton>
                 ))}
               </List>
-              <ResizeHandle
-                onPointerDown={railW.startDrag}
-                onKeyDown={railW.onKeyDown}
-                dragging={railW.dragging}
-                value={railW.width}
-                min={railW.min}
-                max={railW.max}
-                label="Resize report list"
-              />
+              {!isPhone && (
+                <ResizeHandle
+                  onPointerDown={railW.startDrag}
+                  onKeyDown={railW.onKeyDown}
+                  dragging={railW.dragging}
+                  value={railW.width}
+                  min={railW.min}
+                  max={railW.max}
+                  label="Resize report list"
+                />
+              )}
               <Box sx={{ flex: 1, minWidth: 0, overflow: 'auto', p: 2 }}>
                 {!selReport ? (
                   <Box sx={{ height: '100%', display: 'grid', placeItems: 'center' }}>
-                    <EmptyState icon={<DescriptionOutlinedIcon />} title="Select a report" description="Pick a background run on the left to read its report." />
+                    <EmptyState icon={<DescriptionOutlinedIcon />} title="Select a report" description={`Pick a background run ${isPhone ? 'above' : 'on the left'} to read its report.`} />
                   </Box>
                 ) : reportLoading ? (
                   <Typography color="text.secondary">Loading…</Typography>
@@ -370,6 +426,7 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
             {(config.jobs || []).length === 0 ? (
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>No background jobs yet. Add one to run automatically during its scheduled hours, using spare AI capacity.</Typography>
             ) : (
+              <TableScroller narrow={narrow} label="Background jobs" minWidth={640}>
               <Table size="small">
                 <TableHead>
                   <TableRow>
@@ -392,16 +449,40 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
                       sx={dragId === job.id ? { opacity: 0.4 } : undefined}
                     >
                       <TableCell padding="checkbox">
-                        <Tooltip title="Drag to change the order shown here (doesn't change which job runs next)" disableInteractive>
-                          <Box
-                            draggable
-                            onDragStart={() => setDragId(job.id)}
-                            onDragEnd={() => setDragId(null)}
-                            sx={{ display: 'grid', placeItems: 'center', cursor: 'grab', color: 'text.disabled', '&:active': { cursor: 'grabbing' } }}
-                          >
-                            <DragIndicatorIcon fontSize="small" />
-                          </Box>
-                        </Tooltip>
+                        {/* Below 900px the grip is dead weight — an HTML5 drag
+                            is not operable by touch — so it is replaced (not
+                            merely hidden, which would leave an inert
+                            affordance) by two buttons that work by tap and by
+                            keyboard. Same reorder path as the drop. */}
+                        {narrow ? (
+                          <Stack sx={{ alignItems: 'center' }}>
+                            <Tooltip title="Move up" disableInteractive>
+                              <span>
+                                <IconButton size="small" aria-label="Move up" sx={{ p: 0.25 }} disabled={sortedRows[0]?.id === job.id} onClick={() => moveJob(job.id, -1)}>
+                                  <KeyboardArrowUpIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="Move down" disableInteractive>
+                              <span>
+                                <IconButton size="small" aria-label="Move down" sx={{ p: 0.25 }} disabled={sortedRows[sortedRows.length - 1]?.id === job.id} onClick={() => moveJob(job.id, 1)}>
+                                  <KeyboardArrowDownIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </Stack>
+                        ) : (
+                          <Tooltip title="Drag to change the order shown here (doesn't change which job runs next)" disableInteractive>
+                            <Box
+                              draggable
+                              onDragStart={() => setDragId(job.id)}
+                              onDragEnd={() => setDragId(null)}
+                              sx={{ display: 'grid', placeItems: 'center', cursor: 'grab', color: 'text.disabled', '&:active': { cursor: 'grabbing' } }}
+                            >
+                              <DragIndicatorIcon fontSize="small" />
+                            </Box>
+                          </Tooltip>
+                        )}
                       </TableCell>
                       <TableCell padding="checkbox">
                         <Tooltip title={job.enabled ? 'Disable' : 'Enable'} disableInteractive>
@@ -426,6 +507,7 @@ export default function CronJobs({ crons, agents, background, recent, cwd, setCw
                   ))}
                 </TableBody>
               </Table>
+              </TableScroller>
             )}
           </Stack>
         )}

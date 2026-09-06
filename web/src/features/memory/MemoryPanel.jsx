@@ -17,6 +17,7 @@ import DetailPane from '@/components/DetailPane.jsx';
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import { usePhonePane, PhonePaneSwitcher } from '@/components/panelkit/PhonePane.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useRefreshOnFocus } from '@/components/panelkit/useRefreshOnFocus.js';
@@ -47,6 +48,9 @@ export default function MemoryPanel() {
   const [err, setErr] = useState(null);
   const { ensureSaved, dialogEl } = useDirtyGuard();
   const focusTick = useFocusTick();
+  // Phone: one pane at a time (see PhonePane.jsx) — opening a memory file on
+  // phone switches to it.
+  const { isPhone, phonePane, setPhonePane } = usePhonePane(!!sel);
 
   // Load the FS-persisted root once on mount (files load via the [root] effect).
   // Falls back to DEFAULT_ROOT either way so a failed fetch still resolves to a
@@ -74,6 +78,7 @@ export default function MemoryPanel() {
     if (item.path === sel?.path) return;
     if (!await ensureSaved({ dirty, save })) return;
     setSel(item); setMsg(null); setLoadingFile(true); setMtime(null);
+    if (isPhone) setPhonePane('detail');
     fetch(`/api/memory/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : ''); setDirty(false); setMtime(d.ok ? (d.mtime ?? null) : null);
       if (!d.ok) setMsg({ sev: 'error', text: d.error });
@@ -136,66 +141,84 @@ export default function MemoryPanel() {
   const allOpen = groups.length > 0 && groups.every(([p]) => !collapsed.has(p));
   const toggleAll = () => setCollapsed(allOpen ? new Set(groups.map(([p]) => p)) : new Set());
 
+  // Rail pane content — shared between the tablet/desktop Rail and the phone
+  // single-pane layout (no collapse chevron there; see RailHeader).
+  const listPane = (collapse) => (
+    <>
+      <RailHeader
+        searchPlaceholder="Search memory…"
+        searchValue={q}
+        onSearchChange={setQ}
+        allOpen={allOpen}
+        onToggleAll={toggleAll}
+        onPickFolder={() => setPicking(true)}
+        onCollapse={collapse}
+      >
+        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{root ? tildify(root) : ''}</Typography>
+        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
+          {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${files.length} file${files.length === 1 ? '' : 's'}`}
+        </Typography>
+      </RailHeader>
+      <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
+        {groups.map(([project, items]) => {
+          const isCol = collapsed.has(project);
+          return (
+            <Box key={project}>
+              <ListItemButton onClick={() => toggleGroup(project)}
+                sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}>
+                <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }}>
+                  {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
+                  <FolderOpenIcon fontSize="small" color="action" />
+                  <Typography variant="code" sx={{ fontSize: 12 }} noWrap>{project}</Typography>
+                  <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary', ml: 'auto' }}>{items.length}</Typography>
+                </Stack>
+              </ListItemButton>
+              {!isCol && items.map((it, i) => (
+                <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path && !results} onClick={() => open(it)}
+                  sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25, pl: 4 }}>
+                  <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.file}{it.line ? `:${it.line}` : ''}</Typography>
+                  {it.text && <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>}
+                </ListItemButton>
+              ))}
+            </Box>
+          );
+        })}
+        {showing.length === 0 && <EmptyListLine>{results ? 'No matches.' : (err || 'No memory files.')}</EmptyListLine>}
+      </List>
+    </>
+  );
+
   return (
-    <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
-      <Rail storageKey="sing-memory-w" defaultWidth={340} collapsedTitle="Show memory files">
-        {({ collapse }) => (
-          <>
-            <RailHeader
-              searchPlaceholder="Search memory…"
-              searchValue={q}
-              onSearchChange={setQ}
-              allOpen={allOpen}
-              onToggleAll={toggleAll}
-              onPickFolder={() => setPicking(true)}
-              onCollapse={collapse}
-            >
-              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{root ? tildify(root) : ''}</Typography>
-              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
-                {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${files.length} file${files.length === 1 ? '' : 's'}`}
-              </Typography>
-            </RailHeader>
-            <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {groups.map(([project, items]) => {
-                const isCol = collapsed.has(project);
-                return (
-                  <Box key={project}>
-                    <ListItemButton onClick={() => toggleGroup(project)}
-                      sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}>
-                      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', width: '100%' }}>
-                        {isCol ? <ChevronRightIcon fontSize="small" color="action" /> : <ExpandMoreIcon fontSize="small" color="action" />}
-                        <FolderOpenIcon fontSize="small" color="action" />
-                        <Typography variant="code" sx={{ fontSize: 12 }} noWrap>{project}</Typography>
-                        <Typography variant="code" sx={{ fontSize: 11, color: 'text.secondary', ml: 'auto' }}>{items.length}</Typography>
-                      </Stack>
-                    </ListItemButton>
-                    {!isCol && items.map((it, i) => (
-                      <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path && !results} onClick={() => open(it)}
-                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25, pl: 4 }}>
-                        <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.file}{it.line ? `:${it.line}` : ''}</Typography>
-                        {it.text && <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>}
-                      </ListItemButton>
-                    ))}
-                  </Box>
-                );
-              })}
-              {showing.length === 0 && <EmptyListLine>{results ? 'No matches.' : (err || 'No memory files.')}</EmptyListLine>}
-            </List>
-          </>
-        )}
-      </Rail>
+    <Box sx={{ height: '100%', display: 'flex', minHeight: 0, flexDirection: isPhone ? 'column' : 'row' }}>
+      {isPhone && (
+        <Box sx={(t) => ({ p: 1, flexShrink: 0, borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
+          <PhonePaneSwitcher pane={phonePane} onSwitch={setPhonePane} detailDisabled={!sel} />
+        </Box>
+      )}
+
+      {(!isPhone || phonePane === 'list') && (
+        isPhone ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{listPane()}</Box>
+        ) : (
+          <Rail storageKey="sing-memory-w" defaultWidth={340} collapsedTitle="Show memory files">
+            {({ collapse }) => listPane(collapse)}
+          </Rail>
+        )
+      )}
 
       {/* right: editor */}
-      <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
-        <DetailPane
-          empty={!sel && <EmptyState icon={<BookIcon />} title="Select a memory" description="Browse on the left to view or edit here." />}
-          loading={loadingFile}
-        >
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{tildify(sel?.path)}</Typography>
-          <CmEditor key={sel?.path} value={content} onChange={onChange} extensions={[markdown()]} />
-          <SaveBar msg={msg} disabled={!dirty} onSave={save} />
-        </DetailPane>
-      </Stack>
+      {(!isPhone || phonePane === 'detail') && (
+        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
+          <DetailPane
+            empty={!sel && <EmptyState icon={<BookIcon />} title="Select a memory" description="Browse on the left to view or edit here." />}
+            loading={loadingFile}
+          >
+            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} title={tildify(sel?.path)} noWrap>{tildify(sel?.path)}</Typography>
+            <CmEditor key={sel?.path} value={content} onChange={onChange} extensions={[markdown()]} />
+            <SaveBar msg={msg} disabled={!dirty} onSave={save} />
+          </DetailPane>
+        </Stack>
+      )}
 
       {picking && <DirPicker start={untildify(root)} onPick={pickRoot} onClose={() => setPicking(false)} />}
       {dialogEl}

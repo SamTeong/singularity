@@ -35,6 +35,7 @@ import Chip from '@mui/material/Chip';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Drawer from '@mui/material/Drawer';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import CloseIcon from '@mui/icons-material/Close';
 import DescriptionOutlinedIcon from '@mui/icons-material/DescriptionOutlined';
 import TerminalOutlinedIcon from '@mui/icons-material/TerminalOutlined';
@@ -48,6 +49,7 @@ import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState } from '@/lib/domainState.js';
 import { insetQuery } from '@/lib/sheetInset.js';
+import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 import { COLUMNS as STAGES, COLUMN_DOMAIN as STAGE_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
 
 // Live agent states — an "Open session" action only makes sense while a real
@@ -238,9 +240,17 @@ const cardTagPhosphor = (t) => ({
   '&.MuiChip-colorSuccess': { color: `${t.nerv.hue.greenMap} !important` },
 });
 
-export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTranscript, onClose }) {
+export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, onViewTranscript, onClose }) {
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
+  // Below 900px the board's only way to move a card — an HTML5 drag — is not
+  // operable by touch, so the sheet carries the same move as buttons (tap and
+  // keyboard). Deliberately absent from 900px up, where dragging works and
+  // nothing about the desktop sheet may change. The literal shell queries, not
+  // `theme.breakpoints`: the two skins' breakpoint pixels differ.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const isTablet = useMediaQuery(TABLET_QUERY);
+  const narrow = isPhone || isTablet;
   const s = stats?.[task.sessionId];
   // Graceful placeholders: a card with no session yet has no stats entry at all
   // (stats?.[undefined] === undefined), so every field degrades to "—".
@@ -264,6 +274,23 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
     onViewTranscript({ id: task.id, title: task.title, sessionId: task.sessionId, worktree: task.worktree, repo: task.repo });
     onClose();
   };
+
+  // "Move to" — one button per lane the task is not already in, calling the
+  // board's own `moveTask` (same Done confirmation as a drop). Both skins render
+  // the same structure; only the label/button sx differ, passed in by each
+  // branch so neither skin's chrome is hardcoded here.
+  const moveButtons = (labelSx, btnSx) => (narrow && onMove ? (
+    <Box>
+      <Typography sx={labelSx}>Move to</Typography>
+      <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', rowGap: 1 }}>
+        {STAGES.filter(([id]) => id !== task.column).map(([id, label]) => (
+          <Button key={id} size="small" variant="outlined" onClick={() => onMove(task.id, id)} sx={btnSx}>
+            {label}
+          </Button>
+        ))}
+      </Stack>
+    </Box>
+  ) : null);
 
   return (
     <Drawer
@@ -438,6 +465,15 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
               </Box>
             </Box>
 
+            {/* Touch-operable stand-in for dragging the card between lanes
+                (see `moveButtons`). Console chrome: MUI's `outlined` Button as
+                the vendored theme paints it, plus the mono/orange label and
+                hard corners below — no ZAPAC pill/gradient. */}
+            {moveButtons(
+              (t) => ({ fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: t.nerv.hue.orange, fontFamily: t.nerv.fonts.mono, mb: '8px' }),
+              (t) => ({ borderRadius: 0, fontSize: 11, letterSpacing: '.06em', fontFamily: t.nerv.fonts.mono }),
+            )}
+
             {/* Activity — the board pipeline with the task's current column
                 marked. Hard-edged console equivalent of the ZAPAC timeline:
                 a filled tone-hue stamp for the current stage, a dim outline
@@ -606,6 +642,10 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onViewTr
                 </Box>
               </Box>
             </Box>
+
+            {/* Touch-operable stand-in for dragging the card between lanes
+                (see `moveButtons`). */}
+            {moveButtons(() => ({ ...sectionLabel(), mb: '11px' }), () => ({ textTransform: 'none' }))}
 
             {/* `.detail-sec` "Activity" / `.timeline` — the board pipeline with the
                 task's current column marked. Stage membership is all the board

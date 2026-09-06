@@ -26,9 +26,10 @@ export default function TabStrip({ tabs, active, onSelect, onClose, onReorder })
     onDrop: (e) => { e.preventDefault(); setDragPath(null); },
   }) : () => ({});
   return (
-    <Stack direction="row" sx={(t) => ({ flexShrink: 0, overflowX: 'auto', borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
+    <Stack direction="row" role="tablist" aria-label="Editor tabs" sx={(t) => ({ flexShrink: 0, overflowX: 'auto', borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
       {tabs.map((tab) => (
         <Stack key={tab.path} direction="row" spacing={0.5} title={tab.path} onClick={() => onSelect(tab.path)}
+          role="tab" aria-selected={tab.path === active}
           {...dragProps(tab)}
           sx={(t) => ({
             alignItems: 'center', flexShrink: 0, gap: 0.5, px: 1, py: 0.5, cursor: 'pointer',

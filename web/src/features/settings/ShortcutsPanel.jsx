@@ -11,7 +11,7 @@ import ListItem from '@mui/material/ListItem';
 import ListItemText from '@mui/material/ListItemText';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
-import { alpha } from '@mui/material/styles';
+import { stroke2 } from '@/shell/shellStyles.js';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import EditIcon from '@mui/icons-material/Edit';
 import { ACTIONS, DEFAULTS, formatBinding, bindingFromEvent } from '@/lib/keys.js';
@@ -55,7 +55,10 @@ function ShortcutRow({ action, binding, recording, conflict, onRecord, onCancelR
           </span>
         </Tooltip>
       }
-      sx={{ pr: 6, py: 1.25, borderBottom: (t) => `1px solid ${alpha(t.palette.glass.stroke, 0.1)}` }}
+      // `stroke2` is the skin-agnostic faint hairline — reading glass.stroke
+      // through alpha() both crashed Phosphor (no glass palette) and can never
+      // work: tokens are CSS-var strings, which MUI's alpha() rejects.
+      sx={{ pr: 6, py: 1.25, borderBottom: (t) => `1px solid ${stroke2(t)}` }}
     >
       <ListItemText
         primary={action.label}

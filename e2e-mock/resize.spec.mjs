@@ -32,10 +32,10 @@ test('Resize session list: arrow key nudges the width and persists it', async ({
 
 test('Resize terminal dock: same contract on the axis:"y" handle', async ({ page }) => {
   // The dock handle (axis:'y') exercises the other half of the contract —
-  // aria-orientation flips, and the ceiling is the static configured `max`
-  // (2000) rather than a per-render container measurement (useResizable
-  // deliberately keeps that measurement inside the drag/keyboard handlers,
-  // not the render-time return, per react-hooks/refs).
+  // aria-orientation flips, and the ceiling is a container-height measurement
+  // (the shell's own height minus `min`, recomputed on resize/mode changes —
+  // Phase 2 of the responsive plan, useResizable.jsx), not the raw configured
+  // `max` (2000): a saved dock height can never swallow the view above it.
   await page.goto('/');
 
   const handle = page.getByRole('separator', { name: 'Resize terminal dock' });
@@ -43,7 +43,9 @@ test('Resize terminal dock: same contract on the axis:"y" handle', async ({ page
   await expect(handle).toHaveAttribute('aria-orientation', 'horizontal');
   await expect(handle).toHaveAttribute('aria-valuenow', '300'); // default height, sing-dock-h unset
   await expect(handle).toHaveAttribute('aria-valuemin', '140');
-  await expect(handle).toHaveAttribute('aria-valuemax', '2000');
+  const maxNow = Number(await handle.getAttribute('aria-valuemax'));
+  expect(maxNow).toBeGreaterThan(300); // room to grow from the default...
+  expect(maxNow).toBeLessThan(2000); // ...but bounded by the real container, not the raw ceiling
 
   await handle.focus();
   await page.keyboard.press('ArrowUp'); // axis:'y' grows *upward* on ArrowUp
@@ -87,7 +89,9 @@ test.describe('Resize handles — Phosphor Console', () => {
     await expect(handle).toHaveAttribute('aria-orientation', 'horizontal');
     await expect(handle).toHaveAttribute('aria-valuenow', '300');
     await expect(handle).toHaveAttribute('aria-valuemin', '140');
-    await expect(handle).toHaveAttribute('aria-valuemax', '2000');
+    const maxNow = Number(await handle.getAttribute('aria-valuemax'));
+    expect(maxNow).toBeGreaterThan(300);
+    expect(maxNow).toBeLessThan(2000);
 
     await handle.focus();
     await page.keyboard.press('ArrowUp');

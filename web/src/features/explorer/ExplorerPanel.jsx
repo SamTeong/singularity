@@ -16,6 +16,7 @@ import TimerIcon from '@mui/icons-material/Timer';
 import TimerOffIcon from '@mui/icons-material/TimerOff';
 import InsertDriveFileOutlinedIcon from '@mui/icons-material/InsertDriveFileOutlined';
 import { EmptyState } from '@/components/EmptyState.jsx';
+import { getTokens } from '@/theme/contract.js';
 import { json } from '@codemirror/lang-json';
 import { javascript } from '@codemirror/lang-javascript';
 import { markdown } from '@codemirror/lang-markdown';
@@ -24,6 +25,7 @@ import DetailPane from '@/components/DetailPane.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import { usePhonePane, PhonePaneSwitcher } from '@/components/panelkit/PhonePane.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import { useDirtyGuard } from '@/components/panelkit/useDirtyGuard.jsx';
@@ -65,6 +67,9 @@ export default function ExplorerPanel() {
   const [active, setActive] = useState(null);
   const [autosave, setAutosave] = useState(false);
   const [msg, setMsg] = useState(null);
+
+  // Phone: one pane at a time (see PhonePane.jsx) — opening a file switches to it.
+  const { isPhone, phonePane, setPhonePane } = usePhonePane(!!active);
 
   // Autosave's 5s timer fires long after the render that armed it, so `save`
   // can't read `content` from that closure (it predates the keystroke that
@@ -245,6 +250,7 @@ export default function ExplorerPanel() {
   }, [tabs, active, switchActive, keys]);
 
   const openFile = (path) => {
+    if (isPhone) setPhonePane('detail'); // also for the already-active file: its tap must reveal the editor
     if (path === active) return;
     if (tabs.some((t) => t.path === path)) { switchActive(path); return; }
     fetch(`/api/fs/read?path=${encodeURIComponent(path)}`).then((r) => r.json()).then((d) => {
@@ -365,91 +371,112 @@ export default function ExplorerPanel() {
   const lang = langFor(active);
   const imgSrc = active ? `/api/fs/raw?path=${encodeURIComponent(active)}${TOKEN ? `&token=${encodeURIComponent(TOKEN)}` : ''}` : null;
 
-  return (
-    <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>
-      <Rail storageKey="sing-explorer-w" defaultWidth={280} collapsedTitle="Show file tree">
-        {({ collapse }) => (
+  // Rail pane content — shared between the tablet/desktop Rail and the phone
+  // single-pane layout (no collapse chevron there; see RailHeader).
+  const listPane = (collapse) => (
+    <>
+      <RailHeader
+        searchPlaceholder="Search files…"
+        searchValue={q}
+        onSearchChange={setQ}
+        allOpen={allOpen}
+        onToggleAll={toggleAll}
+        groupToggleDisabled={groupToggleDisabled}
+        onPickFolder={() => setPicking(true)}
+        onCollapse={collapse}
+        extra={
+          <Tooltip title={autosave ? 'Autosave on (5s)' : 'Autosave off'} placement="bottom" disableInteractive>
+            <IconButton size="small" onClick={toggleAutosave} sx={{ color: autosave ? 'primary.main' : undefined }}>
+              {autosave ? <TimerIcon fontSize="small" /> : <TimerOffIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
+        }
+      >
+        <Typography variant="code" noWrap title={rootAbs} sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>{tildify(root)}</Typography>
+      </RailHeader>
+      {/* Right-click on the empty area targets the root itself — the only
+          way to create a top-level entry when the root shows no rows. */}
+      <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}
+        onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, node: { path: rootAbs, type: 'dir', parentDir: rootAbs, isRoot: true } }); }}
+      >
+        {searching ? (
           <>
-            <RailHeader
-              searchPlaceholder="Search files…"
-              searchValue={q}
-              onSearchChange={setQ}
-              allOpen={allOpen}
-              onToggleAll={toggleAll}
-              groupToggleDisabled={groupToggleDisabled}
-              onPickFolder={() => setPicking(true)}
-              onCollapse={collapse}
-              extra={
-                <Tooltip title={autosave ? 'Autosave on (5s)' : 'Autosave off'} placement="bottom" disableInteractive>
-                  <IconButton size="small" onClick={toggleAutosave} sx={{ color: autosave ? 'primary.main' : undefined }}>
-                    {autosave ? <TimerIcon fontSize="small" /> : <TimerOffIcon fontSize="small" />}
-                  </IconButton>
-                </Tooltip>
-              }
-            >
-              <Typography variant="code" noWrap title={rootAbs} sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>{tildify(root)}</Typography>
-            </RailHeader>
-            {/* Right-click on the empty area targets the root itself — the only
-                way to create a top-level entry when the root shows no rows. */}
-            <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}
-              onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, node: { path: rootAbs, type: 'dir', parentDir: rootAbs, isRoot: true } }); }}
-            >
-              {searching ? (
-                <>
-                  {(hits?.list || []).map((r) => (
-                    <ListItemButton key={r.path} selected={r.path === active} sx={{ borderRadius: 1, py: 0.25 }}
-                      onClick={() => (r.type === 'dir' ? revealDir(r.path) : openFile(r.path))}
-                      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, node: { path: r.path, type: r.type, parentDir: r.path.slice(0, r.path.lastIndexOf(sepOf(r.path))) } }); }}
-                    >
-                      <ListItemIcon sx={{ minWidth: 22, color: 'text.secondary' }}>
-                        {r.type === 'dir' ? <FolderIcon fontSize="small" /> : <InsertDriveFileOutlinedIcon fontSize="small" />}
-                      </ListItemIcon>
-                      <Box sx={{ minWidth: 0 }}>
-                        <Typography noWrap sx={{ fontSize: 13 }}>{r.name}</Typography>
-                        <Typography noWrap title={r.path} sx={{ fontSize: 10, color: 'text.secondary' }}>{r.path.slice(rootAbs.length + 1) || tildify(root)}</Typography>
-                      </Box>
-                    </ListItemButton>
-                  ))}
-                  {!hits && <EmptyListLine>Searching…</EmptyListLine>}
-                  {hits && !hits.list.length && <EmptyListLine>No matches.</EmptyListLine>}
-                  {hits?.capped && <Typography sx={{ px: 2, py: 0.5, color: 'text.secondary', fontSize: 11 }}>Stopped early — narrow the search.</Typography>}
-                </>
-              ) : (
-                <>
-                  <FileTree path={rootAbs} depth={0} expanded={expanded} childrenByPath={childrenByPath}
-                    activePath={active} onToggleDir={onToggleDir} onOpenFile={openFile}
-                    onContextMenu={(e, node) => setMenu({ x: e.clientX, y: e.clientY, node })} />
-                  {groupToggleDisabled && <EmptyListLine>No files.</EmptyListLine>}
-                </>
-              )}
-            </List>
+            {(hits?.list || []).map((r) => (
+              <ListItemButton key={r.path} selected={r.path === active} sx={{ borderRadius: 1, py: 0.25 }}
+                onClick={() => (r.type === 'dir' ? revealDir(r.path) : openFile(r.path))}
+                onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); setMenu({ x: e.clientX, y: e.clientY, node: { path: r.path, type: r.type, parentDir: r.path.slice(0, r.path.lastIndexOf(sepOf(r.path))) } }); }}
+              >
+                <ListItemIcon sx={{ minWidth: 22, color: 'text.secondary' }}>
+                  {r.type === 'dir' ? <FolderIcon fontSize="small" /> : <InsertDriveFileOutlinedIcon fontSize="small" />}
+                </ListItemIcon>
+                <Box sx={{ minWidth: 0 }}>
+                  <Typography noWrap sx={{ fontSize: 13 }}>{r.name}</Typography>
+                  <Typography noWrap title={r.path} sx={{ fontSize: 10, color: 'text.secondary' }}>{r.path.slice(rootAbs.length + 1) || tildify(root)}</Typography>
+                </Box>
+              </ListItemButton>
+            ))}
+            {!hits && <EmptyListLine>Searching…</EmptyListLine>}
+            {hits && !hits.list.length && <EmptyListLine>No matches.</EmptyListLine>}
+            {hits?.capped && <Typography sx={{ px: 2, py: 0.5, color: 'text.secondary', fontSize: 11 }}>Stopped early — narrow the search.</Typography>}
+          </>
+        ) : (
+          <>
+            <FileTree path={rootAbs} depth={0} expanded={expanded} childrenByPath={childrenByPath}
+              activePath={active} onToggleDir={onToggleDir} onOpenFile={openFile}
+              onContextMenu={(e, node) => setMenu({ x: e.clientX, y: e.clientY, node })} />
+            {groupToggleDisabled && <EmptyListLine>No files.</EmptyListLine>}
           </>
         )}
-      </Rail>
+      </List>
+    </>
+  );
 
-      <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}
-        onKeyDown={(e) => { if (matches(keys.editorSave, e)) { e.preventDefault(); if (active) save(active); } }}>
-        {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={openFile} onClose={closeTab} />}
-        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 2 }} spacing={1.5}>
-          <DetailPane empty={!activeTab && <EmptyState icon={<InsertDriveFileOutlinedIcon />} title="Select a file" description="Browse the tree on the left to open a file here." />}>
-            <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>{tildify(active)}</Typography>
-            {activeTab?.kind === 'text' && (
-              // key={active}: same @uiw typing-latch reason as HooksEditor — a deferred
-              // `value` update from switching files mid-type would show stale content.
-              <CmEditor key={active} value={content.get(active) ?? ''} onChange={(v) => onChange(active, v)} extensions={lang ? [lang] : []} deps={[active]} />
-            )}
-            {activeTab?.kind === 'image' && (
-              <Box component="img" src={imgSrc} sx={{ flex: 1, minHeight: 0, maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
-            )}
-            {(activeTab?.kind === 'binary' || activeTab?.kind === 'toolarge') && (
-              <Typography color="text.secondary" sx={{ fontSize: 13 }}>
-                {activeTab.kind === 'toolarge' ? 'File too large to preview.' : "Can't preview this file type."}
-              </Typography>
-            )}
-            {activeTab?.kind === 'text' && <SaveBar msg={msg} disabled={!activeTab.dirty} onSave={() => save(active)} />}
-          </DetailPane>
+  return (
+    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, flexDirection: isPhone ? 'column' : 'row' }}>
+      {isPhone && (
+        <Box sx={(t) => ({ p: 1, flexShrink: 0, borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
+          <PhonePaneSwitcher pane={phonePane} onSwitch={setPhonePane} detailDisabled={!active} />
+        </Box>
+      )}
+
+      {(!isPhone || phonePane === 'list') && (
+        isPhone ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{listPane()}</Box>
+        ) : (
+          <Rail storageKey="sing-explorer-w" defaultWidth={280} collapsedTitle="Show file tree">
+            {({ collapse }) => listPane(collapse)}
+          </Rail>
+        )
+      )}
+
+      {/* The editor stays in the same child slot across desktop<->phone crossings
+          (the desktop Rail's slot becomes `false`, not a different element), so
+          CmEditor is never remounted and unsaved content survives the resize. */}
+      {(!isPhone || phonePane === 'detail') && (
+        <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, minHeight: 0, height: '100%' }}
+          onKeyDown={(e) => { if (matches(keys.editorSave, e)) { e.preventDefault(); if (active) save(active); } }}>
+          {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={openFile} onClose={closeTab} />}
+          <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 2 }} spacing={1.5}>
+            <DetailPane empty={!activeTab && <EmptyState icon={<InsertDriveFileOutlinedIcon />} title="Select a file" description="Browse the tree on the left to open a file here." />}>
+              <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>{tildify(active)}</Typography>
+              {activeTab?.kind === 'text' && (
+                // key={active}: same @uiw typing-latch reason as HooksEditor — a deferred
+                // `value` update from switching files mid-type would show stale content.
+                <CmEditor key={active} value={content.get(active) ?? ''} onChange={(v) => onChange(active, v)} extensions={lang ? [lang] : []} deps={[active]} />
+              )}
+              {activeTab?.kind === 'image' && (
+                <Box component="img" src={imgSrc} sx={{ flex: 1, minHeight: 0, maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} />
+              )}
+              {(activeTab?.kind === 'binary' || activeTab?.kind === 'toolarge') && (
+                <Typography color="text.secondary" sx={{ fontSize: 13 }}>
+                  {activeTab.kind === 'toolarge' ? 'File too large to preview.' : "Can't preview this file type."}
+                </Typography>
+              )}
+              {activeTab?.kind === 'text' && <SaveBar msg={msg} disabled={!activeTab.dirty} onSave={() => save(active)} />}
+            </DetailPane>
+          </Stack>
         </Stack>
-      </Stack>
+      )}
 
       {picking && <DirPicker start={rootAbs} onPick={pickRoot} onClose={() => setPicking(false)} />}
 

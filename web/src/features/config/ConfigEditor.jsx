@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { getTokens } from '@/theme/contract.js';
 import { matches } from '@/lib/keys.js';
 import { useKeys } from '@/providers/KeysProvider.jsx';
 import Box from '@mui/material/Box';
@@ -23,6 +24,7 @@ import CmEditor from '@/components/CmEditor.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import { usePhonePane, PhonePaneSwitcher } from '@/components/panelkit/PhonePane.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import SaveBar from '@/components/panelkit/SaveBar.jsx';
 import TabStrip from '@/features/explorer/TabStrip.jsx';
@@ -84,6 +86,10 @@ export default function ConfigEditor() {
   const inCodex = (p) => codexRoots.roots.some((r) => normKey(r) === normKey(p));
 
   const activeTab = tabs.find((t) => t.path === active) || null;
+
+  // Phone: one pane at a time — the Rail's ~200px floor plus an editor cannot
+  // share a 375px screen. Opening a file on phone switches to it (openFile).
+  const { isPhone, phonePane, setPhonePane } = usePhonePane(!!activeTab);
 
   const validationError = useMemo(() => {
     if (!activeTab || activeTab.tool !== 'claude') return null;
@@ -279,6 +285,7 @@ export default function ConfigEditor() {
     setTabs((ts) => [...ts, { path, cwd, tool, scope, dirty: false, mtime: entry.mtime || 0 }]);
     setContent((m) => { const n = new Map(m); n.set(path, entry.content || ''); return n; });
     switchActive(path);
+    if (isPhone) setPhonePane('detail');
   };
 
   const removeTab = (path) => {
@@ -346,126 +353,150 @@ export default function ConfigEditor() {
   const searching = q.trim() && results;
   const rowSx = { borderRadius: 4, pl: 1, py: 0.25, mb: 0.25 };
 
-  return (
-    <Box sx={{ display: 'flex', height: '100%', minHeight: 0 }}>
-      <Rail storageKey="sing-config-w" defaultWidth={300} collapsedTitle="Show config paths">
-        {({ collapse }) => (
+  // Rail pane content — shared between the tablet/desktop Rail (resizable,
+  // collapsible) and the phone single-pane layout, which renders it at full
+  // width with no collapse chevron (`collapse` undefined → no dead button,
+  // RailHeader's conditional-chevron contract from Phase 4).
+  const listPane = (collapse) => (
+    <>
+      <RailHeader
+        searchPlaceholder="Search config…"
+        searchValue={q}
+        onSearchChange={setQ}
+        onPickFolder={async () => { if (!await ensureSaved({ dirty: !!activeTab?.dirty, save: () => active && save(active) })) return; setPicking(true); }}
+        onCollapse={collapse}
+      />
+      <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
+        {searching ? (
           <>
-            <RailHeader
-              searchPlaceholder="Search config…"
-              searchValue={q}
-              onSearchChange={setQ}
-              onPickFolder={async () => { if (!await ensureSaved({ dirty: !!activeTab?.dirty, save: () => active && save(active) })) return; setPicking(true); }}
-              onCollapse={collapse}
-            />
-            <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {searching ? (
-                <>
-                  {results.list.map((it, i) => (
-                    <ListItemButton key={`${it.path}:${i}`} onClick={() => openResult(it)}
-                      sx={{ ...rowSx, display: 'block' }}>
-                      <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
-                      <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
-                    </ListItemButton>
-                  ))}
-                  {results.list.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
-                </>
-              ) : (
-                <>
-                  {shownRoots.map((p) => {
-                    const open = expanded.has(p);
-                    const claudeCfg = byRoot.get(`claude:${p}`);
-                    const codexCfg = byRoot.get(`codex:${p}`);
-                    const showClaude = inClaude(p);
-                    const showCodex = inCodex(p);
-                    return (
-                      <Box key={p} sx={{ mb: 0.25 }}>
-                        <ListItemButton onClick={() => toggleRoot(p)} sx={{ ...rowSx, '&:hover .del': { opacity: 1 } }}>
-                          {open ? <ExpandMoreIcon fontSize="small" sx={{ mr: 0.5 }} /> : <ChevronRightIcon fontSize="small" sx={{ mr: 0.5 }} />}
-                          {open ? <FolderOpenIcon fontSize="small" color="primary" /> : <FolderIcon fontSize="small" color="primary" />}
-                          <Typography noWrap sx={{ fontSize: 12, fontFamily: 'monospace', ml: 0.5, flex: 1 }} title={p}>{tildify(p)}</Typography>
-                          <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
-                            onClick={(e) => { e.stopPropagation(); forget(p); }} sx={{ opacity: 0, p: 0.25 }}>
-                            <ClearIcon fontSize="small" />
-                          </IconButton>
-                        </ListItemButton>
-                        <Collapse in={open} timeout="auto" unmountOnExit>
-                          {showClaude && (
-                            <Group label=".claude">
-                              {CLAUDE_LEAVES.map((leaf) => {
-                                const entry = claudeCfg?.[leaf.scope];
-                                const exists = !!entry?.exists;
-                                const sel = entry?.path === active;
-                                return (
-                                  <ListItemButton key={leaf.scope} selected={sel} onClick={() => openFile(p, 'claude', leaf.scope)}
-                                    sx={{ ...rowSx, pl: 3 + 2, opacity: entry && !exists ? 0.5 : 1 }}>
-                                    <InsertDriveFileOutlinedIcon fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
-                                    <Typography noWrap variant="code" sx={{ fontSize: 12 }}>{leaf.name}{entry && !exists ? ' (new)' : ''}</Typography>
-                                  </ListItemButton>
-                                );
-                              })}
-                            </Group>
-                          )}
-                          {showCodex && (() => {
-                            const scope = codexScope(p);
-                            const entry = codexCfg?.[scope];
-                            const exists = !!entry?.exists;
-                            const sel = entry?.path === active;
-                            return (
-                              <Group label=".codex">
-                                <ListItemButton selected={sel} onClick={() => openFile(p, 'codex', scope)}
-                                  sx={{ ...rowSx, pl: 3 + 2, opacity: entry && !exists ? 0.5 : 1 }}>
-                                  <InsertDriveFileOutlinedIcon fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
-                                  <Typography noWrap variant="code" sx={{ fontSize: 12 }}>{CODEX_LEAF_NAME}{entry && !exists ? ' (new)' : ''}</Typography>
-                                </ListItemButton>
-                              </Group>
-                            );
-                          })()}
-                        </Collapse>
-                      </Box>
-                    );
-                  })}
-                  {shownRoots.length === 0 && <EmptyListLine>No config paths.</EmptyListLine>}
-                </>
-              )}
-            </List>
-          </>
-        )}
-      </Rail>
-
-      <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, height: '100%', minHeight: 0 }}>
-        {picking && <DirPicker start={untildify(activeTab?.cwd ?? shownRoots[0] ?? '~')} onPick={pick} onClose={() => setPicking(false)} />}
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0, flexShrink: 0, pr: 1 }}>
-          <Box sx={{ flex: 1, minWidth: 0 }}>
-            {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} onReorder={reorderTabs} />}
-          </Box>
-          <Tooltip title={autosave ? 'Autosave on (5s)' : 'Autosave off'} placement="bottom" disableInteractive>
-            <IconButton size="small" onClick={toggleAutosave} color={autosave ? 'primary' : 'default'}>
-              {autosave ? <TimerIcon /> : <TimerOffIcon />}
-            </IconButton>
-          </Tooltip>
-        </Stack>
-        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 2 }} spacing={1}>
-        {activeTab ? (
-          <>
-            <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }}>
-              {tildify(activeTab.path)} {!byRoot.get(`${activeTab.tool}:${activeTab.cwd}`)?.[activeTab.scope]?.exists && "· (doesn't exist yet — saving will create it)"}
-            </Typography>
-            {/* key={active}: @uiw's typing latch defers a `value` change landing
-                right after a keystroke — remount per tab so the new file's
-                content becomes the initial doc (same fix as HooksEditor). */}
-            <CmEditor key={active} value={content.get(active) ?? ''} onChange={onChange} extensions={activeTab.tool === 'codex' ? [] : [json()]} />
-            <SaveBar msg={validationError ? null : msg} disabled={!activeTab.dirty || !!validationError} onSave={() => active && save(active)}>
-              {validationError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>This isn't valid JSON: {validationError}</Typography>}
-            </SaveBar>
+            {results.list.map((it, i) => (
+              <ListItemButton key={`${it.path}:${i}`} onClick={() => openResult(it)}
+                sx={{ ...rowSx, display: 'block' }}>
+                <Typography variant="code" sx={{ fontSize: 11 }} noWrap title={it.path}>{tildify(it.path)}:{it.line}</Typography>
+                <Typography variant="code" sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>
+              </ListItemButton>
+            ))}
+            {results.list.length === 0 && <Typography color="text.secondary" sx={{ fontSize: 12, p: 1.5 }}>No matches.</Typography>}
           </>
         ) : (
-          <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <EmptyState icon={<InsertDriveFileOutlinedIcon />} title="Select a config" description="Browse on the left to view or edit here." />
-          </Box>
+          <>
+            {shownRoots.map((p) => {
+              const open = expanded.has(p);
+              const claudeCfg = byRoot.get(`claude:${p}`);
+              const codexCfg = byRoot.get(`codex:${p}`);
+              const showClaude = inClaude(p);
+              const showCodex = inCodex(p);
+              return (
+                <Box key={p} sx={{ mb: 0.25 }}>
+                  <ListItemButton onClick={() => toggleRoot(p)} sx={{ ...rowSx, '&:hover .del': { opacity: 1 } }}>
+                    {open ? <ExpandMoreIcon fontSize="small" sx={{ mr: 0.5 }} /> : <ChevronRightIcon fontSize="small" sx={{ mr: 0.5 }} />}
+                    {open ? <FolderOpenIcon fontSize="small" color="primary" /> : <FolderIcon fontSize="small" color="primary" />}
+                    <Typography noWrap sx={{ fontSize: 12, fontFamily: 'monospace', ml: 0.5, flex: 1 }} title={p}>{tildify(p)}</Typography>
+                    <IconButton className="del" size="small" aria-label="Remove from list" title="Remove from list"
+                      onClick={(e) => { e.stopPropagation(); forget(p); }} sx={{ opacity: 0, p: 0.25 }}>
+                      <ClearIcon fontSize="small" />
+                    </IconButton>
+                  </ListItemButton>
+                  <Collapse in={open} timeout="auto" unmountOnExit>
+                    {showClaude && (
+                      <Group label=".claude">
+                        {CLAUDE_LEAVES.map((leaf) => {
+                          const entry = claudeCfg?.[leaf.scope];
+                          const exists = !!entry?.exists;
+                          const sel = entry?.path === active;
+                          return (
+                            <ListItemButton key={leaf.scope} selected={sel} onClick={() => openFile(p, 'claude', leaf.scope)}
+                              sx={{ ...rowSx, pl: 3 + 2, opacity: entry && !exists ? 0.5 : 1 }}>
+                              <InsertDriveFileOutlinedIcon fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                              <Typography noWrap variant="code" sx={{ fontSize: 12 }}>{leaf.name}{entry && !exists ? ' (new)' : ''}</Typography>
+                            </ListItemButton>
+                          );
+                        })}
+                      </Group>
+                    )}
+                    {showCodex && (() => {
+                      const scope = codexScope(p);
+                      const entry = codexCfg?.[scope];
+                      const exists = !!entry?.exists;
+                      const sel = entry?.path === active;
+                      return (
+                        <Group label=".codex">
+                          <ListItemButton selected={sel} onClick={() => openFile(p, 'codex', scope)}
+                            sx={{ ...rowSx, pl: 3 + 2, opacity: entry && !exists ? 0.5 : 1 }}>
+                            <InsertDriveFileOutlinedIcon fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                            <Typography noWrap variant="code" sx={{ fontSize: 12 }}>{CODEX_LEAF_NAME}{entry && !exists ? ' (new)' : ''}</Typography>
+                          </ListItemButton>
+                        </Group>
+                      );
+                    })()}
+                  </Collapse>
+                </Box>
+              );
+            })}
+            {shownRoots.length === 0 && <EmptyListLine>No config paths.</EmptyListLine>}
+          </>
         )}
+      </List>
+    </>
+  );
+
+  return (
+    <Box sx={{ display: 'flex', height: '100%', minHeight: 0, flexDirection: isPhone ? 'column' : 'row' }}>
+      {isPhone && (
+        <Box sx={(t) => ({ p: 1, flexShrink: 0, borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
+          <PhonePaneSwitcher pane={phonePane} onSwitch={setPhonePane} detailDisabled={!activeTab} />
+        </Box>
+      )}
+
+      {/* left: paths + tabs — full width with no Rail behind the switcher on
+          phone, collapsible Rail on tablet/desktop (SessionHistory's shape). */}
+      {(!isPhone || phonePane === 'list') && (
+        isPhone ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{listPane()}</Box>
+        ) : (
+          <Rail storageKey="sing-config-w" defaultWidth={300} collapsedTitle="Show config paths">
+            {({ collapse }) => listPane(collapse)}
+          </Rail>
+        )
+      )}
+
+      {/* right: editor (kept mounted across viewport crossings; unsaved content
+          lives in `content` state, so it survives pane switches). */}
+      {(!isPhone || phonePane === 'detail') && (
+        <Stack ref={editorHostRef} sx={{ flex: 1, minWidth: 0, height: '100%', minHeight: 0 }}>
+          <Stack direction="row" spacing={1} sx={{ alignItems: 'center', minWidth: 0, flexShrink: 0, pr: 1 }}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              {tabs.length > 0 && <TabStrip tabs={tabs} active={active} onSelect={switchActive} onClose={closeTab} onReorder={reorderTabs} />}
+            </Box>
+            <Tooltip title={autosave ? 'Autosave on (5s)' : 'Autosave off'} placement="bottom" disableInteractive>
+              <IconButton size="small" onClick={toggleAutosave} color={autosave ? 'primary' : 'default'}>
+                {autosave ? <TimerIcon /> : <TimerOffIcon />}
+              </IconButton>
+            </Tooltip>
+          </Stack>
+          <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 2 }} spacing={1}>
+          {activeTab ? (
+            <>
+              <Typography noWrap variant="code" sx={{ flexShrink: 0, color: 'text.secondary', fontSize: 11 }} title={tildify(activeTab.path)}>
+                {tildify(activeTab.path)} {!byRoot.get(`${activeTab.tool}:${activeTab.cwd}`)?.[activeTab.scope]?.exists && "· (doesn't exist yet — saving will create it)"}
+              </Typography>
+              {/* key={active}: @uiw's typing latch defers a `value` change landing
+                  right after a keystroke — remount per tab so the new file's
+                  content becomes the initial doc (same fix as HooksEditor). */}
+              <CmEditor key={active} value={content.get(active) ?? ''} onChange={onChange} extensions={activeTab.tool === 'codex' ? [] : [json()]} />
+              <SaveBar msg={validationError ? null : msg} disabled={!activeTab.dirty || !!validationError} onSave={() => active && save(active)}>
+                {validationError && <Typography color="error" variant="code" sx={{ fontSize: 12 }}>This isn't valid JSON: {validationError}</Typography>}
+              </SaveBar>
+            </>
+          ) : (
+            <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <EmptyState icon={<InsertDriveFileOutlinedIcon />} title="Select a config" description="Browse on the left to view or edit here." />
+            </Box>
+          )}
+          </Stack>
         </Stack>
-      </Stack>
+      )}
+      {picking && <DirPicker start={untildify(activeTab?.cwd ?? shownRoots[0] ?? '~')} onPick={pick} onClose={() => setPicking(false)} />}
       {dialogEl}
     </Box>
   );

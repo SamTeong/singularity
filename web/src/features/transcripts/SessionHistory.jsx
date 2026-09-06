@@ -12,6 +12,7 @@ import ListItemButton from '@mui/material/ListItemButton';
 import IconButton from '@mui/material/IconButton';
 import Tabs from '@mui/material/Tabs';
 import Tab from '@mui/material/Tab';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import TextField from '@mui/material/TextField';
 import Select from '@mui/material/Select';
 import MenuItem from '@mui/material/MenuItem';
@@ -36,6 +37,7 @@ import { fmtUsd, fmtTokens, relTime } from '@/lib/format.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
+import { PHONE_QUERY } from '@/shell/breakpoints.js';
 
 // Transcripts root persists across sessions on the daemon FS. Default
 // ~/.claude/projects; used only as a fallback if /sessions/root fails to load.
@@ -68,8 +70,22 @@ function PulseDot({ sx }) {
 
 export default function SessionHistory({ active, sendMsg, registerChat, onResume, liveSessionIds }) {
   const { keys } = useKeys();
+  // Phone has no room for list+detail side by side (same outcome as the
+  // Phase 2 dock and Phase 3 board) — one pane shows at a time, switched by
+  // the control rendered below. Selecting a transcript on phone switches to it.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const [phonePane, setPhonePane] = useState('list');
   const [sessions, setSessions] = useState([]);
   const [sel, setSel] = useState(null); // {project, id, title, cwd}
+  // `open()` only switches panes on a click, so shrinking a desktop window with
+  // a transcript already open would land on the list and hide it. Re-derive the
+  // pane on each *entry* into phone mode — same render-time "adjust state on
+  // prop change" pattern as `SessionDock.jsx:100-104`. Only on the crossing.
+  const [wasPhone, setWasPhone] = useState(isPhone);
+  if (isPhone !== wasPhone) {
+    setWasPhone(isPhone);
+    if (isPhone && sel) setPhonePane('detail');
+  }
   // Search + filters in the URL, so a query or a specific transcript is a link.
   const [q, setQ] = useQueryState('q');
   const [scopeParam, setScope] = useQueryState('scope', 'all'); // 'all' | 'one' — search + chat context
@@ -152,6 +168,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   }, [root]);
 
   const open = (item) => {
+    if (isPhone) setPhonePane('detail');
     if (item.project === sel?.project && item.id === sel?.id) return;
     setSel(item); setMatches(null); setLoadErr(null);
     // The open transcript IS the URL — a click has to be as shareable as a deep
@@ -266,12 +283,12 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const pageKey = pageItems.map((s) => s.id).join(',');
   useEffect(() => { if (!leftResults) loadStats(pageItems); /* eslint-disable-line */ }, [pageKey, leftResults, loadStats]);
 
-  return (
-    <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
-      {/* left: search + session list (collapsible) */}
-      <Rail storageKey="sing-sesshist-w" defaultWidth={340} collapsedTitle="Show transcripts">
-        {({ collapse }) => (
-          <>
+  // List pane content — shared between the desktop/tablet Rail (resizable,
+  // collapsible) and the phone single-pane switcher below, which renders it
+  // at full width with no collapse chevron (collapse is undefined there —
+  // see the RailHeader conditional-render fix for that button).
+  const listPane = (collapse) => (
+    <>
             <RailHeader
               searchPlaceholder="Search transcripts…"
               searchValue={q}
@@ -380,11 +397,41 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
                 <IconButton size="small" disabled={curPage >= pageCount} onClick={() => setPage(curPage + 1)}><ChevronRightIcon /></IconButton>
               </Stack>
             </Box>
-          </>
-        )}
-      </Rail>
+    </>
+  );
+
+  // Phone pane switcher — list ⇄ transcript. Reuses this file's own
+  // ToggleButtonGroup/ToggleButton idiom (already used above for the scope and
+  // source filters) rather than a new control shape for one more two-state
+  // switch. Disabled on "Transcript" until something is selected, same as the
+  // "This transcript" scope toggle.
+  const phoneSwitcher = (
+    <ToggleButtonGroup value={phonePane} exclusive size="small" onChange={(_, v) => v && setPhonePane(v)} sx={{ width: '100%' }}>
+      <ToggleButton value="list" sx={{ flex: 1, fontSize: 12, textTransform: 'none' }}>Sessions</ToggleButton>
+      <ToggleButton value="detail" disabled={!sel} sx={{ flex: 1, fontSize: 12, textTransform: 'none' }}>Transcript</ToggleButton>
+    </ToggleButtonGroup>
+  );
+
+  return (
+    <Box sx={{ height: '100%', display: 'flex', flexDirection: isPhone ? 'column' : 'row', minHeight: 0 }}>
+      {isPhone && (
+        <Box sx={(t) => ({ p: 1, flexShrink: 0, borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>{phoneSwitcher}</Box>
+      )}
+
+      {/* left: search + session list — collapsible Rail on tablet/desktop, full
+          width with no collapse chevron behind the switcher above on phone. */}
+      {(!isPhone || phonePane === 'list') && (
+        isPhone ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{listPane()}</Box>
+        ) : (
+          <Rail storageKey="sing-sesshist-w" defaultWidth={340} collapsedTitle="Show transcripts">
+            {({ collapse }) => listPane(collapse)}
+          </Rail>
+        )
+      )}
 
       {/* right: View / Chat */}
+      {(!isPhone || phonePane === 'detail') && (
       <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0 }} spacing={0}>
         <Stack direction="row" spacing={1} sx={{ alignItems: 'center', px: 1.5, py: 1, borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
           <Tabs value={tab} onChange={(_, v) => setTab(v)} sx={{ minHeight: 36, flex: 1 }}>
@@ -411,7 +458,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
             ) : (
               <>
                 <Stack direction="row" spacing={1} sx={{ alignItems: 'center', mb: 0.5 }}>
-                  <Typography variant="subtitle2" noWrap sx={{ flex: 1, minWidth: 0 }}>{headerLabel}</Typography>
+                  <Typography variant="subtitle2" noWrap title={headerLabel} sx={{ flex: 1, minWidth: 0 }}>{headerLabel}</Typography>
                   {onResume && !sel?.sub && (sel?.source !== 'codex' || transcript.meta?.sessionId === sel.id) && (transcript.meta?.cwd || sel?.cwd) && (
                     <Tooltip title={sessionLive ? 'Session already live in the dock — switch to it instead' : 'Resume this session in a new agent — prefills last model + skill-scopes'}>
                       {/* span: Tooltip needs a live event target — a disabled button fires none. */}
@@ -422,7 +469,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
                   )}
                 </Stack>
                 <Stack direction="row" spacing={1.5} sx={{ mb: 0.5 }}>
-                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(transcript.meta?.cwd || sel?.cwd)}</Typography>
+                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, minWidth: 0 }} noWrap title={tildify(transcript.meta?.cwd || sel?.cwd)}>{tildify(transcript.meta?.cwd || sel?.cwd)}</Typography>
                   <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{transcript.meta?.turns ?? 0} turns · {relTime(sel.mtime)}</Typography>
                 </Stack>
                 {sel && stats[sel.id] && (
@@ -482,6 +529,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
           </Stack>
         )}
       </Stack>
+      )}
 
       {picking && <DirPicker start={untildify(root)} onPick={pickRoot} onClose={() => setPicking(false)} />}
     </Box>

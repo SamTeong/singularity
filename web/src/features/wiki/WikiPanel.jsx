@@ -36,6 +36,7 @@ const WikiGraph = lazy(() => import('@/features/wiki/WikiGraph.jsx'));
 import { tildify, untildify } from '@/lib/paths.js';
 import Rail from '@/components/panelkit/Rail.jsx';
 import RailHeader from '@/components/panelkit/RailHeader.jsx';
+import { usePhonePane, PhonePaneSwitcher } from '@/components/panelkit/PhonePane.jsx';
 import EmptyListLine from '@/components/EmptyListLine.jsx';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 
@@ -64,6 +65,10 @@ export default function WikiPanel() {
   const [content, setContent] = useState('');
   const [loadingFile, setLoadingFile] = useState(false);
   const [graphView, setGraphView] = useState(null); // null | 'main' (right pane) | 'dock' (bottom of left nav)
+  // Phone: one pane at a time (see PhonePane.jsx). The link graph counts as
+  // detail — on phone the Hub button opens it in the full-width main pane
+  // (the dock has no height to spare inside the list pane).
+  const { isPhone, phonePane, setPhonePane } = usePhonePane(!!sel || graphView === 'main');
   const caps = useCapabilities();
   // wiki.available is false when the configured root has no wiki subfolders.
   // The root-picker button (top of the rail) is the enable action — keep it
@@ -100,8 +105,10 @@ export default function WikiPanel() {
   useEffect(() => { const id = setTimeout(search, 250); return () => clearTimeout(id); }, [q, search]);
 
   const open = (item) => {
+    if (isPhone) setPhonePane('detail'); // also for the already-selected page: its tap must reveal the reader
     if (item.path === sel?.path) return;
     setSel(item); setErr(null); setLoadingFile(true);
+    if (isPhone) setPhonePane('detail');
     fetch(`/api/wiki/file?path=${encodeURIComponent(untildify(item.path))}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
       setContent(d.ok ? d.content : '');
       if (!d.ok) setErr(d.error);
@@ -169,152 +176,177 @@ export default function WikiPanel() {
   };
   const selectedRel = sel && sel.rel.split('/')[0] === graphWiki ? sel.rel.split('/').slice(1).join('/') : null;
 
-  return (
-    <Box sx={{ height: '100%', display: 'flex', minHeight: 0 }}>
-      {/* left: search + wiki tree (collapsible) */}
-      <Rail storageKey="sing-wiki-w" defaultWidth={380} collapsedTitle="Show wiki pages">
-        {({ collapse }) => (
-          <>
-            <RailHeader
-              searchPlaceholder="Search wiki…"
-              searchValue={q}
-              onSearchChange={setQ}
-              allOpen={allOpen}
-              onToggleAll={toggleAll}
-              groupToggleDisabled={!!results}
-              onPickFolder={() => setPicking(true)}
-              extra={
-                <Tooltip title={graphWiki ? `How ${graphWiki} pages link together` : 'How pages link together'} placement="bottom" disableInteractive>
-                  <span><IconButton size="small" color={graphView ? 'primary' : 'default'} disabled={!graphWiki}
-                    onClick={() => setGraphView((v) => (v ? null : 'dock'))}><HubIcon /></IconButton></span>
-                </Tooltip>
-              }
-              onCollapse={collapse}
-            >
-              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{root ? tildify(root) : ''}</Typography>
-              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
-                {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${viewWikis.length} wiki${viewWikis.length === 1 ? '' : 's'} · ${pageCount}${capped ? '+' : ''} page${pageCount === 1 ? '' : 's'}`}
-              </Typography>
-              {!results && allCats.length > 0 && (
-                <Autocomplete multiple size="small" options={allCats} value={cats} onChange={(_, v) => setCats(v)}
-                  disableCloseOnSelect slotProps={{ chip: { size: 'small' } }} sx={{ mt: 1, ml: 2, mr: 1 }}
-                  renderInput={(params) => <TextField {...params} variant="standard" placeholder={cats.length ? '' : 'Filter categories…'} />} />
-              )}
-            </RailHeader>
-            <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
-              {results ? (
-                results.map((it, i) => (
-                  <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path} onClick={() => open(it)}
-                    sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
-                    <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                      <StatusPill status="review">{it.rel.split('/')[0]}</StatusPill>
-                      <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.rel.split('/').slice(1).join('/')}{it.line ? `:${it.line}` : ''}</Typography>
-                    </Stack>
-                    {it.text && <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>}
-                  </ListItemButton>
-                ))
-              ) : (
-                viewWikis.map((w) => {
-                  const open2 = expanded.has(w.name);
-                  return (
-                    <Box key={w.path}>
-                      <ListItemButton onClick={() => toggleWiki(w.name)}
-                        sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}>
-                        <ListItemIcon sx={{ minWidth: 28 }}>{open2 ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
-                        <ListItemIcon sx={{ minWidth: 24 }}>{open2 ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
-                        <ListItemText primary={w.name} slotProps={{ primary: { variant: 'subtitle2', noWrap: true } }} />
-                        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{w.pages.length}</Typography>
-                      </ListItemButton>
-                      <Collapse in={open2} timeout={reduceMotion ? 0 : 'auto'} unmountOnExit>
-                        <List dense disablePadding>
-                          {w.pages.map((p) => {
-                            const f = folder(p.rel);
-                            return (
-                              <ListItemButton key={p.path} selected={sel?.path === p.path} onClick={() => openPage(w, p)}
-                                sx={{ pl: 5, borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
-                                <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                                  {f && <StatusPill status="review">{f}</StatusPill>}
-                                  <Typography variant="code" sx={{ fontSize: 11 }} noWrap>{p.rel.split('/').pop()}</Typography>
-                                </Stack>
-                              </ListItemButton>
-                            );
-                          })}
-                          {w.pages.length === 0 && <Typography sx={{ pl: 5, py: 1, color: 'text.secondary', fontSize: 12 }}>(no pages)</Typography>}
-                        </List>
-                      </Collapse>
-                    </Box>
-                  );
-                })
-              )}
-              {!results && viewWikis.length === 0 && <EmptyListLine>{err ? `${err}.` : (cats.length ? 'No pages in selected categories.' : 'No wikis.')}</EmptyListLine>}
-              {results && results.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
-            </List>
-            {graphView === 'dock' && graphWiki && (
-              <Stack sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${getTokens(t).glass.stroke}`, p: 1 })} spacing={0.5}>
-                <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-                  <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · how pages link together</Typography>
-                  <Tooltip title="Expand to main pane" placement="bottom" disableInteractive>
-                    <IconButton size="small" onClick={() => setGraphView('main')}><OpenInFullIcon sx={{ fontSize: 15 }} /></IconButton>
-                  </Tooltip>
-                  <Tooltip title="Close graph" placement="bottom" disableInteractive>
-                    <IconButton size="small" onClick={() => setGraphView(null)}><CloseIcon sx={{ fontSize: 16 }} /></IconButton>
-                  </Tooltip>
-                </Stack>
-                <Suspense fallback={<Box sx={{ p: 2, color: 'text.secondary' }}>Loading graph…</Box>}><WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} /></Suspense>
+  // Rail pane content — shared between the tablet/desktop Rail and the phone
+  // single-pane layout (no collapse chevron there; see RailHeader). The docked
+  // graph lives in here too: on phone it renders under the list at reduced
+  // height (the declared fallback if a desktop 'dock' crossing shrinks), while
+  // a phone-made graph opens straight into the main pane via the Hub button.
+  const listPane = (collapse) => (
+    <>
+      <RailHeader
+        searchPlaceholder="Search wiki…"
+        searchValue={q}
+        onSearchChange={setQ}
+        allOpen={allOpen}
+        onToggleAll={toggleAll}
+        groupToggleDisabled={!!results}
+        onPickFolder={() => setPicking(true)}
+        extra={
+          <Tooltip title={graphWiki ? `How ${graphWiki} pages link together` : 'How pages link together'} placement="bottom" disableInteractive>
+            <span><IconButton size="small" color={graphView ? 'primary' : 'default'} disabled={!graphWiki}
+              onClick={() => {
+                if (!graphView && isPhone) setPhonePane('detail'); // a phone-made graph opens in the main pane
+                setGraphView((v) => (v ? null : isPhone ? 'main' : 'dock'));
+              }}><HubIcon /></IconButton></span>
+          </Tooltip>
+        }
+        onCollapse={collapse}
+      >
+        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{root ? tildify(root) : ''}</Typography>
+        <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, ml: 2, display: 'block' }}>
+          {results ? `${results.length}${capped ? '+ (capped)' : ''} matches` : `${viewWikis.length} wiki${viewWikis.length === 1 ? '' : 's'} · ${pageCount}${capped ? '+' : ''} page${pageCount === 1 ? '' : 's'}`}
+        </Typography>
+        {!results && allCats.length > 0 && (
+          <Autocomplete multiple size="small" options={allCats} value={cats} onChange={(_, v) => setCats(v)}
+            disableCloseOnSelect slotProps={{ chip: { size: 'small' } }} sx={{ mt: 1, ml: 2, mr: 1 }}
+            renderInput={(params) => <TextField {...params} variant="standard" placeholder={cats.length ? '' : 'Filter categories…'} />} />
+        )}
+      </RailHeader>
+      <List dense sx={{ flex: 1, minHeight: 0, overflow: 'auto', px: 0.5, pt: 0 }}>
+        {results ? (
+          results.map((it, i) => (
+            <ListItemButton key={`${it.path}:${it.line ?? i}`} selected={sel?.path === it.path} onClick={() => open(it)}
+              sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
+              <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                <StatusPill status="review">{it.rel.split('/')[0]}</StatusPill>
+                <Typography variant="code" sx={{ fontSize: 11, position: 'relative', top: 3 }} noWrap>{it.rel.split('/').slice(1).join('/')}{it.line ? `:${it.line}` : ''}</Typography>
               </Stack>
-            )}
-          </>
-        )}
-      </Rail>
-
-      {/* right: read-only viewer (or link graph) */}
-      <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
-        {graphView === 'main' && graphWiki ? (
-          <>
-            <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
-              <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · how pages link together</Typography>
-              <Tooltip title="Dock to sidebar" placement="bottom" disableInteractive>
-                <IconButton size="small" onClick={() => setGraphView('dock')}><HorizontalSplitIcon sx={{ fontSize: 16 }} /></IconButton>
-              </Tooltip>
-              <Tooltip title="Close graph" placement="bottom" disableInteractive>
-                <IconButton size="small" onClick={() => setGraphView(null)}><CloseIcon sx={{ fontSize: 16 }} /></IconButton>
-              </Tooltip>
-            </Stack>
-            <Suspense fallback={<Box sx={{ p: 2, color: 'text.secondary' }}>Loading graph…</Box>}><WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} /></Suspense>
-          </>
+              {it.text && <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 0.5 }} noWrap>{it.text}</Typography>}
+            </ListItemButton>
+          ))
         ) : (
-          <DetailPane
-            empty={!sel && <EmptyState icon={<MenuBookIcon />} title={wikiUnavailable ? 'Wiki not set up yet' : 'Select a page'} description={wikiUnavailable ? wikiHint : 'Browse on the left to view here.'} />}
-            loading={loadingFile}
-            error={err}
-          >
-            <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{sel?.rel}</Typography>
-            <Box sx={(t) => ({
-              flex: 1, minHeight: 0, overflow: 'auto',
-              border: `1px solid ${getTokens(t).glass.stroke}`, borderRadius: `${getTokens(t).radius.sm}px`,
-              p: 3, pb: 4,
-            })}>
-              {(() => {
-                const { meta, body } = parseFrontmatter(content);
-                const tags = Array.isArray(meta.tags) ? meta.tags : (meta.tags ? [meta.tags] : []);
-                return (
-                  <>
-                    {meta.title && <Typography variant="h1" sx={{ fontSize: 26, fontWeight: 800, mt: 0, mb: 1.5, letterSpacing: '-0.01em' }}>{meta.title}</Typography>}
-                    {(meta.type || meta.status || tags.length > 0) && (
-                      <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 2.5, alignItems: 'center' }}>
-                        {meta.type && <StatusPill status="active">{meta.type}</StatusPill>}
-                        {meta.status && <StatusPill status={meta.status === 'active' ? 'done' : 'review'}>{meta.status}</StatusPill>}
-                        {tags.map((t2) => <StatusPill key={t2} status="review">{t2}</StatusPill>)}
-                      </Stack>
-                    )}
-                    <MarkdownBody onWikiLink={jumpTo}>{body}</MarkdownBody>
-                  </>
-                );
-              })()}
-            </Box>
-          </DetailPane>
+          viewWikis.map((w) => {
+            const open2 = expanded.has(w.name);
+            return (
+              <Box key={w.path}>
+                <ListItemButton onClick={() => toggleWiki(w.name)}
+                  sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, mb: 0.25 }}>
+                  <ListItemIcon sx={{ minWidth: 28 }}>{open2 ? <ExpandMoreIcon fontSize="small" /> : <ChevronRightIcon fontSize="small" />}</ListItemIcon>
+                  <ListItemIcon sx={{ minWidth: 24 }}>{open2 ? <FolderOpenIcon fontSize="small" /> : <FolderIcon fontSize="small" />}</ListItemIcon>
+                  <ListItemText primary={w.name} slotProps={{ primary: { variant: 'subtitle2', noWrap: true } }} />
+                  <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{w.pages.length}</Typography>
+                </ListItemButton>
+                <Collapse in={open2} timeout={reduceMotion ? 0 : 'auto'} unmountOnExit>
+                  <List dense disablePadding>
+                    {w.pages.map((p) => {
+                      const f = folder(p.rel);
+                      return (
+                        <ListItemButton key={p.path} selected={sel?.path === p.path} onClick={() => openPage(w, p)}
+                          sx={{ pl: 5, borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25 }}>
+                          <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+                            {f && <StatusPill status="review">{f}</StatusPill>}
+                            <Typography variant="code" sx={{ fontSize: 11 }} noWrap>{p.rel.split('/').pop()}</Typography>
+                          </Stack>
+                        </ListItemButton>
+                      );
+                    })}
+                    {w.pages.length === 0 && <Typography sx={{ pl: 5, py: 1, color: 'text.secondary', fontSize: 12 }}>(no pages)</Typography>}
+                  </List>
+                </Collapse>
+              </Box>
+            );
+          })
         )}
-      </Stack>
+        {!results && viewWikis.length === 0 && <EmptyListLine>{err ? `${err}.` : (cats.length ? 'No pages in selected categories.' : 'No wikis.')}</EmptyListLine>}
+        {results && results.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
+      </List>
+      {graphView === 'dock' && graphWiki && (
+        <Stack sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${getTokens(t).glass.stroke}`, p: 1 })} spacing={0.5}>
+          <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+            <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · how pages link together</Typography>
+            <Tooltip title="Expand to main pane" placement="bottom" disableInteractive>
+              <IconButton size="small" onClick={() => { setGraphView('main'); if (isPhone) setPhonePane('detail'); }}><OpenInFullIcon sx={{ fontSize: 15 }} /></IconButton>
+            </Tooltip>
+            <Tooltip title="Close graph" placement="bottom" disableInteractive>
+              <IconButton size="small" onClick={() => setGraphView(null)}><CloseIcon sx={{ fontSize: 16 }} /></IconButton>
+            </Tooltip>
+          </Stack>
+          <Suspense fallback={<Box sx={{ p: 2, color: 'text.secondary' }}>Loading graph…</Box>}><WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} /></Suspense>
+        </Stack>
+      )}
+    </>
+  );
+
+  return (
+    <Box sx={{ height: '100%', display: 'flex', minHeight: 0, flexDirection: isPhone ? 'column' : 'row' }}>
+      {isPhone && (
+        <Box sx={(t) => ({ p: 1, flexShrink: 0, borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
+          <PhonePaneSwitcher pane={phonePane} onSwitch={setPhonePane} detailDisabled={!(sel || graphView === 'main')} />
+        </Box>
+      )}
+
+      {(!isPhone || phonePane === 'list') && (
+        isPhone ? (
+          <Box sx={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>{listPane()}</Box>
+        ) : (
+          <Rail storageKey="sing-wiki-w" defaultWidth={380} collapsedTitle="Show wiki pages">
+            {({ collapse }) => listPane(collapse)}
+          </Rail>
+        )
+      )}
+
+      {/* right: read-only viewer (or link graph). Stays in the same child slot
+          across desktop<->phone crossings, so a mounted WikiGraph (and its
+          fetched layout) survives the resize. */}
+      {(!isPhone || phonePane === 'detail') && (
+        <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0, p: 1.5 }} spacing={1}>
+          {graphView === 'main' && graphWiki ? (
+            <>
+              <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
+                <Typography variant="code" sx={{ flex: 1, minWidth: 0, color: 'text.secondary', fontSize: 11 }} noWrap>{graphWiki} · how pages link together</Typography>
+                <Tooltip title="Dock to sidebar" placement="bottom" disableInteractive>
+                  <IconButton size="small" onClick={() => setGraphView('dock')}><HorizontalSplitIcon sx={{ fontSize: 16 }} /></IconButton>
+                </Tooltip>
+                <Tooltip title="Close graph" placement="bottom" disableInteractive>
+                  <IconButton size="small" onClick={() => { setGraphView(null); if (isPhone && !sel) setPhonePane('list'); }}><CloseIcon sx={{ fontSize: 16 }} /></IconButton>
+                </Tooltip>
+              </Stack>
+              <Suspense fallback={<Box sx={{ p: 2, color: 'text.secondary' }}>Loading graph…</Box>}><WikiGraph root={root} wiki={graphWiki} selected={selectedRel} onOpenPage={openByRel} /></Suspense>
+            </>
+          ) : (
+            <DetailPane
+              empty={!sel && <EmptyState icon={<MenuBookIcon />} title={wikiUnavailable ? 'Wiki not set up yet' : 'Select a page'} description={wikiUnavailable ? wikiHint : 'Browse on the left to view here.'} />}
+              loading={loadingFile}
+              error={err}
+            >
+              <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>{sel?.rel}</Typography>
+              <Box sx={(t) => ({
+                flex: 1, minHeight: 0, overflow: 'auto',
+                border: `1px solid ${getTokens(t).glass.stroke}`, borderRadius: `${getTokens(t).radius.sm}px`,
+                p: 3, pb: 4,
+              })}>
+                {(() => {
+                  const { meta, body } = parseFrontmatter(content);
+                  const tags = Array.isArray(meta.tags) ? meta.tags : (meta.tags ? [meta.tags] : []);
+                  return (
+                    <>
+                      {meta.title && <Typography variant="h1" sx={{ fontSize: 26, fontWeight: 800, mt: 0, mb: 1.5, letterSpacing: '-0.01em' }}>{meta.title}</Typography>}
+                      {(meta.type || meta.status || tags.length > 0) && (
+                        <Stack direction="row" spacing={1} sx={{ flexWrap: 'wrap', gap: 1, mb: 2.5, alignItems: 'center' }}>
+                          {meta.type && <StatusPill status="active">{meta.type}</StatusPill>}
+                          {meta.status && <StatusPill status={meta.status === 'active' ? 'done' : 'review'}>{meta.status}</StatusPill>}
+                          {tags.map((t2) => <StatusPill key={t2} status="review">{t2}</StatusPill>)}
+                        </Stack>
+                      )}
+                      <MarkdownBody onWikiLink={jumpTo}>{body}</MarkdownBody>
+                    </>
+                  );
+                })()}
+              </Box>
+            </DetailPane>
+          )}
+        </Stack>
+      )}
 
       {picking && <DirPicker start={untildify(root)} onPick={pickRoot} onClose={() => setPicking(false)} />}
     </Box>
