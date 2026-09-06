@@ -486,6 +486,12 @@ test.describe('Tasks board — Phosphor Console', () => {
   test('the task dossier stays fully within a narrow viewport, sticky actions included', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
 
+    // At phone width the board shows one lane at a time behind the lane
+    // switcher (responsive plan, Phase 3) — select Done before reaching for
+    // its card. Above 600px all four lanes still render together.
+    await page.getByRole('group', { name: 'Board lane', exact: true })
+      .getByRole('button', { name: /^Done \(/ }).click();
+
     // The seeded Done card is present in this independent mock page.
     const card = page.getByRole('button', { name: 'Seeded done card', exact: true });
     await card.scrollIntoViewIfNeeded();

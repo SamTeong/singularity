@@ -5,6 +5,8 @@ import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import List from '@mui/material/List';
 import IconButton from '@mui/material/IconButton';
+import Button from '@mui/material/Button';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import TerminalIcon from '@mui/icons-material/Terminal';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import ExpandLessIcon from '@mui/icons-material/ExpandLess';
@@ -17,8 +19,31 @@ import { tildify } from '@/lib/paths.js';
 import { KIND } from '@/lib/agentStatus.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { useThemeSkin } from '@/theme/index.js';
+import { PHONE_QUERY } from '@/shell/breakpoints.js';
 import { glass, surface2, stroke2, chipBg, statusColor, focusRing } from '@/shell/shellStyles.js';
 import SessionRow from '@/shell/SessionRow.jsx';
+
+// Phone pane switcher (list ⇄ terminal): plain Buttons with aria-pressed, not
+// ToggleButton/Tab — matches TasksBoard's Board|History segmented control, so
+// the e2e role/name query stays an exact button match. Its per-skin split
+// mirrors that control too (`segBtn`/`segBtnPhosphor`): Phosphor gets hard
+// corners, mono type and its own mint/void hues; ZAPAC keeps the pill. Colours
+// come from each skin's tokens on both branches — never a literal hex.
+const paneBtnSx = (t, active, phosphor) => (phosphor
+  ? {
+      flex: 1, borderRadius: 0, textTransform: 'none', fontSize: 11, fontWeight: 700,
+      letterSpacing: '.06em', fontFamily: t.nerv.fonts.mono,
+      border: `1px solid ${t.nerv.hue.mint}`,
+      color: active ? t.nerv.hue.void : t.nerv.hue.mint,
+      background: active ? t.nerv.hue.mint : 'transparent',
+      '&:hover': { background: active ? t.nerv.hue.mint : 'rgba(82,242,154,.1)' },
+    }
+  : {
+      flex: 1, borderRadius: 999, textTransform: 'none', fontSize: 12, fontWeight: 700,
+      color: active ? t.vars.palette.primary.contrastText : 'text.secondary',
+      background: active ? t.vars.palette.primary.main : 'transparent',
+      '&:hover': { background: active ? t.vars.palette.primary.main : chipBg(t) },
+    });
 
 // Cap live terminals: each mounted xterm holds a full scrollback buffer, so
 // mounting every agent's terminal grows memory without bound. Keep the active
@@ -58,6 +83,25 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
   // session actions — stays one shared tree for both skins.
   const phosphor = skinId === 'phosphor';
   const [dragId, setDragId] = useState(null);
+  // Phone has no room for list+terminal side by side (outcome 2 of the
+  // responsive plan's Phase 2) — one pane shows at a time, switched by the
+  // explicit control below. Both stay mounted regardless (display:none when
+  // hidden), same as every terminal already does, so identity/output survive
+  // the switch. Lazy-initialized from whether a session is active so opening
+  // the dock with one already selected doesn't hide it behind the list.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const [phonePane, setPhonePane] = useState(() => (active ? 'terminal' : 'list'));
+  // The dock mounts once for the app's lifetime, so the initializer above only
+  // ever sees the state at first load — usually before any session exists.
+  // Re-derive the pane on each *entry* into phone mode (the same render-time
+  // "adjust state on prop change" pattern `mru` uses below), so shrinking a
+  // desktop window with a live session lands on that terminal rather than
+  // hiding it behind the list. Only on the crossing, never on every resize.
+  const [wasPhone, setWasPhone] = useState(isPhone);
+  if (isPhone !== wasPhone) {
+    setWasPhone(isPhone);
+    if (isPhone) setPhonePane(active ? 'terminal' : 'list');
+  }
 
   // MRU of viewed agents → the set kept mounted. Real state (not a ref) since
   // it drives rendering below; updated during render (React's documented
@@ -103,10 +147,27 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
         </Stack>
       )}
 
+      {/* Phone pane switcher — outcome 2 of the Phase 2 responsive plan: list and
+          terminal can't sit side by side at phone width, so this explicit,
+          labelled control switches which one shows below instead of requiring
+          a drag. Not rendered at tablet/desktop, where both panes stay visible. */}
+      {isPhone && !dockMin && (
+        <Stack direction="row" spacing={0.5} sx={(t) => ({ px: 1, py: 0.75, flexShrink: 0, borderBottom: `1px solid ${stroke2(t)}` })}>
+          <Button size="small" aria-pressed={phonePane === 'list'} onClick={() => setPhonePane('list')} sx={(t) => paneBtnSx(t, phonePane === 'list', phosphor)}>Session list</Button>
+          <Button size="small" aria-pressed={phonePane === 'terminal'} onClick={() => setPhonePane('terminal')} sx={(t) => paneBtnSx(t, phonePane === 'terminal', phosphor)}>Terminal</Button>
+        </Stack>
+      )}
+
       {/* Body kept mounted while minimized (display:none) so terminals keep
           their live xterm + scrollback. */}
       <Box sx={{ display: dockMin ? 'none' : 'flex', flex: 1, minHeight: 0 }}>
-        <Box sx={(t) => ({ width: listW.width, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', borderRight: `1px solid ${stroke2(t)}`, background: surface2(t) })}>
+        <Box sx={(t) => ({
+          width: isPhone ? '100%' : listW.width,
+          flexShrink: 0,
+          display: isPhone ? (phonePane === 'list' ? 'flex' : 'none') : 'flex',
+          flexDirection: 'column', overflow: 'hidden',
+          borderRight: isPhone ? 'none' : `1px solid ${stroke2(t)}`, background: surface2(t),
+        })}>
           {/* layout-02 `.dock-list-head`: label + count + a trailing chevron —
               scoped to the session-list column's width, not the dock. Clicking
               (or Enter/Space on) the row collapses the dock, same click/keyboard
@@ -159,7 +220,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
                 agent={a}
                 models={models}
                 selected={a.id === active}
-                onSelect={() => setActive(a.id)}
+                onSelect={() => { setActive(a.id); if (isPhone) setPhonePane('terminal'); }}
                 stats={stats[a.id]}
                 subagents={subagents[a.id] || []}
                 dragging={dragId === a.id}
@@ -183,18 +244,23 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
           </List>
         </Box>
 
-        {/* Drag handle — resize the session-list width. layout-02 `.list-handle`:
-            8px hit strip, grip fades in on hover/drag/focus. */}
-        <ResizeHandle
-          axis="x"
-          onPointerDown={listW.startDrag}
-          onKeyDown={listW.onKeyDown}
-          dragging={listW.dragging}
-          value={listW.width}
-          min={listW.min}
-          max={listW.max}
-          label="Resize session list"
-        />
+        {/* Drag handle — resize the session-list width. Not phone's intended
+            affordance (see the pane switcher above): dragging is out and the
+            column is full width, so a hidden separator would be both
+            unreachable and pointless. layout-02 `.list-handle`: 8px hit strip,
+            grip fades in on hover/drag/focus. */}
+        {!isPhone && (
+          <ResizeHandle
+            axis="x"
+            onPointerDown={listW.startDrag}
+            onKeyDown={listW.onKeyDown}
+            dragging={listW.dragging}
+            value={listW.width}
+            min={listW.min}
+            max={listW.max}
+            label="Resize session list"
+          />
+        )}
 
         {/* Terminal pane: a glass term-bar header (display-only chrome showing
             the active session title) over the mounted terminals. `.term` sits a
@@ -202,7 +268,9 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
             dark — so the terminal reads as a well, not another panel. */}
         <Box
           sx={(t) => ({
-            flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column',
+            flex: 1, minWidth: 0,
+            display: isPhone ? (phonePane === 'terminal' ? 'flex' : 'none') : 'flex',
+            flexDirection: 'column',
             background: t.palette.mode === 'dark' ? 'rgba(0,0,0,.34)' : surface2(t),
           })}
         >

@@ -10,6 +10,7 @@ import DialogTitle from '@mui/material/DialogTitle';
 import DialogContent from '@mui/material/DialogContent';
 import DialogActions from '@mui/material/DialogActions';
 import Button from '@mui/material/Button';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import { useColorMode } from '@zapac/mui-theme';
 import { useThemeSkin } from '@/theme/AppThemeProvider.jsx';
 import { getSkin } from '@/theme/registry.js';
@@ -23,6 +24,8 @@ import { useResizable, ResizeHandle } from '@/hooks/useResizable.jsx';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { useTaskActions } from '@/hooks/useTaskActions.js';
 import Sidebar from '@/shell/Sidebar.jsx';
+import MobileNavDrawer from '@/shell/MobileNavDrawer.jsx';
+import { PHONE_QUERY, TABLET_QUERY, SHORT_QUERY } from '@/shell/breakpoints.js';
 import SessionDock from '@/shell/SessionDock.jsx';
 import AppMenu, { NAV_ITEMS } from '@/shell/AppMenu.jsx';
 import PhosphorFrame from '@/shell/PhosphorFrame.jsx';
@@ -57,6 +60,8 @@ const SettingsView = lazy(() => import('@/features/settings/SettingsView.jsx'));
 
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
+const NOOP = () => {};
+
 const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'transcripts', 'explorer'];
 
 // A skin change remounts this entire component — `AppThemeProvider` keys its
@@ -108,7 +113,20 @@ export default function AppShell() {
   // false (closed) | true (create) | a cron job object (edit that row) — same
   // tri-state the Automation view uses for background defs.
   const [cronOpen, setCronOpen] = useState(false);
+  // The user's rail-collapse choice. `railCollapsed` below is what Sidebar
+  // actually renders — tablet forces the icon rail without overwriting this, so
+  // crossing back to >=900px restores whatever the user last chose.
   const [collapsed, setCollapsed] = useState(false);
+  // One shared breakpoint decision for the whole shell: phone gets a header +
+  // temporary drawer instead of the rail, tablet gets the forced icon rail.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const isTablet = useMediaQuery(TABLET_QUERY);
+  const railCollapsed = isTablet || collapsed;
+  // Tablet's icon rail is forced, so its toggle must not write the stored
+  // preference — otherwise a tablet tap silently changes what >=900px restores.
+  const setRailCollapsed = isTablet ? NOOP : setCollapsed;
+  const [navOpen, setNavOpen] = useState(false);
+  const navTriggerRef = useRef(null);
   // The URL owns the selected view (App.jsx's `:view` route). Already validated
   // at the route boundary, so `view` is always a known id here. `setView` keeps
   // its old signature, so Sidebar, AppMenu, the palette and the page-prev/next
@@ -141,10 +159,28 @@ export default function AppShell() {
   const [restarting, setRestarting] = useState(false); // true while polling /health for the new daemon
   // Terminal dock minimized state, persisted (height is a useResizable below).
   const [dockMin, setDockMin] = useState(() => localStorage.getItem('sing-dock-min') === '1');
+  // A viewport that cannot afford an open dock: phone width, or any viewport
+  // short enough that the dock's height clamp still leaves the page above it
+  // unusable (landscape phone, 667x375 — tablet by width, shorter than any
+  // phone in portrait).
+  const isShort = useMediaQuery(SHORT_QUERY);
+  const tightDock = isPhone || isShort;
+  // …opens with the dock collapsed. Un-persisted and viewport-scoped: `dockMin`
+  // above stays the desktop preference, so collapsing/expanding here never
+  // rewrites what a desktop reload restores. Evaluated once, at mount, and
+  // deliberately NOT re-derived on a crossing: shrinking a desktop window
+  // mid-session keeps whatever the user had open (SessionDock re-derives its
+  // pane on that same crossing to surface the live terminal — pulling the dock
+  // shut underneath it would contradict that).
+  const [tightDockMin, setTightDockMin] = useState(
+    () => window.matchMedia(PHONE_QUERY).matches || window.matchMedia(SHORT_QUERY).matches,
+  );
+  // What the dock actually renders as.
+  const dockCollapsed = tightDock ? tightDockMin : dockMin;
 
   const mainRef = useRef(null);
   // Session-list panel width (px, drag-resizable), persisted.
-  const listW = useResizable('sing-list-w', 260, { min: 160, max: 640 });
+  const listW = useResizable('sing-list-w', 260, { min: 160, max: 640, containerRef: mainRef });
   // Terminal dock height (px, drag-resizable), persisted — resizes up from the
   // main pane's bottom, clamped so neither the dock nor the top view can vanish.
   const { width: dockH, startDrag: startDockDrag, onKeyDown: onDockKeyDown, dragging: dockDragging, max: dockHMax } = useResizable('sing-dock-h', 300, { min: 140, max: 2000, axis: 'y', containerRef: mainRef });
@@ -160,6 +196,27 @@ export default function AppShell() {
   // Not the source of truth any more — just the "where was I" memory that a
   // bare `/` redirects to (App.jsx's DefaultRedirect).
   useEffect(() => { localStorage.setItem('sing-view', view); }, [view]);
+  // Resizing out of phone mode takes the header trigger with it, so MUI has
+  // nothing to restore focus to. Close the drawer (same render-time adjustment
+  // `visited` uses above) and, if the unmount dropped focus on <body>, hand it
+  // to the rail's first control that replaced the trigger.
+  // Only set when the drawer was actually open as phone mode ended — MUI's focus
+  // trap has nothing to restore to once the trigger unmounts. If nothing was
+  // focused, leave focus alone rather than stealing it from the page.
+  const [pendingRailFocus, setPendingRailFocus] = useState(false);
+  if (!isPhone && navOpen) { setNavOpen(false); setPendingRailFocus(true); }
+  // The reverse crossing unmounts Sidebar, taking the More menu's anchor node
+  // with it — drop the anchor so Popover doesn't render against a detached element.
+  if (isPhone && menuAnchor) setMenuAnchor(null);
+  useEffect(() => {
+    if (!pendingRailFocus) return;
+    const raf = requestAnimationFrame(() => {
+      setPendingRailFocus(false);
+      if (document.activeElement && document.activeElement !== document.body) return;
+      mainRef.current?.querySelector('aside [role="button"], aside button')?.focus();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [pendingRailFocus]);
   // Cycles More-menu views (xterm + cm-editor handle own focus cases).
   useEffect(() => {
     const onKey = (e) => {
@@ -190,10 +247,18 @@ export default function AppShell() {
     return [...s].sort();
   }, [tasks, taskHistory]);
 
-  const toggleDock = () => setDockMin((m) => { const n = !m; localStorage.setItem('sing-dock-min', n ? '1' : '0'); return n; });
+  // On a tight viewport the toggle drives the un-persisted override instead, so
+  // opening the dock on a phone never becomes the desktop default.
+  const toggleDock = () => {
+    if (tightDock) { setTightDockMin((m) => !m); return; }
+    setDockMin((m) => { const n = !m; localStorage.setItem('sing-dock-min', n ? '1' : '0'); return n; });
+  };
   // Starting a new session should reveal the Sessions dock even if the user had
   // it minimized — no-op if already expanded.
-  const expandDock = useCallback(() => setDockMin((m) => { if (!m) return m; localStorage.setItem('sing-dock-min', '0'); return false; }), []);
+  const expandDock = useCallback(() => {
+    if (tightDock) { setTightDockMin(false); return; }
+    setDockMin((m) => { if (!m) return m; localStorage.setItem('sing-dock-min', '0'); return false; });
+  }, [tightDock]);
 
   // A running claude process picks its TUI theme once at spawn (queried from the
   // terminal background) — xterm's palette flips live but a live session's colors
@@ -344,17 +409,33 @@ export default function AppShell() {
     >
       {SkinBackground && <SkinBackground />}
 
-      {/* Top row: sidebar + selected view. The terminal dock spans full width below. */}
-      <Box sx={{ flex: 1, minHeight: 0, display: 'flex' }}>
-        <Sidebar
-          collapsed={collapsed}
-          setCollapsed={setCollapsed}
+      {isPhone && (
+        <MobileNavDrawer
+          open={navOpen}
+          setOpen={setNavOpen}
+          triggerRef={navTriggerRef}
           view={view}
           setView={setView}
           onNewSession={() => setCreateOpen(true)}
-          onOpenMenu={(e) => setMenuAnchor(e.currentTarget)}
-          menuOpen={!!menuAnchor}
+          onOpenProcesses={() => setProcsOpen(true)}
+          onOpenRestart={() => setRestartOpen(true)}
+          restarting={restarting}
         />
+      )}
+
+      {/* Top row: sidebar + selected view. The terminal dock spans full width below. */}
+      <Box sx={{ flex: 1, minHeight: 0, display: 'flex', minWidth: 0 }}>
+        {!isPhone && (
+          <Sidebar
+            collapsed={railCollapsed}
+            setCollapsed={setRailCollapsed}
+            view={view}
+            setView={setView}
+            onNewSession={() => setCreateOpen(true)}
+            onOpenMenu={(e) => setMenuAnchor(e.currentTarget)}
+            menuOpen={!!menuAnchor}
+          />
+        )}
 
         {/* Selected view. Persistent views mount once (visited) and stay mounted
             (display:none when hidden); Tasks/Cron/Usage render on demand. */}
@@ -408,9 +489,11 @@ export default function AppShell() {
         </Box>
       </Box>
 
-      {/* Drag handle — resize the dock (hidden while minimized). layout-02
-          `.dock-handle`: 12px hit strip, grip fades in on hover/drag/focus. */}
-      {!dockMin && (
+      {/* Drag handle — resize the dock (hidden while minimized, and on phone
+          where the dock has its own explicit controls instead of a drag
+          affordance — see SessionDock.jsx). layout-02 `.dock-handle`: 12px hit
+          strip, grip fades in on hover/drag/focus. */}
+      {!dockCollapsed && !isPhone && (
         <ResizeHandle
           axis="y"
           onPointerDown={startDockDrag}
@@ -425,7 +508,7 @@ export default function AppShell() {
       )}
 
       <SessionDock
-        dockMin={dockMin}
+        dockMin={dockCollapsed}
         toggleDock={toggleDock}
         dockH={dockH}
         listW={listW}

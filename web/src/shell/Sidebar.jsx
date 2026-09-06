@@ -474,7 +474,7 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
       {!collapsed && <UsagePanel usage={usage} caps={caps} />}
 
       {/* Daemon-status footer — always visible (replaces the conditional StatusPill). */}
-      <DaemonFooter connected={connected} />
+      <DaemonFooter connected={connected} collapsed={collapsed} />
     </Box>
   );
 }
@@ -631,10 +631,26 @@ function UsagePanel({ usage, caps }) {
  * mapping, so a lost connection gets the red critical/filled inversion — with
  * the connection state spelled out in visible English text (never color-only).
  */
-function DaemonFooter({ connected }) {
+function DaemonFooter({ connected, collapsed }) {
   const { skinId } = useThemeSkin();
   const isPhosphor = skinId === 'phosphor';
   const host = typeof location !== 'undefined' ? location.host : '127.0.0.1:4317';
+  const label = connected ? 'Daemon connected' : 'Daemon disconnected';
+
+  if (collapsed) {
+    const kind = connected ? 'ok' : 'danger';
+    return (
+      <Tooltip title={label} placement="right" disableInteractive slotProps={PAPER_TOOLTIP_SLOTPROPS}>
+        <Box component="footer" role="status" aria-label={label} sx={(t) => {
+          const c = statusColor(t, kind);
+          return {
+            display: 'grid', placeItems: 'center', p: '18px 0', borderTop: `1px solid ${isPhosphor ? getRoles(t).chrome.stroke : stroke2(t)}`,
+            '&::before': { content: '""', width: '8px', height: '8px', borderRadius: '50%', background: c, boxShadow: `0 0 0 3px color-mix(in srgb, ${c} 22%, transparent)` },
+          };
+        }} />
+      </Tooltip>
+    );
+  }
 
   if (isPhosphor) {
     const { tone, filled } = getDomainState(connected ? 'running' : 'failed');

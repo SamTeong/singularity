@@ -122,19 +122,23 @@ export default function CreateTaskDialog({ open, onClose, cwd, setCwd, recent, o
       <TextField size="small" label="title" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') create(); }} slotProps={{ input: { endAdornment: clearAdornment(title !== '', () => setTitle('')) } }} />
       <TextField size="small" label="description" value={description} onChange={(e) => setDescription(e.target.value)} multiline minRows={3} maxRows={10} slotProps={{ input: { endAdornment: clearAdornment(description !== '', () => setDescription('')) } }} />
       <CwdPicker value={cwd} onChange={setCwd} recent={recent} onBrowse={onBrowse} label="Working directory" />
+      {/* model + turn-limit pairs: `flexWrap` and a model min-width, so at a
+          phone-width dialog the turn limit drops to its own line instead of
+          the pair overflowing the paper (same idiom as
+          CreateBackgroundJobDialog's threshold rows). */}
       <Stack spacing={1}>
-        <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-          <Box sx={{ flex: 1 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" placeholder="required — claude, ollama, or gpt-*" /></Box>
+        <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
+          <Box sx={{ flex: 1, minWidth: 160 }}><ModelSelect model={model} setModel={setModel} label="orchestrator model" placeholder="required — claude, ollama, or gpt-*" /></Box>
           <TextField size="small" type="number" label="turn limit" placeholder="—" value={orchTurns} onChange={(e) => setOrchTurns(e.target.value)} sx={{ width: 110 }} />
         </Stack>
         {!isCodexModel(model, models) && (
           <>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Box sx={{ flex: 1 }}><ModelSelect model={implModel} setModel={setImplModel} label="implementor model" /></Box>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
+              <Box sx={{ flex: 1, minWidth: 160 }}><ModelSelect model={implModel} setModel={setImplModel} label="implementor model" /></Box>
               <TextField size="small" type="number" label="turn limit" placeholder="—" value={implTurns} onChange={(e) => setImplTurns(e.target.value)} sx={{ width: 110 }} />
             </Stack>
-            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-              <Box sx={{ flex: 1 }}><ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" /></Box>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 1 }}>
+              <Box sx={{ flex: 1, minWidth: 160 }}><ModelSelect model={reviewerModel} setModel={setReviewerModel} label="reviewer model" /></Box>
               <TextField size="small" type="number" label="turn limit" placeholder="—" value={revTurns} onChange={(e) => setRevTurns(e.target.value)} sx={{ width: 110 }} />
             </Stack>
           </>

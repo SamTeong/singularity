@@ -31,7 +31,16 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
   },
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  projects: [
+    // Keep existing behavioural specs at their established desktop viewport.
+    { name: 'chromium', testIgnore: 'responsive.spec.mjs', use: { browserName: 'chromium' } },
+    // The responsive smoke contract runs only its matrix, so normal mock flows
+    // do not become four times slower.
+    { name: 'responsive-phone', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: { width: 375, height: 667 } } },
+    { name: 'responsive-tablet', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: { width: 768, height: 1024 } } },
+    { name: 'responsive-compact-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: { width: 1024, height: 768 } } },
+    { name: 'responsive-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: { width: 1440, height: 900 } } },
+  ],
   webServer: {
     // Both --config and --mode are load-bearing: mock mode selects dist-mock
     // and registers the preview middleware for mock-only subresources.

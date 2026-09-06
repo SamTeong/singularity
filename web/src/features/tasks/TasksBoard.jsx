@@ -17,12 +17,14 @@ import TableBody from '@mui/material/TableBody';
 import TableRow from '@mui/material/TableRow';
 import TableCell from '@mui/material/TableCell';
 import TableSortLabel from '@mui/material/TableSortLabel';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import AddIcon from '@mui/icons-material/Add';
 import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import OutlinedFlagOutlinedIcon from '@mui/icons-material/OutlinedFlagOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
 import { StatusPill } from '@/components/StatusPill.jsx';
+import TableScroller from '@/components/TableScroller.jsx';
 import TaskDetailPanel, { DETAIL_SHEET_W } from '@/features/tasks/TaskDetailPanel.jsx';
 import TranscriptView from '@/features/transcripts/TranscriptView.jsx';
 import { repoName } from '@/lib/paths.js';
@@ -32,6 +34,7 @@ import { useThemeSkin } from '@/theme/index.js';
 import { Stamp, StatusLegend, SegmentBar, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState, DOMAIN_STATE_ORDER } from '@/lib/domainState.js';
 import { insetQuery } from '@/lib/sheetInset.js';
+import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 import { COLUMNS, COLUMN_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
 
 // Read the reduced-motion preference once at mount for the transcript sheet —
@@ -394,6 +397,25 @@ const SORT_KEYS = new Set(['title', 'repo', 'branch', 'outcome', 'busyMs', 'apiM
 export default function TasksBoard({ tasks, history, agents, stats, onSelect, onAdd, onMove, onConclude, onDeleteHistory, onSheetInset }) {
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
+  // Viewport contract from the shell's own literal media queries, never
+  // `theme.breakpoints` — the two skins ship different breakpoint pixels
+  // (see web/src/shell/breakpoints.js).
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const isTablet = useMediaQuery(TABLET_QUERY);
+  // Below 900px: the ten-column history table gets the labelled scroll region
+  // (at tablet it was 1.4x its pane, with the row actions off-screen), and the
+  // board stops owning the vertical scroll so the page can scroll instead.
+  const narrow = isPhone || isTablet;
+  // Phone shows ONE lane at a time, picked by the switcher below the filters.
+  // Not a query param: it is a viewport-local view of the same board, and a
+  // ?lane= would leak a phone-only concept into every shared link.
+  const [phoneLane, setPhoneLane] = useState(COLUMNS[0][0]);
+  // Phone topbar controls. Without this the Board|History pair plus New task
+  // are wider than a 375px topbar and wrap onto a row of their own, which was
+  // most of the 161px the header cost above the board before this phase.
+  const compactCtl = isPhone
+    ? { px: '8px', minWidth: 0, minHeight: 28, height: 28, fontSize: 11, '& .MuiButton-startIcon': { marginRight: '4px' } }
+    : null;
   const [dragId, setDragId] = useState(null);
   // Board filters live in the query string, so a filtered board is shareable and
   // survives a reload: ?tag=… (repeated, never CSV — tags are free-form and can
@@ -516,9 +538,12 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
       .finally(() => { if (seq === histReqRef.current) setLoadingT(false); });
   };
 
-  const drop = (col) => {
-    const t = tasks.find((x) => x.id === dragId);
-    setDragId(null);
+  // Move a task to another column, with the Done confirmation the drag drop has
+  // always carried. Split out of `drop` so the detail sheet's touch-operable
+  // move buttons (TaskDetailPanel, narrow viewports) go through exactly the same
+  // guard as a drag — one rule, not a second copy that could drift.
+  const moveTask = (id, col) => {
+    const t = tasks.find((x) => x.id === id);
     if (!t || t.column === col) return;
     if (col === 'done') {
       const agent = agents.find((a) => a.id === t.sessionId);
@@ -527,15 +552,28 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     onMove(t.id, col);
   };
 
+  const drop = (col) => {
+    const id = dragId;
+    setDragId(null);
+    if (id) moveTask(id, col);
+  };
+
   return (
-    <Stack sx={{ height: '100%' }}>
+    // Below 900px the PAGE scrolls, not the board: the board's own scroller
+    // left the topbar permanently on screen and gave the lanes a 114px window
+    // at 375x667 — shorter than one card — and a 10px one at 667x375. With the
+    // overflow here, the topbar scrolls away and the lanes below run at their
+    // natural height, so this stays the only vertical scroller on the route.
+    // `overflowX: 'hidden'` is explicit: setting one axis makes the other
+    // compute to `auto`, which would put a second scrollbar under the cards.
+    <Stack sx={{ height: '100%', ...(narrow && { overflowY: 'auto', overflowX: 'hidden' }) }}>
       {/* layout-02 `.topbar`: 16px/22px, hairline rule under it, actions right. */}
       <Stack
         direction="row"
         spacing={2}
         sx={(t) => ({
-          alignItems: 'center', flexWrap: 'wrap', rowGap: 1.5, flexShrink: 0,
-          px: '22px', py: '16px', borderBottom: `1px solid ${stroke2(t)}`,
+          alignItems: 'center', flexWrap: 'wrap', rowGap: isPhone ? 1 : 1.5, flexShrink: 0,
+          px: isPhone ? '12px' : '22px', py: isPhone ? '10px' : '16px', borderBottom: `1px solid ${stroke2(t)}`,
         })}
       >
         <Box sx={{ minWidth: 0, flex: '1 1 auto' }}>
@@ -544,7 +582,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
               with the bilingual "任務" caption (design.md's bimodal type rule) —
               added only inside this element, so ZAPAC's rendered text/DOM never
               changes (`{phosphor && …}` is a no-op there). */}
-          <Typography variant="h3" sx={{ letterSpacing: '-0.02em', lineHeight: 1 }}>
+          <Typography variant="h3" sx={{ letterSpacing: '-0.02em', lineHeight: 1, ...(isPhone && { fontSize: 20 }) }}>
             Tasks
             {phosphor && (
               <Box component="span" sx={(t) => ({ ml: 1.25, fontFamily: t.nerv.fonts.jp, fontWeight: 800, fontSize: 18, color: t.nerv.hue.orange, letterSpacing: '.16em' })}>
@@ -559,7 +597,11 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
             {phosphor ? <>ORCHESTRATED:{tasks.length} · RUNNING:{runningCount}</> : <>{tasks.length} tasks · {runningCount} running</>}
           </Typography>
         </Box>
-        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', gap: 1.25, flexShrink: 0 }}>
+        {/* `flexWrap` (not just the parent row's) — at 320px the segmented
+            control plus New task is wider than the topbar, and a
+            `flexShrink: 0` row that cannot wrap is exactly what pushes the
+            page into horizontal scroll. */}
+        <Box sx={{ ml: 'auto', display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.25, rowGap: 1, flexShrink: 0 }}>
           {/* Segmented Board|History control — two plain Buttons (role=button)
               with aria-pressed, NOT ToggleButton/Tab, so the e2e role/name
               matches stay exact. Both buttons always visible. */}
@@ -567,14 +609,14 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
             ? { display: 'flex', border: `1px solid ${t.nerv.hue.mint}` }
             : { display: 'flex', background: surface2(t), border: `1px solid ${stroke2(t)}`, borderRadius: 999, p: '3px' })}
           >
-            <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={!showHistory} onClick={() => setShowHistory(false)} sx={(t) => (phosphor ? segBtnPhosphor(t, !showHistory) : segBtn(t, !showHistory))}>Board</Button>
-            <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={showHistory} onClick={() => setShowHistory(true)} sx={(t) => (phosphor ? segBtnPhosphor(t, showHistory) : segBtn(t, showHistory))}>History</Button>
+            <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={!showHistory} onClick={() => setShowHistory(false)} sx={(t) => ({ ...(phosphor ? segBtnPhosphor(t, !showHistory) : segBtn(t, !showHistory)), ...compactCtl })}>Board</Button>
+            <Button variant="text" color="inherit" size="small" disableElevation aria-pressed={showHistory} onClick={() => setShowHistory(true)} sx={(t) => ({ ...(phosphor ? segBtnPhosphor(t, showHistory) : segBtn(t, showHistory)), ...compactCtl })}>History</Button>
           </Box>
           {/* Phosphor: drop the ZAPAC gradient-pill sx entirely and let the
               vendored theme's own `contained` Button override (mint outline,
               fills mint on hover, hard corners, uppercase) carry the button —
               design.md D2 prefers the stock MUI override over a hand-rolled one. */}
-            <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => (phosphor ? { height: PHOSPHOR_CONTROL_H } : primaryBtn(t))}>New task</Button>
+            <Button size="small" startIcon={<AddIcon />} onClick={onAdd} sx={(t) => ({ ...(phosphor ? { height: PHOSPHOR_CONTROL_H } : primaryBtn(t)), ...compactCtl })}>New task</Button>
         </Box>
       </Stack>
       {/* Phosphor-only bilingual status legend (task 5.1) — the centralized
@@ -582,7 +624,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
           labels/tones. Uses the vendored StatusLegend, which reads `theme.nerv`
           directly, so it must never render under ZAPAC (no `nerv` on that theme). */}
       {phosphor && (
-        <Box sx={{ px: '22px', pt: '14px', flexShrink: 0 }}>
+        <Box sx={{ px: isPhone ? '12px' : '22px', pt: isPhone ? '8px' : '14px', flexShrink: 0 }}>
           <StatusLegend
             items={DOMAIN_STATE_ORDER.map((id) => {
               const d = getDomainState(id);
@@ -592,7 +634,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
         </Box>
       )}
       {allTags.length > 0 && (
-        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center', flexShrink: 0, px: '22px', pt: '14px' }}>
+        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center', flexShrink: 0, px: isPhone ? '12px' : '22px', pt: isPhone ? '8px' : '14px' }}>
           {allTags.map((tag) => {
             const on = activeTags.has(tag);
             return (
@@ -622,9 +664,52 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
           )}
         </Stack>
       )}
+      {/* Phone lane switcher — four side-by-side lanes leave ~70px per card and
+          four STACKED lanes make the Done lane seven swipes away, so phone
+          shows one lane at a time and this picks it. Same two-plain-Buttons-
+          with-aria-pressed control as Board|History above and the dock's phone
+          pane switcher (SessionDock.jsx), reusing this file's own `segBtn` /
+          `segBtnPhosphor` so each skin's chrome comes from its own tokens. The
+          count rides in every button's label, so the user can see where work
+          sits without switching lanes — and it is now the only place the lane
+          head's "<Label> (<n>)" string renders at phone (the per-lane head is
+          suppressed below, since the switcher already is that head). */}
+      {isPhone && !showHistory && (
+        <Box sx={{ px: '12px', pt: '8px', flexShrink: 0 }}>
+          <Box
+            role="group"
+            aria-label="Board lane"
+            sx={(t) => (phosphor
+              ? { display: 'flex', flexWrap: 'wrap', border: `1px solid ${t.nerv.hue.mint}` }
+              : { display: 'flex', flexWrap: 'wrap', background: surface2(t), border: `1px solid ${stroke2(t)}`, borderRadius: 999, p: '3px' })}
+          >
+            {COLUMNS.map(([col, label]) => {
+              const on = phoneLane === col;
+              return (
+                <Button
+                  key={col}
+                  variant="text"
+                  color="inherit"
+                  size="small"
+                  disableElevation
+                  aria-pressed={on}
+                  onClick={() => setPhoneLane(col)}
+                  sx={(t) => ({
+                    ...(phosphor ? segBtnPhosphor(t, on) : segBtn(t, on)),
+                    flex: '1 1 auto', px: '4px', fontSize: 10, letterSpacing: 0,
+                  })}
+                >
+                  {label} ({tasks.filter((x) => x.column === col && matchesTags(x)).length})
+                </Button>
+              );
+            })}
+          </Box>
+        </Box>
+      )}
       {showHistory ? (
         <Stack sx={{ flex: 1, minWidth: 0, minHeight: 0 }}>
           <Box sx={{ flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', px: '10px', pt: '6px', pb: '12px' }}>
+            <TableScroller narrow={narrow} label="Task history" minWidth={860}>
             <Table size="small" stickyHeader>
               <TableHead>
                 <TableRow>
@@ -679,8 +764,9 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                 })}
               </TableBody>
             </Table>
+            </TableScroller>
           </Box>
-          <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'center', gap: 1, py: 0.5, borderTop: (t) => `1px solid ${stroke2(t)}` }}>
+          <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', gap: 1, py: 0.5, borderTop: (t) => `1px solid ${stroke2(t)}` }}>
             <Button size="small" disabled={histCurPage <= 1} onClick={() => setHistPage((p) => Math.max(1, p - 1))} sx={{ textTransform: 'none' }}>Prev</Button>
             <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: 12 }}>
               Page {histCurPage} of {histPageCount} · {sortedHistory.length} task{sortedHistory.length === 1 ? '' : 's'}
@@ -694,8 +780,22 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
         // desktop real estate becomes breathing room between lanes, not a
         // fixed 16px gap that would otherwise look cramped once the columns
         // stop capping out at 340px.
-        <Stack direction="row" spacing={{ xs: 2, lg: 3, xl: 4 }} sx={{ flex: 1, minHeight: 0, px: { xs: '22px', xl: '32px' }, py: { xs: '18px', xl: '24px' } }}>
-          {COLUMNS.map(([col, label]) => {
+        // At phone width four side-by-side lanes leave ~70px per card, so the
+        // board renders the ONE lane the switcher above selects, at full width.
+        // Below 900px the board no longer scrolls either — it sizes to its
+        // content and the page (the root Stack) is the scroller, so the topbar
+        // scrolls away instead of permanently costing the lanes their height.
+        // Nothing at 900px and up changes.
+        <Stack
+          direction="row"
+          spacing={isPhone ? 2 : { xs: 2, lg: 3, xl: 4 }}
+          sx={{
+            ...(narrow ? { flex: '0 0 auto' } : { flex: 1, minHeight: 0 }),
+            px: isPhone ? '12px' : { xs: '22px', xl: '32px' },
+            py: isPhone ? '10px' : { xs: '18px', xl: '24px' },
+          }}
+        >
+          {(isPhone ? COLUMNS.filter(([col]) => col === phoneLane) : COLUMNS).map(([col, label]) => {
             const cards = tasks.filter((t) => t.column === col && matchesTags(t));
             const colDom = getDomainState(COLUMN_DOMAIN[col]);
             return (
@@ -734,7 +834,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                     capped at COL_HEAD_MAX_W so the two stay optically grouped
                     on a wide lane instead of the count drifting off to the
                     far right. */}
-                {phosphor ? (
+                {isPhone ? null : phosphor ? (
                   <Box
                     role="group"
                     aria-label={`${label} (${cards.length})`}
@@ -781,7 +881,10 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
                 )}
                 {/* Card list scrolls inside the column when it outgrows the pane. */}
                 <Stack spacing="11px" sx={(t) => ({
-                  flex: 1, minHeight: 0, overflowY: 'auto',
+                  ...(narrow
+                    // The page scrolls below 900px — see the board Stack.
+                    ? { flex: '0 0 auto', overflowY: 'visible' }
+                    : { flex: 1, minHeight: 0, overflowY: 'auto' }),
                   pt: '2px', px: '4px', pb: '8px',
                   '&::-webkit-scrollbar': { width: 8 },
                   '&::-webkit-scrollbar-thumb': { background: trackColor(t), borderRadius: 8 },
@@ -996,6 +1099,7 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
           agent={agents.find((a) => a.id === liveDetailTask.sessionId)}
           stats={stats}
           onSelect={onSelect}
+          onMove={moveTask}
           onViewTranscript={openTranscript}
           onClose={() => setDetailId(null)}
         />
