@@ -12,7 +12,9 @@ import RailGroupToggle from './RailGroupToggle.jsx';
 // Rail render-prop. Caption markup below the toolbar (counts, paths, category
 // filters) stays in each panel — it varies too much to share. `onToggleAll`
 // present → group toggle shows; `extra` slots trailing buttons before the
-// collapse chevron (e.g. Wiki's graph button).
+// collapse chevron (e.g. Wiki's graph button). `onCollapse` omitted (phone's
+// full-width single-pane layout has no Rail to collapse) → the chevron itself
+// doesn't render, rather than showing a dead button.
 export default function RailHeader({ searchPlaceholder, searchValue, onSearchChange, allOpen, onToggleAll, groupToggleDisabled, onPickFolder, extra, onCollapse, children }) {
   return (
     <Box sx={{ p: 1.5, pb: 0.5 }}>
@@ -23,7 +25,7 @@ export default function RailHeader({ searchPlaceholder, searchValue, onSearchCha
           <IconButton size="small" onClick={onPickFolder}><FolderOpenIcon /></IconButton>
         </Tooltip>
         {extra}
-        <IconButton size="small" onClick={onCollapse}><ChevronLeftIcon /></IconButton>
+        {onCollapse && <IconButton size="small" onClick={onCollapse}><ChevronLeftIcon /></IconButton>}
       </Stack>
       {children}
     </Box>
