@@ -470,9 +470,10 @@ function newestCodexDateDirs(maxDirs) {
 }
 
 // Newest rollout files across the newest `maxDateDirs` date dirs, newest-mtime
-// first, capped at `maxFiles` total — the bounded fallback list fetchCodex
-// scans for a usable rate_limits reading (a brand-new session's rollout has
-// none yet; older ones still hold a usable, if slightly stale, reading).
+// first, capped at `maxFiles` total — the bounded candidate list fetchCodex
+// scans for the freshest rate_limits reading. mtime only orders last-append
+// time (any event), not each file's last rate_limits record, so it's just a
+// cheap relevance pre-filter — fetchCodex compares record timestamps itself.
 function newestCodexRollouts(maxFiles, maxDateDirs) {
   const files = [];
   for (const dir of newestCodexDateDirs(maxDateDirs)) {
@@ -488,7 +489,7 @@ function newestCodexRollouts(maxFiles, maxDateDirs) {
     .map(([f]) => f);
 }
 
-// Bounded fallback scan: newest 20 rollout files across the newest 2 date dirs.
+// Bounded candidate scan: newest 20 rollout files across the newest 2 date dirs.
 // Launching Codex without taking a turn leaves a session_meta-only stub rollout
 // with no rate_limits — a handful of those would exhaust a tighter cap and hide
 // the newest real reading behind a "no Codex sessions found" error.
@@ -500,6 +501,11 @@ export async function fetchCodex() {
     const files = newestCodexRollouts(CODEX_ROLLOUT_SCAN_CAP, CODEX_DATE_DIR_SCAN_CAP);
     if (!files.length) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
 
+    // Freshest reading wins by the record's own timestamp, not file mtime: with
+    // parallel Codex sessions a rollout's last append is usually not a
+    // rate_limits event, so the newest-mtime file can carry an older record
+    // than a quieter session's file (seen live: 87% picked over a 99% recorded
+    // 4 minutes later). Within a file the backwards scan takes its last record.
     let record = null;
     for (const file of files) {
       const lines = readFileSync(file, 'utf8').split('\n');
@@ -507,9 +513,11 @@ export async function fetchCodex() {
         if (!lines[i].includes('rate_limits')) continue;
         let parsed;
         try { parsed = JSON.parse(lines[i]); } catch { continue; }
-        if (parsed?.payload?.rate_limits) { record = parsed; break; }
+        if (parsed?.payload?.rate_limits) {
+          if (!record || parsed.timestamp > (record.timestamp ?? '')) record = parsed;
+          break;
+        }
       }
-      if (record) break;
     }
     if (!record) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
 

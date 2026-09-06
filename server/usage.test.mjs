@@ -213,6 +213,31 @@ test('fetchCodex: newest rollout has no rate_limits yet → falls back to older 
   assert.equal(u.weekly.pctUsed, 87);
 });
 
+// Two parallel sessions: the newest-mtime rollout's last rate_limits record is
+// OLDER (its later appends were other events) than a quieter session's record.
+// Selection must go by the record's own timestamp, not file mtime — mtime-first
+// picking served a stale 87% while a 99% reading sat in another file.
+test('fetchCodex: freshest rate_limits record wins over newest-mtime file', async () => {
+  const raceDay = join(scratch, 'codex-home', 'sessions', '2026', '07', '22');
+  mkdirSync(raceDay, { recursive: true });
+  const mk = (ts, pct) => JSON.stringify({ timestamp: ts, type: 'event_msg', payload: { type: 'token_count', rate_limits: { limit_id: 'codex', primary: { used_percent: pct, window_minutes: 10080, resets_at: 1786172475 }, secondary: null, plan_type: 'plus' } } });
+  // Quiet file first, busy file last — write order guarantees busy01 has the
+  // newest mtime while carrying the older rate_limits record.
+  writeFileSync(join(raceDay, 'rollout-2026-07-22T00-00-00-quiet2.jsonl'), `${[
+    '{"timestamp":"2026-07-22T00:00:00.000Z","type":"session_meta","payload":{}}',
+    mk('2026-07-22T12:04:00.000Z', 99),
+  ].join('\n')}\n`);
+  writeFileSync(join(raceDay, 'rollout-2026-07-22T00-00-00-busy01.jsonl'), `${[
+    '{"timestamp":"2026-07-22T00:00:00.000Z","type":"session_meta","payload":{}}',
+    mk('2026-07-22T12:00:00.000Z', 87),
+    '{"timestamp":"2026-07-22T12:05:00.000Z","type":"other","payload":{}}',
+  ].join('\n')}\n`);
+
+  const u = await fetchCodex();
+  assert.equal(u.ok, true);
+  assert.equal(u.weekly.pctUsed, 99);
+});
+
 // The access token expires overnight, so the usage fetch renews it itself via
 // the refresh_token grant. These cover the pre-network guards (no request is
 // made — a real grant here would rotate the developer's own token) and the
