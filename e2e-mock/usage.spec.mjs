@@ -24,6 +24,27 @@ test('Ollama renders populated usage meters', async ({ page }) => {
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
+test('provider usage pages are linked out, never followed', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+
+  // Wait for the provider cards to render before counting the links.
+  await expect(page.getByText('Session (5h)').first()).toBeVisible();
+
+  // One jump-out per provider card, each to that provider's own usage page.
+  const expected = [
+    'https://claude.ai/settings/usage',
+    'https://chatgpt.com/#settings/Usage',
+    'https://ollama.com/settings',
+  ];
+  for (const href of expected) {
+    const link = page.locator(`a[href="${href}"]`);
+    await expect(link).toHaveCount(1);
+    await expect(link).toHaveAttribute('target', '_blank');
+    await expect(link).toHaveAttribute('rel', /noreferrer/);
+  }
+});
+
 test('collapse/expand toggle flips aria-label', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
