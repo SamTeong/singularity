@@ -6,19 +6,21 @@
 // sets its own viewport and navigates by URL, so this runs in the default
 // `chromium` project rather than the fixed responsive-viewport-matrix projects.
 import { test, expect } from './fixtures/test.mjs';
-import { expectNoPageOverflow, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
+import { expectNoPageOverflow, seedSkin, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
 import { WIKI_NAME } from '../web/src/mock/fixtures.js';
 
 const PHONE = RESPONSIVE_VIEWPORTS.phone;               // 375x667
-const LANDSCAPE_PHONE = { width: 667, height: 375 };    // >=600px wide -> Rail, not the phone switcher
+const LANDSCAPE_PHONE = RESPONSIVE_VIEWPORTS.landscapePhone;    // >=600px wide -> Rail, not the phone switcher
 const TABLET = RESPONSIVE_VIEWPORTS.tablet;             // 768x1024
 const COMPACT = RESPONSIVE_VIEWPORTS.compactDesktop;    // 1024x768
 const DESKTOP = RESPONSIVE_VIEWPORTS.desktop;           // 1440x900
 
 test.describe.configure({ timeout: 60_000 });
 
-// The shared Files | Editor switcher (PhonePane.jsx) — one per panel.
-const switcher = (page) => page.getByRole('group').filter({ has: page.getByRole('button', { name: 'Files', exact: true }) });
+// The shared pane switcher (PhonePane.jsx) — one per panel. Explorer keeps
+// Files|Editor; Wiki uses Pages|Page (its left pane isn't a file list). Located
+// by its group aria-label, not by button text, so it works for both.
+const switcher = (page) => page.getByRole('group', { name: 'Pane switch' });
 const cmContent = (page) => page.locator('.cm-content').first();
 // Wiki's Hub button carries its aria-label on the wrapping span (Tooltip), not
 // the button — same shape the desktop wiki.spec.mjs resolves through.
@@ -74,27 +76,27 @@ test.describe('phone explorer touch flows', () => {
 
   test('browse, edit and save — every control reachable by tap', async ({ page }) => {
     await page.setViewportSize(PHONE);
-  await gotoReady(page, '/explorer', explorerReady(page));
+    await gotoReady(page, '/explorer', explorerReady(page));
 
-  // Real touch input, not a mouse click: expand, then open the nested file.
-  await page.getByRole('button', { name: 'subdir', exact: true }).tap();
-  await page.getByRole('button', { name: 'nested.txt', exact: true }).tap();
-  await expect(cmContent(page)).toContainText('Nested file content.');
+    // Real touch input, not a mouse click: expand, then open the nested file.
+    await page.getByRole('button', { name: 'subdir', exact: true }).tap();
+    await page.getByRole('button', { name: 'nested.txt', exact: true }).tap();
+    await expect(cmContent(page)).toContainText('Nested file content.');
 
-  await cmContent(page).tap();
-  await page.keyboard.press('ControlOrMeta+End');
-  await page.keyboard.insertText(' touch edit');
-  const save = page.getByRole('button', { name: 'Save', exact: true }).first();
-  await save.scrollIntoViewIfNeeded();
-  await expect(save).toBeInViewport();
-  await save.tap();
-  await expect(page.getByText('Saved', { exact: true })).toBeVisible();
+    await cmContent(page).tap();
+    await page.keyboard.press('ControlOrMeta+End');
+    await page.keyboard.insertText(' touch edit');
+    const save = page.getByRole('button', { name: 'Save', exact: true }).first();
+    await save.scrollIntoViewIfNeeded();
+    await expect(save).toBeInViewport();
+    await save.tap();
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
-  // Back to the list and re-open: the edit survives the pane switch.
-  await switcher(page).getByRole('button', { name: 'Files', exact: true }).tap();
-  await expect(page.getByRole('button', { name: 'nested.txt', exact: true })).toBeInViewport();
-  await page.getByRole('button', { name: 'nested.txt', exact: true }).tap();
-  await expect(cmContent(page)).toContainText('touch edit');
+    // Back to the list and re-open: the edit survives the pane switch.
+    await switcher(page).getByRole('button', { name: 'Files', exact: true }).tap();
+    await expect(page.getByRole('button', { name: 'nested.txt', exact: true })).toBeInViewport();
+    await page.getByRole('button', { name: 'nested.txt', exact: true }).tap();
+    await expect(cmContent(page)).toContainText('touch edit');
     await expectNoPageOverflow(page);
   });
 });
@@ -133,6 +135,48 @@ test('phone explorer: tabs stay in their own horizontal scroll region, close but
   // Tapping a tab switches the editor back.
   await tabs.filter({ hasText: 'notes.md' }).click();
   await expect(cmContent(page)).toContainText('Explorer fixture markdown.');
+});
+
+// Phase 8 A3 regression: TabStrip had `role="tab"`/`aria-selected` but no
+// roving tabIndex or arrow-key handling — keyboard users could not move
+// between tabs at all. Desktop width so both tabs render without the phone
+// switcher standing between the test and the tab strip.
+test('desktop explorer: tabs are keyboard-operable — roving tabIndex, arrow keys move + select, Enter/Space activate', async ({ page }) => {
+  await page.setViewportSize(DESKTOP);
+  await gotoReady(page, '/explorer', explorerReady(page));
+
+  await explorerReady(page).click();                                    // notes.md
+  await page.getByRole('button', { name: 'script.mjs', exact: true }).click();
+  const tabs = page.getByRole('tab');
+  await expect(tabs).toHaveCount(2);
+  const [notes, script] = [tabs.filter({ hasText: 'notes.md' }), tabs.filter({ hasText: 'script.mjs' })];
+
+  // The active tab (script.mjs, opened last) is the only one in the Tab order.
+  await expect(script).toHaveAttribute('tabindex', '0');
+  await expect(notes).toHaveAttribute('tabindex', '-1');
+
+  await script.focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(notes).toHaveAttribute('aria-selected', 'true');
+  await expect(notes).toHaveAttribute('tabindex', '0');
+  await expect(script).toHaveAttribute('tabindex', '-1');
+  await expect(notes).toBeFocused();
+  await expect(cmContent(page)).toContainText('Explorer fixture markdown.');
+
+  // Home/End jump to the first/last tab; ArrowRight wraps back to the first.
+  await page.keyboard.press('End');
+  await expect(script).toHaveAttribute('aria-selected', 'true');
+  await expect(script).toBeFocused();
+  await page.keyboard.press('ArrowRight');
+  await expect(notes).toHaveAttribute('aria-selected', 'true');
+  await expect(notes).toBeFocused();
+
+  // Enter/Space activate the focused tab explicitly.
+  await page.keyboard.press('End'); // land back on script.mjs, then re-activate via key
+  await page.keyboard.press('Enter');
+  await expect(script).toHaveAttribute('aria-selected', 'true');
+  await expect(cmContent(page)).toContainText('explorerFixture');
+  await expectNoPageOverflow(page);
 });
 
 // ------------------------------------------------------ explorer crossings
@@ -192,19 +236,19 @@ test('phone wiki: page list/reader switcher; the graph opens full width via the 
 
   const sw = switcher(page);
   await expect(sw).toBeVisible();
-  await expect(sw.getByRole('button', { name: 'Files', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await expect(sw.getByRole('button', { name: 'Editor', exact: true })).toBeDisabled();
+  await expect(sw.getByRole('button', { name: 'Pages', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sw.getByRole('button', { name: 'Page', exact: true })).toBeDisabled();
 
   await openWikiPage(page, 'index.md');
-  await expect(sw.getByRole('button', { name: 'Editor', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sw.getByRole('button', { name: 'Page', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByRole('heading', { level: 1, name: 'Handbook' })).toBeVisible();
   await expectNoPageOverflow(page);
 
   // The Hub lives in the list pane header; on phone it opens the graph in the
   // full-width editor pane (the dock has no height to spare inside the list).
-  await sw.getByRole('button', { name: 'Files', exact: true }).click();
+  await sw.getByRole('button', { name: 'Pages', exact: true }).click();
   await hub(page).click();
-  await expect(sw.getByRole('button', { name: 'Editor', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sw.getByRole('button', { name: 'Page', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.getByText(`${WIKI_NAME} · how pages link together`).first()).toBeVisible();
   await expect(page.locator('canvas').first()).toBeVisible();
   await expectNoPageOverflow(page);
@@ -225,7 +269,7 @@ test('phone wiki: re-tapping the already-selected page reveals the reader', asyn
 
   // Back to the list, then re-tap the selection — the reader must come back
   // (the sel?.path early-return must not swallow the pane switch).
-  await switcher(page).getByRole('button', { name: 'Files', exact: true }).click();
+  await switcher(page).getByRole('button', { name: 'Pages', exact: true }).click();
   await page.getByRole('button', { name: 'index.md', exact: true }).click();
   await expect(page.getByRole('heading', { level: 1, name: 'Handbook' })).toBeVisible();
 });
@@ -243,8 +287,8 @@ test('phone wiki: a desktop docked graph crossing down falls back to the list pa
   const sw = switcher(page);
   // The selection is detail, so the reader pane is up; the docked graph hides
   // with the list pane until the switcher surfaces it again.
-  await expect(sw.getByRole('button', { name: 'Editor', exact: true })).toHaveAttribute('aria-pressed', 'true');
-  await sw.getByRole('button', { name: 'Files', exact: true }).click();
+  await expect(sw.getByRole('button', { name: 'Page', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await sw.getByRole('button', { name: 'Pages', exact: true }).click();
 
   // Declared fallback: the dock renders under the list at reduced height, and
   // its controls are reachable, not clipped by an ancestor.
@@ -252,7 +296,7 @@ test('phone wiki: a desktop docked graph crossing down falls back to the list pa
   await expand.scrollIntoViewIfNeeded();
   await expect(expand).toBeInViewport();
   await expand.click();
-  await expect(sw.getByRole('button', { name: 'Editor', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(sw.getByRole('button', { name: 'Page', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('canvas').first()).toBeVisible();
   await expectNoPageOverflow(page);
 });
@@ -263,7 +307,7 @@ test('phone -> desktop with the graph open keeps it mounted', async ({ page, con
   await gotoReady(page, '/wiki', wikiReady(page));
   await openWikiPage(page, 'index.md');
   // The Hub lives in the list pane header — surface the list pane first.
-  await switcher(page).getByRole('button', { name: 'Files', exact: true }).click();
+  await switcher(page).getByRole('button', { name: 'Pages', exact: true }).click();
   await hub(page).click();
   await expect(page.getByText(`${WIKI_NAME} · how pages link together`).first()).toBeVisible();
   await expect(page.locator('canvas').first()).toBeVisible();
@@ -329,10 +373,32 @@ test('desktop wiki: two panes and the docked graph cycle still work at 1440x900'
   await expectNoPageOverflow(page);
 });
 
+// ---------------------------------------------------------- Phosphor skin
+
+// Phase 8 B3 gap 6: this file's phone cases were only ever probed under
+// Phosphor with a throwaway spec (deleted after Phase 6) — no permanent case
+// existed. Shape borrowed from editors-settings-responsive.spec.mjs's Phosphor
+// Console test.
+test('Phosphor Console: explorer and wiki mount and stay overflow-free at desktop and phone', async ({ page, consoleGuard }) => {
+  consoleGuard.allow(/custom wheel sensitivity/i);
+  await seedSkin(page, 'Phosphor Console');
+  for (const vp of [DESKTOP, PHONE]) {
+    await page.setViewportSize(vp);
+    await gotoReady(page, '/explorer', explorerReady(page));
+    await explorerReady(page).click();
+    await expect(cmContent(page)).toContainText('Explorer fixture markdown.');
+    await expectNoPageOverflow(page);
+
+    await page.goto('/wiki');
+    await expect(wikiReady(page)).toBeVisible({ timeout: 15000 });
+    await expectNoPageOverflow(page);
+  }
+});
+
 // ---------------------------------------------------------------- 320x667
 
 test('explorer and wiki at 320px: no page-level horizontal overflow', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 667 });
+  await page.setViewportSize(RESPONSIVE_VIEWPORTS.narrowest);
   await gotoReady(page, '/explorer', explorerReady(page));
   await expectNoPageOverflow(page);
   await page.goto('/wiki');

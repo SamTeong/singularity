@@ -485,13 +485,12 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
  * `useAgents.usage` shape. Renders a muted placeholder row when no data has
  * loaded yet.
  *
- * Each provider gets 2–3 readings — the same anatomy `ProviderRow`
- * (features/usage/UsagePill.jsx, the collapsed-rail tooltip's source) uses: a
- * 5h session window, a 7d weekly window, and a $ extra-usage reading once
- * `extra.enabled && extra.pctUsed != null` (a monthly budget, not a rolling
- * window — it's what keeps the rail non-empty once the plan windows null out
- * on overage). A provider's name is a small group heading over its windows so
- * a reader can tell which bar reads which without a legend.
+ * Each provider gets 2–3 readings: a 5h session window, a 7d weekly window,
+ * and a $ extra-usage reading once `extra.enabled && extra.pctUsed != null`
+ * (a monthly budget, not a rolling window — it's what keeps the rail
+ * non-empty once the plan windows null out on overage). A provider's name is
+ * a small group heading over its windows so a reader can tell which bar reads
+ * which without a legend.
  *
  * Phosphor renders the same rows (task 4.3, revised 8.6) through `@/components/
  * Meter.jsx` — the same themed bar the Usage view's main pane uses (`size="lg"`
@@ -499,9 +498,9 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
  * one implementation. Real percentages/placeholders only, no fabricated
  * provider or telemetry.
  */
-// Per-provider windows, in display order. `pick` mirrors ProviderRow's own
-// `u.ok ? u.session : null` guard so a broken/unauthenticated provider shows
-// '—' per window instead of stale data.
+// Per-provider windows, in display order. `pick`'s `u.ok ? u.session : null`
+// guard means a broken/unauthenticated provider shows '—' per window instead
+// of stale data.
 const USAGE_WINDOWS = [
   { key: '5h', pick: (u) => (u?.ok ? u.session : null), segments: 5, windowMs: 5 * 3.6e6 },
   { key: '7d', pick: (u) => (u?.ok ? u.weekly : null), segments: 7, windowMs: 7 * 24 * 3.6e6 },
@@ -537,10 +536,9 @@ function UsagePanel({ usage, caps }) {
         {!hasData ? (
           <Typography sx={(t) => ({ fontSize: 11, fontFamily: getTokens(t).fonts.mono, textTransform: 'uppercase', color: getRoles(t).status.idle })}>No usage yet</Typography>
         ) : (
-          // Same themed `Meter` the Usage view's main pane and `ProviderRow`
-          // render, at its documented compact size — one bar component, three
-          // surfaces. A mono provider heading groups each provider's 5h/7d(/$)
-          // bars, mirroring ProviderRow's own label-over-meters anatomy.
+          // Same themed `Meter` the Usage view's main pane renders, at its
+          // documented compact size. A mono provider heading groups each
+          // provider's 5h/7d(/$) bars, label over meters.
           <Stack spacing="12px">
             {rows.map((r) => (
               <Box key={r.key}>

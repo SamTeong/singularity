@@ -8,11 +8,11 @@
 // than the fixed responsive-viewport-matrix projects. New session is reached
 // through the phone drawer, never the rail's More menu.
 import { test, expect } from './fixtures/test.mjs';
-import { expectNoPageOverflow, seedSkin, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
+import { expectNoPageOverflow, expectReachableByPaneScroll, seedSkin, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
 import { RICH_SESSION } from '../web/src/mock/fixtures.js';
 
 const PHONE = RESPONSIVE_VIEWPORTS.phone;               // 375x667
-const LANDSCAPE_PHONE = { width: 667, height: 375 };    // >=600px wide -> tablet rail, not the phone switcher
+const LANDSCAPE_PHONE = RESPONSIVE_VIEWPORTS.landscapePhone;    // >=600px wide -> tablet rail, not the phone switcher
 const TABLET = RESPONSIVE_VIEWPORTS.tablet;             // 768x1024
 const COMPACT = RESPONSIVE_VIEWPORTS.compactDesktop;    // 1024x768
 const DESKTOP = RESPONSIVE_VIEWPORTS.desktop;           // 1440x900
@@ -79,7 +79,7 @@ test('phone: transcripts show one pane at a time; selecting a session reveals it
 });
 
 test('phone: 320px wide has no page-level horizontal overflow on Transcripts', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 667 });
+  await page.setViewportSize(RESPONSIVE_VIEWPORTS.narrowest);
   await page.goto('/transcripts');
   await expect(page.getByText(/transcripts$/).first()).toBeVisible({ timeout: 15000 });
   await expectNoPageOverflow(page);
@@ -108,6 +108,25 @@ test('landscape phone: 667px is tablet-width-class, so list and transcript stay 
   const resume = page.getByRole('button', { name: 'Resume', exact: true });
   await resume.scrollIntoViewIfNeeded();
   await expect(resume).toBeInViewport();
+  await expectNoPageOverflow(page);
+});
+
+// Phase 8 B3 gap 4: the landscape-phone 667x375 check above only proved the
+// list/transcript panes fit side by side (width) — SessionHistory.jsx's detail
+// content is `overflow:'auto'` (Phase 4 review LOW 3), so a height squeeze
+// there degrades to an internal scroll rather than a clip; this proves that
+// scroller genuinely bounds the content and the last message is still reachable.
+test('landscape phone: the transcript pane\'s own vertical scroll reaches the last message, not the page', async ({ page }) => {
+  await page.setViewportSize(LANDSCAPE_PHONE);
+  await openRichTranscript(page);
+
+  const header = page.getByText(`Retry backoff cap - ${RICH_SESSION}`, { exact: true });
+  await expect(header).toBeInViewport();
+
+  // Red-proofed: stub SessionHistory.jsx's `flex:1, minHeight:0, overflow:auto`
+  // down to bare `p:2` and this fails — Playwright then reaches the message by
+  // scrolling an `overflow:hidden` ancestor, which a real finger cannot.
+  await expectReachableByPaneScroll(page, page.getByText('Backoff is capped at 30s in', { exact: false }));
   await expectNoPageOverflow(page);
 });
 
@@ -175,7 +194,7 @@ test('phone: New session is reached from the drawer, and Create stays reachable 
 });
 
 test('phone: New session dialog fields stay full width and Cancel is reachable at 320px', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 667 });
+  await page.setViewportSize(RESPONSIVE_VIEWPORTS.narrowest);
   await page.goto('/tasks');
 
   await phoneNewSession(page);

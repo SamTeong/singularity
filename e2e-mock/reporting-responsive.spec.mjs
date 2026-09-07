@@ -6,10 +6,10 @@
 // sets its own viewport and navigates by URL, so this runs in the default
 // `chromium` project rather than the fixed responsive-viewport-matrix projects.
 import { test, expect } from './fixtures/test.mjs';
-import { expectNoPageOverflow, seedSkin, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
+import { expectNoPageOverflow, expectReachableByPaneScroll, seedSkin, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
 
 const PHONE = RESPONSIVE_VIEWPORTS.phone;               // 375x667
-const LANDSCAPE_PHONE = { width: 667, height: 375 };    // >=600px wide -> icon rail, not the phone drawer
+const LANDSCAPE_PHONE = RESPONSIVE_VIEWPORTS.landscapePhone;    // >=600px wide -> icon rail, not the phone drawer
 const TABLET = RESPONSIVE_VIEWPORTS.tablet;             // 768x1024
 const COMPACT = RESPONSIVE_VIEWPORTS.compactDesktop;    // 1024x768
 const DESKTOP = RESPONSIVE_VIEWPORTS.desktop;           // 1440x900
@@ -82,6 +82,83 @@ test('desktop usage: provider cards run side by side, report iframe still explic
   await expectNoPageOverflow(page);
 });
 
+// Phase 8 A5 regression: the report pane's flex chain (UsageView.jsx) used to
+// pin the iframe at its 240px floor (178px content) at every viewport,
+// because the sibling provider-meters section had no bound on its own
+// natural height and always outweighed the shrinkable budget before the
+// report ever saw a surplus to grow into. The report's flex-basis is now
+// proportional (clamp(240px, 55vh, 640px)) instead of the bare floor, so it
+// no longer depends on a leftover that never exists.
+test('desktop usage: report pane grows beyond its floor when the viewport has surplus room', async ({ page }) => {
+  await page.setViewportSize(DESKTOP);
+  await gotoReady(page, '/usage', page.getByRole('button', { name: /collapse usage|expand usage/i }).first());
+
+  const report = page.getByTitle('Usage report');
+  await expect(report).toBeVisible();
+  const box = await report.boundingBox();
+  // The floor alone renders at 178px; real growth clears 190px with margin.
+  expect(box.height).toBeGreaterThan(190);
+  await expectNoPageOverflow(page);
+});
+
+// Phase 8 A5's first shape capped the provider-meters section at 200px with an
+// internal scroll, which cut a provider card mid-meter — reported as the Usage
+// report panel overlapping the Usage panel. The meters section now takes its
+// natural height and the pane's own viewport scrolls instead.
+//
+// The bar this asserts is "nothing INSIDE the pane cuts a card", not "a whole
+// card always fits on screen". The pane is never the viewport — masthead, rail
+// and dock eat into it — so at four of the twelve viewport/skin combinations
+// the pane is measurably shorter than one 364-368px card (ZAPAC 667x375: 299px;
+// Phosphor 320x667 and 375x667: 358px; Phosphor 667x375: 210px; Phosphor
+// 1024x768: 329px). No layout inside UsageView can raise those numbers, and the
+// card is fully reachable by scrolling the pane — which the second assertion
+// proves. Accepted as a vertical-budget constraint, not a clipping defect.
+for (const skin of ['ZAPAC', 'Phosphor Console']) {
+  for (const [name, viewport] of Object.entries(RESPONSIVE_VIEWPORTS)) {
+    test(`usage (${skin} ${name}): no section inside the pane clips a provider card`, async ({ page }) => {
+      await seedSkin(page, skin);
+      await page.setViewportSize(viewport);
+      await gotoReady(page, '/usage', page.getByRole('button', { name: /collapse usage|expand usage/i }).first());
+
+      // Anchored on "Session (5h)" — the full-size ProviderCard's own label. The
+      // sidebar rail renders its own Claude/Ollama rows with the short "5h"
+      // label, so a provider-name locator would match the rail first and never
+      // reach this view at all.
+      const clip = await page.evaluate(() => {
+        const label = [...document.querySelectorAll('*')].find((e) => !e.children.length && e.textContent === 'Session (5h)');
+        let card = label;
+        for (let i = 0; i < 6 && card; i++) {
+          const cs = getComputedStyle(card);
+          if (cs.borderTopWidth !== '0px' && cs.paddingTop !== '0px') break;
+          card = card.parentElement;
+        }
+        // The pane is the scroll viewport that holds BOTH the meters and the
+        // report iframe — identified by content, not by "first bounded
+        // ancestor", which would make the check circular. Anything bounded
+        // between the card and it is a section cutting the card short.
+        const report = document.querySelector('[title="Usage report"]');
+        const bad = [];
+        for (let n = card.parentElement; n && n !== document.body; n = n.parentElement) {
+          if (report && n.contains(report)) break;
+          const oy = getComputedStyle(n).overflowY;
+          if (oy !== 'visible' && n.clientHeight > 0 && n.clientHeight < card.offsetHeight) {
+            bad.push({ cardH: card.offsetHeight, sectionH: n.clientHeight, overflowY: oy });
+          }
+        }
+        return { bad, sawReport: !!report };
+      });
+      expect(clip.sawReport, 'the report iframe anchors the pane boundary').toBe(true);
+      expect(clip.bad, `${skin} ${name}: no section between a provider card and the pane may be shorter than the card`).toEqual([]);
+
+      // ...and the far end of the card is reachable by scrolling the pane, not
+      // by scrolling the page or an ancestor no finger can move.
+      await expectReachableByPaneScroll(page, page.getByText('Weekly (7d)', { exact: true }).first());
+      await expectNoPageOverflow(page);
+    });
+  }
+}
+
 test('landscape phone usage: report iframe keeps a real height at 375px viewport height', async ({ page }) => {
   await page.setViewportSize(LANDSCAPE_PHONE);
   await gotoReady(page, '/usage', page.getByRole('button', { name: /collapse usage|expand usage/i }).first());
@@ -94,7 +171,7 @@ test('landscape phone usage: report iframe keeps a real height at 375px viewport
 });
 
 test('usage at 320px: no page-level horizontal overflow', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 667 });
+  await page.setViewportSize(RESPONSIVE_VIEWPORTS.narrowest);
   await gotoReady(page, '/usage', page.getByRole('button', { name: /collapse usage|expand usage/i }).first());
   await expectNoPageOverflow(page);
 });
@@ -151,7 +228,7 @@ test('tablet history: filter popover opens and the timeframe tab is usable', asy
 });
 
 test('history at 320px: no page-level horizontal overflow', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 667 });
+  await page.setViewportSize(RESPONSIVE_VIEWPORTS.narrowest);
   await gotoReady(page, '/history', page.getByText('History', { exact: true }).first());
   await expectNoPageOverflow(page);
 });
@@ -202,8 +279,39 @@ test('tablet status: two per row in BOTH skins (grid is skin-independent)', asyn
   }
 });
 
+// Phase 8 A6 regression: the per-component grid inside each ProviderCard used
+// the theme's `sm` breakpoint (a viewport decision) even though it lives
+// inside a variable-width card. At a viewport just under BOTH skins' `sm`
+// (ZAPAC 560, Phosphor's default 600) the old code forced a single column
+// regardless of how much room the card actually had; auto-fit tracks the
+// card's real content width instead.
+test('status component grid: two columns below both skins\' `sm`, because the card has room (container-driven, not viewport)', async ({ page }) => {
+  for (const skin of ['ZAPAC', 'Phosphor Console']) {
+    await seedSkin(page, skin);
+    await page.setViewportSize({ width: 500, height: 900 });
+    await gotoReady(page, '/status', page.getByText('Provider status', { exact: true }));
+    await expect(page.getByText('All Systems Operational')).toBeVisible();
+
+    const geom = await page.evaluate(() => {
+      const label = [...document.querySelectorAll('*')].find((el) => el.children.length === 0 && el.textContent === 'All Systems Operational');
+      let card = label;
+      for (let i = 0; i < 6 && card; i++) {
+        const cs = getComputedStyle(card);
+        if (cs.borderTopWidth !== '0px' && cs.paddingTop !== '0px') break;
+        card = card.parentElement;
+      }
+      const grids = [...card.querySelectorAll('div')].filter((d) => getComputedStyle(d).display === 'grid');
+      const ig = grids[grids.length - 1];
+      const cols = getComputedStyle(ig).gridTemplateColumns.split(' ').filter((c) => parseFloat(c) > 1);
+      return { cols: cols.length };
+    });
+    expect(geom.cols, `${skin} two columns at 500px (card has room)`).toBeGreaterThanOrEqual(2);
+    await expectNoPageOverflow(page);
+  }
+});
+
 test('status at 320px: no page-level horizontal overflow', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 667 });
+  await page.setViewportSize(RESPONSIVE_VIEWPORTS.narrowest);
   await gotoReady(page, '/status', page.getByText('Provider status', { exact: true }));
   await expectNoPageOverflow(page);
 });
@@ -228,7 +336,7 @@ test('phone appearance: skin cards wrap, color-mode toggle reachable, no overflo
   await expect(darkBtn).toBeInViewport();
   await expectNoPageOverflow(page);
 
-  await page.setViewportSize({ width: 320, height: 667 });
+  await page.setViewportSize(RESPONSIVE_VIEWPORTS.narrowest);
   await expectNoPageOverflow(page);
 });
 
@@ -281,6 +389,20 @@ test('landscape phone processes: dialog stays usable at 375px height', async ({ 
   await closeBtn.scrollIntoViewIfNeeded();
   await expect(closeBtn).toBeInViewport();
   await expectNoPageOverflow(page);
+});
+
+// Phase 8 B3 gap 7: the baseline route sampler (responsive.spec.mjs) already
+// loops both skins over all 15 routes, so History and Appearance get Phosphor
+// coverage there — but Processes is a dialog, unreachable by a route-only
+// sampler, and had no Phosphor case at all.
+test('Phosphor Console: the processes dialog mounts and stays overflow-free at desktop and phone', async ({ page }) => {
+  await seedSkin(page, 'Phosphor Console');
+  for (const [vp, isPhone] of [[DESKTOP, false], [PHONE, true]]) {
+    await page.setViewportSize(vp);
+    await page.goto('/');
+    await openProcesses(page, isPhone);
+    await expectNoPageOverflow(page);
+  }
 });
 
 // ---------------------------------------------------------- Phosphor skin

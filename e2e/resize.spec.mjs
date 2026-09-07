@@ -32,10 +32,13 @@ test('Resize session list: arrow key nudges the width and persists it', async ({
 
 test('Resize terminal dock: same contract on the axis:"y" handle', async ({ page }) => {
   // The dock handle (axis:'y') exercises the other half of the contract —
-  // aria-orientation flips, and the ceiling is the static configured `max`
-  // (2000) rather than a per-render container measurement (useResizable
-  // deliberately keeps that measurement inside the drag/keyboard handlers,
-  // not the render-time return, per react-hooks/refs).
+  // aria-orientation flips, and (Phase 2's acceptance criterion: clamp
+  // effective saved dimensions to available viewport/container geometry) the
+  // ceiling is a *dynamic* clamp against the main pane's own container height
+  // (useResizable's `effMax`), not the static configured `max` (2000). The two
+  // skins produce different ceilings (their chrome above the dock differs), so
+  // this asserts the invariant the clamp guarantees — bounded, and tracking
+  // the viewport — rather than pinning either skin's magic number.
   await page.goto('/');
 
   const handle = page.getByRole('separator', { name: 'Resize terminal dock' });
@@ -43,7 +46,19 @@ test('Resize terminal dock: same contract on the axis:"y" handle', async ({ page
   await expect(handle).toHaveAttribute('aria-orientation', 'horizontal');
   await expect(handle).toHaveAttribute('aria-valuenow', '300'); // default height, sing-dock-h unset
   await expect(handle).toHaveAttribute('aria-valuemin', '140');
-  await expect(handle).toHaveAttribute('aria-valuemax', '2000');
+
+  const readMax = async () => Number(await handle.getAttribute('aria-valuemax'));
+  const initialMax = await readMax();
+  expect(initialMax).toBeGreaterThan(140);
+  expect(initialMax).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
+
+  // Shrinking the viewport must shrink the ceiling — proves it's a live
+  // container measurement, not a fixed number.
+  await page.setViewportSize({ width: 1600, height: 500 });
+  await expect.poll(readMax).toBeLessThan(initialMax);
+
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await expect.poll(readMax).toBe(initialMax);
 
   await handle.focus();
   await page.keyboard.press('ArrowUp'); // axis:'y' grows *upward* on ArrowUp
@@ -87,7 +102,18 @@ test.describe('Resize handles — Phosphor Console', () => {
     await expect(handle).toHaveAttribute('aria-orientation', 'horizontal');
     await expect(handle).toHaveAttribute('aria-valuenow', '300');
     await expect(handle).toHaveAttribute('aria-valuemin', '140');
-    await expect(handle).toHaveAttribute('aria-valuemax', '2000');
+
+    // Same dynamic-ceiling invariant as the ZAPAC test above — Phosphor's
+    // chrome above the dock differs, so its ceiling (measured 759px) is a
+    // different number from ZAPAC's (860px), not a shared magic constant.
+    const readMax = async () => Number(await handle.getAttribute('aria-valuemax'));
+    const initialMax = await readMax();
+    expect(initialMax).toBeGreaterThan(140);
+    expect(initialMax).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
+    await page.setViewportSize({ width: 1600, height: 500 });
+    await expect.poll(readMax).toBeLessThan(initialMax);
+    await page.setViewportSize({ width: 1600, height: 1000 });
+    await expect.poll(readMax).toBe(initialMax);
 
     await handle.focus();
     await page.keyboard.press('ArrowUp');

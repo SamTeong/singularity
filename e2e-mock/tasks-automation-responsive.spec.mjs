@@ -19,8 +19,8 @@ const PHONE = RESPONSIVE_VIEWPORTS.phone;               // 375x667
 const TABLET = RESPONSIVE_VIEWPORTS.tablet;             // 768x1024
 const COMPACT = RESPONSIVE_VIEWPORTS.compactDesktop;    // 1024x768
 const DESKTOP = RESPONSIVE_VIEWPORTS.desktop;           // 1440x900
-const NARROW = { width: 320, height: 667 };
-const LANDSCAPE_PHONE = { width: 667, height: 375 };
+const NARROW = RESPONSIVE_VIEWPORTS.narrowest;       // 320x667
+const LANDSCAPE_PHONE = RESPONSIVE_VIEWPORTS.landscapePhone;
 
 // Several of these drive a create dialog end to end; this box runs other agent
 // suites concurrently, so keep the per-test budget the other feature specs use.
@@ -79,6 +79,26 @@ test('phone: the board shows one lane at a time behind a switcher, and that lane
   await expectNoPageOverflow(page);
 });
 
+// Phase 8 A7 regression: Phosphor's bilingual status legend (StatusLegend,
+// task 5.1) is the largest single contributor to Phosphor's phone chrome
+// above the board — it's dropped at PHONE_QUERY, where vertical budget is
+// scarce, while staying for tablet+ under Phosphor (unchanged there) and
+// never rendering under ZAPAC at all (no `theme.nerv`).
+test('phone Phosphor: the status legend is hidden (vertical budget), but still renders at tablet width', async ({ page }) => {
+  await seedSkin(page, 'Phosphor Console');
+  await page.setViewportSize(PHONE);
+  await page.goto('/tasks');
+  await expect(page.getByRole('button', { name: 'Seeded todo card', exact: true })).toBeVisible();
+  await expect(page.getByText('QUEUED', { exact: true })).toHaveCount(0);
+  await expectNoPageOverflow(page);
+
+  await page.setViewportSize(TABLET);
+  await page.reload();
+  await expect(page.getByRole('button', { name: 'Seeded todo card', exact: true })).toBeVisible();
+  await expect(page.getByText('QUEUED', { exact: true })).toBeVisible();
+  await expectNoPageOverflow(page);
+});
+
 test('landscape phone: a card is fully reachable rather than clipped to a 10px lane', async ({ page }) => {
   await page.setViewportSize(LANDSCAPE_PHONE);
   await page.goto('/tasks');
@@ -93,6 +113,26 @@ test('landscape phone: a card is fully reachable rather than clipped to a 10px l
   await expect(card).toBeInViewport({ ratio: 0.99 });
   expect(await scrollWindow(card)).toBeGreaterThan(box.height);
   await expectNoPageOverflow(page);
+});
+
+// Phase 8 B3 gap 3a: every board-lane test above `goto()`s straight to its
+// viewport — this is the live 599/600 crossing (isPhone), no reload.
+test('live 599/600 crossing swaps the board between four side-by-side lanes and the one-lane switcher', async ({ page }) => {
+  await page.setViewportSize(TABLET);
+  await page.goto('/tasks');
+  const switcher = page.getByRole('group', { name: 'Board lane', exact: true });
+  await expect(switcher).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Seeded todo card', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Seeded done card', exact: true })).toBeVisible();
+
+  await page.setViewportSize(PHONE);
+  await expect(switcher).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Seeded done card', exact: true })).toHaveCount(0);
+  await expectNoPageOverflow(page);
+
+  await page.setViewportSize(TABLET);
+  await expect(switcher).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Seeded done card', exact: true })).toBeVisible();
 });
 
 test('desktop: the board keeps its four side-by-side lanes', async ({ page }) => {
@@ -345,6 +385,25 @@ test('phone: Move down under an active column sort drops the sort and really mov
     .getByRole('button', { name: 'Move down' }).click();
   await expect.poll(titles).toEqual(['Fixture dependency check', 'Fixture backlog groomer']);
   await expectNoPageOverflow(page);
+});
+
+// Phase 8 B3 gap 3b: the reorder affordance is actually gated on `narrow`
+// (isPhone || isTablet — the same 899/900 boundary TableScroller uses), not
+// 599/600 as the plan phrased it; a live crossing at that boundary was untested.
+test('live 899/900 crossing swaps the background jobs row between the drag grip and Move up/down buttons', async ({ page }) => {
+  await page.setViewportSize(COMPACT);
+  await page.goto('/cron');
+  await expect(page.locator('[aria-label*="Drag to change the order"]').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Move up' })).toHaveCount(0);
+
+  await page.setViewportSize(TABLET);
+  await expect(page.locator('[aria-label*="Drag to change the order"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Move up' }).first()).toBeVisible();
+  await expectNoPageOverflow(page);
+
+  await page.setViewportSize(COMPACT);
+  await expect(page.locator('[aria-label*="Drag to change the order"]').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Move up' })).toHaveCount(0);
 });
 
 test('desktop: the background jobs table keeps its drag grip and gains no move buttons', async ({ page }) => {

@@ -22,7 +22,7 @@ const fmtWall = (iso) => {
 };
 
 // Usage meter: fill + segment ticks + a "now" marker at the current point in
-// the rolling window. size="sm" (UsagePill, collapsed rail) is a compact
+// the rolling window. size="sm" (the rail's UsagePanel) is a compact
 // label/track/pct row; size="lg" (UsageView, main pane) is a labeled block
 // with the %-used/reset line, wall-clock reset time, and per-model breakdown
 // below the track.
@@ -83,7 +83,7 @@ export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
   if (sm) {
     return (
       <Stack direction="row" spacing={0.75} sx={{ alignItems: 'center' }}>
-        {/* `minWidth`, not `width`. UsagePill's labels ("5h", "7d", "$") are
+        {/* `minWidth`, not `width`. The rail's labels ("5h", "7d", "$") are
             narrower than 16px so they still occupy the same 16px box as before,
             but the sidebar rail passes provider names ("CLAUDE", "OLLAMA"),
             which a fixed 16px box cannot hold — they overflowed and were

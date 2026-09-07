@@ -556,6 +556,15 @@ test.describe('Tasks board — Phosphor Console', () => {
   test('the task dossier stays fully within a narrow viewport, sticky actions included', async ({ page }) => {
     await page.setViewportSize({ width: 375, height: 800 });
 
+    // Phase 3: at phone width the board shows one lane at a time behind a
+    // switcher (TasksBoard.jsx) — the Done lane isn't rendered until picked.
+    // Count, not fixed at 1: the earlier "drag a card into Done" ZAPAC test
+    // above permanently moved a second card into Done for the rest of this
+    // file's shared daemon state (same unbounded count already used for the
+    // To-Do column drop target on line 542).
+    const switcher = page.getByRole('group', { name: 'Board lane', exact: true });
+    await switcher.getByRole('button', { name: /^Done \(\d+\)$/ }).click();
+
     // "Seeded done card" is never touched by any test in this file (including
     // the Phosphor drag test above, which moves "Seeded review card" instead).
     const card = page.getByRole('button', { name: 'Seeded done card', exact: true });

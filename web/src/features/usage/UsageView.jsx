@@ -98,8 +98,8 @@ export default function UsageView({ usage, onRefresh }) {
   const [reportOpen, setReportOpen] = useState(true);
   const caps = useCapabilities();
   return (
-    <Stack sx={{ height: '100%', minHeight: 0 }}>
-      <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
+    <Stack sx={{ height: '100%', minHeight: 0, overflowY: 'auto' }}>
+      <Stack direction="row" spacing={1.5} sx={{ flexShrink: 0, p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
         <IconButton
           size="small"
           onClick={() => setOpen((o) => !o)}
@@ -112,7 +112,10 @@ export default function UsageView({ usage, onRefresh }) {
         <Box sx={{ flex: 1 }} />
         <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
       </Stack>
-      <Box sx={{ flexShrink: 1, minHeight: 0, overflowY: 'auto', p: 2, flexGrow: reportOpen ? 0 : 1 }}>
+      {/* Never shrinks: the provider cards are short and always relevant, and
+          capping them clipped a card mid-meter, which read as the report panel
+          overlapping this one. The pane scrolls instead (outer Stack). */}
+      <Box sx={{ flexShrink: 0, p: 2, flexGrow: reportOpen ? 0 : 1 }}>
         <Collapse in={open}>
           <Stack spacing={2}>
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
@@ -125,7 +128,10 @@ export default function UsageView({ usage, onRefresh }) {
         </Collapse>
       </Box>
       {/* Usage report (harness-usage-report skill) fills the rest of the pane, but only while expanded. */}
-      <Box sx={{ flex: reportOpen ? '1 0 240px' : '0 0 auto', minHeight: reportOpen ? 240 : 0 }}>
+      {/* Proportional basis, not the bare 240px floor: the summary above takes
+          its natural height first, so on any real viewport there is no leftover
+          left to grow into and the report would sit pinned at 240. */}
+      <Box sx={{ flexGrow: reportOpen ? 1 : 0, flexShrink: 0, flexBasis: reportOpen ? 'clamp(240px, 55vh, 640px)' : 'auto', minHeight: reportOpen ? 240 : 0 }}>
         <UsageReportView open={reportOpen} onToggle={() => setReportOpen((o) => !o)} />
       </Box>
     </Stack>

@@ -50,6 +50,31 @@ MIT
 - **Settings** — view and customize keyboard shortcut bindings.
 - **Processes** — task manager for Claude processes.
 
+## Responsive layout
+
+The shell adapts across four bands — phone (`<600px`), tablet (`600–899px`),
+compact desktop (`900–1199px`), and desktop (`>=1200px`). Phone gets a mobile
+header + temporary navigation drawer (no persistent rail) and a collapsible
+terminal dock beneath the page; tablet and up keep a persistent icon rail
+(collapsed on tablet, collapse-capable and user-preference-driven from 900px
+up). Both skins (ZAPAC, Phosphor Console) ship the same structure with their
+own chrome and breakpoint pixels.
+
+Run the responsive Playwright projects (mock mode) with:
+
+```
+pnpm test:e2e-mock -- --project=responsive-narrowest    # 320x667
+pnpm test:e2e-mock -- --project=responsive-phone         # 375x667
+pnpm test:e2e-mock -- --project=responsive-tablet        # 768x1024
+pnpm test:e2e-mock -- --project=responsive-compact-desktop  # 1024x768
+pnpm test:e2e-mock -- --project=responsive-desktop       # 1440x900
+```
+
+Each runs the full 15-route x 2-skin baseline contract (`e2e-mock/responsive.spec.mjs`);
+per-feature responsive specs (`e2e-mock/*-responsive.spec.mjs`, `shell-mobile-nav.spec.mjs`,
+`shell-dock-responsive.spec.mjs`) set their own viewports per test and run in
+the default `chromium` project instead, since they exercise live crossings.
+
 ## Security
 
 Daemon binds loopback **only**. It spawns agent with full file system access. Never bind `0.0.0.0`.

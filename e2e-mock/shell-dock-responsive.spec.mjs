@@ -4,15 +4,18 @@
 // initially-restored persisted value both matter), so this runs in the
 // default project rather than the responsive viewport matrix.
 import { test, expect } from './fixtures/test.mjs';
-import { expectNoPageOverflow } from './helpers/responsive.mjs';
+import { expectNoPageOverflow, seedSkin, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
+import { goto } from '../e2e/helpers/nav.mjs';
 
-const PHONE = { width: 375, height: 667 };
-const LANDSCAPE_PHONE = { width: 667, height: 375 }; // >=600px wide → tablet rail, not the phone drawer
-const TABLET = { width: 768, height: 1024 };
-const DESKTOP = { width: 1440, height: 900 };
+const PHONE = RESPONSIVE_VIEWPORTS.phone;                   // 375x667
+const LANDSCAPE_PHONE = RESPONSIVE_VIEWPORTS.landscapePhone; // 667x375, >=600px wide → tablet rail, not the phone drawer
+const TABLET = RESPONSIVE_VIEWPORTS.tablet;                 // 768x1024
+const COMPACT = RESPONSIVE_VIEWPORTS.compactDesktop;        // 1024x768
+const DESKTOP = RESPONSIVE_VIEWPORTS.desktop;               // 1440x900
 
 const listSeparator = (page) => page.getByRole('separator', { name: 'Resize session list' });
 const dockSeparator = (page) => page.getByRole('separator', { name: 'Resize terminal dock' });
+const railWidth = async (page) => (await page.locator('aside').boundingBox()).width;
 
 async function createSession(page, title) {
   await page.getByRole('button', { name: 'New session', exact: true }).click();
@@ -58,6 +61,48 @@ test('a saved 640px list width is clamped at tablet so it cannot crowd the termi
   await expectNoPageOverflow(page);
   // The persisted preference itself is untouched by the tablet clamp.
   expect(await page.evaluate(() => localStorage.getItem('sing-list-w'))).toBe('640');
+});
+
+// Phase 8 B3 gap 1: every clamp test above `goto()`s straight to its target
+// viewport, so the compact-desktop band (900-1199) and a *live* 899/900
+// crossing were never exercised — only the initially-restored path was.
+test('a saved 640px list width live-crosses 899/900: clamped entering tablet, unclamped through compact desktop, restored crossing back', async ({ page }) => {
+  await page.addInitScript(() => window.localStorage.setItem('sing-list-w', '640'));
+  await page.setViewportSize(DESKTOP);
+  await page.goto('/tasks');
+  await expect(listSeparator(page)).toHaveAttribute('aria-valuenow', '640');
+
+  // Live crossing down into tablet (no reload) clamps below the persisted value.
+  await page.setViewportSize(TABLET);
+  await expect.poll(async () => Number(await listSeparator(page).getAttribute('aria-valuenow'))).toBeLessThan(640);
+
+  // The compact-desktop band (900-1199) is desktop width-class — the clamp lifts.
+  await page.setViewportSize(COMPACT);
+  await expect.poll(() => listSeparator(page).getAttribute('aria-valuenow')).toBe('640');
+  await expectNoPageOverflow(page);
+
+  // Crossing back to full desktop keeps the exact same value, and the stored
+  // preference was never touched by any of this live resizing.
+  await page.setViewportSize(DESKTOP);
+  await expect.poll(() => listSeparator(page).getAttribute('aria-valuenow')).toBe('640');
+  expect(await page.evaluate(() => localStorage.getItem('sing-list-w'))).toBe('640');
+});
+
+// Phase 8 B3 gap 2: shell-dock-responsive.spec.mjs had no Phosphor case at all.
+test('the phone dock opens collapsed and its height clamp holds under Phosphor Console too', async ({ page }) => {
+  await seedSkin(page, 'Phosphor Console');
+  await page.addInitScript(() => window.localStorage.setItem('sing-dock-h', '900'));
+  await page.setViewportSize(PHONE);
+  await page.goto('/tasks');
+
+  const restore = page.locator('[role="button"][title="Restore"]');
+  await expect(restore).toBeVisible();
+  await restore.click();
+  const listBtn = page.getByRole('button', { name: 'Session list' });
+  await expect(listBtn).toBeInViewport();
+  const dockBox = await listBtn.locator('xpath=../..').boundingBox();
+  expect(dockBox.height).toBeLessThan(320); // clamped, not the raw persisted 900px
+  await expectNoPageOverflow(page);
 });
 
 // -------------------------------------------------------------- dock height
@@ -225,3 +270,73 @@ for (const [label, viewport] of [['phone', PHONE], ['tablet', TABLET]]) {
     await expect(dialog).not.toBeVisible();
   });
 }
+
+// -------------------------------------------------------- 1199/1200 crossing
+
+// Phase 8 B3 gap 9: the plan's global criteria requires this crossing (route
+// and query state, unsaved editor content, terminal attachment/scrollback,
+// a previously-visited hidden editor, and the restored desktop rail
+// preference — all live, no reload). No component in this diff branches on
+// this exact pixel boundary (only 599/600 and 899/900 do — the same reason
+// Phase 4/5/6 needed no SHORT_QUERY work here), so compact desktop (1024) and
+// full desktop (1440) stand in for "below/above 1200", proving the crossing
+// itself is inert rather than a specific pane-count change.
+test('live compact-desktop/desktop crossing preserves a hidden mounted editor, the live terminal, and the rail collapse preference', async ({ page }) => {
+  test.slow();
+  await page.setViewportSize(DESKTOP);
+  await page.goto('/tasks');
+
+  // A previously-visited, now-hidden editor: reached by clicking through
+  // (client-side nav, not page.goto — a goto is a hard reload and would never
+  // exercise AppShell's persistent-view mount, display:none when hidden,
+  // never unmounted).
+  await goto(page, 'Explorer');
+  const notes = page.getByRole('button', { name: 'notes.md', exact: true }).first();
+  await notes.click();
+  await expect(page.locator('.cm-content').first()).toContainText('Explorer fixture markdown.');
+  await page.locator('.cm-editor').first().evaluate((el) => { el.dataset.keep = 'yes'; });
+  await page.locator('.cm-content').first().click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type('\n/* unsaved */');
+
+  // Back to Tasks (the route the crossing below must preserve), a live
+  // session for the mounted-terminal check, and a rail collapse preference
+  // toggled here (the active row doubles as the toggle — Phase 1).
+  await goto(page, 'Tasks');
+  await expect(page).toHaveURL(/\/tasks(\?|$)/);
+  await createSession(page, 'Crossing fixture');
+  const termNode = await page.locator('.term:visible').elementHandle();
+  // Not exact:true — the expanded rail's active row also carries its task
+  // count badge ("Tasks 4"), unlike the collapsed rail the other toggle tests
+  // click this same row on.
+  await page.locator('aside').getByRole('button', { name: /^Tasks/ }).click();
+  // The collapse is CSS-transitioned — poll for the converged width (64px,
+  // Sidebar.jsx's fixed collapsed value), not just "< some threshold", which
+  // a mid-transition frame can also satisfy and would capture a stale value.
+  await expect.poll(() => railWidth(page)).toBe(64);
+  const collapsedWidth = await railWidth(page);
+
+  const sameTermNode = async () => {
+    const now = await page.locator('.term:visible').elementHandle();
+    return page.evaluate(([a, b]) => a === b, [termNode, now]);
+  };
+
+  // Live crossing down into compact desktop and back — no reload anywhere below.
+  await page.setViewportSize(COMPACT);
+  await expect(page).toHaveURL(/\/tasks(\?|$)/);
+  await expect.poll(() => railWidth(page)).toBe(collapsedWidth);
+  expect(await sameTermNode()).toBe(true);
+  await expectNoPageOverflow(page);
+
+  await page.setViewportSize(DESKTOP);
+  await expect(page).toHaveURL(/\/tasks(\?|$)/);
+  await expect.poll(() => railWidth(page)).toBe(collapsedWidth);
+  expect(await sameTermNode()).toBe(true);
+
+  // The hidden explorer editor survived the whole sequence, unsaved content intact.
+  await goto(page, 'Explorer');
+  const cm = page.locator('.cm-editor').first();
+  expect(await cm.getAttribute('data-keep')).toBe('yes');
+  await expect(page.locator('.cm-content').first()).toContainText('unsaved');
+  await expectNoPageOverflow(page);
+});
