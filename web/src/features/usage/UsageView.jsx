@@ -7,14 +7,17 @@ import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
 import Collapse from '@mui/material/Collapse';
 import IconButton from '@mui/material/IconButton';
+import Link from '@mui/material/Link';
+import Tooltip from '@mui/material/Tooltip';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { visibleProviders, usd } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { Meter } from '@/components/Meter.jsx';
 import UsageReportView from '@/features/usage/UsageReportView.jsx';
 
-function ProviderCard({ label, u }) {
+function ProviderCard({ label, usageUrl, u }) {
   const authHelp = {
     // Browser mode (error 'no-login') vs manual-cookie mode need different fixes.
     ollama: u?.error === 'no-login'
@@ -28,6 +31,16 @@ function ProviderCard({ label, u }) {
       <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'baseline' }}>
         <Typography sx={{ fontSize: 15, fontWeight: 600 }}>{label}</Typography>
         {u?.plan && <Typography variant="code" sx={{ fontSize: 11, px: 0.75, py: 0.25, borderRadius: 1, bgcolor: 'action.selected', color: 'text.secondary', textTransform: 'capitalize' }}>{u.plan}</Typography>}
+        <Box sx={{ flex: 1 }} />
+        {usageUrl && (
+          <Tooltip title="Open usage page" placement="top">
+            {/* alignSelf overrides the header Stack's baseline alignment — an
+                icon has no text baseline of its own to sit on. */}
+            <Link href={usageUrl} target="_blank" rel="noreferrer" sx={{ display: 'inline-flex', alignItems: 'center', alignSelf: 'center' }} color="text.secondary">
+              <OpenInNewIcon fontSize="small" />
+            </Link>
+          </Tooltip>
+        )}
       </Stack>
 
       {!u ? (
@@ -106,7 +119,7 @@ export default function UsageView({ usage, onRefresh }) {
               Shows the usage limits for your whole account: a 5-hour session limit and a 7-day weekly limit. This updates on its own about once a minute — press Refresh to check right now.
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
-              {visibleProviders(caps).map((p) => <ProviderCard key={p.key} label={p.label} u={usage?.[p.key]} />)}
+              {visibleProviders(caps).map((p) => <ProviderCard key={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} />)}
             </Box>
           </Stack>
         </Collapse>

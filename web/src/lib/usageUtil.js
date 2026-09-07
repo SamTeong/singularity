@@ -1,9 +1,12 @@
 // Shared helpers for the usage pill + view. Both render the same normalized
 // {ollama, claude, codex} payload from GET /usage.
+// usageUrl = the provider's own account usage page, linked out of each card
+// (the Status view gets its equivalent pageUrl from the daemon; these are
+// static, so they live here with the rest of the provider catalog).
 export const PROVIDERS = [
-  { key: 'claude', label: 'Claude' },
-  { key: 'codex', label: 'Codex' },
-  { key: 'ollama', label: 'Ollama' },
+  { key: 'claude', label: 'Claude', usageUrl: 'https://claude.ai/settings/usage' },
+  { key: 'codex', label: 'Codex', usageUrl: 'https://chatgpt.com/#settings/Usage' },
+  { key: 'ollama', label: 'Ollama', usageUrl: 'https://ollama.com/settings' },
 ];
 
 // Providers to render given /capabilities. A provider hides when its
