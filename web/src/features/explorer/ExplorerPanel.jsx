@@ -81,6 +81,7 @@ export default function ExplorerPanel() {
 
   const loadedRef = useRef(false); // guards the debounced PUT until restore finishes
   const autosaveTimer = useRef(null); // {id, path} — one pending timer, always for the active tab
+  const openSelectionRef = useRef(0); // incremented for every user selection, including an already-active tab
 
   const clearAutosaveTimer = useCallback(() => { if (autosaveTimer.current) { clearTimeout(autosaveTimer.current.id); autosaveTimer.current = null; } }, []);
   const rootAbs = untildify(root);
@@ -250,6 +251,7 @@ export default function ExplorerPanel() {
   }, [tabs, active, switchActive, keys]);
 
   const openFile = (path) => {
+    const selection = ++openSelectionRef.current;
     if (isPhone) setPhonePane('detail'); // also for the already-active file: its tap must reveal the editor
     if (path === active) return;
     if (tabs.some((t) => t.path === path)) { switchActive(path); return; }
@@ -257,7 +259,7 @@ export default function ExplorerPanel() {
       if (!d.ok) return;
       setTabs((ts) => [...ts, { path, kind: d.kind, size: d.size, mtime: d.mtime, dirty: false }]);
       setContent((m) => { const n = new Map(m); n.set(path, d.content ?? ''); return n; });
-      switchActive(path);
+      if (selection === openSelectionRef.current) switchActive(path);
     });
   };
 

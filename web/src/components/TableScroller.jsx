@@ -23,7 +23,7 @@ export default function TableScroller({ narrow, label, minWidth = 720, children 
       // `flexShrink: 0`: a scroll container's automatic minimum size is 0, so
       // inside a column flex parent (the Automation page) this box would
       // otherwise be squashed to zero height by its own overflowing table.
-      sx={{ maxWidth: '100%', flexShrink: 0, overflowX: 'auto', '& > table': { minWidth } }}
+      sx={{ maxWidth: '100%', maxHeight: '100%', flexShrink: 0, overflow: 'auto', '& > table': { minWidth } }}
     >
       {children}
     </Box>

@@ -1,6 +1,6 @@
 // Mock e2e config. The suite drives the production-mode mock bundle through
 // Vite preview; each browser page owns an isolated in-memory Mirage database.
-import { defineConfig } from '@playwright/test';
+import { defineConfig, devices } from '@playwright/test';
 import { join } from 'node:path';
 import { RESPONSIVE_VIEWPORTS } from './e2e-mock/helpers/responsive.mjs';
 
@@ -35,7 +35,7 @@ export default defineConfig({
   },
   projects: [
     // Keep existing behavioural specs at their established desktop viewport.
-    { name: 'chromium', testIgnore: 'responsive.spec.mjs', use: { browserName: 'chromium' } },
+    { name: 'chromium', testIgnore: ['responsive.spec.mjs', 'webkit-mobile.spec.mjs'], use: { browserName: 'chromium' } },
     // The responsive smoke contract runs only its matrix, so normal mock flows
     // do not become five times slower.
     { name: 'responsive-narrowest', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: narrowest } },
@@ -43,6 +43,13 @@ export default defineConfig({
     { name: 'responsive-tablet', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: tablet } },
     { name: 'responsive-compact-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: compactDesktop } },
     { name: 'responsive-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: desktop } },
+    // Targeted iPhone Safari emulation, not physical-device coverage. Keep its
+    // match narrow so the Chromium suites and responsive matrix stay unchanged.
+    {
+      name: 'webkit-iphone-safari-emulation',
+      testMatch: 'webkit-mobile.spec.mjs',
+      use: { ...devices['iPhone 13'], browserName: 'webkit' },
+    },
   ],
   webServer: {
     // Both --config and --mode are load-bearing: mock mode selects dist-mock

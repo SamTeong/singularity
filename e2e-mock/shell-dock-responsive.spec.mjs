@@ -63,20 +63,28 @@ test('a saved 640px list width is clamped at tablet so it cannot crowd the termi
   expect(await page.evaluate(() => localStorage.getItem('sing-list-w'))).toBe('640');
 });
 
-// Phase 8 B3 gap 1: every clamp test above `goto()`s straight to its target
-// viewport, so the compact-desktop band (900-1199) and a *live* 899/900
-// crossing were never exercised — only the initially-restored path was.
-test('a saved 640px list width live-crosses 899/900: clamped entering tablet, unclamped through compact desktop, restored crossing back', async ({ page }) => {
+// This covers the exact 899/900 edge as well as the wider tablet/compact bands.
+test('a saved 640px list width live-crosses 899/900: rail changes at the edge while the stored desktop width restores through broad bands', async ({ page }) => {
   await page.addInitScript(() => window.localStorage.setItem('sing-list-w', '640'));
   await page.setViewportSize(DESKTOP);
   await page.goto('/tasks');
   await expect(listSeparator(page)).toHaveAttribute('aria-valuenow', '640');
 
-  // Live crossing down into tablet (no reload) clamps below the persisted value.
+  // 899px is tablet: the rail is forced to its icon form, while this width
+  // still has enough room for the saved list preference.
+  await page.setViewportSize({ width: 899, height: COMPACT.height });
+  await expect.poll(() => railWidth(page)).toBe(64);
+  await expect(listSeparator(page)).toHaveAttribute('aria-valuenow', '640');
+
+  // Its immediately adjacent 900px neighbor restores the desktop rail choice
+  // without changing the saved list preference or reloading.
+  await page.setViewportSize({ width: 900, height: COMPACT.height });
+  await expect.poll(() => railWidth(page)).toBeGreaterThan(64);
+  await expect.poll(() => listSeparator(page).getAttribute('aria-valuenow')).toBe('640');
+
+  // Keep the broad tablet/compact transition coverage too.
   await page.setViewportSize(TABLET);
   await expect.poll(async () => Number(await listSeparator(page).getAttribute('aria-valuenow'))).toBeLessThan(640);
-
-  // The compact-desktop band (900-1199) is desktop width-class — the clamp lifts.
   await page.setViewportSize(COMPACT);
   await expect.poll(() => listSeparator(page).getAttribute('aria-valuenow')).toBe('640');
   await expectNoPageOverflow(page);
@@ -273,15 +281,11 @@ for (const [label, viewport] of [['phone', PHONE], ['tablet', TABLET]]) {
 
 // -------------------------------------------------------- 1199/1200 crossing
 
-// Phase 8 B3 gap 9: the plan's global criteria requires this crossing (route
-// and query state, unsaved editor content, terminal attachment/scrollback,
-// a previously-visited hidden editor, and the restored desktop rail
-// preference — all live, no reload). No component in this diff branches on
-// this exact pixel boundary (only 599/600 and 899/900 do — the same reason
-// Phase 4/5/6 needed no SHORT_QUERY work here), so compact desktop (1024) and
-// full desktop (1440) stand in for "below/above 1200", proving the crossing
-// itself is inert rather than a specific pane-count change.
-test('live compact-desktop/desktop crossing preserves a hidden mounted editor, the live terminal, and the rail collapse preference', async ({ page }) => {
+// The plan's global criteria requires this crossing (route state, unsaved
+// hidden-editor content, terminal attachment/scrollback, and the restored
+// desktop rail preference — all live, no reload). The exact 1199/1200 edge is
+// covered alongside the broad compact-desktop/desktop transition.
+test('live 1199/1200 and compact-desktop/desktop crossings preserve a hidden mounted editor, the live terminal, and the rail collapse preference', async ({ page }) => {
   test.slow();
   await page.setViewportSize(DESKTOP);
   await page.goto('/tasks');
@@ -321,12 +325,23 @@ test('live compact-desktop/desktop crossing preserves a hidden mounted editor, t
     return page.evaluate(([a, b]) => a === b, [termNode, now]);
   };
 
-  // Live crossing down into compact desktop and back — no reload anywhere below.
-  await page.setViewportSize(COMPACT);
+  // The exact adjacent edge must retain every mounted/persisted state.
+  await page.setViewportSize({ width: 1199, height: COMPACT.height });
   await expect(page).toHaveURL(/\/tasks(\?|$)/);
   await expect.poll(() => railWidth(page)).toBe(collapsedWidth);
   expect(await sameTermNode()).toBe(true);
   await expectNoPageOverflow(page);
+
+  await page.setViewportSize({ width: 1200, height: COMPACT.height });
+  await expect(page).toHaveURL(/\/tasks(\?|$)/);
+  await expect.poll(() => railWidth(page)).toBe(collapsedWidth);
+  expect(await sameTermNode()).toBe(true);
+
+  // Keep the existing broader compact-desktop/desktop transition coverage.
+  await page.setViewportSize(COMPACT);
+  await expect(page).toHaveURL(/\/tasks(\?|$)/);
+  await expect.poll(() => railWidth(page)).toBe(collapsedWidth);
+  expect(await sameTermNode()).toBe(true);
 
   await page.setViewportSize(DESKTOP);
   await expect(page).toHaveURL(/\/tasks(\?|$)/);

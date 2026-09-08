@@ -115,9 +115,8 @@ test('landscape phone: a card is fully reachable rather than clipped to a 10px l
   await expectNoPageOverflow(page);
 });
 
-// Phase 8 B3 gap 3a: every board-lane test above `goto()`s straight to its
-// viewport — this is the live 599/600 crossing (isPhone), no reload.
-test('live 599/600 crossing swaps the board between four side-by-side lanes and the one-lane switcher', async ({ page }) => {
+// This is the live, exact 599/600 crossing (isPhone), no reload.
+test('live 599/600 crossing preserves an open task detail while swapping the board between four lanes and the one-lane switcher', async ({ page }) => {
   await page.setViewportSize(TABLET);
   await page.goto('/tasks');
   const switcher = page.getByRole('group', { name: 'Board lane', exact: true });
@@ -125,10 +124,25 @@ test('live 599/600 crossing swaps the board between four side-by-side lanes and 
   await expect(page.getByRole('button', { name: 'Seeded todo card', exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Seeded done card', exact: true })).toBeVisible();
 
-  await page.setViewportSize(PHONE);
+  // 600px is still tablet, so all four lanes remain available.
+  await page.setViewportSize({ width: 600, height: PHONE.height });
+  await expect(switcher).toHaveCount(0);
+  await page.getByRole('button', { name: 'Seeded todo card', exact: true }).click();
+  const detail = page.getByRole('dialog', { name: 'Task detail', exact: true });
+  await expect(detail).toBeVisible();
+
+  // 599px is phone. The already-open detail remains mounted through the
+  // exact resize; closing it exposes the one-lane switcher.
+  await page.setViewportSize({ width: 599, height: PHONE.height });
+  await expect(detail).toBeVisible();
+  await detail.getByRole('button', { name: 'Close' }).click();
   await expect(switcher).toBeVisible();
   await expect(page.getByRole('button', { name: 'Seeded done card', exact: true })).toHaveCount(0);
   await expectNoPageOverflow(page);
+
+  // Keep the established broad phone transition as well.
+  await page.setViewportSize(PHONE);
+  await expect(switcher).toBeVisible();
 
   await page.setViewportSize(TABLET);
   await expect(switcher).toHaveCount(0);
@@ -387,20 +401,27 @@ test('phone: Move down under an active column sort drops the sort and really mov
   await expectNoPageOverflow(page);
 });
 
-// Phase 8 B3 gap 3b: the reorder affordance is actually gated on `narrow`
-// (isPhone || isTablet — the same 899/900 boundary TableScroller uses), not
-// 599/600 as the plan phrased it; a live crossing at that boundary was untested.
+// The reorder affordance is gated on `narrow` (isPhone || isTablet), so this
+// covers the exact 899/900 edge without dropping the broader transitions.
 test('live 899/900 crossing swaps the background jobs row between the drag grip and Move up/down buttons', async ({ page }) => {
   await page.setViewportSize(COMPACT);
   await page.goto('/cron');
   await expect(page.locator('[aria-label*="Drag to change the order"]').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Move up' })).toHaveCount(0);
 
-  await page.setViewportSize(TABLET);
+  await page.setViewportSize({ width: 899, height: COMPACT.height });
   await expect(page.locator('[aria-label*="Drag to change the order"]')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Move up' }).first()).toBeVisible();
   await expectNoPageOverflow(page);
 
+  await page.setViewportSize({ width: 900, height: COMPACT.height });
+  await expect(page.locator('[aria-label*="Drag to change the order"]').first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Move up' })).toHaveCount(0);
+
+  // Keep the established broad tablet/compact transition coverage too.
+  await page.setViewportSize(TABLET);
+  await expect(page.locator('[aria-label*="Drag to change the order"]')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Move up' }).first()).toBeVisible();
   await page.setViewportSize(COMPACT);
   await expect(page.locator('[aria-label*="Drag to change the order"]').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Move up' })).toHaveCount(0);

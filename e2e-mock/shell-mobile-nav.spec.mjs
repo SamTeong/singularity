@@ -35,15 +35,33 @@ test('phone shows the nav drawer instead of the rail, and reaches every view', a
   await expectNoPageOverflow(page);
 });
 
-test('phone drawer closes on Escape and returns focus to its trigger', async ({ page }) => {
+test('phone drawer traps focus, closes on backdrop or Escape, and returns focus to its trigger', async ({ page }) => {
   await page.setViewportSize(PHONE);
   await page.goto('/tasks');
 
   const trigger = page.getByRole('button', { name: 'Open navigation' });
+  const drawer = page.getByRole('dialog', { name: 'Navigation' });
   await trigger.click();
-  await expect(page.getByRole('dialog', { name: 'Navigation' })).toBeVisible();
+  await expect(drawer).toBeVisible();
+  await expect.poll(() => drawer.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+
+  const focusable = drawer.locator('[tabindex="0"]');
+  await focusable.first().focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(focusable.last()).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(focusable.first()).toBeFocused();
+
+  await page.locator('.MuiBackdrop-root:not(.MuiBackdrop-invisible)').click({
+    position: { x: PHONE.width - 5, y: PHONE.height / 2 },
+  });
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await expect(drawer).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByRole('dialog', { name: 'Navigation' })).toBeHidden();
+  await expect(drawer).toBeHidden();
   await expect(trigger).toBeFocused();
 });
 

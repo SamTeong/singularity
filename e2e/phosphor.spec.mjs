@@ -316,10 +316,12 @@ test('form helper text keeps its original casing — it is content, not chrome',
   // prose and carries literal identifiers whose casing is meaningful — this one
   // names `CODEX_BIN` and `.env`, which must not render as `.ENV`.
   await page.getByRole('button', { name: 'New session', exact: true }).click();
-  const helper = page.locator('.MuiFormHelperText-root').first();
+  const dialog = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'New session' }) });
+  await dialog.getByLabel(/session id/i).fill('not-a-uuid');
+  const helper = dialog.getByText('Not a valid session id');
   await expect(helper).toBeVisible();
   await expect(helper).toHaveCSS('text-transform', 'none');
-  await page.keyboard.press('Escape');
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
 test('sidebar matches the peg: no nav icons, and More sits below the last nav item', async ({ page }) => {
