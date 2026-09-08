@@ -117,7 +117,14 @@ function Row({ row, expanded, onToggle, onOpenSession, onRegenerate, regeneratin
                 headerRef={headerRef}
               />
               {!!groups.length && (
-                <Stack direction="row" spacing={2} sx={{ overflowX: 'auto', pb: 1, alignItems: 'stretch' }}>
+                <Stack
+                  direction="row"
+                  spacing={2}
+                  role="region"
+                  aria-label={`Projects for ${row.date} (scrolls horizontally)`}
+                  tabIndex={0}
+                  sx={{ overflowX: 'auto', pb: 1, alignItems: 'stretch' }}
+                >
                   {groups.map((g) => (
                     <DayCard
                       key={g.key}

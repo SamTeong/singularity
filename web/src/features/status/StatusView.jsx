@@ -82,8 +82,19 @@ function ProviderCard({ p }) {
             </Stack>
           ))}
 
-          {/* Per-component status grid. */}
-          <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: '1fr 1fr' }, gap: 1.25 }}>
+          {/* Per-component status grid. auto-fit, not the theme's `sm` — this
+              grid lives inside a variable-width ProviderCard (itself sized by
+              the outer auto-fit grid above), so a viewport breakpoint is the
+              wrong input twice over: the two skins redefine `sm` (ZAPAC 560,
+              Phosphor's default 600) AND the card's own rendered width has no
+              fixed relationship to the viewport at all. 110px is measured from
+              this card's own content width at 768px in both skins (ZAPAC
+              267px, Phosphor 252px content box) — the smallest column either
+              skin already renders there (~96-129px) comfortably fits an icon
+              + ellipsis-truncated name, so 110px keeps two columns at that
+              width in both skins while tracking the card's real size instead
+              of the viewport. */}
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(110px, 1fr))', gap: 1.25 }}>
             {(p.components || []).map((c, ci) => {
               const m = COMP[c.status] ?? COMP.operational;
               const Icon = m.Icon;
@@ -146,7 +157,9 @@ export default function StatusView() {
         <Typography sx={{ fontSize: 12, color: 'text.secondary', mb: 2 }}>
           Live availability of upstream provider status pages. Polls every 30 seconds while this page is open.
         </Typography>
-        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', md: '1fr 1fr' }, gap: 2 }}>
+        {/* auto-fit, not a theme breakpoint: the two skins ship different `md` pixels
+            (ZAPAC 720, Phosphor 900), which flipped this grid's column count by skin at 768px. */}
+        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 2 }}>
           {loading && !status
             ? [0, 1].map((i) => <Box key={i} sx={(t) => ({ p: 2.5, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography></Box>)
             : Object.values(status || {}).map((p) => <ProviderCard key={p.key} p={p} />)}

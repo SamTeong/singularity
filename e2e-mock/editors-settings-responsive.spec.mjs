@@ -9,15 +9,18 @@ import { test, expect } from './fixtures/test.mjs';
 import { expectNoPageOverflow, seedSkin, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
 
 const PHONE = RESPONSIVE_VIEWPORTS.phone;               // 375x667
-const LANDSCAPE_PHONE = { width: 667, height: 375 };    // >=600px wide -> Rail, not the phone switcher
+const LANDSCAPE_PHONE = RESPONSIVE_VIEWPORTS.landscapePhone;    // >=600px wide -> Rail, not the phone switcher
 const TABLET = RESPONSIVE_VIEWPORTS.tablet;             // 768x1024
 const COMPACT = RESPONSIVE_VIEWPORTS.compactDesktop;    // 1024x768
 const DESKTOP = RESPONSIVE_VIEWPORTS.desktop;           // 1440x900
 
 test.describe.configure({ timeout: 60_000 });
 
-// The shared Files | Editor switcher (PhonePane.jsx) — one per panel.
-const switcher = (page) => page.getByRole('group').filter({ has: page.getByRole('button', { name: 'Files', exact: true }) });
+// The shared pane switcher (PhonePane.jsx) — one per panel. Its two button
+// labels vary per panel (Config/Hooks/Rules keep Files|Editor; Memory/Skills
+// use their own list label), so it's located by its group aria-label, not by
+// button text.
+const switcher = (page) => page.getByRole('group', { name: 'Pane switch' });
 
 async function gotoReady(page, route, ready) {
   await page.goto(route);
@@ -195,7 +198,7 @@ test('landscape phone config: Rail and editor side by side, Save reachable at 37
 // ------------------------------------------------------------------ 320x667
 
 test('config at 320px: no page-level horizontal overflow', async ({ page }) => {
-  await page.setViewportSize({ width: 320, height: 667 });
+  await page.setViewportSize(RESPONSIVE_VIEWPORTS.narrowest);
   await gotoReady(page, '/config', page.getByRole('button', { name: /workspace/ }).first());
   await expectNoPageOverflow(page);
 });
@@ -235,3 +238,55 @@ test('desktop -> phone with nothing open stays on the file list', async ({ page 
   await expect(sw.getByRole('button', { name: 'Files', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(sw.getByRole('button', { name: 'Editor', exact: true })).toBeDisabled();
 });
+
+// Phase 8 B3 gap 5: the crossing above only covered Config; Memory and Hooks
+// set their pane through non-identical paths (Memory synchronously, Hooks
+// inside a fetch .then), so the shared PhonePane crossing half needed proof
+// across all five panels, each with its own phone -> desktop return.
+const PHONE_PANE_PANELS = [
+  {
+    route: '/config', ready: (p) => p.getByRole('button', { name: /workspace/ }).first(),
+    open: (p) => openConfigSettings(p), content: 'Bash(git status)',
+  },
+  {
+    route: '/hooks', ready: (p) => p.getByRole('button', { name: /workspace/ }).first(),
+    open: (p) => p.getByRole('button', { name: /pre-commit\.sh/ }).first().click(), content: 'fixture hook',
+  },
+  {
+    route: '/rules', ready: (p) => p.getByRole('button', { name: /workspace/ }).first(),
+    open: (p) => p.getByRole('button', { name: /style\.md/ }).first().click(), content: '# Style',
+  },
+  {
+    route: '/memory', ready: (p) => p.getByRole('button', { name: /MEMORY\.md|deploy-notes/ }).first(),
+    open: (p) => p.getByRole('button', { name: /retry-cap/ }).first().click(), content: 'Backoff caps at 30s',
+  },
+  {
+    route: '/skills', ready: (p) => p.getByRole('button', { name: /skills/ }).first(),
+    open: async (p) => { await p.getByRole('button', { name: 'coding' }).click(); await p.getByRole('button', { name: /lint-guard/ }).first().click(); },
+    content: '# Lint guard',
+  },
+];
+
+for (const { route, ready, open, content } of PHONE_PANE_PANELS) {
+  test(`desktop -> phone -> desktop crossing for ${route}: pane follows, node and content preserved`, async ({ page }) => {
+    await page.setViewportSize(DESKTOP);
+    await gotoReady(page, route, ready(page));
+    await open(page);
+    await expect(page.locator('.cm-content').first()).toContainText(content);
+    await page.locator('.cm-editor').first().evaluate((el) => { el.dataset.keep = 'yes'; });
+
+    await page.setViewportSize(PHONE);
+    const sw = switcher(page);
+    await expect(sw.getByRole('button', { name: 'Editor', exact: true })).toHaveAttribute('aria-pressed', 'true');
+    const cm = page.locator('.cm-editor').first();
+    await expect(cm).toBeVisible();
+    expect(await cm.getAttribute('data-keep')).toBe('yes');
+    await expectNoPageOverflow(page);
+
+    await page.setViewportSize(DESKTOP);
+    await expect(switcher(page)).toHaveCount(0);
+    const cm2 = page.locator('.cm-editor').first();
+    expect(await cm2.getAttribute('data-keep')).toBe('yes');
+    await expect(cm2).toContainText(content);
+  });
+}

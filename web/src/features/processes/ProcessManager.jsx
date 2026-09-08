@@ -15,7 +15,10 @@ import TableRow from '@mui/material/TableRow';
 import Typography from '@mui/material/Typography';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import CloseIcon from '@mui/icons-material/Close';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import { StatusPill } from '@/components/StatusPill.jsx';
+import TableScroller from '@/components/TableScroller.jsx';
+import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 
 const KIND_PILL = { tracked: 'active', daemon: 'active', stale: 'error', external: 'review' };
 const KIND_HELP = {
@@ -28,6 +31,13 @@ const KIND_HELP = {
 export default function ProcessManager({ onClose }) {
   const [procs, setProcs] = useState(null);
   const [busy, setBusy] = useState(false);
+  // Six fixed-width columns (~640px) cannot shrink into a phone/tablet dialog
+  // without crushing every field — the same Phase 3 dense-table choice used by
+  // CronJobs/TasksBoard: below 900px, a labelled horizontal scroll region keeps
+  // every column (including Stop) reachable instead of clipping them.
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const isTablet = useMediaQuery(TABLET_QUERY);
+  const narrow = isPhone || isTablet;
 
   const load = useCallback(() => {
     fetch('/api/procs').then((r) => r.json()).then((d) => setProcs(d.procs || [])).catch(() => setProcs([]));
@@ -64,37 +74,39 @@ export default function ProcessManager({ onClose }) {
         <Tooltip title="Refresh list"><IconButton size="small" onClick={load}><RefreshIcon fontSize="small" /></IconButton></Tooltip>
       </DialogTitle>
       <DialogContent dividers sx={{ p: 0 }}>
-        <Table size="small">
-          <TableHead>
-            <TableRow>
-              <TableCell>Process ID</TableCell>
-              <TableCell>Name</TableCell>
-              <TableCell>Started</TableCell>
-              <TableCell>Session</TableCell>
-              <TableCell>Type</TableCell>
-              <TableCell align="right">Stop</TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {(procs || []).map((p) => (
-              <TableRow key={p.pid} hover>
-                <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.pid}</Typography></TableCell>
-                <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.name}</Typography></TableCell>
-                <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.started?.slice(11) || '—'}</Typography></TableCell>
-                <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.session ? p.session.slice(0, 8) : '—'}</Typography></TableCell>
-                <TableCell>
-                  <Tooltip title={KIND_HELP[p.kind]}><span><StatusPill status={KIND_PILL[p.kind]}>{p.kind}</StatusPill></span></Tooltip>
-                </TableCell>
-                <TableCell align="right">
-                  <IconButton size="small" disabled={busy || p.kind === 'daemon'} onClick={() => confirmKill(p)}><CloseIcon fontSize="small" /></IconButton>
-                </TableCell>
+        <TableScroller narrow={narrow} label="Running processes" minWidth={640}>
+          <Table size="small">
+            <TableHead>
+              <TableRow>
+                <TableCell>Process ID</TableCell>
+                <TableCell>Name</TableCell>
+                <TableCell>Started</TableCell>
+                <TableCell>Session</TableCell>
+                <TableCell>Type</TableCell>
+                <TableCell align="right">Stop</TableCell>
               </TableRow>
-            ))}
-            {procs && procs.length === 0 && (
-              <TableRow><TableCell colSpan={6}><Typography sx={{ color: 'text.secondary', py: 2, textAlign: 'center' }}>No processes running.</Typography></TableCell></TableRow>
-            )}
-          </TableBody>
-        </Table>
+            </TableHead>
+            <TableBody>
+              {(procs || []).map((p) => (
+                <TableRow key={p.pid} hover>
+                  <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.pid}</Typography></TableCell>
+                  <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.name}</Typography></TableCell>
+                  <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.started?.slice(11) || '—'}</Typography></TableCell>
+                  <TableCell><Typography variant="code" sx={{ fontSize: 12 }}>{p.session ? p.session.slice(0, 8) : '—'}</Typography></TableCell>
+                  <TableCell>
+                    <Tooltip title={KIND_HELP[p.kind]}><span><StatusPill status={KIND_PILL[p.kind]}>{p.kind}</StatusPill></span></Tooltip>
+                  </TableCell>
+                  <TableCell align="right">
+                    <IconButton size="small" disabled={busy || p.kind === 'daemon'} onClick={() => confirmKill(p)}><CloseIcon fontSize="small" /></IconButton>
+                  </TableCell>
+                </TableRow>
+              ))}
+              {procs && procs.length === 0 && (
+                <TableRow><TableCell colSpan={6}><Typography sx={{ color: 'text.secondary', py: 2, textAlign: 'center' }}>No processes running.</Typography></TableCell></TableRow>
+              )}
+            </TableBody>
+          </Table>
+        </TableScroller>
       </DialogContent>
       <DialogActions sx={{ px: 2, pb: 2, pt: 2 }}>
         <Button size="small" color="error" sx={{ px: 2 }} disabled={busy || stale.length === 0} onClick={killAllStale}>

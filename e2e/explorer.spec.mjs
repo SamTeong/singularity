@@ -117,16 +117,49 @@ test.describe('Explorer', () => {
     expect(existsSync(created)).toBe(false);
   });
 
-  test('reload restores the open tabs and the active tab', async ({ page }) => {
+  test('reload keeps the already-active tab selected after a stale read completes', async ({ page }) => {
     await gotoView(page, 'Explorer');
-    await page.getByRole('button', { name: 'notes.md', exact: true }).click();
-    // Register before the state-changing click below — the debounced
-    // PUT /fs/state fires 400ms after the last change, so the listener must
-    // already be attached when it does.
-    const statePut = page.waitForResponse((r) => r.url().endsWith('/fs/state') && r.request().method() === 'PUT');
+    const initialState = await page.evaluate(async () => (await fetch('/api/fs/state')).json());
+    for (const path of initialState.state?.tabs || []) await expect(tab(page, path)).toBeVisible();
+    if (await tab(page, NOTES).count()) {
+      await tab(page, NOTES).locator('button').click();
+      const discard = page.getByRole('dialog').getByRole('button', { name: 'Discard' });
+      if (await discard.isVisible().catch(() => false)) await discard.click();
+      await expect(tab(page, NOTES)).toHaveCount(0);
+    }
     await page.getByRole('button', { name: 'script.mjs', exact: true }).click();
-    await expect(tab(page, SCRIPT)).toBeVisible();
+    await expect(cm(page)).toContainText('explorerFixture');
+
+    let releaseNotes;
+    let startedNotes;
+    const notesReadStarted = new Promise((resolve) => { startedNotes = resolve; });
+    let delayNotes = true;
+    const holdNotesRead = async (route) => {
+      if (delayNotes) {
+        delayNotes = false;
+        startedNotes();
+        await new Promise((resolve) => { releaseNotes = resolve; });
+      }
+      await route.continue();
+    };
+    const notesReadUrl = (url) => url.pathname === '/api/fs/read' && url.searchParams.get('path') === NOTES;
+    await page.route(notesReadUrl, holdNotesRead);
+
+    await page.getByRole('button', { name: 'notes.md', exact: true }).click();
+    await notesReadStarted;
+    // Script is already active: this tap must invalidate Notes' outstanding
+    // read even though it has no synchronous active-state change to make.
+    const statePut = page.waitForResponse((r) => {
+      if (!r.url().endsWith('/fs/state') || r.request().method() !== 'PUT') return false;
+      const state = r.request().postDataJSON();
+      return state.tabs.includes(NOTES) && state.active === SCRIPT;
+    });
+    await page.getByRole('button', { name: 'script.mjs', exact: true }).click();
+    releaseNotes();
+    await expect(tab(page, NOTES)).toBeVisible();
+    await expect(cm(page)).toContainText('explorerFixture');
     await statePut;
+    await page.unroute(notesReadUrl, holdNotesRead);
 
     await page.reload();
     await page.getByPlaceholder('Search files…').waitFor({ state: 'visible' });

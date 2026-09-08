@@ -6,7 +6,7 @@ test('provider meter cards render from populated mock usage', async ({ page }) =
   await goto(page, 'Usage');
 
   // The meter labels are unique to the full-size ProviderCard — the sidebar
-  // UsagePill renders the same provider with '5h'/'7d' labels instead, which is
+  // The rail's UsagePanel renders the same provider with '5h'/'7d' labels instead, which is
   // why the provider name alone is ambiguous here.
   await expect(page.getByText('Session (5h)').first()).toBeVisible();
   await expect(page.getByText('Weekly (7d)').first()).toBeVisible();

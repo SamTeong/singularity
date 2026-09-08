@@ -30,7 +30,7 @@ process.env.CODEX_HOME = join(scratch, 'codex-nonexistent');
 process.env.USAGE_REPORT_STATE = join(scratch, 'usage-skill-state');
 process.env.CLAUDE_BIN = scratch; // existsSync-true, never actually executed (callSummariser is stubbed)
 process.env.OLLAMA_BIN = scratch; // existsSync-true, never actually executed (callSummariser is stubbed)
-// process.env.CODEX_BIN intentionally left unset.
+delete process.env.CODEX_BIN; // ensure the absent-group-binary fixture ignores inherited environments
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
 const { encodeCwd } = await import('./agents.mjs');

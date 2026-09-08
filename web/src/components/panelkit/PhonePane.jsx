@@ -31,12 +31,16 @@ export function usePhonePane(hasDetail) {
 // The switcher bar itself — MUI's ToggleButtonGroup, themed by each skin
 // (SessionHistory's idiom), so there is no per-skin branch to get wrong.
 // `Editor` is disabled until the panel has something open, mirroring
-// SessionHistory's disabled "Transcript" before a selection.
-export function PhonePaneSwitcher({ pane, onSwitch, detailDisabled }) {
+// SessionHistory's disabled "Transcript" before a selection. `listLabel`/
+// `detailLabel` default to the original Config/Hooks/Rules/Explorer wording;
+// panels whose left pane isn't a file list (Memory, Skills, Wiki) pass their
+// own. `aria-label` on the group keeps the switcher locatable by tests
+// regardless of which labels a given panel passes.
+export function PhonePaneSwitcher({ pane, onSwitch, detailDisabled, listLabel = 'Files', detailLabel = 'Editor' }) {
   return (
-    <ToggleButtonGroup value={pane} exclusive size="small" onChange={(_, v) => v && onSwitch(v)} sx={{ width: '100%' }}>
-      <ToggleButton value="list" sx={{ flex: 1, fontSize: 12, textTransform: 'none' }}>Files</ToggleButton>
-      <ToggleButton value="detail" disabled={detailDisabled} sx={{ flex: 1, fontSize: 12, textTransform: 'none' }}>Editor</ToggleButton>
+    <ToggleButtonGroup value={pane} exclusive size="small" onChange={(_, v) => v && onSwitch(v)} aria-label="Pane switch" sx={{ width: '100%' }}>
+      <ToggleButton value="list" sx={{ flex: 1, fontSize: 12, textTransform: 'none' }}>{listLabel}</ToggleButton>
+      <ToggleButton value="detail" disabled={detailDisabled} sx={{ flex: 1, fontSize: 12, textTransform: 'none' }}>{detailLabel}</ToggleButton>
     </ToggleButtonGroup>
   );
 }

@@ -81,7 +81,12 @@ test('Settings: History summariser accepts a claude-group model and persists it'
 
   // The summariser select now lists every enabled entry across groups
   // (claude/ollama/codex), not just ollama — pick a claude-group option.
-  const summariser = page.getByLabel('History summariser', { exact: true });
+  // `getByRole('combobox', {name})`, not `getByLabel` — MUI's Select renders
+  // both a hidden native input and the visible combobox against the same
+  // label, so `getByLabel` resolves to two elements (the pre-existing
+  // strict-mode collision recorded in Phases 2, 3, 6 and 7). Matches the
+  // working idiom at editors-settings-responsive.spec.mjs:135.
+  const summariser = page.getByRole('combobox', { name: 'History summariser' });
   await summariser.click();
   await page.getByRole('option', { name: 'Best available' }).click();
   await expect(summariser).toHaveText('Best available');

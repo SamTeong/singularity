@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { getTokens } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -13,8 +13,17 @@ const baseOf = (p) => p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) 
 // Passing `onReorder(fromPath, overPath)` makes the tabs drag-reorderable:
 // native HTML5 DnD, live-swapped on dragover (the caller owns the tab order, so
 // there's nothing to commit on drop). Omit it and the strip stays static.
+//
+// Roving tabIndex (WAI-ARIA tabs pattern): only the active tab is in the Tab
+// order (tabIndex 0), the rest are -1; ArrowLeft/ArrowRight/Home/End move
+// focus *and* selection between tabs (automatic activation — there's no
+// separate tabpanel to defer to), Enter/Space activate the focused tab.
+// No `aria-controls`: the editor pane below has no single stable element with
+// an id to point at (ExplorerPanel renders whichever file is active in the
+// same slot, not one per-tab panel), so it's omitted rather than invented.
 export default function TabStrip({ tabs, active, onSelect, onClose, onReorder }) {
   const [dragPath, setDragPath] = useState(null);
+  const tabRefs = useRef([]);
   const dragProps = onReorder ? (tab) => ({
     draggable: true,
     onDragStart: () => setDragPath(tab.path),
@@ -25,11 +34,28 @@ export default function TabStrip({ tabs, active, onSelect, onClose, onReorder })
     },
     onDrop: (e) => { e.preventDefault(); setDragPath(null); },
   }) : () => ({});
+
+  const move = (nextIndex) => {
+    const tab = tabs[nextIndex];
+    if (!tab) return;
+    onSelect(tab.path);
+    tabRefs.current[nextIndex]?.focus();
+  };
+  const onKeyDown = (e, i) => {
+    if (e.key === 'ArrowRight') { e.preventDefault(); move((i + 1) % tabs.length); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); move((i - 1 + tabs.length) % tabs.length); }
+    else if (e.key === 'Home') { e.preventDefault(); move(0); }
+    else if (e.key === 'End') { e.preventDefault(); move(tabs.length - 1); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(tabs[i].path); }
+  };
+
   return (
     <Stack direction="row" role="tablist" aria-label="Editor tabs" sx={(t) => ({ flexShrink: 0, overflowX: 'auto', borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
-      {tabs.map((tab) => (
+      {tabs.map((tab, i) => (
         <Stack key={tab.path} direction="row" spacing={0.5} title={tab.path} onClick={() => onSelect(tab.path)}
-          role="tab" aria-selected={tab.path === active}
+          role="tab" aria-selected={tab.path === active} tabIndex={tab.path === active ? 0 : -1}
+          ref={(el) => { tabRefs.current[i] = el; }}
+          onKeyDown={(e) => onKeyDown(e, i)}
           {...dragProps(tab)}
           sx={(t) => ({
             alignItems: 'center', flexShrink: 0, gap: 0.5, px: 1, py: 0.5, cursor: 'pointer',

@@ -34,7 +34,11 @@ export const VIEW_IDS = {
 //    has made a selection, so it stays valid on a second visit in the same test.
 //  - tasks/cron/usage/appearance/status aren't RailHeader panels; each gets its
 //    own always-present heading/button/label instead.
-const VIEW_LANDMARK = {
+// Exported for e2e-mock/responsive.spec.mjs's strict per-route ready wait —
+// history/settings aren't in VIEW_IDS/MENU_VIEWS above (no rail/More-menu
+// click path they exercise today), but they're real routes the baseline
+// sampler still needs a ready locator for.
+export const VIEW_LANDMARK = {
   // Skin-dependent. ZAPAC's column head is one Typography whose text content is
   // literally "To-Do (7)", so a text matcher finds it. Phosphor's is a flex row
   // of three siblings — label, kanji, count — so its text content reads
@@ -54,6 +58,8 @@ const VIEW_LANDMARK = {
   wiki: (page) => page.getByPlaceholder('Search wiki…'),
   appearance: (page) => page.getByRole('heading', { name: 'Appearance' }),
   status: (page) => page.getByText('Provider status', { exact: true }),
+  history: (page) => page.getByText('History', { exact: true }).first(),
+  settings: (page) => page.getByRole('button', { name: 'Reset all' }), // default tab is Shortcuts
 };
 
 // Wait on `id`'s landmark rather than a fixed sleep. Falls back to a short

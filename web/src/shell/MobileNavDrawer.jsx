@@ -13,17 +13,13 @@ import MonitorHeartIcon from '@mui/icons-material/MonitorHeart';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { getTokens } from '@/theme/contract.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
-import { NAV } from '@/shell/Sidebar.jsx';
-import { NAV_ITEMS } from '@/shell/AppMenu.jsx';
+import { NAV_CATALOG } from '@/shell/views.mjs';
 import { glass, stroke2, statusColor } from '@/shell/shellStyles.js';
 
-// The phone destination list is the same catalogue views.mjs derives its route
-// validation from (rail NAV first, then the More-menu overflow), deduped by id —
-// no second copy of labels or route ids.
-const DESTINATIONS = [];
-for (const item of [...NAV, ...NAV_ITEMS]) {
-  if (!DESTINATIONS.some((x) => x.v === item.v)) DESTINATIONS.push(item);
-}
+// The phone destination list is the same deduped catalogue views.mjs derives
+// its route validation from (rail NAV first, then the More-menu overflow) —
+// no second copy of the dedupe loop.
+const DESTINATIONS = NAV_CATALOG;
 
 /**
  * Phone navigation (`down('sm')`): a header bar with the menu trigger and the
@@ -46,8 +42,14 @@ export default function MobileNavDrawer({
 
   return (
     <>
+      {/* `div`, not `header` (Phase 8 A8): under Phosphor, AppShell also mounts
+          `PhosphorMasthead` (a real `<header>`/banner landmark) at phone
+          width, so a second, unlabelled header here duplicated the banner
+          landmark. This bar is the drawer's trigger + current view name, not
+          a second page banner, so it loses the landmark role rather than
+          gaining a redundant distinguishing label. */}
       <Box
-        component="header"
+        component="div"
         sx={(t) => ({
           ...glass(t),
           position: 'relative',
@@ -72,7 +74,19 @@ export default function MobileNavDrawer({
         >
           <MenuIcon />
         </IconButton>
-        <Typography component="h1" variant="h4" sx={{ flex: 1, minWidth: 0, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {/* `p`, not `h1`, for the same reason the bar above is a `div`: this is
+            the drawer's current-view caption, not the page's heading. As an
+            `h1` it was a second one on every route under Phosphor (whose
+            masthead already renders one) and a third on the routes that own a
+            heading of their own (Appearance, Wiki). Known trade-off: ZAPAC
+            never had a shell-level `h1`, so the routes that own no heading of
+            their own now ship none at phone width either — the same state they
+            have always had at desktop and tablet. Restoring one here would put
+            the duplicate back under Phosphor and on Wiki (whose page title is
+            the correct `h1`, pinned at `level: 1` by e2e/wiki.spec.mjs). A real
+            fix is a per-route heading pass across every view in both skins,
+            deferred rather than papered over here. */}
+        <Typography component="p" variant="h4" sx={{ flex: 1, minWidth: 0, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {current?.label || 'Singularity'}
         </Typography>
       </Box>

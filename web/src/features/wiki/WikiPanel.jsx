@@ -281,7 +281,7 @@ export default function WikiPanel() {
     <Box sx={{ height: '100%', display: 'flex', minHeight: 0, flexDirection: isPhone ? 'column' : 'row' }}>
       {isPhone && (
         <Box sx={(t) => ({ p: 1, flexShrink: 0, borderBottom: `1px solid ${getTokens(t).glass.stroke}` })}>
-          <PhonePaneSwitcher pane={phonePane} onSwitch={setPhonePane} detailDisabled={!(sel || graphView === 'main')} />
+          <PhonePaneSwitcher pane={phonePane} onSwitch={setPhonePane} detailDisabled={!(sel || graphView === 'main')} listLabel="Pages" detailLabel="Page" />
         </Box>
       )}
 

@@ -622,9 +622,13 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
       {/* Phosphor-only bilingual status legend (task 5.1) — the centralized
           lifecycle mapping (`lib/domainState.js`), not a second copy of its
           labels/tones. Uses the vendored StatusLegend, which reads `theme.nerv`
-          directly, so it must never render under ZAPAC (no `nerv` on that theme). */}
-      {phosphor && (
-        <Box sx={{ px: isPhone ? '12px' : '22px', pt: isPhone ? '8px' : '14px', flexShrink: 0 }}>
+          directly, so it must never render under ZAPAC (no `nerv` on that theme).
+          Hidden at PHONE_QUERY (Phase 8 A7): it's the largest single contributor
+          (~60-70px) to Phosphor's phone chrome sitting above the first task
+          card — measured 269px vs ZAPAC's 148px at 375x667 — and phone's
+          vertical budget is the scarce resource, not this legend. */}
+      {phosphor && !isPhone && (
+        <Box sx={{ px: '22px', pt: '14px', flexShrink: 0 }}>
           <StatusLegend
             items={DOMAIN_STATE_ORDER.map((id) => {
               const d = getDomainState(id);
