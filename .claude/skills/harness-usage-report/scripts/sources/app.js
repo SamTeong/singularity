@@ -353,68 +353,24 @@ function renderOllamaTrend(series){
     {title:'Headroom',stats:[["near-cap (>80%)",fmtInt(nearCap)],["capped (100%)",fmtInt(capped)]]}
   ]);
 }
-// Single-gauge variant of svgRateTrend — Codex Plus exposes only a weekly
-// rate-limit window (rate_limits.secondary is always null, no five_hour/session
-// pairing), so there is no second series to plot. Rather than pass a
-// permanently-zero r5 through svgRateTrend (which would render a fake flat 0%
-// "5-hour window" line), this draws one line/legend/dot-set for the single gauge.
-function svgRateTrend1(rl,label,color){
-  if(!rl.length)return '<p class="muted">No rate-limit data yet.</p>';
-  var W=1000,H=220,P=38,n=rl.length;
-  var s=scaler(0,Math.max(n-1,1),0,100,W,H,P);
-  var fx=s[0],fy=s[1];
-  var d=pathD(rl.map(function(s2,i){return [fx(i),fy(s2.r)];}),color,false,'none',2);
-  var th80=pathD([[fx(0),fy(80)],[fx(n-1),fy(80)]],'var(--ink-soft)',true,'none',1);
-  var ceiling=pathD([[fx(0),fy(100)],[fx(n-1),fy(100)]],'var(--ink-faint)',false,'none',0.6);
-  var axes="<line class='axis' x1='"+P+"' y1='"+(H-P)+"' x2='"+(W-P)+"' y2='"+(H-P)+"'/>"+
-          "<line class='axis' x1='"+P+"' y1='"+P+"' x2='"+P+"' y2='"+(H-P)+"'/>";
-  var yticks=[0,25,50,75,100].map(function(v){return "<text x='"+(P-6)+"' y='"+(fy(v)+4).toFixed(1)+"' text-anchor='end' fill='var(--ink-faint)'>"+v+"%</text>";}).join('');
-  var dayFirst={},dayOrder=[];
-  rl.forEach(function(s2,i){var dd=s2.ts.slice(0,10);if(!(dd in dayFirst)){dayFirst[dd]=i;dayOrder.push(dd);}});
-  var MAXLBL=12,stride=Math.ceil(dayOrder.length/MAXLBL);
-  var xlabels='';
-  for(var di=0;di<dayOrder.length;di+=stride){
-    if(di===dayOrder.length-1)continue;
-    var xi=fx(dayFirst[dayOrder[di]]);
-    xlabels+="<text x='"+xi.toFixed(1)+"' y='"+(H-P+16)+"' text-anchor='"+(di===0?'start':'middle')+"' fill='var(--ink-faint)'>"+esc(dayOrder[di].slice(5,10))+"</text>";
-  }
-  var lastDi=dayOrder.length-1,lxi=fx(dayFirst[dayOrder[lastDi]]);
-  xlabels+="<text x='"+lxi.toFixed(1)+"' y='"+(H-P+16)+"' text-anchor='"+(dayOrder.length>1?'end':'start')+"' fill='var(--ink-faint)'>"+esc(dayOrder[lastDi].slice(5,10))+"</text>";
-  xlabels+="<text x='"+(W-P)+"' y='"+(P-10)+"' text-anchor='end' fill='var(--ink-faint)'>% used →</text>";
-  var byDate={};
-  rl.forEach(function(s2,i){if(s2.dow===5||s2.dow===6){var dd=s2.ts.slice(0,10);if(!byDate[dd])byDate[dd]={min:i,max:i};byDate[dd].min=Math.min(byDate[dd].min,i);byDate[dd].max=Math.max(byDate[dd].max,i);}});
-  var step=(n>1)?(fx(1)-fx(0))/2:0;
-  var wknd='';
-  Object.keys(byDate).sort().forEach(function(k){var b=byDate[k];
-    var x1=b.min===0?P:Math.max(P,fx(b.min)-step);
-    var x2=b.max===n-1?(W-P):Math.min(W-P,fx(b.max)+step);
-    if(x2<=x1)return;
-    wknd+="<rect x='"+x1.toFixed(1)+"' y='"+P+"' width='"+(x2-x1).toFixed(1)+"' height='"+(H-2*P)+"' fill='var(--weekend)' fill-opacity='0.5'/>";
-  });
-  var dots='';
-  rl.forEach(function(s2,i){
-    var x=fx(i),tip=esc(s2.ts.slice(0,10)+' · '+label+' '+s2.r.toFixed(1)+'%');
-    dots+="<circle cx='"+x.toFixed(1)+"' cy='"+fy(s2.r).toFixed(1)+"' r='3' fill='"+color+"' opacity='0.85'><title>"+tip+"</title></circle>";
-  });
-  var leg="<div class='legend' style='margin:6px 0'><span class='lg-item'><span class='lg-swatch' style='background:"+color+"'></span>"+esc(label)+"</span><span class='lg-item'><span class='lg-swatch' style='background:var(--weekend);opacity:.5'></span>weekend</span></div>";
-  return leg+svgWrap(W,H,axes+ceiling+th80+yticks+xlabels+wknd+d+dots,'chart');
-}
-// Codex CLI's own weekly quota (Codex Plus), read out of the rollouts by
-// codexIngest into codex-usage.jsonl (no daemon involved, unlike the Ollama
-// card above) and carried here as FORECAST.codex.series — account-wide
-// over wall-clock like the Ollama card above, but only ONE gauge exists
-// (weekly), so this uses svgRateTrend1 instead of svgRateTrend and has no
-// "5-hour window" card.
+// Codex CLI's own account quota (session = 5h window, weekly = 7d), read out
+// of the rollouts by codexIngest plus the daemon's live wham/usage polling
+// into codex-usage.jsonl and carried here as FORECAST.codex.series —
+// account-wide over wall-clock like the Ollama card above. Reuses
+// svgRateTrend + colcards the same way the Ollama card does; no $ stat
+// (Codex is subscription-billed). Legacy weekly-only history just renders a
+// 0% 5h line until 5h readings accumulate.
 function renderCodexTrend(series){
-  var rl=(series||[]).map(function(r){return {ts:r.ts,r:r.weekly||0,dow:dowFromTs(r.ts)};}).filter(function(s){return s.r>0;});
-  if(!rl.length)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No Codex usage yet.</h4><p>Fills in as the app samples Codex weekly quota.</p></div>";
-  var rs=rl.map(function(s){return s.r;});
+  var rl=(series||[]).map(function(r){return {ts:r.ts,r5:r.session||0,r7:r.weekly||0,dow:dowFromTs(r.ts)};}).filter(function(s){return s.r5>0||s.r7>0;});
+  if(!rl.length)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No Codex usage yet.</h4><p>Fills in as the app samples Codex quota.</p></div>";
+  var r5s=rl.map(function(s){return s.r5;}),r7s=rl.map(function(s){return s.r7;});
   var avg=function(a){return a.reduce(function(x,y){return x+y;},0)/a.length;};
   var maxA=function(a){return Math.max.apply(null,a);};
-  var nearCap=rl.filter(function(s){return s.r>=80;}).length;
-  var capped=rl.filter(function(s){return s.r>=99.5;}).length;
-  return svgRateTrend1(rl,'weekly quota','var(--ac)')+colcards([
-    {title:'7-day window',stats:[["avg %",avg(rs).toFixed(1)],["peak %",maxA(rs).toFixed(1)]]},
+  var nearCap=rl.filter(function(s){return s.r5>=80||s.r7>=80;}).length;
+  var capped=rl.filter(function(s){return s.r5>=99.5||s.r7>=99.5;}).length;
+  return svgRateTrend(rl)+colcards([
+    {title:'5-hour window',stats:[["avg %",avg(r5s).toFixed(1)],["peak %",maxA(r5s).toFixed(1)]]},
+    {title:'7-day window',stats:[["avg %",avg(r7s).toFixed(1)],["peak %",maxA(r7s).toFixed(1)]]},
     {title:'Headroom',stats:[["near-cap (>80%)",fmtInt(nearCap)],["capped (100%)",fmtInt(capped)]]}
   ]);
 }
@@ -696,7 +652,15 @@ var OLLAMA_WB_OPTS={
   footnote:"<p class='muted' style='margin-top:6px'>Ollama's own account quota — separate from the Claude 5h:7d rate above, so nothing here draws on or competes with it. Bucketed per 7d reset window for the same reason: a day carries too little Δ7d% to divide by, and a calendar week straddles the reset boundary.</p>"
 };
 var OLLAMA_FORECAST_EMPTY_HTML="<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M3 17l6-6 4 4 8-8'/><path d='M14 7h7v7'/></svg><h4>No ollama forecast yet.</h4><p>Needs 2 finished windows. Fills in as the app samples ollama account quota — 5h windows within a day, 7d windows after about two weeks.</p></div>";
-var CODEX_FORECAST_EMPTY_HTML="<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M3 17l6-6 4 4 8-8'/><path d='M14 7h7v7'/></svg><h4>No Codex forecast yet.</h4><p>Needs 2 finished weekly windows. Fills in as the app samples Codex quota.</p></div>";
+// Codex window-balance card opts (renderWindowBalance): same 5h/7d labels —
+// only the source/empty text that would be wrong for Codex is overridden.
+var CODEX_WB_OPTS={
+  chart:{src:'Codex snapshots',axis:'rate = Δ5h% / Δ7d% ↑'},
+  emptyHtml:"<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 12h16M8 8l-4 4 4 4M16 16l4-4-4-4'/></svg><h4>No Codex window balance yet.</h4><p>Needs a 7d window with measurable movement across at least one finished 5h window. Fills in as the app samples Codex account quota.</p></div>",
+  pollNote:" The app samples this on its own — nothing to run; the gap closes as more 5h windows finish.",
+  footnote:"<p class='muted' style='margin-top:6px'>Codex's own account quota — separate from the Claude 5h:7d rate above, so nothing here draws on or competes with it. Bucketed per 7d reset window for the same reason: a day carries too little Δ7d% to divide by, and a calendar week straddles the reset boundary.</p>"
+};
+var CODEX_FORECAST_EMPTY_HTML="<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M3 17l6-6 4 4 8-8'/><path d='M14 7h7v7'/></svg><h4>No Codex forecast yet.</h4><p>Needs 2 finished windows. Fills in as the app samples Codex quota.</p></div>";
 
 // ---- render ----
 function render(range){
@@ -716,11 +680,12 @@ function render(range){
   el('sec-ollama-util').innerHTML=renderOllamaTrend(FORECAST.ollama&&FORECAST.ollama.series);
   el('sec-ollama-window-balance').innerHTML=renderWindowBalance(FORECAST.ollama,OLLAMA_WB_OPTS);
   el('sec-ollama-forecast').innerHTML=renderForecast(FORECAST.ollama,['session','weekly'],{session:'5-hour window',weekly:'7-day window'},OLLAMA_FORECAST_EMPTY_HTML);
-  // Codex CLI weekly quota: same reasoning as the Ollama block above — sampled
-  // independently of the session date picker, so it renders unconditionally and
-  // stays out of the empty-range bail's id list below. Only one gauge exists.
+  // Codex CLI rate-limit cards: same reasoning as the Ollama block above —
+  // sampled independently of the session date picker, so they render
+  // unconditionally and stay out of the empty-range bail's id list below.
   el('sec-codex-util').innerHTML=renderCodexTrend(FORECAST.codex&&FORECAST.codex.series);
-  el('sec-codex-forecast').innerHTML=renderForecast(FORECAST.codex,['weekly'],{weekly:'weekly quota'},CODEX_FORECAST_EMPTY_HTML);
+  el('sec-codex-window-balance').innerHTML=renderWindowBalance(FORECAST.codex,CODEX_WB_OPTS);
+  el('sec-codex-forecast').innerHTML=renderForecast(FORECAST.codex,['session','weekly'],{session:'5-hour window',weekly:'7-day window'},CODEX_FORECAST_EMPTY_HTML);
   if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','burn-cards','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-cadence','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-harness-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
   var st=deriveStats(agg,range),t=agg.totals;
   var chartModels=agg.models.slice();
