@@ -37,9 +37,9 @@ const USAGE_SNAPSHOTS_JSONL = path.join(SKILL_STATE_DIR, "usage-snapshots.jsonl"
 // rate-limit cards are omitted entirely (see _build_ollama_forecast).
 const OLLAMA_USAGE_JSONL = path.join(SKILL_STATE_DIR, "ollama-usage.jsonl");
 const OLLAMA_SERIES_CAP = 400; // max points in the report's trend series (strided, see _stride)
-// Codex CLI weekly-quota history (written by codexIngest, see codex.mjs). Same
-// snapshot shape as ollama-usage.jsonl but ONE gauge only ("weekly") — Codex
-// Plus exposes a single 7-day rate-limit window, no five_hour/session pairing.
+// Codex CLI rate-limit history (written by codexIngest, see codex.mjs, plus
+// the daemon's live wham/usage polling). Same snapshot shape as
+// ollama-usage.jsonl — session = the 5h window, weekly = the 7d window.
 const CODEX_USAGE_JSONL = path.join(SKILL_STATE_DIR, "codex-usage.jsonl");
 const USAGE_API_URL = "https://api.anthropic.com/api/oauth/usage";
 const USAGE_API_BETA = "oauth-2025-04-20";
@@ -1701,48 +1701,63 @@ function _build_ollama_forecast(nowSec, cfg, fitAt, sessions) {
   };
 }
 
-// ---- Codex weekly rate-limit forecast (own account quota, no OAuth/statusline) ----
-// Mirrors _build_ollama_forecast, but Codex Plus exposes only ONE rate-limit
-// window: rate_limits.primary.window_minutes is always 10080 (weekly),
-// secondary is always null — so there's no five_hour/session pairing and no
-// window-balance ratio to compute. Absent/empty codex-usage.jsonl → null, so
-// out.codex is omitted entirely on a machine with no Codex.
+// ---- Codex 5h/7d rate-limit forecast (own account quota, no OAuth/statusline) ----
+// Mirrors _build_ollama_forecast over codex-usage.jsonl: session = the 5h
+// window, weekly = the 7d window (legacy single-gauge Plus rollouts keep a
+// weekly-only primary — a null session gauge just fits {ok:false}). Same
+// windowBalance estimator via the generic session/weekly pairing. Absent/empty
+// codex-usage.jsonl → null, so out.codex is omitted entirely on a machine
+// with no Codex.
+// Same wrapper contract as _ollama_window_balance, over codex-usage.jsonl.
+function _codex_window_balance(snaps, nowSec) {
+  const windows = _window_balance_oauth(snaps, nowSec, "session", "weekly");
+  const pooled = _wb_pool(windows, "codex");
+  if (!pooled) return null;
+  return { pooled, windows, statuslineWindows: [], minCoverage: WB_MIN_COVERAGE, minD7: WB_MIN_D7 };
+}
+
 function _build_codex_forecast(nowSec, cfg, fitAt) {
   const snaps = _load_usage_snapshots(CODEX_USAGE_JSONL);
   if (!snaps.length) return null;
-  const windows = _gauge_windows(snaps, "weekly");
-  const fit = _fit_gauge("weekly", windows, nowSec, cfg);
-  let gauge = { ok: false };
-  if (fit) {
-    const open = windows.filter((w) => w.resetSec > nowSec)
-      .sort((a, b) => b.snaps.length - a.snaps.length)[0];
-    let result = null;
-    if (open && open.snaps.length >= 1) {
-      const last = open.snaps[open.snaps.length - 1];
-      const r = FC.runForecast({
-        nowSec: last.t, resetSec: open.resetSec, uNow: last.u,
-        snapshots: open.snaps, prior: fit.prior, calibration: fit.calibration,
-        thresholds: [100, 80],
-      }, cfg);
-      if (r.ok) result = {
-        forecast: r.forecast, posterior: { rHat: r.posterior.rHat, usedOLS: r.posterior.usedOLS, n: r.posterior.n },
-        etas: r.etas, openResetSec: open.resetSec, uNow: last.u, nSnaps: open.snaps.length,
+  const gauges = {};
+  for (const gauge of ["weekly", "session"]) {
+    const windows = _gauge_windows(snaps, gauge);
+    const fit = _fit_gauge(gauge, windows, nowSec, cfg);
+    let out = { ok: false };
+    if (fit) {
+      const open = windows.filter((w) => w.resetSec > nowSec)
+        .sort((a, b) => b.snaps.length - a.snaps.length)[0];
+      let result = null;
+      if (open && open.snaps.length >= 1) {
+        const last = open.snaps[open.snaps.length - 1];
+        const r = FC.runForecast({
+          nowSec: last.t, resetSec: open.resetSec, uNow: last.u,
+          snapshots: open.snaps, prior: fit.prior, calibration: fit.calibration,
+          thresholds: [100, 80],
+        }, cfg);
+        if (r.ok) result = {
+          forecast: r.forecast, posterior: { rHat: r.posterior.rHat, usedOLS: r.posterior.usedOLS, n: r.posterior.n },
+          etas: r.etas, openResetSec: open.resetSec, uNow: last.u, nSnaps: open.snaps.length,
+        };
+      }
+      out = {
+        ok: true, source: "codex", nWindows: fit.nWindows,
+        prior: { mu0: fit.prior.mu0, tau0Sq: fit.prior.tau0Sq, nSessions: fit.prior.nSessions },
+        calibration: fit.calibration, result,
       };
     }
-    gauge = {
-      ok: true, source: "codex", nWindows: fit.nWindows,
-      prior: { mu0: fit.prior.mu0, tau0Sq: fit.prior.tau0Sq, nSessions: fit.prior.nSessions },
-      calibration: fit.calibration, result,
-    };
+    gauges[gauge] = out;
   }
   return {
     modelVersion: FC.MODEL_VERSION, fitAt,
-    gauges: { weekly: gauge },
+    gauges,
+    windowBalance: _codex_window_balance(snaps, nowSec),
     // Trend series for the utilization card, strided like the ollama one.
     series: _stride(snaps, OLLAMA_SERIES_CAP).map((rec) => ({
       ts: rec.fetched_at,
+      session: rec.session && rec.session.utilization != null ? Number(rec.session.utilization) : null,
       weekly: rec.weekly && rec.weekly.utilization != null ? Number(rec.weekly.utilization) : null,
-    })).filter((r) => r.weekly != null),
+    })).filter((r) => r.session != null || r.weekly != null),
   };
 }
 

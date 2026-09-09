@@ -136,7 +136,7 @@ function _new_thread_res() {
     tools: {},
     turnContexts: [], // {epoch, model}
     tokenReadings: [], // {epoch, model, i (non-cached input), o, cr, cc}
-    rateReadings: [], // {epoch, usedPercent, resetsAt}
+    rateReadings: [], // {epoch, session:{utilization,resets_at}|null, weekly:{...}|null}
     contextWindowSize: null, // {epoch, size}
   };
 }
@@ -207,10 +207,21 @@ function _parse_thread(filePath, fallbackId, epochFromIso) {
           res.contextWindowSize = { epoch: ts, size: info.model_context_window };
         }
       }
-      const primary = _dig(p, "rate_limits", "primary");
-      if (primary && typeof primary.used_percent === "number") {
-        res.rateReadings.push({ epoch: ts, usedPercent: primary.used_percent, resetsAt: primary.resets_at ?? null });
+      // rate_limits: primary = the 5h window, secondary = the 7d window (same
+      // classification the daemon's normalizeCodexLimits uses — window_minutes
+      // >= 1440 is weekly). One record per token_count event; legacy Plus
+      // rollouts carry a weekly-only primary and a null secondary.
+      const rl = _dig(p, "rate_limits") || {};
+      let rateRec = null;
+      for (const key of ["primary", "secondary"]) {
+        const w = rl[key];
+        if (!w || typeof w.used_percent !== "number") continue;
+        const gauge = (Number(w.window_minutes) || 0) >= 1440 ? "weekly" : "session";
+        (rateRec ??= { epoch: ts, session: null, weekly: null })[gauge] = {
+          utilization: w.used_percent, resets_at: w.resets_at ?? null,
+        };
       }
+      if (rateRec) res.rateReadings.push(rateRec);
     }
   }
 
@@ -291,30 +302,37 @@ function _maybe_warn_unknown_model(model, priceKey, warned) {
   }
 }
 
-// Append newly-observed weekly-quota readings, deduped against the file's
-// last line then within this pass. `readings` should only contain readings
+// Append newly-observed rate-limit readings to codex-usage.jsonl, deduped
+// against the file's last line then within this pass. Record shape mirrors the
+// daemon's ollama-usage.jsonl contract exactly ({fetched_at, session, weekly})
+// so stats.mjs's generic session/weekly machinery (window balance, forecast)
+// reads both files with the same code. `readings` should only contain readings
 // from threads reparsed THIS run (cache hits carry readings already recorded
-// in a prior pass) so an unchanged ~/.codex produces zero new lines.
+// in a prior pass) so an unchanged ~/.codex produces zero new lines. Legacy
+// weekly-only lines (single-gauge Codex Plus) stay readable — session is null.
+// The daemon ALSO appends this file (live wham/usage polling, appendCodexHistory);
+// both writers dedupe against their own last reading, and a zero-delta duplicate
+// line is harmless to the delta-based estimators.
 function _append_usage_jsonl(usagePath, readings, localFmt) {
   if (!readings.length) return;
-  let lastPair = null;
+  let lastKey = null;
   if (isFile(usagePath)) {
     try {
       const lines = fs.readFileSync(usagePath, "utf-8").split(/\r?\n/).filter((l) => l.trim());
       if (lines.length) {
         const last = JSON.parse(lines[lines.length - 1]);
-        lastPair = [last.weekly.utilization, last.weekly.resets_at];
+        lastKey = JSON.stringify([last.session ?? null, last.weekly ?? null]);
       }
     } catch {
-      lastPair = null;
+      lastKey = null;
     }
   }
   const out = [];
   for (const r of readings) {
-    const pair = [r.usedPercent, r.resetsAt];
-    if (lastPair && lastPair[0] === pair[0] && lastPair[1] === pair[1]) continue;
-    out.push(JSON.stringify({ fetched_at: localFmt(r.epoch), weekly: { utilization: r.usedPercent, resets_at: r.resetsAt } }));
-    lastPair = pair;
+    const key = JSON.stringify([r.session ?? null, r.weekly ?? null]);
+    if (lastKey && lastKey === key) continue;
+    out.push(JSON.stringify({ fetched_at: localFmt(r.epoch), session: r.session ?? null, weekly: r.weekly ?? null }));
+    lastKey = key;
   }
   if (!out.length) return;
   try {
@@ -411,7 +429,8 @@ export function codexIngest(deps = {}) {
       }
     }
 
-    const latestRate = _last_by_epoch(acc.rateReadings);
+    const latestSession = _last_by_epoch(acc.rateReadings.filter((r) => r.session));
+    const latestWeekly = _last_by_epoch(acc.rateReadings.filter((r) => r.weekly));
     const hasDuration = acc.startEpoch !== null && acc.endEpoch !== null;
 
     rows.push({
@@ -429,8 +448,8 @@ export function codexIngest(deps = {}) {
       api_duration_ms: "",
       lines_added: "",
       lines_removed: "",
-      rl_5h_pct: "",
-      rl_7d_pct: latestRate ? latestRate.usedPercent : "",
+      rl_5h_pct: latestSession ? latestSession.session.utilization : "",
+      rl_7d_pct: latestWeekly ? latestWeekly.weekly.utilization : "",
       context_pct: "",
       context_window_size: acc.contextWindowSize ? acc.contextWindowSize.size : "",
       turns: acc.turns,
@@ -570,7 +589,10 @@ function _selftest() {
     { timestamp: iso(63000), type: "event_msg", payload: {
       type: "token_count",
       info: { last_token_usage: { input_tokens: 300, cached_input_tokens: 0, cache_write_input_tokens: 50, output_tokens: 20 }, total_token_usage: { input_tokens: 300, output_tokens: 20 }, model_context_window: 200000 },
-      rate_limits: { primary: { used_percent: 15, window_minutes: 10080, resets_at: 2000000000 }, secondary: null },
+      rate_limits: {
+        primary: { used_percent: 15, window_minutes: 300, resets_at: 2000000500 },
+        secondary: { used_percent: 15, window_minutes: 10080, resets_at: 2000000000 },
+      },
     } },
     { timestamp: iso(64000), type: "response_item", payload: { type: "custom_tool_call", name: "apply_patch" } },
   ];
@@ -614,6 +636,7 @@ function _selftest() {
   // subagent's turn_context is chronologically last -> its model wins
   assert(row.last_model === "codex-test-terra", `expected last_model codex-test-terra, got ${row.last_model}`);
   assert(row.rl_7d_pct === 15, `expected rl_7d_pct 15 (latest reading), got ${row.rl_7d_pct}`);
+  assert(row.rl_5h_pct === 15, `expected rl_5h_pct 15 (sub's 300-min window), got ${row.rl_5h_pct}`);
   assert(row.context_window_size === 200000, `expected context_window_size 200000, got ${row.context_window_size}`);
   assert(row.total_cost_usd === "", "total_cost_usd must be blank (Codex is subscription-billed)");
   const expectCost = ((800 + 100 + 200 + 0) + (400 + 50 + 100 + 0) + (300 + 20 + 0 + 50)) * 0.000001;
@@ -661,6 +684,12 @@ function _selftest() {
   const usagePath = path.join(stateDir, "codex-usage.jsonl");
   const linesAfterFirst = fs.readFileSync(usagePath, "utf-8").split(/\r?\n/).filter((l) => l.trim()).length;
   assert(linesAfterFirst > 0, "expected codex-usage.jsonl to gain lines on first ingest");
+  // Record shape mirrors ollama-usage.jsonl ({fetched_at, session, weekly}) so
+  // stats.mjs's generic session/weekly machinery reads both files the same way.
+  const lastRec = JSON.parse(fs.readFileSync(usagePath, "utf-8").trim().split(/\r?\n/).pop());
+  assert(Object.keys(lastRec).sort().join(",") === "fetched_at,session,weekly", `unexpected codex-usage.jsonl record keys: ${Object.keys(lastRec).join(",")}`);
+  assert(lastRec.session && lastRec.session.utilization === 15, `expected last record session 15, got ${JSON.stringify(lastRec.session)}`);
+  assert(lastRec.weekly && lastRec.weekly.utilization === 15, `expected last record weekly 15, got ${JSON.stringify(lastRec.weekly)}`);
 
   // Second run over unchanged data: cache hits everywhere, zero new readings
   // gathered, usage.jsonl must not grow.

@@ -27,6 +27,8 @@ const rolloutLines = [
 ];
 writeFileSync(join(codexDay, 'rollout-2026-07-20T00-00-00-abc123.jsonl'), `${rolloutLines.join('\n')}\n`);
 process.env.CODEX_HOME = join(scratch, 'codex-home');
+const codexAuth = join(process.env.CODEX_HOME, 'auth.json');
+const writeCodexAuth = (tokens) => writeFileSync(codexAuth, JSON.stringify({ tokens }));
 
 // Point the OAuth refresh at scratch credentials, never the real ~/.claude — a
 // live refresh_token grant here would rotate the developer's own token.
@@ -37,7 +39,7 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, fetchCodex, refreshClaudeAuth, refreshOauthGrant } = await import('./usage.mjs');
+const { parseOllamaHtml, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant } = await import('./usage.mjs');
 
 // Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
 // response: plan badge, Session then Weekly meter (aria-label + segment buttons),
@@ -184,6 +186,32 @@ test('appendClaudeSnapshot: skill snapshot shape, dedupes an unchanged reading',
   assert.equal(JSON.parse(lines[1]).five_hour.utilization, 55);
 });
 
+// appendCodexHistory writes the report skill's codex-usage.jsonl shape
+// ({fetched_at, session, weekly, plan}) and de-dupes an unchanged reading —
+// same contract as appendOllamaHistory above, feeding the skill's Codex
+// 5h/7d forecast + window-balance cards.
+const CODEX_HISTORY_FILE = join(process.env.USAGE_REPORT_STATE, 'codex-usage.jsonl');
+const CODEX_READING = {
+  ok: true, source: 'codex', plan: 'plus',
+  session: { pctUsed: 40, resetsAt: '2026-09-09T18:00:00Z', models: [] },
+  weekly: { pctUsed: 12.5, resetsAt: '2026-09-12T00:00:00Z', models: [] },
+};
+
+test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', () => {
+  appendCodexHistory(CODEX_READING);
+  appendCodexHistory(CODEX_READING); // identical → no second line
+  appendCodexHistory({ ...CODEX_READING, session: { ...CODEX_READING.session, pctUsed: 44 } });
+
+  const lines = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 2);
+  const row = JSON.parse(lines[0]);
+  assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.deepEqual(row.session, { utilization: 40, resets_at: '2026-09-09T18:00:00Z' });
+  assert.deepEqual(row.weekly, { utilization: 12.5, resets_at: '2026-09-12T00:00:00Z' });
+  assert.equal(row.plan, 'plus');
+  assert.equal(JSON.parse(lines[1]).session.utilization, 44);
+});
+
 // fetchCodex scans a rollout jsonl backwards for the last token_count line's
 // rate_limits, mapping the 10080-minute (7d) window to `weekly` only.
 test('fetchCodex: backwards-scans to the last token_count line', async () => {
@@ -236,6 +264,66 @@ test('fetchCodex: freshest rate_limits record wins over newest-mtime file', asyn
   const u = await fetchCodex();
   assert.equal(u.ok, true);
   assert.equal(u.weekly.pctUsed, 99);
+});
+
+test('fetchCodex: uses live API headers and normalizes 5h + 7d windows', async () => {
+  const token = 'test-access-token';
+  const accountId = 'test-account-id';
+  writeCodexAuth({ access_token: token, account_id: accountId });
+  const originalFetch = globalThis.fetch;
+  let request;
+  globalThis.fetch = async (url, opts) => {
+    request = { url, opts };
+    return { status: 200, json: async () => ({
+      plan_type: 'plus',
+      rate_limit: {
+        primary_window: { used_percent: 42, limit_window_seconds: 18_000, reset_at: 1786000000 },
+        secondary_window: { used_percent: 63, limit_window_seconds: 604_800, reset_at: 1786172475 },
+      },
+    }) };
+  };
+  try {
+    const u = await fetchCodex();
+    assert.equal(request.url, 'https://chatgpt.com/backend-api/wham/usage');
+    assert.equal(request.opts.method, 'GET');
+    assert.deepEqual(request.opts.headers, { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId });
+    assert.equal(u.plan, 'plus');
+    assert.equal(u.session.pctUsed, 42);
+    assert.equal(u.session.resetsAt, new Date(1786000000 * 1000).toISOString());
+    assert.equal(u.weekly.pctUsed, 63);
+    assert.equal(u.weekly.resetsAt, new Date(1786172475 * 1000).toISOString());
+    assert.equal(JSON.stringify(u).includes(token), false);
+    assert.equal(JSON.stringify(u).includes(accountId), false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchCodex: classifies a weekly-only primary live window', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ status: 200, json: async () => ({
+    plan_type: 'pro',
+    rate_limit: { primary_window: { used_percent: 17, limit_window_seconds: 604_800, reset_at: 1786172475 } },
+  }) });
+  try {
+    const u = await fetchCodex();
+    assert.equal(u.session, null);
+    assert.equal(u.weekly.pctUsed, 17);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchCodex: failed live request falls back to rollout data', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('offline'); };
+  try {
+    const u = await fetchCodex();
+    assert.equal(u.ok, true);
+    assert.equal(u.weekly.pctUsed, 99);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 // The access token expires overnight, so the usage fetch renews it itself via

@@ -116,6 +116,31 @@ function appendJsonl(file, record) {
   } catch {} // best-effort, same posture as persist() — never break /usage
 }
 
+// ---- Codex usage history (same skill contract as the ollama history above) ----
+// Every successful Codex fetch (live wham/usage or rollout fallback) is appended
+// as one snapshot in the report skill's codex-usage.jsonl shape
+// ({fetched_at, session, weekly, plan}) — session = 5h window, weekly = 7d. No
+// `models` key (Codex exposes no per-model split). The skill's own rollout
+// ingestion also appends this file; both writers dedupe against their last
+// reading, and a zero-delta duplicate line is harmless to the estimators.
+const CODEX_HISTORY = join(USAGE_SKILL_STATE, 'codex-usage.jsonl');
+let lastCodexReading = null;
+
+export function appendCodexHistory(data) {
+  const reading = JSON.stringify([
+    data.session?.pctUsed ?? null, data.session?.resetsAt ?? null,
+    data.weekly?.pctUsed ?? null, data.weekly?.resetsAt ?? null,
+  ]);
+  if (reading === lastCodexReading) return;
+  lastCodexReading = reading;
+  appendJsonl(CODEX_HISTORY, {
+    fetched_at: localTimestamp(new Date()),
+    session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt } : null,
+    weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt } : null,
+    plan: data.plan ?? null,
+  });
+}
+
 // ---- Claude usage snapshots (same file the skill's fetch-usage --oauth --save writes)
 // The daemon already GETs api/oauth/usage for the Usage page, so the OAuth
 // snapshot the rate-limit forecast feeds on is a free by-product — no scheduled
@@ -435,15 +460,14 @@ async function fetchClaude(retry = true) {
   }
 }
 
-// ---- Codex: parse local session rollout logs ----------------------------
-// Codex CLI has no 5h-window data and no limits API/cache file — the only
-// source is its own session rollout logs (~/.codex/sessions/YYYY/MM/DD/
-// rollout-*.jsonl, CODEX_HOME overrides ~/.codex), which record a
-// "token_count" event carrying the server's rate_limits payload as a side
-// effect of normal use. Push-only: fetchedAt below is that record's own
-// timestamp (can be a day stale), not "now".
+// ---- Codex: live usage API, with local rollout-log fallback ----------------
+// The API credentials live in ~/.codex/auth.json (CODEX_HOME overrides
+// ~/.codex). When unavailable or rejected, rollout-*.jsonl session records
+// retain the last server-provided rate_limits payload from normal use.
 export const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
 const CODEX_SESSIONS_DIR = join(CODEX_HOME, 'sessions');
+const CODEX_AUTH_PATH = join(CODEX_HOME, 'auth.json');
+const CODEX_USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
 
 // Newest date dirs (sessions/YYYY/MM/DD), newest first, capped at `maxDirs` —
 // bounded backward walk like findCodexRolloutForCwd in stats.mjs, never walks
@@ -496,7 +520,24 @@ function newestCodexRollouts(maxFiles, maxDateDirs) {
 const CODEX_ROLLOUT_SCAN_CAP = 20;
 const CODEX_DATE_DIR_SCAN_CAP = 2;
 
-export async function fetchCodex() {
+function normalizeCodexLimits(plan, windows, durationKey, fetchedAt, resetKey = 'resets_at') {
+  let session = null;
+  let weekly = null;
+  for (const w of windows) {
+    const duration = Number(w?.[durationKey]);
+    if (!Number.isFinite(w?.used_percent) || !Number.isFinite(duration)) continue;
+    const window = {
+      pctUsed: w.used_percent,
+      resetsAt: Number.isFinite(w[resetKey]) ? new Date(w[resetKey] * 1000).toISOString() : null,
+      models: [],
+    };
+    if (duration >= (durationKey === 'window_minutes' ? 1440 : 86400)) weekly = window;
+    else session = window;
+  }
+  return session || weekly ? { ok: true, source: 'codex', plan: plan ?? null, fetchedAt, session, weekly } : null;
+}
+
+function fetchCodexRollout() {
   try {
     const files = newestCodexRollouts(CODEX_ROLLOUT_SCAN_CAP, CODEX_DATE_DIR_SCAN_CAP);
     if (!files.length) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
@@ -522,25 +563,44 @@ export async function fetchCodex() {
     if (!record) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
 
     const rl = record.payload.rate_limits;
-    const mapWindow = (w) => (w ? {
-      pctUsed: w.used_percent,
-      resetsAt: w.resets_at ? new Date(w.resets_at * 1000).toISOString() : null,
-      models: [],
-    } : null);
-    // window_minutes >= 1 day → weekly slot, else session slot. Codex only
-    // reports the 7d window today; this keeps a future 5h window landing in
-    // the right slot for free.
-    let session = null;
-    let weekly = null;
-    for (const w of [rl.primary, rl.secondary]) {
-      if (!w) continue;
-      if (w.window_minutes >= 1440) weekly = mapWindow(w);
-      else session = mapWindow(w);
-    }
-    return { ok: true, source: 'codex', plan: rl.plan_type ?? null, fetchedAt: record.timestamp, session, weekly };
+    return normalizeCodexLimits(rl.plan_type, [rl.primary, rl.secondary], 'window_minutes', record.timestamp)
+      ?? { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
   } catch (e) {
     return { ok: false, source: 'codex', error: e.message, fetchedAt: new Date().toISOString() };
   }
+}
+
+export async function fetchCodex() {
+  let auth;
+  try { auth = JSON.parse(readFileSync(CODEX_AUTH_PATH, 'utf8')); }
+  catch { return fetchCodexRollout(); }
+  const token = auth?.tokens?.access_token;
+  const accountId = auth?.tokens?.account_id;
+  if (!token || !accountId) return fetchCodexRollout();
+
+  let liveError;
+  let resp;
+  try {
+    resp = await fetchWithTimeout(CODEX_USAGE_API_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId },
+    });
+  } catch (e) {
+    liveError = `request failed: ${e.message}`;
+  }
+  if (resp && resp.status !== 200) {
+    liveError = resp.status === 429 ? 'rate-limited' : resp.status === 401 || resp.status === 403 ? 'auth rejected' : `HTTP ${resp.status}`;
+  } else if (resp) {
+    let raw;
+    try { raw = await resp.json(); }
+    catch (e) { liveError = `parse error: ${e.message}`; }
+    const live = normalizeCodexLimits(raw?.plan_type, [raw?.rate_limit?.primary_window, raw?.rate_limit?.secondary_window], 'limit_window_seconds', new Date().toISOString(), 'reset_at');
+    if (live) return live;
+    liveError ??= 'no usable rate limits';
+  }
+
+  const fallback = fetchCodexRollout();
+  return !fallback.ok && liveError ? { ...fallback, error: liveError } : fallback;
 }
 
 // ---- Cache + public API -------------------------------------------------------
@@ -582,6 +642,7 @@ async function pull(src, fetcher, force) {
     historyPaused = null;
     startHistorySampler();
   }
+  if (src === 'codex' && data.ok) appendCodexHistory(data);
   return slot.data;
 }
 
