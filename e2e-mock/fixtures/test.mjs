@@ -11,6 +11,9 @@ const IGNORE = [
   // xterm's WebGL renderer reports GPU driver perf messages under headless
   // chromium's software GL. Machine-dependent noise, not an app defect.
   /GL Driver Message|WebGL|GPU stall/i,
+  // WebKit's scheduler warns when the main-thread task queue overruns its
+  // budget (seen on slow CI runners under the tap-heavy dock flow).
+  /task queue exceeded allotted deadline/,
 ];
 
 export const test = base.extend({
