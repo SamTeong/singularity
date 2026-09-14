@@ -213,16 +213,20 @@ async function fetchOllama() {
       },
     });
   } catch (e) {
-    return { ok: false, source: 'ollama', error: `request failed: ${e.message}` };
+    return { ok: false, source: 'ollama', error: 'unavailable' };
   }
   if (resp.status >= 300 && resp.status < 400) {
-    return { ok: false, source: 'ollama', needsAuth: true, error: `redirect ${resp.status}` };
+    return { ok: false, source: 'ollama', needsAuth: true, error: 'auth-expired' };
   }
   if (resp.status !== 200) {
-    return { ok: false, source: 'ollama', error: `HTTP ${resp.status}` };
+    return { ok: false, source: 'ollama', error: 'unavailable' };
   }
-  const parsed = parseOllamaHtml(await resp.text());
-  if (!parsed) return { ok: false, source: 'ollama', needsAuth: true, error: 'no-meters' };
+  const html = await resp.text();
+  const parsed = parseOllamaHtml(html);
+  if (!parsed) {
+    const error = classifyOllamaPage({ html });
+    return { ok: false, source: 'ollama', needsAuth: error === 'auth-expired', error };
+  }
   return parsed;
 }
 
@@ -231,51 +235,128 @@ async function fetchOllama() {
 // session cookies transparently, so nothing expires and nothing is re-pasted.
 // Launch-per-scrape; a module-level in-flight promise coalesces concurrent
 // callers so two launches never fight over the profile-dir lock.
-// One launch-and-scrape at the given visibility. Serial by construction (the
-// inflight coalescer below never runs two concurrently), so headless→headful
-// retries reuse the profile dir without fighting over its lock.
-async function scrapeOllamaOnce(pw, headless) {
+// The persistent Chromium profile permits only one owner.  Queue both regular
+// scrapes and the interactive connector; coalescing a fetch is not sufficient
+// because a connect and a fetch can otherwise race for the profile directory.
+let ollamaProfileTail = Promise.resolve();
+function ownOllamaProfile(work) {
+  const run = ollamaProfileTail.catch(() => {}).then(work);
+  ollamaProfileTail = run.catch(() => {});
+  return run;
+}
+
+export function classifyOllamaPage({ url = '', html = '' } = {}) {
+  if (/\/signin|\/login/i.test(url) || /sign in|log in to ollama/i.test(html)) return 'auth-expired';
+  if (/turnstile|verify (you are )?human|checking your browser|challenge/i.test(html)) return 'challenge-required';
+  return 'scrape-incompatible';
+}
+
+// One launch-and-scrape at the given visibility.  This function deliberately
+// does not retry headfully: only connectOllamaUsage is allowed to open Edge.
+export async function scrapeOllamaOnce(pw, headless) {
   let ctx;
   try {
     ctx = await pw.chromium.launchPersistentContext(OLLAMA_PROFILE_DIR, { ...PW_STEALTH, headless });
     await pwHideWebdriver(ctx);
     const page = ctx.pages()[0] ?? (await ctx.newPage());
     await page.goto(OLLAMA_SETTINGS_URL, { waitUntil: 'domcontentloaded', timeout: REQ_TIMEOUT_MS });
-    // Logged-out → redirect to /signin; CF challenge → no meter. Either way,
-    // the meter's absence within the wait means we need a (re-)login.
     const gotMeter = await page.waitForSelector('[data-usage-meter]', { timeout: REQ_TIMEOUT_MS })
       .then(() => true).catch(() => false);
+    const html = await page.content();
     if (!gotMeter || /\/signin/.test(page.url())) {
-      return { ok: false, source: 'ollama', needsAuth: true, error: 'no-login' };
+      const error = classifyOllamaPage({ url: page.url(), html });
+      return { ok: false, source: 'ollama', needsAuth: error === 'auth-expired', error };
     }
-    const parsed = parseOllamaHtml(await page.content());
-    return parsed ?? { ok: false, source: 'ollama', needsAuth: true, error: 'no-login' };
-  } catch (e) {
-    return { ok: false, source: 'ollama', error: `browser: ${e.message}` };
+    const parsed = parseOllamaHtml(html);
+    return parsed ?? { ok: false, source: 'ollama', error: 'scrape-incompatible' };
+  } catch {
+    return { ok: false, source: 'ollama', error: 'unavailable' };
   } finally {
     if (ctx) await ctx.close().catch(() => {});
   }
 }
 
-// Browser mode: drive Edge against the persistent login profile (bootstrapped
-// via `npm run ollama-login`) — the browser handles Cloudflare + session cookies
-// transparently, so nothing expires and nothing is re-pasted. Try headless first
-// (invisible, fast); if it fails (Cloudflare challenge headless can't clear),
-// retry headful once — a visible window can pass the challenge. Set cfg.headless
-// === false to skip straight to headful. A module-level in-flight promise
-// coalesces concurrent callers so two launches never fight over the profile lock.
+// Normal refresh is always headless.  A visible Edge is reserved for the
+// explicit connect action below.
 let ollamaBrowserInflight = null;
 function fetchOllamaBrowser(cfg) {
   if (ollamaBrowserInflight) return ollamaBrowserInflight;
   ollamaBrowserInflight = (async () => {
     const pw = await import('playwright-core').catch(() => null);
     if (!pw) return { ok: false, source: 'ollama', error: 'playwright-core not installed (npm i playwright-core)' };
-    if (cfg.headless === false) return scrapeOllamaOnce(pw, false);
-    const first = await scrapeOllamaOnce(pw, true);
-    if (first.ok) return first;
-    return scrapeOllamaOnce(pw, false); // headless failed → headful fallback
+    return ownOllamaProfile(() => scrapeOllamaOnce(pw, true));
   })();
   return ollamaBrowserInflight.finally(() => { ollamaBrowserInflight = null; });
+}
+
+function writeOllamaBrowserMode() {
+  mkdirSync(dirname(OLLAMA_CFG), { recursive: true });
+  const tmp = `${OLLAMA_CFG}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ mode: 'browser' }), { mode: 0o600 });
+  renameSync(tmp, OLLAMA_CFG);
+}
+
+export function sanitizeOllamaUsage(data) {
+  return {
+    ok: !!data?.ok, source: 'ollama', plan: data?.plan ?? null,
+    session: data?.session ?? null, weekly: data?.weekly ?? null, extra: null,
+    fetchedAt: data?.fetchedAt ?? null, stale: !!data?.stale,
+    needsAuth: !!data?.needsAuth, error: data?.error ?? null,
+  };
+}
+
+export function preserveOllamaStale(lastGood, failure) {
+  return lastGood?.ok && !failure.ok
+    ? { ...lastGood, stale: true, error: failure.error, needsAuth: !!failure.needsAuth }
+    : failure;
+}
+
+// Shared by POST /usage/ollama/connect and scripts/ollama-login.mjs.  The
+// optional seams keep its browser behaviour deterministic under node:test.
+export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 120_000, headlessVerifier } = {}) {
+  const pw = playwright ?? await import('playwright-core').catch(() => null);
+  if (!pw) return { ok: false, source: 'ollama', error: 'unavailable' };
+  const interactive = await ownOllamaProfile(async () => {
+    let ctx;
+    try {
+      ctx = await pw.chromium.launchPersistentContext(OLLAMA_PROFILE_DIR, { ...PW_STEALTH, headless: false });
+      await pwHideWebdriver(ctx);
+      const page = ctx.pages()[0] ?? await ctx.newPage();
+      await page.goto(OLLAMA_SETTINGS_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      // Enter is an optional CLI acknowledgement, never a gate: the meter wait
+      // owns the deadline so a forgotten terminal never leaves Edge open.
+      if (waitForUser) Promise.resolve().then(waitForUser).catch(() => {});
+      let deadlineTimer;
+      const deadline = new Promise((resolve) => { deadlineTimer = setTimeout(() => resolve(false), timeoutMs); });
+      let gotMeter;
+      try {
+        gotMeter = await Promise.race([
+          page.waitForSelector('[data-usage-meter]', { timeout: timeoutMs }).then(() => true).catch(() => false),
+          deadline,
+        ]);
+      } finally { clearTimeout(deadlineTimer); }
+      const html = await page.content();
+      if (!gotMeter) {
+        const error = classifyOllamaPage({ url: page.url(), html });
+        return { ok: false, source: 'ollama', needsAuth: error === 'auth-expired', error };
+      }
+      const parsed = parseOllamaHtml(html);
+      if (!parsed) return { ok: false, source: 'ollama', error: 'scrape-incompatible' };
+      return parsed;
+    } catch (e) {
+      return { ok: false, source: 'ollama', error: 'unavailable' };
+    } finally { if (ctx) await ctx.close().catch(() => {}); }
+  });
+  if (!interactive.ok) return sanitizeOllamaUsage(interactive);
+  // Re-open headlessly after the visible session closes. This proves that the
+  // persisted profile, rather than the still-open interactive context, works.
+  // Do not change an existing cookie config unless this verification succeeds.
+  const verified = await (headlessVerifier ?? (() => fetchOllamaBrowser({ mode: 'browser' })))();
+  if (!verified.ok) return sanitizeOllamaUsage(verified);
+  writeOllamaBrowserMode();
+  cache.ollama = { data: null, at: 0 };
+  persist();
+  return sanitizeOllamaUsage({ ...verified, fetchedAt: new Date().toISOString() });
 }
 
 // ---- Claude: OAuth usage API --------------------------------------------------
@@ -631,9 +712,12 @@ async function pull(src, fetcher, force) {
   // codex's fetchedAt is the record's own (possibly stale) timestamp — keep it;
   // ollama/claude never set one, so they still default to "now".
   const data = { fetchedAt: new Date().toISOString(), ...fetched };
-  // Keep the last good payload on a transient failure so the UI doesn't flip to
-  // "error" on one blip — but always surface a fresh needsAuth.
-  if (data.ok || data.needsAuth || !slot.data) { slot.data = data; slot.at = Date.now(); persist(); }
+  if (data.ok || !slot.data) { slot.data = data; slot.at = Date.now(); persist(); }
+  // Ollama failures retain the timestamped successful measurement and surface
+  // the current actionable error; failures never reach the history writer.
+  if (src === 'ollama' && !data.ok && slot.data?.ok) {
+    return preserveOllamaStale(slot.data, data);
+  }
   if (src === 'ollama' && data.ok) {
     appendOllamaHistory(data);
     // A successful ollama read from ANY path (manual Refresh, idle debounce,

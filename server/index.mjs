@@ -27,7 +27,7 @@ import { getConfigState, setConfigState } from './config-state.mjs';
 import { getKeys, setKeys } from './keys.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
-import { getUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
+import { getUsage, connectOllamaUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
 import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
@@ -326,6 +326,11 @@ app.get('/sysstats', async () => getSysStats());
 
 // Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
 app.get('/usage', async (req) => getUsage({ force: req.query.force === '1' }));
+app.post('/usage/ollama/connect', async (req, reply) => {
+  const result = await connectOllamaUsage();
+  if (!result.ok) reply.code(400);
+  return result;
+});
 
 // Provider status (OpenAI + Claude Atlassian Statuspage). Cached ~20s; ?force=1 bypasses.
 app.get('/status', async (req) => getStatus({ force: req.query.force === '1' }));

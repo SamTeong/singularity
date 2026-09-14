@@ -17,12 +17,18 @@ import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { Meter } from '@/components/Meter.jsx';
 import UsageReportView from '@/features/usage/UsageReportView.jsx';
 
-function ProviderCard({ label, usageUrl, u }) {
+function ollamaFailure(error) {
+  if (error === 'auth-expired') return 'Ollama sign-in expired. Reconnect to continue refreshing.';
+  if (error === 'challenge-required') return 'Ollama needs an interactive browser check. Reconnect and complete it.';
+  if (error === 'scrape-incompatible') return 'Ollama settings changed and its usage meter could not be read.';
+  return `Ollama usage is currently unavailable${error ? `: ${error}` : '.'}`;
+}
+
+function ProviderCard({ label, usageUrl, u, onConnect, connecting, connectState }) {
+  const isOllama = label.toLowerCase() === 'ollama';
   const authHelp = {
     // Browser mode (error 'no-login') vs manual-cookie mode need different fixes.
-    ollama: u?.error === 'no-login'
-      ? 'Fresh auth required. Run "npm run ollama-login" in a terminal, then sign in to ollama.com when the browser opens.'
-      : 'Fresh auth required. Run "npm run ollama-login" in a terminal, or sign in to ollama.com and paste a fresh cookie and browser ID from that tab into state/ollama.json.',
+    ollama: ollamaFailure(u?.error),
     claude: 'No usage data yet — run Claude Code to update.',
     codex: 'No usage data yet — run Codex to update.',
   };
@@ -40,6 +46,11 @@ function ProviderCard({ label, usageUrl, u }) {
               <OpenInNewIcon fontSize="small" />
             </Link>
           </Tooltip>
+        )}
+        {isOllama && (
+          <Button size="small" onClick={onConnect} disabled={connecting}>
+            {connecting ? 'Connecting…' : u?.ok ? 'Reconnect' : 'Connect'}
+          </Button>
         )}
       </Stack>
 
@@ -74,11 +85,25 @@ function ProviderCard({ label, usageUrl, u }) {
                 ', window has since reset, run Codex to update.'}
             </Typography>
           )}
+          {isOllama && u.stale && (
+            <Alert severity={u.needsAuth ? 'warning' : 'info'} sx={{ py: 0.5 }}>
+              Last successful usage from {u.fetchedAt ? new Date(u.fetchedAt).toLocaleString() : 'an earlier refresh'}. {ollamaFailure(u.error)}
+            </Alert>
+          )}
         </Stack>
       ) : (
         <Alert severity={u.needsAuth ? 'warning' : 'info'} sx={{ py: 0.5 }}>
           {u.needsAuth ? authHelp[label.toLowerCase()] : `Couldn't load this: ${u.error || 'unknown error'}`}
         </Alert>
+      )}
+      {isOllama && connectState === 'connecting' && (
+        <Alert severity="info" sx={{ py: 0.5, mt: 1 }}>Opening the managed Ollama browser for sign-in…</Alert>
+      )}
+      {isOllama && connectState === 'success' && (
+        <Alert severity="success" sx={{ py: 0.5, mt: 1 }}>Ollama connection verified.</Alert>
+      )}
+      {isOllama && connectState === 'failure' && !u?.stale && (
+        <Alert severity="warning" sx={{ py: 0.5, mt: 1 }}>{ollamaFailure(u?.error)}</Alert>
       )}
       {/* Outside the ok/error branches on purpose: the sampler stops precisely
           when a scrape fails, so at that moment this card is rendering the error
@@ -93,10 +118,16 @@ function ProviderCard({ label, usageUrl, u }) {
 }
 
 // Full usage view (main pane). Both providers side by side, manual force-refresh.
-export default function UsageView({ usage, onRefresh }) {
+export default function UsageView({ usage, onRefresh, onConnectOllama }) {
   const [open, setOpen] = useState(true);
   const [reportOpen, setReportOpen] = useState(true);
+  const [connectState, setConnectState] = useState(null);
   const caps = useCapabilities();
+  const connectOllama = async () => {
+    setConnectState('connecting');
+    const result = await onConnectOllama();
+    setConnectState(result.ok ? 'success' : 'failure');
+  };
   return (
     <Stack sx={{ height: '100%', minHeight: 0, overflowY: 'auto' }}>
       <Stack direction="row" spacing={1.5} sx={{ flexShrink: 0, p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
@@ -122,7 +153,7 @@ export default function UsageView({ usage, onRefresh }) {
               Shows the usage limits for your whole account: a 5-hour session limit and a 7-day weekly limit. This updates on its own about once a minute — press Refresh to check right now.
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
-              {visibleProviders(caps).map((p) => <ProviderCard key={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} />)}
+              {visibleProviders(caps).map((p) => <ProviderCard key={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} />)}
             </Box>
           </Stack>
         </Collapse>
