@@ -195,7 +195,7 @@ async function fetchOllama() {
   catch (e) { return { ok: false, source: 'ollama', error: `bad ${OLLAMA_CFG}: ${e.message}` }; }
 
   // Browser mode: a persistent logged-in Edge profile is the auth — no cookies.
-  if (cfg.mode === 'browser') return fetchOllamaBrowser(cfg);
+  if (cfg.mode === 'browser') return fetchOllamaBrowser();
 
   if (!cfg.cookie) return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
 
@@ -212,7 +212,7 @@ async function fetchOllama() {
         accept: 'text/html',
       },
     });
-  } catch (e) {
+  } catch {
     return { ok: false, source: 'ollama', error: 'unavailable' };
   }
   if (resp.status >= 300 && resp.status < 400) {
@@ -279,7 +279,7 @@ export async function scrapeOllamaOnce(pw, headless) {
 // Normal refresh is always headless.  A visible Edge is reserved for the
 // explicit connect action below.
 let ollamaBrowserInflight = null;
-function fetchOllamaBrowser(cfg) {
+function fetchOllamaBrowser() {
   if (ollamaBrowserInflight) return ollamaBrowserInflight;
   ollamaBrowserInflight = (async () => {
     const pw = await import('playwright-core').catch(() => null);
@@ -343,7 +343,7 @@ export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 
       const parsed = parseOllamaHtml(html);
       if (!parsed) return { ok: false, source: 'ollama', error: 'scrape-incompatible' };
       return parsed;
-    } catch (e) {
+    } catch {
       return { ok: false, source: 'ollama', error: 'unavailable' };
     } finally { if (ctx) await ctx.close().catch(() => {}); }
   });
@@ -351,7 +351,7 @@ export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 
   // Re-open headlessly after the visible session closes. This proves that the
   // persisted profile, rather than the still-open interactive context, works.
   // Do not change an existing cookie config unless this verification succeeds.
-  const verified = await (headlessVerifier ?? (() => fetchOllamaBrowser({ mode: 'browser' })))();
+  const verified = await (headlessVerifier ?? fetchOllamaBrowser)();
   if (!verified.ok) return sanitizeOllamaUsage(verified);
   writeOllamaBrowserMode();
   cache.ollama = { data: null, at: 0 };

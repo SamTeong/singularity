@@ -19,6 +19,8 @@ pnpm build:mock      # mock build → web/dist-mock (never touches web/dist)
 pnpm test:e2e-mock   # build:mock + the parallel Playwright suite in e2e-mock/
 ```
 
+Before finishing code changes: `pnpm lint && pnpm test`.
+
 **Mock mode needs no `.env` and no daemon.** `--mode mock` sets `VITE_MOCK=1`, which switches on `web/src/mock/` — a Mirage server answering every REST route plus a `mock-socket` `/ws` — so the whole UI runs against in-memory fixtures. Nothing reads `SINGULARITY_HOME`, `CLAUDE_BIN`, or the user's `~/.claude`. Use it for UI work; use `pnpm dev` when the change touches daemon behaviour.
 
 Pieces separately: `pnpm server` (daemon) / `pnpm web` (Vite dev server only — no build). Shell: PowerShell primary; Bash tool POSIX only.
