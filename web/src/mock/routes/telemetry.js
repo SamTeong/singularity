@@ -80,6 +80,24 @@ function liveToday() {
 }
 
 export function registerTelemetry(server) {
+  let ollamaUsage = null;
+  const makeOllamaUsage = ({ stale = false } = {}) => {
+    const now = Date.now();
+    return {
+      ok: true, source: 'ollama', plan: 'pro',
+      session: { pctUsed: 12, resetsAt: iso(now + 2 * 3.6e6), models: [{ model: 'deepseek-v4-flash:cloud', requests: 34 }] },
+      weekly: { pctUsed: 38, resetsAt: iso(now + 3 * 86_400_000), models: [{ model: 'deepseek-v4-flash:cloud', requests: 210 }] },
+      extra: null,
+      fetchedAt: iso(now - (stale ? 20 * 60_000 : 0)),
+      stale,
+      needsAuth: stale,
+      error: stale ? 'auth-expired' : null,
+    };
+  };
+  // Default to a retained reading so mock mode exercises the recovery state;
+  // a successful connect below replaces it with verified current usage.
+  ollamaUsage = makeOllamaUsage({ stale: true });
+
   // /usage — { ollama, claude, codex }, each a provider payload (usage.mjs
   // getUsage). The mock can't scrape real accounts, so every provider reports
   // ok:true with plausible windows; the cards render their populated state.
@@ -93,13 +111,7 @@ export function registerTelemetry(server) {
         extra: { enabled: true, used: 1200, monthlyLimit: 5000, pctUsed: 24, resetsAt: iso(now + 20 * 86_400_000) },
         fetchedAt: iso(now),
       },
-      ollama: {
-        ok: true, source: 'ollama', plan: 'pro',
-        session: { pctUsed: 12, resetsAt: iso(now + 2 * 3.6e6), models: [{ model: 'deepseek-v4-flash:cloud', requests: 34 }] },
-        weekly: { pctUsed: 38, resetsAt: iso(now + 3 * 86_400_000), models: [{ model: 'deepseek-v4-flash:cloud', requests: 210 }] },
-        extra: null,
-        fetchedAt: iso(now),
-      },
+      ollama: { ...ollamaUsage, historyPaused: null },
       codex: {
         ok: true, source: 'codex', plan: 'pro',
         fetchedAt: iso(now - 3.6e6), // push-only: last rollout write, can be stale
@@ -108,6 +120,13 @@ export function registerTelemetry(server) {
       },
     };
   });
+
+  // POST /usage/ollama/connect returns the same sanitized provider payload as
+  // connectOllamaUsage in usage.mjs, not the enclosing /usage document.
+  server.post('/usage/ollama/connect', () => {
+    ollamaUsage = makeOllamaUsage();
+    return ollamaUsage;
+  }, 200);
 
   // /status — { claude, openai }, each a normalized Statuspage payload
   // (status.mjs getStatus). Mirrors the e2e STATUS_STUB so the view renders

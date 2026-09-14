@@ -39,7 +39,7 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant } = await import('./usage.mjs');
 
 // Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
 // response: plan badge, Session then Weekly meter (aria-label + segment buttons),
@@ -96,6 +96,63 @@ test('parseOllamaHtml: plan, both windows, resets, per-model breakdown', () => {
 
 test('parseOllamaHtml: login page (no meters) → null', () => {
   assert.equal(parseOllamaHtml('<html><body>Sign in</body></html>'), null);
+});
+
+test('Ollama failure classification is actionable and deterministic', () => {
+  assert.equal(classifyOllamaPage({ url: 'https://ollama.com/signin' }), 'auth-expired');
+  assert.equal(classifyOllamaPage({ html: 'Checking your browser before accessing' }), 'challenge-required');
+  assert.equal(classifyOllamaPage({ html: '<main>Settings</main>' }), 'scrape-incompatible');
+});
+
+test('Ollama refresh failure retains the timestamped last-good reading as stale', () => {
+  const previous = { ...parseOllamaHtml(OLLAMA_HTML), fetchedAt: '2026-01-01T00:00:00.000Z' };
+  const result = preserveOllamaStale(previous, { ok: false, source: 'ollama', needsAuth: true, error: 'auth-expired' });
+  assert.equal(result.ok, true);
+  assert.equal(result.stale, true);
+  assert.equal(result.fetchedAt, '2026-01-01T00:00:00.000Z');
+  assert.equal(result.error, 'auth-expired');
+});
+
+test('connectOllamaUsage: headful connector verifies meter and atomically selects browser mode', async () => {
+  let launched = null;
+  const page = {
+    goto: async () => {}, url: () => 'https://ollama.com/settings',
+    waitForSelector: async () => {}, content: async () => OLLAMA_HTML,
+  };
+  const playwright = { chromium: { launchPersistentContext: async (_dir, opts) => {
+    launched = opts;
+    return { addInitScript: async () => {}, pages: () => [page], close: async () => {} };
+  } } };
+  const result = await connectOllamaUsage({ playwright, headlessVerifier: async () => ({ ...parseOllamaHtml(OLLAMA_HTML), fetchedAt: '2026-01-01T00:00:00.000Z' }) });
+  assert.equal(launched.headless, false);
+  assert.equal(result.ok, true);
+  assert.deepEqual(JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'ollama.json'), 'utf8')), { mode: 'browser' });
+});
+
+test('connectOllamaUsage: deadline closes Edge when the optional CLI acknowledgement never resolves', async () => {
+  let closed = false;
+  const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: () => new Promise(() => {}), content: async () => '' };
+  const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => { closed = true; } }) } };
+  const result = await connectOllamaUsage({ playwright, waitForUser: () => new Promise(() => {}), timeoutMs: 5 });
+  assert.equal(closed, true);
+  assert.equal(result.ok, false);
+});
+
+test('connectOllamaUsage: failed headless verification leaves existing config byte-for-byte intact', async () => {
+  const configPath = join(process.env.SINGULARITY_HOME, 'state', 'ollama.json');
+  const prior = '{"cookie":"still-valid","userAgent":"test-agent"}';
+  mkdirSync(join(process.env.SINGULARITY_HOME, 'state'), { recursive: true });
+  writeFileSync(configPath, prior);
+  const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: async () => {}, content: async () => OLLAMA_HTML };
+  const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => {} }) } };
+  const result = await connectOllamaUsage({ playwright, headlessVerifier: async () => ({ ok: false, source: 'ollama', error: 'unavailable' }) });
+  assert.equal(result.ok, false);
+  assert.equal(readFileSync(configPath, 'utf8'), prior);
+});
+
+test('scrapeOllamaOnce: browser launch failures are unavailable without diagnostic leakage', async () => {
+  const result = await scrapeOllamaOnce({ chromium: { launchPersistentContext: async () => { throw new Error('secret profile path'); } } }, true);
+  assert.deepEqual(result, { ok: false, source: 'ollama', error: 'unavailable' });
 });
 
 // Sample shaped after the OAuth usage API (stats.mjs normalizer L1795-1812).

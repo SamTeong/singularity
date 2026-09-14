@@ -13,7 +13,7 @@ test('provider meter cards render from populated mock usage', async ({ page }) =
   await expect(page.getByText('Claude', { exact: true }).first()).toBeVisible();
 });
 
-test('Ollama renders populated usage meters', async ({ page }) => {
+test('Ollama retains stale usage with an actionable reconnect', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
 
@@ -21,7 +21,21 @@ test('Ollama renders populated usage meters', async ({ page }) => {
   await expect(ollama).toBeVisible();
   await expect(page.getByText('deepseek-v4-flash:cloud: 34 req')).toBeVisible();
   await expect(page.getByText('deepseek-v4-flash:cloud: 210 req')).toBeVisible();
-  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(page.getByText(/Last successful usage from/)).toBeVisible();
+  await expect(page.getByText(/Ollama sign-in expired. Reconnect/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reconnect', exact: true })).toBeVisible();
+});
+
+test('Ollama reconnect posts the production route and shows verified usage', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+  await recordFetchCalls(page);
+
+  await page.getByRole('button', { name: 'Reconnect', exact: true }).click();
+
+  await expect(page.getByText('Ollama connection verified.')).toBeVisible();
+  await expect.poll(() => fetchCalls(page)).toContain('POST /api/usage/ollama/connect');
+  await expect(page.getByText(/Last successful usage from/)).toHaveCount(0);
 });
 
 test('provider usage pages are linked out, never followed', async ({ page }) => {

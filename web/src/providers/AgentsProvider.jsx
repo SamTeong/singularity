@@ -184,6 +184,22 @@ export function AgentsProvider({ children }) {
     fetch(`/api/usage${force ? '?force=1' : ''}`).then((r) => r.json()).then(setUsage).catch(() => {});
   }, []);
 
+  // Interactive Ollama sign-in returns one sanitized provider payload (rather
+  // than the full /usage document), so merge just that provider into the
+  // shared usage state consumed by both the rail and Usage page.
+  const connectOllamaUsage = useCallback(async () => {
+    try {
+      const response = await fetch('/api/usage/ollama/connect', { method: 'POST' });
+      const ollama = await response.json();
+      setUsage((current) => ({ ...current, ollama }));
+      return ollama;
+    } catch {
+      const ollama = { ok: false, source: 'ollama', error: 'unavailable' };
+      setUsage((current) => ({ ...current, ollama }));
+      return ollama;
+    }
+  }, []);
+
   // On-demand: fetch once the socket is up (app opened / reconnected). The
   // backend pushes 'usage' updates on its own auto-refresh from here on.
   useEffect(() => { if (connected) refreshUsage(false); }, [connected, refreshUsage]);
@@ -201,13 +217,13 @@ export function AgentsProvider({ children }) {
     agents, active, setActive, connected, recent,
     tasks, taskHistory, crons, background, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage,
+    sendMsg, reorderAgents, refreshUsage, connectOllamaUsage,
     registerTerminal, registerChat, registerError,
   }), [
     agents, active, connected, recent,
     tasks, taskHistory, crons, background, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage,
+    sendMsg, reorderAgents, refreshUsage, connectOllamaUsage,
     registerTerminal, registerChat, registerError,
   ]);
   return <AgentsContext value={value}>{children}</AgentsContext>;
