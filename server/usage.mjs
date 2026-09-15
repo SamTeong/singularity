@@ -311,6 +311,12 @@ export function preserveOllamaStale(lastGood, failure) {
     : failure;
 }
 
+export function preserveClaudeStale(lastGood, failure) {
+  return lastGood?.ok && !failure.ok
+    ? { ...lastGood, stale: true, error: failure.error, needsAuth: !!failure.needsAuth }
+    : failure;
+}
+
 // Shared by POST /usage/ollama/connect and scripts/ollama-login.mjs.  The
 // optional seams keep its browser behaviour deterministic under node:test.
 export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 120_000, headlessVerifier } = {}) {
@@ -687,6 +693,8 @@ export async function fetchCodex() {
 // ---- Cache + public API -------------------------------------------------------
 const cache = { ollama: { data: null, at: 0 }, claude: { data: null, at: 0 }, codex: { data: null, at: 0 } };
 const SOURCES = ['ollama', 'claude', 'codex'];
+const CLAUDE_RATE_LIMIT_BACKOFF_MS = 5 * 60_000;
+let claudeRateLimitedUntil = 0;
 
 // Warm-start from disk so a freshly-restarted daemon serves last-known values
 // before the first live fetch. Best-effort; a corrupt/absent file is ignored.
@@ -708,16 +716,27 @@ function persist() {
 
 async function pull(src, fetcher, force) {
   const slot = cache[src];
+  if (src === 'claude' && Date.now() < claudeRateLimitedUntil && slot.data) return slot.data;
   if (!force && slot.data && Date.now() - slot.at < TTL) return slot.data;
   const fetched = await fetcher();
   // codex's fetchedAt is the record's own (possibly stale) timestamp — keep it;
   // ollama/claude never set one, so they still default to "now".
   const data = { fetchedAt: new Date().toISOString(), ...fetched };
   if (data.ok || !slot.data) { slot.data = data; slot.at = Date.now(); persist(); }
+  if (src === 'claude' && data.ok) claudeRateLimitedUntil = 0;
+  if (src === 'claude' && data.error === 'rate-limited') claudeRateLimitedUntil = Date.now() + CLAUDE_RATE_LIMIT_BACKOFF_MS;
   // Ollama failures retain the timestamped successful measurement and surface
   // the current actionable error; failures never reach the history writer.
   if (src === 'ollama' && !data.ok && slot.data?.ok) {
     return preserveOllamaStale(slot.data, data);
+  }
+  // Claude uses the same last-good semantics as Ollama. This keeps the meters
+  // visible while making a failed pull unambiguously stale instead of green.
+  if (src === 'claude' && !data.ok && slot.data?.ok) {
+    slot.data = preserveClaudeStale(slot.data, data);
+    slot.at = Date.now();
+    persist();
+    return slot.data;
   }
   if (src === 'ollama' && data.ok) {
     appendOllamaHistory(data);

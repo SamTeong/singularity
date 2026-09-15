@@ -39,7 +39,7 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, preserveClaudeStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
 
 // Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
 // response: plan badge, Session then Weekly meter (aria-label + segment buttons),
@@ -493,4 +493,41 @@ test('getUsage: a filtered pull still assembles a full document', async () => {
   // ollama. 'in', not truthiness: null is the armed state.
   assert.ok('historyPaused' in doc.ollama);
   assert.equal(doc.ollama.historyPaused, null);
+});
+
+test('getUsage: Claude 429 preserves the last good reading and backs off', async () => {
+  writeCreds({ accessToken: 'live-token', expiresAt: Date.now() + 60_000 });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return calls === 1
+      ? { status: 200, json: async () => CLAUDE_RAW }
+      : { status: 429 };
+  };
+  try {
+    const fresh = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(fresh.claude.ok, true);
+
+    const limited = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(limited.claude.ok, true);
+    assert.equal(limited.claude.stale, true);
+    assert.equal(limited.claude.error, 'rate-limited');
+    assert.equal(limited.claude.fetchedAt, fresh.claude.fetchedAt);
+
+    const backedOff = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(backedOff.claude, limited.claude);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('preserveClaudeStale keeps a failed pull separate from its last good reading', () => {
+  const previous = { ok: true, source: 'claude', fetchedAt: '2026-01-01T00:00:00.000Z', session: { pctUsed: 20 } };
+  const result = preserveClaudeStale(previous, { ok: false, source: 'claude', error: 'rate-limited' });
+  assert.equal(result.ok, true);
+  assert.equal(result.stale, true);
+  assert.equal(result.error, 'rate-limited');
+  assert.equal(result.fetchedAt, previous.fetchedAt);
 });

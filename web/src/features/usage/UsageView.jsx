@@ -203,6 +203,11 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
               Last successful usage from {u.fetchedAt ? new Date(u.fetchedAt).toLocaleString() : 'an earlier refresh'}. {ollamaFailure(u.error)}
             </Alert>
           )}
+          {!isOllama && u.stale && (
+            <Alert severity={u.needsAuth ? 'warning' : 'info'} sx={{ py: 0.5 }}>
+              Last successful usage from {u.fetchedAt ? new Date(u.fetchedAt).toLocaleString() : 'an earlier refresh'}. {label} refresh failed{u.error ? `: ${u.error}` : '.'}
+            </Alert>
+          )}
         </Stack>
       ) : (
         <Alert severity={u.needsAuth ? 'warning' : 'info'} sx={{ py: 0.5 }}>
