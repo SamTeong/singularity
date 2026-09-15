@@ -43,6 +43,7 @@ export function AgentsProvider({ children }) {
   const [taskHistory, setTaskHistory] = useState([]);
   const [crons, setCrons] = useState([]);
   const [background, setBackground] = useState(null); // { config, lastTick, liveTaskId }
+  const [windowAnchor, setWindowAnchor] = useState(null); // { claude, codex } from /window-anchor
   const [history, setHistory] = useState(null); // { entries, pending } — pushed as backfill days resolve; the page does its own initial fetch
   const [usage, setUsage] = useState(null); // { ollama, claude } from /usage
   const [stats, setStats] = useState({}); // id -> {turns, tokens}
@@ -103,6 +104,8 @@ export function AgentsProvider({ children }) {
           setCrons(m.crons);
         } else if (m.t === 'background') {
           setBackground({ config: m.config, lastTick: m.lastTick, liveTaskId: m.liveTaskId });
+        } else if (m.t === 'window-anchor') {
+          setWindowAnchor(m.anchor);
         } else if (m.t === 'history') {
           setHistory({ entries: m.entries, pending: m.pending });
         } else if (m.t === 'chat:delta' || m.t === 'chat:done' || m.t === 'chat:error') {
@@ -231,20 +234,50 @@ export function AgentsProvider({ children }) {
     fetch('/api/background').then((r) => r.json()).then(setBackground).catch(() => {});
   }, [connected]);
 
+  // Window-anchor snapshot: initial load on connect (the WS only pushes it on a
+  // mutation), so a page opened between resets still shows the armed window.
+  useEffect(() => {
+    if (!connected) return;
+    fetch('/api/window-anchor').then((r) => r.json()).then(setWindowAnchor).catch(() => {});
+  }, [connected]);
+
+  // Window anchor: enable/disable per provider. The response is the same bare
+  // snapshot the daemon re-emits on the bus, so setting it here is idempotent
+  // with the frame that follows.
+  const setWindowAnchorEnabled = useCallback((enabled) => {
+    return fetch('/api/window-anchor', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    }).then((r) => r.json()).then((state) => { setWindowAnchor(state); return state; }).catch(() => {});
+  }, []);
+
+  // Manual poke — a poke's response carries only its outcome, so the refreshed
+  // lastAnchorAt/lastResult arrive on the WS frame it triggers.
+  const pokeWindowAnchor = useCallback((provider) => {
+    return fetch('/api/window-anchor/poke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ provider }),
+    }).then((r) => r.json()).catch(() => {});
+  }, []);
+
   // Stable identity: consumers put context fields in effect dep arrays, and
   // this provider re-renders every WS frame plus on 5s/8s poll ticks — an
   // inline object would rebind their effects on every tick.
   const value = useMemo(() => ({
     agents, active, setActive, connected, recent,
-    tasks, taskHistory, crons, background, usage, history,
+    tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
     sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
+    setWindowAnchorEnabled, pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   }), [
     agents, active, connected, recent,
-    tasks, taskHistory, crons, background, usage, history,
+    tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
     sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
+    setWindowAnchorEnabled, pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   ]);
   return <AgentsContext value={value}>{children}</AgentsContext>;

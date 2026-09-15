@@ -206,4 +206,43 @@ export function registerAutomation(server) {
   server.get('/background/reports/:taskId', () => new Response(404, {}, { ok: false, error: 'not found' }));
 
   server.patch('/background/reports/:taskId/flag', () => new Response(400, {}, { ok: false, error: 'no such report' }));
+
+  // ---- Window anchor ------------------------------------------------------
+
+  // GET returns the BARE state (server/index.mjs:668 — same shape as /crons),
+  // and every mutation broadcasts the frame the daemon's bus fans out
+  // (pty-ws.mjs 'window-anchor'). The mock arms no timer and pokes no agent:
+  // a toggle only flips the flag (and drops an armed window, as
+  // setWindowAnchorEnabled does), and a manual poke records the run so the
+  // card's last-result cell converges from the socket, not the response body.
+  const anchorFrame = () => ({ t: 'window-anchor', anchor: db.windowAnchor });
+  const ANCHOR_PROVIDERS = ['claude', 'codex'];
+
+  server.get('/window-anchor', () => db.windowAnchor);
+
+  server.post('/window-anchor', (schema, req) => {
+    const { enabled } = parseBody(req);
+    for (const provider of ANCHOR_PROVIDERS) {
+      if (typeof enabled?.[provider] !== 'boolean') continue;
+      db.windowAnchor[provider].enabled = enabled[provider];
+      if (!enabled[provider]) db.windowAnchor[provider].nextAnchorAt = null;
+    }
+    broadcast(anchorFrame());
+    return db.windowAnchor;
+  });
+
+  server.post('/window-anchor/poke', (schema, req) => {
+    const provider = parseBody(req).provider;
+    if (!ANCHOR_PROVIDERS.includes(provider)) {
+      return new Response(400, {}, { ok: false, error: "provider must be 'claude' or 'codex'" });
+    }
+    const s = db.windowAnchor[provider];
+    // Manual poke ignores `enabled` (explicit user action, window-anchor.mjs
+    // pokeProvider) — the mock stands in for a successful one-shot prompt.
+    s.lastAnchorAt = Date.now();
+    s.lastResult = 'ok';
+    s.lastError = null;
+    broadcast(anchorFrame());
+    return { ok: true, provider, result: s.lastResult };
+  }, 200);
 }

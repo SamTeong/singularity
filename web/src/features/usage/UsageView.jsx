@@ -11,12 +11,13 @@ import IconButton from '@mui/material/IconButton';
 import Link from '@mui/material/Link';
 import MenuItem from '@mui/material/MenuItem';
 import Select from '@mui/material/Select';
+import Switch from '@mui/material/Switch';
 import Tooltip from '@mui/material/Tooltip';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { statusColor } from '@/shell/shellStyles.js';
-import { visibleProviders, usd } from '@/lib/usageUtil.js';
+import { visibleProviders, usd, fmtReset } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { useQueryState } from '@/hooks/useQueryState.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
@@ -75,7 +76,7 @@ function ollamaFailure(error) {
   return `Ollama usage is currently unavailable${error ? `: ${error}` : '.'}`;
 }
 
-function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, connectState, cadence, onCadence, onRefreshSource, refreshing }) {
+function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, connectState, cadence, onCadence, onRefreshSource, refreshing, anchor, onAnchorEnabled, onPoke }) {
   const isOllama = label.toLowerCase() === 'ollama';
   // Poll on the chosen cadence while this card is mounted. The timer dies with
   // the card, so navigating away from Usage stops it, and a provider hidden by
@@ -102,6 +103,13 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
     }, interval);
     return () => clearInterval(id);
   }, [interval, sourceKey, onRefreshSource]);
+  // Manual anchor poke, the same in-flight shape as a cadence refresh: the
+  // button reads as motion while the daemon runs the prompt (90s timeout).
+  const [poking, setPoking] = useState(false);
+  const poke = () => {
+    setPoking(true);
+    Promise.resolve(onPoke()).finally(() => setPoking(false));
+  };
   const stale = !u?.ok || !!u?.stale;
   // The dot carries the same three-way read the rail's daemon footer uses
   // (statusColor): stale-but-usable is amber, a failed read is red, fresh is the
@@ -214,6 +222,37 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
           {u.needsAuth ? authHelp[label.toLowerCase()] : `Couldn't load this: ${u.error || 'unknown error'}`}
         </Alert>
       )}
+      {/* Window anchor: keeps this provider's 5h plan window pinned to its
+          reset time by firing one trivial prompt when the old window expires
+          idle. Only Claude and Codex have plan windows, so the row renders only
+          where the daemon reports anchor state. A wrapping row, not a fixed
+          grid, so a 320px card stacks the countdown under the toggle. */}
+      {anchor && (
+        <Stack direction="row" spacing={1} sx={{ mt: 1.5, alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}>
+          <Switch
+            size="small"
+            checked={anchor.enabled}
+            onChange={(e) => onAnchorEnabled(e.target.checked)}
+            slotProps={{ input: { 'aria-label': `${label} window anchor` } }}
+          />
+          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Window anchor</Typography>
+          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
+            {anchor.nextAnchorAt ? `· next in ${fmtReset(new Date(anchor.nextAnchorAt).toISOString())}` : '· not armed'}
+          </Typography>
+          {anchor.lastResult && (
+            <Tooltip disableInteractive={!anchor.lastError} title={anchor.lastError || ''}>
+              <Typography sx={{ fontSize: 12, color: anchor.lastResult === 'error' ? 'error.main' : 'text.secondary' }}>
+                {`· last: ${anchor.lastResult}`}
+              </Typography>
+            </Tooltip>
+          )}
+          <Box sx={{ flex: 1 }} />
+          {/* Explicit user action: the daemon pokes regardless of the toggle. */}
+          <Button size="small" disabled={poking} onClick={poke} sx={{ alignSelf: 'center' }}>
+            {poking ? 'Poking…' : 'Poke now'}
+          </Button>
+        </Stack>
+      )}
       {isOllama && connectState === 'connecting' && (
         <Alert severity="info" sx={{ py: 0.5, mt: 1 }}>Opening the managed Ollama browser for sign-in…</Alert>
       )}
@@ -241,7 +280,7 @@ export default function UsageView({ usage, onRefresh, onConnectOllama }) {
   const [reportOpen, setReportOpen] = useState(true);
   const [connectState, setConnectState] = useState(null);
   const caps = useCapabilities();
-  const { refreshUsageSource } = useAgents();
+  const { refreshUsageSource, windowAnchor, setWindowAnchorEnabled, pokeWindowAnchor } = useAgents();
   // Per-card cadence lives in the query string (the per-view state convention),
   // one key per provider so a hand-edited URL only reaches its own card. The
   // remembered choice is the default the URL overrides, not a second source: the
@@ -295,7 +334,7 @@ export default function UsageView({ usage, onRefresh, onConnectOllama }) {
                 // Persist alongside the URL write: the URL is this visit, the
                 // stored value is the next bare visit.
                 const chooseCadence = (v) => { setCadence(v); writeCadence(p.key, v); };
-                return <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} cadence={cadenceOf(p.key, cadence)} onCadence={chooseCadence} onRefreshSource={refreshUsageSource} refreshing={refreshingAll} />;
+                return <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} cadence={cadenceOf(p.key, cadence)} onCadence={chooseCadence} onRefreshSource={refreshUsageSource} refreshing={refreshingAll} anchor={windowAnchor?.[p.key]} onAnchorEnabled={(v) => setWindowAnchorEnabled({ [p.key]: v })} onPoke={() => pokeWindowAnchor(p.key)} />;
               })}
             </Box>
           </Stack>
