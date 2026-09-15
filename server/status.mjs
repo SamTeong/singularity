@@ -4,6 +4,8 @@
 // no auth — the daemon proxies so the browser never faces the pages' CORS /
 // X-Frame-Options quirks. Short in-memory cache per provider (no disk: status
 // is ephemeral, unlike usage).
+import { fetchExternal } from './external-fetch.mjs';
+
 const TTL = 20_000; // cache 20s; client polls every 30s → always fresh
 const REQ_TIMEOUT_MS = 10_000;
 
@@ -41,17 +43,10 @@ export function normalizeStatus(raw, provider) {
   };
 }
 
-async function fetchWithTimeout(url) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), REQ_TIMEOUT_MS);
-  try { return await fetch(url, { signal: ctrl.signal }); }
-  finally { clearTimeout(timer); }
-}
-
 async function fetchProvider(provider) {
   let resp;
   try {
-    resp = await fetchWithTimeout(`${provider.url}/api/v2/summary.json`);
+    resp = await fetchExternal(`${provider.url}/api/v2/summary.json`, {}, { timeoutMs: REQ_TIMEOUT_MS });
   } catch (e) {
     return { ok: false, key: provider.key, label: provider.label, pageUrl: provider.url, error: `request failed: ${e.message}` };
   }
