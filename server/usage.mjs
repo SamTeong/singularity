@@ -686,6 +686,7 @@ export async function fetchCodex() {
 
 // ---- Cache + public API -------------------------------------------------------
 const cache = { ollama: { data: null, at: 0 }, claude: { data: null, at: 0 }, codex: { data: null, at: 0 } };
+const SOURCES = ['ollama', 'claude', 'codex'];
 
 // Warm-start from disk so a freshly-restarted daemon serves last-known values
 // before the first live fetch. Best-effort; a corrupt/absent file is ignored.
@@ -730,13 +731,33 @@ async function pull(src, fetcher, force) {
   return slot.data;
 }
 
-export async function getUsage({ force = false } = {}) {
+// Which sources a pull may hit the network for. Absent, empty, or all-unknown
+// means all three.
+function normalizeSources(sources) {
+  if (!sources) return new Set(SOURCES);
+  const listed = [].concat(sources).filter((s) => SOURCES.includes(s));
+  return listed.length ? new Set(listed) : new Set(SOURCES);
+}
+
+export async function getUsage({ force = false, sources } = {}) {
+  const allow = normalizeSources(sources);
+  // An excluded source must never reach pull(): pull refetches on its own once
+  // the slot is past TTL, so the allowlist is enforced by not calling it at all
+  // rather than by holding force back. The slot is null until the first
+  // successful fetch, so a filtered pull against a cold cache returns the key
+  // as null — the card renders "Loading…", and the client merge keeps a null
+  // from overwriting a card that already has data.
+  const pick = (src, fetcher) => (allow.has(src) ? pull(src, fetcher, force) : cache[src].data);
   const [ollama, claude, codex] = await Promise.all([
-    pull('ollama', fetchOllama, force),
-    pull('claude', fetchClaude, force),
-    pull('codex', fetchCodex, force),
+    pick('ollama', fetchOllama),
+    pick('claude', fetchClaude),
+    pick('codex', fetchCodex),
   ]);
-  const result = { ollama: { ...ollama, historyPaused }, claude, codex };
+  // A full document even for a filtered pull: scheduleResetRefreshes() rebuilds
+  // every source's reset timer from what it is handed, so a partial document
+  // would clear the timers it does not mention and never recreate them, and the
+  // ollama slot is what carries historyPaused.
+  const result = { ollama: ollama ? { ...ollama, historyPaused } : null, claude, codex };
   usageBus?.emit('usage', result);
   scheduleResetRefreshes(result);
   return result;
@@ -760,7 +781,10 @@ function resetDelay(iso, capMs = 7.75 * 24 * 3.6e6) {
 }
 
 // One forced refresh just after each 5h/7d window resets, so a passive viewer
-// sees the % drop to 0. Rescheduled from every getUsage result.
+// sees the % drop to 0. Rescheduled from every getUsage result — including a
+// filtered one, which is why getUsage always assembles a full document.
+// Rebuilding up to six timers per call is churn a 15s card cadence multiplies,
+// and not worth a previous-document diff to avoid.
 function scheduleResetRefreshes(result) {
   resetTimers.forEach(clearTimeout);
   resetTimers = [];

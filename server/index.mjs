@@ -325,7 +325,14 @@ app.get('/agent-stats', async () => ({ stats: await statsFor(reg.snapshot()) }))
 app.get('/sysstats', async () => getSysStats());
 
 // Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
-app.get('/usage', async (req) => getUsage({ force: req.query.force === '1' }));
+// Repeated ?source=claude&source=codex limits which sources may hit the network
+// (Fastify hands back a string for one occurrence, an array for several); the
+// rest come from cache and the response document is still all three. Absent or
+// empty means all three.
+app.get('/usage', async (req) => getUsage({
+  force: req.query.force === '1',
+  sources: [].concat(req.query.source ?? []),
+}));
 app.post('/usage/ollama/connect', async (req, reply) => {
   const result = await connectOllamaUsage();
   if (!result.ok) reply.code(400);
