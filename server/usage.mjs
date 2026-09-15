@@ -10,6 +10,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
 import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
+import { fetchExternal } from './external-fetch.mjs';
 
 const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
 export const OLLAMA_PROFILE_DIR = join(CACHE_DIR, 'pw-ollama-profile');
@@ -179,13 +180,6 @@ export function appendClaudeSnapshot(raw) {
   });
 }
 
-async function fetchWithTimeout(url, opts) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), REQ_TIMEOUT_MS);
-  try { return await fetch(url, { ...opts, signal: ctrl.signal }); }
-  finally { clearTimeout(timer); }
-}
-
 async function fetchOllama() {
   if (!existsSync(OLLAMA_CFG)) {
     return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
@@ -204,14 +198,14 @@ async function fetchOllama() {
     // No accept-encoding override: let undici negotiate + auto-decode gzip/br
     // (zstd would arrive undecoded). redirect:manual so a bounce to /signin
     // surfaces as a 3xx (dead cf_clearance) instead of a silently-followed 200.
-    resp = await fetchWithTimeout(OLLAMA_SETTINGS_URL, {
+    resp = await fetchExternal(OLLAMA_SETTINGS_URL, {
       redirect: 'manual',
       headers: {
         cookie: cfg.cookie,
         'user-agent': cfg.userAgent || 'Mozilla/5.0',
         accept: 'text/html',
       },
-    });
+    }, { timeoutMs: REQ_TIMEOUT_MS });
   } catch {
     return { ok: false, source: 'ollama', error: 'unavailable' };
   }
@@ -476,11 +470,11 @@ export async function refreshOauthGrant() {
   if (cur.refreshTokenExpiresAt && Number(cur.refreshTokenExpiresAt) < Date.now()) return false;
   let resp;
   try {
-    resp = await fetchWithTimeout(OAUTH_TOKEN_URL, {
+    resp = await fetchExternal(OAUTH_TOKEN_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: cur.refreshToken, client_id: OAUTH_CLIENT_ID }),
-    });
+    }, { timeoutMs: REQ_TIMEOUT_MS });
   } catch { return false; }
   if (resp.status !== 200) return false;
   let body;
@@ -525,9 +519,9 @@ async function fetchClaude(retry = true) {
 
   let resp;
   try {
-    resp = await fetchWithTimeout(USAGE_API_URL, {
+    resp = await fetchExternal(USAGE_API_URL, {
       headers: { Authorization: `Bearer ${oauth.accessToken}`, 'anthropic-beta': USAGE_API_BETA },
-    });
+    }, { timeoutMs: REQ_TIMEOUT_MS });
   } catch (e) {
     return { ok: false, source: 'claude', error: `request failed: ${e.message}` };
   }
@@ -668,10 +662,10 @@ export async function fetchCodex() {
   let liveError;
   let resp;
   try {
-    resp = await fetchWithTimeout(CODEX_USAGE_API_URL, {
+    resp = await fetchExternal(CODEX_USAGE_API_URL, {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId },
-    });
+    }, { timeoutMs: REQ_TIMEOUT_MS });
   } catch (e) {
     liveError = `request failed: ${e.message}`;
   }

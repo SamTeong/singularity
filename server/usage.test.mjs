@@ -356,6 +356,30 @@ test('fetchCodex: uses live API headers and normalizes 5h + 7d windows', async (
   }
 });
 
+test('fetchCodex: retries a transient live API response', async () => {
+  writeCodexAuth({ access_token: 'test-access-token', account_id: 'test-account-id' });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    if (calls === 1) return { status: 503 };
+    return {
+      status: 200,
+      json: async () => ({
+        plan_type: 'plus',
+        rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18_000, reset_at: 1786000000 } },
+      }),
+    };
+  };
+  try {
+    const u = await fetchCodex();
+    assert.equal(u.plan, 'plus');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 2);
+});
+
 test('fetchCodex: classifies a weekly-only primary live window', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ status: 200, json: async () => ({
@@ -517,7 +541,7 @@ test('getUsage: Claude 429 preserves the last good reading and backs off', async
 
     const backedOff = await getUsage({ sources: ['claude'], force: true });
     assert.equal(backedOff.claude, limited.claude);
-    assert.equal(calls, 2);
+    assert.equal(calls, 4); // one success, then the shared helper's three 429 attempts
   } finally {
     globalThis.fetch = originalFetch;
   }

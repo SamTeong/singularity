@@ -11,6 +11,7 @@
 // from silently 400-ing.
 import { claudeOauthToken } from './usage.mjs';
 import { listSessions, sessionText } from './sessions.mjs';
+import { fetchExternal } from './external-fetch.mjs';
 
 const MESSAGES_URL = 'https://api.anthropic.com/v1/messages';
 const IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
@@ -105,14 +106,14 @@ export async function streamChat({ chatId, question, scope = 'one', project, id,
 
   let resp;
   try {
-    resp = await fetch(MESSAGES_URL, {
+    resp = await fetchExternal(MESSAGES_URL, {
       method: 'POST',
       // Combine the caller's cancel signal (new chat supersedes this one) with a
       // hard ceiling, so a stalled connection or stream can't wedge forever.
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(FETCH_TIMEOUT_MS)]) : AbortSignal.timeout(FETCH_TIMEOUT_MS),
       headers: messagesHeaders(oauth.accessToken),
       body: JSON.stringify({ model: MODEL, max_tokens: MAX_TOKENS, system, messages, stream: true }),
-    });
+    }, { retry: false, timeoutMs: null });
   } catch (e) {
     if (signal?.aborted) return;
     send({ t: 'chat:error', chatId, msg: `request failed: ${e.message}` });

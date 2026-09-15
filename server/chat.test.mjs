@@ -22,7 +22,7 @@ writeFileSync(join(scratch, '.claude', '.credentials.json'), JSON.stringify({
 }));
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { consumeStream } = await import('./chat.mjs');
+const { consumeStream, streamChat } = await import('./chat.mjs');
 
 // Queues each entry as one reader.read() resolution (string entries are
 // UTF-8 encoded), then returns {done:true} forever.
@@ -43,6 +43,23 @@ function makeBody(chunks) {
     },
   };
 }
+
+test('streamChat opts out of retries for the Messages POST', async () => {
+  const originalFetch = globalThis.fetch;
+  const events = [];
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { status: 503, ok: false, json: async () => ({}) };
+  };
+  try {
+    await streamChat({ chatId: 'retry-test', question: 'hello' }, (event) => events.push(event));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 1);
+  assert.deepEqual(events, [{ t: 'chat:error', chatId: 'retry-test', msg: 'HTTP 503' }]);
+});
 
 test('consumeStream: an SSE data event split across two read() chunks yields exactly one chat:delta with the full text', async () => {
   const block = 'data: ' + JSON.stringify({ type: 'content_block_delta', delta: { type: 'text_delta', text: 'hello world' } }) + '\n\n';
