@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import TextField from '@mui/material/TextField';
@@ -46,6 +46,7 @@ export default function CreateScheduledJobDialog({ open, onClose, job, cwd, setC
   const [enabled, setEnabled] = useState(true);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const idempotencyKey = useRef(null);
 
   // The dialog never unmounts (renders null while closed) — resync on every
   // open, either from `job` (edit) or back to blank/defaults (create). Fires
@@ -81,7 +82,10 @@ export default function CreateScheduledJobDialog({ open, onClose, job, cwd, setC
   // picked with Browse. Keying on `open` alone fires this only on the
   // false→true transition, mirroring the render-time block above.
   useEffect(() => {
-    if (open && job?.cwd) setCwd(job.cwd);
+    if (open) {
+      idempotencyKey.current = null;
+      if (job?.cwd) setCwd(job.cwd);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
   }, [open, setCwd]);
 
@@ -95,7 +99,7 @@ export default function CreateScheduledJobDialog({ open, onClose, job, cwd, setC
     try {
       const r = await fetch(editing ? `/api/crons/${job.id}` : '/api/crons', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...(!editing ? { 'Idempotency-Key': idempotencyKey.current ||= crypto.randomUUID() } : {}) },
         body: JSON.stringify({
           title: title.trim(), cronExpr: cronExpr.trim(), description: description.trim(), cwd: untildify(cwd.trim()),
           model: model.trim(), scopes, permissionMode, enabled,

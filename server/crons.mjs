@@ -23,9 +23,9 @@ const killTimers = new Map(); // session id -> confirm timer (ride out startup p
 const KILL_CONFIRM_MS = 6000; // kill only after this much sustained idle
 let logger = null;
 
-function persist() {
+function persist(jobs = crons) {
   try {
-    reg.writeAtomic(CRONS_FILE, JSON.stringify({ crons: [...crons.values()] }, null, 2)); // atomic swap — a crash mid-write never truncates CRONS_FILE
+    reg.writeAtomic(CRONS_FILE, JSON.stringify({ crons: [...jobs.values()] }, null, 2)); // atomic swap — a crash mid-write never truncates CRONS_FILE
   } catch (e) {
     logger?.warn({ err: e.message }, 'crons.json write failed');
     const err = new Error(`crons.json write failed: ${e.message}`);
@@ -55,6 +55,29 @@ export function initCrons(log) {
       log?.info({ crons: crons.size }, 'loaded crons.json');
     }
   } catch (e) { log?.warn({ err: e.message }, 'crons.json load failed'); }
+
+  // A pending run is a durable unknown outcome. Only finalize it when the
+  // registry carries the same stable run id; otherwise leave it blocked rather
+  // than risking a duplicate scheduled agent after restart.
+  for (const job of crons.values()) {
+    if (!job.pendingRunId) continue;
+    const pendingRunId = job.pendingRunId;
+    const pendingRunAt = job.pendingRunAt;
+    const agent = reg.findByRunId(job.pendingRunId);
+    if (!agent) continue;
+    job.lastSessionId = agent.id;
+    job.lastFiredAt = job.pendingRunAt;
+    job.updatedAt = Date.now();
+    delete job.pendingRunId;
+    delete job.pendingRunAt;
+    cronSessions.add(agent.id);
+    try { persist(); }
+    catch (e) {
+      job.pendingRunId = pendingRunId;
+      job.pendingRunAt = pendingRunAt;
+      log?.warn({ err: e.message, id: job.id }, 'cron run recovery persist failed');
+    }
+  }
 
   // A cron-fired session still alive at the last shutdown reloads (via reg.init)
   // as a dead 'detached' registry entry — reg never auto-kills it, so it'd sit
@@ -105,15 +128,32 @@ function tick() {
 function spawnForJob(job) {
   // reg.create's params (title/prompt) are the session-registry contract; the
   // cron stores them as title/description, so map at the call site.
-  const agent = reg.create({ cwd: job.cwd, title: job.title, model: job.model, scopes: job.scopes, prompt: job.description, permissionMode: job.permissionMode });
+  const agent = reg.create({ cwd: job.cwd, title: job.title, model: job.model, scopes: job.scopes, prompt: job.description, permissionMode: job.permissionMode, runId: job.pendingRunId });
   job.lastSessionId = agent.id;
   job.lastFiredAt = Date.now();
   job.updatedAt = Date.now();
   job.lastError = null;
   cronSessions.add(agent.id);
-  persist();
+  const pendingRunId = job.pendingRunId;
+  const pendingRunAt = job.pendingRunAt;
+  delete job.pendingRunId;
+  delete job.pendingRunAt;
+  try { persist(); }
+  catch (e) {
+    job.pendingRunId = pendingRunId;
+    job.pendingRunAt = pendingRunAt;
+    throw e;
+  }
   emitCrons();
   return agent;
+}
+
+function beginRun(job) {
+  const pending = { ...job, pendingRunId: randomUUID(), pendingRunAt: Date.now() };
+  const next = new Map(crons);
+  next.set(job.id, pending);
+  persist(next);
+  Object.assign(job, pending);
 }
 
 // Scheduled fire: skip if previous run still alive, else advance nextFire + spawn.
@@ -122,17 +162,26 @@ function spawnForJob(job) {
 // polling), so a push carrying the boundary that just fired leaves the row counting
 // down past zero ("in -80s") until the next fire. Every path emits exactly once.
 function fire(job) {
-  if (reg.isLive(job.lastSessionId)) {
+  if (job.pendingRunId || reg.isLive(job.lastSessionId)) {
     logger?.info({ id: job.id }, 'cron skipped — previous run still active');
     recomputeNext(job);
     emitCrons();
     return;
   }
   recomputeNext(job);
-  try { spawnForJob(job); }
+  try { beginRun(job); spawnForJob(job); }
   catch (e) {
     logger?.warn({ id: job.id, err: e.message }, 'cron spawn failed');
-    job.lastError = e.message; job.updatedAt = Date.now(); persist(); emitCrons();
+    const failed = { ...job, lastError: e.message, updatedAt: Date.now() };
+    const staged = new Map(crons);
+    staged.set(job.id, failed);
+    try {
+      persist(staged);
+      Object.assign(job, failed);
+      emitCrons();
+    } catch (persistError) {
+      logger?.warn({ id: job.id, err: persistError.message }, 'cron failed-run persistence failed');
+    }
   }
 }
 
@@ -140,25 +189,39 @@ export function snapshotCrons() {
   return [...crons.values()].map((j) => ({ ...j, nextFire: nextFires.get(j.id)?.toISOString() ?? null }));
 }
 
-export function createCron({ title, cronExpr, description, cwd, model, scopes, permissionMode, enabled }) {
+export function createCron({ title, cronExpr, description, cwd, model, scopes, permissionMode, enabled, idempotencyKey }) {
   if (!title?.trim() || !cronExpr?.trim() || !description?.trim() || !cwd?.trim()) throw new Error('title, cronExpr, description, cwd required');
   validateExpr(cronExpr.trim());
+  const payload = {
+    title: title.trim(), enabled: enabled !== false, cronExpr: cronExpr.trim(), description: description.trim(),
+    cwd: cwd.trim(), model: model || 'claude', scopes: scopes || [], permissionMode: permissionMode || 'acceptEdits',
+  };
+  const key = typeof idempotencyKey === 'string' && idempotencyKey.trim() ? idempotencyKey.trim() : null;
+  const existing = key && [...crons.values()].find((job) => job.idempotencyKey === key);
+  if (existing) {
+    const fingerprint = existing.idempotencyPayload ?? JSON.stringify({ title: existing.title, enabled: existing.enabled, cronExpr: existing.cronExpr, description: existing.description, cwd: existing.cwd, model: existing.model, scopes: existing.scopes, permissionMode: existing.permissionMode });
+    const same = JSON.stringify(payload) === fingerprint;
+    if (!same) { const err = new Error('Idempotency-Key was already used with a different payload'); err.statusCode = 409; throw err; }
+    return existing;
+  }
   const id = randomUUID();
   const job = {
-    id, title: title.trim(), enabled: enabled !== false, cronExpr: cronExpr.trim(), description: description.trim(),
-    cwd: cwd.trim(), model: model || 'claude', scopes: scopes || [], permissionMode: permissionMode || 'acceptEdits',
+    id, ...payload, ...(key ? { idempotencyKey: key, idempotencyPayload: JSON.stringify(payload) } : {}),
     lastSessionId: null, lastFiredAt: null, createdAt: Date.now(), updatedAt: Date.now(),
   };
+  const pending = new Map(crons);
+  pending.set(id, job);
+  persist(pending);
   crons.set(id, job);
   if (job.enabled) recomputeNext(job);
-  persist();
   emitCrons();
   return job;
 }
 
 export function updateCron(id, body) {
-  const job = crons.get(id);
-  if (!job) throw new Error('no such cron');
+  const current = crons.get(id);
+  if (!current) throw new Error('no such cron');
+  const job = { ...current };
   if (body.title !== undefined) job.title = String(body.title).trim();
   if (body.cronExpr !== undefined) { validateExpr(body.cronExpr); job.cronExpr = String(body.cronExpr).trim(); }
   if (body.description !== undefined) job.description = String(body.description).trim();
@@ -167,17 +230,24 @@ export function updateCron(id, body) {
   if (body.scopes !== undefined) job.scopes = body.scopes;
   if (body.permissionMode !== undefined) job.permissionMode = body.permissionMode;
   if (body.enabled !== undefined) job.enabled = !!body.enabled;
+  if (!job.title?.trim() || !job.cronExpr?.trim() || !job.description?.trim() || !job.cwd?.trim()) throw new Error('title, cronExpr, description, cwd required');
   job.updatedAt = Date.now();
+  const pending = new Map(crons);
+  pending.set(id, job);
+  persist(pending);
+  Object.assign(current, job);
   if (job.enabled) recomputeNext(job); else nextFires.delete(job.id);
-  persist();
   emitCrons();
-  return job;
+  return current;
 }
 
 export function deleteCron(id) {
-  if (!crons.delete(id)) throw new Error('no such cron');
+  if (!crons.has(id)) throw new Error('no such cron');
+  const pending = new Map(crons);
+  pending.delete(id);
+  persist(pending);
+  crons.delete(id);
   nextFires.delete(id);
-  persist();
   emitCrons();
 }
 
@@ -186,6 +256,20 @@ export function deleteCron(id) {
 export function runCron(id) {
   const job = crons.get(id);
   if (!job) throw new Error('no such cron');
-  if (reg.isLive(job.lastSessionId)) throw new Error('previous run still active');
-  return spawnForJob(job);
+  if (job.pendingRunId || reg.isLive(job.lastSessionId)) throw new Error('previous run still active');
+  beginRun(job);
+  try {
+    return spawnForJob(job);
+  } catch (e) {
+    const agent = reg.findByRunId(job.pendingRunId);
+    if (agent) {
+      job.lastSessionId = agent.id;
+      job.lastFiredAt = Date.now();
+      job.updatedAt = Date.now();
+      persist();
+      delete job.pendingRunId;
+      delete job.pendingRunAt;
+    }
+    throw e;
+  }
 }

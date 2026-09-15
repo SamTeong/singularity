@@ -244,7 +244,7 @@ app.addHook('onRequest', async (req, reply) => {
 // write failure instead of silently swallowing it — surface that as 500 (the
 // request succeeded but state wasn't durably saved), vs. 400 for a plain
 // validation error.
-const errStatus = (e) => (e.persistFailure ? 500 : 400);
+const errStatus = (e) => e.statusCode || (e.persistFailure ? 500 : 400);
 
 // Recursively collect file mtimes under `dir` (used by the dist-staleness check below).
 function walkMtimes(dir) {
@@ -646,7 +646,7 @@ app.delete('/tasks/history/:id', async (req, reply) => {
 // missed runs ignored on restart (nextFire recomputed from now).
 app.get('/crons', async () => snapshotCrons());
 app.post('/crons', async (req, reply) => {
-  try { return { ok: true, cron: createCron(req.body || {}) }; }
+  try { return { ok: true, cron: createCron({ ...(req.body || {}), idempotencyKey: req.headers['idempotency-key'] }) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/crons/:id', async (req, reply) => {
@@ -677,7 +677,7 @@ app.post('/window-anchor/poke', async (req, reply) => {
 // (?force=1 bypasses the usage gate). Scheduler lives in-process.
 app.get('/background', async () => snapshotBackground());
 app.post('/background/jobs', async (req, reply) => {
-  try { return { ok: true, job: createJob(req.body || {}) }; }
+  try { return { ok: true, job: createJob({ ...(req.body || {}), idempotencyKey: req.headers['idempotency-key'] }) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.patch('/background/jobs/:id', async (req, reply) => {

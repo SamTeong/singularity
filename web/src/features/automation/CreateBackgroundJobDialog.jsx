@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -46,6 +46,7 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
   const [scopes, setScopes] = useState([]);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const idempotencyKey = useRef(null);
 
   // The dialog never unmounts (renders null while closed) — resync on every
   // open, either from `job` (edit) or back to blank/defaults (create). Fires
@@ -85,7 +86,10 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
   // picked with Browse. Keying on `open` alone fires this only on the
   // false→true transition, mirroring the render-time block above.
   useEffect(() => {
-    if (open && job?.cwd) setCwd(job.cwd);
+    if (open) {
+      idempotencyKey.current = null;
+      if (job?.cwd) setCwd(job.cwd);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
   }, [open, setCwd]);
 
@@ -107,7 +111,7 @@ export default function CreateBackgroundJobDialog({ open, onClose, job, cwd, set
       const method = editing ? 'PATCH' : 'POST';
       const r = await fetch(url, {
         method,
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', ...(!editing ? { 'Idempotency-Key': idempotencyKey.current ||= crypto.randomUUID() } : {}) },
         body: JSON.stringify({
           title: title.trim(), description: description.trim(), cwd: untildify(cwd.trim()),
           cooldownHours: Number(cooldownHours) || 24, enabled, conclude,

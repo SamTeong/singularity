@@ -86,9 +86,9 @@ function isGitWorkTree(repo) {
   catch { return false; }
 }
 
-function persist() {
+function persist(nextTasks = tasks, nextHistory = history) {
   try {
-    reg.writeAtomic(TASKS_FILE, JSON.stringify({ tasks: [...tasks.values()], history }, null, 2)); // atomic swap — a crash mid-write never truncates TASKS_FILE
+    reg.writeAtomic(TASKS_FILE, JSON.stringify({ tasks: [...nextTasks.values()], history: nextHistory }, null, 2)); // atomic swap — a crash mid-write never truncates TASKS_FILE
   } catch (e) {
     logger?.warn({ err: e.message }, 'tasks.json write failed');
     const err = new Error(`tasks.json write failed: ${e.message}`);
@@ -173,6 +173,13 @@ export function initTasks(log) {
       const full = join(WORKTREE_ROOT, d.name);
       if (!referenced.has(full)) log?.warn({ dir: full }, 'orphaned worktree dir — no task references it');
     }
+  }
+  // A crash after the durable transition but before its cleanup is safe to
+  // retry: Done tasks still need their session/worktree reclaimed, while a
+  // reopened git task may need its worktree recreated.
+  for (const t of tasks.values()) {
+    if (t.column === 'done') serialized(() => finishDoneTask(t)).catch((e) => log?.warn({ err: e.message, id: t.id }, 'done-task recovery failed'));
+    else if (t.kind === 'git' && !existsSync(t.worktree)) serialized(() => ensureWorktree(t)).catch((e) => log?.warn({ err: e.message, id: t.id }, 'worktree recovery failed'));
   }
   sweepRetention();
   setInterval(sweepRetention, 3600_000).unref();
@@ -439,7 +446,7 @@ ${t.description}
 // Max-turn cap from the dialog: positive int or null (empty/0/invalid → no cap).
 const posInt = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n > 0 ? n : null; };
 
-export function createTask({ repo, title, description, model, implModel, reviewerModel, orchestratorMaxTurns, implMaxTurns, reviewerMaxTurns, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, conclude, tool }) {
+export function createTask({ repo, title, description, model, implModel, reviewerModel, orchestratorMaxTurns, implMaxTurns, reviewerMaxTurns, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, backgroundJobId, backgroundRunId, conclude, tool }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
   if (!existsSync(repo)) throw new Error('working directory does not exist');
   const kind = isGitWorkTree(repo) ? 'git' : 'plain';
@@ -472,6 +479,8 @@ export function createTask({ repo, title, description, model, implModel, reviewe
       scopes, tags: normalizeTags(tags), requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
       column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
       ...(background ? { conclude: conclude === 'done' ? 'done' : 'inreview' } : {}),
+      ...(backgroundJobId ? { backgroundJobId } : {}),
+      ...(backgroundRunId ? { backgroundRunId } : {}),
       ...(tool ? { tool } : {}),
     };
     // Cost is captured by the global statusline (harness-usage-report skill,
@@ -516,39 +525,48 @@ export function updateTask(id, body) {
 async function updateTaskInner(id, { column, state }) {
   const t = tasks.get(id);
   if (!t) throw new Error('no such task');
+  const next = { ...t };
+  const wasDone = t.column === 'done';
   if (column !== undefined) {
     if (!COLUMNS.includes(column)) throw new Error(`bad column (expected ${COLUMNS.join('|')})`);
-    const wasDone = t.column === 'done';
-    t.column = column;
+    next.column = column;
     if (column === 'done' && !wasDone) {
-      t.doneAt = Date.now();
-      t.state = 'complete'; // clear stale agent state (e.g. "awaiting human review") on manual move; matches auto-flow done state, explicit state param below still wins
-      // Done ⟹ merged & terminal: drop the session (stops cost) and reclaim the
-      // worktree + branch now. Wait for the pty to die first (Windows file locks).
-      if (t.sessionId) {
-        taskBySession.delete(t.sessionId);
-        const wasLive = reg.isLive(t.sessionId);
-        reg.remove(t.sessionId);
-        tails.delete(t.sessionId); // session leaving the board for good — stop tracking its rate-limit tail
-        for (let waited = 0; wasLive && reg.isLive(t.sessionId) && waited < 3000; waited += 200) await sleep(200);
-      }
-      await cleanupGitTask(t);
+      next.doneAt = Date.now();
+      next.state = 'complete'; // clear stale agent state (e.g. "awaiting human review") on manual move; matches auto-flow done state, explicit state param below still wins
     } else if (column !== 'done' && wasDone) {
-      delete t.doneAt;
-      await ensureWorktree(t); // moved back out of Done → give it a working tree again
+      delete next.doneAt;
     }
   }
   if (state !== undefined) {
-    const col = column ?? t.column;
+    const col = column ?? next.column;
     const s = String(state).slice(0, 120);
     const allowed = [...(STATES[col] ?? []), ...OVERLAY_STATES];
     if (!allowed.includes(s)) throw new Error(`bad state for ${col} (expected ${allowed.join('|')})`);
-    t.state = s;
+    next.state = s;
   }
-  t.updatedAt = Date.now();
-  persist();
+  next.updatedAt = Date.now();
+  const staged = new Map(tasks);
+  staged.set(id, next);
+  // Make the transition durable before its irreversible process/worktree work.
+  persist(staged);
+  tasks.set(id, next);
   emitTasks();
-  return t;
+  if (column === 'done' && !wasDone) await finishDoneTask(next);
+  else if (column !== undefined && column !== 'done' && wasDone) await ensureWorktree(next);
+  return next;
+}
+
+async function finishDoneTask(t) {
+  // Idempotent recovery work for a durable Done transition. A later failure
+  // never turns a killed process or removed worktree back into a live task.
+  if (t.sessionId) {
+    taskBySession.delete(t.sessionId);
+    const wasLive = reg.isLive(t.sessionId);
+    reg.remove(t.sessionId);
+    tails.delete(t.sessionId);
+    for (let waited = 0; wasLive && reg.isLive(t.sessionId) && waited < 3000; waited += 200) await sleep(200);
+  }
+  await cleanupGitTask(t);
 }
 
 // Full cleanup (kill session, remove worktree, keep branch) + move to history

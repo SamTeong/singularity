@@ -58,6 +58,7 @@ let lastTick = null; // { at, action:'ran'|'skipped', reason }
 let logger = null;
 let lastDueAt = 0; // when the tick logic last ran (minute-resolution gating)
 let injectedTaskId = null; // watchdog: wrap-up injected for this bg task (once)
+let attemptingRun = false;
 
 // ---- Pure functions (exported, unit-tested) ------------------------------------
 
@@ -96,7 +97,7 @@ export function evalGate(usage, job) {
 // gate entirely — used only for a forced (bypassGate) manual run.
 export function pickJob(jobs, now) {
   const ready = (jobs || []).filter((d) =>
-    d.enabled && (d.lastRunAt == null || now - d.lastRunAt > d.cooldownHours * 3_600_000));
+    d.enabled && !d.pendingRunId && (d.lastRunAt == null || now - d.lastRunAt > d.cooldownHours * 3_600_000));
   ready.sort((a, b) => (a.lastRunAt ?? -Infinity) - (b.lastRunAt ?? -Infinity));
   return ready[0] || null;
 }
@@ -109,7 +110,7 @@ export function pickJob(jobs, now) {
 // per-candidate gate reasons.
 export function pickRunnableJob(jobs, usage, now, { bypassWindow = false } = {}) {
   const ready = (jobs || []).filter((d) =>
-    d.enabled &&
+    d.enabled && !d.pendingRunId &&
     (d.lastRunAt == null || now - d.lastRunAt > d.cooldownHours * 3_600_000) &&
     (bypassWindow || inWindow(d, new Date(now))));
   ready.sort((a, b) => (a.lastRunAt ?? -Infinity) - (b.lastRunAt ?? -Infinity));
@@ -136,9 +137,9 @@ export function watchdogDecision(usage, backend, job, tokens) {
 
 // ---- State + bus ----------------------------------------------------------------
 
-function persist() {
+function persist(next = config) {
   try {
-    reg.writeAtomic(BACKGROUND_FILE, JSON.stringify(config, null, 2)); // atomic swap
+    reg.writeAtomic(BACKGROUND_FILE, JSON.stringify(next, null, 2)); // atomic swap
   } catch (e) {
     logger?.warn({ err: e.message }, 'background.json write failed');
     const err = new Error(`background.json write failed: ${e.message}`);
@@ -194,6 +195,10 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
     emit();
     return null;
   };
+  if (attemptingRun) return refuse('a background run is already live');
+  attemptingRun = true;
+  try {
+  if (config.jobs.some((job) => job.pendingRunId)) return refuse('a background run has an unresolved pending intent; resolve it manually');
   if (await healLiveBgTask()) return refuse('a background run is already live');
 
   let job, backend;
@@ -208,17 +213,31 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
   }
 
   const model = job.models[backend];
+  // Record intent before createTask spawns its agent. If the final bookkeeping
+  // write loses a race with disk failure, startup can join this run to the
+  // durable task record instead of scheduling a duplicate.
+  const runId = randomUUID();
+  const pendingJob = { ...job, pendingRunId: runId, pendingRunAt: now };
+  const pendingConfig = { ...config, jobs: config.jobs.map((d) => d.id === job.id ? pendingJob : d) };
+  persist(pendingConfig);
+  config = pendingConfig;
   const task = createTask({
     repo: job.cwd, title: job.title, description: job.description, model,
     scopes: job.scopes, tags: ['background'], background: true, permissionSettings: DENY,
-    conclude: job.conclude,
+    backgroundJobId: job.id, backgroundRunId: runId, conclude: job.conclude,
   });
-  job.lastRunAt = now;
-  job.lastTaskId = task.id;
-  persist();
+  const completedJob = { ...pendingJob, lastRunAt: now, lastTaskId: task.id };
+  delete completedJob.pendingRunId;
+  delete completedJob.pendingRunAt;
+  const completedConfig = { ...config, jobs: config.jobs.map((d) => d.id === job.id ? completedJob : d) };
+  persist(completedConfig);
+  config = completedConfig;
   lastTick = { at: Date.now(), action: 'ran', reason: `${job.title} → ${backend}/${model}` };
   emit();
   return task;
+  } finally {
+    attemptingRun = false;
+  }
 }
 
 function tick() {
@@ -289,6 +308,23 @@ export function initBackground(log) {
       persist(); // materialize the shipped default so the file exists
     }
   } catch (e) { log?.warn({ err: e.message }, 'background.json load failed'); }
+  const { tasks } = snapshotTasks();
+  let recovered = false;
+  const recoveredJobs = config.jobs.map((job) => {
+    if (!job.pendingRunId) return job;
+    const task = tasks.find((t) => t.backgroundJobId === job.id && t.backgroundRunId === job.pendingRunId);
+    if (!task) return job; // keep the intent: an unknown outcome must not be retried blindly
+    recovered = true;
+    const next = { ...job, lastRunAt: job.pendingRunAt, lastTaskId: task.id };
+    delete next.pendingRunId;
+    delete next.pendingRunAt;
+    return next;
+  });
+  if (recovered) {
+    const next = { ...config, jobs: recoveredJobs };
+    try { persist(next); config = next; }
+    catch (e) { log?.warn({ err: e.message }, 'background run recovery persist failed'); }
+  }
   lastDueAt = Date.now(); // wait one TICK_MINUTES before the first run
   setInterval(tick, TICK_MS).unref();
   setInterval(() => { watchdog().catch(() => {}); }, WATCHDOG_MS).unref();
@@ -311,11 +347,11 @@ export function initBackground(log) {
 // regardless of this setting (see watchdog() above).
 const CONCLUDE_VALUES = ['inreview', 'done'];
 
-export function createJob({ title, description, cwd, cooldownHours, enabled, window, thresholds, models, tokenCaps, scopes, conclude }) {
+export function createJob({ title, description, cwd, cooldownHours, enabled, window, thresholds, models, tokenCaps, scopes, conclude, idempotencyKey }) {
   if (!title?.trim() || !description?.trim() || !cwd?.trim()) throw new Error('title, description, cwd required');
   if (conclude !== undefined && !CONCLUDE_VALUES.includes(conclude)) throw new Error(`conclude must be one of ${CONCLUDE_VALUES.join('|')}`);
-  const job = {
-    id: randomUUID(), title: title.trim(), description: description.trim(), cwd: cwd.trim(),
+  const payload = {
+    title: title.trim(), description: description.trim(), cwd: cwd.trim(),
     cooldownHours: cooldownHours ?? 24, enabled: enabled !== false,
     window: { ...DEFAULT_JOB.window, ...window },
     thresholds: {
@@ -327,10 +363,22 @@ export function createJob({ title, description, cwd, cooldownHours, enabled, win
     tokenCaps: { ...DEFAULT_JOB.tokenCaps, ...tokenCaps },
     scopes: Array.isArray(scopes) ? scopes : [],
     conclude: conclude ?? 'inreview',
+  };
+  const key = typeof idempotencyKey === 'string' && idempotencyKey.trim() ? idempotencyKey.trim() : null;
+  const existing = key && config.jobs.find((job) => job.idempotencyKey === key);
+  if (existing) {
+    const fingerprint = existing.idempotencyPayload ?? JSON.stringify({ title: existing.title, description: existing.description, cwd: existing.cwd, cooldownHours: existing.cooldownHours, enabled: existing.enabled, window: existing.window, thresholds: existing.thresholds, models: existing.models, tokenCaps: existing.tokenCaps, scopes: existing.scopes, conclude: existing.conclude });
+    const same = JSON.stringify(payload) === fingerprint;
+    if (!same) { const err = new Error('Idempotency-Key was already used with a different payload'); err.statusCode = 409; throw err; }
+    return existing;
+  }
+  const job = {
+    id: randomUUID(), ...payload, ...(key ? { idempotencyKey: key, idempotencyPayload: JSON.stringify(payload) } : {}),
     lastRunAt: null, lastTaskId: null,
   };
-  config.jobs.push(job);
-  persist();
+  const next = { ...config, jobs: [...config.jobs, job] };
+  persist(next);
+  config = next;
   emit();
   return job;
 }
@@ -340,8 +388,9 @@ export function createJob({ title, description, cwd, cooldownHours, enabled, win
 // siblings (claude.stop/weeklyMax) and silently disable the gate. Same for
 // window/models/tokenCaps (single level, merge preserves untouched keys).
 export function updateJob(id, partial) {
-  const job = config.jobs.find((d) => d.id === id);
-  if (!job) throw new Error('no such job');
+  const current = config.jobs.find((d) => d.id === id);
+  if (!current) throw new Error('no such job');
+  const job = { ...current, thresholds: { ...current.thresholds } };
   if (partial.conclude !== undefined && !CONCLUDE_VALUES.includes(partial.conclude)) throw new Error(`conclude must be one of ${CONCLUDE_VALUES.join('|')}`);
   for (const k of ['title', 'description', 'cwd', 'cooldownHours', 'enabled', 'lastRunAt', 'lastTaskId', 'conclude']) {
     if (partial[k] !== undefined) job[k] = partial[k];
@@ -355,7 +404,9 @@ export function updateJob(id, partial) {
   if (partial.models) job.models = { ...job.models, ...partial.models };
   if (partial.tokenCaps) job.tokenCaps = { ...job.tokenCaps, ...partial.tokenCaps };
   if (Array.isArray(partial.scopes)) job.scopes = partial.scopes;
-  persist();
+  const next = { ...config, jobs: config.jobs.map((d) => d.id === id ? job : d) };
+  persist(next);
+  config = next;
   emit();
   return job;
 }
@@ -363,8 +414,9 @@ export function updateJob(id, partial) {
 export function deleteJob(id) {
   const i = config.jobs.findIndex((d) => d.id === id);
   if (i === -1) throw new Error('no such job');
-  config.jobs.splice(i, 1);
-  persist();
+  const next = { ...config, jobs: config.jobs.filter((d) => d.id !== id) };
+  persist(next);
+  config = next;
   emit();
 }
 
@@ -374,8 +426,9 @@ export function deleteJob(id) {
 export function reorderJobs(ids) {
   if (!Array.isArray(ids)) throw new Error('ids array required');
   const rank = new Map(ids.map((id, i) => [id, i]));
-  config.jobs.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity));
-  persist();
+  const next = { ...config, jobs: [...config.jobs].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity)) };
+  persist(next);
+  config = next;
   emit();
 }
 
