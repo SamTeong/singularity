@@ -1,31 +1,119 @@
 import { getTokens } from '@/theme/contract.js';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import Alert from '@mui/material/Alert';
+import CircularProgress from '@mui/material/CircularProgress';
 import Collapse from '@mui/material/Collapse';
 import IconButton from '@mui/material/IconButton';
 import Link from '@mui/material/Link';
+import MenuItem from '@mui/material/MenuItem';
+import Select from '@mui/material/Select';
 import Tooltip from '@mui/material/Tooltip';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import { statusColor } from '@/shell/shellStyles.js';
 import { visibleProviders, usd } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
+import { useQueryState } from '@/hooks/useQueryState.js';
+import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { Meter } from '@/components/Meter.jsx';
 import UsageReportView from '@/features/usage/UsageReportView.jsx';
 
+// Per-card refresh cadence. Ollama is floored at a minute: every fetch is a
+// headless Chromium launch plus a scrape of ollama.com, so a sub-minute cadence
+// buys nothing and costs a browser process per tick. Claude and Codex floor at
+// 15s — both are HTTP calls, but Codex falls back to scanning session logs when
+// its auth file is unusable, so it gets no lower a floor than Claude. Off is the
+// default everywhere: the daemon already refreshes after each agent goes idle.
+const REFRESH_OPTIONS = {
+  claude: [['off', 'Off'], ['15s', '15s'], ['30s', '30s'], ['1m', '1m'], ['5m', '5m']],
+  codex: [['off', 'Off'], ['15s', '15s'], ['30s', '30s'], ['1m', '1m'], ['5m', '5m']],
+  ollama: [['off', 'Off'], ['1m', '1m'], ['5m', '5m'], ['15m', '15m']],
+};
+const REFRESH_MS = { '15s': 15_000, '30s': 30_000, '1m': 60_000, '5m': 300_000, '15m': 900_000 };
+
+// A hand-edited or stale URL value degrades to Off rather than throwing.
+function cadenceOf(sourceKey, value) {
+  return REFRESH_OPTIONS[sourceKey].some(([v]) => v === value) ? value : 'off';
+}
+
+// The last choice per provider, remembered per browser. The query string stays
+// the source of truth (the per-view state convention, and what a hand-edited URL
+// edits); this only seeds the default when the URL says nothing, so a bare
+// /usage — sidebar link, rail, deep link — reopens on the intervals this browser
+// had rather than on Off. Per-browser is the correct scope: the timer runs here,
+// not in the daemon, so another profile has its own.
+const CADENCE_KEY = 'sing:refresh-intervals';
+
+function readCadences() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(CADENCE_KEY) ?? '{}');
+    return stored && typeof stored === 'object' ? stored : {};
+  } catch {
+    // Corrupt JSON, or storage blocked (private mode). Fall back to Off rather
+    // than throwing the view away — the same degradation a bad URL param gets.
+    return {};
+  }
+}
+
+function writeCadence(sourceKey, value) {
+  try {
+    localStorage.setItem(CADENCE_KEY, JSON.stringify({ ...readCadences(), [sourceKey]: value }));
+  } catch {
+    // Storage unavailable: the choice still works, it just doesn't outlive the URL.
+  }
+}
+
 function ollamaFailure(error) {
-  if (error === 'auth-expired') return 'Ollama sign-in expired. Reconnect to continue refreshing.';
-  if (error === 'challenge-required') return 'Ollama needs an interactive browser check. Reconnect and complete it.';
+  if (error === 'auth-expired') return 'Ollama sign-in expired. Connect to continue refreshing.';
+  if (error === 'challenge-required') return 'Ollama needs an interactive browser check. Connect and complete it.';
   if (error === 'scrape-incompatible') return 'Ollama settings changed and its usage meter could not be read.';
   return `Ollama usage is currently unavailable${error ? `: ${error}` : '.'}`;
 }
 
-function ProviderCard({ label, usageUrl, u, onConnect, connecting, connectState }) {
+function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, connectState, cadence, onCadence, onRefreshSource, refreshing }) {
   const isOllama = label.toLowerCase() === 'ollama';
+  // Poll on the chosen cadence while this card is mounted. The timer dies with
+  // the card, so navigating away from Usage stops it, and a provider hidden by
+  // visibleProviders(caps) stops it too. A hidden tab stops without dropping the
+  // interval: the next visible tick resumes, and the backend keeps pushing its
+  // own refreshes regardless.
+  const interval = REFRESH_MS[cadence] ?? 0;
+  // The card's own in-flight read, so a poll that takes seconds (the Ollama
+  // scrape) shows as motion rather than as nothing happening. onRefreshSource
+  // resolves when the read lands; a failed read resolves too, so the spinner
+  // cannot stick. `refreshing` is the header's full refresh, which reads every
+  // source at once — same spinner, driven by the parent instead.
+  const [busy, setBusy] = useState(false);
+  // When the next cadence tick is due, so the header tooltip can say so. Every
+  // tick re-stamps it, so it stays ahead of the clock; no interval, no line.
+  const [nextAt, setNextAt] = useState(null);
+  useEffect(() => {
+    if (!interval) return undefined;
+    const id = setInterval(() => {
+      setNextAt(Date.now() + interval);
+      if (document.hidden) return;
+      setBusy(true);
+      Promise.resolve(onRefreshSource(sourceKey)).finally(() => setBusy(false));
+    }, interval);
+    return () => clearInterval(id);
+  }, [interval, sourceKey, onRefreshSource]);
+  const stale = !u?.ok || !!u?.stale;
+  // The dot carries the same three-way read the rail's daemon footer uses
+  // (statusColor): stale-but-usable is amber, a failed read is red, fresh is the
+  // nominal mint. The words live in the tooltip — colour is never the only cue.
+  const statusKind = stale ? (u?.ok ? 'warn' : 'danger') : 'ok';
+  const statusText = stale ? (u?.ok ? 'Stale' : 'Update failed') : 'Up to date';
+  // Stamped from the picker (an event, not an effect) so the line appears with
+  // the schedule the user just chose rather than one tick later.
+  const chooseInterval = (value) => {
+    setNextAt(REFRESH_MS[value] ? Date.now() + REFRESH_MS[value] : null);
+    onCadence(value);
+  };
   const authHelp = {
     // Browser mode (error 'no-login') vs manual-cookie mode need different fixes.
     ollama: ollamaFailure(u?.error),
@@ -34,22 +122,51 @@ function ProviderCard({ label, usageUrl, u, onConnect, connecting, connectState 
   };
   return (
     <Box sx={(t) => ({ p: 2, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}>
-      <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'baseline' }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'baseline', flexWrap: 'wrap' }}>
         <Typography sx={{ fontSize: 15, fontWeight: 600 }}>{label}</Typography>
         {u?.plan && <Typography variant="code" sx={{ fontSize: 11, px: 0.75, py: 0.25, borderRadius: 1, bgcolor: 'action.selected', color: 'text.secondary', textTransform: 'capitalize' }}>{u.plan}</Typography>}
-        <Box sx={{ flex: 1 }} />
+        {/* Jump-out sits right of the plan pill. alignSelf overrides the header
+            Stack's baseline alignment — an icon has no text baseline of its
+            own to sit on. */}
         {usageUrl && (
           <Tooltip title="Open usage page" placement="top">
-            {/* alignSelf overrides the header Stack's baseline alignment — an
-                icon has no text baseline of its own to sit on. */}
             <Link href={usageUrl} target="_blank" rel="noreferrer" sx={{ display: 'inline-flex', alignItems: 'center', alignSelf: 'center' }} color="text.secondary">
               <OpenInNewIcon fontSize="small" />
             </Link>
           </Tooltip>
         )}
-        {isOllama && (
+        {/* Off by default: the daemon already refreshes after each agent goes
+            idle, so polling is opt-in. */}
+        <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Interval:</Typography>
+        <Select
+          size="small"
+          variant="standard"
+          value={cadence}
+          onChange={(e) => chooseInterval(e.target.value)}
+          inputProps={{ 'aria-label': `${label} refresh interval` }}
+          sx={{ alignSelf: 'center', fontSize: 12 }}
+        >
+          {REFRESH_OPTIONS[sourceKey].map(([v, text]) => <MenuItem key={v} value={v} sx={{ fontSize: 12 }}>{text}</MenuItem>)}
+        </Select>
+        {/* This card's last successful read, on demand instead of a stamped line:
+            a timestamp is the only feedback that a short cadence is firing (and
+            that a Codex record is a day old), but it costs the header ~150px it
+            does not have at 320px. Same affordance as the Automation page. */}
+        {u?.fetchedAt && !busy && !refreshing && (
+          <Tooltip disableInteractive title={<>{`${statusText} — Updated on: ${new Date(u.fetchedAt).toLocaleString()}`}{nextAt && <><br />{`Next refresh: ${new Date(nextAt).toLocaleString()}`}</>}</>}>
+            <Box aria-hidden sx={(t) => {
+              const c = statusColor(t, statusKind);
+              return { width: 8, height: 8, borderRadius: '50%', background: c, flex: 'none', alignSelf: 'center', boxShadow: `0 0 0 3px color-mix(in srgb, ${c} 22%, transparent)` };
+            }} />
+          </Tooltip>
+        )}
+        {(busy || refreshing) && <CircularProgress size={14} sx={{ alignSelf: 'center' }} />}
+        <Box sx={{ flex: 1 }} />
+        {/* Connect button only when there's nothing fresh: no snapshot yet, or a
+            stale one after a failed scrape. Fresh data needs no button. */}
+        {isOllama && !(u?.ok && !u?.stale) && (
           <Button size="small" onClick={onConnect} disabled={connecting}>
-            {connecting ? 'Connecting…' : u?.ok ? 'Reconnect' : 'Connect'}
+            {connecting ? 'Connecting…' : 'Connect'}
           </Button>
         )}
       </Stack>
@@ -71,23 +188,24 @@ function ProviderCard({ label, usageUrl, u, onConnect, connecting, connectState 
               </Typography>
             </Box>
           )}
-          {/* Codex data is push-only (last rollout log write) and can be a day
-              stale — show when it's from, unlike the other two live-fetched
-              providers. */}
-          {label.toLowerCase() === 'codex' && (
+          {/* The header's info icon carries this card's last-read time, so what is
+              left here is the rolled-over reading: Codex logs limits only on a real
+              turn, so after a reset with no turns since, these bars show a window
+              that already rolled over — otherwise Refresh looks broken when it
+              faithfully returns the same old record. */}
+          {label.toLowerCase() === 'codex' && u.weekly?.resetsAt && new Date(u.weekly.resetsAt) < new Date() && (
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-              Last updated on {new Date(u.fetchedAt).toLocaleString()}
-              {/* Reading outlives its own window: Codex logs limits only on a real
-                  turn, so after a reset with no turns since, these bars show a
-                  window that already rolled over — otherwise Refresh looks broken
-                  when it faithfully returns the same old record. */}
-              {u.weekly?.resetsAt && new Date(u.weekly.resetsAt) < new Date() &&
-                ', window has since reset, run Codex to update.'}
+              Window has since reset, run Codex to update.
             </Typography>
           )}
           {isOllama && u.stale && (
             <Alert severity={u.needsAuth ? 'warning' : 'info'} sx={{ py: 0.5 }}>
               Last successful usage from {u.fetchedAt ? new Date(u.fetchedAt).toLocaleString() : 'an earlier refresh'}. {ollamaFailure(u.error)}
+            </Alert>
+          )}
+          {!isOllama && u.stale && (
+            <Alert severity={u.needsAuth ? 'warning' : 'info'} sx={{ py: 0.5 }}>
+              Last successful usage from {u.fetchedAt ? new Date(u.fetchedAt).toLocaleString() : 'an earlier refresh'}. {label} refresh failed{u.error ? `: ${u.error}` : '.'}
             </Alert>
           )}
         </Stack>
@@ -123,10 +241,29 @@ export default function UsageView({ usage, onRefresh, onConnectOllama }) {
   const [reportOpen, setReportOpen] = useState(true);
   const [connectState, setConnectState] = useState(null);
   const caps = useCapabilities();
+  const { refreshUsageSource } = useAgents();
+  // Per-card cadence lives in the query string (the per-view state convention),
+  // one key per provider so a hand-edited URL only reaches its own card. The
+  // remembered choice is the default the URL overrides, not a second source: the
+  // URL param wins whenever it is present.
+  const remembered = useMemo(() => readCadences(), []);
+  const cadences = {
+    claude: useQueryState('refresh-claude', remembered.claude ?? 'off'),
+    codex: useQueryState('refresh-codex', remembered.codex ?? 'off'),
+    ollama: useQueryState('refresh-ollama', remembered.ollama ?? 'off'),
+  };
   const connectOllama = async () => {
     setConnectState('connecting');
     const result = await onConnectOllama();
     setConnectState(result.ok ? 'success' : 'failure');
+  };
+  // The header's Refresh is a full-document force pull — all three sources at
+  // once — so the spinner belongs on every card, not on one. onRefresh resolves
+  // when the read lands (a failed read resolves too), so it cannot stick.
+  const [refreshingAll, setRefreshingAll] = useState(false);
+  const refreshAll = async () => {
+    setRefreshingAll(true);
+    try { await onRefresh(true); } finally { setRefreshingAll(false); }
   };
   return (
     <Stack sx={{ height: '100%', minHeight: 0, overflowY: 'auto' }}>
@@ -141,7 +278,7 @@ export default function UsageView({ usage, onRefresh, onConnectOllama }) {
         </IconButton>
         <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Usage</Typography>
         <Box sx={{ flex: 1 }} />
-        <Button size="small" startIcon={<RefreshIcon />} onClick={() => onRefresh(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
+        <Button size="small" disabled={refreshingAll} startIcon={refreshingAll ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon />} onClick={refreshAll} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
       </Stack>
       {/* Never shrinks: the provider cards are short and always relevant, and
           capping them clipped a card mid-meter, which read as the report panel
@@ -150,10 +287,16 @@ export default function UsageView({ usage, onRefresh, onConnectOllama }) {
         <Collapse in={open}>
           <Stack spacing={2}>
             <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-              Shows the usage limits for your whole account: a 5-hour session limit and a 7-day weekly limit. This updates on its own about once a minute — press Refresh to check right now.
+              Shows the usage limits for your whole account: a 5-hour session limit and a 7-day weekly limit. It refreshes on its own about once a minute, and each card can poll on an interval of its own — press Refresh to check right now.
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
-              {visibleProviders(caps).map((p) => <ProviderCard key={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} />)}
+              {visibleProviders(caps).map((p) => {
+                const [cadence, setCadence] = cadences[p.key];
+                // Persist alongside the URL write: the URL is this visit, the
+                // stored value is the next bare visit.
+                const chooseCadence = (v) => { setCadence(v); writeCadence(p.key, v); };
+                return <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} cadence={cadenceOf(p.key, cadence)} onCadence={chooseCadence} onRefreshSource={refreshUsageSource} refreshing={refreshingAll} />;
+              })}
             </Box>
           </Stack>
         </Collapse>

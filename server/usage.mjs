@@ -311,6 +311,12 @@ export function preserveOllamaStale(lastGood, failure) {
     : failure;
 }
 
+export function preserveClaudeStale(lastGood, failure) {
+  return lastGood?.ok && !failure.ok
+    ? { ...lastGood, stale: true, error: failure.error, needsAuth: !!failure.needsAuth }
+    : failure;
+}
+
 // Shared by POST /usage/ollama/connect and scripts/ollama-login.mjs.  The
 // optional seams keep its browser behaviour deterministic under node:test.
 export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 120_000, headlessVerifier } = {}) {
@@ -686,6 +692,9 @@ export async function fetchCodex() {
 
 // ---- Cache + public API -------------------------------------------------------
 const cache = { ollama: { data: null, at: 0 }, claude: { data: null, at: 0 }, codex: { data: null, at: 0 } };
+const SOURCES = ['ollama', 'claude', 'codex'];
+const CLAUDE_RATE_LIMIT_BACKOFF_MS = 5 * 60_000;
+let claudeRateLimitedUntil = 0;
 
 // Warm-start from disk so a freshly-restarted daemon serves last-known values
 // before the first live fetch. Best-effort; a corrupt/absent file is ignored.
@@ -707,16 +716,27 @@ function persist() {
 
 async function pull(src, fetcher, force) {
   const slot = cache[src];
+  if (src === 'claude' && Date.now() < claudeRateLimitedUntil && slot.data) return slot.data;
   if (!force && slot.data && Date.now() - slot.at < TTL) return slot.data;
   const fetched = await fetcher();
   // codex's fetchedAt is the record's own (possibly stale) timestamp — keep it;
   // ollama/claude never set one, so they still default to "now".
   const data = { fetchedAt: new Date().toISOString(), ...fetched };
   if (data.ok || !slot.data) { slot.data = data; slot.at = Date.now(); persist(); }
+  if (src === 'claude' && data.ok) claudeRateLimitedUntil = 0;
+  if (src === 'claude' && data.error === 'rate-limited') claudeRateLimitedUntil = Date.now() + CLAUDE_RATE_LIMIT_BACKOFF_MS;
   // Ollama failures retain the timestamped successful measurement and surface
   // the current actionable error; failures never reach the history writer.
   if (src === 'ollama' && !data.ok && slot.data?.ok) {
     return preserveOllamaStale(slot.data, data);
+  }
+  // Claude uses the same last-good semantics as Ollama. This keeps the meters
+  // visible while making a failed pull unambiguously stale instead of green.
+  if (src === 'claude' && !data.ok && slot.data?.ok) {
+    slot.data = preserveClaudeStale(slot.data, data);
+    slot.at = Date.now();
+    persist();
+    return slot.data;
   }
   if (src === 'ollama' && data.ok) {
     appendOllamaHistory(data);
@@ -730,13 +750,33 @@ async function pull(src, fetcher, force) {
   return slot.data;
 }
 
-export async function getUsage({ force = false } = {}) {
+// Which sources a pull may hit the network for. Absent, empty, or all-unknown
+// means all three.
+function normalizeSources(sources) {
+  if (!sources) return new Set(SOURCES);
+  const listed = [].concat(sources).filter((s) => SOURCES.includes(s));
+  return listed.length ? new Set(listed) : new Set(SOURCES);
+}
+
+export async function getUsage({ force = false, sources } = {}) {
+  const allow = normalizeSources(sources);
+  // An excluded source must never reach pull(): pull refetches on its own once
+  // the slot is past TTL, so the allowlist is enforced by not calling it at all
+  // rather than by holding force back. The slot is null until the first
+  // successful fetch, so a filtered pull against a cold cache returns the key
+  // as null — the card renders "Loading…", and the client merge keeps a null
+  // from overwriting a card that already has data.
+  const pick = (src, fetcher) => (allow.has(src) ? pull(src, fetcher, force) : cache[src].data);
   const [ollama, claude, codex] = await Promise.all([
-    pull('ollama', fetchOllama, force),
-    pull('claude', fetchClaude, force),
-    pull('codex', fetchCodex, force),
+    pick('ollama', fetchOllama),
+    pick('claude', fetchClaude),
+    pick('codex', fetchCodex),
   ]);
-  const result = { ollama: { ...ollama, historyPaused }, claude, codex };
+  // A full document even for a filtered pull: scheduleResetRefreshes() rebuilds
+  // every source's reset timer from what it is handed, so a partial document
+  // would clear the timers it does not mention and never recreate them, and the
+  // ollama slot is what carries historyPaused.
+  const result = { ollama: ollama ? { ...ollama, historyPaused } : null, claude, codex };
   usageBus?.emit('usage', result);
   scheduleResetRefreshes(result);
   return result;
@@ -760,7 +800,10 @@ function resetDelay(iso, capMs = 7.75 * 24 * 3.6e6) {
 }
 
 // One forced refresh just after each 5h/7d window resets, so a passive viewer
-// sees the % drop to 0. Rescheduled from every getUsage result.
+// sees the % drop to 0. Rescheduled from every getUsage result — including a
+// filtered one, which is why getUsage always assembles a full document.
+// Rebuilding up to six timers per call is churn a 15s card cadence multiplies,
+// and not worth a previous-document diff to avoid.
 function scheduleResetRefreshes(result) {
   resetTimers.forEach(clearTimeout);
   resetTimers = [];

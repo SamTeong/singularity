@@ -6,7 +6,7 @@
 // sets its own viewport and navigates by URL, so this runs in the default
 // `chromium` project rather than the fixed responsive-viewport-matrix projects.
 import { test, expect } from './fixtures/test.mjs';
-import { expectNoPageOverflow, expectReachableByPaneScroll, seedSkin, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
+import { expectNoPageOverflow, expectReachableByPaneScroll, seedSkin, RESPONSIVE_SKINS, RESPONSIVE_VIEWPORTS } from './helpers/responsive.mjs';
 
 const PHONE = RESPONSIVE_VIEWPORTS.phone;               // 375x667
 const LANDSCAPE_PHONE = RESPONSIVE_VIEWPORTS.landscapePhone;    // >=600px wide -> icon rail, not the phone drawer
@@ -175,6 +175,45 @@ test('usage at 320px: no page-level horizontal overflow', async ({ page }) => {
   await gotoReady(page, '/usage', page.getByRole('button', { name: /collapse usage|expand usage/i }).first());
   await expectNoPageOverflow(page);
 });
+
+// The card header gained a refresh-interval Select (right of the plan pill and
+// the jump-out link). It is the one control this view can push off a 320px
+// card, so the header Stack wraps instead of widening the card: the control
+// stays on screen, the row stays inside the card, and the page never gains
+// horizontal overflow.
+for (const skin of RESPONSIVE_SKINS) {
+  test(`usage at 320px (${skin}): the per-card refresh-interval control stays inside the card`, async ({ page }) => {
+    await seedSkin(page, skin);
+    await page.setViewportSize(RESPONSIVE_VIEWPORTS.narrowest);
+    await gotoReady(page, '/usage', page.getByRole('button', { name: /collapse usage|expand usage/i }).first());
+
+    // One per visible provider card (Claude, Codex, Ollama), none of them the
+    // sidebar rail's UsagePanel — that renders meters, not cadence controls.
+    const selects = page.getByRole('combobox', { name: /refresh interval$/ });
+    await expect(selects).toHaveCount(3);
+
+    for (const name of ['Claude', 'Codex', 'Ollama']) {
+      const control = page.getByRole('combobox', { name: `${name} refresh interval` });
+      const box = await control.boundingBox();
+      expect(box.x, `${skin} ${name} card control starts on screen`).toBeGreaterThanOrEqual(0);
+      expect(box.x + box.width, `${skin} ${name} card control ends on screen`).toBeLessThanOrEqual(RESPONSIVE_VIEWPORTS.narrowest.width);
+
+      // The header Stack the control is the last flexible child of. Without
+      // flexWrap the Ollama row (label + Connect button, which the flex spacer
+      // pushes right) runs ~32px past the card's 266px content box and carries the
+      // button off-card — while the control itself still lands on screen, so
+      // asserting the control alone stays green. Assert the row. scrollWidth is the
+      // honest measure here: content pushed past the card never reaches
+      // document.body.scrollWidth (the page-level overflow helper stays green too).
+      const row = await control.evaluate((el) => {
+        const stack = el.closest('.MuiStack-root');
+        return { sw: stack.scrollWidth, cw: stack.clientWidth };
+      });
+      expect(row.sw, `${skin} ${name} card header row fits its card`).toBeLessThanOrEqual(row.cw + 1);
+    }
+    await expectNoPageOverflow(page);
+  });
+}
 
 // ----------------------------------------------------------------- history
 

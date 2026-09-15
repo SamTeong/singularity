@@ -39,7 +39,7 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, preserveClaudeStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
 
 // Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
 // response: plan badge, Session then Weekly meter (aria-label + segment buttons),
@@ -401,4 +401,133 @@ test('refreshClaudeAuth: falls back to the CLI once, then throttles', async () =
   process.env.CLAUDE_BIN = process.execPath; // real exe; `auth status` args just make it exit
   assert.equal(await refreshClaudeAuth(), true);
   assert.equal(await refreshClaudeAuth(), false);
+});
+
+// ---- getUsage({ sources }) — the per-card refresh allowlist ----------------------
+// `sources` is a FETCH allowlist, not a projection: only the listed sources may hit
+// the network, the rest are served from their cache slot, and the returned document
+// still carries all three keys (the client merges wholesale). Order matters here —
+// the cold-cache case must run before any other getUsage call in this file, while the
+// module's cache is still empty. The refresh-token tests above leave a credentials
+// file whose token has no `expiresAt`, which claudeOauthToken() still hands back —
+// a permitted claude pull would then reach the real usage endpoint. Remove it, and
+// every pull below stops at the pre-network auth guard.
+let warm; // the fully-warmed document the filtered pulls below compare against
+
+test('getUsage: filtered pull on a cold cache fetches only the listed source', async () => {
+  // Must run here, not at module scope: the refresh-token tests above write this
+  // file only once the tests actually run (see the note block above).
+  rmSync(join(claudeCfg, '.credentials.json'), { force: true });
+  const doc = await getUsage({ sources: ['claude'], force: true });
+  assert.deepEqual(Object.keys(doc).sort(), ['claude', 'codex', 'ollama']);
+  // null, not an error object: an excluded source reads its cache slot, which is
+  // empty until a first successful fetch. A fetcher that ran would have populated
+  // it — fetchOllama always returns an object and fetchCodex reads the rollout
+  // fixture — so a null can only mean "never called".
+  assert.equal(doc.ollama, null);
+  assert.equal(doc.codex, null);
+  // The listed source did run. This scratch home holds expired credentials, so it
+  // stops at the pre-network auth guard rather than the real endpoint.
+  assert.equal(doc.claude.source, 'claude');
+  assert.equal(doc.claude.error, 'no-credentials');
+});
+
+test('getUsage: the allowlist outranks force, and an excluded source is served by reference', async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('offline'); };
+  try {
+    // Warm every slot without touching the network: codex falls back to the
+    // rollout fixture, ollama's cookie scrape fails fast.
+    warm = await getUsage({ force: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(warm.codex.ok, true); // the fixture rollout, not a blank
+
+  const urls = [];
+  globalThis.fetch = async (url) => { urls.push(String(url)); throw new Error('offline'); };
+  let second;
+  try {
+    second = await getUsage({ sources: ['claude'], force: true });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  // Zero requests: an excluded source never reaches the network even under
+  // force=1, and the listed one has no usable credentials to spend.
+  assert.deepEqual(urls, []);
+  // Identity, not a deep-equal: an excluded source returns its slot by reference,
+  // so the same object proves the fetcher never ran (a live fetch would have
+  // replaced it with a fresh rollout read).
+  assert.strictEqual(second.codex, warm.codex);
+});
+
+test('getUsage: an excluded source past its TTL is still not refetched', async () => {
+  // pull() refetches on staleness by itself — force only adds reasons. Excluding a
+  // source therefore has to mean never calling pull for it, which is what this
+  // catches: advance the clock past TTL so the codex slot is stale, and a
+  // claude-only pull must still leave it alone.
+  const realNow = Date.now;
+  const originalFetch = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => { urls.push(String(url)); throw new Error('offline'); };
+  Date.now = () => realNow() + 10 * 60_000;
+  let third;
+  try {
+    third = await getUsage({ sources: ['claude'] });
+  } finally {
+    Date.now = realNow;
+    globalThis.fetch = originalFetch;
+  }
+  assert.deepEqual(urls, []);
+  assert.strictEqual(third.codex, warm.codex);
+});
+
+test('getUsage: a filtered pull still assembles a full document', async () => {
+  const doc = await getUsage({ sources: ['claude'] });
+  // scheduleResetRefreshes() rebuilds every source's reset timer from what it is
+  // handed, so a partial document would clear the timers it omits and never
+  // recreate them — the excluded sources must arrive intact.
+  assert.equal(doc.codex.weekly.pctUsed, warm.codex.weekly.pctUsed);
+  assert.equal(doc.codex.weekly.resetsAt, warm.codex.weekly.resetsAt);
+  // historyPaused rides the ollama slot, so it survives a pull that never read
+  // ollama. 'in', not truthiness: null is the armed state.
+  assert.ok('historyPaused' in doc.ollama);
+  assert.equal(doc.ollama.historyPaused, null);
+});
+
+test('getUsage: Claude 429 preserves the last good reading and backs off', async () => {
+  writeCreds({ accessToken: 'live-token', expiresAt: Date.now() + 60_000 });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return calls === 1
+      ? { status: 200, json: async () => CLAUDE_RAW }
+      : { status: 429 };
+  };
+  try {
+    const fresh = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(fresh.claude.ok, true);
+
+    const limited = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(limited.claude.ok, true);
+    assert.equal(limited.claude.stale, true);
+    assert.equal(limited.claude.error, 'rate-limited');
+    assert.equal(limited.claude.fetchedAt, fresh.claude.fetchedAt);
+
+    const backedOff = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(backedOff.claude, limited.claude);
+    assert.equal(calls, 2);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('preserveClaudeStale keeps a failed pull separate from its last good reading', () => {
+  const previous = { ok: true, source: 'claude', fetchedAt: '2026-01-01T00:00:00.000Z', session: { pctUsed: 20 } };
+  const result = preserveClaudeStale(previous, { ok: false, source: 'claude', error: 'rate-limited' });
+  assert.equal(result.ok, true);
+  assert.equal(result.stale, true);
+  assert.equal(result.error, 'rate-limited');
+  assert.equal(result.fetchedAt, previous.fetchedAt);
 });

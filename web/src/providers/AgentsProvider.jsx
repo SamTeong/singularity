@@ -19,6 +19,18 @@ const WS_URL = `ws://${location.host}/ws${window.__SING_TOKEN__ ? `?token=${enco
 // 'list', but remember the user's pick so a reload doesn't jump back to it.
 const ACTIVE_KEY = 'sing:active';
 
+// Merge a /usage document per source instead of replacing the whole object. A
+// filtered pull (?source=claude) serves the sources it did not fetch from cache,
+// and a slot that has never been filled comes back null — a wholesale replace
+// would blank a card that is already showing data. Nothing ever needs to clear a
+// provider to null: failures arrive as `{ok:false}` payloads.
+function mergeUsageDoc(cur, next) {
+  if (!next) return cur;
+  const out = { ...cur };
+  for (const [key, value] of Object.entries(next)) if (value != null) out[key] = value;
+  return out;
+}
+
 /** @type {React.Context<any>} */
 const AgentsContext = createContext(null);
 
@@ -83,7 +95,7 @@ export function AgentsProvider({ children }) {
           // terminal, which fires the "view full transcript" prompt if trimmed.
           termHandlers.current[m.id]?.meta?.(m);
         } else if (m.t === 'usage') {
-          setUsage(m.data);
+          setUsage((cur) => mergeUsageDoc(cur, m.data));
         } else if (m.t === 'tasks') {
           setTasks(m.tasks);
           setTaskHistory(m.history || []);
@@ -181,7 +193,16 @@ export function AgentsProvider({ children }) {
   // Usage (Ollama Cloud + Claude 5h/7d). On-demand only — no interval poll.
   // Server caches ~60s so repeated opens are cheap; force=1 bypasses.
   const refreshUsage = useCallback((force = false) => {
-    fetch(`/api/usage${force ? '?force=1' : ''}`).then((r) => r.json()).then(setUsage).catch(() => {});
+    return fetch(`/api/usage${force ? '?force=1' : ''}`).then((r) => r.json()).then((d) => setUsage((cur) => mergeUsageDoc(cur, d))).catch(() => {});
+  }, []);
+
+  // One provider's live read, leaving the others to their cache slots — the
+  // Usage page's per-card refresh interval. The daemon enforces the allowlist
+  // (see getUsage) so a fast Claude cadence never launches the Ollama browser.
+  // Returns a promise that settles when the read lands (and never rejects): the
+  // card's in-flight spinner awaits it.
+  const refreshUsageSource = useCallback((key) => {
+    return fetch(`/api/usage?source=${encodeURIComponent(key)}&force=1`).then((r) => r.json()).then((d) => setUsage((cur) => mergeUsageDoc(cur, d))).catch(() => {});
   }, []);
 
   // Interactive Ollama sign-in returns one sanitized provider payload (rather
@@ -217,13 +238,13 @@ export function AgentsProvider({ children }) {
     agents, active, setActive, connected, recent,
     tasks, taskHistory, crons, background, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage, connectOllamaUsage,
+    sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
     registerTerminal, registerChat, registerError,
   }), [
     agents, active, connected, recent,
     tasks, taskHistory, crons, background, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage, connectOllamaUsage,
+    sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
     registerTerminal, registerChat, registerError,
   ]);
   return <AgentsContext value={value}>{children}</AgentsContext>;
