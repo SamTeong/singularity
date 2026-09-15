@@ -8,6 +8,11 @@ const port = Number(process.env.E2E_MOCK_PORT) || 4173;
 const baseURL = `http://127.0.0.1:${port}`;
 const { narrowest, phone, tablet, compactDesktop, desktop } = RESPONSIVE_VIEWPORTS;
 
+// Rasterize canvas (xterm, Cytoscape) on the real GPU instead of SwiftShader:
+// channel:'chromium' = full bundled build (headless shell hard-disables GPU),
+// --use-angle=default = hardware ANGLE in the new headless mode. Chromium-only.
+const gpu = { channel: 'chromium', launchOptions: { args: ['--use-angle=default'] } };
+
 export default defineConfig({
   testDir: 'e2e-mock',
   fullyParallel: true,
@@ -35,14 +40,14 @@ export default defineConfig({
   },
   projects: [
     // Keep existing behavioural specs at their established desktop viewport.
-    { name: 'chromium', testIgnore: ['responsive.spec.mjs', 'webkit-mobile.spec.mjs'], use: { browserName: 'chromium' } },
+    { name: 'chromium', testIgnore: ['responsive.spec.mjs', 'webkit-mobile.spec.mjs'], use: { browserName: 'chromium', ...gpu } },
     // The responsive smoke contract runs only its matrix, so normal mock flows
     // do not become five times slower.
-    { name: 'responsive-narrowest', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: narrowest } },
-    { name: 'responsive-phone', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: phone } },
-    { name: 'responsive-tablet', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: tablet } },
-    { name: 'responsive-compact-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: compactDesktop } },
-    { name: 'responsive-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: desktop } },
+    { name: 'responsive-narrowest', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: narrowest, ...gpu } },
+    { name: 'responsive-phone', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: phone, ...gpu } },
+    { name: 'responsive-tablet', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: tablet, ...gpu } },
+    { name: 'responsive-compact-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: compactDesktop, ...gpu } },
+    { name: 'responsive-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: desktop, ...gpu } },
     // Targeted iPhone Safari emulation, not physical-device coverage. Keep its
     // match narrow so the Chromium suites and responsive matrix stay unchanged.
     {

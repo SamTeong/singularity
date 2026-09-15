@@ -42,8 +42,16 @@ export default defineConfig({
   },
   // Bundled chromium (pnpm exec playwright install chromium) — deliberately not
   // devices['Desktop Chrome'], which pins channel:'chrome' and would drive the
-  // locally installed browser instead.
-  projects: [{ name: 'chromium', use: { browserName: 'chromium' } }],
+  // locally installed browser instead. channel:'chromium' picks the full
+  // bundled build (not headless shell, which hard-disables GPU);
+  // --use-angle=default lets the new headless mode rasterize on the real GPU
+  // via ANGLE instead of SwiftShader — canvas-heavy specs (xterm, Cytoscape)
+  // otherwise burn CPU on software GL.
+  projects: [{ name: 'chromium', use: {
+    browserName: 'chromium',
+    channel: 'chromium',
+    launchOptions: { args: ['--use-angle=default'] },
+  } }],
   webServer: {
     command: 'node e2e/serve.mjs',
     url: `${BASE_URL}/api/health`,
