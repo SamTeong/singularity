@@ -32,6 +32,7 @@ import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
+import { initWindowAnchor, snapshotWindowAnchor, setWindowAnchorEnabled, pokeProvider } from './window-anchor.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
 import { getModels, setModels, restoreDefaults } from './model-store.mjs';
 
@@ -243,7 +244,7 @@ app.addHook('onRequest', async (req, reply) => {
 // write failure instead of silently swallowing it — surface that as 500 (the
 // request succeeded but state wasn't durably saved), vs. 400 for a plain
 // validation error.
-const errStatus = (e) => (e.persistFailure ? 500 : 400);
+const errStatus = (e) => e.statusCode || (e.persistFailure ? 500 : 400);
 
 // Recursively collect file mtimes under `dir` (used by the dist-staleness check below).
 function walkMtimes(dir) {
@@ -645,7 +646,7 @@ app.delete('/tasks/history/:id', async (req, reply) => {
 // missed runs ignored on restart (nextFire recomputed from now).
 app.get('/crons', async () => snapshotCrons());
 app.post('/crons', async (req, reply) => {
-  try { return { ok: true, cron: createCron(req.body || {}) }; }
+  try { return { ok: true, cron: createCron({ ...(req.body || {}), idempotencyKey: req.headers['idempotency-key'] }) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/crons/:id', async (req, reply) => {
@@ -661,12 +662,22 @@ app.post('/crons/:id/run', async (req, reply) => {
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 
+// Window anchor: keeps Claude/Codex 5h plan windows pinned to their reset time.
+// GET returns the full state (bare, like /crons); POST toggles per-provider
+// enablement; /poke fires the trivial anchor prompt manually.
+app.get('/window-anchor', async () => snapshotWindowAnchor());
+app.post('/window-anchor', async (req) => setWindowAnchorEnabled(req.body?.enabled || {}));
+app.post('/window-anchor/poke', async (req, reply) => {
+  try { return { ok: true, ...(await pokeProvider(req.body?.provider)) }; }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
+});
+
 // Background tasks: quota-soak runs during working hours. Per-job CRUD (each
 // job carries its own window/thresholds/models/tokenCaps) + manual trigger
 // (?force=1 bypasses the usage gate). Scheduler lives in-process.
 app.get('/background', async () => snapshotBackground());
 app.post('/background/jobs', async (req, reply) => {
-  try { return { ok: true, job: createJob(req.body || {}) }; }
+  try { return { ok: true, job: createJob({ ...(req.body || {}), idempotencyKey: req.headers['idempotency-key'] }) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.patch('/background/jobs/:id', async (req, reply) => {
@@ -873,6 +884,7 @@ app.post('/history/regenerate', async (req, reply) => {
 reg.init(app.log);
 initTasks(app.log);
 initCrons(app.log);
+initWindowAnchor({ log: app.log });
 initBackground(app.log);
 initUsageAutoRefresh(reg.bus);
 // Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors

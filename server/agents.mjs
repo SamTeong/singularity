@@ -87,8 +87,8 @@ export function writeAtomic(file, data, rename = renameSync) {
 let logger = null;
 function persist() {
   const data = {
-    agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince, mock, tool, threadId }) => ({
-      id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs, mock, tool, threadId,
+    agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince, mock, tool, threadId, runId }) => ({
+      id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs, mock, tool, threadId, runId,
       // fold the live running-span in so a daemon exit while 'running' doesn't lose it
       activeMs: status === 'running' && runningSince ? (activeMs || 0) + (Date.now() - runningSince) : activeMs,
       status: status === 'running' || status === 'starting' || status === 'idle' ? 'detached' : status,
@@ -134,6 +134,7 @@ export function getBuf(id) { return agents.get(id)?.buf.join('') ?? ''; }
 export function getWritten(id) { return agents.get(id)?.written ?? 0; }
 export function getStatus(id) { return agents.get(id)?.status; }
 export function isLive(id) { return !!agents.get(id)?.proc; }
+export function findByRunId(runId) { return [...agents.values()].find((a) => a.runId === runId) || null; }
 // Launch config for a registered agent (by id), for resuming a past session from
 // the Transcripts view: skill-scopes are NOT recorded in the transcript JSONL,
 // only in agents.json, so the registry is the sole source. Returns null for
@@ -411,7 +412,7 @@ export function untildify(p) {
 }
 
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt, threadId }) {
+export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt, threadId, runId }) {
   cwd = untildify(cwd);
   const id = (sessionId && sessionId.trim()) || randomUUID();
   const existing = agents.get(id);
@@ -435,7 +436,7 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
   const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId }, prompt);
   ensureTrusted(cwd);
   const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: spawnEnv(mock), useConptyDll: true });
-  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
+  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, runId, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);

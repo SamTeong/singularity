@@ -4,7 +4,7 @@
 // caveman plugin enabled) the cavecrew fallback.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync, readdirSync, chmodSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync, readdirSync, chmodSync, renameSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -237,6 +237,28 @@ test('updateTask: state validated against the per-column STATES map', async () =
   assert.equal(overlay.state, 'rate-limited');
 });
 
+test('updateTask: failed Done persistence leaves the session and worktree untouched', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  const worktree = mkdtempSync(join(scratch, 'pending-cleanup-'));
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'seed-done-failure', title: 'seed', description: 'd', column: 'inprogress', state: 'working', kind: 'git', repo: scratch, worktree, branch: 'x', sessionId: 'not-a-live-session' }],
+    history: [],
+  }));
+  initTasks(null);
+  const backup = `${tasksFile}.backup`;
+  renameSync(tasksFile, backup);
+  mkdirSync(tasksFile);
+  try {
+    await assert.rejects(() => updateTask('seed-done-failure', { column: 'done' }), (err) => err.persistFailure === true);
+    assert.equal(snapshotTasks().tasks.find((t) => t.id === 'seed-done-failure').column, 'inprogress');
+    assert.equal(existsSync(worktree), true, 'cleanup cannot start before the durable transition');
+  } finally {
+    rmSync(tasksFile, { recursive: true });
+    renameSync(backup, tasksFile);
+    rmSync(worktree, { recursive: true, force: true });
+  }
+});
+
 // concludeTask mutates task state across several awaits (statsFor, the pty-death
 // wait, cleanupGitTask). Before it was routed through serialized(), two
 // concurrent conclusions both read tasks.get(id) as present and both ran to
@@ -425,9 +447,28 @@ test('initTasks: rebuilds taskBySession reverse index from tasks.json for rate-l
   // that the task state transitions to 'rate-limited' (the listener uses
   // taskBySession to find the task, so this only works if the index was rebuilt).
   let stateAfterOutput = null;
-  reg.bus.once('tasks', () => { stateAfterOutput = snapshotTasks().tasks[0]?.state; });
+  let sawTasks;
+  const emitted = new Promise((resolve) => { sawTasks = resolve; });
+  reg.bus.once('tasks', () => { stateAfterOutput = snapshotTasks().tasks[0]?.state; sawTasks(); });
   reg.bus.emit('output', { id: sessionId, data: 'reached your session usage limit' });
-  await new Promise((r) => setImmediate(r)); // let the async listener run
+  await Promise.race([emitted, new Promise((resolve) => setTimeout(resolve, 3500))]);
 
   assert.equal(stateAfterOutput, 'rate-limited', 'taskBySession reverse index was rebuilt, rate-limit listener fired');
+});
+
+test('updateTask: state-only Done update does not recreate a cleaned git worktree', async () => {
+  const repo = initRepo();
+  const worktree = join(scratch, `gone-${Date.now()}`);
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  try {
+    writeFileSync(tasksFile, JSON.stringify({
+      tasks: [{ id: 'done-state-only', title: 'seed', description: 'd', column: 'done', state: 'complete', kind: 'git', repo, worktree, branch: 'gone-branch' }], history: [],
+    }));
+    initTasks(null);
+    await updateTask('done-state-only', { state: 'report ready' });
+    assert.equal(existsSync(worktree), false);
+    assert.throws(() => execFileSync('git', ['-C', repo, 'show-ref', '--verify', '--quiet', 'refs/heads/gone-branch']));
+  } finally {
+    rmRepo(repo);
+  }
 });

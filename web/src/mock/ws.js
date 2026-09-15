@@ -5,8 +5,8 @@
 // Frame shapes mirror server/pty-ws.mjs exactly — the client parses them
 // field-by-field (AgentsProvider.jsx onmessage), so a missing field silently
 // degrades a surface. On connect we emit the daemon's opening burst in its
-// order (list, tasks, crons, background); then we answer the client frames that
-// drive the dock, terminals, and chat (tasks.md section 4).
+// order (list, tasks, crons, background, window-anchor); then we answer the
+// client frames that drive the dock, terminals, and chat (tasks.md section 4).
 //
 // Mutating REST handlers in routes/*.js call the exported broadcast() to push
 // the matching frame, the same way the daemon's bus fans reg events to sockets
@@ -231,6 +231,7 @@ export function startWs() {
     // nextDueAt mirrors the daemon's `lastDueAt + TICK_MINUTES*60_000` — a fresh
     // daemon's lastDueAt is its boot time, so the first check is ~1h out.
     send(socket, { t: 'background', config: { jobs: db.background }, lastTick: null, liveTaskId: null, nextDueAt: Date.now() + 60 * 60 * 1000 });
+    send(socket, { t: 'window-anchor', anchor: db.windowAnchor });
     // mock-socket passes the message data as the listener's first argument
     // (its dispatchEvent forwards custom args, not the event object).
     socket.on('message', (data) => handleMessage(socket, data));

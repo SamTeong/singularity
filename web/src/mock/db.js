@@ -7,7 +7,7 @@
 // (design.md D7).
 import {
   seedFiles, seedSessions, seedTasks, seedTaskHistory,
-  seedCrons, seedBackgroundJobs, seedAgents, seedRoots, seedRecentRepos, T0,
+  seedCrons, seedBackgroundJobs, seedAgents, seedRoots, seedRecentRepos, seedWindowAnchor, T0,
 } from './fixtures.js';
 
 // Fresh top-level containers on every module evaluation — deep clone from
@@ -22,6 +22,7 @@ export const db = {
   taskHistory: clone(seedTaskHistory()), // [task & { outcome, concludedAt, finalStats }]
   crons: clone(seedCrons()), // [cron]
   background: clone(seedBackgroundJobs()), // [job]
+  windowAnchor: clone(seedWindowAnchor()), // { claude, codex } — the bare /window-anchor snapshot
   agents: clone(seedAgents()), // [] — grows at runtime (create/fork/attach, section 4)
   recentRepos: clone(seedRecentRepos()), // cwd list carried by the `list` frame
   roots: clone(seedRoots()), // per-panel picker roots

@@ -52,6 +52,17 @@ const sepOf = (p) => (p.includes('/') && !p.includes('\\') ? '/' : '\\');
 const joinPath = (dir, name) => (dir.endsWith(sepOf(dir)) ? dir + name : dir + sepOf(dir) + name);
 const baseOf = (p) => { const s = sepOf(p); const i = p.lastIndexOf(s); return i < 0 ? p : p.slice(i + 1); };
 
+async function mutate(url, options) {
+  try {
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => null);
+    if (response.ok && data?.ok) return data;
+    return { ok: false, error: data?.error || `Request failed (${response.status})` };
+  } catch {
+    return { ok: false, error: 'Request failed' };
+  }
+}
+
 export default function ExplorerPanel() {
   const { keys } = useKeys();
   const [root, setRoot] = useState('~'); // tildified
@@ -319,10 +330,10 @@ export default function ExplorerPanel() {
   const createEntry = (dir, kind) => {
     const name = window.prompt(kind === 'dir' ? 'Folder name:' : 'File name:');
     if (!name) return;
-    fetch('/api/fs/entry', {
+    mutate('/api/fs/entry', {
       method: 'POST', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ path: joinPath(dir, name), kind }),
-    }).then((r) => r.json()).then((d) => {
+    }).then((d) => {
       if (!d.ok) { window.alert(d.error || 'Failed'); return; }
       relist(dir);
       setExpanded((s) => new Set(s).add(dir));
@@ -333,10 +344,10 @@ export default function ExplorerPanel() {
     const name = window.prompt('Rename to:', baseOf(node.path));
     if (!name) return;
     const to = joinPath(node.parentDir, name);
-    fetch('/api/fs/rename', {
+    mutate('/api/fs/rename', {
       method: 'PATCH', headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ from: node.path, to }),
-    }).then((r) => r.json()).then((d) => {
+    }).then((d) => {
       if (!d.ok) { window.alert(d.error || 'Failed'); return; }
       relist(node.parentDir);
       if (node.type === 'dir') {
@@ -357,7 +368,7 @@ export default function ExplorerPanel() {
     if (!window.confirm(`Delete "${baseOf(node.path)}"?`)) return;
     const sep = sepOf(node.path);
     const under = tabs.filter((t) => t.path === node.path || t.path.startsWith(node.path + sep));
-    fetch(`/api/fs/entry?path=${encodeURIComponent(node.path)}`, { method: 'DELETE' }).then((r) => r.json()).then((d) => {
+    mutate(`/api/fs/entry?path=${encodeURIComponent(node.path)}`, { method: 'DELETE' }).then((d) => {
       if (!d.ok) { window.alert(d.error || 'Failed'); return; }
       relist(node.parentDir);
       under.forEach((t) => removeTab(t.path));

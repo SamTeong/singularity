@@ -91,6 +91,60 @@ test.describe('Explorer', () => {
     await expect(page.getByRole('button', { name: 'created.txt', exact: true })).toHaveCount(0);
   });
 
+  test('failed tree mutations alert and preserve the tree', async ({ page }) => {
+    await gotoView(page, 'Explorer');
+    await page.evaluate(() => {
+      const originalFetch = window.fetch;
+      window.fetch = (input, init = {}) => {
+        const url = typeof input === 'string' ? input : input.url;
+        const method = init.method || (typeof input === 'string' ? 'GET' : input.method);
+        if (window.__explorerMutationFailure === 'create' && method === 'POST' && url.includes('/api/fs/entry')) {
+          return Promise.resolve(new Response(JSON.stringify({ ok: false, error: 'create failed' }), { status: 400, headers: { 'content-type': 'application/json' } }));
+        }
+        if (window.__explorerMutationFailure === 'rename' && method === 'PATCH' && url.includes('/api/fs/rename')) {
+          return Promise.resolve(new Response('broken', { status: 500, headers: { 'content-type': 'text/plain' } }));
+        }
+        if (window.__explorerMutationFailure === 'delete' && method === 'DELETE' && url.includes('/api/fs/entry')) return Promise.reject(new TypeError('failed'));
+        return originalFetch(input, init);
+      };
+    });
+
+    await page.evaluate(() => { window.__explorerMutationFailure = 'create'; });
+    await page.getByRole('button', { name: 'notes.md', exact: true }).click({ button: 'right' });
+    page.once('dialog', (d) => d.accept('failed.txt'));
+    const createError = page.waitForEvent('dialog', (d) => d.type() === 'alert');
+    const createClick = page.getByRole('menuitem', { name: 'New File' }).click();
+    const createAlert = await createError;
+    expect(createAlert.message()).toBe('create failed');
+    await createAlert.accept();
+    await createClick;
+    await expect(page.getByRole('button', { name: 'failed.txt', exact: true })).toHaveCount(0);
+
+    await page.evaluate(() => { window.__explorerMutationFailure = 'rename'; });
+    await page.getByRole('button', { name: 'notes.md', exact: true }).click({ button: 'right' });
+    page.once('dialog', (d) => d.accept('renamed.md'));
+    const renameError = page.waitForEvent('dialog', (d) => d.type() === 'alert');
+    const renameClick = page.getByRole('menuitem', { name: 'Rename' }).click();
+    const renameAlert = await renameError;
+    expect(renameAlert.message()).toBe('Request failed (500)');
+    await renameAlert.accept();
+    await renameClick;
+    await expect(page.getByRole('button', { name: 'notes.md', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'renamed.md', exact: true })).toHaveCount(0);
+
+    await page.evaluate(() => { window.__explorerMutationFailure = 'delete'; });
+    await page.getByRole('button', { name: 'notes.md', exact: true }).click({ button: 'right' });
+    const confirm = onceConfirm(page, true);
+    const deleteError = page.waitForEvent('dialog', (d) => d.type() === 'alert');
+    const deleteClick = page.getByRole('menuitem', { name: 'Delete' }).click();
+    await confirm;
+    const deleteAlert = await deleteError;
+    expect(deleteAlert.message()).toBe('Request failed');
+    await deleteAlert.accept();
+    await deleteClick;
+    await expect(page.getByRole('button', { name: 'notes.md', exact: true })).toBeVisible();
+  });
+
   test('reload resets Explorer content and tabs to the seeded baseline', async ({ page }) => {
     await gotoView(page, 'Explorer');
     await page.getByRole('button', { name: 'script.mjs', exact: true }).click();

@@ -8,7 +8,7 @@
 // (which would try to spawn a real claude). Run: npm test
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -41,6 +41,101 @@ const job = (over = {}) => ({
   ...over,
 });
 const src = (over = {}) => ({ ok: true, session: { pctUsed: 10 }, weekly: { pctUsed: 10 }, ...over });
+
+// Import an isolated scheduler with deterministic I/O; no task process is spawned.
+async function isolatedBackground() {
+  const fixture = { tasks: [], events: [], failWrite: false, failCreate: false, usage: async () => ({ claude: src() }) };
+  const key = `backgroundFixture${Date.now()}${Math.random()}`;
+  globalThis[key] = fixture;
+  const data = (source) => `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+  const access = `const f = globalThis[${JSON.stringify(key)}];`;
+  const mocks = {
+    './agents.mjs': data(`${access} export const STATE_DIR = ${JSON.stringify(STATE_DIR)}; export const bus = { emit: (...args) => f.events.push(args) }; export const isLive = () => true; export function writeAtomic() { if (f.failWrite) throw new Error('disk full'); }`),
+    './tasks.mjs': data(`${access} export const snapshotTasks = () => ({ tasks: f.tasks }); export const updateTask = async () => {}; export const createTask = (options) => { const task = { ...options, id: String(f.tasks.length), column: 'todo' }; f.tasks.push(task); if (f.failCreate) throw new Error('unknown create outcome'); return task; };`),
+    './usage.mjs': data(`${access} export const getUsage = () => f.usage();`),
+  };
+  const source = readFileSync(new URL('./background.mjs', import.meta.url), 'utf8')
+    .replace(/from '(\.\/[^']+)'/g, (_, path) => `from '${mocks[path] || new URL(path, import.meta.url).href}'`);
+  const background = await import(data(source));
+  delete globalThis[key];
+  return { fixture, background };
+}
+
+test('background CRUD: failed persist leaves snapshots and events unchanged', async () => {
+  const { fixture, background: b } = await isolatedBackground();
+  const a = b.createJob({ title: 'a', description: 'd', cwd: 'x' });
+  const other = b.createJob({ title: 'b', description: 'd', cwd: 'x' });
+  const before = JSON.stringify(b.snapshotBackground());
+  const held = b.snapshotBackground().config;
+  fixture.events.length = 0;
+  fixture.failWrite = true;
+  for (const mutate of [
+    () => b.createJob({ title: 'c', description: 'd', cwd: 'x' }),
+    () => b.updateJob(a.id, { title: 'changed', thresholds: { claude: { start: 1 } }, window: { startHour: 0 } }),
+    () => b.deleteJob(a.id),
+    () => b.reorderJobs([other.id, a.id]),
+  ]) {
+    assert.throws(mutate, (e) => e.persistFailure === true);
+    assert.equal(JSON.stringify(b.snapshotBackground()), before);
+    assert.equal(JSON.stringify(held), JSON.stringify(b.snapshotBackground().config));
+    assert.deepEqual(fixture.events, []);
+  }
+});
+
+test('createJob: retries an identical Idempotency-Key without another record, but rejects a changed payload', () => {
+  const key = 'background-lost-response';
+  const body = { title: 'idempotent background', description: 'd', cwd: 'C:\\x', idempotencyKey: key };
+  const first = createJob(body);
+  const retry = createJob(body);
+  assert.equal(retry.id, first.id);
+  assert.equal(snapshotBackground().config.jobs.filter((job) => job.idempotencyKey === key).length, 1);
+  assert.throws(() => createJob({ ...body, title: 'changed' }), (err) => err.statusCode === 409);
+});
+
+test('createJob: idempotency compares the original payload after an update', () => {
+  const key = 'background-original-payload';
+  const body = { title: 'original background', description: 'd', cwd: 'C:\\x', idempotencyKey: key };
+  const first = createJob(body);
+  updateJob(first.id, { title: 'edited' });
+  assert.equal(createJob(body).id, first.id);
+  assert.throws(() => createJob({ ...body, title: 'edited' }), (err) => err.statusCode === 409);
+});
+
+test('background attempts: reserve before healing and throughout usage await; release on failure', async () => {
+  const { fixture, background: b } = await isolatedBackground();
+  b.createJob({ title: 'a', description: 'd', cwd: 'x' });
+  let release;
+  let entered;
+  const started = new Promise((resolve) => { entered = resolve; });
+  fixture.usage = () => { entered(); return new Promise((resolve) => { release = resolve; }); };
+  const first = b.runBackgroundNow({ bypassWindow: true });
+  await assert.rejects(b.runBackgroundNow({ force: true }), /already live/);
+  await started;
+  await assert.rejects(b.runBackgroundNow({ bypassWindow: true }), /already live/);
+  release({ claude: src() });
+  await first;
+  assert.equal(fixture.tasks.length, 1);
+  fixture.tasks.length = 0;
+  b.updateJob(b.snapshotBackground().config.jobs[0].id, { lastRunAt: null });
+  fixture.usage = async () => { throw new Error('usage failed'); };
+  await assert.rejects(b.runBackgroundNow({ bypassWindow: true }), /usage failed/);
+  await b.runBackgroundNow({ force: true });
+  assert.equal(fixture.tasks.length, 1);
+});
+
+test('background attempts: an unknown create outcome retains its intent and blocks every job', async () => {
+  const { fixture, background: b } = await isolatedBackground();
+  const first = b.createJob({ title: 'a', description: 'd', cwd: 'x' });
+  b.createJob({ title: 'b', description: 'd', cwd: 'x' });
+  fixture.failCreate = true;
+  await assert.rejects(b.runBackgroundNow({ force: true }), /unknown create outcome/);
+  const pending = b.snapshotBackground().config.jobs.find((job) => job.id === first.id).pendingRunId;
+  assert.ok(pending);
+  await assert.rejects(b.runBackgroundNow({ force: true }), /unresolved pending intent/);
+  await assert.rejects(b.runBackgroundNow({ bypassWindow: true }), /unresolved pending intent/);
+  assert.equal(b.snapshotBackground().config.jobs.find((job) => job.id === first.id).pendingRunId, pending);
+  assert.equal(fixture.tasks.length, 1, 'no other job may bypass the unknown single-flight intent');
+});
 
 // ---- inWindow ------------------------------------------------------------------
 // 2026-07-15 = Wednesday (getDay 3), 2026-07-18 = Saturday (getDay 6).
@@ -137,6 +232,9 @@ test('pickJob: disabled jobs are skipped', () => {
   const jobs = [job({ enabled: false, cooldownHours: 1, lastRunAt: null })];
   assert.equal(pickJob(jobs, now), null);
 });
+test('pickJob: pending intents are skipped', () => {
+  assert.equal(pickJob([job({ pendingRunId: 'unknown' })], now), null);
+});
 
 // ---- pickRunnableJob (normal path: window + per-job gate folded together) ------
 // Fixed instant inside the default window (Wed 2026-07-15 10:00 local).
@@ -155,6 +253,9 @@ test('pickRunnableJob: bypassWindow picks an out-of-window job if its gate passe
   const r = pickRunnableJob(jobs, { claude: src(), ollama: src() }, outWin, { bypassWindow: true });
   assert.equal(r.job.id, 'a');
   assert.equal(r.backend, 'claude');
+});
+test('pickRunnableJob: pending intents are skipped', () => {
+  assert.equal(pickRunnableJob([job({ pendingRunId: 'unknown' })], { claude: src() }, inWin).job, null);
 });
 test('pickRunnableJob: all in-window candidates fail their own gate → joined reasons', () => {
   const jobs = [job({ id: 'x', title: 'x', lastRunAt: null })];

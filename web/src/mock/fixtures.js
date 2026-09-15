@@ -243,6 +243,19 @@ export function seedBackgroundJobs() {
   return [bgJob(1, 'Fixture backlog groomer'), bgJob(2, 'Fixture dependency check')];
 }
 
+// Window-anchor state (server/window-anchor.mjs defaultProviderState shape).
+// Claude carries an armed window so the Usage card has a real countdown to
+// render; codex is the untouched opt-in shape. nextAnchorAt is relative to
+// now, not T0: unlike the other fixtures this one is *read* as a duration, and
+// a 2025 timestamp would render "now" (fmtReset) forever.
+export function seedWindowAnchor() {
+  const hour = 3.6e6;
+  return {
+    claude: { enabled: true, nextAnchorAt: Date.now() + 2 * hour, lastAnchorAt: Date.now() - hour, lastResult: 'ok', lastError: null },
+    codex: { enabled: false, nextAnchorAt: null, lastAnchorAt: null, lastResult: null, lastError: null },
+  };
+}
+
 // -------------------------------------------------------------------- agents
 
 // No agents: an empty dock is the sandbox baseline too (e2e/fixtures/seed.mjs

@@ -3,6 +3,7 @@ import * as reg from './agents.mjs';
 import { snapshotTasks } from './tasks.mjs';
 import { snapshotCrons } from './crons.mjs';
 import { snapshotBackground } from './background.mjs';
+import { snapshotWindowAnchor } from './window-anchor.mjs';
 import { streamChat } from './chat.mjs';
 
 function send(ws, msg) {
@@ -67,6 +68,10 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     const msg = JSON.stringify({ t: 'crons', crons });
     for (const ws of sockets) send(ws, msg);
   });
+  reg.bus.on('window-anchor', (anchor) => {
+    const msg = JSON.stringify({ t: 'window-anchor', anchor });
+    for (const ws of sockets) send(ws, msg);
+  });
   reg.bus.on('history', (data) => {
     const msg = JSON.stringify({ t: 'history', ...data });
     for (const ws of sockets) send(ws, msg);
@@ -103,6 +108,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     send(ws, { t: 'tasks', ...snapshotTasks() });
     send(ws, { t: 'crons', crons: snapshotCrons() });
     send(ws, { t: 'background', ...snapshotBackground() });
+    send(ws, { t: 'window-anchor', anchor: snapshotWindowAnchor() });
 
     ws.on('message', (raw) => {
       let m;

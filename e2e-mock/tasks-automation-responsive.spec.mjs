@@ -345,6 +345,51 @@ test('phone: create a scheduled job end to end', async ({ page }) => {
   await expectNoPageOverflow(page);
 });
 
+test('automation creates survive a lost response without duplicates', async ({ page }) => {
+  test.slow();
+  await page.goto('/cron');
+  await page.evaluate(() => {
+    const lost = new Set();
+    window.__automationKeys = [];
+    const original = window.fetch;
+    window.fetch = async (...args) => {
+      const [input, init] = args;
+      const url = typeof input === 'string' ? input : input.url;
+      const response = await original(...args);
+      const path = new URL(url, location.origin).pathname;
+      if (/\/(crons|background\/jobs)$/.test(path) && !lost.has(path)) {
+        lost.add(path);
+        window.__automationKeys.push(init.headers['Idempotency-Key']);
+        throw new TypeError('lost response');
+      }
+      if (/\/(crons|background\/jobs)$/.test(path)) window.__automationKeys.push(init.headers['Idempotency-Key']);
+      return response;
+    };
+  });
+
+  await page.getByRole('button', { name: 'Scheduled job' }).click();
+  const cronDialog = page.getByRole('dialog');
+  await cronDialog.getByLabel('title').fill('Retry-safe cron');
+  await cronDialog.getByLabel('description').fill('The first response is lost.');
+  await cronDialog.getByRole('button', { name: 'Create' }).click();
+  await expect(cronDialog.getByText('lost response')).toBeVisible();
+  await cronDialog.getByRole('button', { name: 'Create' }).click();
+  await expect(page.locator('tr').filter({ hasText: 'Retry-safe cron' })).toHaveCount(1);
+  expect(await page.evaluate(() => window.__automationKeys)).toHaveLength(2);
+  expect(await page.evaluate(() => new Set(window.__automationKeys).size)).toBe(1);
+
+  await page.getByRole('button', { name: 'Background job' }).click();
+  const backgroundDialog = page.getByRole('dialog');
+  await backgroundDialog.getByLabel('title').fill('Retry-safe background');
+  await backgroundDialog.getByLabel('description').fill('Normal create after retry.');
+  await backgroundDialog.getByRole('button', { name: 'Create' }).click();
+  await expect(backgroundDialog.getByText('lost response')).toBeVisible();
+  await backgroundDialog.getByRole('button', { name: 'Create' }).click();
+  await expect(page.locator('tr').filter({ hasText: 'Retry-safe background' })).toHaveCount(1);
+  expect(await page.evaluate(() => window.__automationKeys)).toHaveLength(4);
+  expect(await page.evaluate(() => new Set(window.__automationKeys.slice(2)).size)).toBe(1);
+});
+
 test.describe('touch reorder', () => {
   test.use({ hasTouch: true });
 

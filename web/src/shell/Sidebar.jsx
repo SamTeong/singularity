@@ -158,9 +158,16 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
               {/* layout-02 `.brand-mark`: the identity gradient as a rounded tile
                   with a soft bloom, glyph flattened to white on top of it. */}
               <Box
+                component="button"
+                type="button"
+                onClick={() => setCollapsed((c) => !c)}
+                aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
                 sx={(t) => ({
                   width: 36,
                   height: 36,
+                  p: 0,
+                  border: 0,
+                  cursor: 'pointer',
                   flexShrink: 0,
                   display: 'grid',
                   placeItems: 'center',
@@ -283,7 +290,10 @@ export default function Sidebar({ collapsed, setCollapsed, view, setView, onNewS
               <ListItemButton
                 selected={view === item.v}
                 onClick={() => {
-                  if (view === item.v) { setCollapsed((c) => !c); return; }
+                  if (view === item.v) {
+                    setCollapsed((c) => !c);
+                    return;
+                  }
                   setView(item.v);
                   if (isUsage) refreshUsage(true);
                 }}

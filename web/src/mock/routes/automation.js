@@ -57,10 +57,16 @@ export function registerAutomation(server) {
     }
     try { validateExpr(body.cronExpr.trim()); }
     catch (e) { return new Response(400, {}, { ok: false, error: e.message }); }
+    const key = req.requestHeaders['Idempotency-Key']?.trim() || null;
+    const payload = { title: body.title.trim(), enabled: body.enabled !== false, cronExpr: body.cronExpr.trim(), description: body.description.trim(), cwd: body.cwd.trim(), model: body.model || 'claude', scopes: body.scopes || [], permissionMode: body.permissionMode || 'acceptEdits' };
+    const existing = key && db.crons.find((job) => job.idempotencyKey === key);
+    if (existing) {
+      const fingerprint = existing.idempotencyPayload ?? JSON.stringify({ title: existing.title, enabled: existing.enabled, cronExpr: existing.cronExpr, description: existing.description, cwd: existing.cwd, model: existing.model, scopes: existing.scopes, permissionMode: existing.permissionMode });
+      const same = JSON.stringify(payload) === fingerprint;
+      return same ? { ok: true, cron: existing } : new Response(409, {}, { ok: false, error: 'Idempotency-Key was already used with a different payload' });
+    }
     const cron = {
-      id: crypto.randomUUID(), title: body.title.trim(), enabled: body.enabled !== false,
-      cronExpr: body.cronExpr.trim(), description: body.description.trim(), cwd: body.cwd.trim(),
-      model: body.model || 'claude', scopes: body.scopes || [], permissionMode: body.permissionMode || 'acceptEdits',
+      id: crypto.randomUUID(), ...payload, ...(key ? { idempotencyKey: key, idempotencyPayload: JSON.stringify(payload) } : {}),
       lastSessionId: null, lastFiredAt: null, nextFire: null, createdAt: Date.now(), updatedAt: Date.now(),
     };
     db.crons.push(cron);
@@ -123,8 +129,8 @@ export function registerAutomation(server) {
     if (body.conclude !== undefined && !CONCLUDE_VALUES.includes(body.conclude)) {
       return new Response(400, {}, { ok: false, error: `conclude must be one of ${CONCLUDE_VALUES.join('|')}` });
     }
-    const job = {
-      id: crypto.randomUUID(), title: body.title.trim(), description: body.description.trim(), cwd: body.cwd.trim(),
+    const payload = {
+      title: body.title.trim(), description: body.description.trim(), cwd: body.cwd.trim(),
       cooldownHours: body.cooldownHours ?? 24, enabled: body.enabled !== false,
       window: { ...DEFAULT_JOB.window, ...body.window },
       thresholds: {
@@ -136,6 +142,16 @@ export function registerAutomation(server) {
       tokenCaps: { ...DEFAULT_JOB.tokenCaps, ...body.tokenCaps },
       scopes: Array.isArray(body.scopes) ? body.scopes : [],
       conclude: body.conclude ?? 'inreview',
+    };
+    const key = req.requestHeaders['Idempotency-Key']?.trim() || null;
+    const existing = key && db.background.find((job) => job.idempotencyKey === key);
+    if (existing) {
+      const fingerprint = existing.idempotencyPayload ?? JSON.stringify({ title: existing.title, description: existing.description, cwd: existing.cwd, cooldownHours: existing.cooldownHours, enabled: existing.enabled, window: existing.window, thresholds: existing.thresholds, models: existing.models, tokenCaps: existing.tokenCaps, scopes: existing.scopes, conclude: existing.conclude });
+      const same = JSON.stringify(payload) === fingerprint;
+      return same ? { ok: true, job: existing } : new Response(409, {}, { ok: false, error: 'Idempotency-Key was already used with a different payload' });
+    }
+    const job = {
+      id: crypto.randomUUID(), ...payload, ...(key ? { idempotencyKey: key, idempotencyPayload: JSON.stringify(payload) } : {}),
       lastRunAt: null, lastTaskId: null,
     };
     db.background.push(job);
@@ -206,4 +222,43 @@ export function registerAutomation(server) {
   server.get('/background/reports/:taskId', () => new Response(404, {}, { ok: false, error: 'not found' }));
 
   server.patch('/background/reports/:taskId/flag', () => new Response(400, {}, { ok: false, error: 'no such report' }));
+
+  // ---- Window anchor ------------------------------------------------------
+
+  // GET returns the BARE state (server/index.mjs:668 — same shape as /crons),
+  // and every mutation broadcasts the frame the daemon's bus fans out
+  // (pty-ws.mjs 'window-anchor'). The mock arms no timer and pokes no agent:
+  // a toggle only flips the flag (and drops an armed window, as
+  // setWindowAnchorEnabled does), and a manual poke records the run so the
+  // card's last-result cell converges from the socket, not the response body.
+  const anchorFrame = () => ({ t: 'window-anchor', anchor: db.windowAnchor });
+  const ANCHOR_PROVIDERS = ['claude', 'codex'];
+
+  server.get('/window-anchor', () => db.windowAnchor);
+
+  server.post('/window-anchor', (schema, req) => {
+    const { enabled } = parseBody(req);
+    for (const provider of ANCHOR_PROVIDERS) {
+      if (typeof enabled?.[provider] !== 'boolean') continue;
+      db.windowAnchor[provider].enabled = enabled[provider];
+      if (!enabled[provider]) db.windowAnchor[provider].nextAnchorAt = null;
+    }
+    broadcast(anchorFrame());
+    return db.windowAnchor;
+  });
+
+  server.post('/window-anchor/poke', (schema, req) => {
+    const provider = parseBody(req).provider;
+    if (!ANCHOR_PROVIDERS.includes(provider)) {
+      return new Response(400, {}, { ok: false, error: "provider must be 'claude' or 'codex'" });
+    }
+    const s = db.windowAnchor[provider];
+    // Manual poke ignores `enabled` (explicit user action, window-anchor.mjs
+    // pokeProvider) — the mock stands in for a successful one-shot prompt.
+    s.lastAnchorAt = Date.now();
+    s.lastResult = 'ok';
+    s.lastError = null;
+    broadcast(anchorFrame());
+    return { ok: true, provider, result: s.lastResult };
+  }, 200);
 }
