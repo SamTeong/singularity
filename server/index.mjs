@@ -32,6 +32,7 @@ import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
+import { initWindowAnchor, snapshotWindowAnchor, setWindowAnchorEnabled, pokeProvider } from './window-anchor.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
 import { getModels, setModels, restoreDefaults } from './model-store.mjs';
 
@@ -661,6 +662,16 @@ app.post('/crons/:id/run', async (req, reply) => {
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 
+// Window anchor: keeps Claude/Codex 5h plan windows pinned to their reset time.
+// GET returns the full state (bare, like /crons); POST toggles per-provider
+// enablement; /poke fires the trivial anchor prompt manually.
+app.get('/window-anchor', async () => snapshotWindowAnchor());
+app.post('/window-anchor', async (req) => setWindowAnchorEnabled(req.body?.enabled || {}));
+app.post('/window-anchor/poke', async (req, reply) => {
+  try { return { ok: true, ...(await pokeProvider(req.body?.provider)) }; }
+  catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
+});
+
 // Background tasks: quota-soak runs during working hours. Per-job CRUD (each
 // job carries its own window/thresholds/models/tokenCaps) + manual trigger
 // (?force=1 bypasses the usage gate). Scheduler lives in-process.
@@ -873,6 +884,7 @@ app.post('/history/regenerate', async (req, reply) => {
 reg.init(app.log);
 initTasks(app.log);
 initCrons(app.log);
+initWindowAnchor({ log: app.log });
 initBackground(app.log);
 initUsageAutoRefresh(reg.bus);
 // Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors

@@ -6,17 +6,13 @@
 // still in progress has no "closing" message to summarize yet.
 //
 // Harness transcripts only — no git log, no project folders (see plan.md).
-import { mkdirSync, readFileSync, appendFileSync, unlinkSync } from 'node:fs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { STATE_DIR, bus, writeAtomic, CLAUDE_BIN, OLLAMA_BIN, CODEX_BIN } from './agents.mjs';
 import { listSessions, readSession } from './sessions.mjs';
 import { parseSession, readCostFile, readStatsCsvCosts } from './stats.mjs';
 import { getSummariser } from './model-store.mjs';
-
-const execFileP = promisify(execFile);
+import { runOneShotPrompt } from './one-shot.mjs';
 
 const HISTORY_FILE = join(STATE_DIR, 'history.jsonl');
 const BACKFILL_DAYS = 7;
@@ -25,8 +21,6 @@ const USER_TRUNC = 400;
 const ASSISTANT_TRUNC = 800;
 const BULLET_TRUNC = 120;           // one card line — longer just wraps into a wall of text
 const DIGEST_CAP = 48_000;          // assembled per-day digest hard cap (chars)
-const SUMMARISER_TIMEOUT_MS = 120_000;
-const SUMMARISER_MAX_BUFFER = 8 * 1024 * 1024;
 
 // Bullets are read at a glance by someone who is not in the code — so the
 // prompt bans the jargon and comma-stacked clauses an agent transcript is full
@@ -304,50 +298,22 @@ function binFor(group) {
 }
 
 async function callClaudeSummariser(digestText, id) {
-  // --no-session-persistence is load-bearing: without it this call writes a
-  // transcript under ~/.claude/projects that tomorrow's History scan would
-  // then read and summarise — a self-referential feedback loop.
-  // --output-format json returns a single envelope ({ result, usage: {
-  // input_tokens, output_tokens }, ... }); parseJsonSummary runs over `result`.
-  const { stdout } = await execFileP(CLAUDE_BIN, [
-    '-p', `${SUMMARY_SYSTEM}\n\n${digestText}`,
-    '--model', id,
-    '--output-format', 'json',
-    '--no-session-persistence',
-    '--bare',
-  ], { maxBuffer: SUMMARISER_MAX_BUFFER, timeout: SUMMARISER_TIMEOUT_MS });
+  // runOneShotPrompt's claude answer channel is stdout: a single JSON envelope
+  // ({ result, usage: { input_tokens, output_tokens }, ... }); parseJsonSummary
+  // runs over `result`.
+  const stdout = await runOneShotPrompt('claude', id, `${SUMMARY_SYSTEM}\n\n${digestText}`);
   const env = JSON.parse(stdout);
   return { text: env.result, inputTokens: env.usage?.input_tokens ?? null, outputTokens: env.usage?.output_tokens ?? null };
 }
 
 async function callOllamaSummariser(digestText, id) {
-  const { stdout } = await execFileP(OLLAMA_BIN, ['run', id, `${SUMMARY_SYSTEM}\n\n${digestText}`], { maxBuffer: SUMMARISER_MAX_BUFFER, timeout: SUMMARISER_TIMEOUT_MS });
+  const stdout = await runOneShotPrompt('ollama', id, `${SUMMARY_SYSTEM}\n\n${digestText}`);
   return { text: stdout, inputTokens: null, outputTokens: null };
 }
 
 async function callCodexSummariser(digestText, id) {
-  // Codex writes agent chatter to stdout, so the answer channel is the
-  // --output-last-message file, not stdout (else reasoning text could match
-  // parseJsonSummary's brace regex). -s read-only + --skip-git-repo-check: the
-  // summariser only reads a prompt string, it must never be able to write.
-  // --ephemeral is the codex counterpart to the claude rung's
-  // --no-session-persistence: a persisted rollout under CODEX_HOME/sessions is
-  // a transcript the next History scan reads and summarises.
-  const tmpFile = join(STATE_DIR, `.summariser-${randomUUID()}.txt`);
-  try {
-    await execFileP(CODEX_BIN, [
-      'exec', '-m', id,
-      '-s', 'read-only',
-      '--skip-git-repo-check',
-      '--ephemeral',
-      '-C', STATE_DIR,
-      '-o', tmpFile,
-      `${SUMMARY_SYSTEM}\n\n${digestText}`,
-    ], { maxBuffer: SUMMARISER_MAX_BUFFER, timeout: SUMMARISER_TIMEOUT_MS });
-    return { text: readFileSync(tmpFile, 'utf8'), inputTokens: null, outputTokens: null };
-  } finally {
-    try { unlinkSync(tmpFile); } catch { /* best-effort cleanup */ }
-  }
+  const text = await runOneShotPrompt('codex', id, `${SUMMARY_SYSTEM}\n\n${digestText}`);
+  return { text, inputTokens: null, outputTokens: null };
 }
 
 async function defaultCallSummariser(digestText, { id, group }) {
