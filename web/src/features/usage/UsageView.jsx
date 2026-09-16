@@ -17,7 +17,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { statusColor } from '@/shell/shellStyles.js';
-import { visibleProviders, usd, fmtReset, windowAnchored } from '@/lib/usageUtil.js';
+import { visibleProviders, usd, windowAnchored } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { useQueryState } from '@/hooks/useQueryState.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
@@ -80,6 +80,14 @@ function ollamaFailure(error) {
   return `Ollama usage is currently unavailable${error ? `: ${error}` : '.'}`;
 }
 
+// 8px status dot: colour carries severity, the words live in the tooltip. Two
+// of these per card — the header's last-read indicator and the anchor row's
+// schedule indicator — so the style is shared rather than copied.
+const dotSx = (kind) => (t) => {
+  const c = statusColor(t, kind);
+  return { width: 8, height: 8, borderRadius: '50%', background: c, flex: 'none', alignSelf: 'center', boxShadow: `0 0 0 3px color-mix(in srgb, ${c} 22%, transparent)` };
+};
+
 function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, connectState, cadence, onCadence, onRefreshSource, refreshing, anchor, onAnchorEnabled, onPoke }) {
   const isOllama = label.toLowerCase() === 'ollama';
   // Poll on the chosen cadence while this card is mounted. The timer dies with
@@ -115,6 +123,18 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
     Promise.resolve(onPoke()).finally(() => setPoking(false));
   };
   const anchored = windowAnchored(u?.session, anchor?.lastAnchorAt);
+  // The anchor row's schedule + outcome, folded into one indicator: the words
+  // are only worth reading when something looks wrong, and at 320px they cost
+  // the row the space the Trigger button needs. 'Skipped' is a success — real
+  // work anchored the window before the timer fired — so only a failed poke is
+  // red, and an unarmed anchor is informational rather than a fault.
+  const anchorKind = anchor?.lastResult === 'Error' ? 'danger' : anchor?.nextAnchorAt ? 'ok' : 'info';
+  // Two lines, like the header dot's: the outcome with when it happened, then
+  // when the next one is due.
+  const anchorStatus = anchor?.lastResult
+    ? `${anchor.lastResult}${anchor.lastAnchorAt ? ` — Last anchor: ${new Date(anchor.lastAnchorAt).toLocaleString()}` : ''}${anchor.lastError ? ` — ${anchor.lastError}` : ''}`
+    : 'Never anchored';
+  const anchorNext = anchor?.nextAnchorAt ? `Next anchor: ${new Date(anchor.nextAnchorAt).toLocaleString()}` : 'Not armed';
   const stale = !u?.ok || !!u?.stale;
   // The dot carries the same three-way read the rail's daemon footer uses
   // (statusColor): stale-but-usable is amber, a failed read is red, fresh is the
@@ -167,10 +187,7 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
             does not have at 320px. Same affordance as the Automation page. */}
         {u?.fetchedAt && !busy && !refreshing && (
           <Tooltip disableInteractive title={<>{`${statusText} — Updated on: ${new Date(u.fetchedAt).toLocaleString()}`}{nextAt && <><br />{`Next refresh: ${new Date(nextAt).toLocaleString()}`}</>}</>}>
-            <Box aria-hidden sx={(t) => {
-              const c = statusColor(t, statusKind);
-              return { width: 8, height: 8, borderRadius: '50%', background: c, flex: 'none', alignSelf: 'center', boxShadow: `0 0 0 3px color-mix(in srgb, ${c} 22%, transparent)` };
-            }} />
+            <Box aria-hidden sx={dotSx(statusKind)} />
           </Tooltip>
         )}
         {(busy || refreshing) && <CircularProgress size={14} sx={{ alignSelf: 'center' }} />}
@@ -231,7 +248,7 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
           reset time by firing one trivial prompt when the old window expires
           idle. Only Claude and Codex have plan windows, so the row renders only
           where the daemon reports anchor state. A wrapping row, not a fixed
-          grid, so a 320px card stacks the countdown under the toggle. */}
+          grid, so a 320px card stacks the Trigger button under the toggle. */}
       {anchor && (
         <Stack direction="row" spacing={1} sx={{ mt: 1.5, alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}>
           <Switch
@@ -241,16 +258,14 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
             slotProps={{ input: { 'aria-label': `${label} window anchor` } }}
           />
           <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Window anchor</Typography>
-          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-            {anchor.nextAnchorAt ? `· next in ${fmtReset(new Date(anchor.nextAnchorAt).toISOString())}` : '· not armed'}
-          </Typography>
-          {anchor.lastResult && (
-            <Tooltip disableInteractive={!anchor.lastError} title={anchor.lastError || ''}>
-              <Typography sx={{ fontSize: 12, color: anchor.lastResult === 'error' ? 'error.main' : 'text.secondary' }}>
-                {`· last: ${anchor.lastResult}`}
-              </Typography>
-            </Tooltip>
-          )}
+          {/* Wall clock, not a countdown: the row exists to check that the
+              anchor is scheduled where the window actually resets, and "next in
+              4h" cannot be compared against the reset time the meter prints
+              above it. Labelled, unlike the header's decorative dot — this one
+              carries the only copy of the schedule. */}
+          <Tooltip disableInteractive={!anchor.lastError} title={<>{anchorStatus}<br />{anchorNext}</>}>
+            <Box role="img" aria-label={`${label} window anchor status — ${anchorStatus} · ${anchorNext}`} sx={dotSx(anchorKind)} />
+          </Tooltip>
           <Box sx={{ flex: 1 }} />
           {/* Explicit user action: the daemon pokes regardless of the toggle.
               Hidden once the window is anchored — the prompt would just burn

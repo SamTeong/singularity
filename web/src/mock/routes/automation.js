@@ -256,7 +256,7 @@ export function registerAutomation(server) {
     // Manual poke ignores `enabled` (explicit user action, window-anchor.mjs
     // pokeProvider) — the mock stands in for a successful one-shot prompt.
     s.lastAnchorAt = Date.now();
-    s.lastResult = 'ok';
+    s.lastResult = 'Ok';
     s.lastError = null;
     broadcast(anchorFrame());
     return { ok: true, provider, result: s.lastResult };

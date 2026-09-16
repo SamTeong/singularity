@@ -74,9 +74,9 @@ test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flag
   setWindowAnchorEnabled({ codex: true });
   const before = calls.length;
   emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow - HOUR });
-  await until(() => snapshotWindowAnchor().claude.lastResult === 'ok');
+  await until(() => snapshotWindowAnchor().claude.lastResult === 'Ok');
   emitUsage('codex', { pctUsed: 0, resetsAt: fakeNow - HOUR });
-  await until(() => snapshotWindowAnchor().codex.lastResult === 'ok');
+  await until(() => snapshotWindowAnchor().codex.lastResult === 'Ok');
 
   const cla = calls[before];
   assert.equal(cla.file, CLAUDE_BIN);
@@ -107,14 +107,14 @@ test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flag
 
   const s = snapshotWindowAnchor();
   assert.equal(s.claude.lastAnchorAt, fakeNow);
-  assert.equal(s.codex.lastResult, 'ok');
+  assert.equal(s.codex.lastResult, 'Ok');
   assert.equal(s.claude.nextAnchorAt, null);
 });
 
 test('skipped: an expired window with pctUsed>0 stands down without a poke', async () => {
   const before = calls.length;
   emitUsage('claude', { pctUsed: 40, resetsAt: fakeNow - HOUR });
-  await until(() => snapshotWindowAnchor().claude.lastResult === 'skipped');
+  await until(() => snapshotWindowAnchor().claude.lastResult === 'Skipped');
   assert.equal(calls.length, before);
   assert.equal(snapshotWindowAnchor().claude.lastError, null);
 });
@@ -123,7 +123,7 @@ test('dedupe: a second update for the same expired window does not re-poke', () 
   const before = calls.length;
   emitUsage('codex', { pctUsed: 0, resetsAt: fakeNow - HOUR }); // same window as the poke test
   assert.equal(calls.length, before);
-  assert.equal(snapshotWindowAnchor().codex.lastResult, 'ok');
+  assert.equal(snapshotWindowAnchor().codex.lastResult, 'Ok');
 });
 
 test('persistence: state file written and reloaded on re-init', async () => {
@@ -131,9 +131,9 @@ test('persistence: state file written and reloaded on re-init', async () => {
   assert.equal(existsSync(file), true);
   const saved = JSON.parse(readFileSync(file, 'utf8'));
   assert.equal(saved.codex.enabled, true);
-  assert.equal(saved.codex.lastResult, 'ok');
+  assert.equal(saved.codex.lastResult, 'Ok');
   assert.equal(saved.claude.enabled, true);
-  assert.equal(saved.claude.lastResult, 'skipped');
+  assert.equal(saved.claude.lastResult, 'Skipped');
 
   setWindowAnchorEnabled({ claude: false });
   const freshCalls = [];
@@ -141,7 +141,7 @@ test('persistence: state file written and reloaded on re-init', async () => {
   const s = snapshotWindowAnchor();
   assert.equal(s.claude.enabled, false);
   assert.equal(s.codex.enabled, true);
-  assert.equal(s.codex.lastResult, 'ok');
+  assert.equal(s.codex.lastResult, 'Ok');
 });
 
 test('timer fire: an armed timer pokes at resetsAt+5000', async () => {
@@ -151,7 +151,7 @@ test('timer fire: an armed timer pokes at resetsAt+5000', async () => {
   emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow + 100 }); // arms a real ~5.1s timer
   assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, fakeNow + 100 + 5000);
   await until(() => calls.length > before, 8000);
-  assert.equal(snapshotWindowAnchor().claude.lastResult, 'ok');
+  assert.equal(snapshotWindowAnchor().claude.lastResult, 'Ok');
   assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, null);
 });
 
@@ -186,7 +186,7 @@ test('routes: GET shape, POST toggle, poke route 400 on bad provider', async () 
 
   const poke = await app.inject({ method: 'POST', url: '/api/window-anchor/poke', payload: { provider: 'claude' } });
   assert.equal(poke.statusCode, 200);
-  assert.deepEqual(JSON.parse(poke.body), { ok: true, provider: 'claude', result: 'ok' });
+  assert.deepEqual(JSON.parse(poke.body), { ok: true, provider: 'claude', result: 'Ok' });
   await app.close();
 });
 
@@ -206,7 +206,7 @@ test('unstarted: pokes at once, once per window span', async () => {
 
   unstarted();
   await until(() => calls.length === 1);
-  assert.equal(snapshotWindowAnchor().codex.lastResult, 'ok');
+  assert.equal(snapshotWindowAnchor().codex.lastResult, 'Ok');
   assert.equal(snapshotWindowAnchor().codex.nextAnchorAt, null);
 
   // Still unstarted on the next poll (the API lags the turn): no second poke.

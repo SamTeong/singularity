@@ -251,7 +251,7 @@ export function seedBackgroundJobs() {
 export function seedWindowAnchor() {
   const hour = 3.6e6;
   return {
-    claude: { enabled: true, nextAnchorAt: Date.now() + 2 * hour, lastAnchorAt: Date.now() - hour, lastResult: 'ok', lastError: null },
+    claude: { enabled: true, nextAnchorAt: Date.now() + 2 * hour, lastAnchorAt: Date.now() - hour, lastResult: 'Ok', lastError: null },
     codex: { enabled: false, nextAnchorAt: null, lastAnchorAt: null, lastResult: null, lastError: null },
   };
 }
