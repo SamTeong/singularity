@@ -46,3 +46,25 @@ test('retry opt-out makes one attempt', async () => {
   }
   assert.equal(calls, 1);
 });
+
+// A 429 whose Retry-After exceeds our backoff ceiling must end the attempt loop:
+// sleeping it out blocks the caller for a minute-plus and burns another quota
+// unit on the retry. (Claude's usage endpoint answers with Retry-After: 66.)
+test('fetchExternal: long Retry-After returns the 429 instead of sleeping it out', async () => {
+  let calls = 0;
+  const slept = [];
+  global.fetch = async () => { calls += 1; return { status: 429, headers: { get: () => '66' } }; };
+  const resp = await fetchExternal('https://example.test/usage', {}, { sleep: async (ms) => slept.push(ms) });
+  assert.equal(resp.status, 429);
+  assert.equal(calls, 1);
+  assert.deepEqual(slept, []);
+});
+
+test('fetchExternal: short Retry-After still retries', async () => {
+  let calls = 0;
+  const slept = [];
+  global.fetch = async () => { calls += 1; return { status: 429, headers: { get: () => '1' } }; };
+  await fetchExternal('https://example.test/usage', {}, { sleep: async (ms) => slept.push(ms) });
+  assert.equal(calls, 3);
+  assert.deepEqual(slept, [1000, 1000]);
+});

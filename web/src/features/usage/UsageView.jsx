@@ -17,7 +17,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { statusColor } from '@/shell/shellStyles.js';
-import { visibleProviders, usd, fmtReset } from '@/lib/usageUtil.js';
+import { visibleProviders, usd, fmtReset, windowAnchored } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { useQueryState } from '@/hooks/useQueryState.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
@@ -27,9 +27,13 @@ import UsageReportView from '@/features/usage/UsageReportView.jsx';
 // Per-card refresh cadence. Ollama is floored at a minute: every fetch is a
 // headless Chromium launch plus a scrape of ollama.com, so a sub-minute cadence
 // buys nothing and costs a browser process per tick. Claude and Codex floor at
-// 15s — both are HTTP calls, but Codex falls back to scanning session logs when
-// its auth file is unusable, so it gets no lower a floor than Claude. Off is the
-// default everywhere: the daemon already refreshes after each agent goes idle.
+// 15s. Claude's usage endpoint still allows only about one call a minute (a 429
+// carries a ~66s Retry-After), but a poll now reads the statusline's local files
+// before it considers the network, so a fast tick picks up whatever the
+// statusline wrote without spending the quota. Codex falls back to scanning
+// session logs when its auth file is unusable, so it gets no lower a floor than
+// Claude. Off is the default everywhere: the daemon already refreshes after each
+// agent goes idle.
 const REFRESH_OPTIONS = {
   claude: [['off', 'Off'], ['15s', '15s'], ['30s', '30s'], ['1m', '1m'], ['5m', '5m']],
   codex: [['off', 'Off'], ['15s', '15s'], ['30s', '30s'], ['1m', '1m'], ['5m', '5m']],
@@ -110,6 +114,7 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
     setPoking(true);
     Promise.resolve(onPoke()).finally(() => setPoking(false));
   };
+  const anchored = windowAnchored(u?.session, anchor?.lastAnchorAt);
   const stale = !u?.ok || !!u?.stale;
   // The dot carries the same three-way read the rail's daemon footer uses
   // (statusColor): stale-but-usable is amber, a failed read is red, fresh is the
@@ -247,10 +252,14 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
             </Tooltip>
           )}
           <Box sx={{ flex: 1 }} />
-          {/* Explicit user action: the daemon pokes regardless of the toggle. */}
-          <Button size="small" disabled={poking} onClick={poke} sx={{ alignSelf: 'center' }}>
-            {poking ? 'Poking…' : 'Poke now'}
-          </Button>
+          {/* Explicit user action: the daemon pokes regardless of the toggle.
+              Hidden once the window is anchored — the prompt would just burn
+              tokens against a window whose reset is already pinned. */}
+          {!anchored && (
+            <Button size="small" disabled={poking} onClick={poke} sx={{ alignSelf: 'center' }}>
+              {poking ? 'Triggering…' : 'Trigger'}
+            </Button>
+          )}
         </Stack>
       )}
       {isOllama && connectState === 'connecting' && (

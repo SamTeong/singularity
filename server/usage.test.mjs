@@ -6,7 +6,7 @@
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -39,7 +39,7 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, preserveClaudeStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, preserveClaudeStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, readClaudeSnapshot, readCostStateLimits, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
 
 // Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
 // response: plan badge, Session then Weekly meter (aria-label + segment buttons),
@@ -438,10 +438,19 @@ test('refreshClaudeAuth: falls back to the CLI once, then throttles', async () =
 // every pull below stops at the pre-network auth guard.
 let warm; // the fully-warmed document the filtered pulls below compare against
 
+// pull() reads the statusline's local tiers before either gate, so the network
+// tests below have to start with none on disk — the appendClaudeSnapshot test
+// above leaves a fresh one.
+const clearClaudeLocal = () => {
+  rmSync(join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl'), { force: true });
+  rmSync(join(process.env.USAGE_REPORT_STATE, 'cost-state'), { recursive: true, force: true });
+};
+
 test('getUsage: filtered pull on a cold cache fetches only the listed source', async () => {
   // Must run here, not at module scope: the refresh-token tests above write this
   // file only once the tests actually run (see the note block above).
   rmSync(join(claudeCfg, '.credentials.json'), { force: true });
+  clearClaudeLocal();
   const doc = await getUsage({ sources: ['claude'], force: true });
   assert.deepEqual(Object.keys(doc).sort(), ['claude', 'codex', 'ollama']);
   // null, not an error object: an excluded source reads its cache slot, which is
@@ -519,32 +528,86 @@ test('getUsage: a filtered pull still assembles a full document', async () => {
   assert.equal(doc.ollama.historyPaused, null);
 });
 
-test('getUsage: Claude 429 preserves the last good reading and backs off', async () => {
-  writeCreds({ accessToken: 'live-token', expiresAt: Date.now() + 60_000 });
+test('getUsage: Claude 429 preserves the last good reading and backs off by Retry-After', async () => {
+  writeCreds({ accessToken: 'live-token', expiresAt: Date.now() + 3_600_000 });
   const originalFetch = globalThis.fetch;
+  const originalNow = Date.now;
+  let offset = 600_000; // past any TTL an earlier test left on the claude slot
+  clearClaudeLocal(); // the network leg only runs when no local reading is fresh
+  Date.now = () => originalNow() + offset;
   let calls = 0;
   globalThis.fetch = async () => {
     calls++;
     return calls === 1
       ? { status: 200, json: async () => CLAUDE_RAW }
-      : { status: 429 };
+      : { status: 429, headers: { get: () => '66' } };
   };
   try {
     const fresh = await getUsage({ sources: ['claude'], force: true });
     assert.equal(fresh.claude.ok, true);
 
+    // Claude's endpoint allows ~1 call/min, so a forced pull inside the TTL is
+    // served from cache rather than spending the next minute's quota.
+    const floored = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(floored.claude, fresh.claude);
+    assert.equal(calls, 1);
+
+    offset += 61_000;
     const limited = await getUsage({ sources: ['claude'], force: true });
     assert.equal(limited.claude.ok, true);
     assert.equal(limited.claude.stale, true);
     assert.equal(limited.claude.error, 'rate-limited');
     assert.equal(limited.claude.fetchedAt, fresh.claude.fetchedAt);
+    assert.equal(calls, 2); // one request, not three: a long Retry-After ends the retry loop
 
+    // Retry-After: 66 outlasts the 60s TTL, so the backoff — not the TTL — is
+    // what holds the next forced pull off the network.
+    offset += 61_000;
     const backedOff = await getUsage({ sources: ['claude'], force: true });
     assert.equal(backedOff.claude, limited.claude);
-    assert.equal(calls, 4); // one success, then the shared helper's three 429 attempts
+    assert.equal(calls, 2);
   } finally {
     globalThis.fetch = originalFetch;
+    Date.now = originalNow;
   }
+});
+
+// The point of reading the statusline's files first: they cost nothing, so
+// neither the 60s TTL nor the 429 backoff the test above armed should hold a
+// newer reading back. Both gates protect the network leg only.
+test('getUsage: a newer statusline reading outranks the TTL and the 429 backoff', async () => {
+  clearClaudeLocal(); // drop the snapshot the 200 above wrote: tier 1 outranks cost-state
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  // mtime is the reading's timestamp, so two writes need distinct ones.
+  const writeLimits = (pct, ageMs) => {
+    const file = join(dir, 'a-session.json');
+    writeFileSync(file, JSON.stringify({ rate_limits: { five_hour: { used_percentage: pct, resets_at: 1789533000 }, seven_day: { used_percentage: 4, resets_at: 1790096400 } } }));
+    const at = new Date(Date.now() - ageMs);
+    utimesSync(file, at, at);
+  };
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { urls.push(String(url)); throw new Error('offline'); };
+  try {
+    writeLimits(31, 5_000);
+    const first = await getUsage({ sources: ['claude'] });
+    assert.equal(first.claude.session.pctUsed, 31);
+
+    // Same tick — inside the TTL the pull above just refreshed, and inside the
+    // backoff — yet the newer file still lands.
+    writeLimits(44, 0);
+    const second = await getUsage({ sources: ['claude'] });
+    assert.equal(second.claude.session.pctUsed, 44);
+
+    // An unchanged file is not a new reading: the slot is served as-is.
+    const third = await getUsage({ sources: ['claude'] });
+    assert.strictEqual(third.claude, second.claude);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(dir, { recursive: true, force: true }); // the tier-2 test below seeds its own
+  }
+  assert.deepEqual(urls, []); // never spent the account's one call a minute
 });
 
 test('preserveClaudeStale keeps a failed pull separate from its last good reading', () => {
@@ -554,4 +617,54 @@ test('preserveClaudeStale keeps a failed pull separate from its last good readin
   assert.equal(result.stale, true);
   assert.equal(result.error, 'rate-limited');
   assert.equal(result.fetchedAt, previous.fetchedAt);
+});
+
+// The statusline writes usage-snapshots.jsonl once a turn from the same
+// endpoint, so a fresh line spares the daemon a call it would only get 429ed
+// for. Tail-read: the real file is megabytes.
+test('readClaudeSnapshot: serves a fresh tail line, rejects a stale one', () => {
+  const file = join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl');
+  const at = new Date();
+  const stamp = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+  // A long leading row so the 8KB window opens mid-line — the fragment must be
+  // dropped, not parsed.
+  writeFileSync(file, `${JSON.stringify({ fetched_at: stamp(at), pad: 'x'.repeat(9000), raw: { five_hour: { utilization: 1 } } })}
+${JSON.stringify({ fetched_at: stamp(at), raw: CLAUDE_RAW })}\n`);
+
+  const fresh = readClaudeSnapshot();
+  assert.equal(fresh.raw.five_hour.utilization, 42);
+  assert.equal(normalizeClaude(fresh.raw, 'team').session.pctUsed, 42);
+
+  assert.equal(readClaudeSnapshot(60_000, at.getTime() + 120_000), null);
+  writeFileSync(file, 'not json\n');
+  assert.equal(readClaudeSnapshot(), null);
+});
+
+// Tier two under the snapshot: the statusline stamps the same limits into
+// cost-state/<session>.json on every turn of every session, so the newest file
+// is usually fresher than the snapshot log. Windows only — epoch seconds in,
+// ISO out.
+test('readCostStateLimits: newest usable file wins, stale and rate_limits-less ones are skipped', () => {
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  const write = (name, body, ageMs) => {
+    const file = join(dir, name);
+    writeFileSync(file, JSON.stringify(body));
+    const at = new Date(Date.now() - ageMs);
+    utimesSync(file, at, at);
+  };
+  const limits = (pct) => ({ rate_limits: { five_hour: { used_percentage: pct, resets_at: 1789533000 }, seven_day: { used_percentage: 3, resets_at: 1790096400 } } });
+
+  write('newest-no-limits.json', { session_id: 'a' }, 1_000); // launched, no turn yet
+  write('newest-usable.json', limits(22), 5_000);
+  write('older.json', limits(99), 30_000);
+
+  const fresh = readCostStateLimits();
+  assert.equal(fresh.session.pctUsed, 22); // not 99: newest usable, not merely newest
+  assert.equal(fresh.session.resetsAt, new Date(1789533000 * 1000).toISOString());
+  assert.equal(fresh.weekly.pctUsed, 3);
+
+  // Every candidate outside the window → no reading at all, so the caller falls
+  // through to the API instead of serving an hour-old percentage as current.
+  assert.equal(readCostStateLimits(1_000), null);
 });

@@ -5,12 +5,12 @@
 // small in-memory cache per source is enough — no cross-session file needed.
 // SECURITY: reads full account creds (cookie / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
 import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
-import { fetchExternal } from './external-fetch.mjs';
+import { fetchExternal, retryAfterMs } from './external-fetch.mjs';
 
 const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
 export const OLLAMA_PROFILE_DIR = join(CACHE_DIR, 'pw-ollama-profile');
@@ -178,6 +178,74 @@ export function appendClaudeSnapshot(raw) {
       : null,
     raw,
   });
+}
+
+// The global statusline writes this same file once a turn, from the same
+// endpoint — which is also why the daemon kept getting 429s: api.anthropic.com's
+// oauth/usage allows roughly one call a minute per account, and the statusline
+// already spends it. So read the newest line before reaching for the network; a
+// fresh one is the same payload for free. Tail-read a fixed window rather than
+// the whole file: this log is megabytes and append-only.
+const SNAPSHOT_TAIL_BYTES = 8192;
+export const SNAPSHOT_MAX_AGE_MS = 2 * TTL; // one missed ~60s statusline tick
+
+export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
+  let fd;
+  try {
+    fd = openSync(CLAUDE_HISTORY, 'r');
+    const size = statSync(CLAUDE_HISTORY).size;
+    const len = Math.min(size, SNAPSHOT_TAIL_BYTES);
+    const buf = Buffer.alloc(len);
+    readSync(fd, buf, 0, len, size - len);
+    // Only the last complete line matters; a leading fragment from a mid-line
+    // window start is never read.
+    const lines = buf.toString('utf8').split('\n').filter(Boolean);
+    const record = JSON.parse(lines[lines.length - 1]);
+    // localTimestamp's 'YYYY-MM-DD HH:MM:SS' has no zone — parsed as local, which
+    // is what wrote it.
+    const at = Date.parse(record.fetched_at);
+    if (!record.raw || Number.isNaN(at) || now - at > maxAgeMs) return null;
+    return { raw: record.raw, fetchedAt: new Date(at).toISOString() };
+  } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
+}
+
+// Second free source, denser than the snapshot log: the statusline writes
+// cost-state/<session_id>.json on every turn of every session — foreground and
+// task/background alike — and Claude Code hands it the same 5h/7d rate limits.
+// Newest file wins (a session that hasn't taken a turn has no rate_limits and is
+// skipped). Windows only: plan still comes from the credentials file, and
+// extra_usage / per-model carry from the last good reading in fetchClaude.
+const COST_STATE_DIR = join(USAGE_SKILL_STATE, 'cost-state');
+
+export function readCostStateLimits(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
+  let candidates;
+  try {
+    candidates = readdirSync(COST_STATE_DIR)
+      .filter((f) => f.endsWith('.json'))
+      .map((f) => {
+        const file = join(COST_STATE_DIR, f);
+        try { return [file, statSync(file).mtimeMs]; } catch { return [file, 0]; }
+      })
+      .filter(([, at]) => now - at <= maxAgeMs)
+      .sort((a, b) => b[1] - a[1]);
+  } catch { return null; }
+  const win = (w) => (Number.isFinite(w?.used_percentage)
+    ? {
+        pctUsed: w.used_percentage,
+        // epoch seconds here, ISO everywhere else in this module
+        resetsAt: Number.isFinite(w.resets_at) ? new Date(w.resets_at * 1000).toISOString() : null,
+        models: [],
+      }
+    : null);
+  for (const [file, at] of candidates) {
+    try {
+      const rl = JSON.parse(readFileSync(file, 'utf8')).rate_limits;
+      const session = win(rl?.five_hour);
+      const weekly = win(rl?.seven_day);
+      if (session || weekly) return { session, weekly, fetchedAt: new Date(at).toISOString() };
+    } catch { /* unreadable or caught mid-write: fall through to the next newest */ }
+  }
+  return null;
 }
 
 async function fetchOllama() {
@@ -502,7 +570,29 @@ export async function refreshClaudeAuth() {
   });
 }
 
-async function fetchClaude(retry = true) {
+// The two free tiers, in freshness order. Tier 1: whoever fetched last — us or
+// the statusline — left the whole payload on disk. Tier 2: the statusline stamps
+// the live 5h/7d limits into cost-state on every turn of every session, so a
+// session that is mid-task keeps this card fed without spending the account's
+// one-call-a-minute quota; it carries the fields that payload has no room for
+// (extra_usage, per-model) from the last good reading. Both are plain file reads,
+// which is why pull() runs this ahead of the TTL and the 429 backoff — those
+// guard the network leg only.
+export function readClaudeLocal(prev, plan) {
+  const snapshot = readClaudeSnapshot();
+  if (snapshot) return { ...normalizeClaude(snapshot.raw, plan), fetchedAt: snapshot.fetchedAt };
+
+  const limits = readCostStateLimits();
+  if (!limits) return null;
+  const weekly = limits.weekly && { ...limits.weekly, models: prev?.weekly?.models ?? [] };
+  return {
+    ok: true, source: 'claude', plan: plan ?? null,
+    session: limits.session, weekly, extra: prev?.extra ?? null,
+    fetchedAt: limits.fetchedAt,
+  };
+}
+
+async function fetchClaude(retry = true, prev = cache.claude.data) {
   let oauth = claudeOauthToken();
   // Expired token → renew it here rather than making the user open a session.
   if (!oauth && retry && await refreshClaudeAuth()) oauth = claudeOauthToken();
@@ -517,6 +607,9 @@ async function fetchClaude(retry = true) {
     return { ok: false, source: 'claude', needsAuth: true, error: err };
   }
 
+  const local = readClaudeLocal(prev, oauth.subscriptionType);
+  if (local) return local;
+
   let resp;
   try {
     resp = await fetchExternal(USAGE_API_URL, {
@@ -530,7 +623,9 @@ async function fetchClaude(retry = true) {
     if (retry && await refreshClaudeAuth()) return fetchClaude(false);
     return { ok: false, source: 'claude', needsAuth: true, error: 'auth-expired' };
   }
-  if (resp.status === 429) return { ok: false, source: 'claude', error: 'rate-limited' };
+  // The endpoint hands back a Retry-After (~66s) — back off exactly that long
+  // instead of guessing, so the next pull lands just past the window.
+  if (resp.status === 429) return { ok: false, source: 'claude', error: 'rate-limited', retryAfterMs: retryAfterMs(resp.headers?.get?.('retry-after')) };
   if (resp.status !== 200) return { ok: false, source: 'claude', error: `HTTP ${resp.status}` };
   try {
     const raw = await resp.json();
@@ -710,15 +805,32 @@ function persist() {
 
 async function pull(src, fetcher, force) {
   const slot = cache[src];
+  // Claude's local tiers cost a file read, so they run ahead of both gates below
+  // — a backed-off or within-TTL poll still picks up whatever the statusline
+  // wrote since. Only a genuinely newer reading counts; an unchanged one falls
+  // through so the gates decide whether the network leg is worth it.
+  if (src === 'claude') {
+    const local = readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType);
+    if (local && local.fetchedAt !== slot.data?.fetchedAt) {
+      slot.data = local;
+      slot.at = Date.now();
+      persist();
+      return slot.data;
+    }
+  }
   if (src === 'claude' && Date.now() < claudeRateLimitedUntil && slot.data) return slot.data;
-  if (!force && slot.data && Date.now() - slot.at < TTL) return slot.data;
+  // Claude's usage endpoint allows roughly one call a minute per account, and
+  // several triggers converge on it (per-card cadence, the idle debounce, reset
+  // timers, manual Refresh). Forcing past the TTL just spends the next minute's
+  // quota, so for claude `force` collapses onto the cache too.
+  if ((!force || src === 'claude') && slot.data && Date.now() - slot.at < TTL) return slot.data;
   const fetched = await fetcher();
   // codex's fetchedAt is the record's own (possibly stale) timestamp — keep it;
   // ollama/claude never set one, so they still default to "now".
   const data = { fetchedAt: new Date().toISOString(), ...fetched };
   if (data.ok || !slot.data) { slot.data = data; slot.at = Date.now(); persist(); }
   if (src === 'claude' && data.ok) claudeRateLimitedUntil = 0;
-  if (src === 'claude' && data.error === 'rate-limited') claudeRateLimitedUntil = Date.now() + CLAUDE_RATE_LIMIT_BACKOFF_MS;
+  if (src === 'claude' && data.error === 'rate-limited') claudeRateLimitedUntil = Date.now() + (data.retryAfterMs ?? CLAUDE_RATE_LIMIT_BACKOFF_MS);
   // Ollama failures retain the timestamped successful measurement and surface
   // the current actionable error; failures never reach the history writer.
   if (src === 'ollama' && !data.ok && slot.data?.ok) {
