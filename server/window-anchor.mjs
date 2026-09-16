@@ -20,6 +20,7 @@ import { runOneShotPrompt } from './one-shot.mjs';
 
 const execFileP = promisify(execFile);
 
+const WINDOW_MS = 5 * 3.6e6;       // the plan window an anchor pins
 const ANCHOR_DELAY_MS = 5000;      // fire just after the reset, like usage.mjs's reset refresh (+2000)
 const POKE_TIMEOUT_MS = 90_000;
 const MIN_POKE_GAP_MS = 60_000;    // an errored poke may be retried, but no faster than this
@@ -129,7 +130,20 @@ function onUsage(result) {
     if (!s.enabled) { clearTimer(group); continue; }
     const src = result?.[group];
     const session = src?.session;
-    if (!src?.ok || !session?.resetsAt) continue; // no window info yet
+    if (!src?.ok || !session) continue; // no window info yet
+    // Codex reports a window that has not begun (usage.mjs strips its sliding
+    // reset projection). There is no reset to arm against and none will appear
+    // until a turn starts the window — which is the anchor's whole job, so
+    // poke now. One poke per window span: lastAnchorAt is the previous poke and
+    // expires with the window it started; passing it as the window identity
+    // lets shouldPoke space out retries after an error without blocking the
+    // next lapse.
+    if (session.started === false) {
+      clearTimer(group);
+      if (!s.lastAnchorAt || now() - s.lastAnchorAt >= WINDOW_MS) void poke(group, s.lastAnchorAt ?? 0);
+      continue;
+    }
+    if (!session.resetsAt) continue;
     const resetsAt = new Date(session.resetsAt).getTime();
     if (!Number.isFinite(resetsAt)) continue;
     if (resetsAt > now()) {

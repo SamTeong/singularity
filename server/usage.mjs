@@ -702,10 +702,18 @@ function normalizeCodexLimits(plan, windows, durationKey, fetchedAt, resetKey = 
   for (const w of windows) {
     const duration = Number(w?.[durationKey]);
     if (!Number.isFinite(w?.used_percent) || !Number.isFinite(duration)) continue;
+    // A window that has not begun yet: the live API still fills in reset_at,
+    // but as a rolling projection of now + the whole window, so it slides
+    // forward on every poll (seen live: the 5h reset walking 8:31 → 8:32 →
+    // 8:33pm). That is not a reset instant, so drop it and say so — a pinned
+    // reset always has reset_after_seconds below the window length. Rollout
+    // records carry no reset_after_seconds, so they never trip this.
+    const unstarted = Number(w.reset_after_seconds) >= Number(w.limit_window_seconds);
     const window = {
       pctUsed: w.used_percent,
-      resetsAt: Number.isFinite(w[resetKey]) ? new Date(w[resetKey] * 1000).toISOString() : null,
+      resetsAt: !unstarted && Number.isFinite(w[resetKey]) ? new Date(w[resetKey] * 1000).toISOString() : null,
       models: [],
+      ...(unstarted ? { started: false } : {}),
     };
     if (duration >= (durationKey === 'window_minutes' ? 1440 : 86400)) weekly = window;
     else session = window;

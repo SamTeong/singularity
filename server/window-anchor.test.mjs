@@ -189,3 +189,34 @@ test('routes: GET shape, POST toggle, poke route 400 on bad provider', async () 
   assert.deepEqual(JSON.parse(poke.body), { ok: true, provider: 'claude', result: 'ok' });
   await app.close();
 });
+
+// A Codex window that has not begun: usage.mjs strips the sliding reset
+// projection and flags started:false, so there is nothing to arm against. The
+// anchor must poke immediately instead of sitting on a timer that never fires,
+// and must not poke again until the window it started has lapsed.
+test('unstarted: pokes at once, once per window span', async () => {
+  fakeNow += 24 * HOUR; // past any anchor an earlier test left on codex
+  init();
+  calls.length = 0;
+  setWindowAnchorEnabled({ codex: true });
+  const unstarted = () => bus.emit('usage', {
+    ollama: null,
+    codex: { ok: true, source: 'codex', session: { pctUsed: 0, resetsAt: null, started: false } },
+  });
+
+  unstarted();
+  await until(() => calls.length === 1);
+  assert.equal(snapshotWindowAnchor().codex.lastResult, 'ok');
+  assert.equal(snapshotWindowAnchor().codex.nextAnchorAt, null);
+
+  // Still unstarted on the next poll (the API lags the turn): no second poke.
+  fakeNow += 60_000;
+  unstarted();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(calls.length, 1);
+
+  // A window later the anchor it placed has lapsed — poke again.
+  fakeNow += 5 * HOUR;
+  unstarted();
+  await until(() => calls.length === 2);
+});
