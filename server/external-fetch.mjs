@@ -45,6 +45,11 @@ export async function fetchExternal(url, options = {}, policy = {}) {
 
     if (!isRetryableResponse(response) || attempt === attempts) return response;
     const retryAfter = response.status === 429 ? retryAfterMs(response.headers?.get?.('retry-after')) : null;
+    // A Retry-After past our backoff ceiling is the server saying "not within
+    // this request" — sleeping it out would block the caller for a minute-plus
+    // and then spend another quota unit. Hand the 429 back and let the caller's
+    // own schedule decide when to return.
+    if (retryAfter != null && retryAfter > MAX_DELAY_MS) return response;
     await sleep(retryAfter ?? Math.floor(Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** (attempt - 1)) * random()));
   }
 }

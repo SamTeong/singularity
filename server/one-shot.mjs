@@ -22,25 +22,41 @@ const execFileP = promisify(execFile);
 const ONESHOT_TIMEOUT_MS = 120_000;
 const ONESHOT_MAX_BUFFER = 8 * 1024 * 1024;
 
+// execFile leaves stdin an open pipe, so every CLI here stalls waiting on input
+// ("Warning: no stdin data received in 3s, proceeding without"). Close it.
+function run(spawn, bin, args, opts) {
+  const p = spawn(bin, args, opts);
+  p.child?.stdin?.end();
+  return p;
+}
+
 export async function runOneShotPrompt(group, modelId, prompt, { timeoutMs = ONESHOT_TIMEOUT_MS, extraArgs = [], spawn = execFileP } = {}) {
   const opts = { maxBuffer: ONESHOT_MAX_BUFFER, timeout: timeoutMs };
   if (group === 'claude') {
-    const { stdout } = await spawn(CLAUDE_BIN, [
-      '-p', prompt,
-      '--model', modelId,
-      '--output-format', 'json',
-      '--no-session-persistence',
-      '--bare',
-      ...extraArgs,
-    ], opts);
-    return stdout;
+    // No --bare: it skips the credential plumbing along with hooks/LSP/plugins,
+    // so every headless call dies with "Not logged in · Please run /login".
+    try {
+      const { stdout } = await run(spawn, CLAUDE_BIN, [
+        '-p', prompt,
+        '--model', modelId,
+        '--output-format', 'json',
+        '--no-session-persistence',
+        ...extraArgs,
+      ], opts);
+      return stdout;
+    } catch (e) {
+      // claude puts the real reason in its JSON envelope on stdout; execFile's
+      // "Command failed: <argv>" message hides it.
+      let reason; try { reason = JSON.parse(e.stdout)?.result; } catch { /* not JSON */ }
+      throw reason ? new Error(reason) : e;
+    }
   }
   if (group === 'codex') {
     // -s read-only + --skip-git-repo-check: a one-shot only reads its prompt
     // string, it must never be able to write.
     const tmpFile = join(STATE_DIR, `.oneshot-${randomUUID()}.txt`);
     try {
-      await spawn(CODEX_BIN, [
+      await run(spawn, CODEX_BIN, [
         'exec', '-m', modelId,
         '-s', 'read-only',
         '--skip-git-repo-check',
@@ -56,7 +72,7 @@ export async function runOneShotPrompt(group, modelId, prompt, { timeoutMs = ONE
     }
   }
   if (group === 'ollama') {
-    const { stdout } = await spawn(OLLAMA_BIN, ['run', modelId, prompt], opts);
+    const { stdout } = await run(spawn, OLLAMA_BIN, ['run', modelId, prompt], opts);
     return stdout;
   }
   throw new Error(`one-shot: unknown group '${group}'`);

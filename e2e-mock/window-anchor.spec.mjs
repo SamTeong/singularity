@@ -43,18 +43,26 @@ test('toggling the anchor persists across a re-render', async ({ page }) => {
   await expect(page.getByRole('switch', { name: 'Claude window anchor' })).not.toBeChecked();
 });
 
-test('Poke now posts the poke route and converges from the socket', async ({ page }) => {
+test('Trigger posts the poke route and converges from the socket', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
   await recordFetchCalls(page);
 
+  // Claude's fixture 5h window already carries usage (pctUsed 42), so its reset
+  // is pinned and the button is gone; Codex has session:null and has never
+  // anchored, so it keeps the only Trigger on the page.
+  await expect(page.getByRole('button', { name: 'Trigger' })).toHaveCount(1);
   // Cards render claude, codex, ollama in that order. Codex has never anchored
   // in the fixtures, so it has no last-result cell — claude's is the only one.
   await expect(page.getByText('· last: ok')).toHaveCount(1);
-  await page.getByRole('button', { name: 'Poke now' }).nth(1).click();
+  await page.getByRole('button', { name: 'Trigger' }).click();
   await expect.poll(() => fetchCalls(page)).toContain('POST /api/window-anchor/poke');
 
   // The poke response carries only its outcome; the recorded run reaches the
   // card on the broadcast 'window-anchor' frame, so a second cell is the proof.
   await expect(page.getByText('· last: ok')).toHaveCount(2);
+  // That same frame's lastAnchorAt is what retires the button: Codex's session
+  // block is still null, so the fresh anchor timestamp is the only thing that
+  // can tell the card this window is pinned.
+  await expect(page.getByRole('button', { name: 'Trigger' })).toHaveCount(0);
 });

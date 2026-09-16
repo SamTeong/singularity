@@ -86,7 +86,6 @@ test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flag
     '--model', 'haiku',
     '--output-format', 'json',
     '--no-session-persistence',
-    '--bare',
     '--effort', 'low',
   ]);
   assert.equal(cla.opts.timeout, 90_000);

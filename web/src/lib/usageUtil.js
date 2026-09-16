@@ -29,6 +29,15 @@ export function fmtReset(iso) {
   return `${Math.round(h / 24)}d`;
 }
 
+// Is this provider's live 5h plan window already anchored? `pctUsed` cannot
+// answer it: a poke is one trivial turn, which rounds to 0% and does not land
+// in the snapshot until the next /usage read. A successful anchor run less
+// than a window ago is the direct evidence, and it expires with the window.
+export function windowAnchored(session, lastAnchorAt) {
+  if ((session?.pctUsed ?? 0) > 0) return true;
+  return lastAnchorAt != null && Date.now() - lastAnchorAt < 5 * 3.6e6;
+}
+
 // Divider gridlines splitting a meter track into n equal segments (5h→5, 7d→7),
 // so fill-vs-grid reads as a burn-rate gauge. Overlay on top of the fill.
 export function segTicks(color, n) {
