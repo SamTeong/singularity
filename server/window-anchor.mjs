@@ -56,6 +56,7 @@ let now = () => Date.now();
 let spawn = execFileP;
 let busRef = bus;
 let usageHandler = null;
+let latestUsage = null;
 
 function snapshot() {
   return { claude: { ...state.claude }, codex: { ...state.codex } };
@@ -73,9 +74,11 @@ function persistEmit() { persist(); busRef?.emit('window-anchor', snapshot()); }
 
 function clearTimer(group) {
   const cur = armed.get(group);
+  const changed = !!cur || state[group].nextAnchorAt != null;
   if (cur) clearTimeout(cur.timer);
   armed.delete(group);
   state[group].nextAnchorAt = null;
+  return changed;
 }
 
 // (Re)arm the anchor timer for a window ending at resetsAt. Dedupe: a timer
@@ -130,23 +133,35 @@ async function poke(group, windowEnd) {
   return s.lastResult;
 }
 
-function onUsage(result) {
+function onUsage(result, forceUnstarted = null) {
+  latestUsage = result;
   for (const group of PROVIDERS) {
     const s = state[group];
     if (!s.enabled) { clearTimer(group); continue; }
     const src = result?.[group];
     const session = src?.session;
-    if (!src?.ok || !session) continue; // no window info yet
+    if (!src?.ok) continue; // no authoritative window info yet
+    if (!session) {
+      // A successful usage read with no 5h window means this account has
+      // nothing to anchor (for example Claude API billing). Keep the user's
+      // preference, but retire any schedule learned from an older plan/window.
+      if (clearTimer(group)) persistEmit();
+      continue;
+    }
     // Codex reports a window that has not begun (usage.mjs strips its sliding
     // reset projection). There is no reset to arm against and none will appear
     // until a turn starts the window — which is the anchor's whole job, so
     // poke now. One poke per window span: lastAnchorAt is the previous poke and
     // expires with the window it started; passing it as the window identity
     // lets shouldPoke space out retries after an error without blocking the
-    // next lapse.
+    // next lapse. A fresh false->true enable is an explicit retry even when a
+    // prior command exited successfully without opening the provider window.
     if (session.started === false) {
       clearTimer(group);
-      if (!s.lastAnchorAt || now() - s.lastAnchorAt >= WINDOW_MS) void poke(group, s.lastAnchorAt ?? 0);
+      const forced = forceUnstarted?.has(group);
+      if (forced || !s.lastAnchorAt || now() - s.lastAnchorAt >= WINDOW_MS) {
+        void poke(group, forced ? now() : (s.lastAnchorAt ?? 0));
+      }
       continue;
     }
     if (!session.resetsAt) continue;
@@ -177,6 +192,7 @@ export function initWindowAnchor({ bus: b = bus, log, stateDir = STATE_DIR, spaw
   stateFile = join(stateDir, 'window-anchor.json');
   spawn = spawnFn;
   now = nowFn ?? (() => Date.now());
+  latestUsage = null;
 
   // Re-init (tests): drop the previous subscription and any armed timers first.
   if (usageHandler) b.off('usage', usageHandler);
@@ -199,16 +215,22 @@ export function initWindowAnchor({ bus: b = bus, log, stateDir = STATE_DIR, spaw
 
 export function snapshotWindowAnchor() { return snapshot(); }
 
-// POST body { enabled: { claude, codex } } — partial update, persists.
+// POST body { enabled: { claude, codex } } — partial update, persists, then
+// immediately applies the latest usage snapshot for newly-enabled providers.
 export function setWindowAnchorEnabled(enabled = {}) {
   let changed = false;
+  const newlyEnabled = new Set();
   for (const group of PROVIDERS) {
     if (typeof enabled[group] !== 'boolean') continue;
+    if (enabled[group] && !state[group].enabled) newlyEnabled.add(group);
     state[group].enabled = enabled[group];
     if (!enabled[group]) clearTimer(group);
     changed = true;
   }
-  if (changed) persistEmit();
+  if (changed) {
+    persistEmit();
+    if (latestUsage && newlyEnabled.size) onUsage(latestUsage, newlyEnabled);
+  }
   return snapshot();
 }
 

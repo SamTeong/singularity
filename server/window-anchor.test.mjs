@@ -70,6 +70,36 @@ test('arming: a future window arms nextAnchorAt at resetsAt+5000 and dedupes', (
   }
 });
 
+test('a successful read with no plan window clears a stale timer but stays enabled', () => {
+  init();
+  setWindowAnchorEnabled({ claude: true });
+  emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow + 10 * HOUR });
+  assert.notEqual(snapshotWindowAnchor().claude.nextAnchorAt, null);
+
+  bus.emit('usage', { claude: { ok: true, source: 'claude', session: null } });
+  const updated = snapshotWindowAnchor().claude;
+  assert.equal(updated.enabled, true);
+  assert.equal(updated.nextAnchorAt, null);
+});
+
+test('enabling re-evaluates the latest usage and pokes an unstarted window', async () => {
+  fakeNow += 24 * HOUR;
+  init();
+  calls.length = 0;
+  setWindowAnchorEnabled({ claude: false, codex: false });
+  const resetsAt = fakeNow + 9 * HOUR;
+  bus.emit('usage', {
+    claude: { ok: true, source: 'claude', session: { pctUsed: 0, resetsAt: new Date(resetsAt).toISOString() } },
+    codex: { ok: true, source: 'codex', session: { pctUsed: 0, resetsAt: null, started: false } },
+    ollama: null,
+  });
+  assert.equal(calls.length, 0);
+
+  const updated = setWindowAnchorEnabled({ claude: true, codex: true });
+  assert.equal(updated.claude.nextAnchorAt, resetsAt + 5000);
+  await until(() => calls.length === 1 && snapshotWindowAnchor().codex.lastResult === 'Ok');
+});
+
 test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flags', async () => {
   setWindowAnchorEnabled({ codex: true });
   const before = calls.length;

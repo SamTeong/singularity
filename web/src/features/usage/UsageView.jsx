@@ -17,7 +17,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { statusColor } from '@/shell/shellStyles.js';
-import { visibleProviders, usd, windowAnchored } from '@/lib/usageUtil.js';
+import { visibleProviders, usd, windowAnchorAvailable, windowAnchored } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { useQueryState } from '@/hooks/useQueryState.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
@@ -123,6 +123,7 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
     Promise.resolve(onPoke()).finally(() => setPoking(false));
   };
   const anchored = windowAnchored(u?.session, anchor?.lastAnchorAt);
+  const showAnchor = anchor && windowAnchorAvailable(sourceKey, u?.session);
   // The anchor row's schedule + outcome, folded into one indicator: the words
   // are only worth reading when something looks wrong, and at 320px they cost
   // the row the space the Trigger button needs. 'Skipped' is a success — real
@@ -246,10 +247,10 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
       )}
       {/* Window anchor: keeps this provider's 5h plan window pinned to its
           reset time by firing one trivial prompt when the old window expires
-          idle. Only Claude and Codex have plan windows, so the row renders only
-          where the daemon reports anchor state. A wrapping row, not a fixed
+          idle. The row renders only where the daemon reports anchor state and the
+          usage source exposes an applicable plan window. A wrapping row, not a fixed
           grid, so a 320px card stacks the Trigger button under the toggle. */}
-      {anchor && (
+      {showAnchor && (
         <Stack direction="row" spacing={1} sx={{ mt: 1.5, alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}>
           <Switch
             size="small"

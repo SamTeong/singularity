@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { windowAnchored } from './usageUtil.js';
+import { windowAnchorAvailable, windowAnchored } from './usageUtil.js';
 
 const iso = (ms) => new Date(Date.now() + ms).toISOString();
 
@@ -17,4 +17,15 @@ test('an expired idle window is not anchored', () => {
 test('a fresh poke anchors a provider with no session block at all', () => {
   assert.equal(windowAnchored(null, Date.now() - 6e4), true);
   assert.equal(windowAnchored(null, null), false);
+});
+
+test('an explicitly unstarted window remains triggerable after an ineffective poke', () => {
+  const session = { pctUsed: 0, resetsAt: null, started: false };
+  assert.equal(windowAnchored(session, Date.now() - 6e4), false);
+});
+
+test('Claude anchor controls require a plan session window', () => {
+  assert.equal(windowAnchorAvailable('claude', null), false);
+  assert.equal(windowAnchorAvailable('claude', { pctUsed: 0 }), true);
+  assert.equal(windowAnchorAvailable('codex', null), true);
 });

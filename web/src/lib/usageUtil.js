@@ -17,6 +17,13 @@ export function visibleProviders(caps) {
   return PROVIDERS.filter((p) => caps?.[p.key]?.available !== false);
 }
 
+// Codex can bootstrap a not-yet-started window. Claude only exposes enough
+// information to anchor when its successful usage document has a 5h session;
+// API-billed accounts have session:null and no applicable anchor operation.
+export function windowAnchorAvailable(sourceKey, session) {
+  return sourceKey === 'codex' || session != null;
+}
+
 // Relative countdown to an ISO reset instant: "40m" / "3h" / "5d" / "now".
 export function fmtReset(iso) {
   if (!iso) return '—';
@@ -37,6 +44,9 @@ export function fmtReset(iso) {
 // snapshot until the next /usage read. A successful anchor run less than a
 // window ago is the direct evidence, and it expires with the window.
 export function windowAnchored(session, lastAnchorAt) {
+  // The provider's explicit unstarted state is authoritative: a recent CLI
+  // attempt may have exited successfully without actually opening the window.
+  if (session?.started === false) return false;
   const resetsAt = session?.resetsAt ? new Date(session.resetsAt).getTime() : NaN;
   if (resetsAt > Date.now()) return true;
   if ((session?.pctUsed ?? 0) > 0) return true;
@@ -75,4 +85,3 @@ export function usageSummary(usage, caps) {
   }
   return parts.length ? parts.join('\n') : null;
 }
-
