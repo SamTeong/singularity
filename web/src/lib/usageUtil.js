@@ -29,11 +29,16 @@ export function fmtReset(iso) {
   return `${Math.round(h / 24)}d`;
 }
 
-// Is this provider's live 5h plan window already anchored? `pctUsed` cannot
-// answer it: a poke is one trivial turn, which rounds to 0% and does not land
-// in the snapshot until the next /usage read. A successful anchor run less
-// than a window ago is the direct evidence, and it expires with the window.
+// Is this provider's live 5h plan window already anchored? A reset still ahead
+// is the plain answer: the window has started, so its reset time is pinned and
+// a poke would only burn tokens — true even at pctUsed 0, which is what an
+// anchor poke itself leaves behind. Past that, `pctUsed` cannot answer it: a
+// poke is one trivial turn, which rounds to 0% and does not land in the
+// snapshot until the next /usage read. A successful anchor run less than a
+// window ago is the direct evidence, and it expires with the window.
 export function windowAnchored(session, lastAnchorAt) {
+  const resetsAt = session?.resetsAt ? new Date(session.resetsAt).getTime() : NaN;
+  if (resetsAt > Date.now()) return true;
   if ((session?.pctUsed ?? 0) > 0) return true;
   return lastAnchorAt != null && Date.now() - lastAnchorAt < 5 * 3.6e6;
 }

@@ -20,6 +20,7 @@ import { runOneShotPrompt } from './one-shot.mjs';
 
 const execFileP = promisify(execFile);
 
+const WINDOW_MS = 5 * 3.6e6;       // the plan window an anchor pins
 const ANCHOR_DELAY_MS = 5000;      // fire just after the reset, like usage.mjs's reset refresh (+2000)
 const POKE_TIMEOUT_MS = 90_000;
 const MIN_POKE_GAP_MS = 60_000;    // an errored poke may be retried, but no faster than this
@@ -35,6 +36,12 @@ const EFFORT_ARGS = {
   codex: ['-c', 'model_reasoning_effort=low'],
 };
 const PROVIDERS = ['claude', 'codex'];
+
+// lastResult is display copy as well as a predicate — the UI prints it verbatim
+// rather than case-mapping it, so it is capitalised at the source. A file written
+// by an older build carries the lowercase spelling; normalise it on load or the
+// first shouldPoke after an upgrade reads a successful anchor as a failed one.
+const capitalize = (v) => (v ? v[0].toUpperCase() + v.slice(1) : v);
 
 const defaultProviderState = () => ({
   enabled: false, nextAnchorAt: null, lastAnchorAt: null, lastResult: null, lastError: null,
@@ -93,7 +100,7 @@ function arm(group, resetsAt) {
 function shouldPoke(group, windowEnd) {
   const last = lastAttempt.get(group);
   if (!last || last.window !== windowEnd) return true;
-  return state[group].lastResult !== 'ok' && now() - last.at >= MIN_POKE_GAP_MS;
+  return state[group].lastResult !== 'Ok' && now() - last.at >= MIN_POKE_GAP_MS;
 }
 
 // Resolve the anchor model through the model store: null when the SEED alias
@@ -106,17 +113,17 @@ function anchorModel(group) {
 
 async function poke(group, windowEnd) {
   const s = state[group];
-  if (!shouldPoke(group, windowEnd)) return 'skipped';
+  if (!shouldPoke(group, windowEnd)) return 'Skipped';
   lastAttempt.set(group, { window: windowEnd, at: now() });
   try {
     const modelId = anchorModel(group);
     if (!modelId) throw new Error(`no '${CHEAP_MODELS[group]}' model in the ${group} group`);
     await runOneShotPrompt(group, modelId, 'ok', { timeoutMs: POKE_TIMEOUT_MS, extraArgs: EFFORT_ARGS[group] ?? [], spawn });
     s.lastAnchorAt = now();
-    s.lastResult = 'ok';
+    s.lastResult = 'Ok';
     s.lastError = null;
   } catch (e) {
-    s.lastResult = 'error';
+    s.lastResult = 'Error';
     s.lastError = String(e.message || e).slice(0, 200);
   }
   persistEmit();
@@ -129,7 +136,20 @@ function onUsage(result) {
     if (!s.enabled) { clearTimer(group); continue; }
     const src = result?.[group];
     const session = src?.session;
-    if (!src?.ok || !session?.resetsAt) continue; // no window info yet
+    if (!src?.ok || !session) continue; // no window info yet
+    // Codex reports a window that has not begun (usage.mjs strips its sliding
+    // reset projection). There is no reset to arm against and none will appear
+    // until a turn starts the window — which is the anchor's whole job, so
+    // poke now. One poke per window span: lastAnchorAt is the previous poke and
+    // expires with the window it started; passing it as the window identity
+    // lets shouldPoke space out retries after an error without blocking the
+    // next lapse.
+    if (session.started === false) {
+      clearTimer(group);
+      if (!s.lastAnchorAt || now() - s.lastAnchorAt >= WINDOW_MS) void poke(group, s.lastAnchorAt ?? 0);
+      continue;
+    }
+    if (!session.resetsAt) continue;
     const resetsAt = new Date(session.resetsAt).getTime();
     if (!Number.isFinite(resetsAt)) continue;
     if (resetsAt > now()) {
@@ -138,8 +158,8 @@ function onUsage(result) {
       // Real work already anchored the next window — stand down until the
       // following reset.
       clearTimer(group);
-      if (s.lastResult !== 'skipped') {
-        s.lastResult = 'skipped';
+      if (s.lastResult !== 'Skipped') {
+        s.lastResult = 'Skipped';
         s.lastError = null;
         persistEmit();
       }
@@ -166,7 +186,7 @@ export function initWindowAnchor({ bus: b = bus, log, stateDir = STATE_DIR, spaw
     if (existsSync(stateFile)) {
       const data = JSON.parse(readFileSync(stateFile, 'utf8'));
       for (const group of PROVIDERS) {
-        if (data[group] && typeof data[group] === 'object') state[group] = { ...defaultProviderState(), ...data[group] };
+        if (data[group] && typeof data[group] === 'object') state[group] = { ...defaultProviderState(), ...data[group], lastResult: capitalize(data[group].lastResult) };
       }
       log?.info({ file: stateFile }, 'loaded window-anchor.json');
     }

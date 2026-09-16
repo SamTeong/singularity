@@ -380,6 +380,33 @@ test('fetchCodex: retries a transient live API response', async () => {
   assert.equal(calls, 2);
 });
 
+// An unused 5h window has not begun, and the live API fills reset_at with a
+// rolling now + the whole window, so it walks forward on every poll. That is
+// not a reset instant: drop it and flag the window unstarted, or the UI shows a
+// countdown that never lands and the window anchor arms a timer it keeps
+// pushing out of reach.
+test('fetchCodex: a window that has not begun drops its sliding reset', async () => {
+  const originalFetch = globalThis.fetch;
+  const nowSec = Math.floor(Date.now() / 1000);
+  globalThis.fetch = async () => ({ status: 200, json: async () => ({
+    plan_type: 'plus',
+    rate_limit: {
+      primary_window: { used_percent: 0, limit_window_seconds: 18_000, reset_after_seconds: 18_000, reset_at: nowSec + 18_000 },
+      secondary_window: { used_percent: 44, limit_window_seconds: 604_800, reset_after_seconds: 323_436, reset_at: 1786172475 },
+    },
+  }) });
+  try {
+    const u = await fetchCodex();
+    assert.equal(u.session.resetsAt, null);
+    assert.equal(u.session.started, false);
+    // The weekly window is genuinely running — it keeps its pinned reset.
+    assert.equal(u.weekly.resetsAt, new Date(1786172475 * 1000).toISOString());
+    assert.equal('started' in u.weekly, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test('fetchCodex: classifies a weekly-only primary live window', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ status: 200, json: async () => ({

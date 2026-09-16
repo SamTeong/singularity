@@ -102,7 +102,7 @@ export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
       <Typography sx={{ fontSize: 13, mb: 0.5 }}>{label}</Typography>
       {track}
       <Typography variant="code" sx={{ display: 'block', fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
-        {pct == null ? '—' : `${pct.toFixed(dp)}% used`}{win.resetsAt ? ` · resets in ${fmtReset(win.resetsAt)} · ${fmtWall(win.resetsAt)}` : ''}
+        {pct == null ? '—' : `${pct.toFixed(dp)}% used`}{win.resetsAt ? ` · resets in ${fmtReset(win.resetsAt)} · ${fmtWall(win.resetsAt)}` : ''}{win.started === false ? ' · window not started' : ''}
       </Typography>
       {win.models?.length > 0 && (
         <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
