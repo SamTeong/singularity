@@ -9,6 +9,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendF
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
 import { fetchExternal, retryAfterMs } from './external-fetch.mjs';
 
@@ -478,6 +479,16 @@ export function claudeOauthToken() {
   return { accessToken: oauth.accessToken, expiresAt: oauth.expiresAt ?? null, subscriptionType: oauth.subscriptionType ?? null };
 }
 
+// A one-way credential marker lets the persisted usage cache detect a Claude
+// account switch without storing or returning either OAuth token. Prefer the
+// longer-lived refresh token so ordinary access-token renewal does not usually
+// look like a switch; rotation is safe to treat conservatively as one.
+function claudeCredentialFingerprint() {
+  const oauth = readCredentialsFile() ?? readKeychainOnDarwin();
+  const token = oauth?.refreshToken ?? oauth?.accessToken;
+  return token ? createHash('sha256').update(token).digest('hex') : null;
+}
+
 function readCredentialsFile() {
   if (!existsSync(CREDENTIALS_PATH)) return null;
   try { return JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth; }
@@ -592,7 +603,7 @@ export function readClaudeLocal(prev, plan) {
   };
 }
 
-async function fetchClaude(retry = true, prev = cache.claude.data) {
+async function fetchClaude(retry = true, prev = cache.claude.data, skipLocal = false) {
   let oauth = claudeOauthToken();
   // Expired token → renew it here rather than making the user open a session.
   if (!oauth && retry && await refreshClaudeAuth()) oauth = claudeOauthToken();
@@ -607,8 +618,10 @@ async function fetchClaude(retry = true, prev = cache.claude.data) {
     return { ok: false, source: 'claude', needsAuth: true, error: err };
   }
 
-  const local = readClaudeLocal(prev, oauth.subscriptionType);
-  if (local) return local;
+  if (!skipLocal) {
+    const local = readClaudeLocal(prev, oauth.subscriptionType);
+    if (local) return local;
+  }
 
   let resp;
   try {
@@ -620,7 +633,7 @@ async function fetchClaude(retry = true, prev = cache.claude.data) {
   }
   if (resp.status === 401) {
     // Token looked valid locally but the server rejected it — same cure, once.
-    if (retry && await refreshClaudeAuth()) return fetchClaude(false);
+    if (retry && await refreshClaudeAuth()) return fetchClaude(false, prev, skipLocal);
     return { ok: false, source: 'claude', needsAuth: true, error: 'auth-expired' };
   }
   // The endpoint hands back a Retry-After (~66s) — back off exactly that long
@@ -788,7 +801,11 @@ export async function fetchCodex() {
 }
 
 // ---- Cache + public API -------------------------------------------------------
-const cache = { ollama: { data: null, at: 0 }, claude: { data: null, at: 0 }, codex: { data: null, at: 0 } };
+const cache = {
+  ollama: { data: null, at: 0 },
+  claude: { data: null, at: 0, credentialFingerprint: null },
+  codex: { data: null, at: 0 },
+};
 const SOURCES = ['ollama', 'claude', 'codex'];
 const CLAUDE_RATE_LIMIT_BACKOFF_MS = 5 * 60_000;
 let claudeRateLimitedUntil = 0;
@@ -799,7 +816,10 @@ try {
   if (existsSync(CACHE_FILE)) {
     const saved = JSON.parse(readFileSync(CACHE_FILE, 'utf8'));
     for (const src of ['ollama', 'claude', 'codex']) {
-      if (saved[src]?.data) cache[src] = { data: saved[src].data, at: 0 }; // at:0 → stale, refetched on first pull
+      if (saved[src]?.data) {
+        cache[src] = { data: saved[src].data, at: 0 }; // at:0 → stale, refetched on first pull
+        if (src === 'claude') cache[src].credentialFingerprint = saved[src].credentialFingerprint ?? null;
+      }
     }
   }
 } catch {}
@@ -813,12 +833,22 @@ function persist() {
 
 async function pull(src, fetcher, force) {
   const slot = cache[src];
+  let claudeAccountChanged = false;
   // Claude's local tiers cost a file read, so they run ahead of both gates below
   // — a backed-off or within-TTL poll still picks up whatever the statusline
   // wrote since. Only a genuinely newer reading counts; an unchanged one falls
   // through so the gates decide whether the network leg is worth it.
   if (src === 'claude') {
-    const local = readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType);
+    const fingerprint = claudeCredentialFingerprint();
+    claudeAccountChanged = !!fingerprint && fingerprint !== slot.credentialFingerprint;
+    if (claudeAccountChanged) {
+      // Neither the snapshot log nor cost-state identifies its account. Do not
+      // blend either with a cache created under different credentials; one live
+      // OAuth read establishes the complete payload for the new account.
+      slot.data = null;
+      slot.at = 0;
+    }
+    const local = claudeAccountChanged ? null : readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType);
     if (local && local.fetchedAt !== slot.data?.fetchedAt) {
       slot.data = local;
       slot.at = Date.now();
@@ -832,12 +862,17 @@ async function pull(src, fetcher, force) {
   // timers, manual Refresh). Forcing past the TTL just spends the next minute's
   // quota, so for claude `force` collapses onto the cache too.
   if ((!force || src === 'claude') && slot.data && Date.now() - slot.at < TTL) return slot.data;
-  const fetched = await fetcher();
+  const fetched = src === 'claude'
+    ? await fetcher(true, slot.data, claudeAccountChanged)
+    : await fetcher();
   // codex's fetchedAt is the record's own (possibly stale) timestamp — keep it;
   // ollama/claude never set one, so they still default to "now".
   const data = { fetchedAt: new Date().toISOString(), ...fetched };
+  if (src === 'claude' && data.ok) {
+    slot.credentialFingerprint = claudeCredentialFingerprint();
+    claudeRateLimitedUntil = 0;
+  }
   if (data.ok || !slot.data) { slot.data = data; slot.at = Date.now(); persist(); }
-  if (src === 'claude' && data.ok) claudeRateLimitedUntil = 0;
   if (src === 'claude' && data.error === 'rate-limited') claudeRateLimitedUntil = Date.now() + (data.retryAfterMs ?? CLAUDE_RATE_LIMIT_BACKOFF_MS);
   // Ollama failures retain the timestamped successful measurement and surface
   // the current actionable error; failures never reach the history writer.
