@@ -637,6 +637,40 @@ test('getUsage: a newer statusline reading outranks the TTL and the 429 backoff'
   assert.deepEqual(urls, []); // never spent the account's one call a minute
 });
 
+test('getUsage: switching Claude credentials cannot mix old extra usage into the new account', async () => {
+  clearClaudeLocal();
+  const originalFetch = globalThis.fetch;
+  const newAccountRaw = {
+    ...CLAUDE_RAW,
+    five_hour: { utilization: 7, resets_at: '2026-07-14T14:00:00Z' },
+    seven_day: { utilization: 9, resets_at: '2026-07-20T00:00:00Z' },
+    extra_usage: null,
+  };
+  let calls = 0;
+  globalThis.fetch = async () => {
+    const raw = calls++ === 0 ? CLAUDE_RAW : newAccountRaw;
+    return { status: 200, json: async () => raw };
+  };
+  try {
+    writeCreds({ accessToken: 'account-a-token', refreshToken: 'account-a-refresh', expiresAt: Date.now() + 3_600_000 });
+    const oldAccount = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(oldAccount.claude.extra.enabled, true);
+
+    // The first fetch left both a complete cache entry and a fresh snapshot for
+    // account A. Account B must bypass both instead of combining either one with
+    // its own windows.
+    writeCreds({ accessToken: 'account-b-token', refreshToken: 'account-b-refresh', expiresAt: Date.now() + 3_600_000 });
+    const newAccount = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(calls, 2);
+    assert.equal(newAccount.claude.session.pctUsed, 7);
+    assert.equal(newAccount.claude.weekly.pctUsed, 9);
+    assert.equal(newAccount.claude.extra, null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearClaudeLocal();
+  }
+});
+
 test('preserveClaudeStale keeps a failed pull separate from its last good reading', () => {
   const previous = { ok: true, source: 'claude', fetchedAt: '2026-01-01T00:00:00.000Z', session: { pctUsed: 20 } };
   const result = preserveClaudeStale(previous, { ok: false, source: 'claude', error: 'rate-limited' });
