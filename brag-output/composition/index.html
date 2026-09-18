@@ -1,0 +1,1002 @@
+<!doctype html>
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Singularity — Brag</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      /* Palette + type lifted from the project's own deck tokens
+         (github-pages/src/styles/tokens.css). Font families stay generic on
+         purpose: a named family without an @font-face is a lint error. */
+      :root {
+        --bg: #0a0a0a;
+        --mint: #52f29a;
+        --hi: #7cf4ab;
+        --map: #3c9c6c;
+        --dim: #246c3c;
+        --orange: #f26400;
+        --red: #e2280f;
+        --teal: #0c6c80;
+        --blue: #5090d0;
+        --amber: #f49f09;
+        --paper: #edf8d6;
+        --mono: ui-monospace, monospace;
+        --jp: serif;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        width: 1920px;
+        height: 1080px;
+        overflow: hidden;
+        background: var(--bg);
+      }
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--mint);
+        font-family: var(--mono);
+        letter-spacing: 0.03em;
+      }
+
+      /* ---------- shared chrome ---------- */
+      .clip {
+        position: absolute;
+        inset: 0;
+      }
+      .scene {
+        width: 100%;
+        height: 100%;
+        padding: 64px 88px;
+        z-index: 1;
+      }
+      .scene.center {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .eyebrow {
+        position: absolute;
+        left: 88px;
+        top: 64px;
+        font-size: 20px;
+        letter-spacing: 0.22em;
+        color: var(--map);
+        text-transform: uppercase;
+      }
+      .eyebrow .jp {
+        font-family: var(--jp);
+        color: #52a473;
+        margin-right: 18px;
+        letter-spacing: 0.3em;
+      }
+      .prompt {
+        color: var(--dim);
+        margin-right: 22px;
+      }
+      .cursor {
+        display: inline-block;
+        width: 26px;
+        height: 62px;
+        background: var(--mint);
+        vertical-align: -10px;
+        margin-left: 10px;
+      }
+      .type {
+        white-space: pre;
+      }
+      .type span {
+        opacity: 0;
+      }
+
+      /* scanlines + phosphor bloom, drawn over everything */
+      #grain {
+        position: absolute;
+        inset: 0;
+        z-index: 9;
+        pointer-events: none;
+        background: repeating-linear-gradient(
+          to bottom,
+          rgba(82, 242, 154, 0.05) 0px,
+          rgba(82, 242, 154, 0.05) 1px,
+          rgba(0, 0, 0, 0) 1px,
+          rgba(0, 0, 0, 0) 4px
+        );
+      }
+      .wipe {
+        z-index: 5;
+        background: var(--bg);
+      }
+      .wipe i {
+        display: block;
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 3px;
+        background: var(--hi);
+        box-shadow: 0 0 34px 10px rgba(124, 244, 171, 0.45);
+      }
+
+      /* ---------- scene 1 — chaos ---------- */
+      #s1 .s1-body {
+        position: absolute;
+        left: 150px;
+        top: 50%;
+        width: 1500px;
+      }
+      .s1-line1 {
+        font-size: 82px;
+        line-height: 1.12;
+        letter-spacing: 0.01em;
+        color: var(--mint);
+      }
+      .s1-line2 {
+        margin-top: 26px;
+        font-size: 82px;
+        line-height: 1.12;
+        letter-spacing: 0.01em;
+        color: var(--orange);
+        padding-left: 62px;
+      }
+      .ghost {
+        position: absolute;
+        border: 1px solid var(--dim);
+        padding: 12px 16px;
+        font-size: 17px;
+        color: var(--map);
+        opacity: 0;
+      }
+      .ghost .gcur {
+        display: inline-block;
+        width: 10px;
+        height: 17px;
+        background: var(--map);
+        vertical-align: -3px;
+        margin-left: 8px;
+      }
+      .g1 { left: 1400px; top: 150px; width: 330px; }
+      .g2 { left: 1560px; top: 300px; width: 250px; }
+      .g3 { left: 1330px; top: 760px; width: 300px; }
+      .g4 { left: 1620px; top: 900px; width: 210px; }
+      .g5 { left: 120px;  top: 148px; width: 260px; }
+      .g6 { left: 150px;  top: 900px; width: 290px; }
+
+      /* ---------- scene 2 — wordmark ---------- */
+      .s2-col {
+        text-align: center;
+      }
+      .jp-lg {
+        font-family: var(--jp);
+        font-size: 44px;
+        letter-spacing: 0.5em;
+        color: var(--map);
+        margin-bottom: 30px;
+        padding-left: 0.5em;
+      }
+      .wordmark {
+        font-size: 178px;
+        line-height: 1;
+        letter-spacing: 0.02em;
+        font-weight: 700;
+      }
+      .wordmark .w1 { color: var(--mint); }
+      .wordmark .w2 { color: var(--hi); }
+      .claim {
+        margin-top: 44px;
+        font-size: 30px;
+        letter-spacing: 0.2em;
+        color: var(--mint);
+      }
+      #scanbar {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 4px;
+        background: var(--hi);
+        box-shadow: 0 0 40px 12px rgba(124, 244, 171, 0.4);
+        opacity: 0;
+      }
+
+      /* ---------- scene 3 — the board ---------- */
+      .deck {
+        position: absolute;
+        inset: 122px 88px 64px 88px;
+        display: grid;
+        grid-template-columns: 318px 1fr;
+        grid-template-rows: 1fr 116px;
+        gap: 22px;
+      }
+      .rail {
+        border: 1px solid var(--dim);
+        padding: 20px 18px;
+      }
+      .rail-mark {
+        font-size: 22px;
+        letter-spacing: 0.2em;
+        color: var(--hi);
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--dim);
+      }
+      .nav {
+        margin-top: 18px;
+        font-size: 18px;
+        line-height: 2.1;
+        color: var(--map);
+        letter-spacing: 0.1em;
+      }
+      .nav span {
+        display: block;
+      }
+      .nav .on {
+        color: var(--mint);
+        border-left: 3px solid var(--mint);
+        padding-left: 12px;
+        display: block;
+      }
+      .meters {
+        margin-top: 26px;
+        border-top: 1px solid var(--dim);
+        padding-top: 18px;
+        font-size: 15px;
+        letter-spacing: 0.12em;
+        color: var(--map);
+      }
+      .meters .grp {
+        margin-bottom: 14px;
+      }
+      .meters .grp b {
+        display: block;
+        color: var(--mint);
+        font-weight: 400;
+        margin-bottom: 8px;
+      }
+      .mrow {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 6px;
+      }
+      .meter {
+        display: inline-block;
+        width: 168px;
+        height: 10px;
+        border: 1px solid var(--dim);
+      }
+      .meter .fill {
+        display: block;
+        width: 100%;
+        height: 100%;
+        background: var(--mint);
+        transform-origin: left center;
+      }
+      .board {
+        position: relative;
+        border: 1px solid var(--dim);
+        padding: 18px;
+      }
+      .board-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--dim);
+      }
+      .board-title {
+        font-size: 26px;
+        letter-spacing: 0.24em;
+        color: var(--mint);
+      }
+      .btn {
+        border: 1px solid var(--mint);
+        color: var(--mint);
+        padding: 9px 20px;
+        font-size: 17px;
+        letter-spacing: 0.16em;
+      }
+      .cols {
+        margin-top: 18px;
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 18px;
+      }
+      .col {
+        border: 1px solid var(--dim);
+        padding: 12px;
+        min-height: 430px;
+      }
+      .col-head {
+        font-size: 15px;
+        letter-spacing: 0.18em;
+        color: var(--map);
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--dim);
+      }
+      .col-body {
+        padding-top: 12px;
+      }
+      .card {
+        border: 1px solid var(--dim);
+        padding: 12px 13px;
+        margin-bottom: 12px;
+      }
+      .card .t {
+        font-size: 17px;
+        color: var(--mint);
+        letter-spacing: 0.04em;
+      }
+      .card .r {
+        font-size: 13px;
+        color: var(--map);
+        margin-top: 8px;
+        letter-spacing: 0.08em;
+      }
+      .chip {
+        display: inline-block;
+        margin-top: 10px;
+        border: 1px solid var(--dim);
+        color: var(--map);
+        font-size: 12px;
+        letter-spacing: 0.14em;
+        padding: 3px 9px;
+      }
+      #newcard {
+        position: absolute;
+        left: 19px;
+        top: 121px;
+        width: 313px;
+        border: 1px solid var(--mint);
+        background: var(--bg);
+        padding: 12px 13px;
+        opacity: 0;
+      }
+      #newcard .r {
+        color: var(--hi);
+      }
+      .dock {
+        grid-column: 1 / span 2;
+        border: 1px solid var(--dim);
+        padding: 14px 18px;
+        display: flex;
+        align-items: center;
+        gap: 34px;
+        font-size: 16px;
+        letter-spacing: 0.16em;
+        color: var(--map);
+      }
+      #dock-entry {
+        opacity: 0;
+        color: var(--mint);
+        border-left: 3px solid var(--mint);
+        padding-left: 14px;
+      }
+      #dock-entry i {
+        color: var(--hi);
+        font-style: normal;
+      }
+      #cursor {
+        position: absolute;
+        left: 1690px;
+        top: 168px;
+        z-index: 4;
+      }
+      .caption {
+        position: absolute;
+        left: 88px;
+        bottom: 214px;
+        font-size: 27px;
+        letter-spacing: 0.12em;
+        color: var(--mint);
+        z-index: 4;
+      }
+      .caption .dimslash {
+        color: var(--dim);
+        margin-right: 14px;
+      }
+
+      /* ---------- scene 4 — live agent ---------- */
+      .s4-grid {
+        position: absolute;
+        inset: 122px 88px 84px 88px;
+        display: grid;
+        grid-template-columns: 1fr 392px;
+        gap: 26px;
+      }
+      .term {
+        border: 1px solid var(--dim);
+        display: flex;
+        flex-direction: column;
+      }
+      .term-head {
+        border-bottom: 1px solid var(--dim);
+        padding: 14px 20px;
+        font-size: 17px;
+        letter-spacing: 0.2em;
+        color: var(--map);
+        display: flex;
+        justify-content: space-between;
+      }
+      .term-head .dimr {
+        color: var(--hi);
+      }
+      .term-body {
+        flex: 1;
+        padding: 26px 30px;
+        font-size: 24px;
+        line-height: 1.85;
+      }
+      .term-body b {
+        color: var(--hi);
+        font-weight: 400;
+      }
+      .term-body .tl2,
+      .term-body .tl3 {
+        color: var(--map);
+      }
+      .term-body .tl5 {
+        color: var(--dim);
+      }
+      .statusline {
+        border-top: 1px solid var(--dim);
+        padding: 16px 24px;
+        display: flex;
+        align-items: center;
+        gap: 26px;
+        font-size: 21px;
+        letter-spacing: 0.08em;
+        font-variant-numeric: tabular-nums;
+      }
+      .seg {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        opacity: 0;
+        color: var(--mint);
+      }
+      .seg .k {
+        color: var(--map);
+      }
+      .seg .meter {
+        width: 104px;
+      }
+      #sg3 {
+        color: var(--amber);
+      }
+      .donecol {
+        border: 1px solid var(--dim);
+        padding: 16px;
+      }
+      #donecard {
+        border-color: var(--mint);
+        opacity: 0;
+      }
+      #chip {
+        opacity: 0;
+        border-color: var(--mint);
+        color: var(--hi);
+      }
+
+      /* ---------- scene 5 — take control ---------- */
+      .cta {
+        text-align: left;
+        border: 1px solid var(--dim);
+        padding: 62px 74px;
+        width: 1280px;
+      }
+      #cta-title {
+        font-size: 104px;
+        line-height: 1;
+        letter-spacing: 0.06em;
+        color: var(--mint);
+        font-weight: 700;
+      }
+      .cmds {
+        margin-top: 48px;
+        font-size: 32px;
+        line-height: 2.05;
+        color: var(--hi);
+      }
+      .cmds .prompt {
+        margin-right: 18px;
+      }
+      .cta-foot {
+        margin-top: 46px;
+        padding-top: 26px;
+        border-top: 1px solid var(--dim);
+        font-size: 23px;
+        letter-spacing: 0.2em;
+        color: var(--map);
+        opacity: 0;
+      }
+      #cur5 {
+        width: 16px;
+        height: 30px;
+        vertical-align: -4px;
+        margin-left: 8px;
+      }
+    </style>
+  </head>
+  <body>
+    <div
+      id="root"
+      data-composition-id="main"
+      data-start="0"
+      data-width="1920"
+      data-height="1080"
+      data-duration="22.4"
+    >
+      <!-- ===================== SCENE 1 — CHAOS ===================== -->
+      <section id="s1" class="clip scene" data-start="0" data-duration="3.6" data-track-index="0">
+        <div class="eyebrow"><span class="jp">混沌</span>CHAOS DETECTED</div>
+
+        <div class="ghost g1"><span class="prompt">&gt;</span>claude --resume<span class="gcur"></span></div>
+        <div class="ghost g2"><span class="prompt">&gt;</span>pnpm test<span class="gcur"></span></div>
+        <div class="ghost g3"><span class="prompt">&gt;</span>git worktree list<span class="gcur"></span></div>
+        <div class="ghost g4"><span class="prompt">&gt;</span>codex exec<span class="gcur"></span></div>
+        <div class="ghost g5"><span class="prompt">&gt;</span>claude<span class="gcur"></span></div>
+        <div class="ghost g6"><span class="prompt">&gt;</span>ollama run<span class="gcur"></span></div>
+
+        <div class="s1-body">
+          <div class="s1-line1">
+            <span class="prompt">&gt;</span><span id="type1" class="type" data-text="ONE TERMINAL WAS FINE."></span
+            ><span id="cur1" class="cursor"></span>
+          </div>
+          <div id="s1-line2" class="s1-line2">THEN THERE WERE SEVEN.</div>
+        </div>
+      </section>
+
+      <!-- ===================== SCENE 2 — WORDMARK ===================== -->
+      <section id="s2" class="clip scene center" data-start="3.6" data-duration="4.4" data-track-index="0">
+        <div class="eyebrow"><span class="jp">統合</span>LOCAL AGENT OPERATIONS</div>
+        <div class="s2-col">
+          <div id="s2-jp" class="jp-lg">特異点</div>
+          <h1 id="wordmark" class="wordmark"><span class="w1">SINGU</span><span class="w2">LARITY</span></h1>
+          <p id="claim" class="claim">ONE CONTROL PLANE FOR YOUR WHOLE FLEET OF CODING AGENTS.</p>
+        </div>
+        <div id="scanbar"></div>
+      </section>
+
+      <!-- ===================== SCENE 3 — THE BOARD ===================== -->
+      <section id="s3" class="clip scene" data-start="8" data-duration="5.2" data-track-index="0">
+        <div class="eyebrow"><span class="jp">制御</span>FLEET CONTROL</div>
+        <div class="deck">
+          <aside class="rail">
+            <div class="rail-mark">SINGULARITY</div>
+            <div class="nav">
+              <span>+ NEW SESSION</span><br />
+              <span class="on">TASKS</span>
+              <span>AUTOMATION</span>
+              <span>USAGE</span>
+              <span>TRANSCRIPTS</span>
+            </div>
+            <div class="meters">
+              <div class="grp">
+                <b>CLAUDE</b>
+                <div class="mrow">5H <i class="meter"><i class="fill" id="r-5h"></i></i></div>
+                <div class="mrow">7D <i class="meter"><i class="fill" id="r-7d"></i></i></div>
+              </div>
+              <div class="grp">
+                <b>OLLAMA</b>
+                <div class="mrow">5H <i class="meter"><i class="fill" id="r-o5h"></i></i></div>
+                <div class="mrow">7D <i class="meter"><i class="fill" id="r-o7d"></i></i></div>
+              </div>
+            </div>
+          </aside>
+
+          <div class="board">
+            <div class="board-head">
+              <span class="board-title">TASKS</span>
+              <span id="btn-task" class="btn">+ TASK</span>
+            </div>
+            <div class="cols">
+              <div class="col">
+                <div class="col-head">TODO <b id="c-todo">(0)</b></div>
+                <div class="col-body"></div>
+              </div>
+              <div class="col">
+                <div class="col-head">IN PROGRESS <b id="c-prog">(0)</b></div>
+                <div class="col-body"></div>
+              </div>
+              <div class="col">
+                <div class="col-head">IN REVIEW <b>(0)</b></div>
+                <div class="col-body"></div>
+              </div>
+              <div class="col">
+                <div class="col-head">DONE <b>(3)</b></div>
+                <div class="col-body">
+                  <div class="card">
+                    <div class="t">Allow defining claude models in New …</div>
+                    <div class="r">singularity · task/a860e379</div>
+                    <span class="chip">complete</span>
+                  </div>
+                  <div class="card">
+                    <div class="t">Sessions panel: subagent sessions …</div>
+                    <div class="r">singularity · task/ede59321</div>
+                    <span class="chip">complete</span>
+                  </div>
+                  <div class="card">
+                    <div class="t">Harness Review</div>
+                    <div class="r">singularity · task/1c40b7d2</div>
+                    <span class="chip">report ready</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div id="newcard">
+              <div class="t">Add Hooks page</div>
+              <div class="r">singularity · task/7063d43a</div>
+            </div>
+          </div>
+
+          <div class="dock">
+            <span>SESSIONS</span>
+            <span id="dock-entry">7fe813ab <i>●</i> RUNNING · OPUS 4.8 (1M CONTEXT)</span>
+          </div>
+        </div>
+
+        <div id="cursor">
+          <svg viewBox="0 0 12 18" width="24" height="36" aria-hidden="true">
+            <path
+              d="M0.6 0.6 L0.6 15.2 L4.2 11.6 L6.6 17.4 L9.1 16.4 L6.7 10.8 L11.4 10.8 Z"
+              fill="#EDF8D6"
+              stroke="#0A0A0A"
+              stroke-width="0.7"
+            />
+          </svg>
+        </div>
+
+        <div class="caption">
+          <span class="dimslash">//</span><span id="type2" class="type" data-text="EVERY CARD IS A GIT WORKTREE."></span>
+        </div>
+      </section>
+
+      <!-- ===================== SCENE 4 — LIVE AGENT, LIVE COST ===================== -->
+      <section id="s4" class="clip scene" data-start="13.2" data-duration="4.2" data-track-index="0">
+        <div class="eyebrow"><span class="jp">制御</span>LIVE AGENT · LIVE COST</div>
+        <div class="s4-grid">
+          <div class="term" id="term">
+            <div class="term-head"><span>SESSIONS · 7fe813ab</span><span class="dimr">● RUNNING</span></div>
+            <div class="term-body">
+              <div class="tl1"><b>Claude Code</b> v2.1.218</div>
+              <div class="tl2">Opus 4.8 (1M context) · Claude Team</div>
+              <div class="tl3">C:\git\singularity · task/7063d43a</div>
+              <div class="tl4"><span class="prompt">&gt;</span>add the hooks page</div>
+              <div class="tl5">✳ Cogitated for 4s</div>
+            </div>
+            <div class="statusline" id="statusline">
+              <span class="seg" id="sg1"><span id="n-turns">00</span><span class="k">TURNS</span></span>
+              <span class="seg" id="sg2"><span id="n-tok">0k</span><span class="k">/1.0m</span></span>
+              <span class="seg" id="sg3">$<span id="n-cost">0.00</span></span>
+              <span class="seg" id="sg4"
+                ><span class="k">5H</span><i class="meter"><i class="fill" id="m-5h"></i></i>19%</span
+              >
+              <span class="seg" id="sg5"
+                ><span class="k">7D</span><i class="meter"><i class="fill" id="m-7d"></i></i>33%</span
+              >
+            </div>
+          </div>
+
+          <div class="donecol">
+            <div class="col-head">DONE <b>(4)</b></div>
+            <div class="col-body">
+              <div id="donecard" class="card">
+                <div class="t">Add Hooks page</div>
+                <div class="r">singularity · task/7063d43a</div>
+                <span class="chip" id="chip">complete</span>
+              </div>
+              <div class="card">
+                <div class="t">Allow defining claude models …</div>
+                <div class="r">singularity · task/a860e379</div>
+                <span class="chip">complete</span>
+              </div>
+              <div class="card">
+                <div class="t">Sessions panel: subagent …</div>
+                <div class="r">singularity · task/ede59321</div>
+                <span class="chip">complete</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== SCENE 5 — TAKE CONTROL ===================== -->
+      <section id="s5" class="clip scene center" data-start="17.4" data-duration="5" data-track-index="0">
+        <div class="eyebrow"><span class="jp">開始</span>TAKE CONTROL</div>
+        <div class="cta">
+          <h2 id="cta-title">TAKE CONTROL</h2>
+          <div class="cmds">
+            <div class="cmd">
+              <span class="prompt">$</span
+              ><span id="type3" class="type" data-text="git clone https://github.com/SamTeong/singularity.git"></span>
+            </div>
+            <div class="cmd">
+              <span class="prompt">$</span><span id="type4" class="type" data-text="cd singularity"></span>
+            </div>
+            <div class="cmd">
+              <span class="prompt">$</span><span id="type5" class="type" data-text="pnpm bootstrap"></span
+              ><span id="cur5" class="cursor"></span>
+            </div>
+          </div>
+          <div id="cta-foot" class="cta-foot">127.0.0.1:4317 · YOUR MACHINE · YOUR STATE · YOUR AGENTS.</div>
+        </div>
+      </section>
+
+      <!-- ===================== TRANSITION WIPES ===================== -->
+      <div id="wipe1" class="clip wipe" data-start="3.35" data-duration="0.5" data-track-index="1"><i></i></div>
+      <div id="wipe2" class="clip wipe" data-start="12.95" data-duration="0.5" data-track-index="1"><i></i></div>
+      <div id="wipe3" class="clip wipe" data-start="17.15" data-duration="0.5" data-track-index="1"><i></i></div>
+
+      <div id="grain" data-layout-allow-occlusion></div>
+
+      <!-- ===================== AUDIO ===================== -->
+      <!-- music bed — 109.96 BPM, cue preset drives the three beat locks below -->
+      <audio
+        id="bgm"
+        src="assets/music/happy-beats-business-moves-vol-12-by-ende-dot-app.mp3"
+        data-start="0"
+        data-duration="22.4"
+        data-volume="1"
+        data-track-index="10"
+      ></audio>
+
+      <!-- S1: typing under "ONE TERMINAL WAS FINE." -->
+      <audio id="k1" src="assets/sfx/keyboard/keypress-001.wav" data-start="0.6" data-duration="0.16" data-volume="0.28" data-track-index="11"></audio>
+      <audio id="k2" src="assets/sfx/keyboard/keypress-004.wav" data-start="0.78" data-duration="0.16" data-volume="0.28" data-track-index="11"></audio>
+      <audio id="k3" src="assets/sfx/keyboard/keypress-007.wav" data-start="0.96" data-duration="0.16" data-volume="0.28" data-track-index="11"></audio>
+      <audio id="k4" src="assets/sfx/keyboard/keypress-010.wav" data-start="1.14" data-duration="0.16" data-volume="0.28" data-track-index="11"></audio>
+      <audio id="k5" src="assets/sfx/keyboard/keypress-013.wav" data-start="1.32" data-duration="0.16" data-volume="0.28" data-track-index="11"></audio>
+      <!-- S1: the panes multiplying — beat-grid 1.64 / 1.82 / 2.00 -->
+      <audio id="p1" src="assets/sfx/ui/rollover1.ogg" data-start="1.64" data-duration="0.17" data-volume="0.2" data-track-index="12"></audio>
+      <audio id="p2" src="assets/sfx/ui/rollover1.ogg" data-start="1.82" data-duration="0.17" data-volume="0.2" data-track-index="12"></audio>
+      <audio id="p3" src="assets/sfx/ui/rollover1.ogg" data-start="2" data-duration="0.17" data-volume="0.2" data-track-index="12"></audio>
+      <!-- S1: the orange slam — beat 2.19 -->
+      <audio id="slam" src="assets/sfx/impact/impactSoft_medium_001.ogg" data-start="2.19" data-duration="0.6" data-volume="0.5" data-track-index="13"></audio>
+
+      <!-- S2: wordmark resolve — beat 4.39 -->
+      <audio id="reveal" src="assets/sfx/impact/impactBell_heavy_000.ogg" data-start="4.39" data-duration="1.0" data-volume="0.42" data-track-index="13"></audio>
+
+      <!-- S3: + TASK press (strong cue 8.74), card spawn (9.29), caption typing, card slide (strong cue 10.93), dock -->
+      <audio id="click" src="assets/sfx/ui/mouseclick1.ogg" data-start="8.74" data-duration="0.3" data-volume="0.45" data-track-index="12"></audio>
+      <audio id="spawn" src="assets/sfx/interface/drop_001.ogg" data-start="9.29" data-duration="0.3" data-volume="0.34" data-track-index="12"></audio>
+      <audio id="k6" src="assets/sfx/keyboard/keypress-002.wav" data-start="9.66" data-duration="0.16" data-volume="0.22" data-track-index="11"></audio>
+      <audio id="k7" src="assets/sfx/keyboard/keypress-006.wav" data-start="9.84" data-duration="0.16" data-volume="0.22" data-track-index="11"></audio>
+      <audio id="k8" src="assets/sfx/keyboard/keypress-009.wav" data-start="10.02" data-duration="0.16" data-volume="0.22" data-track-index="11"></audio>
+      <audio id="k9" src="assets/sfx/keyboard/keypress-012.wav" data-start="10.2" data-duration="0.16" data-volume="0.22" data-track-index="11"></audio>
+      <audio id="slide1" src="assets/sfx/casino/card-slide-3.ogg" data-start="10.93" data-duration="0.5" data-volume="0.4" data-track-index="12"></audio>
+      <audio id="dockpop" src="assets/sfx/interface/drop_002.ogg" data-start="12.02" data-duration="0.3" data-volume="0.28" data-track-index="12"></audio>
+
+      <!-- S4: statusline + counters + card lands DONE -->
+      <audio id="status" src="assets/sfx/impact/impactGeneric_light_001.ogg" data-start="13.64" data-duration="0.4" data-volume="0.32" data-track-index="13"></audio>
+      <audio id="tick1" src="assets/sfx/casino/chips-stack-1.ogg" data-start="14.2" data-duration="0.5" data-volume="0.18" data-track-index="12"></audio>
+      <audio id="tick2" src="assets/sfx/casino/chips-stack-3.ogg" data-start="14.73" data-duration="0.5" data-volume="0.18" data-track-index="12"></audio>
+      <audio id="slide2" src="assets/sfx/casino/card-slide-3.ogg" data-start="15.84" data-duration="0.5" data-volume="0.36" data-track-index="12"></audio>
+      <audio id="done" src="assets/sfx/impact/impactBell_heavy_003.ogg" data-start="16.38" data-duration="1.0" data-volume="0.4" data-track-index="13"></audio>
+
+      <!-- S5: the install command types out -->
+      <audio id="k10" src="assets/sfx/keyboard/keypress-003.wav" data-start="18.62" data-duration="0.16" data-volume="0.26" data-track-index="11"></audio>
+      <audio id="k11" src="assets/sfx/keyboard/keypress-008.wav" data-start="18.8" data-duration="0.16" data-volume="0.26" data-track-index="11"></audio>
+      <audio id="k12" src="assets/sfx/keyboard/keypress-011.wav" data-start="19.72" data-duration="0.16" data-volume="0.26" data-track-index="11"></audio>
+      <audio id="k13" src="assets/sfx/keyboard/keypress-014.wav" data-start="19.9" data-duration="0.16" data-volume="0.26" data-track-index="11"></audio>
+      <audio id="k14" src="assets/sfx/keyboard/keypress-016.wav" data-start="20.81" data-duration="0.16" data-volume="0.26" data-track-index="11"></audio>
+      <audio id="k15" src="assets/sfx/keyboard/keypress-018.wav" data-start="20.99" data-duration="0.16" data-volume="0.26" data-track-index="11"></audio>
+      <audio id="enter" src="assets/sfx/interface/select_008.ogg" data-start="21.5" data-duration="0.3" data-volume="0.22" data-track-index="12"></audio>
+    </div>
+
+    <script>
+      /* ------------------------------------------------------------------
+         Timing map (global seconds). Beat grid = 109.96 BPM (~0.545s).
+         S1 0.00–3.60 · S2 3.60–8.00 · S3 8.00–13.20 · S4 13.20–17.40 · S5 17.40–22.40
+         Strong-cue locks: 8.74 (+ TASK press) · 10.93 (card → IN PROGRESS) · 17.47 (TAKE CONTROL)
+         ------------------------------------------------------------------ */
+
+      // Split a data-text string into per-character spans so typing is a pure
+      // stagger — seekable, no clocks, no substring math per frame.
+      function splitChars(el) {
+        const text = el.getAttribute("data-text") || "";
+        el.textContent = "";
+        const spans = [];
+        for (const ch of text) {
+          const s = document.createElement("span");
+          s.textContent = ch;
+          el.appendChild(s);
+          spans.push(s);
+        }
+        return spans;
+      }
+
+      // Finite, seek-safe block-cursor blink (no CSS animation: that runs off a
+      // wall clock and would not survive a seek).
+      function blink(tl, target, start, duration) {
+        const cycles = Math.max(0, Math.floor(duration / 1) - 1);
+        tl.fromTo(
+          target,
+          { opacity: 1 },
+          { opacity: 0, duration: 0.5, ease: "steps(1)", repeat: cycles * 2 + 1, yoyo: true },
+          start
+        );
+      }
+
+      const tl = gsap.timeline({ paused: true });
+
+      /* ---------------- SCENE 1 — CHAOS (0.00 – 3.60) ---------------- */
+      const line1 = splitChars(document.getElementById("type1"));
+      tl.to(line1, { opacity: 1, duration: 0.01, stagger: 0.04 }, 0.55);
+      blink(tl, "#cur1", 0, 3.4);
+
+      // the panes multiply // beat-grid: 1.64 / 1.82 / 2.00 / 2.18 / 2.36 / 2.54
+      tl.fromTo(
+        ".ghost",
+        { opacity: 0, scale: 0.94 },
+        { opacity: 0.72, scale: 1, duration: 0.18, ease: "power2.out", stagger: 0.18 },
+        1.64
+      );
+      tl.to(".gcur", { opacity: 0.25, duration: 0.5, ease: "steps(1)", repeat: 3, yoyo: true }, 2.1);
+
+      // "THEN THERE WERE SEVEN." slams in // beat: 2.19
+      tl.fromTo(
+        "#s1-line2",
+        { opacity: 0, x: -34, scaleY: 1.12 },
+        { opacity: 1, x: 0, scaleY: 1, duration: 0.22, ease: "power4.out" },
+        2.19
+      );
+      tl.fromTo("#s1-line2", { color: "#EDF8D6" }, { color: "#F26400", duration: 0.35, immediateRender: false }, 2.19);
+
+      /* ---------------- WIPE 1 (3.35 – 3.85) ---------------- */
+      tl.fromTo("#wipe1", { opacity: 0 }, { opacity: 1, duration: 0.12 }, 3.35);
+      tl.fromTo("#wipe1 i", { y: -20, opacity: 1 }, { y: 1100, duration: 0.42, ease: "power2.in" }, 3.35);
+      tl.to("#wipe1", { opacity: 0, duration: 0.08 }, 3.77);
+
+      /* ---------------- SCENE 2 — WORDMARK (3.60 – 8.00) ---------------- */
+      // hero reveal // beat-locked: 4.39
+      tl.fromTo("#s2-jp", { opacity: 0, y: -14 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 3.9);
+      tl.fromTo(
+        "#wordmark",
+        { opacity: 0, filter: "blur(26px)", scale: 1.06 },
+        { opacity: 1, filter: "blur(0px)", scale: 1, duration: 0.6, ease: "power3.out" },
+        4.39
+      );
+      tl.fromTo("#scanbar", { opacity: 0, y: 260 }, { opacity: 0.9, y: 470, duration: 0.3, ease: "none" }, 4.3);
+      tl.to("#scanbar", { opacity: 0, y: 760, duration: 0.42, ease: "power2.out" }, 4.6);
+      tl.fromTo("#claim", { opacity: 0, y: 22 }, { opacity: 1, y: 0, duration: 0.5, ease: "power2.out" }, 4.91);
+      // phosphor bloom breathes once on the reveal, then settles
+      tl.fromTo("#grain", { opacity: 1 }, { opacity: 0.55, duration: 0.9, ease: "power2.out" }, 4.39);
+      tl.to("#wordmark", { scale: 1.012, duration: 3, ease: "sine.inOut" }, 5);
+
+      /* ---------------- SCENE 3 — THE BOARD (8.00 – 13.20) ---------------- */
+      tl.fromTo(".deck", { opacity: 0, scale: 1.03 }, { opacity: 1, scale: 1, duration: 0.45, ease: "power3.out" }, 8);
+      tl.fromTo("#r-5h", { scaleX: 0 }, { scaleX: 0.14, duration: 0.5, ease: "power2.out" }, 8.3);
+      tl.fromTo("#r-7d", { scaleX: 0 }, { scaleX: 0.29, duration: 0.5, ease: "power2.out" }, 8.4);
+      tl.fromTo("#r-o5h", { scaleX: 0 }, { scaleX: 0.06, duration: 0.5, ease: "power2.out" }, 8.5);
+      tl.fromTo("#r-o7d", { scaleX: 0 }, { scaleX: 0.42, duration: 0.5, ease: "power2.out" }, 8.6);
+
+      // cursor travels to + TASK and presses // beat-locked: 8.74
+      tl.fromTo("#cursor", { x: 150, y: 210, opacity: 0 }, { x: 0, y: 0, opacity: 1, duration: 0.62, ease: "power3.inOut" }, 8.14);
+      tl.fromTo("#btn-task", { scale: 1 }, { scale: 0.93, duration: 0.09, ease: "power2.in", yoyo: true, repeat: 1 }, 8.74);
+      tl.fromTo("#btn-task", { backgroundColor: "rgba(82,242,154,0)" }, { backgroundColor: "rgba(82,242,154,0.28)", duration: 0.12, yoyo: true, repeat: 1, immediateRender: false }, 8.74);
+      tl.to("#cursor", { opacity: 0, duration: 0.2 }, 9.1);
+
+      // the card exists // beat: 9.29
+      tl.set("#newcard", { opacity: 0, x: 0, y: 0, scale: 1 }, 0);
+      tl.fromTo("#newcard", { opacity: 0, y: -16, scale: 0.96 }, { opacity: 1, y: 0, scale: 1, duration: 0.26, ease: "power3.out", immediateRender: false }, 9.29);
+      tl.fromTo("#c-todo", { opacity: 0.4 }, { opacity: 1, duration: 0.2 }, 9.29);
+      tl.to("#c-todo", { textContent: "(1)", duration: 0 }, 9.29);
+
+      const caption = splitChars(document.getElementById("type2"));
+      tl.to(caption, { opacity: 1, duration: 0.01, stagger: 0.033 }, 9.6);
+
+      // the card becomes a worktree // beat-locked: 10.93
+      const cols = document.querySelectorAll("#s3 .col");
+      const pitch = cols.length > 1 ? cols[1].offsetLeft - cols[0].offsetLeft : 358;
+      tl.fromTo("#newcard", { x: 0 }, { x: pitch, duration: 0.42, ease: "power3.inOut", immediateRender: false }, 10.93);
+      tl.to("#c-todo", { textContent: "(0)", duration: 0 }, 11.2);
+      tl.to("#c-prog", { textContent: "(1)", duration: 0 }, 11.2);
+      tl.fromTo("#c-prog", { color: "#3C9C6C" }, { color: "#52F29A", duration: 0.3 }, 11.2);
+
+      // a live session picks it up // beat: 12.02
+      tl.fromTo("#dock-entry", { opacity: 0, x: -18 }, { opacity: 1, x: 0, duration: 0.3, ease: "power2.out" }, 12.02);
+      tl.fromTo("#dock-entry i", { opacity: 1 }, { opacity: 0.2, duration: 0.5, ease: "steps(1)", repeat: 2, yoyo: true }, 12.3);
+
+      /* ---------------- WIPE 2 (12.95 – 13.45) ---------------- */
+      tl.fromTo("#wipe2", { opacity: 0 }, { opacity: 1, duration: 0.1 }, 12.95);
+      tl.fromTo("#wipe2 i", { y: -20, opacity: 1 }, { y: 1100, duration: 0.4, ease: "power2.in" }, 12.95);
+      tl.to("#wipe2", { opacity: 0, duration: 0.08 }, 13.37);
+
+      /* ---------------- SCENE 4 — LIVE AGENT, LIVE COST (13.20 – 17.40) ---------------- */
+      tl.fromTo(".s4-grid", { scale: 1.035, opacity: 0 }, { scale: 1, opacity: 1, duration: 3.6, ease: "power2.out" }, 13.2);
+      tl.fromTo(".term-body > div", { opacity: 0, x: -14 }, { opacity: 1, x: 0, duration: 0.2, stagger: 0.075 }, 13.28);
+
+      // statusline arrives left to right // beat-grid: 13.64 / 14.20 / 14.73 / 15.29 / 15.84
+      tl.fromTo("#sg1", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.2, ease: "power3.out" }, 13.64);
+      tl.fromTo("#sg2", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.2, ease: "power3.out" }, 14.2);
+      tl.fromTo("#sg3", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.2, ease: "power3.out" }, 14.73);
+      tl.fromTo("#sg4", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.2, ease: "power3.out" }, 15.29);
+      tl.fromTo("#sg5", { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.2, ease: "power3.out" }, 15.84);
+
+      // the numbers are the copy — they tick, they do not appear finished
+      const counters = { turns: 0, tok: 0, cost: 0 };
+      const nTurns = document.getElementById("n-turns");
+      const nTok = document.getElementById("n-tok");
+      const nCost = document.getElementById("n-cost");
+      tl.to(
+        counters,
+        {
+          turns: 4,
+          duration: 1.1,
+          ease: "power1.out",
+          onUpdate: () => {
+            nTurns.textContent = String(Math.round(counters.turns)).padStart(2, "0");
+          },
+        },
+        13.64
+      );
+      tl.to(
+        counters,
+        {
+          tok: 42,
+          duration: 1.2,
+          ease: "power1.out",
+          onUpdate: () => {
+            nTok.textContent = Math.round(counters.tok) + "k";
+          },
+        },
+        14.2
+      );
+      tl.to(
+        counters,
+        {
+          cost: 0.17,
+          duration: 1.1,
+          ease: "power1.out",
+          onUpdate: () => {
+            nCost.textContent = counters.cost.toFixed(2);
+          },
+        },
+        14.73
+      );
+      tl.fromTo("#m-5h", { scaleX: 0 }, { scaleX: 0.19, duration: 0.7, ease: "power2.out" }, 15.29);
+      tl.fromTo("#m-7d", { scaleX: 0 }, { scaleX: 0.33, duration: 0.7, ease: "power2.out" }, 15.84);
+
+      // the card lands in DONE // beat: 15.84, chip // beat: 16.38
+      tl.fromTo("#donecard", { opacity: 0, x: 60 }, { opacity: 1, x: 0, duration: 0.34, ease: "power3.out" }, 15.84);
+      tl.fromTo("#chip", { opacity: 0, scale: 0.8 }, { opacity: 1, scale: 1, duration: 0.24, ease: "back.out(2)" }, 16.38);
+
+      /* ---------------- WIPE 3 (17.15 – 17.65) ---------------- */
+      tl.fromTo("#wipe3", { opacity: 0 }, { opacity: 1, duration: 0.1 }, 17.15);
+      tl.fromTo("#wipe3 i", { y: -20, opacity: 1 }, { y: 1100, duration: 0.4, ease: "power2.in" }, 17.15);
+      tl.to("#wipe3", { opacity: 0, duration: 0.08 }, 17.57);
+
+      /* ---------------- SCENE 5 — TAKE CONTROL (17.40 – 22.40) ---------------- */
+      tl.fromTo(".cta", { opacity: 0 }, { opacity: 1, duration: 0.3 }, 17.4);
+      // title snaps // beat-locked: 17.47
+      tl.fromTo("#cta-title", { opacity: 0, y: 26, scaleY: 1.14 }, { opacity: 1, y: 0, scaleY: 1, duration: 0.42, ease: "power4.out" }, 17.47);
+
+      const cmd1 = splitChars(document.getElementById("type3"));
+      const cmd2 = splitChars(document.getElementById("type4"));
+      const cmd3 = splitChars(document.getElementById("type5"));
+      // sequential text on every other beat (~1.09s) so each line clears its reading floor
+      tl.to(cmd1, { opacity: 1, duration: 0.01, stagger: 0.018 }, 18.56);
+      tl.to(cmd2, { opacity: 1, duration: 0.01, stagger: 0.03 }, 19.66);
+      tl.to(cmd3, { opacity: 1, duration: 0.01, stagger: 0.03 }, 20.75);
+      blink(tl, "#cur5", 17.6, 4.6);
+
+      tl.fromTo("#cta-foot", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, 19.93);
+
+      /* ---------------- MUSIC ---------------- */
+      // low under the hook, full from the wordmark, out under the final command
+      tl.set("#bgm", { volume: 0.28 }, 0);
+      tl.to("#bgm", { volume: 0.5, duration: 0.6, ease: "power1.out" }, 4.39);
+      tl.to("#bgm", { volume: 0, duration: 1.2, ease: "power2.in" }, 21.2);
+
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>
