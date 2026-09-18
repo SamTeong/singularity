@@ -668,7 +668,7 @@ app.post('/crons/:id/run', async (req, reply) => {
 app.get('/window-anchor', async () => snapshotWindowAnchor());
 app.post('/window-anchor', async (req) => setWindowAnchorEnabled(req.body?.enabled || {}));
 app.post('/window-anchor/poke', async (req, reply) => {
-  try { return { ok: true, ...(await pokeProvider(req.body?.provider)) }; }
+  try { return { ok: true, ...(await pokeProvider(req.body?.provider, { force: req.body?.force === true })) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 

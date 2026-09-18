@@ -184,6 +184,11 @@ test('normalizeClaude: five_hour→session, seven_day→weekly, per-model + extr
   });
 });
 
+test('normalizeClaude: zero-use window without a reset is unstarted', () => {
+  const u = normalizeClaude({ five_hour: { utilization: 0, resets_at: null }, seven_day: null }, 'max');
+  assert.deepEqual(u.session, { pctUsed: 0, resetsAt: null, models: [], started: false });
+});
+
 test('normalizeClaude: missing windows/extra → nulls, no throw', () => {
   const u = normalizeClaude({ five_hour: null, seven_day: null }, undefined);
   assert.equal(u.session, null);

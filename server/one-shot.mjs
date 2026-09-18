@@ -30,7 +30,9 @@ function run(spawn, bin, args, opts) {
   return p;
 }
 
-export async function runOneShotPrompt(group, modelId, prompt, { timeoutMs = ONESHOT_TIMEOUT_MS, extraArgs = [], spawn = execFileP } = {}) {
+export async function runOneShotPrompt(group, modelId, prompt, {
+  timeoutMs = ONESHOT_TIMEOUT_MS, extraArgs = [], spawn = execFileP, includeMetadata = false,
+} = {}) {
   const opts = { maxBuffer: ONESHOT_MAX_BUFFER, timeout: timeoutMs };
   if (group === 'claude') {
     // No --bare: it skips the credential plumbing along with hooks/LSP/plugins,
@@ -43,7 +45,10 @@ export async function runOneShotPrompt(group, modelId, prompt, { timeoutMs = ONE
         '--no-session-persistence',
         ...extraArgs,
       ], opts);
-      return stdout;
+      if (!includeMetadata) return stdout;
+      let usage = null;
+      try { usage = JSON.parse(stdout)?.usage ?? null; } catch { /* not JSON */ }
+      return { answer: stdout, usage };
     } catch (e) {
       // claude puts the real reason in its JSON envelope on stdout; execFile's
       // "Command failed: <argv>" message hides it.
@@ -56,7 +61,7 @@ export async function runOneShotPrompt(group, modelId, prompt, { timeoutMs = ONE
     // string, it must never be able to write.
     const tmpFile = join(STATE_DIR, `.oneshot-${randomUUID()}.txt`);
     try {
-      await run(spawn, CODEX_BIN, [
+      const { stdout } = await run(spawn, CODEX_BIN, [
         'exec', '-m', modelId,
         '-s', 'read-only',
         '--skip-git-repo-check',
@@ -66,14 +71,24 @@ export async function runOneShotPrompt(group, modelId, prompt, { timeoutMs = ONE
         ...extraArgs,
         prompt,
       ], opts);
-      return readFileSync(tmpFile, 'utf8');
+      const answer = readFileSync(tmpFile, 'utf8');
+      if (!includeMetadata) return answer;
+      let usage = null;
+      for (const line of String(stdout || '').split(/\r?\n/)) {
+        if (!line.trim()) continue;
+        try {
+          const event = JSON.parse(line);
+          if (event.type === 'turn.completed') usage = event.usage ?? event.turn?.usage ?? null;
+        } catch { /* not JSONL */ }
+      }
+      return { answer, usage };
     } finally {
       try { unlinkSync(tmpFile); } catch { /* best-effort cleanup */ }
     }
   }
   if (group === 'ollama') {
     const { stdout } = await run(spawn, OLLAMA_BIN, ['run', modelId, prompt], opts);
-    return stdout;
+    return includeMetadata ? { answer: stdout, usage: null } : stdout;
   }
   throw new Error(`one-shot: unknown group '${group}'`);
 }
