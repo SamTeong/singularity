@@ -10,13 +10,15 @@
 // bus pty-ws fans out). State persists to STATE_DIR/window-anchor.json and is
 // emitted on the bus as 'window-anchor' after every mutation (crons.mjs
 // pattern). Never pokes twice for the same window.
-import { existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { bus, writeAtomic, STATE_DIR } from './agents.mjs';
+import { USAGE_SKILL_STATE } from './app-dir.mjs';
 import { groupFor } from './model-store.mjs';
 import { runOneShotPrompt } from './one-shot.mjs';
+import { getUsage } from './usage.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -24,16 +26,17 @@ const WINDOW_MS = 5 * 3.6e6;       // the plan window an anchor pins
 const ANCHOR_DELAY_MS = 5000;      // fire just after the reset, like usage.mjs's reset refresh (+2000)
 const POKE_TIMEOUT_MS = 90_000;
 const MIN_POKE_GAP_MS = 60_000;    // an errored poke may be retried, but no faster than this
+const TELEMETRY_MAX_RECORDS = 1000;
 
 // Cheapest route per provider (model-store SEED aliases). The ids go through
 // the model store, never hardcoded routing: an alias that moved to another
 // group disables that provider's poke rather than misrouting it.
 const CHEAP_MODELS = { claude: 'haiku', codex: 'gpt-5.6-luna' };
-// Effort flags verified on this box: `claude --help` has --effort <level>;
-// codex takes the config override -c model_reasoning_effort=low.
+// Anchor runs need no repository context or tools. Keep the authenticated CLI
+// plumbing while stripping customizations/configuration and reasoning tokens.
 const EFFORT_ARGS = {
-  claude: ['--effort', 'low'],
-  codex: ['-c', 'model_reasoning_effort=low'],
+  claude: ['--safe-mode', '--tools', '', '--system-prompt', 'Reply exactly: ok', '--effort', 'low'],
+  codex: ['--ignore-user-config', '--ignore-rules', '--json', '-c', 'model_reasoning_effort=none'],
 };
 const PROVIDERS = ['claude', 'codex'];
 
@@ -50,10 +53,13 @@ const defaultProviderState = () => ({
 const state = { claude: defaultProviderState(), codex: defaultProviderState() };
 const armed = new Map();       // provider -> { timer, resetsAt } (in-memory only)
 const lastAttempt = new Map(); // provider -> { window: resetsAtMs, at: epochMs }
+const preflighting = new Set();
 let logger = null;
 let stateFile = join(STATE_DIR, 'window-anchor.json');
+let telemetryFile = join(USAGE_SKILL_STATE, 'window-anchor-runs.jsonl');
 let now = () => Date.now();
 let spawn = execFileP;
+let refreshUsage = getUsage;
 let busRef = bus;
 let usageHandler = null;
 let latestUsage = null;
@@ -71,6 +77,19 @@ function persist() {
 }
 
 function persistEmit() { persist(); busRef?.emit('window-anchor', snapshot()); }
+
+function appendTelemetry(record) {
+  try {
+    mkdirSync(dirname(telemetryFile), { recursive: true });
+    appendFileSync(telemetryFile, `${JSON.stringify(record)}\n`, { mode: 0o600 });
+    const lines = readFileSync(telemetryFile, 'utf8').trimEnd().split(/\r?\n/);
+    if (lines.length > TELEMETRY_MAX_RECORDS) {
+      writeAtomic(telemetryFile, `${lines.slice(-TELEMETRY_MAX_RECORDS).join('\n')}\n`);
+    }
+  } catch (e) {
+    logger?.warn({ err: e.message }, 'window-anchor telemetry write failed');
+  }
+}
 
 function clearTimer(group) {
   const cur = armed.get(group);
@@ -103,7 +122,8 @@ function arm(group, resetsAt) {
 function shouldPoke(group, windowEnd) {
   const last = lastAttempt.get(group);
   if (!last || last.window !== windowEnd) return true;
-  return state[group].lastResult !== 'Ok' && now() - last.at >= MIN_POKE_GAP_MS;
+  const gap = state[group].lastResult === 'Ok' ? WINDOW_MS : MIN_POKE_GAP_MS;
+  return now() - last.at >= gap;
 }
 
 // Resolve the anchor model through the model store: null when the SEED alias
@@ -114,14 +134,45 @@ function anchorModel(group) {
   return g === null || g === group ? id : null;
 }
 
-async function poke(group, windowEnd) {
+function hasActiveWindow(group) {
+  const src = latestUsage?.[group];
+  const session = src?.session;
+  if (!src?.ok || !session || session.started === false || !session.resetsAt) return false;
+  const resetsAt = new Date(session.resetsAt).getTime();
+  return Number.isFinite(resetsAt) && resetsAt > now();
+}
+
+async function poke(group, windowEnd, { trigger = 'automatic', force = false, preflight = true } = {}) {
   const s = state[group];
+  const startedAt = now();
+  if (!force && preflight) {
+    preflighting.add(group);
+    try { await refreshUsage({ force: true, sources: [group] }); }
+    catch (e) { logger?.warn({ err: e.message, provider: group }, 'window-anchor preflight refresh failed'); }
+    finally { preflighting.delete(group); }
+  }
+  if (!force && hasActiveWindow(group)) {
+    s.lastResult = 'Skipped';
+    s.lastError = null;
+    appendTelemetry({
+      started_at: new Date(startedAt).toISOString(), finished_at: new Date(now()).toISOString(),
+      provider: group, trigger, window_end: new Date(windowEnd).toISOString(),
+      result: 'Skipped', reason: 'window-already-started', model: null, usage: null,
+    });
+    persistEmit();
+    return s.lastResult;
+  }
   if (!shouldPoke(group, windowEnd)) return 'Skipped';
   lastAttempt.set(group, { window: windowEnd, at: now() });
+  let modelId = null;
+  let usage = null;
   try {
-    const modelId = anchorModel(group);
+    modelId = anchorModel(group);
     if (!modelId) throw new Error(`no '${CHEAP_MODELS[group]}' model in the ${group} group`);
-    await runOneShotPrompt(group, modelId, 'ok', { timeoutMs: POKE_TIMEOUT_MS, extraArgs: EFFORT_ARGS[group] ?? [], spawn });
+    const result = await runOneShotPrompt(group, modelId, 'ok', {
+      timeoutMs: POKE_TIMEOUT_MS, extraArgs: EFFORT_ARGS[group] ?? [], spawn, includeMetadata: true,
+    });
+    usage = result.usage;
     s.lastAnchorAt = now();
     s.lastResult = 'Ok';
     s.lastError = null;
@@ -129,6 +180,12 @@ async function poke(group, windowEnd) {
     s.lastResult = 'Error';
     s.lastError = String(e.message || e).slice(0, 200);
   }
+  appendTelemetry({
+    started_at: new Date(startedAt).toISOString(), finished_at: new Date(now()).toISOString(),
+    provider: group, trigger, window_end: new Date(windowEnd).toISOString(),
+    result: s.lastResult, reason: null, model: modelId, usage,
+    ...(s.lastError ? { error: s.lastError } : {}),
+  });
   persistEmit();
   return s.lastResult;
 }
@@ -158,9 +215,10 @@ function onUsage(result, forceUnstarted = null) {
     // prior command exited successfully without opening the provider window.
     if (session.started === false) {
       clearTimer(group);
+      if (preflighting.has(group)) continue;
       const forced = forceUnstarted?.has(group);
       if (forced || !s.lastAnchorAt || now() - s.lastAnchorAt >= WINDOW_MS) {
-        void poke(group, forced ? now() : (s.lastAnchorAt ?? 0));
+        void poke(group, forced ? now() : (s.lastAnchorAt ?? 0), { preflight: false });
       }
       continue;
     }
@@ -181,16 +239,21 @@ function onUsage(result, forceUnstarted = null) {
     } else {
       // Expired and idle: poke now.
       clearTimer(group);
-      void poke(group, resetsAt);
+      if (!preflighting.has(group)) void poke(group, resetsAt, { preflight: false });
     }
   }
 }
 
-export function initWindowAnchor({ bus: b = bus, log, stateDir = STATE_DIR, spawn: spawnFn = execFileP, now: nowFn } = {}) {
+export function initWindowAnchor({
+  bus: b = bus, log, stateDir = STATE_DIR, usageStateDir = USAGE_SKILL_STATE,
+  spawn: spawnFn = execFileP, usageRefresh = getUsage, now: nowFn,
+} = {}) {
   logger = log;
   busRef = b;
   stateFile = join(stateDir, 'window-anchor.json');
+  telemetryFile = join(usageStateDir, 'window-anchor-runs.jsonl');
   spawn = spawnFn;
+  refreshUsage = usageRefresh;
   now = nowFn ?? (() => Date.now());
   latestUsage = null;
 
@@ -234,10 +297,10 @@ export function setWindowAnchorEnabled(enabled = {}) {
   return snapshot();
 }
 
-// Manual poke now — explicit user action, so it runs regardless of `enabled`
-// and of the same-window guard (fresh window identity = now).
-export async function pokeProvider(group) {
+// Manual poke now. It runs regardless of `enabled`, but avoids spending a turn
+// on an already-started window unless the caller explicitly requests force.
+export async function pokeProvider(group, { force = false } = {}) {
   if (!PROVIDERS.includes(group)) throw new Error(`provider must be 'claude' or 'codex'`);
-  await poke(group, now());
+  await poke(group, now(), { trigger: 'manual', force });
   return { provider: group, result: state[group].lastResult };
 }

@@ -432,9 +432,15 @@ export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 
 // Schema mirrors stats.mjs (L1795-1812): raw has five_hour, seven_day,
 // seven_day_{sonnet,opus,omelette}, extra_usage; each window {utilization,resets_at}.
 export function normalizeClaude(raw, plan) {
-  const win = (w) => (w && w.utilization != null
-    ? { pctUsed: Number(w.utilization), resetsAt: w.resets_at ?? null, models: [] }
-    : null);
+  const win = (w) => {
+    if (!w || w.utilization == null) return null;
+    const pctUsed = Number(w.utilization);
+    const resetsAt = w.resets_at ?? null;
+    return {
+      pctUsed, resetsAt, models: [],
+      ...(pctUsed === 0 && resetsAt == null ? { started: false } : {}),
+    };
+  };
   const models = [
     ['sonnet', raw.seven_day_sonnet],
     ['opus', raw.seven_day_opus],

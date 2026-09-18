@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-window-anchor-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
+process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
 mkdirSync(join(scratch, 'singularity', 'state'), { recursive: true });
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
@@ -28,11 +29,16 @@ const calls = []; // one entry per spawn: { file, args, opts }
 // channel is the -o file, so the fake writes it; claude's is stdout JSON.
 function fakeSpawn(file, args, opts) {
   calls.push({ file, args, opts });
-  if (args[0] === 'exec') writeFileSync(args[args.indexOf('-o') + 1], 'ok');
-  return Promise.resolve({ stdout: JSON.stringify({ result: 'ok', usage: {} }) });
+  if (args[0] === 'exec') {
+    writeFileSync(args[args.indexOf('-o') + 1], 'ok');
+    return Promise.resolve({ stdout: `${JSON.stringify({ type: 'turn.completed', usage: { input_tokens: 12, output_tokens: 1 } })}\n` });
+  }
+  return Promise.resolve({ stdout: JSON.stringify({ result: 'ok', usage: { input_tokens: 3, output_tokens: 1 } }) });
 }
 
-const init = (over = {}) => initWindowAnchor({ log: null, spawn: fakeSpawn, now: () => fakeNow, ...over });
+const init = (over = {}) => initWindowAnchor({
+  log: null, spawn: fakeSpawn, usageRefresh: async () => null, now: () => fakeNow, ...over,
+});
 
 // Push a usage document the way usage.mjs's getUsage does.
 function emitUsage(group, { pctUsed, resetsAt }) {
@@ -116,6 +122,9 @@ test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flag
     '--model', 'haiku',
     '--output-format', 'json',
     '--no-session-persistence',
+    '--safe-mode',
+    '--tools', '',
+    '--system-prompt', 'Reply exactly: ok',
     '--effort', 'low',
   ]);
   assert.equal(cla.opts.timeout, 90_000);
@@ -130,7 +139,10 @@ test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flag
     '--ephemeral',
     '-C', STATE_DIR,
     '-o', codex.args[codex.args.indexOf('-o') + 1],
-    '-c', 'model_reasoning_effort=low',
+    '--ignore-user-config',
+    '--ignore-rules',
+    '--json',
+    '-c', 'model_reasoning_effort=none',
     'ok',
   ]);
   assert.equal(codex.opts.timeout, 90_000);
@@ -139,6 +151,11 @@ test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flag
   assert.equal(s.claude.lastAnchorAt, fakeNow);
   assert.equal(s.codex.lastResult, 'Ok');
   assert.equal(s.claude.nextAnchorAt, null);
+
+  const records = readFileSync(join(process.env.USAGE_REPORT_STATE, 'window-anchor-runs.jsonl'), 'utf8')
+    .trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(records.findLast((r) => r.provider === 'claude').usage, { input_tokens: 3, output_tokens: 1 });
+  assert.deepEqual(records.findLast((r) => r.provider === 'codex').usage, { input_tokens: 12, output_tokens: 1 });
 });
 
 test('skipped: an expired window with pctUsed>0 stands down without a poke', async () => {
@@ -180,6 +197,7 @@ test('timer fire: an armed timer pokes at resetsAt+5000', async () => {
   const before = calls.length;
   emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow + 100 }); // arms a real ~5.1s timer
   assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, fakeNow + 100 + 5000);
+  fakeNow += 101;
   await until(() => calls.length > before, 8000);
   assert.equal(snapshotWindowAnchor().claude.lastResult, 'Ok');
   assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, null);
@@ -192,7 +210,7 @@ test('routes: GET shape, POST toggle, poke route 400 on bad provider', async () 
   app.get('/api/window-anchor', async () => snapshotWindowAnchor());
   app.post('/api/window-anchor', async (req) => setWindowAnchorEnabled(req.body?.enabled || {}));
   app.post('/api/window-anchor/poke', async (req, reply) => {
-    try { return { ok: true, ...(await pokeProvider(req.body?.provider)) }; }
+    try { return { ok: true, ...(await pokeProvider(req.body?.provider, { force: req.body?.force === true })) }; }
     catch (e) { return reply.code(e.persistFailure ? 500 : 400).send({ ok: false, error: e.message }); }
   });
 
@@ -209,6 +227,7 @@ test('routes: GET shape, POST toggle, poke route 400 on bad provider', async () 
   assert.equal(toggle.statusCode, 200);
   assert.equal(JSON.parse(toggle.body).claude.enabled, false);
   assert.equal(snapshotWindowAnchor().claude.enabled, false);
+  emitUsage('claude', { pctUsed: 1, resetsAt: fakeNow + HOUR });
 
   const bad = await app.inject({ method: 'POST', url: '/api/window-anchor/poke', payload: { provider: 'ollama' } });
   assert.equal(bad.statusCode, 400);
@@ -216,8 +235,34 @@ test('routes: GET shape, POST toggle, poke route 400 on bad provider', async () 
 
   const poke = await app.inject({ method: 'POST', url: '/api/window-anchor/poke', payload: { provider: 'claude' } });
   assert.equal(poke.statusCode, 200);
-  assert.deepEqual(JSON.parse(poke.body), { ok: true, provider: 'claude', result: 'Ok' });
+  assert.deepEqual(JSON.parse(poke.body), { ok: true, provider: 'claude', result: 'Skipped' });
+
+  const forced = await app.inject({ method: 'POST', url: '/api/window-anchor/poke', payload: { provider: 'claude', force: true } });
+  assert.equal(forced.statusCode, 200);
+  assert.deepEqual(JSON.parse(forced.body), { ok: true, provider: 'claude', result: 'Ok' });
   await app.close();
+});
+
+test('manual poke refreshes usage, skips an active window, and force bypasses the guard', async () => {
+  let refreshes = 0;
+  init({
+    usageRefresh: async ({ sources }) => {
+      refreshes++;
+      assert.deepEqual(sources, ['codex']);
+      bus.emit('usage', {
+        codex: { ok: true, source: 'codex', session: { pctUsed: 1, resetsAt: new Date(fakeNow + HOUR).toISOString() } },
+      });
+    },
+  });
+  const before = calls.length;
+
+  assert.deepEqual(await pokeProvider('codex'), { provider: 'codex', result: 'Skipped' });
+  assert.equal(refreshes, 1);
+  assert.equal(calls.length, before);
+
+  assert.deepEqual(await pokeProvider('codex', { force: true }), { provider: 'codex', result: 'Ok' });
+  assert.equal(refreshes, 1);
+  assert.equal(calls.length, before + 1);
 });
 
 // A Codex window that has not begun: usage.mjs strips the sliding reset
