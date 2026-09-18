@@ -1,0 +1,3 @@
+One terminal was fine. Then there were seven.
+
+Singularity: one control plane for your whole fleet of coding agents. Live sessions, a kanban where every card is a real git worktree, and the running token cost — all on 127.0.0.1.
