@@ -1035,7 +1035,7 @@ function showTok(v){
 var __sunPaths='<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5 19 19M19 5l-1.5 1.5M6.5 17.5 5 19"/>';
 var __moonPaths='<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>';
 function __lbl(t){var i=document.getElementById('thI');if(i)i.innerHTML=t==='dark'?__sunPaths:__moonPaths;}
-function __tgl(){var d=document.documentElement,n=d.dataset.theme==='dark'?'light':'dark';d.dataset.theme=n;try{localStorage.setItem('agents-report-theme',n);}catch(e){}__lbl(n);if(window.updateGlow)window.updateGlow();}
+function __tgl(){var d=document.documentElement,n=d.dataset.theme==='dark'?'light':'dark';d.dataset.theme=n;try{localStorage.setItem('agents-report-theme',n);}catch(e){}__lbl(n);}
 
 // ---- roadmap filter (chip filter, mirrors breakdown model-filter) ----
 // empty ROAD_ACTIVE / "all" = no filter; each chip toggles its tag, multiple stack.
