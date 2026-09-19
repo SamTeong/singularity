@@ -85,13 +85,6 @@
     radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%);
 }
 
-/* The #glow canvas (motion.html) paints three drifting radial gradients from
-   --clay/--azure/--cyan. It reads the live tokens, so it leaks no ZAPAC colour —
-   but it IS an ambient radial glow field, which Phosphor does not have: the void
-   is flat and hierarchy comes from borders. Hiding it also stops the animation
-   loop from doing work nothing can see. */
-:root[data-skin="phosphor"] #glow{display:none}
-
 /* ---------- de-glass: no blur anywhere ---------- */
 :root[data-skin="phosphor"] .card,
 :root[data-skin="phosphor"] .supp,

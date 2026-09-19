@@ -300,7 +300,6 @@ footer code{background:color-mix(in srgb,var(--paper-2) 70%,transparent);padding
 .sg-a{display:block;font-family:var(--disp);font-size:16px;color:var(--ink);font-weight:600;letter-spacing:-.01em;margin:12px 0 6px}
 .sg-t{display:block;color:var(--ink-soft);line-height:1.55}
 
-#glow{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.9}
 .topbar{position:sticky;top:0;z-index:50;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
   background:linear-gradient(to bottom,var(--paper) 55%,transparent);border-bottom:1px solid transparent;transition:border-color .3s}
 .topbar.stuck{border-color:var(--line)}

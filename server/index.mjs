@@ -30,7 +30,7 @@ import { getSysStats } from './sysstats.mjs';
 import { getUsage, connectOllamaUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
 import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
-import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory, detectMcp } from './tasks.mjs';
+import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { initWindowAnchor, snapshotWindowAnchor, setWindowAnchorEnabled, pokeProvider } from './window-anchor.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
@@ -477,7 +477,6 @@ app.get('/capabilities', async () => {
     skillScopes: { available: !!(process.env.SING_SCOPE_ROOT && existsSync(process.env.SING_SCOPE_ROOT)), hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
     usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
     wiki:        { available: wikiAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
-    leanCtx:     { available: detectMcp('lean-ctx'), hint: 'Install the lean-ctx MCP server to enable compressed reads in task subagents.' },
     token:       { available: !!process.env.SING_TOKEN, hint: 'Set SING_TOKEN in .env to require an auth token on data endpoints.' },
   };
 });

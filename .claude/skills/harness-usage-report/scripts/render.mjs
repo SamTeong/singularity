@@ -5,7 +5,7 @@
 // constants below, each returned by its render_<section>() function. Client-side
 // chart code is sources/app.js, page CSS is sources/style.css + sources/fonts.css
 // (base64-inlined woff2 from fetch-fonts.mjs), including the secnav/topbar
-// chrome, and the reveal + ambient-glow scripts are sources/motion.html. The
+// chrome, and the reveal scripts are sources/motion.html. The
 // whole document is fully self-contained — zero external requests at view time.
 import fs from "node:fs";
 import path from "node:path";
@@ -393,8 +393,8 @@ function render_scripts(sessions) {
   );
 }
 
-// IntersectionObserver reveal-on-scroll + 2D-canvas ambient glow + flagcard
-// updater — no external libs; every effect no-ops under prefers-reduced-motion.
+// IntersectionObserver reveal-on-scroll + flagcard updater — no external libs;
+// every effect no-ops under prefers-reduced-motion.
 function render_motion() {
   return _source("motion.html");
 }

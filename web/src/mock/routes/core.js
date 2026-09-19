@@ -86,7 +86,6 @@ export function registerCore(server) {
     skillScopes: { available: true, hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
     usageReport: { available: true, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
     wiki:        { available: true, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
-    leanCtx:     { available: true, hint: 'Install the lean-ctx MCP server to enable compressed reads in task subagents.' },
     token:       { available: false, hint: 'Set SING_TOKEN in .env to require an auth token on data endpoints.' },
   }));
 

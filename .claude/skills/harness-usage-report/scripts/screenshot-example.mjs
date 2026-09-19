@@ -98,11 +98,10 @@ const chromium = await loadChromium();
 const browser = await launchBrowser(chromium);
 const page = await browser.newPage({ viewport: { width: 1280, height: 900 }, deviceScaleFactor: 2 });
 await page.goto(REPORT, { waitUntil: "networkidle" });
-// Hide sticky/fixed chrome, and flatten the position:fixed ambient glow to the
-// solid --paper base. On a full-height capture viewport the glow gradient would
-// stretch and cool the deeper sections, giving each screenshot a different tint.
+// Hide sticky/fixed chrome and flatten the ambient glow to the solid --paper
+// base so tall fullPage captures keep a consistent tint.
 await page.addStyleTag({
-  content: ".topbar,.secnav{display:none!important} #glow,body::before{display:none!important}",
+  content: ".topbar,.secnav{display:none!important} body::before{display:none!important}",
 });
 await page.waitForTimeout(1800); // let charts + reveal animations settle
 // Grow the viewport to the full document height so clip regions past the first
