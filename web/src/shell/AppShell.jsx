@@ -85,7 +85,7 @@ const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.
 export default function AppShell() {
   const {
     agents, setActive, connected, tasks, taskHistory, crons, background, recent,
-    usage, stats, sendMsg, refreshUsage, connectOllamaUsage, registerChat, registerError,
+    usage, stats, sendMsg, refreshUsage, registerChat, registerError,
   } = useAgents();
   // Stored model list — needed by the codex/claude classification below (transcript
   // routing, palette, dock rows); a claude-group entry whose id starts with gpt-
@@ -464,7 +464,7 @@ export default function AppShell() {
                 <SessionHistory active={view === 'transcripts'} sendMsg={sendMsg} registerChat={registerChat} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
               </Box>
             )}
-            {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} onConnectOllama={connectOllamaUsage} />}
+            {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
             {view === 'history' && <HistoryView onOpenSession={openHistorySession} onToast={setToast} />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} onSelectSkin={onSelectSkin} />}
             {view === 'status' && <StatusView />}

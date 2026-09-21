@@ -13,19 +13,6 @@ test('provider meter cards render from usage stub', async ({ page }) => {
   await expect(page.getByText('Claude', { exact: true }).first()).toBeVisible();
 });
 
-test('ollama auth error alert renders', async ({ page }) => {
-  await page.goto('/');
-  await goto(page, 'Usage');
-
-  // Ollama also appears in the sidebar pill, hence .first().
-  await expect(page.getByText('Ollama', { exact: true }).first()).toBeVisible();
-
-  // needsAuth renders the provider's auth-help text in an Alert.
-  const alert = page.getByRole('alert').first();
-  await expect(alert).toBeVisible();
-  await expect(alert).toContainText(/sign.?in/i);
-});
-
 test('collapse/expand toggle flips aria-label', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');

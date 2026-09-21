@@ -201,27 +201,11 @@ export function AgentsProvider({ children }) {
 
   // One provider's live read, leaving the others to their cache slots — the
   // Usage page's per-card refresh interval. The daemon enforces the allowlist
-  // (see getUsage) so a fast Claude cadence never launches the Ollama browser.
+  // (see getUsage) so a fast Claude cadence never spends the other sources' quota.
   // Returns a promise that settles when the read lands (and never rejects): the
   // card's in-flight spinner awaits it.
   const refreshUsageSource = useCallback((key) => {
     return fetch(`/api/usage?source=${encodeURIComponent(key)}&force=1`).then((r) => r.json()).then((d) => setUsage((cur) => mergeUsageDoc(cur, d))).catch(() => {});
-  }, []);
-
-  // Interactive Ollama sign-in returns one sanitized provider payload (rather
-  // than the full /usage document), so merge just that provider into the
-  // shared usage state consumed by both the rail and Usage page.
-  const connectOllamaUsage = useCallback(async () => {
-    try {
-      const response = await fetch('/api/usage/ollama/connect', { method: 'POST' });
-      const ollama = await response.json();
-      setUsage((current) => ({ ...current, ollama }));
-      return ollama;
-    } catch {
-      const ollama = { ok: false, source: 'ollama', error: 'unavailable' };
-      setUsage((current) => ({ ...current, ollama }));
-      return ollama;
-    }
   }, []);
 
   // On-demand: fetch once the socket is up (app opened / reconnected). The
@@ -269,14 +253,14 @@ export function AgentsProvider({ children }) {
     agents, active, setActive, connected, recent,
     tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
+    sendMsg, reorderAgents, refreshUsage, refreshUsageSource,
     setWindowAnchorEnabled, pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   }), [
     agents, active, connected, recent,
     tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
+    sendMsg, reorderAgents, refreshUsage, refreshUsageSource,
     setWindowAnchorEnabled, pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   ]);

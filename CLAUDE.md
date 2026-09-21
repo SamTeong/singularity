@@ -50,7 +50,7 @@ web/       React + MUI + xterm shell (src/), vite.config.mjs (dev proxy :5317 â†
 e2e/       Playwright suite driving every UI flow against a throwaway sandbox daemon
 e2e-mock/  sibling Playwright suite driving the same flows against web/src/mock (parallel)
 scripts/   bootstrap.mjs (first setup), demo-tasks.mjs, fix-pty-helper.mjs (postinstall +x),
-           ollama-login.mjs, reap-build-orphans.mjs (pnpm clean)
+           reap-build-orphans.mjs (pnpm clean)
 vendor/    vendored tgz deps (@zapac/mui-theme, phosphor-console-theme) so install works offline
 assets/    screenshots
 docs/      one-shot/ â€” standalone HTML layout mockups (theme/report explorations), not built or served
