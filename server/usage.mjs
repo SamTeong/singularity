@@ -764,8 +764,28 @@ const cache = {
 };
 const SOURCES = ['ollama', 'claude', 'codex'];
 const CLAUDE_RATE_LIMIT_BACKOFF_MS = 5 * 60_000;
-let claudeRateLimitedUntil = 0;
-let claudeRateLimitedFingerprint = null; // which token armed claudeRateLimitedUntil
+
+// The cross-request gate both network lanes need: "no attempt before T, and
+// forget T when the key it was armed for changes". How long to wait is the
+// caller's call — Claude obeys the server's Retry-After, ollama doubles its own
+// — and so is what a key means (Claude passes the credential fingerprint so a
+// different token is never held to a wait it was never told to make; ollama has
+// no key). The per-attempt retries inside one call are external-fetch.mjs's job,
+// not this.
+function rateGate() {
+  let until = 0;
+  let key = null;
+  return {
+    blocked(k = null) {
+      if (k !== key) until = 0;
+      return Date.now() < until;
+    },
+    arm(ms, k = null) { until = Date.now() + ms; key = k; },
+    clear() { until = 0; key = null; },
+  };
+}
+const claudeGate = rateGate();
+const ollamaGate = rateGate();
 
 // The best Claude reading reachable without the network, for the two paths that
 // have no answer of their own: a 429 backoff and a failed pull. The 120s gate
@@ -791,10 +811,6 @@ async function pull(src, fetcher, force) {
   // through so the gates decide whether the network leg is worth it.
   if (src === 'claude') {
     claudeFingerprint = claudeCredentialFingerprint();
-    // A 429 backoff belongs to the token that earned it — track that separately
-    // from slot.credentialFingerprint (which only moves on a successful fetch) so
-    // a different token is never held to a wait it was never told to make.
-    if (claudeFingerprint !== claudeRateLimitedFingerprint) claudeRateLimitedUntil = 0;
     // The cache is in-memory only (no cross-restart persistence), so a still-null
     // slot.credentialFingerprint means "never established this process," not
     // "switched accounts." Only a fingerprint that actually moved counts.
@@ -830,7 +846,7 @@ async function pull(src, fetcher, force) {
   // A cached failure is the one case worth re-deriving here: the backoff would
   // otherwise hold the error card up for the whole Retry-After even though the
   // local tiers can fill it.
-  if (src === 'claude' && Date.now() < claudeRateLimitedUntil && slot.data) {
+  if (src === 'claude' && claudeGate.blocked(claudeFingerprint) && slot.data) {
     if (slot.data.ok) return slot.data;
     slot.data = claudeStaleFloor(slot, slot.data) ?? slot.data;
     return slot.data;
@@ -846,8 +862,7 @@ async function pull(src, fetcher, force) {
   const data = { fetchedAt: new Date().toISOString(), ...fetched };
   if (src === 'claude' && data.ok) {
     slot['credentialFingerprint'] = claudeCredentialFingerprint();
-    claudeRateLimitedUntil = 0;
-    claudeRateLimitedFingerprint = null;
+    claudeGate.clear();
   }
   // A failure replaces a previous failure — the card must show this pull's error,
   // not one from an earlier attempt — but never a good reading; that is what
@@ -855,8 +870,7 @@ async function pull(src, fetcher, force) {
   const lastGood = slot.data?.ok ? slot.data : null;
   if (data.ok || !lastGood) slot.data = data;
   if (src === 'claude' && data.error === 'rate-limited') {
-    claudeRateLimitedUntil = Date.now() + (data.retryAfterMs ?? CLAUDE_RATE_LIMIT_BACKOFF_MS);
-    claudeRateLimitedFingerprint = claudeFingerprint;
+    claudeGate.arm(data.retryAfterMs ?? CLAUDE_RATE_LIMIT_BACKOFF_MS, claudeFingerprint);
   }
   if (src === 'ollama' && !data.ok && lastGood) {
     // Ollama failures retain the timestamped successful measurement and surface
@@ -981,7 +995,6 @@ const API_FRESH_MS = SNAPSHOT_MAX_AGE_MS; // 120s: one missed statusline tick
 const OLLAMA_BACKOFF_CAP_MS = 15 * 60_000;
 let historyTimer = null;
 let historyPaused = null; // {at, error} while the ollama lane is stopped, else null
-let ollamaNextAt = 0; // earliest next ollama attempt (backoff / not-configured)
 let historyBackoffMs = 0; // doubles on a 429/5xx, cleared by the next success
 
 // The tick itself never re-arms early or backs off: a pause or backoff belongs to
@@ -1019,26 +1032,26 @@ function sampleCodex() {
 async function runHistorySample() {
   historyTimer = null;
   // Ollama lane only — a pause or backoff here must never stall the local-read lanes.
-  if (!historyPaused && Date.now() >= ollamaNextAt) {
+  if (!historyPaused && !ollamaGate.blocked()) {
     let ollama;
     try { ollama = await fetchOllama(); }
     catch { ollama = { ok: false, source: 'ollama', error: 'unavailable' }; }
     if (ollama.ok) {
       appendOllamaHistory(ollama);
       historyBackoffMs = 0; // a success clears an accumulated backoff
-      ollamaNextAt = 0;
+      ollamaGate.clear();
     } else if (ollama.error === 'no-config') {
       // Never configured — not a failure worth backing off for. Check back rarely
       // instead of doubling historyBackoffMs, which would otherwise drag Claude
       // and Codex sampling down to the 15m cap on an install that skipped Ollama.
-      ollamaNextAt = Date.now() + OLLAMA_BACKOFF_CAP_MS;
+      ollamaGate.arm(OLLAMA_BACKOFF_CAP_MS);
     } else if (ollama.needsAuth) {
       // An expired login pauses the lane; a successful manual refresh or Connect
       // action re-arms it (pull() clears historyPaused on the next good read).
       historyPaused = { at: new Date().toISOString(), error: ollama.error || 'unknown error' };
     } else {
       historyBackoffMs = Math.min(OLLAMA_BACKOFF_CAP_MS, historyBackoffMs * 2 || USAGE_POLL_MS);
-      ollamaNextAt = Date.now() + historyBackoffMs;
+      ollamaGate.arm(historyBackoffMs);
     }
   }
 
