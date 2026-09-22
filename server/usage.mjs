@@ -343,6 +343,10 @@ export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 
   if (!verified.ok) return sanitizeOllamaUsage(verified);
   writeOllamaBrowserMode();
   cache.ollama = { data: null, at: 0 };
+  historyPaused = null;
+  historyBackoffMs = 0;
+  ollamaGate.clear();
+  startHistorySampler();
   return sanitizeOllamaUsage({ ...verified, fetchedAt: new Date().toISOString() });
 }
 
@@ -832,6 +836,7 @@ async function pull(src, fetcher, force) {
     // is not a new document for the WS push — but a reading that was labelled
     // stale by an earlier failed pull is replaced, since it is demonstrably fresh.
     if (local) {
+      if (!slot.credentialFingerprint && claudeFingerprint) slot.credentialFingerprint = claudeFingerprint;
       const unchanged = slot.data?.ok && !slot.data.stale && slot.data.fetchedAt === local.fetchedAt;
       if (!unchanged) slot.data = local;
       slot.at = Date.now();
@@ -1029,12 +1034,12 @@ function sampleCodex() {
   if (codex.ok) appendCodexHistory(codex);
 }
 
-async function runHistorySample() {
+export async function runHistorySample(fetchOllamaFn = fetchOllama) {
   historyTimer = null;
   // Ollama lane only — a pause or backoff here must never stall the local-read lanes.
   if (!historyPaused && !ollamaGate.blocked()) {
     let ollama;
-    try { ollama = await fetchOllama(); }
+    try { ollama = await fetchOllamaFn(); }
     catch { ollama = { ok: false, source: 'ollama', error: 'unavailable' }; }
     if (ollama.ok) {
       appendOllamaHistory(ollama);

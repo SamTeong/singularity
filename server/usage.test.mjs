@@ -72,6 +72,38 @@ test('connectOllamaUsage: verifies the profile before selecting browser mode', a
   assert.deepEqual(JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'ollama.json'), 'utf8')), { mode: 'browser' });
 });
 
+test('connectOllamaUsage: resumes history collection after authentication recovers', async () => {
+  const { connectOllamaUsage: isolatedConnect, runHistorySample: isolatedSample } = await import(`./usage.mjs?history-resume=${Date.now()}`);
+  const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: async () => {}, content: async () => OLLAMA_HTML };
+  const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => {} }) } };
+  const realNow = Date.now;
+  let calls = 0;
+  try {
+    await isolatedSample(async () => {
+      calls += 1;
+      return { ok: false, source: 'ollama', error: 'unavailable' };
+    });
+    Date.now = () => realNow() + 61_000;
+    await isolatedSample(async () => {
+      calls += 1;
+      return { ok: false, source: 'ollama', needsAuth: true, error: 'auth-expired' };
+    });
+    Date.now = realNow;
+
+    const connected = await isolatedConnect({ playwright, headlessVerifier: async () => parseOllamaHtml(OLLAMA_HTML) });
+    assert.equal(connected.ok, true);
+    await isolatedSample(async () => {
+      calls += 1;
+      return parseOllamaHtml(OLLAMA_HTML);
+    });
+  } finally {
+    Date.now = realNow;
+    rmSync(join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl'), { force: true });
+    rmSync(join(process.env.USAGE_REPORT_STATE, 'codex-usage.jsonl'), { force: true });
+  }
+  assert.equal(calls, 3);
+});
+
 test('scrapeOllamaOnce: launch failure is unavailable without path leakage', async () => {
   const result = await scrapeOllamaOnce({ chromium: { launchPersistentContext: async () => { throw new Error('secret profile path'); } } }, true);
   assert.deepEqual(result, { ok: false, source: 'ollama', error: 'unavailable' });
@@ -548,6 +580,38 @@ test('getUsage: a forced pull serves a fresh local reading instead of 429ing', a
     rmSync(dir, { recursive: true, force: true });
   }
   assert.deepEqual(urls, []); // never spent the account's one call a minute
+});
+
+test('getUsage: a local Claude reading establishes identity before an account switch', async () => {
+  clearClaudeLocal();
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'account-a.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 58, resets_at: 1789533000 }, seven_day: { used_percentage: 9, resets_at: 1790096400 } } }));
+  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?account-switch=${Date.now()}`);
+  const accountA = { expiresAt: Date.now() + 3_600_000 };
+  accountA[ACCESS_TOKEN] = ['account', 'a', 'token'].join('-');
+  const accountB = { expiresAt: Date.now() + 3_600_000 };
+  accountB[ACCESS_TOKEN] = ['account', 'b', 'token'].join('-');
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  try {
+    writeCreds(accountA);
+    const local = await isolatedGetUsage({ sources: ['claude'], force: true });
+    assert.equal(local.claude.session.pctUsed, 58);
+
+    writeCreds(accountB);
+    globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => CLAUDE_RAW }; };
+    const switched = await isolatedGetUsage({ sources: ['claude'], force: true });
+    assert.equal(switched.claude.session.pctUsed, 42);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(dir, { recursive: true, force: true });
+    if (originalCredentials) writeFileSync(credentialsFile, originalCredentials);
+    else rmSync(credentialsFile, { force: true });
+  }
+  assert.equal(calls, 1);
 });
 
 // The point of reading the statusline's files first: they cost nothing, so the
