@@ -61,6 +61,21 @@ function readCadences() {
   }
 }
 
+// Collapsed/expanded state of the two collapsible panels, so a reload lands
+// where the user left it. Absent (or storage blocked) means expanded, the default.
+const USAGE_OPEN_KEY = 'sing:usage-open';
+const REPORT_OPEN_KEY = 'sing:usage-report-open';
+
+function readPanelOpen(key) {
+  try { return localStorage.getItem(key) !== '0'; } catch { return true; }
+}
+
+function writePanelOpen(key, open) {
+  try { localStorage.setItem(key, open ? '1' : '0'); } catch {
+    // Storage unavailable: the toggle still works, it just doesn't outlive the visit.
+  }
+}
+
 function writeCadence(sourceKey, value) {
   try {
     localStorage.setItem(CADENCE_KEY, JSON.stringify({ ...readCadences(), [sourceKey]: value }));
@@ -286,8 +301,10 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
 
 // Full usage view (main pane). Both providers side by side, manual force-refresh.
 export default function UsageView({ usage, onRefresh }) {
-  const [open, setOpen] = useState(true);
-  const [reportOpen, setReportOpen] = useState(true);
+  const [open, setOpen] = useState(() => readPanelOpen(USAGE_OPEN_KEY));
+  const toggleOpen = () => setOpen((o) => { writePanelOpen(USAGE_OPEN_KEY, !o); return !o; });
+  const [reportOpen, setReportOpen] = useState(() => readPanelOpen(REPORT_OPEN_KEY));
+  const toggleReport = () => setReportOpen((o) => { writePanelOpen(REPORT_OPEN_KEY, !o); return !o; });
   const caps = useCapabilities();
   const { refreshUsageSource, connectOllamaUsage, windowAnchor, setWindowAnchorEnabled, pokeWindowAnchor } = useAgents();
   const [connectState, setConnectState] = useState(null);
@@ -319,7 +336,7 @@ export default function UsageView({ usage, onRefresh }) {
       <Stack direction="row" spacing={1.5} sx={{ flexShrink: 0, p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
         <IconButton
           size="small"
-          onClick={() => setOpen((o) => !o)}
+          onClick={toggleOpen}
           aria-label={open ? 'Collapse usage' : 'Expand usage'}
           sx={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .2s' }}
         >
@@ -355,7 +372,7 @@ export default function UsageView({ usage, onRefresh }) {
           its natural height first, so on any real viewport there is no leftover
           left to grow into and the report would sit pinned at 240. */}
       <Box sx={{ flexGrow: reportOpen ? 1 : 0, flexShrink: 0, flexBasis: reportOpen ? 'clamp(240px, 55vh, 640px)' : 'auto', minHeight: reportOpen ? 240 : 0 }}>
-        <UsageReportView open={reportOpen} onToggle={() => setReportOpen((o) => !o)} />
+        <UsageReportView open={reportOpen} onToggle={toggleReport} />
       </Box>
     </Stack>
   );

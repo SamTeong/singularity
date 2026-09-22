@@ -28,6 +28,12 @@ test('collapse/expand toggle flips aria-label', async ({ page }) => {
   // Should now say "Expand usage"
   await expect(collapseButton).toHaveAttribute('aria-label', 'Expand usage');
 
+  // The state outlives the page, not just the component: reload and it is still
+  // collapsed. This is the only assertion a reload can distinguish from the
+  // in-memory useState default.
+  await page.reload();
+  await expect(collapseButton).toHaveAttribute('aria-label', 'Expand usage');
+
   // Click to expand again
   await collapseButton.click();
 
@@ -83,6 +89,10 @@ test('usage report collapse/expand button exists', async ({ page }) => {
   await reportCollapseButton.click();
 
   // Should now say "Expand usage report"
+  await expect(reportCollapseButton).toHaveAttribute('aria-label', /Expand usage report/);
+
+  // Collapsed survives the reload, not just the render.
+  await page.reload();
   await expect(reportCollapseButton).toHaveAttribute('aria-label', /Expand usage report/);
 });
 
