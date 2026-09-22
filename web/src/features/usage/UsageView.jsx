@@ -24,9 +24,8 @@ import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { Meter } from '@/components/Meter.jsx';
 import UsageReportView from '@/features/usage/UsageReportView.jsx';
 
-// Per-card refresh cadence. Ollama floors at a minute even though its read is now
-// a single API call — the daemon's own history sampler owns the fine-grained
-// cadence, so a sub-minute browser poll adds nothing. Claude and Codex floor at
+// Per-card refresh cadence. Ollama floors at a minute because each read launches
+// a headless browser against its authenticated persistent profile. Claude and Codex floor at
 // 15s: both read local files before they consider the network, so a fast tick
 // picks up whatever the statusline or a rollout just wrote without spending
 // quota. Off is the default everywhere: the daemon already refreshes after each
@@ -71,9 +70,9 @@ function writeCadence(sourceKey, value) {
 }
 
 function ollamaFailure(error) {
-  if (error === 'no-api-key' || error === 'set apiKey in ollama.json') {
-    return 'No Ollama API key — set apiKey in state/ollama.json (create one at ollama.com/settings/keys).';
-  }
+  if (error === 'no-config' || error === 'auth-expired') return 'Ollama sign-in expired. Connect to continue refreshing.';
+  if (error === 'challenge-required') return 'Ollama needs an interactive browser check. Connect and complete it.';
+  if (error === 'scrape-incompatible') return 'Ollama settings changed and its usage meter could not be read.';
   return `Ollama usage is currently unavailable${error ? `: ${error}` : '.'}`;
 }
 
@@ -85,7 +84,7 @@ const dotSx = (kind) => (t) => {
   return { width: 8, height: 8, borderRadius: '50%', background: c, flex: 'none', alignSelf: 'center', boxShadow: `0 0 0 3px color-mix(in srgb, ${c} 22%, transparent)` };
 };
 
-function ProviderCard({ sourceKey, label, usageUrl, u, cadence, onCadence, onRefreshSource, refreshing, anchor, onAnchorEnabled, onPoke }) {
+function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, connectState, cadence, onCadence, onRefreshSource, refreshing, anchor, onAnchorEnabled, onPoke }) {
   const isOllama = label.toLowerCase() === 'ollama';
   // Poll on the chosen cadence while this card is mounted. The timer dies with
   // the card, so navigating away from Usage stops it, and a provider hidden by
@@ -189,6 +188,9 @@ function ProviderCard({ sourceKey, label, usageUrl, u, cadence, onCadence, onRef
         )}
         {(busy || refreshing) && <CircularProgress size={14} sx={{ alignSelf: 'center' }} />}
         <Box sx={{ flex: 1 }} />
+        {isOllama && !(u?.ok && !u?.stale) && (
+          <Button size="small" onClick={onConnect} disabled={connecting}>{connecting ? 'Connecting…' : 'Connect'}</Button>
+        )}
       </Stack>
 
       {!u ? (
@@ -234,6 +236,9 @@ function ProviderCard({ sourceKey, label, usageUrl, u, cadence, onCadence, onRef
           {u.needsAuth ? authHelp[label.toLowerCase()] : `Couldn't load this: ${u.error || 'unknown error'}`}
         </Alert>
       )}
+      {isOllama && connectState === 'connecting' && <Alert severity="info" sx={{ py: 0.5, mt: 1 }}>Opening the managed Ollama browser for sign-in…</Alert>}
+      {isOllama && connectState === 'success' && <Alert severity="success" sx={{ py: 0.5, mt: 1 }}>Ollama connection verified.</Alert>}
+      {isOllama && connectState === 'failure' && !u?.stale && <Alert severity="warning" sx={{ py: 0.5, mt: 1 }}>{ollamaFailure(u?.error)}</Alert>}
       {/* Window anchor: keeps this provider's 5h plan window pinned to its
           reset time by firing one trivial prompt when the old window expires
           idle. The row renders only where the daemon reports anchor state and the
@@ -276,7 +281,13 @@ export default function UsageView({ usage, onRefresh }) {
   const [open, setOpen] = useState(true);
   const [reportOpen, setReportOpen] = useState(true);
   const caps = useCapabilities();
-  const { refreshUsageSource, windowAnchor, setWindowAnchorEnabled, pokeWindowAnchor } = useAgents();
+  const { refreshUsageSource, connectOllamaUsage, windowAnchor, setWindowAnchorEnabled, pokeWindowAnchor } = useAgents();
+  const [connectState, setConnectState] = useState(null);
+  const connectOllama = async () => {
+    setConnectState('connecting');
+    const result = await connectOllamaUsage();
+    setConnectState(result.ok ? 'success' : 'failure');
+  };
   // Per-card cadence lives in the query string (the per-view state convention),
   // one key per provider so a hand-edited URL only reaches its own card. The
   // remembered choice is the default the URL overrides, not a second source: the
@@ -325,7 +336,7 @@ export default function UsageView({ usage, onRefresh }) {
                 // Persist alongside the URL write: the URL is this visit, the
                 // stored value is the next bare visit.
                 const chooseCadence = (v) => { setCadence(v); writeCadence(p.key, v); };
-                return <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} cadence={cadenceOf(p.key, cadence)} onCadence={chooseCadence} onRefreshSource={refreshUsageSource} refreshing={refreshingAll} anchor={windowAnchor?.[p.key]} onAnchorEnabled={(v) => setWindowAnchorEnabled({ [p.key]: v })} onPoke={() => pokeWindowAnchor(p.key)} />;
+                return <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} cadence={cadenceOf(p.key, cadence)} onCadence={chooseCadence} onRefreshSource={refreshUsageSource} refreshing={refreshingAll} anchor={windowAnchor?.[p.key]} onAnchorEnabled={(v) => setWindowAnchorEnabled({ [p.key]: v })} onPoke={() => pokeWindowAnchor(p.key)} />;
               })}
             </Box>
           </Stack>

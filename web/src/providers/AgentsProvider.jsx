@@ -199,6 +199,21 @@ export function AgentsProvider({ children }) {
     return fetch(`/api/usage${force ? '?force=1' : ''}`).then((r) => r.json()).then((d) => setUsage((cur) => mergeUsageDoc(cur, d))).catch(() => {});
   }, []);
 
+  // One-shot interactive connect: the daemon opens the managed browser for
+  // sign-in and returns the verified (sanitized) ollama card.
+  const connectOllamaUsage = useCallback(async () => {
+    try {
+      const response = await fetch('/api/usage/ollama/connect', { method: 'POST' });
+      const ollama = await response.json();
+      setUsage((current) => ({ ...current, ollama }));
+      return ollama;
+    } catch {
+      const ollama = { ok: false, source: 'ollama', error: 'unavailable' };
+      setUsage((current) => ({ ...current, ollama }));
+      return ollama;
+    }
+  }, []);
+
   // One provider's live read, leaving the others to their cache slots — the
   // Usage page's per-card refresh interval. The daemon enforces the allowlist
   // (see getUsage) so a fast Claude cadence never spends the other sources' quota.
@@ -253,14 +268,14 @@ export function AgentsProvider({ children }) {
     agents, active, setActive, connected, recent,
     tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage, refreshUsageSource,
+    sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
     setWindowAnchorEnabled, pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   }), [
     agents, active, connected, recent,
     tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage, refreshUsageSource,
+    sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
     setWindowAnchorEnabled, pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   ]);

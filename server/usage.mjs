@@ -5,25 +5,33 @@
 //    every turn of every session, so the OAuth usage API is read only on ?force=1
 //    or when neither local tier is fresh (that endpoint allows roughly one call a
 //    minute per account, and the statusline already spends it).
-//  - ollama: GET ollama.com/api/usage with a Bearer key from state/ollama.json.
+//  - ollama: authenticated Playwright scrape of ollama.com/settings.
 //  - codex/openai: the Stop hook's codex-usage.jsonl tail when fresh, then a
 //    bounded rollout-log scan; live wham/usage only on ?force=1.
 // The daemon is one long-lived process, so a small in-memory cache per source is
 // enough — no cross-session file needed.
-// SECURITY: reads full account creds (api key / OAuth token) but NEVER returns
+// SECURITY: reads full account credentials (browser profile / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
-import { STATE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
+import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
 import { fetchExternal } from './external-fetch.mjs';
 
-// The Ollama API key lives beside the rest of the app's state: state/ollama.json
-// holds { "apiKey": "<key from ollama.com/settings/keys>" }. OLLAMA_API_KEY in the
-// environment overrides it, for a shell or a CI run that must not touch the file.
 const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
-const OLLAMA_USAGE_API_URL = 'https://ollama.com/api/usage';
+export const OLLAMA_PROFILE_DIR = join(CACHE_DIR, 'pw-ollama-profile');
+const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
+export const PW_STEALTH = {
+  channel: 'msedge',
+  args: ['--disable-blink-features=AutomationControlled'],
+  ignoreDefaultArgs: ['--enable-automation'],
+};
+export async function pwHideWebdriver(ctx) {
+  await ctx.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+  });
+}
 // CLAUDE_CONFIG_DIR is Claude Code's own override for ~/.claude — honour it so
 // the refresh below reads and rewrites the same file the CLI does (and so tests
 // can point at a scratch dir instead of the real credentials).
@@ -32,6 +40,22 @@ const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
 const USAGE_API_BETA = 'oauth-2025-04-20'; // schema ref: stats.mjs L34
 const TTL = 60_000;
 const REQ_TIMEOUT_MS = 10_000;
+
+// ---- Ollama: authoritative settings-page scrape -----------------------------
+export function parseOllamaHtml(html) {
+  const plan = html.match(/capitalize"\s*>\s*([A-Za-z][\w-]*)\s*</)?.[1] ?? null;
+  const meters = [...html.matchAll(/aria-label="(Session|Weekly) usage ([\d.]+)% used"/g)];
+  if (meters.length < 2) return null;
+  const times = [...html.matchAll(/data-time="([^"]+)"/g)].map((m) => m[1]);
+  const windowAt = (i) => {
+    const start = meters[i].index;
+    const end = i + 1 < meters.length ? meters[i + 1].index : html.length;
+    const models = [...html.slice(start, end).matchAll(/data-model="([^"]+)"[\s\S]*?data-requests="(\d+)"/g)]
+      .map((m) => ({ model: m[1], requests: Number(m[2]) }));
+    return { pctUsed: parseFloat(meters[i][2]), resetsAt: times[i] ?? null, models };
+  };
+  return { ok: true, source: 'ollama', plan, session: windowAt(0), weekly: windowAt(1), extra: null };
+}
 
 // ---- Ollama usage history (feeds the harness-usage-report skill) ----------
 // Every successful ollama read is appended as one snapshot in the report skill's
@@ -207,48 +231,114 @@ export function readCostStateLimits(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.n
   return null;
 }
 
-// ---- Ollama: usage API (Bearer key) -------------------------------------------
-// ollama.com's own settings page reads its meters from this endpoint with the
-// account's API key; there is no HTML to scrape and no login session to keep.
-// Undocumented, so everything unexpected degrades to a payload, never a throw.
-// The response carries no reset instants — the windows report resetsAt: null.
-function readOllamaApiKey() {
-  try { return JSON.parse(readFileSync(OLLAMA_CFG, 'utf8'))?.apiKey || null; }
-  catch { return null; }
+// ---- Ollama: authenticated persistent-browser scrape --------------------------
+function ownOllamaProfile(work) {
+  const run = ollamaProfileTail.catch(() => {}).then(work);
+  ollamaProfileTail = run.catch(() => {});
+  return run;
+}
+let ollamaProfileTail = Promise.resolve();
+
+export function classifyOllamaPage({ url = '', html = '' } = {}) {
+  if (/\/signin|\/login/i.test(url) || /sign in|log in to ollama/i.test(html)) return 'auth-expired';
+  if (/turnstile|verify (you are )?human|checking your browser|challenge/i.test(html)) return 'challenge-required';
+  return 'scrape-incompatible';
 }
 
-export async function fetchOllamaApi() {
-  const apiKey = process.env.OLLAMA_API_KEY || readOllamaApiKey();
-  // Distinct from a rejected key (below) so the history sampler can tell "this
-  // install has no Ollama account" from "the account's key stopped working".
-  if (!apiKey) return { ok: false, source: 'ollama', needsAuth: true, error: 'no-api-key' };
-
-  let resp;
+export async function scrapeOllamaOnce(pw, headless) {
+  let ctx;
   try {
-    resp = await fetchExternal(OLLAMA_USAGE_API_URL, {
-      headers: { Authorization: `Bearer ${apiKey}`, accept: 'application/json' },
-    }, { timeoutMs: REQ_TIMEOUT_MS });
+    ctx = await pw.chromium.launchPersistentContext(OLLAMA_PROFILE_DIR, { ...PW_STEALTH, headless });
+    await pwHideWebdriver(ctx);
+    const page = ctx.pages()[0] ?? (await ctx.newPage());
+    await page.goto(OLLAMA_SETTINGS_URL, { waitUntil: 'domcontentloaded', timeout: REQ_TIMEOUT_MS });
+    const gotMeter = await page.waitForSelector('[data-usage-meter]', { timeout: REQ_TIMEOUT_MS })
+      .then(() => true).catch(() => false);
+    const html = await page.content();
+    if (!gotMeter || /\/signin/.test(page.url())) {
+      const error = classifyOllamaPage({ url: page.url(), html });
+      return { ok: false, source: 'ollama', needsAuth: error === 'auth-expired', error };
+    }
+    return parseOllamaHtml(html) ?? { ok: false, source: 'ollama', error: 'scrape-incompatible' };
   } catch {
     return { ok: false, source: 'ollama', error: 'unavailable' };
+  } finally {
+    if (ctx) await ctx.close().catch(() => {});
   }
-  if (resp.status === 401) {
-    return { ok: false, source: 'ollama', needsAuth: true, error: 'set apiKey in ollama.json' };
-  }
-  if (resp.status !== 200) return { ok: false, source: 'ollama', error: `HTTP ${resp.status}` };
-  let raw;
-  try { raw = await resp.json(); }
-  catch (e) { return { ok: false, source: 'ollama', error: `parse error: ${e.message}` }; }
+}
 
-  // usage is a 0–1 fraction of the window already spent.
-  const win = (w) => (Number.isFinite(w?.usage)
-    ? { pctUsed: Number(w.usage) * 100, resetsAt: null, models: [] }
-    : null);
+let ollamaBrowserInflight = null;
+function fetchOllamaBrowser() {
+  if (ollamaBrowserInflight) return ollamaBrowserInflight;
+  ollamaBrowserInflight = (async () => {
+    const pw = await import('playwright-core').catch(() => null);
+    if (!pw) return { ok: false, source: 'ollama', error: 'playwright-core not installed (pnpm install)' };
+    return ownOllamaProfile(() => scrapeOllamaOnce(pw, true));
+  })();
+  return ollamaBrowserInflight.finally(() => { ollamaBrowserInflight = null; });
+}
+
+async function fetchOllama() {
+  if (!existsSync(OLLAMA_CFG)) return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
+  try {
+    if (JSON.parse(readFileSync(OLLAMA_CFG, 'utf8'))?.mode === 'browser') return fetchOllamaBrowser();
+  } catch (e) {
+    return { ok: false, source: 'ollama', error: `bad ${OLLAMA_CFG}: ${e.message}` };
+  }
+  return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
+}
+
+function writeOllamaBrowserMode() {
+  mkdirSync(dirname(OLLAMA_CFG), { recursive: true });
+  const tmp = `${OLLAMA_CFG}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, JSON.stringify({ mode: 'browser' }), { mode: 0o600 });
+  renameSync(tmp, OLLAMA_CFG);
+}
+
+export function sanitizeOllamaUsage(data) {
   return {
-    ok: true, source: 'ollama', plan: raw?.plan ?? null,
-    session: win(raw?.limits?.session),
-    weekly: win(raw?.limits?.weekly),
-    extra: null,
+    ok: !!data?.ok, source: 'ollama', plan: data?.plan ?? null,
+    session: data?.session ?? null, weekly: data?.weekly ?? null, extra: null,
+    fetchedAt: data?.fetchedAt ?? null, stale: !!data?.stale,
+    needsAuth: !!data?.needsAuth, error: data?.error ?? null,
   };
+}
+
+export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 120_000, headlessVerifier } = {}) {
+  const pw = playwright ?? await import('playwright-core').catch(() => null);
+  if (!pw) return { ok: false, source: 'ollama', error: 'unavailable' };
+  const interactive = await ownOllamaProfile(async () => {
+    let ctx;
+    try {
+      ctx = await pw.chromium.launchPersistentContext(OLLAMA_PROFILE_DIR, { ...PW_STEALTH, headless: false });
+      await pwHideWebdriver(ctx);
+      const page = ctx.pages()[0] ?? await ctx.newPage();
+      await page.goto(OLLAMA_SETTINGS_URL, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      if (waitForUser) Promise.resolve().then(waitForUser).catch(() => {});
+      let deadlineTimer;
+      const deadline = new Promise((resolve) => { deadlineTimer = setTimeout(() => resolve(false), timeoutMs); });
+      let gotMeter;
+      try {
+        gotMeter = await Promise.race([
+          page.waitForSelector('[data-usage-meter]', { timeout: timeoutMs }).then(() => true).catch(() => false), deadline,
+        ]);
+      } finally { clearTimeout(deadlineTimer); }
+      const html = await page.content();
+      if (!gotMeter) {
+        const error = classifyOllamaPage({ url: page.url(), html });
+        return { ok: false, source: 'ollama', needsAuth: error === 'auth-expired', error };
+      }
+      return parseOllamaHtml(html) ?? { ok: false, source: 'ollama', error: 'scrape-incompatible' };
+    } catch {
+      return { ok: false, source: 'ollama', error: 'unavailable' };
+    } finally { if (ctx) await ctx.close().catch(() => {}); }
+  });
+  if (!interactive.ok) return sanitizeOllamaUsage(interactive);
+  const verified = await (headlessVerifier ?? fetchOllamaBrowser)();
+  if (!verified.ok) return sanitizeOllamaUsage(verified);
+  writeOllamaBrowserMode();
+  cache.ollama = { data: null, at: 0 };
+  return sanitizeOllamaUsage({ ...verified, fetchedAt: new Date().toISOString() });
 }
 
 export function preserveOllamaStale(lastGood, failure) {
@@ -731,7 +821,7 @@ export async function getUsage({ force = false, sources } = {}) {
   // from overwriting a card that already has data.
   const pick = (src, fetcher) => (allow.has(src) ? pull(src, fetcher, force) : cache[src].data);
   const [ollama, claude, codex] = await Promise.all([
-    pick('ollama', fetchOllamaApi),
+    pick('ollama', fetchOllama),
     pick('claude', fetchClaude),
     pick('codex', fetchCodex),
   ]);
@@ -832,7 +922,7 @@ async function sampleClaude() {
 // Codex leg: codex-usage.jsonl is fed per turn end by the harness; the rollout
 // scan is the lazy fallback and only runs when that file has gone stale.
 function sampleCodex() {
-  let stale = true;
+  let stale;
   try { stale = Date.now() - statSync(CODEX_HISTORY).mtimeMs > API_FRESH_MS; } catch { stale = true; }
   if (!stale) return;
   const codex = fetchCodexRollout();
@@ -842,18 +932,16 @@ function sampleCodex() {
 async function runHistorySample() {
   historyTimer = null;
 
-  // Ollama: the sole source is the network, so it runs every tick.
+  // Ollama: the persistent authenticated browser is the authoritative source.
   let ollama;
-  try { ollama = await fetchOllamaApi(); }
+  try { ollama = await fetchOllama(); }
   catch { ollama = { ok: false, source: 'ollama', error: 'unavailable' }; }
   if (ollama.ok) {
     appendOllamaHistory(ollama);
     historyBackoffMs = 0; // a success clears an accumulated backoff
-  } else if (ollama.needsAuth && ollama.error !== 'no-api-key') {
-    // 'no-api-key' is not a failure — an install with no Ollama account just
-    // idles. A key the server rejected is: stop the lane (re-arming is pull()'s
-    // job, on the next successful read from any path). A 429/5xx/offline endpoint
-    // is transient, so it backs off exponentially and keeps trying.
+  } else if (ollama.needsAuth && ollama.error !== 'no-config') {
+    // No configured profile is not a failure. An expired login pauses the lane;
+    // a successful manual refresh or Connect action re-arms it.
     historyPaused = { at: new Date().toISOString(), error: ollama.error || 'unknown error' };
     return;
   } else {

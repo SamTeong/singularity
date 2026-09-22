@@ -1,6 +1,5 @@
-// Unit tests for usage normalization: the claude OAuth-response mapper, the ollama
-// usage-API mapper, and the codex rollout/API readers. No real network — every
-// request is a stubbed global fetch over a captured fixture. usage.mjs pulls in
+// Unit tests for usage normalization: the claude OAuth-response mapper, the
+// Ollama settings-page scraper, and the Codex rollout/API readers. usage.mjs pulls in
 // app-dir.mjs (STATE_DIR/USAGE_SKILL_STATE), which requires SINGULARITY_HOME and
 // reads USAGE_REPORT_STATE — point both at a scratch temp dir before the dynamic
 // import.
@@ -14,7 +13,6 @@ import { tmpdir } from 'node:os';
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-usage-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
 process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
-delete process.env.OLLAMA_API_KEY; // the file key is the path under test
 
 // Codex fixture: one rollout jsonl under the newest date dir, a couple of
 // non-matching lines plus two token_count lines — the backwards scan must
@@ -39,15 +37,45 @@ mkdirSync(claudeCfg, { recursive: true });
 process.env.CLAUDE_CONFIG_DIR = claudeCfg;
 const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json'), JSON.stringify({ claudeAiOauth: oauth }));
 
-const ollamaState = join(process.env.SINGULARITY_HOME, 'state');
-const writeOllamaCfg = (cfg) => {
-  mkdirSync(ollamaState, { recursive: true });
-  writeFileSync(join(ollamaState, 'ollama.json'), JSON.stringify(cfg));
-};
-
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { normalizeClaude, appendOllamaHistory, appendCodexHistory, fetchOllamaApi, fetchCodex, readClaudeSnapshot, readCodexSnapshot, readCostStateLimits, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readCodexSnapshot, readCostStateLimits, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
+
+const OLLAMA_HTML = `
+  <span class="capitalize">pro</span>
+  <div data-usage-meter aria-label="Session usage 27.4% used"><button data-model="glm-5.2" data-requests="218"></button></div>
+  <div data-time="2026-07-14T08:00:00Z"></div>
+  <div data-usage-meter aria-label="Weekly usage 31.2% used"><button data-model="glm-5.2" data-requests="1029"></button></div>
+  <div data-time="2026-07-20T00:00:00Z"></div>`;
+
+test('parseOllamaHtml: percentages, exact resets, and model counts', () => {
+  const usage = parseOllamaHtml(OLLAMA_HTML);
+  assert.equal(usage.plan, 'pro');
+  assert.deepEqual(usage.session, { pctUsed: 27.4, resetsAt: '2026-07-14T08:00:00Z', models: [{ model: 'glm-5.2', requests: 218 }] });
+  assert.deepEqual(usage.weekly, { pctUsed: 31.2, resetsAt: '2026-07-20T00:00:00Z', models: [{ model: 'glm-5.2', requests: 1029 }] });
+  assert.equal(parseOllamaHtml('<main>Sign in</main>'), null);
+});
+
+test('Ollama authentication/failure/stale states are actionable', () => {
+  assert.equal(classifyOllamaPage({ url: 'https://ollama.com/signin' }), 'auth-expired');
+  assert.equal(classifyOllamaPage({ html: 'Checking your browser before accessing' }), 'challenge-required');
+  const stale = preserveOllamaStale({ ...parseOllamaHtml(OLLAMA_HTML), fetchedAt: '2026-01-01T00:00:00.000Z' }, { ok: false, source: 'ollama', needsAuth: true, error: 'auth-expired' });
+  assert.equal(stale.stale, true);
+  assert.equal(stale.fetchedAt, '2026-01-01T00:00:00.000Z');
+});
+
+test('connectOllamaUsage: verifies the profile before selecting browser mode', async () => {
+  const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: async () => {}, content: async () => OLLAMA_HTML };
+  const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => {} }) } };
+  const result = await connectOllamaUsage({ playwright, headlessVerifier: async () => parseOllamaHtml(OLLAMA_HTML) });
+  assert.equal(result.ok, true);
+  assert.deepEqual(JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'ollama.json'), 'utf8')), { mode: 'browser' });
+});
+
+test('scrapeOllamaOnce: launch failure is unavailable without path leakage', async () => {
+  const result = await scrapeOllamaOnce({ chromium: { launchPersistentContext: async () => { throw new Error('secret profile path'); } } }, true);
+  assert.deepEqual(result, { ok: false, source: 'ollama', error: 'unavailable' });
+});
 
 // Sample shaped after the OAuth usage API (stats.mjs normalizer L1795-1812).
 const CLAUDE_RAW = {
@@ -148,66 +176,6 @@ test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', (
   // The rows above are FRESH, and fetchCodex tails this file before the rollout
   // scan — leave the lane file missing so the scan tests below see the fixture.
   rmSync(CODEX_HISTORY_FILE, { force: true });
-});
-
-// ---- Ollama: the Bearer usage API ------------------------------------------------
-// The key lives in state/ollama.json (documented shape: { apiKey }); the response
-// carries limits.session/weekly.usage as 0–1 fractions and nothing else we read.
-test('fetchOllamaApi: no key → needsAuth, without spending a request', async () => {
-  const originalFetch = globalThis.fetch;
-  let calls = 0;
-  globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => ({}) }; };
-  try {
-    const r = await fetchOllamaApi();
-    assert.equal(r.ok, false);
-    assert.equal(r.needsAuth, true);
-    assert.equal(calls, 0);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('fetchOllamaApi: maps the usage fractions to pctUsed and never leaks the key', async () => {
-  writeOllamaCfg({ apiKey: 'key-123' });
-  const originalFetch = globalThis.fetch;
-  let request;
-  globalThis.fetch = async (url, opts) => {
-    request = { url, opts };
-    return { status: 200, json: async () => ({ plan: 'pro', limits: { session: { usage: 0.274 }, weekly: { usage: 0.31 } } }) };
-  };
-  try {
-    const r = await fetchOllamaApi();
-    assert.equal(request.url, 'https://ollama.com/api/usage');
-    assert.equal(request.opts.headers.Authorization, 'Bearer key-123');
-    assert.equal(r.ok, true);
-    assert.equal(r.source, 'ollama');
-    assert.equal(r.plan, 'pro');
-    // No reset instants in this response: both windows report none.
-    assert.deepEqual(r.session, { pctUsed: 0.274 * 100, resetsAt: null, models: [] });
-    assert.equal(r.weekly.pctUsed, 31);
-    assert.equal(JSON.stringify(r).includes('key-123'), false);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test('fetchOllamaApi: a rejected key → needsAuth; a 500 → error payload', async () => {
-  writeOllamaCfg({ apiKey: 'key-123' });
-  const originalFetch = globalThis.fetch;
-  try {
-    globalThis.fetch = async () => ({ status: 401, headers: { get: () => null } });
-    const rejected = await fetchOllamaApi();
-    assert.equal(rejected.ok, false);
-    assert.equal(rejected.needsAuth, true);
-
-    globalThis.fetch = async () => ({ status: 500, headers: { get: () => null } });
-    const broken = await fetchOllamaApi();
-    assert.equal(broken.ok, false);
-    assert.ok(!broken.needsAuth);
-    assert.equal(broken.error, 'HTTP 500');
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
 });
 
 // fetchCodex scans a rollout jsonl backwards for the last token_count line's

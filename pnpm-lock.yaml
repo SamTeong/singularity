@@ -83,6 +83,9 @@ importers:
       phosphor-console-theme:
         specifier: file:vendor\phosphor-console-theme-0.1.0.tgz
         version: file:vendor/phosphor-console-theme-0.1.0.tgz(6227431a1a4a4525e924245c8f495efb)
+      playwright-core:
+        specifier: 1.62.0
+        version: 1.62.0
       react:
         specifier: ^19.2.8
         version: 19.2.8
