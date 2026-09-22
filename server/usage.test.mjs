@@ -526,6 +526,30 @@ test('getUsage: a rate-limited Claude read falls back to an older local reading'
   assert.deepEqual(urls, []); // the backoff still holds the network leg back
 });
 
+// Refresh means "look again", not "go to the network". A reading inside the 120s
+// gate is what the endpoint would return anyway, and the endpoint is the one that
+// 429s — so a forced pull over a fresh local file must answer from the file, and
+// must clear a stale label an earlier failed pull left behind.
+test('getUsage: a forced pull serves a fresh local reading instead of 429ing', async () => {
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'live-session.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 58, resets_at: 1789533000 }, seven_day: { used_percentage: 9, resets_at: 1790096400 } } }));
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { urls.push(String(url)); return { status: 429, headers: { get: () => '66' } }; };
+  try {
+    const doc = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.session.pctUsed, 58);
+    assert.equal(doc.claude.ok, true);
+    assert.ok(!doc.claude.stale); // the reading is current — no amber, no reason line
+    assert.ok(!doc.claude.error);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.deepEqual(urls, []); // never spent the account's one call a minute
+});
+
 // The point of reading the statusline's files first: they cost nothing, so the
 // 60s TTL should never hold a newer reading back — the gate protects the network
 // leg only, and a fresh local reading is served without a request at all.
@@ -748,6 +772,40 @@ test('getUsage: a 429 backoff blocks an established token but not a switched one
     assert.equal(calls, 3);
     assert.equal(switched.claude.ok, true);
   } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// The backoff is a pause, not a dead end. The 60s sampler drives exactly this
+// call, so once the Retry-After the server named has passed the network leg runs
+// again and a good reading replaces the banner — no human pressing Refresh.
+test('getUsage: the Claude rate-limited banner clears once Retry-After has passed', async () => {
+  const creds = { expiresAt: Date.now() + 3_600_000 };
+  creds[ACCESS_TOKEN] = ['recovering', 'account', 'token'].join('-');
+  const originalFetch = globalThis.fetch;
+  const realNow = Date.now;
+  try {
+    // Establish the token: an unconfirmed one always attempts the network, so the
+    // backoff needs a prior success before it means anything.
+    writeCreds(creds);
+    clearClaudeLocal();
+    globalThis.fetch = async () => ({ status: 200, json: async () => CLAUDE_RAW });
+    assert.equal((await getUsage({ sources: ['claude'], force: true })).claude.ok, true);
+
+    clearClaudeLocal();
+    globalThis.fetch = async () => ({ status: 429, headers: { get: () => '66' } });
+    assert.equal((await getUsage({ sources: ['claude'], force: true })).claude.error, 'rate-limited');
+
+    clearClaudeLocal();
+    globalThis.fetch = async () => ({ status: 200, json: async () => CLAUDE_RAW });
+    Date.now = () => realNow() + 70_000; // past the 66s the 429 asked for
+    const recovered = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(recovered.claude.ok, true);
+    assert.equal(recovered.claude.session.pctUsed, 42);
+    assert.ok(!recovered.claude.stale); // green again, not amber
+    assert.ok(!recovered.claude.error);
+  } finally {
+    Date.now = realNow;
     globalThis.fetch = originalFetch;
   }
 });

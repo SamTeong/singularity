@@ -555,8 +555,9 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
     return { ok: false, source: 'claude', needsAuth: true, error: err };
   }
 
-  // Files first: pull() already looked, but a forced read skips that and must
-  // still prefer a free local reading over the rate-limited endpoint.
+  // Files first for a direct caller (the history sampler). pull() has already
+  // looked and found nothing fresh by the time it forces, so this is belt and
+  // braces there rather than a second chance.
   if (!force) {
     const local = readClaudeLocal(prev, oauth.subscriptionType);
     if (local) return local;
@@ -806,14 +807,23 @@ async function pull(src, fetcher, force) {
       slot.at = 0;
     }
     const local = claudeAccountChanged ? null : readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType);
-    if (local && local.fetchedAt !== slot.data?.fetchedAt) {
-      slot.data = local;
+    // A reading inside the 120s gate is exactly what the endpoint would hand back,
+    // and the endpoint is the one that 429s — so it wins on every path, force
+    // included. Refresh means "look again", and looking again at a file the
+    // statusline wrote seconds ago is the right answer; going to the network
+    // instead is how a current card ended up labelled "refresh failed:
+    // rate-limited". Identity is kept when nothing moved, so an unchanged reading
+    // is not a new document for the WS push — but a reading that was labelled
+    // stale by an earlier failed pull is replaced, since it is demonstrably fresh.
+    if (local) {
+      const unchanged = slot.data?.ok && !slot.data.stale && slot.data.fetchedAt === local.fetchedAt;
+      if (!unchanged) slot.data = local;
       slot.at = Date.now();
       return slot.data;
     }
-    // Both tiers stale on a passive poll → the network is the only way to fill the
-    // card, and that is still "on demand" (see fetchClaude): it never runs from a
-    // timer of its own, only from a caller that asked.
+    // Both tiers stale → the network is the only way to fill the card, and that is
+    // still "on demand" (see fetchClaude): it never runs from a timer of its own,
+    // only from a caller that asked.
   }
   // The endpoint allows roughly one call a minute per account; a 429's Retry-After
   // backs the network leg off without touching the free local reads above.
@@ -983,12 +993,17 @@ function scheduleHistorySample() {
   historyTimer.unref();
 }
 
-// Claude leg: the statusline's own reading is the preferred source, so this only
-// reaches the network when both local files have gone stale. A failure is just
-// this tick's answer; the fixed tick interval alone paces the next attempt.
+// Claude leg: routed through getUsage, not a bare fetchClaude, because a reading
+// nobody can see is not a retry — the direct call updated neither the cache nor
+// the bus, so a rate-limited banner sat on the card until someone pressed
+// Refresh. This IS the retry loop that clears it: pull() answers from disk when
+// the statusline is feeding it (no request, but the card still refreshes), holds
+// the network leg back while the 429's own Retry-After has not passed, and pushes
+// the recovered reading to every tab the moment one lands. force, because the
+// tick and the TTL are both 60s and a coin-flip skip would stall the retry — it
+// costs nothing now that a fresh local reading outranks the network.
 async function sampleClaude() {
-  if (readClaudeSnapshot() || readCostStateLimits()) return;
-  try { await fetchClaude(true, cache.claude.data, false); } catch { /* transient */ }
+  try { await getUsage({ sources: ['claude'], force: true }); } catch { /* transient */ }
 }
 
 // Codex leg: codex-usage.jsonl is fed per turn end by the harness; the rollout
