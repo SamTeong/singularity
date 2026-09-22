@@ -85,3 +85,16 @@ test('usage report collapse/expand button exists', async ({ page }) => {
   // Should now say "Expand usage report"
   await expect(reportCollapseButton).toHaveAttribute('aria-label', /Expand usage report/);
 });
+
+test('ollama auth error alert renders', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+
+  // Ollama also appears in the sidebar pill, hence .first().
+  await expect(page.getByText('Ollama', { exact: true }).first()).toBeVisible();
+
+  // needsAuth renders the provider's auth-help text in an Alert.
+  const alert = page.getByRole('alert').first();
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText(/sign.?in/i);
+});

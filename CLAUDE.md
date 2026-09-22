@@ -50,7 +50,7 @@ web/       React + MUI + xterm shell (src/), vite.config.mjs (dev proxy :5317 �
 e2e/       Playwright suite driving every UI flow against a throwaway sandbox daemon
 e2e-mock/  sibling Playwright suite driving the same flows against web/src/mock (parallel)
 scripts/   bootstrap.mjs (first setup), demo-tasks.mjs, fix-pty-helper.mjs (postinstall +x),
-           reap-build-orphans.mjs (pnpm clean)
+           ollama-login.mjs, reap-build-orphans.mjs (pnpm clean)
 vendor/    vendored tgz deps (@zapac/mui-theme, phosphor-console-theme) so install works offline
 assets/    screenshots
 docs/      one-shot/ — standalone HTML layout mockups (theme/report explorations), not built or served
@@ -74,7 +74,7 @@ Per-view filters live in the query string via `web/src/hooks/useQueryState.js` (
 
 Owned app state → `SINGULARITY_HOME` (required, no default — set in `.env`; `APP_DIR`):
 - `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `background.json`, `models.json`, `ollama.json`, plus per-user picker roots — `config-roots.json`, `hook-roots.json`, `memory-root.json`, `rules-roots.json`, `sessions-root.json`, `skills-roots.json` (+ legacy `skills-root.json`), `wiki-root.json`
-- `cache/` (disposable): `usage-cache.json`, `pw-ollama-profile/`
+- `cache/` (disposable): `pw-ollama-profile/`
 
 Model lists are runtime config, not code: `state/models.json` (edited in Settings ▸ Models) drives the picker suggestions, client-side spawn classification (`web/src/lib/models.js`), server spawn routing (`server/models.mjs` via `model-store.mjs`), and the History summariser — any enabled entry from any group (claude/ollama/codex), not just ollama. `model-store.mjs` seeds it from the shipped arrays on first boot; Restore defaults re-merges missing shipped ids. History runs two rungs: the configured summariser, else deterministic bullets — no implicit fallback LLM.
 

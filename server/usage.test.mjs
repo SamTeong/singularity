@@ -499,6 +499,33 @@ test('getUsage: a forced Claude 429 is an error payload, not a stale reading', a
   }
 });
 
+// …unless a local reading exists at all. The 120s gate rejects an older one for
+// freshness, but once the API is out of reach that reading is the only thing the
+// card can show, and an empty error card is strictly worse. Runs with the 429
+// backoff above still armed, so it also covers the backoff gate's early return.
+test('getUsage: a rate-limited Claude read falls back to an older local reading', async () => {
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'stale-session.json');
+  writeFileSync(file, JSON.stringify({ rate_limits: { five_hour: { used_percentage: 77, resets_at: 1789533000 }, seven_day: { used_percentage: 12, resets_at: 1790096400 } } }));
+  const at = new Date(Date.now() - 10 * 60_000); // past the 120s gate, inside the 5h window
+  utimesSync(file, at, at);
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { urls.push(String(url)); throw new Error('offline'); };
+  try {
+    const doc = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, true);
+    assert.equal(doc.claude.stale, true); // amber, never green
+    assert.equal(doc.claude.error, 'rate-limited'); // the card still says why
+    assert.equal(doc.claude.session.pctUsed, 77);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.deepEqual(urls, []); // the backoff still holds the network leg back
+});
+
 // The point of reading the statusline's files first: they cost nothing, so the
 // 60s TTL should never hold a newer reading back — the gate protects the network
 // leg only, and a fresh local reading is served without a request at all.
@@ -674,4 +701,53 @@ test('getUsage: a failed Claude API read appends nothing', async () => {
     globalThis.fetch = originalFetch;
   }
   assert.equal(existsSync(file), false);
+});
+
+// A 429's Retry-After backoff belongs to the token that earned it: it must hold
+// off a forced retry on that same (established) token, but never a different
+// (or switched-to) one, which was never told to wait.
+test('getUsage: a 429 backoff blocks an established token but not a switched one', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  // A fresh, never-before-used token: earlier tests' backoffs must not bleed in.
+  const firstCreds = { expiresAt: Date.now() + 3_600_000 };
+  firstCreds[ACCESS_TOKEN] = ['first', 'account', 'token'].join('-');
+  try {
+    // Establish the token with one successful read first — an unconfirmed token
+    // (no successful read yet) always attempts the network on every pull, so the
+    // backoff below needs a prior success to have something to protect.
+    writeCreds(firstCreds);
+    clearClaudeLocal();
+    globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => CLAUDE_RAW }; };
+    const warm = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(warm.claude.ok, true);
+    assert.equal(calls, 1);
+
+    // The same, now-established token gets rate-limited.
+    clearClaudeLocal();
+    globalThis.fetch = async () => { calls += 1; return { status: 429, headers: { get: () => '66' } }; };
+    const limited = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(limited.claude.error, 'rate-limited');
+    assert.equal(calls, 2);
+
+    // Still inside the 66s Retry-After: a forced retry on the SAME token never
+    // reaches the network at all.
+    clearClaudeLocal();
+    globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => CLAUDE_RAW }; };
+    const stillBlocked = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(calls, 2);
+    assert.equal(stillBlocked.claude.error, 'rate-limited');
+
+    // A different token was never rate-limited — it reaches the network even
+    // while the first token's backoff is still armed.
+    const otherCreds = { expiresAt: Date.now() + 3_600_000 };
+    otherCreds[ACCESS_TOKEN] = ['other', 'account', 'token'].join('-');
+    writeCreds(otherCreds);
+    clearClaudeLocal();
+    const switched = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(calls, 3);
+    assert.equal(switched.claude.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });

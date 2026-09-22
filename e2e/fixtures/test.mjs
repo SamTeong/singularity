@@ -8,9 +8,9 @@
 //    consoleGuard.allow(/regex/).
 //
 //  * stubNetwork — /status and /usage reach the live internet (statuspage APIs,
-//    the Anthropic usage API, and ollama.com's usage API). They are stubbed to
-//    fixed payloads so those views are deterministic and fast. Drop the stub for
-//    one test with stubNetwork.passthrough().
+//    the Anthropic usage API, and a headless-chromium scrape for Ollama). They
+//    are stubbed to fixed payloads so those views are deterministic and fast.
+//    Drop the stub for one test with stubNetwork.passthrough().
 import { test as base, expect } from '@playwright/test';
 
 // Noise that is environmental, not a defect under test.
@@ -54,7 +54,7 @@ export const USAGE_STUB = {
     fetchedAt: new Date().toISOString(),
   },
   ollama: {
-    ok: false, source: 'ollama', needsAuth: true, error: 'no-api-key',
+    ok: false, source: 'ollama', needsAuth: true, error: 'auth-expired',
     fetchedAt: new Date().toISOString(),
   },
 };

@@ -239,6 +239,14 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
       {isOllama && connectState === 'connecting' && <Alert severity="info" sx={{ py: 0.5, mt: 1 }}>Opening the managed Ollama browser for sign-in…</Alert>}
       {isOllama && connectState === 'success' && <Alert severity="success" sx={{ py: 0.5, mt: 1 }}>Ollama connection verified.</Alert>}
       {isOllama && connectState === 'failure' && !u?.stale && <Alert severity="warning" sx={{ py: 0.5, mt: 1 }}>{ollamaFailure(u?.error)}</Alert>}
+      {/* Outside the ok/error branches on purpose: the sampler stops precisely
+          when a scrape fails, so at that moment this card is rendering the error
+          Alert — a note nested in the ok branch would never be seen. */}
+      {u?.historyPaused && (
+        <Typography sx={{ fontSize: 12, color: 'text.secondary', mt: 1 }}>
+          History sampling stopped after {u.historyPaused.error} — press Refresh to resume.
+        </Typography>
+      )}
       {/* Window anchor: keeps this provider's 5h plan window pinned to its
           reset time by firing one trivial prompt when the old window expires
           idle. The row renders only where the daemon reports anchor state and the
