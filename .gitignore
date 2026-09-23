@@ -1,8 +1,8 @@
-node_modules/
-web/dist/
-github-pages/dist/
+**/node_modules/
+**/__pycache__/
+**/dist/
+**/dist-mock/
 github-pages/public/*.glb
-web/dist-mock/
 *.log
 *.local.*
 *.bak
@@ -14,7 +14,6 @@ web/dist-mock/
 e2e/.tmp*/
 playwright-report/
 test-results/
-# scratch dumps from piping a suite run to a file at the repo root
 /test-output.txt
 
 .DS_Store
