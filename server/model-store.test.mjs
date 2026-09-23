@@ -22,7 +22,7 @@ test('seeds the file on first read', () => {
   assert.deepEqual(doc.models.find((m) => m.id === 'opus[1m]'), { id: 'opus[1m]', group: 'claude', label: 'Opus (1M context)', enabled: true });
   assert.equal(doc.models.filter((m) => m.group === 'claude').length, 9);
   assert.equal(doc.models.filter((m) => m.group === 'ollama').length, 6);
-  assert.equal(doc.models.filter((m) => m.group === 'codex').length, 6);
+  assert.equal(doc.models.filter((m) => m.group === 'codex').length, 5);
   assert.equal(doc.defaultModel, 'claude');
   assert.equal(doc.summariserModel, 'deepseek-v4-flash:cloud');
 
@@ -112,7 +112,7 @@ test('restoreDefaults re-adds deleted seed ids without duplicating or resetting 
   assert.equal(new Set(ids).size, ids.length, 'no duplicates');
   assert.deepEqual(ids.slice(0, 2), ['opus', 'my-own:cloud'], 'survivors keep their order, seed entries append');
   assert.deepEqual(doc.models[0], { id: 'opus', group: 'claude', label: 'Renamed Opus', enabled: false }, 'renamed label and disabled flag preserved');
-  assert.ok(ids.includes('haiku') && ids.includes('gpt-5.6-luna'), 'deleted built-ins are back');
+  assert.ok(ids.includes('haiku') && ids.includes('gpt-6-luna') && ids.includes('gpt-6-sol'), 'deleted built-ins are back');
   assert.equal(doc.models.filter((m) => m.id === 'opus').length, 1);
   assert.equal(doc.summariserModel, 'my-own:cloud', 'settings untouched');
   assert.deepEqual(getModels(), doc, 'persisted');

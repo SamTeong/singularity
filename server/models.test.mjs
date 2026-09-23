@@ -49,7 +49,7 @@ test('isCodexModel: every stored codex entry routes to the codex bin', () => {
 });
 
 test('isCodexModel: gpt-* prefix routes to the codex bin', () => {
-  assert.equal(isCodexModel('gpt-5.6-luna'), true);
+  assert.equal(isCodexModel('gpt-6-luna'), true);
   assert.equal(isCodexModel('gpt-5.4'), true);
   assert.equal(isCodexModel('gpt-5.4-mini'), true);
   assert.equal(isCodexModel('gpt-5.3-codex-spark'), true); // free-text codex id
@@ -91,7 +91,7 @@ test('routing follows a store edit with no restart, and free-text still falls ba
   const w = setModels({
     ...before,
     models: [
-      ...before.models.filter((m) => m.id !== 'gpt-5.6-luna'),
+      ...before.models.filter((m) => m.id !== 'gpt-6-luna'),
       { id: 'zephyr-9', group: 'claude', label: 'Zephyr', enabled: true },
     ],
   });
@@ -104,8 +104,8 @@ test('routing follows a store edit with no restart, and free-text still falls ba
   assert.throws(() => validateToolModel('codex', 'zephyr-9'));
 
   // Deleted codex preset typed free-text still routes to the codex bin.
-  assert.equal(isCodexModel('gpt-5.6-luna'), true);
-  assert.equal(isClaudeModel('gpt-5.6-luna'), false);
+  assert.equal(isCodexModel('gpt-6-luna'), true);
+  assert.equal(isClaudeModel('gpt-6-luna'), false);
 
   assert.equal(setModels(before).ok, true);
   assert.equal(isClaudeModel('zephyr-9'), false, 'reverting the store reverts routing');

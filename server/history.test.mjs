@@ -196,7 +196,7 @@ test('summarizeDay: no configured model -> deterministic, reason no-summariser, 
 
 test('summarizeDay: a configured model whose group binary is absent (codex, CODEX_BIN unset) behaves exactly like no configured model', async () => {
   const sessions = [{ id: 's1', title: 'fix flaky test', turns: 5, cwd: 'C:\\fake\\x', project: 'p', source: 'claude' }];
-  setSummariser('gpt-5.6-luna'); // seed codex-group entry
+  setSummariser('gpt-6-luna'); // seed codex-group entry
   let called = false;
   try {
     const r = await summarizeDay('digest', sessions, { callSummariser: async () => { called = true; return { text: '{}' }; } });
