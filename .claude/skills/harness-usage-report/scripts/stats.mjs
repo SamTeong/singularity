@@ -584,11 +584,7 @@ const PRICE = {
   // "gpt-6-astra".includes("gpt-6") is true, so listing it first would shadow the
   // suffixed keys (same trap the gpt-5.6 / gpt-5.4 families document below). Priced
   // as an Astra alias: Astra is the GPT-6 flagship and the only GPT-6 model
-  // without a suffix id. No PRICE_ABOVE rows for gpt-6-sol/gpt-6-luna: Sol's card
-  // states no long-context or batch rates, and Luna's >272K surcharge (2× in/cache,
-  // 1.5× out) starts above the global LONG_CTX_THRESHOLD (200k), so an entry would
-  // misprice the 200k–272k band. ponytail: add entries when OpenAI publishes the
-  // rates/thresholds.
+  // without a suffix id. Sol/Luna use a separate 272k threshold below.
   "gpt-6": [10.0, 50.0, 1.0, 12.5],
   // GPT-5.6 (openai.com/api/pricing; via claude-code wiki sources/openai-api-pricing
   // #flagship-models). 3 tiers only — no pro/mini/nano. cache_read=0.1×in,
@@ -644,6 +640,9 @@ const PRICE_ABOVE = {
   // mirrors it, and must stay BELOW "gpt-6-astra" for the same substring reason
   // as in PRICE.
   "gpt-6-astra": [20.0, 75.0, 2.0, 25.0],
+  // Sol/Luna surcharge begins above 272k input tokens, not the global 200k.
+  "gpt-6-sol": [4.0, 15.0, 0.40, 5.0],
+  "gpt-6-luna": [0.20, 0.75, 0.02, 0.25],
   "gpt-6": [20.0, 75.0, 2.0, 25.0],
   // Sol long-context repriced $10/$45 → $8/$30 alongside its short-context cut.
   "gpt-5.6-sol": [8.0, 30.0, 0.80, 10.0],
@@ -772,9 +771,11 @@ function _msg_cost(model, i, o, cr, cc) {
 
 // Per-message cost with the long-context tier applied when this request's
 // input-side tokens exceed the threshold. Use for absolute cost estimation.
-function _msg_cost_tiered(model, i, o, cr, cc) {
-  const above = PRICE_ABOVE[_price_key(model)];
-  if (above && i + cr + cc > LONG_CTX_THRESHOLD) {
+export function _msg_cost_tiered(model, i, o, cr, cc) {
+  const key = _price_key(model);
+  const above = PRICE_ABOVE[key];
+  const threshold = key === "gpt-6-sol" || key === "gpt-6-luna" ? 272000 : LONG_CTX_THRESHOLD;
+  if (above && i + cr + cc > threshold) {
     return (i * above[0] + o * above[1] + cr * above[2] + cc * above[3]) / 1e6;
   }
   return _msg_cost(model, i, o, cr, cc);

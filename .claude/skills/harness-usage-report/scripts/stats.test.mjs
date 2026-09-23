@@ -3,10 +3,16 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { _has_newer_input, _load_usage_snapshots } from "./stats.mjs";
+import { _has_newer_input, _load_usage_snapshots, _msg_cost_tiered } from "./stats.mjs";
 import { _render_style } from "./render.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+assert.equal(_msg_cost_tiered("gpt-6-sol", 272000, 0, 0, 0), 0.544);
+assert.equal(_msg_cost_tiered("gpt-6-sol", 272001, 0, 0, 0), 1.088004);
+assert.equal(_msg_cost_tiered("gpt-6-luna", 272000, 0, 0, 0), 0.0272);
+assert.equal(_msg_cost_tiered("gpt-6-luna", 272001, 0, 0, 0), 0.0544002);
+assert.equal(_msg_cost_tiered("gpt-5.6-sol", 200001, 0, 0, 0), 1.600008);
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-usage-report-"));
 try {
