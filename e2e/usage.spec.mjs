@@ -13,19 +13,6 @@ test('provider meter cards render from usage stub', async ({ page }) => {
   await expect(page.getByText('Claude', { exact: true }).first()).toBeVisible();
 });
 
-test('ollama auth error alert renders', async ({ page }) => {
-  await page.goto('/');
-  await goto(page, 'Usage');
-
-  // Ollama also appears in the sidebar pill, hence .first().
-  await expect(page.getByText('Ollama', { exact: true }).first()).toBeVisible();
-
-  // needsAuth renders the provider's auth-help text in an Alert.
-  const alert = page.getByRole('alert').first();
-  await expect(alert).toBeVisible();
-  await expect(alert).toContainText(/sign.?in/i);
-});
-
 test('collapse/expand toggle flips aria-label', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
@@ -39,6 +26,12 @@ test('collapse/expand toggle flips aria-label', async ({ page }) => {
   await collapseButton.click();
 
   // Should now say "Expand usage"
+  await expect(collapseButton).toHaveAttribute('aria-label', 'Expand usage');
+
+  // The state outlives the page, not just the component: reload and it is still
+  // collapsed. This is the only assertion a reload can distinguish from the
+  // in-memory useState default.
+  await page.reload();
   await expect(collapseButton).toHaveAttribute('aria-label', 'Expand usage');
 
   // Click to expand again
@@ -97,4 +90,21 @@ test('usage report collapse/expand button exists', async ({ page }) => {
 
   // Should now say "Expand usage report"
   await expect(reportCollapseButton).toHaveAttribute('aria-label', /Expand usage report/);
+
+  // Collapsed survives the reload, not just the render.
+  await page.reload();
+  await expect(reportCollapseButton).toHaveAttribute('aria-label', /Expand usage report/);
+});
+
+test('ollama auth error alert renders', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+
+  // Ollama also appears in the sidebar pill, hence .first().
+  await expect(page.getByText('Ollama', { exact: true }).first()).toBeVisible();
+
+  // needsAuth renders the provider's auth-help text in an Alert.
+  const alert = page.getByRole('alert').first();
+  await expect(alert).toBeVisible();
+  await expect(alert).toContainText(/sign.?in/i);
 });

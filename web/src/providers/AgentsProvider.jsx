@@ -199,18 +199,8 @@ export function AgentsProvider({ children }) {
     return fetch(`/api/usage${force ? '?force=1' : ''}`).then((r) => r.json()).then((d) => setUsage((cur) => mergeUsageDoc(cur, d))).catch(() => {});
   }, []);
 
-  // One provider's live read, leaving the others to their cache slots — the
-  // Usage page's per-card refresh interval. The daemon enforces the allowlist
-  // (see getUsage) so a fast Claude cadence never launches the Ollama browser.
-  // Returns a promise that settles when the read lands (and never rejects): the
-  // card's in-flight spinner awaits it.
-  const refreshUsageSource = useCallback((key) => {
-    return fetch(`/api/usage?source=${encodeURIComponent(key)}&force=1`).then((r) => r.json()).then((d) => setUsage((cur) => mergeUsageDoc(cur, d))).catch(() => {});
-  }, []);
-
-  // Interactive Ollama sign-in returns one sanitized provider payload (rather
-  // than the full /usage document), so merge just that provider into the
-  // shared usage state consumed by both the rail and Usage page.
+  // One-shot interactive connect: the daemon opens the managed browser for
+  // sign-in and returns the verified (sanitized) ollama card.
   const connectOllamaUsage = useCallback(async () => {
     try {
       const response = await fetch('/api/usage/ollama/connect', { method: 'POST' });
@@ -222,6 +212,15 @@ export function AgentsProvider({ children }) {
       setUsage((current) => ({ ...current, ollama }));
       return ollama;
     }
+  }, []);
+
+  // One provider's live read, leaving the others to their cache slots — the
+  // Usage page's per-card refresh interval. The daemon enforces the allowlist
+  // (see getUsage) so a fast Claude cadence never spends the other sources' quota.
+  // Returns a promise that settles when the read lands (and never rejects): the
+  // card's in-flight spinner awaits it.
+  const refreshUsageSource = useCallback((key) => {
+    return fetch(`/api/usage?source=${encodeURIComponent(key)}&force=1`).then((r) => r.json()).then((d) => setUsage((cur) => mergeUsageDoc(cur, d))).catch(() => {});
   }, []);
 
   // On-demand: fetch once the socket is up (app opened / reconnected). The

@@ -13,33 +13,6 @@ test('provider meter cards render from populated mock usage', async ({ page }) =
   await expect(page.getByText('Claude', { exact: true }).first()).toBeVisible();
 });
 
-test('Ollama retains stale usage with an actionable reconnect', async ({ page }) => {
-  await page.goto('/');
-  await goto(page, 'Usage');
-
-  const ollama = page.getByText('Ollama', { exact: true }).first();
-  await expect(ollama).toBeVisible();
-  await expect(page.getByText('deepseek-v4-flash:cloud: 34 req')).toBeVisible();
-  await expect(page.getByText('deepseek-v4-flash:cloud: 210 req')).toBeVisible();
-  await expect(page.getByText(/Last successful usage from/)).toBeVisible();
-  await expect(page.getByText(/Ollama sign-in expired. Connect/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
-});
-
-test('Ollama reconnect posts the production route and shows verified usage', async ({ page }) => {
-  await page.goto('/');
-  await goto(page, 'Usage');
-  await recordFetchCalls(page);
-
-  await page.getByRole('button', { name: 'Connect', exact: true }).click();
-
-  await expect(page.getByText('Ollama connection verified.')).toBeVisible();
-  await expect.poll(() => fetchCalls(page)).toContain('POST /api/usage/ollama/connect');
-  await expect(page.getByText(/Last successful usage from/)).toHaveCount(0);
-  // Fresh data after a successful connect hides the button entirely.
-  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0);
-});
-
 test('provider usage pages are linked out, never followed', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
@@ -74,6 +47,12 @@ test('collapse/expand toggle flips aria-label', async ({ page }) => {
   await collapseButton.click();
 
   // Should now say "Expand usage"
+  await expect(collapseButton).toHaveAttribute('aria-label', 'Expand usage');
+
+  // The state outlives the page, not just the component: reload and it is still
+  // collapsed. This is the only assertion a reload can distinguish from the
+  // in-memory useState default.
+  await page.reload();
   await expect(collapseButton).toHaveAttribute('aria-label', 'Expand usage');
 
   // Click to expand again
@@ -124,6 +103,10 @@ test('usage report collapse/expand button exists', async ({ page }) => {
   await reportCollapseButton.click();
 
   // Should now say "Expand usage report"
+  await expect(reportCollapseButton).toHaveAttribute('aria-label', /Expand usage report/);
+
+  // Collapsed survives the reload, not just the render.
+  await page.reload();
   await expect(reportCollapseButton).toHaveAttribute('aria-label', /Expand usage report/);
 });
 
@@ -213,4 +196,31 @@ test('an unknown cadence in the URL degrades to Off', async ({ page }) => {
   await expect(page.getByRole('combobox', { name: 'Claude refresh interval' })).toHaveText('Off');
   // ...and the card itself still renders its meters.
   await expect(page.getByText('Session (5h)').first()).toBeVisible();
+});
+
+test('Ollama retains stale usage with an actionable reconnect', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+
+  const ollama = page.getByText('Ollama', { exact: true }).first();
+  await expect(ollama).toBeVisible();
+  await expect(page.getByText('deepseek-v4-flash:cloud: 34 req')).toBeVisible();
+  await expect(page.getByText('deepseek-v4-flash:cloud: 210 req')).toBeVisible();
+  await expect(page.getByText(/Last successful usage from/)).toBeVisible();
+  await expect(page.getByText(/Ollama sign-in expired. Connect/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+});
+
+test('Ollama reconnect posts the production route and shows verified usage', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+  await recordFetchCalls(page);
+
+  await page.getByRole('button', { name: 'Connect', exact: true }).click();
+
+  await expect(page.getByText('Ollama connection verified.')).toBeVisible();
+  await expect.poll(() => fetchCalls(page)).toContain('POST /api/usage/ollama/connect');
+  await expect(page.getByText(/Last successful usage from/)).toHaveCount(0);
+  // Fresh data after a successful connect hides the button entirely.
+  await expect(page.getByRole('button', { name: 'Connect', exact: true })).toHaveCount(0);
 });

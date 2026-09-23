@@ -524,6 +524,12 @@ function _msg_tokens(msg) {
 
 
 const PRICE = {
+  // Claude Opus 5.5 (platform.claude.com pricing, fetched 2026-09-23; launched
+  // 2026-09-22). MUST precede "opus" — "claude-opus-5-5".includes("opus") is true,
+  // so the bare key first would shadow it. Cache read 0.05×in (Opus-5.5-specific
+  // multiplier; family default is 0.1×), cache write 1.25×in. Full 1M context at
+  // standard rates → no PRICE_ABOVE entry.
+  "opus-5-5": [4.0, 20.0, 0.20, 5.0],
   opus: [5.0, 25.0, 0.5, 6.25],
   sonnet: [3.0, 15.0, 0.3, 3.75],
   haiku: [1.0, 5.0, 0.1, 1.25],
@@ -567,11 +573,18 @@ const PRICE = {
   // GPT-5.6, and it DOES have a long-context tier (see PRICE_ABOVE).
   // Substring keys: "gpt-6" does NOT collide with any "gpt-5.6-*" key.
   "gpt-6-astra": [10.0, 50.0, 1.0, 12.5],
-  // Bare "gpt-6" MUST stay below "gpt-6-astra" — "gpt-6-astra".includes("gpt-6")
-  // is true, so listing it first would shadow the suffixed key (same trap the
-  // gpt-5.6 / gpt-5.4 families document below). Priced as an Astra alias: Astra
-  // is the only GPT-6 tier that exists today (no Sol/Terra/Luna suffixes in the
-  // GPT-6 generation — the tier name was replaced by a codename).
+  // GPT-6 Sol + GPT-6 Luna (model cards fetched 2026-09-23). The GPT-6 line keeps
+  // Sol/Luna but DROPS Terra — "sol" now means different rungs per generation
+  // ($4/$20 in 5.6, $2/$10 here), so always price by full model id. Both MUST
+  // precede the bare "gpt-6" keys below (substring shadowing, same trap as the
+  // gpt-5.6 family). cache_read=0.1×in, cache_create=1.25×in per the cards.
+  "gpt-6-sol": [2.0, 10.0, 0.20, 2.50],
+  "gpt-6-luna": [0.10, 0.50, 0.01, 0.125],
+  // Bare "gpt-6" MUST stay below "gpt-6-astra"/"gpt-6-sol"/"gpt-6-luna" —
+  // "gpt-6-astra".includes("gpt-6") is true, so listing it first would shadow the
+  // suffixed keys (same trap the gpt-5.6 / gpt-5.4 families document below). Priced
+  // as an Astra alias: Astra is the GPT-6 flagship and the only GPT-6 model
+  // without a suffix id. Sol/Luna use a separate 272k threshold below.
   "gpt-6": [10.0, 50.0, 1.0, 12.5],
   // GPT-5.6 (openai.com/api/pricing; via claude-code wiki sources/openai-api-pricing
   // #flagship-models). 3 tiers only — no pro/mini/nano. cache_read=0.1×in,
@@ -627,6 +640,9 @@ const PRICE_ABOVE = {
   // mirrors it, and must stay BELOW "gpt-6-astra" for the same substring reason
   // as in PRICE.
   "gpt-6-astra": [20.0, 75.0, 2.0, 25.0],
+  // Sol/Luna surcharge begins above 272k input tokens, not the global 200k.
+  "gpt-6-sol": [4.0, 15.0, 0.40, 5.0],
+  "gpt-6-luna": [0.20, 0.75, 0.02, 0.25],
   "gpt-6": [20.0, 75.0, 2.0, 25.0],
   // Sol long-context repriced $10/$45 → $8/$30 alongside its short-context cut.
   "gpt-5.6-sol": [8.0, 30.0, 0.80, 10.0],
@@ -755,9 +771,11 @@ function _msg_cost(model, i, o, cr, cc) {
 
 // Per-message cost with the long-context tier applied when this request's
 // input-side tokens exceed the threshold. Use for absolute cost estimation.
-function _msg_cost_tiered(model, i, o, cr, cc) {
-  const above = PRICE_ABOVE[_price_key(model)];
-  if (above && i + cr + cc > LONG_CTX_THRESHOLD) {
+export function _msg_cost_tiered(model, i, o, cr, cc) {
+  const key = _price_key(model);
+  const above = PRICE_ABOVE[key];
+  const threshold = key === "gpt-6-sol" || key === "gpt-6-luna" ? 272000 : LONG_CTX_THRESHOLD;
+  if (above && i + cr + cc > threshold) {
     return (i * above[0] + o * above[1] + cr * above[2] + cc * above[3]) / 1e6;
   }
   return _msg_cost(model, i, o, cr, cc);

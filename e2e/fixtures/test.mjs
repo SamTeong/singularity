@@ -54,7 +54,7 @@ export const USAGE_STUB = {
     fetchedAt: new Date().toISOString(),
   },
   ollama: {
-    ok: false, source: 'ollama', needsAuth: true, error: 'not signed in',
+    ok: false, source: 'ollama', needsAuth: true, error: 'auth-expired',
     fetchedAt: new Date().toISOString(),
   },
 };

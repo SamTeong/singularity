@@ -175,8 +175,8 @@ function isShellRequest(req) {
 // trusting the dev port unconditionally free.
 // The Origin check alone misses browser *subresource* GETs — an <img>/<link>/
 // <script src> on an attacker page carries no Origin header, so it would sail
-// through to a real handler (burning Messages API quota via /api/history,
-// launching Playwright via /api/usage?force=1). Sec-Fetch-Site is sent by
+// through to a real handler (burning Messages API quota via /api/history, spending
+// the account's Claude/OpenAI usage quota via /api/usage?force=1). Sec-Fetch-Site is sent by
 // every modern browser on every request, same-origin or not, and no local CLI
 // tool sets it — so gate on it too: same-origin/no-value (curl, the e2e
 // harness) pass, anything else 403s. sec-fetch-dest is deliberately not used —
@@ -334,7 +334,7 @@ app.get('/usage', async (req) => getUsage({
   force: req.query.force === '1',
   sources: [].concat(req.query.source ?? []),
 }));
-app.post('/usage/ollama/connect', async (req, reply) => {
+app.post('/usage/ollama/connect', async (_req, reply) => {
   const result = await connectOllamaUsage();
   if (!result.ok) reply.code(400);
   return result;

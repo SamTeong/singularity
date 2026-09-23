@@ -466,9 +466,9 @@ test('buildSpawn: codex with no model → no -m flag', () => {
 });
 
 test('buildSpawn: gpt-* model with tool="claude" routes to codex bin (model-driven)', () => {
-  const { bin, args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.6-luna', scopes: [], tool: 'claude' }, 'do the work');
+  const { bin, args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-6-luna', scopes: [], tool: 'claude' }, 'do the work');
   assert.equal(bin, process.env.CODEX_BIN);
-  assert.equal(args[args.indexOf('-m') + 1], 'gpt-5.6-luna');
+  assert.equal(args[args.indexOf('-m') + 1], 'gpt-6-luna');
   assert.ok(args.includes('do the work'));
   assert.ok(!args.includes('--session-id'));
   assert.ok(!args.includes('launch'));

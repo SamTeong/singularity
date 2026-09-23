@@ -30,6 +30,8 @@ const UNKNOWN_MODEL_RE = /^(gpt-|codex)/i;
 // stats.mjs/render.mjs) with no client change needed. Unknown ids fall
 // through to "" (current behaviour: raw id shown as-is).
 const MODEL_DISPLAY_NAMES = {
+  "gpt-6-sol": "GPT-6 Sol",
+  "gpt-6-luna": "GPT-6 Luna",
   "gpt-5.6-sol": "GPT-5.6 Sol",
   "gpt-5.6-terra": "GPT-5.6 Terra",
   "gpt-5.6-luna": "GPT-5.6 Luna",
@@ -675,6 +677,8 @@ function _selftest() {
   assert(Math.abs(splitTotal - trueTotal) < 2e-4, `expected primary+auto-review cost to equal true total ${trueTotal}, got ${splitTotal}`);
 
   // §D: direct map sanity — known ids resolve, unknown ids stay blank.
+  assert(MODEL_DISPLAY_NAMES["gpt-6-sol"] === "GPT-6 Sol", "expected gpt-6-sol display name");
+  assert(MODEL_DISPLAY_NAMES["gpt-6-luna"] === "GPT-6 Luna", "expected gpt-6-luna display name");
   assert(MODEL_DISPLAY_NAMES["gpt-5.6-sol"] === "GPT-5.6 Sol", "expected gpt-5.6-sol display name");
   assert(MODEL_DISPLAY_NAMES["gpt-5.6-terra"] === "GPT-5.6 Terra", "expected gpt-5.6-terra display name");
   assert(MODEL_DISPLAY_NAMES["gpt-5.6-luna"] === "GPT-5.6 Luna", "expected gpt-5.6-luna display name");

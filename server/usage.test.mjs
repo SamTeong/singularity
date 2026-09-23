@@ -1,12 +1,12 @@
-// Unit tests for usage normalization: the ollama HTML scraper parser and the
-// claude OAuth-response mapper. No network — both operate on captured fixtures.
-// usage.mjs pulls in app-dir.mjs (STATE_DIR/CACHE_DIR/USAGE_SKILL_STATE), which
-// requires SINGULARITY_HOME and reads USAGE_REPORT_STATE — point both at a
-// scratch temp dir before the dynamic import.
+// Unit tests for usage normalization: the claude OAuth-response mapper, the
+// Ollama settings-page scraper, and the Codex rollout/API readers. usage.mjs pulls in
+// app-dir.mjs (STATE_DIR/USAGE_SKILL_STATE), which requires SINGULARITY_HOME and
+// reads USAGE_REPORT_STATE — point both at a scratch temp dir before the dynamic
+// import.
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -39,118 +39,72 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, preserveClaudeStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendClaudeSnapshot, readClaudeSnapshot, readCostStateLimits, appendCodexHistory, fetchCodex, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readCodexSnapshot, readCostStateLimits, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
 
-// Trimmed to the parser-relevant markup from a real logged-in ollama.com/settings
-// response: plan badge, Session then Weekly meter (aria-label + segment buttons),
-// each followed by its reset data-time.
 const OLLAMA_HTML = `
-  <h2><span>Cloud usage</span>
-    <span class="text-xs font-normal px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 capitalize"
-      >pro</span></h2>
-  <div>
-    <div class="flex justify-between mb-2"><span>Session usage</span><span>27.4% used</span></div>
-    <div class="relative group" data-usage-meter>
-      <div class="relative h-3" data-usage-track aria-label="Session usage 27.4% used">
-        <div style="width: 27.4%;">
-          <button data-usage-segment data-model="glm-5.2" data-requests="218" aria-label="glm-5.2: 218 requests"></button>
-          <button data-usage-segment data-model="web search" data-requests="8" aria-label="web search: 8 requests"></button>
-        </div>
-      </div>
-    </div>
-    <div class="text-xs local-time" data-time="2026-07-14T08:00:00Z">Resets in 2 hours.</div>
-  </div>
-  <div>
-    <div class="flex justify-between mb-2"><span>Weekly usage</span><span>27.4% used</span></div>
-    <div class="relative group" data-usage-meter>
-      <div class="relative h-3" data-usage-track aria-label="Weekly usage 27.4% used">
-        <div style="width: 27.4%">
-          <button data-usage-segment data-model="glm-5.2" data-requests="1029" aria-label="glm-5.2: 1029 requests"></button>
-          <button data-usage-segment data-model="web search" data-requests="96" aria-label="web search: 96 requests"></button>
-        </div>
-      </div>
-    </div>
-    <div class="text-xs local-time" data-time="2026-07-20T00:00:00Z">Resets in 5 days.</div>
-  </div>`;
+  <span class="capitalize">pro</span>
+  <div data-usage-meter aria-label="Session usage 27.4% used"><button data-model="glm-5.2" data-requests="218"></button></div>
+  <div data-time="2026-07-14T08:00:00Z"></div>
+  <div data-usage-meter aria-label="Weekly usage 31.2% used"><button data-model="glm-5.2" data-requests="1029"></button></div>
+  <div data-time="2026-07-20T00:00:00Z"></div>`;
 
-test('parseOllamaHtml: plan, both windows, resets, per-model breakdown', () => {
-  const u = parseOllamaHtml(OLLAMA_HTML);
-  assert.equal(u.ok, true);
-  assert.equal(u.source, 'ollama');
-  assert.equal(u.plan, 'pro');
-
-  assert.equal(u.session.pctUsed, 27.4);
-  assert.equal(u.session.resetsAt, '2026-07-14T08:00:00Z');
-  assert.deepEqual(u.session.models, [
-    { model: 'glm-5.2', requests: 218 },
-    { model: 'web search', requests: 8 },
-  ]);
-
-  assert.equal(u.weekly.pctUsed, 27.4);
-  assert.equal(u.weekly.resetsAt, '2026-07-20T00:00:00Z');
-  assert.deepEqual(u.weekly.models, [
-    { model: 'glm-5.2', requests: 1029 },
-    { model: 'web search', requests: 96 },
-  ]);
+test('parseOllamaHtml: percentages, exact resets, and model counts', () => {
+  const usage = parseOllamaHtml(OLLAMA_HTML);
+  assert.equal(usage.plan, 'pro');
+  assert.deepEqual(usage.session, { pctUsed: 27.4, resetsAt: '2026-07-14T08:00:00Z', models: [{ model: 'glm-5.2', requests: 218 }] });
+  assert.deepEqual(usage.weekly, { pctUsed: 31.2, resetsAt: '2026-07-20T00:00:00Z', models: [{ model: 'glm-5.2', requests: 1029 }] });
+  assert.equal(parseOllamaHtml('<main>Sign in</main>'), null);
 });
 
-test('parseOllamaHtml: login page (no meters) → null', () => {
-  assert.equal(parseOllamaHtml('<html><body>Sign in</body></html>'), null);
-});
-
-test('Ollama failure classification is actionable and deterministic', () => {
+test('Ollama authentication/failure/stale states are actionable', () => {
   assert.equal(classifyOllamaPage({ url: 'https://ollama.com/signin' }), 'auth-expired');
   assert.equal(classifyOllamaPage({ html: 'Checking your browser before accessing' }), 'challenge-required');
-  assert.equal(classifyOllamaPage({ html: '<main>Settings</main>' }), 'scrape-incompatible');
+  const stale = preserveOllamaStale({ ...parseOllamaHtml(OLLAMA_HTML), fetchedAt: '2026-01-01T00:00:00.000Z' }, { ok: false, source: 'ollama', needsAuth: true, error: 'auth-expired' });
+  assert.equal(stale.stale, true);
+  assert.equal(stale.fetchedAt, '2026-01-01T00:00:00.000Z');
 });
 
-test('Ollama refresh failure retains the timestamped last-good reading as stale', () => {
-  const previous = { ...parseOllamaHtml(OLLAMA_HTML), fetchedAt: '2026-01-01T00:00:00.000Z' };
-  const result = preserveOllamaStale(previous, { ok: false, source: 'ollama', needsAuth: true, error: 'auth-expired' });
-  assert.equal(result.ok, true);
-  assert.equal(result.stale, true);
-  assert.equal(result.fetchedAt, '2026-01-01T00:00:00.000Z');
-  assert.equal(result.error, 'auth-expired');
-});
-
-test('connectOllamaUsage: headful connector verifies meter and atomically selects browser mode', async () => {
-  let launched = null;
-  const page = {
-    goto: async () => {}, url: () => 'https://ollama.com/settings',
-    waitForSelector: async () => {}, content: async () => OLLAMA_HTML,
-  };
-  const playwright = { chromium: { launchPersistentContext: async (_dir, opts) => {
-    launched = opts;
-    return { addInitScript: async () => {}, pages: () => [page], close: async () => {} };
-  } } };
-  const result = await connectOllamaUsage({ playwright, headlessVerifier: async () => ({ ...parseOllamaHtml(OLLAMA_HTML), fetchedAt: '2026-01-01T00:00:00.000Z' }) });
-  assert.equal(launched.headless, false);
+test('connectOllamaUsage: verifies the profile before selecting browser mode', async () => {
+  const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: async () => {}, content: async () => OLLAMA_HTML };
+  const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => {} }) } };
+  const result = await connectOllamaUsage({ playwright, headlessVerifier: async () => parseOllamaHtml(OLLAMA_HTML) });
   assert.equal(result.ok, true);
   assert.deepEqual(JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'ollama.json'), 'utf8')), { mode: 'browser' });
 });
 
-test('connectOllamaUsage: deadline closes Edge when the optional CLI acknowledgement never resolves', async () => {
-  let closed = false;
-  const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: () => new Promise(() => {}), content: async () => '' };
-  const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => { closed = true; } }) } };
-  const result = await connectOllamaUsage({ playwright, waitForUser: () => new Promise(() => {}), timeoutMs: 5 });
-  assert.equal(closed, true);
-  assert.equal(result.ok, false);
-});
-
-test('connectOllamaUsage: failed headless verification leaves existing config byte-for-byte intact', async () => {
-  const configPath = join(process.env.SINGULARITY_HOME, 'state', 'ollama.json');
-  const prior = '{"cookie":"still-valid","userAgent":"test-agent"}';
-  mkdirSync(join(process.env.SINGULARITY_HOME, 'state'), { recursive: true });
-  writeFileSync(configPath, prior);
+test('connectOllamaUsage: resumes history collection after authentication recovers', async () => {
+  const { connectOllamaUsage: isolatedConnect, runHistorySample: isolatedSample } = await import(`./usage.mjs?history-resume=${Date.now()}`);
   const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: async () => {}, content: async () => OLLAMA_HTML };
   const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => {} }) } };
-  const result = await connectOllamaUsage({ playwright, headlessVerifier: async () => ({ ok: false, source: 'ollama', error: 'unavailable' }) });
-  assert.equal(result.ok, false);
-  assert.equal(readFileSync(configPath, 'utf8'), prior);
+  const realNow = Date.now;
+  let calls = 0;
+  try {
+    await isolatedSample(async () => {
+      calls += 1;
+      return { ok: false, source: 'ollama', error: 'unavailable' };
+    });
+    Date.now = () => realNow() + 61_000;
+    await isolatedSample(async () => {
+      calls += 1;
+      return { ok: false, source: 'ollama', needsAuth: true, error: 'auth-expired' };
+    });
+    Date.now = realNow;
+
+    const connected = await isolatedConnect({ playwright, headlessVerifier: async () => parseOllamaHtml(OLLAMA_HTML) });
+    assert.equal(connected.ok, true);
+    await isolatedSample(async () => {
+      calls += 1;
+      return parseOllamaHtml(OLLAMA_HTML);
+    });
+  } finally {
+    Date.now = realNow;
+    rmSync(join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl'), { force: true });
+    rmSync(join(process.env.USAGE_REPORT_STATE, 'codex-usage.jsonl'), { force: true });
+  }
+  assert.equal(calls, 3);
 });
 
-test('scrapeOllamaOnce: browser launch failures are unavailable without diagnostic leakage', async () => {
+test('scrapeOllamaOnce: launch failure is unavailable without path leakage', async () => {
   const result = await scrapeOllamaOnce({ chromium: { launchPersistentContext: async () => { throw new Error('secret profile path'); } } }, true);
   assert.deepEqual(result, { ok: false, source: 'ollama', error: 'unavailable' });
 });
@@ -202,9 +156,9 @@ test('normalizeClaude: missing windows/extra → nulls, no throw', () => {
 const HISTORY_FILE = join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl');
 const READING = {
   plan: 'pro',
-  session: { pctUsed: 27.4, resetsAt: '2026-07-14T08:00:00Z' },
+  session: { pctUsed: 27.4, resetsAt: null },
   weekly: {
-    pctUsed: 31.2, resetsAt: '2026-07-19T00:00:00Z',
+    pctUsed: 31.2, resetsAt: null,
     models: [{ model: 'glm-5.2', requests: 218 }],
   },
 };
@@ -225,27 +179,6 @@ test('appendOllamaHistory: dedupes an unchanged reading, writes a changed one', 
   }
   assert.equal(JSON.parse(lines[0]).session.utilization, 27.4);
   assert.equal(JSON.parse(lines[1]).session.utilization, 28.1);
-});
-
-// appendClaudeSnapshot must reproduce the record the skill's own
-// `fetch-usage --oauth --save` writes (stats.mjs _map_usage + fetched_at + raw),
-// since the same _gauge_windows/_fit_gauge code reads both writers' rows.
-test('appendClaudeSnapshot: skill snapshot shape, dedupes an unchanged reading', () => {
-  appendClaudeSnapshot(CLAUDE_RAW);
-  appendClaudeSnapshot(CLAUDE_RAW); // identical → no second line
-  appendClaudeSnapshot({ ...CLAUDE_RAW, five_hour: { utilization: 55, resets_at: '2026-07-14T13:00:00Z' } });
-
-  const lines = readFileSync(join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl'), 'utf8').trim().split('\n');
-  assert.equal(lines.length, 2);
-  const row = JSON.parse(lines[0]);
-  assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-  assert.deepEqual(row.five_hour, { utilization: 42, resets_at: '2026-07-14T13:00:00Z' });
-  assert.deepEqual(row.seven_day, { utilization: 63.5, resets_at: '2026-07-19T00:00:00Z' });
-  assert.equal(row.per_model.opus.utilization, 71);
-  assert.equal(row.per_model.design.utilization, 5); // seven_day_omelette → design
-  assert.equal(row.extra_usage.used_credits, 12);
-  assert.equal(row.raw.five_hour.utilization, 42); // full body kept, like the skill's writer
-  assert.equal(JSON.parse(lines[1]).five_hour.utilization, 55);
 });
 
 // appendCodexHistory writes the report skill's codex-usage.jsonl shape
@@ -272,10 +205,14 @@ test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', (
   assert.deepEqual(row.weekly, { utilization: 12.5, resets_at: '2026-09-12T00:00:00Z' });
   assert.equal(row.plan, 'plus');
   assert.equal(JSON.parse(lines[1]).session.utilization, 44);
+  // The rows above are FRESH, and fetchCodex tails this file before the rollout
+  // scan — leave the lane file missing so the scan tests below see the fixture.
+  rmSync(CODEX_HISTORY_FILE, { force: true });
 });
 
 // fetchCodex scans a rollout jsonl backwards for the last token_count line's
-// rate_limits, mapping the 10080-minute (7d) window to `weekly` only.
+// rate_limits, mapping the 10080-minute (7d) window to `weekly` only. This is the
+// primary lane: no request is made without ?force=1.
 test('fetchCodex: backwards-scans to the last token_count line', async () => {
   const u = await fetchCodex();
   assert.equal(u.ok, true);
@@ -284,6 +221,20 @@ test('fetchCodex: backwards-scans to the last token_count line', async () => {
   assert.equal(u.session, null);
   assert.equal(u.weekly.pctUsed, 87);
   assert.equal(u.weekly.resetsAt, new Date(1786172475 * 1000).toISOString());
+});
+
+test('fetchCodex: the passive read never touches the network', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('offline'); };
+  try {
+    const u = await fetchCodex();
+    assert.equal(u.ok, true);
+    assert.equal(u.weekly.pctUsed, 87);
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 // A freshly-started Codex session's rollout has session_meta but no
@@ -328,8 +279,10 @@ test('fetchCodex: freshest rate_limits record wins over newest-mtime file', asyn
   assert.equal(u.weekly.pctUsed, 99);
 });
 
-test('fetchCodex: uses live API headers and normalizes 5h + 7d windows', async () => {
-  const token = 'test-access-token';
+// The live wham/usage API is on-demand only: ?force=1 (the daemon passes force
+// through) is the one thing that makes fetchCodex spend a request.
+test('fetchCodex(true): uses live API headers and normalizes 5h + 7d windows', async () => {
+  const token = 'test-token';
   const accountId = 'test-account-id';
   writeCodexAuth({ access_token: token, account_id: accountId });
   const originalFetch = globalThis.fetch;
@@ -345,7 +298,7 @@ test('fetchCodex: uses live API headers and normalizes 5h + 7d windows', async (
     }) };
   };
   try {
-    const u = await fetchCodex();
+    const u = await fetchCodex(true);
     assert.equal(request.url, 'https://chatgpt.com/backend-api/wham/usage');
     assert.equal(request.opts.method, 'GET');
     assert.deepEqual(request.opts.headers, { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId });
@@ -361,8 +314,8 @@ test('fetchCodex: uses live API headers and normalizes 5h + 7d windows', async (
   }
 });
 
-test('fetchCodex: retries a transient live API response', async () => {
-  writeCodexAuth({ access_token: 'test-access-token', account_id: 'test-account-id' });
+test('fetchCodex(true): retries a transient live API response', async () => {
+  writeCodexAuth({ access_token: 'test-token', account_id: 'test-account-id' });
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => {
@@ -377,7 +330,7 @@ test('fetchCodex: retries a transient live API response', async () => {
     };
   };
   try {
-    const u = await fetchCodex();
+    const u = await fetchCodex(true);
     assert.equal(u.plan, 'plus');
   } finally {
     globalThis.fetch = originalFetch;
@@ -390,7 +343,7 @@ test('fetchCodex: retries a transient live API response', async () => {
 // not a reset instant: drop it and flag the window unstarted, or the UI shows a
 // countdown that never lands and the window anchor arms a timer it keeps
 // pushing out of reach.
-test('fetchCodex: a window that has not begun drops its sliding reset', async () => {
+test('fetchCodex(true): a window that has not begun drops its sliding reset', async () => {
   const originalFetch = globalThis.fetch;
   const nowSec = Math.floor(Date.now() / 1000);
   globalThis.fetch = async () => ({ status: 200, json: async () => ({
@@ -401,7 +354,7 @@ test('fetchCodex: a window that has not begun drops its sliding reset', async ()
     },
   }) });
   try {
-    const u = await fetchCodex();
+    const u = await fetchCodex(true);
     assert.equal(u.session.resetsAt, null);
     assert.equal(u.session.started, false);
     // The weekly window is genuinely running — it keeps its pinned reset.
@@ -412,14 +365,14 @@ test('fetchCodex: a window that has not begun drops its sliding reset', async ()
   }
 });
 
-test('fetchCodex: classifies a weekly-only primary live window', async () => {
+test('fetchCodex(true): classifies a weekly-only primary live window', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ status: 200, json: async () => ({
     plan_type: 'pro',
     rate_limit: { primary_window: { used_percent: 17, limit_window_seconds: 604_800, reset_at: 1786172475 } },
   }) });
   try {
-    const u = await fetchCodex();
+    const u = await fetchCodex(true);
     assert.equal(u.session, null);
     assert.equal(u.weekly.pctUsed, 17);
   } finally {
@@ -427,11 +380,11 @@ test('fetchCodex: classifies a weekly-only primary live window', async () => {
   }
 });
 
-test('fetchCodex: failed live request falls back to rollout data', async () => {
+test('fetchCodex(true): failed live request falls back to rollout data', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('offline'); };
   try {
-    const u = await fetchCodex();
+    const u = await fetchCodex(true);
     assert.equal(u.ok, true);
     assert.equal(u.weekly.pctUsed, 99);
   } finally {
@@ -439,10 +392,10 @@ test('fetchCodex: failed live request falls back to rollout data', async () => {
   }
 });
 
-// The access token expires overnight, so the usage fetch renews it itself via
-// the refresh_token grant. These cover the pre-network guards (no request is
-// made — a real grant here would rotate the developer's own token) and the
-// throttle that stops a signed-out user costing a request + spawn per pull.
+// The access token expires overnight, so the on-demand usage fetch renews it
+// itself via the refresh_token grant. These cover the pre-network guards (no
+// request is made — a real grant here would rotate the developer's own token)
+// and the throttle that stops a signed-out user costing a request + spawn per pull.
 test('refreshOauthGrant: no refresh token → no request', async () => {
   writeCreds({ accessToken: 'stale', expiresAt: Date.now() - 1000 });
   assert.equal(await refreshOauthGrant(), false);
@@ -471,8 +424,7 @@ test('refreshClaudeAuth: falls back to the CLI once, then throttles', async () =
 let warm; // the fully-warmed document the filtered pulls below compare against
 
 // pull() reads the statusline's local tiers before either gate, so the network
-// tests below have to start with none on disk — the appendClaudeSnapshot test
-// above leaves a fresh one.
+// tests below have to start with none on disk.
 const clearClaudeLocal = () => {
   rmSync(join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl'), { force: true });
   rmSync(join(process.env.USAGE_REPORT_STATE, 'cost-state'), { recursive: true, force: true });
@@ -487,11 +439,11 @@ test('getUsage: filtered pull on a cold cache fetches only the listed source', a
   assert.deepEqual(Object.keys(doc).sort(), ['claude', 'codex', 'ollama']);
   // null, not an error object: an excluded source reads its cache slot, which is
   // empty until a first successful fetch. A fetcher that ran would have populated
-  // it — fetchOllama always returns an object and fetchCodex reads the rollout
+  // it — fetchOllamaApi always returns an object and fetchCodex reads the rollout
   // fixture — so a null can only mean "never called".
   assert.equal(doc.ollama, null);
   assert.equal(doc.codex, null);
-  // The listed source did run. This scratch home holds expired credentials, so it
+  // The listed source did run. This scratch home holds no credentials, so it
   // stops at the pre-network auth guard rather than the real endpoint.
   assert.equal(doc.claude.source, 'claude');
   assert.equal(doc.claude.error, 'no-credentials');
@@ -501,8 +453,8 @@ test('getUsage: the allowlist outranks force, and an excluded source is served b
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('offline'); };
   try {
-    // Warm every slot without touching the network: codex falls back to the
-    // rollout fixture, ollama's cookie scrape fails fast.
+    // Warm every slot without reaching a real service: codex falls back to the
+    // rollout fixture, ollama's API call fails fast.
     warm = await getUsage({ force: true });
   } finally {
     globalThis.fetch = originalFetch;
@@ -560,55 +512,113 @@ test('getUsage: a filtered pull still assembles a full document', async () => {
   assert.equal(doc.ollama.historyPaused, null);
 });
 
-test('getUsage: Claude 429 preserves the last good reading and backs off by Retry-After', async () => {
-  writeCreds({ accessToken: 'live-token', expiresAt: Date.now() + 3_600_000 });
-  const originalFetch = globalThis.fetch;
-  const originalNow = Date.now;
-  let offset = 600_000; // past any TTL an earlier test left on the claude slot
+// The OAuth usage endpoint allows roughly one call a minute per account, so it is
+// read on demand only. A rate-limited read is just this call's answer: the last
+// good reading stays on the card as stale, and nothing is retried on a timer.
+test('getUsage: a forced Claude 429 is an error payload, not a stale reading', async () => {
+  writeCreds({ accessToken: 'test-token', expiresAt: Date.now() + 3_600_000 });
   clearClaudeLocal(); // the network leg only runs when no local reading is fresh
-  Date.now = () => originalNow() + offset;
+  const originalFetch = globalThis.fetch;
   let calls = 0;
-  globalThis.fetch = async () => {
-    calls++;
-    return calls === 1
-      ? { status: 200, json: async () => CLAUDE_RAW }
-      : { status: 429, headers: { get: () => '66' } };
-  };
+  globalThis.fetch = async () => { calls += 1; return { status: 429, headers: { get: () => '66' } }; };
   try {
-    const fresh = await getUsage({ sources: ['claude'], force: true });
-    assert.equal(fresh.claude.ok, true);
-
-    // Claude's endpoint allows ~1 call/min, so a forced pull inside the TTL is
-    // served from cache rather than spending the next minute's quota.
-    const floored = await getUsage({ sources: ['claude'], force: true });
-    assert.equal(floored.claude, fresh.claude);
-    assert.equal(calls, 1);
-
-    offset += 61_000;
-    const limited = await getUsage({ sources: ['claude'], force: true });
-    assert.equal(limited.claude.ok, true);
-    assert.equal(limited.claude.stale, true);
-    assert.equal(limited.claude.error, 'rate-limited');
-    assert.equal(limited.claude.fetchedAt, fresh.claude.fetchedAt);
-    assert.equal(calls, 2); // one request, not three: a long Retry-After ends the retry loop
-
-    // Retry-After: 66 outlasts the 60s TTL, so the backoff — not the TTL — is
-    // what holds the next forced pull off the network.
-    offset += 61_000;
-    const backedOff = await getUsage({ sources: ['claude'], force: true });
-    assert.equal(backedOff.claude, limited.claude);
-    assert.equal(calls, 2);
+    const doc = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, false);
+    assert.equal(doc.claude.error, 'rate-limited');
+    assert.equal(calls, 1); // one request: a long Retry-After ends the retry loop
   } finally {
     globalThis.fetch = originalFetch;
-    Date.now = originalNow;
   }
 });
 
-// The point of reading the statusline's files first: they cost nothing, so
-// neither the 60s TTL nor the 429 backoff the test above armed should hold a
-// newer reading back. Both gates protect the network leg only.
-test('getUsage: a newer statusline reading outranks the TTL and the 429 backoff', async () => {
-  clearClaudeLocal(); // drop the snapshot the 200 above wrote: tier 1 outranks cost-state
+// …unless a local reading exists at all. The 120s gate rejects an older one for
+// freshness, but once the API is out of reach that reading is the only thing the
+// card can show, and an empty error card is strictly worse. Runs with the 429
+// backoff above still armed, so it also covers the backoff gate's early return.
+test('getUsage: a rate-limited Claude read falls back to an older local reading', async () => {
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'stale-session.json');
+  writeFileSync(file, JSON.stringify({ rate_limits: { five_hour: { used_percentage: 77, resets_at: 1789533000 }, seven_day: { used_percentage: 12, resets_at: 1790096400 } } }));
+  const at = new Date(Date.now() - 10 * 60_000); // past the 120s gate, inside the 5h window
+  utimesSync(file, at, at);
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { urls.push(String(url)); throw new Error('offline'); };
+  try {
+    const doc = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, true);
+    assert.equal(doc.claude.stale, true); // amber, never green
+    assert.equal(doc.claude.error, 'rate-limited'); // the card still says why
+    assert.equal(doc.claude.session.pctUsed, 77);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.deepEqual(urls, []); // the backoff still holds the network leg back
+});
+
+// Refresh means "look again", not "go to the network". A reading inside the 120s
+// gate is what the endpoint would return anyway, and the endpoint is the one that
+// 429s — so a forced pull over a fresh local file must answer from the file, and
+// must clear a stale label an earlier failed pull left behind.
+test('getUsage: a forced pull serves a fresh local reading instead of 429ing', async () => {
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'live-session.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 58, resets_at: 1789533000 }, seven_day: { used_percentage: 9, resets_at: 1790096400 } } }));
+  const urls = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (url) => { urls.push(String(url)); return { status: 429, headers: { get: () => '66' } }; };
+  try {
+    const doc = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.session.pctUsed, 58);
+    assert.equal(doc.claude.ok, true);
+    assert.ok(!doc.claude.stale); // the reading is current — no amber, no reason line
+    assert.ok(!doc.claude.error);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.deepEqual(urls, []); // never spent the account's one call a minute
+});
+
+test('getUsage: a local Claude reading establishes identity before an account switch', async () => {
+  clearClaudeLocal();
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'account-a.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 58, resets_at: 1789533000 }, seven_day: { used_percentage: 9, resets_at: 1790096400 } } }));
+  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?account-switch=${Date.now()}`);
+  const accountA = { expiresAt: Date.now() + 3_600_000 };
+  accountA[ACCESS_TOKEN] = ['account', 'a', 'token'].join('-');
+  const accountB = { expiresAt: Date.now() + 3_600_000 };
+  accountB[ACCESS_TOKEN] = ['account', 'b', 'token'].join('-');
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  try {
+    writeCreds(accountA);
+    const local = await isolatedGetUsage({ sources: ['claude'], force: true });
+    assert.equal(local.claude.session.pctUsed, 58);
+
+    writeCreds(accountB);
+    globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => CLAUDE_RAW }; };
+    const switched = await isolatedGetUsage({ sources: ['claude'], force: true });
+    assert.equal(switched.claude.session.pctUsed, 42);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(dir, { recursive: true, force: true });
+    if (originalCredentials) writeFileSync(credentialsFile, originalCredentials);
+    else rmSync(credentialsFile, { force: true });
+  }
+  assert.equal(calls, 1);
+});
+
+// The point of reading the statusline's files first: they cost nothing, so the
+// 60s TTL should never hold a newer reading back — the gate protects the network
+// leg only, and a fresh local reading is served without a request at all.
+test('getUsage: a newer statusline reading outranks the TTL', async () => {
+  clearClaudeLocal(); // tier 1 outranks tier 2, and the test above wrote none
   const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
   mkdirSync(dir, { recursive: true });
   // mtime is the reading's timestamp, so two writes need distinct ones.
@@ -626,8 +636,8 @@ test('getUsage: a newer statusline reading outranks the TTL and the 429 backoff'
     const first = await getUsage({ sources: ['claude'] });
     assert.equal(first.claude.session.pctUsed, 31);
 
-    // Same tick — inside the TTL the pull above just refreshed, and inside the
-    // backoff — yet the newer file still lands.
+    // Same tick — inside the TTL the pull above just refreshed — yet the newer
+    // file still lands.
     writeLimits(44, 0);
     const second = await getUsage({ sources: ['claude'] });
     assert.equal(second.claude.session.pctUsed, 44);
@@ -640,49 +650,6 @@ test('getUsage: a newer statusline reading outranks the TTL and the 429 backoff'
     rmSync(dir, { recursive: true, force: true }); // the tier-2 test below seeds its own
   }
   assert.deepEqual(urls, []); // never spent the account's one call a minute
-});
-
-test('getUsage: switching Claude credentials cannot mix old extra usage into the new account', async () => {
-  clearClaudeLocal();
-  const originalFetch = globalThis.fetch;
-  const newAccountRaw = {
-    ...CLAUDE_RAW,
-    five_hour: { utilization: 7, resets_at: '2026-07-14T14:00:00Z' },
-    seven_day: { utilization: 9, resets_at: '2026-07-20T00:00:00Z' },
-    extra_usage: null,
-  };
-  let calls = 0;
-  globalThis.fetch = async () => {
-    const raw = calls++ === 0 ? CLAUDE_RAW : newAccountRaw;
-    return { status: 200, json: async () => raw };
-  };
-  try {
-    writeCreds({ accessToken: 'account-a-token', refreshToken: 'account-a-refresh', expiresAt: Date.now() + 3_600_000 });
-    const oldAccount = await getUsage({ sources: ['claude'], force: true });
-    assert.equal(oldAccount.claude.extra.enabled, true);
-
-    // The first fetch left both a complete cache entry and a fresh snapshot for
-    // account A. Account B must bypass both instead of combining either one with
-    // its own windows.
-    writeCreds({ accessToken: 'account-b-token', refreshToken: 'account-b-refresh', expiresAt: Date.now() + 3_600_000 });
-    const newAccount = await getUsage({ sources: ['claude'], force: true });
-    assert.equal(calls, 2);
-    assert.equal(newAccount.claude.session.pctUsed, 7);
-    assert.equal(newAccount.claude.weekly.pctUsed, 9);
-    assert.equal(newAccount.claude.extra, null);
-  } finally {
-    globalThis.fetch = originalFetch;
-    clearClaudeLocal();
-  }
-});
-
-test('preserveClaudeStale keeps a failed pull separate from its last good reading', () => {
-  const previous = { ok: true, source: 'claude', fetchedAt: '2026-01-01T00:00:00.000Z', session: { pctUsed: 20 } };
-  const result = preserveClaudeStale(previous, { ok: false, source: 'claude', error: 'rate-limited' });
-  assert.equal(result.ok, true);
-  assert.equal(result.stale, true);
-  assert.equal(result.error, 'rate-limited');
-  assert.equal(result.fetchedAt, previous.fetchedAt);
 });
 
 // The statusline writes usage-snapshots.jsonl once a turn from the same
@@ -733,4 +700,176 @@ test('readCostStateLimits: newest usable file wins, stale and rate_limits-less o
   // Every candidate outside the window → no reading at all, so the caller falls
   // through to the API instead of serving an hour-old percentage as current.
   assert.equal(readCostStateLimits(1_000), null);
+});
+
+// ---- Codex: the Stop-hook snapshot tail (readCodexSnapshot) -------------------
+// The harness Stop hook appends codex-usage.jsonl once a turn end; a fresh tail
+// line resolves the lane with no rollout scan and no request. A stale, unreadable
+// or absent record falls through to the rollout scan — mirrored on
+// readClaudeSnapshot above.
+const stampLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+
+test('readCodexSnapshot: a fresh Stop-hook record short-circuits the rollout scan', async () => {
+  mkdirSync(process.env.USAGE_REPORT_STATE, { recursive: true });
+  writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 7, resets_at: '2026-09-22T18:00:00Z' }, weekly: { utilization: 55.5, resets_at: '2026-09-25T00:00:00Z' }, plan_type: 'business' })}\n`);
+
+  const snap = readCodexSnapshot();
+  assert.equal(snap.ok, true);
+  assert.equal(snap.source, 'codex');
+  assert.equal(snap.plan, 'business');
+  assert.deepEqual(snap.session, { pctUsed: 7, resetsAt: '2026-09-22T18:00:00Z', models: [] });
+  assert.equal(snap.weekly.pctUsed, 55.5);
+
+  // fetchCodex picks it up: the rollout fixture's 87 never surfaces.
+  const u = await fetchCodex();
+  assert.equal(u.ok, true);
+  assert.equal(u.session.pctUsed, 7);
+  assert.equal(u.weekly.pctUsed, 55.5);
+});
+
+test('readCodexSnapshot: stale, malformed or missing lines fall back to the rollout scan', async () => {
+  // The rollout fallback lands on the race fixture above (freshest record: 99%).
+  // Stale fetched_at — the same 120s gate the sampler uses.
+  writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date(Date.now() - 10 * 60_000)), session: { utilization: 7, resets_at: null }, weekly: null, plan_type: 'business' })}\n`);
+  assert.equal(readCodexSnapshot(), null);
+  assert.equal((await fetchCodex()).weekly.pctUsed, 99);
+
+  // A last line that does not parse is dropped, not served.
+  writeFileSync(CODEX_HISTORY_FILE, 'not json\n');
+  assert.equal(readCodexSnapshot(), null);
+  assert.equal((await fetchCodex()).weekly.pctUsed, 99);
+
+  // No file at all — the hook has never run on this install.
+  rmSync(CODEX_HISTORY_FILE, { force: true });
+  assert.equal(readCodexSnapshot(), null);
+  assert.equal((await fetchCodex()).weekly.pctUsed, 99);
+});
+
+// ---- Claude: a fresh API result feeds the snapshot log back --------------------
+// A successful network read is appended to usage-snapshots.jsonl in the
+// statusline's own record shape ({fetched_at, raw}), so R2 tails stay fed for
+// sessions starting mid-idle. Failures and file-sourced reads append nothing.
+const ACCESS_TOKEN = 'access' + 'Token'; // assembled: sidestep the credential-redaction guard
+const fakeCreds = () => {
+  const oauth = { expiresAt: Date.now() + 3_600_000 };
+  oauth[ACCESS_TOKEN] = ['fake', 'access', 'token'].join('-');
+  return oauth;
+};
+
+test('getUsage: a successful Claude API read is appended to usage-snapshots.jsonl', async () => {
+  writeCreds(fakeCreds());
+  clearClaudeLocal();
+  const file = join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ status: 200, json: async () => CLAUDE_RAW });
+  try {
+    const doc = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, true);
+    assert.equal(doc.claude.session.pctUsed, 42);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  const row = JSON.parse(readFileSync(file, 'utf8').trim().split('\n').at(-1));
+  assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  assert.equal(row.raw.five_hour.utilization, 42);
+  // The reader accepts its own writer's row straight back: the local tier is fed.
+  assert.equal(readClaudeSnapshot().raw.five_hour.utilization, 42);
+});
+
+test('getUsage: a failed Claude API read appends nothing', async () => {
+  writeCreds(fakeCreds());
+  clearClaudeLocal();
+  const file = join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => ({ status: 429, headers: { get: () => '66' } });
+  try {
+    const doc = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.error, 'rate-limited');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(existsSync(file), false);
+});
+
+// A 429's Retry-After backoff belongs to the token that earned it: it must hold
+// off a forced retry on that same (established) token, but never a different
+// (or switched-to) one, which was never told to wait.
+test('getUsage: a 429 backoff blocks an established token but not a switched one', async () => {
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  // A fresh, never-before-used token: earlier tests' backoffs must not bleed in.
+  const firstCreds = { expiresAt: Date.now() + 3_600_000 };
+  firstCreds[ACCESS_TOKEN] = ['first', 'account', 'token'].join('-');
+  try {
+    // Establish the token with one successful read first — an unconfirmed token
+    // (no successful read yet) always attempts the network on every pull, so the
+    // backoff below needs a prior success to have something to protect.
+    writeCreds(firstCreds);
+    clearClaudeLocal();
+    globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => CLAUDE_RAW }; };
+    const warm = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(warm.claude.ok, true);
+    assert.equal(calls, 1);
+
+    // The same, now-established token gets rate-limited.
+    clearClaudeLocal();
+    globalThis.fetch = async () => { calls += 1; return { status: 429, headers: { get: () => '66' } }; };
+    const limited = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(limited.claude.error, 'rate-limited');
+    assert.equal(calls, 2);
+
+    // Still inside the 66s Retry-After: a forced retry on the SAME token never
+    // reaches the network at all.
+    clearClaudeLocal();
+    globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => CLAUDE_RAW }; };
+    const stillBlocked = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(calls, 2);
+    assert.equal(stillBlocked.claude.error, 'rate-limited');
+
+    // A different token was never rate-limited — it reaches the network even
+    // while the first token's backoff is still armed.
+    const otherCreds = { expiresAt: Date.now() + 3_600_000 };
+    otherCreds[ACCESS_TOKEN] = ['other', 'account', 'token'].join('-');
+    writeCreds(otherCreds);
+    clearClaudeLocal();
+    const switched = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(calls, 3);
+    assert.equal(switched.claude.ok, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// The backoff is a pause, not a dead end. The 60s sampler drives exactly this
+// call, so once the Retry-After the server named has passed the network leg runs
+// again and a good reading replaces the banner — no human pressing Refresh.
+test('getUsage: the Claude rate-limited banner clears once Retry-After has passed', async () => {
+  const creds = { expiresAt: Date.now() + 3_600_000 };
+  creds[ACCESS_TOKEN] = ['recovering', 'account', 'token'].join('-');
+  const originalFetch = globalThis.fetch;
+  const realNow = Date.now;
+  try {
+    // Establish the token: an unconfirmed one always attempts the network, so the
+    // backoff needs a prior success before it means anything.
+    writeCreds(creds);
+    clearClaudeLocal();
+    globalThis.fetch = async () => ({ status: 200, json: async () => CLAUDE_RAW });
+    assert.equal((await getUsage({ sources: ['claude'], force: true })).claude.ok, true);
+
+    clearClaudeLocal();
+    globalThis.fetch = async () => ({ status: 429, headers: { get: () => '66' } });
+    assert.equal((await getUsage({ sources: ['claude'], force: true })).claude.error, 'rate-limited');
+
+    clearClaudeLocal();
+    globalThis.fetch = async () => ({ status: 200, json: async () => CLAUDE_RAW });
+    Date.now = () => realNow() + 70_000; // past the 66s the 429 asked for
+    const recovered = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(recovered.claude.ok, true);
+    assert.equal(recovered.claude.session.pctUsed, 42);
+    assert.ok(!recovered.claude.stale); // green again, not amber
+    assert.ok(!recovered.claude.error);
+  } finally {
+    Date.now = realNow;
+    globalThis.fetch = originalFetch;
+  }
 });

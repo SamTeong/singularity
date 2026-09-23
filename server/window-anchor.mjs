@@ -31,7 +31,7 @@ const TELEMETRY_MAX_RECORDS = 1000;
 // Cheapest route per provider (model-store SEED aliases). The ids go through
 // the model store, never hardcoded routing: an alias that moved to another
 // group disables that provider's poke rather than misrouting it.
-const CHEAP_MODELS = { claude: 'haiku', codex: 'gpt-5.6-luna' };
+const CHEAP_MODELS = { claude: 'haiku', codex: 'gpt-6-luna' };
 // Anchor runs need no repository context or tools. Keep the authenticated CLI
 // plumbing while stripping customizations/configuration and reasoning tokens.
 const EFFORT_ARGS = {

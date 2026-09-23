@@ -133,7 +133,7 @@ test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flag
   assert.equal(codex.file, CODEX_BIN);
   assert.equal(codex.args[0], 'exec');
   assert.deepEqual(codex.args.slice(1), [
-    '-m', 'gpt-5.6-luna',
+    '-m', 'gpt-6-luna',
     '-s', 'read-only',
     '--skip-git-repo-check',
     '--ephemeral',
