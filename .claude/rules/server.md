@@ -10,7 +10,7 @@ paths:
 - `state/` is durable: `agents.json`, `tasks.json`, `crons.json`, `background.json`, `models.json`, `ollama.json`, `projects.json` (Projects view repo list), plus picker roots (`config-roots`, `hook-roots`, `memory-root`, `rules-roots`, `sessions-root`, `skills-roots` (+ legacy `skills-root`), `wiki-root` `.json`). `cache/` is disposable (`pw-ollama-profile/`, `projects-summary/`).
 - `.worktrees/` + `.tickets/<id>/` live at `TRUSTED_ROOT`, not `APP_DIR`. Claude honors repo allow-rules and hooks only inside the trusted root; external paths trigger Task permission prompts.
 - `migrate-state.mjs` (imported by `index.mjs`) moves the old flat layout into `state/` + `cache/` once.
-- External and read-only: `~/.claude/projects` (transcripts), `~/.claude/.credentials.json`, `~/.agents` (spend, skill-scopes), `~/wiki`.
+- External and read-only: `~/.claude/projects` (transcripts), `~/.claude/.credentials.json`, `~/.agents` (spend, skill-scopes), `~/wiki`. One exception: `model-prices.mjs` writes the usage-report skill's `pricing.json` (its only rate source, Settings ▸ Models ▸ Prices).
 
 ## Models
 `state/models.json` (Settings ▸ Models) drives picker suggestions, client spawn classification (`web/src/lib/models.js`), server spawn routing (`models.mjs` via `model-store.mjs`), and the History summariser (any enabled entry, any group). `model-store.mjs` seeds it from the shipped arrays; Restore defaults re-merges missing shipped ids. History has two tiers: the configured summariser, else deterministic bullets. There is no implicit fallback LLM.

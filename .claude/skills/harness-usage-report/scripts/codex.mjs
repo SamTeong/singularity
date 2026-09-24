@@ -294,13 +294,18 @@ function _last_by_epoch(list) {
   return best;
 }
 
-// stats.mjs's price table falls through unknown models to opus — that would
-// bill a Codex session as Anthropic. Warn once per distinct offending model.
-function _maybe_warn_unknown_model(model, priceKey, warned) {
+// stats.mjs's price table falls unmatched models through to pricing.json's
+// default_key (or null, unpriced) — either way that's the wrong rate for a
+// genuine Codex model. Warn once per distinct offending model. Compares
+// against the resolved default/null rather than a hardcoded "opus": default_key
+// is user-configurable now, so there's no fixed fallback name to check against.
+function _maybe_warn_unknown_model(model, priceKey, warned, defaultKey) {
   if (!model || warned.has(model)) return;
-  if (UNKNOWN_MODEL_RE.test(model) && priceKey(model) === "opus") {
+  if (!UNKNOWN_MODEL_RE.test(model)) return;
+  const key = priceKey(model);
+  if (key === null || key === defaultKey) {
     warned.add(model);
-    console.error(`codex.mjs: unrecognized Codex model "${model}" falls through to opus pricing`);
+    console.error(`codex.mjs: unrecognized Codex model "${model}" falls through to ${key === null ? "no" : "default"} pricing`);
   }
 }
 
@@ -347,7 +352,7 @@ function _append_usage_jsonl(usagePath, readings, localFmt) {
 
 export function codexIngest(deps = {}) {
   const codexHome = deps.codexHome || _default_codex_home();
-  const { stateDir, localFmt, epochFromIso, msgCostTiered, priceKey } = deps;
+  const { stateDir, localFmt, epochFromIso, msgCostTiered, priceKey, defaultKey } = deps;
   const cachePath = path.join(stateDir, "codex-cache.json");
   const usagePath = path.join(stateDir, "codex-usage.jsonl");
   const cache = _load_cache(cachePath);
@@ -409,7 +414,7 @@ export function codexIngest(deps = {}) {
     const latestNonReview = _last_by_epoch(acc.turnContexts.filter((tc) => tc.model !== AUTO_REVIEW_MODEL));
     const latestAny = _last_by_epoch(acc.turnContexts);
     const lastModel = (latestNonReview || latestAny || {}).model || "";
-    _maybe_warn_unknown_model(lastModel, priceKey, warned);
+    _maybe_warn_unknown_model(lastModel, priceKey, warned, defaultKey);
 
     // codex-auto-review's usage is real spend but not the session's own work
     // (see AUTO_REVIEW_MODEL above) — split its tokens/cost into their own
@@ -425,9 +430,9 @@ export function codexIngest(deps = {}) {
         inputSum += r.i; outputSum += r.o; crSum += r.cr; ccSum += r.cc;
       }
       if (model) {
-        _maybe_warn_unknown_model(model, priceKey, warned);
+        _maybe_warn_unknown_model(model, priceKey, warned, defaultKey);
         const cost = msgCostTiered(model, r.i, r.o, r.cr, r.cc);
-        if (isAutoReview) arCost += cost; else estCost += cost;
+        if (cost !== null) { if (isAutoReview) arCost += cost; else estCost += cost; }
       }
     }
 
@@ -614,6 +619,7 @@ function _selftest() {
     epochFromIso: _stub_epoch_from_iso,
     msgCostTiered: _stub_msg_cost_tiered,
     priceKey: _stub_price_key,
+    defaultKey: "opus",
   };
 
   const result1 = codexIngest(deps);

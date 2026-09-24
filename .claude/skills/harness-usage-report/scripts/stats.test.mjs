@@ -3,16 +3,81 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { _has_newer_input, _load_usage_snapshots, _msg_cost_tiered } from "./stats.mjs";
 import { _render_style } from "./render.mjs";
 
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
+
+// stats.mjs reads USAGE_REPORT_STATE (and therefore pricing.json) once at
+// import — point it at a fixture dir *before* importing, so these tests never
+// touch the user's real state.
+const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-usage-report-state-"));
+process.env.USAGE_REPORT_STATE = fixtureDir;
+fs.writeFileSync(path.join(fixtureDir, "pricing.json"), JSON.stringify({
+  base: {
+    "gpt-6-sol": [2.0, 10.0, 0.20, 2.50],
+    "gpt-6-luna": [0.10, 0.50, 0.01, 0.125],
+    "gpt-5.6-sol": [4.0, 20.0, 0.40, 5.0],
+    opus: [5.0, 25.0, 0.5, 6.25],
+    sonnet: [3.0, 15.0, 0.3, 3.75],
+  },
+  above_200k: {
+    "gpt-6-sol": [4.0, 15.0, 0.40, 5.0],
+    "gpt-6-luna": [0.20, 0.75, 0.02, 0.25],
+    "gpt-5.6-sol": [8.0, 30.0, 0.80, 10.0],
+  },
+  long_context_threshold: 200000,
+  default_key: "opus",
+}, null, 2));
+
+const { _has_newer_input, _load_usage_snapshots, _msg_cost_tiered, _price_key } = await import("./stats.mjs");
 
 assert.equal(_msg_cost_tiered("gpt-6-sol", 272000, 0, 0, 0), 0.544);
 assert.equal(_msg_cost_tiered("gpt-6-sol", 272001, 0, 0, 0), 1.088004);
 assert.equal(_msg_cost_tiered("gpt-6-luna", 272000, 0, 0, 0), 0.0272);
 assert.equal(_msg_cost_tiered("gpt-6-luna", 272001, 0, 0, 0), 0.0544002);
 assert.equal(_msg_cost_tiered("gpt-5.6-sol", 200001, 0, 0, 0), 1.600008);
+// default_key fallback: an unrecognized model resolves to pricing.json's default_key.
+assert.equal(_price_key("some-unrecognized-model"), "opus");
+console.log("ok");
+
+// No pricing.json at all => every model unpriced (null key, null cost), never a throw.
+{
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-usage-report-empty-"));
+  process.env.USAGE_REPORT_STATE = emptyDir;
+  const mod = await import(`./stats.mjs?case=no-pricing-file`);
+  assert.equal(mod._price_key("claude-opus-5-5"), null, "no pricing.json + no default_key => null");
+  assert.equal(mod._msg_cost_tiered("claude-opus-5-5", 100, 100, 0, 0), null, "no pricing.json => est cost null, not a throw");
+  fs.rmSync(emptyDir, { recursive: true, force: true });
+  console.log("ok");
+}
+
+// default_key fallback when it names a real base entry.
+{
+  const dkDir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-usage-report-defaultkey-"));
+  fs.writeFileSync(path.join(dkDir, "pricing.json"), JSON.stringify({
+    base: { sonnet: [3.0, 15.0, 0.3, 3.75] },
+    default_key: "sonnet",
+  }));
+  process.env.USAGE_REPORT_STATE = dkDir;
+  const mod = await import(`./stats.mjs?case=default-key-fallback`);
+  assert.equal(mod._price_key("totally-unrecognized-model-id"), "sonnet");
+  fs.rmSync(dkDir, { recursive: true, force: true });
+  console.log("ok");
+}
+
+// base key order IS match order: a less-specific key listed first shadows a
+// more-specific one listed after it (order dependency is load-bearing, not a bug).
+{
+  const orderDir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-usage-report-order-"));
+  fs.writeFileSync(path.join(orderDir, "pricing.json"), JSON.stringify({
+    base: { opus: [1, 1, 1, 1], "opus-5-5": [2, 2, 2, 2] },
+  }));
+  process.env.USAGE_REPORT_STATE = orderDir;
+  const mod = await import(`./stats.mjs?case=order`);
+  assert.equal(mod._price_key("claude-opus-5-5"), "opus", "bare 'opus' listed first wins the ordered scan");
+  fs.rmSync(orderDir, { recursive: true, force: true });
+  console.log("ok");
+}
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-usage-report-"));
 try {
@@ -39,6 +104,7 @@ try {
   console.log("ok");
 } finally {
   fs.rmSync(dir, { recursive: true, force: true });
+  fs.rmSync(fixtureDir, { recursive: true, force: true });
 }
 
 // app.js is the shared chart layer for every skin — it must resolve colour

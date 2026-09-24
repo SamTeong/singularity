@@ -33,5 +33,20 @@ export const db = {
   // is fixture data, not UI state: it stands in for the mtime of the canned
   // report the mock-assets Vite plugin serves, and `POST /usagereport/refresh`
   // advances it so UsageReportView remounts its iframe.
-  ui: { usageReportAt: T0 },
+  ui: {
+    usageReportAt: T0,
+    // pricing.json stand-in for the harness-usage-report skill (Settings >
+    // Models > Prices) — see server/model-prices.mjs / mock/routes/core.js.
+    modelPrices: {
+      base: {
+        'opus-5-5': [4.0, 20.0, 0.20, 5.0],
+        opus: [5.0, 25.0, 0.5, 6.25],
+        sonnet: [3.0, 15.0, 0.3, 3.75],
+        haiku: [1.0, 5.0, 0.1, 1.25],
+      },
+      above_200k: { 'gpt-6-sol': [4.0, 15.0, 0.4, 5.0] },
+      long_context_threshold: 200000,
+      default_key: 'opus',
+    },
+  },
 };
