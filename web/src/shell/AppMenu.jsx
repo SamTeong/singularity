@@ -19,6 +19,7 @@ import CloudSyncIcon from '@mui/icons-material/CloudSync';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import PaletteIcon from '@mui/icons-material/Palette';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import FolderCopyIcon from '@mui/icons-material/FolderCopy';
 import KeyboardIcon from '@mui/icons-material/Keyboard';
 import { getTokens, getRoles } from '@/theme/contract.js';
 import { chipBg, stroke2, surface2, brandOrInk, focusRing } from '@/shell/shellStyles.js';
@@ -40,6 +41,7 @@ export const NAV_ITEMS = [
   { v: 'transcripts', icon: <HistoryIcon />, label: 'Transcripts', jp: '記録' },
   { v: 'history', icon: <TimelineIcon />, label: 'History', jp: '履歴' },
   { v: 'wiki', icon: <MenuBookIcon />, label: 'Wiki', jp: '文庫' },
+  { v: 'projects', icon: <FolderCopyIcon />, label: 'Projects', jp: '案件' },
   { v: 'appearance', icon: <PaletteIcon />, label: 'Appearance', jp: '外観' },
   { v: 'status', icon: <CloudSyncIcon />, label: 'Status', jp: '状態' },
   { v: 'settings', icon: <KeyboardIcon />, label: 'Settings', jp: '操作' },

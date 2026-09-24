@@ -49,6 +49,7 @@ const MemoryPanel = lazy(() => import('@/features/memory/MemoryPanel.jsx'));
 const SessionHistory = lazy(() => import('@/features/transcripts/SessionHistory.jsx'));
 const HistoryView = lazy(() => import('@/features/history/HistoryView.jsx'));
 const WikiPanel = lazy(() => import('@/features/wiki/WikiPanel.jsx'));
+const ProjectsView = lazy(() => import('@/features/projects/ProjectsView.jsx'));
 const SkillsPanel = lazy(() => import('@/features/skills/SkillsPanel.jsx'));
 const ExplorerPanel = lazy(() => import('@/features/explorer/ExplorerPanel.jsx'));
 const UsageView = lazy(() => import('@/features/usage/UsageView.jsx'));
@@ -466,6 +467,7 @@ export default function AppShell() {
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
             {view === 'history' && <HistoryView onOpenSession={openHistorySession} onToast={setToast} />}
+            {view === 'projects' && <ProjectsView />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} onSelectSkin={onSelectSkin} />}
             {view === 'status' && <StatusView />}
             {view === 'settings' && <SettingsView />}

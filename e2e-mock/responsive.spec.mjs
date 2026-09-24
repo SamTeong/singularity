@@ -1,6 +1,6 @@
 // Phase 8 B1: strict completion contract for the entire route catalogue, both
-// skins, across all five responsive projects (5 viewports x 15 routes x 2
-// skins = 150 cases). Every case must mount its own route-specific content
+// skins, across all five responsive projects (5 viewports x 16 routes x 2
+// skins = 160 cases). Every case must mount its own route-specific content
 // (not just an arbitrary root child) and carry zero page-level horizontal
 // overflow — no baseline crash exception remains (Phase 5 fixed the one that
 // existed, the Phosphor Settings crash) and no case counts as passing on an
@@ -24,7 +24,7 @@ const shellFile = (name) => fileURLToPath(new URL(`../web/src/shell/${name}`, im
 const idsFrom = (name) => [...readFileSync(shellFile(name), 'utf8').matchAll(/\{ v: '([^']+)'/g)].map(([, id]) => id);
 const ROUTES = [...new Set([...idsFrom('Sidebar.jsx'), ...idsFrom('AppMenu.jsx')])];
 
-expect(ROUTES).toHaveLength(15);
+expect(ROUTES).toHaveLength(16);
 
 for (const skin of RESPONSIVE_SKINS) {
   for (const route of ROUTES) {
