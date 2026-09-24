@@ -64,12 +64,12 @@ test('seeded cards render with status chips', async ({ page }) => {
   await expect(noUpstream).toContainText('untracked 2');
 });
 
-test('cards show committed/uncommitted summary bullets, and a clean tree reads "Working tree clean"', async ({ page }) => {
+test('cards show committed/uncommitted summary bullets, and a clean tree has no Uncommitted section', async ({ page }) => {
   await gotoView(page, 'Projects');
 
   const clean = cardFor(page, PROJECT_PATHS.clean);
   await expect(clean).toContainText('Tidied up the release notes wording');
-  await expect(clean).toContainText('Working tree clean');
+  await expect(clean).not.toContainText('Uncommitted');
   await expect(clean).toContainText('summary: opus');
 
   const dirty = cardFor(page, PROJECT_PATHS.dirty);
@@ -79,7 +79,8 @@ test('cards show committed/uncommitted summary bullets, and a clean tree reads "
   const noUpstream = cardFor(page, PROJECT_PATHS.noUpstream);
   await expect(noUpstream).toContainText('Recent commits');
   await expect(noUpstream).toContainText('Local experiment');
-  await expect(noUpstream).toContainText('summary: git');
+  // The deterministic fallback shows no source line.
+  await expect(noUpstream).not.toContainText('summary:');
 });
 
 test('add via picker: a new path adds a card, the same path does not duplicate', async ({ page }) => {

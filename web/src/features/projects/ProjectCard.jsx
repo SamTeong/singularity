@@ -141,12 +141,8 @@ export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, o
               {!!summary.committed?.length && (
                 <SummarySection title={summary.scope === 'unpushed' ? 'Unpushed' : 'Recent commits'} bullets={summary.committed} />
               )}
-              {summary.uncommitted?.length ? (
-                <SummarySection title="Uncommitted" bullets={summary.uncommitted} />
-              ) : (
-                <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Working tree clean</Typography>
-              )}
-              <Typography sx={{ fontSize: 11, color: 'text.disabled' }}>summary: {summary.source === 'llm' ? summary.model : 'git'}</Typography>
+              {!!summary.uncommitted?.length && <SummarySection title="Uncommitted" bullets={summary.uncommitted} />}
+              {summary.source === 'llm' && <Typography sx={{ fontSize: 11, color: 'text.disabled' }}>summary: {summary.model}</Typography>}
             </Stack>
           )}
         </Stack>
