@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readdirSync, chmodSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readdirSync, chmodSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -26,7 +26,9 @@ function setSummariser(id) { setModels({ ...getModels(), summariserModel: id });
 const PROJECTS_FILE = join(process.env.SINGULARITY_HOME, 'state', 'projects.json');
 
 function initRepo() {
-  const repo = mkdtempSync(join(tmpdir(), 'sing-proj-'));
+  // Long-form path: a Windows runner's tmpdir() is 8.3 (RUNNER~1), but add()
+  // stores git's toplevel, which git reports in long form.
+  const repo = realpathSync.native(mkdtempSync(join(tmpdir(), 'sing-proj-')));
   execFileSync('git', ['-c', 'init.defaultBranch=main', 'init', '-q', repo]);
   execFileSync('git', ['-C', repo, 'config', 'user.email', 'x@x.com']);
   execFileSync('git', ['-C', repo, 'config', 'user.name', 'x']);
