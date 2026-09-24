@@ -129,7 +129,7 @@ export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, o
             <CountChip label="stash" n={status.stash} />
           </Stack>
           {status.lastCommit && (
-            <Typography sx={{ fontSize: 12, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <Typography sx={{ fontSize: 12, color: 'text.secondary', overflowWrap: 'anywhere' }}>
               {status.lastCommit.subject} · {fmtRelative(status.lastCommit.date)}
             </Typography>
           )}
