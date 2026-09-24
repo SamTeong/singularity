@@ -98,6 +98,10 @@ test('connectOllamaUsage: resumes history collection after authentication recove
     });
   } finally {
     Date.now = realNow;
+    // Browser mode left behind makes every later getUsage (and the sampler tick
+    // connect started) run a real headless scrape — slow on CI, and a sign-in
+    // redirect there pauses history mid-suite.
+    rmSync(join(process.env.SINGULARITY_HOME, 'state', 'ollama.json'), { force: true });
     rmSync(join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl'), { force: true });
     rmSync(join(process.env.USAGE_REPORT_STATE, 'codex-usage.jsonl'), { force: true });
   }
