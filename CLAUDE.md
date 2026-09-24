@@ -40,7 +40,7 @@ Auto-loaded only when you touch matching files (`paths:` frontmatter):
 - `.claude/rules/mock-and-e2e.md`: mock backend, `e2e/`, `e2e-mock/`
 
 Not auto-loaded. Read when the trigger applies:
-- `.claude/rules-reference/worktree-workflow.md`: before branch-scoped or multi-session feature work (worktree under `.worktrees/`, like Tasks do; its `.env` needs its own `DAEMON_PORT`/`VITE_PORT`/`E2E_PORT`/`E2E_MOCK_PORT`)
+- `.claude/rules-reference/worktree-workflow.md`: before branch-scoped or multi-session feature work (worktree under `.worktrees/`, like Tasks do; its `.env` needs its own `SINGULARITY_HOME` + `DAEMON_PORT`/`VITE_PORT`/`E2E_PORT`/`E2E_MOCK_PORT`)
 - `.claude/rules-reference/setup-and-layout.md`: first-time setup, env vars, repo layout, runtime probes
 
 Surgical edits and goal-driven testing are covered in `~/.claude/CLAUDE.md`.

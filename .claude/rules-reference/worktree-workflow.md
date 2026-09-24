@@ -20,12 +20,13 @@ Do feature work in a worktree under `.worktrees/` (gitignored, `.gitignore:10`),
 
 Then write the worktree `.env` (next section) before running anything.
 
-## Worktree `.env`: avoid port clashes
+## Worktree `.env`: avoid port and state clashes
 
-The main checkout's dev app (`pnpm --dir C:/git/singularity dev`) owns daemon `:4317` and Vite `:5317`. A worktree's `.env` is a copy of main's with the port keys changed. Every dev and test port is read from `.env`, so no command-line overrides are needed:
+The main checkout's dev app (`pnpm --dir C:/git/singularity dev`) owns daemon `:4317`, Vite `:5317` and `SINGULARITY_HOME=~/.singularity`. A worktree's `.env` is a copy of main's with these keys changed. Every dev and test port is read from `.env`, so no command-line overrides are needed:
 
 | Key | Main (default) | Worktree (+10 per extra worktree) | Used by |
 |---|---|---|---|
+| `SINGULARITY_HOME` | `~/.singularity` | `~/.singularity-wt-<slug>` | daemon state (must differ, see below) |
 | `DAEMON_PORT` | 4317 | 4327 | daemon; Vite dev proxy target |
 | `VITE_PORT` | 5317 | 5327 | `dev` and `dev-mock` (`strictPort`, so a clash fails at startup) |
 | `E2E_PORT` | 4319 | 4329 | `test:e2e` sandbox daemon + its `e2e/.tmp-<port>` dir |
@@ -33,14 +34,17 @@ The main checkout's dev app (`pnpm --dir C:/git/singularity dev`) owns daemon `:
 
 - Both daemon and Vite ports feed the daemon's origin allowlist (`SELF_HOSTS`, `server/index.mjs:186`), so browser requests keep working.
 - Mock and e2e tooling read only their port key from `.env` (`scripts/env-port.mjs`: process env, then `.env`, then the default). They stay isolated from the rest of the machine config.
-- `SINGULARITY_HOME` stays the same as main's (user decision, 2026-09-24). Caveat: both daemons persist `agents.json`/`tasks.json`/`background.json` from their own in-memory registry, so the last one to write wins. If crons are enabled, both daemons would fire them. When either matters, point the worktree at its own home.
+- **Every worktree gets its own `SINGULARITY_HOME`.** Each daemon persists `agents.json`/`tasks.json`/`background.json` from its own in-memory registry, so with a shared home the last writer wins and the other daemon's rows vanish. Each daemon would also fire `crons.json`. Seed the new home with only `state/models.json` + `state/*-root*.json`; never copy agents, tasks, crons or background.
 - `SING_TRUSTED_ROOT` stays unset, so it defaults to the worktree itself, and Tasks created from the worktree's UI nest under `<worktree>/.worktrees/`.
 
 ```powershell
-$wt = '/c//git/singularity/.worktrees/<slug>'
-(Get-Content /c//git/singularity/.env) -replace '^DAEMON_PORT=.*','DAEMON_PORT=4327' -replace '^VITE_PORT=.*','VITE_PORT=5327' |
-  Where-Object { $_ -notmatch '^E2E_(MOCK_)?PORT=' } | Set-Content "$wt.env"
-Add-Content "$wt.env" 'E2E_PORT=4329', 'E2E_MOCK_PORT=4183'
+$slug = '<slug>'; $wt = "C:\git\singularity\.worktrees\$slug"; $h = "$HOME\.singularity-wt-$slug"
+(Get-Content C:\git\singularity\.env) -replace '^SINGULARITY_HOME=.*',"SINGULARITY_HOME=$h" `
+  -replace '^DAEMON_PORT=.*','DAEMON_PORT=4327' -replace '^VITE_PORT=.*','VITE_PORT=5327' |
+  Where-Object { $_ -notmatch '^E2E_(MOCK_)?PORT=' } | Set-Content "$wt\.env"
+Add-Content "$wt\.env" 'E2E_PORT=4329', 'E2E_MOCK_PORT=4183'
+New-Item -ItemType Directory -Force "$h\state" | Out-Null
+Get-ChildItem "$HOME\.singularity\state" -File | Where-Object { $_.Name -eq 'models.json' -or $_.Name -like '*-root*.json' } | Copy-Item -Destination "$h\state"
 ```
 
 ## Running from a worktree
@@ -58,7 +62,7 @@ Add-Content "$wt.env" 'E2E_PORT=4329', 'E2E_MOCK_PORT=4183'
 - Use a `feat/`, `fix/` or `docs/` branch prefix, never `task/` (that prefix belongs to the Tasks board).
 - Keep the worktree inside `TRUSTED_ROOT`. Claude honors repo allow-rules and hooks only there; outside it, Task permission prompts fire.
 - Give subagents absolute worktree paths. Run git as `git -C <worktree>`.
-- Clean up: `git -C C:/git/singularity worktree remove .worktrees/<slug>`.
+- Clean up: `git -C C:/git/singularity worktree remove .worktrees/<slug>`, then delete `~/.singularity-wt-<slug>`.
 
 ## Not a skill
 
