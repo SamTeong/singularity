@@ -15,7 +15,7 @@ A mock handler must match the daemon's exact response shape: several routes retu
 
 ## e2e (real sandbox daemon)
 Details are in `e2e/README.md`; read it before editing specs. Gotchas that aren't obvious from it:
-- `e2e/serve.mjs` strips every `SING_*`/`DAEMON_PORT`/`CLAUDE_BIN`/… key from `process.env`, then boots an isolated daemon with a stub `CLAUDE_BIN`. `E2E_PORT=<n>` gives a parallel side-run its own sandbox.
+- `e2e/serve.mjs` strips every `SING_*`/`DAEMON_PORT`/`CLAUDE_BIN`/… key from `process.env`, then boots an isolated daemon with a stub `CLAUDE_BIN`. `E2E_PORT` (process env or `.env`, via `scripts/env-port.mjs`) gives a run its own port + sandbox dir; only a process-env `E2E_PORT` switches `playwright.config.mjs` into side-run reporting.
 - Playwright drives the pre-built `web/dist`. Rebuild before re-testing source changes, or the fix will look like it failed.
 - MUI `data-testid="<Name>Icon"` exists in DEV only. Reach icon-only buttons via their Tooltip `aria-label`.
 - `PERSISTENT_VIEWS` stay mounted with `display:none`. `getByRole` filters them out, but text/CSS queries need the `visible()` helper.

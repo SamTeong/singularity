@@ -4,6 +4,7 @@
 // import it without touching the sandbox.
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { envPort } from '../../scripts/env-port.mjs';
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -14,7 +15,7 @@ export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..
 // E2E_PORT gives a run its own port AND its own sandbox dir (serve.mjs wipes
 // TMP on boot, so two runs sharing one would clobber each other) — that's what
 // lets several spec files be developed in parallel.
-export const PORT = Number(process.env.E2E_PORT) || 4319;
+export const PORT = envPort('E2E_PORT', 4319);
 export const TOKEN = 'e2etoken';
 export const BASE_URL = `http://127.0.0.1:${PORT}`;
 
