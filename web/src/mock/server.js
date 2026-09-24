@@ -21,6 +21,7 @@ import { registerAutomation } from './routes/automation.js';
 import { registerFs } from './routes/fs.js';
 import { registerEditors } from './routes/editors.js';
 import { registerWiki } from './routes/wiki.js';
+import { registerProjects } from './routes/projects.js';
 import { registerTelemetry } from './routes/telemetry.js';
 
 export function makeServer() {
@@ -41,6 +42,7 @@ export function makeServer() {
       registerFs(this);
       registerEditors(this);
       registerWiki(this);
+      registerProjects(this);
       registerTelemetry(this);
     },
   });

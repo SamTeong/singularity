@@ -19,6 +19,7 @@ import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
+import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, has as hasProject } from './projects.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
 import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
@@ -764,6 +765,30 @@ app.get('/wiki/file', async (req, reply) => {
   const r = readWikiFile(req.query.path, req.query.root);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
+});
+
+// Projects: ordered list of git repo toplevels (STATE_DIR/projects.json),
+// each with an on-demand git status readout. Never runs `git fetch` —
+// ahead/behind are "as of last fetch".
+app.get('/projects', async () => ({ projects: await listProjects() }));
+app.post('/projects', async (req, reply) => {
+  const r = await addProject(req.body?.path);
+  if (!r.ok) reply.code(400);
+  return r;
+});
+app.delete('/projects', async (req) => removeProject(req.body?.path));
+app.put('/projects/order', async (req, reply) => {
+  const r = reorderProjects(req.body?.paths);
+  if (!r.ok) reply.code(400);
+  return r;
+});
+app.get('/projects/status', async (req, reply) => {
+  const p = req.query.path;
+  if (!p) return reply.code(400).send({ error: 'path required' });
+  if (!hasProject(p)) return reply.code(404).send({ error: 'not found' });
+  // Stored but no longer a repo on disk (list() prunes it on next load).
+  try { return await projectStatus(p); }
+  catch { return reply.code(404).send({ error: 'not found' }); }
 });
 
 // Skills viewer: tree of skill scopes → skills, read a skill's SKILL.md.
