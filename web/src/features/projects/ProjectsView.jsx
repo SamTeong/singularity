@@ -17,7 +17,9 @@ import { untildify, repoName } from '@/lib/paths.js';
 import ProjectCard from '@/features/projects/ProjectCard.jsx';
 import { useThemeSkin } from '@/theme/index.js';
 import { primaryBtn, PHOSPHOR_CONTROL_H } from '@/features/tasks/TasksBoard.jsx';
-import { SNACK_GLASS } from '@/shell/shellStyles.js';
+import { SNACK_GLASS, snackDrain, isDrainEnd } from '@/shell/shellStyles.js';
+
+const TOAST_DRAIN = snackDrain(10000);
 
 /**
  * Projects — tracked git repo toplevels, each showing its git status at a
@@ -36,15 +38,10 @@ export default function ProjectsView() {
   // deleted path and its pre-delete index so Undo can restore its slot.
   const [toasts, setToasts] = useState([]);
   const nextToastId = useRef(0);
-  const toastTimers = useRef({});
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
 
-  useEffect(() => () => { Object.values(toastTimers.current).forEach(clearTimeout); }, []);
-
   const dismissToast = (id) => {
-    clearTimeout(toastTimers.current[id]);
-    delete toastTimers.current[id];
     setToasts((ts) => ts.filter((t) => t.id !== id));
   };
 
@@ -72,7 +69,6 @@ export default function ProjectsView() {
         setProjects(d.projects);
         const id = ++nextToastId.current;
         setToasts((ts) => [...ts, { id, path, index }]);
-        toastTimers.current[id] = setTimeout(() => dismissToast(id), 10000);
       })
       .catch(() => {});
   };
@@ -174,7 +170,8 @@ export default function ProjectsView() {
           {toasts.map((toast) => (
             <SnackbarContent
               key={toast.id}
-              sx={SNACK_GLASS}
+              sx={[SNACK_GLASS, TOAST_DRAIN]}
+              onAnimationEnd={(e) => isDrainEnd(e) && dismissToast(toast.id)}
               message={`Removed ${repoName(toast.path)}`}
               action={<Button size="small" variant="contained" onClick={() => undoDelete(toast)}>Undo</Button>}
             />

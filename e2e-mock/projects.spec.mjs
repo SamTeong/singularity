@@ -130,6 +130,17 @@ test('delete shows an Undo toast that restores the card to its slot', async ({ p
   await expect.poll(() => cardOrder(page)).toEqual(before);
 });
 
+// The drain animation's end is the dismiss timer (no setTimeout) — prove it fires.
+test('Undo toast auto-dismisses when its drain animation ends', async ({ page }) => {
+  test.setTimeout(30000);
+  await gotoView(page, 'Projects');
+  await cardFor(page, PROJECT_PATHS.dirty).getByRole('button', { name: 'Remove project' }).click();
+  const toast = page.getByText(`Removed ${repoName(PROJECT_PATHS.dirty)}`);
+  await expect(toast).toBeVisible();
+  await page.mouse.move(0, 0); // hovering the toast pauses the drain
+  await expect(toast).toHaveCount(0, { timeout: 15000 });
+});
+
 test('deleting two cards stacks two Undo toasts at once', async ({ page }) => {
   await gotoView(page, 'Projects');
   await cardFor(page, PROJECT_PATHS.dirty).getByRole('button', { name: 'Remove project' }).click();

@@ -30,7 +30,7 @@ import SessionDock from '@/shell/SessionDock.jsx';
 import AppMenu, { NAV_ITEMS } from '@/shell/AppMenu.jsx';
 import PhosphorFrame from '@/shell/PhosphorFrame.jsx';
 import PhosphorMasthead from '@/shell/PhosphorMasthead.jsx';
-import { glass, SNACK_GLASS } from '@/shell/shellStyles.js';
+import { glass, SNACK_GLASS, snackDrain, isDrainEnd } from '@/shell/shellStyles.js';
 import { useDoubleTap } from '@/features/palette/useDoubleTap.js';
 import CommandPalette from '@/features/palette/CommandPalette.jsx';
 import { buildCommands } from '@/features/palette/commands.mjs';
@@ -596,16 +596,15 @@ export default function AppShell() {
         onBrowse={() => setPicking(true)}
       />
 
-      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} slotProps={{ content: { sx: SNACK_GLASS } }} />
+      <Snackbar open={!!toast} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} slotProps={{ content: { sx: [SNACK_GLASS, snackDrain(5000)], onAnimationEnd: (e) => isDrainEnd(e) && setToast(null) } }} />
 
       {/* Offered when a terminal scrolls to the top of its (capped) scrollback. */}
       <Snackbar
         open={!!txPrompt}
-        autoHideDuration={10000}
         onClose={() => setTxPrompt(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         message="That's the start of what this terminal keeps. View the full transcript?"
-        slotProps={{ content: { sx: SNACK_GLASS } }}
+        slotProps={{ content: { sx: [SNACK_GLASS, snackDrain(10000)], onAnimationEnd: (e) => isDrainEnd(e) && setTxPrompt(null) } }}
         action={
           <>
             <Button size="small" variant="secondary" onClick={() => setTxPrompt(null)}>Dismiss</Button>
