@@ -18,6 +18,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useModels } from '@/hooks/useModels.js';
+import PricesAccordion from '@/features/settings/PricesAccordion.jsx';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { PHONE_QUERY } from '@/shell/breakpoints.js';
@@ -253,6 +254,8 @@ export default function ModelsPanel() {
       <Typography variant="body2" sx={{ color: 'text.secondary', mb: 2 }}>
         Suggestions for the free-text model pickers, grouped by which bin the daemon routes them to.
       </Typography>
+
+      <PricesAccordion />
 
       {loadError && (
         <Typography variant="body2" color="error" sx={{ mb: 2 }}>

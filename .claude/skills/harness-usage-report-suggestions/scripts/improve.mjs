@@ -157,10 +157,10 @@ async function build_roadmap() {
     "bias / pinball. Printed by `priors` (p90 cov / bias columns) and `estimate` (OOS " +
     "calibration row); p90 coverage < 0.70 flagged as unreliable.");
   add("Live pricing refresh", "done",
-    "Layered pricing (Phase F): embedded PRICE → 24h cache (state/pricing-cache.json, " +
-    "from `fetch-pricing --oauth`) → time-bounded PROMOS → manual pricing.json override. " +
-    "Sonnet 5 intro $2/$10 reflected via PROMOS through 2026-08-31. `fetch-pricing --oauth` " +
-    "pulls claumon's remote, reduces model-ids to family keys; `pricing` prints the resolved table.");
+    "pricing.json (state/pricing.json) is the only rate source — no embedded table, no " +
+    "live-fetch cache, no promos. Edited by hand or via Singularity's Settings > Models > " +
+    "Prices UI; `stats.mjs pricing` prints the resolved table. Missing/invalid file or an " +
+    "unmatched model leaves cost unpriced (blank), never a crash.");
   add("Subagent tokens in est cost", "done",
     "Phase G: est_cost_usd (no-billed sessions) now folds in subagent-run transcript " +
     "tokens, summed per assistant message with _msg_cost_tiered. The isSidechain skip is " +

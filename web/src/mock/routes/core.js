@@ -118,6 +118,42 @@ export function registerCore(server) {
     return { ok: true, state: db.ui.models };
   });
 
+  // /models/prices — pricing.json, the harness-usage-report's rate source
+  // (Settings > Models > Prices). Mirrors server/model-prices.mjs: in-memory
+  // db.ui.modelPrices stands in for the skill's pricing.json (no filesystem
+  // under the mock).
+  const isRate = (a) => Array.isArray(a) && a.length === 4 && a.every((x) => typeof x === 'number' && Number.isFinite(x) && x >= 0);
+  const validateTable = (table, label) => {
+    if (!table || typeof table !== 'object' || Array.isArray(table)) throw new Error(`${label} must be an object`);
+    const seen = new Set();
+    const out = {};
+    for (const [rawKey, rate] of Object.entries(table)) {
+      const key = typeof rawKey === 'string' ? rawKey.trim() : '';
+      if (!key || key.length > 64 || seen.has(key) || !isRate(rate)) throw new Error(`invalid ${label} entry for '${rawKey}'`);
+      seen.add(key);
+      out[key] = rate.slice();
+    }
+    return out;
+  };
+
+  server.get('/models/prices', () => db.ui.modelPrices);
+  server.put('/models/prices', (schema, req) => {
+    let body = {};
+    try { body = JSON.parse(req.requestBody || '{}') || {}; } catch {}
+    try {
+      const base = validateTable(body.base, 'base');
+      const above_200k = validateTable(body.above_200k ?? {}, 'above_200k');
+      const threshold = body.long_context_threshold;
+      if (!Number.isInteger(threshold) || threshold <= 0) throw new Error('long_context_threshold must be a positive integer');
+      const defaultKey = typeof body.default_key === 'string' ? body.default_key.trim() : '';
+      if (defaultKey && !(defaultKey in base)) throw new Error(`default_key '${defaultKey}' must be a base key`);
+      db.ui.modelPrices = { base, above_200k, long_context_threshold: threshold, default_key: defaultKey };
+      return db.ui.modelPrices;
+    } catch (e) {
+      return new Response(400, {}, { error: e.message });
+    }
+  });
+
   // /keys — rebindable shortcut overrides. The mock persists nothing to disk,
   // so this starts empty and setKeys below mutates db.ui.keys in memory for the
   // page lifetime (spec: "Mutations persist for the lifetime of the page").

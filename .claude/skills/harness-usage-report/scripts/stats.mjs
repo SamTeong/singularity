@@ -523,257 +523,92 @@ function _msg_tokens(msg) {
 }
 
 
-const PRICE = {
-  // Claude Opus 5.5 (platform.claude.com pricing, fetched 2026-09-23; launched
-  // 2026-09-22). MUST precede "opus" — "claude-opus-5-5".includes("opus") is true,
-  // so the bare key first would shadow it. Cache read 0.05×in (Opus-5.5-specific
-  // multiplier; family default is 0.1×), cache write 1.25×in. Full 1M context at
-  // standard rates → no PRICE_ABOVE entry.
-  "opus-5-5": [4.0, 20.0, 0.20, 5.0],
-  opus: [5.0, 25.0, 0.5, 6.25],
-  sonnet: [3.0, 15.0, 0.3, 3.75],
-  haiku: [1.0, 5.0, 0.1, 1.25],
-  fable: [10.0, 50.0, 1.0, 12.5],
-  // Non-Anthropic models routed through CC (proxy/:cloud tags). Priced from
-  // provider docs so their sessions (no billed total_cost_usd → est-only) attribute
-  // correctly. _price_key does substring match in insertion order — keep the more
-  // specific glm-5.2/glm-5.1 ABOVE glm-5 so "glm-5.2:cloud" matches 5.2, not 5.
-  // cache_create=0: GLM cache-write "limited-time free" (docs.z.ai); Kimi K3 and
-  // K2.7 Code both bill cache_read = the cache-hit discount, no separate
-  // cache-write fee. K3 cache_read=0.30 (90% off $3.00); K2.7 cache_read=0.19
-  // (80% off $0.95). Bump if promos end.
-  // GLM-5.3 family added 2026-09-04 (docs.z.ai/guides/overview/pricing). Same
-  // rates as 5.2/5.1. "glm-5.3-flash" MUST precede "glm-5.3" — the latter is a
-  // substring of the former. glm-5.3-flash carries a 50%-off promo through
-  // 2026-09-09 (UTC+8); the discounted rate is what the page lists today, so it
-  // is what's encoded — bump it when the promo lapses.
-  "glm-5.3-flash": [0.075, 0.25, 0.015, 0.0],
-  "glm-5.3": [1.4, 4.4, 0.26, 0.0],
-  "glm-5.2": [1.4, 4.4, 0.26, 0.0], // docs.z.ai/guides/overview/pricing
-  "glm-5.1": [1.4, 4.4, 0.26, 0.0], // docs.z.ai
-  "glm-5": [1.0, 3.2, 0.2, 0.0], // docs.z.ai
-  "kimi-k3": [3.0, 15.0, 0.30, 0.0], // kimi.com/resources/kimi-k3-pricing
-  // Highspeed MUST precede the standard key — "kimi-k2.7-code-highspeed"
-  // includes "kimi-k2.7-code", so the bare key listed first would shadow it and
-  // bill highspeed usage at half rate. 2x the standard row across the board
-  // (~180 tok/s output). Re-verified 2026-09-04.
-  "kimi-k2.7-code-highspeed": [1.90, 8.0, 0.38, 0.0], // kimi.ai/resources/kimi-k2-7-code-pricing
-  "kimi-k2.7-code": [0.95, 4.0, 0.19, 0.0], // kimi.com/resources/kimi-k2-7-code-pricing
-  // DeepSeek V4 (api-docs.deepseek.com/quick_start/pricing; via agentic-coding
-  // wiki sources/deepseek-pricing-src, fetched 2026-08-09). Routed through CC via
-  // proxy or :cloud tag. cache_read = cache-HIT rate (~98% discount, steepest in
-  // the table); cache_create=0 (no separate cache-write fee). 1M ctx bills flat
-  // USD — the page shows no >200k tier, so NO PRICE_ABOVE entry. Substring keys:
-  // neither overlaps an existing key; a bare "deepseek" key added later must go
-  // BELOW these.
-  "deepseek-v4-flash": [0.14, 0.28, 0.0028, 0.0], // DeepSeek-V4-Flash-0731
-  "deepseek-v4-pro": [0.435, 0.87, 0.003625, 0.0],
-  // GPT-6 Astra (developers.openai.com/api/docs/pricing, verified 2026-09-04;
-  // released 2026-09-03). cache_read=0.1×in, cache_create=1.25×in — same shape as
-  // GPT-5.6, and it DOES have a long-context tier (see PRICE_ABOVE).
-  // Substring keys: "gpt-6" does NOT collide with any "gpt-5.6-*" key.
-  "gpt-6-astra": [10.0, 50.0, 1.0, 12.5],
-  // GPT-6 Sol + GPT-6 Luna (model cards fetched 2026-09-23). The GPT-6 line keeps
-  // Sol/Luna but DROPS Terra — "sol" now means different rungs per generation
-  // ($4/$20 in 5.6, $2/$10 here), so always price by full model id. Both MUST
-  // precede the bare "gpt-6" keys below (substring shadowing, same trap as the
-  // gpt-5.6 family). cache_read=0.1×in, cache_create=1.25×in per the cards.
-  "gpt-6-sol": [2.0, 10.0, 0.20, 2.50],
-  "gpt-6-luna": [0.10, 0.50, 0.01, 0.125],
-  // Bare "gpt-6" MUST stay below "gpt-6-astra"/"gpt-6-sol"/"gpt-6-luna" —
-  // "gpt-6-astra".includes("gpt-6") is true, so listing it first would shadow the
-  // suffixed keys (same trap the gpt-5.6 / gpt-5.4 families document below). Priced
-  // as an Astra alias: Astra is the GPT-6 flagship and the only GPT-6 model
-  // without a suffix id. Sol/Luna use a separate 272k threshold below.
-  "gpt-6": [10.0, 50.0, 1.0, 12.5],
-  // GPT-5.6 (openai.com/api/pricing; via claude-code wiki sources/openai-api-pricing
-  // #flagship-models). 3 tiers only — no pro/mini/nano. cache_read=0.1×in,
-  // cache_create=1.25×in. Substring match: keep the 3 specific keys here; a
-  // generic "gpt-5.6" key added later must go BELOW these or it shadows them.
-  // Sol repriced $5/$30 → $4/$20 (re-verified against developers.openai.com/api/docs/pricing
-  // 2026-09-04; the cut was effective 2026-08-21).
-  "gpt-5.6-sol": [4.0, 20.0, 0.40, 5.0],
-  "gpt-5.6-terra": [2.0, 12.0, 0.20, 2.50],
-  "gpt-5.6-luna": [0.20, 1.20, 0.02, 0.25],
-  // codex-auto-review is Codex CLI's internal reviewer thread (see codex.mjs) —
-  // no public rate exists for it, so it's priced as an alias of gpt-5.6-terra
-  // (mid GPT-5.6 tier) per user decision. Distinct key, no substring overlap
-  // with any key above, so _price_key's ordered scan can't shadow or be shadowed.
-  "codex-auto-review": [2.0, 12.0, 0.20, 2.50],
-  // GPT-5.6 bare id and the GPT-5.4 family (openai.com/api/pricing, cross-checked
-  // against ~/wiki/claude-code/sources/openai-api-pricing.md 2026-07-31). Bare
-  // "gpt-5.6" MUST stay below the three suffixed gpt-5.6-* keys above — a model
-  // string like "gpt-5.6-sol" includes "gpt-5.6" too, so listing the bare key
-  // first would have it win the ordered scan and shadow all three (see their
-  // comment). Within the 5.4 family the suffixed keys (mini/nano/pro) must
-  // likewise precede the bare "gpt-5.4" — "gpt-5.4-mini".includes("gpt-5.4")
-  // is true, so a bare key listed first would shadow all three.
-  "gpt-5.6": [2.0, 12.0, 0.20, 2.50], // bare id → Terra rate, per user decision
-  "gpt-5.4-mini": [0.75, 4.50, 0.075, 0.0],
-  "gpt-5.4-nano": [0.20, 1.25, 0.02, 0.0],
-  "gpt-5.4-pro": [30.0, 180.0, 0.0, 0.0], // no cached-input rate published
-  // cache_create=0 for the whole 5.4 family: unlike GPT-5.6 (cache writes =
-  // 1.25x input), the 5.4 rows publish no cache-write fee.
-  "gpt-5.4": [2.50, 15.0, 0.25, 0.0], // keep BELOW the three 5.4 keys above
-};
-const DEFAULT_PRICE_KEY = "opus";
-
-// Long-context tier mechanism: if a model bills input-side tokens at a higher
-// rate above a token threshold, put [input, output, cache_read, cache_create]
-// $/MTok in PRICE_ABOVE under its key. Applied per API call, never on summed
-// session tokens (cache_read accumulates across turns and would spuriously
-// trip it). Empty by default: as of the current lineup NO Claude model has a
-// >200k premium — Fable/Opus/Sonnet all bill the full 1M window at standard
-// rates (per claude.com/pricing#api). Kept as a mechanism so a tier can be
-// re-added via pricing.json `above_200k` if Anthropic reintroduces one.
-let LONG_CTX_THRESHOLD = 200000;
-// GPT-5.6 long-context tier (>200k input-side tokens), same source as PRICE
-// above (openai.com/api/pricing #flagship-models long-context). 2× short-ctx
-// input/output, cache_read=0.1×in, cache_create=1.25×in. Applied per request in
-// _msg_cost_tiered when i+cr+cc > LONG_CTX_THRESHOLD (200k, OpenAI's cutoff).
-const PRICE_ABOVE = {
-  // GPT-6 Astra long-context row (developers.openai.com/api/docs/pricing,
-  // verified 2026-09-04): 2× short input/cache, 1.5× short output — same ratio
-  // pattern as GPT-5.6. ⚠️ Astra's window is 1,050,000 tokens and OpenAI does not
-  // publish where its long-context tier starts, so this reuses the single global
-  // LONG_CTX_THRESHOLD (200k, GPT-5.6's cutoff) as the lazy default. Bare "gpt-6"
-  // mirrors it, and must stay BELOW "gpt-6-astra" for the same substring reason
-  // as in PRICE.
-  "gpt-6-astra": [20.0, 75.0, 2.0, 25.0],
-  // Sol/Luna surcharge begins above 272k input tokens, not the global 200k.
-  "gpt-6-sol": [4.0, 15.0, 0.40, 5.0],
-  "gpt-6-luna": [0.20, 0.75, 0.02, 0.25],
-  "gpt-6": [20.0, 75.0, 2.0, 25.0],
-  // Sol long-context repriced $10/$45 → $8/$30 alongside its short-context cut.
-  "gpt-5.6-sol": [8.0, 30.0, 0.80, 10.0],
-  "gpt-5.6-terra": [4.0, 18.0, 0.40, 5.0],
-  "gpt-5.6-luna": [0.40, 1.80, 0.04, 0.50],
-  // codex-auto-review aliases gpt-5.6-terra here too — same no-public-rate
-  // reasoning as PRICE above.
-  "codex-auto-review": [4.0, 18.0, 0.40, 5.0],
-  // Bare gpt-5.6 = Terra long-ctx rate (mirrors its PRICE alias above). 5.4-mini
-  // and 5.4-nano have no published long-context row, so they're absent here and
-  // correctly fall back to their standard PRICE rate. gpt-5.4/gpt-5.4-pro's own
-  // long-context cutoff isn't published (GPT-5.4 has a 272k window, wider than
-  // GPT-5.6's) — reusing the single global LONG_CTX_THRESHOLD (200k) is the lazy
-  // default rather than adding a per-key threshold mechanism; costs nothing
-  // today since no gpt-5.4 rows exist on disk yet. ponytail: revisit the
-  // threshold if/when real gpt-5.4 usage shows up and OpenAI publishes its cutoff.
-  "gpt-5.6": [4.0, 18.0, 0.40, 5.0],
-  // gpt-5.4-pro long-context was wrong (30/135); the pricing page lists $60 in /
-  // $270 out. Corrected against developers.openai.com/api/docs/pricing 2026-09-04.
-  "gpt-5.4-pro": [60.0, 270.0, 0.0, 0.0],
-  "gpt-5.4": [5.0, 22.50, 0.50, 0.0],
-};
-
-// Optional pricing override so rates can be bumped without editing this file:
-// ~/.agents/.harness-usage-report/state/pricing.json. Shape (all optional):
+// pricing.json is the sole rate source (no embedded table, no live-fetch cache,
+// no promos): ~/.agents/.harness-usage-report/state/pricing.json (path via
+// USAGE_REPORT_STATE), edited by hand or via Singularity's Settings > Models >
+// Prices UI. Shape (all optional):
 //   { "base": { "opus": [in, out, cache_read, cache_create], ... },
 //     "above_200k": { "sonnet": [in, out, cache_read, cache_create], ... },
-//     "long_context_threshold": 200000 }
-// A bare { "opus": [...], ... } map is accepted as base overrides. Only 4-number
-// rate arrays are honored; malformed/unreadable files are ignored silently.
+//     "long_context_threshold": 200000,
+//     "default_key": "opus" }
+// A bare { "opus": [...], ... } map is accepted as `base` for back-compat. `base`
+// key order IS match order — _price_key does an ordered substring scan, so a
+// more-specific key (e.g. "opus-5-5") must precede a shorter one it contains
+// ("opus"). No file / invalid file / no base => PRICE stays empty => every
+// model is unpriced (est cost stays blank, never a crash).
 const PRICE_OVERRIDE_JSON = path.join(SKILL_STATE_DIR, "pricing.json");
 
-// Phase F: live pricing refresh. Layered resolve (lowest → highest priority):
-//   embedded PRICE → pricing-cache.json (if <24h, from `fetch-pricing --oauth`)
-//   → PROMOS (time-bounded intro rates, in-window) → manual pricing.json override.
-// Network only on explicit `fetch-pricing --oauth` (same gate as fetch-usage); the
-// module-load resolve stays local. Cache shape: {updated, base:{<family>:[4-array]}}.
-const PRICING_CACHE_JSON = path.join(SKILL_STATE_DIR, "pricing-cache.json");
-const PRICING_REMOTE_URL = "https://raw.githubusercontent.com/fabioconcina/claumon/main/pricing.json";
-const PRICING_FETCH_TIMEOUT_MS = 10000;
-const PRICING_CACHE_MAX_AGE_S = 24 * 3600;
-// Known time-bounded intro rates the embedded table doesn't carry. Applied at load
-// when today ≤ expires (after cache, before manual override). Closes the SKILL.md
-// gap "Sonnet 5 intro pricing ($2/$10 to 2026-08-31) is not reflected".
-const PROMOS = [
-  { family: "sonnet", rates: [2.0, 10.0, 0.2, 2.5], expires: "2026-08-31" },
-];
+const PRICE = {};
+const PRICE_ABOVE = {};
+// Long-context tier mechanism: if a model bills input-side tokens at a higher
+// rate above a token threshold, put [input, output, cache_read, cache_create]
+// $/MTok in PRICE_ABOVE under its key (pricing.json `above_200k`). Applied per
+// API call, never on summed session tokens (cache_read accumulates across turns
+// and would spuriously trip it).
+let LONG_CTX_THRESHOLD = 200000;
+let DEFAULT_KEY = "";
 
 function _is_rate(a) {
   return Array.isArray(a) && a.length === 4 && a.every((x) => typeof x === "number" && Number.isFinite(x));
 }
 
-// Merge a family→4-array map into PRICE (validated; unknown families ignored).
-function _merge_price_base(base) {
-  if (!base || typeof base !== "object") return;
-  for (const [k, v] of Object.entries(base)) {
-    if (_is_rate(v) && PRICE[k] !== undefined) PRICE[k] = v.slice();
-  }
-}
-
-function _load_pricing_cache() {
-  if (!isFile(PRICING_CACHE_JSON)) return null;
-  let c;
-  try { c = JSON.parse(fs.readFileSync(PRICING_CACHE_JSON, "utf-8")); } catch { return null; }
-  if (!c || typeof c !== "object") return null;
-  // Freshness: mtime-based (the fetcher stamps `updated` too, but mtime is exact).
-  if (Date.now() / 1000 - getmtime(PRICING_CACHE_JSON) > PRICING_CACHE_MAX_AGE_S) return null;
-  return c;
-}
-
-function _promo_active(p) {
-  if (!p.expires) return true;
-  const d = new Date(p.expires + "T23:59:59");
-  return Number.isNaN(d.getTime()) ? false : Date.now() <= d.getTime();
-}
-
-function _apply_price_overrides() {
-  // 1. live-pricing cache (if fresh)
-  const cache = _load_pricing_cache();
-  if (cache) _merge_price_base(cache.base);
-  // 2. time-bounded promos (win over cache while in-window)
-  for (const p of PROMOS) {
-    if (_promo_active(p) && _is_rate(p.rates) && PRICE[p.family] !== undefined) {
-      PRICE[p.family] = p.rates.slice();
-    }
-  }
-  // 3. manual override (always wins)
+function _load_pricing() {
   if (!isFile(PRICE_OVERRIDE_JSON)) return;
-  let ov;
-  try { ov = JSON.parse(fs.readFileSync(PRICE_OVERRIDE_JSON, "utf-8")); } catch { return; }
-  if (!ov || typeof ov !== "object" || Array.isArray(ov)) return;
-  const bare = !ov.base && !ov.above_200k && !("long_context_threshold" in ov);
-  const base = ov.base && typeof ov.base === "object" ? ov.base : (bare ? ov : null);
-  if (base) for (const [k, v] of Object.entries(base)) if (_is_rate(v) && PRICE[k] !== undefined) PRICE[k] = v.slice();
-  if (ov.above_200k && typeof ov.above_200k === "object") {
-    for (const [k, v] of Object.entries(ov.above_200k)) if (_is_rate(v)) PRICE_ABOVE[k] = v.slice();
+  let doc;
+  try { doc = JSON.parse(fs.readFileSync(PRICE_OVERRIDE_JSON, "utf-8")); } catch { return; }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) return;
+  const bare = !doc.base && !doc.above_200k && !("long_context_threshold" in doc) && !("default_key" in doc);
+  const base = doc.base && typeof doc.base === "object" ? doc.base : (bare ? doc : null);
+  if (base) for (const [k, v] of Object.entries(base)) if (_is_rate(v)) PRICE[k] = v.slice();
+  if (doc.above_200k && typeof doc.above_200k === "object") {
+    for (const [k, v] of Object.entries(doc.above_200k)) if (_is_rate(v)) PRICE_ABOVE[k] = v.slice();
   }
-  if (typeof ov.long_context_threshold === "number" && ov.long_context_threshold > 0) {
-    LONG_CTX_THRESHOLD = ov.long_context_threshold;
+  if (typeof doc.long_context_threshold === "number" && Number.isFinite(doc.long_context_threshold) && doc.long_context_threshold > 0) {
+    LONG_CTX_THRESHOLD = doc.long_context_threshold;
   }
+  if (typeof doc.default_key === "string") DEFAULT_KEY = doc.default_key;
 }
-_apply_price_overrides();
+_load_pricing();
 
+// Returns the first `base` key that's a substring of the (lowercased) model id,
+// else DEFAULT_KEY when it names a real PRICE entry, else null (unpriced).
 export function _price_key(model) {
   const m = (model || "").toLowerCase();
   for (const k of Object.keys(PRICE)) {
     if (m.includes(k)) return k;
   }
-  return DEFAULT_PRICE_KEY;
+  return DEFAULT_KEY && PRICE[DEFAULT_KEY] !== undefined ? DEFAULT_KEY : null;
 }
 
 // Anthropic-family price keys. Any other PRICE key (glm/kimi/…) is a third-party
 // model reached via a proxy or :cloud tag: Claude Code's billed total_cost_usd
 // for those uses the wrong rates, so the report recomputes cost from tokens with
-// the PRICE table instead. Unknown models resolve to DEFAULT_PRICE_KEY (opus, an
-// Anthropic key) → treated as Anthropic, never overridden.
-const _ANTHROPIC_PRICE_KEYS = new Set(["opus", "sonnet", "haiku", "fable"]);
+// the PRICE table instead. No family list is derivable from deleted literals
+// anymore, so this derives from the key name shape instead (still covers custom
+// override keys like "opus-5-5"). Unpriced (null key) is never third-party —
+// there's nothing to recompute from.
 function _is_third_party(model) {
-  return !_ANTHROPIC_PRICE_KEYS.has(_price_key(model));
+  const key = _price_key(model);
+  return key !== null && !/^(opus|sonnet|haiku|fable)/.test(key);
 }
 
 function _msg_cost(model, i, o, cr, cc) {
-  const [inp, out, crp, ccp] = PRICE[_price_key(model)];
+  const key = _price_key(model);
+  if (key === null) return null;
+  const [inp, out, crp, ccp] = PRICE[key];
   return (i * inp + o * out + cr * crp + cc * ccp) / 1e6;
 }
 
 // Per-message cost with the long-context tier applied when this request's
 // input-side tokens exceed the threshold. Use for absolute cost estimation.
+// Returns null when the model has no priced key (unpriced, not a crash).
 export function _msg_cost_tiered(model, i, o, cr, cc) {
   const key = _price_key(model);
+  if (key === null) return null;
   const above = PRICE_ABOVE[key];
+  // Sol/Luna's long-context surcharge begins above 272k input tokens, not the
+  // global threshold — a model-specific quirk, not part of the pricing.json
+  // schema (which carries one global long_context_threshold).
   const threshold = key === "gpt-6-sol" || key === "gpt-6-luna" ? 272000 : LONG_CTX_THRESHOLD;
   if (above && i + cr + cc > threshold) {
     return (i * above[0] + o * above[1] + cr * above[2] + cc * above[3]) / 1e6;
@@ -795,7 +630,8 @@ function _transcript_msg_cost(p, includeSidechain = false) {
     if (o.type !== "assistant") continue;
     const tk = _msg_tokens(o.message || {});
     if (!tk) continue;
-    usd += _msg_cost_tiered(tk.model, tk.i, tk.o, tk.cr, tk.cc);
+    const c = _msg_cost_tiered(tk.model, tk.i, tk.o, tk.cr, tk.cc);
+    if (c !== null) usd += c; // unpriced model: contributes nothing, never a crash
   }
   return usd;
 }
@@ -1018,7 +854,7 @@ function _rebuild_stats_csv(excludeSid, files) {
   try {
     const { rows: codexRows } = codexIngest({
       stateDir: SKILL_STATE_DIR, localFmt: local_fmt, epochFromIso: epoch_from_iso,
-      msgCostTiered: _msg_cost_tiered, priceKey: _price_key,
+      msgCostTiered: _msg_cost_tiered, priceKey: _price_key, defaultKey: DEFAULT_KEY,
     });
     for (const r of codexRows) {
       rows.push(r);
@@ -1145,7 +981,7 @@ export function _load_stats(csvPath = STATS_CSV) {
       // codexIngest folds up to 19 threads mixing models into one session row)
       // over recomputing from summed tokens at last_model's rate alone.
       cost: _is_third_party(row.last_model)
-        ? (_fnum(row.est_cost_usd) || _msg_cost(row.last_model, i, o, cr, cc))
+        ? (_fnum(row.est_cost_usd) || _msg_cost(row.last_model, i, o, cr, cc) || 0)
         : (_fnum(row.total_cost_usd) || _fnum(row.est_cost_usd)),
       model: (row.last_model || "").trim(),
       disp: (row.model_display_name || "").trim(),
@@ -2005,128 +1841,27 @@ async function cmd_fetch_usage(args) {
   if (args.save) print("saved → " + USAGE_SNAPSHOTS_JSONL);
 }
 
-// ---- fetch-pricing (live pricing refresh; Phase F, same off-by-default gate as fetch-usage) ----
-// Fetches claumon's remote pricing.json (per-model-id rates), reduces to the
-// skill's family keys (latest model-id per family by version), writes the cache,
-// and re-applies overrides so the active PRICE reflects it. Malformed/empty
-// remote → ignored (silent), embedded table unchanged.
-
-// Parse "claude-opus-4-8" / "claude-sonnet-5" → [4,8] / [5] for version ordering.
-function _model_version_key(id) {
-  const nums = id.match(/(\d+)(?:-(\d+))?/g) || [];
-  const parts = [];
-  for (const seg of nums) {
-    for (const n of seg.split("-")) {
-      const x = parseInt(n, 10);
-      if (!Number.isNaN(x)) parts.push(x);
+// ---- pricing diagnostic: print the resolved table (pricing.json is the only source) ----
+function cmd_pricing() {
+  if (!isFile(PRICE_OVERRIDE_JSON)) {
+    print("no pricing.json at " + PRICE_OVERRIDE_JSON);
+    return;
+  }
+  print("resolved pricing ($/MTok [input, output, cache_read, cache_create]) from " + PRICE_OVERRIDE_JSON + ":");
+  const keys = Object.keys(PRICE);
+  if (!keys.length) {
+    print("  (no base rates)");
+  } else {
+    for (const f of keys) {
+      print("  " + f.padEnd(8) + JSON.stringify(PRICE[f]) + (f === DEFAULT_KEY ? "  [default]" : ""));
     }
   }
-  return parts.length ? parts : [0];
-}
-
-// Reduce a remote {modelId: {input,output,cache_read,cache_write_5m,...}} map to
-// family → [input, output, cache_read, cache_create(=cache_write_5m)], keeping
-// the highest-version model-id per family (proxy for current rate).
-function _reduce_remote_to_families(models) {
-  const fams = {};
-  for (const [id, p] of Object.entries(models)) {
-    if (!p || typeof p !== "object") continue;
-    const m = id.toLowerCase();
-    let fam = null;
-    for (const k of Object.keys(PRICE)) { if (m.includes(k)) { fam = k; break; } }
-    if (!fam) continue;
-    const rates = [p.input, p.output, p.cache_read, p.cache_write_5m ?? p.cache_write_1h];
-    if (!_is_rate(rates)) continue;
-    const vk = _model_version_key(id);
-    const prev = fams[fam];
-    if (!prev || _cmp_version(vk, prev.vk) > 0) fams[fam] = { rates: rates.map(Number), vk };
+  if (Object.keys(PRICE_ABOVE).length) {
+    print("above " + LONG_CTX_THRESHOLD + " tokens:");
+    for (const f of Object.keys(PRICE_ABOVE)) {
+      print("  " + f.padEnd(8) + JSON.stringify(PRICE_ABOVE[f]));
+    }
   }
-  const out = {};
-  for (const [f, v] of Object.entries(fams)) out[f] = v.rates;
-  return out;
-}
-
-function _cmp_version(a, b) {
-  const n = Math.max(a.length, b.length);
-  for (let i = 0; i < n; i++) {
-    const ai = a[i] ?? 0, bi = b[i] ?? 0;
-    if (ai !== bi) return ai - bi;
-  }
-  return 0;
-}
-
-async function cmd_fetch_pricing(args) {
-  if (!_oauth_enabled(args)) {
-    process.exit(0); // silent no-op — local-only default, same as fetch-usage
-  }
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), PRICING_FETCH_TIMEOUT_MS);
-  let resp;
-  try {
-    resp = await fetch(PRICING_REMOTE_URL, { signal: ctrl.signal });
-  } catch (e) {
-    printErr("fetch-pricing: request failed: " + (e && e.message ? e.message : String(e)));
-    process.exit(0);
-  } finally {
-    clearTimeout(timer);
-  }
-  if (resp.status !== 200) {
-    printErr("fetch-pricing: remote returned " + resp.status);
-    process.exit(0);
-  }
-  let body;
-  try { body = await resp.text(); } catch (e) {
-    printErr("fetch-pricing: read failed: " + e.message);
-    process.exit(0);
-  }
-  if (body.length > 1 << 20) { printErr("fetch-pricing: remote > 1MB, ignored"); process.exit(0); }
-  let parsed;
-  try { parsed = JSON.parse(body); } catch (e) {
-    printErr("fetch-pricing: parse error: " + e.message);
-    process.exit(0);
-  }
-  const models = parsed && parsed.models && typeof parsed.models === "object" ? parsed.models : null;
-  if (!models || !Object.keys(models).length) {
-    printErr("fetch-pricing: remote has no models, ignored");
-    process.exit(0);
-  }
-  const base = _reduce_remote_to_families(models);
-  if (!Object.keys(base).length) {
-    printErr("fetch-pricing: no recognized families in remote, ignored");
-    process.exit(0);
-  }
-  const cache = { updated: now_local(), source: PRICING_REMOTE_URL, base };
-  try {
-    fs.writeFileSync(PRICING_CACHE_JSON, JSON.stringify(cache, null, 2),
-      { encoding: "utf-8", mode: 0o600 });
-  } catch (e) {
-    printErr("fetch-pricing: write failed: " + e.message);
-    process.exit(0);
-  }
-  // Re-apply so the live process reflects the refresh (cache → promos → manual).
-  _apply_price_overrides();
-  print("fetched pricing: " + cache.updated + "  (" + Object.keys(models).length + " models → " +
-    Object.keys(base).length + " families)");
-  for (const f of Object.keys(PRICE)) {
-    print("  " + f.padEnd(8) + "$" + PRICE[f][0] + "/" + PRICE[f][1] + "  (cache " + (base[f] ? "set" : "—") + ")");
-  }
-  print("saved → " + PRICING_CACHE_JSON);
-}
-
-// ---- pricing diagnostic (Phase F): print the resolved table + which layer set it ----
-function cmd_pricing() {
-  const cache = _load_pricing_cache();
-  print("resolved pricing ($/MTok [input, output, cache_read, cache_create]):");
-  for (const f of Object.keys(PRICE)) {
-    const tags = [];
-    if (cache && cache.base && cache.base[f]) tags.push("cache");
-    const promo = PROMOS.find((p) => p.family === f && _promo_active(p));
-    if (promo) tags.push("promo→" + promo.expires);
-    if (isFile(PRICE_OVERRIDE_JSON)) tags.push("override?");
-    print("  " + f.padEnd(8) + JSON.stringify(PRICE[f]) + (tags.length ? "  [" + tags.join(",") + "]" : "  [embedded]"));
-  }
-  if (cache) print("cache: " + cache.updated + " (fresh) → " + PRICING_CACHE_JSON);
-  else print("cache: absent or stale (>24h) → embedded + promos only");
 }
 
 // ---- install (cross-machine setup) ----
@@ -2291,7 +2026,7 @@ async function main() {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
   if (!cmd) {
-    printErr("usage: stats.mjs {record,backfill,report,install,fetch-usage,fetch-pricing,forecast,pricing}");
+    printErr("usage: stats.mjs {record,backfill,report,install,fetch-usage,forecast,pricing}");
     process.exit(2);
   }
   if (cmd === "record") {
@@ -2314,8 +2049,6 @@ async function main() {
     });
   } else if (cmd === "forecast") {
     cmd_forecast({ force: argv.includes("--force") });
-  } else if (cmd === "fetch-pricing") {
-    await cmd_fetch_pricing({ oauth: argv.includes("--oauth") });
   } else if (cmd === "pricing") {
     cmd_pricing();
   } else {
