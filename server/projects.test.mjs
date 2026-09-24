@@ -18,7 +18,7 @@ process.env.SING_GIT_TIMEOUT_MS = '3000';
 process.env.CLAUDE_BIN = process.env.SINGULARITY_HOME;
 delete process.env.OLLAMA_BIN;
 delete process.env.CODEX_BIN;
-const { list, add, remove, reorder, gitStatus, summary, has } = await import('./projects.mjs');
+const { list, add, remove, reorder, gitStatus, gitOp, summary, has } = await import('./projects.mjs');
 const { getModels, setModels } = await import('./model-store.mjs');
 const DEFAULT_SUMMARISER = getModels().summariserModel;
 function setSummariser(id) { setModels({ ...getModels(), summariserModel: id }); }
@@ -132,6 +132,40 @@ test('gitStatus: upstream + 1 unpushed commit -> ahead 1; staged/modified/untrac
 
   rmRepo(bare);
   rmRepo(repo);
+});
+
+test('gitOp: fetch sees upstream commit, rebase replays onto it; conflicting sync is aborted', async () => {
+  const repo = initRepo();
+  const bare = mkdtempSync(join(tmpdir(), 'sing-bare-'));
+  execFileSync('git', ['init', '--bare', '-q', bare]);
+  execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', bare]);
+  execFileSync('git', ['-C', repo, 'push', '-q', '-u', 'origin', 'main']);
+  const other = mkdtempSync(join(tmpdir(), 'sing-clone-'));
+  execFileSync('git', ['clone', '-q', '-b', 'main', bare, other]);
+  execFileSync('git', ['-C', other, '-c', 'user.email=x@x.com', '-c', 'user.name=x', 'commit', '-q', '--allow-empty', '-m', 'remote']);
+  execFileSync('git', ['-C', other, 'push', '-q']);
+  execFileSync('git', ['-C', repo, 'commit', '-q', '--allow-empty', '-m', 'local']);
+
+  assert.deepEqual(await gitOp(repo, 'fetch'), { ok: true });
+  assert.equal((await gitStatus(repo)).behind, 1);
+  assert.deepEqual(await gitOp(repo, 'rebase'), { ok: true });
+  const s = await gitStatus(repo);
+  assert.equal(s.behind, 0);
+  assert.equal(s.ahead, 1);
+
+  // Both sides edit f.txt -> conflict; gitOp must abort, not leave a rebase open.
+  execFileSync('git', ['-C', other, 'pull', '-q', '--rebase']);
+  writeFileSync(join(other, 'f.txt'), 'theirs');
+  execFileSync('git', ['-C', other, '-c', 'user.email=x@x.com', '-c', 'user.name=x', 'commit', '-q', '-am', 'theirs']);
+  execFileSync('git', ['-C', other, 'push', '-q']);
+  writeFileSync(join(repo, 'f.txt'), 'ours');
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-am', 'ours']);
+  const r = await gitOp(repo, 'sync'); // fetch + rebase in one
+  assert.equal(r.ok, false);
+  assert.equal((await gitStatus(repo)).lastCommit.subject, 'ours'); // back on our branch tip
+  assert.equal(execFileSync('git', ['-C', repo, 'status'], { encoding: 'utf8' }).includes('rebase in progress'), false);
+
+  rmRepo(other); rmRepo(bare); rmRepo(repo);
 });
 
 test('gitStatus: no upstream -> upstream null, ahead/behind 0, lastCommit subject', async () => {

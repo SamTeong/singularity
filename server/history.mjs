@@ -300,32 +300,34 @@ export function binFor(group) {
   return null;
 }
 
-async function callClaudeSummariser(digestText, id) {
+async function callClaudeSummariser(prompt, id) {
   // runOneShotPrompt's claude answer channel is stdout: a single JSON envelope
   // ({ result, usage: { input_tokens, output_tokens }, ... }); parseJsonSummary
   // runs over `result`.
-  const stdout = await runOneShotPrompt('claude', id, `${SUMMARY_SYSTEM}\n\n${digestText}`);
+  const stdout = await runOneShotPrompt('claude', id, prompt);
   const env = JSON.parse(stdout);
   return { text: env.result, inputTokens: env.usage?.input_tokens ?? null, outputTokens: env.usage?.output_tokens ?? null };
 }
 
-async function callOllamaSummariser(digestText, id) {
-  const stdout = await runOneShotPrompt('ollama', id, `${SUMMARY_SYSTEM}\n\n${digestText}`);
+async function callOllamaSummariser(prompt, id) {
+  const stdout = await runOneShotPrompt('ollama', id, prompt);
   return { text: stdout, inputTokens: null, outputTokens: null };
 }
 
-async function callCodexSummariser(digestText, id) {
-  const text = await runOneShotPrompt('codex', id, `${SUMMARY_SYSTEM}\n\n${digestText}`);
+async function callCodexSummariser(prompt, id) {
+  const text = await runOneShotPrompt('codex', id, prompt);
   return { text, inputTokens: null, outputTokens: null };
 }
 
 // Exported: server/projects.mjs's summary() uses this as its default
 // callSummariser too, so a project summary routes through the same three
-// binary callers as a History day.
-export async function defaultCallSummariser(digestText, { id, group }) {
-  if (group === 'claude') return callClaudeSummariser(digestText, id);
-  if (group === 'codex') return callCodexSummariser(digestText, id);
-  return callOllamaSummariser(digestText, id);
+// binary callers as a History day. `system` defaults to History's prompt;
+// projects.mjs passes null because its prompt carries its own instructions.
+export async function defaultCallSummariser(digestText, { id, group }, { system = SUMMARY_SYSTEM } = {}) {
+  const prompt = system ? `${system}\n\n${digestText}` : digestText;
+  if (group === 'claude') return callClaudeSummariser(prompt, id);
+  if (group === 'codex') return callCodexSummariser(prompt, id);
+  return callOllamaSummariser(prompt, id);
 }
 
 // callSummariser is injectable — tests stub it so no network/process call ever

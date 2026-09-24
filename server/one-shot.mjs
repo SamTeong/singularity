@@ -87,7 +87,9 @@ export async function runOneShotPrompt(group, modelId, prompt, {
     }
   }
   if (group === 'ollama') {
-    const { stdout } = await run(spawn, OLLAMA_BIN, ['run', modelId, prompt], opts);
+    // Without these, stdout carries a "Thinking..." block (drafts with stray
+    // JSON) and terminal wrap escapes (ESC[nD ESC[K) that corrupt the answer.
+    const { stdout } = await run(spawn, OLLAMA_BIN, ['run', '--hidethinking', '--nowordwrap', modelId, prompt], opts);
     return includeMetadata ? { answer: stdout, usage: null } : stdout;
   }
   throw new Error(`one-shot: unknown group '${group}'`);
