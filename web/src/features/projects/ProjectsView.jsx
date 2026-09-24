@@ -102,7 +102,6 @@ export default function ProjectsView() {
                 path={path}
                 refreshKey={refreshKey}
                 onDelete={removeProject}
-                draggable
                 onDragStart={() => setDragId(path)}
                 onDragEnd={() => setDragId(null)}
                 onDragOver={(e) => e.preventDefault()}

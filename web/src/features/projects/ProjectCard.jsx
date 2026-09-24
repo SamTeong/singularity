@@ -8,6 +8,7 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import { repoName, tildify } from '@/lib/paths.js';
 
 // Tiny relative-time formatter — the codebase has no existing helper for
@@ -47,7 +48,7 @@ function SummarySection({ title, bullets }) {
  * ProjectsView card: one git repo toplevel, its status fetched on mount and
  * whenever `refreshKey` changes (header's refresh-all, no polling).
  */
-export default function ProjectCard({ path, refreshKey, onDelete, draggable, onDragStart, onDragEnd, onDragOver, onDrop }) {
+export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, onDragEnd, onDragOver, onDrop }) {
   const [status, setStatus] = useState(null);
   const [phase, setPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
   const [summary, setSummary] = useState(null);
@@ -71,17 +72,24 @@ export default function ProjectCard({ path, refreshKey, onDelete, draggable, onD
   return (
     <Box
       data-testid="project-card"
-      draggable={draggable}
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       onDragOver={onDragOver}
       onDrop={onDrop}
       sx={(t) => ({
         p: 1.5, borderRadius: `${getTokens(t).radius.md ?? getTokens(t).radius.sm}px`,
-        border: `1px solid ${getTokens(t).glass.stroke}`, cursor: 'grab', minWidth: 0,
+        border: `1px solid ${getTokens(t).glass.stroke}`, minWidth: 0,
       })}
     >
       <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
+        <Tooltip title="Drag to change the order" disableInteractive>
+          <Box
+            draggable
+            onDragStart={onDragStart}
+            onDragEnd={onDragEnd}
+            sx={{ display: 'grid', placeItems: 'center', cursor: 'grab', color: 'text.disabled', mt: 0.25, '&:active': { cursor: 'grabbing' } }}
+          >
+            <DragIndicatorIcon fontSize="small" />
+          </Box>
+        </Tooltip>
         <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography sx={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {repoName(path)}

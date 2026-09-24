@@ -9,6 +9,10 @@ import { PROJECT_PATHS } from '../web/src/mock/fixtures.js';
 const repoName = (p) => p.split('/').pop();
 const cards = (page) => page.locator('[data-testid="project-card"]');
 const cardFor = (page, path) => cards(page).filter({ hasText: repoName(path) });
+// The drag handle is its own draggable element inside the card (a Tooltip'd
+// grip icon), same pattern as the background jobs row grip — the card itself
+// is only the drop target.
+const gripIn = (card) => card.locator('[aria-label*="Drag to change the order"]');
 
 async function html5Drag(page, source, target) {
   const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
@@ -115,13 +119,17 @@ test('drag-reorder changes the order', async ({ page }) => {
   const before = await cardOrder(page);
   expect(before).toEqual([repoName(PROJECT_PATHS.clean), repoName(PROJECT_PATHS.dirty), repoName(PROJECT_PATHS.noUpstream)]);
 
-  await html5Drag(page, cards(page).nth(0), cards(page).nth(2));
+  // The card itself is not draggable — only its grip handle is.
+  await expect(cards(page).nth(0)).not.toHaveAttribute('draggable', 'true');
+  await expect(gripIn(cards(page).nth(0))).toHaveAttribute('draggable', 'true');
+
+  await html5Drag(page, gripIn(cards(page).nth(0)), cards(page).nth(2));
 
   // Dragging down lands after the target, so the last slot is reachable.
   await expect.poll(() => cardOrder(page)).toEqual([repoName(PROJECT_PATHS.dirty), repoName(PROJECT_PATHS.noUpstream), repoName(PROJECT_PATHS.clean)]);
 
   // Dragging up lands before the target, so the first slot is reachable.
-  await html5Drag(page, cards(page).nth(2), cards(page).nth(0));
+  await html5Drag(page, gripIn(cards(page).nth(2)), cards(page).nth(0));
   await expect.poll(() => cardOrder(page)).toEqual([repoName(PROJECT_PATHS.clean), repoName(PROJECT_PATHS.dirty), repoName(PROJECT_PATHS.noUpstream)]);
 });
 
