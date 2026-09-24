@@ -7,13 +7,15 @@ import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Alert from '@mui/material/Alert';
-import CreateNewFolderIcon from '@mui/icons-material/CreateNewFolder';
+import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FolderCopyIcon from '@mui/icons-material/FolderCopy';
 import { EmptyState } from '@/components/EmptyState.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
 import { untildify } from '@/lib/paths.js';
 import ProjectCard from '@/features/projects/ProjectCard.jsx';
+import { useThemeSkin } from '@/theme/index.js';
+import { primaryBtn, PHOSPHOR_CONTROL_H } from '@/features/tasks/TasksBoard.jsx';
 
 /**
  * Projects — tracked git repo toplevels, each showing its git status at a
@@ -28,6 +30,8 @@ export default function ProjectsView() {
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [dragId, setDragId] = useState(null);
+  const { skinId } = useThemeSkin();
+  const phosphor = skinId === 'phosphor';
 
   useEffect(() => {
     fetch('/api/projects').then((r) => r.json()).then((d) => setProjects(d.projects || [])).finally(() => setLoaded(true));
@@ -77,7 +81,7 @@ export default function ProjectsView() {
         <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', minHeight: 71 }}>
           <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Projects</Typography>
           <Box sx={{ flex: 1 }} />
-          <Button size="small" variant="outlined" startIcon={<CreateNewFolderIcon fontSize="small" />} onClick={() => setPicking(true)}>
+          <Button size="small" startIcon={<AddIcon />} onClick={() => setPicking(true)} sx={(t) => (phosphor ? { height: PHOSPHOR_CONTROL_H } : primaryBtn(t))}>
             Add folder
           </Button>
           <Tooltip title="Refresh all" disableInteractive>
