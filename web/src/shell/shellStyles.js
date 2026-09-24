@@ -387,6 +387,12 @@ export const frameGlow = (t) => getRoles(t).shell.glow ?? getTokens(t).glass.car
  */
 export const terminalRoles = (t) => getRoles(t).terminal;
 
+// Glass snackbar content — MUI v9 dropped `ContentProps`, so this must go through
+// slotProps.content or SnackbarContent keeps its default (mode-inverted) colours.
+// Shared here (rather than left local to AppShell) so lazy-loaded views (e.g.
+// ProjectsView) can reuse the same toast look without importing the shell itself.
+export const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur });
+
 // ── tooltip slot props ────────────────────────────────────────────────────────
 
 // Paper-surface tooltip styling, shared across the nav rail + collapsed list.

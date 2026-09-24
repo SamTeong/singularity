@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getTokens } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -7,15 +7,17 @@ import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Alert from '@mui/material/Alert';
+import SnackbarContent from '@mui/material/SnackbarContent';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import FolderCopyIcon from '@mui/icons-material/FolderCopy';
 import { EmptyState } from '@/components/EmptyState.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
-import { untildify } from '@/lib/paths.js';
+import { untildify, repoName } from '@/lib/paths.js';
 import ProjectCard from '@/features/projects/ProjectCard.jsx';
 import { useThemeSkin } from '@/theme/index.js';
 import { primaryBtn, PHOSPHOR_CONTROL_H } from '@/features/tasks/TasksBoard.jsx';
+import { SNACK_GLASS } from '@/shell/shellStyles.js';
 
 /**
  * Projects — tracked git repo toplevels, each showing its git status at a
@@ -30,8 +32,21 @@ export default function ProjectsView() {
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [dragId, setDragId] = useState(null);
+  // One undo toast per delete, stacked (not replaced) — each carries the
+  // deleted path and its pre-delete index so Undo can restore its slot.
+  const [toasts, setToasts] = useState([]);
+  const nextToastId = useRef(0);
+  const toastTimers = useRef({});
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
+
+  useEffect(() => () => { Object.values(toastTimers.current).forEach(clearTimeout); }, []);
+
+  const dismissToast = (id) => {
+    clearTimeout(toastTimers.current[id]);
+    delete toastTimers.current[id];
+    setToasts((ts) => ts.filter((t) => t.id !== id));
+  };
 
   useEffect(() => {
     fetch('/api/projects').then((r) => r.json()).then((d) => setProjects(d.projects || [])).finally(() => setLoaded(true));
@@ -50,10 +65,38 @@ export default function ProjectsView() {
   };
 
   const removeProject = (path) => {
+    const index = projects.indexOf(path);
     fetch('/api/projects', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }) })
       .then((r) => r.json())
-      .then((d) => setProjects(d.projects))
+      .then((d) => {
+        setProjects(d.projects);
+        const id = ++nextToastId.current;
+        setToasts((ts) => [...ts, { id, path, index }]);
+        toastTimers.current[id] = setTimeout(() => dismissToast(id), 10000);
+      })
       .catch(() => {});
+  };
+
+  // Undo one toast: re-add the path, then reinsert it into the CURRENT server
+  // order (not the pre-delete `prev` snapshot — other cards may have been
+  // deleted/reordered since) at its original index, clamped to the new length.
+  const undoDelete = (toast) => {
+    fetch('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: toast.path }) })
+      .then(async (r) => {
+        const d = await r.json();
+        if (!r.ok || d.ok === false) throw new Error();
+        const without = d.projects.filter((p) => p !== toast.path);
+        const idx = Math.min(toast.index, without.length);
+        const next = [...without.slice(0, idx), toast.path, ...without.slice(idx)];
+        return fetch('/api/projects/order', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths: next }) })
+          .then((r2) => r2.json())
+          .then((d2) => {
+            if (!d2.ok) throw new Error();
+            setProjects(d2.projects);
+            dismissToast(toast.id);
+          });
+      })
+      .catch(() => setError('Could not restore project.'));
   };
 
   // Native HTML5 DnD (TasksBoard precedent) — drop moves `path` into the drop
@@ -117,6 +160,27 @@ export default function ProjectsView() {
       </Box>
 
       {picking && <DirPicker start={untildify('~')} onPick={addProject} onClose={() => setPicking(false)} />}
+
+      {/* MUI Snackbar can't stack itself — a fixed-position column of
+          SnackbarContent stands in so a delete during an open toast's window
+          adds a second toast instead of replacing it. */}
+      {toasts.length > 0 && (
+        <Box
+          sx={(t) => ({
+            position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
+            zIndex: t.zIndex.snackbar, display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'center',
+          })}
+        >
+          {toasts.map((toast) => (
+            <SnackbarContent
+              key={toast.id}
+              sx={SNACK_GLASS}
+              message={`Removed ${repoName(toast.path)}`}
+              action={<Button size="small" variant="contained" onClick={() => undoDelete(toast)}>Undo</Button>}
+            />
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }

@@ -117,6 +117,29 @@ test('delete removes a card', async ({ page }) => {
   await expect(cardFor(page, PROJECT_PATHS.noUpstream)).toHaveCount(0);
 });
 
+test('delete shows an Undo toast that restores the card to its slot', async ({ page }) => {
+  await gotoView(page, 'Projects');
+  const before = await cardOrder(page);
+  await cardFor(page, PROJECT_PATHS.dirty).getByRole('button', { name: 'Remove project' }).click();
+  await expect(cardFor(page, PROJECT_PATHS.dirty)).toHaveCount(0);
+
+  await expect(page.getByText(`Removed ${repoName(PROJECT_PATHS.dirty)}`)).toBeVisible();
+  await page.getByRole('button', { name: 'Undo' }).click();
+
+  await expect(cardFor(page, PROJECT_PATHS.dirty)).toBeVisible();
+  await expect.poll(() => cardOrder(page)).toEqual(before);
+});
+
+test('deleting two cards stacks two Undo toasts at once', async ({ page }) => {
+  await gotoView(page, 'Projects');
+  await cardFor(page, PROJECT_PATHS.dirty).getByRole('button', { name: 'Remove project' }).click();
+  await cardFor(page, PROJECT_PATHS.noUpstream).getByRole('button', { name: 'Remove project' }).click();
+
+  await expect(page.getByText(`Removed ${repoName(PROJECT_PATHS.dirty)}`)).toBeVisible();
+  await expect(page.getByText(`Removed ${repoName(PROJECT_PATHS.noUpstream)}`)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(2);
+});
+
 test('drag-reorder changes the order', async ({ page }) => {
   await gotoView(page, 'Projects');
   const before = await cardOrder(page);

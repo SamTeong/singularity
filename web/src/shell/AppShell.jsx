@@ -30,7 +30,7 @@ import SessionDock from '@/shell/SessionDock.jsx';
 import AppMenu, { NAV_ITEMS } from '@/shell/AppMenu.jsx';
 import PhosphorFrame from '@/shell/PhosphorFrame.jsx';
 import PhosphorMasthead from '@/shell/PhosphorMasthead.jsx';
-import { glass } from '@/shell/shellStyles.js';
+import { glass, SNACK_GLASS } from '@/shell/shellStyles.js';
 import { useDoubleTap } from '@/features/palette/useDoubleTap.js';
 import CommandPalette from '@/features/palette/CommandPalette.jsx';
 import { buildCommands } from '@/features/palette/commands.mjs';
@@ -73,10 +73,6 @@ const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'transcr
 // 6.6) — that state lives above the remount boundary, so it survives without
 // this component needing its own Web Storage handoff (see `useThemeSkin()`'s
 // `pendingRespawn`/`clearPendingRespawn` below).
-// Glass snackbar content — MUI v9 dropped `ContentProps`, so this must go through
-// slotProps.content or SnackbarContent keeps its default (mode-inverted) colours.
-const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur });
-
 /**
  * AppShell — orchestration + layout. Holds UI-only state (view, collapse, dock
  * minimise, dialogs, toast), routes the selected view, and composes the sidebar,
