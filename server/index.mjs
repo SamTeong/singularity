@@ -19,7 +19,7 @@ import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
-import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, has as hasProject } from './projects.mjs';
+import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, has as hasProject } from './projects.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
 import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
@@ -788,6 +788,13 @@ app.get('/projects/status', async (req, reply) => {
   if (!hasProject(p)) return reply.code(404).send({ error: 'not found' });
   // Stored but no longer a repo on disk (list() prunes it on next load).
   try { return await projectStatus(p); }
+  catch { return reply.code(404).send({ error: 'not found' }); }
+});
+app.get('/projects/summary', async (req, reply) => {
+  const p = req.query.path;
+  if (!p) return reply.code(400).send({ error: 'path required' });
+  if (!hasProject(p)) return reply.code(404).send({ error: 'not found' });
+  try { return await projectSummary(p); }
   catch { return reply.code(404).send({ error: 'not found' }); }
 });
 

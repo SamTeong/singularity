@@ -16,6 +16,13 @@ function freshStatus(path) {
   };
 }
 
+// A freshly-added repo has no commits/changes to summarize yet — same
+// deterministic no-summariser shape server/projects.mjs returns for an empty
+// repo.
+function freshSummary(path) {
+  return { path, scope: 'recent', source: 'deterministic', llm: { ok: false, reason: 'no-summariser' }, committed: [], uncommitted: [] };
+}
+
 export function registerProjects(server) {
   server.get('/projects', () => ({ projects: db.projects.map((p) => p.path) }));
 
@@ -26,13 +33,17 @@ export function registerProjects(server) {
     if (typeof path !== 'string' || !path || path.includes('not-a-repo')) {
       return new Response(400, {}, { ok: false, error: 'not a git repository' });
     }
-    if (!db.projects.some((p) => p.path === path)) db.projects.push(freshStatus(path));
+    if (!db.projects.some((p) => p.path === path)) {
+      db.projects.push(freshStatus(path));
+      db.projectSummaries[path] = freshSummary(path);
+    }
     return { ok: true, projects: db.projects.map((p) => p.path) };
   });
 
   server.delete('/projects', (schema, req) => {
     const { path } = parseBody(req);
     db.projects = db.projects.filter((p) => p.path !== path);
+    delete db.projectSummaries[path];
     return { ok: true, projects: db.projects.map((p) => p.path) };
   });
 
@@ -51,5 +62,13 @@ export function registerProjects(server) {
     const p = db.projects.find((x) => x.path === path);
     if (!p) return new Response(404, {}, { error: 'not found' });
     return p;
+  });
+
+  server.get('/projects/summary', (schema, req) => {
+    const path = req.queryParams.path;
+    if (!path) return new Response(400, {}, { error: 'path required' });
+    const s = db.projectSummaries[path];
+    if (!s) return new Response(404, {}, { error: 'not found' });
+    return s;
   });
 }

@@ -305,6 +305,31 @@ export function seedProjects() {
   ];
 }
 
+// Summary fixtures (server/projects.mjs:summary shape), keyed by path: one
+// LLM-sourced, one deterministic with scope 'recent' (noUpstream has no
+// upstream), one with empty uncommitted ("Working tree clean" — clean has no
+// working-tree changes either).
+export function seedProjectSummaries() {
+  return {
+    [PROJECT_PATHS.clean]: {
+      path: PROJECT_PATHS.clean, scope: 'unpushed', source: 'llm', model: 'opus',
+      committed: ['Tidied up the release notes wording', 'Bumped the changelog date'],
+      uncommitted: [],
+    },
+    [PROJECT_PATHS.dirty]: {
+      path: PROJECT_PATHS.dirty, scope: 'unpushed', source: 'llm', model: 'opus',
+      committed: ['Reworked the widget layout'],
+      uncommitted: ['Still tuning the widget spacing', 'Stashed an experiment for later'],
+    },
+    [PROJECT_PATHS.noUpstream]: {
+      path: PROJECT_PATHS.noUpstream, scope: 'recent', source: 'deterministic',
+      llm: { ok: false, reason: 'no-summariser' },
+      committed: ['Local experiment'],
+      uncommitted: ['scratch.txt', 'notes.txt', '2 files changed'],
+    },
+  };
+}
+
 // ---------------------------------------------------------------------- misc
 
 // Per-panel picker roots — mirrors the *-root.json files

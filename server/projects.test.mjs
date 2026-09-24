@@ -12,7 +12,16 @@ process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 // Shrinks git()'s hard timeout (default 10s) so a hang stays cheap; real git
 // calls here finish in well under 3s (tasks.test.mjs pattern).
 process.env.SING_GIT_TIMEOUT_MS = '3000';
-const { list, add, remove, reorder, gitStatus, has } = await import('./projects.mjs');
+// CLAUDE_BIN existsSync-true (SINGULARITY_HOME itself), never actually
+// executed — summary()'s LLM path is always exercised with a stubbed
+// callSummariser (history.test.mjs pattern).
+process.env.CLAUDE_BIN = process.env.SINGULARITY_HOME;
+delete process.env.OLLAMA_BIN;
+delete process.env.CODEX_BIN;
+const { list, add, remove, reorder, gitStatus, summary, has } = await import('./projects.mjs');
+const { getModels, setModels } = await import('./model-store.mjs');
+const DEFAULT_SUMMARISER = getModels().summariserModel;
+function setSummariser(id) { setModels({ ...getModels(), summariserModel: id }); }
 
 const PROJECTS_FILE = join(process.env.SINGULARITY_HOME, 'state', 'projects.json');
 
@@ -140,5 +149,100 @@ test('has: gates on the stored list', async () => {
   await add(repo);
   assert.equal(has(repo), true);
   remove(repo);
+  rmRepo(repo);
+});
+
+test('summary: no summariser configured, upstream present -> deterministic, scope unpushed, commit subject only', async () => {
+  const repo = initRepo();
+  const bare = mkdtempSync(join(tmpdir(), 'sing-bare-'));
+  execFileSync('git', ['init', '--bare', '-q', bare]);
+  execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', bare]);
+  execFileSync('git', ['-C', repo, 'push', '-q', '-u', 'origin', 'main']);
+  writeFileSync(join(repo, 'f.txt'), 'unpushed change');
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-am', 'second commit']);
+
+  setSummariser('');
+  try {
+    const r = await summary(repo);
+    assert.equal(r.scope, 'unpushed');
+    assert.deepEqual(r.committed, ['second commit']); // only the unpushed one, not 'init'
+    assert.equal(r.source, 'deterministic');
+    assert.equal(r.llm.reason, 'no-summariser');
+  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  rmRepo(bare);
+  rmRepo(repo);
+});
+
+test('summary: no upstream -> scope recent, deterministic commit subjects, empty uncommitted', async () => {
+  const repo = initRepo(); // one commit 'init', no upstream, clean tree
+  setSummariser('');
+  try {
+    const r = await summary(repo);
+    assert.equal(r.scope, 'recent');
+    assert.deepEqual(r.committed, ['init']);
+    assert.deepEqual(r.uncommitted, []);
+  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  rmRepo(repo);
+});
+
+test('summary: deterministic uncommitted = --stat file lines plus the trailing summary line', async () => {
+  const repo = initRepo();
+  writeFileSync(join(repo, 'f.txt'), 'changed');
+  setSummariser('');
+  try {
+    const r = await summary(repo);
+    assert.equal(r.uncommitted.length, 2);
+    assert.match(r.uncommitted[0], /f\.txt/);
+    assert.match(r.uncommitted[1], /file changed/);
+  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  rmRepo(repo);
+});
+
+test('summary: untracked-only tree is not reported clean', async () => {
+  const repo = initRepo();
+  writeFileSync(join(repo, 'new1.txt'), 'x');
+  writeFileSync(join(repo, 'new2.txt'), 'y');
+  setSummariser('');
+  try {
+    const r = await summary(repo);
+    assert.deepEqual(r.uncommitted, ['2 untracked files']);
+  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  rmRepo(repo);
+});
+
+test('summary: LLM path parses JSON and caches; a cache hit skips the stub; a changed tree busts the cache', async () => {
+  const repo = initRepo();
+  setSummariser('opus'); // claude-group entry; CLAUDE_BIN existsSync-true, never actually run
+  let calls = 0;
+  const callSummariser = async () => { calls++; return { text: JSON.stringify({ committed: ['did x'], uncommitted: ['changed y'] }) }; };
+  try {
+    const r1 = await summary(repo, { callSummariser });
+    assert.equal(r1.source, 'llm');
+    assert.equal(r1.model, 'opus');
+    assert.deepEqual(r1.committed, ['did x']);
+    assert.equal(calls, 1);
+
+    const r2 = await summary(repo, { callSummariser });
+    assert.equal(r2.cached, true);
+    assert.deepEqual(r2.committed, ['did x']);
+    assert.equal(calls, 1, 'cache hit — the stub is not called again');
+
+    writeFileSync(join(repo, 'new.txt'), 'x'); // untracked — changes status --porcelain
+    const r3 = await summary(repo, { callSummariser });
+    assert.equal(calls, 2, 'a changed working tree busts the cache');
+    assert.equal(r3.cached, undefined);
+  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  rmRepo(repo);
+});
+
+test('summary: bad LLM JSON falls back to deterministic', async () => {
+  const repo = initRepo();
+  setSummariser('opus');
+  try {
+    const r = await summary(repo, { callSummariser: async () => ({ text: 'not json' }) });
+    assert.equal(r.source, 'deterministic');
+    assert.equal(r.llm.ok, false);
+    assert.deepEqual(r.committed, ['init']);
+  } finally { setSummariser(DEFAULT_SUMMARISER); }
   rmRepo(repo);
 });

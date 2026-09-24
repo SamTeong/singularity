@@ -28,6 +28,21 @@ function CountChip({ label, n }) {
   return <Chip label={`${label} ${n}`} size="small" sx={{ height: 20, fontSize: 11, opacity: n ? 1 : 0.4 }} />;
 }
 
+// A titled compact bullet list — same list styling as History's per-project
+// bullets (DayCard.jsx).
+function SummarySection({ title, bullets }) {
+  return (
+    <Box>
+      <Typography sx={{ fontSize: 11, fontWeight: 600, color: 'text.secondary' }}>{title}</Typography>
+      <Box component="ul" sx={{ m: 0, mt: 0.25, pl: 2, '& li + li': { mt: '0.4em' } }}>
+        {bullets.map((b, i) => (
+          <Typography key={i} component="li" sx={{ fontSize: 13, lineHeight: 1.4, color: 'text.secondary', '&::marker': { color: 'text.disabled' } }}>{b}</Typography>
+        ))}
+      </Box>
+    </Box>
+  );
+}
+
 /**
  * ProjectsView card: one git repo toplevel, its status fetched on mount and
  * whenever `refreshKey` changes (header's refresh-all, no polling).
@@ -35,12 +50,20 @@ function CountChip({ label, n }) {
 export default function ProjectCard({ path, refreshKey, onDelete, draggable, onDragStart, onDragEnd, onDragOver, onDrop }) {
   const [status, setStatus] = useState(null);
   const [phase, setPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
+  const [summary, setSummary] = useState(null);
+  const [summaryPhase, setSummaryPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
 
   const load = useCallback(() => {
     fetch(`/api/projects/status?path=${encodeURIComponent(path)}`)
       .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
       .then((d) => { setStatus(d); setPhase('ok'); })
       .catch(() => setPhase('error'));
+    // Loads independently of status: a slow LLM summary must never hold up
+    // the status chips above.
+    fetch(`/api/projects/summary?path=${encodeURIComponent(path)}`)
+      .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
+      .then((d) => { setSummary(d); setSummaryPhase('ok'); })
+      .catch(() => setSummaryPhase('error'));
   }, [path]);
 
   useEffect(() => { load(); }, [load, refreshKey]);
@@ -101,6 +124,22 @@ export default function ProjectCard({ path, refreshKey, onDelete, draggable, onD
             <Typography sx={{ fontSize: 12, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {status.lastCommit.subject} · {fmtRelative(status.lastCommit.date)}
             </Typography>
+          )}
+
+          {summaryPhase === 'error' && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>summary unavailable</Typography>}
+          {summaryPhase === 'loading' && !summary && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Summarizing…</Typography>}
+          {summary && (
+            <Stack spacing={0.75}>
+              {!!summary.committed?.length && (
+                <SummarySection title={summary.scope === 'unpushed' ? 'Unpushed' : 'Recent commits'} bullets={summary.committed} />
+              )}
+              {summary.uncommitted?.length ? (
+                <SummarySection title="Uncommitted" bullets={summary.uncommitted} />
+              ) : (
+                <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Working tree clean</Typography>
+              )}
+              <Typography sx={{ fontSize: 11, color: 'text.disabled' }}>summary: {summary.source === 'llm' ? summary.model : 'git'}</Typography>
+            </Stack>
           )}
         </Stack>
       )}
