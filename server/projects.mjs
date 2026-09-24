@@ -1,8 +1,8 @@
 // Projects: an ordered list of git repo toplevels, persisted at
 // STATE_DIR/projects.json (wiki-root.json pattern — see wiki.mjs). Each entry
 // gets an on-demand git status readout (branch, ahead/behind, working-tree
-// counts, stash, last commit). Never runs `git fetch` — ahead/behind are "as
-// of last fetch".
+// counts, stash, last commit). Status never runs `git fetch` — ahead/behind are
+// "as of last fetch"; fetch/rebase run only on explicit request (gitOp).
 import { existsSync, readFileSync, statSync, mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
@@ -130,6 +130,22 @@ export async function gitStatus(path) {
   return { path, branch, upstream, ahead, behind, staged, modified, untracked, conflicted, stash, lastCommit };
 }
 
+// Card buttons: plain `git fetch` / `git rebase` (onto upstream) / both
+// ('sync'), shelled out directly — no agent. A rebase that stops (conflicts)
+// is aborted so the repo is never left mid-rebase; git's own refusal (dirty
+// tree, no upstream) comes back as the error.
+export const GIT_OPS = { fetch: ['fetch'], rebase: ['rebase'], sync: ['fetch', 'rebase'] };
+export async function gitOp(path, op) {
+  for (const cmd of GIT_OPS[op]) {
+    try { await git(path, cmd); }
+    catch (e) {
+      if (cmd === 'rebase') await git(path, 'rebase', '--abort').catch(() => {});
+      return { ok: false, error: e.message };
+    }
+  }
+  return { ok: true };
+}
+
 // Unpushed commits (@{u}..HEAD) when there's an upstream, else the last
 // RECENT_COMMIT_COUNT. An empty repo (no HEAD yet) has no commits either way.
 async function commitScope(path) {
@@ -193,7 +209,9 @@ function cacheFileFor(path, headSha, diff, porcelain) {
 // LLM results are cached by path + HEAD sha + a hash of the working tree, so
 // reopening the Projects view doesn't re-bill the model; the deterministic
 // path is cheap enough that it's never cached.
-export async function summary(path, { callSummariser = defaultCallSummariser } = {}) {
+const callProjectSummariser = (prompt, m) => defaultCallSummariser(prompt, m, { system: null });
+
+export async function summary(path, { callSummariser = callProjectSummariser } = {}) {
   const [{ subjects, scope }, { stat, porcelain, diff }] = await Promise.all([commitScope(path), uncommittedChanges(path)]);
   let headSha = 'none';
   try { headSha = await git(path, 'rev-parse', 'HEAD'); } catch { /* empty repo */ }

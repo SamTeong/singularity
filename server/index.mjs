@@ -19,7 +19,7 @@ import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
-import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, has as hasProject } from './projects.mjs';
+import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
 import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
@@ -768,8 +768,8 @@ app.get('/wiki/file', async (req, reply) => {
 });
 
 // Projects: ordered list of git repo toplevels (STATE_DIR/projects.json),
-// each with an on-demand git status readout. Never runs `git fetch` —
-// ahead/behind are "as of last fetch".
+// each with an on-demand git status readout. Status never runs `git fetch` —
+// ahead/behind are "as of last fetch"; /projects/git runs fetch/rebase/both on click.
 app.get('/projects', async () => ({ projects: await listProjects() }));
 app.post('/projects', async (req, reply) => {
   const r = await addProject(req.body?.path);
@@ -789,6 +789,12 @@ app.get('/projects/status', async (req, reply) => {
   // Stored but no longer a repo on disk (list() prunes it on next load).
   try { return await projectStatus(p); }
   catch { return reply.code(404).send({ error: 'not found' }); }
+});
+app.post('/projects/git', async (req, reply) => {
+  const { path: p, op } = req.body ?? {};
+  if (!p || !Object.hasOwn(PROJECT_GIT_OPS, op)) return reply.code(400).send({ ok: false, error: 'path and op (fetch|rebase|sync) required' });
+  if (!hasProject(p)) return reply.code(404).send({ ok: false, error: 'not found' });
+  return projectGitOp(p, op);
 });
 app.get('/projects/summary', async (req, reply) => {
   const p = req.query.path;

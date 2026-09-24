@@ -64,6 +64,14 @@ export function registerProjects(server) {
     return p;
   });
 
+  // No real git in the mock: any tracked repo's fetch/rebase/sync succeeds.
+  server.post('/projects/git', (schema, req) => {
+    const { path, op } = parseBody(req);
+    if (!path || !['fetch', 'rebase', 'sync'].includes(op)) return new Response(400, {}, { ok: false, error: 'path and op (fetch|rebase|sync) required' });
+    if (!db.projects.some((p) => p.path === path)) return new Response(404, {}, { ok: false, error: 'not found' });
+    return { ok: true };
+  });
+
   server.get('/projects/summary', (schema, req) => {
     const path = req.queryParams.path;
     if (!path) return new Response(400, {}, { error: 'path required' });

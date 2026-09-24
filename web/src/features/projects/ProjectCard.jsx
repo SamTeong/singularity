@@ -9,6 +9,9 @@ import Tooltip from '@mui/material/Tooltip';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined';
+import CallMergeIcon from '@mui/icons-material/CallMerge';
+import SyncIcon from '@mui/icons-material/Sync';
 import { repoName, tildify } from '@/lib/paths.js';
 
 // Tiny relative-time formatter — the codebase has no existing helper for
@@ -69,6 +72,19 @@ export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, o
 
   useEffect(() => { load(); }, [load, refreshKey]);
 
+  // Plain git (daemon shells out, no agent); reload status either way.
+  const [gitBusy, setGitBusy] = useState(false);
+  const [gitError, setGitError] = useState(null);
+  const runGit = (op) => {
+    setGitBusy(true);
+    setGitError(null);
+    fetch('/api/projects/git', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path, op }) })
+      .then((r) => r.json())
+      .then((d) => { if (!d.ok) setGitError(d.error || `git ${op} failed`); })
+      .catch(() => setGitError(`git ${op} failed`))
+      .finally(() => { setGitBusy(false); load(); });
+  };
+
   return (
     <Box
       data-testid="project-card"
@@ -98,14 +114,24 @@ export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, o
             {tildify(path)}
           </Typography>
         </Box>
+        <Tooltip title="git fetch" disableInteractive>
+          <span><IconButton size="small" aria-label="git fetch" disabled={gitBusy} onClick={() => runGit('fetch')}><CloudDownloadOutlinedIcon fontSize="small" /></IconButton></span>
+        </Tooltip>
+        <Tooltip title="git rebase" disableInteractive>
+          <span><IconButton size="small" aria-label="git rebase" disabled={gitBusy} onClick={() => runGit('rebase')}><CallMergeIcon fontSize="small" /></IconButton></span>
+        </Tooltip>
+        <Tooltip title="git fetch + rebase" disableInteractive>
+          <span><IconButton size="small" aria-label="git fetch + rebase" disabled={gitBusy} onClick={() => runGit('sync')}><SyncIcon fontSize="small" /></IconButton></span>
+        </Tooltip>
         <Tooltip title="Refresh project" disableInteractive>
-          <IconButton size="small" aria-label="Refresh project" onClick={load}><RefreshIcon fontSize="small" /></IconButton>
+          <IconButton size="small" aria-label="Refresh project" onClick={() => { setGitError(null); load(); }}><RefreshIcon fontSize="small" /></IconButton>
         </Tooltip>
         <Tooltip title="Remove project" disableInteractive>
           <IconButton size="small" aria-label="Remove project" onClick={() => onDelete(path)}><DeleteOutlineIcon fontSize="small" /></IconButton>
         </Tooltip>
       </Stack>
 
+      {gitError && <Typography role="alert" sx={{ mt: 1.5, fontSize: 12, color: 'error.main', overflowWrap: 'anywhere', whiteSpace: 'pre-wrap' }}>{gitError}</Typography>}
       {phase === 'error' && <Typography sx={{ mt: 1.5, fontSize: 13, color: 'text.secondary' }}>unavailable</Typography>}
       {phase === 'loading' && !status && <Typography sx={{ mt: 1.5, fontSize: 13, color: 'text.secondary' }}>Loading…</Typography>}
       {status && (
