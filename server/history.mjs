@@ -290,7 +290,10 @@ function deterministicSummary(sessions) {
 }
 
 // group -> its binary path, or null when that binary isn't configured.
-function binFor(group) {
+// Exported: server/projects.mjs's summary() reuses the same no-summariser /
+// no-binary gate as summarizeDay, so a project card never triggers an
+// implicit fallback LLM either.
+export function binFor(group) {
   if (group === 'claude') return CLAUDE_BIN;
   if (group === 'ollama') return OLLAMA_BIN;
   if (group === 'codex') return CODEX_BIN;
@@ -316,7 +319,10 @@ async function callCodexSummariser(digestText, id) {
   return { text, inputTokens: null, outputTokens: null };
 }
 
-async function defaultCallSummariser(digestText, { id, group }) {
+// Exported: server/projects.mjs's summary() uses this as its default
+// callSummariser too, so a project summary routes through the same three
+// binary callers as a History day.
+export async function defaultCallSummariser(digestText, { id, group }) {
   if (group === 'claude') return callClaudeSummariser(digestText, id);
   if (group === 'codex') return callCodexSummariser(digestText, id);
   return callOllamaSummariser(digestText, id);

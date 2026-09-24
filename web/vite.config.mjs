@@ -1,6 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { homedir } from 'node:os';
 import { defineConfig } from 'vite';
+import { envPort } from '../scripts/env-port.mjs';
 import react from '@vitejs/plugin-react';
 import mockAssetsPlugin from './mock-assets.plugin.mjs';
 
@@ -9,7 +10,7 @@ import mockAssetsPlugin from './mock-assets.plugin.mjs';
 // relative imports to their co-located source.
 const srcDir = fileURLToPath(new URL('./src', import.meta.url));
 const backendPort = process.env.DAEMON_PORT ?? '4317';
-const vitePort = Number(process.env.VITE_PORT ?? 5317);
+const vitePort = envPort('VITE_PORT', 5317); // dev-mock loads no .env
 const apiTarget = `http://127.0.0.1:${backendPort}`;
 
 // Phase 1: Vite dev server proxies WS to the daemon on DAEMON_PORT.

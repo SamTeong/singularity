@@ -272,6 +272,64 @@ export function seedRecentRepos() {
   return [join(ROOTS.projects, PROJECT_A), join(ROOTS.projects, PROJECT_B)];
 }
 
+// ------------------------------------------------------------------ projects
+
+// Projects view fixtures — an ordered list of git repo toplevels, each with a
+// baked-in git-status readout (the mock has no real git; the daemon shells
+// out to produce this shape from server/projects.mjs:gitStatus). One clean
+// repo with unpushed commits, one dirty repo with a stash, one with no
+// upstream — so every card state the UI needs is exercisable without a fetch.
+export const PROJECT_PATHS = {
+  clean: join(FAKE_HOME, 'repos', 'sing-clean'),
+  dirty: join(FAKE_HOME, 'repos', 'sing-dirty'),
+  noUpstream: join(FAKE_HOME, 'repos', 'sing-scratch'),
+};
+
+export function seedProjects() {
+  return [
+    {
+      path: PROJECT_PATHS.clean, branch: 'main', upstream: 'origin/main', ahead: 2, behind: 0,
+      staged: 0, modified: 0, untracked: 0, conflicted: 0, stash: 0,
+      lastCommit: { sha: 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678', subject: 'Tidy release notes', date: new Date(T0 - 3_600_000).toISOString() },
+    },
+    {
+      path: PROJECT_PATHS.dirty, branch: 'feat/widget', upstream: 'origin/feat/widget', ahead: 0, behind: 1,
+      staged: 2, modified: 3, untracked: 1, conflicted: 0, stash: 1,
+      lastCommit: { sha: 'b2c3d4e5f60718293a4b5c6d7e8f90123456789a', subject: 'WIP: widget layout', date: new Date(T0 - 7_200_000).toISOString() },
+    },
+    {
+      path: PROJECT_PATHS.noUpstream, branch: 'scratch', upstream: null, ahead: 0, behind: 0,
+      staged: 0, modified: 0, untracked: 2, conflicted: 0, stash: 0,
+      lastCommit: { sha: 'c3d4e5f60718293a4b5c6d7e8f90123456789ab0', subject: 'Local experiment', date: new Date(T0 - 86_400_000).toISOString() },
+    },
+  ];
+}
+
+// Summary fixtures (server/projects.mjs:summary shape), keyed by path: one
+// LLM-sourced, one deterministic with scope 'recent' (noUpstream has no
+// upstream), one with empty uncommitted ("Working tree clean" — clean has no
+// working-tree changes either).
+export function seedProjectSummaries() {
+  return {
+    [PROJECT_PATHS.clean]: {
+      path: PROJECT_PATHS.clean, scope: 'unpushed', source: 'llm', model: 'opus',
+      committed: ['Tidied up the release notes wording', 'Bumped the changelog date'],
+      uncommitted: [],
+    },
+    [PROJECT_PATHS.dirty]: {
+      path: PROJECT_PATHS.dirty, scope: 'unpushed', source: 'llm', model: 'opus',
+      committed: ['Reworked the widget layout'],
+      uncommitted: ['Still tuning the widget spacing', 'Stashed an experiment for later'],
+    },
+    [PROJECT_PATHS.noUpstream]: {
+      path: PROJECT_PATHS.noUpstream, scope: 'recent', source: 'deterministic',
+      llm: { ok: false, reason: 'no-summariser' },
+      committed: ['Local experiment'],
+      uncommitted: ['scratch.txt', 'notes.txt', '2 files changed'],
+    },
+  };
+}
+
 // ---------------------------------------------------------------------- misc
 
 // Per-panel picker roots — mirrors the *-root.json files

@@ -30,7 +30,7 @@ import SessionDock from '@/shell/SessionDock.jsx';
 import AppMenu, { NAV_ITEMS } from '@/shell/AppMenu.jsx';
 import PhosphorFrame from '@/shell/PhosphorFrame.jsx';
 import PhosphorMasthead from '@/shell/PhosphorMasthead.jsx';
-import { glass } from '@/shell/shellStyles.js';
+import { glass, SNACK_GLASS, snackDrain, isDrainEnd } from '@/shell/shellStyles.js';
 import { useDoubleTap } from '@/features/palette/useDoubleTap.js';
 import CommandPalette from '@/features/palette/CommandPalette.jsx';
 import { buildCommands } from '@/features/palette/commands.mjs';
@@ -49,6 +49,7 @@ const MemoryPanel = lazy(() => import('@/features/memory/MemoryPanel.jsx'));
 const SessionHistory = lazy(() => import('@/features/transcripts/SessionHistory.jsx'));
 const HistoryView = lazy(() => import('@/features/history/HistoryView.jsx'));
 const WikiPanel = lazy(() => import('@/features/wiki/WikiPanel.jsx'));
+const ProjectsView = lazy(() => import('@/features/projects/ProjectsView.jsx'));
 const SkillsPanel = lazy(() => import('@/features/skills/SkillsPanel.jsx'));
 const ExplorerPanel = lazy(() => import('@/features/explorer/ExplorerPanel.jsx'));
 const UsageView = lazy(() => import('@/features/usage/UsageView.jsx'));
@@ -72,10 +73,6 @@ const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'transcr
 // 6.6) — that state lives above the remount boundary, so it survives without
 // this component needing its own Web Storage handoff (see `useThemeSkin()`'s
 // `pendingRespawn`/`clearPendingRespawn` below).
-// Glass snackbar content — MUI v9 dropped `ContentProps`, so this must go through
-// slotProps.content or SnackbarContent keeps its default (mode-inverted) colours.
-const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur });
-
 /**
  * AppShell — orchestration + layout. Holds UI-only state (view, collapse, dock
  * minimise, dialogs, toast), routes the selected view, and composes the sidebar,
@@ -466,6 +463,7 @@ export default function AppShell() {
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
             {view === 'history' && <HistoryView onOpenSession={openHistorySession} onToast={setToast} />}
+            {view === 'projects' && <ProjectsView />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} onSelectSkin={onSelectSkin} />}
             {view === 'status' && <StatusView />}
             {view === 'settings' && <SettingsView />}
@@ -598,16 +596,15 @@ export default function AppShell() {
         onBrowse={() => setPicking(true)}
       />
 
-      <Snackbar open={!!toast} autoHideDuration={5000} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} slotProps={{ content: { sx: SNACK_GLASS } }} />
+      <Snackbar open={!!toast} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} slotProps={{ content: { sx: [SNACK_GLASS, snackDrain(5000)], onAnimationEnd: (e) => isDrainEnd(e) && setToast(null) } }} />
 
       {/* Offered when a terminal scrolls to the top of its (capped) scrollback. */}
       <Snackbar
         open={!!txPrompt}
-        autoHideDuration={10000}
         onClose={() => setTxPrompt(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
         message="That's the start of what this terminal keeps. View the full transcript?"
-        slotProps={{ content: { sx: SNACK_GLASS } }}
+        slotProps={{ content: { sx: [SNACK_GLASS, snackDrain(10000)], onAnimationEnd: (e) => isDrainEnd(e) && setTxPrompt(null) } }}
         action={
           <>
             <Button size="small" variant="secondary" onClick={() => setTxPrompt(null)}>Dismiss</Button>

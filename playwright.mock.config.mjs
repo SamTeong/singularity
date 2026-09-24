@@ -3,8 +3,9 @@
 import { defineConfig, devices } from '@playwright/test';
 import { join } from 'node:path';
 import { RESPONSIVE_VIEWPORTS } from './e2e-mock/helpers/responsive.mjs';
+import { envPort } from './scripts/env-port.mjs';
 
-const port = Number(process.env.E2E_MOCK_PORT) || 4173;
+const port = envPort('E2E_MOCK_PORT', 4173);
 const baseURL = `http://127.0.0.1:${port}`;
 const { narrowest, phone, tablet, compactDesktop, desktop } = RESPONSIVE_VIEWPORTS;
 

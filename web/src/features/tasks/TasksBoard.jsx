@@ -108,7 +108,7 @@ const segBtn = (t, on) => {
 
 // Gradient primary action (.btn-primary) — brand-grad fill, white ink, soft
 // brand glow, hover lift + stronger glow, focus ring on keyboard focus.
-const primaryBtn = (t) => {
+export const primaryBtn = (t) => {
   const glow = brandGlow(t);
   return {
     borderRadius: 999, px: '18px', py: '7px', minHeight: 38,
@@ -163,7 +163,7 @@ const countChip = (t) => ({
 // explicit height lands at the same rendered box regardless of border width,
 // which minHeight can't guarantee against the New Task button's own 2px
 // `contained`-variant border (fix 1: shared control height under Phosphor).
-const PHOSPHOR_CONTROL_H = 32;
+export const PHOSPHOR_CONTROL_H = 32;
 const segBtnPhosphor = (t, on) => ({
   px: '14px', py: '6px', minWidth: 0, height: PHOSPHOR_CONTROL_H, borderRadius: 0,
   fontSize: 11, fontWeight: 700, letterSpacing: '.06em', lineHeight: 1.2,
