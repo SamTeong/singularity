@@ -5,96 +5,42 @@ Local web UI — control plane for a fleet of coding agents (spec-driven dev). B
 ## Run
 
 ```
-pnpm bootstrap       # first setup: generate .env (detects CLAUDE_BIN) + wire usage-report skill + install + start
-pnpm install         # installs dependencies, runs postinstall hook. @zapac/mui-theme + phosphor-console-theme are vendored (file:vendor/*.tgz)
-pnpm postinstall     # mac: run if agents fail with "posix_spawnp failed"
+pnpm install         # deps + postinstall
 pnpm start           # build web + serve on http://127.0.0.1:4317
-pnpm build           # build web only (vite build → web/dist); run before serving with `pnpm server`
-pnpm dev             # daemon (:4317) + Vite (:5317) → browse UI at 127.0.0.1:5317; Vite proxies /ws + REST to daemon
+pnpm dev             # daemon (:4317) + Vite (:5317); browse 127.0.0.1:5317
+pnpm dev-mock        # UI only, no daemon/.env: Vite (:5317) + in-browser mock backend
 pnpm test            # node --test-force-exit "server/*.test.mjs"
-pnpm clean           # reap orphan esbuild/vite procs (fixes build hangs before a fresh build)
-
-pnpm dev-mock        # UI only, no daemon: Vite (:5317) with an in-browser mock backend
-pnpm build:mock      # mock build → web/dist-mock (never touches web/dist)
-pnpm test:e2e-mock   # build:mock + the parallel Playwright suite in e2e-mock/
+pnpm test:e2e-mock   # build:mock + parallel Playwright suite in e2e-mock/
 ```
 
 Before finishing code changes: `pnpm lint && pnpm test`.
 
-**Mock mode needs no `.env` and no daemon.** `--mode mock` sets `VITE_MOCK=1`, which switches on `web/src/mock/` — a Mirage server answering every REST route plus a `mock-socket` `/ws` — so the whole UI runs against in-memory fixtures. Nothing reads `SINGULARITY_HOME`, `CLAUDE_BIN`, or the user's `~/.claude`. Use it for UI work; use `pnpm dev` when the change touches daemon behaviour.
+- `pnpm build`/`pnpm start` take ~20s+: run with `run_in_background` (or `timeout: 300000`).
+- Use mock mode for UI-only work, and `pnpm dev` when a change touches daemon behaviour.
+- Shell: PowerShell primary; Bash tool POSIX only.
+- `SINGULARITY_HOME`, `DAEMON_PORT`, `CLAUDE_BIN` are required in `.env` (no baked-in defaults). `pnpm bootstrap` generates it.
 
-Pieces separately: `pnpm server` (daemon) / `pnpm web` (Vite dev server only — no build). Shell: PowerShell primary; Bash tool POSIX only.
+## Invariants
 
-`pnpm build`/`pnpm start` run the production build (~20s warm, longer cold) — run with `run_in_background` (or `timeout: 300000`); the default 120s timeout always fires and auto-backgrounds it.
-
-Machine-specific config — **no baked-in defaults**: `SINGULARITY_HOME`, `DAEMON_PORT`, `CLAUDE_BIN` are REQUIRED; `OLLAMA_BIN` (absent → ollama models unavailable), `SING_SCOPE_ROOT` (absent → no skill-scopes; skills viewer auto-detects flat `~/.claude/skills` + `<project>/.claude/skills` vs grouped), `SING_TRUSTED_ROOT` (absent → default = this clone), `SING_USAGE_SKILL`/`SING_USAGE_REPORTS` (absent → usage-report degrade silently; `/capabilities` reports them), `SING_TOKEN` are OPTIONAL — daemon boots without any. `pnpm bootstrap` generates a `.env` with these filled (detects `CLAUDE_BIN`) for first-time setup. Scripts load it via `node --env-file-if-exists=.env`; missing `.env` or any required var → daemon refuses to start (`requireEnv` in `server/index.mjs`, `SINGULARITY_HOME` enforced in `app-dir.mjs`).
-
-## File structure
-
-```
-server/    daemon — Fastify routes (index.mjs) + feature modules, one *.mjs per concern, *.test.mjs co-located
-web/       React + MUI + xterm shell (src/), vite.config.mjs (dev proxy :5317 → :4317), dist/ (gitignored build)
-  src/
-    features/     one dir per surface — appearance, automation, config, config-hooks,
-                   explorer, history, memory, palette, processes, rules, sessions,
-                   settings, skills, status, tasks, transcripts, usage, wiki
-    components/   shared widgets (panelkit, Sparkline, CmEditor, …)
-    shell/        AppShell + AppMenu (lazy-loads each feature)
-    hooks/        React data hooks (useAgents, useSysStats, …)
-    lib/          small utilities
-    providers/    context providers
-    theme/        MUI theme
-    mock/         mock backend (dev-mock + e2e-mock only) — server.js (Mirage) + routes/
-                   one-per-concern, ws.js (mock-socket /ws), db.js + fixtures.js (seed
-                   corpora), index.js (startMock). Tree-shaken out of the prod bundle.
-e2e/       Playwright suite driving every UI flow against a throwaway sandbox daemon
-e2e-mock/  sibling Playwright suite driving the same flows against web/src/mock (parallel)
-scripts/   bootstrap.mjs (first setup), demo-tasks.mjs, fix-pty-helper.mjs (postinstall +x),
-           ollama-login.mjs, reap-build-orphans.mjs (pnpm clean)
-vendor/    vendored tgz deps (@zapac/mui-theme, phosphor-console-theme) so install works offline
-assets/    screenshots
-docs/      one-shot/ — standalone HTML layout mockups (theme/report explorations), not built or served
-github-pages/  self-contained React + three.js deck (own package.json + pnpm-lock + pnpm-workspace.yaml,
-           deliberately OUTSIDE the root workspace) — install and build from inside that dir, not the root
-```
-
-Backend modules → routes in `server/index.mjs`. Add a concern = new module + route + co-located test.
-
-The HTTP API lives under `/api` (e.g. `POST /api/tasks`); `/ws`, `GET /`, and `/assets/*` stay at the root. The Vite dev proxy forwards the whole `/api` prefix in one entry, so a new route needs no proxy edit.
-
-**The root namespace belongs to the UI.** Every view is a real URL — `/tasks`, `/usage`, `/transcripts` (React Router `BrowserRouter`, no basename) — so view ids and API paths no longer share a namespace. `web/src/shell/views.mjs` is the one view catalog (sidebar rail + More menu, deduped); the router validates against it and an unknown id **redirects** to `/tasks` rather than rendering Tasks under a lying URL. `AppShell`'s `view` comes from `useParams`, and `localStorage['sing-view']` is now only the "where was I" memory a bare `/` redirects to. Any GET navigation that matches no route falls to `setNotFoundHandler` in `server/index.mjs`, which serves the shell through `sendShell` (token + home injection) — never a bare `sendFile`, or a deep-link reload ships a shell with no `window.__SING_TOKEN__` and every call 401s.
-
-Per-view filters live in the query string via `web/src/hooks/useQueryState.js` (`useQueryState` / `useQueryList` / `useUpdateQuery`) — `/tasks?tag=x&history=1`, `/history?preset=30`, `/transcripts?project=…&session=…&source=codex`. Repeated params, never CSV (tags and cwd paths contain commas); a param equal to its default is absent; an invalid value degrades to the default instead of breaking the view. Anything changing more than one key must go through `useUpdateQuery`'s single patch — two `setSearchParams` calls in one tick both read the same snapshot and the first write is lost.
-
-**New server route → one more edit, mandatory:**
-
-**Add a handler to `web/src/mock/routes/`.** Mirage is configured to throw on any unhandled request, so a route the client gains but the mock lacks fails the whole mock suite loudly — that's the intended drift alarm, not a flake. Match the daemon's exact response shape (several routes return bare arrays or keyed objects with no `ok`), and broadcast the matching WS frame if the daemon does.
-
-## State
-
-Owned app state → `SINGULARITY_HOME` (required, no default — set in `.env`; `APP_DIR`):
-- `state/` (durable): `agents.json`, `tasks.json`, `crons.json`, `background.json`, `models.json`, `ollama.json`, plus per-user picker roots — `config-roots.json`, `hook-roots.json`, `memory-root.json`, `rules-roots.json`, `sessions-root.json`, `skills-roots.json` (+ legacy `skills-root.json`), `wiki-root.json`
-- `cache/` (disposable): `pw-ollama-profile/`
-
-Model lists are runtime config, not code: `state/models.json` (edited in Settings ▸ Models) drives the picker suggestions, client-side spawn classification (`web/src/lib/models.js`), server spawn routing (`server/models.mjs` via `model-store.mjs`), and the History summariser — any enabled entry from any group (claude/ollama/codex), not just ollama. `model-store.mjs` seeds it from the shipped arrays on first boot; Restore defaults re-merges missing shipped ids. History runs two rungs: the configured summariser, else deterministic bullets — no implicit fallback LLM.
-
-`.worktrees/` + `.tickets/<id>/` live at `TRUSTED_ROOT` (default = this clone; override via `SING_TRUSTED_ROOT` in `.env`), NOT under `APP_DIR` — Claude only honors repo-controllable permissions (allow-rules/hooks) for paths inside the trusted project root; external paths fire Task-permission prompts.
-Single source = `server/app-dir.mjs` (`APP_DIR`/`STATE_DIR`/`CACHE_DIR`/`WORKTREES_DIR`/`TICKETS_DIR`). Route all new state through `reg` from `agents.mjs` — never hardcode `~/.singularity`. `migrate-state.mjs` (imported by `index.mjs`) moves the pre-split flat layout into `state/`+`cache/` once.
-
-External (read-only, not owned): `~/.claude/projects` (session transcripts), `~/.claude/.credentials.json` (OAuth), `~/.agents` (spend, skill-scopes), `~/wiki` (client-chosen root).
+- **Never restart the live daemon (:4317) or Vite (:5317).** This session usually runs inside it. Probe with an isolated daemon (own `SINGULARITY_HOME` + `DAEMON_PORT`).
+- **New server route:** add it in `server/index.mjs`, add the module, a co-located `*.test.mjs`, **and** a handler in `web/src/mock/routes/`. Mirage throws on unhandled requests.
+- HTTP API lives under `/api`. `/ws`, `GET /` and `/assets/*` stay at root. The root namespace belongs to UI views (real URLs, catalog in `web/src/shell/views.mjs`).
+- New state goes through `reg` (`agents.mjs`) / `server/app-dir.mjs`. Never hardcode `~/.singularity`.
+- `claude`/`ollama` are invoked only via absolute `CLAUDE_BIN`/`OLLAMA_BIN` (no PATH fallback).
 
 ## Security
 
-Daemon binds **127.0.0.1 only** — spawns `claude` with full FS access. Never bind `0.0.0.0`.
-Origin allowlist (daemon + Vite hosts) blocks DNS-rebinding / drive-by browser hits to loopback.
-Optional `SING_TOKEN` gates data endpoints + WS + the shell itself (`x-sing-token` header / `?token=` / `sing_token` HttpOnly cookie — a `?token=` hit mints the cookie and 302s the token out of the URL); assets stay open. Env-var only — app never persists it. Served into `window.__SING_TOKEN__` for the shell.
+The daemon binds **127.0.0.1 only**, because it spawns `claude` with full FS access. Never bind `0.0.0.0`. An origin allowlist blocks DNS rebinding. Optional `SING_TOKEN` gates data, WS and the shell (details: `.claude/rules/server.md`).
 
-## Working rules
+## Rules index
 
-- `claude`/`ollama` binaries: absolute paths from `CLAUDE_BIN`/`OLLAMA_BIN` (no PATH fallback — Windows node-pty does no PATH resolution).
-- Per-agent cost = turns + total tokens, plus `$` from the **global statusline** (`harness-usage-report` skill, `~/.claude/settings.json`) — the single source of truth for every session, foreground and task/background. `server/stats.mjs:readCostFile` reads `~/.agents/.harness-usage-report/state/cost-state/<id>.json` (full payload, `cost.total_cost_usd`); honors `USAGE_REPORT_STATE`. No per-task statusline override, no parallel capture script — one statusline, one store. Token estimates (`est_cost_usd`) are the pricing-table fallback only.
-- Tests redirect state with `SINGULARITY_HOME=<scratch temp>` set before a **dynamic** `import('./agents.mjs')` (static imports hoist above the env assignment; `app-dir.mjs` throws without it). Same applies to ad-hoc `node -e` scripts importing server modules — run as `node --env-file-if-exists=.env -e "..."`.
-- Config editor writes 2 scopes — `settings.json` (project) + `settings.local.json` (project-local) — with `.bak` backup + JSON validate; paths derived server-side, client never supplies a path. User-level `~/.claude/settings.json` is reachable by picking root `~` (project scope resolves to it), not a separate tab.
-- Shell-level viewport decisions (rail vs. drawer, dock defaults) import `PHONE_QUERY`/`TABLET_QUERY`/`SHORT_QUERY` from `web/src/shell/breakpoints.js` — never `theme.breakpoints.*` (ZAPAC and Phosphor Console ship different `sm`/`md`/`lg` pixels). Feature-internal layout may use the theme's own breakpoints or `repeat(auto-fit, minmax(...))` where a widget's own container width, not the viewport, should drive it. Reuse `web/src/components/panelkit/PhonePane.jsx` for a Rail editor's phone single-pane switch and `web/src/components/TableScroller.jsx` for a dense table below 900px — don't re-implement either. Any new narrow representation needs a responsive spec case (`e2e-mock/*-responsive.spec.mjs` or `shell-mobile-nav`/`shell-dock-responsive`), proven to fail before the fix and looping both skins where the assertion is skin- or column-count-sensitive. `expectNoPageOverflow` measures **horizontal** overflow only; for a bounded scroll region use `expectReachableByPaneScroll` from `e2e-mock/helpers/responsive.mjs` — `scrollIntoViewIfNeeded()` + `toBeInViewport()` alone stay green when the region is removed outright, because Playwright will scroll an `overflow:hidden` ancestor no user can.
+Auto-loaded only when you touch matching files (`paths:` frontmatter):
+- `.claude/rules/server.md`: `server/**` (state layout, models, cost, config editor, tests, security detail)
+- `.claude/rules/web-ui.md`: `web/src/**` (routing + query state, responsive, CodeMirror, canvas)
+- `.claude/rules/mock-and-e2e.md`: mock backend, `e2e/`, `e2e-mock/`
+
+Not auto-loaded. Read when the trigger applies:
+- `.claude/rules-reference/worktree-workflow.md`: before branch-scoped or multi-session feature work (worktree under `.worktrees/`, like Tasks do)
+- `.claude/rules-reference/setup-and-layout.md`: first-time setup, env vars, repo layout, runtime probes
 
 Surgical edits and goal-driven testing are covered in `~/.claude/CLAUDE.md`.
