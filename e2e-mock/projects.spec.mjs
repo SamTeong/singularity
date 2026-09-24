@@ -101,6 +101,8 @@ test('add via picker: a new path adds a card, the same path does not duplicate',
 test('a non-repo path shows the add error', async ({ page }) => {
   await gotoView(page, 'Projects');
   const dialog = await openPicker(page);
+  // The path field takes focus on open, so typing a path needs no click.
+  await expect(dialog.getByRole('textbox')).toBeFocused();
   await dialog.getByRole('textbox').fill('/home/mock/not-a-repo');
   await dialog.getByRole('button', { name: 'Select' }).click();
   await expect(page.getByRole('alert')).toContainText('not a git repository');
