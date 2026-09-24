@@ -7,7 +7,7 @@ paths:
 
 ## State
 - All owned state goes under `SINGULARITY_HOME` (`APP_DIR`, no default). The single source is `server/app-dir.mjs` (`APP_DIR`/`STATE_DIR`/`CACHE_DIR`/`WORKTREES_DIR`/`TICKETS_DIR`). Route new state through `reg` from `agents.mjs`. Never hardcode `~/.singularity`.
-- `state/` is durable: `agents.json`, `tasks.json`, `crons.json`, `background.json`, `models.json`, `ollama.json`, plus picker roots (`config-roots`, `hook-roots`, `memory-root`, `rules-roots`, `sessions-root`, `skills-roots` (+ legacy `skills-root`), `wiki-root` `.json`). `cache/` is disposable (`pw-ollama-profile/`).
+- `state/` is durable: `agents.json`, `tasks.json`, `crons.json`, `background.json`, `models.json`, `ollama.json`, `projects.json` (Projects view repo list), plus picker roots (`config-roots`, `hook-roots`, `memory-root`, `rules-roots`, `sessions-root`, `skills-roots` (+ legacy `skills-root`), `wiki-root` `.json`). `cache/` is disposable (`pw-ollama-profile/`, `projects-summary/`).
 - `.worktrees/` + `.tickets/<id>/` live at `TRUSTED_ROOT`, not `APP_DIR`. Claude honors repo allow-rules and hooks only inside the trusted root; external paths trigger Task permission prompts.
 - `migrate-state.mjs` (imported by `index.mjs`) moves the old flat layout into `state/` + `cache/` once.
 - External and read-only: `~/.claude/projects` (transcripts), `~/.claude/.credentials.json`, `~/.agents` (spend, skill-scopes), `~/wiki`.
