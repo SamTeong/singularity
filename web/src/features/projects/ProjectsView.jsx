@@ -35,7 +35,7 @@ export default function ProjectsView() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [dragId, setDragId] = useState(null);
   // One undo toast per delete, stacked (not replaced) — each carries the
-  // deleted path and its pre-delete index so Undo can restore its slot.
+  // deleted path and the shared order from the start of the delete stack.
   const [toasts, setToasts] = useState([]);
   const nextToastId = useRef(0);
   const { skinId } = useThemeSkin();
@@ -62,28 +62,40 @@ export default function ProjectsView() {
   };
 
   const removeProject = (path) => {
-    const index = projects.indexOf(path);
+    const order = toasts[0]?.order || projects;
     fetch('/api/projects', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }) })
       .then((r) => r.json())
       .then((d) => {
         setProjects(d.projects);
         const id = ++nextToastId.current;
-        setToasts((ts) => [...ts, { id, path, index }]);
+        setToasts((ts) => [...ts, { id, path, order }]);
       })
       .catch(() => {});
   };
 
   // Undo one toast: re-add the path, then reinsert it into the CURRENT server
-  // order (not the pre-delete `prev` snapshot — other cards may have been
-  // deleted/reordered since) at its original index, clamped to the new length.
+  // order (not the pre-delete `prev` snapshot). Nearest surviving neighbors
+  // from the shared delete-stack order keep stacked removals in saved order.
   const undoDelete = (toast) => {
     fetch('/api/projects', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: toast.path }) })
       .then(async (r) => {
         const d = await r.json();
         if (!r.ok || d.ok === false) throw new Error();
         const without = d.projects.filter((p) => p !== toast.path);
-        const idx = Math.min(toast.index, without.length);
-        const next = [...without.slice(0, idx), toast.path, ...without.slice(idx)];
+        const orderIndex = toast.order.indexOf(toast.path);
+        let index = -1;
+        for (let i = orderIndex - 1; i >= 0; i--) {
+          const neighborIndex = without.indexOf(toast.order[i]);
+          if (neighborIndex >= 0) { index = neighborIndex + 1; break; }
+        }
+        if (index < 0) {
+          for (let i = orderIndex + 1; i < toast.order.length; i++) {
+            const neighborIndex = without.indexOf(toast.order[i]);
+            if (neighborIndex >= 0) { index = neighborIndex; break; }
+          }
+        }
+        if (index < 0) index = Math.min(Math.max(orderIndex, 0), without.length);
+        const next = [...without.slice(0, index), toast.path, ...without.slice(index)];
         return fetch('/api/projects/order', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths: next }) })
           .then((r2) => r2.json())
           .then((d2) => {

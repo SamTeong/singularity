@@ -114,3 +114,43 @@ test('Settings: dragging a model onto a lower row moves it there', async ({ page
   await expect(boxes().nth(2)).toHaveValue(c);
   await expect(boxes().nth(4)).toHaveValue(a);
 });
+
+test('Settings: deleting the selected fallback chooses next and clears the last row', async ({ page }) => {
+  await page.goto('/settings?tab=models');
+  await page.getByText('Prices (harness-usage-report)').click();
+  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'Prices (harness-usage-report)' });
+  const saved = () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
+
+  await prices.getByRole('button', { name: 'Delete opus', exact: true }).click();
+  await expect.poll(async () => (await saved()).default_key).toBe('sonnet');
+  await prices.getByRole('button', { name: 'Delete sonnet' }).click();
+  await expect.poll(async () => (await saved()).default_key).toBe('haiku');
+  await prices.getByRole('button', { name: 'Delete haiku' }).click();
+  await expect.poll(async () => (await saved()).default_key).toBe('opus-5-5');
+  await prices.getByRole('button', { name: 'Delete opus-5-5' }).click();
+  await expect.poll(async () => (await saved()).default_key).toBe('');
+});
+
+test('Settings: deleting the selected last fallback chooses the preceding base row', async ({ page }) => {
+  await page.goto('/settings?tab=models');
+  await page.getByText('Prices (harness-usage-report)').click();
+  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'Prices (harness-usage-report)' });
+  const fallback = prices.getByRole('combobox');
+  await fallback.click();
+  await page.getByRole('option', { name: 'haiku', exact: true }).click();
+
+  await prices.getByRole('button', { name: 'Delete haiku' }).click();
+  await expect.poll(async () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json())))
+    .toMatchObject({ default_key: 'sonnet' });
+});
+
+test('Settings: renaming the selected fallback keeps it selected', async ({ page }) => {
+  await page.goto('/settings?tab=models');
+  await page.getByText('Prices (harness-usage-report)').click();
+  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'Prices (harness-usage-report)' });
+  await prices.getByPlaceholder('e.g. opus').nth(1).fill('opus-renamed');
+  await prices.getByPlaceholder('e.g. opus').nth(1).press('Tab');
+
+  await expect.poll(async () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json())))
+    .toMatchObject({ default_key: 'opus-renamed' });
+});
