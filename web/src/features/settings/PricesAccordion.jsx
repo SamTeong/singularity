@@ -100,7 +100,14 @@ export default function PricesAccordion() {
     [rows[i], rows[j]] = [rows[j], rows[i]];
     save({ ...draft, [table]: rows });
   };
-  const deleteRow = (table, i) => save({ ...draft, [table]: draft[table].filter((_, j) => j !== i) });
+  const deleteRow = (table, i) => {
+    const rows = draft[table].filter((_, j) => j !== i);
+    let defaultKey = draft.defaultKey;
+    if (table === 'base' && draft.base[i]?.key.trim() === defaultKey) {
+      defaultKey = rows[i]?.key.trim() || rows[i - 1]?.key.trim() || '';
+    }
+    save({ ...draft, [table]: rows, defaultKey });
+  };
   const addRow = (table, add, setAdd, atTop) => {
     const row = { key: add.key.trim(), values: add.values };
     const rows = atTop ? [row, ...draft[table]] : [...draft[table], row];
@@ -129,7 +136,13 @@ export default function PricesAccordion() {
             size="small"
             placeholder="e.g. opus"
             value={row.key}
-            onChange={(e) => setDraft({ ...draft, [tableKey]: replaceRow(tableKey, i, { key: e.target.value }) })}
+            onChange={(e) => {
+              const key = e.target.value;
+              const defaultKey = tableKey === 'base' && row.key.trim() === draft.defaultKey
+                ? key.trim()
+                : draft.defaultKey;
+              setDraft({ ...draft, [tableKey]: replaceRow(tableKey, i, { key }), defaultKey });
+            }}
             onBlur={saveIfChanged}
             sx={{ width: 160 }}
           />

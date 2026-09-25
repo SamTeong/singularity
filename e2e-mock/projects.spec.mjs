@@ -151,6 +151,34 @@ test('deleting two cards stacks two Undo toasts at once', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(2);
 });
 
+for (const [undoOrder, firstUndo] of [['deletion order', 0], ['reverse order', 1]]) {
+  test(`undoing stacked adjacent deletions in ${undoOrder} preserves card order`, async ({ page }) => {
+    await gotoView(page, 'Projects');
+    const before = await cardOrder(page);
+    await cardFor(page, PROJECT_PATHS.dirty).getByRole('button', { name: 'Remove project' }).click();
+    await cardFor(page, PROJECT_PATHS.noUpstream).getByRole('button', { name: 'Remove project' }).click();
+
+    await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(2);
+    await page.getByRole('button', { name: 'Undo' }).nth(firstUndo).click();
+    await page.getByRole('button', { name: 'Undo' }).nth(0).click();
+
+    await expect.poll(() => cardOrder(page)).toEqual(before);
+  });
+}
+
+test('undo preserves the current order of surviving cards', async ({ page }) => {
+  await gotoView(page, 'Projects');
+  await cardFor(page, PROJECT_PATHS.dirty).getByRole('button', { name: 'Remove project' }).click();
+  await expect(cardFor(page, PROJECT_PATHS.dirty)).toHaveCount(0);
+  await html5Drag(page, gripIn(cardFor(page, PROJECT_PATHS.noUpstream)), cardFor(page, PROJECT_PATHS.clean));
+  await expect.poll(() => cardOrder(page)).toEqual([repoName(PROJECT_PATHS.noUpstream), repoName(PROJECT_PATHS.clean)]);
+
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => cardOrder(page)).toEqual([
+    repoName(PROJECT_PATHS.noUpstream), repoName(PROJECT_PATHS.clean), repoName(PROJECT_PATHS.dirty),
+  ]);
+});
+
 test('drag-reorder changes the order', async ({ page }) => {
   await gotoView(page, 'Projects');
   const before = await cardOrder(page);
