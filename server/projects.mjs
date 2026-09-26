@@ -9,7 +9,7 @@ import { createHash } from 'node:crypto';
 import * as reg from './agents.mjs';
 import { git } from './tasks.mjs';
 import { getSummariser } from './model-store.mjs';
-import { defaultCallSummariser, binFor } from './history.mjs';
+import { defaultCallSummariser, binFor, declawedGuidance } from './history.mjs';
 
 const SUMMARY_CACHE_DIR = join(reg.CACHE_DIR, 'projects-summary');
 const RECENT_COMMIT_COUNT = 10;
@@ -198,8 +198,12 @@ function parseJsonSummary(text) {
   } catch { return null; }
 }
 
-function cacheFileFor(path, headSha, diff, porcelain) {
-  const key = sha1(`${path}\0${headSha}\0${sha1(diff + porcelain)}`);
+// scope + subjects are in the key because a push moves @{u}, not HEAD —
+// without them a pushed repo keeps hitting its stale "Unpushed" entry.
+// declawedGuidance() is in the key too, so installing/removing the skill
+// doesn't keep serving bullets worded under the old (or no) rules.
+function cacheFileFor(path, headSha, scope, subjects, diff, porcelain) {
+  const key = sha1(`${path}\0${headSha}\0${scope}\0${subjects.join('\n')}\0${sha1(diff + porcelain)}\0${sha1(declawedGuidance())}`);
   return join(SUMMARY_CACHE_DIR, `${key}.json`);
 }
 
@@ -221,7 +225,7 @@ export async function summary(path, { callSummariser = callProjectSummariser } =
     return { path, scope, ...deterministicSummary(subjects, stat, porcelain), source: 'deterministic', llm: { ok: false, reason: 'no-summariser' } };
   }
 
-  const cacheFile = cacheFileFor(path, headSha, diff, porcelain);
+  const cacheFile = cacheFileFor(path, headSha, scope, subjects, diff, porcelain);
   try {
     const cached = JSON.parse(readFileSync(cacheFile, 'utf8'));
     return { ...cached, cached: true };

@@ -8,6 +8,7 @@
 // Harness transcripts only — no git log, no project folders (see plan.md).
 import { mkdirSync, readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { homedir } from 'node:os';
 import { STATE_DIR, bus, writeAtomic, CLAUDE_BIN, OLLAMA_BIN, CODEX_BIN } from './agents.mjs';
 import { listSessions, readSession } from './sessions.mjs';
 import { parseSession, readCostFile, readStatsCsvCosts } from './stats.mjs';
@@ -35,6 +36,22 @@ const SUMMARY_SYSTEM = 'Summarize one day of coding-agent transcripts into stric
   + '6. No hype: drop "leveraged", "robust", "comprehensive", "seamless", "streamlined", "significantly". No sentence built on a contrast with what it is not.\n'
   + '7. Nothing about the session, the agent, the transcript, or this summary.\n'
   + 'Good: "history page now opens without a wait". Bad: "implemented concurrent ensureHistory deduplication via shared in-flight promise".';
+
+// declawed's Phase 2 (rewrite) rules, appended to the summariser prompt so
+// bullets read like human prose — re-read on every call so installing or
+// removing the skill takes effect without a restart. No skill installed (or
+// unreadable, or no Phase 2 heading) => '', prompt is unchanged from today.
+const DECLAWED_SKILL = join(homedir(), '.agents', 'skills', 'declawed', 'SKILL.md');
+export function declawedGuidance(skillFile = DECLAWED_SKILL) {
+  let text;
+  try { text = readFileSync(skillFile, 'utf8'); } catch { return ''; }
+  const start = text.match(/^## Phase 2.*$/m);
+  if (!start) return '';
+  const from = start.index;
+  const endMatch = text.slice(from).match(/^## Phase 3.*$/m);
+  const to = endMatch ? from + endMatch.index : text.length;
+  return text.slice(from, to).trim();
+}
 
 // Machine-local YYYY-MM-DD — no manual TZ math (per plan). Defaults to now.
 export function localDay(ts) {
@@ -324,7 +341,9 @@ async function callCodexSummariser(prompt, id) {
 // binary callers as a History day. `system` defaults to History's prompt;
 // projects.mjs passes null because its prompt carries its own instructions.
 export async function defaultCallSummariser(digestText, { id, group }, { system = SUMMARY_SYSTEM } = {}) {
-  const prompt = system ? `${system}\n\n${digestText}` : digestText;
+  const guidance = declawedGuidance();
+  const parts = [system, guidance && `Write every bullet in plain, specific human prose. Apply these rules from the declawed skill to the wording only; the output format stays exactly as requested above/below:\n\n${guidance}`, digestText].filter(Boolean);
+  const prompt = parts.join('\n\n');
   if (group === 'claude') return callClaudeSummariser(prompt, id);
   if (group === 'codex') return callCodexSummariser(prompt, id);
   return callOllamaSummariser(prompt, id);

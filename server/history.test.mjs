@@ -36,7 +36,7 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 const { encodeCwd } = await import('./agents.mjs');
 const { USAGE_SKILL_STATE } = await import('./app-dir.mjs');
 const { getModels, setModels } = await import('./model-store.mjs');
-const { readHistory, ensureHistory, regenerateDay, liveToday, scanDays, buildDigest, summarizeDay, localDay } = await import('./history.mjs');
+const { readHistory, ensureHistory, regenerateDay, liveToday, scanDays, buildDigest, summarizeDay, localDay, declawedGuidance } = await import('./history.mjs');
 const DEFAULT_SUMMARISER = getModels().summariserModel; // seed default ('deepseek-v4-flash:cloud', ollama)
 function setSummariser(id) { setModels({ ...getModels(), summariserModel: id }); }
 
@@ -487,4 +487,18 @@ test('scanDays: cache key includes root — same session id under different root
   const days2 = await scanDays(windowStart, root2);
   const session2 = days2.get(dateStr)?.sessions.find((s) => s.id === id);
   assert.equal(session2?.lastAssistantText, 'response2', 'root2 returns response2, not the cached response1');
+});
+
+test('declawedGuidance: slices the Phase 2 section, trimmed, up to (not including) Phase 3', () => {
+  const skillFile = join(scratch, 'declawed-skill.md');
+  writeFileSync(skillFile, '# X\n## Phase 1\nscan\n## Phase 2\nrewrite rules\n## Phase 3\nverify');
+  const guidance = declawedGuidance(skillFile);
+  assert.ok(guidance.startsWith('## Phase 2'));
+  assert.ok(guidance.includes('rewrite rules'));
+  assert.ok(!guidance.includes('Phase 3'));
+  assert.ok(!guidance.includes('scan'));
+});
+
+test('declawedGuidance: missing file -> empty string', () => {
+  assert.equal(declawedGuidance(join(scratch, 'no-such-skill.md')), '');
 });

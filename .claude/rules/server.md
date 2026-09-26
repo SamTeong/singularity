@@ -13,7 +13,7 @@ paths:
 - External and read-only: `~/.claude/projects` (transcripts), `~/.claude/.credentials.json`, `~/.agents` (spend, skill-scopes), `~/wiki`. One exception: `model-prices.mjs` writes the usage-report skill's `pricing.json` (its only rate source, Settings ▸ Models ▸ Prices).
 
 ## Models
-`state/models.json` (Settings ▸ Models) drives picker suggestions, client spawn classification (`web/src/lib/models.js`), server spawn routing (`models.mjs` via `model-store.mjs`), and the History summariser (any enabled entry, any group). `model-store.mjs` seeds it from the shipped arrays; Restore defaults re-merges missing shipped ids. History has two tiers: the configured summariser, else deterministic bullets. There is no implicit fallback LLM.
+`state/models.json` (Settings ▸ Models) drives picker suggestions, client spawn classification (`web/src/lib/models.js`), server spawn routing (`models.mjs` via `model-store.mjs`), and the History summariser (any enabled entry, any group). `model-store.mjs` seeds it from the shipped arrays; Restore defaults re-merges missing shipped ids. History has two tiers: the configured summariser, else deterministic bullets. There is no implicit fallback LLM. Summarisers append declawed's Phase 2 (rewrite) rules to the prompt when `~/.agents/skills/declawed/SKILL.md` exists.
 
 ## Binaries, cost, config
 - `claude`/`ollama`: always absolute paths from `CLAUDE_BIN`/`OLLAMA_BIN`. There is no PATH fallback, because Windows node-pty does no PATH resolution.

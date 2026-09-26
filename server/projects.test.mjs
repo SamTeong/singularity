@@ -271,6 +271,28 @@ test('summary: LLM path parses JSON and caches; a cache hit skips the stub; a ch
   rmRepo(repo);
 });
 
+test('summary: pushing (HEAD unchanged) busts the LLM cache', async () => {
+  const repo = initRepo();
+  const bare = mkdtempSync(join(tmpdir(), 'sing-bare-'));
+  execFileSync('git', ['init', '--bare', '-q', bare]);
+  execFileSync('git', ['-C', repo, 'remote', 'add', 'origin', bare]);
+  execFileSync('git', ['-C', repo, 'push', '-q', '-u', 'origin', 'main']);
+  writeFileSync(join(repo, 'f.txt'), 'unpushed change');
+  execFileSync('git', ['-C', repo, 'commit', '-q', '-am', 'second commit']);
+  setSummariser('opus');
+  let calls = 0;
+  const callSummariser = async () => { calls++; return { text: JSON.stringify({ committed: calls === 1 ? ['did x'] : [], uncommitted: [] }) }; };
+  try {
+    assert.deepEqual((await summary(repo, { callSummariser })).committed, ['did x']);
+    execFileSync('git', ['-C', repo, 'push', '-q']);
+    const r = await summary(repo, { callSummariser });
+    assert.equal(calls, 2, 'push changes the unpushed set, so the cache misses');
+    assert.deepEqual(r.committed, []);
+  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  rmRepo(bare);
+  rmRepo(repo);
+});
+
 test('summary: bad LLM JSON falls back to deterministic', async () => {
   const repo = initRepo();
   setSummariser('opus');
