@@ -170,12 +170,13 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const open = (item) => {
     if (isPhone) setPhonePane('detail');
     if (item.project === sel?.project && item.id === sel?.id) return;
-    setSel(item); setMatches(null); setLoadErr(null);
+    setSel(item); setLoadErr(null);
     // The open transcript IS the URL — a click has to be as shareable as a deep
-    // link, and has to survive a reload. Clearing `q` rides the same patch: two
-    // setSearchParams in one tick both read the same snapshot, so the first
-    // write would be lost.
-    updateQuery({ q: null, project: item.project, session: item.id, source: item.source || null });
+    // link, and has to survive a reload. project/session/source ride in one
+    // patch: two setSearchParams calls in one tick both read the same
+    // snapshot, so the first write would be lost. `q` isn't touched here — a
+    // search result click must keep the query that produced it.
+    updateQuery({ project: item.project, session: item.id, source: item.source || null });
     loadStats([item]); // ensure detail-header stats even when opened from search
     setLoadingFile(true);
     const src = item.source === 'codex' ? `&source=codex${item.file ? `&file=${encodeURIComponent(item.file)}` : ''}` : '';

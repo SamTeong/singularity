@@ -49,6 +49,23 @@ test('search narrows the list to cross-session matches; clearing restores it', a
   await expect(visible(page.getByText(`${TOTAL_SESSIONS} transcripts`, { exact: true })).first()).toBeVisible();
 });
 
+test('clicking a search result opens it without clearing the search query', async ({ page }) => {
+  await openTranscripts(page);
+
+  await page.getByPlaceholder('Search transcripts…').fill('MAX_BACKOFF_MS');
+  await expect(visible(page.getByText('1 matches', { exact: true })).first()).toBeVisible();
+
+  await page.getByRole('button', { name: /MAX_BACKOFF_MS/ }).click();
+  // Search-result rows carry no title/blurb (mock shape), so the header falls
+  // back to the bare session id — still proof the rich transcript opened.
+  await expect(visible(page.getByText(RICH_SESSION, { exact: true })).first()).toBeVisible();
+  await expect(page.getByText(/Backoff is capped at 30s/)).toBeVisible();
+
+  // The query survives the click — both the input value and the still-scoped result count.
+  await expect(page.getByPlaceholder('Search transcripts…')).toHaveValue('MAX_BACKOFF_MS');
+  await expect(visible(page.getByText('1 matches', { exact: true })).first()).toBeVisible();
+});
+
 test('"This transcript" is disabled with nothing selected, then scopes search to the open transcript', async ({ page }) => {
   await openTranscripts(page);
 
