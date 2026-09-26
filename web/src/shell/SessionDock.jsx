@@ -19,7 +19,7 @@ import { tildify } from '@/lib/paths.js';
 import { KIND } from '@/lib/agentStatus.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { useThemeSkin } from '@/theme/index.js';
-import { PHONE_QUERY } from '@/shell/breakpoints.js';
+import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 import { glass, surface2, stroke2, chipBg, statusColor, focusRing } from '@/shell/shellStyles.js';
 import SessionRow from '@/shell/SessionRow.jsx';
 
@@ -90,6 +90,10 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
   // the switch. Lazy-initialized from whether a session is active so opening
   // the dock with one already selected doesn't hide it behind the list.
   const isPhone = useMediaQuery(PHONE_QUERY);
+  const isTablet = useMediaQuery(TABLET_QUERY);
+  // Below 900px the row's whole-row HTML5 drag is not operable by touch, so each
+  // row gets the compact Move pair instead (the CronJobs idiom).
+  const narrow = isPhone || isTablet;
   const [phonePane, setPhonePane] = useState(() => (active ? 'terminal' : 'list'));
   // The dock mounts once for the app's lifetime, so the initializer above only
   // ever sees the state at first load — usually before any session exists.
@@ -214,7 +218,7 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
             <ExpandMoreIcon aria-hidden sx={{ fontSize: 18, color: 'text.secondary' }} />
           </Stack>
           <List sx={{ flex: 1, overflow: 'auto', px: 1, py: 0.5 }}>
-            {agents.map((a) => (
+            {agents.map((a, i) => (
               <SessionRow
                 key={a.id}
                 agent={a}
@@ -224,6 +228,10 @@ export default function SessionDock({ dockMin, toggleDock, dockH, listW, expandD
                 stats={stats[a.id]}
                 subagents={subagents[a.id] || []}
                 dragging={dragId === a.id}
+                narrow={narrow}
+                onMove={(dir) => reorderAgents(a.id, agents[i + dir].id)}
+                canUp={i > 0}
+                canDown={i < agents.length - 1}
                 dragHandlers={{
                   onDragStart: () => setDragId(a.id),
                   onDragOver: (e) => e.preventDefault(),

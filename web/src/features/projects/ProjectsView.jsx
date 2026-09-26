@@ -6,10 +6,13 @@ import Typography from '@mui/material/Typography';
 import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import Alert from '@mui/material/Alert';
 import SnackbarContent from '@mui/material/SnackbarContent';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
+import UnfoldMoreIcon from '@mui/icons-material/UnfoldMore';
 import FolderCopyIcon from '@mui/icons-material/FolderCopy';
 import { EmptyState } from '@/components/EmptyState.jsx';
 import DirPicker from '@/components/DirPicker.jsx';
@@ -18,6 +21,7 @@ import ProjectCard from '@/features/projects/ProjectCard.jsx';
 import { useThemeSkin } from '@/theme/index.js';
 import { primaryBtn, PHOSPHOR_CONTROL_H } from '@/features/tasks/TasksBoard.jsx';
 import { SNACK_GLASS, snackDrain, isDrainEnd } from '@/shell/shellStyles.js';
+import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 
 const TOAST_DRAIN = snackDrain(10000);
 
@@ -33,6 +37,7 @@ export default function ProjectsView() {
   const [picking, setPicking] = useState(false);
   const [error, setError] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [expandAll, setExpandAll] = useState({ on: false, n: 0 });
   const [dragId, setDragId] = useState(null);
   // One undo toast per delete, stacked (not replaced) — each carries the
   // deleted path and the shared order from the start of the delete stack.
@@ -40,6 +45,11 @@ export default function ProjectsView() {
   const nextToastId = useRef(0);
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const isTablet = useMediaQuery(TABLET_QUERY);
+  // Below 900px an HTML5 drag is not operable by touch, so the card's grip is
+  // replaced by the compact Move pair (same phone||tablet switch as CronJobs).
+  const narrow = isPhone || isTablet;
 
   const dismissToast = (id) => {
     setToasts((ts) => ts.filter((t) => t.id !== id));
@@ -126,18 +136,43 @@ export default function ProjectsView() {
       .catch(() => setProjects(prev));
   };
 
+  // Narrow-viewport equivalent of the grip drag — adjacent swap, persisted the
+  // same way (PUT /api/projects/order, rolled back on a non-ok response).
+  const moveCard = (from, dir) => {
+    const to = from + dir;
+    if (to < 0 || to >= projects.length) return;
+    const prev = projects;
+    const next = [...prev];
+    [next[from], next[to]] = [next[to], next[from]];
+    setProjects(next);
+    fetch('/api/projects/order', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ paths: next }) })
+      .then((r) => r.json())
+      .then((d) => { if (!d.ok) setProjects(prev); })
+      .catch(() => setProjects(prev));
+  };
+
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Stack sx={{ borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
         <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', minHeight: 71 }}>
           <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Projects</Typography>
           <Box sx={{ flex: 1 }} />
-          <Button size="small" startIcon={<AddIcon />} onClick={() => setPicking(true)} sx={(t) => (phosphor ? { height: PHOSPHOR_CONTROL_H } : primaryBtn(t))}>
-            Add folder
-          </Button>
+          <Tooltip title={expandAll.on ? 'Collapse all' : 'Expand all'} disableInteractive>
+            <IconButton
+              size="small"
+              aria-label={expandAll.on ? 'Collapse all' : 'Expand all'}
+              aria-pressed={expandAll.on}
+              onClick={() => setExpandAll((s) => ({ on: !s.on, n: s.n + 1 }))}
+            >
+              {expandAll.on ? <UnfoldLessIcon fontSize="small" /> : <UnfoldMoreIcon fontSize="small" />}
+            </IconButton>
+          </Tooltip>
           <Tooltip title="Refresh all" disableInteractive>
             <IconButton size="small" aria-label="Refresh all" onClick={() => setRefreshKey((k) => k + 1)}><RefreshIcon fontSize="small" /></IconButton>
           </Tooltip>
+          <Button size="small" startIcon={<AddIcon />} onClick={() => setPicking(true)} sx={(t) => (phosphor ? { height: PHOSPHOR_CONTROL_H } : primaryBtn(t))}>
+            Add folder
+          </Button>
         </Stack>
         {error && <Alert severity="error" role="alert" sx={{ mx: 2, mb: 1.5 }} onClose={() => setError(null)}>{error}</Alert>}
       </Stack>
@@ -151,12 +186,17 @@ export default function ProjectsView() {
           </Box>
         ) : (
           <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 2 }}>
-            {projects.map((path) => (
+            {projects.map((path, i) => (
               <ProjectCard
                 key={path}
                 path={path}
                 refreshKey={refreshKey}
+                expandAll={expandAll}
                 onDelete={removeProject}
+                narrow={narrow}
+                onMove={(dir) => moveCard(i, dir)}
+                canUp={i > 0}
+                canDown={i < projects.length - 1}
                 onDragStart={() => setDragId(path)}
                 onDragEnd={() => setDragId(null)}
                 onDragOver={(e) => e.preventDefault()}

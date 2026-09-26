@@ -270,6 +270,18 @@ test('refresh-all re-fetches status for every card', async ({ page }) => {
   await expect.poll(() => page.evaluate(() => window.__statusFetches)).toBeGreaterThanOrEqual(3);
 });
 
+test('expand all / collapse all toggles every card at once', async ({ page }) => {
+  await gotoView(page, 'Projects');
+  await expect(cards(page)).toHaveCount(3);
+  for (const card of await cards(page).all()) await expect(card).toHaveAttribute('aria-expanded', 'false');
+
+  await page.getByRole('button', { name: 'Expand all' }).click();
+  for (const card of await cards(page).all()) await expect(card).toHaveAttribute('aria-expanded', 'true');
+
+  await page.getByRole('button', { name: 'Collapse all' }).click();
+  for (const card of await cards(page).all()) await expect(card).toHaveAttribute('aria-expanded', 'false');
+});
+
 test('phone width (375px): cards are single column, no horizontal overflow', async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto('/projects');

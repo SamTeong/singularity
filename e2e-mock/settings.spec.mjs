@@ -115,10 +115,58 @@ test('Settings: dragging a model onto a lower row moves it there', async ({ page
   await expect(boxes().nth(4)).toHaveValue(a);
 });
 
+test('Settings: dragging an API rate row onto a lower row moves it there', async ({ page }) => {
+  await page.goto('/settings?tab=models');
+  await page.getByText('API Rates').click();
+  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
+
+  // One textbox per base row (the above_200k table's rows follow them).
+  const keys = () => prices.getByPlaceholder('e.g. opus');
+  const [a, b, c] = [await keys().nth(0).inputValue(), await keys().nth(1).inputValue(), await keys().nth(2).inputValue()];
+
+  // Non-adjacent drop: the row moves to the target slot, it is not swapped
+  // with it — so the two rows it passed shift up rather than jumping. Base's
+  // order IS match order, so this is the real reorder path (PUT round trip).
+  const handle = prices.getByRole('button', { name: 'Reorder' }).nth(0);
+  await html5Drag(page, handle, keys().nth(2));
+
+  await expect(keys().nth(0)).toHaveValue(b);
+  await expect(keys().nth(1)).toHaveValue(c);
+  await expect(keys().nth(2)).toHaveValue(a);
+});
+
+test('Settings: dragging an above-threshold rate row reorders and persists it', async ({ page }) => {
+  await page.goto('/settings?tab=models');
+  await page.getByText('API Rates').click();
+  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
+
+  // above_200k seeds a single row, so add a second before there is anything to
+  // reorder. The add row is the second "Key"/"Input"… group — base's comes
+  // first — and every rate box must be filled or Add stays disabled.
+  await prices.getByPlaceholder('Key').nth(1).fill('probe-above');
+  for (const col of ['Input', 'Output', 'Cache read', 'Cache write']) {
+    await prices.getByPlaceholder(col).nth(1).fill('1');
+  }
+  await prices.getByRole('button', { name: 'Add', exact: true }).nth(1).click();
+
+  // Base's four rows come first; the above table's two rows follow them.
+  const keys = () => prices.getByPlaceholder('e.g. opus');
+  const [above0, above1] = [await keys().nth(4).inputValue(), await keys().nth(5).inputValue()];
+  const handle = prices.getByRole('button', { name: 'Reorder' }).nth(4);
+  await html5Drag(page, handle, keys().nth(5));
+
+  await expect(keys().nth(4)).toHaveValue(above1);
+  await expect(keys().nth(5)).toHaveValue(above0);
+
+  // Same whole-doc PUT as the base table — above_200k order round-trips.
+  const doc = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
+  expect(Object.keys(doc.above_200k)).toEqual([above1, above0]);
+});
+
 test('Settings: deleting the selected fallback chooses next and clears the last row', async ({ page }) => {
   await page.goto('/settings?tab=models');
-  await page.getByText('Prices (harness-usage-report)').click();
-  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'Prices (harness-usage-report)' });
+  await page.getByText('API Rates').click();
+  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
   const saved = () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
 
   await prices.getByRole('button', { name: 'Delete opus', exact: true }).click();
@@ -133,8 +181,8 @@ test('Settings: deleting the selected fallback chooses next and clears the last 
 
 test('Settings: deleting the selected last fallback chooses the preceding base row', async ({ page }) => {
   await page.goto('/settings?tab=models');
-  await page.getByText('Prices (harness-usage-report)').click();
-  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'Prices (harness-usage-report)' });
+  await page.getByText('API Rates').click();
+  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
   const fallback = prices.getByRole('combobox');
   await fallback.click();
   await page.getByRole('option', { name: 'haiku', exact: true }).click();
@@ -146,8 +194,8 @@ test('Settings: deleting the selected last fallback chooses the preceding base r
 
 test('Settings: renaming the selected fallback keeps it selected', async ({ page }) => {
   await page.goto('/settings?tab=models');
-  await page.getByText('Prices (harness-usage-report)').click();
-  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'Prices (harness-usage-report)' });
+  await page.getByText('API Rates').click();
+  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
   await prices.getByPlaceholder('e.g. opus').nth(1).fill('opus-renamed');
   await prices.getByPlaceholder('e.g. opus').nth(1).press('Tab');
 

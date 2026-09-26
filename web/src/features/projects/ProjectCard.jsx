@@ -9,6 +9,8 @@ import Tooltip from '@mui/material/Tooltip';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined';
 import CallMergeIcon from '@mui/icons-material/CallMerge';
 import SyncIcon from '@mui/icons-material/Sync';
@@ -79,7 +81,7 @@ function SummarySection({ title, bullets }) {
  * the working-tree counts, last commit and summary. The (LLM) summary is
  * fetched only once expanded, and re-fetched after a refresh when next shown.
  */
-export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, onDragEnd, onDragOver, onDrop }) {
+export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onDragStart, onDragEnd, onDragOver, onDrop, narrow, onMove, canUp, canDown }) {
   const [status, setStatus] = useState(null);
   const [phase, setPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
   const [summary, setSummary] = useState(null);
@@ -90,6 +92,9 @@ export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, o
     if (e.target.closest('button, [draggable="true"]') || window.getSelection()?.toString()) return;
     setExpanded((x) => !x);
   };
+
+  // Header's expand/collapse-all — skip n=0 (initial) so cards still start collapsed.
+  useEffect(() => { if (expandAll.n) setExpanded(expandAll.on); }, [expandAll]); // eslint-disable-line react-hooks/set-state-in-effect
 
   // Bumped by the card's own refresh / git ops; refreshKey is refresh-all.
   const [reloadN, setReloadN] = useState(0);
@@ -144,16 +149,39 @@ export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, o
       })}
     >
       <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
-        <Tooltip title="Drag to change the order" disableInteractive>
-          <Box
-            draggable
-            onDragStart={onDragStart}
-            onDragEnd={onDragEnd}
-            sx={{ display: 'grid', placeItems: 'center', cursor: 'grab', color: 'text.disabled', mt: 0.25, '&:active': { cursor: 'grabbing' } }}
-          >
-            <DragIndicatorIcon fontSize="small" />
-          </Box>
-        </Tooltip>
+        {narrow ? (
+          // Below 900px an HTML5 drag is not operable by touch, so the grip is
+          // replaced by the compact Move pair — the card itself never drags, it
+          // only carries the drop target and click-to-expand, so the buttons
+          // stopPropagation.
+          <Stack sx={{ alignItems: 'center', mt: 0.25 }}>
+            <Tooltip title="Move up" disableInteractive>
+              <span>
+                <IconButton size="small" aria-label={`Move ${repoName(path)} up`} sx={{ p: 0.25 }} disabled={!canUp} onClick={(e) => { e.stopPropagation(); onMove(-1); }}>
+                  <KeyboardArrowUpIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+            <Tooltip title="Move down" disableInteractive>
+              <span>
+                <IconButton size="small" aria-label={`Move ${repoName(path)} down`} sx={{ p: 0.25 }} disabled={!canDown} onClick={(e) => { e.stopPropagation(); onMove(1); }}>
+                  <KeyboardArrowDownIcon fontSize="small" />
+                </IconButton>
+              </span>
+            </Tooltip>
+          </Stack>
+        ) : (
+          <Tooltip title="Drag to change the order" disableInteractive>
+            <Box
+              draggable
+              onDragStart={onDragStart}
+              onDragEnd={onDragEnd}
+              sx={{ display: 'grid', placeItems: 'center', cursor: 'grab', color: 'text.disabled', mt: 0.25, '&:active': { cursor: 'grabbing' } }}
+            >
+              <DragIndicatorIcon fontSize="small" />
+            </Box>
+          </Tooltip>
+        )}
         <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography sx={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {repoName(path)}

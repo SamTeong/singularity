@@ -3,8 +3,13 @@ import { getTokens } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import IconButton from '@mui/material/IconButton';
+import Tooltip from '@mui/material/Tooltip';
+import useMediaQuery from '@mui/material/useMediaQuery';
 import Typography from '@mui/material/Typography';
 import CloseIcon from '@mui/icons-material/Close';
+import KeyboardArrowLeftIcon from '@mui/icons-material/KeyboardArrowLeft';
+import KeyboardArrowRightIcon from '@mui/icons-material/KeyboardArrowRight';
+import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 
 const baseOf = (p) => p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) + 1);
 
@@ -24,7 +29,13 @@ const baseOf = (p) => p.slice(Math.max(p.lastIndexOf('/'), p.lastIndexOf('\\')) 
 export default function TabStrip({ tabs, active, onSelect, onClose, onReorder }) {
   const [dragPath, setDragPath] = useState(null);
   const tabRefs = useRef([]);
-  const dragProps = onReorder ? (tab) => ({
+  // Below 900px an HTML5 drag is not operable by touch, so each tab carries the
+  // compact Move left/right pair instead (the same phone||tablet switch the
+  // vertical reorder surfaces use, on the horizontal axis).
+  const isPhone = useMediaQuery(PHONE_QUERY);
+  const isTablet = useMediaQuery(TABLET_QUERY);
+  const narrow = isPhone || isTablet;
+  const dragProps = onReorder && !narrow ? (tab) => ({
     draggable: true,
     onDragStart: () => setDragPath(tab.path),
     onDragEnd: () => setDragPath(null),
@@ -34,6 +45,14 @@ export default function TabStrip({ tabs, active, onSelect, onClose, onReorder })
     },
     onDrop: (e) => { e.preventDefault(); setDragPath(null); },
   }) : () => ({});
+
+  // Adjacent move through the same onReorder seam the drag uses (it is
+  // move-to-slot, so moving onto the immediate neighbour is the adjacent swap).
+  const moveTab = (i, dir) => {
+    const other = tabs[i + dir];
+    if (!other) return;
+    onReorder(tabs[i].path, other.path);
+  };
 
   const move = (nextIndex) => {
     const tab = tabs[nextIndex];
@@ -66,6 +85,27 @@ export default function TabStrip({ tabs, active, onSelect, onClose, onReorder })
               : { bgcolor: tab.path === active ? 'action.selected' : 'transparent' }),
           })}
         >
+          {narrow && onReorder && (
+            // tabIndex -1 keeps the roving-tabindex contract above intact: the
+            // pair is a touch affordance and must not add 2 tab stops per tab.
+            // The keyboard reorder path stays the desktop grip / ArrowUp-Down.
+            <Stack sx={{ alignItems: 'center' }}>
+              <Tooltip title="Move left" disableInteractive>
+                <span>
+                  <IconButton size="small" tabIndex={-1} aria-label={`Move ${baseOf(tab.path)} left`} sx={{ p: 0.25 }} disabled={i === 0} onClick={(e) => { e.stopPropagation(); moveTab(i, -1); }}>
+                    <KeyboardArrowLeftIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="Move right" disableInteractive>
+                <span>
+                  <IconButton size="small" tabIndex={-1} aria-label={`Move ${baseOf(tab.path)} right`} sx={{ p: 0.25 }} disabled={i === tabs.length - 1} onClick={(e) => { e.stopPropagation(); moveTab(i, 1); }}>
+                    <KeyboardArrowRightIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Stack>
+          )}
           {tab.dirty && <Box sx={{ width: 6, height: 6, borderRadius: '50%', bgcolor: 'warning.main', flexShrink: 0 }} />}
           <Typography noWrap sx={{ fontSize: 12, maxWidth: 160 }}>{baseOf(tab.path)}</Typography>
           <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => { e.stopPropagation(); onClose(tab.path); }}>

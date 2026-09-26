@@ -15,13 +15,15 @@ import { stroke2 } from '@/shell/shellStyles.js';
 import AddIcon from '@mui/icons-material/Add';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import InfoOutlinedIcon from '@mui/icons-material/InfoOutlined';
 import RestartAltIcon from '@mui/icons-material/RestartAlt';
 import { useModels } from '@/hooks/useModels.js';
 import PricesAccordion from '@/features/settings/PricesAccordion.jsx';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import useMediaQuery from '@mui/material/useMediaQuery';
-import { PHONE_QUERY } from '@/shell/breakpoints.js';
+import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 
 const GROUPS = ['claude', 'ollama', 'codex'];
 const EMPTY_ADD = { id: '', label: '', group: 'claude' };
@@ -45,6 +47,11 @@ export default function ModelsPanel() {
   // minimum width inside a labelled, keyboard-focusable horizontal scroll
   // region instead. Tablet+ fits the columns without one.
   const isPhone = useMediaQuery(PHONE_QUERY);
+  const isTablet = useMediaQuery(TABLET_QUERY);
+  // Below 900px an HTML5 drag is not operable by touch, so the grip is replaced
+  // (not merely hidden) by Move up/down buttons — the same phone||tablet switch
+  // CronJobs and the API Rates panel use. Desktop keeps the grip.
+  const narrow = isPhone || isTablet;
   const ollamaUnavailable = caps && caps.ollama?.available === false;
   const codexUnavailable = caps && caps.codexSpawn?.available === false;
   // Memoized identity is load-bearing: the draft-sync guard below compares doc
@@ -135,6 +142,17 @@ export default function ModelsPanel() {
     save({ ...draft, models });
   };
 
+  // Adjacent move within the group — the narrow-viewport equivalent of the grip
+  // (below 900px an HTML5 drag is not operable by touch). Like reorder() it never
+  // crosses a group edge; the group Select does that.
+  const moveModel = (i, dir) => {
+    const j = i + dir;
+    if (j < 0 || j >= draft.models.length || draft.models[j].group !== draft.models[i].group) return;
+    const models = [...draft.models];
+    [models[i], models[j]] = [models[j], models[i]];
+    save({ ...draft, models });
+  };
+
   const addModel = () => {
     save({ ...draft, models: [...draft.models, { id: add.id.trim(), group: add.group, label: add.label, enabled: true }] });
     setAdd(EMPTY_ADD);
@@ -178,23 +196,42 @@ export default function ModelsPanel() {
             bgcolor: overIndex === i && dragIndex !== i ? 'action.hover' : 'transparent',
           }}
         >
-          <Tooltip title="Drag to reorder within the group (or focus and press ↑ / ↓)">
-            <IconButton
-              size="small"
-              aria-label="Reorder"
-              draggable
-              onDragStart={(e) => { setDragIndex(i); e.dataTransfer.effectAllowed = 'move'; }}
-              onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
-              onKeyDown={(e) => {
-                if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
-                e.preventDefault();
-                reorder(i, i + (e.key === 'ArrowUp' ? -1 : 1));
-              }}
-              sx={{ cursor: 'grab' }}
-            >
-              <DragIndicatorIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
+          {narrow ? (
+            <Stack sx={{ alignItems: 'center' }}>
+              <Tooltip title="Move up" disableInteractive>
+                <span>
+                  <IconButton size="small" aria-label={`Move ${m.id || 'model'} up`} sx={{ p: 0.25 }} disabled={i === 0 || draft.models[i - 1].group !== m.group} onClick={() => moveModel(i, -1)}>
+                    <KeyboardArrowUpIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="Move down" disableInteractive>
+                <span>
+                  <IconButton size="small" aria-label={`Move ${m.id || 'model'} down`} sx={{ p: 0.25 }} disabled={i === draft.models.length - 1 || draft.models[i + 1].group !== m.group} onClick={() => moveModel(i, 1)}>
+                    <KeyboardArrowDownIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Stack>
+          ) : (
+            <Tooltip title="Drag to reorder within the group (or focus and press ↑ / ↓)">
+              <IconButton
+                size="small"
+                aria-label="Reorder"
+                draggable
+                onDragStart={(e) => { setDragIndex(i); e.dataTransfer.effectAllowed = 'move'; }}
+                onDragEnd={() => { setDragIndex(null); setOverIndex(null); }}
+                onKeyDown={(e) => {
+                  if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+                  e.preventDefault();
+                  reorder(i, i + (e.key === 'ArrowUp' ? -1 : 1));
+                }}
+                sx={{ cursor: 'grab' }}
+              >
+                <DragIndicatorIcon fontSize="small" />
+              </IconButton>
+            </Tooltip>
+          )}
           <Tooltip title={m.enabled ? 'Mark as default' : 'Enable to mark as default'}>
             <Radio
               size="small"

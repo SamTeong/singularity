@@ -17,6 +17,8 @@ import LinkIcon from '@mui/icons-material/Link';
 import HistoryIcon from '@mui/icons-material/History';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import CloseIcon from '@mui/icons-material/Close';
+import KeyboardArrowUpIcon from '@mui/icons-material/KeyboardArrowUp';
+import KeyboardArrowDownIcon from '@mui/icons-material/KeyboardArrowDown';
 import { StatusPill } from '@/components/StatusPill.jsx';
 import { KIND, isLive } from '@/lib/agentStatus.js';
 import { isCodexModel } from '@/lib/models.js';
@@ -42,6 +44,7 @@ const TERMINAL_NAME = PLATFORM.includes('mac') ? 'Terminal'
  */
 export default function SessionRow({
   agent, models, selected, onSelect, stats, subagents = [], dragging, dragHandlers,
+  narrow, onMove, canUp, canDown,
   onViewTranscript, onDuplicate, onFork, onRespawn, onReattach, onOpenExternal, onKill,
 }) {
   const a = agent;
@@ -63,7 +66,7 @@ export default function SessionRow({
       <ListItemButton
         selected={selected}
         onClick={onSelect}
-        draggable
+        draggable={!narrow}
         onDragStart={dragHandlers.onDragStart}
         onDragOver={dragHandlers.onDragOver}
         onDrop={dragHandlers.onDrop}
@@ -92,6 +95,27 @@ export default function SessionRow({
       >
         {/* Row 1: name (left) + actions (right). */}
         <Stack direction="row" sx={{ alignItems: 'center', minWidth: 0 }}>
+          {/* Below 900px the whole-row drag is dead weight (not touch-operable),
+              so the compact Move pair replaces it. The row itself is a
+              click-to-select button, so these stopPropagation. */}
+          {narrow && (
+            <Stack sx={{ alignItems: 'center', flexShrink: 0 }}>
+              <Tooltip title="Move up" disableInteractive>
+                <span>
+                  <IconButton size="small" aria-label={`Move ${a.title} up`} sx={{ p: 0.25 }} disabled={!canUp} onClick={(e) => { e.stopPropagation(); onMove(-1); }}>
+                    <KeyboardArrowUpIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+              <Tooltip title="Move down" disableInteractive>
+                <span>
+                  <IconButton size="small" aria-label={`Move ${a.title} down`} sx={{ p: 0.25 }} disabled={!canDown} onClick={(e) => { e.stopPropagation(); onMove(1); }}>
+                    <KeyboardArrowDownIcon fontSize="small" />
+                  </IconButton>
+                </span>
+              </Tooltip>
+            </Stack>
+          )}
           <Typography variant="subtitle2" noWrap sx={(t) => ({ flex: 1, minWidth: 0, color: phosphor && selected ? t.nerv.hue.mint : undefined })}>{a.title}</Typography>
           <Stack direction="row" className="row-act" sx={{ flexShrink: 0, transition: 'opacity .15s' }}>
             <Tooltip title="View transcript — the full conversation, beyond what the terminal keeps" disableInteractive>
