@@ -20,6 +20,7 @@ import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
+import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
 import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
@@ -815,6 +816,19 @@ app.get('/projects/summary', async (req, reply) => {
   if (!hasProject(p)) return reply.code(404).send({ error: 'not found' });
   try { return await projectSummary(p); }
   catch { return reply.code(404).send({ error: 'not found' }); }
+});
+// project-review skill's ledger, scoped to one tracked project — disabled
+// ({enabled:false}) when PROJECT_REVIEW_DIR is unset.
+app.get('/projects/review', async (req, reply) => {
+  const p = req.query.path;
+  if (!p) return reply.code(400).send({ error: 'path required' });
+  if (!hasProject(p)) return reply.code(404).send({ error: 'not found' });
+  return projectReviewStatus(p);
+});
+app.get('/projects/review/file', async (req, reply) => {
+  const r = readReviewFile(req.query.rel);
+  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
+  return r;
 });
 
 // Skills viewer: tree of skill scopes → skills, read a skill's SKILL.md.

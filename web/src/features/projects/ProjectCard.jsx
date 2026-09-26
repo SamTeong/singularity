@@ -6,6 +6,9 @@ import Typography from '@mui/material/Typography';
 import Chip from '@mui/material/Chip';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
+import Dialog from '@mui/material/Dialog';
+import DialogTitle from '@mui/material/DialogTitle';
+import DialogContent from '@mui/material/DialogContent';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
@@ -20,6 +23,7 @@ import NoteAddOutlinedIcon from '@mui/icons-material/NoteAddOutlined';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import { repoName, tildify } from '@/lib/paths.js';
+import MarkdownBody from '@/components/MarkdownBody.jsx';
 
 // Tiny relative-time formatter — the codebase has no existing helper for
 // this (checked: no `fromNow`/`RelativeTimeFormat` under web/src).
@@ -74,6 +78,96 @@ function SummarySection({ title, bullets }) {
   );
 }
 
+const REVIEW_STATUS_COLOR = { DONE: 'success', BLOCKED: 'error', STARTED: 'info', ABANDONED: 'default' };
+
+// One review run: header (harness/status/date) toggles its finding rows +
+// artifact links. `open` is XORed against the default (latest run open,
+// older runs collapsed) so a click only needs to remember what changed.
+function RunRow({ run, open, onToggle, onOpenFile }) {
+  return (
+    <Box>
+      <Stack direction="row" spacing={1} onClick={(e) => { e.stopPropagation(); onToggle(); }} sx={{ alignItems: 'center', cursor: 'pointer' }}>
+        <Typography sx={{ fontSize: 12, fontWeight: 600 }}>{run.harness} · {run.status}</Typography>
+        <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{fmtRelative(run.completedAt || run.startedAt)}</Typography>
+      </Stack>
+      {open && (
+        <Stack spacing={0.25} sx={{ pl: 1.5, mt: 0.25 }}>
+          {run.findings.map((f, i) => (
+            <Typography key={i} sx={{ fontSize: 12, color: 'text.secondary', overflowWrap: 'anywhere' }}>{f.sev} · {f.title} · {f.status}</Typography>
+          ))}
+          {!!run.artifacts.length && (
+            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
+              {run.artifacts.map((a) => (
+                <Chip key={a.rel} label={a.label} size="small" clickable
+                  onClick={(e) => { e.stopPropagation(); onOpenFile(a.rel, a.label); }}
+                  sx={{ height: 20, fontSize: 11 }} />
+              ))}
+            </Stack>
+          )}
+        </Stack>
+      )}
+    </Box>
+  );
+}
+
+// Expand-gated "Review" section (project-review skill's ledger, server/
+// project-review.mjs). Hidden entirely by the caller when `!data.enabled`.
+function ReviewSection({ data, onOpenFile }) {
+  const { runs, latest } = data;
+  const [toggledRuns, setToggledRuns] = useState(() => new Set());
+  const toggleRun = (id) => setToggledRuns((s) => {
+    const n = new Set(s);
+    if (n.has(id)) n.delete(id); else n.add(id);
+    return n;
+  });
+
+  if (!latest) {
+    return (
+      <Stack spacing={0.75}>
+        <Typography sx={{ fontSize: 11, fontWeight: 600, color: 'text.secondary' }}>Review</Typography>
+        <Chip label="Not run" size="small" sx={{ height: 20, fontSize: 11, alignSelf: 'flex-start' }} />
+      </Stack>
+    );
+  }
+
+  const total = latest.counts.open + latest.counts.resolved;
+  return (
+    <Stack spacing={0.75}>
+      <Typography sx={{ fontSize: 11, fontWeight: 600, color: 'text.secondary' }}>Review</Typography>
+      <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}>
+        <Chip label={latest.status} size="small" color={REVIEW_STATUS_COLOR[latest.status] || 'default'} variant="outlined" sx={{ height: 20, fontSize: 11 }} />
+        <Typography sx={{ fontSize: 11, color: 'text.secondary', overflowWrap: 'anywhere' }}>
+          reviewed to {latest.target.slice(0, 7)}{latest.completedAt ? ` · ${fmtRelative(latest.completedAt)}` : ''}
+        </Typography>
+        {latest.status === 'DONE' && (
+          <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>
+            {latest.commitsSince === null ? 'sha not in repo' : `${latest.commitsSince} commits since`}
+          </Typography>
+        )}
+      </Stack>
+      {total === 0 ? (
+        <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>No findings</Typography>
+      ) : (
+        <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5, alignItems: 'center' }}>
+          <CountChip label="P0" n={latest.counts.P0} />
+          <CountChip label="P1" n={latest.counts.P1} />
+          <CountChip label="P2" n={latest.counts.P2} />
+          <CountChip label="P3" n={latest.counts.P3} />
+          <CountChip label="open" n={latest.counts.open} />
+          <CountChip label="resolved" n={latest.counts.resolved} />
+          {latest.counts.open === 0 && <Typography sx={{ fontSize: 11, color: 'success.main' }}>All resolved</Typography>}
+        </Stack>
+      )}
+      <Stack spacing={0.5}>
+        {runs.map((run, i) => (
+          <RunRow key={run.sessionId} run={run} open={toggledRuns.has(run.sessionId) !== (i === 0)}
+            onToggle={() => toggleRun(run.sessionId)} onOpenFile={onOpenFile} />
+        ))}
+      </Stack>
+    </Stack>
+  );
+}
+
 /**
  * ProjectsView card: one git repo toplevel, its status fetched on mount and
  * whenever `refreshKey` changes (header's refresh-all, no polling). Starts
@@ -120,6 +214,32 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
       .then((d) => { setSummary(d); setSummaryPhase('ok'); })
       .catch(() => setSummaryPhase('error'));
   }, [expanded, summaryKey, path]);
+
+  // Review status (project-review skill's ledger) — same expand-gated,
+  // once-per-refresh fetch shape as the summary above, its own state pair.
+  const [review, setReview] = useState(null);
+  const [reviewPhase, setReviewPhase] = useState('loading');
+  const reviewKey = `${path}|${refreshKey}|${reloadN}`;
+  const reviewFor = useRef(null);
+  useEffect(() => {
+    if (!expanded || reviewFor.current === reviewKey) return;
+    reviewFor.current = reviewKey;
+    fetch(`/api/projects/review?path=${encodeURIComponent(path)}`)
+      .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
+      .then((d) => { setReview(d); setReviewPhase('ok'); })
+      .catch(() => setReviewPhase('error'));
+  }, [expanded, reviewKey, path]);
+
+  // Artifact-link dialog: /projects/review/file?rel= content, reusing the
+  // wiki/memory/skills markdown viewer rather than writing a new one.
+  const [fileDialog, setFileDialog] = useState(null); // { label, content, phase }
+  const openFile = (rel, label) => {
+    setFileDialog({ label, content: null, phase: 'loading' });
+    fetch(`/api/projects/review/file?rel=${encodeURIComponent(rel)}`)
+      .then((r) => r.json())
+      .then((d) => setFileDialog({ label, content: d.content, phase: d.ok ? 'ok' : 'error' }))
+      .catch(() => setFileDialog({ label, content: null, phase: 'error' }));
+  };
 
   // Plain git (daemon shells out, no agent); reload status either way.
   const [gitBusy, setGitBusy] = useState(false);
@@ -249,9 +369,22 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
                 {summary.source === 'llm' && <Typography sx={{ fontSize: 11, color: 'text.disabled' }}>summary: {summary.model}</Typography>}
               </Stack>
             )}
+
+            {reviewPhase === 'error' && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>review unavailable</Typography>}
+            {reviewPhase === 'loading' && !review && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Loading review…</Typography>}
+            {review?.enabled && <ReviewSection data={review} onOpenFile={openFile} />}
           </>)}
         </Stack>
       )}
+      {/* Portal clicks still bubble through the React tree to the card's toggle. */}
+      <Dialog open={!!fileDialog} onClose={() => setFileDialog(null)} onClick={(e) => e.stopPropagation()} maxWidth="md" fullWidth>
+        <DialogTitle>{fileDialog?.label}</DialogTitle>
+        <DialogContent dividers>
+          {fileDialog?.phase === 'loading' && <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography>}
+          {fileDialog?.phase === 'error' && <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>unavailable</Typography>}
+          {fileDialog?.phase === 'ok' && <MarkdownBody>{fileDialog.content}</MarkdownBody>}
+        </DialogContent>
+      </Dialog>
     </Box>
   );
 }
