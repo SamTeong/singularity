@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { getTokens } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -12,6 +12,11 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import CloudDownloadOutlinedIcon from '@mui/icons-material/CloudDownloadOutlined';
 import CallMergeIcon from '@mui/icons-material/CallMerge';
 import SyncIcon from '@mui/icons-material/Sync';
+import AddCircleOutlineIcon from '@mui/icons-material/AddCircleOutlined';
+import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
+import NoteAddOutlinedIcon from '@mui/icons-material/NoteAddOutlined';
+import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
+import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
 import { repoName, tildify } from '@/lib/paths.js';
 
 // Tiny relative-time formatter — the codebase has no existing helper for
@@ -32,6 +37,26 @@ function CountChip({ label, n }) {
   return <Chip label={`${label} ${n}`} size="small" sx={{ height: 20, fontSize: 11, opacity: n ? 1 : 0.4 }} />;
 }
 
+// Collapsed-card twin of CountChip: icon + number, label in the tooltip.
+const COUNT_ICONS = [
+  ['staged', AddCircleOutlineIcon], ['modified', EditOutlinedIcon], ['untracked', NoteAddOutlinedIcon],
+  ['conflicted', ReportProblemOutlinedIcon], ['stash', Inventory2OutlinedIcon],
+];
+function CountIcons({ status }) {
+  return (
+    <Stack direction="row" spacing={1} sx={{ alignItems: 'center', ml: 'auto !important' }}>
+      {COUNT_ICONS.map(([label, Icon]) => (
+        <Tooltip key={label} title={`${label} ${status[label]}`} disableInteractive>
+          <Stack direction="row" spacing={0.25} sx={{ alignItems: 'center', color: 'text.secondary', opacity: status[label] ? 1 : 0.4 }}>
+            <Icon sx={{ fontSize: 14 }} />
+            <Typography sx={{ fontSize: 11 }}>{status[label]}</Typography>
+          </Stack>
+        </Tooltip>
+      ))}
+    </Stack>
+  );
+}
+
 // A titled compact bullet list — same list styling as History's per-project
 // bullets (DayCard.jsx).
 function SummarySection({ title, bullets }) {
@@ -49,28 +74,47 @@ function SummarySection({ title, bullets }) {
 
 /**
  * ProjectsView card: one git repo toplevel, its status fetched on mount and
- * whenever `refreshKey` changes (header's refresh-all, no polling).
+ * whenever `refreshKey` changes (header's refresh-all, no polling). Starts
+ * collapsed (header + branch line); clicking the card's blank space toggles
+ * the working-tree counts, last commit and summary. The (LLM) summary is
+ * fetched only once expanded, and re-fetched after a refresh when next shown.
  */
 export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, onDragEnd, onDragOver, onDrop }) {
   const [status, setStatus] = useState(null);
   const [phase, setPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
   const [summary, setSummary] = useState(null);
   const [summaryPhase, setSummaryPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
+  const [expanded, setExpanded] = useState(false);
+  // Buttons, the drag grip and a text selection keep their own meaning.
+  const toggle = (e) => {
+    if (e.target.closest('button, [draggable="true"]') || window.getSelection()?.toString()) return;
+    setExpanded((x) => !x);
+  };
 
-  const load = useCallback(() => {
+  // Bumped by the card's own refresh / git ops; refreshKey is refresh-all.
+  const [reloadN, setReloadN] = useState(0);
+  const load = () => setReloadN((n) => n + 1);
+
+  useEffect(() => {
     fetch(`/api/projects/status?path=${encodeURIComponent(path)}`)
       .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
       .then((d) => { setStatus(d); setPhase('ok'); })
       .catch(() => setPhase('error'));
-    // Loads independently of status: a slow LLM summary must never hold up
-    // the status chips above.
+  }, [path, refreshKey, reloadN]);
+
+  // Loads independently of status: a slow LLM summary must never hold up the
+  // status chips above. Skipped while collapsed; `summaryFor` remembers which
+  // refresh generation was fetched so re-expanding doesn't re-request.
+  const summaryKey = `${path}|${refreshKey}|${reloadN}`;
+  const summaryFor = useRef(null);
+  useEffect(() => {
+    if (!expanded || summaryFor.current === summaryKey) return;
+    summaryFor.current = summaryKey;
     fetch(`/api/projects/summary?path=${encodeURIComponent(path)}`)
       .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
       .then((d) => { setSummary(d); setSummaryPhase('ok'); })
       .catch(() => setSummaryPhase('error'));
-  }, [path]);
-
-  useEffect(() => { load(); }, [load, refreshKey]);
+  }, [expanded, summaryKey, path]);
 
   // Plain git (daemon shells out, no agent); reload status either way.
   const [gitBusy, setGitBusy] = useState(false);
@@ -88,11 +132,15 @@ export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, o
   return (
     <Box
       data-testid="project-card"
+      aria-expanded={expanded}
+      tabIndex={0}
+      onClick={toggle}
+      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setExpanded((x) => !x); } }}
       onDragOver={onDragOver}
       onDrop={onDrop}
       sx={(t) => ({
         p: 1.5, borderRadius: `${getTokens(t).radius.md ?? getTokens(t).radius.sm}px`,
-        border: `1px solid ${getTokens(t).glass.stroke}`, minWidth: 0,
+        border: `1px solid ${getTokens(t).glass.stroke}`, minWidth: 0, cursor: 'pointer',
       })}
     >
       <Stack direction="row" spacing={1} sx={{ alignItems: 'flex-start' }}>
@@ -146,31 +194,34 @@ export default function ProjectCard({ path, refreshKey, onDelete, onDragStart, o
             ) : (
               <Chip label="no upstream" size="small" sx={{ height: 20, fontSize: 11 }} />
             )}
+            {!expanded && <CountIcons status={status} />}
           </Stack>
-          <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
-            <CountChip label="staged" n={status.staged} />
-            <CountChip label="modified" n={status.modified} />
-            <CountChip label="untracked" n={status.untracked} />
-            <CountChip label="conflicted" n={status.conflicted} />
-            <CountChip label="stash" n={status.stash} />
-          </Stack>
-          {status.lastCommit && (
-            <Typography sx={{ fontSize: 12, color: 'text.secondary', overflowWrap: 'anywhere' }}>
-              {status.lastCommit.subject} · {fmtRelative(status.lastCommit.date)}
-            </Typography>
-          )}
-
-          {summaryPhase === 'error' && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>summary unavailable</Typography>}
-          {summaryPhase === 'loading' && !summary && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Summarizing…</Typography>}
-          {summary && (
-            <Stack spacing={0.75}>
-              {!!summary.committed?.length && (
-                <SummarySection title={summary.scope === 'unpushed' ? 'Unpushed' : 'Recent commits'} bullets={summary.committed} />
-              )}
-              {!!summary.uncommitted?.length && <SummarySection title="Uncommitted" bullets={summary.uncommitted} />}
-              {summary.source === 'llm' && <Typography sx={{ fontSize: 11, color: 'text.disabled' }}>summary: {summary.model}</Typography>}
+          {expanded && (<>
+            <Stack direction="row" spacing={0.5} sx={{ flexWrap: 'wrap', rowGap: 0.5 }}>
+              <CountChip label="staged" n={status.staged} />
+              <CountChip label="modified" n={status.modified} />
+              <CountChip label="untracked" n={status.untracked} />
+              <CountChip label="conflicted" n={status.conflicted} />
+              <CountChip label="stash" n={status.stash} />
             </Stack>
-          )}
+            {status.lastCommit && (
+              <Typography sx={{ fontSize: 12, color: 'text.secondary', overflowWrap: 'anywhere' }}>
+                {status.lastCommit.subject} · {fmtRelative(status.lastCommit.date)}
+              </Typography>
+            )}
+
+            {summaryPhase === 'error' && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>summary unavailable</Typography>}
+            {summaryPhase === 'loading' && !summary && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Summarizing…</Typography>}
+            {summary && (
+              <Stack spacing={0.75}>
+                {!!summary.committed?.length && (
+                  <SummarySection title={summary.scope === 'unpushed' ? 'Unpushed' : 'Recent commits'} bullets={summary.committed} />
+                )}
+                {!!summary.uncommitted?.length && <SummarySection title="Uncommitted" bullets={summary.uncommitted} />}
+                {summary.source === 'llm' && <Typography sx={{ fontSize: 11, color: 'text.disabled' }}>summary: {summary.model}</Typography>}
+              </Stack>
+            )}
+          </>)}
         </Stack>
       )}
     </Box>

@@ -13,6 +13,9 @@ const cardFor = (page, path) => cards(page).filter({ hasText: repoName(path) });
 // grip icon), same pattern as the background jobs row grip — the card itself
 // is only the drop target.
 const gripIn = (card) => card.locator('[aria-label*="Drag to change the order"]');
+// Cards start collapsed; clicking blank card space (top-left padding corner)
+// expands details (counts, last commit, summary).
+const toggle = (card) => card.click({ position: { x: 4, y: 4 } });
 
 async function html5Drag(page, source, target) {
   const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
@@ -43,9 +46,61 @@ test('opens from the More menu directly below Wiki', async ({ page }) => {
   await expect(page.getByText('Projects', { exact: true }).first()).toBeVisible();
 });
 
+test('cards start collapsed; clicking blank card space toggles details per card', async ({ page }) => {
+  await gotoView(page, 'Projects');
+  const clean = cardFor(page, PROJECT_PATHS.clean);
+  const dirty = cardFor(page, PROJECT_PATHS.dirty);
+  await expect(clean).toContainText('↑2 ↓0');
+  await expect(clean).not.toContainText('Tidy release notes');
+  await expect(dirty).not.toContainText('staged 2');
+  // Collapsed counts render as icon + number, labelled via tooltip.
+  await expect(dirty.getByLabel('staged 2')).toBeVisible();
+  await expect(dirty.getByLabel('stash 1')).toBeVisible();
+
+  await toggle(clean);
+  await expect(clean).toContainText('Tidy release notes');
+  await expect(dirty).not.toContainText('staged 2');
+
+  // Action buttons keep their own meaning and don't toggle.
+  await clean.getByRole('button', { name: 'Refresh project' }).click();
+  await expect(clean).toContainText('Tidy release notes');
+
+  await toggle(clean);
+  await expect(clean).not.toContainText('Tidy release notes');
+});
+
+test('the LLM summary is fetched only when a card is expanded, once per refresh', async ({ page }) => {
+  // The mock (Mirage/pretender) replaces window.fetch after init scripts run,
+  // so count through a setter that wraps whatever fetch gets installed.
+  await page.addInitScript(() => {
+    window.__summaryFetches = 0;
+    const wrap = (orig) => (...args) => {
+      const [input] = args;
+      if ((typeof input === 'string' ? input : input.url).includes('/projects/summary')) window.__summaryFetches++;
+      return orig(...args);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  });
+  await gotoView(page, 'Projects');
+  const clean = cardFor(page, PROJECT_PATHS.clean);
+  await expect(clean).toContainText('↑2 ↓0');
+  expect(await page.evaluate(() => window.__summaryFetches)).toBe(0);
+
+  await toggle(clean);
+  await expect(clean).toContainText('Tidied up the release notes wording');
+  await toggle(clean);
+  await toggle(clean);
+  expect(await page.evaluate(() => window.__summaryFetches)).toBe(1);
+
+  await clean.getByRole('button', { name: 'Refresh project' }).click();
+  await expect.poll(() => page.evaluate(() => window.__summaryFetches)).toBe(2);
+});
+
 test('seeded cards render with status chips', async ({ page }) => {
   await gotoView(page, 'Projects');
   await expect(cards(page)).toHaveCount(3);
+  for (const p of Object.values(PROJECT_PATHS)) await toggle(cardFor(page, p));
 
   const clean = cardFor(page, PROJECT_PATHS.clean);
   await expect(clean.getByText('main', { exact: true })).toBeVisible();
@@ -66,6 +121,7 @@ test('seeded cards render with status chips', async ({ page }) => {
 
 test('cards show committed/uncommitted summary bullets, and a clean tree has no Uncommitted section', async ({ page }) => {
   await gotoView(page, 'Projects');
+  for (const p of Object.values(PROJECT_PATHS)) await toggle(cardFor(page, p));
 
   const clean = cardFor(page, PROJECT_PATHS.clean);
   await expect(clean).toContainText('Tidied up the release notes wording');
