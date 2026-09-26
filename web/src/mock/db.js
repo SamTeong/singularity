@@ -7,7 +7,7 @@
 // (design.md D7).
 import {
   seedFiles, seedSessions, seedTasks, seedTaskHistory,
-  seedCrons, seedBackgroundJobs, seedAgents, seedRoots, seedRecentRepos, seedWindowAnchor, seedProjects, seedProjectSummaries, T0,
+  seedCrons, seedBackgroundJobs, seedAgents, seedRoots, seedRecentRepos, seedWindowAnchor, seedProjects, seedProjectSummaries, seedProjectReviews, seedProjectReviewFiles, T0,
 } from './fixtures.js';
 
 // Fresh top-level containers on every module evaluation — deep clone from
@@ -28,6 +28,8 @@ export const db = {
   roots: clone(seedRoots()), // per-panel picker roots
   projects: clone(seedProjects()), // [{ path, branch, ahead, behind, ... }] — ordered list, git status baked in
   projectSummaries: clone(seedProjectSummaries()), // path -> { scope, committed, uncommitted, source, ... }
+  projectReviews: clone(seedProjectReviews()), // path -> { enabled, runs, latest } (server/project-review.mjs shape)
+  projectReviewFiles: clone(seedProjectReviewFiles()), // rel -> markdown content, for /projects/review/file
   // Panel UI state (open tabs, selections, ...) — route groups lazy-populate
   // the rest as needed. `usageReportAt` is seeded rather than lazy because it
   // is fixture data, not UI state: it stands in for the mtime of the canned

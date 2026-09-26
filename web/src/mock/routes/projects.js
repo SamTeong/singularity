@@ -79,4 +79,18 @@ export function registerProjects(server) {
     if (!s) return new Response(404, {}, { error: 'not found' });
     return s;
   });
+
+  // project-review skill's ledger, scoped to one tracked project (server/
+  // project-review.mjs:reviewStatus shape) — same 400/404 gating as /summary.
+  server.get('/projects/review', (schema, req) => {
+    const path = req.queryParams.path;
+    if (!path) return new Response(400, {}, { error: 'path required' });
+    if (!db.projects.some((p) => p.path === path)) return new Response(404, {}, { error: 'not found' });
+    return db.projectReviews[path] || { enabled: false };
+  });
+  server.get('/projects/review/file', (schema, req) => {
+    const content = db.projectReviewFiles[req.queryParams.rel];
+    if (content == null) return new Response(404, {}, { ok: false, error: 'not found' });
+    return { ok: true, content };
+  });
 }

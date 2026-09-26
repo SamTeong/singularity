@@ -330,6 +330,63 @@ export function seedProjectSummaries() {
   };
 }
 
+// project-review skill's ledger, keyed by tracked project path (server/
+// project-review.mjs:reviewStatus shape). Covers the four states a card's
+// review-status section can show: not run (noUpstream), a run with open
+// findings whose *latest* run is BLOCKED (dirty — counts still reflect the
+// open backlog from its earlier DONE run), and a fully resolved run (clean).
+export function seedProjectReviews() {
+  return {
+    [PROJECT_PATHS.clean]: {
+      enabled: true,
+      runs: [{
+        sessionId: '00000000-0000-4000-8000-r00000000001', worktree: PROJECT_PATHS.clean,
+        baseline: 'a1b2c3d', target: 'd4e5f6a', startedAt: new Date(T0 - 172_800_000).toISOString(), completedAt: new Date(T0 - 172_000_000).toISOString(),
+        harness: 'Claude Code', model: 'claude-opus-5-5', status: 'DONE',
+        artifacts: [{ label: 'report', rel: 'r00000000001/reports/review.md' }, { label: 'findings', rel: 'r00000000001/findings/introduced.md' }],
+        findings: [
+          { sev: 'P1', title: 'Race condition on save', status: 'fixed', kind: 'introduced', rel: 'r00000000001/findings/introduced.md' },
+          { sev: 'P2', title: 'Missing null check', status: 'wontfix', kind: 'preexisting', rel: 'r00000000001/findings/preexisting.md' },
+        ],
+      }],
+      latest: { status: 'DONE', target: 'd4e5f6a', completedAt: new Date(T0 - 172_000_000).toISOString(), commitsSince: 2, counts: { P0: 0, P1: 1, P2: 1, P3: 0, open: 0, resolved: 2 } },
+    },
+    [PROJECT_PATHS.dirty]: {
+      enabled: true,
+      runs: [
+        {
+          sessionId: '00000000-0000-4000-8000-r00000000003', worktree: PROJECT_PATHS.dirty,
+          baseline: 'b2c3d4e', target: 'c3d4e5f', startedAt: new Date(T0 - 3_600_000).toISOString(), completedAt: null,
+          harness: 'Codex', model: 'unknown', status: 'BLOCKED',
+          artifacts: [{ label: 'report', rel: 'r00000000003/reports/review.md' }],
+          findings: [],
+        },
+        {
+          sessionId: '00000000-0000-4000-8000-r00000000002', worktree: PROJECT_PATHS.dirty,
+          baseline: 'a2b3c4d', target: 'b2c3d4e', startedAt: new Date(T0 - 259_200_000).toISOString(), completedAt: new Date(T0 - 258_800_000).toISOString(),
+          harness: 'Claude Code', model: 'claude-sonnet-5', status: 'DONE',
+          artifacts: [{ label: 'report', rel: 'r00000000002/reports/review.md' }, { label: 'findings', rel: 'r00000000002/findings/introduced.md' }],
+          findings: [
+            { sev: 'P0', title: 'Stashed change clobbers widget layout on rebase', status: 'open', kind: 'introduced', rel: 'r00000000002/findings/introduced.md' },
+            { sev: 'P2', title: 'Widget spacing still WIP', status: 'open', kind: 'introduced', rel: 'r00000000002/findings/introduced.md' },
+          ],
+        },
+      ],
+      latest: { status: 'BLOCKED', target: 'c3d4e5f', completedAt: null, commitsSince: null, counts: { P0: 1, P1: 0, P2: 1, P3: 0, open: 2, resolved: 0 } },
+    },
+    [PROJECT_PATHS.noUpstream]: { enabled: true, runs: [], latest: null },
+  };
+}
+
+// GET /projects/review/file fixture content, keyed by the `rel` links above —
+// only the two artifacts a card's UI would actually open in this fixture set.
+export function seedProjectReviewFiles() {
+  return {
+    'r00000000001/findings/introduced.md': '# Introduced findings\n\n## P1 — Race condition on save\nStatus: fixed — d4e5f6a\n',
+    'r00000000002/findings/introduced.md': '# Introduced findings\n\n## P0 — Stashed change clobbers widget layout on rebase\nStatus: open\n\n## P2 — Widget spacing still WIP\nStatus: open\n',
+  };
+}
+
 // ---------------------------------------------------------------------- misc
 
 // Per-panel picker roots — mirrors the *-root.json files
