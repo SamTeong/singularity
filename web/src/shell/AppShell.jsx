@@ -113,7 +113,8 @@ export default function AppShell() {
   // The user's rail-collapse choice. `railCollapsed` below is what Sidebar
   // actually renders — tablet forces the icon rail without overwriting this, so
   // crossing back to >=900px restores whatever the user last chose.
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(
+    () => localStorage.getItem('sing-rail-collapsed') === '1');
   // One shared breakpoint decision for the whole shell: phone gets a header +
   // temporary drawer instead of the rail, tablet gets the forced icon rail.
   const isPhone = useMediaQuery(PHONE_QUERY);
@@ -121,7 +122,11 @@ export default function AppShell() {
   const railCollapsed = isTablet || collapsed;
   // Tablet's icon rail is forced, so its toggle must not write the stored
   // preference — otherwise a tablet tap silently changes what >=900px restores.
-  const setRailCollapsed = isTablet ? NOOP : setCollapsed;
+  const setRailCollapsed = isTablet ? NOOP : (v) => setCollapsed((c) => {
+    const n = typeof v === 'function' ? v(c) : v;
+    localStorage.setItem('sing-rail-collapsed', n ? '1' : '0');
+    return n;
+  });
   const [navOpen, setNavOpen] = useState(false);
   const navTriggerRef = useRef(null);
   // The URL owns the selected view (App.jsx's `:view` route). Already validated
