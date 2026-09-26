@@ -22,6 +22,8 @@ import Collapse from '@mui/material/Collapse';
 import Chip from '@mui/material/Chip';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Checkbox from '@mui/material/Checkbox';
+import FormControlLabel from '@mui/material/FormControlLabel';
 import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -112,6 +114,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const [picking, setPicking] = useState(false);
   const [toolParam, setTool] = useQueryState('tool', 'all'); // 'all' | 'claude' | 'codex' — filter the merged list
   const tool = TOOLS.has(toolParam) ? toolParam : 'all';
+  const [hideReviewsParam, setHideReviews] = useQueryState('hideReviews');
+  const hideReviews = hideReviewsParam === '1';
   // ?project=&session=(&source=) is the transcript to open — the replacement for
   // the openTx prop AppShell used to drill in. `source` is load-bearing: the
   // daemon only takes its Codex branch when it is 'codex'.
@@ -141,22 +145,30 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   // wasteful when nobody is looking, and a backgrounded tab would hammer the API.
   useEffect(() => {
     if (!active || root == null) return;
-    const load = () => { if (document.hidden) return; fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => setSessions(d.sessions || [])).catch(() => setSessErr('Failed to load transcripts.')); };
+    let request = 0;
+    const load = () => { if (document.hidden) return; const current = ++request; fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}${hideReviews ? '&hideReviews=1' : ''}`).then((r) => r.json()).then((d) => { if (current === request) setSessions(d.sessions || []); }).catch(() => { if (current === request) setSessErr('Failed to load transcripts.'); }); };
     load();
     const iv = setInterval(load, 15000);
-    return () => clearInterval(iv);
-  }, [root, active]);
+    return () => { request++; clearInterval(iv); };
+  }, [root, active, hideReviews]);
 
   // Cross-session search (scope 'all'): results replace the left list, like
   // Memory. Scope 'one' filters the open transcript in the right view instead.
-  const searchAll = useCallback((query) => {
+  const searchAll = useCallback((query, isCurrent) => {
     if (!query.trim()) { setMatches(null); setCapped(false); return; }
     if (root == null) return; // root not resolved yet — don't guess
-    fetch(`/api/transcripts/search?q=${encodeURIComponent(query.trim())}&root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
-      setMatches(d.results || []); setCapped(!!d.capped);
+    fetch(`/api/transcripts/search?q=${encodeURIComponent(query.trim())}&root=${encodeURIComponent(untildify(root))}${hideReviews ? '&hideReviews=1' : ''}`).then((r) => r.json()).then((d) => {
+      if (isCurrent()) { setMatches(d.results || []); setCapped(!!d.capped); }
     });
-  }, [root]);
-  useEffect(() => { if (scope === 'all') { const id = setTimeout(() => searchAll(q), 250); return () => clearTimeout(id); } }, [q, scope, root, searchAll]);
+  }, [root, hideReviews]);
+  useEffect(() => {
+    let current = true;
+    if (scope === 'all') {
+      const id = setTimeout(() => searchAll(q, () => current), 250);
+      return () => { current = false; clearTimeout(id); };
+    }
+    return () => { current = false; };
+  }, [q, scope, root, searchAll]);
 
   // Batch-fetch cost + token breakdown; merge into the id-keyed stats map.
   const loadStats = useCallback((items) => {
@@ -279,7 +291,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const leftList = leftResults ?? filteredSessions;
   // Jumps back to page 1 whenever the search/scope/page-size changes the list
   // being paginated — see usePagedList for the reset-during-render mechanics.
-  const { page: curPage, pageCount, pageItems, setPage } = usePagedList(leftList, pageSize, `${q}:${scope}:${pageSize}:${tool}`);
+  const { page: curPage, pageCount, pageItems, setPage } = usePagedList(leftList, pageSize, `${q}:${scope}:${pageSize}:${tool}:${hideReviews}`);
   // Fetch cost/tokens for the visible session rows (not the per-match search rows).
   const pageKey = pageItems.map((s) => s.id).join(',');
   useEffect(() => { if (!leftResults) loadStats(pageItems); /* eslint-disable-line */ }, [pageKey, leftResults, loadStats]);
@@ -304,11 +316,18 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
               onCollapse={collapse}
             >
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }} noWrap>{tool === 'codex' ? '~/.codex (Codex home)' : tildify(root)}</Typography>
-              <ToggleButtonGroup value={tool} exclusive size="small" color="primary" onChange={(_, v) => v && setTool(v)} sx={{ mt: 1, ml: 2, alignSelf: 'flex-start' }}>
-                <ToggleButton value="all" aria-label="All sources" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>All</ToggleButton>
-                <ToggleButton value="claude" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>Claude</ToggleButton>
-                <ToggleButton value="codex" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>Codex</ToggleButton>
-              </ToggleButtonGroup>
+              <Stack direction="row" sx={{ mt: 1, ml: 2, alignItems: 'center', flexWrap: 'wrap', columnGap: 1 }}>
+                <ToggleButtonGroup value={tool} exclusive size="small" color="primary" onChange={(_, v) => v && setTool(v)} sx={{ flexShrink: 0 }}>
+                  <ToggleButton value="all" aria-label="All sources" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>All</ToggleButton>
+                  <ToggleButton value="claude" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>Claude</ToggleButton>
+                  <ToggleButton value="codex" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>Codex</ToggleButton>
+                </ToggleButtonGroup>
+                <FormControlLabel
+                  control={<Checkbox size="small" checked={hideReviews} onChange={(e) => setHideReviews(e.target.checked ? '1' : null)} />}
+                  label="Hide automated reviews"
+                  sx={{ m: 0, '& .MuiFormControlLabel-label': { fontSize: 12 } }}
+                />
+              </Stack>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
                 {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${filteredSessions.length} transcript${filteredSessions.length === 1 ? '' : 's'}`}
               </Typography>

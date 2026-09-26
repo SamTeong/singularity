@@ -5,7 +5,7 @@
 // Run: npm test  (node --test server/)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, mkdtempSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -93,6 +93,62 @@ test('searchSessions: codex transcripts are searched and tagged with source', as
     const codexHit = results.find((r) => r.source === 'codex');
     assert.ok(codexHit, 'codex search result found');
     assert.equal(codexHit.id, THREAD_ID);
+  } finally {
+    rmSync(CODEX_HOME, { recursive: true, force: true });
+  }
+});
+
+test('readSession: response_item users and tool outputs render without duplicate user turns', async () => {
+  writeRollout([
+    EVENTS[0],
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [
+      { type: 'input_text', text: '<recommended_plugins>\nPlugin guidance\n</recommended_plugins>' },
+      { type: 'input_text', text: '# AGENTS.md instructions\n\n<INSTRUCTIONS>\nRepo guidance\n</INSTRUCTIONS>' },
+      { type: 'input_text', text: '<environment_context>\nShell details\n</environment_context>' },
+    ] } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'First item-only prompt' }] } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Inspect this rollout' }] } }),
+    JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Inspect this rollout' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'function_call', name: 'exec_command', arguments: '{}' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', output: 'command output' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call', name: 'apply_patch', input: 'patch' } }),
+    JSON.stringify({ type: 'response_item', payload: { type: 'custom_tool_call_output', output: [{ type: 'input_text', text: 'patch result' }] } }),
+  ]);
+  try {
+    const r = await readSession('<codex>', THREAD_ID, undefined, 'codex');
+    assert.equal(r.meta.title, 'First item-only prompt');
+    assert.deepEqual(r.messages.map(({ role, kind, text }) => ({ role, kind, text })), [
+      { role: 'user', kind: 'text', text: 'First item-only prompt' },
+      { role: 'user', kind: 'text', text: 'Inspect this rollout' },
+      { role: 'assistant', kind: 'toolUse', text: '{}' },
+      { role: 'user', kind: 'toolResult', text: 'command output' },
+      { role: 'assistant', kind: 'toolUse', text: 'patch' },
+      { role: 'user', kind: 'toolResult', text: 'patch result' },
+    ]);
+    const { results } = await searchSessions('patch result', { root: join(CODEX_HOME, 'nonexistent') });
+    assert.equal(results.length, 1);
+    assert.equal((await searchSessions('Repo guidance', { root: join(CODEX_HOME, 'nonexistent') })).results.length, 0);
+    const sessions = await listSessions({ root: join(CODEX_HOME, 'nonexistent') });
+    assert.equal(sessions[0].title, 'First item-only prompt');
+  } finally {
+    rmSync(CODEX_HOME, { recursive: true, force: true });
+  }
+});
+
+test('hideReviews excludes Codex review prompts before the list cap and from search', async () => {
+  const reviewId = '019f9718-405c-7fd3-9b8a-f3af71880fe3';
+  const reviewFile = join(ROLLOUT_DIR, `rollout-2026-07-24T10-26-16-${reviewId}.jsonl`);
+  const reviewPrompt = 'The following is the Codex agent history whose request action you are assessing. ' + 'x'.repeat(70000) + ' shared needle';
+  writeRollout([EVENTS[0], JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'shared needle ordinary work' }] } })]);
+  writeFileSync(reviewFile, [EVENTS[0], JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: reviewPrompt }] } })].join('\n') + '\n');
+  utimesSync(join(ROLLOUT_DIR, ROLLOUT), new Date('2026-07-24T00:00:00Z'), new Date('2026-07-24T00:00:00Z'));
+  utimesSync(reviewFile, new Date('2026-07-25T00:00:00Z'), new Date('2026-07-25T00:00:00Z'));
+  try {
+    const root = join(CODEX_HOME, 'nonexistent');
+    assert.equal((await listSessions({ cap: 1, root })).at(0).id, reviewId);
+    assert.equal((await listSessions({ cap: 1, root, hideReviews: true })).at(0).id, THREAD_ID);
+    const { results } = await searchSessions('shared needle', { root, hideReviews: true });
+    assert.deepEqual([...new Set(results.map((r) => r.id))], [THREAD_ID]);
   } finally {
     rmSync(CODEX_HOME, { recursive: true, force: true });
   }

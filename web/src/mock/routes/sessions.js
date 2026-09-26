@@ -211,6 +211,7 @@ export function registerSessions(server) {
   // /transcripts — every transcript, reverse-chrono by mtime, capped. Row shape
   // matches listSessions: { id, project, cwd, title, blurb, mtime, size,
   // running, source }. The mock has no subagents, so no subagents field.
+  // hideReviews=1 is accepted; this Claude-only corpus has no Codex review rows.
   server.get('/transcripts', (schema, req) => {
     const cap = Number(req.queryParams.cap) || 5000;
     // The daemon resolves the client-supplied root to enumerate transcripts
@@ -256,6 +257,7 @@ export function registerSessions(server) {
   // /transcripts/search — substring search over session text, scoped to one
   // session when {project,id} given. Mirrors searchSessions: id matches
   // synthesize a role:'id' hit; text matches carry the line-indexed snippet.
+  // hideReviews=1 is accepted; the Claude-only corpus has no Codex review rows.
   server.get('/transcripts/search', (schema, req) => {
     const q = req.queryParams.q || '';
     const ql = q.toLowerCase();

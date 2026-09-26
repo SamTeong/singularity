@@ -49,6 +49,30 @@ test('search narrows the list to cross-session matches; clearing restores it', a
   await expect(visible(page.getByText(`${TOTAL_SESSIONS} transcripts`, { exact: true })).first()).toBeVisible();
 });
 
+test('automated review filter is opt-in and preserves transcript and source query state', async ({ page }) => {
+  await openTranscripts(page);
+  const checkbox = page.getByRole('checkbox', { name: 'Hide automated reviews' });
+  await expect(checkbox).not.toBeChecked();
+
+  await page.getByRole('button', { name: 'Claude', exact: true }).click();
+  await page.getByRole('button', { name: /Retry backoff cap/ }).click();
+  await checkbox.click();
+  await expect(checkbox).toBeChecked();
+  await expect(page).toHaveURL(/hideReviews=1/);
+  const params = await page.evaluate(() => Object.fromEntries(new URLSearchParams(location.search)));
+  expect(params.tool).toBe('claude');
+  expect(params.project).toBeTruthy();
+  expect(params.session).toBe(RICH_SESSION);
+
+  await page.getByPlaceholder('Search transcripts…').fill('MAX_BACKOFF_MS');
+  await expect(visible(page.getByText('1 matches', { exact: true })).first()).toBeVisible();
+  await checkbox.click();
+  await expect(checkbox).not.toBeChecked();
+  await expect(page).not.toHaveURL(/hideReviews=1/);
+  await expect(page).toHaveURL(/tool=claude/);
+  await expect(page).toHaveURL(/session=/);
+});
+
 test('clicking a search result opens it without clearing the search query', async ({ page }) => {
   await openTranscripts(page);
 

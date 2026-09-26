@@ -42,6 +42,8 @@ const RUNNING_MS = 30000;     // external-session recency heuristic: mtime withi
 // we use it as the row id. session_meta carries the root session_id + cwd.
 const CODEX_FILE_CAP = 5000;
 const CODEX_THREAD_RE = /-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
+const CODEX_REVIEW_PREFIX = 'the following is the codex agent history whose request action you are assessing.';
+const isCodexReview = (text) => typeof text === 'string' && text.trimStart().toLowerCase().startsWith(CODEX_REVIEW_PREFIX);
 
 function codexThreadId(filename) {
   const base = filename.slice(0, -6); // strip .jsonl
@@ -49,8 +51,50 @@ function codexThreadId(filename) {
   return m ? m[1] : base;
 }
 
+const codexContentText = (content) => (content || []).map((part) => part.text || '').join('');
+const codexOutputText = (output) => Array.isArray(output) ? codexContentText(output) : output || '';
+const isCodexContextText = (text) => typeof text === 'string' && (
+  /^# AGENTS\.md instructions\s*<INSTRUCTIONS>[\s\S]*<\/INSTRUCTIONS>$/.test(text.trim())
+  || /^<environment_context>[\s\S]*<\/environment_context>$/.test(text.trim())
+  || /^<recommended_plugins>[\s\S]*<\/recommended_plugins>$/.test(text.trim())
+);
+const codexUserText = (content) => codexContentText((content || []).filter((part) => !isCodexContextText(part.text)));
+
+// Some rollouts contain both a response_item user message and an event_msg
+// user_message for the same turn. Prefer the response_item and consume only
+// the matching number of event duplicates, preserving repeated prompts.
+function codexItemUserCounts(events) {
+  const counts = new Map();
+  for (const e of events) {
+    const p = e?.payload;
+    if (e?.type !== 'response_item' || p?.type !== 'message' || p.role !== 'user') continue;
+    const text = codexUserText(p.content);
+    if (text) counts.set(text, (counts.get(text) || 0) + 1);
+  }
+  return counts;
+}
+
+function isDuplicateCodexUserEvent(text, counts) {
+  const count = counts.get(text) || 0;
+  if (!count) return false;
+  counts.set(text, count - 1);
+  return true;
+}
+
+function firstCodexUserText(events) {
+  for (const e of events) {
+    const p = e?.payload;
+    if (e?.type === 'response_item' && p?.type === 'message' && p.role === 'user') {
+      const text = codexUserText(p.content);
+      if (text) return text;
+    }
+    if (e?.type === 'event_msg' && p?.type === 'user_message' && (p.message || p.text)) return p.message || p.text;
+  }
+  return null;
+}
+
 // Reduce a peek's events to {cwd, sessionId, title}. session_meta gives cwd +
-// session_id; the first user_message gives the title (fallback: Codex <uuid>).
+// session_id; the first user message gives the title (fallback: Codex <uuid>).
 function peekCodexMeta(events) {
   let cwd = null, sessionId = null, title = null;
   for (const e of events) {
@@ -60,6 +104,9 @@ function peekCodexMeta(events) {
     }
     if (!title && e.type === 'event_msg' && e.payload?.type === 'user_message' && e.payload.message) {
       title = e.payload.message;
+    }
+    if (!title && e.type === 'response_item' && e.payload?.type === 'message' && e.payload.role === 'user') {
+      title = codexUserText(e.payload.content) || null;
     }
   }
   return { cwd, sessionId, title };
@@ -83,7 +130,7 @@ const codexMetaCache = new Map(); // path -> { mtimeMs, size, cwd, sessionId, ti
 // Callers pass `cap`, but codex rollouts have never been capped — the param was
 // accepted and ignored. Dropped from the signature rather than left as dead
 // weight; wire it up here if the rollout count ever needs bounding.
-async function listCodexSessions({ isLive = () => false, now = Date.now() } = {}) {
+async function listCodexSessions({ isLive = () => false, now = Date.now(), hideReviews = false } = {}) {
   if (!existsSync(CODEX_HOME)) return [];
   const files = [];
   for (const sub of ['sessions', 'archived_sessions']) await listCodexRollouts(join(CODEX_HOME, sub), files);
@@ -94,19 +141,26 @@ async function listCodexSessions({ isLive = () => false, now = Date.now() } = {}
     if (!pk) continue;
     const { st } = pk;
     const id = codexThreadId(basename(p));
-    let cwd, sessionId, title;
+    let cwd, sessionId, title, review;
     const hit = codexMetaCache.get(p);
     if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
-      ({ cwd, sessionId, title } = hit);
+      ({ cwd, sessionId, title, review } = hit);
     } else {
       ({ cwd, sessionId, title } = peekCodexMeta(parseEvents(pk.head)));
+      review = title ? isCodexReview(title) : undefined;
       // Slice the tail, not the head: a codex thread uuid is time-ordered, so
       // its first 8 chars are a timestamp prefix shared by every thread started
       // in the same window — 69 of 246 rollouts here collide on it.
       if (!title) title = `Codex ${id.slice(-8)}`;
-      codexMetaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, sessionId, title });
+      codexMetaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, sessionId, title, review });
       if (codexMetaCache.size > 200) codexMetaCache.delete(codexMetaCache.keys().next().value);
     }
+    if (hideReviews && review === undefined) {
+      review = isCodexReview(firstCodexUserText(parseEvents(await readFile(p, 'utf8'))));
+      const cached = codexMetaCache.get(p);
+      if (cached) cached.review = review;
+    }
+    if (hideReviews && review) continue;
     out.push({
       id, project: '<codex>', cwd, title, mtime: st.mtimeMs, size: st.size,
       running: isLive(id) || (now - st.mtimeMs) < RUNNING_MS,
@@ -143,6 +197,7 @@ async function findCodexById(id) {
 // ponytail: codex cost notional, wire stats when needed
 async function readCodexSession(p) {
   const events = parseEvents(await readFile(p, 'utf8'));
+  const duplicateUsers = codexItemUserCounts(events);
   const messages = [];
   let cwd = null, sessionId = null, title = null, turns = 0, firstTs = null, lastTs = null, lastModel = null;
   for (const e of events) {
@@ -159,9 +214,15 @@ async function readCodexSession(p) {
     if (typ === 'turn_context') { if (payload.model) lastModel = payload.model; continue; }
     if (typ === 'response_item') {
       if (payload.type === 'message') {
-        if (payload.role === 'assistant') {
+        if (payload.role === 'user') {
+          const text = codexUserText(payload.content);
+          if (text) {
+            messages.push({ ts, role: 'user', kind: 'text', text });
+            if (!title) title = text.slice(0, 120);
+          }
+        } else if (payload.role === 'assistant') {
           turns++;
-          const text = (payload.content || []).map((c) => c.text || '').join('');
+          const text = codexContentText(payload.content);
           if (text) messages.push({ ts, role: 'assistant', kind: 'text', text });
         }
       } else if (payload.type === 'reasoning') {
@@ -171,13 +232,18 @@ async function readCodexSession(p) {
         const name = payload.name || '?';
         const args = payload.arguments || payload.input || '';
         messages.push({ ts, role: 'assistant', kind: 'toolUse', name, text: trunc(args, TOOL_TRUNC) });
+      } else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
+        messages.push({ ts, role: 'user', kind: 'toolResult', text: trunc(codexOutputText(payload.output), TOOL_TRUNC) });
+      } else if (payload.type === 'agent_message') {
+        const text = codexContentText(payload.content);
+        if (text) messages.push({ ts, role: 'assistant', kind: 'text', text: `${payload.author || 'agent'}: ${text}` });
       }
       continue;
     }
     if (typ === 'event_msg') {
       if (payload.type === 'user_message') {
         const text = payload.message || payload.text || '';
-        if (text) {
+        if (text && !isDuplicateCodexUserEvent(text, duplicateUsers)) {
           messages.push({ ts, role: 'user', kind: 'text', text });
           if (!title) title = text.slice(0, 120);
         }
@@ -207,6 +273,7 @@ async function codexTextItems(p) {
 }
 async function readCodexForSearch(p) {
   const events = parseEvents(await readFile(p, 'utf8'));
+  const duplicateUsers = codexItemUserCounts(events);
   const items = [];
   let cwd = null;
   for (const e of events) {
@@ -215,17 +282,22 @@ async function readCodexForSearch(p) {
     const payload = e.payload || {};
     if (e.type === 'event_msg' && payload.type === 'user_message') {
       const text = payload.message || payload.text || '';
-      if (text) items.push({ idx: items.length, role: 'user', text, cwd });
+      if (text && !isDuplicateCodexUserEvent(text, duplicateUsers)) items.push({ idx: items.length, role: 'user', text, cwd });
     } else if (e.type === 'response_item') {
-      if (payload.type === 'message' && payload.role === 'assistant') {
-        const text = (payload.content || []).map((c) => c.text || '').join('');
-        if (text) items.push({ idx: items.length, role: 'assistant', text, cwd });
+      if (payload.type === 'message' && (payload.role === 'assistant' || payload.role === 'user')) {
+        const text = payload.role === 'user' ? codexUserText(payload.content) : codexContentText(payload.content);
+        if (text) items.push({ idx: items.length, role: payload.role, text, cwd });
       } else if (payload.type === 'reasoning') {
         const text = [...(payload.summary || []), ...(payload.content || [])].map((c) => c.text || '').join('');
         if (text) items.push({ idx: items.length, role: 'assistant', text, cwd });
       } else if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
         const name = payload.name || '?';
         items.push({ idx: items.length, role: 'assistant', text: `[tool: ${name}] ${trunc(payload.arguments || payload.input || '', 500)}`, cwd });
+      } else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
+        items.push({ idx: items.length, role: 'user', text: trunc(codexOutputText(payload.output), 500), cwd });
+      } else if (payload.type === 'agent_message') {
+        const text = codexContentText(payload.content);
+        if (text) items.push({ idx: items.length, role: 'assistant', text: `${payload.author || 'agent'}: ${text}`, cwd });
       }
     } else if (e.type === 'event_msg' && payload.type === 'mcp_tool_call_end') {
       const name = payload.invocation?.tool || '?';
@@ -328,10 +400,10 @@ function peekMeta(events) {
 // mtime. The (mtime,size)-keyed cache holds the peeked meta so repeated list
 // calls don't re-read heads of unchanged files.
 const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title }
-export async function listSessions({ cap = 5000, isLive = () => false, now = Date.now(), root } = {}) {
+export async function listSessions({ cap = 5000, isLive = () => false, now = Date.now(), root, hideReviews = false } = {}) {
   const PROJECTS = resolveRoot(root);
   if (!existsSync(PROJECTS)) {
-    const codexOnly = await listCodexSessions({ cap, isLive, now });
+    const codexOnly = await listCodexSessions({ isLive, now, hideReviews });
     codexOnly.sort((a, b) => b.mtime - a.mtime);
     return codexOnly.slice(0, cap);
   }
@@ -369,7 +441,7 @@ export async function listSessions({ cap = 5000, isLive = () => false, now = Dat
     }
   }
   for (const r of out) r.source = 'claude';
-  const codex = await listCodexSessions({ cap, isLive, now });
+  const codex = await listCodexSessions({ isLive, now, hideReviews });
   const all = out.concat(codex);
   all.sort((a, b) => b.mtime - a.mtime);
   return all.slice(0, cap);
@@ -593,7 +665,7 @@ function snippet(text, at, q) {
   return (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
 }
 
-export async function searchSessions(q, { project, id, root } = {}) {
+export async function searchSessions(q, { project, id, root, hideReviews = false } = {}) {
   const ql = (q || '').toLowerCase();
   if (!ql) return { results: [], capped: false };
   const PROJECTS = resolveRoot(root);
@@ -624,18 +696,18 @@ export async function searchSessions(q, { project, id, root } = {}) {
   }
   const results = [];
   for (const t of targets) {
+    const items = t.source === 'codex' ? await codexTextItems(t.path) : await sessionTextItems(t.path);
+    if (hideReviews && t.source === 'codex' && isCodexReview(items?.find((item) => item.role === 'user')?.text)) continue;
     // Match the query against the session id (filename stem) itself — the id
     // lives in event metadata (sessionId field), never in message text, so a
     // pure-id search otherwise returns nothing.
     if (t.id.toLowerCase().includes(ql)) {
       // id lives in event metadata, not message text — synthesize one hit and
       // skip the (always-empty) message-text scan for the same id.
-      const items = t.source === 'codex' ? await codexTextItems(t.path) : await sessionTextItems(t.path);
       results.push({ project: t.project, id: t.id, cwd: items?.[0]?.cwd || null, lineIndex: 0, role: 'id', snippet: t.id, source: t.source });
       if (results.length >= RESULT_CAP) return { results, capped: true };
       continue;
     }
-    const items = t.source === 'codex' ? await codexTextItems(t.path) : await sessionTextItems(t.path);
     if (!items) continue;
     for (const it of items) {
       const at = it.text.toLowerCase().indexOf(ql);
