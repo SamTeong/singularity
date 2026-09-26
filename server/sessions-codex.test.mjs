@@ -101,6 +101,11 @@ test('searchSessions: codex transcripts are searched and tagged with source', as
 test('readSession: response_item users and tool outputs render without duplicate user turns', async () => {
   writeRollout([
     EVENTS[0],
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [
+      { type: 'input_text', text: '<recommended_plugins>\nPlugin guidance\n</recommended_plugins>' },
+      { type: 'input_text', text: '# AGENTS.md instructions\n\n<INSTRUCTIONS>\nRepo guidance\n</INSTRUCTIONS>' },
+      { type: 'input_text', text: '<environment_context>\nShell details\n</environment_context>' },
+    ] } }),
     JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'First item-only prompt' }] } }),
     JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Inspect this rollout' }] } }),
     JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'Inspect this rollout' } }),
@@ -122,6 +127,7 @@ test('readSession: response_item users and tool outputs render without duplicate
     ]);
     const { results } = await searchSessions('patch result', { root: join(CODEX_HOME, 'nonexistent') });
     assert.equal(results.length, 1);
+    assert.equal((await searchSessions('Repo guidance', { root: join(CODEX_HOME, 'nonexistent') })).results.length, 0);
     const sessions = await listSessions({ root: join(CODEX_HOME, 'nonexistent') });
     assert.equal(sessions[0].title, 'First item-only prompt');
   } finally {

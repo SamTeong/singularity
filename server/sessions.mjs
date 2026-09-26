@@ -53,6 +53,12 @@ function codexThreadId(filename) {
 
 const codexContentText = (content) => (content || []).map((part) => part.text || '').join('');
 const codexOutputText = (output) => Array.isArray(output) ? codexContentText(output) : output || '';
+const isCodexContextText = (text) => typeof text === 'string' && (
+  /^# AGENTS\.md instructions\s*<INSTRUCTIONS>[\s\S]*<\/INSTRUCTIONS>$/.test(text.trim())
+  || /^<environment_context>[\s\S]*<\/environment_context>$/.test(text.trim())
+  || /^<recommended_plugins>[\s\S]*<\/recommended_plugins>$/.test(text.trim())
+);
+const codexUserText = (content) => codexContentText((content || []).filter((part) => !isCodexContextText(part.text)));
 
 // Some rollouts contain both a response_item user message and an event_msg
 // user_message for the same turn. Prefer the response_item and consume only
@@ -62,7 +68,7 @@ function codexItemUserCounts(events) {
   for (const e of events) {
     const p = e?.payload;
     if (e?.type !== 'response_item' || p?.type !== 'message' || p.role !== 'user') continue;
-    const text = codexContentText(p.content);
+    const text = codexUserText(p.content);
     if (text) counts.set(text, (counts.get(text) || 0) + 1);
   }
   return counts;
@@ -79,7 +85,7 @@ function firstCodexUserText(events) {
   for (const e of events) {
     const p = e?.payload;
     if (e?.type === 'response_item' && p?.type === 'message' && p.role === 'user') {
-      const text = codexContentText(p.content);
+      const text = codexUserText(p.content);
       if (text) return text;
     }
     if (e?.type === 'event_msg' && p?.type === 'user_message' && (p.message || p.text)) return p.message || p.text;
@@ -100,7 +106,7 @@ function peekCodexMeta(events) {
       title = e.payload.message;
     }
     if (!title && e.type === 'response_item' && e.payload?.type === 'message' && e.payload.role === 'user') {
-      title = codexContentText(e.payload.content) || null;
+      title = codexUserText(e.payload.content) || null;
     }
   }
   return { cwd, sessionId, title };
@@ -209,7 +215,7 @@ async function readCodexSession(p) {
     if (typ === 'response_item') {
       if (payload.type === 'message') {
         if (payload.role === 'user') {
-          const text = codexContentText(payload.content);
+          const text = codexUserText(payload.content);
           if (text) {
             messages.push({ ts, role: 'user', kind: 'text', text });
             if (!title) title = text.slice(0, 120);
@@ -279,7 +285,7 @@ async function readCodexForSearch(p) {
       if (text && !isDuplicateCodexUserEvent(text, duplicateUsers)) items.push({ idx: items.length, role: 'user', text, cwd });
     } else if (e.type === 'response_item') {
       if (payload.type === 'message' && (payload.role === 'assistant' || payload.role === 'user')) {
-        const text = codexContentText(payload.content);
+        const text = payload.role === 'user' ? codexUserText(payload.content) : codexContentText(payload.content);
         if (text) items.push({ idx: items.length, role: payload.role, text, cwd });
       } else if (payload.type === 'reasoning') {
         const text = [...(payload.summary || []), ...(payload.content || [])].map((c) => c.text || '').join('');
