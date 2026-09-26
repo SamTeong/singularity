@@ -7,7 +7,6 @@ import { execFile, execFileSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { homedir } from 'node:os';
 import * as reg from './agents.mjs';
 import { isClaudeModel, isCodexModel } from './models.mjs';
 import { statsFor } from './stats.mjs';
@@ -55,6 +54,8 @@ const execFileP = promisify(execFile);
 // GCM_INTERACTIVE is Windows Git Credential Manager, what this machine uses.
 // Overridable via SING_GIT_TIMEOUT_MS for tests that need a short bound.
 const GIT_TIMEOUT_MS = Number(process.env.SING_GIT_TIMEOUT_MS) || 10_000;
+// Absolute path from .env when set; else `git` on PATH (execFile resolves it).
+const GIT_BIN = process.env.GIT_BIN || 'git';
 const GIT_OPTS = {
   encoding: 'utf8', timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL',
   env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: 'echo' },
@@ -64,7 +65,7 @@ const GIT_OPTS = {
 // block the event loop (and freeze live PTY agents + WS clients).
 export async function git(repo, ...args) {
   try {
-    return (await execFileP('git', ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS)).stdout.trim();
+    return (await execFileP(GIT_BIN, ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS)).stdout.trim();
   } catch (e) {
     throw new Error(`git ${args.join(' ')} failed: ${e.message}`, { cause: e });
   }
@@ -75,7 +76,7 @@ export async function git(repo, ...args) {
 // changing those call sites. Same timeout/non-interactive guards as git().
 export function gitSync(repo, ...args) {
   try {
-    return execFileSync('git', ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS).trim();
+    return execFileSync(GIT_BIN, ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS).trim();
   } catch (e) {
     throw new Error(`git ${args.join(' ')} failed: ${e.message}`, { cause: e });
   }
@@ -133,12 +134,9 @@ export async function ensureWorktree(t) {
 }
 
 // Caveman plugin (user scope) ships compressed cavecrew subagents — usable from
-// any cwd. Detected from ~/.claude/settings.json enabledPlugins.
+// any cwd. Opt-in via SING_CAVECREW=1 in .env (external plugin, not shipped).
 function cavecrewAvailable() {
-  try {
-    const s = JSON.parse(readFileSync(join(homedir(), '.claude', 'settings.json'), 'utf8'));
-    return Object.keys(s.enabledPlugins || {}).some((k) => k.startsWith('caveman@'));
-  } catch { return false; }
+  return process.env.SING_CAVECREW === '1';
 }
 
 export function initTasks(log) {
