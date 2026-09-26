@@ -33,7 +33,7 @@ test('a DONE run with every finding resolved shows counts and All resolved', asy
   await expect(card).toContainText(`P2 ${latest.counts.P2}`);
   await expect(card).toContainText(`open ${latest.counts.open}`);
   await expect(card).toContainText(`resolved ${latest.counts.resolved}`);
-  await expect(card).toContainText('All resolved');
+  await expect(card.getByLabel('All resolved')).toBeVisible();
 });
 
 test('a BLOCKED latest run still surfaces open findings from an older DONE run', async ({ page }) => {
@@ -45,7 +45,7 @@ test('a BLOCKED latest run still surfaces open findings from an older DONE run',
   await expect(card).not.toContainText('sha not in repo'); // commitsSince only applies to DONE
   await expect(card).toContainText(`P0 ${latest.counts.P0}`);
   await expect(card).toContainText(`open ${latest.counts.open}`);
-  await expect(card).not.toContainText('All resolved');
+  await expect(card.getByLabel('All resolved')).toHaveCount(0);
 
   // The older run is collapsed by default; its findings are not yet in the DOM.
   await expect(card).not.toContainText('Stashed change clobbers widget layout on rebase');

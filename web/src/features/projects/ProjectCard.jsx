@@ -22,6 +22,7 @@ import EditOutlinedIcon from '@mui/icons-material/EditOutlined';
 import NoteAddOutlinedIcon from '@mui/icons-material/NoteAddOutlined';
 import ReportProblemOutlinedIcon from '@mui/icons-material/ReportProblemOutlined';
 import Inventory2OutlinedIcon from '@mui/icons-material/Inventory2Outlined';
+import CheckCircleOutlineIcon from '@mui/icons-material/CheckCircleOutlined';
 import { repoName, tildify } from '@/lib/paths.js';
 import MarkdownBody from '@/components/MarkdownBody.jsx';
 
@@ -155,7 +156,7 @@ function ReviewSection({ data, onOpenFile }) {
           <CountChip label="P3" n={latest.counts.P3} />
           <CountChip label="open" n={latest.counts.open} />
           <CountChip label="resolved" n={latest.counts.resolved} />
-          {latest.counts.open === 0 && <Typography sx={{ fontSize: 11, color: 'success.main' }}>All resolved</Typography>}
+          {latest.counts.open === 0 && <CheckCircleOutlineIcon titleAccess="All resolved" aria-label="All resolved" sx={{ fontSize: 16, color: 'success.main' }} />}
         </Stack>
       )}
       <Stack spacing={0.5}>
@@ -337,7 +338,7 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
             {status.upstream ? (
               <>
                 <Typography sx={{ fontSize: 11, color: 'text.secondary' }}>{status.upstream}</Typography>
-                <Typography sx={{ fontSize: 11 }}>↑{status.ahead} ↓{status.behind}</Typography>
+                <Typography sx={{ fontSize: 11, color: !status.ahead && !status.behind ? 'success.main' : undefined }}>↑{status.ahead} ↓{status.behind}</Typography>
               </>
             ) : (
               <Chip label="no upstream" size="small" sx={{ height: 20, fontSize: 11 }} />
