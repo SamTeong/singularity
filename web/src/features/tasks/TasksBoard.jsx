@@ -11,6 +11,8 @@ import Button from '@mui/material/Button';
 import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import Drawer from '@mui/material/Drawer';
+import Select from '@mui/material/Select';
+import MenuItem from '@mui/material/MenuItem';
 import Table from '@mui/material/Table';
 import TableHead from '@mui/material/TableHead';
 import TableBody from '@mui/material/TableBody';
@@ -23,6 +25,8 @@ import CloseIcon from '@mui/icons-material/Close';
 import DeleteOutlineIcon from '@mui/icons-material/DeleteOutlined';
 import OutlinedFlagOutlinedIcon from '@mui/icons-material/OutlinedFlagOutlined';
 import StorageOutlinedIcon from '@mui/icons-material/StorageOutlined';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import { StatusPill } from '@/components/StatusPill.jsx';
 import TableScroller from '@/components/TableScroller.jsx';
 import TaskDetailPanel, { DETAIL_SHEET_W } from '@/features/tasks/TaskDetailPanel.jsx';
@@ -48,10 +52,6 @@ const prefersReducedMotion = () =>
 // Column-head inner-row cap (task 1) — see the column-head comment below for
 // why this exists.
 const COL_HEAD_MAX_W = 340;
-
-// History table page size (HistoryView windows at 60). The table rendered the
-// whole corpus unbounded before.
-const HIST_PAGE_SIZE = 50;
 
 // Duration formatter — cost/token formatters live in format.js.
 const fmtMs = (ms) => {
@@ -501,11 +501,14 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, activeTags, sort]);
 
-  // History pagination — Prev/Next under the table, disabled at bounds. Page
-  // resets to 1 when the sort or tag filter changes the paginated set.
-  const histPageKey = `${sortParam}:${[...activeTags].join(',')}`;
+  // History pagination (HistoryView windows at 60; the table rendered the whole
+  // corpus unbounded before) — the same page-size Select + icon prev/next bar
+  // the Transcripts rail uses. Page resets to 1 when the sort, tag filter or
+  // page size changes the paginated set.
+  const [histPageSize, setHistPageSize] = useState(50);
+  const histPageKey = `${sortParam}:${[...activeTags].join(',')}:${histPageSize}`;
   const { page: histCurPage, pageCount: histPageCount, pageItems: pagedHistory, setPage: setHistPage } =
-    usePagedList(sortedHistory, HIST_PAGE_SIZE, histPageKey);
+    usePagedList(sortedHistory, histPageSize, histPageKey);
 
   // Transcript sheet: selecting a History row — or handing off from
   // TaskDetailPanel's "View transcript" — loads its session's transcript
@@ -770,13 +773,18 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
             </Table>
             </TableScroller>
           </Box>
-          <Stack direction="row" sx={{ alignItems: 'center', flexWrap: 'wrap', justifyContent: 'center', gap: 1, py: 0.5, borderTop: (t) => `1px solid ${stroke2(t)}` }}>
-            <Button size="small" disabled={histCurPage <= 1} onClick={() => setHistPage((p) => Math.max(1, p - 1))} sx={{ textTransform: 'none' }}>Prev</Button>
-            <Typography variant="body2" sx={{ color: 'text.secondary', fontSize: 12 }}>
-              Page {histCurPage} of {histPageCount} · {sortedHistory.length} task{sortedHistory.length === 1 ? '' : 's'}
-            </Typography>
-            <Button size="small" disabled={histCurPage >= histPageCount} onClick={() => setHistPage((p) => Math.min(histPageCount, p + 1))} sx={{ textTransform: 'none' }}>Next</Button>
-          </Stack>
+          <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${getTokens(t).glass.stroke}`, flexShrink: 0 })}>
+            <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
+              <Select size="small" aria-label="Rows per page" value={histPageSize} onChange={(e) => setHistPageSize(Number(e.target.value))} sx={{ height: 34, '& .MuiSelect-select': { py: 0.5, fontSize: 12 } }}>
+                {[25, 50, 100].map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
+              </Select>
+              <IconButton size="small" disabled={histCurPage <= 1} onClick={() => setHistPage(histCurPage - 1)}><ChevronLeftIcon /></IconButton>
+              <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 52, height: 34 }}>
+                <Typography sx={{ fontSize: 11, color: 'text.secondary', lineHeight: 1 }}>{sortedHistory.length ? `${histCurPage}/${histPageCount}` : '—'}</Typography>
+              </Box>
+              <IconButton size="small" disabled={histCurPage >= histPageCount} onClick={() => setHistPage(histCurPage + 1)}><ChevronRightIcon /></IconButton>
+            </Stack>
+          </Box>
         </Stack>
       ) : (
         // layout-02 `.board`: columns now flex to fill the full board width

@@ -387,7 +387,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
             </List>
             <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${getTokens(t).glass.stroke}`, flexShrink: 0 })}>
               <Stack direction="row" spacing={1} sx={{ alignItems: 'center' }}>
-                <Select size="small" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} sx={{ height: 34, '& .MuiSelect-select': { py: 0.5, fontSize: 12 } }}>
+                <Select size="small" aria-label="Rows per page" value={pageSize} onChange={(e) => setPageSize(Number(e.target.value))} sx={{ height: 34, '& .MuiSelect-select': { py: 0.5, fontSize: 12 } }}>
                   {[25, 50, 100].map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
                 </Select>
                 <IconButton size="small" disabled={curPage <= 1} onClick={() => setPage(curPage - 1)}><ChevronLeftIcon /></IconButton>
