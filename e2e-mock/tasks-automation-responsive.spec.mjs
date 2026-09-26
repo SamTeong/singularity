@@ -374,6 +374,7 @@ test('automation creates survive a lost response without duplicates', async ({ p
   await cronDialog.getByRole('button', { name: 'Create' }).click();
   await expect(cronDialog.getByText('lost response')).toBeVisible();
   await cronDialog.getByRole('button', { name: 'Create' }).click();
+  await expect(cronDialog).not.toBeVisible();
   await expect(page.locator('tr').filter({ hasText: 'Retry-safe cron' })).toHaveCount(1);
   expect(await page.evaluate(() => window.__automationKeys)).toHaveLength(2);
   expect(await page.evaluate(() => new Set(window.__automationKeys).size)).toBe(1);
@@ -385,6 +386,7 @@ test('automation creates survive a lost response without duplicates', async ({ p
   await backgroundDialog.getByRole('button', { name: 'Create' }).click();
   await expect(backgroundDialog.getByText('lost response')).toBeVisible();
   await backgroundDialog.getByRole('button', { name: 'Create' }).click();
+  await expect(backgroundDialog).not.toBeVisible();
   await expect(page.locator('tr').filter({ hasText: 'Retry-safe background' })).toHaveCount(1);
   expect(await page.evaluate(() => window.__automationKeys)).toHaveLength(4);
   expect(await page.evaluate(() => new Set(window.__automationKeys.slice(2)).size)).toBe(1);
