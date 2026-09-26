@@ -224,6 +224,65 @@ test('history view: toggle, every sortable column header, and delete a row', asy
   await expect(concludedRow).toBeVisible();
 });
 
+// 30 created+concluded tasks on top of the 2 fixture history rows = 32, so the
+// 50 default is one page and 25 is two — the only way to get a second page in
+// mock (fixtures.js seeds just 2 history rows). Same POST-then-conclude helper
+// as table-sticky-responsive.spec.mjs:22.
+async function seedHistoryRows(page, count) {
+  await page.evaluate(async (rowCount) => {
+    for (let index = 0; index < rowCount; index += 1) {
+      const created = await fetch('/api/tasks', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          title: `Pager history ${index + 1}`,
+          description: `Seed row ${index + 1}.`,
+          repo: '/mock/pager-history',
+          model: 'claude',
+          implModel: 'claude',
+          reviewerModel: 'claude',
+        }),
+      }).then((response) => response.json());
+      await fetch(`/api/tasks/${created.task.id}/conclude`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ outcome: 'completed' }),
+      });
+    }
+  }, count);
+}
+
+test('history pager: the page-size Select offers 25/50/100 and prev/next paginate', async ({ page }) => {
+  await page.goto('/tasks?history=1');
+  await seedHistoryRows(page, 30);
+
+  const pageLabel = page.getByText(/^\d+\/\d+$/);
+  await expect(pageLabel).toHaveText('1/1'); // 32 rows under the 50 default
+
+  // The Select is scoped to the pager bar: the History toolbar has other
+  // controls, so an unscoped getByRole('combobox') is not safe on this view.
+  const bar = pageLabel.locator('xpath=ancestor::div[contains(@class,"MuiStack-root")][1]');
+  await bar.getByRole('combobox').click();
+  for (const n of ['25', '50', '100']) await expect(page.getByRole('option', { name: n, exact: true })).toBeVisible();
+  await page.getByRole('option', { name: '25', exact: true }).click();
+
+  await expect(pageLabel).toHaveText('1/2');
+  // Icon-only prev/next carry no accessible name, so they are reached
+  // structurally off the "n/n" label they flank (transcripts.spec.mjs:92-94).
+  const pageBox = pageLabel.locator('xpath=..');
+  const prevBtn = pageBox.locator('xpath=preceding-sibling::button[1]');
+  const nextBtn = pageBox.locator('xpath=following-sibling::button[1]');
+
+  await expect(prevBtn).toBeDisabled();
+  await nextBtn.click();
+  await expect(pageLabel).toHaveText('2/2');
+  await expect(nextBtn).toBeDisabled();
+
+  await prevBtn.click();
+  await expect(pageLabel).toHaveText('1/2');
+  await expect(prevBtn).toBeDisabled();
+});
+
 // ---------------------------------------------------------------------------
 // Phosphor Console (openspec/changes/implement-phosphor-theme, task 8.3):
 // status legend/columns/cards, card-to-dossier behavior, dossier dismissal/
