@@ -39,7 +39,13 @@ export async function pwHideWebdriver(ctx) {
 const CREDENTIALS_PATH = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), '.credentials.json');
 const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
 const USAGE_API_BETA = 'oauth-2025-04-20'; // schema ref: stats.mjs L34
-const TTL = 60_000;
+// The per-source floor on network/heavy work (the OAuth usage API, the codex
+// wham/usage API, the codex rollout scan, the ollama scrape): at most one
+// attempt every NETWORK_FLOOR_MS, success or failure, for an automated caller
+// (force=false — every sampler tick, the idle-debounce refresh, the reset
+// timers). The manual Refresh route (`GET /api/usage?force=1`) passes
+// force=true and is exempt — see pull()'s own gate below.
+const NETWORK_FLOOR_MS = 60_000;
 const REQ_TIMEOUT_MS = 10_000;
 
 // ---- Ollama: authoritative settings-page scrape -----------------------------
@@ -140,7 +146,7 @@ export function appendCodexHistory(data) {
 // window rather than the whole file: this log is megabytes and append-only.
 const CLAUDE_HISTORY = join(USAGE_SKILL_STATE, 'usage-snapshots.jsonl');
 const SNAPSHOT_TAIL_BYTES = 8192;
-export const SNAPSHOT_MAX_AGE_MS = 2 * TTL; // one missed ~60s statusline tick
+export const SNAPSHOT_MAX_AGE_MS = 2 * NETWORK_FLOOR_MS; // one missed ~60s statusline tick
 // How old a local reading may be before it is worse than nothing. Capped at the
 // 5h window because past that the session meter describes a window that has
 // already rolled over; anything inside it is served marked stale.
@@ -596,68 +602,20 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
   }
 }
 
-// ---- Codex: local rollout logs first, live usage API on demand --------------
+// ---- Codex: the Stop hook's snapshot tail, live usage API on demand ---------
 // The API credentials live in ~/.codex/auth.json (CODEX_HOME overrides
-// ~/.codex). The rollout-*.jsonl session records retain the last server-provided
-// rate_limits payload from normal use — appended mid-session, so they are live
-// data, not exit-only residue — and cost nothing to read. Read order: the Stop
-// hook's codex-usage.jsonl tail when fresh, then this bounded rollout scan; the
-// live API is only consulted on ?force=1.
+// ~/.codex). Read order: the Stop hook's codex-usage.jsonl tail when fresh
+// (the hook now bumps the file's own record on every turn, changed or not, so
+// a quiet session still keeps this fresh); the live wham/usage API is
+// consulted only on ?force=1 (the manual Refresh route, or once the file has
+// gone stale and pull()'s own per-source network floor allows it — see the
+// history sampler section). There is no rollout-log scan any more: it read
+// the CLI's own session logs as a zero-cost fallback, but per-source floor and
+// the hook's own liveness meant the free tier already answers every 5s tick,
+// and the live API is the only other source this lane actually needs.
 export const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
-const CODEX_SESSIONS_DIR = join(CODEX_HOME, 'sessions');
 const CODEX_AUTH_PATH = join(CODEX_HOME, 'auth.json');
 const CODEX_USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
-
-// Newest date dirs (sessions/YYYY/MM/DD), newest first, capped at `maxDirs` —
-// bounded backward walk like findCodexRolloutForCwd in stats.mjs, never walks
-// the whole tree. Zero-padded names sort correctly as strings.
-function newestCodexDateDirs(maxDirs) {
-  const dirs = [];
-  let years;
-  try { years = readdirSync(CODEX_SESSIONS_DIR).sort(); } catch { return dirs; }
-  for (const year of [...years].reverse()) {
-    if (dirs.length >= maxDirs) break;
-    let months;
-    try { months = readdirSync(join(CODEX_SESSIONS_DIR, year)).sort(); } catch { continue; }
-    for (const month of [...months].reverse()) {
-      if (dirs.length >= maxDirs) break;
-      let days;
-      try { days = readdirSync(join(CODEX_SESSIONS_DIR, year, month)).sort(); } catch { continue; }
-      for (const day of [...days].reverse()) {
-        if (dirs.length >= maxDirs) break;
-        dirs.push(join(CODEX_SESSIONS_DIR, year, month, day));
-      }
-    }
-  }
-  return dirs;
-}
-
-// Newest rollout files across the newest `maxDateDirs` date dirs, newest-mtime
-// first, capped at `maxFiles` total — the bounded candidate list fetchCodex
-// scans for the freshest rate_limits reading. mtime only orders last-append
-// time (any event), not each file's last rate_limits record, so it's just a
-// cheap relevance pre-filter — fetchCodex compares record timestamps itself.
-function newestCodexRollouts(maxFiles, maxDateDirs) {
-  const files = [];
-  for (const dir of newestCodexDateDirs(maxDateDirs)) {
-    let names;
-    try { names = readdirSync(dir).filter((f) => f.startsWith('rollout-') && f.endsWith('.jsonl')); }
-    catch { continue; }
-    for (const f of names) files.push(join(dir, f));
-  }
-  return files
-    .map((f) => [f, statSync(f).mtimeMs])
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, maxFiles)
-    .map(([f]) => f);
-}
-
-// Bounded candidate scan: newest 20 rollout files across the newest 2 date dirs.
-// Launching Codex without taking a turn leaves a session_meta-only stub rollout
-// with no rate_limits — a handful of those would exhaust a tighter cap and hide
-// the newest real reading behind a "no Codex sessions found" error.
-const CODEX_ROLLOUT_SCAN_CAP = 20;
-const CODEX_DATE_DIR_SCAN_CAP = 2;
 
 function normalizeCodexLimits(plan, windows, durationKey, fetchedAt, resetKey = 'resets_at') {
   let session = null;
@@ -684,57 +642,29 @@ function normalizeCodexLimits(plan, windows, durationKey, fetchedAt, resetKey = 
   return session || weekly ? { ok: true, source: 'codex', plan: plan ?? null, fetchedAt, session, weekly } : null;
 }
 
-export function fetchCodexRollout() {
-  try {
-    const files = newestCodexRollouts(CODEX_ROLLOUT_SCAN_CAP, CODEX_DATE_DIR_SCAN_CAP);
-    if (!files.length) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
-
-    // Freshest reading wins by the record's own timestamp, not file mtime: with
-    // parallel Codex sessions a rollout's last append is usually not a
-    // rate_limits event, so the newest-mtime file can carry an older record
-    // than a quieter session's file (seen live: 87% picked over a 99% recorded
-    // 4 minutes later). Within a file the backwards scan takes its last record.
-    let record = null;
-    for (const file of files) {
-      const lines = readFileSync(file, 'utf8').split('\n');
-      for (let i = lines.length - 1; i >= 0; i--) {
-        if (!lines[i].includes('rate_limits')) continue;
-        let parsed;
-        try { parsed = JSON.parse(lines[i]); } catch { continue; }
-        if (parsed?.payload?.rate_limits) {
-          if (!record || parsed.timestamp > (record.timestamp ?? '')) record = parsed;
-          break;
-        }
-      }
-    }
-    if (!record) return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
-
-    const rl = record.payload.rate_limits;
-    return normalizeCodexLimits(rl.plan_type, [rl.primary, rl.secondary], 'window_minutes', record.timestamp)
-      ?? { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
-  } catch (e) {
-    return { ok: false, source: 'codex', error: e.message, fetchedAt: new Date().toISOString() };
-  }
+// The one answer both branches fall back to: nothing usable was found, either
+// on disk (no fresh Stop-hook record) or, on the live leg, no credentials.
+function noCodexData() {
+  return { ok: false, source: 'codex', error: 'no Codex sessions found', fetchedAt: new Date().toISOString() };
 }
 
 export async function fetchCodex(force = false) {
   // The Stop hook's tail is the freshest free source: a fresh codex-usage.jsonl
-  // line answers with no rollout scan at all; stale or missing falls through.
+  // line (bumped every turn, changed or not) answers with no network at all;
+  // stale or missing falls through to the live wham/usage API below, which
+  // ?force=1 (the manual Refresh route, or pull()'s own network floor once
+  // the automated 5s tick finds this stale) is the only thing that reaches.
   if (!force) {
     const snapshot = readCodexSnapshot();
-    if (snapshot) return snapshot;
+    return snapshot ?? noCodexData();
   }
-  const rollout = fetchCodexRollout();
-  // Passively the rollout scan IS the answer: it is the same rate_limits payload
-  // the API would hand back, from the CLI's own log, at no request cost.
-  if (!force) return rollout;
 
   let auth;
   try { auth = JSON.parse(readFileSync(CODEX_AUTH_PATH, 'utf8')); }
-  catch { return rollout; }
+  catch { return noCodexData(); }
   const token = auth?.tokens?.access_token;
   const accountId = auth?.tokens?.account_id;
-  if (!token || !accountId) return rollout;
+  if (!token || !accountId) return noCodexData();
 
   let liveError;
   let resp;
@@ -757,10 +687,14 @@ export async function fetchCodex(force = false) {
     liveError ??= 'no usable rate limits';
   }
 
-  return !rollout.ok && liveError ? { ...rollout, error: liveError } : rollout;
+  return { ...noCodexData(), error: liveError ?? 'no usable rate limits' };
 }
 
 // ---- Cache + public API -------------------------------------------------------
+// `at` is the timestamp of the last network/heavy-work ATTEMPT for that source
+// (stamped in pull(), success or failure) — the network floor's own clock, not
+// "when data last changed." Free-tier hits (claude's local files, codex's
+// snapshot) never touch it.
 const cache = {
   ollama: { data: null, at: 0 },
   claude: { data: null, at: 0, credentialFingerprint: null },
@@ -807,18 +741,17 @@ function claudeStaleFloor(slot, failure) {
 
 async function pull(src, fetcher, force) {
   const slot = cache[src];
-  let claudeAccountChanged = false;
   let claudeFingerprint = null;
-  // Claude's local tiers cost a file read, so they run ahead of both gates below
-  // — a backed-off or within-TTL poll still picks up whatever the statusline
-  // wrote since. Only a genuinely newer reading counts; an unchanged one falls
+  // Claude's local tiers cost a file read, so they run ahead of every gate
+  // below, force included — a fresh statusline write always wins over the
+  // network leg. Only a genuinely newer reading counts; an unchanged one falls
   // through so the gates decide whether the network leg is worth it.
   if (src === 'claude') {
     claudeFingerprint = claudeCredentialFingerprint();
     // The cache is in-memory only (no cross-restart persistence), so a still-null
     // slot.credentialFingerprint means "never established this process," not
     // "switched accounts." Only a fingerprint that actually moved counts.
-    claudeAccountChanged = !!slot.credentialFingerprint && !!claudeFingerprint && claudeFingerprint !== slot.credentialFingerprint;
+    const claudeAccountChanged = !!slot.credentialFingerprint && !!claudeFingerprint && claudeFingerprint !== slot.credentialFingerprint;
     if (claudeAccountChanged) {
       // Neither the snapshot log nor cost-state identifies its account. Do not
       // blend either with a cache created under different credentials; one live
@@ -839,12 +772,23 @@ async function pull(src, fetcher, force) {
       if (!slot.credentialFingerprint && claudeFingerprint) slot.credentialFingerprint = claudeFingerprint;
       const unchanged = slot.data?.ok && !slot.data.stale && slot.data.fetchedAt === local.fetchedAt;
       if (!unchanged) slot.data = local;
-      slot.at = Date.now();
       return slot.data;
     }
-    // Both tiers stale → the network is the only way to fill the card, and that is
-    // still "on demand" (see fetchClaude): it never runs from a timer of its own,
-    // only from a caller that asked.
+    // Both tiers stale → the network is the only way to fill the card, gated by
+    // claudeGate and the network floor below.
+  }
+  // Codex's cheap file tier, the same shape as claude's above: a fresh
+  // Stop-hook snapshot answers every call — any cadence, force or not — with no
+  // rollout scan and no network. Only once this is null (stale/missing) do we
+  // reach the floor gate below, which is what now keeps the rollout scan (a
+  // multi-file disk scan, not free) off the 5s file tick.
+  if (src === 'codex') {
+    const snapshot = readCodexSnapshot();
+    if (snapshot) {
+      const unchanged = slot.data?.ok && slot.data.fetchedAt === snapshot.fetchedAt;
+      if (!unchanged) slot.data = snapshot;
+      return slot.data;
+    }
   }
   // The endpoint allows roughly one call a minute per account; a 429's Retry-After
   // backs the network leg off without touching the free local reads above.
@@ -856,12 +800,21 @@ async function pull(src, fetcher, force) {
     slot.data = claudeStaleFloor(slot, slot.data) ?? slot.data;
     return slot.data;
   }
-  // Off by default: the daemon refreshes after each agent goes idle. ?force=1 from
-  // a card's Refresh — or the interval a card was left on — re-reads regardless.
-  if (!force && slot.data && Date.now() - slot.at < TTL) return slot.data;
+  // The network floor: once every NETWORK_FLOOR_MS per source at most for an
+  // automated caller (force=false), whether the previous attempt succeeded or
+  // failed — a persistently failing source cannot retry sooner than the floor
+  // either. force=true is the manual Refresh route only; it bypasses this the
+  // same way it always bypassed the cache below.
+  if (!force && slot.data && Date.now() - slot.at < NETWORK_FLOOR_MS) return slot.data;
+  slot.at = Date.now(); // stamp before the attempt: a hang or failure still counts against the floor
+  // Past every gate above: this pull is doing the heavy work, so it asks the
+  // fetcher for its fullest answer (claude's OAuth call, codex's rollout scan
+  // + live wham API, ollama's scrape) regardless of the caller's own force —
+  // the gates above already decided whether to get here, not how hard to try
+  // once here.
   const fetched = src === 'claude'
-    ? await fetcher(true, slot.data, force || claudeAccountChanged)
-    : await fetcher(force);
+    ? await fetcher(true, slot.data, true)
+    : await fetcher(true);
   // codex's fetchedAt is the record's own (possibly stale) timestamp — keep it;
   // ollama/claude never set one, so they still default to "now".
   const data = { fetchedAt: new Date().toISOString(), ...fetched };
@@ -888,7 +841,6 @@ async function pull(src, fetcher, force) {
     const floor = claudeStaleFloor(slot, data);
     if (floor) {
       slot.data = floor;
-      slot.at = Date.now();
       return slot.data;
     }
   }
@@ -912,6 +864,11 @@ function normalizeSources(sources) {
   return listed.length ? new Set(listed) : new Set(SOURCES);
 }
 
+// The last document actually pushed over the WS bus, as a JSON string — cheap
+// to compare, and the only way an automated call (below) knows whether a 5s
+// file-tier tick actually changed anything worth pushing to every open tab.
+let lastEmitted = null;
+
 export async function getUsage({ force = false, sources } = {}) {
   const allow = normalizeSources(sources);
   // An excluded source must never reach pull(): pull refetches on its own once
@@ -931,7 +888,21 @@ export async function getUsage({ force = false, sources } = {}) {
   // would clear the timers it does not mention and never recreate them, and the
   // ollama slot is what carries historyPaused.
   const result = { ollama: ollama ? { ...ollama, historyPaused } : null, claude, codex };
-  usageBus?.emit('usage', result);
+  // Manual/forced calls (the Refresh button, force=1) always push — a user who
+  // pressed the button waiting on an unchanged reading is not a bug. Automated
+  // calls (every 5s/60s sampler tick, idle-debounce, reset timers) only push
+  // when the document actually changed, since 5s is far too often to spam every
+  // open tab with an identical frame.
+  if (force) {
+    lastEmitted = JSON.stringify(result);
+    usageBus?.emit('usage', result);
+  } else {
+    const serialized = JSON.stringify(result);
+    if (serialized !== lastEmitted) {
+      lastEmitted = serialized;
+      usageBus?.emit('usage', result);
+    }
+  }
   scheduleResetRefreshes(result);
   return result;
 }
@@ -953,89 +924,117 @@ function resetDelay(iso, capMs = 7.75 * 24 * 3.6e6) {
   return ms;
 }
 
-// One forced refresh just after each 5h/7d window resets, so a passive viewer
-// sees the % drop to 0. Rescheduled from every getUsage result — including a
-// filtered one, which is why getUsage always assembles a full document.
-// Rebuilding up to six timers per call is churn a 15s card cadence multiplies,
-// and not worth a previous-document diff to avoid.
+// A refresh just after each 5h/7d window resets, so a passive viewer sees the %
+// drop to 0. Rescheduled from every getUsage result — including a filtered
+// one, which is why getUsage always assembles a full document. Rebuilding up
+// to six timers per call is churn a 5s card cadence multiplies, and not worth
+// a previous-document diff to avoid. force=false: this is an automated
+// trigger, so it respects the same per-source network floor as everything
+// else in this file — it is not the user pressing Refresh.
 function scheduleResetRefreshes(result) {
   resetTimers.forEach(clearTimeout);
   resetTimers = [];
   for (const src of ['ollama', 'claude', 'codex']) {
     for (const win of ['session', 'weekly']) {
       const delay = resetDelay(result[src]?.[win]?.resetsAt);
-      if (delay != null) resetTimers.push(setTimeout(() => getUsage({ force: true }).catch(() => {}), delay + 2000));
+      if (delay != null) resetTimers.push(setTimeout(() => getUsage({}).catch(() => {}), delay + 2000));
     }
   }
 }
 
 // Wire the triggers: store the bus for 'usage' emits, and refresh 30s after an
 // agent goes idle (turn end likely spent tokens; the debounce coalesces a burst
-// of agents finishing into one pull).
+// of agents finishing into one pull). force=false: an automated trigger, same
+// network floor as the sampler ticks — not the user's own Refresh press.
 export function initUsageAutoRefresh(bus) {
   usageBus = bus;
   bus.on('status', ({ status }) => {
     if (status !== 'idle') return;
     clearTimeout(idleTimer);
-    idleTimer = setTimeout(() => getUsage({ force: true }).catch(() => {}), DEBOUNCE_MS);
+    idleTimer = setTimeout(() => getUsage({}).catch(() => {}), DEBOUNCE_MS);
   });
   startHistorySampler();
 }
 
 // ---- Usage history clock sampler -----------------------------------------------
-// One 60s tick drives all three lanes, filling ollama-usage.jsonl /
-// codex-usage.jsonl / usage-snapshots.jsonl unattended (the weekly gauges need
-// ~2 weeks of samples, longer than anyone keeps the Usage page open). The tick is
-// affordable because each lane prefers a free local source: claude reads
-// usage-snapshots.jsonl + cost-state (the statusline writes both once a turn),
-// codex reads codex-usage.jsonl, and ollama's Bearer API is the only lane whose
-// sole source costs a request. So the two API legs run ONLY when their local
-// files have gone stale (>120s, i.e. the statusline has stopped feeding them) —
-// that keeps the daemon off api.anthropic.com's ~1/min per-account budget, which
-// the statusline already spends. `USAGE_POLL_MS` overrides the cadence.
-const USAGE_POLL_MS = Number(process.env.USAGE_POLL_MS) > 0
-  ? Number(process.env.USAGE_POLL_MS)
-  : 60_000;
-const API_FRESH_MS = SNAPSHOT_MAX_AGE_MS; // 120s: one missed statusline tick
+// Per-source timers, one per provider cadence, so refresh timing lives in the
+// daemon and is not tied to a browser tab being open. Every tick still feeds
+// ollama-usage.jsonl / codex-usage.jsonl / usage-snapshots.jsonl unattended (the
+// weekly gauges need ~2 weeks of samples, longer than anyone keeps the Usage page
+// open), and every tick still calls getUsage — which now only emits on usageBus
+// when the document actually changed (see getUsage's lastEmitted gate).
+//
+// Claude and Codex tick every 5s (FILE_POLL_MS): cheap, file-only, force=false.
+// pull()'s own free tiers (readClaudeLocal / readCodexSnapshot) answer straight
+// from usage-snapshots.jsonl + cost-state / codex-usage.jsonl on every one of
+// these ticks with no rollout scan and no network — that is the whole point of
+// a 5s cadence. Only once BOTH tiers have gone stale (>120s, i.e. nobody's fed
+// them — same API_FRESH_MS/SNAPSHOT_MAX_AGE_MS gate as before, no new
+// threshold) does pull() reach its network floor gate, which lets an actual
+// OAuth/wham/rollout attempt through at most once per NETWORK_FLOOR_MS (60s)
+// regardless of how often this 5s tick asks — this is the fix for the
+// hammering review flagged on Codex (and, on reflection, latent for Claude
+// too): force=false here means "respect the floor," not "don't bother."
+// Ollama's sole source is the Bearer scrape (no file tier at all), so it keeps
+// its own slower 60s cadence and existing backoff/pause handling below,
+// already matching the network floor by construction.
+const FILE_POLL_MS = 5_000;
+const OLLAMA_POLL_MS = 60_000;
 const OLLAMA_BACKOFF_CAP_MS = 15 * 60_000;
-let historyTimer = null;
+let claudeTimer = null;
+let codexTimer = null;
+let ollamaTimer = null;
 let historyPaused = null; // {at, error} while the ollama lane is stopped, else null
 let historyBackoffMs = 0; // doubles on a 429/5xx, cleared by the next success
 
-// The tick itself never re-arms early or backs off: a pause or backoff belongs to
-// the ollama lane only (see runHistorySample) and must not stall Claude/Codex,
-// whose local-file reads are unattended-collection's whole reason to exist.
-function scheduleHistorySample() {
-  if (historyTimer) return; // already ticking; never reset the countdown
-  historyTimer = setTimeout(runHistorySample, USAGE_POLL_MS);
-  historyTimer.unref();
+function scheduleClaudeSample() {
+  if (claudeTimer) return; // already ticking; never reset the countdown
+  claudeTimer = setTimeout(async () => { claudeTimer = null; await sampleClaude(); scheduleClaudeSample(); }, FILE_POLL_MS);
+  claudeTimer.unref();
+}
+
+function scheduleCodexSample() {
+  if (codexTimer) return;
+  codexTimer = setTimeout(async () => { codexTimer = null; await sampleCodex(); scheduleCodexSample(); }, FILE_POLL_MS);
+  codexTimer.unref();
 }
 
 // Claude leg: routed through getUsage, not a bare fetchClaude, because a reading
 // nobody can see is not a retry — the direct call updated neither the cache nor
 // the bus, so a rate-limited banner sat on the card until someone pressed
 // Refresh. This IS the retry loop that clears it: pull() answers from disk when
-// the statusline is feeding it (no request, but the card still refreshes), holds
-// the network leg back while the 429's own Retry-After has not passed, and pushes
-// the recovered reading to every tab the moment one lands. force, because the
-// tick and the TTL are both 60s and a coin-flip skip would stall the retry — it
-// costs nothing now that a fresh local reading outranks the network.
+// the statusline is feeding it (no request, but the card still refreshes), and
+// once local goes stale, pull()'s own network floor holds the network leg to
+// at most once every 60s (still recovering it — nothing here backs off harder
+// than that floor, so a fixed Retry-After or a floor-wait both just wait for
+// the next open tick). force=false: this is the automated trigger the floor
+// exists for, not the user's own Refresh press.
 async function sampleClaude() {
-  try { await getUsage({ sources: ['claude'], force: true }); } catch { /* transient */ }
+  try { await getUsage({ sources: ['claude'] }); } catch { /* transient */ }
 }
 
-// Codex leg: codex-usage.jsonl is fed per turn end by the harness; the rollout
-// scan is the lazy fallback and only runs when that file has gone stale.
-function sampleCodex() {
-  let stale;
-  try { stale = Date.now() - statSync(CODEX_HISTORY).mtimeMs > API_FRESH_MS; } catch { stale = true; }
-  if (!stale) return;
-  const codex = fetchCodexRollout();
-  if (codex.ok) appendCodexHistory(codex);
+// Codex leg: mirrors sampleClaude exactly now — codex-usage.jsonl is fed per
+// turn end by the harness, pull()'s own free tier (readCodexSnapshot) answers
+// every 5s tick with no rollout scan and no network while it's fresh, and only
+// once it goes stale does pull()'s network floor let the rollout scan + live
+// wham API leg through, at most once every 60s. No staleness check lives here
+// anymore — pull() is the one place that decides, so the file-tier tick above
+// and the manual Refresh route can't disagree about what "stale" means.
+export async function sampleCodex() {
+  try { await getUsage({ sources: ['codex'] }); } catch { /* transient */ }
+}
+
+// The tick itself never re-arms early or backs off: a pause or backoff belongs to
+// the ollama lane only (see runHistorySample) and must not stall Claude/Codex,
+// whose local-file reads are unattended-collection's whole reason to exist.
+function scheduleOllamaSample() {
+  if (ollamaTimer) return; // already ticking; never reset the countdown
+  ollamaTimer = setTimeout(runHistorySample, OLLAMA_POLL_MS);
+  ollamaTimer.unref();
 }
 
 export async function runHistorySample(fetchOllamaFn = fetchOllama) {
-  historyTimer = null;
+  ollamaTimer = null;
   // Ollama lane only — a pause or backoff here must never stall the local-read lanes.
   if (!historyPaused && !ollamaGate.blocked()) {
     let ollama;
@@ -1047,25 +1046,23 @@ export async function runHistorySample(fetchOllamaFn = fetchOllama) {
       ollamaGate.clear();
     } else if (ollama.error === 'no-config') {
       // Never configured — not a failure worth backing off for. Check back rarely
-      // instead of doubling historyBackoffMs, which would otherwise drag Claude
-      // and Codex sampling down to the 15m cap on an install that skipped Ollama.
+      // instead of doubling historyBackoffMs, which would otherwise drag the
+      // lane down to the 15m cap on an install that skipped Ollama.
       ollamaGate.arm(OLLAMA_BACKOFF_CAP_MS);
     } else if (ollama.needsAuth) {
       // An expired login pauses the lane; a successful manual refresh or Connect
       // action re-arms it (pull() clears historyPaused on the next good read).
       historyPaused = { at: new Date().toISOString(), error: ollama.error || 'unknown error' };
     } else {
-      historyBackoffMs = Math.min(OLLAMA_BACKOFF_CAP_MS, historyBackoffMs * 2 || USAGE_POLL_MS);
+      historyBackoffMs = Math.min(OLLAMA_BACKOFF_CAP_MS, historyBackoffMs * 2 || OLLAMA_POLL_MS);
       ollamaGate.arm(historyBackoffMs);
     }
   }
-
-  // Neither of these can pause or back off the tick: they are local reads.
-  await sampleClaude();
-  sampleCodex();
-  scheduleHistorySample();
+  scheduleOllamaSample();
 }
 
 function startHistorySampler() {
-  scheduleHistorySample();
+  scheduleClaudeSample();
+  scheduleCodexSample();
+  scheduleOllamaSample();
 }
