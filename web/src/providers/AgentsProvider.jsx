@@ -214,15 +214,6 @@ export function AgentsProvider({ children }) {
     }
   }, []);
 
-  // One provider's live read, leaving the others to their cache slots — the
-  // Usage page's per-card refresh interval. The daemon enforces the allowlist
-  // (see getUsage) so a fast Claude cadence never spends the other sources' quota.
-  // Returns a promise that settles when the read lands (and never rejects): the
-  // card's in-flight spinner awaits it.
-  const refreshUsageSource = useCallback((key) => {
-    return fetch(`/api/usage?source=${encodeURIComponent(key)}&force=1`).then((r) => r.json()).then((d) => setUsage((cur) => mergeUsageDoc(cur, d))).catch(() => {});
-  }, []);
-
   // On-demand: fetch once the socket is up (app opened / reconnected). The
   // backend pushes 'usage' updates on its own auto-refresh from here on.
   useEffect(() => { if (connected) refreshUsage(false); }, [connected, refreshUsage]);
@@ -268,14 +259,14 @@ export function AgentsProvider({ children }) {
     agents, active, setActive, connected, recent,
     tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
+    sendMsg, reorderAgents, refreshUsage, connectOllamaUsage,
     setWindowAnchorEnabled, pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   }), [
     agents, active, connected, recent,
     tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
-    sendMsg, reorderAgents, refreshUsage, refreshUsageSource, connectOllamaUsage,
+    sendMsg, reorderAgents, refreshUsage, connectOllamaUsage,
     setWindowAnchorEnabled, pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   ]);

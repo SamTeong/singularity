@@ -1,5 +1,5 @@
 // Unit tests for usage normalization: the claude OAuth-response mapper, the
-// Ollama settings-page scraper, and the Codex rollout/API readers. usage.mjs pulls in
+// Ollama settings-page scraper, and the Codex snapshot/API readers. usage.mjs pulls in
 // app-dir.mjs (STATE_DIR/USAGE_SKILL_STATE), which requires SINGULARITY_HOME and
 // reads USAGE_REPORT_STATE — point both at a scratch temp dir before the dynamic
 // import.
@@ -14,19 +14,8 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-usage-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
 process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
 
-// Codex fixture: one rollout jsonl under the newest date dir, a couple of
-// non-matching lines plus two token_count lines — the backwards scan must
-// pick the LAST one (used_percent 87, not the earlier 40).
-const codexDay = join(scratch, 'codex-home', 'sessions', '2026', '07', '20');
-mkdirSync(codexDay, { recursive: true });
-const rolloutLines = [
-  '{"timestamp":"2026-07-20T00:00:00.000Z","type":"session_meta","payload":{}}',
-  '{"timestamp":"2026-07-20T00:05:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":40.0,"window_minutes":10080,"resets_at":1786000000},"secondary":null,"plan_type":"plus"}}}',
-  '{"timestamp":"2026-07-20T00:10:00.000Z","type":"other","payload":{}}',
-  '{"timestamp":"2026-07-20T00:15:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":87.0,"window_minutes":10080,"resets_at":1786172475},"secondary":null,"plan_type":"plus"}}}',
-];
-writeFileSync(join(codexDay, 'rollout-2026-07-20T00-00-00-abc123.jsonl'), `${rolloutLines.join('\n')}\n`);
 process.env.CODEX_HOME = join(scratch, 'codex-home');
+mkdirSync(process.env.CODEX_HOME, { recursive: true });
 const codexAuth = join(process.env.CODEX_HOME, 'auth.json');
 const writeCodexAuth = (tokens) => writeFileSync(codexAuth, JSON.stringify({ tokens }));
 
@@ -39,7 +28,7 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readCodexSnapshot, readCostStateLimits, refreshClaudeAuth, refreshOauthGrant, getUsage } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readCodexSnapshot, readCostStateLimits, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
 
 const OLLAMA_HTML = `
   <span class="capitalize">pro</span>
@@ -214,73 +203,45 @@ test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', (
   rmSync(CODEX_HISTORY_FILE, { force: true });
 });
 
-// fetchCodex scans a rollout jsonl backwards for the last token_count line's
-// rate_limits, mapping the 10080-minute (7d) window to `weekly` only. This is the
-// primary lane: no request is made without ?force=1.
-test('fetchCodex: backwards-scans to the last token_count line', async () => {
-  const u = await fetchCodex();
-  assert.equal(u.ok, true);
-  assert.equal(u.source, 'codex');
-  assert.equal(u.plan, 'plus');
-  assert.equal(u.session, null);
-  assert.equal(u.weekly.pctUsed, 87);
-  assert.equal(u.weekly.resetsAt, new Date(1786172475 * 1000).toISOString());
-});
+// Codex's only local tier now is the Stop hook's codex-usage.jsonl tail (the
+// rollout-log scan was removed in favor of the hook bumping this file every
+// turn, changed or not). A fresh line answers with no network at all; no
+// file (or a stale one) reports "no Codex sessions found" rather than
+// scanning anything else on disk.
+const codexFreshLine = (pct) => writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: null, weekly: { utilization: pct, resets_at: '2026-07-20T00:00:00Z' }, plan_type: 'plus' })}\n`);
 
-test('fetchCodex: the passive read never touches the network', async () => {
+test('fetchCodex: a fresh codex-usage.jsonl line answers with no network at all', async () => {
+  codexFreshLine(87);
   const originalFetch = globalThis.fetch;
   let calls = 0;
   globalThis.fetch = async () => { calls += 1; throw new Error('offline'); };
   try {
     const u = await fetchCodex();
     assert.equal(u.ok, true);
+    assert.equal(u.source, 'codex');
+    assert.equal(u.plan, 'plus');
+    assert.equal(u.session, null);
     assert.equal(u.weekly.pctUsed, 87);
     assert.equal(calls, 0);
   } finally {
     globalThis.fetch = originalFetch;
+    rmSync(CODEX_HISTORY_FILE, { force: true });
   }
 });
 
-// A freshly-started Codex session's rollout has session_meta but no
-// token_count yet (no turn completed) — it's now the newest file, but
-// fetchCodex must fall back to the older rollout's reading instead of
-// reporting "no Codex sessions found".
-test('fetchCodex: newest rollout has no rate_limits yet → falls back to older rollout', async () => {
-  const freshDay = join(scratch, 'codex-home', 'sessions', '2026', '07', '21');
-  mkdirSync(freshDay, { recursive: true });
-  writeFileSync(
-    join(freshDay, 'rollout-2026-07-21T00-00-00-fresh01.jsonl'),
-    '{"timestamp":"2026-07-21T00:00:00.000Z","type":"session_meta","payload":{}}\n',
-  );
-
-  const u = await fetchCodex();
-  assert.equal(u.ok, true);
-  assert.equal(u.weekly.pctUsed, 87);
-});
-
-// Two parallel sessions: the newest-mtime rollout's last rate_limits record is
-// OLDER (its later appends were other events) than a quieter session's record.
-// Selection must go by the record's own timestamp, not file mtime — mtime-first
-// picking served a stale 87% while a 99% reading sat in another file.
-test('fetchCodex: freshest rate_limits record wins over newest-mtime file', async () => {
-  const raceDay = join(scratch, 'codex-home', 'sessions', '2026', '07', '22');
-  mkdirSync(raceDay, { recursive: true });
-  const mk = (ts, pct) => JSON.stringify({ timestamp: ts, type: 'event_msg', payload: { type: 'token_count', rate_limits: { limit_id: 'codex', primary: { used_percent: pct, window_minutes: 10080, resets_at: 1786172475 }, secondary: null, plan_type: 'plus' } } });
-  // Quiet file first, busy file last — write order guarantees busy01 has the
-  // newest mtime while carrying the older rate_limits record.
-  writeFileSync(join(raceDay, 'rollout-2026-07-22T00-00-00-quiet2.jsonl'), `${[
-    '{"timestamp":"2026-07-22T00:00:00.000Z","type":"session_meta","payload":{}}',
-    mk('2026-07-22T12:04:00.000Z', 99),
-  ].join('\n')}\n`);
-  writeFileSync(join(raceDay, 'rollout-2026-07-22T00-00-00-busy01.jsonl'), `${[
-    '{"timestamp":"2026-07-22T00:00:00.000Z","type":"session_meta","payload":{}}',
-    mk('2026-07-22T12:00:00.000Z', 87),
-    '{"timestamp":"2026-07-22T12:05:00.000Z","type":"other","payload":{}}',
-  ].join('\n')}\n`);
-
-  const u = await fetchCodex();
-  assert.equal(u.ok, true);
-  assert.equal(u.weekly.pctUsed, 99);
+test('fetchCodex: no codex-usage.jsonl at all reports "no Codex sessions found", still no network', async () => {
+  rmSync(CODEX_HISTORY_FILE, { force: true });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('offline'); };
+  try {
+    const u = await fetchCodex();
+    assert.equal(u.ok, false);
+    assert.equal(u.error, 'no Codex sessions found');
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 // The live wham/usage API is on-demand only: ?force=1 (the daemon passes force
@@ -384,13 +345,13 @@ test('fetchCodex(true): classifies a weekly-only primary live window', async () 
   }
 });
 
-test('fetchCodex(true): failed live request falls back to rollout data', async () => {
+test('fetchCodex(true): a failed live request reports the live error, with no rollout to fall back to', async () => {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('offline'); };
   try {
     const u = await fetchCodex(true);
-    assert.equal(u.ok, true);
-    assert.equal(u.weekly.pctUsed, 99);
+    assert.equal(u.ok, false);
+    assert.equal(u.error, 'request failed: offline');
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -454,16 +415,17 @@ test('getUsage: filtered pull on a cold cache fetches only the listed source', a
 });
 
 test('getUsage: the allowlist outranks force, and an excluded source is served by reference', async () => {
+  codexFreshLine(55); // codex answers from its own free tier — no network needed here
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('offline'); };
   try {
-    // Warm every slot without reaching a real service: codex falls back to the
-    // rollout fixture, ollama's API call fails fast.
+    // Warm every slot without reaching a real service: codex answers from its
+    // own fresh local file, ollama's API call fails fast.
     warm = await getUsage({ force: true });
   } finally {
     globalThis.fetch = originalFetch;
   }
-  assert.equal(warm.codex.ok, true); // the fixture rollout, not a blank
+  assert.equal(warm.codex.ok, true); // the fresh local file, not a blank
 
   const urls = [];
   globalThis.fetch = async (url) => { urls.push(String(url)); throw new Error('offline'); };
@@ -707,13 +669,14 @@ test('readCostStateLimits: newest usable file wins, stale and rate_limits-less o
 });
 
 // ---- Codex: the Stop-hook snapshot tail (readCodexSnapshot) -------------------
-// The harness Stop hook appends codex-usage.jsonl once a turn end; a fresh tail
-// line resolves the lane with no rollout scan and no request. A stale, unreadable
-// or absent record falls through to the rollout scan — mirrored on
-// readClaudeSnapshot above.
+// The harness Stop hook appends codex-usage.jsonl once a turn end (and now bumps
+// it every turn, changed or not, so a quiet session still keeps this fresh); a
+// fresh tail line resolves the lane with no request. A stale, unreadable or
+// absent record reports "no Codex sessions found" — there is no rollout-log
+// scan any more to fall back to — mirrored on readClaudeSnapshot above.
 const stampLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
 
-test('readCodexSnapshot: a fresh Stop-hook record short-circuits the rollout scan', async () => {
+test('readCodexSnapshot: a fresh Stop-hook record answers with no network', async () => {
   mkdirSync(process.env.USAGE_REPORT_STATE, { recursive: true });
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 7, resets_at: '2026-09-22T18:00:00Z' }, weekly: { utilization: 55.5, resets_at: '2026-09-25T00:00:00Z' }, plan_type: 'business' })}\n`);
 
@@ -724,29 +687,28 @@ test('readCodexSnapshot: a fresh Stop-hook record short-circuits the rollout sca
   assert.deepEqual(snap.session, { pctUsed: 7, resetsAt: '2026-09-22T18:00:00Z', models: [] });
   assert.equal(snap.weekly.pctUsed, 55.5);
 
-  // fetchCodex picks it up: the rollout fixture's 87 never surfaces.
+  // fetchCodex picks it up straight from the snapshot.
   const u = await fetchCodex();
   assert.equal(u.ok, true);
   assert.equal(u.session.pctUsed, 7);
   assert.equal(u.weekly.pctUsed, 55.5);
 });
 
-test('readCodexSnapshot: stale, malformed or missing lines fall back to the rollout scan', async () => {
-  // The rollout fallback lands on the race fixture above (freshest record: 99%).
+test('readCodexSnapshot: stale, malformed or missing lines all report "no Codex sessions found" (no rollout to fall back to)', async () => {
   // Stale fetched_at — the same 120s gate the sampler uses.
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date(Date.now() - 10 * 60_000)), session: { utilization: 7, resets_at: null }, weekly: null, plan_type: 'business' })}\n`);
   assert.equal(readCodexSnapshot(), null);
-  assert.equal((await fetchCodex()).weekly.pctUsed, 99);
+  assert.equal((await fetchCodex()).error, 'no Codex sessions found');
 
   // A last line that does not parse is dropped, not served.
   writeFileSync(CODEX_HISTORY_FILE, 'not json\n');
   assert.equal(readCodexSnapshot(), null);
-  assert.equal((await fetchCodex()).weekly.pctUsed, 99);
+  assert.equal((await fetchCodex()).error, 'no Codex sessions found');
 
   // No file at all — the hook has never run on this install.
   rmSync(CODEX_HISTORY_FILE, { force: true });
   assert.equal(readCodexSnapshot(), null);
-  assert.equal((await fetchCodex()).weekly.pctUsed, 99);
+  assert.equal((await fetchCodex()).error, 'no Codex sessions found');
 });
 
 // ---- Claude: a fresh API result feeds the snapshot log back --------------------
@@ -875,5 +837,138 @@ test('getUsage: the Claude rate-limited banner clears once Retry-After has passe
   } finally {
     Date.now = realNow;
     globalThis.fetch = originalFetch;
+  }
+});
+
+// ---- sampleCodex / the network floor (v2: split file vs network cadence) -----
+// pull()'s own free tier (readCodexSnapshot) answers every call — any cadence,
+// force or not — straight from codex-usage.jsonl with no rollout scan and no
+// network. sampleCodex no longer computes its own staleness (that redundant
+// check lived in pass 1); once the snapshot is null, pull()'s network floor
+// is the one and only gate deciding whether the rollout scan + live wham API
+// leg actually runs — at most once per NETWORK_FLOOR_MS (60s) for an automated
+// (force=false) caller, success or failure, never for the manual force=1 route.
+test('sampleCodex: a fresh codex-usage.jsonl line never reaches the live wham API', async () => {
+  writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 5, resets_at: null }, weekly: { utilization: 20, resets_at: null }, plan_type: 'plus' })}\n`);
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('offline'); };
+  try {
+    await sampleCodex();
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(calls, 0);
+});
+
+// Fresh isolated import per floor test: the floor is shared, in-memory,
+// per-module-instance state, so a test that wants to observe it armed from a
+// clean slate cannot share the module top-of-file already exercised network.
+const staleCodexLine = (staleAt) => writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(staleAt), session: { utilization: 5, resets_at: null }, weekly: { utilization: 20, resets_at: null }, plan_type: 'plus' })}\n`);
+
+test('sampleCodex: a stale codex-usage.jsonl falls back to the live wham API, then the floor blocks an immediate repeat', async () => {
+  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-floor=${Date.now()}`);
+  const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));
+  staleCodexLine(staleAt);
+  writeCodexAuth({ access_token: '[REDACTED:credential-assignment]', account_id: 'codex-floor-account' });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return {
+      status: 200,
+      json: async () => ({
+        plan_type: 'plus',
+        rate_limit: { primary_window: { used_percent: 33, limit_window_seconds: 18_000, reset_at: Math.floor(Date.now() / 1000) + 18_000 } },
+      }),
+    };
+  };
+  try {
+    await isolatedSampleCodex();
+    assert.equal(calls, 1);
+    // The live reading lands in the cache, not just the history file — the
+    // next unfiltered pull sees it without a second request.
+    const doc = await isolatedGetUsage({ sources: ['codex'] });
+    assert.equal(doc.codex.session.pctUsed, 33);
+
+    // appendCodexHistory just wrote a fresh line from that live reading — put
+    // the file back to stale content (the Stop hook hasn't run again), so this
+    // second call is blocked by the FLOOR, not by the free tier finding a
+    // still-fresh snapshot.
+    staleCodexLine(staleAt);
+    await isolatedSampleCodex();
+    assert.equal(calls, 1); // no second request inside the same 60s window
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('sampleCodex: the network floor arms even on a failed attempt — a persistent failure cannot retry sooner than 60s', async () => {
+  const { sampleCodex: isolatedSampleCodex } = await import(`./usage.mjs?codex-floor-fail=${Date.now()}`);
+  const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));
+  staleCodexLine(staleAt);
+  writeCodexAuth({ access_token: '[REDACTED:credential-assignment]', account_id: 'codex-floor-fail-account' });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('offline'); };
+  try {
+    await isolatedSampleCodex();
+    // fetchExternal retries a transient failure internally before giving up —
+    // the point here is that this ONE sampleCodex() call is the only round the
+    // floor allowed, whatever fetchExternal's own retry count is.
+    const afterFirstAttempt = calls;
+    assert.ok(afterFirstAttempt > 0);
+    staleCodexLine(staleAt); // still stale — nothing new to serve for free
+    await isolatedSampleCodex();
+    assert.equal(calls, afterFirstAttempt); // the floor holds regardless of the outcome
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('getUsage: manual force=1 bypasses the network floor an automated call just armed', async () => {
+  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-floor-manual=${Date.now()}`);
+  const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));
+  staleCodexLine(staleAt);
+  writeCodexAuth({ access_token: '[REDACTED:credential-assignment]', account_id: 'codex-floor-manual-account' });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { status: 200, json: async () => ({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 41, limit_window_seconds: 18_000, reset_at: Math.floor(Date.now() / 1000) + 18_000 } } }) };
+  };
+  try {
+    await isolatedSampleCodex(); // automated: arms the floor
+    assert.equal(calls, 1);
+    staleCodexLine(staleAt); // still stale — the floor alone would hold this back
+    const manual = await isolatedGetUsage({ sources: ['codex'], force: true }); // the Refresh button's own route
+    assert.equal(calls, 2); // bypassed the floor
+    assert.equal(manual.codex.session.pctUsed, 41);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+// ---- getUsage: emit-on-change (v2) ---------------------------------------------
+// A 5s automated tick that finds nothing new must not spam every open tab with
+// an identical WS frame; a manual/forced call (the Refresh button) always
+// pushes, since a user pressing it is not the "nothing changed" case.
+test('getUsage: an automated call does not re-emit an unchanged document; a manual one always does', async () => {
+  const { getUsage: isolatedGetUsage, initUsageAutoRefresh: isolatedInit } = await import(`./usage.mjs?emit-gate=${Date.now()}`);
+  let emits = 0;
+  isolatedInit({ on() {}, emit(t) { if (t === 'usage') emits += 1; } });
+
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'emit-gate.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 12, resets_at: 1789533000 }, seven_day: { used_percentage: 4, resets_at: 1790096400 } } }));
+  try {
+    await isolatedGetUsage({ sources: ['claude'] }); // first automated read — a new document
+    assert.equal(emits, 1);
+    await isolatedGetUsage({ sources: ['claude'] }); // same file, same reading
+    assert.equal(emits, 1); // no re-emit
+    await isolatedGetUsage({ sources: ['claude'], force: true }); // manual/forced
+    assert.equal(emits, 2); // always emits, unchanged or not
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
