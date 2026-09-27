@@ -58,7 +58,9 @@ test('automated review filter is opt-in and preserves transcript and source quer
   await page.getByRole('button', { name: /Retry backoff cap/ }).click();
   await checkbox.click();
   await expect(checkbox).toBeChecked();
-  await expect(page).toHaveURL(/hideReviews=1/);
+  await expect(page).not.toHaveURL(/hideReviews/);
+  await expect(page).toHaveURL(/session=/);
+  expect(await page.evaluate(() => localStorage.getItem('sing-hide-reviews'))).toBe('1');
   const params = await page.evaluate(() => Object.fromEntries(new URLSearchParams(location.search)));
   expect(params.tool).toBe('claude');
   expect(params.project).toBeTruthy();
@@ -68,9 +70,10 @@ test('automated review filter is opt-in and preserves transcript and source quer
   await expect(visible(page.getByText('1 matches', { exact: true })).first()).toBeVisible();
   await checkbox.click();
   await expect(checkbox).not.toBeChecked();
-  await expect(page).not.toHaveURL(/hideReviews=1/);
+  await expect(page).not.toHaveURL(/hideReviews/);
   await expect(page).toHaveURL(/tool=claude/);
   await expect(page).toHaveURL(/session=/);
+  expect(await page.evaluate(() => localStorage.getItem('sing-hide-reviews'))).toBe('0');
 });
 
 test('clicking a search result opens it without clearing the search query', async ({ page }) => {

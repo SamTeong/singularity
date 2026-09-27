@@ -114,8 +114,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const [picking, setPicking] = useState(false);
   const [toolParam, setTool] = useQueryState('tool', 'all'); // 'all' | 'claude' | 'codex' — filter the merged list
   const tool = TOOLS.has(toolParam) ? toolParam : 'all';
-  const [hideReviewsParam, setHideReviews] = useQueryState('hideReviews');
-  const hideReviews = hideReviewsParam === '1';
+  // Browser-persisted preference, not a URL param — it's a per-user default, not view state to share.
+  const [hideReviews, setHideReviews] = useState(() => { try { return localStorage.getItem('sing-hide-reviews') === '1'; } catch { return false; } });
   // ?project=&session=(&source=) is the transcript to open — the replacement for
   // the openTx prop AppShell used to drill in. `source` is load-bearing: the
   // daemon only takes its Codex branch when it is 'codex'.
@@ -323,7 +323,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
                   <ToggleButton value="codex" sx={{ px: 1, fontSize: 11, textTransform: 'none' }}>Codex</ToggleButton>
                 </ToggleButtonGroup>
                 <FormControlLabel
-                  control={<Checkbox size="small" checked={hideReviews} onChange={(e) => setHideReviews(e.target.checked ? '1' : null)} />}
+                  control={<Checkbox size="small" checked={hideReviews} onChange={(e) => { const v = e.target.checked; setHideReviews(v); try { localStorage.setItem('sing-hide-reviews', v ? '1' : '0'); } catch {} }} />}
                   label="Hide automated reviews"
                   sx={{ m: 0, '& .MuiFormControlLabel-label': { fontSize: 12 } }}
                 />
