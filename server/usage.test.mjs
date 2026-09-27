@@ -97,6 +97,44 @@ test('connectOllamaUsage: resumes history collection after authentication recove
   assert.equal(calls, 3);
 });
 
+test('runHistorySample: a good tick caches the reading without a second scrape', async () => {
+  const { runHistorySample: isolatedSample, getUsage: isolatedGetUsage } = await import(`./usage.mjs?history-good=${Date.now()}`);
+  try {
+    await isolatedSample(async () => parseOllamaHtml(OLLAMA_HTML));
+    // Within the network floor, getUsage must answer from the cache the tick
+    // just wrote — never call this fetcher again.
+    let scraped = false;
+    const { ollama } = await isolatedGetUsage({ sources: ['ollama'], fetchers: { ollama: async () => { scraped = true; throw new Error('should not scrape'); } } });
+    assert.equal(scraped, false);
+    assert.equal(ollama.ok, true);
+    assert.equal(ollama.plan, 'pro');
+  } finally {
+    rmSync(join(process.env.SINGULARITY_HOME, 'state', 'ollama.json'), { force: true });
+    rmSync(join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl'), { force: true });
+  }
+  // Not asserted: the WS 'usage' emit via initUsageAutoRefresh — it unconditionally
+  // calls startHistorySampler(), arming real un-cancellable timers, so wiring a
+  // bus here for one assertion is not cheap. Skipped per the task's own escape hatch.
+});
+
+test('runHistorySample: a genuine failure still arms the gate (is not skipped as a floor hit)', async () => {
+  const { runHistorySample: isolatedSample } = await import(`./usage.mjs?history-fail=${Date.now()}`);
+  const realNow = Date.now;
+  try {
+    await isolatedSample(async () => parseOllamaHtml(OLLAMA_HTML)); // tick 1: good reading, clears backoff
+    Date.now = () => realNow() + 61_000; // past the 60s network floor: tick 2 gets a real attempt
+    await isolatedSample(async () => ({ ok: false, source: 'ollama', error: 'boom' })); // tick 2: genuine failure
+    let called = false;
+    await isolatedSample(async () => { called = true; return { ok: false, source: 'ollama', error: 'boom' }; }); // tick 3: immediate retry
+    // ollamaGate armed by tick 2's failure blocks tick 3 before it ever reaches the fetcher.
+    assert.equal(called, false);
+  } finally {
+    Date.now = realNow;
+    rmSync(join(process.env.SINGULARITY_HOME, 'state', 'ollama.json'), { force: true });
+    rmSync(join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl'), { force: true });
+  }
+});
+
 test('scrapeOllamaOnce: launch failure is unavailable without path leakage', async () => {
   const result = await scrapeOllamaOnce({ chromium: { launchPersistentContext: async () => { throw new Error('secret profile path'); } } }, true);
   assert.deepEqual(result, { ok: false, source: 'ollama', error: 'unavailable' });

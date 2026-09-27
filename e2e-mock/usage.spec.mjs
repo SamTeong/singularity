@@ -5,11 +5,11 @@ test('provider meter cards render from populated mock usage', async ({ page }) =
   await page.goto('/');
   await goto(page, 'Usage');
 
-  // The meter labels are unique to the full-size ProviderCard — the sidebar
-  // The rail's UsagePanel renders the same provider with '5h'/'7d' labels instead, which is
-  // why the provider name alone is ambiguous here.
-  await expect(page.getByText('Session (5h)').first()).toBeVisible();
-  await expect(page.getByText('Weekly (7d)').first()).toBeVisible();
+  // The meter titles ("5h: 42% · <reset stamp>") are unique to the full-size
+  // ProviderCard — the rail's UsagePanel renders the same provider with bare
+  // '5h'/'7d' labels, which the anchored regexes never match.
+  await expect(page.getByText(/^5h: \d/).first()).toBeVisible();
+  await expect(page.getByText(/^7d: \d/).first()).toBeVisible();
   await expect(page.getByText('Claude', { exact: true }).first()).toBeVisible();
 });
 
@@ -18,7 +18,7 @@ test('provider usage pages are linked out, never followed', async ({ page }) => 
   await goto(page, 'Usage');
 
   // Wait for the provider cards to render before counting the links.
-  await expect(page.getByText('Session (5h)').first()).toBeVisible();
+  await expect(page.getByText(/^5h: \d/).first()).toBeVisible();
 
   // One jump-out per provider card, each to that provider's own usage page.
   const expected = [
@@ -130,8 +130,8 @@ test('Ollama retains stale usage with an actionable reconnect', async ({ page })
 
   const ollama = page.getByText('Ollama', { exact: true }).first();
   await expect(ollama).toBeVisible();
-  await expect(page.getByText('deepseek-v4-flash:cloud: 34 req')).toBeVisible();
-  await expect(page.getByText('deepseek-v4-flash:cloud: 210 req')).toBeVisible();
+  // Request-count model breakdowns no longer render on the card (report only).
+  await expect(page.getByText(/: \d+ req$/)).toHaveCount(0);
   await expect(page.getByText(/Last successful usage from/)).toBeVisible();
   await expect(page.getByText(/Ollama sign-in expired. Connect/)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();

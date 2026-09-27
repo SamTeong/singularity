@@ -869,7 +869,7 @@ function normalizeSources(sources) {
 // file-tier tick actually changed anything worth pushing to every open tab.
 let lastEmitted = null;
 
-export async function getUsage({ force = false, sources } = {}) {
+export async function getUsage({ force = false, sources, fetchers } = {}) {
   const allow = normalizeSources(sources);
   // An excluded source must never reach pull(): pull refetches on its own once
   // the slot is past TTL, so the allowlist is enforced by not calling it at all
@@ -877,7 +877,9 @@ export async function getUsage({ force = false, sources } = {}) {
   // successful fetch, so a filtered pull against a cold cache returns the key
   // as null — the card renders "Loading…", and the client merge keeps a null
   // from overwriting a card that already has data.
-  const pick = (src, fetcher) => (allow.has(src) ? pull(src, fetcher, force) : cache[src].data);
+  // fetchers: a per-source fetch override, so the ollama history sampler (and
+  // its tests) can route through pull() without hitting the real scrape.
+  const pick = (src, fetcher) => (allow.has(src) ? pull(src, fetchers?.[src] ?? fetcher, force) : cache[src].data);
   const [ollama, claude, codex] = await Promise.all([
     pick('ollama', fetchOllama),
     pick('claude', fetchClaude),
@@ -977,7 +979,8 @@ export function initUsageAutoRefresh(bus) {
 // too): force=false here means "respect the floor," not "don't bother."
 // Ollama's sole source is the Bearer scrape (no file tier at all), so it keeps
 // its own slower 60s cadence and existing backoff/pause handling below,
-// already matching the network floor by construction.
+// already matching the network floor by construction — routed through
+// getUsage too, so each scrape also refreshes the card and the WS push.
 const FILE_POLL_MS = 5_000;
 const OLLAMA_POLL_MS = 60_000;
 const OLLAMA_BACKOFF_CAP_MS = 15 * 60_000;
@@ -1037,23 +1040,33 @@ export async function runHistorySample(fetchOllamaFn = fetchOllama) {
   ollamaTimer = null;
   // Ollama lane only — a pause or backoff here must never stall the local-read lanes.
   if (!historyPaused && !ollamaGate.blocked()) {
+    // Routed through getUsage like sampleClaude/sampleCodex, so the fresh scrape
+    // lands in the cache slot and the WS 'usage' push, not just the history
+    // file. pull() already appends history and clears a pause on a good read.
+    const attemptedAt = cache.ollama.at;
     let ollama;
-    try { ollama = await fetchOllamaFn(); }
-    catch { ollama = { ok: false, source: 'ollama', error: 'unavailable' }; }
-    if (ollama.ok) {
-      appendOllamaHistory(ollama);
+    try {
+      ({ ollama } = await getUsage({ sources: ['ollama'], fetchers: { ollama: fetchOllamaFn } }));
+    } catch { ollama = { ok: false, source: 'ollama', error: 'unavailable' }; }
+    // cache.ollama.at only moves when pull() actually attempted the network (it
+    // is stamped before the fetcher call); unchanged means another caller's
+    // pull answered this tick from its 60s floor, so there is nothing of this
+    // tick's own to classify — skip straight to rescheduling below.
+    if (cache.ollama.at === attemptedAt) {
+      // no attempt made; fall through without touching backoff/gate state
+    } else if (ollama?.ok && !ollama.stale) {
       historyBackoffMs = 0; // a success clears an accumulated backoff
       ollamaGate.clear();
-    } else if (ollama.error === 'no-config') {
+    } else if (ollama?.error === 'no-config') {
       // Never configured — not a failure worth backing off for. Check back rarely
       // instead of doubling historyBackoffMs, which would otherwise drag the
       // lane down to the 15m cap on an install that skipped Ollama.
       ollamaGate.arm(OLLAMA_BACKOFF_CAP_MS);
-    } else if (ollama.needsAuth) {
+    } else if (ollama?.needsAuth) {
       // An expired login pauses the lane; a successful manual refresh or Connect
       // action re-arms it (pull() clears historyPaused on the next good read).
       historyPaused = { at: new Date().toISOString(), error: ollama.error || 'unknown error' };
-    } else {
+    } else if (ollama) {
       historyBackoffMs = Math.min(OLLAMA_BACKOFF_CAP_MS, historyBackoffMs * 2 || OLLAMA_POLL_MS);
       ollamaGate.arm(historyBackoffMs);
     }

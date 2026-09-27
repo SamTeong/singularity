@@ -247,7 +247,7 @@ export function seedBackgroundJobs() {
 // Claude carries an armed window so the Usage card has a real countdown to
 // render; codex is the not-enabled shape (absent from WINDOW_ANCHOR). nextAnchorAt is relative to
 // now, not T0: unlike the other fixtures this one is *read* as a duration, and
-// a 2025 timestamp would render "now" (fmtReset) forever.
+// a 2025 timestamp would read as an already-elapsed anchor forever.
 export function seedWindowAnchor() {
   const hour = 3.6e6;
   return {
