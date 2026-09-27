@@ -4,7 +4,7 @@ import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
-import { meterColor, segTicks, fmtReset } from '@/lib/usageUtil.js';
+import { meterColor, segTicks } from '@/lib/usageUtil.js';
 
 // ponytail: the "now" marker teal isn't in the zapac palette (checked cmTheme.js
 // + the @zapac/mui-theme palette — no clean extension point for a one-off
@@ -15,17 +15,22 @@ const NOW_MARKER = '#2dd4bf';
 // the glass default. Same discriminator `shellStyles.glass()` uses.
 const isFramed = (th) => !!getRoles(th).shell?.frameBorderWidth;
 
+// "27 Sep (Sun) 19:00:00" — the year appended only when it is not the current
+// one ("27 Dec 2027 (Mon) …" for a window crossing into next year).
 const fmtWall = (iso) => {
   if (!iso) return '';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  if (Number.isNaN(d.getTime())) return '';
+  const month = d.toLocaleDateString('en', { month: 'short' });
+  const year = d.getFullYear() === new Date().getFullYear() ? '' : ` ${d.getFullYear()}`;
+  return `${d.getDate()} ${month}${year} (${d.toLocaleDateString('en', { weekday: 'short' })}) ${d.toLocaleTimeString('en-GB')}`;
 };
 
 // Usage meter: fill + segment ticks + a "now" marker at the current point in
 // the rolling window. size="sm" (the rail's UsagePanel) is a compact
-// label/track/pct row; size="lg" (UsageView, main pane) is a labeled block
-// with the %-used/reset line, wall-clock reset time, and per-model breakdown
-// below the track.
+// label/track/pct row; size="lg" (UsageView, main pane) folds pct + wall-clock
+// reset into the title ("5h: 42% · 27 Sep (Sun) 18:59:00"), with the
+// %-share per-model breakdown below the track.
 export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
   const t = useTheme();
   // "Now" marker position needs the current wall-clock time, which can't be read
@@ -97,18 +102,20 @@ export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
     );
   }
 
+  // Only %-share breakdowns (Claude's per-model split) earn a line here; raw
+  // request counts (Ollama's) live in the usage report, not the card.
+  const pctModels = (win.models ?? []).filter((m) => m.pctUsed != null);
   return (
     <Box>
-      <Typography sx={{ fontSize: 13, mb: 0.5 }}>{label}</Typography>
-      {track}
-      <Typography variant="code" sx={{ display: 'block', fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
-        {pct == null ? '—' : `${pct.toFixed(dp)}% used`}{win.resetsAt ? ` · resets in ${fmtReset(win.resetsAt)} · ${fmtWall(win.resetsAt)}` : ''}{win.started === false ? ' · window not started' : ''}
+      <Typography sx={{ fontSize: 13, mb: 0.5 }}>
+        <strong>{label}</strong>{pct == null ? '' : `: ${pct.toFixed(dp)}%`}{win.resetsAt ? ` · ${fmtWall(win.resetsAt)}` : ''}{win.started === false ? ' · window not started' : ''}
       </Typography>
-      {win.models?.length > 0 && (
+      {track}
+      {pctModels.length > 0 && (
         <Stack direction="row" spacing={1} sx={{ mt: 0.5, flexWrap: 'wrap' }}>
-          {win.models.map((m) => (
+          {pctModels.map((m) => (
             <Typography key={m.model} variant="code" sx={{ fontSize: 10, color: 'text.secondary' }}>
-              {m.model}: {m.pctUsed != null ? `${m.pctUsed}%` : `${m.requests} req`}
+              {m.model}: {m.pctUsed}%
             </Typography>
           ))}
         </Stack>

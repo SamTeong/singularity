@@ -14,6 +14,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
 import { statusColor } from '@/shell/shellStyles.js';
+import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 import { visibleProviders, usd, windowAnchorAvailable, windowAnchored } from '@/lib/usageUtil.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
@@ -133,8 +134,14 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
         <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography>
       ) : u.ok ? (
         <Stack spacing={2}>
-          <Meter size="lg" label="Session (5h)" win={u.session} segments={5} windowMs={5 * 3.6e6} />
-          <Meter size="lg" label="Weekly (7d)" win={u.weekly} segments={7} windowMs={7 * 24 * 3.6e6} />
+          {/* Phone + tablet: the two rolling-window meters share a row
+              (half-width columns); desktop stacks them with room for the full
+              reset stamp. Query literals, not theme.breakpoints — the skins
+              ship different breakpoint pixels (breakpoints.js). */}
+          <Box sx={{ display: 'grid', gap: 2, [`@media ${PHONE_QUERY}, ${TABLET_QUERY}`]: { gridTemplateColumns: '1fr 1fr' } }}>
+            <Meter size="lg" label="5h" win={u.session} segments={5} windowMs={5 * 3.6e6} />
+            <Meter size="lg" label="7d" win={u.weekly} segments={7} windowMs={7 * 24 * 3.6e6} />
+          </Box>
           {/* Extra usage ($ overage): monthly $ budget, not a rolling window → no
               ticks. Draw as a meter so the view isn't blank when plan windows null
               out on overage; $ amounts under the bar. */}
@@ -230,9 +237,6 @@ export default function UsageView({ usage, onRefresh }) {
       <Box sx={{ flexShrink: 0, p: 2, flexGrow: reportOpen ? 0 : 1 }}>
         <Collapse in={open}>
           <Stack spacing={2}>
-            <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-              Shows the usage limits for your whole account: a 5-hour session limit and a 7-day weekly limit. Claude and Codex check local files every 5s and the network at most every 60s; Ollama checks every 60s — press Refresh to check right now.
-            </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
               {visibleProviders(caps).map((p) => (
                 <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} refreshing={refreshingAll} anchor={windowAnchor?.[p.key]} onPoke={() => pokeWindowAnchor(p.key)} />

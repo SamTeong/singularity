@@ -24,18 +24,6 @@ export function windowAnchorAvailable(sourceKey, session) {
   return sourceKey === 'codex' || session != null;
 }
 
-// Relative countdown to an ISO reset instant: "40m" / "3h" / "5d" / "now".
-export function fmtReset(iso) {
-  if (!iso) return '—';
-  const ms = new Date(iso).getTime() - Date.now();
-  if (!Number.isFinite(ms)) return '—';
-  if (ms <= 0) return 'now';
-  const h = ms / 3.6e6;
-  if (h < 1) return `${Math.max(1, Math.round(ms / 6e4))}m`;
-  if (h < 48) return `${Math.round(h)}h`;
-  return `${Math.round(h / 24)}d`;
-}
-
 // Is this provider's live 5h plan window already anchored? A reset still ahead
 // is the plain answer: the window has started, so its reset time is pinned and
 // a poke would only burn tokens — true even at pctUsed 0, which is what an

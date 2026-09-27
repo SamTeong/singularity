@@ -64,12 +64,12 @@ test('desktop usage: provider cards run side by side, report iframe still explic
   await page.setViewportSize(DESKTOP);
   await gotoReady(page, '/usage', page.getByRole('button', { name: /collapse usage|expand usage/i }).first());
 
-  // "Session (5h)" is the full-size ProviderCard's own label — the sidebar
-  // rail's UsagePanel mini-bars use the short "5h"/"7d" labels instead, so this
-  // text is unambiguous and unaffected by the rail also rendering at desktop.
+  // "5h: <pct>%…" is the full-size ProviderCard's own meter title — the sidebar
+  // rail's UsagePanel mini-bars use the bare "5h"/"7d" labels, so the anchored
+  // regex is unambiguous and unaffected by the rail also rendering at desktop.
   // Codex has no session window (push-only data), so the two matches are
   // Claude then Ollama in DOM order.
-  const sessionLabels = page.getByText('Session (5h)', { exact: true });
+  const sessionLabels = page.getByText(/^5h: \d/);
   const claudeBox = await sessionLabels.nth(0).boundingBox();
   const ollamaBox = await sessionLabels.nth(1).boundingBox();
   expect(Math.abs(claudeBox.x - ollamaBox.x)).toBeGreaterThan(200);
@@ -81,6 +81,43 @@ test('desktop usage: provider cards run side by side, report iframe still explic
   expect(box.height).toBeGreaterThan(0);
   await expectNoPageOverflow(page);
 });
+
+// The two rolling-window meters share one row through tablet (half-width
+// columns in the provider card) and stack on desktop. Claude's card is first in
+// DOM order, so .first() anchors both locators to the same card. This is a
+// column-count-sensitive assertion, so both skins loop.
+for (const skin of RESPONSIVE_SKINS) {
+  test(`usage (${skin}): 5h and 7d meters share a row through tablet, stack on desktop`, async ({ page }) => {
+    await seedSkin(page, skin);
+    await page.setViewportSize(PHONE);
+    await gotoReady(page, '/usage', page.getByRole('button', { name: /collapse usage|expand usage/i }).first());
+
+    const five = page.getByText(/^5h: \d/).first();
+    const seven = page.getByText(/^7d: \d/).first();
+    await expect(five).toBeVisible();
+
+    const a = await five.boundingBox();
+    const b = await seven.boundingBox();
+    expect(Math.abs(a.y - b.y), 'phone: meters on one row').toBeLessThan(2);
+
+    // Tablet keeps the shared row (the boundary is desktop, not tablet).
+    await page.setViewportSize(TABLET);
+    await expect.poll(async () => {
+      const a1 = await five.boundingBox();
+      const b1 = await seven.boundingBox();
+      return Math.abs(a1.y - b1.y);
+    }, { message: 'tablet: meters stay on one row' }).toBeLessThan(2);
+
+    // Desktop (>=900px) stacks them again — resize in place and poll: the
+    // reflow is not instantaneous.
+    await page.setViewportSize(DESKTOP);
+    await expect.poll(async () => {
+      const a2 = await five.boundingBox();
+      const b2 = await seven.boundingBox();
+      return b2.y - a2.y;
+    }, { message: 'desktop: meters stack vertically again' }).toBeGreaterThan(20);
+  });
+}
 
 // Phase 8 A5 regression: the report pane's flex chain (UsageView.jsx) used to
 // pin the iframe at its 240px floor (178px content) at every viewport,
@@ -121,12 +158,12 @@ for (const skin of ['ZAPAC', 'Phosphor Console']) {
       await page.setViewportSize(viewport);
       await gotoReady(page, '/usage', page.getByRole('button', { name: /collapse usage|expand usage/i }).first());
 
-      // Anchored on "Session (5h)" — the full-size ProviderCard's own label. The
-      // sidebar rail renders its own Claude/Ollama rows with the short "5h"
-      // label, so a provider-name locator would match the rail first and never
-      // reach this view at all.
+      // Anchored on "5h: <pct>%…" — the full-size ProviderCard's own meter
+      // title. The sidebar rail renders its own Claude/Ollama rows with the
+      // bare "5h" label, so a provider-name locator would match the rail
+      // first and never reach this view at all.
       const clip = await page.evaluate(() => {
-        const label = [...document.querySelectorAll('*')].find((e) => !e.children.length && e.textContent === 'Session (5h)');
+        const label = [...document.querySelectorAll('*')].find((e) => !e.children.length && e.textContent.startsWith('5h: '));
         let card = label;
         for (let i = 0; i < 6 && card; i++) {
           const cs = getComputedStyle(card);
@@ -153,7 +190,7 @@ for (const skin of ['ZAPAC', 'Phosphor Console']) {
 
       // ...and the far end of the card is reachable by scrolling the pane, not
       // by scrolling the page or an ancestor no finger can move.
-      await expectReachableByPaneScroll(page, page.getByText('Weekly (7d)', { exact: true }).first());
+      await expectReachableByPaneScroll(page, page.getByText(/^7d: \d/).first());
       await expectNoPageOverflow(page);
     });
   }
