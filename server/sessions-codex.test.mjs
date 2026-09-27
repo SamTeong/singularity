@@ -54,6 +54,36 @@ test('listSessions: codex rollout appears with source, cwd, sessionId', async ()
   }
 });
 
+test('listSessions: Codex subagent rollouts nest under their root thread while orphans remain visible', async () => {
+  const childId = '019fb617-e20b-7501-844d-01fe34169a73';
+  const orphanId = '019fb617-a4b4-7853-add8-fdffb1260ff9';
+  const writeThread = (id, sessionId, threadSource, title) => {
+    writeFileSync(join(ROLLOUT_DIR, `rollout-2026-07-25T10-26-16-${id}.jsonl`), [
+      JSON.stringify({ type: 'session_meta', payload: { id, session_id: sessionId, cwd: 'C:\\git\\test', thread_source: threadSource } }),
+      JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: title }] } }),
+    ].join('\n') + '\n');
+  };
+  mkdirSync(ROLLOUT_DIR, { recursive: true });
+  writeThread(THREAD_ID, THREAD_ID, 'user', 'Root task');
+  writeThread(childId, THREAD_ID, 'subagent', 'assistant /root: Message Type: NEW_TASK');
+  writeThread(orphanId, '019fb612-0000-0000-0000-000000000000', 'subagent', 'Orphan task');
+  try {
+    const sessions = await listSessions({ root: join(CODEX_HOME, 'nonexistent') });
+    const parent = sessions.find((s) => s.id === THREAD_ID);
+    assert.ok(parent);
+    assert.equal(parent.subagents.length, 1);
+    assert.equal(parent.subagents[0].id, childId);
+    assert.equal(parent.subagents[0].source, 'codex');
+    assert.ok(parent.subagents[0].file.endsWith(`${childId}.jsonl`));
+    assert.equal(sessions.some((s) => s.id === childId), false);
+    assert.ok(sessions.some((s) => s.id === orphanId));
+    const child = await readSession('<codex>', childId, undefined, 'codex', parent.subagents[0].file);
+    assert.equal(child.messages[0].text, 'assistant /root: Message Type: NEW_TASK');
+  } finally {
+    rmSync(CODEX_HOME, { recursive: true, force: true });
+  }
+});
+
 test('readSession: source codex parses user + assistant + toolUse messages', async () => {
   writeRollout(EVENTS);
   try {

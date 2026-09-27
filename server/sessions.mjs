@@ -93,14 +93,15 @@ function firstCodexUserText(events) {
   return null;
 }
 
-// Reduce a peek's events to {cwd, sessionId, title}. session_meta gives cwd +
+// Reduce a peek's events to {cwd, sessionId, threadSource, title}. session_meta gives cwd +
 // session_id; the first user message gives the title (fallback: Codex <uuid>).
 function peekCodexMeta(events) {
-  let cwd = null, sessionId = null, title = null;
+  let cwd = null, sessionId = null, threadSource = null, title = null;
   for (const e of events) {
     if (e.type === 'session_meta' && e.payload) {
       if (!sessionId) sessionId = e.payload.session_id || e.payload.id || null;
       if (!cwd && e.payload.cwd) cwd = e.payload.cwd;
+      if (!threadSource) threadSource = e.payload.thread_source || null;
     }
     if (!title && e.type === 'event_msg' && e.payload?.type === 'user_message' && e.payload.message) {
       title = e.payload.message;
@@ -109,7 +110,7 @@ function peekCodexMeta(events) {
       title = codexUserText(e.payload.content) || null;
     }
   }
-  return { cwd, sessionId, title };
+  return { cwd, sessionId, threadSource, title };
 }
 
 // Bounded recursive walk collecting rollout-*.jsonl under base. Stops at
@@ -126,7 +127,7 @@ async function listCodexRollouts(base, acc) {
   }
 }
 
-const codexMetaCache = new Map(); // path -> { mtimeMs, size, cwd, sessionId, title }
+const codexMetaCache = new Map(); // path -> { mtimeMs, size, cwd, sessionId, threadSource, title }
 // Callers pass `cap`, but codex rollouts have never been capped — the param was
 // accepted and ignored. Dropped from the signature rather than left as dead
 // weight; wire it up here if the rollout count ever needs bounding.
@@ -136,23 +137,24 @@ async function listCodexSessions({ isLive = () => false, now = Date.now(), hideR
   for (const sub of ['sessions', 'archived_sessions']) await listCodexRollouts(join(CODEX_HOME, sub), files);
   if (files.length >= CODEX_FILE_CAP) console.error('[codex] hit file cap, truncating');
   const out = [];
+  const threadSources = new Map();
   for (const p of files) {
     const pk = await peek(p);
     if (!pk) continue;
     const { st } = pk;
     const id = codexThreadId(basename(p));
-    let cwd, sessionId, title, review;
+    let cwd, sessionId, threadSource, title, review;
     const hit = codexMetaCache.get(p);
     if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
-      ({ cwd, sessionId, title, review } = hit);
+      ({ cwd, sessionId, threadSource, title, review } = hit);
     } else {
-      ({ cwd, sessionId, title } = peekCodexMeta(parseEvents(pk.head)));
+      ({ cwd, sessionId, threadSource, title } = peekCodexMeta(parseEvents(pk.head)));
       review = title ? isCodexReview(title) : undefined;
       // Slice the tail, not the head: a codex thread uuid is time-ordered, so
       // its first 8 chars are a timestamp prefix shared by every thread started
       // in the same window — 69 of 246 rollouts here collide on it.
       if (!title) title = `Codex ${id.slice(-8)}`;
-      codexMetaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, sessionId, title, review });
+      codexMetaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, sessionId, threadSource, title, review });
       if (codexMetaCache.size > 200) codexMetaCache.delete(codexMetaCache.keys().next().value);
     }
     if (hideReviews && review === undefined) {
@@ -161,6 +163,7 @@ async function listCodexSessions({ isLive = () => false, now = Date.now(), hideR
       if (cached) cached.review = review;
     }
     if (hideReviews && review) continue;
+    threadSources.set(id, threadSource);
     out.push({
       id, project: '<codex>', cwd, title, mtime: st.mtimeMs, size: st.size,
       running: isLive(id) || (now - st.mtimeMs) < RUNNING_MS,
@@ -168,7 +171,15 @@ async function listCodexSessions({ isLive = () => false, now = Date.now(), hideR
       file: relative(CODEX_HOME, p),
     });
   }
-  return out;
+  const byId = new Map(out.map((row) => [row.id, row]));
+  const roots = out.filter((row) => {
+    const parent = threadSources.get(row.id) === 'subagent' && byId.get(row.sessionId);
+    if (!parent || parent === row) return true;
+    (parent.subagents ??= []).push({ ...row, agentId: row.id });
+    return false;
+  });
+  for (const row of roots) row.subagents?.sort((a, b) => b.mtime - a.mtime);
+  return roots;
 }
 
 // Resolve a codex rollout relpath (stored in the row) to an absolute path,
