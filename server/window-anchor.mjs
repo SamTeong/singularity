@@ -190,7 +190,7 @@ async function poke(group, windowEnd, { trigger = 'automatic', force = false, pr
   return s.lastResult;
 }
 
-function onUsage(result, forceUnstarted = null) {
+function onUsage(result) {
   latestUsage = result;
   for (const group of PROVIDERS) {
     const s = state[group];
@@ -211,14 +211,12 @@ function onUsage(result, forceUnstarted = null) {
     // poke now. One poke per window span: lastAnchorAt is the previous poke and
     // expires with the window it started; passing it as the window identity
     // lets shouldPoke space out retries after an error without blocking the
-    // next lapse. A fresh false->true enable is an explicit retry even when a
-    // prior command exited successfully without opening the provider window.
+    // next lapse.
     if (session.started === false) {
       clearTimer(group);
       if (preflighting.has(group)) continue;
-      const forced = forceUnstarted?.has(group);
-      if (forced || !s.lastAnchorAt || now() - s.lastAnchorAt >= WINDOW_MS) {
-        void poke(group, forced ? now() : (s.lastAnchorAt ?? 0), { preflight: false });
+      if (!s.lastAnchorAt || now() - s.lastAnchorAt >= WINDOW_MS) {
+        void poke(group, s.lastAnchorAt ?? 0, { preflight: false });
       }
       continue;
     }
@@ -246,7 +244,7 @@ function onUsage(result, forceUnstarted = null) {
 
 export function initWindowAnchor({
   bus: b = bus, log, stateDir = STATE_DIR, usageStateDir = USAGE_SKILL_STATE,
-  spawn: spawnFn = execFileP, usageRefresh = getUsage, now: nowFn,
+  spawn: spawnFn = execFileP, usageRefresh = getUsage, now: nowFn, enabled = process.env.WINDOW_ANCHOR,
 } = {}) {
   logger = log;
   busRef = b;
@@ -270,6 +268,10 @@ export function initWindowAnchor({
       log?.info({ file: stateFile }, 'loaded window-anchor.json');
     }
   } catch (e) { log?.warn({ err: e.message }, 'window-anchor.json load failed'); }
+  // .env owns enablement (WINDOW_ANCHOR=claude,codex); a persisted `enabled`
+  // from an older build is overridden, never trusted.
+  const on = new Set(String(enabled ?? '').split(',').map((v) => v.trim().toLowerCase()));
+  for (const group of PROVIDERS) state[group].enabled = on.has(group);
 
   usageHandler = (result) => onUsage(result);
   b.on('usage', usageHandler);
@@ -278,26 +280,7 @@ export function initWindowAnchor({
 
 export function snapshotWindowAnchor() { return snapshot(); }
 
-// POST body { enabled: { claude, codex } } — partial update, persists, then
-// immediately applies the latest usage snapshot for newly-enabled providers.
-export function setWindowAnchorEnabled(enabled = {}) {
-  let changed = false;
-  const newlyEnabled = new Set();
-  for (const group of PROVIDERS) {
-    if (typeof enabled[group] !== 'boolean') continue;
-    if (enabled[group] && !state[group].enabled) newlyEnabled.add(group);
-    state[group].enabled = enabled[group];
-    if (!enabled[group]) clearTimer(group);
-    changed = true;
-  }
-  if (changed) {
-    persistEmit();
-    if (latestUsage && newlyEnabled.size) onUsage(latestUsage, newlyEnabled);
-  }
-  return snapshot();
-}
-
-// Manual poke now. It runs regardless of `enabled`, but avoids spending a turn
+// Manual poke now (the card's Anchor button). It runs regardless of `enabled`, but avoids spending a turn
 // on an already-started window unless the caller explicitly requests force.
 export async function pokeProvider(group, { force = false } = {}) {
   if (!PROVIDERS.includes(group)) throw new Error(`provider must be 'claude' or 'codex'`);

@@ -18,7 +18,7 @@ process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
 mkdirSync(join(scratch, 'singularity', 'state'), { recursive: true });
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { initWindowAnchor, snapshotWindowAnchor, setWindowAnchorEnabled, pokeProvider } = await import('./window-anchor.mjs');
+const { initWindowAnchor, snapshotWindowAnchor, pokeProvider } = await import('./window-anchor.mjs');
 const { bus, STATE_DIR, CLAUDE_BIN, CODEX_BIN } = await import('./agents.mjs');
 
 const HOUR = 3_600_000;
@@ -37,7 +37,7 @@ function fakeSpawn(file, args, opts) {
 }
 
 const init = (over = {}) => initWindowAnchor({
-  log: null, spawn: fakeSpawn, usageRefresh: async () => null, now: () => fakeNow, ...over,
+  log: null, spawn: fakeSpawn, usageRefresh: async () => null, now: () => fakeNow, enabled: 'claude,codex', ...over,
 });
 
 // Push a usage document the way usage.mjs's getUsage does.
@@ -58,7 +58,6 @@ async function until(fn, ms = 3000) {
 
 test('arming: a future window arms nextAnchorAt at resetsAt+5000 and dedupes', () => {
   init();
-  setWindowAnchorEnabled({ claude: true });
   const resetsAt = fakeNow + 10 * HOUR;
   emitUsage('claude', { pctUsed: 0, resetsAt });
   assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, resetsAt + 5000);
@@ -78,7 +77,6 @@ test('arming: a future window arms nextAnchorAt at resetsAt+5000 and dedupes', (
 
 test('a successful read with no plan window clears a stale timer but stays enabled', () => {
   init();
-  setWindowAnchorEnabled({ claude: true });
   emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow + 10 * HOUR });
   assert.notEqual(snapshotWindowAnchor().claude.nextAnchorAt, null);
 
@@ -88,26 +86,16 @@ test('a successful read with no plan window clears a stale timer but stays enabl
   assert.equal(updated.nextAnchorAt, null);
 });
 
-test('enabling re-evaluates the latest usage and pokes an unstarted window', async () => {
-  fakeNow += 24 * HOUR;
+test('WINDOW_ANCHOR provider list drives enablement, overriding persisted state', () => {
+  init({ enabled: ' Codex , bogus' });
+  assert.equal(snapshotWindowAnchor().claude.enabled, false);
+  assert.equal(snapshotWindowAnchor().codex.enabled, true);
+  init({ enabled: undefined });
+  assert.equal(snapshotWindowAnchor().codex.enabled, false);
   init();
-  calls.length = 0;
-  setWindowAnchorEnabled({ claude: false, codex: false });
-  const resetsAt = fakeNow + 9 * HOUR;
-  bus.emit('usage', {
-    claude: { ok: true, source: 'claude', session: { pctUsed: 0, resetsAt: new Date(resetsAt).toISOString() } },
-    codex: { ok: true, source: 'codex', session: { pctUsed: 0, resetsAt: null, started: false } },
-    ollama: null,
-  });
-  assert.equal(calls.length, 0);
-
-  const updated = setWindowAnchorEnabled({ claude: true, codex: true });
-  assert.equal(updated.claude.nextAnchorAt, resetsAt + 5000);
-  await until(() => calls.length === 1 && snapshotWindowAnchor().codex.lastResult === 'Ok');
 });
 
 test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flags', async () => {
-  setWindowAnchorEnabled({ codex: true });
   const before = calls.length;
   emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow - HOUR });
   await until(() => snapshotWindowAnchor().claude.lastResult === 'Ok');
@@ -182,9 +170,8 @@ test('persistence: state file written and reloaded on re-init', async () => {
   assert.equal(saved.claude.enabled, true);
   assert.equal(saved.claude.lastResult, 'Skipped');
 
-  setWindowAnchorEnabled({ claude: false });
   const freshCalls = [];
-  init({ spawn: (file2, args) => { freshCalls.push({ file: file2, args }); return Promise.resolve({ stdout: '{}' }); } });
+  init({ enabled: 'codex', spawn: (file2, args) => { freshCalls.push({ file: file2, args }); return Promise.resolve({ stdout: '{}' }); } });
   const s = snapshotWindowAnchor();
   assert.equal(s.claude.enabled, false);
   assert.equal(s.codex.enabled, true);
@@ -193,7 +180,6 @@ test('persistence: state file written and reloaded on re-init', async () => {
 
 test('timer fire: an armed timer pokes at resetsAt+5000', async () => {
   init(); // back to the recording fakeSpawn (persistence test's re-init swapped it)
-  setWindowAnchorEnabled({ claude: true });
   const before = calls.length;
   emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow + 100 }); // arms a real ~5.1s timer
   assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, fakeNow + 100 + 5000);
@@ -203,12 +189,12 @@ test('timer fire: an armed timer pokes at resetsAt+5000', async () => {
   assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, null);
 });
 
-test('routes: GET shape, POST toggle, poke route 400 on bad provider', async () => {
+test('routes: GET shape, poke route 400 on bad provider', async () => {
+  init({ enabled: '' });
   const Fastify = (await import('fastify')).default;
   const app = Fastify();
   // Same handler shapes as index.mjs's /api/window-anchor routes.
   app.get('/api/window-anchor', async () => snapshotWindowAnchor());
-  app.post('/api/window-anchor', async (req) => setWindowAnchorEnabled(req.body?.enabled || {}));
   app.post('/api/window-anchor/poke', async (req, reply) => {
     try { return { ok: true, ...(await pokeProvider(req.body?.provider, { force: req.body?.force === true })) }; }
     catch (e) { return reply.code(e.persistFailure ? 500 : 400).send({ ok: false, error: e.message }); }
@@ -223,10 +209,6 @@ test('routes: GET shape, POST toggle, poke route 400 on bad provider', async () 
     }
   }
 
-  const toggle = await app.inject({ method: 'POST', url: '/api/window-anchor', payload: { enabled: { claude: false } } });
-  assert.equal(toggle.statusCode, 200);
-  assert.equal(JSON.parse(toggle.body).claude.enabled, false);
-  assert.equal(snapshotWindowAnchor().claude.enabled, false);
   emitUsage('claude', { pctUsed: 1, resetsAt: fakeNow + HOUR });
 
   const bad = await app.inject({ method: 'POST', url: '/api/window-anchor/poke', payload: { provider: 'ollama' } });
@@ -273,7 +255,6 @@ test('unstarted: pokes at once, once per window span', async () => {
   fakeNow += 24 * HOUR; // past any anchor an earlier test left on codex
   init();
   calls.length = 0;
-  setWindowAnchorEnabled({ codex: true });
   const unstarted = () => bus.emit('usage', {
     ollama: null,
     codex: { ok: true, source: 'codex', session: { pctUsed: 0, resetsAt: null, started: false } },

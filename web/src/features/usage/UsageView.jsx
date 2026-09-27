@@ -9,7 +9,6 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Collapse from '@mui/material/Collapse';
 import IconButton from '@mui/material/IconButton';
 import Link from '@mui/material/Link';
-import Switch from '@mui/material/Switch';
 import Tooltip from '@mui/material/Tooltip';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -50,15 +49,17 @@ function ollamaFailure(error) {
   return `Ollama usage is currently unavailable${error ? `: ${error}` : '.'}`;
 }
 
-// 8px status dot: colour carries severity, the words live in the tooltip. Two
-// of these per card — the header's last-read indicator and the anchor row's
-// schedule indicator — so the style is shared rather than copied.
+// 8px status dot: colour carries severity, the words live in the tooltip.
 const dotSx = (kind) => (t) => {
   const c = statusColor(t, kind);
   return { width: 8, height: 8, borderRadius: '50%', background: c, flex: 'none', alignSelf: 'center', boxShadow: `0 0 0 3px color-mix(in srgb, ${c} 22%, transparent)` };
 };
 
-function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, connectState, refreshing, anchor, onAnchorEnabled, onPoke }) {
+const SEVERITY = { ok: 0, info: 0, warn: 1, danger: 2 };
+// yyyy-MM-dd HH:mm:ss in local time (the sv-SE locale prints exactly that).
+const stamp = (t) => (t ? new Date(t).toLocaleString('sv-SE') : 'never');
+
+function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, connectState, refreshing, anchor, onPoke }) {
   const isOllama = label.toLowerCase() === 'ollama';
   // Manual anchor poke, the same in-flight shape as the header's refresh: the
   // button reads as motion while the daemon runs the prompt (90s timeout).
@@ -69,24 +70,21 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
   };
   const anchored = windowAnchored(u?.session, anchor?.lastAnchorAt);
   const showAnchor = anchor && windowAnchorAvailable(sourceKey, u?.session);
-  // The anchor row's schedule + outcome, folded into one indicator: the words
-  // are only worth reading when something looks wrong, and at 320px they cost
-  // the row the space the Trigger button needs. 'Skipped' is a success — real
-  // work anchored the window before the timer fired — so only a failed poke is
-  // red, and an unarmed anchor is informational rather than a fault.
-  const anchorKind = anchor?.lastResult === 'Error' ? 'danger' : anchor?.nextAnchorAt ? 'ok' : 'info';
-  // Two lines, like the header dot's: the outcome with when it happened, then
-  // when the next one is due.
-  const anchorStatus = anchor?.lastResult
-    ? `${anchor.lastResult}${anchor.lastAnchorAt ? ` — Last anchor: ${new Date(anchor.lastAnchorAt).toLocaleString()}` : ''}${anchor.lastError ? ` — ${anchor.lastError}` : ''}`
-    : 'Never anchored';
-  const anchorNext = anchor?.nextAnchorAt ? `Next anchor: ${new Date(anchor.nextAnchorAt).toLocaleString()}` : 'Not armed';
+  // Anchor (enabled via the daemon's WINDOW_ANCHOR in .env) folds into the
+  // header dot: 'Skipped' is a success — real work anchored the window before
+  // the timer fired — so a failed poke is red and an unarmed anchor amber.
+  const anchorOn = showAnchor && anchor.enabled;
+  const anchorKind = anchor?.lastResult === 'Error' ? 'danger' : anchor?.nextAnchorAt ? 'ok' : 'warn';
+  const anchorLine = `Window anchor: ${anchor?.lastResult ?? 'Never'}: Last ${stamp(anchor?.lastAnchorAt)}${anchor?.lastError ? ` — ${anchor.lastError}` : ''}`;
+  const nextLine = `Next ${anchor?.nextAnchorAt ? stamp(anchor.nextAnchorAt) : 'not armed'}`;
   const stale = !u?.ok || !!u?.stale;
   // The dot carries the same three-way read the rail's daemon footer uses
   // (statusColor): stale-but-usable is amber, a failed read is red, fresh is the
   // nominal mint. The words live in the tooltip — colour is never the only cue.
-  const statusKind = stale ? (u?.ok ? 'warn' : 'danger') : 'ok';
-  const statusText = stale ? (u?.ok ? 'Stale' : 'Update failed') : 'Up to date';
+  const usageKind = stale ? (u?.ok ? 'warn' : 'danger') : 'ok';
+  const statusKind = anchorOn && SEVERITY[anchorKind] > SEVERITY[usageKind] ? anchorKind : usageKind;
+  const statusText = stale ? (u?.ok ? 'Stale' : 'Update failed') : 'Up-to-date';
+  const statusLines = [`5h/7d usage: ${statusText}: Last ${stamp(u?.fetchedAt)}`, ...(anchorOn ? [anchorLine, nextLine] : [])];
   const authHelp = {
     ollama: ollamaFailure(u?.error),
     claude: 'No usage data yet — run Claude Code to update.',
@@ -112,12 +110,20 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
             that a Codex record is a day old), but it costs the header ~150px it
             does not have at 320px. Same affordance as the Automation page. */}
         {u?.fetchedAt && !refreshing && (
-          <Tooltip disableInteractive title={`${statusText} — Updated on: ${new Date(u.fetchedAt).toLocaleString()}`}>
-            <Box aria-hidden sx={dotSx(statusKind)} />
+          <Tooltip disableInteractive={!(anchorOn && anchor.lastError)} title={<>{statusLines.map((l) => <div key={l}>{l}</div>)}</>}>
+            <Box role="img" data-status={statusKind} aria-label={`${label} status — ${statusLines.join(' · ')}`} sx={dotSx(statusKind)} />
           </Tooltip>
         )}
         {refreshing && <CircularProgress size={14} sx={{ alignSelf: 'center' }} />}
         <Box sx={{ flex: 1 }} />
+        {/* Manual anchor: the daemon pokes regardless of WINDOW_ANCHOR. Hidden
+            once the window is anchored — the prompt would just burn tokens
+            against a window whose reset is already pinned. */}
+        {showAnchor && !anchored && (
+          <Button size="small" disabled={poking} onClick={poke} sx={{ alignSelf: 'center' }}>
+            {poking ? 'Anchoring…' : 'Anchor'}
+          </Button>
+        )}
         {isOllama && !(u?.ok && !u?.stale) && (
           <Button size="small" onClick={onConnect} disabled={connecting}>{connecting ? 'Connecting…' : 'Connect'}</Button>
         )}
@@ -177,39 +183,6 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
           History sampling stopped after {u.historyPaused.error} — press Refresh to resume.
         </Typography>
       )}
-      {/* Window anchor: keeps this provider's 5h plan window pinned to its
-          reset time by firing one trivial prompt when the old window expires
-          idle. The row renders only where the daemon reports anchor state and the
-          usage source exposes an applicable plan window. A wrapping row, not a fixed
-          grid, so a 320px card stacks the Trigger button under the toggle. */}
-      {showAnchor && (
-        <Stack direction="row" spacing={1} sx={{ mt: 1.5, alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}>
-          <Switch
-            size="small"
-            checked={anchor.enabled}
-            onChange={(e) => onAnchorEnabled(e.target.checked)}
-            slotProps={{ input: { 'aria-label': `${label} window anchor` } }}
-          />
-          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Window anchor</Typography>
-          {/* Wall clock, not a countdown: the row exists to check that the
-              anchor is scheduled where the window actually resets, and "next in
-              4h" cannot be compared against the reset time the meter prints
-              above it. Labelled, unlike the header's decorative dot — this one
-              carries the only copy of the schedule. */}
-          <Tooltip disableInteractive={!anchor.lastError} title={<>{anchorStatus}<br />{anchorNext}</>}>
-            <Box role="img" aria-label={`${label} window anchor status — ${anchorStatus} · ${anchorNext}`} sx={dotSx(anchorKind)} />
-          </Tooltip>
-          <Box sx={{ flex: 1 }} />
-          {/* Explicit user action: the daemon pokes regardless of the toggle.
-              Hidden once the window is anchored — the prompt would just burn
-              tokens against a window whose reset is already pinned. */}
-          {!anchored && (
-            <Button size="small" disabled={poking} onClick={poke} sx={{ alignSelf: 'center' }}>
-              {poking ? 'Triggering…' : 'Trigger'}
-            </Button>
-          )}
-        </Stack>
-      )}
     </Box>
   );
 }
@@ -221,7 +194,7 @@ export default function UsageView({ usage, onRefresh }) {
   const [reportOpen, setReportOpen] = useState(() => readPanelOpen(REPORT_OPEN_KEY));
   const toggleReport = () => setReportOpen((o) => { writePanelOpen(REPORT_OPEN_KEY, !o); return !o; });
   const caps = useCapabilities();
-  const { connectOllamaUsage, windowAnchor, setWindowAnchorEnabled, pokeWindowAnchor } = useAgents();
+  const { connectOllamaUsage, windowAnchor, pokeWindowAnchor } = useAgents();
   const [connectState, setConnectState] = useState(null);
   const connectOllama = async () => {
     setConnectState('connecting');
@@ -262,7 +235,7 @@ export default function UsageView({ usage, onRefresh }) {
             </Typography>
             <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
               {visibleProviders(caps).map((p) => (
-                <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} refreshing={refreshingAll} anchor={windowAnchor?.[p.key]} onAnchorEnabled={(v) => setWindowAnchorEnabled({ [p.key]: v })} onPoke={() => pokeWindowAnchor(p.key)} />
+                <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} refreshing={refreshingAll} anchor={windowAnchor?.[p.key]} onPoke={() => pokeWindowAnchor(p.key)} />
               ))}
             </Box>
           </Stack>

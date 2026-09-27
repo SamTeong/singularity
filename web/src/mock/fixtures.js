@@ -245,7 +245,7 @@ export function seedBackgroundJobs() {
 
 // Window-anchor state (server/window-anchor.mjs defaultProviderState shape).
 // Claude carries an armed window so the Usage card has a real countdown to
-// render; codex is the untouched opt-in shape. nextAnchorAt is relative to
+// render; codex is the not-enabled shape (absent from WINDOW_ANCHOR). nextAnchorAt is relative to
 // now, not T0: unlike the other fixtures this one is *read* as a duration, and
 // a 2025 timestamp would render "now" (fmtReset) forever.
 export function seedWindowAnchor() {
