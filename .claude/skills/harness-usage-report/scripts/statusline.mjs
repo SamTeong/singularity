@@ -102,7 +102,7 @@ const fmtClock = (dt) => {
 const fmtRl = (pct, resetTs, label, showDate) => {
   if (pct === null || pct === undefined || pct === "" || resetTs === null || resetTs === undefined || resetTs === "") return "";
   const local = new Date(Math.trunc(resetTs) * 1000);
-  let s = `${label} ${pct}% resets ${fmtClock(local)}`;
+  let s = `${label} ${pct}% ${fmtClock(local)}`;
   if (showDate) s += ` ${local.getDate()} ${MONTHS[local.getMonth()]} (${WEEKDAYS[local.getDay()]})`;
   return `${colorFor(pct)}${s}${RESET}`;
 };
@@ -169,11 +169,12 @@ const p1 = [model, usageSeg, costStr];
 if (rateLimitStr) p1.push(rateLimitStr);
 const line1 = p1.join(" | ");
 
-const p2 = [dirDisplay];
+const p2 = [];
+if (sid) p2.push(sid);
+p2.push(dirDisplay);
 if (worktree) p2.push(worktree);
 p2.push(gitStr);
 if (scopes.length) p2.push(scopes.join(","));
-if (sid) p2.push(sid);
 const line2 = p2.join(" | ");
 
 process.stdout.write(line1 + "\n" + line2);
