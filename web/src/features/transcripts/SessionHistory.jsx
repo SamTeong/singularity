@@ -386,7 +386,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
                             <ListItemButton
                               key={sub.id}
                               selected={sel?.project === s.project && sel?.id === sub.id}
-                              onClick={() => open({ project: s.project, id: sub.id, title: sub.title, blurb: sub.blurb, cwd: s.cwd, mtime: sub.mtime, sub: true })}
+                              onClick={() => open({ ...sub, project: s.project, cwd: sub.cwd || s.cwd, source: sub.source || s.source, sub: true })}
                               sx={{ borderRadius: (t) => `${getTokens(t).radius.sm}px`, display: 'block', mb: 0.25, pl: 3 }}
                             >
                               <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
