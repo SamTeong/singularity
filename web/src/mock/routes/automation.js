@@ -227,25 +227,14 @@ export function registerAutomation(server) {
 
   // GET returns the BARE state (server/index.mjs:668 — same shape as /crons),
   // and every mutation broadcasts the frame the daemon's bus fans out
-  // (pty-ws.mjs 'window-anchor'). The mock arms no timer and pokes no agent:
-  // a toggle only flips the flag (and drops an armed window, as
-  // setWindowAnchorEnabled does), and a manual poke records the run so the
-  // card's last-result cell converges from the socket, not the response body.
+  // (pty-ws.mjs 'window-anchor'). Enablement is daemon .env (WINDOW_ANCHOR),
+  // so there is no toggle route. The mock arms no timer and pokes no agent: a
+  // manual poke records the run so the card's status dot converges from the
+  // socket, not the response body.
   const anchorFrame = () => ({ t: 'window-anchor', anchor: db.windowAnchor });
   const ANCHOR_PROVIDERS = ['claude', 'codex'];
 
   server.get('/window-anchor', () => db.windowAnchor);
-
-  server.post('/window-anchor', (schema, req) => {
-    const { enabled } = parseBody(req);
-    for (const provider of ANCHOR_PROVIDERS) {
-      if (typeof enabled?.[provider] !== 'boolean') continue;
-      db.windowAnchor[provider].enabled = enabled[provider];
-      if (!enabled[provider]) db.windowAnchor[provider].nextAnchorAt = null;
-    }
-    broadcast(anchorFrame());
-    return db.windowAnchor;
-  });
 
   server.post('/window-anchor/poke', (schema, req) => {
     const provider = parseBody(req).provider;

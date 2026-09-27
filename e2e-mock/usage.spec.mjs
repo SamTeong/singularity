@@ -112,18 +112,16 @@ test('usage report collapse/expand button exists', async ({ page }) => {
 
 // The card's own last read is a tooltip on a header status dot, not a stamped
 // line — same affordance the Automation page uses. Refresh cadence is now
-// daemon-owned (no client picker to anchor off), so the dot is found relative
-// to the card's own label — a <div>, unlike the jump-out link's <svg> icon,
-// which also carries aria-hidden.
+// daemon-owned, so the dot is found by its accessible name (it also carries
+// the window-anchor state, window-anchor.spec.mjs).
 test('each provider card exposes its last read in a tooltip', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
 
-  const row = page.getByText('Claude', { exact: true }).locator('xpath=..');
-  const dot = row.locator('div[aria-hidden="true"]');
+  const dot = page.getByRole('img', { name: /^Claude status — / });
   await expect(dot).toBeVisible();
   await dot.hover();
-  await expect(page.getByRole('tooltip')).toContainText('Updated on: ');
+  await expect(page.getByRole('tooltip')).toContainText('5h/7d usage: ');
 });
 
 test('Ollama retains stale usage with an actionable reconnect', async ({ page }) => {

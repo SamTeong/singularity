@@ -231,17 +231,6 @@ export function AgentsProvider({ children }) {
     fetch('/api/window-anchor').then((r) => r.json()).then(setWindowAnchor).catch(() => {});
   }, [connected]);
 
-  // Window anchor: enable/disable per provider. The response is the same bare
-  // snapshot the daemon re-emits on the bus, so setting it here is idempotent
-  // with the frame that follows.
-  const setWindowAnchorEnabled = useCallback((enabled) => {
-    return fetch('/api/window-anchor', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ enabled }),
-    }).then((r) => r.json()).then((state) => { setWindowAnchor(state); return state; }).catch(() => {});
-  }, []);
-
   // Manual poke — a poke's response carries only its outcome, so the refreshed
   // lastAnchorAt/lastResult arrive on the WS frame it triggers.
   const pokeWindowAnchor = useCallback((provider) => {
@@ -260,14 +249,14 @@ export function AgentsProvider({ children }) {
     tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
     sendMsg, reorderAgents, refreshUsage, connectOllamaUsage,
-    setWindowAnchorEnabled, pokeWindowAnchor,
+    pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   }), [
     agents, active, connected, recent,
     tasks, taskHistory, crons, background, windowAnchor, usage, history,
     stats, subagents,
     sendMsg, reorderAgents, refreshUsage, connectOllamaUsage,
-    setWindowAnchorEnabled, pokeWindowAnchor,
+    pokeWindowAnchor,
     registerTerminal, registerChat, registerError,
   ]);
   return <AgentsContext value={value}>{children}</AgentsContext>;

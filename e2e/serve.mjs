@@ -22,7 +22,7 @@ const env = { ...process.env };
 // be absent — never inherited.
 for (const k of ['SINGULARITY_HOME', 'DAEMON_PORT', 'CLAUDE_BIN', 'OLLAMA_BIN', 'SING_SCOPE_ROOT',
   'SING_TRUSTED_ROOT', 'SING_USAGE_SKILL', 'SING_USAGE_REPORTS', 'SING_TOKEN', 'USAGE_REPORT_STATE',
-  'CODEX_HOME']) delete env[k];
+  'CODEX_HOME', 'WINDOW_ANCHOR']) delete env[k];
 Object.assign(env, {
   // Node's os.homedir() reads HOME on POSIX and USERPROFILE on Windows. Pin
   // both so the shell's synchronous __SING_HOME__ injection and every daemon
