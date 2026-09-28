@@ -29,9 +29,10 @@ const fmtWall = (iso) => {
 // Usage meter: fill + segment ticks + a "now" marker at the current point in
 // the rolling window. size="sm" (the rail's UsagePanel) is a compact
 // label/track/pct row; size="lg" (UsageView, main pane) folds pct + wall-clock
-// reset into the title ("5h: 42% · 27 Sep (Sun) 18:59:00"), with the
+// reset into the title ("5h: 42% · 27 Sep (Sun) 18:59:00"; `suffix` appends
+// after the pct, e.g. the extra-usage "$128.05 / $200"), with the
 // %-share per-model breakdown below the track.
-export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
+export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0, suffix }) {
   const t = useTheme();
   // "Now" marker position needs the current wall-clock time, which can't be read
   // impurely during render — subscribe to the system clock instead (ticks are
@@ -108,7 +109,7 @@ export function Meter({ size = 'lg', label, win, segments, windowMs, dp = 0 }) {
   return (
     <Box>
       <Typography sx={{ fontSize: 13, mb: 0.5 }}>
-        <strong>{label}</strong>{pct == null ? '' : `: ${pct.toFixed(dp)}%`}{win.resetsAt ? ` · ${fmtWall(win.resetsAt)}` : ''}{win.started === false ? ' · window not started' : ''}
+        <strong>{label}</strong>{pct == null ? '' : `: ${pct.toFixed(dp)}%`}{suffix ? ` · ${suffix}` : ''}{win.resetsAt ? ` · ${fmtWall(win.resetsAt)}` : ''}{win.started === false ? ' · window not started' : ''}
       </Typography>
       {track}
       {pctModels.length > 0 && (

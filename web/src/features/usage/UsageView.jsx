@@ -144,14 +144,9 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
           </Box>
           {/* Extra usage ($ overage): monthly $ budget, not a rolling window → no
               ticks. Draw as a meter so the view isn't blank when plan windows null
-              out on overage; $ amounts under the bar. */}
+              out on overage; $ amounts ride in the title. */}
           {u.extra?.enabled && u.extra.pctUsed != null && (
-            <Box>
-              <Meter size="lg" label="Extra usage ($)" win={u.extra} segments={1} dp={1} />
-              <Typography variant="code" sx={{ display: 'block', fontSize: 12, color: 'text.secondary', mt: 0.5 }}>
-                {usd(u.extra.used)} / {usd(u.extra.monthlyLimit)}
-              </Typography>
-            </Box>
+            <Meter size="lg" label="Extra usage" win={u.extra} segments={1} dp={1} suffix={`${usd(u.extra.used)} / ${usd(u.extra.monthlyLimit)}`} />
           )}
           {/* The header's info icon carries this card's last-read time, so what is
               left here is the rolled-over reading: Codex logs limits only on a real

@@ -425,6 +425,9 @@ export const PAPER_TOOLTIP_SLOTPROPS = {
       color: 'var(--mui-palette-text-primary) !important',
       border: '1px solid var(--mui-palette-divider) !important',
       backdropFilter: 'blur(8px)',
+      // MUI's 300px default wraps the usage summary line ("…, extra: 64.0% ·
+      // $128.05 / $200"); shared slotProps, so every rail tooltip widens.
+      maxWidth: 420,
       whiteSpace: 'pre-line', // multi-line titles (usage summary) break on \n
     },
   },

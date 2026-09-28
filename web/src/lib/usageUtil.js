@@ -59,8 +59,9 @@ export function meterColor(t, pct) {
 export const usd = (credits) => (credits == null ? '—' : `$${(credits / 100).toFixed(2).replace(/\.00$/, '')}`);
 
 // Per-provider summary for the collapsed rail tooltip, one line per provider:
-// "Claude — 5h: 13%, 7d: 22%\nOllama — 5h: 0%, 7d: 99%". Extra usage ($) appended
-// when active. Null if nothing loaded. Render with whiteSpace: 'pre-line'.
+// "Claude — 5h: 13%, 7d: 22%\nOllama — 5h: 0%, 7d: 99%". Extra usage (pct · $
+// spent / $ limit) appended when active. Null if nothing loaded. Render with
+// whiteSpace: 'pre-line'.
 export function usageSummary(usage, caps) {
   const win = (label, w) => `${label}: ${w?.pctUsed == null ? '—' : `${Math.round(w.pctUsed)}%`}`;
   const parts = [];
@@ -68,7 +69,7 @@ export function usageSummary(usage, caps) {
     const u = usage?.[p.key];
     if (!u?.ok) continue;
     const extra = u.extra?.enabled && u.extra.pctUsed != null
-      ? `, extra: ${usd(u.extra.used)}/${usd(u.extra.monthlyLimit)}` : '';
+      ? `, extra: ${u.extra.pctUsed.toFixed(1)}% · ${usd(u.extra.used)} / ${usd(u.extra.monthlyLimit)}` : '';
     parts.push(`${p.label} — ${win('5h', u.session)}, ${win('7d', u.weekly)}${extra}`);
   }
   return parts.length ? parts.join('\n') : null;
