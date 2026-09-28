@@ -15,6 +15,7 @@ import { useColorMode } from '@zapac/mui-theme';
 import { useThemeSkin } from '@/theme/AppThemeProvider.jsx';
 import { getSkin } from '@/theme/registry.js';
 import DirPicker from '@/components/DirPicker.jsx';
+import ToastHost from '@/components/ToastHost.jsx';
 import { untildify } from '@/lib/paths.js';
 import ProcessManager from '@/features/processes/ProcessManager.jsx';
 import CreateSessionDialog from '@/features/sessions/CreateSessionDialog.jsx';
@@ -137,7 +138,23 @@ export default function AppShell() {
   const navigate = useNavigate();
   const setView = useCallback((v) => navigate(`/${v}`), [navigate]);
   const [paletteOpen, setPaletteOpen] = useState(false);
-  const [toast, setToast] = useState(null);
+  const [toasts, setToasts] = useState([]);
+  const toastItems = useRef([]);
+  const nextToastId = useRef(0);
+  const enqueueToast = useCallback((message, options = {}) => {
+    const toast = { id: ++nextToastId.current, message, duration: options.duration ?? 5000, action: options.action, onDismiss: options.onDismiss };
+    toastItems.current = [...toastItems.current, toast];
+    setToasts(toastItems.current);
+    return toast.id;
+  }, []);
+  const dismissToast = useCallback((id) => {
+    const toast = toastItems.current.find((item) => item.id === id);
+    if (!toast) return;
+    toastItems.current = toastItems.current.filter((item) => item.id !== id);
+    setToasts(toastItems.current);
+    toast.onDismiss?.();
+  }, []);
+  const setToast = enqueueToast;
   const [txPrompt, setTxPrompt] = useState(null); // agent whose terminal hit scrollback top
   // Width (px) the open right-hand sheet wants the shell to vacate; 0 = none
   // open. A feature reports it rather than the shell knowing sheet widths, so
@@ -237,7 +254,7 @@ export default function AppShell() {
   }, [view, setView, keys]);
 
   // Surface daemon 'error' frames as a toast (the provider owns no UI state).
-  useEffect(() => registerError(setToast), [registerError]);
+  useEffect(() => registerError(setToast), [registerError, setToast]);
 
   const { moveTask, concludeTask, deleteHistory } = useTaskActions(setToast);
 
@@ -468,7 +485,7 @@ export default function AppShell() {
             )}
             {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
             {view === 'history' && <HistoryView onOpenSession={openHistorySession} onToast={setToast} />}
-            {view === 'projects' && <ProjectsView />}
+            {view === 'projects' && <ProjectsView onToast={enqueueToast} dismissToast={dismissToast} />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} onSelectSkin={onSelectSkin} />}
             {view === 'status' && <StatusView />}
             {view === 'settings' && <SettingsView />}
@@ -601,7 +618,7 @@ export default function AppShell() {
         onBrowse={() => setPicking(true)}
       />
 
-      <Snackbar open={!!toast} onClose={() => setToast(null)} message={toast} anchorOrigin={{ vertical: 'top', horizontal: 'center' }} slotProps={{ content: { sx: [SNACK_GLASS, snackDrain(5000)], onAnimationEnd: (e) => isDrainEnd(e) && setToast(null) } }} />
+      <ToastHost toasts={toasts} onDismiss={dismissToast} />
 
       {/* Offered when a terminal scrolls to the top of its (capped) scrollback. */}
       <Snackbar

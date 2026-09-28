@@ -176,7 +176,7 @@ function ReviewSection({ data, onOpenFile }) {
  * the working-tree counts, last commit and summary. The (LLM) summary is
  * fetched only once expanded, and re-fetched after a refresh when next shown.
  */
-export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onDragStart, onDragEnd, onDragOver, onDrop, narrow, onMove, canUp, canDown }) {
+export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onToast, onRefreshResult, onDragStart, onDragEnd, onDragOver, onDrop, narrow, onMove, canUp, canDown }) {
   const [status, setStatus] = useState(null);
   const [phase, setPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
   const [summary, setSummary] = useState(null);
@@ -192,20 +192,35 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
   useEffect(() => { if (expandAll.n) setExpanded(expandAll.on); }, [expandAll]); // eslint-disable-line react-hooks/set-state-in-effect
 
   // Bumped by the card's own refresh / git ops; refreshKey is refresh-all.
-  const [reloadN, setReloadN] = useState(0);
-  const load = () => setReloadN((n) => n + 1);
+  const [reload, setReload] = useState({ n: 0, reason: 'silent' });
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const load = (reason = 'git') => setReload((r) => ({ n: r.n + 1, reason }));
+  const seenRefreshKey = useRef(refreshKey);
 
   useEffect(() => {
+    const mode = refreshKey !== seenRefreshKey.current ? 'all' : reload.reason;
+    seenRefreshKey.current = refreshKey;
+    const report = (result) => {
+      if (mode === 'single') onToast?.(result.ok
+        ? `Refreshed ${repoName(path)}`
+        : `Refresh ${repoName(path)} failed: ${result.error}`);
+      if (mode === 'all') onRefreshResult?.(refreshKey, path, result);
+    };
     fetch(`/api/projects/status?path=${encodeURIComponent(path)}`)
-      .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
-      .then((d) => { setStatus(d); setPhase('ok'); })
-      .catch(() => setPhase('error'));
-  }, [path, refreshKey, reloadN]);
+      .then(async (r) => {
+        let d;
+        try { d = await r.json(); } catch { throw new Error(`Invalid response (HTTP ${r.status})`); }
+        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+        return d;
+      })
+      .then((d) => { setStatus(d); setPhase('ok'); report({ ok: true }); if (mode === 'single') setRefreshBusy(false); })
+      .catch((e) => { setPhase('error'); report({ ok: false, error: e.message || 'network error' }); if (mode === 'single') setRefreshBusy(false); });
+  }, [path, refreshKey, reload, onToast, onRefreshResult]);
 
   // Loads independently of status: a slow LLM summary must never hold up the
   // status chips above. Skipped while collapsed; `summaryFor` remembers which
   // refresh generation was fetched so re-expanding doesn't re-request.
-  const summaryKey = `${path}|${refreshKey}|${reloadN}`;
+  const summaryKey = `${path}|${refreshKey}|${reload.n}`;
   const summaryFor = useRef(null);
   useEffect(() => {
     if (!expanded || summaryFor.current === summaryKey) return;
@@ -220,7 +235,7 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
   // once-per-refresh fetch shape as the summary above, its own state pair.
   const [review, setReview] = useState(null);
   const [reviewPhase, setReviewPhase] = useState('loading');
-  const reviewKey = `${path}|${refreshKey}|${reloadN}`;
+  const reviewKey = `${path}|${refreshKey}|${reload.n}`;
   const reviewFor = useRef(null);
   useEffect(() => {
     if (!expanded || reviewFor.current === reviewKey) return;
@@ -245,14 +260,24 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
   // Plain git (daemon shells out, no agent); reload status either way.
   const [gitBusy, setGitBusy] = useState(false);
   const [gitError, setGitError] = useState(null);
-  const runGit = (op) => {
+  const runGit = async (op) => {
     setGitBusy(true);
     setGitError(null);
-    fetch('/api/projects/git', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path, op }) })
-      .then((r) => r.json())
-      .then((d) => { if (!d.ok) setGitError(d.error || `git ${op} failed`); })
-      .catch(() => setGitError(`git ${op} failed`))
-      .finally(() => { setGitBusy(false); load(); });
+    const action = { fetch: 'git fetch', rebase: 'git rebase', sync: 'git fetch + rebase' }[op];
+    try {
+      const r = await fetch('/api/projects/git', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path, op }) });
+      let d;
+      try { d = await r.json(); } catch { throw new Error(`Invalid response (HTTP ${r.status})`); }
+      if (!r.ok || !d.ok) throw new Error(d.error || (r.ok ? `${action} failed` : `HTTP ${r.status}`));
+      onToast?.(`${action} succeeded for ${repoName(path)}`);
+    } catch (e) {
+      const detail = e.message || 'network error';
+      setGitError(`${action} failed: ${detail}`);
+      onToast?.(`${action} failed for ${repoName(path)}: ${detail}`);
+    } finally {
+      setGitBusy(false);
+      load();
+    }
   };
 
   return (
@@ -321,7 +346,7 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
           <span><IconButton size="small" aria-label="git fetch + rebase" disabled={gitBusy} onClick={() => runGit('sync')}><SyncIcon fontSize="small" /></IconButton></span>
         </Tooltip>
         <Tooltip title="Refresh project" disableInteractive>
-          <IconButton size="small" aria-label="Refresh project" onClick={() => { setGitError(null); load(); }}><RefreshIcon fontSize="small" /></IconButton>
+          <IconButton size="small" aria-label="Refresh project" disabled={refreshBusy} onClick={() => { setGitError(null); setRefreshBusy(true); load('single'); }}><RefreshIcon fontSize="small" /></IconButton>
         </Tooltip>
         <Tooltip title="Remove project" disableInteractive>
           <IconButton size="small" aria-label="Remove project" onClick={() => onDelete(path)}><DeleteOutlineIcon fontSize="small" /></IconButton>
