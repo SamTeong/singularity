@@ -391,7 +391,7 @@ export const terminalRoles = (t) => getRoles(t).terminal;
 // slotProps.content or SnackbarContent keeps its default (mode-inverted) colours.
 // Shared here (rather than left local to AppShell) so lazy-loaded views (e.g.
 // ProjectsView) can reuse the same toast look without importing the shell itself.
-export const SNACK_GLASS = (t) => ({ bgcolor: getTokens(t).glass.surface, color: 'text.primary', border: `1px solid ${getTokens(t).glass.stroke}`, backdropFilter: getTokens(t).glass.blur });
+export const SNACK_GLASS = (t) => ({ ...glass(t), color: 'text.primary', ...(getRoles(t).shell.frameBorderWidth ? null : { background: brandGrad(t), color: '#fff' }), borderRadius: getRoles(t).shell.frameBorderWidth ? 0 : '19px', fontFamily: getTokens(t).fonts.ui });
 
 // Reverse water-fill for auto-dismissing toasts: a big rotating rounded square
 // whose top edge reads as a wave, its level draining from full to empty over
@@ -408,7 +408,11 @@ export const snackDrain = (ms) => (t) => ({
     content: '""', position: 'absolute', zIndex: -1, left: '-50%', width: '200%', aspectRatio: '1', borderRadius: '45%',
     background: `color-mix(in srgb, ${t.vars.palette.primary.main} 22%, transparent)`,
     animation: `${DRAIN_ANIM} ${ms}ms linear forwards, sing-toast-wave 5s linear infinite`,
-    '@media (prefers-reduced-motion: reduce)': { animation: `${DRAIN_ANIM} ${ms}ms linear forwards` },
+    '@media (prefers-reduced-motion: reduce)': {
+      animation: `${DRAIN_ANIM} ${ms}ms linear forwards`,
+      // The drain is also the toast timer, so keep its requested duration.
+      animationDuration: `${ms}ms !important`,
+    },
   },
   '&:hover::before, &:focus-within::before': { animationPlayState: 'paused' },
   [`@keyframes ${DRAIN_ANIM}`]: { from: { top: '-15%' }, to: { top: '100%' } },

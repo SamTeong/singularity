@@ -142,7 +142,7 @@ export default function AppShell() {
   const toastItems = useRef([]);
   const nextToastId = useRef(0);
   const enqueueToast = useCallback((message, options = {}) => {
-    const toast = { id: ++nextToastId.current, message, duration: options.duration ?? 5000, action: options.action, onDismiss: options.onDismiss };
+    const toast = { id: ++nextToastId.current, message, duration: options.duration ?? 10000, action: options.action, onDismiss: options.onDismiss };
     toastItems.current = [...toastItems.current, toast];
     setToasts(toastItems.current);
     return toast.id;

@@ -16,9 +16,9 @@ export default function ToastHost({ toasts, onDismiss }) {
   if (!toasts.length) return null;
   return (
     <Box sx={(t) => ({
-      position: 'fixed', top: 24, left: '50%', transform: 'translateX(-50%)',
-      zIndex: t.zIndex.snackbar, display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'center',
-      width: 'min(600px, calc(100vw - 32px))',
+      position: 'fixed', bottom: 'calc(72px + env(safe-area-inset-bottom))', left: '50%', transform: 'translateX(-50%)',
+      zIndex: t.zIndex.snackbar, display: 'flex', flexDirection: 'column-reverse', gap: 1, alignItems: 'center',
+      width: 'min(300px, calc(100vw - 32px))',
     })}>
       {toasts.map((toast) => (
         <SnackbarContent

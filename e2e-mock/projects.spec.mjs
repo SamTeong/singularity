@@ -143,11 +143,11 @@ test('stacked outcome toasts expire independently and hover pauses their drain',
   await clean.getByRole('button', { name: 'git rebase', exact: true }).click();
   await expect(second).toBeVisible();
   await first.hover();
-  await page.waitForTimeout(5500);
+  await page.waitForTimeout(10500);
   await expect(second).toHaveCount(0);
   await expect(first).toBeVisible();
   await page.mouse.move(0, 0);
-  await expect(first).toHaveCount(0, { timeout: 6000 });
+  await expect(first).toHaveCount(0, { timeout: 11000 });
 });
 
 test('the LLM summary is fetched only when a card is expanded, once per refresh', async ({ page }) => {
