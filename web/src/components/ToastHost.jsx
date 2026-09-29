@@ -7,7 +7,9 @@ export default function ToastHost({ toasts, onDismiss }) {
   useEffect(() => {
     if (!toasts.length) return undefined;
     const closeTopToast = (e) => {
-      if (e.key === 'Escape') onDismiss(toasts[toasts.length - 1].id);
+      if (e.key !== 'Escape' || e.defaultPrevented) return;
+      if (e.target instanceof Element && e.target.closest('input,textarea,[contenteditable]:not([contenteditable="false"]),[role="dialog"],.xterm')) return;
+      onDismiss(toasts[toasts.length - 1].id);
     };
     window.addEventListener('keydown', closeTopToast);
     return () => window.removeEventListener('keydown', closeTopToast);

@@ -63,6 +63,10 @@ const SettingsView = lazy(() => import('@/features/settings/SettingsView.jsx'));
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
 const NOOP = () => {};
+// localStorage throws in private mode / when storage is blocked or full.
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* best-effort persistence */ } };
+const MAX_TOASTS = 4;
 
 const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'transcripts', 'explorer'];
 
@@ -115,7 +119,7 @@ export default function AppShell() {
   // actually renders — tablet forces the icon rail without overwriting this, so
   // crossing back to >=900px restores whatever the user last chose.
   const [collapsed, setCollapsed] = useState(
-    () => localStorage.getItem('sing-rail-collapsed') === '1');
+    () => lsGet('sing-rail-collapsed') === '1');
   // One shared breakpoint decision for the whole shell: phone gets a header +
   // temporary drawer instead of the rail, tablet gets the forced icon rail.
   const isPhone = useMediaQuery(PHONE_QUERY);
@@ -125,7 +129,7 @@ export default function AppShell() {
   // preference — otherwise a tablet tap silently changes what >=900px restores.
   const setRailCollapsed = isTablet ? NOOP : (v) => setCollapsed((c) => {
     const n = typeof v === 'function' ? v(c) : v;
-    localStorage.setItem('sing-rail-collapsed', n ? '1' : '0');
+    lsSet('sing-rail-collapsed', n ? '1' : '0');
     return n;
   });
   const [navOpen, setNavOpen] = useState(false);
@@ -143,8 +147,12 @@ export default function AppShell() {
   const nextToastId = useRef(0);
   const enqueueToast = useCallback((message, options = {}) => {
     const toast = { id: ++nextToastId.current, message, duration: options.duration ?? 10000, action: options.action, onDismiss: options.onDismiss };
-    toastItems.current = [...toastItems.current, toast];
+    const last = toastItems.current[toastItems.current.length - 1];
+    if (last && last.message === message && last.action === options.action) return last.id;
+    const evicted = toastItems.current.slice(0, Math.max(0, toastItems.current.length + 1 - MAX_TOASTS));
+    toastItems.current = [...toastItems.current.slice(evicted.length), toast];
     setToasts(toastItems.current);
+    evicted.forEach((t) => t.onDismiss?.());
     return toast.id;
   }, []);
   const dismissToast = useCallback((id) => {
@@ -177,7 +185,7 @@ export default function AppShell() {
   const [restartOpen, setRestartOpen] = useState(false); // restart-daemon confirm dialog
   const [restarting, setRestarting] = useState(false); // true while polling /health for the new daemon
   // Terminal dock minimized state, persisted (height is a useResizable below).
-  const [dockMin, setDockMin] = useState(() => localStorage.getItem('sing-dock-min') === '1');
+  const [dockMin, setDockMin] = useState(() => lsGet('sing-dock-min') === '1');
   // A viewport that cannot afford an open dock: phone width, or any viewport
   // short enough that the dock's height clamp still leaves the page above it
   // unusable (landscape phone, 667x375 — tablet by width, shorter than any
@@ -214,7 +222,7 @@ export default function AppShell() {
 
   // Not the source of truth any more — just the "where was I" memory that a
   // bare `/` redirects to (App.jsx's DefaultRedirect).
-  useEffect(() => { localStorage.setItem('sing-view', view); }, [view]);
+  useEffect(() => { lsSet('sing-view', view); }, [view]);
   // Resizing out of phone mode takes the header trigger with it, so MUI has
   // nothing to restore focus to. Close the drawer (same render-time adjustment
   // `visited` uses above) and, if the unmount dropped focus on <body>, hand it
@@ -270,13 +278,13 @@ export default function AppShell() {
   // opening the dock on a phone never becomes the desktop default.
   const toggleDock = () => {
     if (tightDock) { setTightDockMin((m) => !m); return; }
-    setDockMin((m) => { const n = !m; localStorage.setItem('sing-dock-min', n ? '1' : '0'); return n; });
+    setDockMin((m) => { const n = !m; lsSet('sing-dock-min', n ? '1' : '0'); return n; });
   };
   // Starting a new session should reveal the Sessions dock even if the user had
   // it minimized — no-op if already expanded.
   const expandDock = useCallback(() => {
     if (tightDock) { setTightDockMin(false); return; }
-    setDockMin((m) => { if (!m) return m; localStorage.setItem('sing-dock-min', '0'); return false; });
+    setDockMin((m) => { if (!m) return m; lsSet('sing-dock-min', '0'); return false; });
   }, [tightDock]);
 
   // A running claude process picks its TUI theme once at spawn (queried from the
