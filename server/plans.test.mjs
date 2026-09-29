@@ -79,6 +79,14 @@ test('listSessions: only session dirs with >=1 plan; origins/, non-UUID and plan
   assert.deepEqual(a.statusBuckets, { active: 1, done: 0, blocked: 0, superseded: 0, other: 0 });
   assert.equal(typeof a.mtime, 'number');
   assert.ok(a.mtime > 0); // folder mtime
+
+  // state.json summary fields (VERIFY: refine-server-fields)
+  assert.equal(a.branch, 'main');
+  assert.equal(a.contextTokens, 173412);
+
+  const c = list.find((s) => s.sid === SID_C); // no state.json in this dir
+  assert.equal(c.branch, null);
+  assert.equal(c.contextTokens, null);
 });
 
 test('isPlan detection: `# Plan` heading and `## Objective` heading both qualify', async () => {

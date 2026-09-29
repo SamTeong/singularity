@@ -152,7 +152,20 @@ export async function listSessions() {
     if (planCount < 1) continue;
     let mtime = 0;
     try { mtime = (await stat(dir)).mtimeMs; } catch { /* keep 0 */ }
-    out.push({ sid: e.name, mtime, planCount, statusBuckets: buckets });
+    // state.json summary for the list card (same snapshot getSession reads):
+    // branch + context tokens, null when the file is absent or malformed.
+    // VERIFY: refine-server-fields
+    let branch = null;
+    let contextTokens = null;
+    const raw = await readCapped(join(dir, 'state.json'));
+    if (raw) {
+      try {
+        const j = JSON.parse(raw);
+        branch = j.branch ?? null;
+        contextTokens = j.context_tokens ?? null;
+      } catch { /* malformed snapshot → keep nulls */ }
+    }
+    out.push({ sid: e.name, mtime, planCount, statusBuckets: buckets, branch, contextTokens });
   }
   return out;
 }
