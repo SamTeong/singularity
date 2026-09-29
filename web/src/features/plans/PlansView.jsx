@@ -301,7 +301,8 @@ export default function PlansView() {
           type: 'plan',
           position: { x: x + COL_PITCH, y: y + j * PLAN_PITCH },
           draggable: false,
-          zIndex: 10,
+          // the open accordion grows past the next card — paint it above siblings
+          zIndex: openPlan === key ? 20 : 10,
           data: {
             plan: p,
             notes: openDetail.notes.filter((n) => !n.plan || n.plan === p.file),
