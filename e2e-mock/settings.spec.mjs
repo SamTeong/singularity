@@ -149,14 +149,16 @@ test('Settings: dragging an above-threshold rate row reorders and persists it', 
   }
   await prices.getByRole('button', { name: 'Add', exact: true }).nth(1).click();
 
-  // Base's four rows come first; the above table's two rows follow them.
+  // Base's rows come first; the above table's two rows follow them. Base's
+  // length is seed-dependent, so derive the boundary instead of hard-coding.
   const keys = () => prices.getByPlaceholder('e.g. opus');
-  const [above0, above1] = [await keys().nth(4).inputValue(), await keys().nth(5).inputValue()];
-  const handle = prices.getByRole('button', { name: 'Reorder' }).nth(4);
-  await html5Drag(page, handle, keys().nth(5));
+  const nBase = (await keys().count()) - 2;
+  const [above0, above1] = [await keys().nth(nBase).inputValue(), await keys().nth(nBase + 1).inputValue()];
+  const handle = prices.getByRole('button', { name: 'Reorder' }).nth(nBase);
+  await html5Drag(page, handle, keys().nth(nBase + 1));
 
-  await expect(keys().nth(4)).toHaveValue(above1);
-  await expect(keys().nth(5)).toHaveValue(above0);
+  await expect(keys().nth(nBase)).toHaveValue(above1);
+  await expect(keys().nth(nBase + 1)).toHaveValue(above0);
 
   // Same whole-doc PUT as the base table — above_200k order round-trips.
   const doc = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
@@ -170,8 +172,10 @@ test('Settings: deleting the selected fallback chooses next and clears the last 
   const saved = () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
 
   await prices.getByRole('button', { name: 'Delete opus', exact: true }).click();
+  await expect.poll(async () => (await saved()).default_key).toBe('sonnet-5-5');
+  await prices.getByRole('button', { name: 'Delete sonnet-5-5', exact: true }).click();
   await expect.poll(async () => (await saved()).default_key).toBe('sonnet');
-  await prices.getByRole('button', { name: 'Delete sonnet' }).click();
+  await prices.getByRole('button', { name: 'Delete sonnet', exact: true }).click();
   await expect.poll(async () => (await saved()).default_key).toBe('haiku');
   await prices.getByRole('button', { name: 'Delete haiku' }).click();
   await expect.poll(async () => (await saved()).default_key).toBe('opus-5-5');
