@@ -964,6 +964,20 @@ test('sampleCodex: the network floor arms even on a failed attempt — a persist
   }
 });
 
+test('getUsage: the network floor also holds on a cold cache (a concurrent automated pull does not double-fetch)', async () => {
+  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?cold-floor=${Date.now()}`);
+  let calls = 0;
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const fetchers = { ollama: async () => { calls += 1; await gate; return { ok: true, session: null, weekly: null }; } };
+  const first = isolatedGetUsage({ sources: ['ollama'], fetchers });
+  const second = await isolatedGetUsage({ sources: ['ollama'], fetchers });
+  assert.equal(second.ollama, null); // cold + inside the floor: "Loading…", not a second attempt
+  release();
+  await first;
+  assert.equal(calls, 1);
+});
+
 test('getUsage: manual force=1 bypasses the network floor an automated call just armed', async () => {
   const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-floor-manual=${Date.now()}`);
   const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));

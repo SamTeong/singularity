@@ -165,6 +165,22 @@ test('readSession: response_item users and tool outputs render without duplicate
   }
 });
 
+test('listSessions: injected wrapper-tag context (<user_instructions>, <turn_aborted>) never becomes the title', async () => {
+  const user = (text) => JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text }] } });
+  writeRollout([
+    EVENTS[0],
+    user('<user_instructions>\nBe terse\n</user_instructions>'),
+    user('<turn_aborted>\nThe user interrupted\n</turn_aborted>'),
+    user('Real prompt'),
+  ]);
+  try {
+    const sessions = await listSessions({ root: join(CODEX_HOME, 'nonexistent') });
+    assert.equal(sessions[0].title, 'Real prompt');
+  } finally {
+    rmSync(CODEX_HOME, { recursive: true, force: true });
+  }
+});
+
 test('hideReviews excludes Codex review prompts before the list cap and from search', async () => {
   const reviewId = '019f9718-405c-7fd3-9b8a-f3af71880fe3';
   const reviewFile = join(ROLLOUT_DIR, `rollout-2026-07-24T10-26-16-${reviewId}.jsonl`);

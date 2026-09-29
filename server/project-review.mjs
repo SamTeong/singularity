@@ -16,7 +16,7 @@ const IS_WIN = process.platform === 'win32';
 // project path here is whatever projects.json stored (native separators on
 // win32). Fold both to the same shape before comparing.
 const slashKey = (p) => {
-  const s = String(p).replace(/\\/g, '/');
+  const s = String(p).replace(/\\/g, '/').replace(/(?<=.)\/+$/, ''); // trailing slash must not break equality/prefix
   return IS_WIN ? s.toLowerCase() : s;
 };
 
@@ -90,10 +90,15 @@ function parseFindingsFile(content, kind) {
   return findings;
 }
 
+// Ledger cells are untrusted text: session ids become path segments, targets git args.
+const SESSION_ID_RE = /^[\w-]+$/;
+const SHA_RE = /^[0-9a-f]{7,40}$/i;
+
 // All findings across every *.md file under <sid>/findings/ — file name
 // 'preexisting*' => kind 'preexisting', else 'introduced'. Missing dir => [].
 function readRunFindings(sessionId) {
   const dir = join(PROJECT_REVIEW_DIR, sessionId, 'findings');
+  if (!SESSION_ID_RE.test(sessionId) || !contains(PROJECT_REVIEW_DIR, dir)) return [];
   let names;
   try { names = readdirSync(dir).filter((f) => f.toLowerCase().endsWith('.md')).sort(); }
   catch { return []; }
@@ -128,11 +133,13 @@ function addCounts(counts, findings) {
 // current backlog).
 export async function reviewStatus(path) {
   if (!PROJECT_REVIEW_DIR) return { enabled: false };
+  // ponytail: ledger + findings are read synchronously per request (one small file each);
+  // move to async reads or an mtime-keyed cache if the ledger passes a few hundred rows.
   const ledgerFile = join(PROJECT_REVIEW_DIR, 'project-review-log.md');
   let text;
   try { text = readFileSync(ledgerFile, 'utf8'); } catch { return { enabled: true, runs: [], latest: null }; }
 
-  const rows = parseLedgerRows(text).filter((cells) => matchesWorktree(cells[1], path));
+  const rows = parseLedgerRows(text).filter((cells) => SESSION_ID_RE.test(cells[0]) && matchesWorktree(cells[1], path));
   const runs = rows.map((cells) => {
     const [sessionId, worktree, baseline, target, startedAt, completedAt, harness, model, , status, artifactsCell] = cells;
     return {
@@ -149,7 +156,7 @@ export async function reviewStatus(path) {
   for (const r of runs) addCounts(counts, r.findings);
 
   let commitsSince = null;
-  if (latestRun.status === 'DONE') {
+  if (latestRun.status === 'DONE' && SHA_RE.test(latestRun.target)) {
     try { commitsSince = Number(await git(path, 'rev-list', '--count', `${latestRun.target}..HEAD`)); }
     catch { commitsSince = null; } // target sha unknown to this worktree
   }
