@@ -500,7 +500,7 @@ export default function AppShell() {
             {view === 'status' && <StatusView />}
             {view === 'settings' && <SettingsView />}
             {view === 'skills' && <SkillsPanel />}
-            {view === 'plans' && <PlansView />}
+            {view === 'plans' && <PlansView onToast={setToast} />}
             {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} cwd={cwd} setCwd={setCwd} onBrowse={() => setPicking(true)} onAdd={() => setCronOpen(true)} onEdit={setCronOpen} onToast={setToast} />}
             {view === 'tasks' && (
               <TasksBoard

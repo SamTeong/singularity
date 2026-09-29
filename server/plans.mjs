@@ -5,14 +5,14 @@
 // Model on rules.mjs (bounded dir listing, path guard, SING_* test override).
 import { readdir, readFile, stat, open } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
-import { homedir } from 'node:os';
 
-// SING_PLANS_ROOT overrides the tree root (tests isolate from the real FS).
-// Read at import time, like rules.mjs's SING_RULES_REF, so it must be set
-// before the dynamic import in a test.
-const PLAN_ROOT = process.env.SING_PLANS_ROOT
+// The plan tree root comes from SING_PLANS_ROOT — there is no implicit
+// ~/.agents/.plan default: the feature stays disabled until the user points
+// the daemon at a dir in .env. Read at import time, like rules.mjs's
+// SING_RULES_REF, so it must be set before the dynamic import in a test.
+export const PLAN_ROOT = process.env.SING_PLANS_ROOT
   ? resolve(process.env.SING_PLANS_ROOT)
-  : join(homedir(), '.agents', '.plan');
+  : null;
 
 const DIR_CAP = 300;               // session dirs scanned per listSessions call
 const NOTES_CAP = 200;             // note files returned per session
@@ -134,6 +134,7 @@ function parsePlan(file, md) {
 // VERIFY: plans.mjs-routes  (both exports below back /plans/sessions + /plans/session)
 export async function listSessions() {
   const out = [];
+  if (PLAN_ROOT == null) return out; // disabled: no SING_PLANS_ROOT in .env
   let ents;
   try { ents = await readdir(PLAN_ROOT, { withFileTypes: true }); } catch { return out; }
   let scanned = 0;
@@ -176,6 +177,7 @@ export async function listSessions() {
 // with no plan files (notes are still browsable); only a missing/unreadable dir
 // is 'not found'.
 export async function getSession(sid) {
+  if (PLAN_ROOT == null) return { ok: false, error: 'plans disabled' }; // no SING_PLANS_ROOT in .env
   if (typeof sid !== 'string' || !SID_RE.test(sid)) return { ok: false, error: 'bad sid' };
   const root = resolve(PLAN_ROOT);
   const dir = resolve(join(root, sid));
