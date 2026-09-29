@@ -18,6 +18,8 @@ import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchC
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
+// Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
+import { listSessions as listPlanSessions, getSession as getPlanSession } from './plans.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
@@ -763,6 +765,16 @@ app.put('/rules/file', async (req, reply) => {
 app.get('/rules/reference', async (req, reply) => {
   const r = findRuleReference(req.query.path);
   if (!r.ok) reply.code(r.error === 'no reference' ? 404 : 400);
+  return r;
+});
+
+// Plans: read-only browse of the handoff plan tree (~/.agents/.plan) — session
+// dirs holding markdown plans + a state.json snapshot. Never written to.
+// VERIFY: plans-index-routes
+app.get('/plans/sessions', async () => listPlanSessions());
+app.get('/plans/session', async (req, reply) => {
+  const r = await getPlanSession(req.query.sid);
+  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
 

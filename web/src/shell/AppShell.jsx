@@ -59,6 +59,8 @@ const CronJobs = lazy(() => import('@/features/automation/CronJobs.jsx'));
 const AppearanceView = lazy(() => import('@/features/appearance/AppearanceView.jsx'));
 const StatusView = lazy(() => import('@/features/status/StatusView.jsx'));
 const SettingsView = lazy(() => import('@/features/settings/SettingsView.jsx'));
+// POC boards — see features/plans-poc/. Delete with the losing view.
+const PlansView = lazy(() => import('@/features/plans/PlansView.jsx'));
 
 // Views that mount once (on first visit) and stay mounted (display:none when
 // hidden) so live CodeMirror + unsaved edits survive view switches.
@@ -498,6 +500,7 @@ export default function AppShell() {
             {view === 'status' && <StatusView />}
             {view === 'settings' && <SettingsView />}
             {view === 'skills' && <SkillsPanel />}
+            {view === 'plans' && <PlansView />}
             {view === 'cron' && <CronJobs crons={crons} agents={agents} background={background} recent={recent} cwd={cwd} setCwd={setCwd} onBrowse={() => setPicking(true)} onAdd={() => setCronOpen(true)} onEdit={setCronOpen} onToast={setToast} />}
             {view === 'tasks' && (
               <TasksBoard
