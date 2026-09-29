@@ -145,7 +145,7 @@ test('stacked outcome toasts expire independently and hover pauses their drain',
   await first.hover();
   await expect(second).toHaveCount(0, { timeout: 15000 });
   await expect(first).toBeVisible();
-  await clean.hover();
+  await page.mouse.move(0, 0); // unhover: the drain resumes only once :hover clears
   await expect(first).toHaveCount(0, { timeout: 13000 });
 });
 
