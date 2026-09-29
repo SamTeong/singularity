@@ -163,7 +163,7 @@ for (const skin of ['ZAPAC', 'Phosphor Console']) {
       // bare "5h" label, so a provider-name locator would match the rail
       // first and never reach this view at all.
       const clip = await page.evaluate(() => {
-        const label = [...document.querySelectorAll('*')].find((e) => !e.children.length && e.textContent.startsWith('5h: '));
+        const label = [...document.querySelectorAll('*')].find((e) => e.textContent.startsWith('5h: ') && ![...e.children].some((c) => c.textContent.startsWith('5h: ')));
         let card = label;
         for (let i = 0; i < 6 && card; i++) {
           const cs = getComputedStyle(card);
