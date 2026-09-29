@@ -196,10 +196,12 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onT
   const [refreshBusy, setRefreshBusy] = useState(false);
   const load = (reason = 'git') => setReload((r) => ({ n: r.n + 1, reason }));
   const seenRefreshKey = useRef(refreshKey);
+  const statusSeq = useRef(0);
 
   useEffect(() => {
     const mode = refreshKey !== seenRefreshKey.current ? 'all' : reload.reason;
     seenRefreshKey.current = refreshKey;
+    const seq = ++statusSeq.current;
     const report = (result) => {
       if (mode === 'single') onToast?.(result.ok
         ? `Refreshed ${repoName(path)}`
@@ -213,8 +215,8 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onT
         if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
         return d;
       })
-      .then((d) => { setStatus(d); setPhase('ok'); report({ ok: true }); if (mode === 'single') setRefreshBusy(false); })
-      .catch((e) => { setPhase('error'); report({ ok: false, error: e.message || 'network error' }); if (mode === 'single') setRefreshBusy(false); });
+      .then((d) => { if (seq === statusSeq.current) { setStatus(d); setPhase('ok'); } report({ ok: true }); setRefreshBusy(false); })
+      .catch((e) => { if (seq === statusSeq.current) setPhase('error'); report({ ok: false, error: e.message || 'network error' }); setRefreshBusy(false); });
   }, [path, refreshKey, reload, onToast, onRefreshResult]);
 
   // Loads independently of status: a slow LLM summary must never hold up the
@@ -227,8 +229,8 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onT
     summaryFor.current = summaryKey;
     fetch(`/api/projects/summary?path=${encodeURIComponent(path)}`)
       .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
-      .then((d) => { setSummary(d); setSummaryPhase('ok'); })
-      .catch(() => setSummaryPhase('error'));
+      .then((d) => { if (summaryFor.current === summaryKey) { setSummary(d); setSummaryPhase('ok'); } })
+      .catch(() => { if (summaryFor.current === summaryKey) { summaryFor.current = null; setSummaryPhase('error'); } });
   }, [expanded, summaryKey, path]);
 
   // Review status (project-review skill's ledger) — same expand-gated,
@@ -242,8 +244,8 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onT
     reviewFor.current = reviewKey;
     fetch(`/api/projects/review?path=${encodeURIComponent(path)}`)
       .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
-      .then((d) => { setReview(d); setReviewPhase('ok'); })
-      .catch(() => setReviewPhase('error'));
+      .then((d) => { if (reviewFor.current === reviewKey) { setReview(d); setReviewPhase('ok'); } })
+      .catch(() => { if (reviewFor.current === reviewKey) { reviewFor.current = null; setReviewPhase('error'); } });
   }, [expanded, reviewKey, path]);
 
   // Artifact-link dialog: /projects/review/file?rel= content, reusing the
@@ -283,6 +285,8 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onT
   return (
     <Box
       data-testid="project-card"
+      role="group"
+      aria-label={repoName(path)}
       aria-expanded={expanded}
       tabIndex={0}
       onClick={toggle}

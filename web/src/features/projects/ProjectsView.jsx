@@ -76,6 +76,12 @@ export default function ProjectsView({ onToast, dismissToast }) {
       .then((r) => r.json())
       .then((d) => {
         setProjects(d.projects);
+        const batch = refreshAll.current;
+        if (batch) {
+          batch.paths = batch.paths.filter((p) => p !== path);
+          batch.results.delete(path);
+          settleRefreshAll();
+        }
         const toast = { id: null, path, order };
         const id = onToast(`Removed ${repoName(path)}`, {
           duration: 10000,
@@ -126,11 +132,9 @@ export default function ProjectsView({ onToast, dismissToast }) {
       .catch(() => setError('Could not restore project.'));
   };
 
-  const onRefreshResult = useCallback((generation, path, result) => {
+  const settleRefreshAll = useCallback(() => {
     const batch = refreshAll.current;
-    if (!batch || batch.generation !== generation || !batch.paths.includes(path)) return;
-    batch.results.set(path, result);
-    if (batch.results.size !== batch.paths.length) return;
+    if (!batch || batch.results.size !== batch.paths.length) return;
     refreshAll.current = null;
     setRefreshingAll(false);
     const failed = [...batch.results].filter(([, outcome]) => !outcome.ok);
@@ -138,6 +142,13 @@ export default function ProjectsView({ onToast, dismissToast }) {
       ? `Refresh all failed: ${failed.map(([p, outcome]) => `${repoName(p)}: ${outcome.error}`).join('; ')}`
       : 'All projects refreshed');
   }, [onToast]);
+
+  const onRefreshResult = useCallback((generation, path, result) => {
+    const batch = refreshAll.current;
+    if (!batch || batch.generation !== generation || !batch.paths.includes(path)) return;
+    batch.results.set(path, result);
+    settleRefreshAll();
+  }, [settleRefreshAll]);
 
   const refreshAllProjects = () => {
     const generation = refreshKey + 1;
