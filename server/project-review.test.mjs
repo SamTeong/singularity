@@ -159,6 +159,19 @@ test('reviewStatus: BLOCKED latest run never attempts commitsSince', async () =>
   assert.equal(r.latest.commitsSince, null);
 });
 
+test('reviewStatus: rejects traversal session ids and non-sha targets; trailing slash on path still matches', async () => {
+  const row = (sid, target) => `| ${sid} | /evil/repo | none | ${target} | t | t | Codex | unknown | unknown | DONE | |\n`;
+  writeFileSync(join(REVIEW_DIR, 'project-review-log.md'), ledger
+    + row('../sid-new', 'abc1234') + row('sid-new', '--output=x') + row('sid-ok', 'abc1234'));
+  const r = await reviewStatus('/evil/repo/');
+  assert.deepEqual(r.runs.map((x) => x.sessionId), ['sid-ok', 'sid-new']); // '../sid-new' skipped
+  assert.equal(r.runs[1].target, '--output=x');
+  assert.equal(r.runs[0].findings.length, 0);
+  const bad = await reviewStatus('/evil/repo');
+  assert.equal(bad.latest.commitsSince, null); // sid-ok target unknown to git, and never a flag-shaped target
+  writeFileSync(join(REVIEW_DIR, 'project-review-log.md'), ledger);
+});
+
 test('reviewStatus: PROJECT_REVIEW_DIR unset => disabled', async () => {
   const saved = process.env.PROJECT_REVIEW_DIR;
   delete process.env.PROJECT_REVIEW_DIR;

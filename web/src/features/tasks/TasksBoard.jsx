@@ -778,11 +778,11 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
               <Select size="small" aria-label="Rows per page" value={histPageSize} onChange={(e) => setHistPageSize(Number(e.target.value))} sx={{ height: 34, '& .MuiSelect-select': { py: 0.5, fontSize: 12 } }}>
                 {[25, 50, 100].map((n) => <MenuItem key={n} value={n}>{n}</MenuItem>)}
               </Select>
-              <IconButton size="small" disabled={histCurPage <= 1} onClick={() => setHistPage(histCurPage - 1)}><ChevronLeftIcon /></IconButton>
+              <IconButton size="small" aria-label="Previous page" disabled={histCurPage <= 1} onClick={() => setHistPage(histCurPage - 1)}><ChevronLeftIcon /></IconButton>
               <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 52, height: 34 }}>
                 <Typography sx={{ fontSize: 11, color: 'text.secondary', lineHeight: 1 }}>{sortedHistory.length ? `${histCurPage}/${histPageCount}` : '—'}</Typography>
               </Box>
-              <IconButton size="small" disabled={histCurPage >= histPageCount} onClick={() => setHistPage(histCurPage + 1)}><ChevronRightIcon /></IconButton>
+              <IconButton size="small" aria-label="Next page" disabled={histCurPage >= histPageCount} onClick={() => setHistPage(histCurPage + 1)}><ChevronRightIcon /></IconButton>
             </Stack>
           </Box>
         </Stack>

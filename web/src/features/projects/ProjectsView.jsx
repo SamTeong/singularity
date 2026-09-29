@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { getTokens } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -8,7 +8,6 @@ import IconButton from '@mui/material/IconButton';
 import Tooltip from '@mui/material/Tooltip';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import Alert from '@mui/material/Alert';
-import SnackbarContent from '@mui/material/SnackbarContent';
 import AddIcon from '@mui/icons-material/Add';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import UnfoldLessIcon from '@mui/icons-material/UnfoldLess';
@@ -20,10 +19,8 @@ import { untildify, repoName } from '@/lib/paths.js';
 import ProjectCard from '@/features/projects/ProjectCard.jsx';
 import { useThemeSkin } from '@/theme/index.js';
 import { primaryBtn, PHOSPHOR_CONTROL_H } from '@/features/tasks/TasksBoard.jsx';
-import { SNACK_GLASS, snackDrain, isDrainEnd } from '@/shell/shellStyles.js';
 import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 
-const TOAST_DRAIN = snackDrain(10000);
 
 /**
  * Projects — tracked git repo toplevels, each showing its git status at a
@@ -31,7 +28,7 @@ const TOAST_DRAIN = snackDrain(10000);
  * status, and surfaces the "not a git repository" add error. No polling: a
  * card refreshes on mount, on add, and on refresh-all (gaps §Refresh).
  */
-export default function ProjectsView() {
+export default function ProjectsView({ onToast, dismissToast }) {
   const [projects, setProjects] = useState([]);
   const [loaded, setLoaded] = useState(false);
   const [picking, setPicking] = useState(false);
@@ -39,10 +36,11 @@ export default function ProjectsView() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [expandAll, setExpandAll] = useState({ on: false, n: 0 });
   const [dragId, setDragId] = useState(null);
-  // One undo toast per delete, stacked (not replaced) — each carries the
-  // deleted path and the shared order from the start of the delete stack.
-  const [toasts, setToasts] = useState([]);
-  const nextToastId = useRef(0);
+  // Undo metadata stays here; the shell's shared host owns toast presentation.
+  const [undoToasts, setUndoToasts] = useState([]);
+  const undoToastIds = useRef(new Set());
+  const refreshAll = useRef(null);
+  const [refreshingAll, setRefreshingAll] = useState(false);
   const { skinId } = useThemeSkin();
   const phosphor = skinId === 'phosphor';
   const isPhone = useMediaQuery(PHONE_QUERY);
@@ -51,9 +49,10 @@ export default function ProjectsView() {
   // replaced by the compact Move pair (same phone||tablet switch as CronJobs).
   const narrow = isPhone || isTablet;
 
-  const dismissToast = (id) => {
-    setToasts((ts) => ts.filter((t) => t.id !== id));
-  };
+  useEffect(() => () => {
+    for (const id of undoToastIds.current) dismissToast(id);
+    undoToastIds.current.clear();
+  }, [dismissToast]);
 
   useEffect(() => {
     fetch('/api/projects').then((r) => r.json()).then((d) => setProjects(d.projects || [])).finally(() => setLoaded(true));
@@ -72,13 +71,29 @@ export default function ProjectsView() {
   };
 
   const removeProject = (path) => {
-    const order = toasts[0]?.order || projects;
+    const order = undoToasts[0]?.order || projects;
     fetch('/api/projects', { method: 'DELETE', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path }) })
       .then((r) => r.json())
       .then((d) => {
         setProjects(d.projects);
-        const id = ++nextToastId.current;
-        setToasts((ts) => [...ts, { id, path, order }]);
+        const batch = refreshAll.current;
+        if (batch) {
+          batch.paths = batch.paths.filter((p) => p !== path);
+          batch.results.delete(path);
+          settleRefreshAll();
+        }
+        const toast = { id: null, path, order };
+        const id = onToast(`Removed ${repoName(path)}`, {
+          duration: 10000,
+          action: <Button size="small" variant="contained" onClick={() => undoDelete({ ...toast, id })}>Undo</Button>,
+          onDismiss: () => {
+            undoToastIds.current.delete(id);
+            setUndoToasts((ts) => ts.filter((t) => t.id !== id));
+          },
+        });
+        toast.id = id;
+        undoToastIds.current.add(id);
+        setUndoToasts((ts) => [...ts, toast]);
       })
       .catch(() => {});
   };
@@ -115,6 +130,33 @@ export default function ProjectsView() {
           });
       })
       .catch(() => setError('Could not restore project.'));
+  };
+
+  const settleRefreshAll = useCallback(() => {
+    const batch = refreshAll.current;
+    if (!batch || batch.results.size !== batch.paths.length) return;
+    refreshAll.current = null;
+    setRefreshingAll(false);
+    const failed = [...batch.results].filter(([, outcome]) => !outcome.ok);
+    onToast(failed.length
+      ? `Refresh all failed: ${failed.map(([p, outcome]) => `${repoName(p)}: ${outcome.error}`).join('; ')}`
+      : 'All projects refreshed');
+  }, [onToast]);
+
+  const onRefreshResult = useCallback((generation, path, result) => {
+    const batch = refreshAll.current;
+    if (!batch || batch.generation !== generation || !batch.paths.includes(path)) return;
+    batch.results.set(path, result);
+    settleRefreshAll();
+  }, [settleRefreshAll]);
+
+  const refreshAllProjects = () => {
+    const generation = refreshKey + 1;
+    const paths = [...projects];
+    if (!paths.length) { onToast('All projects refreshed'); return; }
+    refreshAll.current = { generation, paths, results: new Map() };
+    setRefreshingAll(true);
+    setRefreshKey(generation);
   };
 
   // Native HTML5 DnD (TasksBoard precedent) — drop moves `path` into the drop
@@ -168,7 +210,7 @@ export default function ProjectsView() {
             </IconButton>
           </Tooltip>
           <Tooltip title="Refresh all" disableInteractive>
-            <IconButton size="small" aria-label="Refresh all" onClick={() => setRefreshKey((k) => k + 1)}><RefreshIcon fontSize="small" /></IconButton>
+          <IconButton size="small" aria-label="Refresh all" disabled={refreshingAll} onClick={refreshAllProjects}><RefreshIcon fontSize="small" /></IconButton>
           </Tooltip>
           <Button size="small" startIcon={<AddIcon />} onClick={() => setPicking(true)} sx={(t) => (phosphor ? { height: PHOSPHOR_CONTROL_H } : primaryBtn(t))}>
             Add folder
@@ -191,6 +233,8 @@ export default function ProjectsView() {
                 key={path}
                 path={path}
                 refreshKey={refreshKey}
+                onToast={onToast}
+                onRefreshResult={onRefreshResult}
                 expandAll={expandAll}
                 onDelete={removeProject}
                 narrow={narrow}
@@ -209,27 +253,6 @@ export default function ProjectsView() {
 
       {picking && <DirPicker start={untildify('~')} onPick={addProject} onClose={() => setPicking(false)} />}
 
-      {/* MUI Snackbar can't stack itself — a fixed-position column of
-          SnackbarContent stands in so a delete during an open toast's window
-          adds a second toast instead of replacing it. */}
-      {toasts.length > 0 && (
-        <Box
-          sx={(t) => ({
-            position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)',
-            zIndex: t.zIndex.snackbar, display: 'flex', flexDirection: 'column', gap: 1, alignItems: 'center',
-          })}
-        >
-          {toasts.map((toast) => (
-            <SnackbarContent
-              key={toast.id}
-              sx={[SNACK_GLASS, TOAST_DRAIN]}
-              onAnimationEnd={(e) => isDrainEnd(e) && dismissToast(toast.id)}
-              message={`Removed ${repoName(toast.path)}`}
-              action={<Button size="small" variant="contained" onClick={() => undoDelete(toast)}>Undo</Button>}
-            />
-          ))}
-        </Box>
-      )}
     </Box>
   );
 }

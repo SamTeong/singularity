@@ -68,6 +68,9 @@ export default function PricesAccordion() {
   // Last known-good draft (from load or a successful save), to skip a PUT on
   // blur when nothing actually changed.
   const lastSaved = useRef(EMPTY_DRAFT);
+  // Refs to grip handles keyed by `${tableKey}:${index}` for keyboard focus
+  // management after reorder.
+  const gripRefs = useRef({});
 
   const load = () => {
     fetch('/api/models/prices')
@@ -116,11 +119,17 @@ export default function PricesAccordion() {
   // endpoints. Native HTML5 DnD, committed on drop like ModelsPanel's group
   // reorder; the handle also takes ArrowUp/ArrowDown so it stays keyboard-usable.
   const reorder = (table, from, to) => {
+    if (from === to) return;
     const rows = [...draft[table]];
     if (to < 0 || to >= rows.length) return;
     const [row] = rows.splice(from, 1);
     rows.splice(to, 0, row);
     save({ ...draft, [table]: rows });
+    // Focus the grip handle at its new position on the next frame.
+    requestAnimationFrame(() => {
+      const newKey = `${table}:${to}`;
+      gripRefs.current[newKey]?.focus();
+    });
   };
   const deleteRow = (table, i) => {
     const rows = draft[table].filter((_, j) => j !== i);
@@ -183,6 +192,7 @@ export default function PricesAccordion() {
           ) : (
             <Tooltip title="Drag to reorder (or focus and press ↑ / ↓)">
               <IconButton
+                ref={(el) => { if (el) gripRefs.current[`${tableKey}:${i}`] = el; }}
                 size="small"
                 aria-label="Reorder"
                 draggable
@@ -191,7 +201,8 @@ export default function PricesAccordion() {
                 onKeyDown={(e) => {
                   if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
                   e.preventDefault();
-                  reorder(tableKey, i, i + (e.key === 'ArrowUp' ? -1 : 1));
+                  const newIndex = i + (e.key === 'ArrowUp' ? -1 : 1);
+                  reorder(tableKey, i, newIndex);
                 }}
                 sx={{ cursor: 'grab' }}
               >

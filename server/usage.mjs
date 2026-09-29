@@ -805,7 +805,7 @@ async function pull(src, fetcher, force) {
   // failed — a persistently failing source cannot retry sooner than the floor
   // either. force=true is the manual Refresh route only; it bypasses this the
   // same way it always bypassed the cache below.
-  if (!force && slot.data && Date.now() - slot.at < NETWORK_FLOOR_MS) return slot.data;
+  if (!force && slot.at && Date.now() - slot.at < NETWORK_FLOOR_MS) return slot.data; // null on a cold cache = "Loading…"
   slot.at = Date.now(); // stamp before the attempt: a hang or failure still counts against the floor
   // Past every gate above: this pull is doing the heavy work, so it asks the
   // fetcher for its fullest answer (claude's OAuth call, codex's rollout scan
@@ -939,7 +939,10 @@ function scheduleResetRefreshes(result) {
   for (const src of ['ollama', 'claude', 'codex']) {
     for (const win of ['session', 'weekly']) {
       const delay = resetDelay(result[src]?.[win]?.resetsAt);
-      if (delay != null) resetTimers.push(setTimeout(() => getUsage({}).catch(() => {}), delay + 2000));
+      if (delay != null) resetTimers.push(setTimeout(() => {
+        cache[src].at = 0; // the window just reset: let exactly one refresh past the floor
+        getUsage({ sources: src }).catch(() => {});
+      }, delay + 2000));
     }
   }
 }

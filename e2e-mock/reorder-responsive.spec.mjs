@@ -22,7 +22,7 @@ test.describe.configure({ timeout: 60_000 });
 // ------------------------------------------------------------- project cards
 
 // Cards are ordered by DOM position; the first <p> in the card is its repoName.
-const cardTitles = (page) => page.locator('[data-testid="project-card"]').evaluateAll((els) => els.map((el) => el.querySelector('p')?.textContent || ''));
+const cardTitles = (page) => page.locator('[data-testid="project-card"]').evaluateAll((els) => els.map((el) => el.querySelector('button[aria-expanded]')?.textContent || ''));
 
 test('live 899/900 crossing swaps a project card between the drag grip and Move up/down buttons', async ({ page }) => {
   await page.setViewportSize(DESKTOP);

@@ -2,7 +2,7 @@
 // git-status readout (web/src/mock/routes/projects.js). Same conventions as
 // config.spec.mjs (html5Drag recipe, gotoView/openMenu from e2e/helpers/nav.mjs).
 import { test, expect } from './fixtures/test.mjs';
-import { gotoView, openMenu } from '../e2e/helpers/nav.mjs';
+import { gotoView, gotoRail, gotoMenu, openMenu } from '../e2e/helpers/nav.mjs';
 import { expectNoPageOverflow } from './helpers/responsive.mjs';
 import { PROJECT_PATHS } from '../web/src/mock/fixtures.js';
 
@@ -28,7 +28,7 @@ async function html5Drag(page, source, target) {
 // The name Typography is the first `.MuiTypography-root` in each card (name,
 // then secondary full-path text) — reads DOM order, independent of the grid's
 // visual column layout.
-const cardOrder = (page) => cards(page).evaluateAll((els) => els.map((el) => el.querySelector('.MuiTypography-root')?.textContent));
+const cardOrder = (page) => cards(page).evaluateAll((els) => els.map((el) => el.querySelector('button[aria-expanded]')?.textContent));
 
 async function openPicker(page) {
   await page.getByRole('button', { name: 'Add folder' }).click();
@@ -67,6 +67,86 @@ test('cards start collapsed; clicking blank card space toggles details per card'
 
   await toggle(clean);
   await expect(clean).not.toContainText('Tidy release notes');
+});
+
+test('all project actions report successful outcomes', async ({ page }) => {
+  await gotoView(page, 'Projects');
+  const clean = cardFor(page, PROJECT_PATHS.clean);
+  for (const [name, text] of [
+    ['git fetch', 'git fetch succeeded for sing-clean'],
+    ['git rebase', 'git rebase succeeded for sing-clean'],
+    ['git fetch + rebase', 'git fetch + rebase succeeded for sing-clean'],
+  ]) {
+    await clean.getByRole('button', { name, exact: true }).click();
+    await expect(page.getByText(text)).toBeVisible();
+  }
+  await clean.getByRole('button', { name: 'Refresh project' }).click();
+  await expect(page.getByText('Refreshed sing-clean')).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh all' }).click();
+  await expect(page.getByText('All projects refreshed')).toBeVisible();
+});
+
+test('Git body, HTTP, and network failures include useful details', async ({ page }) => {
+  await gotoView(page, 'Projects');
+  await page.evaluate(() => {
+    const original = window.fetch;
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.includes('/projects/git')) {
+        const { op } = JSON.parse(init.body);
+        if (op === 'fetch') return Promise.resolve(new Response(JSON.stringify({ ok: false, error: 'remote rejected' }), { status: 200 }));
+        if (op === 'rebase') return Promise.resolve(new Response(JSON.stringify({ ok: false, error: 'upstream unavailable' }), { status: 503 }));
+        return Promise.reject(new Error('offline'));
+      }
+      return original(input, init);
+    };
+  });
+  const clean = cardFor(page, PROJECT_PATHS.clean);
+  for (const [name, text] of [
+    ['git fetch', 'git fetch failed for sing-clean: remote rejected'],
+    ['git rebase', 'git rebase failed for sing-clean: upstream unavailable'],
+    ['git fetch + rebase', 'git fetch + rebase failed for sing-clean: offline'],
+  ]) {
+    await clean.getByRole('button', { name, exact: true }).click();
+    await expect(page.getByText(text)).toBeVisible();
+  }
+});
+
+test('project refresh failure and refresh-all aggregate include failing project details', async ({ page }) => {
+  await gotoView(page, 'Projects');
+  await page.evaluate((dirtyPath) => {
+    const original = window.fetch;
+    window.fetch = (input, init) => {
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.includes('/projects/status') && url.includes(encodeURIComponent(dirtyPath))) {
+        return Promise.resolve(new Response(JSON.stringify({ error: 'status unavailable' }), { status: 503 }));
+      }
+      return original(input, init);
+    };
+  }, PROJECT_PATHS.dirty);
+  await cardFor(page, PROJECT_PATHS.dirty).getByRole('button', { name: 'Refresh project' }).click();
+  await expect(page.getByText('Refresh sing-dirty failed: status unavailable')).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh all' }).click();
+  await expect(page.getByText(/Refresh all failed:.*sing-dirty: status unavailable/)).toBeVisible();
+});
+
+test('stacked outcome toasts expire independently and hover pauses their drain', async ({ page }) => {
+  test.setTimeout(30000);
+  await gotoView(page, 'Projects');
+  const clean = cardFor(page, PROJECT_PATHS.clean);
+  const first = page.getByText('git fetch succeeded for sing-clean');
+  const second = page.getByText('git rebase succeeded for sing-clean');
+  await clean.getByRole('button', { name: 'git fetch', exact: true }).click();
+  await expect(first).toBeVisible();
+  await first.hover();
+  await page.waitForTimeout(1000);
+  await clean.getByRole('button', { name: 'git rebase', exact: true }).click();
+  await expect(second).toBeVisible();
+  await first.hover();
+  await expect(second).toHaveCount(0, { timeout: 15000 });
+  await expect(first).toBeVisible();
+  await page.mouse.move(0, 0);
+  await expect(first).toHaveCount(0, { timeout: 11000 });
 });
 
 test('the LLM summary is fetched only when a card is expanded, once per refresh', async ({ page }) => {
@@ -186,6 +266,20 @@ test('delete shows an Undo toast that restores the card to its slot', async ({ p
   await expect.poll(() => cardOrder(page)).toEqual(before);
 });
 
+test('leaving Projects dismisses its Undo toast', async ({ page }) => {
+  await gotoView(page, 'Projects');
+  const targetPath = PROJECT_PATHS.dirty;
+  await cardFor(page, targetPath).getByRole('button', { name: 'Remove project' }).click();
+  const undoToast = page.getByText(`Removed ${repoName(targetPath)}`);
+  await expect(undoToast).toBeVisible();
+
+  await gotoRail(page, 'Tasks');
+  await expect(undoToast).toHaveCount(0);
+  await gotoMenu(page, 'Projects');
+  await expect(cardFor(page, PROJECT_PATHS.clean)).toBeVisible();
+  await expect(cardFor(page, targetPath)).toHaveCount(0);
+});
+
 // The drain animation's end is the dismiss timer (no setTimeout) — prove it fires.
 test('Undo toast auto-dismisses when its drain animation ends', async ({ page }) => {
   test.setTimeout(30000);
@@ -273,13 +367,22 @@ test('refresh-all re-fetches status for every card', async ({ page }) => {
 test('expand all / collapse all toggles every card at once', async ({ page }) => {
   await gotoView(page, 'Projects');
   await expect(cards(page)).toHaveCount(3);
-  for (const card of await cards(page).all()) await expect(card).toHaveAttribute('aria-expanded', 'false');
+  const toggles = () => cards(page).locator('button[aria-expanded]');
+  await expect(toggles()).toHaveCount(3);
+  for (const t of await toggles().all()) await expect(t).toHaveAttribute('aria-expanded', 'false');
 
   await page.getByRole('button', { name: 'Expand all' }).click();
-  for (const card of await cards(page).all()) await expect(card).toHaveAttribute('aria-expanded', 'true');
+  for (const t of await toggles().all()) await expect(t).toHaveAttribute('aria-expanded', 'true');
 
   await page.getByRole('button', { name: 'Collapse all' }).click();
-  for (const card of await cards(page).all()) await expect(card).toHaveAttribute('aria-expanded', 'false');
+  for (const t of await toggles().all()) await expect(t).toHaveAttribute('aria-expanded', 'false');
+
+  // Native button: keyboard Enter toggles just that card.
+  const first = toggles().first();
+  await first.focus();
+  await page.keyboard.press('Enter');
+  await expect(first).toHaveAttribute('aria-expanded', 'true');
+  await expect(toggles().nth(1)).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('phone width (375px): cards are single column, no horizontal overflow', async ({ page }) => {

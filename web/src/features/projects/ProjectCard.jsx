@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { getTokens } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -176,12 +176,13 @@ function ReviewSection({ data, onOpenFile }) {
  * the working-tree counts, last commit and summary. The (LLM) summary is
  * fetched only once expanded, and re-fetched after a refresh when next shown.
  */
-export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onDragStart, onDragEnd, onDragOver, onDrop, narrow, onMove, canUp, canDown }) {
+export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onToast, onRefreshResult, onDragStart, onDragEnd, onDragOver, onDrop, narrow, onMove, canUp, canDown }) {
   const [status, setStatus] = useState(null);
   const [phase, setPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
   const [summary, setSummary] = useState(null);
   const [summaryPhase, setSummaryPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
   const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
   // Buttons, the drag grip and a text selection keep their own meaning.
   const toggle = (e) => {
     if (e.target.closest('button, [draggable="true"]') || window.getSelection()?.toString()) return;
@@ -192,43 +193,60 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
   useEffect(() => { if (expandAll.n) setExpanded(expandAll.on); }, [expandAll]); // eslint-disable-line react-hooks/set-state-in-effect
 
   // Bumped by the card's own refresh / git ops; refreshKey is refresh-all.
-  const [reloadN, setReloadN] = useState(0);
-  const load = () => setReloadN((n) => n + 1);
+  const [reload, setReload] = useState({ n: 0, reason: 'silent' });
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const load = (reason = 'git') => setReload((r) => ({ n: r.n + 1, reason }));
+  const seenRefreshKey = useRef(refreshKey);
+  const statusSeq = useRef(0);
 
   useEffect(() => {
+    const mode = refreshKey !== seenRefreshKey.current ? 'all' : reload.reason;
+    seenRefreshKey.current = refreshKey;
+    const seq = ++statusSeq.current;
+    const report = (result) => {
+      if (mode === 'single') onToast?.(result.ok
+        ? `Refreshed ${repoName(path)}`
+        : `Refresh ${repoName(path)} failed: ${result.error}`);
+      if (mode === 'all') onRefreshResult?.(refreshKey, path, result);
+    };
     fetch(`/api/projects/status?path=${encodeURIComponent(path)}`)
-      .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
-      .then((d) => { setStatus(d); setPhase('ok'); })
-      .catch(() => setPhase('error'));
-  }, [path, refreshKey, reloadN]);
+      .then(async (r) => {
+        let d;
+        try { d = await r.json(); } catch { throw new Error(`Invalid response (HTTP ${r.status})`); }
+        if (!r.ok) throw new Error(d.error || `HTTP ${r.status}`);
+        return d;
+      })
+      .then((d) => { if (seq === statusSeq.current) { setStatus(d); setPhase('ok'); } report({ ok: true }); setRefreshBusy(false); })
+      .catch((e) => { if (seq === statusSeq.current) setPhase('error'); report({ ok: false, error: e.message || 'network error' }); setRefreshBusy(false); });
+  }, [path, refreshKey, reload, onToast, onRefreshResult]);
 
   // Loads independently of status: a slow LLM summary must never hold up the
   // status chips above. Skipped while collapsed; `summaryFor` remembers which
   // refresh generation was fetched so re-expanding doesn't re-request.
-  const summaryKey = `${path}|${refreshKey}|${reloadN}`;
+  const summaryKey = `${path}|${refreshKey}|${reload.n}`;
   const summaryFor = useRef(null);
   useEffect(() => {
     if (!expanded || summaryFor.current === summaryKey) return;
     summaryFor.current = summaryKey;
     fetch(`/api/projects/summary?path=${encodeURIComponent(path)}`)
       .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
-      .then((d) => { setSummary(d); setSummaryPhase('ok'); })
-      .catch(() => setSummaryPhase('error'));
+      .then((d) => { if (summaryFor.current === summaryKey) { setSummary(d); setSummaryPhase('ok'); } })
+      .catch(() => { if (summaryFor.current === summaryKey) { summaryFor.current = null; setSummaryPhase('error'); } });
   }, [expanded, summaryKey, path]);
 
   // Review status (project-review skill's ledger) — same expand-gated,
   // once-per-refresh fetch shape as the summary above, its own state pair.
   const [review, setReview] = useState(null);
   const [reviewPhase, setReviewPhase] = useState('loading');
-  const reviewKey = `${path}|${refreshKey}|${reloadN}`;
+  const reviewKey = `${path}|${refreshKey}|${reload.n}`;
   const reviewFor = useRef(null);
   useEffect(() => {
     if (!expanded || reviewFor.current === reviewKey) return;
     reviewFor.current = reviewKey;
     fetch(`/api/projects/review?path=${encodeURIComponent(path)}`)
       .then((r) => { if (!r.ok) throw new Error('unavailable'); return r.json(); })
-      .then((d) => { setReview(d); setReviewPhase('ok'); })
-      .catch(() => setReviewPhase('error'));
+      .then((d) => { if (reviewFor.current === reviewKey) { setReview(d); setReviewPhase('ok'); } })
+      .catch(() => { if (reviewFor.current === reviewKey) { reviewFor.current = null; setReviewPhase('error'); } });
   }, [expanded, reviewKey, path]);
 
   // Artifact-link dialog: /projects/review/file?rel= content, reusing the
@@ -245,23 +263,32 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
   // Plain git (daemon shells out, no agent); reload status either way.
   const [gitBusy, setGitBusy] = useState(false);
   const [gitError, setGitError] = useState(null);
-  const runGit = (op) => {
+  const runGit = async (op) => {
     setGitBusy(true);
     setGitError(null);
-    fetch('/api/projects/git', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path, op }) })
-      .then((r) => r.json())
-      .then((d) => { if (!d.ok) setGitError(d.error || `git ${op} failed`); })
-      .catch(() => setGitError(`git ${op} failed`))
-      .finally(() => { setGitBusy(false); load(); });
+    const action = { fetch: 'git fetch', rebase: 'git rebase', sync: 'git fetch + rebase' }[op];
+    try {
+      const r = await fetch('/api/projects/git', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path, op }) });
+      let d;
+      try { d = await r.json(); } catch { throw new Error(`Invalid response (HTTP ${r.status})`); }
+      if (!r.ok || !d.ok) throw new Error(d.error || (r.ok ? `${action} failed` : `HTTP ${r.status}`));
+      onToast?.(`${action} succeeded for ${repoName(path)}`);
+    } catch (e) {
+      const detail = e.message || 'network error';
+      setGitError(`${action} failed: ${detail}`);
+      onToast?.(`${action} failed for ${repoName(path)}: ${detail}`);
+    } finally {
+      setGitBusy(false);
+      load();
+    }
   };
 
   return (
     <Box
       data-testid="project-card"
-      aria-expanded={expanded}
-      tabIndex={0}
+      role="group"
+      aria-label={repoName(path)}
       onClick={toggle}
-      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setExpanded((x) => !x); } }}
       onDragOver={onDragOver}
       onDrop={onDrop}
       sx={(t) => ({
@@ -304,9 +331,20 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
           </Tooltip>
         )}
         <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography sx={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <Box
+            component="button"
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={status ? bodyId : undefined}
+            onClick={() => setExpanded((x) => !x)}
+            sx={{
+              display: 'block', maxWidth: '100%', p: 0, border: 0, background: 'none', color: 'inherit', cursor: 'pointer',
+              font: 'inherit', fontWeight: 600, fontSize: 15, textAlign: 'left',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+          >
             {repoName(path)}
-          </Typography>
+          </Box>
           <Typography sx={{ fontSize: 11, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {tildify(path)}
           </Typography>
@@ -321,7 +359,7 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
           <span><IconButton size="small" aria-label="git fetch + rebase" disabled={gitBusy} onClick={() => runGit('sync')}><SyncIcon fontSize="small" /></IconButton></span>
         </Tooltip>
         <Tooltip title="Refresh project" disableInteractive>
-          <IconButton size="small" aria-label="Refresh project" onClick={() => { setGitError(null); load(); }}><RefreshIcon fontSize="small" /></IconButton>
+          <IconButton size="small" aria-label="Refresh project" disabled={refreshBusy} onClick={() => { setGitError(null); setRefreshBusy(true); load('single'); }}><RefreshIcon fontSize="small" /></IconButton>
         </Tooltip>
         <Tooltip title="Remove project" disableInteractive>
           <IconButton size="small" aria-label="Remove project" onClick={() => onDelete(path)}><DeleteOutlineIcon fontSize="small" /></IconButton>
@@ -332,7 +370,7 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onD
       {phase === 'error' && <Typography sx={{ mt: 1.5, fontSize: 13, color: 'text.secondary' }}>unavailable</Typography>}
       {phase === 'loading' && !status && <Typography sx={{ mt: 1.5, fontSize: 13, color: 'text.secondary' }}>Loading…</Typography>}
       {status && (
-        <Stack spacing={1} sx={{ mt: 1.5 }}>
+        <Stack id={bodyId} spacing={1} sx={{ mt: 1.5 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}>
             <Chip label={status.branch || 'detached'} size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: 11 }} />
             {status.upstream ? (
