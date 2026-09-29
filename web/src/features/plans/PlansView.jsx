@@ -18,7 +18,14 @@ import Stack from '@mui/material/Stack';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
+import { useColorScheme } from '@mui/material/styles';
 import FilterAltIcon from '@mui/icons-material/FilterAlt';
+import ViewCarouselIcon from '@mui/icons-material/ViewCarousel';
+import GridViewIcon from '@mui/icons-material/GridView';
+import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
+import ChevronRightIcon from '@mui/icons-material/ChevronRight';
+import FolderOpenIcon from '@mui/icons-material/FolderOpen';
+import { useSearchParams } from 'react-router-dom';
 import { useQueryState, useUpdateQuery } from '@/hooks/useQueryState.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { EmptyState } from '@/components/EmptyState.jsx';
@@ -26,18 +33,30 @@ import { planBadge } from './plansMockData.mjs';
 import { getTokens } from '@/theme/contract.js';
 
 const NODE_W = 280;
-const COLS = 6;
-const COL_PITCH = 320;
-const ROW_PITCH = 240;
-const PLAN_PITCH = 140;
+const SESSION_W = 380;
+const COLS = 4;
+const COL_PITCH = 404;
+const ROW_PITCH = 176;
 const VP_KEY = 'sing-plans-viewport';
+const TIMEFRAME_KEY = 'sing-plans-timeframe';
 const DBL_MS = 250;
+const RING_RADIUS = 240;
+const RING_DRAG_PX = 160;
 
 // Recognised ?preset= values; anything else falls back to the default. Same
 // URL contract as History (?preset=7|30|all|custom plus ?from/?to ISO days).
 const PRESETS = new Set(['7', '30', 'all', 'custom']);
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const isoDay = (v) => (ISO_DAY.test(v) ? v : '');
+const readSavedTimeframe = () => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(TIMEFRAME_KEY));
+    if (saved && PRESETS.has(saved.preset)) {
+      return { preset: saved.preset, from: isoDay(saved.from), to: isoDay(saved.to) };
+    }
+  } catch { /* storage unavailable or invalid */ }
+  return { preset: 'all', from: '', to: '' };
+};
 // mtime (epoch ms) as a local ISO day, for the custom-range string compare.
 const localDay = (ms) => {
   const d = new Date(ms);
@@ -88,7 +107,7 @@ const CARD_LIFT = {
 };
 
 function SessionCard({ data }) {
-  const { session, expanded, dimmed, onToggle, onToast } = data;
+  const { session, expanded, dimmed, onToggle, onToast, standalone, boardIndex } = data;
   const active = BUCKETS.filter((b) => (session.statusBuckets?.[b] ?? 0) > 0);
   const tokens = fmtTokens(session.contextTokens);
   // d3-zoom's native dblclick.zoom on the canvas ancestor kills propagation
@@ -98,11 +117,16 @@ function SessionCard({ data }) {
   // on the pane, and the dblclick never reaches the card.
   const cardRef = useRef(null);
   const pendingToggle = useRef(null);
+  const [openingFolder, setOpeningFolder] = useState(false);
   useEffect(() => () => clearTimeout(pendingToggle.current), []);
   useEffect(() => {
     const el = cardRef.current;
     if (!el) return undefined;
     const onDbl = (e) => {
+      if (e.target.closest('[data-open-session-folder]')) {
+        e.stopPropagation();
+        return;
+      }
       e.stopPropagation();
       clearTimeout(pendingToggle.current);
       window.getSelection()?.removeAllRanges();
@@ -115,15 +139,40 @@ function SessionCard({ data }) {
     clearTimeout(pendingToggle.current);
     pendingToggle.current = setTimeout(onToggle, DBL_MS);
   };
+  const openFolder = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (openingFolder) return;
+    setOpeningFolder(true);
+    try {
+      const response = await fetch('/api/plans/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sid: session.sid }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || 'Could not open session folder');
+      onToast('Opened session folder');
+    } catch (error) {
+      onToast(error.message || 'Could not open session folder');
+    } finally {
+      setOpeningFolder(false);
+    }
+  };
   return (
     <Card
       ref={cardRef}
       variant="outlined"
       className="nopan"
       sx={(t) => ({
-        width: NODE_W,
-        bgcolor: 'background.paper',
+        width: standalone ? `min(${SESSION_W}px, calc(100vw - 24px))` : SESSION_W,
+        position: 'relative',
+        bgcolor: getTokens(t).glass.surface,
         borderColor: expanded ? 'primary.main' : undefined,
+        '& .MuiTypography-caption': { fontSize: '0.98rem' },
+        '& .MuiChip-label': { fontSize: '0.94rem' },
+        '& .MuiChip-root': { height: 'auto', minHeight: 29 },
+        '& .MuiSvgIcon-root': { fontSize: '1.5rem' },
         // VERIFY: refine-dim
         opacity: dimmed ? 0.05 : 1,
         pointerEvents: dimmed ? 'none' : 'auto',
@@ -131,16 +180,21 @@ function SessionCard({ data }) {
         ...cardDepth(t, { expanded, dimmed }),
       })}
     >
-      <Handle type="source" position={Position.Right} />
-      <CardActionArea onClick={onClick} sx={{ p: 1.5, userSelect: 'text', ...CARD_LIFT }}>
+      {!standalone && <Handle type="source" position={Position.Right} />}
+      <CardActionArea
+        onClick={onClick}
+        aria-expanded={expanded}
+        data-board-session={boardIndex}
+        sx={{ p: 2.4, pr: 5, userSelect: 'text', ...CARD_LIFT }}
+      >
         <Stack spacing={0.75}>
           <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between' }}>
             <Typography variant="caption" sx={{ fontFamily: 'monospace', color: 'text.secondary' }}>
               {session.sid.slice(0, 8)}
             </Typography>
-            <Stack direction="row" spacing={0.5}>
+            <Stack direction="row" spacing={0.5} sx={{ mr: standalone ? 2 : 1.5, transform: standalone ? 'translateY(-2px)' : undefined }}>
               {active.map((s) => (
-                <Box key={s} sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: dotColor(s) }} />
+                <Box key={s} sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: dotColor(s) }} />
               ))}
             </Stack>
           </Stack>
@@ -165,6 +219,20 @@ function SessionCard({ data }) {
           </Stack>
         </Stack>
       </CardActionArea>
+      <Tooltip title="Open session folder in File Explorer">
+        <Box component="span" data-open-session-folder sx={{ position: 'absolute', top: standalone ? 10 : 14, right: 16, zIndex: 2, display: 'inline-flex' }}>
+          <IconButton
+            size="small"
+            aria-label="Open session folder"
+            disabled={openingFolder}
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={openFolder}
+            onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
+          >
+            <FolderOpenIcon fontSize="small" />
+          </IconButton>
+        </Box>
+      </Tooltip>
     </Card>
   );
 }
@@ -177,15 +245,14 @@ function PlanCard({ data }) {
       className="nopan"
       sx={(t) => ({
         width: NODE_W,
-        bgcolor: 'background.paper',
+        bgcolor: getTokens(t).glass.surface,
         opacity: dimmed ? 0.15 : 1,
         pointerEvents: dimmed ? 'none' : 'auto',
         userSelect: 'text',
         ...cardDepth(t, { expanded, dimmed }),
       })}
     >
-      <Handle type="target" position={Position.Left} />
-      <CardActionArea onClick={onToggle} sx={{ p: 1.25, userSelect: 'text', ...CARD_LIFT }}>
+      <CardActionArea onClick={onToggle} aria-expanded={expanded} sx={{ p: 2, userSelect: 'text', ...CARD_LIFT }}>
         <Stack spacing={0.5}>
           <Typography variant="subtitle2" sx={{ lineHeight: 1.3 }}>
             {plan.title}
@@ -211,7 +278,7 @@ function PlanCard({ data }) {
       </CardActionArea>
       <Collapse in={expanded} unmountOnExit>
         <Divider />
-        <Box sx={{ p: 1.25 }}>
+        <Box sx={{ p: 2 }}>
           <Stack spacing={0.25}>
             {plan.phases.map((ph, i) => (
               <Typography
@@ -251,13 +318,32 @@ function PlanCard({ data }) {
   );
 }
 
+function PlanStackNode({ data }) {
+  const { plans, notes, sid, openPlan, onTogglePlan } = data;
+  return (
+    <Box sx={{ position: 'relative', display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+      <Handle type="target" position={Position.Left} />
+      {plans.map((plan) => {
+        const key = `${sid}:${plan.file}`;
+        return <PlanCard key={key} data={{
+          plan,
+          notes: notes.filter((note) => !note.plan || note.plan === plan.file),
+          expanded: openPlan === key,
+          dimmed: false,
+          onToggle: () => onTogglePlan(key),
+        }} />;
+      })}
+    </Box>
+  );
+}
+
 // Placeholder node under an expanded session while its detail request is in
 // flight, or when it failed (retry re-runs the fetch).
 function InfoCard({ data }) {
-  const { loading, error, onRetry } = data;
+  const { loading, error, onRetry, standalone } = data;
   return (
-    <Card variant="outlined" sx={(t) => ({ width: NODE_W, p: 1.5, bgcolor: 'background.paper', ...cardDepth(t, { expanded: true }) })}>
-      <Handle type="target" position={Position.Left} />
+    <Card variant="outlined" sx={(t) => ({ width: NODE_W, p: 1.5, bgcolor: getTokens(t).glass.surface, ...cardDepth(t, { expanded: true }) })}>
+      {!standalone && <Handle type="target" position={Position.Left} />}
       {loading ? (
         <Stack sx={{ alignItems: 'center', py: 1 }}>
           <CircularProgress size={20} />
@@ -276,7 +362,7 @@ function InfoCard({ data }) {
   );
 }
 
-const nodeTypes = { session: SessionCard, plan: PlanCard, info: InfoCard };
+const nodeTypes = { session: SessionCard, planStack: PlanStackNode, info: InfoCard };
 
 export default function PlansView({ onToast }) {
   const [list, setList] = useState(null);
@@ -291,27 +377,54 @@ export default function PlansView({ onToast }) {
   const [detailErr, setDetailErr] = useState(null);
   const [retry, setRetry] = useState(0);
   const [status, setStatus] = useQueryState('status', 'all');
+  const [layout, setLayout] = useQueryState('layout', 'carousel');
+  const carousel = layout === 'carousel';
+  const [deckPosition, setDeckPosition] = useState(0);
+  const [ringDragging, setRingDragging] = useState(false);
+  const dragRef = useRef(null);
+  const ringRef = useRef(null);
+  const boardRef = useRef(null);
+  const planStackRef = useRef(null);
+  const initialSelectionRef = useRef(false);
+  const suppressClickRef = useRef(false);
   const caps = useCapabilities();
+  const { mode, systemMode } = useColorScheme();
+  const boardColorMode = (mode === 'system' ? systemMode : mode) === 'dark' ? 'dark' : 'light';
+  const [searchParams] = useSearchParams();
+  const [savedTimeframe, setSavedTimeframe] = useState(readSavedTimeframe);
   // Timeframe in the URL, same contract as History: ?preset=7|30|all|custom
   // plus ?from/?to ISO days. An unrecognised preset degrades to the default.
-  const [presetParam] = useQueryState('preset', 'all');
-  const preset = PRESETS.has(presetParam) ? presetParam : 'all';
-  const [fromParam] = useQueryState('from');
-  const [toParam] = useQueryState('to');
-  const from = isoDay(fromParam), to = isoDay(toParam);
+  const timeframeInUrl = ['preset', 'from', 'to'].some((key) => searchParams.has(key));
+  const urlPreset = searchParams.get('preset') ?? 'all';
+  const urlTimeframe = {
+    preset: PRESETS.has(urlPreset) ? urlPreset : 'all',
+    from: isoDay(searchParams.get('from')),
+    to: isoDay(searchParams.get('to')),
+  };
+  if (timeframeInUrl && (savedTimeframe.preset !== urlTimeframe.preset
+    || savedTimeframe.from !== urlTimeframe.from || savedTimeframe.to !== urlTimeframe.to)) {
+    setSavedTimeframe(urlTimeframe);
+  }
+  const { preset, from, to } = timeframeInUrl ? urlTimeframe : savedTimeframe;
   const updateQuery = useUpdateQuery();
   const [filterAnchor, setFilterAnchor] = useState(null);
   const filtersActive = preset !== 'all';
   // Date.now() is impure during render — capture it once per mount for the cutoffs.
   const [now] = useState(() => Date.now());
   // last pan/zoom survives refresh via localStorage; when absent, fitView
-  const [initialViewport] = useState(() => {
+  const [initialViewport, setInitialViewport] = useState(() => {
     try {
       const vp = JSON.parse(localStorage.getItem(VP_KEY));
       if (vp && Number.isFinite(vp.x) && Number.isFinite(vp.y) && Number.isFinite(vp.zoom)) return vp;
     } catch { /* parse miss = fresh fit */ }
     return null;
   });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(TIMEFRAME_KEY, JSON.stringify(savedTimeframe));
+    } catch { /* storage unavailable — timeframe still works for this visit */ }
+  }, [savedTimeframe]);
 
   // VERIFY: refine-fetch
   useEffect(() => {
@@ -378,12 +491,160 @@ export default function PlansView({ onToast }) {
     };
     return kept.filter((s) => inRange(s.mtime)).sort((a, b) => b.mtime - a.mtime);
   }, [list, status, preset, from, to, now]);
+  useEffect(() => {
+    if (initialSelectionRef.current || list == null || sessions.length === 0) return undefined;
+    initialSelectionRef.current = true;
+    setOpenSession(sessions[0].sid);
+  }, [list, sessions]);
+  useEffect(() => {
+    if (!openSession) return undefined;
+    const index = sessions.findIndex((s) => s.sid === openSession);
+    if (index < 0) return undefined;
+    if (!carousel) {
+      const board = boardRef.current;
+      if (!board) return undefined;
+      const focusSelected = (force = false) => {
+        const active = document.activeElement;
+        if (!force && active !== document.body && !active?.matches('[data-board-session]')) return;
+        board.querySelector(`[data-board-session="${index}"]`)?.focus();
+      };
+      focusSelected(true);
+      const observer = new MutationObserver(() => focusSelected());
+      observer.observe(board, { childList: true, subtree: true });
+      const frame = requestAnimationFrame(() => focusSelected());
+      return () => {
+        cancelAnimationFrame(frame);
+        observer.disconnect();
+      };
+    }
+    let secondFrame;
+    const firstFrame = requestAnimationFrame(() => {
+      secondFrame = requestAnimationFrame(() => {
+        if (document.activeElement?.closest('.react-flow__node-planStack, [data-plan-card]')) return;
+        ringRef.current?.querySelector('[aria-current="true"] .MuiCardActionArea-root')?.focus();
+      });
+    });
+    return () => {
+      cancelAnimationFrame(firstFrame);
+      cancelAnimationFrame(secondFrame);
+    };
+  }, [openSession, sessions, carousel]);
+  const currentDeckIndex = sessions.length
+    ? ((Math.round(deckPosition) % sessions.length) + sessions.length) % sessions.length
+    : 0;
+  const moveDeck = (delta) => {
+    setDeckPosition((position) => Math.round(position) + delta);
+    setOpenSession(null);
+    setOpenPlan(null);
+  };
+  const onRingKeyDown = (e) => {
+    if (openSession !== sessions[currentDeckIndex]?.sid
+      || !e.target.closest('[aria-current="true"] .MuiCardActionArea-root')) return;
+    if (e.key === 'ArrowDown') {
+      const firstPlan = planStackRef.current?.querySelector('[data-plan-card] .MuiCardActionArea-root');
+      if (firstPlan) {
+        e.preventDefault();
+        firstPlan.focus();
+      }
+      return;
+    }
+    if (sessions.length <= 1) return;
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const delta = e.key === 'ArrowRight' ? 1 : -1;
+    setDeckPosition((position) => Math.round(position) + delta);
+    setOpenSession(sessions[(currentDeckIndex + delta + sessions.length) % sessions.length].sid);
+    setOpenPlan(null);
+    const ring = e.currentTarget;
+    requestAnimationFrame(() => ring.querySelector('[aria-current="true"] .MuiCardActionArea-root')?.focus());
+  };
+  const onPlanKeyDown = (e) => {
+    if (e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+    const cards = [...e.currentTarget.querySelectorAll('[data-plan-card] .MuiCardActionArea-root')];
+    const index = cards.indexOf(e.target);
+    if (index < 0) return;
+    e.preventDefault();
+    if (e.key === 'ArrowUp' && index === 0) {
+      ringRef.current?.querySelector('[aria-current="true"] .MuiCardActionArea-root')?.focus();
+    } else {
+      cards[index + (e.key === 'ArrowDown' ? 1 : -1)]?.focus();
+    }
+  };
+  const onBoardKeyDown = (e) => {
+    if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+    const planStack = e.target.closest('.react-flow__node-planStack');
+    if (planStack) {
+      const cards = [...planStack.querySelectorAll('.MuiCardActionArea-root')];
+      const index = cards.indexOf(e.target);
+      if (index < 0 || (e.key === 'ArrowLeft' && index !== 0) || e.key === 'ArrowRight') return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === 'ArrowLeft') {
+        const sessionIndex = sessions.findIndex((s) => s.sid === openSession);
+        boardRef.current?.querySelector(`[data-board-session="${sessionIndex}"]`)?.focus();
+      } else {
+        cards[index + (e.key === 'ArrowDown' ? 1 : -1)]?.focus();
+      }
+      return;
+    }
+    const index = Number(e.target.dataset.boardSession);
+    if (!Number.isInteger(index) || e.target.dataset.boardSession === undefined) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'ArrowRight' && openSession === sessions[index].sid) {
+      const firstPlan = boardRef.current?.querySelector('.react-flow__node-planStack .MuiCardActionArea-root');
+      if (firstPlan) {
+        firstPlan.focus();
+        return;
+      }
+    }
+    const next = e.key === 'ArrowLeft' ? (index % COLS ? index - 1 : -1)
+      : e.key === 'ArrowRight' ? (index % COLS < COLS - 1 ? index + 1 : -1)
+        : index + (e.key === 'ArrowDown' ? COLS : -COLS);
+    if (next < 0 || next >= sessions.length) return;
+    setOpenSession(sessions[next].sid);
+    setOpenPlan(null);
+  };
+  const onRingPointerDown = (e) => {
+    if (e.button !== 0) return;
+    dragRef.current = { x: e.clientX, position: deckPosition, last: deckPosition, moved: false };
+  };
+  const onRingPointerMove = (e) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const distance = e.clientX - drag.x;
+    if (!drag.moved && Math.abs(distance) < 8) return;
+    if (!drag.moved) {
+      drag.moved = true;
+      setRingDragging(true);
+      e.currentTarget.setPointerCapture(e.pointerId);
+    }
+    e.preventDefault();
+    drag.last = drag.position - distance / RING_DRAG_PX;
+    setDeckPosition(drag.last);
+  };
+  const onRingPointerEnd = (e) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    dragRef.current = null;
+    if (!drag.moved) return;
+    setRingDragging(false);
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
+    setDeckPosition(Math.round(drag.last));
+    if (Math.round(drag.last) !== Math.round(drag.position)) {
+      setOpenSession(null);
+      setOpenPlan(null);
+    }
+    suppressClickRef.current = true;
+    setTimeout(() => { suppressClickRef.current = false; }, 0);
+  };
 
   // Detail counts only when it belongs to the open session — a stale row from a
   // previously expanded session is ignored rather than cleared in an effect.
   const openDetail = detail && detail.sid === openSession ? detail : null;
   const openErr = detailErr && detailErr.sid === openSession ? detailErr.message : null;
   const detailLoading = openSession !== null && openDetail == null && openErr == null;
+  const selectedSessionVisible = sessions.some((s) => s.sid === openSession);
 
   const { nodes, edges } = useMemo(() => {
     const ns = [];
@@ -397,7 +658,11 @@ export default function PlansView({ onToast }) {
         type: 'session',
         position: { x, y },
         draggable: false,
-        data: { session: s, expanded, dimmed: openSession !== null && !expanded, onToggle: () => toggleSession(s.sid), onToast },
+        data: {
+          session: s, expanded, dimmed: openSession !== null && !expanded,
+          onToggle: () => toggleSession(s.sid), onToast,
+          boardIndex: i,
+        },
       });
       if (!expanded) return;
       if (openDetail == null) {
@@ -411,25 +676,22 @@ export default function PlansView({ onToast }) {
         });
         return;
       }
-      openDetail.plans.forEach((p, j) => {
-        const key = `${s.sid}:${p.file}`;
-        ns.push({
-          id: key,
-          type: 'plan',
-          position: { x: x + COL_PITCH, y: y + j * PLAN_PITCH },
-          draggable: false,
-          // the open accordion grows past the next card — paint it above siblings
-          zIndex: openPlan === key ? 20 : 10,
-          data: {
-            plan: p,
-            notes: openDetail.notes.filter((n) => !n.plan || n.plan === p.file),
-            expanded: openPlan === key,
-            dimmed: openPlan !== null && openPlan !== key,
-            onToggle: () => togglePlan(key),
-          },
-        });
-        es.push({ id: `e-${key}`, source: s.sid, target: key, type: 'default' });
+      const key = `${s.sid}:plans`;
+      ns.push({
+        id: key,
+        type: 'planStack',
+        position: { x: x + COL_PITCH, y },
+        draggable: false,
+        zIndex: 10,
+        data: {
+          plans: openDetail.plans,
+          notes: openDetail.notes,
+          sid: s.sid,
+          openPlan,
+          onTogglePlan: togglePlan,
+        },
       });
+      es.push({ id: `e-${key}`, source: s.sid, target: key, type: 'default' });
     });
     return { nodes: ns, edges: es };
   }, [sessions, openSession, openPlan, openDetail, detailLoading, openErr, toggleSession, togglePlan, onToast]);
@@ -446,15 +708,15 @@ export default function PlansView({ onToast }) {
   }
 
   return (
-    <Box sx={{ position: 'relative', width: '100%', height: '100%' }}>
+    <Box ref={boardRef} onKeyDownCapture={carousel ? undefined : onBoardKeyDown} sx={{ position: 'relative', width: '100%', height: '100%' }}>
       {/* Milky-way backdrop: pure-CSS star layers behind the canvas. Three
           repeating star fields drift at different speeds (parallax) over a
           blurred galactic band; pointer-events none so it never eats pan. */}
       <Box
         aria-hidden
-        sx={{
+        sx={(t) => ({
           position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none',
-          background: 'linear-gradient(165deg, rgba(15,25,60,.45), rgba(40,20,80,.30) 55%, rgba(8,15,35,.45))',
+          background: t.palette.mode === 'dark' ? 'linear-gradient(165deg, rgba(15,25,60,.45), rgba(40,20,80,.30) 55%, rgba(8,15,35,.45))' : 'transparent',
           // galactic band
           '& .sing-mw-band': {
             position: 'absolute', inset: '-25%', transform: 'rotate(-28deg)',
@@ -556,13 +818,14 @@ export default function PlansView({ onToast }) {
           '@media (prefers-reduced-motion: reduce)': {
             '& .sing-mw-band, & .sing-mw-stars, & .sing-mw-far': { animation: 'none' },
           },
-        }}
+        })}
       >
         <Box className="sing-mw-band" />
         <Box className="sing-mw-far" />
         <Box className="sing-mw-stars" />
       </Box>
-      <ReactFlow
+      {!carousel && <ReactFlow
+        colorMode={boardColorMode}
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
@@ -576,6 +839,7 @@ export default function PlansView({ onToast }) {
         fitView={initialViewport == null}
         defaultViewport={initialViewport ?? undefined}
         onMoveEnd={(_, vp) => {
+          setInitialViewport(vp);
           try {
             localStorage.setItem(VP_KEY, JSON.stringify(vp));
           } catch { /* storage full/blocked — viewport just won't persist */ }
@@ -590,11 +854,122 @@ export default function PlansView({ onToast }) {
         minZoom={0.2}
         maxZoom={1.5}
         proOptions={{ hideAttribution: true }}
-      />
+      />}
+      {carousel && (
+        <Box sx={{ position: 'absolute', inset: 0, pt: 7, pb: 2, overflowY: 'auto' }}>
+          <Stack direction="row" sx={{ px: 2, justifyContent: 'flex-end' }}>
+            <Stack direction="row" sx={{ alignItems: 'center' }}>
+              <IconButton size="small" aria-label="Previous session" disabled={sessions.length <= 1} onClick={() => moveDeck(-1)}>
+                <ChevronLeftIcon fontSize="small" />
+              </IconButton>
+              <Typography variant="caption" sx={{ minWidth: 42, textAlign: 'center' }}>
+                {sessions.length ? `${currentDeckIndex + 1} / ${sessions.length}` : '0 / 0'}
+              </Typography>
+              <IconButton size="small" aria-label="Next session" disabled={sessions.length <= 1} onClick={() => moveDeck(1)}>
+                <ChevronRightIcon fontSize="small" />
+              </IconButton>
+            </Stack>
+          </Stack>
+          {sessions.length === 0 ? (
+            <Typography variant="body2" color="text.secondary" sx={{ px: 2, py: 3 }}>
+              No sessions match the filters.
+            </Typography>
+          ) : (
+            <Box
+              ref={ringRef}
+              role="region"
+              aria-label="Session carousel"
+              onKeyDown={onRingKeyDown}
+              onPointerDown={onRingPointerDown}
+              onPointerMove={onRingPointerMove}
+              onPointerUp={onRingPointerEnd}
+              onPointerCancel={onRingPointerEnd}
+              onClickCapture={(e) => {
+                if (!suppressClickRef.current) return;
+                e.preventDefault();
+                e.stopPropagation();
+                suppressClickRef.current = false;
+              }}
+              sx={{
+                position: 'relative', height: { xs: 150, sm: 156 }, overflow: 'hidden',
+                perspective: '1200px', touchAction: 'pan-y', cursor: 'grab',
+                '&:active': { cursor: 'grabbing' },
+              }}
+            >
+              {sessions.map((s, i) => {
+                const angle = (i - deckPosition) * 360 / sessions.length;
+                const facing = Math.cos(angle * Math.PI / 180);
+                return (
+                  <Box
+                    key={s.sid}
+                    aria-current={i === currentDeckIndex ? 'true' : undefined}
+                    aria-hidden={facing <= 0}
+                    inert={facing <= 0}
+                    onClickCapture={(e) => {
+                      if (i === currentDeckIndex) return;
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const forward = (i - currentDeckIndex + sessions.length) % sessions.length;
+                      moveDeck(forward <= sessions.length / 2 ? forward : forward - sessions.length);
+                    }}
+                    sx={{
+                      position: 'absolute', top: 0, left: '50%',
+                      zIndex: Math.round((facing + 1) * 100),
+                      transform: `translateX(-50%) rotateY(${angle}deg) translateZ(${RING_RADIUS}px) scale(.8)`,
+                      opacity: Math.max(0.3, (facing + 1) / 2),
+                      transition: ringDragging ? 'none' : 'transform .35s ease, opacity .35s ease',
+                      backfaceVisibility: 'hidden',
+                      '@media (prefers-reduced-motion: reduce)': { transition: 'none' },
+                    }}
+                  >
+                    <SessionCard data={{
+                      session: s, expanded: openSession === s.sid, dimmed: false, standalone: true,
+                      onToggle: () => toggleSession(s.sid), onToast,
+                    }} />
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
+          {selectedSessionVisible && (
+            <Box sx={{ mt: 2 }}>
+              <Box
+                ref={planStackRef}
+                role="region"
+                aria-label="Plans in selected session"
+                onKeyDown={onPlanKeyDown}
+                sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1.5, px: 2, pb: 3 }}
+              >
+                {openDetail == null ? (
+                  <InfoCard data={{ loading: detailLoading, error: openErr, onRetry: () => setRetry((n) => n + 1), standalone: true }} />
+                ) : openDetail.plans.map((p) => {
+                  const key = `${openSession}:${p.file}`;
+                  return (
+                    <Box key={key} data-plan-card>
+                      <PlanCard data={{
+                        plan: p,
+                        notes: openDetail.notes.filter((n) => !n.plan || n.plan === p.file),
+                        expanded: openPlan === key,
+                        dimmed: false,
+                        onToggle: () => togglePlan(key),
+                      }} />
+                    </Box>
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
+        </Box>
+      )}
       <Stack
         direction="row"
         spacing={0.5}
-        sx={{ position: 'absolute', top: 8, left: 8, zIndex: 5, flexWrap: 'wrap', gap: 0.5 }}
+        sx={{
+          position: 'absolute', top: 8, left: 8, zIndex: 5, gap: 0.5,
+          ...(carousel
+            ? { right: 88, overflowX: 'auto', flexWrap: 'nowrap', '& .MuiChip-root': { flexShrink: 0 } }
+            : { flexWrap: 'wrap' }),
+        }}
       >
         {['all', ...BUCKETS].map((b) => (
           <Chip
@@ -607,6 +982,23 @@ export default function PlansView({ onToast }) {
           />
         ))}
       </Stack>
+      <Tooltip title={carousel ? 'Board view' : 'Carousel view'} disableInteractive>
+        <IconButton
+          size="small"
+          aria-label={carousel ? 'Switch to board view' : 'Switch to carousel view'}
+          aria-pressed={carousel}
+          onClick={() => {
+            if (!carousel && openSession != null) {
+              const index = sessions.findIndex((s) => s.sid === openSession);
+              if (index >= 0) setDeckPosition(index);
+            }
+            setLayout(carousel ? 'board' : 'carousel');
+          }}
+          sx={{ position: 'absolute', top: 8, right: 48, zIndex: 5 }}
+        >
+          {carousel ? <GridViewIcon fontSize="small" /> : <ViewCarouselIcon fontSize="small" />}
+        </IconButton>
+      </Tooltip>
       <Tooltip title="Filter" disableInteractive>
         <IconButton
           size="small"
@@ -635,7 +1027,11 @@ export default function PlansView({ onToast }) {
                 label={label}
                 size="small"
                 clickable
-                onClick={() => updateQuery({ preset: p === 'all' ? null : p, from: null, to: null })}
+                onClick={() => {
+                  const next = { preset: p, from: '', to: '' };
+                  setSavedTimeframe(next);
+                  updateQuery({ preset: p === 'all' ? null : p, from: null, to: null });
+                }}
                 color={preset === p ? 'primary' : 'default'}
                 variant={preset === p ? 'filled' : 'outlined'}
               />
@@ -647,7 +1043,11 @@ export default function PlansView({ onToast }) {
             label="From"
             value={preset === 'custom' ? from : ''}
             slotProps={{ inputLabel: { shrink: true } }}
-            onChange={(e) => updateQuery({ preset: 'custom', from: e.target.value || null, to })}
+            onChange={(e) => {
+              const next = { preset: 'custom', from: e.target.value || '', to };
+              setSavedTimeframe(next);
+              updateQuery({ preset: 'custom', from: next.from || null, to: to || null });
+            }}
             sx={{ width: '100%' }}
           />
           <TextField
@@ -656,7 +1056,11 @@ export default function PlansView({ onToast }) {
             label="To"
             value={preset === 'custom' ? to : ''}
             slotProps={{ inputLabel: { shrink: true } }}
-            onChange={(e) => updateQuery({ preset: 'custom', from, to: e.target.value || null })}
+            onChange={(e) => {
+              const next = { preset: 'custom', from, to: e.target.value || '' };
+              setSavedTimeframe(next);
+              updateQuery({ preset: 'custom', from: from || null, to: next.to || null });
+            }}
             sx={{ width: '100%' }}
           />
         </Stack>

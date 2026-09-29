@@ -11,7 +11,7 @@ process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 // The tree plans.mjs actually reads — set BEFORE the import (read at module load).
 const ROOT = mkdtempSync(join(tmpdir(), 'sing-plans-'));
 process.env.SING_PLANS_ROOT = ROOT;
-const { listSessions, getSession } = await import('./plans.mjs');
+const { listSessions, getSession, resolveSessionDirectory } = await import('./plans.mjs');
 
 const SID_A = 'aaaaaaaa-1111-4111-8111-111111111111'; // full plan + note + phase-N + state.json
 const SID_B = 'bbbbbbbb-2222-4222-8222-222222222222'; // plan-less (review.md only)
@@ -162,4 +162,13 @@ test('getSession: plan-less folder resolves with no plans; missing sid and trave
     const r = await getSession(bad);
     assert.equal(r.ok, false, `sid ${String(bad)} must be rejected`);
   }
+});
+
+test('resolveSessionDirectory: returns only existing session directories under the plans root', async () => {
+  const valid = await resolveSessionDirectory(SID_A);
+  assert.equal(valid.ok, true);
+  assert.equal(valid.dir, join(ROOT, SID_A));
+
+  assert.deepEqual(await resolveSessionDirectory(SID_MISSING), { ok: false, error: 'not found' });
+  assert.deepEqual(await resolveSessionDirectory('../origins'), { ok: false, error: 'bad sid' });
 });

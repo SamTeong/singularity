@@ -3,7 +3,7 @@
 // (plan.md, phase-N.md, evidence notes) plus a hook-written state.json snapshot.
 // External and read-only: this module NEVER writes there (see .claude/rules/server.md).
 // Model on rules.mjs (bounded dir listing, path guard, SING_* test override).
-import { readdir, readFile, stat, open } from 'node:fs/promises';
+import { readdir, readFile, stat, open, realpath } from 'node:fs/promises';
 import { join, resolve, sep } from 'node:path';
 
 // The plan tree root comes from SING_PLANS_ROOT — there is no implicit
@@ -171,17 +171,29 @@ export async function listSessions() {
   return out;
 }
 
+export async function resolveSessionDirectory(sid) {
+  if (PLAN_ROOT == null) return { ok: false, error: 'plans disabled' };
+  if (typeof sid !== 'string' || !SID_RE.test(sid)) return { ok: false, error: 'bad sid' };
+  try {
+    const root = await realpath(PLAN_ROOT);
+    const dir = await realpath(join(root, sid));
+    if (dir !== root && !dir.startsWith(root + sep)) return { ok: false, error: 'bad sid' };
+    if (!(await stat(dir)).isDirectory()) return { ok: false, error: 'not found' };
+    return { ok: true, dir };
+  } catch {
+    return { ok: false, error: 'not found' };
+  }
+}
+
 // One session dir: its plans, its notes (grouped to the plan that mentions them
 // by basename — `## Evidence` lists them, `## Phases` links the phase-N.md files),
 // and the picked state.json fields. An existing dir always resolves ok, even
 // with no plan files (notes are still browsable); only a missing/unreadable dir
 // is 'not found'.
 export async function getSession(sid) {
-  if (PLAN_ROOT == null) return { ok: false, error: 'plans disabled' }; // no SING_PLANS_ROOT in .env
-  if (typeof sid !== 'string' || !SID_RE.test(sid)) return { ok: false, error: 'bad sid' };
-  const root = resolve(PLAN_ROOT);
-  const dir = resolve(join(root, sid));
-  if (dir !== root && !dir.startsWith(root + sep)) return { ok: false, error: 'bad sid' };
+  const resolved = await resolveSessionDirectory(sid);
+  if (!resolved.ok) return resolved;
+  const { dir } = resolved;
 
   const names = await mdNames(dir);
   if (!names) return { ok: false, error: 'not found' };

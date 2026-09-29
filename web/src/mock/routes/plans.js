@@ -52,4 +52,11 @@ export function registerPlans(server) {
         : null,
     };
   });
+
+  server.post('/plans/open', (schema, req) => {
+    const sid = req.requestBody ? JSON.parse(req.requestBody).sid : null;
+    if (typeof sid !== 'string' || !SID_RE.test(sid)) return new Response(400, {}, { ok: false, error: 'bad sid' });
+    if (!MOCK_SESSIONS.some((s) => s.sid === sid)) return new Response(404, {}, { ok: false, error: 'not found' });
+    return { ok: true };
+  });
 }
