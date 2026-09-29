@@ -18,12 +18,15 @@ import { USAGE_SKILL_STATE } from './app-dir.mjs';
 export const COST_STATE_DIR = join(USAGE_SKILL_STATE, 'cost-state');
 
 // $ per million tokens: [input, output]. Matched by longest prefix on the
-// transcript message model id. cache read = 0.1x input; cache write = 1.25x
-// input (5m TTL) or 2x input (1h TTL) — applied per-TTL below when the usage
-// object has a cache_creation breakdown, else 1.25x on the whole bucket.
+// transcript message model id. cache read = 0.1x input (0.05x on opus-5-5, via
+// the optional cacheReadMult field); cache write = 1.25x input (5m TTL) or 2x
+// input (1h TTL) — applied per-TTL below when the usage object has a
+// cache_creation breakdown, else 1.25x on the whole bucket.
 const PRICES = [
   ['claude-fable-5', { input: 10, output: 50 }],
   ['claude-mythos', { input: 10, output: 50 }],
+  ['claude-opus-5-5', { input: 4, output: 20, cacheReadMult: 0.05 }],
+  ['claude-opus-5', { input: 5, output: 25 }],
   ['claude-opus-4-5', { input: 5, output: 25 }],
   ['claude-opus-4-6', { input: 5, output: 25 }],
   ['claude-opus-4-7', { input: 5, output: 25 }],
@@ -33,6 +36,8 @@ const PRICES = [
   ['claude-3-opus', { input: 15, output: 75 }],
   ['claude-3-7-sonnet', { input: 3, output: 15 }],
   ['claude-3-5-sonnet', { input: 3, output: 15 }],
+  ['claude-sonnet-5-5', { input: 2, output: 10 }],
+  ['claude-sonnet-5', { input: 2, output: 10 }],
   ['claude-sonnet', { input: 3, output: 15 }],
   ['claude-haiku-4-5', { input: 1, output: 5 }],
   ['claude-3-5-haiku', { input: 1, output: 5 }],
@@ -102,7 +107,7 @@ async function parseByPath(p) {
       const price = priceFor(o.message?.model);
       if (!price) continue; // unknown model prefix — skip, leaves estCostUsd null for pure-unknown sessions
       let cost = (input * price.input + output * price.output) / 1e6;
-      cost += (cacheRead * price.input * 0.1) / 1e6;
+      cost += (cacheRead * price.input * (price.cacheReadMult ?? 0.1)) / 1e6;
       if (u.cache_creation?.ephemeral_5m_input_tokens != null || u.cache_creation?.ephemeral_1h_input_tokens != null) {
         cost += ((u.cache_creation.ephemeral_5m_input_tokens || 0) * price.input * 1.25) / 1e6;
         cost += ((u.cache_creation.ephemeral_1h_input_tokens || 0) * price.input * 2) / 1e6;
