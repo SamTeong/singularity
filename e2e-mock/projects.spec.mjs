@@ -28,7 +28,7 @@ async function html5Drag(page, source, target) {
 // The name Typography is the first `.MuiTypography-root` in each card (name,
 // then secondary full-path text) — reads DOM order, independent of the grid's
 // visual column layout.
-const cardOrder = (page) => cards(page).evaluateAll((els) => els.map((el) => el.querySelector('.MuiTypography-root')?.textContent));
+const cardOrder = (page) => cards(page).evaluateAll((els) => els.map((el) => el.querySelector('button[aria-expanded]')?.textContent));
 
 async function openPicker(page) {
   await page.getByRole('button', { name: 'Add folder' }).click();
@@ -367,13 +367,22 @@ test('refresh-all re-fetches status for every card', async ({ page }) => {
 test('expand all / collapse all toggles every card at once', async ({ page }) => {
   await gotoView(page, 'Projects');
   await expect(cards(page)).toHaveCount(3);
-  for (const card of await cards(page).all()) await expect(card).toHaveAttribute('aria-expanded', 'false');
+  const toggles = () => cards(page).locator('button[aria-expanded]');
+  await expect(toggles()).toHaveCount(3);
+  for (const t of await toggles().all()) await expect(t).toHaveAttribute('aria-expanded', 'false');
 
   await page.getByRole('button', { name: 'Expand all' }).click();
-  for (const card of await cards(page).all()) await expect(card).toHaveAttribute('aria-expanded', 'true');
+  for (const t of await toggles().all()) await expect(t).toHaveAttribute('aria-expanded', 'true');
 
   await page.getByRole('button', { name: 'Collapse all' }).click();
-  for (const card of await cards(page).all()) await expect(card).toHaveAttribute('aria-expanded', 'false');
+  for (const t of await toggles().all()) await expect(t).toHaveAttribute('aria-expanded', 'false');
+
+  // Native button: keyboard Enter toggles just that card.
+  const first = toggles().first();
+  await first.focus();
+  await page.keyboard.press('Enter');
+  await expect(first).toHaveAttribute('aria-expanded', 'true');
+  await expect(toggles().nth(1)).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('phone width (375px): cards are single column, no horizontal overflow', async ({ page }) => {

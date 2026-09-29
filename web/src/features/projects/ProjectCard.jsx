@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { getTokens } from '@/theme/contract.js';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
@@ -182,6 +182,7 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onT
   const [summary, setSummary] = useState(null);
   const [summaryPhase, setSummaryPhase] = useState('loading'); // 'loading' | 'ok' | 'error'
   const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
   // Buttons, the drag grip and a text selection keep their own meaning.
   const toggle = (e) => {
     if (e.target.closest('button, [draggable="true"]') || window.getSelection()?.toString()) return;
@@ -287,10 +288,7 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onT
       data-testid="project-card"
       role="group"
       aria-label={repoName(path)}
-      aria-expanded={expanded}
-      tabIndex={0}
       onClick={toggle}
-      onKeyDown={(e) => { if (e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setExpanded((x) => !x); } }}
       onDragOver={onDragOver}
       onDrop={onDrop}
       sx={(t) => ({
@@ -333,9 +331,20 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onT
           </Tooltip>
         )}
         <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography sx={{ fontWeight: 600, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <Box
+            component="button"
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={status ? bodyId : undefined}
+            onClick={() => setExpanded((x) => !x)}
+            sx={{
+              display: 'block', maxWidth: '100%', p: 0, border: 0, background: 'none', color: 'inherit', cursor: 'pointer',
+              font: 'inherit', fontWeight: 600, fontSize: 15, textAlign: 'left',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}
+          >
             {repoName(path)}
-          </Typography>
+          </Box>
           <Typography sx={{ fontSize: 11, color: 'text.secondary', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {tildify(path)}
           </Typography>
@@ -361,7 +370,7 @@ export default function ProjectCard({ path, refreshKey, expandAll, onDelete, onT
       {phase === 'error' && <Typography sx={{ mt: 1.5, fontSize: 13, color: 'text.secondary' }}>unavailable</Typography>}
       {phase === 'loading' && !status && <Typography sx={{ mt: 1.5, fontSize: 13, color: 'text.secondary' }}>Loading…</Typography>}
       {status && (
-        <Stack spacing={1} sx={{ mt: 1.5 }}>
+        <Stack id={bodyId} spacing={1} sx={{ mt: 1.5 }}>
           <Stack direction="row" spacing={1} sx={{ alignItems: 'center', flexWrap: 'wrap', rowGap: 0.5 }}>
             <Chip label={status.branch || 'detached'} size="small" color="primary" variant="outlined" sx={{ height: 20, fontSize: 11 }} />
             {status.upstream ? (
