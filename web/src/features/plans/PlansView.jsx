@@ -48,7 +48,6 @@ function SessionCard({ data }) {
   const tokens = fmtTokens(session.contextTokens);
   return (
     <Card
-      className="nodrag nopan"
       variant="outlined"
       sx={{
         width: NODE_W,
@@ -99,7 +98,7 @@ function SessionCard({ data }) {
 function PlanCard({ data }) {
   const { plan, notes, expanded, onToggle } = data;
   return (
-    <Card className="nodrag nopan" variant="outlined" sx={{ width: NODE_W }}>
+    <Card variant="outlined" sx={{ width: NODE_W }}>
       <Handle type="target" position={Position.Left} />
       <CardActionArea onClick={onToggle} sx={{ p: 1.25, userSelect: 'text' }}>
         <Stack spacing={0.5}>
@@ -324,7 +323,7 @@ export default function PlansView() {
         nodeTypes={nodeTypes}
         onNodesChange={noop}
         // VERIFY: refine-panondrag
-        panOnDrag={[1, 2]}
+        panOnDrag={[0, 1, 2]}
         panOnScroll={false}
         zoomOnScroll
         zoomOnPinch
