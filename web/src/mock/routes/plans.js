@@ -20,10 +20,32 @@ function statusBuckets(plans) {
   return BUCKETS.filter((b) => seen.has(b));
 }
 
+// Fixture mtimes are absolute, so re-anchor them: the newest sits an hour
+// behind Date.now(), keeping the default 3d window deterministic.
+const FIXTURE_NEWEST = Math.max(...MOCK_SESSIONS.map((s) => Date.parse(s.mtime)));
+const shifted = (s, now) => ({ ...s, mtime: new Date(now - 3600e3 - (FIXTURE_NEWEST - Date.parse(s.mtime))).toISOString() });
+
+// Opt-in scale corpus for e2e: localStorage 'sing-mock-plans-extra' = N adds N
+// sessions, 20 min apart, all inside the 3d window.
+function allSessions() {
+  const now = Date.now();
+  const extra = Number(globalThis.localStorage?.getItem('sing-mock-plans-extra')) || 0;
+  const generated = Array.from({ length: extra }, (_, i) => ({
+    sid: `b0000000-0000-4000-8000-${String(i).padStart(12, '0')}`,
+    mtime: new Date(now - 2 * 3600e3 - i * 20 * 60e3).toISOString(),
+    branch: `bulk/${i}`,
+    cwd: 'C:/git/singularity',
+    plans: [{ file: 'plan.md', title: `Bulk session ${i}`, status: 'active', statusRaw: 'active', objective: 'Scale fixture.', currentPhase: null, phases: [], nextSteps: [], required: [], completed: null }],
+    notes: [],
+    state: { generatedAt: null, contextTokens: 1000, branch: `bulk/${i}` },
+  }));
+  return [...MOCK_SESSIONS.map((s) => shifted(s, now)), ...generated];
+}
+
 export function registerPlans(server) {
   // /plans/sessions — one row per session, shaped like listSessions' (with the
   // branch + contextTokens fields the daemon folds in from state.json).
-  server.get('/plans/sessions', () => MOCK_SESSIONS.map((s) => ({
+  server.get('/plans/sessions', () => allSessions().map((s) => ({
     sid: s.sid,
     mtime: Date.parse(s.mtime),
     planCount: s.plans.length,
@@ -39,7 +61,7 @@ export function registerPlans(server) {
   server.get('/plans/session', (schema, req) => {
     const sid = req.queryParams.sid;
     if (typeof sid !== 'string' || !SID_RE.test(sid)) return new Response(400, {}, { ok: false, error: 'bad sid' });
-    const s = MOCK_SESSIONS.find((x) => x.sid === sid);
+    const s = allSessions().find((x) => x.sid === sid);
     if (!s) return new Response(404, {}, { ok: false, error: 'not found' });
     return {
       ok: true,
@@ -56,7 +78,7 @@ export function registerPlans(server) {
   server.post('/plans/open', (schema, req) => {
     const sid = req.requestBody ? JSON.parse(req.requestBody).sid : null;
     if (typeof sid !== 'string' || !SID_RE.test(sid)) return new Response(400, {}, { ok: false, error: 'bad sid' });
-    if (!MOCK_SESSIONS.some((s) => s.sid === sid)) return new Response(404, {}, { ok: false, error: 'not found' });
+    if (!allSessions().some((s) => s.sid === sid)) return new Response(404, {}, { ok: false, error: 'not found' });
     return { ok: true };
   });
 }

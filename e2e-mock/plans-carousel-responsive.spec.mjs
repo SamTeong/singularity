@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures/test.mjs';
-import { expectNoPageOverflow } from './helpers/responsive.mjs';
+import { expectNoPageOverflow, RESPONSIVE_SKINS, seedSkin } from './helpers/responsive.mjs';
 
 test('Plans carousel is reachable and swipeable on a narrow screen', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 667 });
@@ -29,14 +29,16 @@ test('Plans carousel is reachable and swipeable on a narrow screen', async ({ pa
   expect(cardBottom).toBeLessThanOrEqual(deckBox.y + deckBox.height);
   expect(await deck.evaluate((el) => getComputedStyle(el).perspective)).toBe('1200px');
   const overlap = await deck.evaluate((el) => {
-    const first = el.children[0].getBoundingClientRect();
-    const second = el.children[1].getBoundingClientRect();
+    const at = [...el.children].findIndex((child) => child.getAttribute('aria-current') === 'true');
+    const first = el.children[at].getBoundingClientRect();
+    const second = el.children[at + 1].getBoundingClientRect();
     return first.right - second.left;
   });
   expect(overlap).toBeGreaterThan(0);
   const rotatedNeighbor = await deck.evaluate((el) => {
-    const center = getComputedStyle(el.children[0]).transform;
-    const neighbor = getComputedStyle(el.children[1]).transform;
+    const at = [...el.children].findIndex((child) => child.getAttribute('aria-current') === 'true');
+    const center = getComputedStyle(el.children[at]).transform;
+    const neighbor = getComputedStyle(el.children[at + 1]).transform;
     return neighbor.startsWith('matrix3d(') && neighbor !== center;
   });
   expect(rotatedNeighbor).toBe(true);
@@ -46,7 +48,9 @@ test('Plans carousel is reachable and swipeable on a narrow screen', async ({ pa
   await page.mouse.down();
   await page.mouse.move(bounds.x + bounds.width / 2 - 128, bounds.y + bounds.height / 2, { steps: 5 });
   await page.mouse.up();
-  const frontIndex = () => deck.evaluate((el) => [...el.children].findIndex((child) => child.getAttribute('aria-current') === 'true'));
+  // The ring renders only a window around the selection, so track position by the counter.
+  const counter = page.getByText(/^\d+ \/ \d+$/);
+  const frontIndex = async () => Number((await counter.textContent()).split(' / ')[0]) - 1;
   await expect.poll(frontIndex).toBe(1);
   await page.getByRole('button', { name: 'Next session' }).click();
   await expect.poll(frontIndex).toBe(2);
@@ -177,6 +181,8 @@ test('board arrow keys traverse sessions and their plan stack', async ({ page })
 
   await sessions.first().click();
   await expect(stack).not.toBeVisible();
+  // Default zoom is 1, so the 4th column sits past the right edge; frame everything.
+  await page.getByRole('button', { name: 'Fit all' }).click();
   await sessions.nth(3).click();
   await expect(stack.locator('.MuiCardActionArea-root')).toHaveCount(2);
   await expect(sessions.nth(3)).toBeFocused();
@@ -188,4 +194,83 @@ test('board arrow keys traverse sessions and their plan stack', async ({ page })
   await expect(stack.locator('.MuiCardActionArea-root').first()).toBeFocused();
   await page.keyboard.press('ArrowLeft');
   await expect(sessions.nth(3)).toBeFocused();
+});
+
+// 130 generated sessions (plus the 7 fixtures inside the 3d window) = 137.
+const BULK = 130;
+const TOTAL = 137;
+const seedBulk = (page) => page.addInitScript((n) => window.localStorage.setItem('sing-mock-plans-extra', String(n)), BULK);
+const viewportZoom = (page) => page.locator('.react-flow__viewport').evaluate((el) => new DOMMatrix(getComputedStyle(el).transform).a);
+
+for (const skin of RESPONSIVE_SKINS) {
+  for (const [name, size] of [['phone', { width: 375, height: 667 }], ['desktop', { width: 1440, height: 900 }]]) {
+    test(`Plans carousel stays bounded and fully reachable with ${TOTAL} sessions (${skin}, ${name})`, async ({ page }) => {
+      await page.setViewportSize(size);
+      await seedSkin(page, skin);
+      await seedBulk(page);
+      await page.goto('/plans');
+      const deck = page.getByRole('region', { name: 'Session carousel' });
+      const counter = page.getByText(/^\d+ \/ \d+$/);
+      await expect(counter).toHaveText(`1 / ${TOTAL}`);
+      await expect(deck.locator('[aria-current="true"] .MuiCardActionArea-root')).toBeFocused();
+      await expect(deck.locator(':scope > *')).toHaveCount(7);
+
+      // Previous from the first card wraps to the last, which is then selected.
+      await page.getByRole('button', { name: 'Previous session' }).click();
+      await expect(counter).toHaveText(`${TOTAL} / ${TOTAL}`);
+      await expect(deck.locator('[aria-current="true"]')).toHaveCount(1);
+      expect(await deck.locator(':scope > *').count()).toBeLessThanOrEqual(7);
+      await page.getByRole('button', { name: 'Next session' }).click();
+      await expect(counter).toHaveText(`1 / ${TOTAL}`);
+      await page.getByRole('button', { name: 'Next session' }).click();
+      await expect(counter).toHaveText(`2 / ${TOTAL}`);
+
+      // Keyboard: arrows act on the expanded selected card; they move and wrap.
+      const selected = deck.locator('[aria-current="true"] .MuiCardActionArea-root');
+      await selected.click();
+      await expect(selected).toHaveAttribute('aria-expanded', 'true');
+      await page.keyboard.press('ArrowLeft');
+      await expect(counter).toHaveText(`1 / ${TOTAL}`);
+      await page.keyboard.press('ArrowLeft');
+      await expect(counter).toHaveText(`${TOTAL} / ${TOTAL}`);
+      await page.keyboard.press('ArrowRight');
+      await expect(counter).toHaveText(`1 / ${TOTAL}`);
+      expect(await deck.locator(':scope > *').count()).toBeLessThanOrEqual(7);
+      await expectNoPageOverflow(page);
+    });
+
+    test(`Plans board opens readable and Fit all zooms out with ${TOTAL} sessions (${skin}, ${name})`, async ({ page }) => {
+      await page.setViewportSize(size);
+      await seedSkin(page, skin);
+      await seedBulk(page);
+      await page.goto('/plans?layout=board');
+      await expect(page.locator('.react-flow__node-session').first()).toBeVisible();
+      await expect.poll(() => viewportZoom(page)).toBeCloseTo(1, 2);
+      await expectNoPageOverflow(page);
+      await page.getByRole('button', { name: 'Fit all' }).click();
+      await expect.poll(() => viewportZoom(page)).toBeLessThan(0.5);
+      await expectNoPageOverflow(page);
+    });
+  }
+}
+
+test.describe('Plans timeframe defaults', () => {
+  const counter = (page) => page.getByText(/^\d+ \/ \d+$/);
+
+  test('first visit is 3d without a preset in the URL', async ({ page }) => {
+    await page.goto('/plans');
+    await expect(counter(page)).toHaveText('1 / 7');
+    await expect(page).not.toHaveURL(/preset=/);
+  });
+
+  test('a saved timeframe wins over the 3d default', async ({ page }) => {
+    await page.addInitScript(() => window.localStorage.setItem('sing-plans-timeframe', JSON.stringify({ preset: 'all', from: '', to: '' })));
+    await page.goto('/plans');
+    await expect(counter(page)).toHaveText('1 / 12');
+  });
+
+  test('an invalid ?preset degrades to 3d', async ({ page }) => {
+    await page.goto('/plans?preset=bogus');
+    await expect(counter(page)).toHaveText('1 / 7');
+  });
 });

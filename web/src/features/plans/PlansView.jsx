@@ -39,13 +39,16 @@ const COL_PITCH = 404;
 const ROW_PITCH = 176;
 const VP_KEY = 'sing-plans-viewport';
 const TIMEFRAME_KEY = 'sing-plans-timeframe';
+const DEFAULT_BOARD_VIEWPORT = { x: 24, y: 96, zoom: 1 };
 const DBL_MS = 250;
 const RING_RADIUS = 240;
 const RING_DRAG_PX = 160;
+const RING_ANGLE = 48;
+const RING_WINDOW = 3;
 
 // Recognised ?preset= values; anything else falls back to the default. Same
-// URL contract as History (?preset=7|30|all|custom plus ?from/?to ISO days).
-const PRESETS = new Set(['7', '30', 'all', 'custom']);
+// URL contract as History (?preset=3|7|30|all|custom plus ?from/?to ISO days).
+const PRESETS = new Set(['3', '7', '30', 'all', 'custom']);
 const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
 const isoDay = (v) => (ISO_DAY.test(v) ? v : '');
 const readSavedTimeframe = () => {
@@ -55,7 +58,7 @@ const readSavedTimeframe = () => {
       return { preset: saved.preset, from: isoDay(saved.from), to: isoDay(saved.to) };
     }
   } catch { /* storage unavailable or invalid */ }
-  return { preset: 'all', from: '', to: '' };
+  return { preset: '3', from: '', to: '' };
 };
 // mtime (epoch ms) as a local ISO day, for the custom-range string compare.
 const localDay = (ms) => {
@@ -107,7 +110,7 @@ const CARD_LIFT = {
 };
 
 function SessionCard({ data }) {
-  const { session, expanded, dimmed, onToggle, onToast, standalone, boardIndex } = data;
+  const { session, expanded, dimmed, onToggle, onToast, standalone, carouselSelected, boardIndex } = data;
   const active = BUCKETS.filter((b) => (session.statusBuckets?.[b] ?? 0) > 0);
   const tokens = fmtTokens(session.contextTokens);
   // d3-zoom's native dblclick.zoom on the canvas ancestor kills propagation
@@ -174,8 +177,7 @@ function SessionCard({ data }) {
         '& .MuiChip-root': { height: 'auto', minHeight: 29 },
         '& .MuiSvgIcon-root': { fontSize: '1.5rem' },
         // VERIFY: refine-dim
-        opacity: dimmed ? 0.05 : 1,
-        pointerEvents: dimmed ? 'none' : 'auto',
+        opacity: dimmed ? 0.65 : 1,
         userSelect: 'text',
         ...cardDepth(t, { expanded, dimmed }),
       })}
@@ -185,6 +187,7 @@ function SessionCard({ data }) {
         onClick={onClick}
         aria-expanded={expanded}
         data-board-session={boardIndex}
+        tabIndex={standalone && !carouselSelected ? -1 : undefined}
         sx={{ p: 2.4, pr: 5, userSelect: 'text', ...CARD_LIFT }}
       >
         <Stack spacing={0.75}>
@@ -225,6 +228,7 @@ function SessionCard({ data }) {
             size="small"
             aria-label="Open session folder"
             disabled={openingFolder}
+            tabIndex={standalone && !carouselSelected ? -1 : undefined}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={openFolder}
             onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -384,6 +388,8 @@ export default function PlansView({ onToast }) {
   const dragRef = useRef(null);
   const ringRef = useRef(null);
   const boardRef = useRef(null);
+  const flowRef = useRef(null);
+  const lastFilterRef = useRef(null);
   const planStackRef = useRef(null);
   const initialSelectionRef = useRef(false);
   const suppressClickRef = useRef(false);
@@ -392,12 +398,12 @@ export default function PlansView({ onToast }) {
   const boardColorMode = (mode === 'system' ? systemMode : mode) === 'dark' ? 'dark' : 'light';
   const [searchParams] = useSearchParams();
   const [savedTimeframe, setSavedTimeframe] = useState(readSavedTimeframe);
-  // Timeframe in the URL, same contract as History: ?preset=7|30|all|custom
+  // Timeframe in the URL, same contract as History: ?preset=3|7|30|all|custom
   // plus ?from/?to ISO days. An unrecognised preset degrades to the default.
   const timeframeInUrl = ['preset', 'from', 'to'].some((key) => searchParams.has(key));
-  const urlPreset = searchParams.get('preset') ?? 'all';
+  const urlPreset = searchParams.get('preset') ?? '3';
   const urlTimeframe = {
-    preset: PRESETS.has(urlPreset) ? urlPreset : 'all',
+    preset: PRESETS.has(urlPreset) ? urlPreset : '3',
     from: isoDay(searchParams.get('from')),
     to: isoDay(searchParams.get('to')),
   };
@@ -411,14 +417,30 @@ export default function PlansView({ onToast }) {
   const filtersActive = preset !== 'all';
   // Date.now() is impure during render — capture it once per mount for the cutoffs.
   const [now] = useState(() => Date.now());
-  // last pan/zoom survives refresh via localStorage; when absent, fitView
+  // Last pan/zoom survives refresh; first visits start at readable scale.
   const [initialViewport, setInitialViewport] = useState(() => {
     try {
       const vp = JSON.parse(localStorage.getItem(VP_KEY));
       if (vp && Number.isFinite(vp.x) && Number.isFinite(vp.y) && Number.isFinite(vp.zoom)) return vp;
-    } catch { /* parse miss = fresh fit */ }
-    return null;
+    } catch { /* parse miss = fresh viewport */ }
+    return DEFAULT_BOARD_VIEWPORT;
   });
+
+  const filterKey = `${status}|${preset}|${from}|${to}`;
+  useEffect(() => {
+    if (lastFilterRef.current == null) {
+      lastFilterRef.current = filterKey;
+      return;
+    }
+    if (lastFilterRef.current === filterKey) return;
+    lastFilterRef.current = filterKey;
+    setDeckPosition(0);
+    setInitialViewport(DEFAULT_BOARD_VIEWPORT);
+    if (!carousel) flowRef.current?.setViewport(DEFAULT_BOARD_VIEWPORT);
+    try {
+      localStorage.setItem(VP_KEY, JSON.stringify(DEFAULT_BOARD_VIEWPORT));
+    } catch { /* storage unavailable */ }
+  }, [filterKey, carousel]);
 
   useEffect(() => {
     try {
@@ -481,7 +503,7 @@ export default function PlansView({ onToast }) {
   const sessions = useMemo(() => {
     const rows = list ?? [];
     const kept = status === 'all' ? rows : rows.filter((s) => (s.statusBuckets?.[status] ?? 0) > 0);
-    const cutoff = preset === '7' ? now - 7 * 86400e3 : preset === '30' ? now - 30 * 86400e3 : null;
+    const cutoff = ['3', '7', '30'].includes(preset) ? now - Number(preset) * 86400e3 : null;
     // mtime can be epoch ms or ISO string (see relTime) — normalize before comparing.
     const inRange = (ms) => {
       const t = new Date(ms).getTime();
@@ -532,6 +554,11 @@ export default function PlansView({ onToast }) {
   const currentDeckIndex = sessions.length
     ? ((Math.round(deckPosition) % sessions.length) + sessions.length) % sessions.length
     : 0;
+  const deckWindow = Array.from({ length: Math.min(sessions.length, RING_WINDOW * 2 + 1) }, (_, slot) => {
+    const offset = slot - Math.floor(Math.min(sessions.length, RING_WINDOW * 2 + 1) / 2);
+    const index = (currentDeckIndex + offset + sessions.length) % sessions.length;
+    return { session: sessions[index], index, offset };
+  });
   const moveDeck = (delta) => {
     setDeckPosition((position) => Math.round(position) + delta);
     setOpenSession(null);
@@ -836,8 +863,8 @@ export default function PlansView({ onToast }) {
         panOnScroll={false}
         zoomOnScroll
         zoomOnPinch
-        fitView={initialViewport == null}
-        defaultViewport={initialViewport ?? undefined}
+        defaultViewport={initialViewport}
+        onInit={(flow) => { flowRef.current = flow; }}
         onMoveEnd={(_, vp) => {
           setInitialViewport(vp);
           try {
@@ -851,10 +878,20 @@ export default function PlansView({ onToast }) {
           if (openPlan != null) setOpenPlan(null);
           else setOpenSession(null);
         }}
-        minZoom={0.2}
+        minZoom={0.05}
         maxZoom={1.5}
         proOptions={{ hideAttribution: true }}
       />}
+      {!carousel && sessions.length > 0 && (
+        <Button
+          size="small"
+          variant="contained"
+          onClick={() => flowRef.current?.fitView({ padding: 0.2, minZoom: 0.05 })}
+          sx={{ position: 'absolute', right: 8, bottom: 8, zIndex: 5 }}
+        >
+          Fit all
+        </Button>
+      )}
       {carousel && (
         <Box sx={{ position: 'absolute', inset: 0, pt: 7, pb: 2, overflowY: 'auto' }}>
           <Stack direction="row" sx={{ px: 2, justifyContent: 'flex-end' }}>
@@ -896,21 +933,21 @@ export default function PlansView({ onToast }) {
                 '&:active': { cursor: 'grabbing' },
               }}
             >
-              {sessions.map((s, i) => {
-                const angle = (i - deckPosition) * 360 / sessions.length;
+              {deckWindow.map(({ session: s, index: i, offset }) => {
+                const angle = (offset + Math.round(deckPosition) - deckPosition) * RING_ANGLE;
                 const facing = Math.cos(angle * Math.PI / 180);
+                const selected = i === currentDeckIndex;
                 return (
                   <Box
                     key={s.sid}
-                    aria-current={i === currentDeckIndex ? 'true' : undefined}
-                    aria-hidden={facing <= 0}
+                    aria-current={selected ? 'true' : undefined}
+                    aria-hidden={!selected}
                     inert={facing <= 0}
                     onClickCapture={(e) => {
-                      if (i === currentDeckIndex) return;
+                      if (selected) return;
                       e.preventDefault();
                       e.stopPropagation();
-                      const forward = (i - currentDeckIndex + sessions.length) % sessions.length;
-                      moveDeck(forward <= sessions.length / 2 ? forward : forward - sessions.length);
+                      moveDeck(offset);
                     }}
                     sx={{
                       position: 'absolute', top: 0, left: '50%',
@@ -924,6 +961,7 @@ export default function PlansView({ onToast }) {
                   >
                     <SessionCard data={{
                       session: s, expanded: openSession === s.sid, dimmed: false, standalone: true,
+                      carouselSelected: selected,
                       onToggle: () => toggleSession(s.sid), onToast,
                     }} />
                   </Box>
@@ -1021,7 +1059,7 @@ export default function PlansView({ onToast }) {
       >
         <Stack spacing={1.5} sx={{ p: 2 }}>
           <Stack direction="row" spacing={1}>
-            {[['7', '7d'], ['30', '30d'], ['all', 'All']].map(([p, label]) => (
+            {[['3', '3d'], ['7', '7d'], ['30', '30d'], ['all', 'All']].map(([p, label]) => (
               <Chip
                 key={p}
                 label={label}
@@ -1030,7 +1068,7 @@ export default function PlansView({ onToast }) {
                 onClick={() => {
                   const next = { preset: p, from: '', to: '' };
                   setSavedTimeframe(next);
-                  updateQuery({ preset: p === 'all' ? null : p, from: null, to: null });
+                  updateQuery({ preset: p === '3' ? null : p, from: null, to: null });
                 }}
                 color={preset === p ? 'primary' : 'default'}
                 variant={preset === p ? 'filled' : 'outlined'}
