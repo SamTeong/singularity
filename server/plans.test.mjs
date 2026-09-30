@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -167,7 +167,7 @@ test('getSession: plan-less folder resolves with no plans; missing sid and trave
 test('resolveSessionDirectory: returns only existing session directories under the plans root', async () => {
   const valid = await resolveSessionDirectory(SID_A);
   assert.equal(valid.ok, true);
-  assert.equal(valid.dir, join(ROOT, SID_A));
+  assert.equal(valid.dir, realpathSync(join(ROOT, SID_A)));
 
   assert.deepEqual(await resolveSessionDirectory(SID_MISSING), { ok: false, error: 'not found' });
   assert.deepEqual(await resolveSessionDirectory('../origins'), { ok: false, error: 'bad sid' });
