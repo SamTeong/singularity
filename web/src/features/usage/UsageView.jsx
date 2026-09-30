@@ -1,5 +1,8 @@
 import { getTokens } from '@/theme/contract.js';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { CacheProvider } from '@emotion/react';
+import createCache from '@emotion/cache';
 import Box from '@mui/material/Box';
 import Stack from '@mui/material/Stack';
 import Typography from '@mui/material/Typography';
@@ -13,6 +16,7 @@ import Tooltip from '@mui/material/Tooltip';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import OpenInNewIcon from '@mui/icons-material/OpenInNew';
+import PictureInPictureAltIcon from '@mui/icons-material/PictureInPictureAlt';
 import { statusColor } from '@/shell/shellStyles.js';
 import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 import { visibleProviders, usd, windowAnchorAvailable, windowAnchored } from '@/lib/usageUtil.js';
@@ -60,7 +64,41 @@ const SEVERITY = { ok: 0, info: 0, warn: 1, danger: 2 };
 // yyyy-MM-dd HH:mm:ss in local time (the sv-SE locale prints exactly that).
 const stamp = (t) => (t ? new Date(t).toLocaleString('sv-SE') : 'never');
 
-function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, connectState, refreshing, anchor, onPoke }) {
+// A plain popup window the provider cards portal into. Called synchronously
+// from the click so the popup blocker lets it through; null when blocked.
+// ponytail: styles are a snapshot at open time, so a skin or colour-mode switch
+// while the window is open is not mirrored; reopen it (or observe <html>) if that matters.
+function openPopout() {
+  const win = window.open('', '_blank', 'popup,width=380,height=300');
+  if (!win) return null;
+  win.document.title = 'Usage';
+  // Unlike the opener's tabs, a popup outlives a reload; close it rather than leave it empty.
+  window.addEventListener('pagehide', () => win.close(), { once: true });
+  // Theme CSS vars, CssBaseline and style.css already live in the page's sheets.
+  for (const sheet of document.styleSheets) {
+    try {
+      const style = win.document.createElement('style');
+      style.textContent = [...sheet.cssRules].map((r) => r.cssText).join('\n');
+      win.document.head.append(style);
+    } catch {
+      // Cross-origin sheet (web fonts): its rules are unreadable, so link it.
+      const link = win.document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = sheet.href;
+      win.document.head.append(link);
+    }
+  }
+  // Skin + colour-scheme selectors key off <html> attributes (data-skin, class).
+  for (const { name, value } of document.documentElement.attributes) win.document.documentElement.setAttribute(name, value);
+  win.document.body.style.padding = '16px';
+  // Emotion styles first rendered inside the window must land in its own head.
+  return { win, cache: createCache({ key: 'popout', container: win.document.head }) };
+}
+
+function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, connectState, refreshing, anchor, onPoke, inPopout }) {
+  // Tooltips portal to the main document's body by default, which is invisible
+  // from the pop-out window; render them inline there instead.
+  const tipSlots = inPopout ?{ popper: { disablePortal: true } } : undefined;
   const isOllama = label.toLowerCase() === 'ollama';
   // Manual anchor poke, the same in-flight shape as the header's refresh: the
   // button reads as motion while the daemon runs the prompt (90s timeout).
@@ -100,7 +138,7 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
             Stack's baseline alignment — an icon has no text baseline of its
             own to sit on. */}
         {usageUrl && (
-          <Tooltip title="Open usage page" placement="top">
+          <Tooltip title="Open usage page" placement="top" slotProps={tipSlots}>
             <Link href={usageUrl} target="_blank" rel="noreferrer" sx={{ display: 'inline-flex', alignItems: 'center', alignSelf: 'center' }} color="text.secondary">
               <OpenInNewIcon fontSize="small" />
             </Link>
@@ -111,7 +149,7 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
             that a Codex record is a day old), but it costs the header ~150px it
             does not have at 320px. Same affordance as the Automation page. */}
         {u?.fetchedAt && !refreshing && (
-          <Tooltip disableInteractive={!(anchorOn && anchor.lastError)} title={<>{statusLines.map((l) => <div key={l}>{l}</div>)}</>}>
+          <Tooltip slotProps={tipSlots} disableInteractive={!(anchorOn && anchor.lastError)} title={<>{statusLines.map((l) => <div key={l}>{l}</div>)}</>}>
             <Box role="img" data-status={statusKind} aria-label={`${label} status — ${statusLines.join(' · ')}`} sx={dotSx(statusKind)} />
           </Tooltip>
         )}
@@ -211,6 +249,24 @@ export default function UsageView({ usage, onRefresh }) {
     setRefreshingAll(true);
     try { await onRefresh(true); } finally { setRefreshingAll(false); }
   };
+  // { win, cache } while the pop-out window is open. Leaving the view closes it
+  // (the portal would otherwise leave an empty window behind).
+  const [popout, setPopout] = useState(null);
+  useEffect(() => () => popout?.win.close(), [popout]);
+  const togglePopout = () => {
+    if (popout) { popout.win.close(); return; }
+    const next = openPopout();
+    if (!next) return;
+    next.win.addEventListener('pagehide', () => setPopout(null));
+    setPopout(next);
+  };
+  const cards = (inPopout) => (
+    <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
+      {visibleProviders(caps).map((p) => (
+        <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} refreshing={refreshingAll} anchor={windowAnchor?.[p.key]} onPoke={() => pokeWindowAnchor(p.key)} inPopout={inPopout} />
+      ))}
+    </Box>
+  );
   return (
     <Stack sx={{ height: '100%', minHeight: 0, overflowY: 'auto' }}>
       <Stack direction="row" spacing={1.5} sx={{ flexShrink: 0, p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
@@ -224,6 +280,11 @@ export default function UsageView({ usage, onRefresh }) {
         </IconButton>
         <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Usage</Typography>
         <Box sx={{ flex: 1 }} />
+        <Tooltip title={popout ? 'Close pop-out' : 'Pop out'}>
+          <IconButton size="small" onClick={togglePopout} aria-label={popout ? 'Close usage pop-out' : 'Pop out usage'} aria-pressed={!!popout}>
+            <PictureInPictureAltIcon fontSize="small" />
+          </IconButton>
+        </Tooltip>
         <Button size="small" disabled={refreshingAll} startIcon={refreshingAll ? <CircularProgress size={14} color="inherit" /> : <RefreshIcon />} onClick={refreshAll} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
       </Stack>
       {/* Never shrinks: the provider cards are short and always relevant, and
@@ -232,14 +293,11 @@ export default function UsageView({ usage, onRefresh }) {
       <Box sx={{ flexShrink: 0, p: 2, flexGrow: reportOpen ? 0 : 1 }}>
         <Collapse in={open}>
           <Stack spacing={2}>
-            <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 2 }}>
-              {visibleProviders(caps).map((p) => (
-                <ProviderCard key={p.key} sourceKey={p.key} label={p.label} usageUrl={p.usageUrl} u={usage?.[p.key]} onConnect={p.key === 'ollama' ? connectOllama : undefined} connecting={p.key === 'ollama' && connectState === 'connecting'} connectState={p.key === 'ollama' ? connectState : null} refreshing={refreshingAll} anchor={windowAnchor?.[p.key]} onPoke={() => pokeWindowAnchor(p.key)} />
-              ))}
-            </Box>
+            {cards(false)}
           </Stack>
         </Collapse>
       </Box>
+      {popout && createPortal(<CacheProvider value={popout.cache}>{cards(true)}</CacheProvider>, popout.win.document.body)}
       {/* Usage report (harness-usage-report skill) fills the rest of the pane, but only while expanded. */}
       {/* Proportional basis, not the bare 240px floor: the summary above takes
           its natural height first, so on any real viewport there is no leftover

@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { parse as parsePath } from 'node:path';
 import { homedir } from 'node:os';
@@ -18,6 +18,8 @@ import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchC
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
+// Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
+import { listSessions as listPlanSessions, getSession as getPlanSession, resolveSessionDirectory, PLAN_ROOT } from './plans.mjs';
 import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
@@ -492,6 +494,7 @@ app.get('/capabilities', async () => {
     skillScopes: { available: !!(process.env.SING_SCOPE_ROOT && existsSync(process.env.SING_SCOPE_ROOT)), hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
     usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
     wiki:        { available: wikiAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
+    plans:       { available: PLAN_ROOT != null, hint: 'Set SING_PLANS_ROOT in .env to enable the Plans view.' },
     token:       { available: !!process.env.SING_TOKEN, hint: 'Set SING_TOKEN in .env to require an auth token on data endpoints.' },
   };
 });
@@ -764,6 +767,46 @@ app.get('/rules/reference', async (req, reply) => {
   const r = findRuleReference(req.query.path);
   if (!r.ok) reply.code(r.error === 'no reference' ? 404 : 400);
   return r;
+});
+
+// Plans: read-only browse of the handoff plan tree (SING_PLANS_ROOT in .env) —
+// session dirs holding markdown plans + a state.json snapshot. Never written
+// to. Unset root = feature disabled: routes answer empty/404 and
+// /capabilities tells the UI to show the disabled state.
+// VERIFY: plans-index-routes
+app.get('/plans/sessions', async () => listPlanSessions());
+app.get('/plans/session', async (req, reply) => {
+  const r = await getPlanSession(req.query.sid);
+  if (!r.ok) reply.code(r.error === 'not found' ? 404 : r.error === 'plans disabled' ? 404 : 400);
+  return r;
+});
+app.post('/plans/open', async (req, reply) => {
+  const r = await resolveSessionDirectory(req.body?.sid);
+  if (!r.ok) {
+    reply.code(r.error === 'bad sid' ? 400 : 404);
+    return r;
+  }
+  if (process.platform !== 'win32') {
+    reply.code(501);
+    return { ok: false, error: 'unsupported platform' };
+  }
+  try {
+    const explorer = resolve(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
+    const child = spawn(explorer, [r.dir], { detached: true, stdio: 'ignore' });
+    const spawned = await new Promise((done) => {
+      child.once('spawn', () => done(true));
+      child.once('error', () => done(false));
+    });
+    if (!spawned) {
+      reply.code(500);
+      return { ok: false, error: 'failed to open session folder' };
+    }
+    child.unref();
+    return { ok: true };
+  } catch {
+    reply.code(500);
+    return { ok: false, error: 'failed to open session folder' };
+  }
 });
 
 // Wiki: recursive .md browse + search + read-only file view under a client-

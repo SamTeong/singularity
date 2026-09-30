@@ -60,6 +60,7 @@ export const VIEW_LANDMARK = {
   status: (page) => page.getByText('Provider status', { exact: true }),
   history: (page) => page.getByText('History', { exact: true }).first(),
   projects: (page) => page.getByText('Projects', { exact: true }).first(),
+  plans: (page) => page.getByRole('button', { name: 'Filter plans' }),
   settings: (page) => page.getByRole('button', { name: 'Reset all' }), // default tab is Shortcuts
 };
 

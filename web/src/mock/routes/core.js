@@ -30,6 +30,7 @@ const MODEL_SEED = {
     { id: 'kimi-k3:cloud', group: 'ollama', label: '', enabled: true },
     { id: 'gpt-6-luna', group: 'codex', label: '', enabled: true },
     { id: 'gpt-6-sol', group: 'codex', label: '', enabled: true },
+    { id: 'gpt-6.1-sol', group: 'codex', label: '', enabled: true },
     { id: 'gpt-5.4', group: 'codex', label: '', enabled: true },
     { id: 'gpt-5.4-mini', group: 'codex', label: '', enabled: true },
     { id: 'gpt-5.4-pro', group: 'codex', label: '', enabled: true },
@@ -85,6 +86,7 @@ export function registerCore(server) {
     skillScopes: { available: true, hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
     usageReport: { available: true, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
     wiki:        { available: true, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
+    plans:       { available: true, hint: 'Set SING_PLANS_ROOT in .env to enable the Plans view.' },
     token:       { available: false, hint: 'Set SING_TOKEN in .env to require an auth token on data endpoints.' },
   }));
 
