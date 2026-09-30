@@ -14,10 +14,11 @@ const BUCKETS = ['active', 'done', 'blocked', 'superseded', 'other'];
 // Same sid shape guard the daemon applies before touching the FS.
 const SID_RE = /^[0-9a-f-]{8,64}$/i;
 
-// Distinct buckets present in a session, in canonical order.
+// Counts per bucket, matching the daemon's listSessions response.
 function statusBuckets(plans) {
-  const seen = new Set(plans.map((p) => (BUCKETS.includes(p.status) ? p.status : 'other')));
-  return BUCKETS.filter((b) => seen.has(b));
+  const counts = Object.fromEntries(BUCKETS.map((b) => [b, 0]));
+  for (const plan of plans) counts[BUCKETS.includes(plan.status) ? plan.status : 'other']++;
+  return counts;
 }
 
 // Fixture mtimes are absolute, so re-anchor them: the newest sits an hour

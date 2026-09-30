@@ -30,6 +30,7 @@ const MODEL_SEED = {
     { id: 'kimi-k3:cloud', group: 'ollama', label: '', enabled: true },
     { id: 'gpt-6-luna', group: 'codex', label: '', enabled: true },
     { id: 'gpt-6-sol', group: 'codex', label: '', enabled: true },
+    { id: 'gpt-6.1-sol', group: 'codex', label: '', enabled: true },
     { id: 'gpt-5.4', group: 'codex', label: '', enabled: true },
     { id: 'gpt-5.4-mini', group: 'codex', label: '', enabled: true },
     { id: 'gpt-5.4-pro', group: 'codex', label: '', enabled: true },

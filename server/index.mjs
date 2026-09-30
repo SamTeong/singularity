@@ -772,7 +772,7 @@ app.get('/rules/reference', async (req, reply) => {
 // Plans: read-only browse of the handoff plan tree (SING_PLANS_ROOT in .env) —
 // session dirs holding markdown plans + a state.json snapshot. Never written
 // to. Unset root = feature disabled: routes answer empty/404 and
-// /capabilities tells the UI to hide the view.
+// /capabilities tells the UI to show the disabled state.
 // VERIFY: plans-index-routes
 app.get('/plans/sessions', async () => listPlanSessions());
 app.get('/plans/session', async (req, reply) => {

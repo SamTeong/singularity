@@ -14,6 +14,7 @@ const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), "harness-usage-report-s
 process.env.USAGE_REPORT_STATE = fixtureDir;
 fs.writeFileSync(path.join(fixtureDir, "pricing.json"), JSON.stringify({
   base: {
+    "gpt-6.1-sol": [2.0, 10.0, 0.10, 2.50],
     "gpt-6-sol": [2.0, 10.0, 0.20, 2.50],
     "gpt-6-luna": [0.10, 0.50, 0.01, 0.125],
     "gpt-5.6-sol": [4.0, 20.0, 0.40, 5.0],
@@ -21,6 +22,7 @@ fs.writeFileSync(path.join(fixtureDir, "pricing.json"), JSON.stringify({
     sonnet: [3.0, 15.0, 0.3, 3.75],
   },
   above_200k: {
+    "gpt-6.1-sol": [4.0, 15.0, 0.20, 5.0],
     "gpt-6-sol": [4.0, 15.0, 0.40, 5.0],
     "gpt-6-luna": [0.20, 0.75, 0.02, 0.25],
     "gpt-5.6-sol": [8.0, 30.0, 0.80, 10.0],
@@ -31,6 +33,8 @@ fs.writeFileSync(path.join(fixtureDir, "pricing.json"), JSON.stringify({
 
 const { _has_newer_input, _load_usage_snapshots, _msg_cost_tiered, _price_key } = await import("./stats.mjs");
 
+assert.equal(_msg_cost_tiered("gpt-6.1-sol", 272000, 0, 0, 0), 0.544);
+assert.equal(_msg_cost_tiered("gpt-6.1-sol", 272001, 0, 0, 0), 1.088004);
 assert.equal(_msg_cost_tiered("gpt-6-sol", 272000, 0, 0, 0), 0.544);
 assert.equal(_msg_cost_tiered("gpt-6-sol", 272001, 0, 0, 0), 1.088004);
 assert.equal(_msg_cost_tiered("gpt-6-luna", 272000, 0, 0, 0), 0.0272);

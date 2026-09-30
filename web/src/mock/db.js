@@ -41,13 +41,14 @@ export const db = {
     // Models > Prices) — see server/model-prices.mjs / mock/routes/core.js.
     modelPrices: {
       base: {
+        'gpt-6.1-sol': [2.0, 10.0, 0.10, 2.50],
         'opus-5-5': [4.0, 20.0, 0.20, 5.0],
         opus: [5.0, 25.0, 0.5, 6.25],
         'sonnet-5-5': [2.0, 10.0, 0.20, 2.50],
         sonnet: [3.0, 15.0, 0.3, 3.75],
         haiku: [1.0, 5.0, 0.1, 1.25],
       },
-      above_200k: { 'gpt-6-sol': [4.0, 15.0, 0.4, 5.0] },
+      above_200k: { 'gpt-6.1-sol': [4.0, 15.0, 0.2, 5.0], 'gpt-6-sol': [4.0, 15.0, 0.4, 5.0] },
       long_context_threshold: 200000,
       default_key: 'opus',
     },
