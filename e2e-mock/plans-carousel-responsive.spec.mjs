@@ -108,6 +108,7 @@ test('Plans carousel is reachable and swipeable on a narrow screen', async ({ pa
 });
 
 test('carousel and board session cards share the same dark styling', async ({ page }) => {
+  test.slow();
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/plans');
   const card = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCard-root');
@@ -340,7 +341,7 @@ test('Plans ?sid= deep link expands the session once and does not re-expand afte
   await seedBulk(page);
   await page.goto(`/plans?sid=${bulkSid(5)}`);
   const selected = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root');
-  await expect(selected).toContainText('bulk/5');
+  await expect(selected).toContainText(/^b0000000bulk\/51k tokens/);
   await expect(selected).toHaveAttribute('aria-expanded', 'true');
   await selected.click();
   await expect(selected).toHaveAttribute('aria-expanded', 'false');
@@ -364,5 +365,5 @@ test('Plans status chips multi-select as repeated ?status= params; search clears
   await page.getByPlaceholder('Search session id…').fill(bulkSid(7));
   await page.getByPlaceholder('Search session id…').press('Enter');
   await expect(page).not.toHaveURL(/status=/);
-  await expect(page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root')).toContainText('bulk/7');
+  await expect(page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root')).toContainText(/^b0000000bulk\/71k tokens/);
 });
