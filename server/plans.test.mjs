@@ -145,6 +145,30 @@ test('getSession: parses plan fields, phases/next steps/required, groups notes, 
   });
 });
 
+test('incomplete and negated completion statuses stay active while explicit buckets win', async () => {
+  const sid = 'ffffffff-6666-4666-8666-666666666666';
+  const statuses = [
+    ['incomplete', 'active'],
+    ['not complete', 'active'],
+    ['not completed', 'active'],
+    ['active - complete the next phase', 'active'],
+    ['blocked - completion is pending', 'blocked'],
+    ['superseded by a completed draft', 'superseded'],
+    ['phase 1 superseded by a completed draft', 'superseded'],
+    ['done', 'done'],
+    ['complete', 'done'],
+    ['completed', 'done'],
+    ['undone', 'other'],
+    ['uncompleted', 'other'],
+  ];
+  statuses.forEach(([raw], index) => put(sid, `plan-${index}.md`, `# Plan ${index}\nStatus: ${raw}\n`));
+
+  const detail = await getSession(sid);
+  assert.deepEqual(Object.fromEntries(detail.plans.map((plan) => [plan.statusRaw, plan.status])), Object.fromEntries(statuses));
+  const row = (await listSessions()).find((session) => session.sid === sid);
+  assert.deepEqual(row.statusBuckets, { active: 4, done: 3, blocked: 1, superseded: 2, other: 2 });
+});
+
 test('getSession: plan-less folder resolves with no plans; missing sid and traversal rejected', async () => {
   const b = await getSession(SID_B);
   assert.equal(b.ok, true); // the dir exists — notes are still browsable

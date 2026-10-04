@@ -48,9 +48,10 @@ const stripEm = (s) => (s || '').replace(/\*\*/g, '').trim();
 function normalizeStatus(raw) {
   const s = stripEm(raw);
   if (/^(active|in.?progress)/i.test(s)) return 'active';
-  if (/(done|complete)/i.test(s)) return 'done';
-  if (/^blocked/i.test(s)) return 'blocked';
+  if (/^blocked\b/i.test(s)) return 'blocked';
   if (/superseded/i.test(s)) return 'superseded';
+  if (/^(incomplete|not\s+completed?)\b/i.test(s)) return 'active';
+  if (/\b(done|complete|completed)\b/i.test(s)) return 'done';
   return 'other';
 }
 
