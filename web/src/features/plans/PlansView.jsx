@@ -13,8 +13,11 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Divider from '@mui/material/Divider';
 import Collapse from '@mui/material/Collapse';
 import IconButton from '@mui/material/IconButton';
+import ListItemButton from '@mui/material/ListItemButton';
 import Popover from '@mui/material/Popover';
 import Stack from '@mui/material/Stack';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
 import TextField from '@mui/material/TextField';
 import Tooltip from '@mui/material/Tooltip';
 import Typography from '@mui/material/Typography';
@@ -26,8 +29,9 @@ import ChevronLeftIcon from '@mui/icons-material/ChevronLeft';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import { useSearchParams } from 'react-router-dom';
-import { useQueryState, useUpdateQuery } from '@/hooks/useQueryState.js';
+import { useQueryState, useQueryList, useUpdateQuery } from '@/hooks/useQueryState.js';
 import { useCapabilities } from '@/hooks/useCapabilities.js';
+import RailSearch from '@/components/panelkit/RailSearch.jsx';
 import { EmptyState } from '@/components/EmptyState.jsx';
 import { planBadge } from './plansMockData.mjs';
 import { getTokens } from '@/theme/contract.js';
@@ -67,7 +71,6 @@ const localDay = (ms) => {
 };
 
 const BUCKETS = ['active', 'done', 'blocked', 'superseded', 'other'];
-const STATUS_FILTERS = ['all', ...BUCKETS];
 const LAYOUTS = ['carousel', 'board'];
 const STATUS_COLOR = { active: 'primary', done: 'success', blocked: 'error', superseded: 'warning', other: 'default' };
 const statusColor = (s) => STATUS_COLOR[s] ?? 'default';
@@ -382,9 +385,13 @@ export default function PlansView({ onToast }) {
   const [detail, setDetail] = useState(null);
   const [detailErr, setDetailErr] = useState(null);
   const [retry, setRetry] = useState(0);
-  const [statusParam, setStatus] = useQueryState('status', 'all');
+  // ?status= (repeated bucket names; empty = all). An invalid value is dropped
+  // from the selection and the URL collapses back below.
+  const [statusList, setStatusList] = useQueryList('status');
+  // ?sid= deep-links a loaded session's plan (?sid=<full sid>); absent by default.
+  const [sidParam, setSid] = useQueryState('sid');
   const [layoutParam, setLayout] = useQueryState('layout', 'carousel');
-  const status = STATUS_FILTERS.includes(statusParam) ? statusParam : 'all';
+  const status = useMemo(() => statusList.filter((v) => BUCKETS.includes(v)), [statusList]);
   const layout = LAYOUTS.includes(layoutParam) ? layoutParam : 'carousel';
   const carousel = layout === 'carousel';
   const [deckPosition, setDeckPosition] = useState(0);
@@ -396,6 +403,7 @@ export default function PlansView({ onToast }) {
   const lastFilterRef = useRef(null);
   const planStackRef = useRef(null);
   const initialSelectionRef = useRef(false);
+  const lastSidOpenRef = useRef(null);
   const suppressClickRef = useRef(false);
   const caps = useCapabilities();
   const { mode, systemMode } = useColorScheme();
@@ -418,14 +426,24 @@ export default function PlansView({ onToast }) {
   const { preset, from, to } = timeframeInUrl ? urlTimeframe : savedTimeframe;
   const updateQuery = useUpdateQuery();
   useEffect(() => {
-    if (statusParam === status && layoutParam === layout) return;
+    if (statusList.length === status.length && layoutParam === layout) return;
     updateQuery({
-      ...(statusParam !== status && { status: null }),
+      ...(statusList.length !== status.length && { status }),
       ...(layoutParam !== layout && { layout: null }),
     });
-  }, [statusParam, status, layoutParam, layout, updateQuery]);
+  }, [statusList, status, layoutParam, layout, updateQuery]);
   const [filterAnchor, setFilterAnchor] = useState(null);
-  const filtersActive = preset !== 'all';
+  const [filterTab, setFilterTab] = useState('timeframe'); // 'timeframe' | 'status'
+  const filtersActive = preset !== 'all' || status.length > 0;
+  // Session-id search top-left: client-side substring match over the fetched
+  // list, dropdown capped at 10 rows, selection deep-links via ?sid=.
+  const [searchQ, setSearchQ] = useState('');
+  const [searchWrap, setSearchWrap] = useState(null);
+  const searchMatches = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    if (!q) return [];
+    return (list ?? []).filter((s) => s.sid.toLowerCase().includes(q)).slice(0, 10);
+  }, [searchQ, list]);
   // Date.now() is impure during render — capture it once per mount for the cutoffs.
   const [now] = useState(() => Date.now());
   // Last pan/zoom survives refresh; first visits start at readable scale.
@@ -437,7 +455,7 @@ export default function PlansView({ onToast }) {
     return DEFAULT_BOARD_VIEWPORT;
   });
 
-  const filterKey = `${status}|${preset}|${from}|${to}`;
+  const filterKey = `${status.join(',')}|${preset}|${from}|${to}`;
   useEffect(() => {
     if (lastFilterRef.current == null) {
       lastFilterRef.current = filterKey;
@@ -513,7 +531,11 @@ export default function PlansView({ onToast }) {
   // VERIFY: refine-filter
   const sessions = useMemo(() => {
     const rows = list ?? [];
-    const kept = status === 'all' ? rows : rows.filter((s) => (s.statusBuckets?.[status] ?? 0) > 0);
+    // Empty selection = all; otherwise a session matches when it has >0 plans
+    // in ANY selected bucket.
+    const kept = status.length === 0
+      ? rows
+      : rows.filter((s) => status.some((b) => (s.statusBuckets?.[b] ?? 0) > 0));
     const cutoff = ['3', '7', '30'].includes(preset) ? now - Number(preset) * 86400e3 : null;
     // mtime can be epoch ms or ISO string (see relTime) — normalize before comparing.
     const inRange = (ms) => {
@@ -524,11 +546,36 @@ export default function PlansView({ onToast }) {
     };
     return kept.filter((s) => inRange(s.mtime)).sort((a, b) => b.mtime - a.mtime);
   }, [list, status, preset, from, to, now]);
+  // Open + focus a session by sid. Shared by the ?sid= deep-link effect and the
+  // search-bar selection handlers — a handler can re-select the sid already in
+  // the URL, where the param change alone would not re-fire the effect.
+  const focusSession = useCallback((sid) => {
+    if (list == null || !list.some((s) => s.sid === sid)) return;
+    initialSelectionRef.current = true;
+    lastSidOpenRef.current = sid;
+    if (carousel) {
+      // Ring selection is deckPosition-driven — move the deck onto the hit.
+      const index = sessions.findIndex((s) => s.sid === sid);
+      if (index >= 0) setDeckPosition(index);
+    } else {
+      // Bring the persisted board viewport onto the node once React Flow is up.
+      requestAnimationFrame(() => {
+        flowRef.current?.fitView({ nodes: [{ id: sid }], maxZoom: 1, duration: 300 });
+      });
+    }
+    setOpenSession(sid);
+  }, [list, sessions, carousel]);
+  // First appearance of a ?sid= session expands it once (stale or unknown sid
+  // is ignored); it never re-expands after the user collapses it. Else the
+  // newest session. Clearing the search input never collapses an opened
+  // session — only navigation away (unmount) does.
   useEffect(() => {
-    if (initialSelectionRef.current || list == null || sessions.length === 0) return undefined;
+    if (list == null) return undefined;
+    if (sidParam && sidParam !== lastSidOpenRef.current) focusSession(sidParam);
+    if (initialSelectionRef.current || sessions.length === 0) return undefined;
     initialSelectionRef.current = true;
     setOpenSession(sessions[0].sid);
-  }, [list, sessions]);
+  }, [list, sessions, sidParam, carousel, focusSession]);
   useEffect(() => {
     if (!openSession) return undefined;
     const index = sessions.findIndex((s) => s.sid === openSession);
@@ -1016,27 +1063,57 @@ export default function PlansView({ onToast }) {
           )}
         </Box>
       )}
-      <Stack
-        direction="row"
-        spacing={0.5}
-        sx={{
-          position: 'absolute', top: 8, left: 8, zIndex: 5, gap: 0.5,
-          ...(carousel
-            ? { right: 88, overflowX: 'auto', flexWrap: 'nowrap', '& .MuiChip-root': { flexShrink: 0 } }
-            : { flexWrap: 'wrap' }),
+      <Box
+        ref={setSearchWrap}
+        onKeyDown={(e) => {
+          // ENTER executes the search: open the top hit (matches are already
+          // sorted newest-first by the sessions list).
+          if (e.key === 'Enter' && searchMatches.length > 0) {
+            const hit = searchMatches[0];
+            focusSession(hit.sid);
+            setSid(hit.sid);
+            setSearchQ('');
+          }
         }}
+        sx={{ position: 'absolute', top: 8, left: 8, zIndex: 5, width: 240, maxWidth: 'calc(100% - 112px)' }}
       >
-        {['all', ...BUCKETS].map((b) => (
-          <Chip
-            key={b}
-            size="small"
-            label={b}
-            color={status === b ? 'primary' : 'default'}
-            variant={status === b ? 'filled' : 'outlined'}
-            onClick={() => setStatus(b)}
-          />
-        ))}
-      </Stack>
+        <RailSearch
+          placeholder="Search session id…"
+          value={searchQ}
+          onChange={setSearchQ}
+        />
+      </Box>
+      <Popover
+        open={searchQ.trim() !== '' && searchMatches.length > 0}
+        anchorEl={searchWrap}
+        onClose={() => setSearchQ('')}
+        // The input keeps focus so typing continues while the dropdown is open.
+        disableAutoFocus
+        disableEnforceFocus
+        disableRestoreFocus
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'left' }}
+        transformOrigin={{ vertical: 'top', horizontal: 'left' }}
+        slotProps={{ paper: { sx: { width: 260 } } }}
+      >
+        <Stack>
+          {searchMatches.map((m) => {
+            const dominant = BUCKETS.reduce((a, b) => ((m.statusBuckets?.[b] ?? 0) > (m.statusBuckets?.[a] ?? 0) ? b : a));
+            return (
+              <ListItemButton key={m.sid} dense onClick={() => { focusSession(m.sid); setSid(m.sid); setSearchQ(''); }} data-plans-search-hit>
+                <Typography variant="caption" sx={{ fontFamily: 'monospace', flex: 1 }}>
+                  {m.sid.slice(0, 8)}
+                </Typography>
+                {(m.statusBuckets?.[dominant] ?? 0) > 0 && (
+                  <Chip size="small" variant="outlined" color={statusColor(dominant)} label={dominant} />
+                )}
+                <Typography variant="caption" color="text.secondary">
+                  {m.planCount} plan{m.planCount === 1 ? '' : 's'}
+                </Typography>
+              </ListItemButton>
+            );
+          })}
+        </Stack>
+      </Popover>
       <Tooltip title={carousel ? 'Board view' : 'Carousel view'} disableInteractive>
         <IconButton
           size="small"
@@ -1072,53 +1149,81 @@ export default function PlansView({ onToast }) {
         onClose={() => setFilterAnchor(null)}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
         transformOrigin={{ vertical: 'top', horizontal: 'right' }}
-        slotProps={{ paper: { sx: { width: 260 } } }}
+        slotProps={{ paper: { sx: { width: 300, display: 'flex', flexDirection: 'column' } } }}
       >
-        <Stack spacing={1.5} sx={{ p: 2 }}>
-          <Stack direction="row" spacing={1}>
-            {[['3', '3d'], ['7', '7d'], ['30', '30d'], ['all', 'All']].map(([p, label]) => (
-              <Chip
-                key={p}
-                label={label}
-                size="small"
-                clickable
-                onClick={() => {
-                  const next = { preset: p, from: '', to: '' };
-                  setSavedTimeframe(next);
-                  updateQuery({ preset: p === '3' ? null : p, from: null, to: null });
-                }}
-                color={preset === p ? 'primary' : 'default'}
-                variant={preset === p ? 'filled' : 'outlined'}
-              />
-            ))}
+        <Tabs value={filterTab} onChange={(_, v) => setFilterTab(v)} sx={{ minHeight: 40, px: 1 }}>
+          <Tab value="timeframe" label="Timeframe" sx={{ minHeight: 40, textTransform: 'none' }} />
+          <Tab value="status" label="Status" sx={{ minHeight: 40, textTransform: 'none' }} />
+        </Tabs>
+        {filterTab === 'timeframe' ? (
+          <Stack spacing={1.5} sx={{ p: 2, pt: 1.5 }}>
+            <Stack direction="row" spacing={1}>
+              {[['3', '3d'], ['7', '7d'], ['30', '30d'], ['all', 'All']].map(([p, label]) => (
+                <Chip
+                  key={p}
+                  label={label}
+                  size="small"
+                  clickable
+                  onClick={() => {
+                    const next = { preset: p, from: '', to: '' };
+                    setSavedTimeframe(next);
+                    updateQuery({ preset: p === '3' ? null : p, from: null, to: null });
+                  }}
+                  color={preset === p ? 'primary' : 'default'}
+                  variant={preset === p ? 'filled' : 'outlined'}
+                />
+              ))}
+            </Stack>
+            <TextField
+              type="date"
+              size="small"
+              label="From"
+              value={preset === 'custom' ? from : ''}
+              slotProps={{ inputLabel: { shrink: true } }}
+              onChange={(e) => {
+                const next = { preset: 'custom', from: e.target.value || '', to };
+                setSavedTimeframe(next);
+                updateQuery({ preset: 'custom', from: next.from || null, to: to || null });
+              }}
+              sx={{ width: '100%' }}
+            />
+            <TextField
+              type="date"
+              size="small"
+              label="To"
+              value={preset === 'custom' ? to : ''}
+              slotProps={{ inputLabel: { shrink: true } }}
+              onChange={(e) => {
+                const next = { preset: 'custom', from, to: e.target.value || '' };
+                setSavedTimeframe(next);
+                updateQuery({ preset: 'custom', from: from || null, to: next.to || null });
+              }}
+              sx={{ width: '100%' }}
+            />
           </Stack>
-          <TextField
-            type="date"
-            size="small"
-            label="From"
-            value={preset === 'custom' ? from : ''}
-            slotProps={{ inputLabel: { shrink: true } }}
-            onChange={(e) => {
-              const next = { preset: 'custom', from: e.target.value || '', to };
-              setSavedTimeframe(next);
-              updateQuery({ preset: 'custom', from: next.from || null, to: to || null });
-            }}
-            sx={{ width: '100%' }}
-          />
-          <TextField
-            type="date"
-            size="small"
-            label="To"
-            value={preset === 'custom' ? to : ''}
-            slotProps={{ inputLabel: { shrink: true } }}
-            onChange={(e) => {
-              const next = { preset: 'custom', from, to: e.target.value || '' };
-              setSavedTimeframe(next);
-              updateQuery({ preset: 'custom', from: from || null, to: next.to || null });
-            }}
-            sx={{ width: '100%' }}
-          />
-        </Stack>
+        ) : (
+          <Box sx={{ p: 2, pt: 1.5 }}>
+            {/* Multi-select: empty = all; 'all' clears the selection. */}
+            <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
+              {['all', ...BUCKETS].map((b) => {
+                const selected = b === 'all' ? status.length === 0 : status.includes(b);
+                const nextStatus = b === 'all' ? []
+                  : status.includes(b) ? status.filter((x) => x !== b)
+                    : [...status, b];
+                return (
+                  <Chip
+                    key={b}
+                    size="small"
+                    label={b}
+                    color={selected ? 'primary' : 'default'}
+                    variant={selected ? 'filled' : 'outlined'}
+                    onClick={() => setStatusList(nextStatus)}
+                  />
+                );
+              })}
+            </Stack>
+          </Box>
+        )}
       </Popover>
       {list == null && listError == null && (
         <Box sx={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', zIndex: 20 }}>
