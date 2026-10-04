@@ -9,7 +9,7 @@ pnpm install         # deps + postinstall
 pnpm start           # build web + serve on http://127.0.0.1:4317
 pnpm dev             # daemon (:4317) + Vite (:5317); browse 127.0.0.1:5317
 pnpm dev-mock        # UI only, no daemon/.env: Vite (:5317) + in-browser mock backend
-pnpm test            # node --test-force-exit "server/*.test.mjs"
+pnpm test            # node --test --test-force-exit "server/*.test.mjs" "web/src/**/*.test.mjs"
 pnpm test:e2e-mock   # build:mock + parallel Playwright suite in e2e-mock/
 ```
 
@@ -43,4 +43,4 @@ Not auto-loaded. Read when the trigger applies:
 - `.claude/rules-reference/worktree-workflow.md`: before branch-scoped or multi-session feature work (worktree under `.worktrees/`, like Tasks do; its `.env` needs its own `SINGULARITY_HOME` + `DAEMON_PORT`/`VITE_PORT`/`E2E_PORT`/`E2E_MOCK_PORT`)
 - `.claude/rules-reference/setup-and-layout.md`: first-time setup, env vars, repo layout, runtime probes
 
-Surgical edits and goal-driven testing are covered in `~/.claude/CLAUDE.md`.
+Surgical edits are covered in `~/.claude/CLAUDE.md`.
