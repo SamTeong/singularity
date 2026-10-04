@@ -131,7 +131,6 @@ test('project refresh failure and refresh-all aggregate include failing project 
 });
 
 test('stacked outcome toasts expire independently and hover pauses their drain', async ({ page }) => {
-  test.setTimeout(30000);
   await gotoView(page, 'Projects');
   const clean = cardFor(page, PROJECT_PATHS.clean);
   const first = page.getByText('git fetch succeeded for sing-clean');

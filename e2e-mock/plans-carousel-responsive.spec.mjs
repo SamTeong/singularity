@@ -173,6 +173,7 @@ test('board arrow keys traverse sessions and their plan stack', async ({ page })
   await expect(sessions.first()).toBeFocused();
 
   await sessions.first().click();
+  await expect(sessions.first()).toHaveAttribute('aria-expanded', 'false');
   await expect(stack).not.toBeVisible();
   await page.keyboard.press('ArrowRight');
   await expect(sessions.nth(1)).toBeFocused();
@@ -180,6 +181,7 @@ test('board arrow keys traverse sessions and their plan stack', async ({ page })
   await expect(sessions.first()).toBeFocused();
 
   await sessions.first().click();
+  await expect(sessions.first()).toHaveAttribute('aria-expanded', 'false');
   await expect(stack).not.toBeVisible();
   // Default zoom is 1, so the 4th column sits past the right edge; frame everything.
   await page.getByRole('button', { name: 'Fit all' }).click();
@@ -205,6 +207,32 @@ const viewportZoom = (page) => page.locator('.react-flow__viewport').evaluate((e
 for (const skin of RESPONSIVE_SKINS) {
   for (const [name, size] of [['phone', { width: 375, height: 667 }], ['desktop', { width: 1440, height: 900 }]]) {
     test(`Plans carousel stays bounded and fully reachable with ${TOTAL} sessions (${skin}, ${name})`, async ({ page }) => {
+      // Selection must keep keyboard focus even when animation frames arrive late.
+      await page.addInitScript(() => {
+        const request = window.requestAnimationFrame.bind(window);
+        const cancel = window.cancelAnimationFrame.bind(window);
+        const pending = new Map();
+        let nextId = 0;
+        window.requestAnimationFrame = (callback) => {
+          const id = nextId++;
+          const frame = request((time) => {
+            if (!pending.has(id)) return;
+            pending.set(id, { kind: 'timer', handle: setTimeout(() => {
+              pending.delete(id);
+              callback(time);
+            }, 200) });
+          });
+          pending.set(id, { kind: 'frame', handle: frame });
+          return id;
+        };
+        window.cancelAnimationFrame = (id) => {
+          const handle = pending.get(id);
+          if (handle === undefined) return;
+          pending.delete(id);
+          if (handle.kind === 'frame') cancel(handle.handle);
+          else clearTimeout(handle.handle);
+        };
+      });
       await page.setViewportSize(size);
       await seedSkin(page, skin);
       await seedBulk(page);
