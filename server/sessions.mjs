@@ -57,7 +57,7 @@ const isCodexContextText = (text) => typeof text === 'string' && (
   /^# AGENTS\.md instructions\s*<INSTRUCTIONS>[\s\S]*<\/INSTRUCTIONS>$/.test(text.trim())
   || /^<environment_context>[\s\S]*<\/environment_context>$/.test(text.trim())
   || /^<recommended_plugins>[\s\S]*<\/recommended_plugins>$/.test(text.trim())
-  || /^<([a-z_]+)>[\s\S]*<\/\1>$/.test(text.trim()) // any other injected wrapper: <user_instructions>, <turn_aborted>, ...
+  || /^<(user_instructions|turn_aborted)>[\s\S]*<\/\1>$/.test(text.trim())
 );
 const codexUserText = (content) => codexContentText((content || []).filter((part) => !isCodexContextText(part.text)));
 
