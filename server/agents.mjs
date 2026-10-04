@@ -385,7 +385,9 @@ export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extr
 // under the user's real USAGE_REPORT_STATE. Point mock spawns at a disposable
 // dir under the existing CACHE_DIR instead of inventing a new state root.
 export function spawnEnv(mock) {
-  return mock ? { ...process.env, USAGE_REPORT_STATE: join(CACHE_DIR, 'mock-usage-state') } : process.env;
+  const env = { ...process.env, HARNESS_LAUNCH_SOURCE: 'singularity' };
+  if (mock) env.USAGE_REPORT_STATE = join(CACHE_DIR, 'mock-usage-state');
+  return env;
 }
 
 // node-pty's raw spawn failure ("posix_spawnp failed." on macOS/Linux) names

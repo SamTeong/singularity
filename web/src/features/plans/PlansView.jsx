@@ -1,7 +1,7 @@
 // Plans board — plan sessions as cards on a React Flow canvas ("Plans 2D").
 // Real data: GET /api/plans/sessions (list) + /api/plans/session?sid= (detail,
 // fetched on expand). planBadge is a pure helper from plansMockData.mjs.
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ReactFlow, Handle, Position } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import Box from '@mui/material/Box';
@@ -565,6 +565,12 @@ export default function PlansView({ onToast }) {
   const currentDeckIndex = sessions.length
     ? ((Math.round(deckPosition) % sessions.length) + sessions.length) % sessions.length
     : 0;
+  const selectedDeckSid = sessions[currentDeckIndex]?.sid;
+  // VERIFY: carousel-focus-commit
+  useLayoutEffect(() => {
+    if (!carousel || !openSession || selectedDeckSid !== openSession) return;
+    ringRef.current?.querySelector('[aria-current="true"] .MuiCardActionArea-root')?.focus();
+  }, [carousel, selectedDeckSid, openSession]);
   const deckWindow = Array.from({ length: Math.min(sessions.length, RING_WINDOW * 2 + 1) }, (_, slot) => {
     const offset = slot - Math.floor(Math.min(sessions.length, RING_WINDOW * 2 + 1) / 2);
     const index = (currentDeckIndex + offset + sessions.length) % sessions.length;

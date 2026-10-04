@@ -140,8 +140,7 @@ test('Settings: dragging an above-threshold rate row reorders and persists it', 
   await page.getByText('API Rates').click();
   const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
 
-  // above_200k seeds a single row, so add a second before there is anything to
-  // reorder. The add row is the second "Key"/"Input"… group — base's comes
+  // The add row is the second "Key"/"Input"… group — base's comes
   // first — and every rate box must be filled or Add stays disabled.
   await prices.getByPlaceholder('Key').nth(1).fill('probe-above');
   for (const col of ['Input', 'Output', 'Cache read', 'Cache write']) {
@@ -149,11 +148,13 @@ test('Settings: dragging an above-threshold rate row reorders and persists it', 
   }
   await prices.getByRole('button', { name: 'Add', exact: true }).nth(1).click();
 
-  // Base's rows come first; the above table's two rows follow them. Base's
-  // length is seed-dependent, so derive the boundary instead of hard-coding.
+  // Base's rows come first; the above table's rows follow them. Read the
+  // current document so this remains valid as seed rates are added.
   const keys = () => prices.getByPlaceholder('e.g. opus');
-  const nBase = (await keys().count()) - 2;
-  const [above0, above1] = [await keys().nth(nBase).inputValue(), await keys().nth(nBase + 1).inputValue()];
+  const before = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
+  const nBase = Object.keys(before.base).length;
+  const above0 = await keys().nth(nBase).inputValue();
+  const above1 = await keys().nth(nBase + 1).inputValue();
   const handle = prices.getByRole('button', { name: 'Reorder' }).nth(nBase);
   await html5Drag(page, handle, keys().nth(nBase + 1));
 
@@ -161,8 +162,10 @@ test('Settings: dragging an above-threshold rate row reorders and persists it', 
   await expect(keys().nth(nBase + 1)).toHaveValue(above0);
 
   // Same whole-doc PUT as the base table — above_200k order round-trips.
+  const expected = Object.keys(before.above_200k);
+  [expected[0], expected[1]] = [above1, above0];
   const doc = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
-  expect(Object.keys(doc.above_200k)).toEqual([above1, above0]);
+  expect(Object.keys(doc.above_200k)).toEqual(expected);
 });
 
 test('Settings: deleting the selected fallback chooses next and clears the last row', async ({ page }) => {
@@ -171,16 +174,19 @@ test('Settings: deleting the selected fallback chooses next and clears the last 
   const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
   const saved = () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
 
-  await prices.getByRole('button', { name: 'Delete opus', exact: true }).click();
-  await expect.poll(async () => (await saved()).default_key).toBe('sonnet-5-5');
-  await prices.getByRole('button', { name: 'Delete sonnet-5-5', exact: true }).click();
-  await expect.poll(async () => (await saved()).default_key).toBe('sonnet');
-  await prices.getByRole('button', { name: 'Delete sonnet', exact: true }).click();
-  await expect.poll(async () => (await saved()).default_key).toBe('haiku');
-  await prices.getByRole('button', { name: 'Delete haiku' }).click();
-  await expect.poll(async () => (await saved()).default_key).toBe('opus-5-5');
-  await prices.getByRole('button', { name: 'Delete opus-5-5' }).click();
-  await expect.poll(async () => (await saved()).default_key).toBe('');
+  const initialKeys = Object.keys((await saved()).base);
+  for (let remaining = initialKeys.length; remaining > 0; remaining--) {
+    const current = await saved();
+    const baseKeys = Object.keys(current.base);
+    const fallbackIndex = baseKeys.indexOf(current.default_key);
+    const key = current.default_key;
+    const expected = baseKeys[fallbackIndex + 1] || baseKeys[fallbackIndex - 1] || '';
+    await prices.getByRole('button', { name: `Delete ${key}`, exact: true }).first().click();
+    await expect.poll(async () => (await saved()).default_key).toBe(expected);
+  }
+  const empty = await saved();
+  expect(Object.keys(empty.base)).toHaveLength(0);
+  expect(empty.default_key).toBe('');
 });
 
 test('Settings: deleting the selected last fallback chooses the preceding base row', async ({ page }) => {
@@ -189,20 +195,27 @@ test('Settings: deleting the selected last fallback chooses the preceding base r
   const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
   const fallback = prices.getByRole('combobox');
   await fallback.click();
-  await page.getByRole('option', { name: 'haiku', exact: true }).click();
+  const before = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
+  const keys = Object.keys(before.base);
+  const last = keys.at(-1);
+  const preceding = keys.at(-2) || '';
+  await page.getByRole('option', { name: last, exact: true }).click();
 
-  await prices.getByRole('button', { name: 'Delete haiku' }).click();
+  await prices.getByRole('button', { name: `Delete ${last}` }).click();
   await expect.poll(async () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json())))
-    .toMatchObject({ default_key: 'sonnet' });
+    .toMatchObject({ default_key: preceding });
 });
 
 test('Settings: renaming the selected fallback keeps it selected', async ({ page }) => {
   await page.goto('/settings?tab=models');
   await page.getByText('API Rates').click();
   const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
-  await prices.getByPlaceholder('e.g. opus').nth(1).fill('opus-renamed');
-  await prices.getByPlaceholder('e.g. opus').nth(1).press('Tab');
+  const doc = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
+  const selectedIndex = Object.keys(doc.base).indexOf(doc.default_key);
+  const selectedRow = prices.getByPlaceholder('e.g. opus').nth(selectedIndex);
+  await selectedRow.fill(`${doc.default_key}-renamed`);
+  await selectedRow.press('Tab');
 
   await expect.poll(async () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json())))
-    .toMatchObject({ default_key: 'opus-renamed' });
+    .toMatchObject({ default_key: `${doc.default_key}-renamed` });
 });
