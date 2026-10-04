@@ -138,10 +138,14 @@ test('buildSpawn: typed full claude id runs via claude bin with --model', () => 
 // mock demo sessions (tasks.mjs's mock:true) must not write cost-state into the
 // user's real ~/.agents/.harness-usage-report store — spawnEnv redirects
 // USAGE_REPORT_STATE into the disposable CACHE_DIR for mock spawns only.
-test('spawnEnv: mock spawn gets USAGE_REPORT_STATE under CACHE_DIR; normal spawn is untouched', () => {
+// All spawns (mock and normal) carry HARNESS_LAUNCH_SOURCE: 'singularity'.
+test('spawnEnv: mock spawn gets USAGE_REPORT_STATE under CACHE_DIR; all spawns get HARNESS_LAUNCH_SOURCE', () => {
   const mockEnv = spawnEnv(true);
   assert.equal(mockEnv.USAGE_REPORT_STATE, join(CACHE_DIR, 'mock-usage-state'));
-  assert.equal(spawnEnv(false), process.env);
+  assert.equal(mockEnv.HARNESS_LAUNCH_SOURCE, 'singularity');
+  const normalEnv = spawnEnv(false);
+  assert.equal(normalEnv.HARNESS_LAUNCH_SOURCE, 'singularity');
+  assert(!normalEnv.USAGE_REPORT_STATE);
 });
 
 test('buildSpawn: existing session log switches to --resume', () => {
