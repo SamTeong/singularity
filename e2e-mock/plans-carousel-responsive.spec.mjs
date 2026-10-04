@@ -321,3 +321,48 @@ test('invalid Plans status and layout are removed while valid timeframe and unre
     return [params.get('status'), params.get('layout'), params.get('keep')];
   })).toEqual(['active', 'board', 'here']);
 });
+
+const bulkSid = (i) => `b0000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
+
+test('Plans session-id search lists <=10 hits and Enter opens the top hit via ?sid=', async ({ page }) => {
+  await seedBulk(page);
+  await page.goto('/plans');
+  await page.getByPlaceholder('Search session id…').fill('b0000000-0000-4000-8000-00000000001');
+  const hits = page.locator('[data-plans-search-hit]');
+  await expect(hits.first()).toBeVisible();
+  expect(await hits.count()).toBeLessThanOrEqual(10);
+  await page.getByPlaceholder('Search session id…').press('Enter');
+  await expect(page).toHaveURL(/sid=b0000000-0000-4000-8000-0000000000\d\d/);
+  await expect(page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root')).toHaveAttribute('aria-expanded', 'true');
+});
+
+test('Plans ?sid= deep link expands the session once and does not re-expand after collapse', async ({ page }) => {
+  await seedBulk(page);
+  await page.goto(`/plans?sid=${bulkSid(5)}`);
+  const selected = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root');
+  await expect(page.getByText(/^6 \/ \d+$/)).toBeVisible();
+  await expect(selected).toHaveAttribute('aria-expanded', 'true');
+  await selected.click();
+  await expect(selected).toHaveAttribute('aria-expanded', 'false');
+  await page.waitForTimeout(500);
+  await expect(selected).toHaveAttribute('aria-expanded', 'false');
+});
+
+test('Plans status chips multi-select as repeated ?status= params; search clears filters hiding the hit', async ({ page }) => {
+  await seedBulk(page);
+  await page.goto('/plans');
+  await page.getByRole('button', { name: 'Filter plans' }).click();
+  await page.getByRole('tab', { name: /status/i }).click();
+  await page.getByText('done', { exact: true }).click();
+  await page.getByText('active', { exact: true }).click();
+  await expect(page).toHaveURL(/status=active/);
+  await expect(page).toHaveURL(/status=done/);
+  // Drop 'active' again: only 'done' remains, hiding the bulk (active) sessions.
+  await page.getByText('active', { exact: true }).click();
+  await expect(page).not.toHaveURL(/status=active/);
+  await page.keyboard.press('Escape');
+  await page.getByPlaceholder('Search session id…').fill(bulkSid(7));
+  await page.getByPlaceholder('Search session id…').press('Enter');
+  await expect(page).not.toHaveURL(/status=/);
+  await expect(page.getByText(/^8 \/ \d+$/)).toBeVisible();
+});
