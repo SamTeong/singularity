@@ -274,3 +274,22 @@ test.describe('Plans timeframe defaults', () => {
     await expect(counter(page)).toHaveText('1 / 7');
   });
 });
+
+test('invalid Plans status and layout are removed while valid timeframe and unrelated params remain', async ({ page }) => {
+  await page.goto('/plans?status=bogus&layout=invalid&preset=all&from=2026-09-01&to=2026-09-30&keep=here');
+
+  await expect(page.getByRole('region', { name: 'Session carousel' })).toBeVisible();
+  await expect(page.getByText(/^1 \/ 12$/)).toBeVisible();
+  await expect(page.locator('.react-flow')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => {
+    const params = new URLSearchParams(location.search);
+    return [params.has('status'), params.has('layout'), params.get('preset'), params.get('from'), params.get('to'), params.get('keep')];
+  })).toEqual([false, false, 'all', '2026-09-01', '2026-09-30', 'here']);
+
+  await page.goto('/plans?status=active&layout=board&keep=here');
+  await expect(page.locator('.react-flow')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => {
+    const params = new URLSearchParams(location.search);
+    return [params.get('status'), params.get('layout'), params.get('keep')];
+  })).toEqual(['active', 'board', 'here']);
+});

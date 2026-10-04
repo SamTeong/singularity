@@ -249,8 +249,9 @@ export default function UsageView({ usage, onRefresh }) {
     setRefreshingAll(true);
     try { await onRefresh(true); } finally { setRefreshingAll(false); }
   };
-  // { win, cache } while the pop-out window is open. Leaving the view closes it
-  // (the portal would otherwise leave an empty window behind).
+  // { win, cache } while the pop-out window is open. The shell keeps this view
+  // mounted (hidden) across navigation, so the pop-out survives it; a full
+  // unmount closes it (the portal would otherwise leave an empty window behind).
   const [popout, setPopout] = useState(null);
   useEffect(() => () => popout?.win.close(), [popout]);
   const togglePopout = () => {

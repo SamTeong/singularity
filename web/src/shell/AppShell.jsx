@@ -70,7 +70,7 @@ const lsGet = (k) => { try { return localStorage.getItem(k); } catch { return nu
 const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch { /* best-effort persistence */ } };
 const MAX_TOASTS = 4;
 
-const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'transcripts', 'explorer'];
+const PERSISTENT_VIEWS = ['config', 'hooks', 'rules', 'memory', 'wiki', 'transcripts', 'explorer', 'usage'];
 
 // A skin change remounts this entire component — `AppThemeProvider` keys its
 // skin subtree by `skin.id` (see theme/AppThemeProvider.jsx), so any React
@@ -467,7 +467,7 @@ export default function AppShell() {
         )}
 
         {/* Selected view. Persistent views mount once (visited) and stay mounted
-            (display:none when hidden); Tasks/Cron/Usage render on demand. */}
+            (display:none when hidden); Tasks/Cron render on demand. */}
         <Box sx={(t) => ({ ...glass(t), position: 'relative', flex: 1, mt: 1.5, mx: 1.5, minWidth: 0, borderRadius: isPhosphor ? 0 : `${getTokens(t).radius.lg}px`, overflow: 'hidden', zIndex: getTokens(t).layers.content })}>
           <Suspense fallback={<Box sx={{ p: 3, color: 'text.secondary' }}>Loading…</Box>}>
             {visited.has('config') && (
@@ -493,7 +493,9 @@ export default function AppShell() {
                 <SessionHistory active={view === 'transcripts'} sendMsg={sendMsg} registerChat={registerChat} onResume={onResumeSession} liveSessionIds={liveSessionIds} />
               </Box>
             )}
-            {view === 'usage' && <UsageView usage={usage} onRefresh={refreshUsage} />}
+            {visited.has('usage') && (
+              <Box sx={{ display: view === 'usage' ? 'block' : 'none', height: '100%' }}><UsageView usage={usage} onRefresh={refreshUsage} /></Box>
+            )}
             {view === 'history' && <HistoryView onOpenSession={openHistorySession} onToast={setToast} />}
             {view === 'projects' && <ProjectsView onToast={enqueueToast} dismissToast={dismissToast} />}
             {view === 'appearance' && <AppearanceView onToggleColorMode={onToggleTheme} onSelectSkin={onSelectSkin} />}

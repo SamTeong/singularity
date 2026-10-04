@@ -181,6 +181,24 @@ test('listSessions: injected wrapper-tag context (<user_instructions>, <turn_abo
   }
 });
 
+test('response_item XML task prompts remain searchable transcript and title text', async () => {
+  const prompt = '<task>Build a widget that preserves XML prompt text</task>';
+  writeRollout([
+    EVENTS[0],
+    JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: prompt }] } }),
+  ]);
+  try {
+    const session = await readSession('<codex>', THREAD_ID, undefined, 'codex');
+    assert.equal(session.meta.title, prompt);
+    assert.equal(session.messages[0].text, prompt);
+    const { results } = await searchSessions('preserves XML prompt text', { root: join(CODEX_HOME, 'nonexistent') });
+    assert.equal(results.length, 1);
+    assert.equal(results[0].id, THREAD_ID);
+  } finally {
+    rmSync(CODEX_HOME, { recursive: true, force: true });
+  }
+});
+
 test('hideReviews excludes Codex review prompts before the list cap and from search', async () => {
   const reviewId = '019f9718-405c-7fd3-9b8a-f3af71880fe3';
   const reviewFile = join(ROLLOUT_DIR, `rollout-2026-07-24T10-26-16-${reviewId}.jsonl`);

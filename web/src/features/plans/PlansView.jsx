@@ -67,6 +67,8 @@ const localDay = (ms) => {
 };
 
 const BUCKETS = ['active', 'done', 'blocked', 'superseded', 'other'];
+const STATUS_FILTERS = ['all', ...BUCKETS];
+const LAYOUTS = ['carousel', 'board'];
 const STATUS_COLOR = { active: 'primary', done: 'success', blocked: 'error', superseded: 'warning', other: 'default' };
 const statusColor = (s) => STATUS_COLOR[s] ?? 'default';
 const dotColor = (s) => (s === 'other' ? 'text.disabled' : `${statusColor(s)}.main`);
@@ -380,8 +382,10 @@ export default function PlansView({ onToast }) {
   const [detail, setDetail] = useState(null);
   const [detailErr, setDetailErr] = useState(null);
   const [retry, setRetry] = useState(0);
-  const [status, setStatus] = useQueryState('status', 'all');
-  const [layout, setLayout] = useQueryState('layout', 'carousel');
+  const [statusParam, setStatus] = useQueryState('status', 'all');
+  const [layoutParam, setLayout] = useQueryState('layout', 'carousel');
+  const status = STATUS_FILTERS.includes(statusParam) ? statusParam : 'all';
+  const layout = LAYOUTS.includes(layoutParam) ? layoutParam : 'carousel';
   const carousel = layout === 'carousel';
   const [deckPosition, setDeckPosition] = useState(0);
   const [ringDragging, setRingDragging] = useState(false);
@@ -413,6 +417,13 @@ export default function PlansView({ onToast }) {
   }
   const { preset, from, to } = timeframeInUrl ? urlTimeframe : savedTimeframe;
   const updateQuery = useUpdateQuery();
+  useEffect(() => {
+    if (statusParam === status && layoutParam === layout) return;
+    updateQuery({
+      ...(statusParam !== status && { status: null }),
+      ...(layoutParam !== layout && { layout: null }),
+    });
+  }, [statusParam, status, layoutParam, layout, updateQuery]);
   const [filterAnchor, setFilterAnchor] = useState(null);
   const filtersActive = preset !== 'all';
   // Date.now() is impure during render — capture it once per mount for the cutoffs.
