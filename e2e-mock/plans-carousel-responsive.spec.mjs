@@ -340,7 +340,7 @@ test('Plans ?sid= deep link expands the session once and does not re-expand afte
   await seedBulk(page);
   await page.goto(`/plans?sid=${bulkSid(5)}`);
   const selected = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root');
-  await expect(page.getByText(/^6 \/ \d+$/)).toBeVisible();
+  await expect(selected).toContainText('bulk/5');
   await expect(selected).toHaveAttribute('aria-expanded', 'true');
   await selected.click();
   await expect(selected).toHaveAttribute('aria-expanded', 'false');
@@ -364,5 +364,5 @@ test('Plans status chips multi-select as repeated ?status= params; search clears
   await page.getByPlaceholder('Search session id…').fill(bulkSid(7));
   await page.getByPlaceholder('Search session id…').press('Enter');
   await expect(page).not.toHaveURL(/status=/);
-  await expect(page.getByText(/^8 \/ \d+$/)).toBeVisible();
+  await expect(page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root')).toContainText('bulk/7');
 });
