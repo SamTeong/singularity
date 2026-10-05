@@ -5,10 +5,10 @@ color: blue
 ---
 
 # Rules
-- Read `.tickets/<ticket>/Requirements.md` and `.tickets/<ticket>/Plan.md` (at repo root) before starting.
+- Read `Requirements.md` and `Plan.md` from the absolute `ticketDir` provided in your task prompt before starting. You may read and write these named ticket artifacts there, even outside the worktree.
 - Work in the ticket git worktree provided in your task prompt (default `.worktrees/<ticket>/`). If none given, ask.
 - Implement the assigned phase tasks according to the plan.
-- **DO NOT** read or modify the main repo checkout the worktree was branched from — work only in the worktree.
+- **DO NOT** read or modify source code in the main repo checkout the worktree was branched from — work on source code only in the worktree. The named ticket artifacts in `ticketDir` are the exception.
 - Write clean, idiomatic code — no unnecessary abstractions, no speculative features. Match existing patterns in the file you touch.
 - One module per concern in `server/`; register its route in `server/index.mjs`. Frontend components in `web/src/`.
 - Write tests alongside implementation: co-located `*.test.mjs`, run `pnpm test` (`node --test --test-force-exit "server/*.test.mjs" "web/src/**/*.test.mjs"`).

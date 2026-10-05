@@ -367,3 +367,30 @@ test('Plans status chips multi-select as repeated ?status= params; search clears
   await expect(page).not.toHaveURL(/status=/);
   await expect(page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root')).toContainText(/^b0000000bulk\/71k tokens/);
 });
+
+test('Plans search refocuses an already selected sid after a filter hides it and preserves collapse-once', async ({ page }) => {
+  await seedBulk(page);
+  await page.goto(`/plans?sid=${bulkSid(5)}`);
+  const selected = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root');
+  await expect(selected).toContainText(/^b0000000bulk\/51k tokens/);
+  await expect(selected).toHaveAttribute('aria-expanded', 'true');
+
+  await page.getByRole('button', { name: 'Filter plans' }).click();
+  await page.getByRole('tab', { name: /status/i }).click();
+  await page.getByText('done', { exact: true }).click();
+  await expect(page).toHaveURL(/status=done/);
+  await page.keyboard.press('Escape');
+
+  const search = page.getByPlaceholder('Search session id…');
+  await search.fill(bulkSid(5));
+  await search.press('Enter');
+  await expect(page).not.toHaveURL(/status=/);
+  await expect(page).toHaveURL(new RegExp(`sid=${bulkSid(5)}`));
+  await expect(selected).toContainText(/^b0000000bulk\/51k tokens/);
+  await expect(selected).toHaveAttribute('aria-expanded', 'true');
+
+  await selected.click();
+  await expect(selected).toHaveAttribute('aria-expanded', 'false');
+  await page.waitForTimeout(500);
+  await expect(selected).toHaveAttribute('aria-expanded', 'false');
+});

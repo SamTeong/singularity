@@ -555,6 +555,7 @@ export default function PlansView({ onToast }) {
     if (!sessions.some((s) => s.sid === sid)) {
       // Hit is hidden by the active filters — clear them; the sid effect re-runs
       // once `sessions` includes it and focuses it then.
+      lastSidOpenRef.current = null;
       setSavedTimeframe({ preset: 'all', from: '', to: '' });
       updateQuery({ status: null, preset: 'all', from: null, to: null });
       setOpenSession(sid);
