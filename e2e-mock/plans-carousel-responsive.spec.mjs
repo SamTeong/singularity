@@ -163,15 +163,40 @@ test('board arrow keys traverse sessions and their plan stack', async ({ page })
   await expect(sessions.first()).toHaveAttribute('aria-expanded', 'true');
   await expect(stack).toBeVisible();
   await expect(sessions.first()).toBeFocused();
+  await page.evaluate(() => {
+    window.__sessionVisibilityMutations = [];
+    window.__sessionVisibilityObserver = new MutationObserver((records) => {
+      for (const record of records) {
+        if (getComputedStyle(record.target).visibility === 'hidden' || /visibility:\s*hidden/.test(record.oldValue || '')) {
+          window.__sessionVisibilityMutations.push(record.target.getAttribute('data-id'));
+        }
+      }
+    });
+    document.querySelectorAll('.react-flow__node-session').forEach((node) => {
+      window.__sessionVisibilityObserver.observe(node, { attributes: true, attributeFilter: ['style'], attributeOldValue: true });
+    });
+  });
 
   await page.keyboard.press('ArrowRight');
   await expect(stack.locator('.MuiCardActionArea-root').first()).toBeFocused();
   await page.keyboard.press('ArrowLeft');
   await expect(sessions.first()).toBeFocused();
+  await page.evaluate(() => { window.__sessionVisibilityMutations = []; });
   await page.keyboard.press('ArrowDown');
   await expect(sessions.nth(4)).toBeFocused();
+  await expect(stack).toBeVisible();
   await page.keyboard.press('ArrowUp');
   await expect(sessions.first()).toBeFocused();
+  await expect(stack).toBeVisible();
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  expect(await page.evaluate(() => {
+    const hidden = window.__sessionVisibilityObserver.takeRecords()
+      .filter((record) => getComputedStyle(record.target).visibility === 'hidden'
+        || /visibility:\s*hidden/.test(record.oldValue || ''))
+      .map((record) => record.target.getAttribute('data-id'));
+    return [...window.__sessionVisibilityMutations, ...hidden];
+  })).toEqual([]);
+  await page.evaluate(() => window.__sessionVisibilityObserver.disconnect());
 
   await sessions.first().click();
   await expect(sessions.first()).toHaveAttribute('aria-expanded', 'false');
