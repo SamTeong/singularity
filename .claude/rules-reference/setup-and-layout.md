@@ -33,7 +33,7 @@ pnpm build:mock      # mock build → web/dist-mock (never touches web/dist)
 server/    daemon — Fastify routes (index.mjs) + one *.mjs per concern, *.test.mjs co-located
 web/src/
   features/     one dir per surface (appearance, automation, config, config-hooks, explorer, history,
-                memory, palette, processes, rules, sessions, settings, skills, status, tasks,
+                memory, palette, plans, processes, projects, rules, sessions, settings, skills, status, tasks,
                 transcripts, usage, wiki)
   components/   shared widgets (panelkit, Sparkline, CmEditor, TableScroller, …)
   shell/        AppShell + AppMenu + Sidebar (lazy-loads each feature), views.mjs, breakpoints.js

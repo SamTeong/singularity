@@ -18,6 +18,6 @@ Details are in `e2e/README.md`; read it before editing specs. Gotchas that aren'
 - `e2e/serve.mjs` strips every `SING_*`/`DAEMON_PORT`/`CLAUDE_BIN`/… key from `process.env`, then boots an isolated daemon with a stub `CLAUDE_BIN`. `E2E_PORT` (process env or `.env`, via `scripts/env-port.mjs`) gives a run its own port + sandbox dir; only a process-env `E2E_PORT` switches `playwright.config.mjs` into side-run reporting.
 - Playwright drives the pre-built `web/dist`. Rebuild before re-testing source changes, or the fix will look like it failed.
 - MUI `data-testid="<Name>Icon"` exists in DEV only. Reach icon-only buttons via their Tooltip `aria-label`.
-- `PERSISTENT_VIEWS` stay mounted with `display:none`. `getByRole` filters them out, but text/CSS queries need the `visible()` helper.
+- `PERSISTENT_VIEWS` (`web/src/shell/AppShell.jsx`) stay mounted with `display:none`. `getByRole` filters them out, but text/CSS queries need the `visible()` helper.
 - `/procs` scans the real machine, so never assert a row count. `ensureTrusted` writes the real `~/.claude.json`, so no spec may create a task, session or cron: those specs are cancel-only on seeded rows.
 - The `consoleGuard` fixture fails a test on any console error or warning. Opt out per test with `allow(/re/)`. The cytoscape "custom wheel sensitivity" warning is allowlisted.

@@ -552,6 +552,15 @@ export default function PlansView({ onToast }) {
   const focusSession = useCallback((sid) => {
     if (list == null || !list.some((s) => s.sid === sid)) return;
     initialSelectionRef.current = true;
+    if (!sessions.some((s) => s.sid === sid)) {
+      // Hit is hidden by the active filters — clear them; the sid effect re-runs
+      // once `sessions` includes it and focuses it then.
+      lastSidOpenRef.current = null;
+      setSavedTimeframe({ preset: 'all', from: '', to: '' });
+      updateQuery({ status: null, preset: 'all', from: null, to: null });
+      setOpenSession(sid);
+      return;
+    }
     lastSidOpenRef.current = sid;
     if (carousel) {
       // Ring selection is deckPosition-driven — move the deck onto the hit.
@@ -564,7 +573,7 @@ export default function PlansView({ onToast }) {
       });
     }
     setOpenSession(sid);
-  }, [list, sessions, carousel]);
+  }, [list, sessions, carousel, updateQuery]);
   // First appearance of a ?sid= session expands it once (stale or unknown sid
   // is ignored); it never re-expands after the user collapses it. Else the
   // newest session. Clearing the search input never collapses an opened
