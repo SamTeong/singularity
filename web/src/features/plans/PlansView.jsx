@@ -88,8 +88,6 @@ const relTime = (ms) => {
 
 const fmtTokens = (n) => (n == null ? null : `${Math.round(n / 1000)}k tokens`);
 
-const noop = () => {};
-
 // Soft depth for board cards floating over the starfield backdrop. `cardShadow`
 // is the skin's glass shadow token (a CSS-var reference — see theme/contract.js
 // getTokens), so the resting lift reads in both shipped skins. Open cards cast
@@ -400,6 +398,7 @@ export default function PlansView({ onToast }) {
   const ringRef = useRef(null);
   const boardRef = useRef(null);
   const flowRef = useRef(null);
+  const [measuredSessions, setMeasuredSessions] = useState(() => new Map());
   const lastFilterRef = useRef(null);
   const planStackRef = useRef(null);
   const initialSelectionRef = useRef(false);
@@ -746,6 +745,23 @@ export default function PlansView({ onToast }) {
   const detailLoading = openSession !== null && openDetail == null && openErr == null;
   const selectedSessionVisible = sessions.some((s) => s.sid === openSession);
 
+  const onNodesChange = useCallback((changes) => {
+    const sessionIds = new Set(sessions.map((s) => s.sid));
+    setMeasuredSessions((current) => {
+      const next = new Map([...current].filter(([sid]) => sessionIds.has(sid)));
+      let changed = next.size !== current.size;
+      changes.forEach((change) => {
+        if (change.type !== 'dimensions' || !sessionIds.has(change.id)) return;
+        const previous = next.get(change.id);
+        const { width, height } = change.dimensions;
+        if (previous?.width === width && previous?.height === height) return;
+        next.set(change.id, change.dimensions);
+        changed = true;
+      });
+      return changed ? next : current;
+    });
+  }, [sessions]);
+
   const { nodes, edges } = useMemo(() => {
     const ns = [];
     const es = [];
@@ -757,6 +773,7 @@ export default function PlansView({ onToast }) {
         id: s.sid,
         type: 'session',
         position: { x, y },
+        measured: measuredSessions.get(s.sid),
         draggable: false,
         data: {
           session: s, expanded, dimmed: openSession !== null && !expanded,
@@ -794,7 +811,7 @@ export default function PlansView({ onToast }) {
       es.push({ id: `e-${key}`, source: s.sid, target: key, type: 'default' });
     });
     return { nodes: ns, edges: es };
-  }, [sessions, openSession, openPlan, openDetail, detailLoading, openErr, toggleSession, togglePlan, onToast]);
+  }, [sessions, openSession, openPlan, openDetail, detailLoading, openErr, toggleSession, togglePlan, onToast, measuredSessions]);
 
   if (caps?.plans?.available === false) {
     return (
@@ -930,7 +947,7 @@ export default function PlansView({ onToast }) {
         edges={edges}
         nodeTypes={nodeTypes}
         style={{ backgroundColor: 'transparent' }}
-        onNodesChange={noop}
+        onNodesChange={onNodesChange}
         // VERIFY: refine-panondrag
         panOnDrag={[0, 1, 2]}
         panOnScroll={false}
