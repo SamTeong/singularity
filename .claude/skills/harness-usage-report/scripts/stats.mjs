@@ -606,10 +606,14 @@ export function _msg_cost_tiered(model, i, o, cr, cc) {
   const key = _price_key(model);
   if (key === null) return null;
   const above = PRICE_ABOVE[key];
-  // Sol/Luna's long-context surcharge begins above 272k input tokens, not the
-  // global threshold — a model-specific quirk, not part of the pricing.json
-  // schema (which carries one global long_context_threshold).
-  const threshold = key === "gpt-6-sol" || key === "gpt-6-luna" || key === "gpt-6.1-sol" ? 272000 : LONG_CTX_THRESHOLD;
+  // Sol/Luna's long-context surcharge begins above 272k input tokens, and
+  // haiku-5-5's above 100k — not the global threshold; model-specific quirks,
+  // not part of the pricing.json schema (which carries one global
+  // long_context_threshold).
+  const threshold =
+    key === "gpt-6-sol" || key === "gpt-6-luna" || key === "gpt-6.1-sol" ? 272000
+    : key === "haiku-5-5" ? 100000
+    : LONG_CTX_THRESHOLD;
   if (above && i + cr + cc > threshold) {
     return (i * above[0] + o * above[1] + cr * above[2] + cc * above[3]) / 1e6;
   }
