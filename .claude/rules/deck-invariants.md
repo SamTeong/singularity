@@ -5,6 +5,8 @@ paths:
 
 # Deck invariants
 
+Paths (`src/...`, `scripts/...`) are relative to `github-pages/`; run `pnpm ...` commands from there.
+
 ## The two invariants that will bite you
 
 Both are consequences of the same thing: `CSS3DObject` **reparents** the real

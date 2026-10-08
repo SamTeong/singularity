@@ -1,5 +1,7 @@
 # Deck editing runbook
 
+Paths (`src/...`, `scripts/...`) are relative to `github-pages/`; run `pnpm ...` commands from there.
+
 Read when adding, removing, or reordering slides in `github-pages/`. Core model and invariants: `github-pages/CLAUDE.md`, `.claude/rules/deck-invariants.md`.
 
 ## Add a slide
@@ -138,4 +140,3 @@ panels, camera path and rail all read the array in order, and `Chapters.tsx`
 renders from it.
 
 Renumber `num` / `code` to match, or the HUD will read `05` on the third slide.
-

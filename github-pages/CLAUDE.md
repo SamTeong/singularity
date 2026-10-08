@@ -32,7 +32,7 @@ the camera.
 
 ---
 
-Add/remove/reorder slide steps, and how to choose `u`/`yaw`/`pitch`: read `.claude/rules-reference/deck-editing.md` before such an edit. Always-on invariants (React/CSS3DObject contract, `three` import limit, BASE_URL, no-WebGL fallback, autoplay, reduced motion): `.claude/rules/deck-invariants.md`.
+Add/remove/reorder slide steps, and how to choose `u`/`yaw`/`pitch`: read `../.claude/rules-reference/deck-editing.md` before such an edit. Always-on invariants (React/CSS3DObject contract, `three` import limit, BASE_URL, no-WebGL fallback, autoplay, reduced motion): `../.claude/rules/deck-invariants.md`.
 
 ## After editing — always
 
