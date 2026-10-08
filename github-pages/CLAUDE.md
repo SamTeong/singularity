@@ -2,8 +2,8 @@
 
 This app is a **slide deck**: fifteen chapters ("slides") mounted as real DOM
 inside one persistent Three.js world, toured by a scroll-driven camera on rails.
-Adding, removing, and reordering slides is the routine edit, and this file is the
-runbook for it.
+Adding, removing, and reordering slides is the routine edit; its runbook is
+`../.claude/rules-reference/deck-editing.md`.
 
 Read `README.md` first for the architecture. This file is only about editing slides.
 
@@ -32,7 +32,7 @@ the camera.
 
 ---
 
-Add/remove/reorder slide steps, and how to choose `u`/`yaw`/`pitch`: read `../.claude/rules-reference/deck-editing.md` before such an edit. Always-on invariants (React/CSS3DObject contract, `three` import limit, BASE_URL, no-WebGL fallback, autoplay, reduced motion): `../.claude/rules/deck-invariants.md`.
+Add/remove/reorder slide steps, and how to choose `u`/`yaw`/`pitch`: read `../.claude/rules-reference/deck-editing.md` before such an edit. Invariants, auto-loaded on `github-pages/**` edits (React/CSS3DObject contract, `three` import limit, BASE_URL, no-WebGL fallback, autoplay, reduced motion): `../.claude/rules/deck-invariants.md`.
 
 ## After editing — always
 
