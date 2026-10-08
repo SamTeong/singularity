@@ -39,6 +39,8 @@ const PRICES = [
   ['claude-sonnet-5-5', { input: 2, output: 10 }],
   ['claude-sonnet-5', { input: 2, output: 10 }],
   ['claude-sonnet', { input: 3, output: 15 }],
+  // haiku-5-5: prompts over 100k tokens are $0.50/$2.50 — no long-context tiering in this table, so not modeled
+  ['claude-haiku-5-5', { input: 0.1, output: 0.5 }],
   ['claude-haiku-4-5', { input: 1, output: 5 }],
   ['claude-3-5-haiku', { input: 1, output: 5 }],
 ].sort((a, b) => b[0].length - a[0].length); // longest prefix first
