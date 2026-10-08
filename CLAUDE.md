@@ -17,7 +17,6 @@ Before finishing code changes: `pnpm lint && pnpm test`.
 
 - `pnpm build`/`pnpm start` take ~20s+: run with `run_in_background` (or `timeout: 300000`).
 - Use mock mode for UI-only work, and `pnpm dev` when a change touches daemon behaviour.
-- Shell: PowerShell primary; Bash tool POSIX only.
 - `SINGULARITY_HOME`, `DAEMON_PORT`, `CLAUDE_BIN` are required in `.env` (no baked-in defaults). `pnpm bootstrap` generates it.
 
 ## Invariants
@@ -42,5 +41,3 @@ Auto-loaded only when you touch matching files (`paths:` frontmatter):
 Not auto-loaded. Read when the trigger applies:
 - `.claude/rules-reference/worktree-workflow.md`: before branch-scoped or multi-session feature work (worktree under `.worktrees/`, like Tasks do; its `.env` needs its own `SINGULARITY_HOME` + `DAEMON_PORT`/`VITE_PORT`/`E2E_PORT`/`E2E_MOCK_PORT`)
 - `.claude/rules-reference/setup-and-layout.md`: first-time setup, env vars, repo layout, runtime probes
-
-Surgical edits are covered in `~/.claude/CLAUDE.md`.
