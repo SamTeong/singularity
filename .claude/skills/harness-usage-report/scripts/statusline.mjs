@@ -10,7 +10,7 @@
 // context usage bar, cost / rate limits (5h/7d) / dir, worktree, git status.
 // Invoke explicitly: `node statusline.mjs` (Node is guaranteed on PATH; shebang
 // is not honoured on Windows).
-import { mkdirSync, writeFileSync, statSync } from "node:fs";
+import { mkdirSync, writeFileSync, statSync, readFileSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -167,6 +167,15 @@ const scopes = (g("workspace", "added_dirs") || [])
 // the new one. Keep this line 7-bit — no emoji, no box-drawing bars.
 const p1 = [model, usageSeg, costStr];
 if (rateLimitStr) p1.push(rateLimitStr);
+// Cache-TTL countdown: cache-refresh plugin records the main-agent turn end.
+try {
+  if (sid && /^[0-9a-fA-F-]{1,64}$/.test(sid)) {
+    const { turnEndMs } = JSON.parse(readFileSync(join(stateRoot, "cache-ttl", sid + ".json"), "utf8"));
+    if (Number.isFinite(turnEndMs)) {
+      p1.push(`TTL: ${Math.max(0, 60 - Math.floor((Date.now() - turnEndMs) / 60000))}m`);
+    }
+  }
+} catch { /* no TTL segment */ }
 const line1 = p1.join(" | ");
 
 const p2 = [];
