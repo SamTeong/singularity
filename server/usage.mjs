@@ -736,8 +736,8 @@ function rateGate() {
   let until = 0;
   let key = null;
   return {
-    blocked(k = null) {
-      if (k !== key) until = 0;
+    blocked(k = null, preserveUnknown = false) {
+      if (!(preserveUnknown && k === null) && k !== key) until = 0;
       return Date.now() < until;
     },
     arm(ms, k = null) { until = Date.now() + ms; key = k; },
@@ -842,7 +842,7 @@ async function pull(src, fetcher, force) {
       if (!slot.credentialFingerprint && codexFingerprint) slot.credentialFingerprint = codexFingerprint;
       if (complete) return slot.data;
     }
-    if (codexGate.blocked(codexFingerprint) && slot.data) {
+    if (codexGate.blocked(codexFingerprint, true) && slot.data) {
       slot.data = codexStaleFloor(slot, slot.data) ?? slot.data;
       return slot.data;
     }

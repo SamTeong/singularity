@@ -1149,6 +1149,28 @@ test('getUsage: Codex 429 keeps last-good data stale until Retry-After expires',
   } finally { Date.now = realNow; globalThis.fetch = originalFetch; }
 });
 
+test('getUsage: unreadable Codex auth preserves the 429 backoff until an account switch', async () => {
+  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-auth-gap=${Date.now()}`);
+  rmSync(CODEX_HISTORY_FILE, { force: true });
+  writeCodexAuth({ access_token: 'mock-gap-token', account_id: 'mock-gap-account' });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  try {
+    globalThis.fetch = async () => { calls += 1; return { status: 429, headers: { get: () => '66' } }; };
+    await isolatedGetUsage({ sources: ['codex'], force: true });
+    const afterLimit = calls;
+    rmSync(codexAuth, { force: true });
+    await isolatedGetUsage({ sources: ['codex'], force: true });
+    writeCodexAuth({ access_token: 'mock-gap-token', account_id: 'mock-gap-account' });
+    await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(calls, afterLimit);
+    writeCodexAuth({ access_token: 'mock-other-token', account_id: 'mock-other-account' });
+    globalThis.fetch = async () => { calls += 1; return { status: 429, headers: { get: () => '66' } }; };
+    await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(calls, afterLimit + 1);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
 // Fresh isolated import per floor test: the floor is shared, in-memory,
 // per-module-instance state, so a test that wants to observe it armed from a
 // clean slate cannot share the module top-of-file already exercised network.
