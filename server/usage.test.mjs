@@ -7,7 +7,7 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-usage-test-'));
@@ -238,6 +238,18 @@ test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', (
   assert.equal(JSON.parse(lines[1]).session.utilization, 44);
   // The rows above are FRESH, and fetchCodex tails this file before the rollout
   // scan — leave the lane file missing so the scan tests below see the fixture.
+  rmSync(CODEX_HISTORY_FILE, { force: true });
+});
+
+test('appendCodexHistory: an unstarted transition with unchanged limits appends a fresh snapshot', () => {
+  const window = { pctUsed: 0, resetsAt: null, models: [] };
+  appendCodexHistory({ ...CODEX_READING, session: window });
+  appendCodexHistory({ ...CODEX_READING, session: { ...window, started: false } });
+  const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].session.started, undefined);
+  assert.equal(rows[1].session.started, false);
+  assert.equal(readCodexSnapshot().session.started, false);
   rmSync(CODEX_HISTORY_FILE, { force: true });
 });
 
@@ -1023,6 +1035,118 @@ test('sampleCodex: a fresh codex-usage.jsonl line never reaches the live wham AP
     globalThis.fetch = originalFetch;
   }
   assert.equal(calls, 0);
+});
+
+test('getUsage: Codex partial snapshots recover missing windows and retain active cached windows', async () => {
+  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-partial=${Date.now()}`);
+  writeCodexAuth({ access_token: 'mock-token', account_id: 'mock-account' });
+  mkdirSync(dirname(CODEX_HISTORY_FILE), { recursive: true });
+  writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: null, weekly: { utilization: 9, resets_at: new Date(Date.now() + 7 * 86400_000).toISOString() }, plan_type: 'plus' })}\n`);
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { status: 200, json: async () => ({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 31, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 18000 }, secondary_window: { used_percent: 22, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 604800 } } }) };
+  };
+  try {
+    const result = await isolatedGetUsage({ sources: ['codex'] });
+    assert.equal(calls, 1);
+    assert.equal(result.codex.session.pctUsed, 31);
+    assert.equal(result.codex.weekly.pctUsed, 22);
+    writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 42, resets_at: new Date(Date.now() + 3_600_000).toISOString() }, weekly: null, plan_type: 'plus' })}\n`);
+    const merged = await isolatedGetUsage({ sources: ['codex'] });
+    assert.equal(calls, 1);
+    assert.equal(merged.codex.session.pctUsed, 42);
+    assert.equal(merged.codex.weekly.pctUsed, 22);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('getUsage: complete unstarted Codex windows avoid the endpoint, including forced refresh', async () => {
+  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-unstarted=${Date.now()}`);
+  writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 0, resets_at: null, started: false }, weekly: { utilization: 0, resets_at: null, started: false }, plan_type: 'plus' })}\n`);
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('unexpected request'); };
+  try {
+    const result = await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(result.codex.session.started, false);
+    assert.equal(result.codex.weekly.started, false);
+    assert.equal(calls, 0);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('getUsage: Codex account switches discard cached and unidentified snapshot data', async () => {
+  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-account-switch=${Date.now()}`);
+  rmSync(CODEX_HISTORY_FILE, { force: true });
+  writeCodexAuth({ access_token: 'mock-old-token', account_id: 'mock-old-account' });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { status: 200, json: async () => ({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 64, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 18000 }, secondary_window: { used_percent: 22, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 604800 } } }) };
+  };
+  try {
+    const warm = await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(warm.codex.session.pctUsed, 64);
+    writeCodexAuth({ access_token: 'mock-new-token', account_id: 'mock-new-account' });
+    globalThis.fetch = async () => { calls += 1; throw new Error('offline'); };
+    const switched = await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(switched.codex.pctUsed, undefined);
+    assert.notEqual(switched.codex.session?.pctUsed, 64);
+    const afterFailure = calls;
+    await isolatedGetUsage({ sources: ['codex'] });
+    assert.equal(calls, afterFailure);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('getUsage: Codex partial session snapshot fetches the missing weekly window under force', async () => {
+  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-missing-weekly=${Date.now()}`);
+  mkdirSync(dirname(CODEX_HISTORY_FILE), { recursive: true });
+  writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 13, resets_at: new Date(Date.now() + 18000_000).toISOString() }, weekly: null, plan_type: 'plus' })}\n`);
+  writeCodexAuth({ access_token: 'mock-weekly-token', account_id: 'mock-weekly-account' });
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => ({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 19, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 18000 }, secondary_window: { used_percent: 26, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 604800 } } }) }; };
+  try {
+    const result = await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(calls, 1);
+    assert.equal(result.codex.session.pctUsed, 19);
+    assert.equal(result.codex.weekly.pctUsed, 26);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test('getUsage: Codex 429 keeps last-good data stale until Retry-After expires', async () => {
+  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-retry-after=${Date.now()}`);
+  rmSync(CODEX_HISTORY_FILE, { force: true });
+  writeCodexAuth({ access_token: 'mock-retry-token', account_id: 'mock-retry-account' });
+  const originalFetch = globalThis.fetch;
+  const realNow = Date.now;
+  let calls = 0;
+  try {
+    globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => ({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 27, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 18000 }, secondary_window: { used_percent: 35, limit_window_seconds: 604800, reset_at: null } } }) }; };
+    const warm = await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(warm.codex.session.pctUsed, 27);
+    rmSync(CODEX_HISTORY_FILE, { force: true });
+    globalThis.fetch = async () => { calls += 1; return { status: 429, headers: { get: () => '66' } }; };
+    const limited = await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(limited.codex.stale, true);
+    assert.equal(limited.codex.error, 'rate-limited');
+    assert.equal(limited.codex.session.pctUsed, 27);
+    const afterLimit = calls;
+    writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: null, weekly: { utilization: 36, resets_at: null }, plan_type: 'plus' })}\n`);
+    globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => ({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 29, limit_window_seconds: 18000, reset_at: Math.floor(Date.now() / 1000) + 18000 }, secondary_window: { used_percent: 36, limit_window_seconds: 604800, reset_at: Math.floor(Date.now() / 1000) + 604800 } } }) }; };
+    const gated = await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(calls, afterLimit);
+    assert.equal(gated.codex.stale, true);
+    assert.equal(gated.codex.error, 'rate-limited');
+    assert.equal(gated.codex.session.pctUsed, 27);
+    assert.equal(gated.codex.weekly.pctUsed, 36);
+    Date.now = () => realNow() + 70_000;
+    const recovered = await isolatedGetUsage({ sources: ['codex'], force: true });
+    assert.equal(calls, afterLimit + 1);
+    assert.equal(recovered.codex.session.pctUsed, 29);
+    assert.equal(recovered.codex.stale, undefined);
+  } finally { Date.now = realNow; globalThis.fetch = originalFetch; }
 });
 
 // Fresh isolated import per floor test: the floor is shared, in-memory,
