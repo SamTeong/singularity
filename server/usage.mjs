@@ -125,15 +125,15 @@ let lastCodexReading = null;
 
 export function appendCodexHistory(data) {
   const reading = JSON.stringify([
-    data.session?.pctUsed ?? null, data.session?.resetsAt ?? null,
-    data.weekly?.pctUsed ?? null, data.weekly?.resetsAt ?? null,
+    data.session?.pctUsed ?? null, data.session?.resetsAt ?? null, data.session?.started === false,
+    data.weekly?.pctUsed ?? null, data.weekly?.resetsAt ?? null, data.weekly?.started === false,
   ]);
   if (reading === lastCodexReading) return;
   lastCodexReading = reading;
   appendJsonl(CODEX_HISTORY, {
     fetched_at: localTimestamp(new Date()),
-    session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt } : null,
-    weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt } : null,
+    session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt, ...(data.session.started === false ? { started: false } : {}) } : null,
+    weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt, ...(data.weekly.started === false ? { started: false } : {}) } : null,
     plan: data.plan ?? null,
   });
 }
@@ -174,7 +174,7 @@ export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.no
 
 // Codex's parallel: the harness Stop hook appends codex-usage.jsonl once a turn
 // end (appendCodexHistory writes daemon-sourced reads to the same file), so a
-// fresh tail line resolves the lane with no rollout scan at all. Same fixed
+// complete fresh tail line resolves the lane with no network. Same fixed
 // tail window, same 120s freshness gate (SNAPSHOT_MAX_AGE_MS).
 export function readCodexSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
   let fd;
@@ -189,7 +189,7 @@ export function readCodexSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now
     const at = Date.parse(record.fetched_at);
     if (Number.isNaN(at) || now - at > maxAgeMs) return null;
     const win = (w) => (Number.isFinite(w?.utilization)
-      ? { pctUsed: w.utilization, resetsAt: w.resets_at ?? null, models: [] }
+      ? { pctUsed: w.utilization, resetsAt: w.resets_at ?? null, models: [], ...(w.started === false ? { started: false } : {}) }
       : null);
     const session = win(record.session);
     const weekly = win(record.weekly);
@@ -240,6 +240,18 @@ export function readCostStateLimits(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.n
     } catch { /* unreadable or caught mid-write: fall through to the next newest */ }
   }
   return null;
+}
+
+function hasCompleteWindow(window) {
+  return window?.started === false || Number.isFinite(Date.parse(window?.resetsAt));
+}
+
+function hasActiveWindow(window, now = Date.now()) {
+  return Number.isFinite(Date.parse(window?.resetsAt)) && Date.parse(window.resetsAt) > now;
+}
+
+function preferCurrentWindow(current, previous) {
+  return hasCompleteWindow(current) || !hasActiveWindow(previous) ? current : previous;
 }
 
 // ---- Ollama: authenticated persistent-browser scrape --------------------------
@@ -538,14 +550,24 @@ export async function refreshClaudeAuth() {
 // leg only.
 export function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
   const snapshot = readClaudeSnapshot(maxAgeMs);
-  if (snapshot) return { ...normalizeClaude(snapshot.raw, plan), fetchedAt: snapshot.fetchedAt };
+  if (snapshot) {
+    const data = normalizeClaude(snapshot.raw, plan);
+    return {
+      ...data,
+      session: preferCurrentWindow(data.session, prev?.session),
+      weekly: preferCurrentWindow(data.weekly, prev?.weekly),
+      fetchedAt: snapshot.fetchedAt,
+    };
+  }
 
   const limits = readCostStateLimits(maxAgeMs);
   if (!limits) return null;
-  const weekly = limits.weekly && { ...limits.weekly, models: prev?.weekly?.models ?? [] };
+  const session = preferCurrentWindow(limits.session, prev?.session);
+  const weeklyLimit = preferCurrentWindow(limits.weekly, prev?.weekly);
+  const weekly = weeklyLimit && { ...weeklyLimit, models: prev?.weekly?.models ?? limits.weekly?.models ?? [] };
   return {
     ok: true, source: 'claude', plan: plan ?? null,
-    session: limits.session, weekly, extra: prev?.extra ?? null,
+    session, weekly, extra: prev?.extra ?? null,
     fetchedAt: limits.fetchedAt,
   };
 }
@@ -607,8 +629,8 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
 // ~/.codex). Read order: the Stop hook's codex-usage.jsonl tail when fresh
 // (the hook now bumps the file's own record on every turn, changed or not, so
 // a quiet session still keeps this fresh); the live wham/usage API is
-// consulted only on ?force=1 (the manual Refresh route, or once the file has
-// gone stale and pull()'s own per-source network floor allows it — see the
+// consulted when a window is missing or the file has gone stale, once pull()'s
+// per-source network floor allows it (manual Refresh bypasses that floor — see the
 // history sampler section). There is no rollout-log scan any more: it read
 // the CLI's own session logs as a zero-cost fallback, but per-source floor and
 // the hook's own liveness meant the free tier already answers every 5s tick,
@@ -650,8 +672,8 @@ function noCodexData() {
 
 export async function fetchCodex(force = false) {
   // The Stop hook's tail is the freshest free source: a fresh codex-usage.jsonl
-  // line (bumped every turn, changed or not) answers with no network at all;
-  // stale or missing falls through to the live wham/usage API below, which
+  // line (bumped every turn, changed or not) answers direct callers locally;
+  // pull() handles incomplete windows before it calls the live API, which
   // ?force=1 (the manual Refresh route, or pull()'s own network floor once
   // the automated 5s tick finds this stale) is the only thing that reaches.
   if (!force) {
@@ -687,7 +709,7 @@ export async function fetchCodex(force = false) {
     liveError ??= 'no usable rate limits';
   }
 
-  return { ...noCodexData(), error: liveError ?? 'no usable rate limits' };
+  return { ...noCodexData(), error: liveError ?? 'no usable rate limits', ...(resp?.status === 429 ? { retryAfterMs: retryAfterMs(resp.headers?.get?.('retry-after')) } : {}) };
 }
 
 // ---- Cache + public API -------------------------------------------------------
@@ -698,7 +720,7 @@ export async function fetchCodex(force = false) {
 const cache = {
   ollama: { data: null, at: 0 },
   claude: { data: null, at: 0, credentialFingerprint: null },
-  codex: { data: null, at: 0 },
+  codex: { data: null, at: 0, credentialFingerprint: null, ignoreCodexSnapshot: false },
 };
 const SOURCES = ['ollama', 'claude', 'codex'];
 const CLAUDE_RATE_LIMIT_BACKOFF_MS = 5 * 60_000;
@@ -724,6 +746,15 @@ function rateGate() {
 }
 const claudeGate = rateGate();
 const ollamaGate = rateGate();
+const codexGate = rateGate();
+const CODEX_STALE_MAX_MS = CLAUDE_STALE_MAX_MS;
+
+function codexAccountFingerprint() {
+  try {
+    const accountId = JSON.parse(readFileSync(CODEX_AUTH_PATH, 'utf8'))?.tokens?.account_id;
+    return accountId ? createHash('sha256').update(accountId).digest('hex') : null;
+  } catch { return null; }
+}
 
 // The best Claude reading reachable without the network, for the two paths that
 // have no answer of their own: a 429 backoff and a failed pull. The 120s gate
@@ -739,9 +770,22 @@ function claudeStaleFloor(slot, failure) {
   return best ? preserveClaudeStale(best, failure) : null;
 }
 
+function codexStaleFloor(slot, failure) {
+  const widened = slot.ignoreCodexSnapshot ? null : readCodexSnapshot(CODEX_STALE_MAX_MS);
+  const lastGood = slot.data?.ok ? slot.data : null;
+  const merged = widened && lastGood ? {
+    ...widened,
+    session: preferCurrentWindow(widened.session, lastGood.session),
+    weekly: preferCurrentWindow(widened.weekly, lastGood.weekly),
+  } : widened;
+  const best = merged && !(lastGood?.fetchedAt > merged.fetchedAt) ? merged : lastGood;
+  return best ? preserveClaudeStale(best, failure) : null;
+}
+
 async function pull(src, fetcher, force) {
   const slot = cache[src];
   let claudeFingerprint = null;
+  let codexFingerprint = null;
   // Claude's local tiers cost a file read, so they run ahead of every gate
   // below, force included — a fresh statusline write always wins over the
   // network leg. Only a genuinely newer reading counts; an unchanged one falls
@@ -760,33 +804,46 @@ async function pull(src, fetcher, force) {
       slot.at = 0;
     }
     const local = claudeAccountChanged ? null : readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType);
-    // A reading inside the 120s gate is exactly what the endpoint would hand back,
-    // and the endpoint is the one that 429s — so it wins on every path, force
-    // included. Refresh means "look again", and looking again at a file the
-    // statusline wrote seconds ago is the right answer; going to the network
-    // instead is how a current card ended up labelled "refresh failed:
-    // rate-limited". Identity is kept when nothing moved, so an unchanged reading
-    // is not a new document for the WS push — but a reading that was labelled
-    // stale by an earlier failed pull is replaced, since it is demonstrably fresh.
+    // Complete local windows answer the card without spending the endpoint's
+    // account quota. Partial windows reach the existing network floor, with the
+    // local reading retained as fallback if that request fails.
     if (local) {
       if (!slot.credentialFingerprint && claudeFingerprint) slot.credentialFingerprint = claudeFingerprint;
       const unchanged = slot.data?.ok && !slot.data.stale && slot.data.fetchedAt === local.fetchedAt;
       if (!unchanged) slot.data = local;
-      return slot.data;
+      if (hasCompleteWindow(local.session) && hasCompleteWindow(local.weekly)) return slot.data;
     }
     // Both tiers stale → the network is the only way to fill the card, gated by
     // claudeGate and the network floor below.
   }
   // Codex's cheap file tier, the same shape as claude's above: a fresh
-  // Stop-hook snapshot answers every call — any cadence, force or not — with no
-  // rollout scan and no network. Only once this is null (stale/missing) do we
-  // reach the floor gate below, which is what now keeps the rollout scan (a
-  // multi-file disk scan, not free) off the 5s file tick.
+  // Complete Stop-hook snapshots answer every call, including force. Partial
+  // snapshots retain valid windows while the missing window reaches the
+  // network floor below.
   if (src === 'codex') {
-    const snapshot = readCodexSnapshot();
+    codexFingerprint = codexAccountFingerprint();
+    const accountChanged = !!slot.credentialFingerprint && !!codexFingerprint && codexFingerprint !== slot.credentialFingerprint;
+    if (accountChanged) {
+      slot.data = null;
+      slot.at = 0;
+      slot.credentialFingerprint = codexFingerprint;
+      slot.ignoreCodexSnapshot = true;
+      lastCodexReading = null;
+    }
+    const snapshot = slot.ignoreCodexSnapshot ? null : readCodexSnapshot();
     if (snapshot) {
-      const unchanged = slot.data?.ok && slot.data.fetchedAt === snapshot.fetchedAt;
-      if (!unchanged) slot.data = snapshot;
+      const previous = slot.data?.ok ? slot.data : null;
+      const merged = { ...snapshot, session: preferCurrentWindow(snapshot.session, previous?.session), weekly: preferCurrentWindow(snapshot.weekly, previous?.weekly) };
+      const complete = hasCompleteWindow(merged.session) && hasCompleteWindow(merged.weekly);
+      const reading = previous?.stale && !complete
+        ? { ...merged, stale: true, error: previous.error, needsAuth: previous.needsAuth }
+        : merged;
+      if (JSON.stringify(slot.data) !== JSON.stringify(reading)) slot.data = reading;
+      if (!slot.credentialFingerprint && codexFingerprint) slot.credentialFingerprint = codexFingerprint;
+      if (complete) return slot.data;
+    }
+    if (codexGate.blocked(codexFingerprint) && slot.data) {
+      slot.data = codexStaleFloor(slot, slot.data) ?? slot.data;
       return slot.data;
     }
   }
@@ -822,6 +879,11 @@ async function pull(src, fetcher, force) {
     slot['credentialFingerprint'] = claudeCredentialFingerprint();
     claudeGate.clear();
   }
+  if (src === 'codex' && data.ok) {
+    slot.credentialFingerprint = codexFingerprint;
+    slot.ignoreCodexSnapshot = false;
+    codexGate.clear();
+  }
   // A failure replaces a previous failure — the card must show this pull's error,
   // not one from an earlier attempt — but never a good reading; that is what
   // preserve*Stale below is for.
@@ -830,6 +892,7 @@ async function pull(src, fetcher, force) {
   if (src === 'claude' && data.error === 'rate-limited') {
     claudeGate.arm(data.retryAfterMs ?? CLAUDE_RATE_LIMIT_BACKOFF_MS, claudeFingerprint);
   }
+  if (src === 'codex' && data.error === 'rate-limited') codexGate.arm(data.retryAfterMs ?? CLAUDE_RATE_LIMIT_BACKOFF_MS, codexFingerprint);
   if (src === 'ollama' && !data.ok && lastGood) {
     // Ollama failures retain the timestamped successful measurement and surface
     // the current actionable error; failures never reach the history writer.
@@ -843,6 +906,10 @@ async function pull(src, fetcher, force) {
       slot.data = floor;
       return slot.data;
     }
+  }
+  if (src === 'codex' && !data.ok) {
+    const floor = codexStaleFloor(slot, data);
+    if (floor) { slot.data = floor; return slot.data; }
   }
   if (src === 'ollama' && data.ok) {
     appendOllamaHistory(data);
@@ -1020,10 +1087,9 @@ async function sampleClaude() {
 }
 
 // Codex leg: mirrors sampleClaude exactly now — codex-usage.jsonl is fed per
-// turn end by the harness, pull()'s own free tier (readCodexSnapshot) answers
-// every 5s tick with no rollout scan and no network while it's fresh, and only
-// once it goes stale does pull()'s network floor let the rollout scan + live
-// wham API leg through, at most once every 60s. No staleness check lives here
+// turn end by the harness. Complete fresh snapshots answer every 5s tick
+// without network work. Missing or stale windows reach pull()'s network floor
+// and the live wham API, at most once every 60s. No staleness check lives here
 // anymore — pull() is the one place that decides, so the file-tier tick above
 // and the manual Refresh route can't disagree about what "stale" means.
 export async function sampleCodex() {

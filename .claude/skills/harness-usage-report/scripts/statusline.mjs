@@ -165,17 +165,18 @@ const scopes = (g("workspace", "added_dirs") || [])
 // terminal actually draws, so the in-place redraw skips cells it thinks are
 // unchanged and leaves stale characters from the previous frame wedged into
 // the new one. Keep this line 7-bit — no emoji, no box-drawing bars.
-const p1 = [model, usageSeg, costStr];
-if (rateLimitStr) p1.push(rateLimitStr);
 // Cache-TTL countdown: cache-refresh plugin records the main-agent turn end.
+let ttlSeg = "";
 try {
   if (sid && /^[0-9a-fA-F-]{1,64}$/.test(sid)) {
     const { turnEndMs } = JSON.parse(readFileSync(join(stateRoot, "cache-ttl", sid + ".json"), "utf8"));
     if (Number.isFinite(turnEndMs)) {
-      p1.push(`TTL: ${Math.max(0, 60 - Math.floor((Date.now() - turnEndMs) / 60000))}m`);
+      ttlSeg = ` ${Math.max(0, 60 - Math.floor((Date.now() - turnEndMs) / 60000))}m`;
     }
   }
 } catch { /* no TTL segment */ }
+const p1 = [model, usageSeg + ttlSeg, costStr];
+if (rateLimitStr) p1.push(rateLimitStr);
 const line1 = p1.join(" | ");
 
 const p2 = [];
