@@ -586,6 +586,107 @@ test('getUsage: a forced pull serves a fresh local reading instead of 429ing', a
   assert.deepEqual(urls, []); // never spent the account's one call a minute
 });
 
+test('getUsage: an incomplete local Claude window is refreshed from OAuth', async () => {
+  clearClaudeLocal();
+  writeCreds({ accessToken: 'partial-refresh-token', expiresAt: Date.now() + 3_600_000 });
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'weekly-only.json');
+  writeFileSync(file, JSON.stringify({ rate_limits: { seven_day: { used_percentage: 74, resets_at: 1791910800 } } }));
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { status: 200, json: async () => CLAUDE_RAW };
+  };
+  try {
+    const doc = await getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.session.pctUsed, 42);
+    assert.equal(doc.claude.session.resetsAt, CLAUDE_RAW.five_hour.resets_at);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('getUsage: an automatic pull refreshes an incomplete local Claude window', async () => {
+  clearClaudeLocal();
+  writeCreds({ accessToken: 'automatic-partial-token', expiresAt: Date.now() + 3_600_000 });
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'weekly-only.json'), JSON.stringify({ rate_limits: { seven_day: { used_percentage: 74, resets_at: 1791910800 } } }));
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { status: 200, json: async () => CLAUDE_RAW };
+  };
+  try {
+    const doc = await getUsage({ sources: ['claude'] });
+    assert.equal(doc.claude.session.pctUsed, 42);
+    assert.equal(doc.claude.session.resetsAt, CLAUDE_RAW.five_hour.resets_at);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearClaudeLocal();
+  }
+});
+
+test('getUsage: automatic incomplete-window retries honor the network floor', async () => {
+  clearClaudeLocal();
+  writeCreds({ accessToken: 'automatic-floor-token', expiresAt: Date.now() + 3_600_000 });
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'weekly-only.json'), JSON.stringify({ rate_limits: { seven_day: { used_percentage: 74, resets_at: 1791910800 } } }));
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { status: 404, headers: { get: () => null } };
+  };
+  const isolatedGetUsage = (await import(`./usage.mjs?automatic-floor=${Date.now()}`)).getUsage;
+  try {
+    await isolatedGetUsage({ sources: ['claude'] });
+    await isolatedGetUsage({ sources: ['claude'] });
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearClaudeLocal();
+  }
+});
+
+test('getUsage: a partial cost-state reading preserves an active cached session', async () => {
+  clearClaudeLocal();
+  writeCreds({ accessToken: 'cached-session-token', expiresAt: Date.now() + 3_600_000 });
+  const raw = {
+    ...CLAUDE_RAW,
+    five_hour: { utilization: 18, resets_at: new Date(Date.now() + 3_600_000).toISOString() },
+    seven_day: { utilization: 74, resets_at: new Date(Date.now() + 3 * 86_400_000).toISOString() },
+  };
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { status: 200, json: async () => raw };
+  };
+  try {
+    await getUsage({ sources: ['claude'], force: true });
+    rmSync(join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl'), { force: true });
+    const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'weekly-only.json'), JSON.stringify({ rate_limits: { seven_day: { used_percentage: 74, resets_at: Math.floor((Date.now() + 3 * 86_400_000) / 1000) } } }));
+
+    const doc = await getUsage({ sources: ['claude'] });
+    assert.equal(doc.claude.session.pctUsed, 18);
+    assert.equal(doc.claude.session.resetsAt, raw.five_hour.resets_at);
+    assert.equal(calls, 1);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearClaudeLocal();
+  }
+});
+
 test('getUsage: a local Claude reading establishes identity before an account switch', async () => {
   clearClaudeLocal();
   const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
@@ -675,6 +776,31 @@ ${JSON.stringify({ fetched_at: stamp(at), raw: CLAUDE_RAW })}\n`);
   assert.equal(readClaudeSnapshot(60_000, at.getTime() + 120_000), null);
   writeFileSync(file, 'not json\n');
   assert.equal(readClaudeSnapshot(), null);
+});
+
+test('getUsage: a valid unstarted local session does not trigger OAuth polling', async () => {
+  clearClaudeLocal();
+  writeCreds({ accessToken: 'unstarted-window-token', expiresAt: Date.now() + 3_600_000 });
+  mkdirSync(process.env.USAGE_REPORT_STATE, { recursive: true });
+  writeFileSync(join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl'), `${JSON.stringify({
+    fetched_at: stampLocal(new Date()),
+    raw: {
+      five_hour: { utilization: 0, resets_at: null },
+      seven_day: { utilization: 74, resets_at: new Date(Date.now() + 3 * 86_400_000).toISOString() },
+    },
+  })}\n`);
+  const originalFetch = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => CLAUDE_RAW }; };
+  try {
+    const isolatedGetUsage = (await import(`./usage.mjs?unstarted=${Date.now()}`)).getUsage;
+    const doc = await isolatedGetUsage({ sources: ['claude'] });
+    assert.equal(doc.claude.session.started, false);
+    assert.equal(calls, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    clearClaudeLocal();
+  }
 });
 
 // Tier two under the snapshot: the statusline stamps the same limits into

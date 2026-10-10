@@ -242,6 +242,18 @@ export function readCostStateLimits(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.n
   return null;
 }
 
+function hasClaudeWindow(window) {
+  return window?.started === false || Number.isFinite(Date.parse(window?.resetsAt));
+}
+
+function hasActiveClaudeWindow(window, now = Date.now()) {
+  return Number.isFinite(Date.parse(window?.resetsAt)) && Date.parse(window.resetsAt) > now;
+}
+
+function preferCurrentClaudeWindow(current, previous) {
+  return hasClaudeWindow(current) || !hasActiveClaudeWindow(previous) ? current : previous;
+}
+
 // ---- Ollama: authenticated persistent-browser scrape --------------------------
 let ollamaProfileTail = Promise.resolve();
 function ownOllamaProfile(work) {
@@ -538,14 +550,24 @@ export async function refreshClaudeAuth() {
 // leg only.
 export function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
   const snapshot = readClaudeSnapshot(maxAgeMs);
-  if (snapshot) return { ...normalizeClaude(snapshot.raw, plan), fetchedAt: snapshot.fetchedAt };
+  if (snapshot) {
+    const data = normalizeClaude(snapshot.raw, plan);
+    return {
+      ...data,
+      session: preferCurrentClaudeWindow(data.session, prev?.session),
+      weekly: preferCurrentClaudeWindow(data.weekly, prev?.weekly),
+      fetchedAt: snapshot.fetchedAt,
+    };
+  }
 
   const limits = readCostStateLimits(maxAgeMs);
   if (!limits) return null;
-  const weekly = limits.weekly && { ...limits.weekly, models: prev?.weekly?.models ?? [] };
+  const session = preferCurrentClaudeWindow(limits.session, prev?.session);
+  const weeklyLimit = preferCurrentClaudeWindow(limits.weekly, prev?.weekly);
+  const weekly = weeklyLimit && { ...weeklyLimit, models: prev?.weekly?.models ?? limits.weekly?.models ?? [] };
   return {
     ok: true, source: 'claude', plan: plan ?? null,
-    session: limits.session, weekly, extra: prev?.extra ?? null,
+    session, weekly, extra: prev?.extra ?? null,
     fetchedAt: limits.fetchedAt,
   };
 }
@@ -760,19 +782,14 @@ async function pull(src, fetcher, force) {
       slot.at = 0;
     }
     const local = claudeAccountChanged ? null : readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType);
-    // A reading inside the 120s gate is exactly what the endpoint would hand back,
-    // and the endpoint is the one that 429s — so it wins on every path, force
-    // included. Refresh means "look again", and looking again at a file the
-    // statusline wrote seconds ago is the right answer; going to the network
-    // instead is how a current card ended up labelled "refresh failed:
-    // rate-limited". Identity is kept when nothing moved, so an unchanged reading
-    // is not a new document for the WS push — but a reading that was labelled
-    // stale by an earlier failed pull is replaced, since it is demonstrably fresh.
+    // Complete local windows answer the card without spending the endpoint's
+    // account quota. Partial windows reach the existing network floor, with the
+    // local reading retained as fallback if that request fails.
     if (local) {
       if (!slot.credentialFingerprint && claudeFingerprint) slot.credentialFingerprint = claudeFingerprint;
       const unchanged = slot.data?.ok && !slot.data.stale && slot.data.fetchedAt === local.fetchedAt;
       if (!unchanged) slot.data = local;
-      return slot.data;
+      if (hasClaudeWindow(local.session) && hasClaudeWindow(local.weekly)) return slot.data;
     }
     // Both tiers stale → the network is the only way to fill the card, gated by
     // claudeGate and the network floor below.
