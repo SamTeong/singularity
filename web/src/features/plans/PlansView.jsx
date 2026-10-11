@@ -1233,9 +1233,6 @@ export default function PlansView({ onToast }) {
             <Stack direction="row" sx={{ flexWrap: 'wrap', gap: 0.5 }}>
               {['all', ...BUCKETS].map((b) => {
                 const selected = b === 'all' ? status.length === 0 : status.includes(b);
-                const nextStatus = b === 'all' ? []
-                  : status.includes(b) ? status.filter((x) => x !== b)
-                    : [...status, b];
                 return (
                   <Chip
                     key={b}
@@ -1243,7 +1240,9 @@ export default function PlansView({ onToast }) {
                     label={b}
                     color={selected ? 'primary' : 'default'}
                     variant={selected ? 'filled' : 'outlined'}
-                    onClick={() => setStatusList(nextStatus)}
+                    onClick={() => setStatusList((current) => b === 'all' ? []
+                      : current.includes(b) ? current.filter((x) => x !== b)
+                        : [...current, b])}
                   />
                 );
               })}

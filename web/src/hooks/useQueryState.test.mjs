@@ -18,6 +18,17 @@ test('an array replaces the previous values rather than appending to them', () =
   assert.equal(patch('tag=a&tag=b', { tag: [] }), '');
 });
 
+test('functional list patches compose before the rendered query catches up', () => {
+  let params = new URLSearchParams();
+  const toggle = (current, value) => current.includes(value)
+    ? current.filter((item) => item !== value)
+    : [...current, value];
+  params = queryPatch(params, (current) => ({ status: toggle(current.getAll('status'), 'done') }));
+  params = queryPatch(params, (current) => ({ status: toggle(current.getAll('status'), 'active') }));
+  params = queryPatch(params, (current) => ({ status: toggle(current.getAll('status'), 'active') }));
+  assert.deepEqual(params.getAll('status'), ['done']);
+});
+
 test('untouched keys survive and one call writes many keys', () => {
   assert.equal(
     patch('q=hi&preset=7', { preset: '30', from: '2026-01-01' }),

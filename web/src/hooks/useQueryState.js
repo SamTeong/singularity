@@ -11,7 +11,8 @@ import { useSearchParams } from 'react-router-dom';
  */
 export function queryPatch(params, patch) {
   const next = new URLSearchParams(params);
-  for (const [k, v] of Object.entries(patch)) {
+  const changes = typeof patch === 'function' ? patch(new URLSearchParams(next)) : patch;
+  for (const [k, v] of Object.entries(changes)) {
     next.delete(k);
     if (v == null || v === '') continue;
     if (Array.isArray(v)) [...v].sort().forEach((x) => next.append(k, x));
@@ -63,7 +64,8 @@ export function useUpdateQuery({ replace = true } = {}) {
   return useCallback(
     (patch) => {
       const path = window.location.pathname;
-      const next = queryPatch(patchBase(lastWritten, path, window.location.search), patch);
+      const base = patchBase(lastWritten, path, window.location.search);
+      const next = queryPatch(base, patch);
       lastWritten = { path, params: next };
       setSearchParams(next, { replace });
     },
@@ -85,6 +87,9 @@ export function useQueryList(key, { replace = true } = {}) {
   const [params] = useSearchParams();
   const update = useUpdateQuery({ replace });
   const value = useMemo(() => params.getAll(key), [params, key]);
-  const set = useCallback((list) => update({ [key]: list.length ? list : null }), [update, key]);
+  const set = useCallback((list) => update((params) => {
+    const next = typeof list === 'function' ? list(params.getAll(key)) : list;
+    return { [key]: next.length ? next : null };
+  }), [update, key]);
   return [value, set];
 }

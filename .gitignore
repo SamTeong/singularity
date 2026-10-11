@@ -15,6 +15,7 @@ e2e/.tmp*/
 playwright-report/
 test-results/
 /test-output.txt
+.pnpm-store/
 
 .DS_Store
 references/
