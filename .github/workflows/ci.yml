@@ -69,3 +69,11 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium webkit
       - run: pnpm test:e2e-mock
+      - name: Upload mock E2E failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: mock-e2e-failure
+          path: test-results/mock/
+          retention-days: 7
+          if-no-files-found: warn
