@@ -66,6 +66,7 @@ const fmtTokens = (n) => {
 
 // --- Fields ---
 const model = g("model", "display_name") || "Unknown Model";
+const effort = g("effort", "level");
 const totalCost = g("cost", "total_cost_usd");
 const currentDir = g("workspace", "current_dir") || g("cwd");
 const worktree = g("worktree", "name");
@@ -175,7 +176,7 @@ try {
     }
   }
 } catch { /* no TTL segment */ }
-const p1 = [model, usageSeg + ttlSeg, costStr];
+const p1 = [effort ? `${model} ${effort}` : model, usageSeg + ttlSeg, costStr];
 if (rateLimitStr) p1.push(rateLimitStr);
 const line1 = p1.join(" | ");
 
