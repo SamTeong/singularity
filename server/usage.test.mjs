@@ -182,6 +182,28 @@ test('normalizeClaude: missing windows/extra → nulls, no throw', () => {
   assert.equal(u.plan, null);
 });
 
+// Extra-usage-only subscription: no window utilization, spend percentage instead.
+const CLAUDE_EXTRA_ONLY = {
+  five_hour: null,
+  seven_day: null,
+  extra_usage: { is_enabled: true, used_credits: 0, monthly_limit: 20000, utilization: null },
+  spend: {
+    percent: 0,
+    used: { amount_minor: 0, currency: 'USD', exponent: 2 },
+    limit: { amount_minor: 20000, currency: 'USD', exponent: 2 },
+  },
+};
+
+test('normalizeClaude: extra-only plan falls back to top-level spend percent', () => {
+  const u = normalizeClaude(CLAUDE_EXTRA_ONLY, 'max');
+  assert.equal(u.session, null);
+  assert.equal(u.weekly, null);
+  assert.deepEqual(u.extra, {
+    enabled: true, used: 0, monthlyLimit: 20000, pctUsed: 0, resetsAt: null,
+  });
+  assert.equal(normalizeClaude({ ...CLAUDE_EXTRA_ONLY, spend: { ...CLAUDE_EXTRA_ONLY.spend, percent: 25 } }, 'max').extra.pctUsed, 25);
+});
+
 // appendOllamaHistory writes the report skill's snapshot shape and de-dupes an
 // unchanged reading (idle-debounce refreshes call this often).
 const HISTORY_FILE = join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl');

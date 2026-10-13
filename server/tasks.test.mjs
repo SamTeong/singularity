@@ -4,7 +4,7 @@
 // caveman plugin enabled) the cavecrew fallback.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync, readdirSync, chmodSync, renameSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync, readdirSync, chmodSync, renameSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -235,6 +235,90 @@ test('updateTask: state validated against the per-column STATES map', async () =
 
   const overlay = await updateTask('seed-1', { state: 'rate-limited' });
   assert.equal(overlay.state, 'rate-limited');
+});
+
+// Durable transition history: updateTaskInner appends a { from, to, at } record
+// to the task's `transitions` array only on a real column change — state-only
+// updates (incl. rate-limited overlays) leave no trace, and actor/source/reason
+// ride along only when the caller supplies them in the POST body.
+test('updateTask: column change appends a durable transition record', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'seed-tr1', title: 'seed', description: 'd', column: 'todo', state: 'analyzing', kind: 'plain', repo: '/r' }],
+    history: [],
+  }));
+  initTasks(null);
+
+  const t = await updateTask('seed-tr1', { column: 'inprogress' });
+  assert.equal(t.transitions.length, 1);
+  assert.equal(t.transitions[0].from, 'todo');
+  assert.equal(t.transitions[0].to, 'inprogress');
+  assert.ok(Number.isFinite(t.transitions[0].at));
+  // Durable: the record reached tasks.json, not just the in-memory map.
+  // (Find by id — the module Map carries seeds from earlier tests, so [0] is
+  // not this task.)
+  const saved = JSON.parse(readFileSync(tasksFile, 'utf8'));
+  assert.equal(saved.tasks.find((x) => x.id === 'seed-tr1').transitions.length, 1);
+});
+
+test('updateTask: state-only update (incl. overlay) appends no transition', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'seed-tr2', title: 'seed', description: 'd', column: 'inprogress', state: 'working', kind: 'plain', repo: '/r' }],
+    history: [],
+  }));
+  initTasks(null);
+
+  await updateTask('seed-tr2', { state: 'fixing' });
+  await updateTask('seed-tr2', { state: 'rate-limited' });
+  assert.deepEqual(snapshotTasks().tasks.find((t) => t.id === 'seed-tr2').transitions, []);
+});
+
+test('updateTask: actor/source/reason recorded only when supplied, trimmed + capped at 120', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'seed-tr3', title: 'seed', description: 'd', column: 'todo', state: 'analyzing', kind: 'plain', repo: '/r' }],
+    history: [],
+  }));
+  initTasks(null);
+
+  const bare = await updateTask('seed-tr3', { column: 'inprogress' });
+  assert.deepEqual(Object.keys(bare.transitions[0]), ['from', 'to', 'at']);
+  const rich = await updateTask('seed-tr3', { column: 'inreview', actor: '  sam  ', source: 'ui', reason: 'x'.repeat(200) });
+  const rec = rich.transitions[1];
+  assert.equal(rec.actor, 'sam');
+  assert.equal(rec.source, 'ui');
+  assert.equal(rec.reason, 'x'.repeat(120));
+});
+
+test('updateTask: done round trip leaves two transition records', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [{ id: 'seed-tr4', title: 'seed', description: 'd', column: 'done', state: 'complete', kind: 'plain', repo: '/r' }],
+    history: [],
+  }));
+  initTasks(null);
+
+  await updateTask('seed-tr4', { column: 'inreview' });
+  const t = await updateTask('seed-tr4', { column: 'done' });
+  assert.deepEqual(t.transitions.map((r) => [r.from, r.to]), [['done', 'inreview'], ['inreview', 'done']]);
+});
+
+test('initTasks: old-shape task and history records load with transitions defaulted to []', async () => {
+  const tasksFile = join(process.env.SINGULARITY_HOME, 'state', 'tasks.json');
+  writeFileSync(tasksFile, JSON.stringify({
+    tasks: [
+      { id: 'seed-tr5', title: 'seed', description: 'd', column: 'todo', state: 'analyzing', kind: 'plain', repo: '/r' },
+      { id: 'seed-tr6', title: 'seed', description: 'd', column: 'inprogress', state: 'working', kind: 'plain', repo: '/r', transitions: [{ from: 'todo', to: 'inprogress', at: 123 }] },
+    ],
+    history: [{ id: 'seed-tr5h', title: 'h', column: 'done', kind: 'plain', repo: '/r' }],
+  }));
+  initTasks(null);
+
+  const snap = snapshotTasks();
+  assert.deepEqual(snap.tasks.find((t) => t.id === 'seed-tr5').transitions, []);
+  assert.deepEqual(snap.tasks.find((t) => t.id === 'seed-tr6').transitions, [{ from: 'todo', to: 'inprogress', at: 123 }]);
+  assert.deepEqual(snap.history[0].transitions, []);
 });
 
 test('updateTask: failed Done persistence leaves the session and worktree untouched', async () => {

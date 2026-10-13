@@ -40,3 +40,18 @@ export const COLUMN_DOMAIN = Object.fromEntries(COLUMN_DEFS.map((c) => [c.id, c.
  */
 export const cardDomainId = (task, agent) =>
   agent ? (KIND_TO_DOMAIN[KIND[agent.status]] ?? 'review') : (COLUMN_DOMAIN[task.column] ?? 'queued');
+
+/**
+ * Epoch ms the task first entered `columnId`. To-Do starts at task creation;
+ * later columns use their first durable transition record targeting that
+ * column (appended by server/tasks.mjs updateTaskInner on a real column
+ * change). Null when the stage has no known entry time.
+ * @param {{ to: string, at: number }[]|undefined} transitions
+ * @param {string} columnId
+ * @param {number|undefined} createdAt
+ * @returns {number|null}
+ */
+export const firstEnteredAt = (transitions, columnId, createdAt) =>
+  (columnId === 'todo' && typeof createdAt === 'number' ? createdAt : null)
+    ?? transitions?.find((r) => r.to === columnId)?.at
+    ?? null;

@@ -184,7 +184,7 @@ function task(id, title, column, state, extra = {}) {
     model: 'claude', implModel: 'claude', reviewerModel: 'claude',
     orchestratorMaxTurns: null, implMaxTurns: null, reviewerMaxTurns: null,
     scopes: [], tags: TAGS, requirePlanApproval: false, mergeMode: null,
-    column, state, sessionId: null, createdAt: T0, updatedAt: T0, ...extra,
+    column, state, transitions: [], sessionId: null, createdAt: T0, updatedAt: T0, ...extra,
   };
 }
 

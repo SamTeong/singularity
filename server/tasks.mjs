@@ -144,9 +144,9 @@ export function initTasks(log) {
   try {
     if (existsSync(TASKS_FILE)) {
       const data = JSON.parse(readFileSync(TASKS_FILE, 'utf8'));
-      for (const t of data.tasks || []) tasks.set(t.id, t);
+      for (const t of data.tasks || []) tasks.set(t.id, { transitions: [], ...t });
       for (const t of tasks.values()) if (t.sessionId) taskBySession.set(t.sessionId, t.id);
-      history = data.history || []; // old tasks.json shape { tasks } has no history — defaults []
+      history = (data.history || []).map((h) => ({ transitions: [], ...h })); // old tasks.json shape { tasks } has no history — defaults []; same default for records saved before transition history existed
       log?.info({ tasks: tasks.size, history: history.length }, 'loaded tasks.json');
     }
   } catch (e) { log?.warn({ err: e.message }, 'tasks.json load failed'); }
@@ -458,7 +458,7 @@ export function createTask({ repo, title, description, model, implModel, reviewe
       model, implModel, reviewerModel,
       orchestratorMaxTurns: posInt(orchestratorMaxTurns), implMaxTurns: posInt(implMaxTurns), reviewerMaxTurns: posInt(reviewerMaxTurns),
       scopes, tags: normalizeTags(tags), requirePlanApproval: !!requirePlanApproval, mergeMode: kind === 'git' ? (mergeMode === 'auto' ? 'auto' : 'manual') : null,
-      column: 'todo', state: 'analyzing', sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
+      column: 'todo', state: 'analyzing', transitions: [], sessionId: null, createdAt: Date.now(), updatedAt: Date.now(),
       ...(background ? { conclude: conclude === 'done' ? 'done' : 'inreview' } : {}),
       ...(backgroundJobId ? { backgroundJobId } : {}),
       ...(backgroundRunId ? { backgroundRunId } : {}),
@@ -503,7 +503,7 @@ export function updateTask(id, body) {
   return serialized(() => updateTaskInner(id, body));
 }
 
-async function updateTaskInner(id, { column, state }) {
+async function updateTaskInner(id, { column, state, actor, source, reason }) {
   const t = tasks.get(id);
   if (!t) throw new Error('no such task');
   const next = { ...t };
@@ -516,6 +516,16 @@ async function updateTaskInner(id, { column, state }) {
       next.state = 'complete'; // clear stale agent state (e.g. "awaiting human review") on manual move; matches auto-flow done state, explicit state param below still wins
     } else if (column !== 'done' && wasDone) {
       delete next.doneAt;
+    }
+    // Durable transition record — appended only on a real column change, so
+    // state-only updates (incl. rate-limited overlays) leave no trace.
+    if (t.column !== column) {
+      next.transitions = [...(t.transitions ?? []), {
+        from: t.column, to: column, at: Date.now(),
+        ...(actor !== undefined ? { actor: String(actor).trim().slice(0, 120) } : {}),
+        ...(source !== undefined ? { source: String(source).trim().slice(0, 120) } : {}),
+        ...(reason !== undefined ? { reason: String(reason).trim().slice(0, 120) } : {}),
+      }];
     }
   }
   if (state !== undefined) {
