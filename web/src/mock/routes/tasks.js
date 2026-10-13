@@ -77,6 +77,7 @@ export function registerTasks(server) {
       mergeMode: null, // kind is 'plain' — no merge policy
       column: 'todo',
       state: 'analyzing',
+      transitions: [],
       sessionId: null,
       createdAt: Date.now(),
       updatedAt: Date.now(),
@@ -92,18 +93,29 @@ export function registerTasks(server) {
   server.post('/tasks/:id/status', (schema, req) => {
     const t = db.tasks.find((x) => x.id === req.params.id);
     if (!t) return new Response(400, {}, { ok: false, error: 'no such task' });
-    const { column, state } = parseBody(req);
+    const { column, state, actor, source, reason } = parseBody(req);
     if (column !== undefined) {
       if (!COLUMNS.includes(column)) {
         return new Response(400, {}, { ok: false, error: `bad column (expected ${COLUMNS.join('|')})` });
       }
-      const wasDone = t.column === 'done';
+      const prev = t.column;
+      const wasDone = prev === 'done';
       t.column = column;
       if (column === 'done' && !wasDone) {
         t.doneAt = Date.now();
         t.state = 'complete'; // clear stale agent state on manual move; explicit state param below still wins
       } else if (column !== 'done' && wasDone) {
         delete t.doneAt;
+      }
+      // Durable transition record — appended only on a real column change, so
+      // state-only updates (incl. rate-limited overlays) leave no trace.
+      if (prev !== column) {
+        t.transitions = [...(t.transitions ?? []), {
+          from: prev, to: column, at: Date.now(),
+          ...(actor !== undefined ? { actor: String(actor).trim().slice(0, 120) } : {}),
+          ...(source !== undefined ? { source: String(source).trim().slice(0, 120) } : {}),
+          ...(reason !== undefined ? { reason: String(reason).trim().slice(0, 120) } : {}),
+        }];
       }
     }
     if (state !== undefined) {

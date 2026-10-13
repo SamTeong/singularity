@@ -50,7 +50,7 @@ import { Stamp, toneHue } from 'phosphor-console-theme/components';
 import { getDomainState } from '@/lib/domainState.js';
 import { insetQuery } from '@/lib/sheetInset.js';
 import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
-import { COLUMNS as STAGES, COLUMN_DOMAIN as STAGE_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
+import { COLUMNS as STAGES, COLUMN_DOMAIN as STAGE_DOMAIN, cardDomainId, firstEnteredAt } from '@/features/tasks/taskDomain.js';
 
 // Live agent states — an "Open session" action only makes sense while a real
 // claude process is attached (`isLive` comes from agentStatus.js, shared with
@@ -478,8 +478,9 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
                 marked. Hard-edged console equivalent of the ZAPAC timeline:
                 a filled tone-hue stamp for the current stage, a dim outline
                 stamp for completed stages, and a bare dim label for future
-                ones. Stage membership is all the board models, so there are no
-                per-stage timestamps to show. */}
+                ones. A stage's first-entered time comes from the task's durable
+                transition records; stages never entered (or entered before
+                that history existed) show no time. */}
             <Box>
               <Typography sx={(t) => ({ fontSize: 10, fontWeight: 700, letterSpacing: '.12em', textTransform: 'uppercase', color: t.nerv.hue.orange, fontFamily: t.nerv.fonts.mono, mb: '8px' })}>Activity</Typography>
               <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>
@@ -487,6 +488,7 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
                   const at = STAGES.findIndex(([c]) => c === task.column);
                   const state = i < at ? 'done' : i === at ? 'cur' : 'future';
                   const stageDom = getDomainState(STAGE_DOMAIN[id]);
+                  const entered = firstEnteredAt(task.transitions, id);
                   return (
                     <Box
                       component="li"
@@ -515,6 +517,11 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
                       })}>
                         {label}
                       </Typography>
+                      {entered !== null && (
+                        <Typography sx={(t) => ({ ml: 'auto', fontSize: 10, fontFamily: t.nerv.fonts.mono, color: t.nerv.hue.greenDim })}>
+                          {new Date(entered).toLocaleString()}
+                        </Typography>
+                      )}
                     </Box>
                   );
                 })}
@@ -648,8 +655,9 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
             {moveButtons(() => ({ ...sectionLabel(), mb: '11px' }), () => ({ textTransform: 'none' }))}
 
             {/* `.detail-sec` "Activity" / `.timeline` — the board pipeline with the
-                task's current column marked. Stage membership is all the board
-                models, so there are no per-stage timestamps to show. */}
+                task's current column marked. A stage's first-entered time comes
+                from the task's durable transition records; stages never entered
+                (or entered before that history existed) show no time. */}
             <Box>
               <Typography sx={{ ...sectionLabel(), mb: '11px' }}>Activity</Typography>
               <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>
@@ -657,6 +665,7 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
                   const at = STAGES.findIndex(([c]) => c === task.column);
                   const state = i < at ? 'done' : i === at ? 'cur' : 'future';
                   const last = i === STAGES.length - 1;
+                  const entered = firstEnteredAt(task.transitions, id);
                   return (
                     <Box
                       component="li"
@@ -690,6 +699,11 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
                       <Typography sx={{ fontSize: 13, color: state === 'future' ? 'text.disabled' : 'text.primary' }}>
                         {label}
                       </Typography>
+                      {entered !== null && (
+                        <Typography sx={{ ml: 'auto', fontSize: 12, color: 'text.disabled' }}>
+                          {new Date(entered).toLocaleString()}
+                        </Typography>
+                      )}
                     </Box>
                   );
                 })}

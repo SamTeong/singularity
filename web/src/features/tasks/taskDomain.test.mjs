@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { COLUMNS, COLUMN_DOMAIN, cardDomainId } from './taskDomain.js';
+import { COLUMNS, COLUMN_DOMAIN, cardDomainId, firstEnteredAt } from './taskDomain.js';
 // Relative, not the `@/` alias — Node's test runner doesn't resolve it (see
 // theme/resolveSkin.js's doc comment for the same note).
 import { DOMAIN_STATE } from '../../lib/domainState.js';
@@ -30,4 +30,21 @@ test('cardDomainId falls back to the column tone when there is no agent', () => 
 
 test('cardDomainId falls back to "queued" for an unknown column with no agent', () => {
   assert.equal(cardDomainId({ column: 'not-a-real-column' }, undefined), 'queued');
+});
+
+test('firstEnteredAt returns the first transition record targeting the column', () => {
+  const transitions = [
+    { from: 'todo', to: 'inprogress', at: 1000 },
+    { from: 'inprogress', to: 'inreview', at: 2000 },
+    { from: 'inreview', to: 'done', at: 3000 },
+  ];
+  assert.equal(firstEnteredAt(transitions, 'inprogress'), 1000);
+  assert.equal(firstEnteredAt(transitions, 'done'), 3000);
+});
+
+test('firstEnteredAt returns null for a never-entered column or missing history', () => {
+  const transitions = [{ from: 'todo', to: 'done', at: 1000 }];
+  assert.equal(firstEnteredAt(transitions, 'inreview'), null);
+  assert.equal(firstEnteredAt(undefined, 'done'), null);
+  assert.equal(firstEnteredAt([], 'done'), null);
 });

@@ -40,3 +40,15 @@ export const COLUMN_DOMAIN = Object.fromEntries(COLUMN_DEFS.map((c) => [c.id, c.
  */
 export const cardDomainId = (task, agent) =>
   agent ? (KIND_TO_DOMAIN[KIND[agent.status]] ?? 'review') : (COLUMN_DOMAIN[task.column] ?? 'queued');
+
+/**
+ * Epoch ms the task first entered `columnId` — its first durable transition
+ * record targeting that column (appended by server/tasks.mjs updateTaskInner on
+ * a real column change). Null when it never did, or when the record predates
+ * transition history (old tasks.json records default to []).
+ * @param {{ to: string, at: number }[]|undefined} transitions
+ * @param {string} columnId
+ * @returns {number|null}
+ */
+export const firstEnteredAt = (transitions, columnId) =>
+  transitions?.find((r) => r.to === columnId)?.at ?? null;
