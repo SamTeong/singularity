@@ -91,8 +91,10 @@ export function registerTasks(server) {
   // POST /tasks/:id/status — move a card (column/state). Mirrors
   // server/tasks.mjs updateTask: validates column + state, bumps updatedAt.
   server.post('/tasks/:id/status', (schema, req) => {
-    const t = db.tasks.find((x) => x.id === req.params.id);
-    if (!t) return new Response(400, {}, { ok: false, error: 'no such task' });
+    const index = db.tasks.findIndex((x) => x.id === req.params.id);
+    if (index < 0) return new Response(400, {}, { ok: false, error: 'no such task' });
+    const t = db.tasks[index];
+    const next = { ...t };
     const { column, state, actor, source, reason } = parseBody(req);
     if (column !== undefined) {
       if (!COLUMNS.includes(column)) {
@@ -100,17 +102,17 @@ export function registerTasks(server) {
       }
       const prev = t.column;
       const wasDone = prev === 'done';
-      t.column = column;
+      next.column = column;
       if (column === 'done' && !wasDone) {
-        t.doneAt = Date.now();
-        t.state = 'complete'; // clear stale agent state on manual move; explicit state param below still wins
+        next.doneAt = Date.now();
+        next.state = 'complete'; // clear stale agent state on manual move; explicit state param below still wins
       } else if (column !== 'done' && wasDone) {
-        delete t.doneAt;
+        delete next.doneAt;
       }
       // Durable transition record — appended only on a real column change, so
       // state-only updates (incl. rate-limited overlays) leave no trace.
       if (prev !== column) {
-        t.transitions = [...(t.transitions ?? []), {
+        next.transitions = [...(t.transitions ?? []), {
           from: prev, to: column, at: Date.now(),
           ...(actor !== undefined ? { actor: String(actor).trim().slice(0, 120) } : {}),
           ...(source !== undefined ? { source: String(source).trim().slice(0, 120) } : {}),
@@ -119,17 +121,18 @@ export function registerTasks(server) {
       }
     }
     if (state !== undefined) {
-      const col = column ?? t.column;
+      const col = column ?? next.column;
       const s = String(state).slice(0, 120);
       const allowed = [...(STATES[col] ?? []), ...OVERLAY_STATES];
       if (!allowed.includes(s)) {
         return new Response(400, {}, { ok: false, error: `bad state for ${col} (expected ${allowed.join('|')})` });
       }
-      t.state = s;
+      next.state = s;
     }
-    t.updatedAt = Date.now();
+    next.updatedAt = Date.now();
+    db.tasks[index] = next;
     broadcast(tasksFrame());
-    return { ok: true, task: t };
+    return { ok: true, task: next };
   }, 200);
 
   // POST /tasks/:id/conclude — move a card to history with outcome + stats.

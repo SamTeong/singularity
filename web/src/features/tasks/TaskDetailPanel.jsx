@@ -488,7 +488,8 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
                   const at = STAGES.findIndex(([c]) => c === task.column);
                   const state = i < at ? 'done' : i === at ? 'cur' : 'future';
                   const stageDom = getDomainState(STAGE_DOMAIN[id]);
-                  const entered = firstEnteredAt(task.transitions, id);
+                  // Phosphor To-Do starts at creation.
+                  const entered = firstEnteredAt(task.transitions, id, task.createdAt);
                   return (
                     <Box
                       component="li"
@@ -665,7 +666,8 @@ export default function TaskDetailPanel({ task, agent, stats, onSelect, onMove, 
                   const at = STAGES.findIndex(([c]) => c === task.column);
                   const state = i < at ? 'done' : i === at ? 'cur' : 'future';
                   const last = i === STAGES.length - 1;
-                  const entered = firstEnteredAt(task.transitions, id);
+                  // ZAPAC To-Do starts at creation.
+                  const entered = firstEnteredAt(task.transitions, id, task.createdAt);
                   return (
                     <Box
                       component="li"

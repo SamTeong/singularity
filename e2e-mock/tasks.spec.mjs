@@ -6,7 +6,7 @@
 // dialog's cancel-only mechanics separately; these board tests only use seeded
 // cards and the mock's REST → WebSocket convergence path.
 import { test, expect, onceConfirm } from './fixtures/test.mjs';
-import { goto, setSkin } from '../e2e/helpers/nav.mjs';
+import { goto, gotoUrl, setSkin } from '../e2e/helpers/nav.mjs';
 
 // Playwright's dragTo()/mouse.down+move+up did not reliably fire React's
 // onDragStart/onDragOver/onDrop for these HTML5-draggable elements under
@@ -34,6 +34,66 @@ test('all four columns render with their seeded counts', async ({ page }) => {
   await expect(page.getByRole('button', { name: 'Seeded in-progress card' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Seeded review card' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'Seeded done card' })).toBeVisible();
+});
+
+test('rejected task update leaves the task and transition history unchanged', async ({ page }) => {
+  await page.goto('/');
+
+  const result = await page.evaluate(async () => {
+    const before = await fetch('/api/tasks').then((response) => response.json());
+    const task = before.tasks.find((item) => item.column === 'todo');
+    const response = await fetch(`/api/tasks/${task.id}/status`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ column: 'done', state: 'working' }),
+    });
+    const after = await fetch('/api/tasks').then((getResponse) => getResponse.json());
+    return {
+      status: response.status,
+      before: {
+        column: task.column,
+        state: task.state,
+        doneAt: task.doneAt,
+        updatedAt: task.updatedAt,
+        transitions: task.transitions,
+      },
+      after: after.tasks.find((item) => item.id === task.id),
+    };
+  });
+
+  expect(result.status).toBe(400);
+  expect({
+    column: result.after.column,
+    state: result.after.state,
+    updatedAt: result.after.updatedAt,
+    transitions: result.after.transitions,
+  }).toEqual(result.before);
+  expect(result.after.doneAt).toBeUndefined();
+});
+
+test('To-Do Activity shows task creation time in ZAPAC and narrow Phosphor dossier', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Tasks');
+
+  const createdAt = await page.evaluate(async () => {
+    const { tasks } = await fetch('/api/tasks').then((response) => response.json());
+    const todo = tasks.find((task) => task.column === 'todo');
+    return new Date(todo.createdAt).toLocaleString();
+  });
+
+  const todoCard = page.getByRole('button', { name: 'Seeded todo card', exact: true });
+  await todoCard.click();
+  let dialog = page.getByRole('dialog', { name: 'Task detail', exact: true });
+  let activity = dialog.getByText('Activity', { exact: true }).locator('xpath=..');
+  await expect(activity.locator('li').filter({ hasText: 'To-Do' }).getByText(createdAt, { exact: true })).toBeVisible();
+
+  await setSkin(page, 'Phosphor Console');
+  await gotoUrl(page, 'Tasks');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole('button', { name: 'Seeded todo card', exact: true }).click();
+  dialog = page.getByRole('dialog', { name: 'Task detail', exact: true });
+  activity = dialog.getByText('Activity', { exact: true }).locator('xpath=..');
+  await expect(activity.locator('li').filter({ hasText: 'To-Do' }).getByText(createdAt, { exact: true })).toBeVisible();
 });
 
 // Every seeded card AND both seeded history rows carry the identical tag set

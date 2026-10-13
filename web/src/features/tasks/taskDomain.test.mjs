@@ -42,9 +42,23 @@ test('firstEnteredAt returns the first transition record targeting the column', 
   assert.equal(firstEnteredAt(transitions, 'done'), 3000);
 });
 
+test('firstEnteredAt uses creation time for To-Do, including legacy tasks and later re-entry', () => {
+  const createdAt = 500;
+  const transitions = [
+    { from: 'todo', to: 'inprogress', at: 1000 },
+    { from: 'inprogress', to: 'todo', at: 2000 },
+  ];
+
+  assert.equal(firstEnteredAt([], 'todo', createdAt), createdAt);
+  assert.equal(firstEnteredAt(transitions, 'todo', createdAt), createdAt);
+  assert.equal(firstEnteredAt(undefined, 'todo', createdAt), createdAt);
+});
+
 test('firstEnteredAt returns null for a never-entered column or missing history', () => {
   const transitions = [{ from: 'todo', to: 'done', at: 1000 }];
   assert.equal(firstEnteredAt(transitions, 'inreview'), null);
   assert.equal(firstEnteredAt(undefined, 'done'), null);
   assert.equal(firstEnteredAt([], 'done'), null);
+  assert.equal(firstEnteredAt([], 'todo'), null);
+  assert.equal(firstEnteredAt([{ from: 'inprogress', to: 'todo', at: 2000 }], 'todo'), 2000);
 });
