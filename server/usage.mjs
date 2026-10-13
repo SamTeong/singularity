@@ -411,7 +411,9 @@ export function normalizeClaude(raw, plan) {
     extra: eu && typeof eu === 'object'
       ? { enabled: eu.is_enabled ?? null, used: eu.used_credits ?? null,
           monthlyLimit: eu.monthly_limit ?? null,
-          pctUsed: eu.utilization != null ? Number(eu.utilization) : null,
+          // Extra-usage-only subscriptions omit utilization but carry a top-level spend percentage.
+          pctUsed: eu.utilization != null ? Number(eu.utilization)
+            : raw.spend && typeof raw.spend === 'object' && raw.spend.percent != null ? Number(raw.spend.percent) : null,
           resetsAt: eu.resets_at ?? null }
       : null,
   };
