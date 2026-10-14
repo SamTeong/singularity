@@ -122,14 +122,18 @@ function appendJsonl(file, record) {
 // reading, and a zero-delta duplicate line is harmless to the estimators.
 const CODEX_HISTORY = join(USAGE_SKILL_STATE, 'codex-usage.jsonl');
 let lastCodexReading = null;
+let lastCodexAt = 0;
+// Heartbeat keeps readers' 10-min freshness gate (fetched_at age) satisfied while quota is idle.
+const CODEX_HEARTBEAT_MS = 5 * 60_000;
 
 export function appendCodexHistory(data) {
   const reading = JSON.stringify([
     data.session?.pctUsed ?? null, data.session?.resetsAt ?? null, data.session?.started === false,
     data.weekly?.pctUsed ?? null, data.weekly?.resetsAt ?? null, data.weekly?.started === false,
   ]);
-  if (reading === lastCodexReading) return;
+  if (reading === lastCodexReading && Date.now() - lastCodexAt < CODEX_HEARTBEAT_MS) return;
   lastCodexReading = reading;
+  lastCodexAt = Date.now();
   appendJsonl(CODEX_HISTORY, {
     fetched_at: localTimestamp(new Date()),
     session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt, ...(data.session.started === false ? { started: false } : {}) } : null,
@@ -629,8 +633,8 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
 // ---- Codex: the Stop hook's snapshot tail, live usage API on demand ---------
 // The API credentials live in ~/.codex/auth.json (CODEX_HOME overrides
 // ~/.codex). Read order: the Stop hook's codex-usage.jsonl tail when fresh
-// (the hook now bumps the file's own record on every turn, changed or not, so
-// a quiet session still keeps this fresh); the live wham/usage API is
+// (the hook and appendCodexHistory append on a changed reading, or an unchanged
+// one once CODEX_HEARTBEAT_MS has passed, so an idle quota stays fresh); the live wham/usage API is
 // consulted when a window is missing or the file has gone stale, once pull()'s
 // per-source network floor allows it (manual Refresh bypasses that floor — see the
 // history sampler section). There is no rollout-log scan any more: it read

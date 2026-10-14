@@ -263,6 +263,22 @@ test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', (
   rmSync(CODEX_HISTORY_FILE, { force: true });
 });
 
+test('appendCodexHistory: an unchanged reading is rewritten once the 5-min heartbeat has passed', () => {
+  const realNow = Date.now;
+  try {
+    appendCodexHistory(CODEX_READING);
+    appendCodexHistory(CODEX_READING); // within the heartbeat → deduped
+    Date.now = () => realNow() + 5 * 60_000;
+    appendCodexHistory(CODEX_READING); // heartbeat elapsed → written again
+    const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(rows.length, 2);
+    assert.deepEqual(rows[1].session, rows[0].session);
+  } finally {
+    Date.now = realNow;
+    rmSync(CODEX_HISTORY_FILE, { force: true });
+  }
+});
+
 test('appendCodexHistory: an unstarted transition with unchanged limits appends a fresh snapshot', () => {
   const window = { pctUsed: 0, resetsAt: null, models: [] };
   appendCodexHistory({ ...CODEX_READING, session: window });
