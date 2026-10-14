@@ -1,4 +1,3 @@
-
 Backlog is installed locally; run commands from its instructions as `pnpm exec backlog <command>`.
 
 <!-- BACKLOG.MD GUIDELINES START -->
@@ -25,8 +24,10 @@ Do not edit Backlog task, draft, document, decision, or milestone markdown files
 </CRITICAL_INSTRUCTION>
 <!-- BACKLOG.MD GUIDELINES END -->
 
-## Groma
-
 Groma is installed locally; run its commands as `pnpm exec groma <command>`.
 
-Before scanning, inspecting, or curating architecture, or changing files for a Backlog task, run `pnpm exec groma agent-instructions` and read the applicable guide. Do not edit Groma-owned architecture files directly.
+<!-- groma:start -->
+## Groma
+
+This project uses Groma. Before you scan, inspect, or curate architecture, or change files for a Backlog task, run `pnpm exec groma agent-instructions` and read the guide it names for that job. When it reports a first scan, ask the user whether they want you to curate the architecture. Do not edit Groma-owned architecture files directly.
+<!-- groma:end -->
