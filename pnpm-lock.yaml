@@ -120,6 +120,9 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.7.0
         version: 4.7.0(supports-color@8.1.1)(vite@6.4.3)
+      backlog.md:
+        specifier: 1.53.0
+        version: 1.53.0
       concurrently:
         specifier: ^9.2.4
         version: 9.2.4
@@ -132,6 +135,9 @@ importers:
       globals:
         specifier: ^17.9.0
         version: 17.9.0
+      groma.md:
+        specifier: 0.6.6
+        version: 0.6.6
       miragejs:
         specifier: ^0.1.48
         version: 0.1.48
@@ -1168,6 +1174,40 @@ packages:
     resolution: {integrity: sha512-Cg7TFGpIr01vOQNODXOOaGz2NpCU5gl8x1qJFbb6hbZxR7XrcE2vtbAsTAbJ7/xwJtUuJEw8K8Zr/AE0LHlesg==}
     engines: {node: '>=10', npm: '>=6'}
 
+  backlog.md-darwin-arm64@1.53.0:
+    resolution: {integrity: sha512-NQT4XHXoeudV5rZ/JVe039eTJV3hKcCdnEZd6rI1GCuMFnSYY9t5NaiFk2f/OzJTJPcFanpVnKOGefLiPs37uw==}
+    cpu: [arm64]
+    os: [darwin]
+
+  backlog.md-darwin-x64@1.53.0:
+    resolution: {integrity: sha512-fC0vCuhGfHFAvvDNRf1dN/7F3GdmbuSZGzMVVHKx0+To4cakLOwuqOUhPX5KIGXeK6minHBMPIxIJFFtae2xvA==}
+    cpu: [x64]
+    os: [darwin]
+
+  backlog.md-linux-arm64@1.53.0:
+    resolution: {integrity: sha512-7EjAd91HexoteCYsz0jIKKMNxPaVg5gPv1LkcqHHiOpmCjmz3bDb02Wsk/VecPGeNFqFgpbpLyYI184UCCW0vA==}
+    cpu: [arm64]
+    os: [linux]
+
+  backlog.md-linux-x64@1.53.0:
+    resolution: {integrity: sha512-EusW2vDzNjzKRaloJ3yPNgGwjqJ8Fow8aKdBRLZGs6+Pb1V9CREyhqOOia/H1OvQ86M74gjVBnnIpCDRrU0m8w==}
+    cpu: [x64]
+    os: [linux]
+
+  backlog.md-windows-arm64@1.53.0:
+    resolution: {integrity: sha512-ia0gxBfewMhQSaGprz8DH1FA3iel3OqbEjngdZDKjfQrMNk8gqkmDUM3hQr1IMOXsq/YbteRQhdlHpCLUgLBoA==}
+    cpu: [arm64]
+    os: [win32]
+
+  backlog.md-windows-x64@1.53.0:
+    resolution: {integrity: sha512-EzNL6Rx/DA6Hnq52wNAP78MTAK23xpBi2aAqMqObW3LhjhefG3h4M5SjTSUkizbH2FyvYsZlahlYJFdxUpz31g==}
+    cpu: [x64]
+    os: [win32]
+
+  backlog.md@1.53.0:
+    resolution: {integrity: sha512-VfYdR7RGu+mgEpSbHpBfdsyHVlJ+d4DIRzixkmyLqsfgCk4pLPDRhNkbu6dU3UgLEbQfxKhDuXUIbN/RLyGk1A==}
+    hasBin: true
+
   bail@2.0.2:
     resolution: {integrity: sha512-0xO6mYd7JB2YesxDKplafRpsiOzPt9V02ddPCLbY1xYGPOX24NTyN50qnUxgCPcSoYMhKpAuBTjQoRZCAkUDRw==}
 
@@ -1691,6 +1731,36 @@ packages:
   globals@17.9.0:
     resolution: {integrity: sha512-m/MvAW61QVU5VDNF1Vj8axt016h8w7L5TU1e9zlab7XIttAT2YAlCwl75K1fOqvMM9apmD7lbCIRhpfkhmxhCg==}
     engines: {node: '>=18'}
+
+  groma.md-darwin-arm64@0.6.6:
+    resolution: {integrity: sha512-rvcqBjkDhvbl0R4hZnrFrT6TP/T2eZeBouw7K1BLTKrS89V/cfQXWHUh4OAhHKcloPgFIqOc7u3tQLQFRRqYKg==}
+    cpu: [arm64]
+    os: [darwin]
+
+  groma.md-linux-arm64@0.6.6:
+    resolution: {integrity: sha512-H1eUazx0Qz8yhiS1f84l1GoknUU+D4GD6oaJT69USymbv84uBosulZDOWZGL0j+7hmaMlJPnAgjMSyfiwGJEww==}
+    cpu: [arm64]
+    os: [linux]
+
+  groma.md-linux-x64@0.6.6:
+    resolution: {integrity: sha512-BFH2wtz///OSn4KCSfuc0B8WXv46DnnZfskQ5ar0xeebFSzbN4uYbcxLU2gsO0h1Fp+T6lPruvkB6iPN4AOOag==}
+    cpu: [x64]
+    os: [linux]
+
+  groma.md-windows-arm64@0.6.6:
+    resolution: {integrity: sha512-V2DMH2gyfH/fvGdGinh30K48kxrkC3RW04IOlwgnOmMs1zs71OBxINtyjgp6XHKWHEoDTmr+qyaGy+WjYqqKOw==}
+    cpu: [arm64]
+    os: [win32]
+
+  groma.md-windows-x64@0.6.6:
+    resolution: {integrity: sha512-QRv4Cttl4w4Qz5w7enhGWj0YieUdRMfw3Drgc+mA3Qon1/w9JSTJOlO1Rf6kslGvxACFzZ28avGpF5s1/7N5Eg==}
+    cpu: [x64]
+    os: [win32]
+
+  groma.md@0.6.6:
+    resolution: {integrity: sha512-msLPe2Mocpw8n68BXTsGBUG6pFbeL/PLcwgomLqnIXZ4NLoI62Fku6QMNzbGhgCvQA/LUGyS5BwaISSBLC2WWA==}
+    engines: {node: '>=20.19.0'}
+    hasBin: true
 
   hachure-fill@0.5.2:
     resolution: {integrity: sha512-3GKBOn+m2LX9iq+JC1064cSFprJY4jL1jCXTcpnfER5HYE2l/4EfWSGzkPa/ZDBmYI0ZOEj5VHV/eKnPGkHuOg==}
@@ -3684,6 +3754,33 @@ snapshots:
       cosmiconfig: 7.1.0
       resolve: 1.22.12
 
+  backlog.md-darwin-arm64@1.53.0:
+    optional: true
+
+  backlog.md-darwin-x64@1.53.0:
+    optional: true
+
+  backlog.md-linux-arm64@1.53.0:
+    optional: true
+
+  backlog.md-linux-x64@1.53.0:
+    optional: true
+
+  backlog.md-windows-arm64@1.53.0:
+    optional: true
+
+  backlog.md-windows-x64@1.53.0:
+    optional: true
+
+  backlog.md@1.53.0:
+    optionalDependencies:
+      backlog.md-darwin-arm64: 1.53.0
+      backlog.md-darwin-x64: 1.53.0
+      backlog.md-linux-arm64: 1.53.0
+      backlog.md-linux-x64: 1.53.0
+      backlog.md-windows-arm64: 1.53.0
+      backlog.md-windows-x64: 1.53.0
+
   bail@2.0.2: {}
 
   balanced-match@4.0.4: {}
@@ -4261,6 +4358,29 @@ snapshots:
       path-scurry: 2.0.2
 
   globals@17.9.0: {}
+
+  groma.md-darwin-arm64@0.6.6:
+    optional: true
+
+  groma.md-linux-arm64@0.6.6:
+    optional: true
+
+  groma.md-linux-x64@0.6.6:
+    optional: true
+
+  groma.md-windows-arm64@0.6.6:
+    optional: true
+
+  groma.md-windows-x64@0.6.6:
+    optional: true
+
+  groma.md@0.6.6:
+    optionalDependencies:
+      groma.md-darwin-arm64: 0.6.6
+      groma.md-linux-arm64: 0.6.6
+      groma.md-linux-x64: 0.6.6
+      groma.md-windows-arm64: 0.6.6
+      groma.md-windows-x64: 0.6.6
 
   hachure-fill@0.5.2: {}
 
