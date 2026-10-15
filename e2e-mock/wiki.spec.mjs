@@ -52,10 +52,17 @@ test('the sweep history table collapses and shows latest completed dates', async
 });
 
 test('changing the wiki root hides stale sweep dates and scopes mock history', async ({ page }) => {
-  await page.route('**/api/wiki/sweeps**', async (route) => {
-    const root = new URL(route.request().url()).searchParams.get('root');
-    if (root?.endsWith('/skills')) await new Promise((resolve) => setTimeout(resolve, 900));
-    await route.continue();
+  // Mirage answers fetch inside the page, so page.route never sees this request;
+  // wrap whatever fetch gets installed (projects-review.spec.mjs recipe) instead.
+  await page.addInitScript(() => {
+    const wrap = (orig) => async (...args) => {
+      const [input] = args;
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.includes('/api/wiki/sweeps?') && decodeURIComponent(url).endsWith('/skills')) await new Promise((resolve) => setTimeout(resolve, 900));
+      return orig(...args);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
   });
   await gotoView(page, 'Wiki');
   const table = page.getByRole('table', { name: 'Last completed wiki sweeps' });
@@ -79,7 +86,17 @@ test('changing the wiki root hides stale sweep dates and scopes mock history', a
 });
 
 test('failed sweep history request shows an unavailable state', async ({ page }) => {
-  await page.route('**/api/wiki/sweeps**', (route) => route.abort());
+  // Same fetch-wrap recipe as above: a rejected fetch stands in for a network failure.
+  await page.addInitScript(() => {
+    const wrap = (orig) => (...args) => {
+      const [input] = args;
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.includes('/api/wiki/sweeps?')) return Promise.reject(new TypeError('Failed to fetch'));
+      return orig(...args);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  });
   await gotoView(page, 'Wiki');
   await expect(page.getByRole('alert').filter({ hasText: 'Sweep history unavailable.' })).toBeVisible();
   await expect(page.getByRole('table', { name: 'Last completed wiki sweeps' })).toHaveCount(0);
