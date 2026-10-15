@@ -123,18 +123,21 @@ export function parseSweepHistory(markdown) {
   const headings = [...source.matchAll(SWEEP_HEADING)];
   for (let i = 0; i < headings.length; i++) {
     const heading = headings[i];
-    const body = source.slice(heading.index + heading[0].length, headings[i + 1]?.index ?? source.length);
+    const rest = source.slice(heading.index + heading[0].length);
+    const next = rest.search(/\n## /); // any level-2 heading ends the sweep body
+    const body = next < 0 ? rest : rest.slice(0, next);
     const date = heading[1];
+    const type = heading[2].toLowerCase();
     const timestamp = Date.parse(`${date}T00:00:00.000Z`);
     if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== date) continue;
 
     const summary = body.slice(0, 1200);
-    const interrupted = /\b(?:partial|interrupted|aborted|stopped before|tool-call cap)\b/i.test(summary);
-    const sweepCompleted = /^\s*(?:[-*]\s*)?(?:(?:whole|entire)\s+)?sweep\s+(?:was\s+)?completed\b/im.test(summary);
+    const interrupted = /\b(?:partial(?:ly)?|interrupted|aborted|stopped before|tool-call cap|not completed|incomplete|failed|did not|cancell?ed|timed out)\b/i.test(summary);
+    const sweepCompleted = /^\s*(?:[-*]\s*)?(?:(?:whole|entire)\s+)?sweep\s+(?:was\s+)?completed[ \t]*(?:$|[.:\-–—])/im.test(summary);
     const continuationCompleted = /continuation/i.test(heading[0])
       && /^\s*(?:[-*]\s*)?continuation\s+(?:was\s+)?completed\b/im.test(summary);
     if (interrupted && !sweepCompleted && !continuationCompleted) continue;
-    if (!latest[heading[2]] || date > latest[heading[2]]) latest[heading[2]] = date;
+    if (!latest[type] || date > latest[type]) latest[type] = date;
   }
   return latest;
 }

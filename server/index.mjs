@@ -815,7 +815,7 @@ app.post('/plans/open', async (req, reply) => {
 app.get('/wiki/root', async () => ({ root: getWikiRoot() }));
 app.put('/wiki/root', async (req) => setWikiRoot(req.body?.root));
 app.get('/wiki/files', async (req) => wikiFiles(req.query.root));
-app.get('/wiki/sweeps', async (req) => wikiSweepHistory(req.query.root));
+app.get('/wiki/sweeps', async (req) => wikiSweepHistory(typeof req.query.root === 'string' ? req.query.root : null));
 app.get('/wiki/search', async (req) => searchWiki(req.query.q, req.query.root));
 app.get('/wiki/graph', async (req) => wikiGraph(req.query.root, req.query.wiki));
 app.get('/wiki/file', async (req, reply) => {

@@ -108,8 +108,9 @@ export default function WikiPanel() {
   useEffect(() => {
     if (root == null) return;
     let cancelled = false;
-    fetch(`/api/wiki/sweeps?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
-      if (!cancelled) setSweepHistory({ root, status: d.error ? 'error' : 'ready', wikis: d.wikis || [] });
+    fetch(`/api/wiki/sweeps?root=${encodeURIComponent(untildify(root))}`).then(async (r) => ({ ok: r.ok, d: await r.json() })).then(({ ok, d }) => {
+      const failed = !ok || d.error || !Array.isArray(d.wikis);
+      if (!cancelled) setSweepHistory({ root, status: failed ? 'error' : 'ready', wikis: failed ? [] : d.wikis });
     }).catch(() => { if (!cancelled) setSweepHistory({ root, status: 'error', wikis: [] }); });
     return () => { cancelled = true; };
   }, [root]);

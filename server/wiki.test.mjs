@@ -80,6 +80,40 @@ test('sweep completion markers for individual lanes do not override interruption
   ].join('\n')), { shallow: '2026-10-12', deep: null, horizon: null });
 });
 
+test('negated completion counts as interrupted and the completed override must end its clause', () => {
+  const deep = (line) => parseSweepHistory(`## [2026-10-20] deep | lanes: all\n${line}\n`).deep;
+  assert.equal(deep('- Sweep not completed: lane 3 failed.'), null);
+  assert.equal(deep('- Sweep completed lanes 1 and 2 only; lane 3 interrupted.'), null);
+  for (const line of ['- Not completed.', '- Incomplete.', '- Lane 3 failed.', '- Lane 3 did not finish.',
+    '- Cancelled by user.', '- Canceled by user.', '- Lane 2 timed out.', '- Partially done.']) {
+    assert.equal(deep(line), null, line);
+  }
+  assert.equal(deep('- Sweep completed.'), '2026-10-20');
+  assert.equal(deep('- Sweep completed: lane 3 failed then retried.'), '2026-10-20');
+  assert.equal(deep('- Sweep completed - lane 2 timed out on retry'), '2026-10-20');
+  assert.equal(deep('- Sweep completed\r\n- one lane failed and was rerun.'), '2026-10-20');
+});
+
+test('sweep types are case-insensitive, rollover dates are rejected, and any heading ends a body', () => {
+  assert.deepEqual(parseSweepHistory('## [2026-10-20] Shallow | lanes: all\n- NEW: —\n'), { shallow: '2026-10-20', deep: null, horizon: null });
+  assert.deepEqual(parseSweepHistory([
+    '## [2026-02-30] shallow | lanes: all',
+    '- Sweep completed.',
+    '## [2026-02-29] deep | lanes: all',
+    '- Sweep completed.',
+  ].join('\n')), { shallow: null, deep: null, horizon: null });
+  assert.deepEqual(parseSweepHistory([
+    '## [2026-10-20] shallow | lanes: all',
+    '- NEW: —',
+    '## Notes',
+    '- partial notes',
+    '## [2026-10-19] deep | lanes: all',
+    '- NEW: —',
+    '## [2026-10-21] lint',
+    '- interrupted lint run',
+  ].join('\n')), { shallow: '2026-10-20', deep: '2026-10-19', horizon: null });
+});
+
 test('wiki sweep history returns the three supported domains and null for a missing ledger', async () => {
   const root = mkdtempSync(join(tmpdir(), 'wiki-sweeps-'));
   const ledger = join(root, 'agentic-coding', 'meta', 'websearch-log.md');
@@ -91,4 +125,6 @@ test('wiki sweep history returns the three supported domains and null for a miss
     { name: 'dotnet', shallow: null, deep: null, horizon: null },
     { name: 'iap', shallow: null, deep: null, horizon: null },
   ] });
+  // index.mjs coerces an array-valued ?root= to null; that path must not throw.
+  assert.deepEqual((await wikiSweepHistory(null)).wikis.map((w) => w.shallow), [null, null, null]);
 });

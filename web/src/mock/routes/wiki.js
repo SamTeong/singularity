@@ -87,7 +87,9 @@ export function registerWiki(server) {
   // /wiki/sweeps — dates are a sample for the wiki fixture root only; other
   // fixture roots have no sweep ledgers and therefore return empty history.
   server.get('/wiki/sweeps', (schema, req) => {
-    const sample = untildify(req.queryParams.root) === ROOTS.wiki;
+    const root = untildify(req.queryParams.root);
+    // Trailing slashes normalised as in rootKnown, mirroring the server's path.resolve.
+    const sample = typeof root === 'string' && (root.endsWith('/') ? root : root + '/') === ROOTS.wiki + '/';
     return { wikis: [
       { name: 'agentic-coding', shallow: sample ? '2026-10-12' : null, deep: sample ? '2026-10-04' : null, horizon: sample ? '2026-10-10' : null },
       { name: 'dotnet', shallow: sample ? '2026-09-21' : null, deep: sample ? '2026-10-04' : null, horizon: sample ? '2026-10-10' : null },
