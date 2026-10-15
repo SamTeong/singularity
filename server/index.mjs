@@ -20,7 +20,7 @@ import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot
 import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
 import { listSessions as listPlanSessions, getSession as getPlanSession, resolveSessionDirectory, PLAN_ROOT } from './plans.mjs';
-import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
+import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, wikiSweepHistory, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
@@ -815,6 +815,7 @@ app.post('/plans/open', async (req, reply) => {
 app.get('/wiki/root', async () => ({ root: getWikiRoot() }));
 app.put('/wiki/root', async (req) => setWikiRoot(req.body?.root));
 app.get('/wiki/files', async (req) => wikiFiles(req.query.root));
+app.get('/wiki/sweeps', async (req) => wikiSweepHistory(req.query.root));
 app.get('/wiki/search', async (req) => searchWiki(req.query.q, req.query.root));
 app.get('/wiki/graph', async (req) => wikiGraph(req.query.root, req.query.wiki));
 app.get('/wiki/file', async (req, reply) => {

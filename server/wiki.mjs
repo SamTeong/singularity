@@ -111,6 +111,41 @@ export async function listFiles(root) {
   return { wikis, capped };
 }
 
+const SWEEP_WIKIS = ['agentic-coding', 'dotnet', 'iap'];
+const SWEEP_TYPES = ['shallow', 'deep', 'horizon'];
+const SWEEP_HEADING = /^## \[(\d{4}-\d{2}-\d{2})\] (shallow|deep|horizon)(?: continuation)?\b/gim;
+
+// Sweep ledgers are Markdown event histories. Keep dates at their recorded
+// day precision, and ignore entries that explicitly stopped before completion.
+export function parseSweepHistory(markdown) {
+  const latest = Object.fromEntries(SWEEP_TYPES.map((type) => [type, null]));
+  const source = String(markdown || '');
+  const headings = [...source.matchAll(SWEEP_HEADING)];
+  for (let i = 0; i < headings.length; i++) {
+    const heading = headings[i];
+    const body = source.slice(heading.index + heading[0].length, headings[i + 1]?.index ?? source.length);
+    const completed = !/\b(?:partial|interrupted|aborted|stopped before|tool-call cap)\b/i.test(body.slice(0, 1200))
+      || /\bcompleted\b/i.test(body.slice(0, 1200));
+    if (completed && (!latest[heading[2]] || heading[1] > latest[heading[2]])) latest[heading[2]] = heading[1];
+  }
+  return latest;
+}
+
+export async function wikiSweepHistory(root) {
+  const resolved = resolveRoot(root);
+  const byName = resolved && existsSync(resolved) ? new Map((await wikiDirs(resolved)).map((wiki) => [wiki.name, wiki])) : new Map();
+  const wikis = [];
+  for (const name of SWEEP_WIKIS) {
+    let content = '';
+    const wiki = byName.get(name);
+    if (wiki) {
+      try { content = await readFile(join(wiki.path, 'meta', 'websearch-log.md'), 'utf8'); } catch { /* no sweep ledger */ }
+    }
+    wikis.push({ name, ...parseSweepHistory(content) });
+  }
+  return { wikis };
+}
+
 // Search across every wiki's pages. rel is "<wiki>/<page-rel>" so hits show
 // which wiki they belong to.
 export async function searchWiki(q, root) {

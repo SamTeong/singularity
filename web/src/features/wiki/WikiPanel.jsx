@@ -13,6 +13,15 @@ import ListItemText from '@mui/material/ListItemText';
 import Autocomplete from '@mui/material/Autocomplete';
 import TextField from '@mui/material/TextField';
 import Collapse from '@mui/material/Collapse';
+import Accordion from '@mui/material/Accordion';
+import AccordionSummary from '@mui/material/AccordionSummary';
+import AccordionDetails from '@mui/material/AccordionDetails';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableContainer from '@mui/material/TableContainer';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import FolderIcon from '@mui/icons-material/Folder';
@@ -57,6 +66,7 @@ export default function WikiPanel() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null); // search hits
   const [wikis, setWikis] = useState([]); // [{name, path, pages:[{path,rel}]}]
+  const [sweepHistory, setSweepHistory] = useState([]);
   const [capped, setCapped] = useState(false);
   const [err, setErr] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set()); // wiki names
@@ -91,6 +101,15 @@ export default function WikiPanel() {
       if (d.error) { setWikis([]); setCapped(false); setErr(d.error); return; }
       setWikis(d.wikis || []); setCapped(!!d.capped); setErr(null);
     }).catch(() => { if (!cancelled) { setWikis([]); setCapped(false); setErr('failed to load wikis'); } });
+    return () => { cancelled = true; };
+  }, [root]);
+
+  useEffect(() => {
+    if (root == null) return;
+    let cancelled = false;
+    fetch(`/api/wiki/sweeps?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
+      if (!cancelled) setSweepHistory(d.wikis || []);
+    }).catch(() => { if (!cancelled) setSweepHistory([]); });
     return () => { cancelled = true; };
   }, [root]);
 
@@ -260,6 +279,33 @@ export default function WikiPanel() {
         {!results && viewWikis.length === 0 && <EmptyListLine>{err ? `${err}.` : (cats.length ? 'No pages in selected categories.' : 'No wikis.')}</EmptyListLine>}
         {results && results.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
       </List>
+      <Accordion defaultExpanded disableGutters elevation={0} sx={{ flexShrink: 0, borderTop: (t) => `1px solid ${getTokens(t).glass.stroke}`, '&:before': { display: 'none' } }}>
+        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 34, px: 1.5, '& .MuiAccordionSummary-content': { my: 0.75 } }}>
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>Last completed sweeps</Typography>
+        </AccordionSummary>
+        <AccordionDetails sx={{ pt: 0, px: 0.5, pb: 0.75 }}>
+          <TableContainer>
+            <Table size="small" aria-label="Last completed wiki sweeps">
+              <TableHead><TableRow>
+                <TableCell sx={{ fontSize: 10, px: 0.75 }}>Wiki</TableCell>
+                <TableCell sx={{ fontSize: 10, px: 0.5 }}>Shallow</TableCell>
+                <TableCell sx={{ fontSize: 10, px: 0.5 }}>Deep</TableCell>
+                <TableCell sx={{ fontSize: 10, px: 0.5 }}>Horizon</TableCell>
+              </TableRow></TableHead>
+              <TableBody>{sweepHistory.map((wiki) => (
+                <TableRow key={wiki.name}>
+                  <TableCell sx={{ fontSize: 10, px: 0.75, whiteSpace: 'nowrap' }}>{wiki.name}</TableCell>
+                  {['shallow', 'deep', 'horizon'].map((type) => (
+                    <TableCell key={type} sx={{ fontSize: 10, px: 0.5, whiteSpace: 'nowrap' }}>
+                      {wiki[type] || <span aria-label="No completed sweep recorded">—</span>}
+                    </TableCell>
+                  ))}
+                </TableRow>
+              ))}</TableBody>
+            </Table>
+          </TableContainer>
+        </AccordionDetails>
+      </Accordion>
       {graphView === 'dock' && graphWiki && (
         <Stack sx={(t) => ({ flex: 1, minHeight: 0, borderTop: `1px solid ${getTokens(t).glass.stroke}`, p: 1 })} spacing={0.5}>
           <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>

@@ -32,6 +32,25 @@ test('the tree lists the wiki, its page count, and its pages once expanded', asy
   await expect(page.getByRole('button', { name: /design.*daemon\.md/ })).toBeVisible();
 });
 
+test('the sweep history table collapses and shows latest completed dates', async ({ page }) => {
+  await gotoView(page, 'Wiki');
+  const toggle = page.getByRole('button', { name: 'Last completed sweeps' });
+  const table = page.getByRole('table', { name: 'Last completed wiki sweeps' });
+  await expect(toggle).toBeVisible();
+  await expect(table).toBeVisible();
+  await toggle.click();
+  await expect(table).toHaveCount(0);
+  await toggle.click();
+
+  await expect(table).toBeVisible();
+  await expect(table.getByRole('row')).toHaveCount(4);
+  await expect(table.getByRole('row', { name: /agentic-coding/ })).toContainText('2026-10-12');
+  await expect(table.getByRole('row', { name: /dotnet/ })).toContainText('2026-08-13');
+  await expect(table.getByRole('row', { name: /iap/ }).locator('[aria-label="No completed sweep recorded"]')).toHaveCount(3);
+  await toggle.click();
+  await expect(table).toHaveCount(0);
+});
+
 test('opening a page renders its frontmatter title, status pill and body', async ({ page }) => {
   await gotoView(page, 'Wiki');
   await openPage(page, 'index.md');

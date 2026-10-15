@@ -4,12 +4,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 
 // wiki.mjs imports app-dir.mjs (STATE_DIR), which throws without SINGULARITY_HOME.
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
-const { isWikiPath, readWikiFile, getWikiRoot, setWikiRoot } = await import('./wiki.mjs');
+const { isWikiPath, readWikiFile, getWikiRoot, setWikiRoot, parseSweepHistory, wikiSweepHistory } = await import('./wiki.mjs');
 
 const ROOT = join(homedir(), 'wiki');
 const w = (...parts) => join(ROOT, ...parts);
@@ -45,4 +45,37 @@ test('wiki root persists to FS: default, roundtrip, bad input', () => {
   assert.deepEqual(setWikiRoot('~/notes'), { ok: true, root: '~/notes' });
   assert.equal(getWikiRoot(), '~/notes'); // read back from disk
   assert.equal(setWikiRoot('').ok, false); // rejects empty
+});
+
+test('sweep history keeps latest completed typed entries and ignores interrupted attempts', () => {
+  assert.deepEqual(parseSweepHistory([
+    '## [2026-10-12] shallow | lanes: all',
+    '- NEW: —',
+    '## [2026-10-11] horizon | stopped before completion',
+    '- This partial sweep stopped before saturation.',
+    '## [2026-10-10] horizon continuation | lane 1',
+    '- Continuation completed after four rounds.',
+    '## [2026-10-04] deep | lanes: all',
+    '- OVERTURNS: —',
+    '## [2026-10-01] thorough | lanes: all',
+    '- not a displayed sweep type',
+  ].join('\n')), {
+    shallow: '2026-10-12',
+    deep: '2026-10-04',
+    horizon: '2026-10-10',
+  });
+  assert.deepEqual(parseSweepHistory(''), { shallow: null, deep: null, horizon: null });
+});
+
+test('wiki sweep history returns the three supported domains and null for a missing ledger', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'wiki-sweeps-'));
+  const ledger = join(root, 'agentic-coding', 'meta', 'websearch-log.md');
+  mkdirSync(join(root, 'agentic-coding', 'meta'), { recursive: true });
+  writeFileSync(ledger, '## [2026-10-12] shallow | lanes: all\n- NEW: —\n');
+
+  assert.deepEqual(await wikiSweepHistory(root), { wikis: [
+    { name: 'agentic-coding', shallow: '2026-10-12', deep: null, horizon: null },
+    { name: 'dotnet', shallow: null, deep: null, horizon: null },
+    { name: 'iap', shallow: null, deep: null, horizon: null },
+  ] });
 });

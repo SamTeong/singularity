@@ -84,6 +84,14 @@ export function registerWiki(server) {
     return { wikis: wikiDirs(root), capped: false };
   });
 
+  // /wiki/sweeps — stable history sample for the sidebar table. The live
+  // daemon derives the same shape from each domain's typed sweep ledger.
+  server.get('/wiki/sweeps', () => ({ wikis: [
+    { name: 'agentic-coding', shallow: '2026-10-12', deep: '2026-10-04', horizon: '2026-10-10' },
+    { name: 'dotnet', shallow: '2026-08-13', deep: '2026-10-04', horizon: '2026-10-10' },
+    { name: 'iap', shallow: null, deep: null, horizon: null },
+  ] }));
+
   // /wiki/search — substring match over page content, one hit per matching
   // line. rel is "<wiki>/<page-rel>" so hits show which wiki they belong to.
   server.get('/wiki/search', (schema, req) => {
