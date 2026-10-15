@@ -124,9 +124,17 @@ export function parseSweepHistory(markdown) {
   for (let i = 0; i < headings.length; i++) {
     const heading = headings[i];
     const body = source.slice(heading.index + heading[0].length, headings[i + 1]?.index ?? source.length);
-    const completed = !/\b(?:partial|interrupted|aborted|stopped before|tool-call cap)\b/i.test(body.slice(0, 1200))
-      || /\bcompleted\b/i.test(body.slice(0, 1200));
-    if (completed && (!latest[heading[2]] || heading[1] > latest[heading[2]])) latest[heading[2]] = heading[1];
+    const date = heading[1];
+    const timestamp = Date.parse(`${date}T00:00:00.000Z`);
+    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== date) continue;
+
+    const summary = body.slice(0, 1200);
+    const interrupted = /\b(?:partial|interrupted|aborted|stopped before|tool-call cap)\b/i.test(summary);
+    const sweepCompleted = /^\s*(?:[-*]\s*)?(?:(?:whole|entire)\s+)?sweep\s+(?:was\s+)?completed\b/im.test(summary);
+    const continuationCompleted = /continuation/i.test(heading[0])
+      && /^\s*(?:[-*]\s*)?continuation\s+(?:was\s+)?completed\b/im.test(summary);
+    if (interrupted && !sweepCompleted && !continuationCompleted) continue;
+    if (!latest[heading[2]] || date > latest[heading[2]]) latest[heading[2]] = date;
   }
   return latest;
 }

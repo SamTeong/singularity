@@ -45,10 +45,44 @@ test('the sweep history table collapses and shows latest completed dates', async
   await expect(table).toBeVisible();
   await expect(table.getByRole('row')).toHaveCount(4);
   await expect(table.getByRole('row', { name: /agentic-coding/ })).toContainText('2026-10-12');
-  await expect(table.getByRole('row', { name: /dotnet/ })).toContainText('2026-08-13');
+  await expect(table.getByRole('row', { name: /dotnet/ })).toContainText('2026-09-21');
   await expect(table.getByRole('row', { name: /iap/ }).locator('[aria-label="No completed sweep recorded"]')).toHaveCount(3);
   await toggle.click();
   await expect(table).toHaveCount(0);
+});
+
+test('changing the wiki root hides stale sweep dates and scopes mock history', async ({ page }) => {
+  await page.route('**/api/wiki/sweeps**', async (route) => {
+    const root = new URL(route.request().url()).searchParams.get('root');
+    if (root?.endsWith('/skills')) await new Promise((resolve) => setTimeout(resolve, 900));
+    await route.continue();
+  });
+  await gotoView(page, 'Wiki');
+  const table = page.getByRole('table', { name: 'Last completed wiki sweeps' });
+  await expect(table.getByRole('row', { name: /agentic-coding/ })).toContainText('2026-10-12');
+
+  await page.getByRole('button', { name: 'Browse' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('textbox').fill('~/skills');
+  await dialog.getByRole('button', { name: 'Go' }).click();
+  await dialog.getByRole('button', { name: 'coding' }).waitFor();
+  await dialog.getByRole('button', { name: 'Select' }).click();
+
+  await expect(page.getByRole('status').filter({ hasText: 'Loading sweep history…' })).toBeVisible();
+  await expect(table).toHaveCount(0);
+  await expect(page.getByRole('table', { name: 'Last completed wiki sweeps' })).toBeVisible();
+  const skillsTable = page.getByRole('table', { name: 'Last completed wiki sweeps' });
+  await expect(skillsTable.getByRole('row')).toHaveCount(4);
+  for (const name of ['agentic-coding', 'dotnet', 'iap']) {
+    await expect(skillsTable.getByRole('row', { name: new RegExp(name) }).locator('[aria-label="No completed sweep recorded"]')).toHaveCount(3);
+  }
+});
+
+test('failed sweep history request shows an unavailable state', async ({ page }) => {
+  await page.route('**/api/wiki/sweeps**', (route) => route.abort());
+  await gotoView(page, 'Wiki');
+  await expect(page.getByRole('alert').filter({ hasText: 'Sweep history unavailable.' })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Last completed wiki sweeps' })).toHaveCount(0);
 });
 
 test('opening a page renders its frontmatter title, status pill and body', async ({ page }) => {

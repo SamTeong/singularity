@@ -51,6 +51,10 @@ test('sweep history keeps latest completed typed entries and ignores interrupted
   assert.deepEqual(parseSweepHistory([
     '## [2026-10-12] shallow | lanes: all',
     '- NEW: —',
+    '## [9999-99-99] shallow | lanes: all',
+    '- Sweep completed.',
+    '## [2026-10-15] deep | lanes: all',
+    '- Interrupted: sweep not completed because lane 3 failed; lanes 1 and 2 completed.',
     '## [2026-10-11] horizon | stopped before completion',
     '- This partial sweep stopped before saturation.',
     '## [2026-10-10] horizon continuation | lane 1',
@@ -65,6 +69,15 @@ test('sweep history keeps latest completed typed entries and ignores interrupted
     horizon: '2026-10-10',
   });
   assert.deepEqual(parseSweepHistory(''), { shallow: null, deep: null, horizon: null });
+});
+
+test('sweep completion markers for individual lanes do not override interruption', () => {
+  assert.deepEqual(parseSweepHistory([
+    '## [2026-10-15] shallow | lanes: all',
+    '- Interrupted: lane 3 failed; lanes 1 and 2 completed.',
+    '## [2026-10-12] shallow | lanes: all',
+    '- Sweep completed.',
+  ].join('\n')), { shallow: '2026-10-12', deep: null, horizon: null });
 });
 
 test('wiki sweep history returns the three supported domains and null for a missing ledger', async () => {

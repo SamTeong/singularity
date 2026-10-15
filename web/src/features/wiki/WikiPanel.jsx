@@ -66,7 +66,8 @@ export default function WikiPanel() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null); // search hits
   const [wikis, setWikis] = useState([]); // [{name, path, pages:[{path,rel}]}]
-  const [sweepHistory, setSweepHistory] = useState([]);
+  const [sweepHistory, setSweepHistory] = useState({ root: null, status: 'loading', wikis: [] });
+  const visibleSweepHistory = sweepHistory.root === root ? sweepHistory : null;
   const [capped, setCapped] = useState(false);
   const [err, setErr] = useState(null);
   const [expanded, setExpanded] = useState(() => new Set()); // wiki names
@@ -107,9 +108,10 @@ export default function WikiPanel() {
   useEffect(() => {
     if (root == null) return;
     let cancelled = false;
+    setSweepHistory({ root, status: 'loading', wikis: [] });
     fetch(`/api/wiki/sweeps?root=${encodeURIComponent(untildify(root))}`).then((r) => r.json()).then((d) => {
-      if (!cancelled) setSweepHistory(d.wikis || []);
-    }).catch(() => { if (!cancelled) setSweepHistory([]); });
+      if (!cancelled) setSweepHistory({ root, status: d.error ? 'error' : 'ready', wikis: d.wikis || [] });
+    }).catch(() => { if (!cancelled) setSweepHistory({ root, status: 'error', wikis: [] }); });
     return () => { cancelled = true; };
   }, [root]);
 
@@ -284,26 +286,32 @@ export default function WikiPanel() {
           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>Last completed sweeps</Typography>
         </AccordionSummary>
         <AccordionDetails sx={{ pt: 0, px: 0.5, pb: 0.75 }}>
-          <TableContainer>
-            <Table size="small" aria-label="Last completed wiki sweeps">
-              <TableHead><TableRow>
-                <TableCell sx={{ fontSize: 10, px: 0.75 }}>Wiki</TableCell>
-                <TableCell sx={{ fontSize: 10, px: 0.5 }}>Shallow</TableCell>
-                <TableCell sx={{ fontSize: 10, px: 0.5 }}>Deep</TableCell>
-                <TableCell sx={{ fontSize: 10, px: 0.5 }}>Horizon</TableCell>
-              </TableRow></TableHead>
-              <TableBody>{sweepHistory.map((wiki) => (
-                <TableRow key={wiki.name}>
-                  <TableCell sx={{ fontSize: 10, px: 0.75, whiteSpace: 'nowrap' }}>{wiki.name}</TableCell>
-                  {['shallow', 'deep', 'horizon'].map((type) => (
-                    <TableCell key={type} sx={{ fontSize: 10, px: 0.5, whiteSpace: 'nowrap' }}>
-                      {wiki[type] || <span aria-label="No completed sweep recorded">—</span>}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))}</TableBody>
-            </Table>
-          </TableContainer>
+          {visibleSweepHistory?.status === 'ready' ? (
+            <TableContainer>
+              <Table size="small" aria-label="Last completed wiki sweeps">
+                <TableHead><TableRow>
+                  <TableCell sx={{ fontSize: 10, px: 0.75 }}>Wiki</TableCell>
+                  <TableCell sx={{ fontSize: 10, px: 0.5 }}>Shallow</TableCell>
+                  <TableCell sx={{ fontSize: 10, px: 0.5 }}>Deep</TableCell>
+                  <TableCell sx={{ fontSize: 10, px: 0.5 }}>Horizon</TableCell>
+                </TableRow></TableHead>
+                <TableBody>{visibleSweepHistory.wikis.map((wiki) => (
+                  <TableRow key={wiki.name}>
+                    <TableCell sx={{ fontSize: 10, px: 0.75, whiteSpace: 'nowrap' }}>{wiki.name}</TableCell>
+                    {['shallow', 'deep', 'horizon'].map((type) => (
+                      <TableCell key={type} sx={{ fontSize: 10, px: 0.5, whiteSpace: 'nowrap' }}>
+                        {wiki[type] || <span aria-label="No completed sweep recorded">—</span>}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))}</TableBody>
+              </Table>
+            </TableContainer>
+          ) : (
+            <Typography role={visibleSweepHistory?.status === 'error' ? 'alert' : 'status'} sx={{ px: 1, py: 0.5, color: 'text.secondary', fontSize: 11 }}>
+              {visibleSweepHistory?.status === 'error' ? 'Sweep history unavailable.' : 'Loading sweep history…'}
+            </Typography>
+          )}
         </AccordionDetails>
       </Accordion>
       {graphView === 'dock' && graphWiki && (
