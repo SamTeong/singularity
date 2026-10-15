@@ -4,7 +4,7 @@ title: Show last completed wiki sweeps in the sidebar
 status: Done
 assignee: []
 created_date: '2026-10-15 12:05'
-updated_date: '2026-10-15 12:15'
+updated_date: '2026-10-15 14:02'
 labels: []
 dependencies: []
 modified_files:
@@ -65,10 +65,12 @@ Desktop E2E also checks that the table is initially expanded before collapsing a
 Phone responsive coverage now accounts for the table opening expanded, then tests collapse and reopen before continuing the graph flow.
 
 Validation passed: pnpm lint (exit 0); pnpm test (569 passed); focused mock E2E on port 5417 (22 passed). Runner used the same uncommitted source tree; no source edits occurred after validation.
+
+Cross-review fixes (rounds 1-2): completion now requires affirmative whole-sweep or continuation completion, treats negated/incomplete/failed/cancelled/timed-out/partial summaries as interrupted, anchors 'Sweep completed' to its clause, lowercases sweep keys, ends sweep bodies at any level-2 heading, rejects invalid and rollover dates, scopes history requests per root with loading/unavailable states (non-ok responses included), normalises mock roots, and coerces array root queries. Mock e2e uses fetch-wrap init scripts because Mirage answers requests before page.route. Validated at 384891f: pnpm lint clean, pnpm test 573/573, focused mock e2e 25/25.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-Added a latest-completed wiki sweep table for agentic-coding, dotnet, and iap above the existing graph toggle, with date-only typed-ledger data and dashes for missing depths. Verified with pnpm lint, pnpm test (569 passed), and focused mock E2E (22 passed).
+Added a collapsible sweep-history table (agentic-coding, dotnet, iap x shallow/deep/horizon; dash when no completed history) above the wiki sidebar graph, backed by GET /api/wiki/sweeps and a mock route. Hardened completion parsing and root-change states after two cross-review rounds. Verified at 384891f with pnpm lint, pnpm test (573/573) and focused mock e2e (25/25).
 <!-- SECTION:FINAL_SUMMARY:END -->
