@@ -7,6 +7,7 @@
 // context.
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { readdir, stat, readFile, open } from 'node:fs/promises';
+import { StringDecoder } from 'node:string_decoder';
 import { join, resolve, sep, normalize, basename, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd } from './agents.mjs';
@@ -31,6 +32,7 @@ function restoreOllamaTag(model) {
   return hits.length === 1 ? hits[0].id : model;
 }
 const PEEK_BYTES = 65536;     // list only peeks the head — full MB reads are deferred to open
+const SCAN_CHUNK = 65536;     // codex review scan reads this much per step, stopping at the first user record
 const RESULT_CAP = 200;
 const TOOL_TRUNC = 300;       // tool_use inputs / tool_result bodies in the view payload
 const TEXT_CAP = 80000;       // sessionText head+tail cap (chars)
@@ -96,12 +98,38 @@ function firstCodexUserText(events) {
   return null;
 }
 
+// firstCodexUserText over the whole rollout, but read in chunks and stopped at
+// the first deciding record. Same /\r?\n/ split + parseEvents, so the answer
+// matches a full read. A deciding record must carry a "user" role/type string
+// (literal or \u-escaped), so other lines skip JSON.parse.
+async function scanFirstCodexUserText(p) {
+  const fh = await open(p, 'r');
+  try {
+    const buf = Buffer.alloc(SCAN_CHUNK);
+    const dec = new StringDecoder('utf8');
+    let rest = '';
+    for (;;) {
+      const { bytesRead } = await fh.read(buf, 0, SCAN_CHUNK, null);
+      const chunk = bytesRead ? dec.write(buf.subarray(0, bytesRead)) : dec.end();
+      if (bytesRead && !chunk.includes('\n')) { rest += chunk; continue; } // huge single line: avoid re-splitting
+      const lines = (rest + chunk).split(/\r?\n/);
+      rest = bytesRead ? lines.pop() : '';
+      const text = firstCodexUserText(parseEvents(lines.filter((l) => l.includes('user') || l.includes('\\u')).join('\n')));
+      if (text || !bytesRead) return text;
+    }
+  } finally { await fh.close(); }
+}
+
 // Reduce a peek's events to {cwd, sessionId, threadSource, title}. session_meta gives cwd +
 // session_id; the first user message gives the title (fallback: Codex <uuid>).
 function peekCodexMeta(events) {
-  let cwd = null, sessionId = null, threadSource = null, title = null;
+  let cwd = null, sessionId = null, threadSource = null, title = null, notReview = false;
   for (const e of events) {
     if (e.type === 'session_meta' && e.payload) {
+      // Reviews are always guardian-source; cli/exec/vscode and thread_spawn never are, so skip their full scan.
+      // thread_source is unsafe here (58 reviews carry "subagent"); unknown source shapes stay scanned.
+      const src = e.payload.source;
+      if (typeof src === 'string' || src?.subagent?.thread_spawn) notReview = true;
       if (!sessionId) sessionId = e.payload.session_id || e.payload.id || null;
       if (!cwd && e.payload.cwd) cwd = e.payload.cwd;
       if (!threadSource) threadSource = e.payload.thread_source || null;
@@ -113,7 +141,7 @@ function peekCodexMeta(events) {
       title = codexUserText(e.payload.content) || null;
     }
   }
-  return { cwd, sessionId, threadSource, title };
+  return { cwd, sessionId, threadSource, title, notReview };
 }
 
 // Bounded recursive walk collecting rollout-*.jsonl under base. Stops at
@@ -151,8 +179,9 @@ async function listCodexSessions({ isLive = () => false, now = Date.now(), hideR
       ({ cwd, sessionId, threadSource, title, review } = hit);
     } else {
       const pk = await peek(p, st);
-      ({ cwd, sessionId, threadSource, title } = peekCodexMeta(parseEvents(pk.head)));
-      review = title ? isCodexReview(title) : undefined;
+      let notReview;
+      ({ cwd, sessionId, threadSource, title, notReview } = peekCodexMeta(parseEvents(pk.head)));
+      review = title ? isCodexReview(title) : (notReview ? false : undefined);
       // Slice the tail, not the head: a codex thread uuid is time-ordered, so
       // its first 8 chars are a timestamp prefix shared by every thread started
       // in the same window — 69 of 246 rollouts here collide on it.
@@ -161,7 +190,7 @@ async function listCodexSessions({ isLive = () => false, now = Date.now(), hideR
       if (codexMetaCache.size > CODEX_FILE_CAP) codexMetaCache.delete(codexMetaCache.keys().next().value);
     }
     if (hideReviews && review === undefined) {
-      review = isCodexReview(firstCodexUserText(parseEvents(await readFile(p, 'utf8'))));
+      review = isCodexReview(await scanFirstCodexUserText(p));
       const cached = codexMetaCache.get(p);
       if (cached) cached.review = review;
     }
@@ -428,7 +457,7 @@ function peekMeta(events) {
 // listSessions: every *.jsonl under the resolved root, reverse-chrono by
 // mtime. The (mtime,size)-keyed cache holds the peeked meta so repeated list
 // calls don't re-read heads of unchanged files.
-const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title, blurb }
+const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title, blurb, metaTitle (subagent entries only) }
 export async function listSessions({ cap = 5000, isLive = () => false, now = Date.now(), root, hideReviews = false } = {}) {
   const PROJECTS = resolveRoot(root);
   if (!existsSync(PROJECTS)) {
@@ -487,22 +516,22 @@ async function listSubagents(parentDir, parentId, isLive, now) {
     let st;
     try { st = await stat(p); } catch { return null; }
     const agentId = f.slice(0, -6);
-    let metaTitle = null;
-    try {
-      const meta = JSON.parse(await readFile(join(subDir, `${agentId}.meta.json`), 'utf8'));
-      if (meta.agentType) metaTitle = meta.description ? `${meta.agentType}: ${meta.description}` : meta.agentType;
-    } catch {}
-    // blurb always comes from the peek (meta.json never carries one), so use
-    // the bounded head cache even when meta.json already supplied a title.
-    let peekTitle, blurb;
+    // meta.json title and the peeked title/blurb share the (mtime,size)-keyed
+    // entry of the subagent jsonl, so unchanged agents re-read neither. A
+    // missing/invalid meta.json caches as null so it is not retried either.
+    let metaTitle = null, peekTitle, blurb;
     const hit = metaCache.get(p);
-    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.blurb !== undefined) {
-      peekTitle = hit.title; blurb = hit.blurb;
+    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.blurb !== undefined && hit.metaTitle !== undefined) {
+      peekTitle = hit.title; blurb = hit.blurb; metaTitle = hit.metaTitle;
     } else {
       const pk = await peek(p, st);
+      try {
+        const meta = JSON.parse(await readFile(join(subDir, `${agentId}.meta.json`), 'utf8'));
+        if (meta.agentType) metaTitle = meta.description ? `${meta.agentType}: ${meta.description}` : meta.agentType;
+      } catch {}
       const peeked = peekMeta(parseEvents(pk.head));
       peekTitle = peeked.title; blurb = peeked.blurb;
-      metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd: peeked.cwd, title: peeked.title, blurb: peeked.blurb });
+      metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd: peeked.cwd, title: peeked.title, blurb: peeked.blurb, metaTitle });
       if (metaCache.size > CLAUDE_META_CACHE_CAP) metaCache.delete(metaCache.keys().next().value);
     }
     return {

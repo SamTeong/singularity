@@ -160,6 +160,27 @@ test('listSessions: discovers subagent transcripts and attaches them to the pare
   }
 });
 
+test('listSessions: subagent meta.json title is cached with the jsonl (mtime,size) and re-read only when the jsonl changes', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-subagent-meta-'));
+  const parentId = 'parent-meta-cache';
+  const subDir = join(root, 'proj', parentId, 'subagents');
+  mkdirSync(subDir, { recursive: true });
+  writeFileSync(join(root, 'proj', `${parentId}.jsonl`), JSON.stringify({ type: 'user', message: { content: 'hi' } }) + '\n');
+  const jsonl = join(subDir, 'agent-x.jsonl');
+  writeFileSync(jsonl, JSON.stringify({ type: 'user', message: { content: 'sub' } }) + '\n');
+  writeFileSync(join(subDir, 'agent-x.meta.json'), JSON.stringify({ agentType: 'reviewer', description: 'checks stuff' }));
+  const subTitle = async () => (await listSessions({ root })).find((s) => s.id === parentId).subagents[0].title;
+  try {
+    assert.equal(await subTitle(), 'reviewer: checks stuff');
+    writeFileSync(join(subDir, 'agent-x.meta.json'), JSON.stringify({ agentType: 'changed' }));
+    assert.equal(await subTitle(), 'reviewer: checks stuff', 'unchanged jsonl serves the cached meta.json title');
+    utimesSync(jsonl, new Date('2026-07-16T00:00:00Z'), new Date('2026-07-16T00:00:00Z'));
+    assert.equal(await subTitle(), 'changed', 'a touched jsonl re-reads meta.json');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('readSession: nested subagent id opens via the pathFor relaxation; escapes and plain slashes stay rejected', async () => {
   const project = 'sessions-test-nested-path';
   const parentId = 'parent-2';
