@@ -129,6 +129,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const updateQuery = useUpdateQuery();
   const chatBoxRef = useRef(null);
   const chatIdRef = useRef(null);
+  const listRequestRef = useRef(false);
+  const listLoadRef = useRef(null);
 
   // Load the FS-persisted root once on mount (sessions load via the [root]
   // effect, which waits for this to resolve). Falls back to DEFAULT_ROOT once
@@ -145,11 +147,30 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   // wasteful when nobody is looking, and a backgrounded tab would hammer the API.
   useEffect(() => {
     if (!active || root == null) return;
+    let current = true;
     let request = 0;
-    const load = () => { if (document.hidden) return; const current = ++request; fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}${hideReviews ? '&hideReviews=1' : ''}`).then((r) => r.json()).then((d) => { if (current === request) setSessions(d.sessions || []); }).catch(() => { if (current === request) setSessErr('Failed to load transcripts.'); }); };
+    const load = () => {
+      if (document.hidden || listRequestRef.current) return;
+      listRequestRef.current = true;
+      const currentRequest = ++request;
+      fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}${hideReviews ? '&hideReviews=1' : ''}`)
+        .then((r) => r.json())
+        .then((d) => { if (current && currentRequest === request) setSessions(d.sessions || []); })
+        .catch(() => { if (current && currentRequest === request) setSessErr('Failed to load transcripts.'); })
+        .finally(() => {
+          listRequestRef.current = false;
+          if (listLoadRef.current && listLoadRef.current !== load) listLoadRef.current();
+        });
+    };
+    listLoadRef.current = load;
     load();
     const iv = setInterval(load, 15000);
-    return () => { request++; clearInterval(iv); };
+    return () => {
+      current = false;
+      request++;
+      clearInterval(iv);
+      if (listLoadRef.current === load) listLoadRef.current = null;
+    };
   }, [root, active, hideReviews]);
 
   // Cross-session search (scope 'all'): results replace the left list, like

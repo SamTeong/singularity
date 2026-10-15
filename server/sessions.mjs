@@ -35,6 +35,8 @@ const RESULT_CAP = 200;
 const TOOL_TRUNC = 300;       // tool_use inputs / tool_result bodies in the view payload
 const TEXT_CAP = 80000;       // sessionText head+tail cap (chars)
 const RUNNING_MS = 30000;     // external-session recency heuristic: mtime within this window counts as running
+const SCAN_CONCURRENCY = 16;
+const CLAUDE_META_CACHE_CAP = 20000;
 
 // ---- Codex CLI transcripts (~/.codex/sessions/**/rollout-*.jsonl) ----
 // Codex stores one JSONL per thread under CODEX_HOME/sessions/ (and
@@ -139,16 +141,16 @@ async function listCodexSessions({ isLive = () => false, now = Date.now(), hideR
   if (files.length >= CODEX_FILE_CAP) console.error('[codex] hit file cap, truncating');
   const out = [];
   const threadSources = new Map();
-  for (const p of files) {
-    const pk = await peek(p);
-    if (!pk) continue;
-    const { st } = pk;
+  const rows = await mapConcurrent(files, async (p) => {
+    let st;
+    try { st = await stat(p); } catch { return null; }
     const id = codexThreadId(basename(p));
     let cwd, sessionId, threadSource, title, review;
     const hit = codexMetaCache.get(p);
     if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
       ({ cwd, sessionId, threadSource, title, review } = hit);
     } else {
+      const pk = await peek(p, st);
       ({ cwd, sessionId, threadSource, title } = peekCodexMeta(parseEvents(pk.head)));
       review = title ? isCodexReview(title) : undefined;
       // Slice the tail, not the head: a codex thread uuid is time-ordered, so
@@ -163,15 +165,16 @@ async function listCodexSessions({ isLive = () => false, now = Date.now(), hideR
       const cached = codexMetaCache.get(p);
       if (cached) cached.review = review;
     }
-    if (hideReviews && review) continue;
+    if (hideReviews && review) return null;
     threadSources.set(id, threadSource);
-    out.push({
+    return {
       id, project: '<codex>', cwd, title, mtime: st.mtimeMs, size: st.size,
       running: isLive(id) || (now - st.mtimeMs) < RUNNING_MS,
       source: 'codex', sessionId,
       file: relative(CODEX_HOME, p),
-    });
-  }
+    };
+  });
+  out.push(...rows.filter(Boolean));
   const byId = new Map(out.map((row) => [row.id, row]));
   const roots = out.filter((row) => {
     const parent = threadSources.get(row.id) === 'subagent' && byId.get(row.sessionId);
@@ -353,9 +356,11 @@ function parseEvents(text) {
 
 // Read only the first PEEK_BYTES of a file — stat the size + head chunk so the
 // list endpoint never reads whole multi-MB transcripts. Returns null if gone.
-async function peek(p) {
-  let st;
-  try { st = await stat(p); } catch { return null; }
+async function peek(p, knownStat) {
+  let st = knownStat;
+  if (!st) {
+    try { st = await stat(p); } catch { return null; }
+  }
   let head = '';
   try {
     const fh = await open(p, 'r');
@@ -366,6 +371,18 @@ async function peek(p) {
     } finally { await fh.close(); }
   } catch {}
   return { st, head };
+}
+
+async function mapConcurrent(items, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(SCAN_CONCURRENCY, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  }));
+  return results;
 }
 
 // First text out of a user event's content — mirrors readSession's own
@@ -411,7 +428,7 @@ function peekMeta(events) {
 // listSessions: every *.jsonl under the resolved root, reverse-chrono by
 // mtime. The (mtime,size)-keyed cache holds the peeked meta so repeated list
 // calls don't re-read heads of unchanged files.
-const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title }
+const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title, blurb }
 export async function listSessions({ cap = 5000, isLive = () => false, now = Date.now(), root, hideReviews = false } = {}) {
   const PROJECTS = resolveRoot(root);
   if (!existsSync(PROJECTS)) {
@@ -425,20 +442,19 @@ export async function listSessions({ cap = 5000, isLive = () => false, now = Dat
     const dir = join(PROJECTS, proj.name);
     let files;
     try { files = await readdir(dir); } catch { continue; }
-    for (const f of files) {
-      if (!f.endsWith('.jsonl')) continue;
+    const rows = await mapConcurrent(files.filter((f) => f.endsWith('.jsonl')), async (f) => {
       const p = join(dir, f);
-      const pk = await peek(p);
-      if (!pk) continue;
-      const { st } = pk;
+      let st;
+      try { st = await stat(p); } catch { return null; }
       let cwd, title, blurb;
       const hit = metaCache.get(p);
       if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.blurb !== undefined) {
         cwd = hit.cwd; title = hit.title; blurb = hit.blurb;
       } else {
+        const pk = await peek(p, st);
         ({ cwd, title, blurb } = peekMeta(parseEvents(pk.head)));
         metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, title, blurb });
-        if (metaCache.size > 200) metaCache.delete(metaCache.keys().next().value); // FIFO cap, matches textCache/sessionCache
+        if (metaCache.size > CLAUDE_META_CACHE_CAP) metaCache.delete(metaCache.keys().next().value);
       }
       const id = f.slice(0, -6);
       const row = { id, project: proj.name, cwd, title, blurb, mtime: st.mtimeMs, size: st.size };
@@ -449,8 +465,9 @@ export async function listSessions({ cap = 5000, isLive = () => false, now = Dat
       // unchanged — no ref resolution needed.
       const subagents = await listSubagents(dir, id, isLive, now);
       if (subagents.length) row.subagents = subagents;
-      out.push(row);
-    }
+      return row;
+    });
+    out.push(...rows.filter(Boolean));
   }
   for (const r of out) r.source = 'claude';
   const codex = await listCodexSessions({ isLive, now, hideReviews });
@@ -465,32 +482,30 @@ async function listSubagents(parentDir, parentId, isLive, now) {
   const subDir = join(parentDir, parentId, 'subagents');
   let files;
   try { files = await readdir(subDir); } catch { return []; }
-  const out = [];
-  for (const f of files) {
-    if (!f.endsWith('.jsonl')) continue;
+  const rows = await mapConcurrent(files.filter((f) => f.endsWith('.jsonl')), async (f) => {
     const p = join(subDir, f);
-    const pk = await peek(p);
-    if (!pk) continue;
-    const { st } = pk;
+    let st;
+    try { st = await stat(p); } catch { return null; }
     const agentId = f.slice(0, -6);
     let metaTitle = null;
     try {
       const meta = JSON.parse(await readFile(join(subDir, `${agentId}.meta.json`), 'utf8'));
       if (meta.agentType) metaTitle = meta.description ? `${meta.agentType}: ${meta.description}` : meta.agentType;
     } catch {}
-    // blurb always comes from the peek (meta.json never carries one), so peek
-    // unconditionally even when meta.json already supplied a title.
+    // blurb always comes from the peek (meta.json never carries one), so use
+    // the bounded head cache even when meta.json already supplied a title.
     let peekTitle, blurb;
     const hit = metaCache.get(p);
     if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.blurb !== undefined) {
       peekTitle = hit.title; blurb = hit.blurb;
     } else {
+      const pk = await peek(p, st);
       const peeked = peekMeta(parseEvents(pk.head));
       peekTitle = peeked.title; blurb = peeked.blurb;
       metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd: peeked.cwd, title: peeked.title, blurb: peeked.blurb });
-      if (metaCache.size > 200) metaCache.delete(metaCache.keys().next().value); // FIFO cap, matches textCache/sessionCache
+      if (metaCache.size > CLAUDE_META_CACHE_CAP) metaCache.delete(metaCache.keys().next().value);
     }
-    out.push({
+    return {
       id: `${parentId}/subagents/${agentId}`,
       agentId,
       title: metaTitle || peekTitle,
@@ -498,9 +513,9 @@ async function listSubagents(parentDir, parentId, isLive, now) {
       mtime: st.mtimeMs,
       size: st.size,
       running: isLive(agentId) || (now - st.mtimeMs) < RUNNING_MS,
-    });
-  }
-  return out;
+    };
+  });
+  return rows.filter(Boolean);
 }
 
 // Live subagents for one agent session: the daemon agent's id IS its Claude

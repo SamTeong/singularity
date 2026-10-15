@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
@@ -249,5 +250,47 @@ test('listSessions/readSession/searchSessions scope to an explicit root, ignorin
     assert.equal(results[0].project, project);
   } finally {
     rmSync(scratchRoot, { recursive: true, force: true });
+  }
+});
+
+test('listSessions: unchanged corpus stays cached beyond 200 entries and only changed files are reread', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-sessions-cache-'));
+  const project = 'cache-corpus';
+  const dir = join(root, project);
+  mkdirSync(dir, { recursive: true });
+  for (let i = 0; i < 201; i++) {
+    const id = `fixture-${String(i).padStart(3, '0')}`;
+    writeFileSync(join(dir, `${id}.jsonl`), JSON.stringify({ type: 'user', message: { content: `prompt ${i}` } }) + '\n');
+  }
+
+  const probe = await open(join(dir, 'fixture-000.jsonl'), 'r');
+  const handlePrototype = Object.getPrototypeOf(probe);
+  await probe.close();
+  const originalRead = handlePrototype.read;
+  let contentReads = 0;
+  handlePrototype.read = function (...args) {
+    contentReads++;
+    return originalRead.apply(this, args);
+  };
+  try {
+    const first = await listSessions({ root });
+    assert.equal(first.length, 201);
+    assert.equal(contentReads, 201);
+
+    contentReads = 0;
+    const second = await listSessions({ root });
+    assert.deepEqual(second.map(({ id, blurb }) => [id, blurb]), first.map(({ id, blurb }) => [id, blurb]));
+    assert.equal(contentReads, 0, 'unchanged files should be served from metadata cache');
+
+    writeFileSync(join(dir, 'fixture-100.jsonl'), JSON.stringify({ type: 'user', message: { content: 'updated prompt' } }) + '\n');
+    const changedTime = new Date(Date.now() + 2000);
+    utimesSync(join(dir, 'fixture-100.jsonl'), changedTime, changedTime);
+    contentReads = 0;
+    const third = await listSessions({ root });
+    assert.equal(third.find((row) => row.id === 'fixture-100').blurb, 'updated prompt');
+    assert.equal(contentReads, 1, 'only the changed file should be reread');
+  } finally {
+    handlePrototype.read = originalRead;
+    rmSync(root, { recursive: true, force: true });
   }
 });
