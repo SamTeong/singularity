@@ -128,3 +128,19 @@ test('wiki sweep history returns the three supported domains and null for a miss
   // index.mjs coerces an array-valued ?root= to null; that path must not throw.
   assert.deepEqual((await wikiSweepHistory(null)).wikis.map((w) => w.shallow), [null, null, null]);
 });
+
+test('iap freshness uses wiki-sync.json lastIngestedAt as Deep and ignores any sweep ledger', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'wiki-iap-'));
+  mkdirSync(join(root, 'iap', 'meta'), { recursive: true });
+  const iap = async () => (await wikiSweepHistory(root)).wikis.find((w) => w.name === 'iap');
+  assert.deepEqual(await iap(), { name: 'iap', shallow: null, deep: null, horizon: null }); // missing file
+  writeFileSync(join(root, 'iap', 'meta', 'websearch-log.md'), '## [2026-10-12] shallow | lanes: all\n- NEW: —\n');
+  writeFileSync(join(root, 'iap', 'wiki-sync.json'), JSON.stringify({ lastIngestedAt: '2026-10-10' }));
+  assert.deepEqual(await iap(), { name: 'iap', shallow: null, deep: '2026-10-10', horizon: null });
+  for (const bad of [{ lastIngestedAt: '2026-02-30' }, { lastIngestedAt: '2026-10-10T08:00:00Z' }, { lastIngestedAt: 20261010 }, {}]) {
+    writeFileSync(join(root, 'iap', 'wiki-sync.json'), JSON.stringify(bad));
+    assert.equal((await iap()).deep, null, JSON.stringify(bad));
+  }
+  writeFileSync(join(root, 'iap', 'wiki-sync.json'), '{not json');
+  assert.equal((await iap()).deep, null);
+});

@@ -239,14 +239,14 @@ test('phone wiki: page list/reader switcher; the graph opens full width via the 
   await expect(sw.getByRole('button', { name: 'Pages', exact: true })).toHaveAttribute('aria-pressed', 'true');
   await expect(sw.getByRole('button', { name: 'Page', exact: true })).toBeDisabled();
 
-  const sweepsToggle = page.getByRole('button', { name: 'Last completed sweeps' });
+  const sweepsToggle = page.getByRole('button', { name: 'Wiki freshness' });
   const sweeps = page.getByRole('table', { name: 'Last completed wiki sweeps' });
   await expect(sweepsToggle).toBeVisible();
   await expect(sweeps).toBeVisible();
   await sweepsToggle.click();
   await expect(sweeps).toHaveCount(0);
   await sweepsToggle.click();
-  await expect(sweeps.getByRole('row', { name: /iap/ }).locator('[aria-label="No completed sweep recorded"]')).toHaveCount(3);
+  await expect(sweeps.getByRole('row', { name: /iap/ }).locator('[aria-label="No completed sweep recorded"]')).toHaveCount(2);
   await expectNoPageOverflow(page);
   await sweepsToggle.click();
 

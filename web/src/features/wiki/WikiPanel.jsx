@@ -1,4 +1,5 @@
-import { getTokens } from '@/theme/contract.js';
+import { getTokens, getRoles } from '@/theme/contract.js';
+import { useThemeSkin } from '@/theme/index.js';
 import { useEffect, useState, useCallback, lazy, Suspense } from 'react';
 import { useReducedMotion } from 'framer-motion';
 import Box from '@mui/material/Box';
@@ -24,6 +25,7 @@ import TableHead from '@mui/material/TableHead';
 import TableRow from '@mui/material/TableRow';
 import ChevronRightIcon from '@mui/icons-material/ChevronRight';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import ExpandLessIcon from '@mui/icons-material/ExpandLess';
 import FolderIcon from '@mui/icons-material/Folder';
 import FolderOpenIcon from '@mui/icons-material/FolderOpen';
 import MenuBookIcon from '@mui/icons-material/MenuBook';
@@ -62,6 +64,7 @@ export default function WikiPanel() {
   // against a guessed root on first render (mirrors SessionHistory:95).
   const [root, setRoot] = useState(null);
   const reduceMotion = useReducedMotion();
+  const isPhosphor = useThemeSkin().skinId === 'phosphor';
   const [picking, setPicking] = useState(false);
   const [q, setQ] = useState('');
   const [results, setResults] = useState(null); // search hits
@@ -282,8 +285,16 @@ export default function WikiPanel() {
         {results && results.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
       </List>
       <Accordion defaultExpanded disableGutters elevation={0} sx={{ flexShrink: 0, borderTop: (t) => `1px solid ${getTokens(t).glass.stroke}`, '&:before': { display: 'none' } }}>
-        <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ minHeight: 34, px: 1.5, '& .MuiAccordionSummary-content': { my: 0.75 } }}>
-          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>Last completed sweeps</Typography>
+        <AccordionSummary expandIcon={<ExpandLessIcon />} sx={(t) => {
+          // Toggle icon mirrors the nav-rail collapse IconButton (Sidebar.jsx moreBtnSx, size="small").
+          const ink = isPhosphor ? getRoles(t).chrome.stroke : (t.vars || t).palette.action.active;
+          return {
+            minHeight: 34, px: 1.5, '& .MuiAccordionSummary-content': { my: 0.75 },
+            '& .MuiAccordionSummary-expandIconWrapper': { p: '5px', color: ink, borderRadius: isPhosphor ? getTokens(t).radius.none : '50%', ...(isPhosphor && { border: `1px solid ${ink}` }) },
+            '&:hover .MuiAccordionSummary-expandIconWrapper': isPhosphor ? { backgroundColor: ink, color: getRoles(t).shell.surface } : { backgroundColor: (t.vars || t).palette.action.hover },
+          };
+        }}>
+          <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>Wiki freshness</Typography>
         </AccordionSummary>
         <AccordionDetails sx={{ pt: 0, px: 0.5, pb: 0.75 }}>
           {visibleSweepHistory?.status === 'ready' ? (

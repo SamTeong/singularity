@@ -115,6 +115,13 @@ const SWEEP_WIKIS = ['agentic-coding', 'dotnet', 'iap'];
 const SWEEP_TYPES = ['shallow', 'deep', 'horizon'];
 const SWEEP_HEADING = /^## \[(\d{4}-\d{2}-\d{2})\] (shallow|deep|horizon)(?: continuation)?\b/gim;
 
+// Valid YYYY-MM-DD calendar day (rejects rollovers such as 2026-02-30).
+function isDay(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const timestamp = Date.parse(`${date}T00:00:00.000Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === date;
+}
+
 // Sweep ledgers are Markdown event histories. Keep dates at their recorded
 // day precision, and ignore entries that explicitly stopped before completion.
 export function parseSweepHistory(markdown) {
@@ -128,8 +135,7 @@ export function parseSweepHistory(markdown) {
     const body = next < 0 ? rest : rest.slice(0, next);
     const date = heading[1];
     const type = heading[2].toLowerCase();
-    const timestamp = Date.parse(`${date}T00:00:00.000Z`);
-    if (!Number.isFinite(timestamp) || new Date(timestamp).toISOString().slice(0, 10) !== date) continue;
+    if (!isDay(date)) continue;
 
     const summary = body.slice(0, 1200);
     const interrupted = /\b(?:partial(?:ly)?|interrupted|aborted|stopped before|tool-call cap|not completed|incomplete|failed|did not|cancell?ed|timed out)\b/i.test(summary);
@@ -149,6 +155,15 @@ export async function wikiSweepHistory(root) {
   for (const name of SWEEP_WIKIS) {
     let content = '';
     const wiki = byName.get(name);
+    if (name === 'iap') {
+      // iap has no sweep ledger; its Deep date is the last repo ingest from wiki-sync.json.
+      let deep = null;
+      if (wiki) {
+        try { deep = JSON.parse(await readFile(join(wiki.path, 'wiki-sync.json'), 'utf8')).lastIngestedAt; } catch { /* no sync record */ }
+      }
+      wikis.push({ name, shallow: null, deep: isDay(deep) ? deep : null, horizon: null });
+      continue;
+    }
     if (wiki) {
       try { content = await readFile(join(wiki.path, 'meta', 'websearch-log.md'), 'utf8'); } catch { /* no sweep ledger */ }
     }

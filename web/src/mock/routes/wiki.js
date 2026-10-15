@@ -93,7 +93,7 @@ export function registerWiki(server) {
     return { wikis: [
       { name: 'agentic-coding', shallow: sample ? '2026-10-12' : null, deep: sample ? '2026-10-04' : null, horizon: sample ? '2026-10-10' : null },
       { name: 'dotnet', shallow: sample ? '2026-09-21' : null, deep: sample ? '2026-10-04' : null, horizon: sample ? '2026-10-10' : null },
-      { name: 'iap', shallow: null, deep: null, horizon: null },
+      { name: 'iap', shallow: null, deep: sample ? '2026-10-10' : null, horizon: null }, // deep = wiki-sync.json lastIngestedAt
     ] };
   });
 
