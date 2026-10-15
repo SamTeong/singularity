@@ -127,9 +127,9 @@ function peekCodexMeta(events) {
   for (const e of events) {
     if (e.type === 'session_meta' && e.payload) {
       // Reviews are always guardian-source; cli/exec/vscode and thread_spawn never are, so skip their full scan.
-      // thread_source is unsafe here (58 reviews carry "subagent"); unknown source shapes stay scanned.
+      // thread_source is unsafe here (58 reviews carry "subagent"); other strings and unknown shapes stay scanned.
       const src = e.payload.source;
-      if (typeof src === 'string' || src?.subagent?.thread_spawn) notReview = true;
+      if (['cli', 'exec', 'vscode'].includes(src) || src?.subagent?.thread_spawn) notReview = true;
       if (!sessionId) sessionId = e.payload.session_id || e.payload.id || null;
       if (!cwd && e.payload.cwd) cwd = e.payload.cwd;
       if (!threadSource) threadSource = e.payload.thread_source || null;
@@ -190,7 +190,7 @@ async function listCodexSessions({ isLive = () => false, now = Date.now(), hideR
       if (codexMetaCache.size > CODEX_FILE_CAP) codexMetaCache.delete(codexMetaCache.keys().next().value);
     }
     if (hideReviews && review === undefined) {
-      review = isCodexReview(await scanFirstCodexUserText(p));
+      try { review = isCodexReview(await scanFirstCodexUserText(p)); } catch { return null; } // rollout vanished/unreadable since peek
       const cached = codexMetaCache.get(p);
       if (cached) cached.review = review;
     }

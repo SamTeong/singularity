@@ -5,6 +5,8 @@
 // Run: npm test  (node --test server/)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -273,6 +275,7 @@ test('hideReviews: head-miss scan skipped for string/thread_spawn source, kept f
   const fixtures = [
     ['1', 'cli', true], ['2', { subagent: { thread_spawn: { depth: 1 } } }, true],
     ['3', { subagent: { other: 'guardian' } }, false], ['4', { mystery: 1 }, false],
+    ['5', 'unknown', false], ['6', 'mcp', false], ['7', 'exec', true], ['8', 'vscode', true],
   ];
   mkdirSync(ROLLOUT_DIR, { recursive: true });
   const pad = JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'x'.repeat(70000) }] } });
@@ -287,6 +290,38 @@ test('hideReviews: head-miss scan skipped for string/thread_spawn source, kept f
     const kept = new Set((await listSessions({ root: join(CODEX_HOME, 'nonexistent'), hideReviews: true })).map((s) => s.id));
     fixtures.forEach(([, , keep], i) => assert.equal(kept.has(ids[i]), keep, `fixture ${i + 1} ${keep ? 'kept (scan skipped)' : 'excluded (scanned)'}`));
   } finally {
+    rmSync(CODEX_HOME, { recursive: true, force: true });
+  }
+});
+
+// F1: a rollout that vanishes between the head peek and the review scan drops
+// only its own row; the list still resolves with the other rows.
+test('hideReviews: rollout unreadable at review-scan time drops its row, list still resolves', async () => {
+  const meta = (id) => JSON.stringify({ type: 'session_meta', payload: { id, session_id: id, cwd: 'C:\\git\\van' } });
+  const pad = JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'x'.repeat(70000) }] } });
+  const vanId = '019fd000-0000-7000-8000-000000000001', okId = '019fd000-0000-7000-8000-000000000002';
+  mkdirSync(ROLLOUT_DIR, { recursive: true });
+  const vanPath = join(ROLLOUT_DIR, `rollout-2026-07-22T00-00-00-${vanId}.jsonl`);
+  writeFileSync(vanPath, [meta(vanId), pad].join('\n') + '\n');
+  writeFileSync(join(ROLLOUT_DIR, `rollout-2026-07-22T00-00-00-${okId}.jsonl`),
+    [meta(okId), JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'ordinary work' } })].join('\n') + '\n');
+  // First open of vanPath (the head peek) passes through; later opens (the scan) fail as if deleted.
+  const realOpen = fsp.open;
+  let opens = 0;
+  fsp.open = async (p, ...a) => {
+    if (p === vanPath && ++opens > 1) throw Object.assign(new Error('ENOENT: vanished'), { code: 'ENOENT' });
+    return realOpen(p, ...a);
+  };
+  syncBuiltinESMExports();
+  try {
+    const rows = await listSessions({ root: join(CODEX_HOME, 'nonexistent'), hideReviews: true });
+    assert.ok(opens > 1, 'scan attempted an open after the peek');
+    const ids = new Set(rows.map((s) => s.id));
+    assert.ok(ids.has(okId), 'other row still listed');
+    assert.ok(!ids.has(vanId), 'vanished row dropped');
+  } finally {
+    fsp.open = realOpen;
+    syncBuiltinESMExports();
     rmSync(CODEX_HOME, { recursive: true, force: true });
   }
 });
