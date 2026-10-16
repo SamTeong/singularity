@@ -94,6 +94,13 @@ test('negated completion counts as interrupted and the completed override must e
   assert.equal(deep('- Sweep completed\r\n- one lane failed and was rerun.'), '2026-10-20');
 });
 
+test('status words in NEW claim payloads do not mark a completed sweep as interrupted', () => {
+  assert.deepEqual(parseSweepHistory([
+    '## [2026-10-20] deep | lanes: all',
+    '- NEW: [[failed-login-handling]]',
+  ].join('\n')), { shallow: null, deep: '2026-10-20', horizon: null });
+});
+
 test('sweep types are case-insensitive, rollover dates are rejected, and any heading ends a body', () => {
   assert.deepEqual(parseSweepHistory('## [2026-10-20] Shallow | lanes: all\n- NEW: —\n'), { shallow: '2026-10-20', deep: null, horizon: null });
   assert.deepEqual(parseSweepHistory([

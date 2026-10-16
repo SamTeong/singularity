@@ -95,7 +95,6 @@ export function appendOllamaHistory(data) {
   if (lastOllamaReading
     && reading.sessionUtil === lastOllamaReading.sessionUtil && reading.sessionResets === lastOllamaReading.sessionResets
     && reading.weeklyUtil === lastOllamaReading.weeklyUtil && reading.weeklyResets === lastOllamaReading.weeklyResets) return;
-  lastOllamaReading = reading;
   const record = {
     fetched_at: localTimestamp(new Date()),
     session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt } : null,
@@ -103,7 +102,7 @@ export function appendOllamaHistory(data) {
     plan: data.plan ?? null,
     models: data.weekly?.models ?? [],
   };
-  appendJsonl(OLLAMA_HISTORY, record);
+  if (appendJsonl(OLLAMA_HISTORY, record)) lastOllamaReading = reading;
 }
 
 function appendJsonl(file, record) {

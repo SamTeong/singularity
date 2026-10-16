@@ -154,7 +154,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
       listRequestRef.current = true;
       const currentRequest = ++request;
       fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}${hideReviews ? '&hideReviews=1' : ''}`)
-        .then((r) => r.json())
+        .then((r) => { if (!r.ok) throw new Error('Failed to load transcripts'); return r.json(); })
         .then((d) => { if (current && currentRequest === request) setSessions(d.sessions || []); })
         .catch(() => { if (current && currentRequest === request) setSessErr('Failed to load transcripts.'); })
         .finally(() => {
