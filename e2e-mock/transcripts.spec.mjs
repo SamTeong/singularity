@@ -35,6 +35,35 @@ test('the session list renders every seeded transcript, reverse-chronological', 
   await expect(rows[rows.length - 1]).toHaveText(/Fixture session 0\b/);
 });
 
+test('a successful empty poll clears the prior transcript list error', async ({ page }) => {
+  await page.goto('/tasks');
+  await page.evaluate(() => {
+    const originalFetch = window.fetch.bind(window);
+    let listRequests = 0;
+    window.fetch = (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      if (url.pathname === '/api/transcripts') {
+        listRequests += 1;
+        window.__transcriptListRequests = listRequests;
+        if (listRequests === 1) return Promise.resolve(new Response('', { status: 503 }));
+        return Promise.resolve(new Response(JSON.stringify({ sessions: [] }), {
+          headers: { 'content-type': 'application/json' },
+        }));
+      }
+      return originalFetch(input, init);
+    };
+  });
+
+  await gotoMenu(page, 'Transcripts');
+  await expect(page.getByText('Failed to load transcripts.', { exact: true })).toBeVisible();
+
+  // Changing this filter restarts the list effect and triggers its recovery poll.
+  await page.getByRole('checkbox', { name: 'Hide automated reviews' }).click();
+  await expect(page.getByText('No transcripts.', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.__transcriptListRequests)).toBe(2);
+});
+
 test('search narrows the list to cross-session matches; clearing restores it', async ({ page }) => {
   await openTranscripts(page);
 
