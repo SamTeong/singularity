@@ -516,22 +516,26 @@ async function listSubagents(parentDir, parentId, isLive, now) {
     let st;
     try { st = await stat(p); } catch { return null; }
     const agentId = f.slice(0, -6);
-    // meta.json title and the peeked title/blurb share the (mtime,size)-keyed
-    // entry of the subagent jsonl, so unchanged agents re-read neither. A
-    // missing/invalid meta.json caches as null so it is not retried either.
+    // Track the sidecar separately so its appearance or edits refresh the
+    // title without making unchanged transcripts miss the warm cache.
     let metaTitle = null, peekTitle, blurb;
+    const metaPath = join(subDir, `${agentId}.meta.json`);
+    let metaStat;
+    try { metaStat = await stat(metaPath); } catch {}
+    const metaMtimeMs = metaStat?.mtimeMs ?? null;
+    const metaSize = metaStat?.size ?? null;
     const hit = metaCache.get(p);
-    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.blurb !== undefined && hit.metaTitle !== undefined) {
+    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.metaMtimeMs === metaMtimeMs && hit.metaSize === metaSize && hit.blurb !== undefined && hit.metaTitle !== undefined) {
       peekTitle = hit.title; blurb = hit.blurb; metaTitle = hit.metaTitle;
     } else {
       const pk = await peek(p, st);
       try {
-        const meta = JSON.parse(await readFile(join(subDir, `${agentId}.meta.json`), 'utf8'));
+        const meta = JSON.parse(await readFile(metaPath, 'utf8'));
         if (meta.agentType) metaTitle = meta.description ? `${meta.agentType}: ${meta.description}` : meta.agentType;
       } catch {}
       const peeked = peekMeta(parseEvents(pk.head));
       peekTitle = peeked.title; blurb = peeked.blurb;
-      metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd: peeked.cwd, title: peeked.title, blurb: peeked.blurb, metaTitle });
+      metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, metaMtimeMs, metaSize, cwd: peeked.cwd, title: peeked.title, blurb: peeked.blurb, metaTitle });
       if (metaCache.size > CLAUDE_META_CACHE_CAP) metaCache.delete(metaCache.keys().next().value);
     }
     return {

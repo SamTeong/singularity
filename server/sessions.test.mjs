@@ -160,25 +160,69 @@ test('listSessions: discovers subagent transcripts and attaches them to the pare
   }
 });
 
-test('listSessions: subagent meta.json title is cached with the jsonl (mtime,size) and re-read only when the jsonl changes', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'sing-subagent-meta-'));
-  const parentId = 'parent-meta-cache';
-  const subDir = join(root, 'proj', parentId, 'subagents');
-  mkdirSync(subDir, { recursive: true });
-  writeFileSync(join(root, 'proj', `${parentId}.jsonl`), JSON.stringify({ type: 'user', message: { content: 'hi' } }) + '\n');
-  const jsonl = join(subDir, 'agent-x.jsonl');
-  writeFileSync(jsonl, JSON.stringify({ type: 'user', message: { content: 'sub' } }) + '\n');
-  writeFileSync(join(subDir, 'agent-x.meta.json'), JSON.stringify({ agentType: 'reviewer', description: 'checks stuff' }));
-  const subTitle = async () => (await listSessions({ root })).find((s) => s.id === parentId).subagents[0].title;
-  try {
-    assert.equal(await subTitle(), 'reviewer: checks stuff');
-    writeFileSync(join(subDir, 'agent-x.meta.json'), JSON.stringify({ agentType: 'changed' }));
-    assert.equal(await subTitle(), 'reviewer: checks stuff', 'unchanged jsonl serves the cached meta.json title');
-    utimesSync(jsonl, new Date('2026-07-16T00:00:00Z'), new Date('2026-07-16T00:00:00Z'));
-    assert.equal(await subTitle(), 'changed', 'a touched jsonl re-reads meta.json');
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test('listSessions: subagent title cache refreshes when sidecar metadata changes', async (t) => {
+  const fixture = (parentId, withMeta) => {
+    const root = mkdtempSync(join(tmpdir(), 'sing-subagent-meta-'));
+    const subDir = join(root, 'proj', parentId, 'subagents');
+    mkdirSync(subDir, { recursive: true });
+    writeFileSync(join(root, 'proj', `${parentId}.jsonl`), JSON.stringify({ type: 'user', message: { content: 'hi' } }) + '\n');
+    const jsonl = join(subDir, 'agent-x.jsonl');
+    writeFileSync(jsonl, [
+      JSON.stringify({ type: 'ai-title', aiTitle: 'prompt title' }),
+      JSON.stringify({ type: 'user', message: { content: 'sub' } }),
+    ].join('\n') + '\n');
+    const meta = join(subDir, 'agent-x.meta.json');
+    if (withMeta) writeFileSync(meta, JSON.stringify({ agentType: 'reviewer', description: 'checks stuff' }));
+    return { root, jsonl, meta, parentId };
+  };
+  const title = async ({ root, parentId }) => (await listSessions({ root })).find((s) => s.id === parentId).subagents[0].title;
+
+  await t.test('late sidecar appearance refreshes the prompt title and warm transcript stays cached', async () => {
+    const f = fixture('parent-meta-appears', false);
+    const probe = await open(f.jsonl, 'r');
+    const handlePrototype = Object.getPrototypeOf(probe);
+    await probe.close();
+    const originalRead = handlePrototype.read;
+    let reads = 0;
+    handlePrototype.read = function (...args) {
+      reads++;
+      return originalRead.apply(this, args);
+    };
+    try {
+      assert.equal(await title(f), 'prompt title');
+      assert.equal(reads, 2, 'parent and subagent transcript heads are read once');
+      assert.equal(await title(f), 'prompt title');
+      assert.equal(reads, 2, 'unchanged transcripts stay warm');
+      writeFileSync(f.meta, JSON.stringify({ agentType: 'reviewer', description: 'checks stuff' }));
+      assert.equal(await title(f), 'reviewer: checks stuff', 'a newly appearing sidecar refreshes the title');
+    } finally {
+      handlePrototype.read = originalRead;
+      rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('metadata-only edits refresh the title', async () => {
+    const f = fixture('parent-meta-updates', true);
+    try {
+      assert.equal(await title(f), 'reviewer: checks stuff');
+      writeFileSync(f.meta, JSON.stringify({ agentType: 'changed' }));
+      utimesSync(f.meta, new Date('2026-07-17T00:00:00Z'), new Date('2026-07-17T00:00:00Z'));
+      assert.equal(await title(f), 'changed');
+    } finally {
+      rmSync(f.root, { recursive: true, force: true });
+    }
+  });
+
+  await t.test('sidecar removal returns to the transcript title', async () => {
+    const f = fixture('parent-meta-removes', true);
+    try {
+      assert.equal(await title(f), 'reviewer: checks stuff');
+      rmSync(f.meta);
+      assert.equal(await title(f), 'prompt title');
+    } finally {
+      rmSync(f.root, { recursive: true, force: true });
+    }
+  });
 });
 
 test('readSession: nested subagent id opens via the pathFor relaxation; escapes and plain slashes stay rejected', async () => {
