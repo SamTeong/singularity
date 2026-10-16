@@ -101,6 +101,14 @@ test('status words in NEW claim payloads do not mark a completed sweep as interr
   ].join('\n')), { shallow: null, deep: '2026-10-20', horizon: null });
 });
 
+test('long claim rows do not hide a later interrupted sweep marker', () => {
+  assert.equal(parseSweepHistory([
+    '## [2026-10-20] deep | lanes: all',
+    `- NEW: ${'claim '.repeat(220)}`,
+    '- Lane 3 failed.',
+  ].join('\n')).deep, null);
+});
+
 test('sweep types are case-insensitive, rollover dates are rejected, and any heading ends a body', () => {
   assert.deepEqual(parseSweepHistory('## [2026-10-20] Shallow | lanes: all\n- NEW: —\n'), { shallow: '2026-10-20', deep: null, horizon: null });
   assert.deepEqual(parseSweepHistory([

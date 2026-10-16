@@ -4,7 +4,7 @@ title: Clear transcript list error after successful recovery
 status: Done
 assignee: []
 created_date: '2026-10-16 14:55'
-updated_date: '2026-10-16 15:13'
+updated_date: '2026-10-16 15:53'
 labels: []
 dependencies: []
 modified_files:
@@ -36,15 +36,7 @@ A failed transcript list request sets an error message that remains visible afte
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-The focused mock UI regression failed before the source fix: after a 503 followed by a successful empty response, No transcripts. did not appear (test-before.log).
-
-Focused mock UI regression passed after the fix: 1 passed.
-
-Focused browser recovery regression passed after the fix (1 passed); red/green output is recorded in implement-recovery.notes.md. Criterion 2's preserved-row behavior was not exercised by that focused test; the existing failure handler still only sets the error, and final pinned lint/test validation remains pending in the outer review.
-
-Focused mock Playwright verification passed: the existing initial 503 test confirms a failed request reports Failed to load transcripts., and the new later-poll 503 test confirms all 32 previously loaded seeded rows remain. UI limitation: SessionHistory renders sessErr only when filteredSessions is empty, so with preserved rows the error is not visible alongside them; AC2 is evidenced across the two scenarios without expanding UI behavior.
-
-Follow-up verification: the failed-poll browser test now observes the 503 request, then crosses two animation frames before asserting rows. The resolved mock response and browser microtask ordering ensure the component catch runs before those frames; focused command passed 2 tests.
+Focused mock UI regression failed before the source fix: after a 503 followed by a successful empty response, No transcripts. did not appear (test-before.log). Focused mock UI regression passed after the fix (1 passed); focused browser recovery regression passed after the fix (1 passed), with red/green output in implement-recovery.notes.md. e2e-mock/transcripts.spec.mjs:66-67 asserts the initial 503 and Failed to load transcripts. message; lines 73-75 verify a successful empty poll clears the error. The separate failed-poll test at lines 78-100 confirms all 32 previously loaded seeded rows remain after a 503. Follow-up verification waits across two animation frames after the mocked 503 resolves before checking rows; the focused browser command passed 2 tests. Final pinned validation at ed8256d67f2a9fb59d7dc1c22dbfa329d619c1e4 passed: pnpm lint, pnpm test (586 passed), and the focused mock Playwright recovery run (2 passed).
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

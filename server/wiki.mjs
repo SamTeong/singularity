@@ -138,7 +138,7 @@ export function parseSweepHistory(markdown) {
     if (!isDay(date)) continue;
 
     const summary = body.slice(0, 1200);
-    const statusSummary = summary.replace(/^\s*[-*]\s*(?:NEW|UPDATE|OVERTURNS):.*$/gim, '');
+    const statusSummary = body.replace(/^\s*[-*]\s*(?:NEW|UPDATE|OVERTURNS):.*$/gim, '').slice(0, 1200);
     const interrupted = /\b(?:partial(?:ly)?|interrupted|aborted|stopped before|tool-call cap|not completed|incomplete|failed|did not|cancell?ed|timed out)\b/i.test(statusSummary);
     const sweepCompleted = /^\s*(?:[-*]\s*)?(?:(?:whole|entire)\s+)?sweep\s+(?:was\s+)?completed[ \t]*(?:$|[.:\-–—])/im.test(summary);
     const continuationCompleted = /continuation/i.test(heading[0])
