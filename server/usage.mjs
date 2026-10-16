@@ -110,7 +110,8 @@ function appendJsonl(file, record) {
   try {
     mkdirSync(dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-  } catch {} // best-effort, never break /usage
+    return true;
+  } catch { return false; } // best-effort, never break /usage
 }
 
 // ---- Codex usage history (same skill contract as the ollama history above) ----
@@ -132,14 +133,15 @@ export function appendCodexHistory(data) {
     data.weekly?.pctUsed ?? null, data.weekly?.resetsAt ?? null, data.weekly?.started === false,
   ]);
   if (reading === lastCodexReading && Date.now() - lastCodexAt < CODEX_HEARTBEAT_MS) return;
-  lastCodexReading = reading;
-  lastCodexAt = Date.now();
-  appendJsonl(CODEX_HISTORY, {
+  if (appendJsonl(CODEX_HISTORY, {
     fetched_at: localTimestamp(new Date()),
     session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt, ...(data.session.started === false ? { started: false } : {}) } : null,
     weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt, ...(data.weekly.started === false ? { started: false } : {}) } : null,
     plan: data.plan ?? null,
-  });
+  })) {
+    lastCodexReading = reading;
+    lastCodexAt = Date.now();
+  }
 }
 
 // The global statusline writes this same file once a turn, from the same

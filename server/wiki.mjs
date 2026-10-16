@@ -113,7 +113,7 @@ export async function listFiles(root) {
 
 const SWEEP_WIKIS = ['agentic-coding', 'dotnet', 'iap'];
 const SWEEP_TYPES = ['shallow', 'deep', 'horizon'];
-const SWEEP_HEADING = /^## \[(\d{4}-\d{2}-\d{2})\] (shallow|deep|horizon)(?: continuation)?\b/gim;
+const SWEEP_HEADING = /^## \[(\d{4}-\d{2}-\d{2})\] (shallow|deep|horizon)(?: continuation)?(?=$|\s|\|)/gim;
 
 // Valid YYYY-MM-DD calendar day (rejects rollovers such as 2026-02-30).
 function isDay(date) {

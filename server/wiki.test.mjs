@@ -114,6 +114,21 @@ test('sweep types are case-insensitive, rollover dates are rejected, and any hea
   ].join('\n')), { shallow: '2026-10-20', deep: '2026-10-19', horizon: null });
 });
 
+test('sweep type headings reject hyphenated words while retaining supported delimiters', () => {
+  assert.deepEqual(parseSweepHistory([
+    '## [2026-10-20] deep-dive notes',
+    '- Sweep completed.',
+    '## [2026-10-19] deep continuation',
+    '- Sweep completed.',
+    '## [2026-10-18] shallow | lanes: all',
+    '- Sweep completed.',
+  ].join('\n')), {
+    shallow: '2026-10-18',
+    deep: '2026-10-19',
+    horizon: null,
+  });
+});
+
 test('wiki sweep history returns the three supported domains and null for a missing ledger', async () => {
   const root = mkdtempSync(join(tmpdir(), 'wiki-sweeps-'));
   const ledger = join(root, 'agentic-coding', 'meta', 'websearch-log.md');
