@@ -188,7 +188,7 @@ function listDirs(p) { try { return readdirSync(p, { withFileTypes: true }).filt
 // counting (mirrors the harness-usage-report codex parser). estCostUsd stays
 // null — the server PRICES table has no gpt-* entries, and codex cost is not
 // tracked by the claude statusline. Cached by (mtime,size) like claude paths.
-async function parseCodexRollout(p) {
+export async function parseCodexRollout(p) {
   let st; try { st = await stat(p); } catch { return { ...EMPTY_SESSION }; }
   const hit = cache.get(p);
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.result;

@@ -489,6 +489,37 @@ test('scanDays: cache key includes root — same session id under different root
   assert.equal(session2?.lastAssistantText, 'response2', 'root2 returns response2, not the cached response1');
 });
 
+test('scanDays: each codex row takes tokens from its own rollout, not the newest rollout at the same cwd', async () => {
+  const codexHome = process.env.CODEX_HOME;
+  const dir = join(codexHome, 'sessions', '2026', '10', '15');
+  mkdirSync(dir, { recursive: true });
+  const cwd = 'C:\\fake\\history-codex-same-cwd';
+  const now = Date.now();
+  const writeRollout = (id, tokens, mtime) => {
+    const ts = new Date(mtime).toISOString();
+    const file = join(dir, `rollout-2026-10-15T00-00-00-${id}.jsonl`);
+    writeFileSync(file, [
+      { timestamp: ts, type: 'session_meta', payload: { id, cwd } },
+      { timestamp: ts, type: 'response_item', payload: { type: 'message', role: 'user', content: [{ type: 'input_text', text: `work ${id}` }] } },
+      { timestamp: ts, type: 'response_item', payload: { type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'done' }] } },
+      { timestamp: ts, type: 'event_msg', payload: { type: 'token_count', info: { last_token_usage: { input_tokens: tokens, output_tokens: 0 } } } },
+    ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+    utimesSync(file, new Date(mtime), new Date(mtime));
+  };
+  const olderId = '019fa000-0000-7000-8000-000000000001';
+  const newerId = '019fa000-0000-7000-8000-000000000002';
+  writeRollout(olderId, 1000, now - 2 * 3600 * 1000);
+  writeRollout(newerId, 7000, now - 3600 * 1000);
+  try {
+    const days = await scanDays(now - 24 * 3600 * 1000, SESSIONS_ROOT);
+    const all = [...days.values()].flatMap((d) => d.sessions);
+    assert.equal(all.find((s) => s.id === olderId)?.dayTokens, 1000, 'older row reads its own rollout');
+    assert.equal(all.find((s) => s.id === newerId)?.dayTokens, 7000, 'newer row reads its own rollout');
+  } finally {
+    rmSync(codexHome, { recursive: true, force: true });
+  }
+});
+
 test('declawedGuidance: slices the Phase 2 section, trimmed, up to (not including) Phase 3', () => {
   const skillFile = join(scratch, 'declawed-skill.md');
   writeFileSync(skillFile, '# X\n## Phase 1\nscan\n## Phase 2\nrewrite rules\n## Phase 3\nverify');

@@ -6,7 +6,7 @@
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, utimesSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -234,6 +234,19 @@ test('appendOllamaHistory: dedupes an unchanged reading, writes a changed one', 
   assert.equal(JSON.parse(lines[1]).session.utilization, 28.1);
 });
 
+test('appendOllamaHistory retries an identical reading after a failed append', () => {
+  const retryReading = { ...READING, session: { ...READING.session, pctUsed: 99.9 } };
+  rmSync(HISTORY_FILE, { recursive: true, force: true });
+  mkdirSync(HISTORY_FILE);
+  appendOllamaHistory(retryReading); // path is a directory, so the append fails
+  rmSync(HISTORY_FILE, { recursive: true, force: true });
+  appendOllamaHistory(retryReading); // same successful result must be retried
+
+  const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 1);
+  assert.equal(JSON.parse(lines[0]).session.utilization, 99.9);
+});
+
 // appendCodexHistory writes the report skill's codex-usage.jsonl shape
 // ({fetched_at, session, weekly, plan}) and de-dupes an unchanged reading —
 // same contract as appendOllamaHistory above, feeding the skill's Codex
@@ -275,6 +288,31 @@ test('appendCodexHistory: an unchanged reading is rewritten once the 5-min heart
     assert.deepEqual(rows[1].session, rows[0].session);
   } finally {
     Date.now = realNow;
+    rmSync(CODEX_HISTORY_FILE, { force: true });
+  }
+});
+
+test('appendCodexHistory: retries an unchanged reading after a failed append', () => {
+  const historyDir = dirname(CODEX_HISTORY_FILE);
+  const heldDir = `${historyDir}-held`;
+  const reading = { ...CODEX_READING, session: { ...CODEX_READING.session, pctUsed: 41 } };
+  mkdirSync(historyDir, { recursive: true });
+  rmSync(heldDir, { recursive: true, force: true });
+  renameSync(historyDir, heldDir);
+  writeFileSync(historyDir, 'blocks directory creation');
+  try {
+    appendCodexHistory(reading); // append fails best-effort while parent path is a file
+  } finally {
+    rmSync(historyDir, { force: true });
+    renameSync(heldDir, historyDir);
+  }
+
+  try {
+    appendCodexHistory(reading); // same reading must retry before heartbeat expiry
+    const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].session.utilization, 41);
+  } finally {
     rmSync(CODEX_HISTORY_FILE, { force: true });
   }
 });

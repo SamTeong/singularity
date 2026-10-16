@@ -10,8 +10,8 @@ import { mkdirSync, readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR, bus, writeAtomic, CLAUDE_BIN, OLLAMA_BIN, CODEX_BIN } from './agents.mjs';
-import { listSessions, readSession } from './sessions.mjs';
-import { parseSession, readCostFile, readStatsCsvCosts } from './stats.mjs';
+import { listSessions, readSession, pathForCodex } from './sessions.mjs';
+import { parseSession, parseCodexRollout, readCostFile, readStatsCsvCosts } from './stats.mjs';
 import { getSummariser } from './model-store.mjs';
 import { runOneShotPrompt } from './one-shot.mjs';
 
@@ -181,11 +181,15 @@ export async function scanDays(windowStart, root) {
     }
     if (byDay.size === 0) continue; // no user/assistant text at all
 
-    // Some transcript rows carry no cwd; parseSession would hand null to
-    // encodeCwd (or findCodexRolloutForCwd) and throw, 500ing the whole route.
-    // No cwd means no path to a token log — count the day, skip the tokens.
-    const parsed = row.cwd
-      ? await parseSession(row.cwd, row.id, row.source === 'codex' ? 'codex' : undefined)
+    // A codex row already names its own rollout (row.file), so parse that one
+    // directly — parseSession's cwd lookup would guess the newest rollout at
+    // the cwd (wrong row) via synchronous directory scans that stall the loop.
+    // Some claude rows carry no cwd; parseSession would hand null to encodeCwd
+    // and throw, 500ing the whole route. No cwd means no path to a token log —
+    // count the day, skip the tokens.
+    const codexRollout = row.source === 'codex' ? pathForCodex(row.file) : null;
+    const parsed = codexRollout ? await parseCodexRollout(codexRollout)
+      : row.cwd && row.source !== 'codex' ? await parseSession(row.cwd, row.id)
       : { exists: false, tokens: 0 };
     const tokens = parsed.exists ? parsed.tokens : 0;
     // Cost resolution (most → least authoritative): the stats.csv append log

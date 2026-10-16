@@ -32,6 +32,115 @@ test('the tree lists the wiki, its page count, and its pages once expanded', asy
   await expect(page.getByRole('button', { name: /design.*daemon\.md/ })).toBeVisible();
 });
 
+test('the sweep history table collapses and shows latest completed dates', async ({ page }) => {
+  await gotoView(page, 'Wiki');
+  const toggle = page.getByRole('button', { name: 'Wiki freshness' });
+  const table = page.getByRole('table', { name: 'Last completed wiki sweeps' });
+  await expect(toggle).toBeVisible();
+  await expect(table).toBeVisible();
+  await toggle.click();
+  await expect(table).toHaveCount(0);
+  await toggle.click();
+
+  await expect(table).toBeVisible();
+  await expect(table.getByRole('row')).toHaveCount(4);
+  await expect(table.getByRole('row', { name: /agentic-coding/ })).toContainText('2026-10-12');
+  await expect(table.getByRole('row', { name: /dotnet/ })).toContainText('2026-09-21');
+  await expect(table.getByRole('row', { name: /iap/ })).toContainText('2026-10-10');
+  await expect(table.getByRole('row', { name: /iap/ }).locator('[aria-label="No completed sweep recorded"]')).toHaveCount(2);
+  await toggle.click();
+  await expect(table).toHaveCount(0);
+});
+
+// Hold /api/wiki/sweeps responses for roots ending in `suffix` until the test
+// calls window.__releaseSweeps(). Mirage answers fetch inside the page, so
+// page.route never sees this request; wrap whatever fetch gets installed
+// (projects-review.spec.mjs recipe) instead. __heldSweepsSettled flips once the
+// held response's body has been handed to the app.
+async function holdSweeps(page, suffix) {
+  await page.addInitScript((holdSuffix) => {
+    let release;
+    const gate = new Promise((resolve) => { release = resolve; });
+    window.__releaseSweeps = () => release();
+    const wrap = (orig) => async (...args) => {
+      const [input] = args;
+      const url = typeof input === 'string' ? input : input.url;
+      if (!url.includes('/api/wiki/sweeps?') || !decodeURIComponent(url).endsWith(holdSuffix)) return orig(...args);
+      await gate;
+      const res = await orig(...args);
+      const json = res.json.bind(res);
+      res.json = async () => { const d = await json(); setTimeout(() => { window.__heldSweepsSettled = true; }); return d; };
+      return res;
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  }, suffix);
+}
+
+async function selectSkillsRoot(page) {
+  await page.getByRole('button', { name: 'Browse' }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByRole('textbox').fill('~/skills');
+  await dialog.getByRole('button', { name: 'Go' }).click();
+  await dialog.getByRole('button', { name: 'coding' }).waitFor();
+  await dialog.getByRole('button', { name: 'Select' }).click();
+}
+
+async function expectEmptySweepTable(table) {
+  await expect(table.getByRole('row')).toHaveCount(4);
+  for (const name of ['agentic-coding', 'dotnet', 'iap']) {
+    await expect(table.getByRole('row', { name: new RegExp(name) }).locator('[aria-label="No completed sweep recorded"]')).toHaveCount(3);
+  }
+}
+
+test('changing the wiki root hides stale sweep dates and scopes mock history', async ({ page }) => {
+  await holdSweeps(page, '/skills');
+  await gotoView(page, 'Wiki');
+  const table = page.getByRole('table', { name: 'Last completed wiki sweeps' });
+  await expect(table.getByRole('row', { name: /agentic-coding/ })).toContainText('2026-10-12');
+
+  await selectSkillsRoot(page);
+
+  await expect(page.getByRole('status').filter({ hasText: 'Loading sweep history…' })).toBeVisible();
+  await expect(table).toHaveCount(0);
+  await page.evaluate(() => window.__releaseSweeps());
+  await expect(table).toBeVisible();
+  await expectEmptySweepTable(table);
+});
+
+test('a late sweep response for the previous root does not replace the new root', async ({ page }) => {
+  await holdSweeps(page, '/wiki');
+  await gotoView(page, 'Wiki');
+  const table = page.getByRole('table', { name: 'Last completed wiki sweeps' });
+  const loading = page.getByRole('status').filter({ hasText: 'Loading sweep history…' });
+  await expect(loading).toBeVisible();
+
+  await selectSkillsRoot(page);
+  await expectEmptySweepTable(table);
+
+  await page.evaluate(() => window.__releaseSweeps());
+  await page.waitForFunction(() => window.__heldSweepsSettled);
+  await expect(loading).toHaveCount(0);
+  await expectEmptySweepTable(table);
+});
+
+test('failed sweep history request shows an unavailable state', async ({ page }) => {
+  // Same fetch-wrap recipe as above: a rejected fetch stands in for a network failure.
+  await page.addInitScript(() => {
+    const wrap = (orig) => (...args) => {
+      const [input] = args;
+      const url = typeof input === 'string' ? input : input.url;
+      if (url.includes('/api/wiki/sweeps?')) return Promise.reject(new TypeError('Failed to fetch'));
+      return orig(...args);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  });
+  await gotoView(page, 'Wiki');
+  await expect(page.getByRole('alert').filter({ hasText: 'Sweep history unavailable.' })).toBeVisible();
+  await expect(page.getByRole('table', { name: 'Last completed wiki sweeps' })).toHaveCount(0);
+});
+
 test('opening a page renders its frontmatter title, status pill and body', async ({ page }) => {
   await gotoView(page, 'Wiki');
   await openPage(page, 'index.md');

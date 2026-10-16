@@ -111,6 +111,68 @@ export async function listFiles(root) {
   return { wikis, capped };
 }
 
+const SWEEP_WIKIS = ['agentic-coding', 'dotnet', 'iap'];
+const SWEEP_TYPES = ['shallow', 'deep', 'horizon'];
+const SWEEP_HEADING = /^## \[(\d{4}-\d{2}-\d{2})\] (shallow|deep|horizon)(?: continuation)?(?=$|\s|\|)/gim;
+
+// Valid YYYY-MM-DD calendar day (rejects rollovers such as 2026-02-30).
+function isDay(date) {
+  if (typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date)) return false;
+  const timestamp = Date.parse(`${date}T00:00:00.000Z`);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString().slice(0, 10) === date;
+}
+
+// Sweep ledgers are Markdown event histories. Keep dates at their recorded
+// day precision, and ignore entries that explicitly stopped before completion.
+export function parseSweepHistory(markdown) {
+  const latest = Object.fromEntries(SWEEP_TYPES.map((type) => [type, null]));
+  const source = String(markdown || '');
+  const headings = [...source.matchAll(SWEEP_HEADING)];
+  for (let i = 0; i < headings.length; i++) {
+    const heading = headings[i];
+    const rest = source.slice(heading.index + heading[0].length);
+    const next = rest.search(/\n## /); // any level-2 heading ends the sweep body
+    const body = next < 0 ? rest : rest.slice(0, next);
+    const date = heading[1];
+    const type = heading[2].toLowerCase();
+    if (!isDay(date)) continue;
+
+    const summary = body.slice(0, 1200);
+    const statusSummary = summary.replace(/^\s*[-*]\s*(?:NEW|UPDATE|OVERTURNS):.*$/gim, '');
+    const interrupted = /\b(?:partial(?:ly)?|interrupted|aborted|stopped before|tool-call cap|not completed|incomplete|failed|did not|cancell?ed|timed out)\b/i.test(statusSummary);
+    const sweepCompleted = /^\s*(?:[-*]\s*)?(?:(?:whole|entire)\s+)?sweep\s+(?:was\s+)?completed[ \t]*(?:$|[.:\-–—])/im.test(summary);
+    const continuationCompleted = /continuation/i.test(heading[0])
+      && /^\s*(?:[-*]\s*)?continuation\s+(?:was\s+)?completed\b/im.test(summary);
+    if (interrupted && !sweepCompleted && !continuationCompleted) continue;
+    if (!latest[type] || date > latest[type]) latest[type] = date;
+  }
+  return latest;
+}
+
+export async function wikiSweepHistory(root) {
+  const resolved = resolveRoot(root);
+  const byName = resolved && existsSync(resolved) ? new Map((await wikiDirs(resolved)).map((wiki) => [wiki.name, wiki])) : new Map();
+  const wikis = [];
+  for (const name of SWEEP_WIKIS) {
+    let content = '';
+    const wiki = byName.get(name);
+    if (name === 'iap') {
+      // iap has no sweep ledger; its Deep date is the last repo ingest from wiki-sync.json.
+      let deep = null;
+      if (wiki) {
+        try { deep = JSON.parse(await readFile(join(wiki.path, 'wiki-sync.json'), 'utf8')).lastIngestedAt; } catch { /* no sync record */ }
+      }
+      wikis.push({ name, shallow: null, deep: isDay(deep) ? deep : null, horizon: null });
+      continue;
+    }
+    if (wiki) {
+      try { content = await readFile(join(wiki.path, 'meta', 'websearch-log.md'), 'utf8'); } catch { /* no sweep ledger */ }
+    }
+    wikis.push({ name, ...parseSweepHistory(content) });
+  }
+  return { wikis };
+}
+
 // Search across every wiki's pages. rel is "<wiki>/<page-rel>" so hits show
 // which wiki they belong to.
 export async function searchWiki(q, root) {
