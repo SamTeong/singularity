@@ -4,7 +4,7 @@ title: Detect interruptions after long wiki claim rows
 status: Done
 assignee: []
 created_date: '2026-10-16 15:50'
-updated_date: '2026-10-16 16:04'
+updated_date: '2026-10-16 16:22'
 labels: []
 dependencies: []
 modified_files:
@@ -36,7 +36,7 @@ Sweep-history parsing truncates a ledger body at 1200 characters before removing
 ## Implementation Notes
 
 <!-- SECTION:NOTES:BEGIN -->
-The focused regression failed before the parser fix: `node --test server/wiki.test.mjs` reported 13 passed, 1 failed because a completion marker after a long claim row was hidden by the raw-body cap. After using the same claim-stripped, 1200-character summary for interruption, sweep completion, and continuation completion checks, the same command passed all 14 tests. The regression covers both sweep and continuation completion lines after long claims.
+Historical regression evidence: wiki.test.mjs:104 covers the interruption marker after long claim rows. It failed on the original parser with 12 passed and 1 failed, then passed after the parser fix with 13 passed. The later completion and continuation regressions at wiki.test.mjs:112-124 failed on the intermediate round-1 code with 13 passed and 1 failed, then passed after the shared-summary fix with 14 passed.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

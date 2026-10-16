@@ -240,7 +240,15 @@ async function findCodexById(id) {
 // message/reasoning/function_call/custom_tool_call → assistant entries.
 // ponytail: codex cost notional, wire stats when needed
 async function readCodexSession(p) {
-  const events = parseEvents(await readFile(p, 'utf8'));
+  let raw;
+  try {
+    raw = await readFile(p, 'utf8');
+  } catch (e) {
+    // A Codex rollout may disappear after path lookup.
+    if (e?.code === 'ENOENT') return { ok: false, error: 'not found' };
+    throw e;
+  }
+  const events = parseEvents(raw);
   const duplicateUsers = codexItemUserCounts(events);
   const messages = [];
   let cwd = null, sessionId = null, title = null, turns = 0, firstTs = null, lastTs = null, lastModel = null;
@@ -613,7 +621,15 @@ export async function readSession(project, id, root, source = 'claude', file) {
   let p = pathFor(project, id, root);
   if (!p || !existsSync(p)) p = await findById(id, root); // stale project slug → locate by unique id
   if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
-  const events = parseEvents(await readFile(p, 'utf8'));
+  let raw;
+  try {
+    raw = await readFile(p, 'utf8');
+  } catch (e) {
+    // A Claude transcript may disappear after path lookup.
+    if (e?.code === 'ENOENT') return { ok: false, error: 'not found' };
+    throw e;
+  }
+  const events = parseEvents(raw);
   const messages = [];
   let cwd = null, title = null, turns = 0, firstTs = null, lastTs = null, lastModel = null;
   for (const e of events) {
