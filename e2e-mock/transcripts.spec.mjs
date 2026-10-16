@@ -36,32 +36,43 @@ test('the session list renders every seeded transcript, reverse-chronological', 
 });
 
 test('a successful empty poll clears the prior transcript list error', async ({ page }) => {
-  await page.goto('/tasks');
-  await page.evaluate(() => {
-    const originalFetch = window.fetch.bind(window);
-    let listRequests = 0;
-    window.fetch = (input, init) => {
+  await page.addInitScript(() => {
+    let failedListRequests = 0;
+    let successfulListRequests = 0;
+    window.__recoverTranscriptList = false;
+    const wrap = (originalFetch) => (input, init) => {
       const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
       const url = new URL(rawUrl, location.origin);
       if (url.pathname === '/api/transcripts') {
-        listRequests += 1;
-        window.__transcriptListRequests = listRequests;
-        if (listRequests === 1) return Promise.resolve(new Response('', { status: 503 }));
+        if (!window.__recoverTranscriptList) {
+          failedListRequests += 1;
+          window.__failedTranscriptListRequests = failedListRequests;
+          return Promise.resolve(new Response('', { status: 503 }));
+        }
+        successfulListRequests += 1;
+        window.__successfulTranscriptListRequests = successfulListRequests;
         return Promise.resolve(new Response(JSON.stringify({ sessions: [] }), {
           headers: { 'content-type': 'application/json' },
         }));
       }
       return originalFetch(input, init);
     };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
   });
+  await page.goto('/tasks');
 
   await gotoMenu(page, 'Transcripts');
   await expect(page.getByText('Failed to load transcripts.', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.__failedTranscriptListRequests)).toBeGreaterThan(0);
 
+  // Keep every list request failed until the error is visible, then arm recovery.
+  await page.evaluate(() => { window.__recoverTranscriptList = true; });
   // Changing this filter restarts the list effect and triggers its recovery poll.
   await page.getByRole('checkbox', { name: 'Hide automated reviews' }).click();
   await expect(page.getByText('No transcripts.', { exact: true })).toBeVisible();
-  expect(await page.evaluate(() => window.__transcriptListRequests)).toBe(2);
+  await expect(page.getByText('Failed to load transcripts.', { exact: true })).not.toBeVisible();
+  expect(await page.evaluate(() => window.__successfulTranscriptListRequests)).toBeGreaterThan(0);
 });
 
 test('a failed transcript poll preserves previously loaded rows', async ({ page }) => {
