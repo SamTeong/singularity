@@ -64,6 +64,32 @@ test('a successful empty poll clears the prior transcript list error', async ({ 
   expect(await page.evaluate(() => window.__transcriptListRequests)).toBe(2);
 });
 
+test('a failed transcript poll preserves previously loaded rows', async ({ page }) => {
+  await openTranscripts(page);
+  await page.evaluate(() => {
+    const originalFetch = window.fetch.bind(window);
+    let listRequests = 0;
+    window.fetch = (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      if (url.pathname === '/api/transcripts') {
+        listRequests += 1;
+        window.__transcriptListRequests = listRequests;
+        return Promise.resolve(new Response('', { status: 503 }));
+      }
+      return originalFetch(input, init);
+    };
+  });
+
+  await page.getByRole('checkbox', { name: 'Hide automated reviews' }).click();
+  await expect.poll(() => page.evaluate(() => window.__transcriptListRequests)).toBe(1);
+  // The mocked 503 is already resolved. A frame boundary drains the fetch
+  // continuation and its catch microtask before checking the preserved rows.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.getByRole('button', { name: /^Fixture session \d+|Retry backoff cap/ })).toHaveCount(TOTAL_SESSIONS);
+  await expect(page.getByRole('button', { name: /Retry backoff cap/ })).toBeVisible();
+});
+
 test('search narrows the list to cross-session matches; clearing restores it', async ({ page }) => {
   await openTranscripts(page);
 
