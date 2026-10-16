@@ -276,13 +276,14 @@ test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', (
   rmSync(CODEX_HISTORY_FILE, { force: true });
 });
 
-test('appendCodexHistory: an unchanged reading is rewritten once the 5-min heartbeat has passed', () => {
+test('appendCodexHistory: an unchanged reading is rewritten once the 5-min heartbeat has passed', async () => {
+  const { appendCodexHistory: isolatedAppendCodexHistory } = await import(`./usage.mjs?codex-heartbeat=${Date.now()}`);
   const realNow = Date.now;
   try {
-    appendCodexHistory(CODEX_READING);
-    appendCodexHistory(CODEX_READING); // within the heartbeat → deduped
+    isolatedAppendCodexHistory(CODEX_READING);
+    isolatedAppendCodexHistory(CODEX_READING); // within the heartbeat → deduped
     Date.now = () => realNow() + 5 * 60_000;
-    appendCodexHistory(CODEX_READING); // heartbeat elapsed → written again
+    isolatedAppendCodexHistory(CODEX_READING); // heartbeat elapsed → written again
     const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(rows.length, 2);
     assert.deepEqual(rows[1].session, rows[0].session);
