@@ -188,14 +188,17 @@ function codexFiles(since, now) {
 // The cost is a session's first API call when it starts in the window (cents).
 // Both files rotate at TAIL_BYTES (statusline HISTORY_CAP), so the read is contiguous
 // bar at most each file's oldest row.
-function claudeCostEvents() {
+// Rows with a 5h % also push {t, pct, resetsAt} onto `pts` (the extra history points).
+function claudeCostEvents(pts) {
   const last = new Map();
   const out = new Map();
   const file = join(USAGE_SKILL_STATE, 'cost-history.jsonl');
   for (const line of [...tailLines(file + '.1'), ...tailLines(file)]) {
     let r; try { r = JSON.parse(line); } catch { continue; }
     const t = Date.parse(r.ts);
-    if (!r.session_id || !Number.isFinite(r.cost_usd) || Number.isNaN(t)) continue;
+    if (Number.isNaN(t)) continue;
+    if (Number.isFinite(r.five_hour_pct) && Number.isFinite(r.five_hour_resets_at)) pts.push({ t, pct: r.five_hour_pct, resetsAt: r.five_hour_resets_at * 1000 });
+    if (!r.session_id || !Number.isFinite(r.cost_usd)) continue;
     const base = last.get(r.session_id);
     const usd = base === undefined ? 0 : Math.max(0, r.cost_usd - base);
     last.set(r.session_id, r.cost_usd);
@@ -231,7 +234,7 @@ function codexTurnEvents() {
 }
 
 // Map sessionId -> {label, events}.
-function sessionEvents(provider, since, now) {
+function sessionEvents(provider, since, now, costPoints = []) {
   const out = new Map();
   const add = (id, cwd, events) => {
     const s = out.get(id) ?? { label: cwd ? `${basename(cwd)} · ${id.slice(0, 8)}` : id.slice(0, 8), events: [] };
@@ -247,7 +250,7 @@ function sessionEvents(provider, since, now) {
     pruneCache(parseClaudeTranscript, new Set(files.map(([path]) => path)));
     // A session with statusline rows takes its reported cost from its first (baseline)
     // row on; transcript events before that row are the only record of earlier spend.
-    for (const [id, events] of claudeCostEvents()) {
+    for (const [id, events] of claudeCostEvents(costPoints)) {
       const s = out.get(id);
       if (s) s.events = s.events.filter((e) => e.t < events[0].t);
       add(id, null, events);
@@ -362,5 +365,14 @@ export function getUsageHistory(provider, now = Date.now(), windowKey = '5h') {
   if (windowKey === '7d') points = points.filter((p, i) => Math.floor(p.t / WEEK_BUCKET_MS) !== Math.floor((points[i + 1]?.t ?? Infinity) / WEEK_BUCKET_MS));
   const doc = { provider, window: windowKey, windowStart: new Date(start).toISOString(), resetsAt: new Date(resetsAt).toISOString(), estimated };
   if (!estimated) return { ...doc, points: points.map((p) => ({ ts: new Date(p.t).toISOString(), pct: p.pct, sessions: {} })), sessions: [] };
-  return { ...doc, ...attribute(points, sessionEvents(provider, start, now), pricer()) };
+  // Statusline rows (every turn) fill the sparse snapshots: keep this window's (resets_at
+  // within 60s: snapshots carry fractions), then collapse consecutive equal readings.
+  const costPoints = [];
+  const sessions = sessionEvents(provider, start, now, costPoints);
+  if (provider === 'claude') {
+    points = [...points, ...costPoints.filter((p) => Math.abs(p.resetsAt - resetsAt) <= 60_000 && p.t >= start && p.t <= resetsAt)]
+      .sort((a, b) => a.t - b.t)
+      .filter((p, i, a) => p.pct !== a[i - 1]?.pct);
+  }
+  return { ...doc, ...attribute(points, sessions, pricer()) };
 }

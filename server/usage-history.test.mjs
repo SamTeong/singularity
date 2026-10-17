@@ -160,6 +160,18 @@ test('claude: sessions with statusline cost rows split by reported cost deltas; 
   rmSync(join(STATE, 'cost-history.jsonl'));
 });
 
+test('claude: statusline 5h % rows add in-window points; off-window rows ignored; equal readings collapse', () => {
+  jsonl(join(STATE, 'usage-snapshots.jsonl'), [10, 30].map((u, i) => ({ fetched_at: local(T[i * 2]), raw: { five_hour: { utilization: u, resets_at: new Date(RESET).toISOString() } } })));
+  const row = (ms, pct, reset = RESET) => ({ ts: new Date(ms).toISOString(), session_id: 'sess-z', cost_usd: 1, tokens: null, five_hour_pct: pct, five_hour_resets_at: Math.floor(reset / 1000) });
+  jsonl(join(STATE, 'cost-history.jsonl'), [
+    row(T[1], 20), row(T[1] + 1000, 20), // new point, then a duplicate
+    row(T[1] + 2000, 99, RESET - 6 * 3.6e6), // other window
+  ]);
+  const doc = getUsageHistory('claude', NOW);
+  assert.deepEqual(doc.points.map((p) => p.pct), [10, 20, 30]);
+  rmSync(join(STATE, 'cost-history.jsonl'));
+});
+
 test('claude: transcript spend before a session\'s first cost row is kept; cost deltas replace it after', () => {
   jsonl(join(STATE, 'usage-snapshots.jsonl'), [10, 20, 30].map((u, i) => ({ fetched_at: local(T[i]), raw: { five_hour: { utilization: u, resets_at: new Date(RESET).toISOString() } } })));
   // sess-a's statusline rows start mid-window (baseline in interval 2), so its
