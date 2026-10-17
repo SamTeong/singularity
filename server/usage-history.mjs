@@ -298,7 +298,8 @@ function codexTurnEvents() {
 function sessionEvents(provider, since, now, costPoints, files) {
   const out = new Map();
   const add = (id, cwd, events) => {
-    const s = out.get(id) ?? { label: cwd ? `${basename(cwd)} · ${id.slice(0, 8)}` : id.slice(0, 8), events: [] };
+    // Last 8 chars: UUIDv7 (Codex) ids share their time prefix within a second.
+    const s = out.get(id) ?? { label: cwd ? `${basename(cwd)} · ${id.slice(-8)}` : id.slice(-8), events: [] };
     s.events.push(...events.filter((e) => e.t >= since && e.t <= now));
     out.set(id, s);
   };

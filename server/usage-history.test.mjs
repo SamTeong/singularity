@@ -77,20 +77,24 @@ test('codex: rollout token_count spend is attributed; repeated totals are not ne
   const d = new Date(T[0]);
   const dir = join(scratch, 'codex', 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
   const tc = (ms, total) => ({ timestamp: new Date(ms).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: total }, last_token_usage: { input_tokens: 150, cached_input_tokens: 50 } } } });
+  // UUIDv7-style ids started in the same second share their first 8 chars.
+  const X = '01a14896-0000-7000-8000-0000thread-x';
+  const Y = '01a14896-0000-7000-8000-0000thread-y';
   jsonl(join(dir, 'rollout-x.jsonl'), [
-    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: 'thread-x', cwd: 'C:\\proj' } },
+    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: X, cwd: 'C:\\proj' } },
     { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-luna' } },
     tc(T[0] + 60_000, 100), tc(T[0] + 61_000, 100),
   ]);
   jsonl(join(dir, 'rollout-y.jsonl'), [
-    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: 'thread-y', cwd: 'C:\\proj' } },
+    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: Y, cwd: 'C:\\proj' } },
     { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-luna' } },
     tc(T[0] + 90_000, 100),
   ]);
   const doc = getUsageHistory('codex', NOW);
   // 50/50 only if x's repeated total is skipped; counting it gives 6.67/3.33.
-  assert.deepEqual(doc.points[1].sessions, { 'thread-x': 5, 'thread-y': 5, _unattributed: 5 });
-  assert.equal(doc.sessions[0].label, 'proj · thread-x');
+  assert.deepEqual(doc.points[1].sessions, { [X]: 5, [Y]: 5, _unattributed: 5 });
+  // Labels end in the id's last 8 chars, so a shared prefix still tells them apart.
+  assert.deepEqual(doc.sessions.filter((s) => s.id !== '_unattributed').map((s) => s.label).sort(), ['proj · thread-x', 'proj · thread-y']);
 });
 
 test('codex: Stop-hook rows split by total_token_usage deltas; rollout events outside them are the fallback; old rows still chart', () => {
