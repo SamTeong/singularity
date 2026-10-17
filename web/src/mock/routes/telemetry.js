@@ -121,6 +121,28 @@ export function registerTelemetry(server) {
     };
   });
 
+  // /usage/history?provider= — usage-history.mjs getUsageHistory: the current
+  // 5h window (started 3h ago), one reading every 10 min. Claude/Codex carry an
+  // estimated two-session split; Ollama is the total line only.
+  server.get('/usage/history', (_schema, request) => {
+    const provider = request.queryParams.provider;
+    if (!['claude', 'codex', 'ollama'].includes(provider)) {
+      return new Response(400, {}, { ok: false, error: 'provider must be one of claude, codex, ollama' });
+    }
+    const now = Date.now();
+    const start = now - 3 * 3.6e6;
+    const estimated = provider !== 'ollama';
+    const sessions = estimated
+      ? [{ id: 's1', label: 'singularity · s1' }, { id: 's2', label: 'wiki · s2' }, { id: '_unattributed', label: 'Unattributed' }]
+      : [];
+    const points = Array.from({ length: 19 }, (_, i) => {
+      const a = i * 1.5;
+      const b = Math.max(0, i - 6);
+      return { ts: iso(start + i * 600_000), pct: 4 + a + b, sessions: estimated ? { s1: a, s2: b, _unattributed: 4 } : {} };
+    });
+    return { provider, windowStart: iso(start), resetsAt: iso(start + 5 * 3.6e6), points, sessions, estimated };
+  });
+
   // POST /usage/ollama/connect returns the same sanitized provider payload as
   // connectOllamaUsage in usage.mjs, not the enclosing /usage document.
   server.post('/usage/ollama/connect', () => {

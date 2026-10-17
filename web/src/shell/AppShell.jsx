@@ -494,7 +494,7 @@ export default function AppShell() {
               </Box>
             )}
             {visited.has('usage') && (
-              <Box sx={{ display: view === 'usage' ? 'block' : 'none', height: '100%' }}><UsageView usage={usage} onRefresh={refreshUsage} /></Box>
+              <Box sx={{ display: view === 'usage' ? 'block' : 'none', height: '100%' }}><UsageView usage={usage} onRefresh={refreshUsage} active={view === 'usage'} /></Box>
             )}
             {view === 'history' && <HistoryView onOpenSession={openHistorySession} onToast={setToast} />}
             {view === 'projects' && <ProjectsView onToast={enqueueToast} dismissToast={dismissToast} />}

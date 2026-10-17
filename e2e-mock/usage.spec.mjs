@@ -62,6 +62,37 @@ test('collapse/expand toggle flips aria-label', async ({ page }) => {
   await expect(collapseButton).toHaveAttribute('aria-label', 'Collapse usage');
 });
 
+test('5h history panel: collapsed state survives a reload', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+
+  const toggle = page.getByRole('button', { name: /^(Collapse|Expand) 5h history$/ });
+  await expect(toggle).toHaveAttribute('aria-label', 'Collapse 5h history');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-label', 'Expand 5h history');
+  await page.reload();
+  await expect(toggle).toHaveAttribute('aria-label', 'Expand 5h history');
+});
+
+// Real time, not page.clock: a frozen clock also stalls Mirage's response timer.
+test('5h history re-fetches at the chosen rate only while the Usage view is showing', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/');
+  await goto(page, 'Usage');
+  await expect(page.getByRole('figure', { name: '5h history chart' })).toBeVisible();
+  await recordFetchCalls(page);
+  const count = async () => (await fetchCalls(page)).filter((c) => c === 'GET /api/usage/history?provider=claude').length;
+
+  await page.getByRole('button', { name: '10s', exact: true }).click();
+  // One fetch on selecting the rate, then one per 10s tick.
+  await expect.poll(count, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+
+  await goto(page, 'Tasks');
+  const hidden = await count();
+  await page.waitForTimeout(11_000);
+  expect(await count(), 'no polling while the Usage view is hidden').toBe(hidden);
+});
+
 test('usage Refresh triggers GET /usage with force=1', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');

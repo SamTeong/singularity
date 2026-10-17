@@ -24,6 +24,7 @@ import { useCapabilities } from '@/hooks/useCapabilities.js';
 import { useAgents } from '@/providers/AgentsProvider.jsx';
 import { Meter } from '@/components/Meter.jsx';
 import UsageReportView from '@/features/usage/UsageReportView.jsx';
+import UsageHistoryPanel from '@/features/usage/UsageHistoryPanel.jsx';
 
 // The daemon owns refresh cadence now: claude/codex check their local files
 // every 5s (no network on those ticks) and reach the network at most once
@@ -36,6 +37,7 @@ import UsageReportView from '@/features/usage/UsageReportView.jsx';
 // where the user left it. Absent (or storage blocked) means expanded, the default.
 const USAGE_OPEN_KEY = 'sing:usage-open';
 const REPORT_OPEN_KEY = 'sing:usage-report-open';
+const HISTORY_OPEN_KEY = 'sing:usage-history-open';
 
 function readPanelOpen(key) {
   try { return localStorage.getItem(key) !== '0'; } catch { return true; }
@@ -228,9 +230,11 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
 }
 
 // Full usage view (main pane). Both providers side by side, manual force-refresh.
-export default function UsageView({ usage, onRefresh }) {
+export default function UsageView({ usage, onRefresh, active }) {
   const [open, setOpen] = useState(() => readPanelOpen(USAGE_OPEN_KEY));
   const toggleOpen = () => setOpen((o) => { writePanelOpen(USAGE_OPEN_KEY, !o); return !o; });
+  const [historyOpen, setHistoryOpen] = useState(() => readPanelOpen(HISTORY_OPEN_KEY));
+  const toggleHistory = () => setHistoryOpen((o) => { writePanelOpen(HISTORY_OPEN_KEY, !o); return !o; });
   const [reportOpen, setReportOpen] = useState(() => readPanelOpen(REPORT_OPEN_KEY));
   const toggleReport = () => setReportOpen((o) => { writePanelOpen(REPORT_OPEN_KEY, !o); return !o; });
   const caps = useCapabilities();
@@ -297,6 +301,9 @@ export default function UsageView({ usage, onRefresh }) {
             {cards(false)}
           </Stack>
         </Collapse>
+      </Box>
+      <Box sx={{ flexShrink: 0 }}>
+        <UsageHistoryPanel open={historyOpen} onToggle={toggleHistory} active={active} providers={visibleProviders(caps)} />
       </Box>
       {popout && createPortal(<CacheProvider value={popout.cache}>{cards(true)}</CacheProvider>, popout.win.document.body)}
       {/* Usage report (harness-usage-report skill) fills the rest of the pane, but only while expanded. */}
