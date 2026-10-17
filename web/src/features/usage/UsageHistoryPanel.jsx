@@ -19,29 +19,36 @@ const RATES = ['off', '10', '30', '60'];
 
 const hhmm = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const hourLabel = (d) => `${d.getHours() % 12 || 12}${d.getHours() < 12 ? 'am' : 'pm'}`;
-const HALF_HOUR = 30 * 60 * 1000;
-// shortcut: epoch-ms rounding hits local :00/:30 only for whole/half-hour UTC offsets; upgrade if :45 zones matter.
-const halfHourTicks = (min, max) => {
+const dayLabel = (d) => `${d.toLocaleDateString([], { weekday: 'short' })} ${d.getDate()}`;
+const HOUR = 3.6e6;
+// Grid step per window: 5h every 30 min (labels on the hour), 7d every 6h (labels at local midnight).
+const STEP = { '5h': HOUR / 2, '7d': 6 * HOUR };
+// Ticks every `step` ms, aligned to local time via the zone offset at `min`.
+// shortcut: a DST change inside the window shifts later ticks by the DST delta; re-read the offset per tick if that matters.
+const stepTicks = (min, max, step) => {
+  const off = new Date(min).getTimezoneOffset() * 60_000;
   const ticks = [];
-  for (let t = Math.ceil(min / HALF_HOUR) * HALF_HOUR; t <= max; t += HALF_HOUR) ticks.push(new Date(t));
+  for (let t = Math.ceil((min - off) / step) * step + off; t <= max; t += step) ticks.push(new Date(t));
   return ticks;
 };
 
-// Current 5h window per provider (GET /api/usage/history). Claude/Codex stack
-// an estimated per-session split; Ollama has no per-session data, so it is the
-// account % line only. Polls only while open AND the Usage view is showing:
+// Current 5h or 7d window per provider (GET /api/usage/history). 5h: Claude/Codex
+// stack an estimated per-session split; Ollama has no per-session data, so it is
+// the account % line only. 7d is the account weekly % line for every provider.
+// Polls only while open AND the Usage view is showing:
 // the shell keeps this view mounted (hidden) across navigation.
 export default function UsageHistoryPanel({ open, onToggle, active, providers }) {
   const [tab, setTab] = useState(providers[0]?.key ?? 'claude');
   const provider = providers.some((p) => p.key === tab) ? tab : providers[0]?.key;
   const [rate, setRate] = useState('10');
+  const [win, setWin] = useState('5h');
   const [doc, setDoc] = useState(null);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     if (!open || !active || !provider) return undefined;
     let alive = true;
-    const load = () => fetch(`/api/usage/history?provider=${provider}`)
+    const load = () => fetch(`/api/usage/history?provider=${provider}${win === '7d' ? '&window=7d' : ''}`)
       .then((r) => r.json())
       .then((d) => { if (!alive) return; if (d.points) { setDoc(d); setError(null); } else setError(d.error || 'history unavailable'); })
       .catch((e) => alive && setError(e.message));
@@ -49,13 +56,13 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
     // A backgrounded tab skips ticks; the next visible tick catches up.
     const id = rate === 'off' ? null : setInterval(() => { if (!document.hidden) load(); }, Number(rate) * 1000);
     return () => { alive = false; clearInterval(id); };
-  }, [open, active, provider, rate]);
+  }, [open, active, provider, rate, win]);
 
-  const d = doc?.provider === provider ? doc : null;
+  const d = doc?.provider === provider && doc.window === win ? doc : null;
   const times = d?.points.map((p) => new Date(p.ts)) ?? [];
   const series = !d ? [] : d.estimated
     ? d.sessions.map((s) => ({ id: s.id, label: s.label, data: d.points.map((p) => p.sessions[s.id] ?? 0), area: true, stack: 'total', showMark: false, valueFormatter: (v) => `${v}%` }))
-    : [{ id: 'total', label: '5h %', data: d.points.map((p) => p.pct), showMark: false, valueFormatter: (v) => `${v}%` }];
+    : [{ id: 'total', label: `${win} %`, data: d.points.map((p) => p.pct), showMark: false, valueFormatter: (v) => `${v}%` }];
 
   return (
     <Box>
@@ -63,13 +70,16 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
         <IconButton
           size="small"
           onClick={onToggle}
-          aria-label={open ? 'Collapse 5h history' : 'Expand 5h history'}
+          aria-label={`${open ? 'Collapse' : 'Expand'} ${win} history`}
           sx={{ transform: open ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform .2s' }}
         >
           <ExpandMoreIcon />
         </IconButton>
         <TimelineIcon sx={{ fontSize: 18, color: 'text.secondary' }} />
-        <Typography variant="subtitle2" sx={{ flex: 1 }}>5h history</Typography>
+        <Typography variant="subtitle2" sx={{ flex: 1 }}>{win} history</Typography>
+        <ToggleButtonGroup size="small" exclusive value={win} onChange={(_e, v) => v && setWin(v)} aria-label="History window">
+          {Object.keys(STEP).map((w) => <ToggleButton key={w} value={w} sx={{ py: 0.25, px: 1, fontSize: 12 }}>{w}</ToggleButton>)}
+        </ToggleButtonGroup>
         <ToggleButtonGroup size="small" exclusive value={rate} onChange={(_e, v) => v && setRate(v)} aria-label="History refresh interval">
           {RATES.map((r) => <ToggleButton key={r} value={r} sx={{ py: 0.25, px: 1, fontSize: 12 }}>{r === 'off' ? 'Off' : `${r}s`}</ToggleButton>)}
         </ToggleButtonGroup>
@@ -83,17 +93,19 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
           {!d ? (
             !error && <Typography sx={{ py: 2, fontSize: 13, color: 'text.secondary' }}>Loading…</Typography>
           ) : d.points.length === 0 ? (
-            <Typography sx={{ py: 2, fontSize: 13, color: 'text.secondary' }}>No usage in the current 5h window yet.</Typography>
+            <Typography sx={{ py: 2, fontSize: 13, color: 'text.secondary' }}>No usage in the current {win} window yet.</Typography>
           ) : (
-            <Box role="figure" aria-label="5h history chart">
+            <Box role="figure" aria-label={`${win} history chart`}>
               <LineChart
                 height={260}
                 series={series}
                 xAxis={[{
                   data: times, scaleType: 'time', min: new Date(d.windowStart), max: new Date(d.resetsAt),
-                  tickInterval: halfHourTicks(new Date(d.windowStart).getTime(), new Date(d.resetsAt).getTime()),
-                  tickLabelInterval: (v) => v.getMinutes() === 0,
-                  valueFormatter: (v, ctx) => (ctx.location === 'tick' ? hourLabel(v) : hhmm(v)),
+                  tickInterval: stepTicks(new Date(d.windowStart).getTime(), new Date(d.resetsAt).getTime(), STEP[win]),
+                  tickLabelInterval: win === '7d' ? (v) => v.getHours() === 0 : (v) => v.getMinutes() === 0,
+                  valueFormatter: win === '7d'
+                    ? (v, ctx) => (ctx.location === 'tick' ? dayLabel(v) : `${dayLabel(v)} ${hhmm(v)}`)
+                    : (v, ctx) => (ctx.location === 'tick' ? hourLabel(v) : hhmm(v)),
                 }]}
                 yAxis={[{ min: 0, max: 100, tickInterval: [0, 20, 40, 60, 80, 100], valueFormatter: (v) => `${v}%` }]}
                 grid={{ horizontal: true, vertical: true }}

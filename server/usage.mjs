@@ -145,10 +145,10 @@ export function appendCodexHistory(data) {
   }
 }
 
-// The global statusline writes this same file once a turn, from the same
-// endpoint — which is also why the daemon used to keep getting 429s:
-// api.anthropic.com's oauth/usage allows roughly one call a minute per account,
-// and the statusline already spends it. So read the newest line before reaching
+// fetchClaude's network reads, the usage-report skill's stats.mjs fetch and
+// readClaudeLocal append this file (the statusline stamps only cost-state; see
+// the header). api.anthropic.com's oauth/usage allows roughly one call a minute
+// per account, which is why the daemon used to keep getting 429s. So read the newest line before reaching
 // for the network; a fresh one is the same payload for free. Tail-read a fixed
 // window rather than the whole file: this log is megabytes and append-only.
 const CLAUDE_HISTORY = join(USAGE_SKILL_STATE, 'usage-snapshots.jsonl');

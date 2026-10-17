@@ -16,27 +16,33 @@ import { USAGE_SKILL_STATE } from './app-dir.mjs';
 import { getModelPrices } from './model-prices.mjs';
 
 export const HISTORY_PROVIDERS = ['claude', 'codex', 'ollama'];
-const WINDOW_MS = 5 * 3.6e6;
+// 7d = each provider's weekly account % only, no per-session split (TASK-10 option A).
+const WINDOW_MS = { '5h': 5 * 3.6e6, '7d': 7 * 86_400_000 };
+export const HISTORY_WINDOWS = Object.keys(WINDOW_MS);
 // shortcut: reads only the last 2MB of each history log (~1-2KB a line, far more
 // than one 5h window of samples); read further back if a window ever overflows it.
 const TAIL_BYTES = 2 * 1024 * 1024;
+// shortcut: 7d reads the last 8MB (Claude snapshots ~1.5KB/row every ~2 min = ~3.5MB a week); raise it if sampling gets denser.
+const WEEK_TAIL_BYTES = 8 * 1024 * 1024;
+// shortcut: 7d keeps the last reading per 15 min (<= 672 points); a spike inside one bucket is not drawn.
+const WEEK_BUCKET_MS = 15 * 60 * 1000;
 // The rest fold into one "Other sessions" series so the legend stays readable.
 const MAX_SERIES = 8;
 const UNATTRIBUTED = '_unattributed';
 const OTHER = '_other';
 
 const TOTALS = {
-  claude: { file: 'usage-snapshots.jsonl', win: (r) => r.raw?.five_hour ?? r.five_hour },
-  codex: { file: 'codex-usage.jsonl', win: (r) => r.session },
-  ollama: { file: 'ollama-usage.jsonl', win: (r) => r.session },
+  claude: { file: 'usage-snapshots.jsonl', win: { '5h': (r) => r.raw?.five_hour ?? r.five_hour, '7d': (r) => r.raw?.seven_day ?? r.seven_day } },
+  codex: { file: 'codex-usage.jsonl', win: { '5h': (r) => r.session, '7d': (r) => r.weekly } },
+  ollama: { file: 'ollama-usage.jsonl', win: { '5h': (r) => r.session, '7d': (r) => r.weekly } },
 };
 
-function tailLines(file) {
+function tailLines(file, bytes = TAIL_BYTES) {
   let fd;
   try {
     fd = openSync(file, 'r');
     const size = fstatSync(fd).size;
-    const len = Math.min(size, TAIL_BYTES);
+    const len = Math.min(size, bytes);
     const buf = Buffer.alloc(len);
     readSync(fd, buf, 0, len, size - len);
     const lines = buf.toString('utf8').split('\n');
@@ -47,15 +53,17 @@ function tailLines(file) {
 
 // [{t, pct, resetsAt}] oldest first. fetched_at is local time with no zone,
 // parsed as local, which is what wrote it.
-function readTotals(provider) {
-  const { file, win } = TOTALS[provider];
+function readTotals(provider, windowKey) {
+  const { file } = TOTALS[provider];
+  const win = TOTALS[provider].win[windowKey];
   const rows = [];
-  for (const line of tailLines(join(USAGE_SKILL_STATE, file))) {
+  for (const line of tailLines(join(USAGE_SKILL_STATE, file), windowKey === '7d' ? WEEK_TAIL_BYTES : TAIL_BYTES)) {
     let r; try { r = JSON.parse(line); } catch { continue; }
     const w = win(r);
     const t = Date.parse(r.fetched_at);
     if (!Number.isFinite(w?.utilization) || Number.isNaN(t)) continue;
-    const resetsAt = w.resets_at ? Date.parse(w.resets_at) : NaN;
+    // Old Codex rows carry resets_at as epoch seconds.
+    const resetsAt = typeof w.resets_at === 'number' ? w.resets_at * 1000 : w.resets_at ? Date.parse(w.resets_at) : NaN;
     rows.push({ t, pct: w.utilization, resetsAt: Number.isNaN(resetsAt) ? null : resetsAt });
   }
   return rows.sort((a, b) => a.t - b.t);
@@ -339,18 +347,20 @@ function attribute(points, sessions, cost) {
   };
 }
 
-// GET /api/usage/history?provider= — null for an unknown provider (route 400s).
-export function getUsageHistory(provider, now = Date.now()) {
-  if (!HISTORY_PROVIDERS.includes(provider)) return null;
-  const rows = readTotals(provider);
+// GET /api/usage/history?provider=&window= — null for an unknown provider or
+// window (route 400s).
+export function getUsageHistory(provider, now = Date.now(), windowKey = '5h') {
+  if (!HISTORY_PROVIDERS.includes(provider) || !HISTORY_WINDOWS.includes(windowKey)) return null;
+  const rows = readTotals(provider, windowKey);
   const resetsAt = rows.at(-1)?.resetsAt ?? null;
-  const estimated = provider !== 'ollama';
+  const estimated = provider !== 'ollama' && windowKey === '5h';
   // No reset time on the newest reading = no window running (0% after a reset);
   // a reset already past = that window is over (usage.mjs hasActiveWindow).
-  if (resetsAt == null || resetsAt <= now) return { provider, windowStart: null, resetsAt: null, points: [], sessions: [], estimated };
-  const start = resetsAt - WINDOW_MS;
-  const points = rows.filter((r) => r.t >= start && r.t <= resetsAt);
-  const doc = { provider, windowStart: new Date(start).toISOString(), resetsAt: new Date(resetsAt).toISOString(), estimated };
+  if (resetsAt == null || resetsAt <= now) return { provider, window: windowKey, windowStart: null, resetsAt: null, points: [], sessions: [], estimated };
+  const start = resetsAt - WINDOW_MS[windowKey];
+  let points = rows.filter((r) => r.t >= start && r.t <= resetsAt);
+  if (windowKey === '7d') points = points.filter((p, i) => Math.floor(p.t / WEEK_BUCKET_MS) !== Math.floor((points[i + 1]?.t ?? Infinity) / WEEK_BUCKET_MS));
+  const doc = { provider, window: windowKey, windowStart: new Date(start).toISOString(), resetsAt: new Date(resetsAt).toISOString(), estimated };
   if (!estimated) return { ...doc, points: points.map((p) => ({ ts: new Date(p.t).toISOString(), pct: p.pct, sessions: {} })), sessions: [] };
   return { ...doc, ...attribute(points, sessionEvents(provider, start, now), pricer()) };
 }

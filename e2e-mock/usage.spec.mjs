@@ -96,6 +96,22 @@ test('5h history re-fetches at the chosen rate only while the Usage view is show
   expect(await count(), 'no polling while the Usage view is hidden').toBe(hidden);
 });
 
+test('history window toggle: 7d re-fetches with window=7d and labels local midnights', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+  await expect(page.getByRole('figure', { name: '5h history chart' })).toBeVisible();
+  await recordFetchCalls(page);
+
+  await page.getByRole('button', { name: '7d', exact: true }).click();
+  await expect.poll(() => fetchCalls(page)).toContain('GET /api/usage/history?provider=claude&window=7d');
+  const chart = page.getByRole('figure', { name: '7d history chart' });
+  await expect(chart).toBeVisible();
+  await expect(chart.getByText(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}$/).first()).toBeVisible();
+
+  await page.getByRole('button', { name: '5h', exact: true }).click();
+  await expect(page.getByRole('figure', { name: '5h history chart' })).toBeVisible();
+});
+
 test('usage Refresh triggers GET /usage with force=1', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');

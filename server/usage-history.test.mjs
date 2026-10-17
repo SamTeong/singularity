@@ -198,3 +198,35 @@ test('no running window (newest reading has no reset) and unknown provider', () 
   assert.deepEqual(getUsageHistory('ollama', NOW).points, []);
   assert.equal(getUsageHistory('nope', NOW), null);
 });
+
+test('7d: weekly % line per provider from resets_at - 7d, no session split, one reading per 15 min', () => {
+  const DAY = 86_400_000;
+  const B = 15 * 60 * 1000;
+  const wReset = NOW + 2 * DAY; // weekly window started 5 days ago
+  const tb = Math.floor((NOW - DAY) / B) * B + 60_000; // two readings inside one 15-min bucket
+  const W = [NOW - 8 * DAY, NOW - 3 * DAY, tb, tb + 120_000];
+  jsonl(join(STATE, 'usage-snapshots.jsonl'), [40, 50, 60, 61].map((u, i) => ({ fetched_at: local(W[i]), raw: { five_hour: { utilization: 1, resets_at: new Date(RESET).toISOString() }, seven_day: { utilization: u, resets_at: new Date(wReset).toISOString() } } })));
+  const claude = getUsageHistory('claude', NOW, '7d');
+  assert.equal(claude.window, '7d');
+  assert.equal(claude.estimated, false);
+  assert.deepEqual(claude.sessions, []);
+  assert.equal(claude.windowStart, new Date(wReset - 7 * DAY).toISOString());
+  assert.deepEqual(claude.points.map((p) => p.pct), [50, 61]); // 8 days ago is outside; 60 folds into 61
+  assert.deepEqual(claude.points[1].sessions, {});
+  // 5h on the same rows still reads five_hour: its window, not the weekly one.
+  assert.equal(getUsageHistory('claude', NOW).windowStart, new Date(RESET - 5 * 3.6e6).toISOString());
+
+  // Codex weekly, with an old-style epoch-seconds resets_at.
+  jsonl(join(STATE, 'codex-usage.jsonl'), [{ fetched_at: local(W[1]), session: { utilization: 5, resets_at: new Date(RESET).toISOString() }, weekly: { utilization: 70, resets_at: Math.floor(wReset / 1000) } }]);
+  const codex = getUsageHistory('codex', NOW, '7d');
+  assert.equal(codex.estimated, false);
+  assert.deepEqual(codex.points.map((p) => p.pct), [70]);
+  assert.equal(codex.resetsAt, new Date(Math.floor(wReset / 1000) * 1000).toISOString());
+
+  jsonl(join(STATE, 'ollama-usage.jsonl'), [{ fetched_at: local(W[1]), weekly: { utilization: 96.4, resets_at: new Date(wReset).toISOString() } }]);
+  assert.deepEqual(getUsageHistory('ollama', NOW, '7d').points.map((p) => p.pct), [96.4]);
+});
+
+test('unknown window is rejected (route 400s)', () => {
+  assert.equal(getUsageHistory('claude', NOW, '1d'), null);
+});

@@ -32,7 +32,7 @@ import { getKeys, setKeys } from './keys.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, connectOllamaUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
-import { getUsageHistory, HISTORY_PROVIDERS } from './usage-history.mjs';
+import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
 import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
@@ -342,8 +342,8 @@ app.get('/usage', async (req) => getUsage({
 }));
 // Current 5h window: account % readings + estimated per-session split (usage-history.mjs).
 app.get('/usage/history', async (req, reply) => {
-  const doc = getUsageHistory(req.query.provider);
-  if (!doc) return reply.code(400).send({ ok: false, error: `provider must be one of ${HISTORY_PROVIDERS.join(', ')}` });
+  const doc = getUsageHistory(req.query.provider, Date.now(), req.query.window ?? '5h');
+  if (!doc) return reply.code(400).send({ ok: false, error: `provider must be one of ${HISTORY_PROVIDERS.join(', ')}; window one of ${HISTORY_WINDOWS.join(', ')}` });
   return doc;
 });
 app.post('/usage/ollama/connect', async (_req, reply) => {
