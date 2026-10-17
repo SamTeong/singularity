@@ -1,8 +1,10 @@
 // 5h history for the Usage view's history panel: the current 5h window's
 // account-level % readings per provider, plus an ESTIMATED per-session split.
 // Providers report only the account total, so each interval's % rise is split
-// by each session's share of the cost spent in that interval. Cost = tokens
-// priced with the usage-report skill's pricing.json (Claude: transcript
+// by each session's share of the cost spent in that interval. Claude cost =
+// Claude Code's own reported cost deltas from the statusline's
+// cost-history.jsonl; sessions with no rows there, and Codex, fall back to
+// tokens priced with the usage-report skill's pricing.json (Claude: transcript
 // message usage, Codex: rollout token_count events). Ollama has no per-session
 // data, so its series is the total line only.
 // Read-only: USAGE_SKILL_STATE history files, ~/.claude/projects, ~/.codex/sessions.
@@ -170,6 +172,26 @@ function codexFiles(since, now) {
   return out.filter((p) => mtime(p) >= since);
 }
 
+// Map sessionId -> [{t, usd}]: rises of each session's cumulative cost.total_cost_usd
+// between its statusline rows (statusline.mjs appendHistory); .1 is the older half.
+// shortcut: a session's first row in the tail counts its whole cost as one rise, so a
+// session whose earlier rows rotated out lumps them there; keep a per-session baseline if that shows.
+function claudeCostEvents() {
+  const last = new Map();
+  const out = new Map();
+  const file = join(USAGE_SKILL_STATE, 'cost-history.jsonl');
+  for (const line of [...tailLines(file + '.1'), ...tailLines(file)]) {
+    let r; try { r = JSON.parse(line); } catch { continue; }
+    const t = Date.parse(r.ts);
+    if (!r.session_id || !Number.isFinite(r.cost_usd) || Number.isNaN(t)) continue;
+    const usd = Math.max(0, r.cost_usd - (last.get(r.session_id) ?? 0));
+    last.set(r.session_id, r.cost_usd);
+    if (!out.has(r.session_id)) out.set(r.session_id, []);
+    out.get(r.session_id).push({ t, usd });
+  }
+  return out;
+}
+
 // Map sessionId -> {label, events}.
 function sessionEvents(provider, since, now) {
   const out = new Map();
@@ -185,6 +207,12 @@ function sessionEvents(provider, since, now) {
       if (r) add(id, r.cwd, r.events);
     }
     pruneCache(parseClaudeTranscript, new Set(files.map(([path]) => path)));
+    // A session with statusline rows takes its reported cost; transcripts keep only its label.
+    for (const [id, events] of claudeCostEvents()) {
+      const s = out.get(id);
+      if (s) s.events = [];
+      add(id, null, events);
+    }
   } else if (provider === 'codex') {
     const files = codexFiles(since, now);
     for (const path of files) {
@@ -233,7 +261,7 @@ function attribute(points, sessions, cost) {
       for (const [id, s] of sessions) {
         for (const e of s.events) {
           if (e.t <= prev.t || e.t > p.t) continue;
-          const c = cost(e.model, e.tok);
+          const c = e.usd ?? cost(e.model, e.tok);
           spend.set(id, (spend.get(id) ?? 0) + c);
           total += c;
         }

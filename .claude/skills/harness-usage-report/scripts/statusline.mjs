@@ -5,12 +5,13 @@
 //     ~/.agents/.harness-usage-report/state/cost-state/<session_id>.json
 // (last write per session wins ≈ final snapshot). The harness-usage-report SessionEnd
 // hook then projects that JSON into stats.csv and archives it to sessions.jsonl.
+// It also appends a deduped per-render row to state/cost-history.jsonl (appendHistory).
 //
 // Everything below the contract renders the three-line status display: model,
 // context usage bar, cost / rate limits (5h/7d) / dir, worktree, git status.
 // Invoke explicitly: `node statusline.mjs` (Node is guaranteed on PATH; shebang
 // is not honoured on Windows).
-import { mkdirSync, writeFileSync, statSync, readFileSync } from "node:fs";
+import { mkdirSync, writeFileSync, statSync, readFileSync, appendFileSync, renameSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -39,10 +40,39 @@ const sid = (g("session_id") || "").trim();
 // Guard the join: sid comes from the statusline payload — reject anything that
 // isn't hex+hyphens (≤64) so a crafted session_id can't escape stateDir via ../.
 if (sid && /^[0-9a-fA-F-]{1,64}$/.test(sid)) {
+  const file = join(stateDir, sid + ".json");
+  try {
+    appendHistory(file);
+  } catch { /* never break the status line */ }
   try {
     mkdirSync(stateDir, { recursive: true });
-    writeFileSync(join(stateDir, sid + ".json"), raw, { encoding: "utf8", mode: 0o600 });
+    writeFileSync(file, raw, { encoding: "utf8", mode: 0o600 });
   } catch { /* never break the status line */ }
+}
+
+// Per-render series: one row to cost-history.jsonl when this session's cost or
+// 5h % moved since its previous payload (the cost-state file about to be
+// overwritten holds it, so dedup never reads the jsonl). Above HISTORY_CAP the
+// file rotates to cost-history.jsonl.1, replacing the old one: at most two files.
+// shortcut: concurrent renders can race the rename and drop a few rows; fine for a history series.
+function appendHistory(file) {
+  const HISTORY_CAP = 8 * 1024 * 1024;
+  const pick = (o) => [o?.cost?.total_cost_usd ?? null, o?.rate_limits?.five_hour?.used_percentage ?? null];
+  const now = pick(d);
+  let prev = null;
+  try { prev = pick(JSON.parse(readFileSync(file, "utf8"))); } catch { /* first render or SessionEnd removed it */ }
+  if (prev && prev[0] === now[0] && prev[1] === now[1]) return;
+  const hist = join(stateRoot, "cost-history.jsonl");
+  try { if (statSync(hist).size > HISTORY_CAP) renameSync(hist, hist + ".1"); } catch { /* not there yet */ }
+  const cw = g("context_window") || {};
+  const tokens = Number.isFinite(cw.total_input_tokens) || Number.isFinite(cw.total_output_tokens)
+    ? { input: cw.total_input_tokens ?? null, output: cw.total_output_tokens ?? null }
+    : null;
+  mkdirSync(stateRoot, { recursive: true });
+  appendFileSync(hist, JSON.stringify({
+    ts: new Date().toISOString(), session_id: sid, cost_usd: now[0], tokens,
+    five_hour_pct: now[1], five_hour_resets_at: g("rate_limits", "five_hour", "resets_at") ?? null,
+  }) + "\n", { encoding: "utf8", mode: 0o600 });
 }
 
 // --- ANSI ---

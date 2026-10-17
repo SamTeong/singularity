@@ -1,13 +1,21 @@
 ---
 id: TASK-8
 title: 'Usage history: per-render Claude cost/token capture via statusline'
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-17 01:39'
+updated_date: '2026-10-17 01:44'
 labels:
   - server
 dependencies:
   - TASK-7
+modified_files:
+  - .claude/skills/harness-usage-report/scripts/statusline.mjs
+  - .claude/skills/harness-usage-report/SKILL.md
+  - .claude/skills/harness-usage-report/INSTALL.md
+  - server/usage-history.mjs
+  - server/usage-history.test.mjs
 ordinal: 8000
 ---
 
@@ -26,3 +34,9 @@ TASK-7 attributes each 5h interval to Claude sessions by re-pricing transcript t
 - [ ] #5 Unit tests cover the append dedup, rotation, and the attribution switch with fallback
 - [ ] #6 `pnpm lint && pnpm test` pass
 <!-- AC:END -->
+
+## Implementation Plan
+
+<!-- SECTION:PLAN:BEGIN -->
+1. statusline.mjs: before overwriting cost-state/<sid>.json, read the previous payload; if cost.total_cost_usd or rate_limits.five_hour.used_percentage changed (or none), appendFileSync one row {ts, session_id, cost_usd, tokens, five_hour_pct, five_hour_resets_at} to <state>/cost-history.jsonl. All in try/catch.
+<!-- SECTION:PLAN:END -->
