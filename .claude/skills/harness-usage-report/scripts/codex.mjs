@@ -698,8 +698,12 @@ function _selftest() {
   assert(linesAfterFirst > 0, "expected codex-usage.jsonl to gain lines on first ingest");
   // Record shape mirrors ollama-usage.jsonl ({fetched_at, session, weekly}) so
   // stats.mjs's generic session/weekly machinery reads both files the same way.
+  // The harness Stop hook's rows may also carry its per-turn keys.
+  const HOOK_KEYS = new Set(["session_id", "last_token_usage", "total_token_usage"]);
   const lastRec = JSON.parse(fs.readFileSync(usagePath, "utf-8").trim().split(/\r?\n/).pop());
-  assert(Object.keys(lastRec).sort().join(",") === "fetched_at,session,weekly", `unexpected codex-usage.jsonl record keys: ${Object.keys(lastRec).join(",")}`);
+  const assertRecKeys = (rec) => assert(Object.keys(rec).filter((k) => !HOOK_KEYS.has(k)).sort().join(",") === "fetched_at,session,weekly", `unexpected codex-usage.jsonl record keys: ${Object.keys(rec).join(",")}`);
+  assertRecKeys(lastRec);
+  assertRecKeys({ ...lastRec, session_id: "s1", last_token_usage: { total_tokens: 1 }, total_token_usage: { total_tokens: 9 } });
   assert(lastRec.session && lastRec.session.utilization === 15, `expected last record session 15, got ${JSON.stringify(lastRec.session)}`);
   assert(lastRec.weekly && lastRec.weekly.utilization === 15, `expected last record weekly 15, got ${JSON.stringify(lastRec.weekly)}`);
 

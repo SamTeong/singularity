@@ -93,6 +93,31 @@ test('codex: rollout token_count spend is attributed; repeated totals are not ne
   assert.equal(doc.sessions[0].label, 'proj · thread-x');
 });
 
+test('codex: Stop-hook rows split by total_token_usage deltas; rollout events outside them are the fallback; old rows still chart', () => {
+  // Old-shape rows (no session_id / token keys, one daemon row with plan) give the totals.
+  // The hook rows here carry no 5h gauge so they add no points; real ones do.
+  const hook = (ms, input) => ({ fetched_at: local(ms), session: null, weekly: null, session_id: 'thread-x', last_token_usage: null, total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input } });
+  jsonl(join(STATE, 'codex-usage.jsonl'), [
+    { fetched_at: local(T[0]), session: { utilization: 5, resets_at: new Date(RESET).toISOString() } },
+    hook(T[0] + 61_000, 1000), // baseline: 1000 tokens of earlier spend, not credited
+    { fetched_at: local(T[1]), session: { utilization: 15, resets_at: new Date(RESET).toISOString() }, weekly: null, plan: 'pro' },
+    hook(T[1] + 61_000, 1300), // +300 in interval 2; the rollout shows only 100 of it
+    { fetched_at: local(T[2]), session: { utilization: 25, resets_at: new Date(RESET).toISOString() } },
+  ]);
+  const d = new Date(T[0]);
+  const dir = join(scratch, 'codex', 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
+  const tc = (ms, total) => ({ timestamp: new Date(ms).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: total }, last_token_usage: { input_tokens: 100 } } } });
+  const meta = (id) => [{ timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id, cwd: 'C:\\proj' } }, { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-luna' } }];
+  // x: one turn before its first row (fallback), one covered by its rows, one after its last row (fallback).
+  jsonl(join(dir, 'rollout-x.jsonl'), [...meta('thread-x'), tc(T[0] + 60_000, 1), tc(T[1] + 60_000, 2), tc(T[1] + 120_000, 3)]);
+  jsonl(join(dir, 'rollout-y.jsonl'), [...meta('thread-y'), tc(T[0] + 90_000, 1), tc(T[1] + 90_000, 2)]);
+  const doc = getUsageHistory('codex', NOW);
+  assert.deepEqual(doc.points.map((p) => p.pct), [5, 15, 25]);
+  assert.deepEqual(doc.points[1].sessions, { 'thread-x': 5, 'thread-y': 5, _unattributed: 5 });
+  // x = 300 (row delta) + 100 (after its last row) vs y 100. Rollout only: 6.67/3.33; no fallback: 7.5/2.5.
+  assert.deepEqual(doc.points[2].sessions, { 'thread-x': 13, 'thread-y': 7, _unattributed: 5 });
+});
+
 test('ollama: total line only, flagged not estimated', () => {
   jsonl(join(STATE, 'ollama-usage.jsonl'), [{ fetched_at: local(T[2]), session: { utilization: 12.5, resets_at: new Date(RESET).toISOString() } }]);
   const doc = getUsageHistory('ollama', NOW);

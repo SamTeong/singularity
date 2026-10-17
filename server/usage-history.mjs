@@ -5,7 +5,8 @@
 // Claude Code's own reported cost deltas from the statusline's
 // cost-history.jsonl; sessions with no rows there, and Codex, fall back to
 // tokens priced with the usage-report skill's pricing.json (Claude: transcript
-// message usage, Codex: rollout token_count events). Ollama has no per-session
+// message usage; Codex: the harness Stop hook's per-turn token rows, else rollout
+// token_count events). Ollama has no per-session
 // data, so its series is the total line only.
 // Read-only: USAGE_SKILL_STATE history files, ~/.claude/projects, ~/.codex/sessions.
 import { readFileSync, readdirSync, statSync, openSync, fstatSync, readSync, closeSync } from 'node:fs';
@@ -196,6 +197,28 @@ function claudeCostEvents() {
   return out;
 }
 
+// Map sessionId -> {first, last, events: [{t, tok}]} from the Codex Stop hook's rows
+// in codex-usage.jsonl: rises of a session's running total_token_usage between its
+// rows. The first row read is only a baseline, as in claudeCostEvents. Rows without
+// session_id (the daemon's, codex.mjs's, older hook rows) only feed the totals.
+function codexTurnEvents() {
+  const out = new Map();
+  for (const line of tailLines(join(USAGE_SKILL_STATE, 'codex-usage.jsonl'))) {
+    let r; try { r = JSON.parse(line); } catch { continue; }
+    const u = r.total_token_usage;
+    const t = Date.parse(r.fetched_at);
+    if (!r.session_id || !Number.isFinite(u?.total_tokens) || Number.isNaN(t)) continue;
+    const s = out.get(r.session_id);
+    if (!s) { out.set(r.session_id, { first: t, last: t, base: u, events: [] }); continue; }
+    const d = (k) => Math.max(0, (u[k] ?? 0) - (s.base[k] ?? 0));
+    const cached = d('cached_input_tokens'); // input includes cached, as in parseCodexRollout
+    s.events.push({ t, tok: [Math.max(0, d('input_tokens') - cached), d('output_tokens'), cached, 0] });
+    s.base = u;
+    s.last = t;
+  }
+  return out;
+}
+
 // Map sessionId -> {label, events}.
 function sessionEvents(provider, since, now) {
   const out = new Map();
@@ -218,12 +241,23 @@ function sessionEvents(provider, since, now) {
       add(id, null, events);
     }
   } else if (provider === 'codex') {
+    const turns = codexTurnEvents();
+    const models = new Map();
     const files = codexFiles(since, now);
+    // A session's hook rows cover its spend from its first row to its last; rollout
+    // events before the first (baseline) or after the last (no Stop row yet) are the
+    // per-turn fallback. +1s: fetched_at has whole-second resolution.
     for (const path of files) {
       const r = parseCached(path, parseCodexRollout);
-      if (r) add(r.id ?? basename(path, '.jsonl'), r.cwd, r.events);
+      if (!r) continue;
+      const id = r.id ?? basename(path, '.jsonl');
+      const s = turns.get(id);
+      models.set(id, r.events.at(-1)?.model ?? '');
+      add(id, r.cwd, s ? r.events.filter((e) => e.t < s.first + 1000 || e.t >= s.last + 1000) : r.events);
     }
     pruneCache(parseCodexRollout, new Set(files));
+    // Rows carry no model: price them at the session's rollout model, else the default.
+    for (const [id, s] of turns) add(id, null, s.events.map((e) => ({ ...e, model: models.get(id) ?? '' })));
   }
   return out;
 }
