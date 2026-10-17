@@ -11,6 +11,7 @@ import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { LineChart } from '@mui/x-charts/LineChart';
+import { useDrawingArea, useXScale, useYScale } from '@mui/x-charts/hooks';
 
 // Seconds between re-fetches; 'off' fetches only on open, tab change or view
 // return. The daemon samples claude/codex every 5s and ollama every 60s, so a
@@ -31,6 +32,27 @@ const stepTicks = (min, max, step) => {
   for (let t = Math.ceil((min - off) / step) * step + off; t <= max; t += step) ticks.push(new Date(t));
   return ticks;
 };
+
+// Highest total point; `>=` keeps the most recent on ties.
+const peakPoint = (points) => points.reduce((best, p) => (!best || p.pct >= best.pct ? p : best), null);
+
+// Dot + caption at the peak point. Flips below near the top edge and anchors inward near the side edges.
+function PeakLabel({ point }) {
+  const xs = useXScale();
+  const ys = useYScale();
+  const { left, top, width } = useDrawingArea();
+  const x = xs(new Date(point.ts));
+  const y = ys(point.pct);
+  const text = `${Math.round(point.pct)}%`;
+  const below = y - top < 20;
+  const anchor = x - left < 20 ? 'start' : left + width - x < 20 ? 'end' : 'middle';
+  return (
+    <g data-testid="usage-peak">
+      <circle cx={x} cy={y} r={3} style={{ fill: 'var(--mui-palette-primary-main)' }} />
+      <text x={x} y={below ? y + 15 : y - 8} textAnchor={anchor} fontSize={11} style={{ fill: 'var(--mui-palette-text-primary)' }}>{text}</text>
+    </g>
+  );
+}
 
 // Current 5h or 7d window per provider (GET /api/usage/history). 5h: Claude/Codex
 // stack an estimated per-session split; Ollama has no per-session data, so it is
@@ -109,7 +131,9 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
                 }]}
                 yAxis={[{ min: 0, max: 100, tickInterval: [0, 20, 40, 60, 80, 100], valueFormatter: (v) => `${v}%` }]}
                 grid={{ horizontal: true, vertical: true }}
-              />
+              >
+                <PeakLabel point={peakPoint(d.points)} />
+              </LineChart>
             </Box>
           )}
         </Box>

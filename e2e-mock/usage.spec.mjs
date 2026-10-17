@@ -107,6 +107,7 @@ test('history window toggle: 7d re-fetches with window=7d and labels local midni
   const chart = page.getByRole('figure', { name: '7d history chart' });
   await expect(chart).toBeVisible();
   await expect(chart.getByText(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}$/).first()).toBeVisible();
+  await expect(chart.getByTestId('usage-peak')).toHaveText('46%');
 
   await page.getByRole('button', { name: '5h', exact: true }).click();
   await expect(page.getByRole('figure', { name: '5h history chart' })).toBeVisible();
