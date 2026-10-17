@@ -209,10 +209,13 @@ function codexTurnEvents() {
     const t = Date.parse(r.fetched_at);
     if (!r.session_id || !Number.isFinite(u?.total_tokens) || Number.isNaN(t)) continue;
     const s = out.get(r.session_id);
-    if (!s) { out.set(r.session_id, { first: t, last: t, base: u, events: [] }); continue; }
+    if (!s) { out.set(r.session_id, { first: t, last: t, base: u, events: [], mixed: false }); continue; }
+    // A falling total means rows from several threads share this id (early hook rows
+    // keyed sub-agents by the root id) or a reset: the session falls back to its rollout.
+    if (u.total_tokens < s.base.total_tokens) s.mixed = true;
     const d = (k) => Math.max(0, (u[k] ?? 0) - (s.base[k] ?? 0));
     const cached = d('cached_input_tokens'); // input includes cached, as in parseCodexRollout
-    s.events.push({ t, tok: [Math.max(0, d('input_tokens') - cached), d('output_tokens'), cached, 0] });
+    s.events.push({ t, tok: [Math.max(0, d('input_tokens') - cached), d('output_tokens'), cached, d('cache_write_input_tokens')] });
     s.base = u;
     s.last = t;
   }
@@ -242,7 +245,6 @@ function sessionEvents(provider, since, now) {
     }
   } else if (provider === 'codex') {
     const turns = codexTurnEvents();
-    const models = new Map();
     const files = codexFiles(since, now);
     // A session's hook rows cover its spend from its first row to its last; rollout
     // events before the first (baseline) or after the last (no Stop row yet) are the
@@ -252,12 +254,16 @@ function sessionEvents(provider, since, now) {
       if (!r) continue;
       const id = r.id ?? basename(path, '.jsonl');
       const s = turns.get(id);
-      models.set(id, r.events.at(-1)?.model ?? '');
-      add(id, r.cwd, s ? r.events.filter((e) => e.t < s.first + 1000 || e.t >= s.last + 1000) : r.events);
+      if (!s || s.mixed) { add(id, r.cwd, r.events); continue; }
+      add(id, r.cwd, r.events.filter((e) => e.t < s.first + 1000 || e.t >= s.last + 1000));
+      // Rows carry no model: price them at the session's rollout model.
+      add(id, null, s.events.map((e) => ({ ...e, model: r.events.at(-1)?.model ?? '' })));
     }
     pruneCache(parseCodexRollout, new Set(files));
-    // Rows carry no model: price them at the session's rollout model, else the default.
-    for (const [id, s] of turns) add(id, null, s.events.map((e) => ({ ...e, model: models.get(id) ?? '' })));
+    // shortcut: rows whose id joins no rollout in codexFiles' day range are dropped (a
+    // wrongly keyed root-id row would double-count); widen the scan if old sessions matter.
+    // shortcut: a root-id row set whose totals only rise looks like one thread; it is
+    // not detected. Such rows exist only from harness 4f4826f to e4c4479.
   }
   return out;
 }

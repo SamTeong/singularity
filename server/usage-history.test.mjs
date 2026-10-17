@@ -118,6 +118,21 @@ test('codex: Stop-hook rows split by total_token_usage deltas; rollout events ou
   assert.deepEqual(doc.points[2].sessions, { 'thread-x': 13, 'thread-y': 7, _unattributed: 5 });
 });
 
+test('codex: hook rows that join no rollout, or whose totals fall (mixed threads), fall back to rollout data', () => {
+  // Reuses rollout-x / rollout-y above. thread-x rows as before; a root-id row pair (an
+  // early hook keyed sub-agents by the root) joins no rollout; thread-y's totals fall.
+  const hook = (ms, id, input) => ({ fetched_at: local(ms), session: null, weekly: null, session_id: id, last_token_usage: null, total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input } });
+  const gauge = (ms, u) => ({ fetched_at: local(ms), session: { utilization: u, resets_at: new Date(RESET).toISOString() } });
+  jsonl(join(STATE, 'codex-usage.jsonl'), [
+    gauge(T[0], 5), hook(T[0] + 61_000, 'thread-x', 1000), hook(T[0] + 70_000, 'root-id', 0), hook(T[0] + 91_000, 'thread-y', 1000),
+    gauge(T[1], 15), hook(T[1] + 61_000, 'thread-x', 1300), hook(T[1] + 80_000, 'root-id', 5000), hook(T[1] + 91_000, 'thread-y', 500),
+    gauge(T[2], 25),
+  ]);
+  const doc = getUsageHistory('codex', NOW);
+  // Same as the test above: no 'root-id' series, and y priced from its rollout (100 + 100).
+  assert.deepEqual(doc.points[2].sessions, { 'thread-x': 13, 'thread-y': 7, _unattributed: 5 });
+});
+
 test('ollama: total line only, flagged not estimated', () => {
   jsonl(join(STATE, 'ollama-usage.jsonl'), [{ fetched_at: local(T[2]), session: { utilization: 12.5, resets_at: new Date(RESET).toISOString() } }]);
   const doc = getUsageHistory('ollama', NOW);
