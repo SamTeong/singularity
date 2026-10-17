@@ -11,7 +11,7 @@
 // context usage bar, cost / rate limits (5h/7d) / dir, worktree, git status.
 // Invoke explicitly: `node statusline.mjs` (Node is guaranteed on PATH; shebang
 // is not honoured on Windows).
-import { mkdirSync, writeFileSync, statSync, readFileSync, appendFileSync, renameSync } from "node:fs";
+import { mkdirSync, writeFileSync, statSync, readFileSync, appendFileSync, renameSync, rmdirSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -55,8 +55,15 @@ if (sid && /^[0-9a-fA-F-]{1,64}$/.test(sid)) {
 // overwritten holds it, so dedup never reads the jsonl). Above HISTORY_CAP the
 // file rotates to cost-history.jsonl.1, replacing the old one: at most two files.
 // The cap matches the daemon's 2 MB tail read (usage-history.mjs), so both files are read whole.
-// shortcut: two renders rotating at once can rename a fresh 1-row file over .1 and lose the older
-// half; a failed append is skipped until the value moves again. Both rare; use a lock if they show.
+// A mkdir lock serialises check+rename so a second render can't rename the fresh file over .1;
+// a render that loses the lock skips rotation, and a stale lock (>10s) is reclaimed.
+function rotateHistory(hist, cap) {
+  const lock = hist + ".lock";
+  try { if (Date.now() - statSync(lock).mtimeMs > 10_000) rmdirSync(lock); } catch { /* no lock */ }
+  try { mkdirSync(lock); } catch { return; }
+  try { if (statSync(hist).size > cap) renameSync(hist, hist + ".1"); } catch { /* not there yet, or rename failed */ }
+  finally { try { rmdirSync(lock); } catch { /* already gone */ } }
+}
 function appendHistory(file) {
   const HISTORY_CAP = 2 * 1024 * 1024;
   const pick = (o) => [o?.cost?.total_cost_usd ?? null, o?.rate_limits?.five_hour?.used_percentage ?? null];
@@ -65,7 +72,10 @@ function appendHistory(file) {
   try { prev = pick(JSON.parse(readFileSync(file, "utf8"))); } catch { /* first render or SessionEnd removed it */ }
   if (prev && prev[0] === now[0] && prev[1] === now[1]) return;
   const hist = join(stateRoot, "cost-history.jsonl");
-  try { if (statSync(hist).size > HISTORY_CAP) renameSync(hist, hist + ".1"); } catch { /* not there yet */ }
+  rotateHistory(hist, HISTORY_CAP);
+  let size = 0;
+  try { size = statSync(hist).size; } catch { /* not there yet */ }
+  if (size > 2 * HISTORY_CAP) return; // rotation keeps failing: skip the append, keep the cap
   const cw = g("context_window") || {};
   const tokens = Number.isFinite(cw.total_input_tokens) || Number.isFinite(cw.total_output_tokens)
     ? { input: cw.total_input_tokens ?? null, output: cw.total_output_tokens ?? null }

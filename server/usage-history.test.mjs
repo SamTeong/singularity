@@ -30,7 +30,7 @@ const RESET = NOW + 3.6e6; // window started 4h ago
 const T = [NOW - 3 * 3.6e6, NOW - 2 * 3.6e6, NOW - 3.6e6]; // three readings in the window
 mkdirSync(STATE, { recursive: true });
 // $1/MTok on input only keeps the cost shares easy to read.
-writeFileSync(join(STATE, 'pricing.json'), JSON.stringify({ base: { opus: [1, 0, 0, 0], 'gpt-6': [1, 0, 0, 0] }, default_key: 'opus' }));
+writeFileSync(join(STATE, 'pricing.json'), JSON.stringify({ base: { opus: [1, 0, 0, 0], 'gpt-6-pro': [2, 0, 0, 0], 'gpt-6': [1, 0, 0, 0] }, default_key: 'opus' }));
 
 test('claude: each interval rise splits by session cost share; first reading stays unattributed', () => {
   jsonl(join(STATE, 'usage-snapshots.jsonl'), [
@@ -39,7 +39,7 @@ test('claude: each interval rise splits by session cost share; first reading sta
     ...[10, 20, 30].map((u, i) => ({ fetched_at: local(T[i]), raw: { five_hour: { utilization: u, resets_at: new Date(RESET).toISOString() } } })),
   ]);
   const proj = join(scratch, 'claude', 'projects', 'C--repo');
-  const msg = (id, ms, tokens) => ({ type: 'assistant', timestamp: new Date(ms).toISOString(), cwd: 'C:\\repo', message: { id, model: 'claude-opus-5-5', usage: { input_tokens: tokens } } });
+  const msg = (id, ms, tokens) => ({ type: 'assistant', timestamp: new Date(ms).toISOString(), cwd: join(scratch, 'repo'), message: { id, model: 'claude-opus-5-5', usage: { input_tokens: tokens } } });
   // Interval 1: A (m1, streamed as a partial line then a complete one) and B
   // (via a subagent transcript) spend equally. Interval 2: only A spends.
   jsonl(join(proj, 'sess-a.jsonl'), [msg('m1', T[0] + 60_000, 50), msg('m1', T[0] + 61_000, 100), msg('m2', T[1] + 60_000, 100)]);
@@ -81,12 +81,12 @@ test('codex: rollout token_count spend is attributed; repeated totals are not ne
   const X = '01a14896-0000-7000-8000-0000thread-x';
   const Y = '01a14896-0000-7000-8000-0000thread-y';
   jsonl(join(dir, 'rollout-x.jsonl'), [
-    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: X, cwd: 'C:\\proj' } },
+    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: X, cwd: join(scratch, 'proj') } },
     { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-luna' } },
     tc(T[0] + 60_000, 100), tc(T[0] + 61_000, 100),
   ]);
   jsonl(join(dir, 'rollout-y.jsonl'), [
-    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: Y, cwd: 'C:\\proj' } },
+    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: Y, cwd: join(scratch, 'proj') } },
     { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-luna' } },
     tc(T[0] + 90_000, 100),
   ]);
@@ -111,7 +111,7 @@ test('codex: Stop-hook rows split by total_token_usage deltas; rollout events ou
   const d = new Date(T[0]);
   const dir = join(scratch, 'codex', 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
   const tc = (ms, total) => ({ timestamp: new Date(ms).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: total }, last_token_usage: { input_tokens: 100 } } } });
-  const meta = (id) => [{ timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id, cwd: 'C:\\proj' } }, { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-luna' } }];
+  const meta = (id) => [{ timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id, cwd: join(scratch, 'proj') } }, { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-luna' } }];
   // x: one turn before its first row (fallback), one covered by its rows, one after its last row (fallback).
   jsonl(join(dir, 'rollout-x.jsonl'), [...meta('thread-x'), tc(T[0] + 60_000, 1), tc(T[1] + 60_000, 2), tc(T[1] + 120_000, 3)]);
   jsonl(join(dir, 'rollout-y.jsonl'), [...meta('thread-y'), tc(T[0] + 90_000, 1), tc(T[1] + 90_000, 2)]);
@@ -145,7 +145,9 @@ test('ollama: total line only, flagged not estimated', () => {
   assert.deepEqual(doc.points.map((p) => p.pct), [12.5]);
 });
 
-test('claude: sessions with statusline cost rows split by reported cost deltas; others fall back to transcripts', () => {
+test('claude: sessions with statusline cost rows split by reported cost deltas; others fall back to transcripts', (t) => {
+  // Clean up even when an assertion throws, so later tests never see these rows.
+  t.after(() => { rmSync(join(STATE, 'cost-history.jsonl.1'), { force: true }); rmSync(join(STATE, 'cost-history.jsonl'), { force: true }); });
   jsonl(join(STATE, 'usage-snapshots.jsonl'), [10, 20, 30].map((u, i) => ({ fetched_at: local(T[i]), raw: { five_hour: { utilization: u, resets_at: new Date(RESET).toISOString() } } })));
   // sess-a reports $0.0003 in interval 1 (its transcript prices it $0.0001, like
   // sess-b's), then $0.0001 in interval 2. sess-b has no rows: transcript $0.0001.
@@ -160,8 +162,6 @@ test('claude: sessions with statusline cost rows split by reported cost deltas; 
   assert.deepEqual(doc.points[1].sessions, { 'sess-a': 7.5, 'sess-b': 2.5, 'sess-c': 0, _unattributed: 10 });
   assert.deepEqual(doc.points[2].sessions, { 'sess-a': 12.5, 'sess-b': 2.5, 'sess-c': 5, _unattributed: 10 });
   assert.equal(doc.sessions[0].label, 'repo · sess-a');
-  rmSync(join(STATE, 'cost-history.jsonl.1'));
-  rmSync(join(STATE, 'cost-history.jsonl'));
 });
 
 test('claude: statusline 5h % rows add in-window points; off-window rows ignored; equal readings collapse', () => {
@@ -187,6 +187,30 @@ test('claude: transcript spend before a session\'s first cost row is kept; cost 
   assert.deepEqual(doc.points[1].sessions, { 'sess-a': 5, 'sess-b': 5, _unattributed: 10 });
   assert.deepEqual(doc.points[2].sessions, { 'sess-a': 15, 'sess-b': 5, _unattributed: 10 });
   rmSync(join(STATE, 'cost-history.jsonl'));
+});
+
+test('codex: hook rows are priced at the rollout model active at their time, not its final model', () => {
+  rmSync(join(scratch, 'codex'), { recursive: true, force: true });
+  const hook = (ms, input) => ({ fetched_at: local(ms), session: null, weekly: null, session_id: 'thread-m', last_token_usage: null, total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input } });
+  const gauge = (ms, u) => ({ fetched_at: local(ms), session: { utilization: u, resets_at: new Date(RESET).toISOString() } });
+  jsonl(join(STATE, 'codex-usage.jsonl'), [gauge(T[0], 5), hook(T[0] + 61_000, 1000), gauge(T[1], 15), hook(T[0] + 100_000, 1300), gauge(T[2], 25)]);
+  const d = new Date(T[0]);
+  const dir = join(scratch, 'codex', 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
+  const iso = (ms) => new Date(ms).toISOString();
+  const tc = (ms, total) => ({ timestamp: iso(ms), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: total }, last_token_usage: { input_tokens: 100 } } } });
+  const ctx = (ms, model) => ({ timestamp: iso(ms), type: 'turn_context', payload: { model } });
+  // m: gpt-6-pro ($2/MTok) for its first turn, switches to gpt-6-luna ($1) after; the +300 hook delta is a pro-era turn.
+  jsonl(join(dir, 'rollout-m.jsonl'), [
+    { timestamp: iso(T[0]), type: 'session_meta', payload: { id: 'thread-m', cwd: join(scratch, 'proj') } },
+    ctx(T[0], 'gpt-6-pro'), tc(T[0] + 65_000, 1), ctx(T[1] + 10_000, 'gpt-6-luna'), tc(T[1] + 60_000, 2),
+  ]);
+  jsonl(join(dir, 'rollout-n.jsonl'), [
+    { timestamp: iso(T[0]), type: 'session_meta', payload: { id: 'thread-n', cwd: join(scratch, 'proj') } },
+    ctx(T[0], 'gpt-6-luna'), tc(T[0] + 90_000, 1),
+  ]);
+  const doc = getUsageHistory('codex', NOW);
+  // m 300 tok at $2 = 600 vs n 100 at $1: 8.57/1.43. Final-model pricing would give 7.5/2.5.
+  assert.deepEqual(doc.points[1].sessions, { 'thread-m': 8.57, 'thread-n': 1.43, _unattributed: 5 });
 });
 
 test('statusline: appends a row only when cost or 5h % moves; rotates to .1 above 2 MB', () => {

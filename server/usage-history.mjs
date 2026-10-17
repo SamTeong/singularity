@@ -328,8 +328,9 @@ function sessionEvents(provider, since, now, costPoints, files) {
       const s = turns.get(id);
       if (!s || s.mixed) { add(id, r.cwd, r.events); continue; }
       add(id, r.cwd, r.events.filter((e) => e.t < s.first + 1000 || e.t >= s.last + 1000));
-      // Rows carry no model: price them at the session's rollout model.
-      add(id, null, s.events.map((e) => ({ ...e, model: r.events.at(-1)?.model ?? '' })));
+      // Rows carry no model: price each at the rollout model active at its time.
+      const modelAt = (t) => (r.events.findLast((x) => x.t <= t) ?? r.events[0])?.model ?? '';
+      add(id, null, s.events.map((e) => ({ ...e, model: modelAt(e.t) })));
     }
     pruneCache(parseCodexRollout, new Set(files.map(([path]) => path)));
     // shortcut: rows whose id joins no rollout in codexFiles' day range are dropped (a

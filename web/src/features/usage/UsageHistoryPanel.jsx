@@ -12,6 +12,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { LineChart } from '@mui/x-charts/LineChart';
 import { useDrawingArea, useXScale, useYScale } from '@mui/x-charts/hooks';
+import { stepTicks } from './stepTicks.mjs';
 
 // Seconds between re-fetches; 'off' fetches only on open, tab change or view
 // return. The daemon samples claude/codex every 5s and ollama every 60s, so a
@@ -24,14 +25,6 @@ const dayLabel = (d) => `${d.toLocaleDateString([], { weekday: 'short' })} ${d.g
 const HOUR = 3.6e6;
 // Grid step per window: 5h every 30 min (labels on the hour), 7d every 6h (labels at local midnight).
 const STEP = { '5h': HOUR / 2, '7d': 6 * HOUR };
-// Ticks every `step` ms, aligned to local time via the zone offset at `min`.
-// shortcut: a DST change inside the window shifts later ticks by the DST delta; re-read the offset per tick if that matters.
-const stepTicks = (min, max, step) => {
-  const off = new Date(min).getTimezoneOffset() * 60_000;
-  const ticks = [];
-  for (let t = Math.ceil((min - off) / step) * step + off; t <= max; t += step) ticks.push(new Date(t));
-  return ticks;
-};
 
 // Highest total point; `>=` keeps the most recent on ties.
 const peakPoint = (points) => points.reduce((best, p) => (!best || p.pct >= best.pct ? p : best), null);

@@ -1,9 +1,11 @@
 ---
 id: TASK-12
 title: Resolve confirmed issues from usage history pre-push review
-status: To Do
-assignee: []
+status: In Progress
+assignee:
+  - '@claude'
 created_date: '2026-10-17 07:19'
+updated_date: '2026-10-17 08:43'
 labels: []
 dependencies: []
 type: task
