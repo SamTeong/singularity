@@ -75,16 +75,23 @@ function parseCached(path, parse) {
   if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.result;
   let content; try { content = readFileSync(path, 'utf8'); } catch { return null; }
   const result = parse(content);
-  cache.set(path, { mtimeMs: st.mtimeMs, size: st.size, result });
+  cache.set(path, { mtimeMs: st.mtimeMs, size: st.size, parse, result });
   return result;
+}
+
+// Drop this parser's entries for files that left the window or were deleted.
+// shortcut: a changed file is still re-read whole; parse only the appended tail if large transcripts make polls slow.
+function pruneCache(parse, keep) {
+  for (const [path, hit] of cache) if (hit.parse === parse && !keep.has(path)) cache.delete(path);
 }
 
 // tok = [input, output, cacheRead, cacheWrite], the pricing.json rate order.
 // One API response spans several transcript lines repeating the same usage, so
-// dedupe on message.id.
+// dedupe on message.id. The last line wins: a rare early line carries partial
+// usage (output_tokens 0) that a later line completes.
 function parseClaudeTranscript(content) {
   const events = [];
-  const seen = new Set();
+  const seen = new Map(); // message.id -> index in events
   let cwd = null;
   for (const line of content.split('\n')) {
     if (!line) continue;
@@ -93,12 +100,14 @@ function parseClaudeTranscript(content) {
     let o; try { o = JSON.parse(line); } catch { continue; }
     const m = o.message;
     const u = m?.usage;
-    if (!u || (m.id && seen.has(m.id))) continue;
-    if (m.id) seen.add(m.id);
-    events.push({
+    if (!u) continue;
+    const e = {
       t: Date.parse(o.timestamp), model: m.model ?? '',
       tok: [u.input_tokens ?? 0, u.output_tokens ?? 0, u.cache_read_input_tokens ?? 0, u.cache_creation_input_tokens ?? 0],
-    });
+    };
+    if (m.id && seen.has(m.id)) { events[seen.get(m.id)] = { ...e, t: events[seen.get(m.id)].t }; continue; }
+    if (m.id) seen.set(m.id, events.length);
+    events.push(e);
   }
   return { cwd, events };
 }
@@ -170,15 +179,19 @@ function sessionEvents(provider, since, now) {
     out.set(id, s);
   };
   if (provider === 'claude') {
-    for (const [path, id] of claudeFiles(since)) {
+    const files = claudeFiles(since);
+    for (const [path, id] of files) {
       const r = parseCached(path, parseClaudeTranscript);
       if (r) add(id, r.cwd, r.events);
     }
+    pruneCache(parseClaudeTranscript, new Set(files.map(([path]) => path)));
   } else if (provider === 'codex') {
-    for (const path of codexFiles(since, now)) {
+    const files = codexFiles(since, now);
+    for (const path of files) {
       const r = parseCached(path, parseCodexRollout);
       if (r) add(r.id ?? basename(path, '.jsonl'), r.cwd, r.events);
     }
+    pruneCache(parseCodexRollout, new Set(files));
   }
   return out;
 }
@@ -206,7 +219,15 @@ function attribute(points, sessions, cost) {
   const rows = points.map((p, i) => {
     if (i > 0) {
       const prev = points[i - 1];
-      const rise = Math.max(0, p.pct - prev.pct);
+      const rise = p.pct - prev.pct;
+      if (rise < 0) {
+        // A drop (provider rounding or correction): shrink every share in
+        // proportion, since the stack equalled prev.pct.
+        const f = prev.pct > 0 ? p.pct / prev.pct : 0;
+        for (const [id, v] of cum) cum.set(id, v * f);
+        unattributed *= f;
+        return { ts: p.t, pct: p.pct, shares: new Map(cum), unattributed };
+      }
       const spend = new Map();
       let total = 0;
       for (const [id, s] of sessions) {
@@ -251,11 +272,12 @@ export function getUsageHistory(provider, now = Date.now()) {
   const rows = readTotals(provider);
   const resetsAt = rows.at(-1)?.resetsAt ?? null;
   const estimated = provider !== 'ollama';
-  // No reset time on the newest reading = no window running (0% after a reset).
-  if (resetsAt == null) return { provider, windowStart: null, resetsAt: null, points: [], sessions: [], estimated };
+  // No reset time on the newest reading = no window running (0% after a reset);
+  // a reset already past = that window is over (usage.mjs hasActiveWindow).
+  if (resetsAt == null || resetsAt <= now) return { provider, windowStart: null, resetsAt: null, points: [], sessions: [], estimated };
   const start = resetsAt - WINDOW_MS;
   const points = rows.filter((r) => r.t >= start && r.t <= resetsAt);
   const doc = { provider, windowStart: new Date(start).toISOString(), resetsAt: new Date(resetsAt).toISOString(), estimated };
   if (!estimated) return { ...doc, points: points.map((p) => ({ ts: new Date(p.t).toISOString(), pct: p.pct, sessions: {} })), sessions: [] };
-  return { ...doc, ...attribute(points, sessionEvents(provider, start, Math.min(now, resetsAt)), pricer()) };
+  return { ...doc, ...attribute(points, sessionEvents(provider, start, now), pricer()) };
 }

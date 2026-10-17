@@ -38,21 +38,36 @@ test('claude: each interval rise splits by session cost share; first reading sta
   ]);
   const proj = join(scratch, 'claude', 'projects', 'C--repo');
   const msg = (id, ms, tokens) => ({ type: 'assistant', timestamp: new Date(ms).toISOString(), cwd: 'C:\\repo', message: { id, model: 'claude-opus-5-5', usage: { input_tokens: tokens } } });
-  const a = msg('m1', T[0] + 60_000, 100);
-  // Interval 1: only A spends (a duplicate content-block line must not double it).
-  // Interval 2: A and B (via a subagent transcript) spend equally.
-  jsonl(join(proj, 'sess-a.jsonl'), [a, a, msg('m2', T[1] + 60_000, 100)]);
-  jsonl(join(proj, 'sess-b', 'subagents', 'agent-1.jsonl'), [msg('m3', T[1] + 120_000, 100)]);
+  // Interval 1: A (m1, streamed as a partial line then a complete one) and B
+  // (via a subagent transcript) spend equally. Interval 2: only A spends.
+  jsonl(join(proj, 'sess-a.jsonl'), [msg('m1', T[0] + 60_000, 50), msg('m1', T[0] + 61_000, 100), msg('m2', T[1] + 60_000, 100)]);
+  jsonl(join(proj, 'sess-b', 'subagents', 'agent-1.jsonl'), [msg('m3', T[0] + 120_000, 100)]);
 
   const doc = getUsageHistory('claude', NOW);
   assert.equal(doc.estimated, true);
   assert.equal(doc.resetsAt, new Date(RESET).toISOString());
   assert.equal(doc.points.length, 3);
   assert.deepEqual(doc.points.map((p) => p.pct), [10, 20, 30]);
+  // 50/50 only if m1 counts once, at its last line's usage:
+  // no dedupe gives 6/4, first-line-wins 3.33/6.67.
+  assert.deepEqual(doc.points[1].sessions, { 'sess-a': 5, 'sess-b': 5, _unattributed: 10 });
   assert.deepEqual(doc.points[2].sessions, { 'sess-a': 15, 'sess-b': 5, _unattributed: 10 });
-  assert.deepEqual(doc.points[1].sessions, { 'sess-a': 10, 'sess-b': 0, _unattributed: 10 });
   assert.equal(doc.sessions[0].label, 'repo · sess-a');
   assert.equal(doc.sessions.at(-1).id, '_unattributed');
+});
+
+test('claude: a % drop scales every share so the stack still sums to the account %', () => {
+  // Reuses the transcripts above: interval 1 splits 20 points 10/10.
+  jsonl(join(STATE, 'usage-snapshots.jsonl'), [10, 30, 15].map((u, i) => ({ fetched_at: local(T[i]), raw: { five_hour: { utilization: u, resets_at: new Date(RESET).toISOString() } } })));
+  const doc = getUsageHistory('claude', NOW);
+  assert.deepEqual(doc.points[2].sessions, { 'sess-a': 5, 'sess-b': 5, _unattributed: 5 });
+});
+
+test('claude: a window whose reset has passed is not charted as current', () => {
+  jsonl(join(STATE, 'usage-snapshots.jsonl'), [{ fetched_at: local(T[0]), raw: { five_hour: { utilization: 40, resets_at: new Date(NOW - 60_000).toISOString() } } }]);
+  const doc = getUsageHistory('claude', NOW);
+  assert.deepEqual(doc.points, []);
+  assert.equal(doc.resetsAt, null);
 });
 
 test('codex: rollout token_count spend is attributed; repeated totals are not new spend', () => {
@@ -65,8 +80,14 @@ test('codex: rollout token_count spend is attributed; repeated totals are not ne
     { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-luna' } },
     tc(T[0] + 60_000, 100), tc(T[0] + 61_000, 100),
   ]);
+  jsonl(join(dir, 'rollout-y.jsonl'), [
+    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: 'thread-y', cwd: 'C:\\proj' } },
+    { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6-luna' } },
+    tc(T[0] + 90_000, 100),
+  ]);
   const doc = getUsageHistory('codex', NOW);
-  assert.deepEqual(doc.points[1].sessions, { 'thread-x': 10, _unattributed: 5 });
+  // 50/50 only if x's repeated total is skipped; counting it gives 6.67/3.33.
+  assert.deepEqual(doc.points[1].sessions, { 'thread-x': 5, 'thread-y': 5, _unattributed: 5 });
   assert.equal(doc.sessions[0].label, 'proj · thread-x');
 });
 
