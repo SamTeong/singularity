@@ -174,8 +174,11 @@ function codexFiles(since, now) {
 
 // Map sessionId -> [{t, usd}]: rises of each session's cumulative cost.total_cost_usd
 // between its statusline rows (statusline.mjs appendHistory); .1 is the older half.
-// shortcut: a session's first row in the tail counts its whole cost as one rise, so a
-// session whose earlier rows rotated out lumps them there; keep a per-session baseline if that shows.
+// A session's first row read is only its baseline: its cost so far may span rows
+// that rotated out, so crediting it would lump hours of spend into one interval.
+// The cost is a session's first API call when it starts in the window (cents).
+// Both files rotate at TAIL_BYTES (statusline HISTORY_CAP), so the read is contiguous
+// bar at most each file's oldest row.
 function claudeCostEvents() {
   const last = new Map();
   const out = new Map();
@@ -184,7 +187,8 @@ function claudeCostEvents() {
     let r; try { r = JSON.parse(line); } catch { continue; }
     const t = Date.parse(r.ts);
     if (!r.session_id || !Number.isFinite(r.cost_usd) || Number.isNaN(t)) continue;
-    const usd = Math.max(0, r.cost_usd - (last.get(r.session_id) ?? 0));
+    const base = last.get(r.session_id);
+    const usd = base === undefined ? 0 : Math.max(0, r.cost_usd - base);
     last.set(r.session_id, r.cost_usd);
     if (!out.has(r.session_id)) out.set(r.session_id, []);
     out.get(r.session_id).push({ t, usd });

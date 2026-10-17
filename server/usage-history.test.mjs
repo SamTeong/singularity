@@ -107,17 +107,20 @@ test('claude: sessions with statusline cost rows split by reported cost deltas; 
   // sess-b's), then $0.0001 in interval 2. sess-b has no rows: transcript $0.0001.
   const row = (ms, cost) => ({ ts: new Date(ms).toISOString(), session_id: 'sess-a', cost_usd: cost, tokens: null, five_hour_pct: null, five_hour_resets_at: null });
   jsonl(join(STATE, 'cost-history.jsonl.1'), [row(T[0] - 60_000, 1)]);
-  jsonl(join(STATE, 'cost-history.jsonl'), [row(T[0] + 60_000, 1.0003), row(T[1] + 60_000, 1.0004)]);
+  // sess-c's first row carries $40 of earlier, unread spend: only a baseline.
+  // Then it spends $0.0001 in interval 2, like sess-a.
+  const c = (ms, cost) => ({ ...row(ms, cost), session_id: 'sess-c' });
+  jsonl(join(STATE, 'cost-history.jsonl'), [row(T[0] + 60_000, 1.0003), c(T[0] + 90_000, 40), row(T[1] + 60_000, 1.0004), c(T[1] + 90_000, 40.0001)]);
   const doc = getUsageHistory('claude', NOW);
-  // Transcript re-pricing for both would give 5/5.
-  assert.deepEqual(doc.points[1].sessions, { 'sess-a': 7.5, 'sess-b': 2.5, _unattributed: 10 });
-  assert.deepEqual(doc.points[2].sessions, { 'sess-a': 17.5, 'sess-b': 2.5, _unattributed: 10 });
+  // Transcript re-pricing for both would give 5/5; crediting sess-c's $40 would give it ~10.
+  assert.deepEqual(doc.points[1].sessions, { 'sess-a': 7.5, 'sess-b': 2.5, 'sess-c': 0, _unattributed: 10 });
+  assert.deepEqual(doc.points[2].sessions, { 'sess-a': 12.5, 'sess-b': 2.5, 'sess-c': 5, _unattributed: 10 });
   assert.equal(doc.sessions[0].label, 'repo · sess-a');
   rmSync(join(STATE, 'cost-history.jsonl.1'));
   rmSync(join(STATE, 'cost-history.jsonl'));
 });
 
-test('statusline: appends a row only when cost or 5h % moves; rotates to .1 above 8 MB', () => {
+test('statusline: appends a row only when cost or 5h % moves; rotates to .1 above 2 MB', () => {
   const sl = join(scratch, 'statusline-state');
   const hist = join(sl, 'cost-history.jsonl');
   const script = join(import.meta.dirname, '..', '.claude', 'skills', 'harness-usage-report', 'scripts', 'statusline.mjs');
@@ -131,9 +134,9 @@ test('statusline: appends a row only when cost or 5h % moves; rotates to .1 abov
   const { ts, ...rest } = rows()[0];
   assert.ok(!Number.isNaN(Date.parse(ts)));
   assert.deepEqual(rest, { session_id: 'abc-1', cost_usd: 1, tokens: { input: 5, output: 6 }, five_hour_pct: 10, five_hour_resets_at: 1700000000 });
-  writeFileSync(hist, Buffer.alloc(8 * 1024 * 1024 + 1, 0x20));
+  writeFileSync(hist, Buffer.alloc(2 * 1024 * 1024 + 1, 0x20));
   render(3, 12);
-  assert.equal(statSync(hist + '.1').size, 8 * 1024 * 1024 + 1);
+  assert.equal(statSync(hist + '.1').size, 2 * 1024 * 1024 + 1);
   assert.deepEqual(rows().map((r) => r.cost_usd), [3]);
 });
 

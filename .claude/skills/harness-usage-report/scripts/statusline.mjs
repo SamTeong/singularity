@@ -54,9 +54,11 @@ if (sid && /^[0-9a-fA-F-]{1,64}$/.test(sid)) {
 // 5h % moved since its previous payload (the cost-state file about to be
 // overwritten holds it, so dedup never reads the jsonl). Above HISTORY_CAP the
 // file rotates to cost-history.jsonl.1, replacing the old one: at most two files.
-// shortcut: concurrent renders can race the rename and drop a few rows; fine for a history series.
+// The cap matches the daemon's 2 MB tail read (usage-history.mjs), so both files are read whole.
+// shortcut: two renders rotating at once can rename a fresh 1-row file over .1 and lose the older
+// half; a failed append is skipped until the value moves again. Both rare; use a lock if they show.
 function appendHistory(file) {
-  const HISTORY_CAP = 8 * 1024 * 1024;
+  const HISTORY_CAP = 2 * 1024 * 1024;
   const pick = (o) => [o?.cost?.total_cost_usd ?? null, o?.rate_limits?.five_hour?.used_percentage ?? null];
   const now = pick(d);
   let prev = null;
