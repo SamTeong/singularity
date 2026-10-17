@@ -14,13 +14,14 @@
 // enough — no cross-session file needed.
 // SECURITY: reads full account credentials (browser profile / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, readdirSync, statSync, openSync, readSync, closeSync, linkSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
 import { fetchExternal, retryAfterMs } from './external-fetch.mjs';
+import { newestSnapshotArchive } from './usage-history.mjs';
 
 const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
 export const OLLAMA_PROFILE_DIR = join(CACHE_DIR, 'pw-ollama-profile');
@@ -159,18 +160,86 @@ export const SNAPSHOT_MAX_AGE_MS = 2 * NETWORK_FLOOR_MS; // one missed ~60s stat
 // already rolled over; anything inside it is served marked stale.
 export const CLAUDE_STALE_MAX_MS = 5 * 3.6e6;
 
-export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
+// Last line of a log as JSON; throws when missing, empty or unparseable.
+function lastJsonlRecord(file) {
   let fd;
   try {
-    fd = openSync(CLAUDE_HISTORY, 'r');
-    const size = statSync(CLAUDE_HISTORY).size;
+    fd = openSync(file, 'r');
+    const size = statSync(file).size;
     const len = Math.min(size, SNAPSHOT_TAIL_BYTES);
     const buf = Buffer.alloc(len);
     readSync(fd, buf, 0, len, size - len);
     // Only the last complete line matters; a leading fragment from a mid-line
     // window start is never read.
     const lines = buf.toString('utf8').split('\n').filter(Boolean);
-    const record = JSON.parse(lines[lines.length - 1]);
+    return JSON.parse(lines[lines.length - 1]);
+  } finally { if (fd !== undefined) closeSync(fd); }
+}
+
+const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+// First line of a log ('' when missing or empty); a partial line comes back as-is.
+function firstJsonlLine(file) {
+  let fd;
+  try {
+    fd = openSync(file, 'r');
+    const buf = Buffer.alloc(SNAPSHOT_TAIL_BYTES);
+    const n = readSync(fd, buf, 0, buf.length, 0);
+    return buf.toString('utf8', 0, n).split('\n')[0];
+  } catch (e) {
+    if (e.code === 'ENOENT') return '';
+    throw e;
+  } finally { if (fd !== undefined) closeSync(fd); }
+}
+
+// Monthly rotation of usage-snapshots.jsonl, run before each daemon append. The
+// skill's report (stats.mjs --save) appends here too, so the decision uses the live
+// file's FIRST row: when its calendar month (local) is earlier than now, the file
+// moves to usage-snapshots-<first row's month>.jsonl and the append starts a fresh
+// one. Archive names stay monotonic because a fresh file's first row is this month;
+// an archive can still span several months when the daemon was idle across them.
+// The move is linkSync then unlinkSync: link fails atomically with EEXIST, so two
+// daemons sharing the file can never overwrite a finished archive. Any failure
+// (busy file, unparseable head, failed unlink) is not cached and retries on the
+// next append; otherwise the checked month is cached: one head read a month.
+let claudeHistoryMonth = null;
+export function rotateClaudeHistory(now = new Date(), { link = linkSync, unlink = unlinkSync } = {}) {
+  const month = ym(now);
+  if (claudeHistoryMonth === month) return;
+  let head;
+  try { head = firstJsonlLine(CLAUDE_HISTORY); } catch { return; }
+  if (head) {
+    let at = NaN;
+    try { at = Date.parse(JSON.parse(head).fetched_at); } catch { /* checked below */ }
+    if (Number.isNaN(at)) return; // partial or corrupt head row: retry next append
+    const from = ym(new Date(at));
+    if (from < month) {
+      const target = join(USAGE_SKILL_STATE, `usage-snapshots-${from}.jsonl`);
+      try { link(CLAUDE_HISTORY, target); } catch (e) {
+        if (e.code !== 'EEXIST') return;
+        // Same inode: our earlier link whose unlink failed, so finish the move.
+        let same;
+        try { same = statSync(target).ino === statSync(CLAUDE_HISTORY).ino; } catch { return; }
+        // shortcut: a different existing archive for that month is never merged into or overwritten; rotation skips and the live file keeps growing until merged by hand.
+        if (!same) { claudeHistoryMonth = month; return; }
+      }
+      try { unlink(CLAUDE_HISTORY); } catch { return; }
+    }
+  }
+  claudeHistoryMonth = month;
+}
+
+function appendClaudeHistory(record) {
+  rotateClaudeHistory();
+  return appendJsonl(CLAUDE_HISTORY, record);
+}
+
+export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
+  try {
+    // A just-rotated (missing or empty) live file: the newest archive holds the last row.
+    let file = CLAUDE_HISTORY;
+    try { if (!statSync(file).size) throw new Error('empty'); } catch { file = newestSnapshotArchive() ?? file; }
+    const record = lastJsonlRecord(file);
     // localTimestamp's 'YYYY-MM-DD HH:MM:SS' has no zone — parsed as local, which
     // is what wrote it.
     const at = Date.parse(record.fetched_at);
@@ -178,7 +247,7 @@ export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.no
     // serving it here would blank those; tier 2 answers from the same reading.
     if (!record.raw || record.source === 'cost-state' || Number.isNaN(at) || now - at > maxAgeMs) return null;
     return { raw: record.raw, fetchedAt: new Date(at).toISOString() };
-  } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
+  } catch { return null; }
 }
 
 // Codex's parallel: the harness Stop hook appends codex-usage.jsonl once a turn
@@ -260,7 +329,7 @@ function appendClaudeCostStateSnapshot(limits) {
   const reading = JSON.stringify([limits.session.pctUsed, limits.session.resetsAt]);
   if (reading === lastClaudeCostStateReading) return;
   const win = (w) => w && { utilization: w.pctUsed, resets_at: w.resetsAt };
-  if (appendJsonl(CLAUDE_HISTORY, {
+  if (appendClaudeHistory({
     fetched_at: localTimestamp(new Date(limits.fetchedAt)),
     source: 'cost-state',
     raw: { five_hour: win(limits.session), seven_day: win(limits.weekly) },
@@ -645,7 +714,7 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
     // Feed a fresh network reading back into the statusline's own log so R2
     // tails stay fed for sessions starting mid-idle (readClaudeSnapshot reads
     // {fetched_at, raw}). Failures and file-sourced reads append nothing.
-    appendJsonl(CLAUDE_HISTORY, { fetched_at: localTimestamp(new Date()), raw });
+    appendClaudeHistory({ fetched_at: localTimestamp(new Date()), raw });
     return normalizeClaude(raw, oauth.subscriptionType);
   } catch (e) {
     return { ok: false, source: 'claude', error: `parse error: ${e.message}` };

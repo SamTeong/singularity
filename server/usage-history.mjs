@@ -9,7 +9,7 @@
 // token_count events). Ollama has no per-session
 // data, so its series is the total line only.
 // Read-only: USAGE_SKILL_STATE history files, ~/.claude/projects, ~/.codex/sessions.
-import { readFileSync, readdirSync, statSync, openSync, fstatSync, readSync, closeSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, openSync, readSync, closeSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { USAGE_SKILL_STATE } from './app-dir.mjs';
@@ -37,28 +37,88 @@ const TOTALS = {
   ollama: { file: 'ollama-usage.jsonl', win: { '5h': (r) => r.session, '7d': (r) => r.weekly } },
 };
 
-function tailLines(file, bytes = TAIL_BYTES) {
+function readAt(file, pos, len) {
   let fd;
   try {
     fd = openSync(file, 'r');
-    const size = fstatSync(fd).size;
-    const len = Math.min(size, bytes);
     const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, size - len);
-    const lines = buf.toString('utf8').split('\n');
-    if (len < size) lines.shift(); // mid-line window start
-    return lines.filter(Boolean);
-  } catch { return []; } finally { if (fd !== undefined) closeSync(fd); }
+    return buf.subarray(0, readSync(fd, buf, 0, len, pos));
+  } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
+}
+
+const parseRow = (s) => { try { const v = JSON.parse(s); return v && typeof v === 'object' ? v : null; } catch { return null; } };
+
+// Parsed JSON rows of the last `bytes` of a log, the window start's partial line
+// dropped (as a cold tail read does), each kept with its byte offset per
+// (file, bytes). A grown file reads only the new bytes; a shrunk, replaced or
+// rewritten file reads cold. `keep` (<= bytes) narrows the result to the last
+// `keep` bytes with the same boundary rule. Equals a cold read (usage-history.test.mjs).
+const tails = new Map();
+export function tailRows(file, bytes = TAIL_BYTES, keep = bytes) {
+  const key = `${file}\0${bytes}`;
+  let st; try { st = statSync(file); } catch { tails.delete(key); return []; }
+  const cold = () => { const pos = Math.max(0, st.size - bytes); return { ino: st.ino, birthtimeMs: st.birthtimeMs, size: 0, mtimeMs: 0, pos, lead: pos > 0, rows: [], frag: null, last: null }; };
+  let e = tails.get(key);
+  if (!e || st.ino !== e.ino || st.birthtimeMs !== e.birthtimeMs || st.size < e.size
+    || (st.size === e.size && st.mtimeMs !== e.mtimeMs) || st.size - bytes > e.pos) e = cold();
+  if (st.size !== e.size || st.mtimeMs !== e.mtimeMs) {
+    // Re-read the last complete line too: changed bytes there = rewritten in place.
+    let from = e.last?.off ?? e.pos;
+    let buf = readAt(file, from, st.size - from);
+    if (buf && e.last && !(buf[e.last.len] === 10 && buf.toString('utf8', 0, e.last.len) === e.last.text)) {
+      e = cold();
+      from = e.pos;
+      buf = readAt(file, from, st.size - from);
+    }
+    if (!buf) return [];
+    let at = e.pos - from;
+    for (let nl; (nl = buf.indexOf(10, at)) !== -1; at = nl + 1) {
+      if (e.lead) { e.lead = false; continue; } // mid-line window start
+      const text = buf.toString('utf8', at, nl);
+      e.last = { off: from + at, len: nl - at, text };
+      if (text) e.rows.push({ off: from + at, value: parseRow(text) });
+    }
+    // An unterminated last line is served but re-read next time.
+    e.pos = e.lead ? from + buf.length : from + at;
+    e.frag = !e.lead && at < buf.length ? { off: e.pos, value: parseRow(buf.toString('utf8', at)) } : null;
+    e.size = from + buf.length;
+    e.mtimeMs = st.mtimeMs;
+    const start = st.size - bytes;
+    const i = start > 0 ? e.rows.findIndex((r) => r.off > start) : 0;
+    if (i !== 0) e.rows = i === -1 ? [] : e.rows.slice(i);
+    tails.set(key, e);
+  }
+  const from = st.size - keep;
+  const out = [];
+  for (const r of e.frag ? [...e.rows, e.frag] : e.rows) if (r.value && (from <= 0 || r.off > from)) out.push(r.value);
+  return out;
+}
+
+// usage.mjs rotates usage-snapshots.jsonl into usage-snapshots-YYYY-MM.jsonl monthly.
+export function newestSnapshotArchive() {
+  const f = safeDir(USAGE_SKILL_STATE).filter((n) => /^usage-snapshots-\d{4}-\d{2}\.jsonl$/.test(n)).sort().at(-1);
+  return f ? join(USAGE_SKILL_STATE, f) : null;
 }
 
 // [{t, pct, resetsAt}] oldest first. fetched_at is local time with no zone,
 // parsed as local, which is what wrote it.
+let lastArchive = null;
 function readTotals(provider, windowKey) {
   const { file } = TOTALS[provider];
   const win = TOTALS[provider].win[windowKey];
+  const bytes = windowKey === '7d' ? WEEK_TAIL_BYTES : TAIL_BYTES;
+  const path = join(USAGE_SKILL_STATE, file);
+  let lines = tailRows(path, bytes);
+  // Claude's archive + live file are one stream: a live file under the budget
+  // continues into the newest archive's tail (budget < one month of rows).
+  const live = fileStat(path)?.[1] ?? 0;
+  if (provider === 'claude' && live < bytes) {
+    const archive = newestSnapshotArchive();
+    if (archive !== lastArchive) { for (const k of tails.keys()) if (lastArchive && k.startsWith(`${lastArchive}\0`)) tails.delete(k); lastArchive = archive; }
+    if (archive) lines = [...tailRows(archive, bytes, bytes - live), ...lines];
+  }
   const rows = [];
-  for (const line of tailLines(join(USAGE_SKILL_STATE, file), windowKey === '7d' ? WEEK_TAIL_BYTES : TAIL_BYTES)) {
-    let r; try { r = JSON.parse(line); } catch { continue; }
+  for (const r of lines) {
     const w = win(r);
     const t = Date.parse(r.fetched_at);
     if (!Number.isFinite(w?.utilization) || Number.isNaN(t)) continue;
@@ -73,8 +133,9 @@ function safeDir(dir) {
   try { return readdirSync(dir); } catch { return []; }
 }
 
-function mtime(p) {
-  try { return statSync(p).mtimeMs; } catch { return 0; }
+// [mtimeMs, size], or null when missing.
+function fileStat(p) {
+  try { const s = statSync(p); return [s.mtimeMs, s.size]; } catch { return null; }
 }
 
 // Parsed transcript/rollout events per path, reused while (mtime, size) hold.
@@ -148,7 +209,7 @@ function parseCodexRollout(content) {
   return { id, cwd, events };
 }
 
-// [[path, sessionId]] for transcripts touched since `since`. Subagent
+// [[path, sessionId, mtimeMs, size]] for transcripts touched since `since`. Subagent
 // transcripts (<proj>/<id>/subagents/*.jsonl) count toward their parent.
 // shortcut: stats every transcript on each call; index by project dir mtime if this ever shows up in profiles.
 function claudeFiles(since) {
@@ -163,7 +224,7 @@ function claudeFiles(since) {
       for (const s of safeDir(sub)) if (s.endsWith('.jsonl')) subs.push([join(sub, s), f]);
     }
   }
-  return [...out, ...subs].filter(([p]) => mtime(p) >= since);
+  return [...out, ...subs].map(([p, id]) => [p, id, ...(fileStat(p) ?? [0, 0])]).filter(([, , m]) => m >= since);
 }
 
 // Rollouts live under sessions/YYYY/MM/DD by local start date; the day before
@@ -178,7 +239,7 @@ function codexFiles(since, now) {
   }
   const out = [];
   for (const dir of dirs) for (const f of safeDir(dir)) if (f.startsWith('rollout-') && f.endsWith('.jsonl')) out.push(join(dir, f));
-  return out.filter((p) => mtime(p) >= since);
+  return out.map((p) => [p, ...(fileStat(p) ?? [0, 0])]).filter(([, m]) => m >= since); // [[path, mtimeMs, size]]
 }
 
 // Map sessionId -> [{t, usd}]: rises of each session's cumulative cost.total_cost_usd
@@ -189,12 +250,11 @@ function codexFiles(since, now) {
 // Both files rotate at TAIL_BYTES (statusline HISTORY_CAP), so the read is contiguous
 // bar at most each file's oldest row.
 // Rows with a 5h % also push {t, pct, resetsAt} onto `pts` (the extra history points).
+const COST_HISTORY = join(USAGE_SKILL_STATE, 'cost-history.jsonl');
 function claudeCostEvents(pts) {
   const last = new Map();
   const out = new Map();
-  const file = join(USAGE_SKILL_STATE, 'cost-history.jsonl');
-  for (const line of [...tailLines(file + '.1'), ...tailLines(file)]) {
-    let r; try { r = JSON.parse(line); } catch { continue; }
+  for (const r of [...tailRows(COST_HISTORY + '.1'), ...tailRows(COST_HISTORY)]) {
     const t = Date.parse(r.ts);
     if (Number.isNaN(t)) continue;
     if (Number.isFinite(r.five_hour_pct) && Number.isFinite(r.five_hour_resets_at)) pts.push({ t, pct: r.five_hour_pct, resetsAt: r.five_hour_resets_at * 1000 });
@@ -212,10 +272,10 @@ function claudeCostEvents(pts) {
 // in codex-usage.jsonl: rises of a session's running total_token_usage between its
 // rows. The first row read is only a baseline, as in claudeCostEvents. Rows without
 // session_id (the daemon's, codex.mjs's, older hook rows) only feed the totals.
+const CODEX_USAGE = join(USAGE_SKILL_STATE, 'codex-usage.jsonl');
 function codexTurnEvents() {
   const out = new Map();
-  for (const line of tailLines(join(USAGE_SKILL_STATE, 'codex-usage.jsonl'))) {
-    let r; try { r = JSON.parse(line); } catch { continue; }
+  for (const r of tailRows(CODEX_USAGE)) {
     const u = r.total_token_usage;
     const t = Date.parse(r.fetched_at);
     if (!r.session_id || !Number.isFinite(u?.total_tokens) || Number.isNaN(t)) continue;
@@ -234,7 +294,8 @@ function codexTurnEvents() {
 }
 
 // Map sessionId -> {label, events}.
-function sessionEvents(provider, since, now, costPoints = []) {
+// `files` = claudeFiles / codexFiles for this window.
+function sessionEvents(provider, since, now, costPoints, files) {
   const out = new Map();
   const add = (id, cwd, events) => {
     const s = out.get(id) ?? { label: cwd ? `${basename(cwd)} · ${id.slice(0, 8)}` : id.slice(0, 8), events: [] };
@@ -242,7 +303,6 @@ function sessionEvents(provider, since, now, costPoints = []) {
     out.set(id, s);
   };
   if (provider === 'claude') {
-    const files = claudeFiles(since);
     for (const [path, id] of files) {
       const r = parseCached(path, parseClaudeTranscript);
       if (r) add(id, r.cwd, r.events);
@@ -257,11 +317,10 @@ function sessionEvents(provider, since, now, costPoints = []) {
     }
   } else if (provider === 'codex') {
     const turns = codexTurnEvents();
-    const files = codexFiles(since, now);
     // A session's hook rows cover its spend from its first row to its last; rollout
     // events before the first (baseline) or after the last (no Stop row yet) are the
     // per-turn fallback. +1s: fetched_at has whole-second resolution.
-    for (const path of files) {
+    for (const [path] of files) {
       const r = parseCached(path, parseCodexRollout);
       if (!r) continue;
       const id = r.id ?? basename(path, '.jsonl');
@@ -271,7 +330,7 @@ function sessionEvents(provider, since, now, costPoints = []) {
       // Rows carry no model: price them at the session's rollout model.
       add(id, null, s.events.map((e) => ({ ...e, model: r.events.at(-1)?.model ?? '' })));
     }
-    pruneCache(parseCodexRollout, new Set(files));
+    pruneCache(parseCodexRollout, new Set(files.map(([path]) => path)));
     // shortcut: rows whose id joins no rollout in codexFiles' day range are dropped (a
     // wrongly keyed root-id row would double-count); widen the scan if old sessions matter.
     // shortcut: a root-id row set whose totals only rise looks like one thread; it is
@@ -350,10 +409,19 @@ function attribute(points, sessions, cost) {
   };
 }
 
+const statSig = (paths) => paths.map((p) => [p, fileStat(p)]);
+
+// Last doc per provider:window, served while its inputs are unchanged. Inputs are
+// statted before they are read, so a write in between forces a recompute, never a stale hit.
+// shortcut: readings/events stamped after `now` (clock skew) are not re-checked on a hit.
+const docs = new Map();
+
 // GET /api/usage/history?provider=&window= — null for an unknown provider or
 // window (route 400s).
 export function getUsageHistory(provider, now = Date.now(), windowKey = '5h') {
   if (!HISTORY_PROVIDERS.includes(provider) || !HISTORY_WINDOWS.includes(windowKey)) return null;
+  const live = join(USAGE_SKILL_STATE, TOTALS[provider].file);
+  const totalsSig = statSig(provider === 'claude' ? [live, newestSnapshotArchive()].filter(Boolean) : [live]);
   const rows = readTotals(provider, windowKey);
   const resetsAt = rows.at(-1)?.resetsAt ?? null;
   const estimated = provider !== 'ollama' && windowKey === '5h';
@@ -361,6 +429,17 @@ export function getUsageHistory(provider, now = Date.now(), windowKey = '5h') {
   // a reset already past = that window is over (usage.mjs hasActiveWindow).
   if (resetsAt == null || resetsAt <= now) return { provider, window: windowKey, windowStart: null, resetsAt: null, points: [], sessions: [], estimated };
   const start = resetsAt - WINDOW_MS[windowKey];
+  const files = !estimated ? [] : provider === 'claude' ? claudeFiles(start) : codexFiles(start, now);
+  const logs = !estimated ? [] : provider === 'claude' ? [`${COST_HISTORY}.1`, COST_HISTORY] : [CODEX_USAGE];
+  const sig = JSON.stringify([resetsAt, totalsSig, statSig(logs), files, estimated && getModelPrices()]);
+  const key = `${provider}:${windowKey}`;
+  if (docs.get(key)?.sig === sig) return docs.get(key).doc;
+  const doc = buildDoc(provider, windowKey, rows, resetsAt, start, estimated, now, files);
+  docs.set(key, { sig, doc });
+  return doc;
+}
+
+function buildDoc(provider, windowKey, rows, resetsAt, start, estimated, now, files) {
   let points = rows.filter((r) => r.t >= start && r.t <= resetsAt);
   if (windowKey === '7d') points = points.filter((p, i) => Math.floor(p.t / WEEK_BUCKET_MS) !== Math.floor((points[i + 1]?.t ?? Infinity) / WEEK_BUCKET_MS));
   const doc = { provider, window: windowKey, windowStart: new Date(start).toISOString(), resetsAt: new Date(resetsAt).toISOString(), estimated };
@@ -368,7 +447,7 @@ export function getUsageHistory(provider, now = Date.now(), windowKey = '5h') {
   // Statusline rows (every turn) fill the sparse snapshots: keep this window's (resets_at
   // within 60s: snapshots carry fractions), then collapse consecutive equal readings.
   const costPoints = [];
-  const sessions = sessionEvents(provider, start, now, costPoints);
+  const sessions = sessionEvents(provider, start, now, costPoints, files);
   if (provider === 'claude') {
     points = [...points, ...costPoints.filter((p) => Math.abs(p.resetsAt - resetsAt) <= 60_000 && p.t >= start && p.t <= resetsAt)]
       .sort((a, b) => a.t - b.t)

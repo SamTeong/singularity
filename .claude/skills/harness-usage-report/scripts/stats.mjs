@@ -1195,14 +1195,24 @@ function _fetched_epoch(rec) {
 }
 
 // Read usage-snapshots.jsonl into memory; skip malformed lines. Returns [] when
-// the file is absent (OAuth off / no fetch yet).
+// the file is absent (OAuth off / no fetch yet). The Singularity daemon rotates
+// usage-snapshots.jsonl monthly into usage-snapshots-YYYY-MM.jsonl; those archives
+// are read first so the forecast keeps its multi-week history.
 export function _load_usage_snapshots(p = USAGE_SNAPSHOTS_JSONL) {
-  if (!isFile(p)) return [];
+  let files = [p];
+  if (p === USAGE_SNAPSHOTS_JSONL) {
+    let names = [];
+    try { names = fs.readdirSync(path.dirname(p)); } catch { /* no state dir yet */ }
+    files = [...names.filter((n) => /^usage-snapshots-\d{4}-\d{2}\.jsonl$/.test(n)).sort().map((n) => path.join(path.dirname(p), n)), p];
+  }
   const out = [];
-  for (const line of fs.readFileSync(p, "utf-8").split("\n")) {
-    const t = line.trim();
-    if (!t) continue;
-    try { out.push(JSON.parse(t)); } catch { /* drop corrupt line */ }
+  for (const f of files) {
+    if (!isFile(f)) continue;
+    for (const line of fs.readFileSync(f, "utf-8").split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      try { out.push(JSON.parse(t)); } catch { /* drop corrupt line */ }
+    }
   }
   return out.sort((a, b) => (_fetched_epoch(a) ?? Infinity) - (_fetched_epoch(b) ?? Infinity));
 }

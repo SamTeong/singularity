@@ -5,7 +5,7 @@
 // scratch dir, so nothing real is read. Run: pnpm test
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync, rmSync, mkdtempSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, writeFileSync, rmSync, mkdtempSync, readFileSync, statSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
@@ -18,7 +18,7 @@ process.env.CLAUDE_CONFIG_DIR = join(scratch, 'claude');
 process.env.CODEX_HOME = join(scratch, 'codex');
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { getUsageHistory } = await import('./usage-history.mjs');
+const { getUsageHistory, tailRows } = await import('./usage-history.mjs');
 
 const pad = (n) => String(n).padStart(2, '0');
 // The writers' fetched_at: local time, no zone.
@@ -241,4 +241,70 @@ test('7d: weekly % line per provider from resets_at - 7d, no session split, one 
 
 test('unknown window is rejected (route 400s)', () => {
   assert.equal(getUsageHistory('claude', NOW, '1d'), null);
+});
+
+// The pre-cache cold read (whole tail re-read, first partial line dropped), parsed.
+const coldRows = (file, bytes) => {
+  const buf = readFileSync(file);
+  const len = Math.min(buf.length, bytes);
+  const lines = buf.subarray(buf.length - len).toString('utf8').split('\n');
+  if (len < buf.length) lines.shift();
+  return lines.filter(Boolean).flatMap((l) => { try { const v = JSON.parse(l); return v && typeof v === 'object' ? [v] : []; } catch { return []; } });
+};
+
+test('tailRows: incremental appends always equal a cold tail read', () => {
+  const file = join(scratch, 'tail', 'log.jsonl');
+  mkdirSync(join(file, '..'), { recursive: true });
+  writeFileSync(file, '');
+  let seed = 7;
+  const rand = (n) => { seed = (seed * 1103515245 + 12345) % 2 ** 31; return seed % n; };
+  for (let i = 0; i < 300; i++) {
+    // Rows of varied length (multibyte too); some appends end mid-line, completed by the next.
+    const row = JSON.stringify({ i, s: 'é'.repeat(rand(40)) + 'x'.repeat(rand(200)) }) + '\n';
+    const cut = rand(4) === 0 ? rand(row.length) : row.length;
+    appendFileSync(file, row.slice(0, cut));
+    if (cut < row.length) {
+      for (const b of [600, 5000, 1e6]) assert.deepEqual(tailRows(file, b), coldRows(file, b), `fragment, i=${i} bytes=${b}`);
+      appendFileSync(file, row.slice(cut));
+    }
+    if (rand(3) === 0) appendFileSync(file, '\n'); // blank lines are skipped
+    for (const b of [600, 5000, 1e6]) assert.deepEqual(tailRows(file, b), coldRows(file, b), `i=${i} bytes=${b}`);
+    assert.deepEqual(tailRows(file, 5000, 700), coldRows(file, 700), `keep, i=${i}`);
+  }
+});
+
+test('tailRows: a shrunk, replaced or in-place rewritten file reads cold', () => {
+  const file = join(scratch, 'tail', 'rewrite.jsonl');
+  jsonl(file, [1, 2, 3, 4].map((n) => ({ n })));
+  assert.deepEqual(tailRows(file, 1e6).map((r) => r.n), [1, 2, 3, 4]);
+  rmSync(file);
+  jsonl(file, [5].map((n) => ({ n })));
+  assert.deepEqual(tailRows(file, 1e6).map((r) => r.n), [5]);
+  writeFileSync(file, [6, 7, 8].map((n) => JSON.stringify({ n })).join('\n') + '\n'); // larger, same inode
+  assert.deepEqual(tailRows(file, 1e6).map((r) => r.n), [6, 7, 8]);
+  rmSync(file);
+  assert.deepEqual(tailRows(file, 1e6), []);
+});
+
+test('claude totals span the newest monthly archive and the live file; the doc is memoized', () => {
+  const snap = (t, u) => ({ fetched_at: local(t), raw: { five_hour: { utilization: u, resets_at: new Date(RESET).toISOString() } } });
+  const archive = join(STATE, 'usage-snapshots-2000-01.jsonl');
+  jsonl(join(STATE, 'usage-snapshots-1999-12.jsonl'), [snap(T[0], 99)]); // older archive: never read
+  jsonl(archive, [snap(T[0], 11), snap(T[1], 22)]);
+  jsonl(join(STATE, 'usage-snapshots.jsonl'), [snap(T[2], 33)]);
+  try {
+    const doc = getUsageHistory('claude', NOW);
+    assert.deepEqual(doc.points.map((p) => p.pct), [11, 22, 33]);
+    assert.equal(getUsageHistory('claude', NOW), doc); // unchanged inputs: same doc
+    appendFileSync(join(STATE, 'usage-snapshots.jsonl'), JSON.stringify(snap(T[2] + 60_000, 44)) + '\n');
+    const next = getUsageHistory('claude', NOW);
+    assert.notEqual(next, doc);
+    assert.deepEqual(next.points.map((p) => p.pct), [11, 22, 33, 44]);
+    // A just-rotated live file (missing): the archive alone is the stream.
+    rmSync(join(STATE, 'usage-snapshots.jsonl'));
+    assert.deepEqual(getUsageHistory('claude', NOW).points.map((p) => p.pct), [11, 22]);
+  } finally {
+    rmSync(archive, { force: true });
+    rmSync(join(STATE, 'usage-snapshots-1999-12.jsonl'), { force: true });
+  }
 });
