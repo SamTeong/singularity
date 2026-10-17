@@ -160,6 +160,19 @@ test('claude: sessions with statusline cost rows split by reported cost deltas; 
   rmSync(join(STATE, 'cost-history.jsonl'));
 });
 
+test('claude: transcript spend before a session\'s first cost row is kept; cost deltas replace it after', () => {
+  jsonl(join(STATE, 'usage-snapshots.jsonl'), [10, 20, 30].map((u, i) => ({ fetched_at: local(T[i]), raw: { five_hour: { utilization: u, resets_at: new Date(RESET).toISOString() } } })));
+  // sess-a's statusline rows start mid-window (baseline in interval 2), so its
+  // interval-1 transcript m1 ($0.0001) still counts; its m2 is replaced by +$0.0003.
+  const row = (ms, cost) => ({ ts: new Date(ms).toISOString(), session_id: 'sess-a', cost_usd: cost, tokens: null, five_hour_pct: null, five_hour_resets_at: null });
+  jsonl(join(STATE, 'cost-history.jsonl'), [row(T[1] + 30_000, 1), row(T[1] + 90_000, 1.0003)]);
+  const doc = getUsageHistory('claude', NOW);
+  // Dropping a's transcript would give sess-b all of interval 1 (a 0, b 10).
+  assert.deepEqual(doc.points[1].sessions, { 'sess-a': 5, 'sess-b': 5, _unattributed: 10 });
+  assert.deepEqual(doc.points[2].sessions, { 'sess-a': 15, 'sess-b': 5, _unattributed: 10 });
+  rmSync(join(STATE, 'cost-history.jsonl'));
+});
+
 test('statusline: appends a row only when cost or 5h % moves; rotates to .1 above 2 MB', () => {
   const sl = join(scratch, 'statusline-state');
   const hist = join(sl, 'cost-history.jsonl');

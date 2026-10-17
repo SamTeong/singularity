@@ -237,10 +237,11 @@ function sessionEvents(provider, since, now) {
       if (r) add(id, r.cwd, r.events);
     }
     pruneCache(parseClaudeTranscript, new Set(files.map(([path]) => path)));
-    // A session with statusline rows takes its reported cost; transcripts keep only its label.
+    // A session with statusline rows takes its reported cost from its first (baseline)
+    // row on; transcript events before that row are the only record of earlier spend.
     for (const [id, events] of claudeCostEvents()) {
       const s = out.get(id);
-      if (s) s.events = [];
+      if (s) s.events = s.events.filter((e) => e.t < events[0].t);
       add(id, null, events);
     }
   } else if (provider === 'codex') {

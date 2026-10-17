@@ -921,6 +921,38 @@ test('readCostStateLimits: newest usable file wins, stale and rate_limits-less o
   assert.equal(readCostStateLimits(1_000), null);
 });
 
+// The cost-state tier never reaches fetchClaude's append, so readClaudeLocal logs
+// its reading itself — once per change — or the 5h history chart freezes.
+test('readClaudeLocal: a cost-state reading appends a snapshot row on change only', async () => {
+  clearClaudeLocal();
+  const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
+  const file = join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl');
+  mkdirSync(dir, { recursive: true });
+  const resets = Math.floor((Date.now() + 3_600_000) / 1000);
+  const write = (pct) => writeFileSync(join(dir, 'live.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: pct, resets_at: resets }, seven_day: { used_percentage: 3, resets_at: resets + 86_400 } } }));
+  const rows = () => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
+  const { readClaudeLocal: isolatedReadLocal } = await import(`./usage.mjs?cost-state-append=${Date.now()}`);
+  try {
+    write(40);
+    assert.equal(isolatedReadLocal(null, 'max').session.pctUsed, 40);
+    assert.equal(rows().length, 1);
+    const [row] = rows();
+    assert.equal(row.source, 'cost-state');
+    assert.equal(row.raw.five_hour.utilization, 40);
+    assert.equal(row.raw.five_hour.resets_at, new Date(resets * 1000).toISOString());
+    assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+    isolatedReadLocal(null, 'max'); // unchanged: no row
+    assert.equal(rows().length, 1);
+    write(41);
+    isolatedReadLocal(null, 'max');
+    assert.deepEqual(rows().map((r) => r.raw.five_hour.utilization), [40, 41]);
+    // Tier 1 skips these rows: they lack extra_usage / per-model.
+    assert.equal(readClaudeSnapshot(), null);
+  } finally {
+    clearClaudeLocal();
+  }
+});
+
 // ---- Codex: the Stop-hook snapshot tail (readCodexSnapshot) -------------------
 // The harness Stop hook appends codex-usage.jsonl once a turn end (and now bumps
 // it every turn, changed or not, so a quiet session still keeps this fresh); a

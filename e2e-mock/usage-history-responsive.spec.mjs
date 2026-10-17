@@ -26,10 +26,9 @@ for (const skin of RESPONSIVE_SKINS) {
         return { sw: stack.scrollWidth, cw: stack.clientWidth };
       });
       expect(row.sw, 'header row fits its pane').toBeLessThanOrEqual(row.cw + 1);
-      await expect(page.getByText(/^Estimated attribution/)).toBeVisible();
 
       await page.getByRole('tab', { name: 'Ollama' }).click();
-      await expect(page.getByText(/^Ollama reports no per-session data/)).toBeVisible();
+      await expect(page.getByRole('tab', { name: 'Ollama' })).toHaveAttribute('aria-selected', 'true');
       await expectNoPageOverflow(page);
     });
   }

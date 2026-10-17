@@ -83,9 +83,12 @@ test('5h history re-fetches at the chosen rate only while the Usage view is show
   await recordFetchCalls(page);
   const count = async () => (await fetchCalls(page)).filter((c) => c === 'GET /api/usage/history?provider=claude').length;
 
+  // 10s is the default; leave and re-select it so the rate change is observed.
+  await expect(page.getByRole('button', { name: '10s', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Off', exact: true }).click();
   await page.getByRole('button', { name: '10s', exact: true }).click();
-  // One fetch on selecting the rate, then one per 10s tick.
-  await expect.poll(count, { timeout: 15_000 }).toBeGreaterThanOrEqual(2);
+  // One fetch per rate change (Off, 10s), then one per 10s tick.
+  await expect.poll(count, { timeout: 15_000 }).toBeGreaterThanOrEqual(3);
 
   await goto(page, 'Tasks');
   const hidden = await count();

@@ -1,8 +1,10 @@
 // Usage backend: pull the 5h/7d limits for three providers and normalize them to
 // one shape. Files first — the network is only for demand:
-//  - claude/anthropic: the global statusline writes the whole OAuth payload to
-//    usage-snapshots.jsonl once a turn and stamps cost-state/<session>.json on
-//    every turn of every session, so the OAuth usage API is read only on ?force=1
+//  - claude/anthropic: the global statusline stamps cost-state/<session>.json on
+//    every turn of every session (it does not write usage-snapshots.jsonl). That
+//    log is appended by fetchClaude's network reads, by the usage-report skill's
+//    stats.mjs fetch, and by readClaudeLocal when a cost-state reading changes
+//    (source: 'cost-state'). The OAuth usage API is read only on ?force=1
 //    or when neither local tier is fresh (that endpoint allows roughly one call a
 //    minute per account, and the statusline already spends it).
 //  - ollama: authenticated Playwright scrape of ollama.com/settings.
@@ -172,7 +174,9 @@ export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.no
     // localTimestamp's 'YYYY-MM-DD HH:MM:SS' has no zone — parsed as local, which
     // is what wrote it.
     const at = Date.parse(record.fetched_at);
-    if (!record.raw || Number.isNaN(at) || now - at > maxAgeMs) return null;
+    // A cost-state row carries only the windows, not extra_usage or per-model, so
+    // serving it here would blank those; tier 2 answers from the same reading.
+    if (!record.raw || record.source === 'cost-state' || Number.isNaN(at) || now - at > maxAgeMs) return null;
     return { raw: record.raw, fetchedAt: new Date(at).toISOString() };
   } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
 }
@@ -245,6 +249,22 @@ export function readCostStateLimits(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.n
     } catch { /* unreadable or caught mid-write: fall through to the next newest */ }
   }
   return null;
+}
+
+// While cost-state stays fresh the network leg never runs, so nothing else
+// appends usage-snapshots.jsonl and the 5h history chart would freeze. Log the
+// cost-state reading in fetchClaude's {fetched_at, raw} shape, only on a change.
+let lastClaudeCostStateReading = null;
+function appendClaudeCostStateSnapshot(limits) {
+  if (!limits.session) return;
+  const reading = JSON.stringify([limits.session.pctUsed, limits.session.resetsAt]);
+  if (reading === lastClaudeCostStateReading) return;
+  const win = (w) => w && { utilization: w.pctUsed, resets_at: w.resetsAt };
+  if (appendJsonl(CLAUDE_HISTORY, {
+    fetched_at: localTimestamp(new Date(limits.fetchedAt)),
+    source: 'cost-state',
+    raw: { five_hour: win(limits.session), seven_day: win(limits.weekly) },
+  })) lastClaudeCostStateReading = reading;
 }
 
 function hasCompleteWindow(window) {
@@ -569,6 +589,7 @@ export function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
 
   const limits = readCostStateLimits(maxAgeMs);
   if (!limits) return null;
+  appendClaudeCostStateSnapshot(limits);
   const session = preferCurrentWindow(limits.session, prev?.session);
   const weeklyLimit = preferCurrentWindow(limits.weekly, prev?.weekly);
   const weekly = weeklyLimit && { ...weeklyLimit, models: prev?.weekly?.models ?? limits.weekly?.models ?? [] };

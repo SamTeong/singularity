@@ -18,6 +18,14 @@ import { LineChart } from '@mui/x-charts/LineChart';
 const RATES = ['off', '10', '30', '60'];
 
 const hhmm = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const hourLabel = (d) => `${d.getHours() % 12 || 12}${d.getHours() < 12 ? 'am' : 'pm'}`;
+const HALF_HOUR = 30 * 60 * 1000;
+// shortcut: epoch-ms rounding hits local :00/:30 only for whole/half-hour UTC offsets; upgrade if :45 zones matter.
+const halfHourTicks = (min, max) => {
+  const ticks = [];
+  for (let t = Math.ceil(min / HALF_HOUR) * HALF_HOUR; t <= max; t += HALF_HOUR) ticks.push(new Date(t));
+  return ticks;
+};
 
 // Current 5h window per provider (GET /api/usage/history). Claude/Codex stack
 // an estimated per-session split; Ollama has no per-session data, so it is the
@@ -26,7 +34,7 @@ const hhmm = (d) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit
 export default function UsageHistoryPanel({ open, onToggle, active, providers }) {
   const [tab, setTab] = useState(providers[0]?.key ?? 'claude');
   const provider = providers.some((p) => p.key === tab) ? tab : providers[0]?.key;
-  const [rate, setRate] = useState('off');
+  const [rate, setRate] = useState('10');
   const [doc, setDoc] = useState(null);
   const [error, setError] = useState(null);
 
@@ -81,16 +89,17 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
               <LineChart
                 height={260}
                 series={series}
-                xAxis={[{ data: times, scaleType: 'time', min: new Date(d.windowStart), max: new Date(d.resetsAt), valueFormatter: hhmm }]}
-                yAxis={[{ min: 0, valueFormatter: (v) => `${v}%` }]}
+                xAxis={[{
+                  data: times, scaleType: 'time', min: new Date(d.windowStart), max: new Date(d.resetsAt),
+                  tickInterval: halfHourTicks(new Date(d.windowStart).getTime(), new Date(d.resetsAt).getTime()),
+                  tickLabelInterval: (v) => v.getMinutes() === 0,
+                  valueFormatter: (v, ctx) => (ctx.location === 'tick' ? hourLabel(v) : hhmm(v)),
+                }]}
+                yAxis={[{ min: 0, max: 100, tickInterval: [0, 20, 40, 60, 80, 100], valueFormatter: (v) => `${v}%` }]}
+                grid={{ horizontal: true, vertical: true }}
               />
             </Box>
           )}
-          <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>
-            {provider === 'ollama'
-              ? 'Ollama reports no per-session data: this is the account 5h % only.'
-              : "Estimated attribution: providers report only the account total, so each interval's % rise is split by each session's share of cost."}
-          </Typography>
         </Box>
       </Collapse>
     </Box>
