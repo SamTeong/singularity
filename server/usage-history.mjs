@@ -189,12 +189,16 @@ function parseClaudeTranscript(content) {
 // running total did not move is a repeat, not new spend.
 function parseCodexRollout(content) {
   const events = [];
+  const models = [];
   let id = null, cwd = null, model = '', lastTotal = null;
   for (const line of content.split('\n')) {
     if (!line) continue;
     let o; try { o = JSON.parse(line); } catch { continue; }
     if (o.type === 'session_meta') { id = o.payload?.id ?? id; cwd = o.payload?.cwd ?? cwd; }
-    if (o.type === 'turn_context' && o.payload?.model) model = o.payload.model;
+    if (o.type === 'turn_context' && o.payload?.model) {
+      model = o.payload.model;
+      models.push({ t: Date.parse(o.timestamp), model });
+    }
     if (o.type !== 'event_msg' || o.payload?.type !== 'token_count') continue;
     const total = o.payload.info?.total_token_usage?.total_tokens;
     const last = o.payload.info?.last_token_usage;
@@ -206,7 +210,7 @@ function parseCodexRollout(content) {
       tok: [Math.max(0, (last.input_tokens ?? 0) - cached), last.output_tokens ?? 0, cached, last.cache_write_input_tokens ?? 0],
     });
   }
-  return { id, cwd, events };
+  return { id, cwd, events, models };
 }
 
 // [[path, sessionId, mtimeMs, size]] for transcripts touched since `since`. Subagent
@@ -329,7 +333,7 @@ function sessionEvents(provider, since, now, costPoints, files) {
       if (!s || s.mixed) { add(id, r.cwd, r.events); continue; }
       add(id, r.cwd, r.events.filter((e) => e.t < s.first + 1000 || e.t >= s.last + 1000));
       // Rows carry no model: price each at the rollout model active at its time.
-      const modelAt = (t) => (r.events.findLast((x) => x.t <= t) ?? r.events[0])?.model ?? '';
+      const modelAt = (t) => (r.models.findLast((x) => x.t <= t + 1000) ?? r.models[0] ?? r.events[0])?.model ?? '';
       add(id, null, s.events.map((e) => ({ ...e, model: modelAt(e.t) })));
     }
     pruneCache(parseCodexRollout, new Set(files.map(([path]) => path)));
