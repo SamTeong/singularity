@@ -62,6 +62,57 @@ test('collapse/expand toggle flips aria-label', async ({ page }) => {
   await expect(collapseButton).toHaveAttribute('aria-label', 'Collapse usage');
 });
 
+test('5h history panel: collapsed state survives a reload', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+
+  const toggle = page.getByRole('button', { name: /^(Collapse|Expand) 5h history$/ });
+  await expect(toggle).toHaveAttribute('aria-label', 'Collapse 5h history');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-label', 'Expand 5h history');
+  await page.reload();
+  await expect(toggle).toHaveAttribute('aria-label', 'Expand 5h history');
+});
+
+// Real time, not page.clock: a frozen clock also stalls Mirage's response timer.
+test('5h history re-fetches at the chosen rate only while the Usage view is showing', async ({ page }) => {
+  test.setTimeout(60_000);
+  await page.goto('/');
+  await goto(page, 'Usage');
+  await expect(page.getByRole('figure', { name: '5h history chart' })).toBeVisible();
+  await recordFetchCalls(page);
+  const count = async () => (await fetchCalls(page)).filter((c) => c === 'GET /api/usage/history?provider=claude').length;
+
+  // 10s is the default; leave and re-select it so the rate change is observed.
+  await expect(page.getByRole('button', { name: '10s', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: 'Off', exact: true }).click();
+  await page.getByRole('button', { name: '10s', exact: true }).click();
+  // One fetch per rate change (Off, 10s), then one per 10s tick.
+  await expect.poll(count, { timeout: 15_000 }).toBeGreaterThanOrEqual(3);
+
+  await goto(page, 'Tasks');
+  const hidden = await count();
+  await page.waitForTimeout(11_000);
+  expect(await count(), 'no polling while the Usage view is hidden').toBe(hidden);
+});
+
+test('history window toggle: 7d re-fetches with window=7d and labels local midnights', async ({ page }) => {
+  await page.goto('/');
+  await goto(page, 'Usage');
+  await expect(page.getByRole('figure', { name: '5h history chart' })).toBeVisible();
+  await recordFetchCalls(page);
+
+  await page.getByRole('button', { name: '7d', exact: true }).click();
+  await expect.poll(() => fetchCalls(page)).toContain('GET /api/usage/history?provider=claude&window=7d');
+  const chart = page.getByRole('figure', { name: '7d history chart' });
+  await expect(chart).toBeVisible();
+  await expect(chart.getByText(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}$/).first()).toBeVisible();
+  await expect(chart.getByTestId('usage-peak')).toHaveText('46%');
+
+  await page.getByRole('button', { name: '5h', exact: true }).click();
+  await expect(page.getByRole('figure', { name: '5h history chart' })).toBeVisible();
+});
+
 test('usage Refresh triggers GET /usage with force=1', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');

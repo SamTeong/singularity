@@ -27,6 +27,8 @@ Flags:
 
 Live cost/duration/lines/rate-limit/context capture needs your statusline to write the raw statusline JSON (the stdin it receives) to `~/.agents/.harness-usage-report/state/cost-state/<session_id>.json` on each render — last write per session wins. Reference statusline at `<SKILL_DIR>/scripts/statusline.mjs`; `install --with-statusline` wires it. **Optional**: without it the report renders from transcripts only (cost/duration/lines/rate-limits blank, populated once a statusline is wired).
 
+The reference statusline also appends a deduped per-render row `{ts, session_id, cost_usd, tokens, five_hour_pct, five_hour_resets_at}` to `~/.agents/.harness-usage-report/state/cost-history.jsonl` (skipped when cost and 5h % match the session's previous payload). Retention cap: rotates to `cost-history.jsonl.1` above 2 MB, at most two files (~4 MB). Field details: SKILL.md "Capture contract (statusline)". A custom statusline may omit it; only per-session Usage history attribution then falls back to transcript re-pricing.
+
 ## Generate a report
 
 ```

@@ -7,7 +7,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
-import { open } from 'node:fs/promises';
+import fsPromises, { open } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
@@ -17,6 +18,7 @@ import { mkdtempSync } from 'node:fs';
 // (static imports hoist above the env assignment).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 process.env.CODEX_HOME = join(tmpdir(), 'codex-nonexistent-' + Date.now());
+const CODEX_HOME = process.env.CODEX_HOME;
 const { readSession, sessionText, searchSessions, listSessions, getSessionsRoot, setSessionsRoot, resolveRoot } = await import('./sessions.mjs');
 
 const PROJECTS = join(homedir(), '.claude', 'projects');
@@ -135,6 +137,51 @@ test('readSession: pathFor rejects project/id containing ".." or separators', as
   assert.deepEqual(await readSession('proj', '../escape'), { ok: false, error: 'not found' });
   assert.deepEqual(await readSession('proj', 'a\\b'), { ok: false, error: 'not found' });
   assert.deepEqual(await readSession('', 'foo'), { ok: false, error: 'not found' });
+});
+
+test('readSession: Claude and Codex transcripts deleted during read return not found', async () => {
+  const claudeProject = 'sessions-test-delete-during-read';
+  const claudeId = 'deleted-claude';
+  const claudeDir = writeSession(claudeProject, claudeId, ['{}']);
+  const claudeFile = join(claudeDir, `${claudeId}.jsonl`);
+  const codexRelative = join('sessions', 'deleted-codex.jsonl');
+  const codexFile = join(CODEX_HOME, codexRelative);
+  const codexDir = join(CODEX_HOME, 'sessions');
+  mkdirSync(codexDir, { recursive: true });
+  writeFileSync(codexFile, '{}\n');
+  const otherProject = 'sessions-test-read-error';
+  const otherId = 'read-error';
+  const otherDir = writeSession(otherProject, otherId, ['{}']);
+  const otherFile = join(otherDir, `${otherId}.jsonl`);
+  const originalReadFile = fsPromises.readFile;
+  let targetFile;
+  let readError;
+  fsPromises.readFile = async (file, ...args) => {
+    if (file === targetFile) {
+      if (readError.code === 'ENOENT') rmSync(file);
+      throw readError;
+    }
+    return originalReadFile(file, ...args);
+  };
+  syncBuiltinESMExports();
+  try {
+    targetFile = claudeFile;
+    readError = Object.assign(new Error('deleted'), { code: 'ENOENT' });
+    assert.deepEqual(await readSession(claudeProject, claudeId), { ok: false, error: 'not found' });
+
+    targetFile = codexFile;
+    assert.deepEqual(await readSession('', 'deleted-codex', undefined, 'codex', codexRelative), { ok: false, error: 'not found' });
+
+    targetFile = otherFile;
+    readError = Object.assign(new Error('read failed'), { code: 'EIO' });
+    await assert.rejects(readSession(otherProject, otherId), { code: 'EIO' });
+  } finally {
+    fsPromises.readFile = originalReadFile;
+    syncBuiltinESMExports();
+    rmSync(claudeDir, { recursive: true, force: true });
+    rmSync(codexDir, { recursive: true, force: true });
+    rmSync(otherDir, { recursive: true, force: true });
+  }
 });
 
 test('listSessions: discovers subagent transcripts and attaches them to the parent row', async () => {

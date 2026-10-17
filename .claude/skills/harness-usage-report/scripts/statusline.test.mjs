@@ -1,0 +1,44 @@
+// Statusline cost-history rotation: lock-guarded rotate, and the cap holds when rotation fails.
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtempSync, mkdirSync, writeFileSync, statSync, rmSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+
+const script = join(import.meta.dirname, 'statusline.mjs');
+const CAP = 2 * 1024 * 1024;
+const sid = 'abcdef01-2345';
+
+function run(state) {
+  const input = JSON.stringify({ session_id: sid, cost: { total_cost_usd: Math.random() + 1 } });
+  const r = spawnSync(process.execPath, [script], { input, env: { ...process.env, USAGE_REPORT_STATE: state }, encoding: 'utf8' });
+  assert.equal(r.status, 0);
+}
+const withState = (fn) => {
+  const state = mkdtempSync(join(tmpdir(), 'statusline-'));
+  try { fn(state, join(state, 'cost-history.jsonl')); } finally { rmSync(state, { recursive: true, force: true }); }
+};
+
+test('over-cap history rotates to .1 and releases the lock', () => withState((state, hist) => {
+  writeFileSync(hist, Buffer.alloc(CAP + 1, 'x'));
+  run(state);
+  assert.equal(statSync(hist + '.1').size, CAP + 1);
+  assert.ok(statSync(hist).size < 1024);
+  assert.ok(!existsSync(hist + '.lock'));
+}));
+
+test('a held lock skips rotation instead of clobbering .1', () => withState((state, hist) => {
+  writeFileSync(hist, Buffer.alloc(CAP + 1, 'x'));
+  writeFileSync(hist + '.1', 'older');
+  mkdirSync(hist + '.lock');
+  run(state);
+  assert.equal(statSync(hist + '.1').size, 5);
+}));
+
+test('repeated rotation failure stops appending past 2x cap', () => withState((state, hist) => {
+  writeFileSync(hist, Buffer.alloc(2 * CAP + 1, 'x'));
+  mkdirSync(hist + '.1'); // rename over a directory fails
+  run(state);
+  assert.equal(statSync(hist).size, 2 * CAP + 1);
+}));

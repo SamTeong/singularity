@@ -35,6 +35,72 @@ test('the session list renders every seeded transcript, reverse-chronological', 
   await expect(rows[rows.length - 1]).toHaveText(/Fixture session 0\b/);
 });
 
+test('a successful empty poll clears the prior transcript list error', async ({ page }) => {
+  await page.addInitScript(() => {
+    let failedListRequests = 0;
+    let successfulListRequests = 0;
+    window.__recoverTranscriptList = false;
+    const wrap = (originalFetch) => (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      if (url.pathname === '/api/transcripts') {
+        if (!window.__recoverTranscriptList) {
+          failedListRequests += 1;
+          window.__failedTranscriptListRequests = failedListRequests;
+          return Promise.resolve(new Response('', { status: 503 }));
+        }
+        successfulListRequests += 1;
+        window.__successfulTranscriptListRequests = successfulListRequests;
+        return Promise.resolve(new Response(JSON.stringify({ sessions: [] }), {
+          headers: { 'content-type': 'application/json' },
+        }));
+      }
+      return originalFetch(input, init);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  });
+  await page.goto('/tasks');
+
+  await gotoMenu(page, 'Transcripts');
+  await expect(page.getByText('Failed to load transcripts.', { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => window.__failedTranscriptListRequests)).toBeGreaterThan(0);
+
+  // Keep every list request failed until the error is visible, then arm recovery.
+  await page.evaluate(() => { window.__recoverTranscriptList = true; });
+  // Changing this filter restarts the list effect and triggers its recovery poll.
+  await page.getByRole('checkbox', { name: 'Hide automated reviews' }).click();
+  await expect(page.getByText('No transcripts.', { exact: true })).toBeVisible();
+  await expect(page.getByText('Failed to load transcripts.', { exact: true })).not.toBeVisible();
+  expect(await page.evaluate(() => window.__successfulTranscriptListRequests)).toBeGreaterThan(0);
+});
+
+test('a failed transcript poll preserves previously loaded rows', async ({ page }) => {
+  await openTranscripts(page);
+  await page.evaluate(() => {
+    const originalFetch = window.fetch.bind(window);
+    let listRequests = 0;
+    window.fetch = (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      if (url.pathname === '/api/transcripts') {
+        listRequests += 1;
+        window.__transcriptListRequests = listRequests;
+        return Promise.resolve(new Response('', { status: 503 }));
+      }
+      return originalFetch(input, init);
+    };
+  });
+
+  await page.getByRole('checkbox', { name: 'Hide automated reviews' }).click();
+  await expect.poll(() => page.evaluate(() => window.__transcriptListRequests)).toBe(1);
+  // The mocked 503 is already resolved. A frame boundary drains the fetch
+  // continuation and its catch microtask before checking the preserved rows.
+  await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await expect(page.getByRole('button', { name: /^Fixture session \d+|Retry backoff cap/ })).toHaveCount(TOTAL_SESSIONS);
+  await expect(page.getByRole('button', { name: /Retry backoff cap/ })).toBeVisible();
+});
+
 test('search narrows the list to cross-session matches; clearing restores it', async ({ page }) => {
   await openTranscripts(page);
 

@@ -121,6 +121,34 @@ export function registerTelemetry(server) {
     };
   });
 
+  // /usage/history?provider=&window= — usage-history.mjs getUsageHistory: the
+  // current 5h window (started 3h ago), one reading every 10 min. Claude/Codex carry an
+  // estimated two-session split; Ollama is the total line only. window=7d: the
+  // weekly % total line only (started 3 days ago), one reading every 3h.
+  server.get('/usage/history', (_schema, request) => {
+    const { provider, window = '5h' } = request.queryParams;
+    if (!['claude', 'codex', 'ollama'].includes(provider) || !['5h', '7d'].includes(window)) {
+      return new Response(400, {}, { ok: false, error: 'provider must be one of claude, codex, ollama; window one of 5h, 7d' });
+    }
+    const now = Date.now();
+    if (window === '7d') {
+      const start = now - 3 * 86_400_000;
+      const points = Array.from({ length: 25 }, (_, i) => ({ ts: iso(start + i * 3 * 3.6e6), pct: 10 + i * 1.5, sessions: {} }));
+      return { provider, window, windowStart: iso(start), resetsAt: iso(start + 7 * 86_400_000), points, sessions: [], estimated: false };
+    }
+    const start = now - 3 * 3.6e6;
+    const estimated = provider !== 'ollama';
+    const sessions = estimated
+      ? [{ id: 's1', label: 'singularity · s1' }, { id: 's2', label: 'wiki · s2' }, { id: '_unattributed', label: 'Unattributed' }]
+      : [];
+    const points = Array.from({ length: 19 }, (_, i) => {
+      const a = i * 1.5;
+      const b = Math.max(0, i - 6);
+      return { ts: iso(start + i * 600_000), pct: 4 + a + b, sessions: estimated ? { s1: a, s2: b, _unattributed: 4 } : {} };
+    });
+    return { provider, window, windowStart: iso(start), resetsAt: iso(start + 5 * 3.6e6), points, sessions, estimated };
+  });
+
   // POST /usage/ollama/connect returns the same sanitized provider payload as
   // connectOllamaUsage in usage.mjs, not the enclosing /usage document.
   server.post('/usage/ollama/connect', () => {
