@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@codex'
 created_date: '2026-10-17 07:19'
-updated_date: '2026-10-17 12:15'
+updated_date: '2026-10-18 01:34'
 labels: []
 dependencies: []
 modified_files:
@@ -37,6 +37,10 @@ Track confirmed in-scope defects found while reviewing the 22 unpushed commits f
 
 <!-- SECTION:NOTES:BEGIN -->
 Primary checkout selected for validation: main currently contains the merged alternate implementation in 0328600 and 2d7eb2f; source commit 10e352d is not an ancestor and has an additional mock E2E regression. Validate the current primary target and independently review all commits after 7590329. Validation and root cross-review remain pending.
+
+PR #105 fixture repair: server/usage-history.test.mjs derives the rollout model switch from Date.parse(local(T[0] + 100_000)) + 500 so it stays 500ms after the recorded whole-second hook at every epoch remainder. Deterministic target test failed before the change at remainder 750 (actual thread-m 8.57/thread-n 1.43 vs expected 7.5/2.5); passed after at remainders 250, 750, and 900. pnpm lint passed. pnpm test was invoked, but its captured log ended before the test summary/exit status, so full-suite validation remains unconfirmed pending CI.
+
+PR #105 CI repair: complete local TAP summary confirms 614/614 tests pass; lint and deterministic 250/750/900ms cases pass. Hosted CI is being rerun.
 <!-- SECTION:NOTES:END -->
 
 ## Final Summary

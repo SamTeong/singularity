@@ -193,6 +193,7 @@ test('codex: hook rows are priced at the rollout model active at their time, not
   rmSync(join(scratch, 'codex'), { recursive: true, force: true });
   const hook = (ms, input) => ({ fetched_at: local(ms), session: null, weekly: null, session_id: 'thread-m', last_token_usage: null, total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input } });
   const gauge = (ms, u) => ({ fetched_at: local(ms), session: { utilization: u, resets_at: new Date(RESET).toISOString() } });
+  const secondHookAt = Date.parse(local(T[0] + 100_000));
   jsonl(join(STATE, 'codex-usage.jsonl'), [gauge(T[0], 5), hook(T[0] + 61_000, 1000), gauge(T[1], 15), hook(T[0] + 100_000, 1300), gauge(T[2], 25)]);
   const d = new Date(T[0]);
   const dir = join(scratch, 'codex', 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
@@ -202,7 +203,7 @@ test('codex: hook rows are priced at the rollout model active at their time, not
   // The switch is 500ms after the whole-second hook timestamp; the hook tolerance prices it at luna.
   jsonl(join(dir, 'rollout-m.jsonl'), [
     { timestamp: iso(T[0]), type: 'session_meta', payload: { id: 'thread-m', cwd: join(scratch, 'proj') } },
-    ctx(T[0], 'gpt-6-pro'), tc(T[0] + 65_000, 1), ctx(T[0] + 100_500, 'gpt-6-luna'), tc(T[1] + 60_000, 2),
+    ctx(T[0], 'gpt-6-pro'), tc(T[0] + 65_000, 1), ctx(secondHookAt + 500, 'gpt-6-luna'), tc(T[1] + 60_000, 2),
   ]);
   jsonl(join(dir, 'rollout-n.jsonl'), [
     { timestamp: iso(T[0]), type: 'session_meta', payload: { id: 'thread-n', cwd: join(scratch, 'proj') } },
