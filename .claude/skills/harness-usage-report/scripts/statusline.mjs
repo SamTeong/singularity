@@ -56,10 +56,11 @@ if (sid && /^[0-9a-fA-F-]{1,64}$/.test(sid)) {
 // file rotates to cost-history.jsonl.1, replacing the old one: at most two files.
 // The cap matches the daemon's 2 MB tail read (usage-history.mjs), so both files are read whole.
 // A mkdir lock serialises check+rename so a second render can't rename the fresh file over .1;
-// a render that loses the lock skips rotation, and a stale lock (>10s) is reclaimed.
+// a render that loses the lock skips rotation. Stale locks are left in place: reclaiming a
+// directory by pathname has no compare-and-swap, so two stale-lock observers can steal from
+// each other. A stale lock can stop rotation until manually cleared, but never races writers.
 function rotateHistory(hist, cap) {
   const lock = hist + ".lock";
-  try { if (Date.now() - statSync(lock).mtimeMs > 10_000) rmdirSync(lock); } catch { /* no lock */ }
   try { mkdirSync(lock); } catch { return; }
   try { if (statSync(hist).size > cap) renameSync(hist, hist + ".1"); } catch { /* not there yet, or rename failed */ }
   finally { try { rmdirSync(lock); } catch { /* already gone */ } }

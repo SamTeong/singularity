@@ -193,24 +193,25 @@ test('codex: hook rows are priced at the rollout model active at their time, not
   rmSync(join(scratch, 'codex'), { recursive: true, force: true });
   const hook = (ms, input) => ({ fetched_at: local(ms), session: null, weekly: null, session_id: 'thread-m', last_token_usage: null, total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input } });
   const gauge = (ms, u) => ({ fetched_at: local(ms), session: { utilization: u, resets_at: new Date(RESET).toISOString() } });
+  const secondHookAt = Date.parse(local(T[0] + 100_000));
   jsonl(join(STATE, 'codex-usage.jsonl'), [gauge(T[0], 5), hook(T[0] + 61_000, 1000), gauge(T[1], 15), hook(T[0] + 100_000, 1300), gauge(T[2], 25)]);
   const d = new Date(T[0]);
   const dir = join(scratch, 'codex', 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
   const iso = (ms) => new Date(ms).toISOString();
   const tc = (ms, total) => ({ timestamp: iso(ms), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: total }, last_token_usage: { input_tokens: 100 } } } });
   const ctx = (ms, model) => ({ timestamp: iso(ms), type: 'turn_context', payload: { model } });
-  // m: gpt-6-pro ($2/MTok) for its first turn, switches to gpt-6-luna ($1) after; the +300 hook delta is a pro-era turn.
+  // The switch is 500ms after the whole-second hook timestamp; the hook tolerance prices it at luna.
   jsonl(join(dir, 'rollout-m.jsonl'), [
     { timestamp: iso(T[0]), type: 'session_meta', payload: { id: 'thread-m', cwd: join(scratch, 'proj') } },
-    ctx(T[0], 'gpt-6-pro'), tc(T[0] + 65_000, 1), ctx(T[1] + 10_000, 'gpt-6-luna'), tc(T[1] + 60_000, 2),
+    ctx(T[0], 'gpt-6-pro'), tc(T[0] + 65_000, 1), ctx(secondHookAt + 500, 'gpt-6-luna'), tc(T[1] + 60_000, 2),
   ]);
   jsonl(join(dir, 'rollout-n.jsonl'), [
     { timestamp: iso(T[0]), type: 'session_meta', payload: { id: 'thread-n', cwd: join(scratch, 'proj') } },
     ctx(T[0], 'gpt-6-luna'), tc(T[0] + 90_000, 1),
   ]);
   const doc = getUsageHistory('codex', NOW);
-  // m 300 tok at $2 = 600 vs n 100 at $1: 8.57/1.43. Final-model pricing would give 7.5/2.5.
-  assert.deepEqual(doc.points[1].sessions, { 'thread-m': 8.57, 'thread-n': 1.43, _unattributed: 5 });
+  // m's +300 hook delta uses luna at $1, matching n's $1 rate: 7.5/2.5.
+  assert.deepEqual(doc.points[1].sessions, { 'thread-m': 7.5, 'thread-n': 2.5, _unattributed: 5 });
 });
 
 test('statusline: appends a row only when cost or 5h % moves; rotates to .1 above 2 MB', () => {
