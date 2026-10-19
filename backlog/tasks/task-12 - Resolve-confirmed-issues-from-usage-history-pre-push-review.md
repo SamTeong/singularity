@@ -1,11 +1,11 @@
 ---
 id: TASK-12
 title: Resolve confirmed issues from usage history pre-push review
-status: In Progress
+status: Done
 assignee:
   - '@codex'
 created_date: '2026-10-17 07:19'
-updated_date: '2026-10-19 02:48'
+updated_date: '2026-10-19 02:54'
 labels: []
 dependencies: []
 modified_files:
@@ -32,9 +32,9 @@ Track confirmed in-scope defects found while reviewing the 22 unpushed commits f
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
 - [x] #1 Every confirmed in-scope review finding has a focused fix or a documented reason it remains open.
-- [ ] #2 Relevant tests and project checks pass for each fix.
-- [ ] #3 The project-review finding and report artifacts reflect verified fix status.
-- [ ] #4 The independently confirmed wiki parser defect is fixed and covered by a regression.
+- [x] #2 Relevant tests and project checks pass for each fix.
+- [x] #3 The project-review finding and report artifacts reflect verified fix status.
+- [x] #4 The independently confirmed wiki parser defect is fixed and covered by a regression.
 <!-- AC:END -->
 
 ## Implementation Plan
@@ -66,5 +66,5 @@ Legacy statusline lock boundary: automatic recovery now requires a positively id
 ## Final Summary
 
 <!-- SECTION:FINAL_SUMMARY:BEGIN -->
-The four confirmed P2 findings are implemented in the merged usage-history changes. Primary-checkout validation and independent review of the fix delta remain pending; keep this task In Progress until both are complete.
+Fixed the confirmed usage-history and wiki parser findings with regression coverage. Verified with 621/621 unit tests, 541/541 mock browser tests, lint, production build, focused statusline/wiki tests, and diff checks; final project-review artifacts record the committed fixes and migration boundary.
 <!-- SECTION:FINAL_SUMMARY:END -->
