@@ -11,10 +11,11 @@
 // context usage bar, cost / rate limits (5h/7d) / dir, worktree, git status.
 // Invoke explicitly: `node statusline.mjs` (Node is guaranteed on PATH; shebang
 // is not honoured on Windows).
-import { mkdirSync, writeFileSync, statSync, readFileSync, appendFileSync, renameSync, rmdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, statSync, readFileSync, appendFileSync, renameSync, rmdirSync, rmSync } from "node:fs";
 import { join, basename } from "node:path";
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 
 // --- Read stdin verbatim ---
 const chunks = [];
@@ -56,14 +57,35 @@ if (sid && /^[0-9a-fA-F-]{1,64}$/.test(sid)) {
 // file rotates to cost-history.jsonl.1, replacing the old one: at most two files.
 // The cap matches the daemon's 2 MB tail read (usage-history.mjs), so both files are read whole.
 // A mkdir lock serialises check+rename so a second render can't rename the fresh file over .1;
-// a render that loses the lock skips rotation. Stale locks are left in place: reclaiming a
-// directory by pathname has no compare-and-swap, so two stale-lock observers can steal from
-// each other. A stale lock can stop rotation until manually cleared, but never races writers.
+// a render that loses the lock skips rotation. The owner PID allows reclaiming a dead process's
+// lock. Ownerless legacy locks stay protected until an operator migrates them after old writers stop.
 function rotateHistory(hist, cap) {
   const lock = hist + ".lock";
-  try { mkdirSync(lock); } catch { return; }
+  try { mkdirSync(lock); writeFileSync(join(lock, "owner"), String(process.pid)); }
+  catch {
+    let pid;
+    try { statSync(lock); } catch { return; }
+    try { pid = Number(readFileSync(join(lock, "owner"), "utf8")); }
+    catch (error) { if (error.code !== "ENOENT") return; pid = null; }
+    if (pid === null || !Number.isSafeInteger(pid) || pid <= 0) return;
+    try { process.kill(pid, 0); return; } catch (error) { if (error.code !== "ESRCH") return; }
+    const claim = lock + ".stale-" + randomUUID();
+    try { renameSync(lock, claim); } catch { return; }
+    try {
+      const claimedPid = Number(readFileSync(join(claim, "owner"), "utf8"));
+      if (claimedPid !== pid) { try { renameSync(claim, lock); } catch { /* another writer acquired the lock */ } return; }
+      try { process.kill(claimedPid, 0); try { renameSync(claim, lock); } catch { /* another writer acquired the lock */ } return; }
+      catch (error) { if (error.code !== "ESRCH") { try { renameSync(claim, lock); } catch { /* another writer acquired the lock */ } return; } }
+      mkdirSync(lock);
+      writeFileSync(join(lock, "owner"), String(process.pid));
+    } catch {
+      try { renameSync(claim, lock); } catch { /* another writer acquired the lock */ }
+      return;
+    }
+    try { rmSync(claim, { recursive: true, force: true }); } catch { /* stale claim is outside the lock path */ }
+  }
   try { if (statSync(hist).size > cap) renameSync(hist, hist + ".1"); } catch { /* not there yet, or rename failed */ }
-  finally { try { rmdirSync(lock); } catch { /* already gone */ } }
+  finally { try { rmSync(lock, { recursive: true, force: true }); } catch { /* already gone */ } }
 }
 function appendHistory(file) {
   const HISTORY_CAP = 2 * 1024 * 1024;
@@ -76,16 +98,17 @@ function appendHistory(file) {
   rotateHistory(hist, HISTORY_CAP);
   let size = 0;
   try { size = statSync(hist).size; } catch { /* not there yet */ }
-  if (size > 2 * HISTORY_CAP) return; // rotation keeps failing: skip the append, keep the cap
   const cw = g("context_window") || {};
   const tokens = Number.isFinite(cw.total_input_tokens) || Number.isFinite(cw.total_output_tokens)
     ? { input: cw.total_input_tokens ?? null, output: cw.total_output_tokens ?? null }
     : null;
-  mkdirSync(stateRoot, { recursive: true });
-  appendFileSync(hist, JSON.stringify({
+  const row = JSON.stringify({
     ts: new Date().toISOString(), session_id: sid, cost_usd: now[0], tokens,
     five_hour_pct: now[1], five_hour_resets_at: g("rate_limits", "five_hour", "resets_at") ?? null,
-  }) + "\n", { encoding: "utf8", mode: 0o600 });
+  }) + "\n";
+  if (size + Buffer.byteLength(row) > 2 * HISTORY_CAP) return; // rotation failed: preserve the hard cap
+  mkdirSync(stateRoot, { recursive: true });
+  appendFileSync(hist, row, { encoding: "utf8", mode: 0o600 });
 }
 
 // --- ANSI ---

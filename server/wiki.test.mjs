@@ -101,6 +101,46 @@ test('status words in NEW claim payloads do not mark a completed sweep as interr
   ].join('\n')), { shallow: null, deep: '2026-10-20', horizon: null });
 });
 
+test('claim verification failures and partial research context do not reject completed sweeps', () => {
+  const ledger = [
+    '## [2026-10-18] deep | lanes: all',
+    '- NEW: Substantive verified results.',
+    '- UNVERIFIED: NetMediate — package page fetch failed; search snippets do not verify feature or license claims.',
+    '## [2026-10-04] deep | lanes: all',
+    '- CARRY-FORWARD: New partial context: dotnet/roslyn issue #84817 explains an unresolved claim.',
+    '## [2026-09-28] deep | lanes: all',
+    '- Sweep completed.',
+  ].join('\n');
+
+  assert.equal(parseSweepHistory(ledger).deep, '2026-10-18');
+  assert.equal(parseSweepHistory(ledger.slice(ledger.indexOf('## [2026-10-04]'))).deep, '2026-10-04');
+});
+
+test('a later interrupted sweep falls back to the latest completed sweep with claim evidence', () => {
+  assert.equal(parseSweepHistory([
+    '## [2026-10-19] deep | lanes: all',
+    '- Interrupted: sweep not completed because lane 3 failed.',
+    '## [2026-10-18] deep | lanes: all',
+    '- UNVERIFIED: NetMediate — package page fetch failed.',
+    '## [2026-10-04] deep | lanes: all',
+    '- CARRY-FORWARD: New partial context: dotnet/roslyn issue #84817.',
+  ].join('\n')).deep, '2026-10-18');
+});
+
+test('partial-context wording preserves later interruption status in its claim bullet', () => {
+  for (const context of [
+    'New partial context: issue #84817; this sweep was incomplete.',
+    'New partial context: issue #84817. This sweep was incomplete.',
+  ]) {
+    assert.equal(parseSweepHistory([
+      '## [2026-10-19] deep | lanes: all',
+      `- CARRY-FORWARD: ${context}`,
+      '## [2026-10-18] deep | lanes: all',
+      '- Sweep completed.',
+    ].join('\n')).deep, '2026-10-18', context);
+  }
+});
+
 test('long claim rows do not hide a later interrupted sweep marker', () => {
   assert.equal(parseSweepHistory([
     '## [2026-10-20] deep | lanes: all',

@@ -12,7 +12,7 @@ import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import { LineChart } from '@mui/x-charts/LineChart';
 import { useDrawingArea, useXScale, useYScale } from '@mui/x-charts/hooks';
-import { stepTicks } from './stepTicks.mjs';
+import { stepTicks, firstTickOfEachLocalDate } from './stepTicks.mjs';
 
 // Seconds between re-fetches; 'off' fetches only on open, tab change or view
 // return. The daemon samples claude/codex every 5s and ollama every 60s, so a
@@ -78,6 +78,8 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
   const series = !d ? [] : d.estimated
     ? d.sessions.map((s) => ({ id: s.id, label: s.label, data: d.points.map((p) => p.sessions[s.id] ?? 0), area: true, stack: 'total', showMark: false, valueFormatter: (v) => `${v}%` }))
     : [{ id: 'total', label: `${win} %`, data: d.points.map((p) => p.pct), showMark: false, valueFormatter: (v) => `${v}%` }];
+  const ticks = d ? stepTicks(new Date(d.windowStart).getTime(), new Date(d.resetsAt).getTime(), STEP[win]) : [];
+  const dateLabelTicks = firstTickOfEachLocalDate(ticks);
 
   return (
     <Box>
@@ -116,8 +118,8 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
                 series={series}
                 xAxis={[{
                   data: times, scaleType: 'time', min: new Date(d.windowStart), max: new Date(d.resetsAt),
-                  tickInterval: stepTicks(new Date(d.windowStart).getTime(), new Date(d.resetsAt).getTime(), STEP[win]),
-                  tickLabelInterval: win === '7d' ? (v) => v.getHours() === 0 : (v) => v.getMinutes() === 0,
+                  tickInterval: ticks,
+                  tickLabelInterval: win === '7d' ? (v) => dateLabelTicks.has(v.getTime()) : (v) => v.getMinutes() === 0,
                   valueFormatter: win === '7d'
                     ? (v, ctx) => (ctx.location === 'tick' ? dayLabel(v) : `${dayLabel(v)} ${hhmm(v)}`)
                     : (v, ctx) => (ctx.location === 'tick' ? hourLabel(v) : hhmm(v)),
