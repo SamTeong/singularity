@@ -214,6 +214,37 @@ test('codex: hook rows are priced at the rollout model active at their time, not
   assert.deepEqual(doc.points[1].sessions, { 'thread-m': 7.5, 'thread-n': 2.5, _unattributed: 5 });
 });
 
+test('codex: model pricing includes same-second transitions but excludes later-second transitions', () => {
+  const hook = (ms, id, input) => ({ fetched_at: local(ms), session: null, weekly: null, session_id: id, last_token_usage: null, total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input } });
+  const gauge = (ms, u) => ({ fetched_at: local(ms), session: { utilization: u, resets_at: new Date(RESET).toISOString() } });
+  const secondHookAt = Date.parse(local(T[0] + 100_000));
+  const date = new Date(T[0]);
+  const dir = join(scratch, 'codex', 'sessions', String(date.getFullYear()), pad(date.getMonth() + 1), pad(date.getDate()));
+  const iso = (ms) => new Date(ms).toISOString();
+  const tc = (ms, total) => ({ timestamp: iso(ms), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: total }, last_token_usage: { input_tokens: 100 } } } });
+  for (const delta of [999, 1000, 1500]) {
+    rmSync(join(scratch, 'codex'), { recursive: true, force: true });
+    rmSync(join(STATE, 'codex-usage.jsonl'), { force: true });
+    const id = `thread-edge-${delta}`;
+    jsonl(join(STATE, 'codex-usage.jsonl'), [gauge(T[0], 5), hook(T[0] + 61_000, id, 1000), gauge(T[1], 15), hook(secondHookAt, id, 1300), gauge(T[2], 25)]);
+    jsonl(join(dir, `rollout-${delta}.jsonl`), [
+      { timestamp: iso(T[0]), type: 'session_meta', payload: { id, cwd: join(scratch, 'proj') } },
+      { timestamp: iso(T[0]), type: 'turn_context', payload: { model: 'gpt-6-pro' } },
+      tc(T[0] + 65_000, 1),
+      { timestamp: iso(secondHookAt + delta), type: 'turn_context', payload: { model: 'gpt-6-luna' } },
+      tc(T[1] + 60_000, 2),
+    ]);
+    jsonl(join(dir, `rollout-control-${delta}.jsonl`), [
+      { timestamp: iso(T[0]), type: 'session_meta', payload: { id: 'thread-n', cwd: join(scratch, 'proj') } },
+      { timestamp: iso(T[0]), type: 'turn_context', payload: { model: 'gpt-6-luna' } },
+      tc(T[0] + 90_000, 1),
+    ]);
+    const doc = getUsageHistory('codex', NOW);
+    const expected = delta < 1000 ? 7.5 : 8.57;
+    assert.equal(doc.points[1].sessions[id], expected, `switch at +${delta}ms; sessions=${JSON.stringify(doc.points[1]?.sessions)}`);
+  }
+});
+
 test('statusline: appends a row only when cost or 5h % moves; rotates to .1 above 2 MB', () => {
   const sl = join(scratch, 'statusline-state');
   const hist = join(sl, 'cost-history.jsonl');

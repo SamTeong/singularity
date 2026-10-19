@@ -333,7 +333,7 @@ function sessionEvents(provider, since, now, costPoints, files) {
       if (!s || s.mixed) { add(id, r.cwd, r.events); continue; }
       add(id, r.cwd, r.events.filter((e) => e.t < s.first + 1000 || e.t >= s.last + 1000));
       // Rows carry no model: price each at the rollout model active at its time.
-      const modelAt = (t) => (r.models.findLast((x) => x.t <= t + 1000) ?? r.models[0] ?? r.events[0])?.model ?? '';
+      const modelAt = (t) => (r.models.findLast((x) => x.t < (Math.floor(t / 1000) + 1) * 1000) ?? r.models[0] ?? r.events[0])?.model ?? '';
       add(id, null, s.events.map((e) => ({ ...e, model: modelAt(e.t) })));
     }
     pruneCache(parseCodexRollout, new Set(files.map(([path]) => path)));

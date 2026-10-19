@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { stepTicks } from './stepTicks.mjs';
+import { stepTicks, firstTickOfEachLocalDate } from './stepTicks.mjs';
 
 const H = 3.6e6;
 
@@ -30,6 +30,31 @@ test('invalid tick bounds and steps return no ticks', () => {
   for (const args of [[NaN, 10, 1], [0, Infinity, 1], [0, 10, NaN], [0, 10, 0], [10, 0, 1]]) {
     assert.deepEqual(stepTicks(...args), []);
   }
+});
+
+test('5h ticks align to local half-hours in quarter-hour time zones', () => {
+  process.env.TZ = 'Asia/Kathmandu';
+  const min = Date.parse('2026-01-01T00:00:00Z');
+  const ticks = stepTicks(min, min + 5 * H, H / 2);
+  assert.ok(ticks.length > 0);
+  assert.ok(ticks.every((d) => d.getMinutes() === 0 || d.getMinutes() === 30));
+  assert.equal(ticks.filter((d) => d.getMinutes() === 0).length, 5);
+});
+
+test('tick generation respects its 100,000 tick cap', () => {
+  assert.deepEqual(stepTicks(0, 100_001 * H, H), []);
+});
+
+test('first local date tick remains labelable when DST skips midnight', () => {
+  process.env.TZ = 'America/Sao_Paulo';
+  const min = new Date(2018, 10, 3).getTime();
+  const max = new Date(2018, 10, 6).getTime();
+  const ticks = stepTicks(min, max, 6 * H);
+  const labels = firstTickOfEachLocalDate(ticks);
+  const transitionDate = ticks.find((d) => d.getFullYear() === 2018 && d.getMonth() === 10 && d.getDate() === 4);
+  assert.ok(transitionDate);
+  assert.equal(transitionDate.getHours(), 6);
+  assert.ok(labels.has(transitionDate.getTime()));
 });
 
 test('6h ticks remain monotonic and unique through fall DST', () => {

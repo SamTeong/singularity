@@ -29,6 +29,8 @@ Live cost/duration/lines/rate-limit/context capture needs your statusline to wri
 
 The reference statusline also appends a deduped per-render row `{ts, session_id, cost_usd, tokens, five_hour_pct, five_hour_resets_at}` to `~/.agents/.harness-usage-report/state/cost-history.jsonl` (skipped when cost and 5h % match the session's previous payload). Retention cap: rotates to `cost-history.jsonl.1` above 2 MB, at most two files (~4 MB). Field details: SKILL.md "Capture contract (statusline)". A custom statusline may omit it; only per-session Usage history attribution then falls back to transcript re-pricing.
 
+Legacy lock migration: the current statusline protects an ownerless `.lock` directory because an older writer may still be using it, regardless of its age. To remove one, first establish an offline boundary: stop all sessions/invocations that could still run the old statusline, verify future invocations use the updated script, and confirm no old writer remains active. Resolve the configured `USAGE_REPORT_STATE` (or the default state root) and check that the exact `cost-history.jsonl.lock` path is inside it. Immediately before removal, recheck that the lock still exists and has no `owner` file; if it has an owner, is unreadable, or its state is uncertain, leave it in place. Remove only that exact ownerless lock directory after rechecking the offline boundary. Never use age alone as evidence that a writer stopped.
+
 ## Generate a report
 
 ```

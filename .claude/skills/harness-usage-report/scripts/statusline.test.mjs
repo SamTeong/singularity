@@ -1,7 +1,7 @@
 // Statusline cost-history rotation: lock-guarded rotate, and the cap holds when rotation fails.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, statSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, statSync, rmSync, existsSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -28,12 +28,46 @@ test('over-cap history rotates to .1 and releases the lock', () => withState((st
   assert.ok(!existsSync(hist + '.lock'));
 }));
 
-test('a held lock skips rotation instead of clobbering .1', () => withState((state, hist) => {
+test('a fresh ownerless legacy lock stays protected', () => withState((state, hist) => {
+  writeFileSync(hist, Buffer.alloc(CAP + 1, 'x'));
+  writeFileSync(hist + '.1', 'older');
+  const lock = hist + '.lock';
+  mkdirSync(lock);
+  run(state);
+  assert.equal(statSync(hist + '.1').size, 5);
+  assert.ok(existsSync(lock));
+}));
+
+test('an old ownerless legacy lock stays protected regardless of age', () => withState((state, hist) => {
+  writeFileSync(hist, Buffer.alloc(CAP + 1, 'x'));
+  writeFileSync(hist + '.1', 'older');
+  const lock = hist + '.lock';
+  mkdirSync(lock);
+  const old = new Date(Date.now() - 60_000);
+  utimesSync(lock, old, old);
+  run(state);
+  assert.equal(statSync(hist + '.1').size, 5);
+  assert.ok(existsSync(lock));
+}));
+
+test('a stale lock is recovered and preserves the changed row beyond the rotation cap', () => withState((state, hist) => {
+  writeFileSync(hist, Buffer.alloc(CAP + 1, 'x'));
+  mkdirSync(hist + '.lock');
+  writeFileSync(join(hist + '.lock', 'owner'), '2147483647');
+  run(state);
+  assert.equal(statSync(hist + '.1').size, CAP + 1);
+  assert.ok(statSync(hist).size > 0);
+  assert.ok(!existsSync(hist + '.lock'));
+}));
+
+test('a live lock owner is never reclaimed', () => withState((state, hist) => {
   writeFileSync(hist, Buffer.alloc(CAP + 1, 'x'));
   writeFileSync(hist + '.1', 'older');
   mkdirSync(hist + '.lock');
+  writeFileSync(join(hist + '.lock', 'owner'), String(process.pid));
   run(state);
   assert.equal(statSync(hist + '.1').size, 5);
+  assert.ok(existsSync(join(hist + '.lock', 'owner')));
 }));
 
 test('repeated rotation failure stops appending past 2x cap', () => withState((state, hist) => {
@@ -41,4 +75,18 @@ test('repeated rotation failure stops appending past 2x cap', () => withState((s
   mkdirSync(hist + '.1'); // rename over a directory fails
   run(state);
   assert.equal(statSync(hist).size, 2 * CAP + 1);
+}));
+
+test('history at the 2x retention boundary does not append', () => withState((state, hist) => {
+  writeFileSync(hist, Buffer.alloc(2 * CAP, 'x'));
+  mkdirSync(hist + '.1');
+  run(state);
+  assert.equal(statSync(hist).size, 2 * CAP);
+}));
+
+test('a near-cap history reserves room for the encoded row when rotation fails', () => withState((state, hist) => {
+  writeFileSync(hist, Buffer.alloc(2 * CAP - 1, 'x'));
+  mkdirSync(hist + '.1');
+  run(state);
+  assert.equal(statSync(hist).size, 2 * CAP - 1);
 }));

@@ -2,7 +2,8 @@
 export const stepTicks = (min, max, step) => {
   if (![min, max, step].every(Number.isFinite) || step <= 0 || max < min) return [];
   if (step <= 3.6e6) {
-    const first = Math.ceil(min / step) * step;
+    const offset = new Date(min).getTimezoneOffset() * 60_000;
+    const first = Math.ceil((min - offset) / step) * step + offset;
     const count = Math.floor((max - first) / step) + 1;
     if (!Number.isFinite(count) || count <= 0 || count > 100_000) return [];
     return Array.from({ length: count }, (_, i) => new Date(first + i * step));
@@ -18,4 +19,14 @@ export const stepTicks = (min, max, step) => {
     if (t >= min && t <= max && (!ticks.length || t > ticks.at(-1).getTime())) ticks.push(new Date(t));
   }
   return ticks;
+};
+
+export const firstTickOfEachLocalDate = (ticks) => {
+  const seen = new Set();
+  return new Set(ticks.filter((tick) => {
+    const date = `${tick.getFullYear()}-${tick.getMonth()}-${tick.getDate()}`;
+    if (seen.has(date)) return false;
+    seen.add(date);
+    return true;
+  }).map((tick) => tick.getTime()));
 };
