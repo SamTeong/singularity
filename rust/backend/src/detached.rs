@@ -84,6 +84,7 @@ mod tests {
 
     #[test]
     fn detached_child_probe() {
+        let _probe_env_guard = ENV_LOCK.lock().unwrap();
         let Ok(marker) = std::env::var("SINGULARITY_DETACHED_PROBE") else {
             return;
         };

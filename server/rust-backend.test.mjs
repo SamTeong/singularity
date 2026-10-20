@@ -904,6 +904,55 @@ test('Rust usage auth bridge keeps platform and attempted-auth outcomes private'
   }
 });
 
+test('Rust usage auth bridge forwards the current environment in both private requests', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin.end = () => {
+    queueMicrotask(() => child.emit('exit', 0, null));
+  };
+  child.kill = () => {
+    queueMicrotask(() => child.emit('exit', 0, null));
+    return true;
+  };
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    const request = JSON.parse(String(chunk));
+    requests.push(request);
+    queueMicrotask(() => {
+      child.stdout.write(`${JSON.stringify(request.op === 'usage_keychain' ? { ok: false } : { attempted: true })}\n`);
+      callback?.();
+    });
+    return true;
+  };
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => {
+      child.emit('spawn');
+      child.stdout.write('{"ready":true}\n');
+    });
+    return child;
+  } });
+  const key = 'SINGULARITY_TEST_AUTH_ENV';
+  const previous = process.env[key];
+  const marker = 'synthetic-bridge-auth-env-marker';
+  process.env[key] = marker;
+  try {
+    await backend.start();
+    assert.equal(await backend.usageKeychain('darwin', 'synthetic-security'), null);
+    assert.deepEqual(await backend.usageAuthStatus('synthetic-claude', 10_000), { attempted: true });
+    assert.equal(requests.length, 2);
+    assert.deepEqual(requests.map(({ op, env }) => [op, env[key]]), [
+      ['usage_keychain', marker],
+      ['usage_auth_status', marker],
+    ]);
+  } finally {
+    if (previous === undefined) delete process.env[key];
+    else process.env[key] = previous;
+    await backend.stop();
+  }
+});
+
 test('Rust procs kill bridge terminates a scratch child and rejects bad pids', async () => {
   const backend = createRustBackend();
   try {

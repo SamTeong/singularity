@@ -210,12 +210,14 @@ fn main() -> io::Result<()> {
                 singularity_backend::usage_auth::keychain(
                     request.platform.as_str(),
                     request.bin.as_str(),
+                    &request.env,
                 )
             }
             Ok(request) if request.op == "usage_auth_status" => {
                 singularity_backend::usage_auth::auth_status(
                     request.bin.as_str(),
                     request.timeout_ms.as_f64().unwrap_or(10_000.0),
+                    &request.env,
                 )
             }
             Ok(request) if request.op == "procs_kill" => {

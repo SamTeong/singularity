@@ -323,12 +323,12 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     },
 
     async usageKeychain(platform, bin = 'security') {
-      const payload = await request({ op: 'usage_keychain', platform, bin });
+      const payload = await request({ op: 'usage_keychain', platform, bin, env: process.env });
       return payload?.ok ? payload.oauth ?? null : null;
     },
 
     async usageAuthStatus(bin, timeout) {
-      return request({ op: 'usage_auth_status', bin, timeout_ms: timeout });
+      return request({ op: 'usage_auth_status', bin, timeout_ms: timeout, env: process.env });
     },
 
     // Guarded PID kill for procs.mjs: { ok } | { ok:false, error } — Node keeps
