@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 pub mod config_write;
+pub mod hooks_write;
 pub mod memory;
 pub mod model_prices;
 pub mod models;

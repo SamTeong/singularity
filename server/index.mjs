@@ -644,7 +644,7 @@ app.get('/hooks/file', async (req, reply) => {
 app.put('/hooks/file', async (req, reply) => {
   const { path, content, mtime, force } = req.body || {};
   if (!path || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = await writeHook(path, content, mtime, force);
+  const r = await writeHook(path, content, mtime, force, rustBackend, app.log);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });

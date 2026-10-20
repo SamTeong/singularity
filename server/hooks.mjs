@@ -6,7 +6,6 @@
 // (which can't stop a write to ANY */.claude/hooks/ on the machine — hooks are
 // auto-executed by Claude). Roots are an independent FS-persisted list under STATE_DIR.
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
 import { join, sep, resolve, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
@@ -91,7 +90,7 @@ export function readHook(path) {
 
 // Write raw content back with a backup (mirror writeConfig). No JSON
 // validation — hook files are scripts, not JSON.
-export async function writeHook(path, content, mtime, force) {
+export async function writeHook(path, content, mtime, force, backend, logger) {
   const abs = guard(path);
   if (!abs) return { ok: false, error: 'bad path' };
   try {
@@ -104,8 +103,19 @@ export async function writeHook(path, content, mtime, force) {
     if (mtime != null && !force && existsSync(abs) && Math.abs(statSync(abs).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    await writeFile(abs, content);
-    return { ok: true, backup, path: abs, mtime: statSync(abs).mtimeMs };
+    if (typeof content !== 'string') return { ok: false, error: 'content must be a string' };
+    let result;
+    try { result = await backend.hooksWrite(abs, content, mtime, force); }
+    catch (e) {
+      logger?.error({ err: e.message }, 'Rust Hooks write backend failed');
+      return { ok: false, error: 'hook write failed' };
+    }
+    if (!result.ok) {
+      if (result.error === 'changed on disk') return result;
+      logger?.error({ err: result.error }, 'Rust Hooks write backend failed');
+      return { ok: false, error: 'hook write failed' };
+    }
+    return { ...result, backup, path: abs };
   } catch (e) {
     return { ok: false, error: e.message };
   }
