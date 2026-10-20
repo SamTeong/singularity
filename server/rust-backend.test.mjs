@@ -495,6 +495,81 @@ test('gateway turns Rust process failure into a logged 500 response', async () =
   await app.close();
 });
 
+test('Rust stdio bridge writes Claude Config with UTF-8, mtime coercion, force, and no parent creation', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-config-write-'));
+  const path = join(base, '.claude', 'settings.json');
+  await mkdir(join(base, '.claude'), { recursive: true });
+  await writeFile(path, 'prior');
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    const saved = await backend.configWrite(path, '{"theme":"更新 ✓"}', null, false);
+    assert.deepEqual(Object.keys(saved).sort(), ['mtime', 'ok']);
+    assert.equal(saved.ok, true);
+    assert.equal(await readFile(path, 'utf8'), '{"theme":"更新 ✓"}');
+    assert.ok(Math.abs(saved.mtime - (await (await import('node:fs/promises')).stat(path)).mtimeMs) < 2);
+
+    const matchingStringMtime = await backend.configWrite(path, '', String(saved.mtime), false);
+    assert.equal(matchingStringMtime.ok, true); // string mtime is Number-coerced
+    assert.equal(await readFile(path, 'utf8'), '');
+
+    await writeFile(path, 'external');
+    const future = new Date(Date.now() + 5000);
+    await utimes(path, future, future);
+    const stale = await backend.configWrite(path, 'rejected', saved.mtime, false);
+    assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
+    assert.equal(await readFile(path, 'utf8'), 'external');
+
+    const forced = await backend.configWrite(path, 'forced', saved.mtime, 'false');
+    assert.equal(forced.ok, true); // truthy force follows JavaScript coercion
+    assert.equal(await readFile(path, 'utf8'), 'forced');
+
+    const unguarded = await backend.configWrite(path, 'unguarded', 'not-a-number', false);
+    assert.equal(unguarded.ok, true); // Number(NaN) serializes as null and disables the guard
+
+    const missing = join(base, 'absent', '.claude', 'settings.json');
+    const failed = await backend.configWrite(missing, '{}', null, false);
+    assert.equal(failed.ok, false);
+    assert.equal(await access(join(base, 'absent')).then(() => true, () => false), false);
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('Rust Config bridge preserves and checks pre-epoch mtimes', async (t) => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-config-pre-epoch-'));
+  const path = join(base, '.claude', 'settings.json');
+  await mkdir(join(base, '.claude'), { recursive: true });
+  await writeFile(path, 'prior');
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    const preEpoch = new Date(Date.UTC(1960, 0, 1));
+    try { await utimes(path, preEpoch, preEpoch); }
+    catch (error) {
+      t.skip(`filesystem cannot set a pre-epoch mtime: ${error.message}`);
+      return;
+    }
+    const { mtimeMs } = await (await import('node:fs/promises')).stat(path);
+    if (mtimeMs >= 0) {
+      t.skip(`filesystem did not retain the pre-epoch mtime; observed ${mtimeMs}`);
+      return;
+    }
+
+    const stale = await backend.configWrite(path, 'rejected', mtimeMs + 10, false);
+    assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
+    assert.equal(await readFile(path, 'utf8'), 'prior');
+
+    const saved = await backend.configWrite(path, 'updated', String(mtimeMs), false);
+    assert.equal(saved.ok, true);
+    assert.equal(await readFile(path, 'utf8'), 'updated');
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
 test('Rust Memory write bridge preserves mtime, coercion, force, and missing-parent behavior', async () => {
   const base = await mkdtemp(join(tmpdir(), 'singularity-rust-memory-'));
   const path = join(base, 'project', 'memory', 'fact.md');

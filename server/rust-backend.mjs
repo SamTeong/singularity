@@ -240,6 +240,16 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       });
     },
 
+    configWrite(path, content, mtime, force) {
+      return request({
+        op: 'config_write',
+        path,
+        content,
+        mtime: mtime == null ? null : Number(mtime),
+        force: !!force,
+      });
+    },
+
     readFile(path) {
       return request({ op: 'read', path });
     },

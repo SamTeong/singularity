@@ -589,7 +589,7 @@ app.post('/config/search', async (req) => {
 app.put('/config/:scope', async (req, reply) => {
   const { cwd, content, mtime, force } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
-  const r = await writeConfig(cwd, req.params.scope, content, mtime, force);
+  const r = await writeConfig(cwd, req.params.scope, content, mtime, force, rustBackend, app.log);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
