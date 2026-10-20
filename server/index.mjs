@@ -17,10 +17,11 @@ import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, ge
 import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, getConfigRoots as getCodexConfigRoots, setConfigRoots as setCodexConfigRoots } from './codex-config.mjs';
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
-import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
+import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, createRuleReferenceHandler } from './rules.mjs';
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
-import { listSessions as listPlanSessions, getSession as getPlanSession, resolveSessionDirectory, PLAN_ROOT } from './plans.mjs';
-import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, wikiSweepHistory, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
+import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
+import { getWikiRoot, setWikiRoot, resolveRoot, isWikiPath } from './wiki.mjs';
+import { createRustBackend, createWikiGraphHandler } from './rust-backend.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
@@ -119,6 +120,8 @@ const app = Fastify({
     },
   },
 });
+const rustBackend = createRustBackend();
+app.addHook('onClose', async () => rustBackend.stop());
 
 // Safety net: the daemon hosts live PTY agents — an unhandled rejection must be
 // logged and survive, never crash the process.
@@ -770,23 +773,15 @@ app.put('/rules/file', async (req, reply) => {
   return r;
 });
 // Companion <stem>-reference.md for a rule file (read-only, separate tree).
-app.get('/rules/reference', async (req, reply) => {
-  const r = findRuleReference(req.query.path);
-  if (!r.ok) reply.code(r.error === 'no reference' ? 404 : 400);
-  return r;
-});
+app.get('/rules/reference', createRuleReferenceHandler(rustBackend, app.log));
 
 // Plans: read-only browse of the handoff plan tree (SING_PLANS_ROOT in .env) —
 // session dirs holding markdown plans + a state.json snapshot. Never written
 // to. Unset root = feature disabled: routes answer empty/404 and
 // /capabilities tells the UI to show the disabled state.
 // VERIFY: plans-index-routes
-app.get('/plans/sessions', async () => listPlanSessions());
-app.get('/plans/session', async (req, reply) => {
-  const r = await getPlanSession(req.query.sid);
-  if (!r.ok) reply.code(r.error === 'not found' ? 404 : r.error === 'plans disabled' ? 404 : 400);
-  return r;
-});
+app.get('/plans/sessions', createPlanSessionsHandler(rustBackend, app.log));
+app.get('/plans/session', createPlanSessionHandler(rustBackend, app.log));
 app.post('/plans/open', async (req, reply) => {
   const r = await resolveSessionDirectory(req.body?.sid);
   if (!r.ok) {
@@ -821,12 +816,26 @@ app.post('/plans/open', async (req, reply) => {
 // FS-persisted wiki root choice (survives browser cache clear).
 app.get('/wiki/root', async () => ({ root: getWikiRoot() }));
 app.put('/wiki/root', async (req) => setWikiRoot(req.body?.root));
-app.get('/wiki/files', async (req) => wikiFiles(req.query.root));
-app.get('/wiki/sweeps', async (req) => wikiSweepHistory(typeof req.query.root === 'string' ? req.query.root : null));
-app.get('/wiki/search', async (req) => searchWiki(req.query.q, req.query.root));
-app.get('/wiki/graph', async (req) => wikiGraph(req.query.root, req.query.wiki));
+app.get('/wiki/files', async (req) => rustBackend.files(resolveRoot(req.query.root)));
+app.get('/wiki/sweeps', async (req) => rustBackend.sweeps(typeof req.query.root === 'string' ? req.query.root : null));
+app.get('/wiki/search', async (req) => {
+  const q = req.query.q ?? '';
+  if (q) q.toLowerCase(); // Preserve the existing invalid-array query failure.
+  return rustBackend.search(q, q ? resolveRoot(req.query.root) : null);
+});
+app.get('/wiki/graph', createWikiGraphHandler(rustBackend, app.log));
 app.get('/wiki/file', async (req, reply) => {
-  const r = readWikiFile(req.query.path, req.query.root);
+  if (!isWikiPath(req.query.path, req.query.root)) {
+    reply.code(400);
+    return { ok: false, error: 'path outside wiki root' };
+  }
+  let r;
+  try { r = await rustBackend.readFile(req.query.path); }
+  catch (error) {
+    app.log.error({ err: error.message }, 'Rust wiki file backend failed');
+    reply.code(500);
+    return { ok: false, error: 'wiki file backend unavailable' };
+  }
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
@@ -1006,6 +1015,12 @@ initUsageAutoRefresh(reg.bus);
 ensureHistory().catch((e) => app.log.warn({ err: e.message }, 'history backfill failed'));
 
 let server;
+try {
+  await rustBackend.start();
+} catch (error) {
+  app.log.error({ err: error.message }, 'Rust backend failed to start; build it with cargo build --release --manifest-path rust/backend/Cargo.toml');
+  process.exit(1);
+}
 // ponytail: retry bind — a /restart child waits for the old daemon to free the port
 for (let tries = 20; ; tries--) {
   try {

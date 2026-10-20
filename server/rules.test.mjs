@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
 
 // rules.mjs imports app-dir.mjs (STATE_DIR), which throws without SINGULARITY_HOME.
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
@@ -10,7 +11,7 @@ process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 // Isolate RULES_REF_DIR from the real ~/.agents/rules-reference so tests can
 // plant reference files without touching the user's FS. Must precede the import.
 process.env.SING_RULES_REF = mkdtempSync(join(tmpdir(), 'sing-rules-ref-'));
-const { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, isRulePath, readRuleFile, writeRuleFile, findRuleReference } = await import('./rules.mjs');
+const { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, isRulePath, readRuleFile, writeRuleFile, createRuleReferenceHandler } = await import('./rules.mjs');
 
 // A base root's rules live at <base>/.claude/rules — make + return that dir.
 const mkRoot = () => {
@@ -116,23 +117,39 @@ test('writeRuleFile rejects a stale mtime with "changed on disk"; force override
   assert.equal(readFileSync(p, 'utf8'), 'v-forced');
 });
 
-test('findRuleReference pairs <stem>.md with <stem>-reference.md', () => {
-  const { dir } = mkRoot();
-  const rulePath = join(dir, 'skills.md');
-  writeFileSync(rulePath, 'rule body');
+// Reference lookup runs in Rust (see rust-backend.test.mjs for the real-child
+// coverage); rules.mjs owns the configured root and the HTTP mapping.
+test('rules reference handler passes the configured root and preserves payload and HTTP mapping', async () => {
+  const app = Fastify();
   const refDir = process.env.SING_RULES_REF;
-  writeFileSync(join(refDir, 'skills-reference.md'), '# reference body');
-
-  const r = findRuleReference(rulePath);
-  assert.equal(r.ok, true);
-  assert.match(r.path, /skills-reference\.md$/);
-  assert.match(r.content, /reference body/);
+  const backend = {
+    ruleReference: async (path, root) => {
+      assert.equal(root, refDir); // SING_RULES_REF captured at import is passed per call
+      if (path === 'skills.md') return { ok: true, path: join(root, 'skills-reference.md'), content: '# reference body' };
+      if (path === 'lonely.md') return { ok: false, error: 'no reference' };
+      return { ok: false, error: 'no path' };
+    },
+  };
+  app.get('/rules/reference', createRuleReferenceHandler(backend, app.log));
+  try {
+    const hit = await app.inject('/rules/reference?path=skills.md');
+    assert.equal(hit.statusCode, 200);
+    assert.deepEqual(hit.json(), { ok: true, path: join(refDir, 'skills-reference.md'), content: '# reference body' });
+    const missing = await app.inject('/rules/reference?path=lonely.md');
+    assert.equal(missing.statusCode, 404);
+    assert.deepEqual(missing.json(), { ok: false, error: 'no reference' });
+    const empty = await app.inject('/rules/reference');
+    assert.equal(empty.statusCode, 400);
+    assert.deepEqual(empty.json(), { ok: false, error: 'no path' });
+  } finally { await app.close(); }
 });
 
-test('findRuleReference: no companion → ok:false', () => {
-  const { dir } = mkRoot();
-  const rulePath = join(dir, 'lonely.md');
-  writeFileSync(rulePath, 'x');
-  assert.equal(findRuleReference(rulePath).ok, false);
-  assert.equal(findRuleReference('').ok, false);
+test('rules reference backend failures map to explicit 500 responses', async () => {
+  const app = Fastify();
+  const backend = { ruleReference: async () => { throw new Error('child exited'); } };
+  app.get('/rules/reference', createRuleReferenceHandler(backend, app.log));
+  const response = await app.inject('/rules/reference?path=x.md');
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(response.json(), { ok: false, error: 'rules reference backend unavailable' });
+  await app.close();
 });

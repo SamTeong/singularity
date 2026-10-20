@@ -1,0 +1,181 @@
+import { spawn } from 'node:child_process';
+import { readdirSync } from 'node:fs';
+import { createInterface } from 'node:readline';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const defaultBinary = resolve(__dirname, '..', 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
+const childEnv = Object.fromEntries(['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'WINDIR']
+  .filter((key) => process.env[key] !== undefined)
+  .map((key) => [key, process.env[key]]));
+
+function wikiOrder(root) {
+  try {
+    return readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort((a, b) => a.localeCompare(b));
+  } catch { return []; }
+}
+
+export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = spawn } = {}) {
+  let child;
+  let lines;
+  let startPromise;
+  let closed = false;
+  let busy = false;
+  const queue = [];
+  const request = (body) => {
+    if (!child || closed) return Promise.reject(new Error('Rust backend is not running'));
+    return new Promise((resolveRequest, rejectRequest) => {
+      queue.push({ request: body, resolve: resolveRequest, reject: rejectRequest });
+      pump();
+    });
+  };
+
+  const fail = (error) => {
+    closed = true;
+    child?.stdin?.destroy();
+    while (queue.length) queue.shift().reject(error);
+  };
+
+  const pump = () => {
+    if (closed || busy || queue.length === 0) return;
+    busy = true;
+    const item = queue[0];
+    try {
+      child.stdin.write(`${JSON.stringify(item.request)}\n`, (error) => {
+        if (error) fail(error);
+      });
+    } catch (error) { fail(error); }
+  };
+
+  return {
+    start() {
+      if (startPromise) return startPromise;
+      if (child) return Promise.resolve();
+      startPromise = new Promise((resolveStart, rejectStart) => {
+        let ready = false;
+        let settled = false;
+        const startupTimer = setTimeout(() => {
+          const error = new Error('Rust backend startup timed out waiting for ready signal');
+          fail(error);
+          if (!settled) { settled = true; rejectStart(error); }
+          child?.kill();
+        }, 10000);
+        const rejectStartup = (error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(startupTimer);
+          rejectStart(error);
+        };
+        const resolveStartup = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(startupTimer);
+          resolveStart();
+        };
+        child = spawnProcess(binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, env: childEnv });
+        child.once('error', (error) => { fail(error); rejectStartup(error); });
+        child.stderr.setEncoding('utf8');
+        child.stderr.on('data', (chunk) => process.stderr.write(`[rust-backend] ${chunk}`));
+        lines = createInterface({ input: child.stdout });
+        lines.on('line', (line) => {
+          let response;
+          try { response = JSON.parse(line); }
+          catch { return fail(new Error('Rust backend returned invalid JSON')); }
+          if (!ready) {
+            if (response?.ready !== true) {
+              const error = new Error('Rust backend returned invalid startup handshake');
+              fail(error);
+              rejectStartup(error);
+              child.kill();
+              return;
+            }
+            ready = true;
+            resolveStartup();
+            return;
+          }
+          const item = queue.shift();
+          if (!item) return fail(new Error('Rust backend returned an unsolicited response'));
+          item.resolve(response);
+          busy = false;
+          pump();
+        });
+        child.once('exit', (code, signal) => {
+          const error = new Error(ready
+            ? `Rust backend exited (${signal || code})`
+            : `Rust backend exited before ready (${signal || code})`);
+          fail(error);
+          rejectStartup(error);
+        });
+      });
+      return startPromise;
+    },
+
+    graph(root, wiki) {
+      return request({ root, wiki });
+    },
+
+    files(root) {
+      return request({ op: 'files', root, wiki_order: wikiOrder(root) }).then((payload) => {
+        payload.wikis?.sort((a, b) => a.name.localeCompare(b.name));
+        for (const wiki of payload.wikis || []) wiki.pages?.sort((a, b) => a.rel.localeCompare(b.rel));
+        return payload;
+      });
+    },
+
+    sweeps(root) {
+      return request({ op: 'sweeps', root });
+    },
+
+    search(q, root) {
+      return request({ op: 'search', q, root, wiki_order: wikiOrder(root) }).then((payload) => {
+        payload.results?.sort((a, b) => a.rel.split('/')[0].localeCompare(b.rel.split('/')[0]));
+        for (const result of payload.results || []) result.text = result.text.slice(0, 200);
+        return payload;
+      });
+    },
+
+    planSessions(root) {
+      return request({ op: 'plan_sessions', root });
+    },
+
+    planSession(dir, sid) {
+      return request({ op: 'plan_session', path: dir, sid });
+    },
+
+    ruleReference(path, root) {
+      return request({ op: 'rule_reference', path, root });
+    },
+
+    readFile(path) {
+      return request({ op: 'read', path });
+    },
+
+    async stop() {
+      if (!child || closed) return;
+      closed = true;
+      lines?.close();
+      child.stdin.end();
+      const exited = new Promise((resolveExit) => child.once('exit', resolveExit));
+      let timer;
+      const timeout = new Promise((resolveExit) => { timer = setTimeout(() => { child.kill(); resolveExit(); }, 2000); });
+      await Promise.race([exited, timeout]);
+      clearTimeout(timer);
+      while (queue.length) queue.shift().reject(new Error('Rust backend stopped'));
+    },
+  };
+}
+
+export function createWikiGraphHandler(backend, logger) {
+  return async (req, reply) => {
+    try { return await backend.graph(req.query.root ?? '', req.query.wiki ?? ''); }
+    catch (error) {
+      logger.error({ err: error.message }, 'Rust wiki graph backend failed');
+      reply.code(500);
+      return { error: 'wiki graph backend unavailable' };
+    }
+  };
+}

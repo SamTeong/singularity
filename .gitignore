@@ -21,3 +21,4 @@ test-results/
 references/
 .gstack/
 .local/
+rust/backend/target/
