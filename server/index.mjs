@@ -26,6 +26,7 @@ import { list as listProjects, add as addProject, remove as removeProject, reord
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
+import { setOneShotBackend } from './one-shot.mjs';
 import { readSkillsDir, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } from './skills.mjs';
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, setExplorerBackend } from './explorer.mjs';
 import { getConfigState, setConfigState } from './config-state.mjs';
@@ -123,6 +124,7 @@ const app = Fastify({
 });
 const rustBackend = createRustBackend();
 setExplorerBackend(rustBackend);
+setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, window-anchor pokes)
 setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
 setModelsBackend(rustBackend); // model-store.mjs dispatches catalogue and routing calls on the shared child
 const modelHandlers = createModelsHandlers(rustBackend, join(reg.STATE_DIR, 'models.json'), app.log);

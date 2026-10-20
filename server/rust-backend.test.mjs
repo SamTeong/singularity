@@ -799,3 +799,37 @@ test('Rust Explorer filesystem bridge mutates isolated files and directories', a
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test('Rust one-shot bridge execs a binary and maps stdout, failure, and timeout', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-oneshot-'));
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    const okScript = join(base, 'ok.mjs');
+    const failScript = join(base, 'fail.mjs');
+    const slowScript = join(base, 'slow.mjs');
+    await writeFile(okScript, "process.stdout.write('bridge-ok');");
+    await writeFile(failScript, "process.stdout.write('bridge-boom'); process.exit(3);");
+    await writeFile(slowScript, 'setTimeout(() => {}, 5000);');
+
+    const ok = await backend.oneShot(process.execPath, [okScript], { timeout: 10_000 });
+    assert.equal(ok.stdout, 'bridge-ok');
+
+    await assert.rejects(backend.oneShot(process.execPath, [failScript], { timeout: 10_000 }), (error) => {
+      assert.match(error.message, /Command failed:/);
+      assert.equal(error.code, 3);
+      assert.equal(error.killed, false);
+      assert.equal(error.stdout, 'bridge-boom');
+      return true;
+    });
+
+    await assert.rejects(backend.oneShot(process.execPath, [slowScript], { timeout: 200 }), (error) => {
+      assert.match(error.message, /timed out after 200ms/);
+      assert.equal(error.killed, true);
+      return true;
+    });
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});

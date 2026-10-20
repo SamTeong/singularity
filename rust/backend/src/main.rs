@@ -46,6 +46,12 @@ struct Request {
     to: Value,
     #[serde(default)]
     kind: Value,
+    #[serde(default)]
+    bin: Value,
+    #[serde(default)]
+    args: Value,
+    #[serde(default)]
+    timeout_ms: Value,
 }
 
 fn default_op() -> String {
@@ -177,6 +183,11 @@ fn main() -> io::Result<()> {
             Ok(request) if request.op == "explorer_rename" => {
                 singularity_backend::explorer_fs::rename(request.from.as_str(), request.to.as_str())
             }
+            Ok(request) if request.op == "oneshot" => singularity_backend::oneshot::run(
+                request.bin.as_str(),
+                &request.args,
+                request.timeout_ms.as_f64(),
+            ),
             Ok(request) if request.op == "plan_session" => {
                 match (request.path.as_str(), request.sid.as_str()) {
                     (Some(path), Some(sid)) => singularity_backend::plans::get_session(path, sid),

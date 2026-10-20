@@ -22,6 +22,17 @@ const execFileP = promisify(execFile);
 const ONESHOT_TIMEOUT_MS = 120_000;
 const ONESHOT_MAX_BUFFER = 8 * 1024 * 1024;
 
+let oneShotBackend;
+export function setOneShotBackend(backend) { oneShotBackend = backend; }
+
+// Default executor for runOneShotPrompt: the queued Rust backend when index.mjs
+// wires it in (std::process::Command, stdin-null + windowsHide + timeout parity);
+// the legacy in-process execFile otherwise, so standalone imports keep working.
+export async function oneShotSpawn(bin, args, opts = {}) {
+  if (!oneShotBackend) return execFileP(bin, args, opts);
+  return oneShotBackend.oneShot(bin, args, opts);
+}
+
 // execFile leaves stdin an open pipe, so every CLI here stalls waiting on input
 // ("Warning: no stdin data received in 3s, proceeding without"). Close it.
 function run(spawn, bin, args, opts) {
@@ -31,7 +42,7 @@ function run(spawn, bin, args, opts) {
 }
 
 export async function runOneShotPrompt(group, modelId, prompt, {
-  timeoutMs = ONESHOT_TIMEOUT_MS, extraArgs = [], spawn = execFileP, includeMetadata = false,
+  timeoutMs = ONESHOT_TIMEOUT_MS, extraArgs = [], spawn = oneShotSpawn, includeMetadata = false,
 } = {}) {
   const opts = { maxBuffer: ONESHOT_MAX_BUFFER, timeout: timeoutMs };
   if (group === 'claude') {

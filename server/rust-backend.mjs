@@ -294,6 +294,27 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'explorer_rename', from, to });
     },
 
+    // execFile-shaped one-shot CLI exec: resolves { stdout }, rejects with an
+    // error carrying the captured stdout (one-shot.mjs's claude branch reads
+    // the JSON reason out of it) and the timeout/exit cause.
+    async oneShot(bin, args, opts) {
+      const payload = await request({
+        op: 'oneshot', bin, args: args ?? [], timeout_ms: opts?.timeout ?? null,
+      });
+      if (payload.ok) return { stdout: payload.stdout };
+      const argv = [bin, ...(args ?? [])].join(' ');
+      const tail = String(payload.stderr || '').trim().split(/\r?\n/).pop() || '';
+      const message = payload.timed_out
+        ? `Command timed out after ${opts?.timeout}ms: ${argv}`
+        : `Command failed: ${argv}${tail ? `\n${tail}` : ''}`;
+      const error = new Error(message);
+      error.stdout = payload.stdout ?? undefined;
+      error.stderr = payload.stderr ?? undefined;
+      error.code = payload.code ?? undefined;
+      error.killed = !!payload.timed_out;
+      throw error;
+    },
+
     readFile(path) {
       return request({ op: 'read', path });
     },

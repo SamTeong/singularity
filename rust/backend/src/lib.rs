@@ -13,6 +13,7 @@ pub mod hooks_write;
 pub mod memory;
 pub mod model_prices;
 pub mod models;
+pub mod oneshot;
 pub mod plans;
 pub mod rules;
 pub mod skills;

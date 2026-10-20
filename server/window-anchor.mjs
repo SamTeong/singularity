@@ -11,16 +11,12 @@
 // emitted on the bus as 'window-anchor' after every mutation (crons.mjs
 // pattern). Never pokes twice for the same window.
 import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { dirname, join } from 'node:path';
 import { bus, writeAtomic, STATE_DIR } from './agents.mjs';
 import { USAGE_SKILL_STATE } from './app-dir.mjs';
 import { groupFor } from './model-store.mjs';
-import { runOneShotPrompt } from './one-shot.mjs';
+import { runOneShotPrompt, oneShotSpawn } from './one-shot.mjs';
 import { getUsage } from './usage.mjs';
-
-const execFileP = promisify(execFile);
 
 const WINDOW_MS = 5 * 3.6e6;       // the plan window an anchor pins
 const ANCHOR_DELAY_MS = 5000;      // fire just after the reset, like usage.mjs's reset refresh (+2000)
@@ -58,7 +54,7 @@ let logger = null;
 let stateFile = join(STATE_DIR, 'window-anchor.json');
 let telemetryFile = join(USAGE_SKILL_STATE, 'window-anchor-runs.jsonl');
 let now = () => Date.now();
-let spawn = execFileP;
+let spawn = oneShotSpawn;
 let refreshUsage = getUsage;
 let busRef = bus;
 let usageHandler = null;
@@ -244,7 +240,7 @@ function onUsage(result) {
 
 export function initWindowAnchor({
   bus: b = bus, log, stateDir = STATE_DIR, usageStateDir = USAGE_SKILL_STATE,
-  spawn: spawnFn = execFileP, usageRefresh = getUsage, now: nowFn, enabled = process.env.WINDOW_ANCHOR,
+  spawn: spawnFn = oneShotSpawn, usageRefresh = getUsage, now: nowFn, enabled = process.env.WINDOW_ANCHOR,
 } = {}) {
   logger = log;
   busRef = b;
