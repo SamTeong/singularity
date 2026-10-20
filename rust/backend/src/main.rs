@@ -142,6 +142,15 @@ fn main() -> io::Result<()> {
                     request.force.as_bool().unwrap_or(false),
                 )
             }
+            Ok(request) if request.op == "explorer_state_get" => {
+                singularity_backend::explorer_state::get(request.path.as_str().unwrap_or(""))
+            }
+            Ok(request) if request.op == "explorer_state_set" => {
+                singularity_backend::explorer_state::set(
+                    request.path.as_str().unwrap_or(""),
+                    &request.state,
+                )
+            }
             Ok(request) if request.op == "plan_session" => {
                 match (request.path.as_str(), request.sid.as_str()) {
                     (Some(path), Some(sid)) => singularity_backend::plans::get_session(path, sid),

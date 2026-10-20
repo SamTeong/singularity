@@ -1,6 +1,6 @@
 // Unit tests for the explorer backend — full-FS list/read/write/create/delete/
-// rename + FS-persisted UI state. No containment guard (bad(p) only), so
-// tests exercise real scratch dirs rather than a fenced root.
+// Explorer filesystem behavior. No containment guard (bad(p) only), so tests
+// exercise real scratch dirs rather than a fenced root.
 // Run: node --test server/
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -8,11 +8,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, utimesSync } from 'node:fs';
 
-// explorer.mjs imports app-dir.mjs (STATE_DIR), which throws without
-// SINGULARITY_HOME. Point it at a scratch temp dir before a dynamic import
-// (static imports hoist above this assignment).
+// Keep the filesystem fixture isolated from any user files.
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
-const { listEntries, searchEntries, readEntry, writeEntry, createEntry, deleteEntry, renameEntry, getState, setState, rawEntry } = await import('./explorer.mjs');
+const { listEntries, searchEntries, readEntry, writeEntry, createEntry, deleteEntry, renameEntry, rawEntry } = await import('./explorer.mjs');
 
 const ROOT = mkdtempSync(join(tmpdir(), 'sing-explorer-'));
 const p = (...parts) => join(ROOT, ...parts);
@@ -29,7 +27,6 @@ test('listEntries: dirs before files, alpha within each group, dotfiles included
   assert.equal(r.entries[2].type, 'file');
   assert.equal(r.parent, p());
 });
-
 // Junctions are how ~/.agents + ~/.claude/skills are wired, and Dirent (lstat)
 // calls them neither dir nor file — listEntries must stat through the link.
 test('listEntries: a junction to a dir is typed dir, a broken link is skipped', () => {
@@ -195,16 +192,4 @@ test('every mutating fn rejects bad paths: empty, null, relative', async () => {
     assert.equal(renameEntry(p('ok.txt'), bad).error, 'bad path');
     assert.equal(rawEntry(bad).error, 'bad path');
   }
-});
-
-test('getState: default shape; setState: partial-merge round-trip', () => {
-  assert.deepEqual(getState(), { root: '~', expanded: [], tabs: [], active: null, autosave: false });
-
-  const r1 = setState({ root: '/tmp/foo', tabs: ['/a.txt'] });
-  assert.equal(r1.ok, true);
-  assert.deepEqual(r1.state, { root: '/tmp/foo', expanded: [], tabs: ['/a.txt'], active: null, autosave: false });
-  assert.deepEqual(getState(), r1.state);
-
-  const r2 = setState({ active: '/a.txt', autosave: true });
-  assert.deepEqual(r2.state, { root: '/tmp/foo', expanded: [], tabs: ['/a.txt'], active: '/a.txt', autosave: true });
 });

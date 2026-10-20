@@ -8,7 +8,6 @@
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, renameSync } from 'node:fs';
 import { readdir, writeFile } from 'node:fs/promises';
 import { join, dirname, parse as parsePath, isAbsolute, extname } from 'node:path';
-import { STATE_DIR } from './app-dir.mjs';
 import { backupFile } from './backups.mjs';
 
 const ENTRY_CAP = 2000;
@@ -152,38 +151,5 @@ export function rawEntry(path) {
   try {
     const mime = MIME[extname(path).toLowerCase()] || 'application/octet-stream';
     return { ok: true, buf: readFileSync(path), mime };
-  } catch (e) { return { ok: false, error: e.message }; }
-}
-
-// Explorer UI state (root/expanded tree/open tabs): FS-persisted under
-// STATE_DIR, same pattern as memory.mjs's ROOT_FILE / hooks.mjs's ROOTS_FILE.
-const STATE_FILE = join(STATE_DIR, 'explorer-state.json');
-const DEFAULT_STATE = { root: '~', expanded: [], tabs: [], active: null, autosave: false };
-
-export function getState() {
-  try {
-    const s = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-    return { ...DEFAULT_STATE, ...s };
-  } catch { return { ...DEFAULT_STATE }; }
-}
-
-function strArray(v) {
-  return Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 500) : undefined;
-}
-
-export function setState(patch) {
-  const cur = getState();
-  const next = { ...cur };
-  if (patch && typeof patch.root === 'string' && patch.root) next.root = patch.root;
-  const expanded = strArray(patch?.expanded);
-  if (expanded) next.expanded = expanded;
-  const tabs = strArray(patch?.tabs);
-  if (tabs) next.tabs = tabs;
-  if (patch && (typeof patch.active === 'string' || patch.active === null)) next.active = patch.active;
-  if (patch && typeof patch.autosave === 'boolean') next.autosave = patch.autosave;
-  try {
-    mkdirSync(STATE_DIR, { recursive: true });
-    writeFileSync(STATE_FILE, JSON.stringify(next));
-    return { ok: true, state: next };
   } catch (e) { return { ok: false, error: e.message }; }
 }

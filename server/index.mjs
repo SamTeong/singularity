@@ -27,7 +27,7 @@ import { reviewStatus as projectReviewStatus, readReviewFile } from './project-r
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
 import { readSkillsDir, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } from './skills.mjs';
-import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, getState as getExplorerState, setState as setExplorerState } from './explorer.mjs';
+import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry } from './explorer.mjs';
 import { getConfigState, setConfigState } from './config-state.mjs';
 import { getKeys, setKeys } from './keys.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
@@ -447,8 +447,22 @@ app.patch('/fs/rename', async (req, reply) => {
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
-app.get('/fs/state', async () => ({ state: getExplorerState() }));
-app.put('/fs/state', async (req) => setExplorerState(req.body));
+const EXPLORER_STATE_FILE = join(reg.STATE_DIR, 'explorer-state.json');
+const DEFAULT_EXPLORER_STATE = { root: '~', expanded: [], tabs: [], active: null, autosave: false };
+app.get('/fs/state', async () => {
+  try { return { state: await rustBackend.explorerStateGet(EXPLORER_STATE_FILE) }; }
+  catch (error) {
+    app.log.warn({ err: error }, 'Explorer state read failed');
+    return { state: { ...DEFAULT_EXPLORER_STATE } };
+  }
+});
+app.put('/fs/state', async (req) => {
+  try { return await rustBackend.explorerStateSet(EXPLORER_STATE_FILE, req.body); }
+  catch (error) {
+    app.log.warn({ err: error }, 'Explorer state write failed');
+    return { ok: false, error: error.message };
+  }
+});
 app.get('/keys', async () => ({ keys: getKeys() }));
 app.put('/keys', async (req) => setKeys(req.body));
 

@@ -724,3 +724,46 @@ test('Rust Memory bridge saves pre-epoch files and rejects stale pre-epoch mtime
     await rm(base, { recursive: true, force: true });
   }
 });
+
+test('Rust Explorer state bridge reads and merges one fresh fixed state file', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'singularity-rust-explorer-state-'));
+  const statePath = join(home, 'state', 'explorer-state.json');
+  const backend = createRustBackend();
+  const defaults = { root: '~', expanded: [], tabs: [], active: null, autosave: false };
+  try {
+    await backend.start();
+    assert.deepEqual(await backend.explorerStateGet(statePath), defaults);
+    const saved = await backend.explorerStateSet(statePath, {
+      root: ' ~/work ', tabs: ['/a', 1, '/b'], expanded: ['/z', 1, '/a'],
+      active: '/a', autosave: true, custom: 'ignored',
+    });
+    assert.deepEqual(Object.keys(saved), ['ok', 'state']);
+    assert.deepEqual(saved.state, {
+      ...defaults, root: ' ~/work ', tabs: ['/a', '/b'], expanded: ['/z', '/a'], active: '/a', autosave: true,
+    });
+    const clearActive = await backend.explorerStateSet(statePath, { active: null });
+    assert.equal(clearActive.state.active, null);
+
+    await writeFile(statePath, JSON.stringify({ root: 7, unknown: { retained: true }, tabs: 'legacy' }));
+    assert.deepEqual(await backend.explorerStateGet(statePath), {
+      ...defaults, root: 7, unknown: { retained: true }, tabs: 'legacy',
+    });
+    const noop = await backend.explorerStateSet(statePath, null);
+    assert.equal(noop.ok, true);
+    assert.deepEqual(noop.state.unknown, { retained: true });
+    assert.deepEqual(JSON.parse(await readFile(statePath, 'utf8')), noop.state);
+
+    await writeFile(statePath, '{ malformed');
+    assert.deepEqual(await backend.explorerStateGet(statePath), defaults);
+    assert.equal(await readFile(statePath, 'utf8'), '{ malformed');
+
+    const blocker = join(home, 'file-blocker');
+    await writeFile(blocker, 'file');
+    const failed = await backend.explorerStateSet(join(blocker, 'state.json'), null);
+    assert.equal(failed.ok, false);
+    assert.equal(typeof failed.error, 'string');
+  } finally {
+    await backend.stop();
+    await rm(home, { recursive: true, force: true });
+  }
+});
