@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { access, mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 import Fastify from 'fastify';
@@ -17,6 +18,46 @@ async function wiki(root, name, files) {
     await writeFile(path, text);
   }
 }
+
+test('Rust detached spawn returns immediately, inherits cwd and environment, and reports spawn failures', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'singularity-rust-detached-'));
+  const marker = join(root, 'child.txt');
+  const backend = createRustBackend();
+  const oldMarker = process.env.SINGULARITY_DETACHED_MARKER;
+  const oldValue = process.env.SINGULARITY_DETACHED_VALUE;
+  try {
+    await backend.start();
+    process.env.SINGULARITY_DETACHED_MARKER = marker;
+    process.env.SINGULARITY_DETACHED_VALUE = 'bridge-inherited';
+    const started = Date.now();
+    await backend.spawnDetached(process.execPath, [fileURLToPath(new URL('./detached-child-fixture.mjs', import.meta.url)), 'argv-value'], root);
+    assert.ok(Date.now() - started < 300, 'spawn should return before the synthetic child finishes');
+    if (oldMarker === undefined) delete process.env.SINGULARITY_DETACHED_MARKER;
+    else process.env.SINGULARITY_DETACHED_MARKER = oldMarker;
+    if (oldValue === undefined) delete process.env.SINGULARITY_DETACHED_VALUE;
+    else process.env.SINGULARITY_DETACHED_VALUE = oldValue;
+    await backend.stop();
+
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      try { await access(marker); break; }
+      catch { await new Promise((resolve) => setTimeout(resolve, 20)); }
+    }
+    assert.equal(await readFile(marker, 'utf8'), `${root}|argv-value|bridge-inherited`);
+    const failureBackend = createRustBackend();
+    try {
+      await failureBackend.start();
+      await assert.rejects(failureBackend.spawnDetached('singularity-command-that-does-not-exist', []), /failed to spawn/);
+    } finally { await failureBackend.stop(); }
+  } finally {
+    if (oldMarker === undefined) delete process.env.SINGULARITY_DETACHED_MARKER;
+    else process.env.SINGULARITY_DETACHED_MARKER = oldMarker;
+    if (oldValue === undefined) delete process.env.SINGULARITY_DETACHED_VALUE;
+    else process.env.SINGULARITY_DETACHED_VALUE = oldValue;
+    await backend.stop();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 test('Rust bridge rejects startup when a spawned child exits before ready', async () => {
   const child = new EventEmitter();

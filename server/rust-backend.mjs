@@ -316,6 +316,12 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       throw error;
     },
 
+    async spawnDetached(bin, args, cwd, env = process.env) {
+      const payload = await request({ op: 'detached_spawn', bin, args: args ?? [], cwd: cwd ?? null, env });
+      if (!payload?.ok) throw new Error(payload?.error || 'failed to spawn process');
+      return { ok: true };
+    },
+
     async usageKeychain(platform, bin = 'security') {
       const payload = await request({ op: 'usage_keychain', platform, bin });
       return payload?.ok ? payload.oauth ?? null : null;

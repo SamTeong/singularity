@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { parse as parsePath } from 'node:path';
 import { homedir } from 'node:os';
@@ -36,6 +36,7 @@ import { getSysStats } from './sysstats.mjs';
 import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend, CODEX_HOME } from './usage.mjs';
 import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
 import { createModelPricesHandler } from './rust-backend.mjs';
+import { createExternalSessionLaunchHandler, createSessionFolderOpenHandler } from './detached-launch.mjs';
 import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
@@ -568,22 +569,7 @@ app.post('/restart', async (req, reply) => {
 // Continue a session in an external terminal (Windows Terminal / macOS Terminal).
 // detached-spawn wt.exe / osascript with the same resume argv in-app reattach
 // uses (buildSpawn). Gated by the global token hook like the other action POSTs.
-app.post('/session/external', async (req, reply) => {
-  const id = req.body?.id;
-  if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
-  const r = await reg.externalLaunch(id);
-  if (!r.ok) return reply.code(400).send(r);
-  try {
-    // r.launcher is an absolute path (agents.mjs resolves the wt.exe alias
-    // stub under WindowsApps on Windows) — argv stays a real array, no shell.
-    spawn(r.launcher, r.launcherArgs, { detached: true, stdio: 'ignore', cwd: r.cwd }).unref();
-  } catch (e) { return reply.code(500).send({ ok: false, error: e.message }); }
-  // Hand-off: drop the session from the dock (kills the in-app pty if live via
-  // removeOnExit, else drops the detached entry). The on-disk session log
-  // survives so the external `claude --resume <id>` continues the conversation.
-  reg.remove(id);
-  return { ok: true };
-});
+app.post('/session/external', createExternalSessionLaunchHandler({ reg, rustBackend }));
 
 // Config editor: 3-scope resolver + backup-then-write.
 app.get('/config', async (req, reply) => {
@@ -786,34 +772,7 @@ app.get('/rules/reference', createRuleReferenceHandler(rustBackend, app.log));
 // VERIFY: plans-index-routes
 app.get('/plans/sessions', createPlanSessionsHandler(rustBackend, app.log));
 app.get('/plans/session', createPlanSessionHandler(rustBackend, app.log));
-app.post('/plans/open', async (req, reply) => {
-  const r = await resolveSessionDirectory(req.body?.sid);
-  if (!r.ok) {
-    reply.code(r.error === 'bad sid' ? 400 : 404);
-    return r;
-  }
-  if (process.platform !== 'win32') {
-    reply.code(501);
-    return { ok: false, error: 'unsupported platform' };
-  }
-  try {
-    const explorer = resolve(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
-    const child = spawn(explorer, [r.dir], { detached: true, stdio: 'ignore' });
-    const spawned = await new Promise((done) => {
-      child.once('spawn', () => done(true));
-      child.once('error', () => done(false));
-    });
-    if (!spawned) {
-      reply.code(500);
-      return { ok: false, error: 'failed to open session folder' };
-    }
-    child.unref();
-    return { ok: true };
-  } catch {
-    reply.code(500);
-    return { ok: false, error: 'failed to open session folder' };
-  }
-});
+app.post('/plans/open', createSessionFolderOpenHandler({ resolveSessionDirectory, rustBackend }));
 
 // Wiki: recursive .md browse + search + read-only file view under a client-
 // selected root (default ~/wiki). No write — wikis are LLM-authored.

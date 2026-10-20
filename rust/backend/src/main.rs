@@ -49,6 +49,8 @@ struct Request {
     #[serde(default)]
     bin: Value,
     #[serde(default)]
+    cwd: Value,
+    #[serde(default)]
     args: Value,
     #[serde(default)]
     timeout_ms: Value,
@@ -197,6 +199,12 @@ fn main() -> io::Result<()> {
                 request.timeout_ms.as_f64(),
                 request.max_buffer.as_f64(),
                 Some(&request.env),
+            ),
+            Ok(request) if request.op == "detached_spawn" => singularity_backend::detached::spawn(
+                request.bin.as_str(),
+                &request.args,
+                request.cwd.as_str(),
+                &request.env,
             ),
             Ok(request) if request.op == "usage_keychain" => {
                 singularity_backend::usage_auth::keychain(
