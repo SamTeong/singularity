@@ -6,11 +6,9 @@
 // content search run in Rust (rust/backend/src/rules.rs); Node keeps roots
 // persistence, the path guard and the guarded read/write.
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
 import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
-import { backupFile } from './backups.mjs';
 
 // Rule root list: FS-persisted (survives browser cache clear) under STATE_DIR.
 // Seeded with '~' (→ ~/.claude/rules) when absent/empty.
@@ -103,22 +101,25 @@ export function readRuleFile(p) {
   catch (e) { return { ok: false, error: e.message }; }
 }
 
-export async function writeRuleFile(p, content, mtime, force) {
+export async function writeRuleFile(p, content, mtime, force, backend, logger) {
   if (!isRulePath(p)) return { ok: false, error: 'path outside rule roots' };
   try {
-    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
-      return { ok: false, error: 'changed on disk' };
-    }
-    await backupFile(p);
-    // Re-check: backupFile's await can yield to a concurrent save of this
-    // same path landing in between, which the first check (above) can't see.
-    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
-      return { ok: false, error: 'changed on disk' };
-    }
-    await writeFile(p, content);
-    return { ok: true, mtime: statSync(p).mtimeMs };
+    return await backend.ruleWrite(p, content, mtime, force);
   }
-  catch (e) { return { ok: false, error: e.message }; }
+  catch (error) {
+    logger.error({ err: error.message }, 'Rust Rules write backend failed');
+    return { ok: false, error: 'rules write backend unavailable' };
+  }
+}
+
+export function createRuleWriteHandler(backend, logger) {
+  return async (req, reply) => {
+    const { path, content, mtime, force } = req.body || {};
+    if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
+    const result = await writeRuleFile(path, content, mtime, force, backend, logger);
+    if (!result.ok) reply.code(result.error === 'rules write backend unavailable' ? 500 : result.error === 'changed on disk' ? 409 : 400);
+    return result;
+  };
 }
 
 // Companion reference for a rule file. Convention (see global CLAUDE.md): a rule

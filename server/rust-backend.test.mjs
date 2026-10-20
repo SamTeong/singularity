@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
@@ -321,6 +321,47 @@ test('Rust stdio bridge serves the Rules file walk and content search', async ()
     // 200 UTF-16 code units: the boundary splits the emoji's surrogate pair.
     assert.equal(clip.results[0].text, `${'x'.repeat(199)}\ud83d`);
     assert.equal(clip.results[0].line, 1);
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('Rust stdio bridge writes Rules content with mtime checks and force', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-rules-write-'));
+  const path = join(base, '.claude', 'rules', 'note.md');
+  await mkdir(join(path, '..'), { recursive: true });
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    const saved = await backend.ruleWrite(path, 'rule ✓', null, false);
+    assert.equal(saved.ok, true);
+    assert.equal(typeof saved.mtime, 'number');
+    const { mtimeMs } = await (await import('node:fs/promises')).stat(path);
+    assert.ok(Math.abs(saved.mtime - mtimeMs) < 2);
+    assert.equal(await readFile(path, 'utf8'), 'rule ✓');
+
+    const roundTrip = await backend.ruleWrite(path, 'round-trip', saved.mtime, false);
+    assert.equal(roundTrip.ok, true); // returned metadata is usable with the strict 1ms guard
+    const empty = await backend.ruleWrite(path, '', roundTrip.mtime + 1, false);
+    assert.equal(empty.ok, true); // the existing 1ms tolerance is inclusive
+    assert.equal(await readFile(path, 'utf8'), '');
+    await writeFile(path, 'external');
+    const future = new Date(Date.now() + 5000);
+    await utimes(path, future, future);
+    const stale = await backend.ruleWrite(path, 'rejected', saved.mtime, false);
+    assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
+    assert.equal(await readFile(path, 'utf8'), 'external');
+    const staleNumericString = await backend.ruleWrite(path, 'rejected string mtime', String(saved.mtime), false);
+    assert.deepEqual(staleNumericString, { ok: false, error: 'changed on disk' });
+    assert.equal(await readFile(path, 'utf8'), 'external');
+    const forced = await backend.ruleWrite(path, 'forced', saved.mtime, 'false');
+    assert.equal(forced.ok, true);
+    assert.equal(await readFile(path, 'utf8'), 'forced');
+    const unguarded = await backend.ruleWrite(path, 'unguarded', 'not-a-number', false);
+    assert.equal(unguarded.ok, true);
+    const missing = await backend.ruleWrite(join(base, 'absent', 'x.md'), 'x', null, false);
+    assert.equal(missing.ok, false);
   } finally {
     await backend.stop();
     await rm(base, { recursive: true, force: true });

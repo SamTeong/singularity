@@ -17,7 +17,7 @@ import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, ge
 import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, getConfigRoots as getCodexConfigRoots, setConfigRoots as setCodexConfigRoots } from './codex-config.mjs';
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
-import { getRulesRoots, setRulesRoots, readRuleFile, writeRuleFile, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } from './rules.mjs';
+import { getRulesRoots, setRulesRoots, readRuleFile, createRuleWriteHandler, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } from './rules.mjs';
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
 import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
 import { getWikiRoot, setWikiRoot, resolveRoot, isWikiPath } from './wiki.mjs';
@@ -764,13 +764,7 @@ app.get('/rules/file', async (req, reply) => {
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
-app.put('/rules/file', async (req, reply) => {
-  const { path, content, mtime, force } = req.body || {};
-  if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = await writeRuleFile(path, content, mtime, force);
-  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
-  return r;
-});
+app.put('/rules/file', createRuleWriteHandler(rustBackend, app.log));
 // Companion <stem>-reference.md for a rule file (read-only, separate tree).
 app.get('/rules/reference', createRuleReferenceHandler(rustBackend, app.log));
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 import Fastify from 'fastify';
@@ -11,7 +11,7 @@ process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 // Isolate RULES_REF_DIR from the real ~/.agents/rules-reference so tests can
 // plant reference files without touching the user's FS. Must precede the import.
 process.env.SING_RULES_REF = mkdtempSync(join(tmpdir(), 'sing-rules-ref-'));
-const { getRulesRoots, setRulesRoots, isRulePath, readRuleFile, writeRuleFile, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } = await import('./rules.mjs');
+const { getRulesRoots, setRulesRoots, isRulePath, readRuleFile, createRuleWriteHandler, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } = await import('./rules.mjs');
 
 // A base root's rules live at <base>/.claude/rules — make + return that dir.
 const mkRoot = () => {
@@ -101,18 +101,26 @@ test('isRulePath rejects a path outside all persisted rules dirs', () => {
   assert.equal(isRulePath(null), false);
 });
 
-test('writeRuleFile then readRuleFile round-trips', async () => {
+test('Rules write handler authorizes in Node and sends empty content through Rust', async () => {
+  const app = Fastify();
   const { root, dir } = mkRoot();
   setRulesRoots([root]);
   const p = join(dir, 'note.md');
-
-  const w = await writeRuleFile(p, '# hello');
-  assert.equal(w.ok, true);
-  assert.equal(typeof w.mtime, 'number');
-  const r = readRuleFile(p);
-  assert.equal(r.ok, true);
-  assert.equal(r.content, '# hello');
-  assert.equal(typeof r.mtime, 'number');
+  const calls = [];
+  app.put('/rules/file', createRuleWriteHandler({
+    ruleWrite: async (...args) => { calls.push(args); return { ok: true, mtime: 1234.5 }; },
+  }, app.log));
+  try {
+    const saved = await app.inject({ method: 'PUT', url: '/rules/file', payload: { path: p, content: '' } });
+    assert.equal(saved.statusCode, 200);
+    assert.deepEqual(saved.json(), { ok: true, mtime: 1234.5 });
+    const outside = await app.inject({ method: 'PUT', url: '/rules/file', payload: { path: join(root, 'outside.md'), content: 'x' } });
+    assert.equal(outside.statusCode, 400);
+    const missing = await app.inject({ method: 'PUT', url: '/rules/file', payload: { path: p } });
+    assert.equal(missing.statusCode, 400);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], [p, '', undefined, undefined]);
+  } finally { await app.close(); }
 });
 
 test('readRuleFile reports mtime on success', () => {
@@ -126,25 +134,23 @@ test('readRuleFile reports mtime on success', () => {
   assert.ok(r.mtime > 0);
 });
 
-test('writeRuleFile rejects a stale mtime with "changed on disk"; force overrides', async () => {
+test('Rules write handler maps conflicts and transport failures', async () => {
+  const app = Fastify();
   const { root, dir } = mkRoot();
   setRulesRoots([root]);
   const p = join(dir, 'g.md');
-  await writeRuleFile(p, 'v1');
-  const stale = readRuleFile(p).mtime;
-  // Externally rewrite + bump mtime past the 1ms guard window.
-  writeFileSync(p, 'v-external');
-  const future = (Date.now() + 5000) / 1000;
-  utimesSync(p, future, future);
-  const rejected = await writeRuleFile(p, 'v2', stale);
-  assert.equal(rejected.ok, false);
-  assert.equal(rejected.error, 'changed on disk');
-  assert.equal(readFileSync(p, 'utf8'), 'v-external');
-  // force overrides the drift.
-  const forced = await writeRuleFile(p, 'v-forced', stale, true);
-  assert.equal(forced.ok, true);
-  assert.equal(typeof forced.mtime, 'number');
-  assert.equal(readFileSync(p, 'utf8'), 'v-forced');
+  app.put('/rules/file', createRuleWriteHandler({
+    ruleWrite: async () => ({ ok: false, error: 'changed on disk' }),
+  }, app.log));
+  app.put('/transport', createRuleWriteHandler({ ruleWrite: async () => { throw new Error('child exited'); } }, app.log));
+  try {
+    const conflict = await app.inject({ method: 'PUT', url: '/rules/file', payload: { path: p, content: 'v2', mtime: 10 } });
+    assert.equal(conflict.statusCode, 409);
+    assert.deepEqual(conflict.json(), { ok: false, error: 'changed on disk' });
+    const transport = await app.inject({ method: 'PUT', url: '/transport', payload: { path: p, content: 'x' } });
+    assert.equal(transport.statusCode, 500);
+    assert.deepEqual(transport.json(), { ok: false, error: 'rules write backend unavailable' });
+  } finally { await app.close(); }
 });
 
 // Reference lookup runs in Rust (see rust-backend.test.mjs for the real-child

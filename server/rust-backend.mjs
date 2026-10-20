@@ -178,6 +178,16 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       });
     },
 
+    ruleWrite(path, content, mtime, force) {
+      return request({
+        op: 'rules_write',
+        path,
+        content,
+        mtime: mtime == null ? null : Number(mtime),
+        force: !!force,
+      });
+    },
+
     skillsList(root) {
       return request({ op: 'skills_list', root });
     },

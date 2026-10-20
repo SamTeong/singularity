@@ -191,6 +191,50 @@ pub fn search(roots: &Value, q: &Value) -> Value {
     json!({ "results": results, "capped": false })
 }
 
+fn modified_ms(path: &Path) -> Result<f64, String> {
+    let modified = fs::metadata(path)
+        .map_err(|error| error.to_string())?
+        .modified()
+        .map_err(|error| error.to_string())?;
+    let duration = modified
+        .duration_since(UNIX_EPOCH)
+        .map_err(|error| error.to_string())?;
+    Ok(duration.as_secs_f64() * 1000.0)
+}
+
+pub fn write_file(
+    path: Option<&str>,
+    content: Option<&str>,
+    mtime: Option<f64>,
+    force: bool,
+) -> Value {
+    let Some(path) = path.filter(|path| !path.is_empty()) else {
+        return json!({"ok": false, "error": "path required"});
+    };
+    let Some(content) = content else {
+        return json!({"ok": false, "error": "content must be a string"});
+    };
+    let path = Path::new(path);
+    if let Some(expected) = mtime.filter(|_| !force) {
+        if path.exists() {
+            match modified_ms(path) {
+                Ok(actual) if (actual - expected).abs() > 1.0 => {
+                    return json!({"ok": false, "error": "changed on disk"});
+                }
+                Ok(_) => {}
+                Err(error) => return json!({"ok": false, "error": error}),
+            }
+        }
+    }
+    if let Err(error) = fs::write(path, content.as_bytes()) {
+        return json!({"ok": false, "error": error.to_string()});
+    }
+    match modified_ms(path) {
+        Ok(mtime) => json!({"ok": true, "mtime": mtime}),
+        Err(error) => json!({"ok": false, "error": error}),
+    }
+}
+
 // Companion <stem>-reference.md lookup for a rule file (see rules.mjs). The
 // root is configured Node-side (SING_RULES_REF / homedir default) and passed
 // per request; Rust never resolves it itself.

@@ -28,6 +28,12 @@ struct Request {
     flat: Value,
     #[serde(default)]
     file: Value,
+    #[serde(default)]
+    content: Value,
+    #[serde(default)]
+    mtime: Value,
+    #[serde(default)]
+    force: Value,
 }
 
 fn default_op() -> String {
@@ -70,6 +76,12 @@ fn main() -> io::Result<()> {
             Ok(request) if request.op == "rules_search" => {
                 singularity_backend::rules::search(&request.roots, &request.q)
             }
+            Ok(request) if request.op == "rules_write" => singularity_backend::rules::write_file(
+                request.path.as_str(),
+                request.content.as_str(),
+                request.mtime.as_f64(),
+                request.force.as_bool().unwrap_or(false),
+            ),
             Ok(request) if request.op == "skills_list" => {
                 singularity_backend::skills::list(&request.root)
             }
