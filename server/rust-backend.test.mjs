@@ -767,3 +767,35 @@ test('Rust Explorer state bridge reads and merges one fresh fixed state file', a
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test('Rust Explorer filesystem bridge mutates isolated files and directories', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'singularity-rust-explorer-fs-'));
+  const backend = createRustBackend();
+  const path = (...parts) => join(home, ...parts);
+  try {
+    await backend.start();
+    const target = path('nested', 'file.txt');
+    const parentFailure = await backend.explorerCreate(path('missing', 'file.txt'), 'unknown');
+    assert.equal(parentFailure.ok, false);
+    assert.deepEqual(await backend.explorerCreate(path('nested', 'child'), 'dir'), { ok: true });
+    const emptyWrite = await backend.explorerWrite(target, '', null, false);
+    assert.equal(emptyWrite.ok, true);
+    assert.equal(typeof emptyWrite.mtime, 'number');
+    await writeFile(target, 'external');
+    assert.deepEqual(await backend.explorerWrite(target, 'stale', 0, false), { ok: false, error: 'changed on disk' });
+    assert.deepEqual(await backend.explorerWrite(target, 'forced', 0, true).then(({ ok, mtime }) => ({ ok, hasMtime: typeof mtime === 'number' })), { ok: true, hasMtime: true });
+    assert.equal(await readFile(target, 'utf8'), 'forced');
+
+    const collision = path('taken.txt');
+    await writeFile(collision, 'keep');
+    assert.equal((await backend.explorerRename(target, collision)).ok, false);
+    assert.equal((await backend.explorerRename(path('missing-source'), collision)).ok, false);
+    assert.deepEqual(await backend.explorerRename(target, path('renamed.txt')), { ok: true });
+    assert.deepEqual(await backend.explorerDelete(path('nested')), { ok: true });
+    assert.equal((await backend.explorerDelete(path('nested'))).ok, false);
+    assert.equal(await readFile(collision, 'utf8'), 'keep');
+  } finally {
+    await backend.stop();
+    await rm(home, { recursive: true, force: true });
+  }
+});

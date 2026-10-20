@@ -2,18 +2,37 @@
 // Explorer filesystem behavior. No containment guard (bad(p) only), so tests
 // exercise real scratch dirs rather than a fenced root.
 // Run: node --test server/
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, utimesSync, rmSync, lstatSync, readdirSync } from 'node:fs';
 
 // Keep the filesystem fixture isolated from any user files.
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
-const { listEntries, searchEntries, readEntry, writeEntry, createEntry, deleteEntry, renameEntry, rawEntry } = await import('./explorer.mjs');
+const { BACKUPS_DIR } = await import('./app-dir.mjs');
+const { listEntries, searchEntries, readEntry, writeEntry, createEntry, deleteEntry, renameEntry, rawEntry, setExplorerBackend } = await import('./explorer.mjs');
+const explorerBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await explorerBackend.start();
+setExplorerBackend(explorerBackend);
+after(() => explorerBackend.stop());
 
 const ROOT = mkdtempSync(join(tmpdir(), 'sing-explorer-'));
 const p = (...parts) => join(ROOT, ...parts);
+function backupArtifacts(target) {
+  const key = createHash('sha256').update(target).digest('hex').slice(0, 16);
+  const dir = join(BACKUPS_DIR, key);
+  return new Map((existsSync(dir) ? readdirSync(dir) : [])
+    .filter((name) => name.endsWith('.bak'))
+    .map((name) => [name, readFileSync(join(dir, name))]));
+}
+function assertOneFreshBackup(before, after, expectedBytes) {
+  assert.equal(after.size, before.size + 1);
+  const added = [...after].filter(([name]) => !before.has(name));
+  assert.equal(added.length, 1);
+  assert.deepEqual(added[0][1], Buffer.from(expectedBytes));
+}
 
 test('listEntries: dirs before files, alpha within each group, dotfiles included, parent', () => {
   mkdirSync(p('list', 'zdir'), { recursive: true });
@@ -119,6 +138,87 @@ test("writeEntry: a write landing during backupFile's await is caught by the rec
   assert.equal(readFileSync(p('race.txt'), 'utf8'), 'concurrent writer'); // untouched by the stale writer
 });
 
+test('writeEntry: successful overwrite creates one fresh backup with the exact prior bytes', async () => {
+  const target = p('backup-success-unique.txt');
+  const prior = 'prior-success-bytes';
+  writeFileSync(target, prior);
+  const before = backupArtifacts(target);
+  const result = await writeEntry(target, 'replacement');
+  const after = backupArtifacts(target);
+  assert.equal(result.ok, true);
+  assertOneFreshBackup(before, after, prior);
+  assert.equal(readFileSync(target, 'utf8'), 'replacement');
+});
+
+test('writeEntry: matching-mtime invalid content backs up existing bytes before rejection', async () => {
+  const target = p('backup-invalid-unique.txt');
+  const prior = 'prior-invalid-bytes';
+  writeFileSync(target, prior);
+  const opened = readEntry(target);
+  const before = backupArtifacts(target);
+  const result = await writeEntry(target, 17, opened.mtime);
+  const after = backupArtifacts(target);
+  assert.deepEqual(result, { ok: false, error: 'content must be a string' });
+  assertOneFreshBackup(before, after, prior);
+  assert.equal(readFileSync(target, 'utf8'), prior);
+});
+
+test('writeEntry: initially stale target rejects before creating a backup', async () => {
+  const target = p('backup-stale-unique.txt');
+  const prior = 'prior-stale-bytes';
+  writeFileSync(target, prior);
+  const before = backupArtifacts(target);
+  const result = await writeEntry(target, 'rejected', 0);
+  const after = backupArtifacts(target);
+  assert.deepEqual(result, { ok: false, error: 'changed on disk' });
+  assert.deepEqual([...after.keys()], [...before.keys()]);
+  assert.equal(readFileSync(target, 'utf8'), prior);
+});
+
+test('writeEntry: backup completes with prior bytes before queued stale rejection returns 409', async () => {
+  const Fastify = (await import('fastify')).default;
+  const app = Fastify();
+  const target = p('backup-race-unique.txt');
+  const prior = 'prior-race-bytes';
+  writeFileSync(target, prior);
+  const opened = readEntry(target);
+  const before = backupArtifacts(target);
+  let enterQueuedWrite;
+  let releaseQueuedWrite;
+  const queuedWriteEntered = new Promise((resolve) => { enterQueuedWrite = resolve; });
+  const queuedWriteGate = new Promise((resolve) => { releaseQueuedWrite = resolve; });
+  setExplorerBackend({
+    async explorerWrite(...args) {
+      enterQueuedWrite();
+      await queuedWriteGate;
+      return explorerBackend.explorerWrite(...args);
+    },
+  });
+  app.put('/fs/write', async (req, reply) => {
+    const { path, content, mtime, force } = req.body || {};
+    const result = await writeEntry(path, content, mtime, force);
+    if (!result.ok) reply.code(result.error === 'changed on disk' ? 409 : 400);
+    return result;
+  });
+  try {
+    const pending = app.inject({ method: 'PUT', url: '/fs/write', payload: { path: target, content: 'rejected', mtime: opened.mtime } });
+    await queuedWriteEntered;
+    const afterBackup = backupArtifacts(target);
+    assertOneFreshBackup(before, afterBackup, prior);
+    writeFileSync(target, 'concurrent external bytes', { flush: true });
+    utimesSync(target, new Date(), new Date(opened.mtime + 5000));
+    releaseQueuedWrite();
+    const response = await pending;
+    assert.equal(response.statusCode, 409);
+    assert.deepEqual(response.json(), { ok: false, error: 'changed on disk' });
+    assert.equal(readFileSync(target, 'utf8'), 'concurrent external bytes');
+  } finally {
+    releaseQueuedWrite();
+    setExplorerBackend(explorerBackend);
+    await app.close();
+  }
+});
+
 // Regression test for the exact breakage this ticket's async conversion risked:
 // index.mjs's PUT /api/fs/write does `const r = await writeEntry(...)` then
 // `if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400)`. Before the
@@ -153,32 +253,65 @@ test('HTTP route shape: an awaited writeEntry reports 409 on conflict, 200 on su
   await app.close();
 });
 
-test('createEntry: refuses existing path, creates dir and file', () => {
+test('createEntry: refuses existing path, creates dir and file', async () => {
   writeFileSync(p('exists.txt'), 'x');
-  assert.deepEqual(createEntry(p('exists.txt'), 'file'), { ok: false, error: 'already exists' });
+  assert.deepEqual(await createEntry(p('exists.txt'), 'file'), { ok: false, error: 'already exists' });
 
-  assert.deepEqual(createEntry(p('created-dir'), 'dir'), { ok: true });
+  assert.deepEqual(await createEntry(p('created-dir'), 'dir'), { ok: true });
   assert.equal(existsSync(p('created-dir')), true);
 
-  assert.deepEqual(createEntry(p('created-file.txt'), 'file'), { ok: true });
+  assert.deepEqual(await createEntry(p('created-file.txt'), 'file'), { ok: true });
   assert.equal(readEntry(p('created-file.txt')).content, '');
 });
 
-test('renameEntry: refuses existing target / missing source, works otherwise', () => {
+test('renameEntry: refuses existing target / missing source, works otherwise', async () => {
   writeFileSync(p('from.txt'), 'x');
   writeFileSync(p('taken.txt'), 'y');
-  assert.deepEqual(renameEntry(p('from.txt'), p('taken.txt')), { ok: false, error: 'already exists' });
-  assert.deepEqual(renameEntry(p('nope.txt'), p('dest.txt')), { ok: false, error: 'not found' });
-  assert.deepEqual(renameEntry(p('from.txt'), p('renamed.txt')), { ok: true });
+  assert.deepEqual(await renameEntry(p('from.txt'), p('taken.txt')), { ok: false, error: 'already exists' });
+  assert.deepEqual(await renameEntry(p('nope.txt'), p('dest.txt')), { ok: false, error: 'not found' });
+  assert.deepEqual(await renameEntry(p('from.txt'), p('renamed.txt')), { ok: true });
   assert.equal(existsSync(p('renamed.txt')), true);
 });
 
-test('deleteEntry: removes a non-empty dir recursively, errors on missing', () => {
+test('deleteEntry: removes a non-empty dir recursively, errors on missing', async () => {
   mkdirSync(p('todelete', 'nested'), { recursive: true });
   writeFileSync(p('todelete', 'nested', 'f.txt'), 'x');
-  assert.deepEqual(deleteEntry(p('todelete')), { ok: true });
+  assert.deepEqual(await deleteEntry(p('todelete')), { ok: true });
   assert.equal(existsSync(p('todelete')), false);
-  assert.deepEqual(deleteEntry(p('todelete')), { ok: false, error: 'not found' });
+  assert.deepEqual(await deleteEntry(p('todelete')), { ok: false, error: 'not found' });
+});
+
+test('deleteEntry: matches Node directory-link removal and leaves dangling links untouched', async (t) => {
+  mkdirSync(p('link-target', 'nested'), { recursive: true });
+  writeFileSync(p('link-target', 'nested', 'safe.txt'), 'keep');
+  try {
+    symlinkSync(p('link-target'), p('node-link'), 'junction');
+    symlinkSync(p('link-target'), p('rust-link'), 'junction');
+    symlinkSync(p('missing-link-target'), p('dangling-link'), 'junction');
+  } catch (error) {
+    t.skip(`directory links unavailable: ${error.code || error.message}`);
+    return;
+  }
+
+  rmSync(p('node-link'), { recursive: true });
+  assert.equal(readFileSync(p('link-target', 'nested', 'safe.txt'), 'utf8'), 'keep');
+  assert.deepEqual(await deleteEntry(p('rust-link')), { ok: true });
+  assert.equal(readFileSync(p('link-target', 'nested', 'safe.txt'), 'utf8'), 'keep');
+  assert.deepEqual(await deleteEntry(p('dangling-link')), { ok: false, error: 'not found' });
+  assert.equal(lstatSync(p('dangling-link')).isSymbolicLink(), true);
+});
+
+test('writeEntry: creates parents before native content failure and stale check wins', async () => {
+  const invalid = await writeEntry(p('invalid-parent', 'bad.txt'), 17);
+  assert.equal(invalid.ok, false);
+  assert.equal(existsSync(p('invalid-parent')), true);
+
+  writeFileSync(p('stale-type.txt'), 'prior');
+  const opened = readEntry(p('stale-type.txt'));
+  writeFileSync(p('stale-type.txt'), 'changed externally', { flush: true });
+  utimesSync(p('stale-type.txt'), new Date(), new Date(opened.mtime + 5000));
+  assert.deepEqual(await writeEntry(p('stale-type.txt'), 17, opened.mtime), { ok: false, error: 'changed on disk' });
+  assert.equal(readFileSync(p('stale-type.txt'), 'utf8'), 'changed externally');
 });
 
 test('every mutating fn rejects bad paths: empty, null, relative', async () => {
@@ -186,10 +319,10 @@ test('every mutating fn rejects bad paths: empty, null, relative', async () => {
     assert.equal(listEntries(bad).error, 'bad path');
     assert.equal(readEntry(bad).error, 'bad path');
     assert.equal((await writeEntry(bad, 'x')).error, 'bad path');
-    assert.equal(createEntry(bad, 'file').error, 'bad path');
-    assert.equal(deleteEntry(bad).error, 'bad path');
-    assert.equal(renameEntry(bad, p('ok.txt')).error, 'bad path');
-    assert.equal(renameEntry(p('ok.txt'), bad).error, 'bad path');
+    assert.equal((await createEntry(bad, 'file')).error, 'bad path');
+    assert.equal((await deleteEntry(bad)).error, 'bad path');
+    assert.equal((await renameEntry(bad, p('ok.txt'))).error, 'bad path');
+    assert.equal((await renameEntry(p('ok.txt'), bad)).error, 'bad path');
     assert.equal(rawEntry(bad).error, 'bad path');
   }
 });

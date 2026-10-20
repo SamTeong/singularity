@@ -278,6 +278,22 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'explorer_state_set', path, state });
     },
 
+    explorerWrite(path, content, mtime, force) {
+      return request({ op: 'explorer_write', path, content, mtime: mtime == null ? null : Number(mtime), force: !!force });
+    },
+
+    explorerCreate(path, kind) {
+      return request({ op: 'explorer_create', path, kind });
+    },
+
+    explorerDelete(path) {
+      return request({ op: 'explorer_delete', path });
+    },
+
+    explorerRename(from, to) {
+      return request({ op: 'explorer_rename', from, to });
+    },
+
     readFile(path) {
       return request({ op: 'read', path });
     },

@@ -40,6 +40,12 @@ struct Request {
     tool: Value,
     #[serde(default)]
     state: Value,
+    #[serde(default)]
+    from: Value,
+    #[serde(default)]
+    to: Value,
+    #[serde(default)]
+    kind: Value,
 }
 
 fn default_op() -> String {
@@ -150,6 +156,26 @@ fn main() -> io::Result<()> {
                     request.path.as_str().unwrap_or(""),
                     &request.state,
                 )
+            }
+            Ok(request) if request.op == "explorer_write" => {
+                singularity_backend::explorer_fs::write(
+                    request.path.as_str(),
+                    &request.content,
+                    request.mtime.as_f64(),
+                    request.force.as_bool().unwrap_or(false),
+                )
+            }
+            Ok(request) if request.op == "explorer_create" => {
+                singularity_backend::explorer_fs::create(
+                    request.path.as_str(),
+                    request.kind.as_str(),
+                )
+            }
+            Ok(request) if request.op == "explorer_delete" => {
+                singularity_backend::explorer_fs::delete(request.path.as_str())
+            }
+            Ok(request) if request.op == "explorer_rename" => {
+                singularity_backend::explorer_fs::rename(request.from.as_str(), request.to.as_str())
             }
             Ok(request) if request.op == "plan_session" => {
                 match (request.path.as_str(), request.sid.as_str()) {
