@@ -17,7 +17,7 @@ import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, ge
 import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, getConfigRoots as getCodexConfigRoots, setConfigRoots as setCodexConfigRoots } from './codex-config.mjs';
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
-import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, createRuleReferenceHandler } from './rules.mjs';
+import { getRulesRoots, setRulesRoots, readRuleFile, writeRuleFile, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } from './rules.mjs';
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
 import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
 import { getWikiRoot, setWikiRoot, resolveRoot, isWikiPath } from './wiki.mjs';
@@ -755,11 +755,8 @@ app.put('/memory/file', async (req, reply) => {
 // recursive .md tree — browse + search + guarded read/write.
 app.get('/rules/roots', async () => ({ roots: getRulesRoots() }));
 app.put('/rules/roots', async (req) => setRulesRoots(req.body?.roots));
-app.post('/rules/files', async (req) => listRuleFiles(req.body?.roots));
-app.post('/rules/search', async (req) => {
-  const { roots, q } = req.body || {};
-  return searchRules(roots, q);
-});
+app.post('/rules/files', createRuleFilesHandler(rustBackend, app.log));
+app.post('/rules/search', createRuleSearchHandler(rustBackend, app.log));
 app.get('/rules/file', async (req, reply) => {
   const r = readRuleFile(req.query.path);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);

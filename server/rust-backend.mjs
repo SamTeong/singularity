@@ -150,6 +150,19 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'rule_reference', path, root });
     },
 
+    ruleFiles(scans) {
+      return request({ op: 'rules_files', roots: scans });
+    },
+
+    ruleSearch(scans, q) {
+      return request({ op: 'rules_search', roots: scans, q }).then((payload) => {
+        // Rust covers whole UTF-16 chars (may exceed 200 by one); trim to the
+        // JS slice(0, 200) contract, as the wiki search does.
+        for (const result of payload.results || []) result.text = result.text.slice(0, 200);
+        return payload;
+      });
+    },
+
     readFile(path) {
       return request({ op: 'read', path });
     },

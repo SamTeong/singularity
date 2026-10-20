@@ -199,6 +199,52 @@ test('Rust stdio bridge serves the Rules companion-reference lookup', async () =
   }
 });
 
+test('Rust stdio bridge serves the Rules file walk and content search', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-rules-walk-'));
+  const dir = join(base, '.claude', 'rules');
+  await mkdir(join(dir, 'sub'), { recursive: true });
+  await mkdir(join(dir, 'node_modules', 'dep'), { recursive: true });
+  await mkdir(join(dir, '.hidden'), { recursive: true });
+  await writeFile(join(dir, 'a.md'), 'line one\nFIND me here\nline three');
+  await writeFile(join(dir, 'sub', 'b.md'), `${'x'.repeat(199)}\u{1F600} needle`);
+  await writeFile(join(dir, 'ignore.txt'), 'FIND me');
+  await writeFile(join(dir, '.dot.md'), 'FIND me');
+  await writeFile(join(dir, '.hidden', 'x.md'), 'FIND me');
+  await writeFile(join(dir, 'node_modules', 'dep', 'y.md'), 'FIND me');
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    const scans = [{ root: 'raw-base', dir }];
+    const listing = await backend.ruleFiles(scans);
+    assert.equal(listing.capped, false);
+    const rels = listing.files.map(({ rel }) => rel).sort();
+    assert.deepEqual(rels, ['a.md', 'sub/b.md']); // .md only; dot/SKIP_DIRS entries never listed
+    const first = listing.files.find(({ rel }) => rel === 'a.md');
+    assert.equal(first.root, 'raw-base'); // verbatim raw client string
+    assert.equal(first.path, join(dir, 'a.md'));
+    assert.equal(first.file, 'a.md');
+
+    const missing = await backend.ruleFiles([{ root: 'raw-base', dir: join(base, 'absent') }]);
+    assert.deepEqual(missing, { files: [], capped: false }); // silent skip
+
+    assert.deepEqual(await backend.ruleSearch(scans, ''), { results: [], capped: false });
+    const search = await backend.ruleSearch(scans, 'find me');
+    assert.equal(search.capped, false);
+    assert.equal(search.results.length, 1); // ignore.txt + dot/hidden files never scanned
+    assert.deepEqual(search.results[0], {
+      root: 'raw-base', path: join(dir, 'a.md'), rel: 'a.md', file: 'a.md', line: 2, text: 'FIND me here',
+    });
+    const clip = await backend.ruleSearch(scans, 'needle');
+    assert.equal(clip.capped, false);
+    // 200 UTF-16 code units: the boundary splits the emoji's surrogate pair.
+    assert.equal(clip.results[0].text, `${'x'.repeat(199)}\ud83d`);
+    assert.equal(clip.results[0].line, 1);
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
 test('gateway turns Rust process failure into a logged 500 response', async () => {
   const app = Fastify();
   app.get('/api/wiki/graph', createWikiGraphHandler({ graph: async () => { throw new Error('child exited'); } }, app.log));

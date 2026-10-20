@@ -18,6 +18,8 @@ struct Request {
     wiki_order: Value,
     #[serde(default)]
     sid: Value,
+    #[serde(default)]
+    roots: Value,
 }
 
 fn default_op() -> String {
@@ -53,6 +55,12 @@ fn main() -> io::Result<()> {
                     request.path.as_str(),
                     request.root.as_str(),
                 )
+            }
+            Ok(request) if request.op == "rules_files" => {
+                singularity_backend::rules::list_files(&request.roots)
+            }
+            Ok(request) if request.op == "rules_search" => {
+                singularity_backend::rules::search(&request.roots, &request.q)
             }
             Ok(request) if request.op == "plan_session" => {
                 match (request.path.as_str(), request.sid.as_str()) {
