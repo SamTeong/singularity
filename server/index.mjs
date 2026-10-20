@@ -39,7 +39,7 @@ import { createModelPricesHandler } from './rust-backend.mjs';
 import { createExternalSessionLaunchHandler, createSessionFolderOpenHandler } from './detached-launch.mjs';
 import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
-import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
+import { initTasks, setTasksBackend, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { initWindowAnchor, snapshotWindowAnchor, pokeProvider } from './window-anchor.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
@@ -130,6 +130,7 @@ setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, wi
 setProcsBackend(rustBackend); // procs.mjs process scan execs + guarded PID kill
 setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
 setModelsBackend(rustBackend); // model-store.mjs dispatches catalogue and routing calls on the shared child
+setTasksBackend(rustBackend);
 const modelHandlers = createModelsHandlers(rustBackend, join(reg.STATE_DIR, 'models.json'), app.log);
 app.addHook('onClose', async () => rustBackend.stop());
 
@@ -950,7 +951,6 @@ app.post('/history/regenerate', async (req, reply) => {
 }, { prefix: '/api' });
 
 reg.init(app.log);
-initTasks(app.log);
 initCrons(app.log);
 initWindowAnchor({ log: app.log });
 initBackground(app.log);
@@ -966,6 +966,7 @@ try {
   app.log.error({ err: error.message }, 'Rust backend failed to start; build it with cargo build --release --manifest-path rust/backend/Cargo.toml');
   process.exit(1);
 }
+initTasks(app.log);
 // ponytail: retry bind — a /restart child waits for the old daemon to free the port
 for (let tries = 20; ; tries--) {
   try {

@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync, readdirSync, chmodSync, rmSync } from 'node:fs';
@@ -16,6 +16,11 @@ delete process.env.CODEX_BIN;
 
 const REVIEW_DIR = mkdtempSync(join(tmpdir(), 'sing-review-'));
 process.env.PROJECT_REVIEW_DIR = REVIEW_DIR;
+const reviewBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await reviewBackend.start();
+const taskModule = await import('./tasks.mjs');
+taskModule.setTasksBackend(reviewBackend);
+after(async () => reviewBackend.stop());
 const { reviewStatus, readReviewFile } = await import('./project-review.mjs');
 
 function writeRun(sid, files) {

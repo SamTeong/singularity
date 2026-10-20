@@ -3,8 +3,6 @@
 // the task's own agent (curl, prompt-instructed) or by a UI drag. Emits
 // 'tasks' on the shared agents bus; pty-ws fans it out.
 import { randomUUID } from 'node:crypto';
-import { execFile, execFileSync } from 'node:child_process';
-import { promisify } from 'node:util';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as reg from './agents.mjs';
@@ -46,7 +44,7 @@ let logger = null;
 // conclude) so this never grows across a daemon's lifetime.
 const tails = new Map();
 
-const execFileP = promisify(execFile);
+let gitBackend = null;
 // Hard timeout + non-interactive flags on every git call: this runs on the
 // request path (route handlers, awaited below), and a hung subprocess — a
 // credential-helper prompt is the classic case — must never block forever.
@@ -63,27 +61,21 @@ const GIT_OPTS = {
 
 // Async — used by every request-path caller so a slow/hung git process can't
 // block the event loop (and freeze live PTY agents + WS clients).
+export function setTasksBackend(backend) { gitBackend = backend; }
+
 export async function git(repo, ...args) {
+  if (!gitBackend) throw new Error('Rust backend is not configured for Git');
   try {
-    return (await execFileP(GIT_BIN, ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS)).stdout.trim();
+    return (await gitBackend.git(GIT_BIN, ['-C', repo, '-c', 'core.askpass=', ...args], {
+      timeout: GIT_TIMEOUT_MS, maxBuffer: 1024 * 1024,
+      env: GIT_OPTS.env,
+    })).stdout.trim();
   } catch (e) {
     throw new Error(`git ${args.join(' ')} failed: ${e.message}`, { cause: e });
   }
 }
-
-// Sync variant, for createTask only: its callers (the POST /tasks route,
-// background.mjs) call it un-awaited, so it can't become async without
-// changing those call sites. Same timeout/non-interactive guards as git().
-export function gitSync(repo, ...args) {
-  try {
-    return execFileSync(GIT_BIN, ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS).trim();
-  } catch (e) {
-    throw new Error(`git ${args.join(' ')} failed: ${e.message}`, { cause: e });
-  }
-}
-
-function isGitWorkTree(repo) {
-  try { return gitSync(repo, 'rev-parse', '--is-inside-work-tree') === 'true'; }
+async function isGitWorkTree(repo) {
+  try { return await git(repo, 'rev-parse', '--is-inside-work-tree') === 'true'; }
   catch { return false; }
 }
 
@@ -434,16 +426,16 @@ export async function createTask({ repo, title, description, model, implModel, r
   const modelRoute = await getModelRoute(model, tool);
   if (modelRoute.toolModelError) throw new Error(modelRoute.toolModelError);
   if (!existsSync(repo)) throw new Error('working directory does not exist');
-  const kind = isGitWorkTree(repo) ? 'git' : 'plain';
+  const kind = await isGitWorkTree(repo) ? 'git' : 'plain';
   const id = randomUUID();
   const short = id.slice(0, 8);
   let baseBranch = null, branch = null, worktree = null, cwd = repo;
   if (kind === 'git') {
-    baseBranch = gitSync(repo, 'rev-parse', '--abbrev-ref', 'HEAD');
+    baseBranch = await git(repo, 'rev-parse', '--abbrev-ref', 'HEAD');
     branch = `task/${short}`;
     worktree = join(WORKTREE_ROOT, short);
     mkdirSync(WORKTREE_ROOT, { recursive: true });
-    gitSync(repo, 'worktree', 'add', worktree, '-b', branch);
+    await git(repo, 'worktree', 'add', worktree, '-b', branch);
     cwd = worktree;
   }
   // Everything from here on can fail (disk, spawn, ...) after `git worktree
@@ -485,7 +477,7 @@ export async function createTask({ repo, title, description, model, implModel, r
     emitTasks();
     return t;
   } catch (e) {
-    if (kind === 'git') { try { gitSync(repo, 'worktree', 'remove', '--force', worktree); gitSync(repo, 'branch', '-D', branch); } catch {} }
+    if (kind === 'git') { try { await git(repo, 'worktree', 'remove', '--force', worktree); await git(repo, 'branch', '-D', branch); } catch {} }
     throw e;
   }
 }

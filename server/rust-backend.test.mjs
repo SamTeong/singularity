@@ -11,6 +11,46 @@ import { test } from 'node:test';
 import Fastify from 'fastify';
 import { createModelPricesHandler, createModelsHandlers, createRustBackend, createWikiGraphHandler } from './rust-backend.mjs';
 
+test('Rust Git subprocess preserves argv, environment, streams, stdin, timeout, and errors', async () => {
+  const backend = createRustBackend();
+  const fixture = fileURLToPath(new URL('./git-process-fixture.mjs', import.meta.url));
+  try {
+    await backend.start();
+    const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: 'echo' };
+    const argv = await backend.git(process.execPath, [fixture, 'args-env', 'one value', 'two'], { env, timeout: 3000, maxBuffer: 1024 * 1024 });
+    assert.equal(argv.stdout, 'one value|two|0|never|echo');
+    const streams = await backend.git(process.execPath, [fixture, 'streams'], { env, timeout: 3000, maxBuffer: 1024 * 1024 });
+    assert.equal(Buffer.byteLength(streams.stdout), 700 * 1024);
+
+    await assert.rejects(backend.git(process.execPath, [fixture, 'multiline-error'], { env, timeout: 3000 }), (error) => {
+      assert.match(error.message, /first error line\nsecond error line/);
+      assert.equal(error.code, 7);
+      assert.equal(error.killed, false);
+      assert.equal(error.stdout, 'partial stdout');
+      assert.equal(error.stderr, 'first error line\nsecond error line\n');
+      return true;
+    });
+    await assert.rejects(backend.git('singularity-git-missing-executable', [], { env, timeout: 3000 }), (error) => error.code === 'ENOENT');
+    await assert.rejects(backend.git(tmpdir(), [], { env, timeout: 3000 }), (error) => {
+      assert.notEqual(error.code, 'ENOENT');
+      assert.equal(error.code, 'EACCES');
+      assert.ok(error.cause);
+      return true;
+    });
+    await assert.rejects(backend.git(process.execPath, [fixture, 'sleep'], { env, timeout: 100 }), (error) => error.killed && error.signal === 'SIGKILL');
+    await assert.rejects(backend.git(process.execPath, [fixture, 'wait-stdin'], { env, timeout: 100 }), (error) => error.killed && error.signal === 'SIGKILL');
+    for (const mode of ['over-stdout', 'over-stderr']) {
+      await assert.rejects(backend.git(process.execPath, [fixture, mode], { env, timeout: 3000, maxBuffer: 1024 * 1024 }), (error) => {
+        assert.equal(error.code, 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER');
+        assert.equal(error.killed, true);
+        assert.equal(error.signal, 'SIGKILL');
+        assert.equal(Buffer.byteLength(mode === 'over-stdout' ? error.stdout : error.stderr), 1024 * 1024);
+        return true;
+      });
+    }
+  } finally { await backend.stop(); }
+});
+
 async function wiki(root, name, files) {
   for (const [rel, text] of Object.entries(files)) {
     const path = join(root, name, rel);

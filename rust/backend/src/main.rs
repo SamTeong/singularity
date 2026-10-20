@@ -200,6 +200,13 @@ fn main() -> io::Result<()> {
                 request.max_buffer.as_f64(),
                 Some(&request.env),
             ),
+            Ok(request) if request.op == "git" => singularity_backend::oneshot::run_git(
+                request.bin.as_str(),
+                &request.args,
+                request.timeout_ms.as_f64(),
+                request.max_buffer.as_f64(),
+                Some(&request.env),
+            ),
             Ok(request) if request.op == "detached_spawn" => singularity_backend::detached::spawn(
                 request.bin.as_str(),
                 &request.args,

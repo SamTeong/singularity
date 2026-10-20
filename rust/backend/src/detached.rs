@@ -88,7 +88,15 @@ mod tests {
         let Ok(marker) = std::env::var("SINGULARITY_DETACHED_PROBE") else {
             return;
         };
-        thread::sleep(Duration::from_millis(350));
+        let marker = PathBuf::from(marker);
+        let ready = marker.with_extension("ready");
+        let release = marker.with_extension("release");
+        fs::write(&ready, "ready").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !release.exists() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(10));
+        }
+        assert!(release.exists(), "parent should release detached child");
         fs::write(
             marker,
             format!(
@@ -108,10 +116,21 @@ mod tests {
         std::env::temp_dir().join(format!("singularity-detached-{id}.txt"))
     }
 
+    struct ReleaseChild(PathBuf);
+
+    impl Drop for ReleaseChild {
+        fn drop(&mut self) {
+            let _ = fs::write(&self.0, "release");
+        }
+    }
+
     #[test]
     fn spawn_returns_before_child_exits_and_preserves_arguments_cwd_and_environment() {
         let _guard = ENV_LOCK.lock().unwrap();
         let marker = marker_path();
+        let ready = marker.with_extension("ready");
+        let release = marker.with_extension("release");
+        let _release_child = ReleaseChild(release.clone());
         let cwd = marker.parent().unwrap();
         let previous_marker = std::env::var_os("SINGULARITY_DETACHED_PROBE");
         let previous_value = std::env::var_os("SINGULARITY_DETACHED_VALUE");
@@ -125,7 +144,6 @@ mod tests {
             "detached::tests::detached_child_probe",
             "--nocapture"
         ]);
-        let started = Instant::now();
         let result = spawn(
             std::env::current_exe().unwrap().to_str(),
             &args,
@@ -143,15 +161,23 @@ mod tests {
             }
         }
         assert_eq!(result, json!({"ok": true}));
-        assert!(started.elapsed() < Duration::from_millis(300));
-        let deadline = Instant::now() + Duration::from_secs(3);
-        while !marker.exists() && Instant::now() < deadline {
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() && Instant::now() < ready_deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(ready.exists(), "child should reach its ready marker");
+        assert!(!marker.exists(), "child must wait for the release marker");
+        fs::write(&release, "release").unwrap();
+        let completion_deadline = Instant::now() + Duration::from_secs(5);
+        while !marker.exists() && Instant::now() < completion_deadline {
             thread::sleep(Duration::from_millis(20));
         }
         let text = fs::read_to_string(&marker).expect("child should write its marker");
         assert!(text.starts_with(&cwd.display().to_string()));
         assert!(text.ends_with(":inherited-value"));
-        let _ = fs::remove_file(marker);
+        let _ = fs::remove_file(&marker);
+        let _ = fs::remove_file(ready);
+        let _ = fs::remove_file(release);
     }
 
     #[test]

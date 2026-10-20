@@ -24,6 +24,8 @@ const { getModels, setModels } = store;
 const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
 await modelBackend.start();
 store.setModelsBackend(modelBackend);
+const taskModule = await import('./tasks.mjs');
+taskModule.setTasksBackend(modelBackend);
 after(async () => modelBackend.stop());
 const DEFAULT_SUMMARISER = (await getModels()).summariserModel;
 async function setSummariser(id) { return setModels({ ...(await getModels()), summariserModel: id }); }

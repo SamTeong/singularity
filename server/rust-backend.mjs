@@ -316,6 +316,42 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       throw error;
     },
 
+    async git(bin, args, opts) {
+      const payload = await request({
+        op: 'git', bin, args: args ?? [], timeout_ms: opts?.timeout ?? null,
+        max_buffer: opts?.maxBuffer ?? null, env: opts?.env ?? null,
+      });
+      if (payload.ok) return { stdout: payload.stdout };
+      const argv = [bin, ...(args ?? [])].join(' ');
+      let error;
+      if (payload.spawn_error) {
+        const rawCode = payload.spawn_error_raw_os_code;
+        const code = rawCode === 2 || rawCode === 3 ? 'ENOENT'
+          : rawCode === 5 || rawCode === 13 || rawCode === 193 ? 'EACCES'
+            : rawCode === 32 ? 'EBUSY' : rawCode === 87 ? 'EINVAL'
+              : payload.spawn_error_kind === 'NotFound' ? 'ENOENT'
+                : payload.spawn_error_kind === 'PermissionDenied' ? 'EACCES' : 'UNKNOWN';
+        error = new Error(`spawn ${bin} ${code}`);
+        error.code = code;
+        error.cause = payload.error;
+        if (rawCode != null) error.errno = rawCode;
+      }
+      else if (payload.error === 'stdout maxBuffer exceeded' || payload.error === 'stderr maxBuffer exceeded') {
+        error = new RangeError(`${payload.error.slice(0, -' maxBuffer exceeded'.length)} maxBuffer length exceeded`);
+        error.code = 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER';
+      } else {
+        error = new Error(payload.timed_out
+          ? `Command failed: ${argv}`
+          : `Command failed: ${argv}${payload.stderr ? `\n${payload.stderr}` : ''}`);
+      }
+      error.stdout = payload.stdout ?? undefined;
+      error.stderr = payload.stderr ?? undefined;
+      error.code ??= payload.code ?? undefined;
+      error.signal = payload.signal ?? (payload.timed_out ? 'SIGKILL' : null);
+      error.killed = !!payload.killed || !!payload.timed_out;
+      throw error;
+    },
+
     async spawnDetached(bin, args, cwd, env = process.env) {
       const payload = await request({ op: 'detached_spawn', bin, args: args ?? [], cwd: cwd ?? null, env });
       if (!payload?.ok) throw new Error(payload?.error || 'failed to spawn process');

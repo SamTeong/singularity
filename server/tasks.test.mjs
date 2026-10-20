@@ -33,12 +33,14 @@ const modelStore = await import('./model-store.mjs');
 const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
 await modelBackend.start();
 modelStore.setModelsBackend(modelBackend);
+const taskModule = await import('./tasks.mjs');
+taskModule.setTasksBackend(modelBackend);
 after(async () => {
   await modelBackend.stop();
   rmSync(scratch, { recursive: true, force: true });
 });
 
-const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, buildCodexBackgroundPrompt, createTask, updateTask, concludeTask, snapshotTasks, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree, git } = await import('./tasks.mjs');
+const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, buildCodexBackgroundPrompt, createTask, updateTask, concludeTask, snapshotTasks, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree, git } = taskModule;
 const reg = await import('./agents.mjs');
 
 function initRepo() {
@@ -379,7 +381,12 @@ test('concludeTask: concurrent calls on the same task conclude it exactly once',
 test('git: a hung subprocess loses to the hard timeout instead of blocking forever', async () => {
   const repo = initRepo();
   try {
-    await assert.rejects(() => git(repo, 'hash-object', '--stdin'), /git hash-object --stdin failed/);
+    await assert.rejects(() => git(repo, 'hash-object', '--stdin'), (error) => {
+      assert.match(error.message, /git hash-object --stdin failed: Command failed:/);
+      assert.equal(error.cause.signal, 'SIGKILL');
+      assert.equal(error.cause.killed, true);
+      return true;
+    });
   } finally {
     rmRepo(repo);
   }

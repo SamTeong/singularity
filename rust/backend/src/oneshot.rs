@@ -64,10 +64,24 @@ fn fail(
     timed_out: bool,
     stdout: Option<Vec<u8>>,
     stderr: Option<Vec<u8>>,
+    cap: Option<usize>,
 ) -> Value {
     let _ = child.kill();
     let _ = child.wait();
-    json!({ "ok": false, "error": error, "timed_out": timed_out, "stdout": lossy(stdout), "stderr": lossy(stderr) })
+    let clip = |mut buf: Vec<u8>| {
+        if let Some(cap) = cap {
+            buf.truncate(cap);
+        }
+        buf
+    };
+    let stdout = stdout.map(clip);
+    let stderr = stderr.map(clip);
+    let mut payload = json!({ "ok": false, "error": error, "timed_out": timed_out, "stdout": lossy(stdout), "stderr": lossy(stderr) });
+    if cap.is_some() {
+        payload["killed"] = json!(true);
+        payload["signal"] = json!("SIGKILL");
+    }
+    payload
 }
 
 pub fn run(
@@ -76,6 +90,28 @@ pub fn run(
     timeout_ms: Option<f64>,
     max_buffer: Option<f64>,
     env: Option<&Value>,
+) -> Value {
+    run_inner(bin, args, timeout_ms, max_buffer, env, false, false)
+}
+
+pub fn run_git(
+    bin: Option<&str>,
+    args: &Value,
+    timeout_ms: Option<f64>,
+    max_buffer: Option<f64>,
+    env: Option<&Value>,
+) -> Value {
+    run_inner(bin, args, timeout_ms, max_buffer, env, true, true)
+}
+
+fn run_inner(
+    bin: Option<&str>,
+    args: &Value,
+    timeout_ms: Option<f64>,
+    max_buffer: Option<f64>,
+    env: Option<&Value>,
+    keep_stdin_open: bool,
+    cap_stderr: bool,
 ) -> Value {
     let Some(bin) = bin else {
         return json!({ "ok": false, "error": "bad bin", "stdout": "", "stderr": "" });
@@ -98,7 +134,11 @@ pub fn run(
 
     let mut cmd = Command::new(bin);
     cmd.args(argv)
-        .stdin(Stdio::null())
+        .stdin(if keep_stdin_open {
+            Stdio::piped()
+        } else {
+            Stdio::null()
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     if let Some(map) = env.and_then(Value::as_object) {
@@ -117,7 +157,11 @@ pub fn run(
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(error) => {
-            return json!({ "ok": false, "error": format!("Command failed: {bin}: {error}"), "stdout": "", "stderr": "" });
+            return if cap_stderr {
+                json!({ "ok": false, "error": format!("Command failed: {bin}: {error}"), "spawn_error": true, "spawn_error_kind": format!("{:?}", error.kind()), "spawn_error_raw_os_code": error.raw_os_error(), "stdout": "", "stderr": "" })
+            } else {
+                json!({ "ok": false, "error": format!("Command failed: {bin}: {error}"), "stdout": "", "stderr": "" })
+            };
         }
     };
 
@@ -147,7 +191,16 @@ pub fn run(
         match received {
             Some(Pipe::Stdout(buf)) => stdout = Some(buf),
             Some(Pipe::Stderr(buf)) => stderr = Some(buf),
-            None => return fail(&mut child, "timeout", true, stdout.take(), stderr.take()),
+            None => {
+                return fail(
+                    &mut child,
+                    "timeout",
+                    true,
+                    stdout.take(),
+                    stderr.take(),
+                    cap_stderr.then_some(cap),
+                );
+            }
         }
     }
     if stdout.as_ref().is_some_and(|buf| buf.len() > cap) {
@@ -157,27 +210,117 @@ pub fn run(
             false,
             stdout,
             stderr,
+            cap_stderr.then_some(cap),
+        );
+    }
+    if cap_stderr && stderr.as_ref().is_some_and(|buf| buf.len() > cap) {
+        return fail(
+            &mut child,
+            "stderr maxBuffer exceeded",
+            false,
+            stdout,
+            stderr,
+            Some(cap),
         );
     }
     let status = match wait_bounded(&mut child, deadline) {
         WaitOutcome::Exited(status) => status,
         WaitOutcome::TimedOut => {
-            return fail(&mut child, "timeout", true, stdout.take(), stderr.take());
+            return fail(
+                &mut child,
+                "timeout",
+                true,
+                stdout.take(),
+                stderr.take(),
+                cap_stderr.then_some(cap),
+            );
         }
         WaitOutcome::Failed(error) => {
             return json!({ "ok": false, "error": error, "stdout": lossy(stdout), "stderr": lossy(stderr) });
         }
     };
     if !status.success() {
-        return json!({
+        #[cfg(unix)]
+        let signal = {
+            use std::os::unix::process::ExitStatusExt;
+            status.signal().map(signal_name)
+        };
+        #[cfg(not(unix))]
+        let signal: Option<&str> = None;
+        let mut payload = json!({
             "ok": false,
             "error": format!("exit code {}", status.code().unwrap_or(-1)),
             "code": status.code(),
             "stdout": lossy(stdout),
             "stderr": lossy(stderr),
         });
+        if cap_stderr {
+            payload["signal"] = json!(signal);
+        }
+        return payload;
     }
     json!({ "ok": true, "stdout": lossy(stdout), "stderr": lossy(stderr) })
+}
+
+#[cfg(unix)]
+fn signal_name(signal: i32) -> &'static str {
+    match signal {
+        libc::SIGHUP => "SIGHUP",
+        libc::SIGINT => "SIGINT",
+        libc::SIGQUIT => "SIGQUIT",
+        libc::SIGILL => "SIGILL",
+        libc::SIGTRAP => "SIGTRAP",
+        libc::SIGABRT => "SIGABRT",
+        libc::SIGBUS => "SIGBUS",
+        libc::SIGFPE => "SIGFPE",
+        libc::SIGKILL => "SIGKILL",
+        libc::SIGUSR1 => "SIGUSR1",
+        libc::SIGSEGV => "SIGSEGV",
+        libc::SIGUSR2 => "SIGUSR2",
+        libc::SIGPIPE => "SIGPIPE",
+        libc::SIGALRM => "SIGALRM",
+        libc::SIGTERM => "SIGTERM",
+        libc::SIGCHLD => "SIGCHLD",
+        libc::SIGCONT => "SIGCONT",
+        libc::SIGSTOP => "SIGSTOP",
+        libc::SIGTSTP => "SIGTSTP",
+        libc::SIGTTIN => "SIGTTIN",
+        libc::SIGTTOU => "SIGTTOU",
+        libc::SIGURG => "SIGURG",
+        libc::SIGXCPU => "SIGXCPU",
+        libc::SIGXFSZ => "SIGXFSZ",
+        libc::SIGVTALRM => "SIGVTALRM",
+        libc::SIGPROF => "SIGPROF",
+        libc::SIGWINCH => "SIGWINCH",
+        libc::SIGIO => "SIGIO",
+        libc::SIGSYS => "SIGSYS",
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        libc::SIGSTKFLT => "SIGSTKFLT",
+        #[cfg(any(target_os = "linux", target_os = "android"))]
+        libc::SIGPWR => "SIGPWR",
+        #[cfg(target_os = "macos")]
+        libc::SIGEMT => "SIGEMT",
+        #[cfg(target_os = "macos")]
+        libc::SIGINFO => "SIGINFO",
+        _ => "SIGUNKNOWN",
+    }
+}
+
+#[cfg(all(test, unix))]
+#[test]
+fn unix_signal_number_maps_to_node_signal_name() {
+    assert_eq!(signal_name(libc::SIGBUS), "SIGBUS");
+    assert_eq!(signal_name(libc::SIGUSR1), "SIGUSR1");
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        assert_eq!(signal_name(libc::SIGSTKFLT), "SIGSTKFLT");
+        assert_eq!(signal_name(libc::SIGPWR), "SIGPWR");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        assert_eq!(signal_name(libc::SIGEMT), "SIGEMT");
+        assert_eq!(signal_name(libc::SIGINFO), "SIGINFO");
+    }
 }
 
 #[cfg(test)]
