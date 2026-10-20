@@ -191,15 +191,19 @@ pub fn search(roots: &Value, q: &Value) -> Value {
     json!({ "results": results, "capped": false })
 }
 
+fn signed_time_ms(time: std::time::SystemTime) -> f64 {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(since) => since.as_secs_f64() * 1000.0,
+        Err(before) => -before.duration().as_secs_f64() * 1000.0,
+    }
+}
+
 fn modified_ms(path: &Path) -> Result<f64, String> {
     let modified = fs::metadata(path)
         .map_err(|error| error.to_string())?
         .modified()
         .map_err(|error| error.to_string())?;
-    let duration = modified
-        .duration_since(UNIX_EPOCH)
-        .map_err(|error| error.to_string())?;
-    Ok(duration.as_secs_f64() * 1000.0)
+    Ok(signed_time_ms(modified))
 }
 
 pub fn write_file(
@@ -300,6 +304,15 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn signed_time_ms_preserves_times_before_and_after_epoch() {
+        let duration = std::time::Duration::from_micros(2_750_125);
+        let after = UNIX_EPOCH + duration;
+        let before = UNIX_EPOCH - duration;
+        assert_eq!(signed_time_ms(after), 2750.125);
+        assert_eq!(signed_time_ms(before), -2750.125);
     }
 
     #[test]

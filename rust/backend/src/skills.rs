@@ -224,12 +224,18 @@ fn base_dir(root: &str, scope: Option<&str>, skill: &str, flat: bool) -> PathBuf
     }
 }
 
+fn signed_time_ms(time: std::time::SystemTime) -> f64 {
+    match time.duration_since(UNIX_EPOCH) {
+        Ok(since) => since.as_secs_f64() * 1000.0,
+        Err(before) => -before.duration().as_secs_f64() * 1000.0,
+    }
+}
+
 fn mtime_ms(path: &Path) -> Option<f64> {
     fs::metadata(path)
         .and_then(|meta| meta.modified())
         .ok()
-        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-        .map(|since| since.as_secs_f64() * 1000.0)
+        .map(signed_time_ms)
 }
 
 // Read a skill's SKILL.md. Name/scope validation happened Node-side; `flat`
@@ -385,6 +391,15 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+
+    #[test]
+    fn signed_time_ms_preserves_times_before_and_after_epoch() {
+        let duration = std::time::Duration::from_micros(2_750_125);
+        let after = EPOCH + duration;
+        let before = EPOCH - duration;
+        assert_eq!(signed_time_ms(after), 2750.125);
+        assert_eq!(signed_time_ms(before), -2750.125);
     }
 
     #[test]
