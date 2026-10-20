@@ -100,6 +100,12 @@ fn main() -> io::Result<()> {
                     &request.flat,
                 )
             }
+            Ok(request) if request.op == "skill_write" => singularity_backend::skills::write_file(
+                request.path.as_str(),
+                request.content.as_str(),
+                request.mtime.as_f64(),
+                request.force.as_bool().unwrap_or(false),
+            ),
             Ok(request) if request.op == "plan_session" => {
                 match (request.path.as_str(), request.sid.as_str()) {
                     (Some(path), Some(sid)) => singularity_backend::plans::get_session(path, sid),

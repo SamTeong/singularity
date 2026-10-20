@@ -322,6 +322,40 @@ pub fn read_skill_file(
     }
 }
 
+// The request path is derived and validated Node-side; this final mtime check
+// runs after the private bridge queue wait and directly before the sync write.
+pub fn write_file(
+    path: Option<&str>,
+    content: Option<&str>,
+    mtime: Option<f64>,
+    force: bool,
+) -> Value {
+    let Some(path) = path.filter(|path| !path.is_empty()) else {
+        return json!({ "ok": false, "error": "path required" });
+    };
+    let Some(content) = content else {
+        return json!({ "ok": false, "error": "content must be a string" });
+    };
+    let path = Path::new(path);
+    if let Some(expected) = mtime.filter(|_| !force) {
+        if path.exists() {
+            let Some(actual) = mtime_ms(path) else {
+                return json!({ "ok": false, "error": "unreadable file" });
+            };
+            if (actual - expected).abs() > 1.0 {
+                return json!({ "ok": false, "error": "changed on disk" });
+            }
+        }
+    }
+    if let Err(error) = fs::write(path, content.as_bytes()) {
+        return json!({ "ok": false, "error": error.to_string() });
+    }
+    match mtime_ms(path) {
+        Some(mtime) => json!({ "ok": true, "mtime": mtime }),
+        None => json!({ "ok": false, "error": "unreadable file" }),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -451,6 +485,36 @@ mod tests {
             list(&json!(f.0.join("roots/as-file").to_string_lossy()))["error"],
             "skills root unreadable"
         );
+    }
+
+    #[test]
+    fn writes_utf8_empty_content_checks_mtime_and_does_not_create_parents() {
+        let f = Fixture::new();
+        let path = f.0.join("skill/SKILL.md");
+        f.put("skill/SKILL.md", "prior");
+        let initial = mtime_ms(&path).unwrap();
+        let saved = write_file(path.to_str(), Some("技能 🧪"), Some(initial), false);
+        assert_eq!(saved["ok"], true);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "技能 🧪");
+
+        let empty = write_file(path.to_str(), Some(""), None, false);
+        assert_eq!(empty["ok"], true);
+        assert_eq!(fs::read(&path).unwrap(), b"");
+
+        let changed = write_file(path.to_str(), Some("external"), None, false);
+        assert_eq!(changed["ok"], true);
+        let actual = mtime_ms(&path).unwrap();
+        let stale = write_file(path.to_str(), Some("rejected"), Some(actual - 10.0), false);
+        assert_eq!(stale["error"], "changed on disk");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "external");
+        let forced = write_file(path.to_str(), Some("forced"), Some(actual - 10.0), true);
+        assert_eq!(forced["ok"], true);
+        assert_eq!(fs::read_to_string(&path).unwrap(), "forced");
+
+        let missing = f.0.join("missing/child.md");
+        let result = write_file(missing.to_str(), Some("x"), None, false);
+        assert_eq!(result["ok"], false);
+        assert!(!missing.parent().unwrap().exists());
     }
 
     #[test]

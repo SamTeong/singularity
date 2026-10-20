@@ -11,7 +11,6 @@
 // Rust trusts them), the localeCompare sort + caps (Rust emits readdir order —
 // a Rust sort cannot match locale order byte for byte), and the guarded writes.
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
@@ -148,33 +147,43 @@ export async function readSkillFile(root, scope, skill, file, flat) {
   return readSkillFileOn(backend, root, scope, skill, file, flat);
 }
 
+async function writeSkillContent(b, p, content, mtime, force, logger) {
+  try {
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    await backupFile(p);
+    // Re-check after the backup await, then Rust checks again when this queued
+    // request reaches the child so the final guard is adjacent to the write.
+    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
+      return { ok: false, error: 'changed on disk' };
+    }
+    try { return await b.skillWrite(p, content, mtime, force); }
+    catch (error) {
+      logger?.error({ err: error.message }, 'Rust Skills write backend failed');
+      return { ok: false, error: 'skills write backend unavailable' };
+    }
+  }
+  catch (e) { return { ok: false, error: e.message }; }
+}
+
 // Write a skill's SKILL.md (raw content, frontmatter preserved as edited).
-export async function writeSkill(root, scope, skill, content, flat, mtime, force) {
+async function writeSkillOn(b, root, scope, skill, content, flat, mtime, force, logger) {
   root = root || (getSkillsRoots()[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
   if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };
   if (typeof content !== 'string') return { ok: false, error: 'bad content' };
   const p = flat ? join(root, skill, 'SKILL.md') : join(root, scope, '.claude', 'skills', skill, 'SKILL.md');
-  try {
-    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
-      return { ok: false, error: 'changed on disk' };
-    }
-    await backupFile(p);
-    // Re-check: backupFile's await can yield to a concurrent save of this
-    // same path landing in between, which the first check (above) can't see.
-    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
-      return { ok: false, error: 'changed on disk' };
-    }
-    await writeFile(p, content);
-    return { ok: true, mtime: statSync(p).mtimeMs };
-  }
-  catch (e) { return { ok: false, error: e.message }; }
+  return writeSkillContent(b, p, content, mtime, force, logger);
+}
+export async function writeSkill(root, scope, skill, content, flat, mtime, force) {
+  return writeSkillOn(backend, root, scope, skill, content, flat, mtime, force);
 }
 
 // Write a supporting file inside a skill dir. Same validation as readSkillFile;
 // image type is not writable (binary). Server-derived path, segment-validated.
-export async function writeSkillFile(root, scope, skill, file, content, flat, mtime, force) {
+async function writeSkillFileOn(b, root, scope, skill, file, content, flat, mtime, force, logger) {
   root = root || (getSkillsRoots()[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
@@ -186,20 +195,22 @@ export async function writeSkillFile(root, scope, skill, file, content, flat, mt
   const p = flat ? join(root, skill, ...segs) : join(root, scope, '.claude', 'skills', skill, ...segs);
   const ext = p.slice(p.lastIndexOf('.') + 1).toLowerCase();
   if (IMG_EXT.has(ext)) return { ok: false, error: 'cannot edit image' };
-  try {
-    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
-      return { ok: false, error: 'changed on disk' };
-    }
-    await backupFile(p);
-    // Re-check: backupFile's await can yield to a concurrent save of this
-    // same path landing in between, which the first check (above) can't see.
-    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
-      return { ok: false, error: 'changed on disk' };
-    }
-    await writeFile(p, content);
-    return { ok: true, mtime: statSync(p).mtimeMs };
-  }
-  catch (e) { return { ok: false, error: e.message }; }
+  return writeSkillContent(b, p, content, mtime, force, logger);
+}
+export async function writeSkillFile(root, scope, skill, file, content, flat, mtime, force) {
+  return writeSkillFileOn(backend, root, scope, skill, file, content, flat, mtime, force);
+}
+
+export function createSkillWriteHandler(backend_, logger) {
+  return async (req, reply) => {
+    const b = req.body || {};
+    const flat = b.flat === true || b.flat === '1';
+    const result = b.file
+      ? await writeSkillFileOn(backend_, b.root, b.scope, b.skill, b.file, b.content, flat, b.mtime, b.force, logger)
+      : await writeSkillOn(backend_, b.root, b.scope, b.skill, b.content, flat, b.mtime, b.force, logger);
+    if (!result.ok) reply.code(result.error === 'skills write backend unavailable' ? 500 : result.error === 'changed on disk' ? 409 : 400);
+    return result;
+  };
 }
 
 // The Rust-backed read routes have no other 500 path — a bridge crash is the

@@ -200,6 +200,16 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'skill_file_read', root, scope, skill, file, flat });
     },
 
+    skillWrite(path, content, mtime, force) {
+      return request({
+        op: 'skill_write',
+        path,
+        content,
+        mtime: mtime == null ? null : Number(mtime),
+        force: !!force,
+      });
+    },
+
     readFile(path) {
       return request({ op: 'read', path });
     },

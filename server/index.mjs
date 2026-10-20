@@ -26,7 +26,7 @@ import { list as listProjects, add as addProject, remove as removeProject, reord
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
-import { readSkillsDir, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler } from './skills.mjs';
+import { readSkillsDir, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } from './skills.mjs';
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, getState as getExplorerState, setState as setExplorerState } from './explorer.mjs';
 import { getConfigState, setConfigState } from './config-state.mjs';
 import { getKeys, setKeys } from './keys.mjs';
@@ -892,15 +892,7 @@ app.put('/skills/roots', async (req) => setSkillsRoots(req.body?.roots));
 app.get('/skills', createSkillsListHandler(rustBackend, app.log));
 app.get('/skill', createSkillReadHandler(rustBackend, app.log));
 // Write a skill's SKILL.md (no file) or a supporting file (file present).
-app.put('/skill', async (req, reply) => {
-  const b = req.body || {};
-  const flat = b.flat === true || b.flat === '1';
-  const r = b.file
-    ? await writeSkillFile(b.root, b.scope, b.skill, b.file, b.content, flat, b.mtime, b.force)
-    : await writeSkill(b.root, b.scope, b.skill, b.content, flat, b.mtime, b.force);
-  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
-  return r;
-});
+app.put('/skill', createSkillWriteHandler(rustBackend, app.log));
 
 // Session history: list transcripts (reverse-chrono), read one, search across
 // all or one, under a client-selected root (default ~/.claude/projects).

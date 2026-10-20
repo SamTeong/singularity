@@ -9,7 +9,8 @@
 import Fastify from 'fastify';
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, utimesSync, symlinkSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, readdirSync, utimesSync, symlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 
@@ -43,10 +44,26 @@ mkdirSync(join(flatRoot, 'not-a-skill'), { recursive: true }); // no SKILL.md �
 const { createRustBackend } = await import('./rust-backend.mjs');
 const backend = createRustBackend();
 await backend.start();
-const { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler } = await import('./skills.mjs');
-const { STATE_DIR } = await import('./app-dir.mjs');
+const { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } = await import('./skills.mjs');
+const { STATE_DIR, BACKUPS_DIR } = await import('./app-dir.mjs');
 setSkillsBackend(backend);
 after(async () => { await backend.stop(); rmSync(scratch, { recursive: true, force: true }); });
+
+function backupSnapshot(sourcePath) {
+  const key = createHash('sha256').update(sourcePath).digest('hex').slice(0, 16);
+  const dir = join(BACKUPS_DIR, key);
+  let files = [];
+  try { files = readdirSync(dir).filter((name) => name.endsWith('.bak')); } catch {}
+  return { dir, files: new Set(files) };
+}
+
+function hasNewBackup(snapshot, content) {
+  try {
+    return readdirSync(snapshot.dir)
+      .filter((name) => name.endsWith('.bak') && !snapshot.files.has(name))
+      .some((name) => readFileSync(join(snapshot.dir, name), 'utf8') === content);
+  } catch { return false; }
+}
 
 test('listSkills: grouped — includes common, skips scopes with no skills, carries description', async () => {
   const { scopes, flat } = await listSkills(root);
@@ -229,15 +246,78 @@ test('writeSkillFile rejects a stale mtime with "changed on disk"; force overrid
   writeFileSync(fp, 'v-external');
   const future = (Date.now() + 5000) / 1000;
   utimesSync(fp, future, future);
-  const rejected = await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v2', false, stale);
+  const rejected = await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v2', false, String(stale));
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error, 'changed on disk');
   assert.equal(readFileSync(fp, 'utf8'), 'v-external');
   // force overrides the drift.
-  const forced = await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v-forced', false, stale, true);
+  const forced = await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'v-forced', false, stale, 'false');
   assert.equal(forced.ok, true);
   assert.equal(typeof forced.mtime, 'number');
   assert.equal(readFileSync(fp, 'utf8'), 'v-forced');
+});
+
+test('Rust-backed Skills writes preserve backups, UTF-8, layout, optional mtime and the final guard', async () => {
+  const skillPath = join(root, 'coding', '.claude', 'skills', 'noisy', 'SKILL.md');
+  const priorSkill = `prior-skill:${scratch}`;
+  writeFileSync(skillPath, priorSkill);
+  const skillBackups = backupSnapshot(skillPath);
+  const empty = await writeSkill(root, 'coding', 'noisy', '');
+  assert.equal(empty.ok, true);
+  assert.equal(typeof empty.mtime, 'number');
+  assert.equal(readFileSync(skillPath, 'utf8'), '');
+  assert.equal(hasNewBackup(skillBackups, priorSkill), true, 'SKILL.md gets a current-run prior-byte backup');
+  const unicode = await writeSkill(root, 'coding', 'noisy', '技能 🧪');
+  assert.equal(unicode.ok, true);
+  assert.equal(readFileSync(skillPath, 'utf8'), '技能 🧪');
+
+  const supportPath = join(root, 'coding', '.claude', 'skills', 'freeze', 'scripts', 'run.mjs');
+  const priorSupport = `prior-support:${scratch}`;
+  writeFileSync(supportPath, priorSupport);
+  const supportBackups = backupSnapshot(supportPath);
+  const support = await writeSkillFile(root, 'coding', 'freeze', 'scripts/run.mjs', 'support ✓');
+  assert.equal(support.ok, true);
+  assert.equal(readFileSync(supportPath, 'utf8'), 'support ✓');
+  assert.equal(hasNewBackup(supportBackups, priorSupport), true, 'supporting file gets a current-run prior-byte backup');
+
+  const flat = await writeSkillFile(flatRoot, null, 'declawed', 'new.txt', 'flat ✓', true);
+  assert.equal(flat.ok, true);
+  assert.equal(readFileSync(join(flatRoot, 'declawed', 'new.txt'), 'utf8'), 'flat ✓');
+  const missingParent = join(flatRoot, 'declawed', 'missing', 'child.txt');
+  assert.equal((await writeSkillFile(flatRoot, null, 'declawed', 'missing/child.txt', 'x', true)).ok, false);
+  assert.equal(readdirSync(join(flatRoot, 'declawed')).includes('missing'), false);
+
+  assert.equal((await writeSkillFile(flatRoot, null, 'declawed', 'optional.txt', 'optional', true, null)).ok, true);
+  const guardPath = join(flatRoot, 'declawed', 'guard.txt');
+  const initial = await backend.skillWrite(guardPath, 'initial', null, false);
+  assert.equal(initial.ok, true);
+  writeFileSync(guardPath, 'external');
+  const future = (Date.now() + 5000) / 1000;
+  utimesSync(guardPath, future, future);
+  const stale = await backend.skillWrite(guardPath, 'rejected', initial.mtime, false);
+  assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
+  assert.equal(readFileSync(guardPath, 'utf8'), 'external');
+  assert.equal(missingParent.includes('missing'), true);
+});
+
+test('Skills write handler preserves application statuses and isolates bridge failures', async () => {
+  const app = Fastify();
+  let calls = 0;
+  const child = { skillWrite: async () => { calls++; return { ok: false, error: 'changed on disk' }; } };
+  app.put('/skill', createSkillWriteHandler(child, app.log));
+  const conflict = await app.inject({ method: 'PUT', url: '/skill', payload: { root, scope: 'coding', skill: 'noisy', content: 'x' } });
+  assert.equal(conflict.statusCode, 409);
+  const badName = await app.inject({ method: 'PUT', url: '/skill', payload: { root, scope: 'coding', skill: '..', content: 'x' } });
+  assert.equal(badName.statusCode, 400);
+  assert.equal(calls, 1, 'invalid names do not reach Rust');
+  await app.close();
+
+  const failedApp = Fastify();
+  failedApp.put('/skill', createSkillWriteHandler({ skillWrite: async () => { throw new Error('child exited'); } }, failedApp.log));
+  const unavailable = await failedApp.inject({ method: 'PUT', url: '/skill', payload: { root, scope: 'coding', skill: 'noisy', content: 'x' } });
+  assert.equal(unavailable.statusCode, 500);
+  assert.deepEqual(unavailable.json(), { ok: false, error: 'skills write backend unavailable' });
+  await failedApp.close();
 });
 
 // --- Bridge-port additions (behaviors the old Node tests never pinned) ---
