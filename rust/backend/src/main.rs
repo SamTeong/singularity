@@ -71,6 +71,9 @@ fn default_op() -> String {
 }
 
 fn main() -> io::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--pty") {
+        return singularity_backend::pty::run();
+    }
     let stdin = io::stdin();
     let mut stdout = io::BufWriter::new(io::stdout().lock());
     serde_json::to_writer(&mut stdout, &serde_json::json!({ "ready": true }))?;
