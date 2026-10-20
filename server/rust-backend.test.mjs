@@ -809,12 +809,27 @@ test('Rust one-shot bridge execs a binary and maps stdout, failure, and timeout'
     const okScript = join(base, 'ok.mjs');
     const failScript = join(base, 'fail.mjs');
     const slowScript = join(base, 'slow.mjs');
+    const envScript = join(base, 'env.mjs');
+    const bigScript = join(base, 'big.mjs');
     await writeFile(okScript, "process.stdout.write('bridge-ok');");
     await writeFile(failScript, "process.stdout.write('bridge-boom'); process.exit(3);");
     await writeFile(slowScript, 'setTimeout(() => {}, 5000);');
+    await writeFile(envScript, "process.stdout.write(process.env.SING_BRIDGE_PROBE ?? 'unset');");
+    await writeFile(bigScript, "process.stdout.write('x'.repeat(64));");
 
     const ok = await backend.oneShot(process.execPath, [okScript], { timeout: 10_000 });
     assert.equal(ok.stdout, 'bridge-ok');
+
+    const env = await backend.oneShot(process.execPath, [envScript], {
+      timeout: 10_000, env: { SING_BRIDGE_PROBE: 'bridge-env-ok' },
+    });
+    assert.equal(env.stdout, 'bridge-env-ok');
+
+    await assert.rejects(backend.oneShot(process.execPath, [bigScript], { timeout: 10_000, maxBuffer: 8 }), (error) => {
+      assert.match(error.message, /Command failed:/);
+      assert.ok(error.stdout.length > 8, 'captured stdout should exceed the 8-byte cap');
+      return true;
+    });
 
     await assert.rejects(backend.oneShot(process.execPath, [failScript], { timeout: 10_000 }), (error) => {
       assert.match(error.message, /Command failed:/);

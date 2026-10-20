@@ -3,9 +3,9 @@
 // requests) into the skill's reports dir and prints the path to stdout. We spawn
 // it on demand and serve the newest file to a sandboxed iframe — no render logic
 // is duplicated here; the skill owns compute + render.
-import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { oneShotSpawn } from './one-shot.mjs';
 
 // Skill CLI + report output dir — optional; absent → usage-report degrades
 // silently (daemon boots fine; /capabilities reports availability).
@@ -38,28 +38,27 @@ export function latestReportHtml() {
   try { return readFileSync(f, 'utf8'); } catch { return null; }
 }
 
-// Regenerate by spawning the skill's `report` command. USAGE_REPORT_BROWSER=node
-// neutralizes the skill's auto-open on win32: node runs the .html, errors, and
-// exits — so no browser window pops for a daemon-triggered refresh. Resolves
-// { ok, at } (mtime, for client cache-busting) or { ok:false, error }.
-export function generateReport() {
+// Regenerate by spawning the skill's `report` command through the queued Rust
+// backend (oneShotSpawn; execFile fallback for standalone imports).
+// USAGE_REPORT_BROWSER=node neutralizes the skill's auto-open on win32: node
+// runs the .html, errors, and exits — so no browser window pops for a
+// daemon-triggered refresh. Resolves { ok, at } (mtime, for client cache-
+// busting) or { ok:false, error }.
+export async function generateReport() {
   if (!existsSync(SKILL_STATS)) {
-    return Promise.resolve({ ok: false, error: `usage-report skill not found: ${SKILL_STATS}` });
+    return { ok: false, error: `usage-report skill not found: ${SKILL_STATS}` };
   }
-  return new Promise((resolve) => {
-    execFile(
-      'node', [SKILL_STATS, 'report'],
-      { env: { ...process.env, USAGE_REPORT_BROWSER: 'node' }, maxBuffer: 16 * 1024 * 1024, timeout: 180_000 },
-      (err, stdout) => {
-        if (err) return resolve({ ok: false, error: err.message });
-        const last = String(stdout).trim().split('\n').pop().trim();
-        if (!last.endsWith('.html') || !existsSync(last)) {
-          return resolve({ ok: false, error: 'report path not found in skill output' });
-        }
-        let at = null;
-        try { at = statSync(last).mtimeMs; } catch {}
-        resolve({ ok: true, at });
-      },
-    );
-  });
+  const opts = { env: { ...process.env, USAGE_REPORT_BROWSER: 'node' }, maxBuffer: 16 * 1024 * 1024, timeout: 180_000 };
+  try {
+    const { stdout } = await oneShotSpawn('node', [SKILL_STATS, 'report'], opts);
+    const last = String(stdout).trim().split('\n').pop().trim();
+    if (!last.endsWith('.html') || !existsSync(last)) {
+      return { ok: false, error: 'report path not found in skill output' };
+    }
+    let at = null;
+    try { at = statSync(last).mtimeMs; } catch {}
+    return { ok: true, at };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }

@@ -1,7 +1,9 @@
 // One-shot CLI prompt execution for server/one-shot.mjs: runs a binary to
 // completion with a deadline and returns its captured stdout. Ports Node's
 // execFile semantics: stdin closed (Stdio::null = immediate EOF), windowsHide,
-// timeout kill, and the 8MB maxBuffer cap (ONESHOT_MAX_BUFFER parity).
+// timeout kill, and the maxBuffer cap (ONESHOT_MAX_BUFFER parity; the caller
+// can raise it per exec — usagereport needs 16MB). Optional env entries are
+// set over the inherited environment (execFile's env replacement parity).
 use serde_json::{Value, json};
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -68,7 +70,13 @@ fn fail(
     json!({ "ok": false, "error": error, "timed_out": timed_out, "stdout": lossy(stdout), "stderr": lossy(stderr) })
 }
 
-pub fn run(bin: Option<&str>, args: &Value, timeout_ms: Option<f64>) -> Value {
+pub fn run(
+    bin: Option<&str>,
+    args: &Value,
+    timeout_ms: Option<f64>,
+    max_buffer: Option<f64>,
+    env: Option<&Value>,
+) -> Value {
     let Some(bin) = bin else {
         return json!({ "ok": false, "error": "bad bin", "stdout": "", "stderr": "" });
     };
@@ -83,12 +91,23 @@ pub fn run(bin: Option<&str>, args: &Value, timeout_ms: Option<f64>) -> Value {
     let deadline = Some(timeout_ms.unwrap_or(DEFAULT_TIMEOUT_MS).max(0.0))
         .filter(|ms| *ms > 0.0) // Node treats timeout <= 0 as no timeout
         .map(|ms| Instant::now() + Duration::from_millis(ms as u64));
+    let cap = max_buffer
+        .filter(|bytes| *bytes > 0.0)
+        .map(|bytes| bytes as usize)
+        .unwrap_or(MAX_BUFFER);
 
     let mut cmd = Command::new(bin);
     cmd.args(argv)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if let Some(map) = env.and_then(Value::as_object) {
+        for (key, value) in map {
+            if let Some(v) = value.as_str() {
+                cmd.env(key, v);
+            }
+        }
+    }
     // execFile's windowsHide parity: never flash a console window.
     #[cfg(windows)]
     {
@@ -106,12 +125,12 @@ pub fn run(bin: Option<&str>, args: &Value, timeout_ms: Option<f64>) -> Value {
     if let Some(pipe) = child.stdout.take() {
         let tx = tx.clone();
         std::thread::spawn(move || {
-            let _ = tx.send(Pipe::Stdout(read_pipe(pipe, MAX_BUFFER)));
+            let _ = tx.send(Pipe::Stdout(read_pipe(pipe, cap)));
         });
     }
     if let Some(pipe) = child.stderr.take() {
         std::thread::spawn(move || {
-            let _ = tx.send(Pipe::Stderr(read_pipe(pipe, MAX_BUFFER)));
+            let _ = tx.send(Pipe::Stderr(read_pipe(pipe, cap)));
         });
     }
 
@@ -131,7 +150,7 @@ pub fn run(bin: Option<&str>, args: &Value, timeout_ms: Option<f64>) -> Value {
             None => return fail(&mut child, "timeout", true, stdout.take(), stderr.take()),
         }
     }
-    if stdout.as_ref().is_some_and(|buf| buf.len() > MAX_BUFFER) {
+    if stdout.as_ref().is_some_and(|buf| buf.len() > cap) {
         return fail(
             &mut child,
             "stdout maxBuffer exceeded",
@@ -171,7 +190,7 @@ mod tests {
         let (bin, args) = ("cmd", json!(["/C", "echo one-shot-ok"]));
         #[cfg(not(windows))]
         let (bin, args) = ("sh", json!(["-c", "echo one-shot-ok"]));
-        let out = run(Some(bin), &args, Some(10_000.0));
+        let out = run(Some(bin), &args, Some(10_000.0), None, None);
         assert_eq!(out["ok"], true, "expected success, got {out}");
         assert!(out["stdout"].as_str().unwrap().contains("one-shot-ok"));
     }
@@ -182,7 +201,7 @@ mod tests {
         let (bin, args) = ("cmd", json!(["/C", "echo boom & exit 3"]));
         #[cfg(not(windows))]
         let (bin, args) = ("sh", json!(["-c", "echo boom; exit 3"]));
-        let out = run(Some(bin), &args, Some(10_000.0));
+        let out = run(Some(bin), &args, Some(10_000.0), None, None);
         assert_eq!(out["ok"], false);
         assert_eq!(out["code"], 3);
         assert!(out["stdout"].as_str().unwrap().contains("boom"));
@@ -195,7 +214,7 @@ mod tests {
         let (bin, args) = ("ping", json!(["-n", "10", "127.0.0.1"]));
         #[cfg(not(windows))]
         let (bin, args) = ("sleep", json!(["1"]));
-        let out = run(Some(bin), &args, Some(100.0));
+        let out = run(Some(bin), &args, Some(100.0), None, None);
         assert_eq!(out["ok"], false);
         assert_eq!(out["error"], "timeout");
     }
@@ -248,6 +267,8 @@ mod tests {
             Some("definitely-not-a-binary-xyz"),
             &json!([]),
             Some(1000.0),
+            None,
+            None,
         );
         assert_eq!(out["ok"], false);
         assert!(
@@ -256,5 +277,33 @@ mod tests {
                 .unwrap()
                 .contains("definitely-not-a-binary-xyz")
         );
+    }
+
+    #[test]
+    fn max_buffer_override_caps_oversized_stdout() {
+        #[cfg(windows)]
+        let (bin, args) = ("cmd", json!(["/C", "echo 0123456789ABCDEF"]));
+        #[cfg(not(windows))]
+        let (bin, args) = ("sh", json!(["-c", "echo 0123456789ABCDEF"]));
+        let out = run(Some(bin), &args, Some(10_000.0), Some(4.0), None);
+        assert_eq!(out["ok"], false);
+        assert_eq!(out["error"], "stdout maxBuffer exceeded");
+    }
+
+    #[test]
+    fn env_entries_reach_the_child() {
+        #[cfg(windows)]
+        let (bin, args) = ("cmd", json!(["/C", "echo %ONESHOT_ENV_PROBE%"]));
+        #[cfg(not(windows))]
+        let (bin, args) = ("sh", json!(["-c", "echo $ONESHOT_ENV_PROBE"]));
+        let out = run(
+            Some(bin),
+            &args,
+            Some(10_000.0),
+            None,
+            Some(&json!({ "ONESHOT_ENV_PROBE": "env-ok" })),
+        );
+        assert_eq!(out["ok"], true, "expected success, got {out}");
+        assert!(out["stdout"].as_str().unwrap().contains("env-ok"));
     }
 }

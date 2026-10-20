@@ -53,6 +53,10 @@ struct Request {
     #[serde(default)]
     timeout_ms: Value,
     #[serde(default)]
+    max_buffer: Value,
+    #[serde(default)]
+    env: Value,
+    #[serde(default)]
     pid: Value,
 }
 
@@ -189,6 +193,8 @@ fn main() -> io::Result<()> {
                 request.bin.as_str(),
                 &request.args,
                 request.timeout_ms.as_f64(),
+                request.max_buffer.as_f64(),
+                Some(&request.env),
             ),
             Ok(request) if request.op == "procs_kill" => {
                 singularity_backend::procs::kill(&request.pid)
