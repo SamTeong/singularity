@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 
 pub mod plans;
 pub mod rules;
+pub mod skills;
 pub mod wiki_read;
 
 const FILE_CAP: usize = 2000;

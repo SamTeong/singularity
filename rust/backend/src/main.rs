@@ -20,6 +20,14 @@ struct Request {
     sid: Value,
     #[serde(default)]
     roots: Value,
+    #[serde(default)]
+    scope: Value,
+    #[serde(default)]
+    skill: Value,
+    #[serde(default)]
+    flat: Value,
+    #[serde(default)]
+    file: Value,
 }
 
 fn default_op() -> String {
@@ -61,6 +69,24 @@ fn main() -> io::Result<()> {
             }
             Ok(request) if request.op == "rules_search" => {
                 singularity_backend::rules::search(&request.roots, &request.q)
+            }
+            Ok(request) if request.op == "skills_list" => {
+                singularity_backend::skills::list(&request.root)
+            }
+            Ok(request) if request.op == "skill_read" => singularity_backend::skills::read_skill(
+                &request.root,
+                &request.scope,
+                &request.skill,
+                &request.flat,
+            ),
+            Ok(request) if request.op == "skill_file_read" => {
+                singularity_backend::skills::read_skill_file(
+                    &request.root,
+                    &request.scope,
+                    &request.skill,
+                    &request.file,
+                    &request.flat,
+                )
             }
             Ok(request) if request.op == "plan_session" => {
                 match (request.path.as_str(), request.sid.as_str()) {

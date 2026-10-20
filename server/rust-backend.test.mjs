@@ -245,6 +245,68 @@ test('Rust stdio bridge serves the Rules file walk and content search', async ()
   }
 });
 
+test('Rust stdio bridge serves the Skills list, skill read, and supporting-file read', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-skills-'));
+  const scopesRoot = join(base, 'scopes');
+  const md = '---\nname: freeze\ndescription: Lock edits to a directory.\ntriggers:\n  - freeze edits\n---\n\n# freeze\n\nbody';
+  await mkdir(join(scopesRoot, 'coding', '.claude', 'skills', 'freeze', 'scripts'), { recursive: true });
+  await writeFile(join(scopesRoot, 'coding', '.claude', 'skills', 'freeze', 'SKILL.md'), md);
+  await writeFile(join(scopesRoot, 'coding', '.claude', 'skills', 'freeze', 'scripts', 'run.mjs'), "console.log('run')");
+  await writeFile(join(scopesRoot, 'coding', '.claude', 'skills', 'freeze', 'pic.png'), 'binaryish');
+  await mkdir(join(scopesRoot, 'common', '.claude', 'skills', 'x'), { recursive: true });
+  await writeFile(join(scopesRoot, 'common', '.claude', 'skills', 'x', 'SKILL.md'), '---\nname: x\ndescription: hidden\n---\n');
+  const flatRoot = join(base, 'flat');
+  await mkdir(join(flatRoot, 'declawed'), { recursive: true });
+  await writeFile(join(flatRoot, 'declawed', 'SKILL.md'), '---\nname: declawed\n---\n');
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+
+    const listed = await backend.skillsList(scopesRoot);
+    assert.equal(listed.flat, false);
+    const coding = listed.scopes.find((s) => s.name === 'coding'); // scopes ship in readdir order
+    const freeze = coding.skills.find((s) => s.name === 'freeze');
+    assert.equal(freeze.description, 'Lock edits to a directory.');
+    assert.equal(freeze.raw, md);
+    assert.deepEqual(freeze.tree.map((e) => e.n).sort(), ['SKILL.md', 'pic.png', 'scripts']); // readdir order, entry tree not flattened
+    const scripts = freeze.tree.find((e) => e.n === 'scripts');
+    assert.deepEqual(scripts, { n: 'scripts', f: false, c: [{ n: 'run.mjs', f: true }] });
+    assert.equal(listed.scopes.find((s) => s.name === 'common').skills[0].name, 'x');
+    const flat = await backend.skillsList(flatRoot);
+    assert.equal(flat.flat, true);
+    assert.equal(flat.scopes[0].name, 'flat'); // basename of the root
+    assert.equal(flat.scopes[0].skills[0].name, 'declawed');
+    assert.deepEqual(await backend.skillsList(join(base, 'absent')),
+      { scopes: [], flat: false, error: 'skills root not found' });
+
+    const read = await backend.skillRead(scopesRoot, 'coding', 'freeze', false);
+    assert.equal(read.ok, true);
+    assert.equal(read.name, 'freeze');
+    assert.deepEqual(read.triggers, ['freeze edits']);
+    assert.equal(read.body, '\n# freeze\n\nbody');
+    assert.equal(read.raw, md);
+    assert.equal(read.path, join(scopesRoot, 'coding', '.claude', 'skills', 'freeze', 'SKILL.md'));
+    assert.equal(typeof read.mtime, 'number');
+    assert.deepEqual(await backend.skillRead(scopesRoot, 'coding', 'nope', false),
+      { ok: false, error: 'not found' });
+
+    const code = await backend.skillFileRead(scopesRoot, 'coding', 'freeze', 'scripts/run.mjs', false);
+    assert.equal(code.ok, true);
+    assert.equal(code.type, 'code');
+    assert.equal(code.name, 'run.mjs');
+    assert.equal(code.content, "console.log('run')");
+    const image = await backend.skillFileRead(scopesRoot, 'coding', 'freeze', 'pic.png', false);
+    assert.equal(image.type, 'image');
+    assert.equal('content' in image, false); // binary never ships
+    assert.equal(image.name, 'pic.png');
+    assert.deepEqual(await backend.skillFileRead(scopesRoot, 'coding', 'freeze', 'missing.md', false),
+      { ok: false, error: 'not found' });
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
 test('gateway turns Rust process failure into a logged 500 response', async () => {
   const app = Fastify();
   app.get('/api/wiki/graph', createWikiGraphHandler({ graph: async () => { throw new Error('child exited'); } }, app.log));

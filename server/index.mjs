@@ -26,7 +26,7 @@ import { list as listProjects, add as addProject, remove as removeProject, reord
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
-import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
+import { readSkillsDir, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler } from './skills.mjs';
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, getState as getExplorerState, setState as setExplorerState } from './explorer.mjs';
 import { getConfigState, setConfigState } from './config-state.mjs';
 import { getKeys, setKeys } from './keys.mjs';
@@ -121,6 +121,7 @@ const app = Fastify({
   },
 });
 const rustBackend = createRustBackend();
+setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
 app.addHook('onClose', async () => rustBackend.stop());
 
 // Safety net: the daemon hosts live PTY agents — an unhandled rejection must be
@@ -522,7 +523,7 @@ app.get('/skill-scopes', async () => {
       .sort((a, b) => a.localeCompare(b));
   } catch {}
   for (const s of scopes) {
-    const r = readSkillsDir(join(root, s, '.claude', 'skills'));
+    const r = await readSkillsDir(join(root, s, '.claude', 'skills'));
     skillsByScope[s] = r ? r.skills.map((k) => k.name) : [];
   }
   return { scopes, skillsByScope };
@@ -893,18 +894,8 @@ app.get('/projects/review/file', async (req, reply) => {
 // (grouped scope dir vs flat .claude/skills) is auto-detected server-side.
 app.get('/skills/roots', async () => ({ roots: getSkillsRoots() }));
 app.put('/skills/roots', async (req) => setSkillsRoots(req.body?.roots));
-app.get('/skills', async (req) => listSkills(req.query.root));
-app.get('/skill', async (req, reply) => {
-  const flat = req.query.flat === '1';
-  if (req.query.file) {
-    const r = readSkillFile(req.query.root, req.query.scope, req.query.skill, req.query.file, flat);
-    if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
-    return r;
-  }
-  const r = readSkill(req.query.root, req.query.scope, req.query.skill, flat);
-  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
-  return r;
-});
+app.get('/skills', createSkillsListHandler(rustBackend, app.log));
+app.get('/skill', createSkillReadHandler(rustBackend, app.log));
 // Write a skill's SKILL.md (no file) or a supporting file (file present).
 app.put('/skill', async (req, reply) => {
   const b = req.body || {};
