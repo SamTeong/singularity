@@ -18,6 +18,27 @@ import path from 'node:path';
 import { livePids, isLive } from './agents.mjs';
 
 const execFileP = promisify(execFile);
+
+// The queued Rust backend owns the child-process execution once index.mjs
+// wires this in (oneshot op: argv-only spawn, windowsHide, 8MB maxBuffer,
+// timeout 0 = no deadline — parity with the scan's optionless execFile).
+// Legacy in-process execFile otherwise, so standalone imports keep working.
+let procsBackend;
+export function setProcsBackend(backend) { procsBackend = backend; }
+
+async function procsExecFile(bin, args, opts) {
+  if (!procsBackend) return execFileP(bin, args, opts);
+  return procsBackend.oneShot(bin, args, { timeout: 0 });
+}
+
+// The terminate itself runs on the Rust backend (procs_kill op — no signal
+// primitive left in Node); legacy process.kill keeps standalone imports working.
+async function killPid(pid) {
+  if (procsBackend) return procsBackend.procsKill(pid);
+  try { process.kill(pid); return { ok: true }; }
+  catch (e) { return { ok: false, error: e.message }; }
+}
+
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
 const IS_DARWIN = process.platform === 'darwin';
 const SELF_PID = process.pid; // this daemon — its own row is always 'daemon', never killable
@@ -72,7 +93,7 @@ export async function scanClaude() {
 async function scanClaudeWindows() {
   let out;
   try {
-    ({ stdout: out } = await execFileP('powershell.exe', PS, { windowsHide: true, maxBuffer: 8 * 1024 * 1024 }));
+    ({ stdout: out } = await procsExecFile('powershell.exe', PS, { windowsHide: true, maxBuffer: 8 * 1024 * 1024 }));
   } catch {
     return []; // no powershell / no matches
   }
@@ -101,7 +122,7 @@ async function scanClaudeWindows() {
 async function scanClaudeDarwin() {
   let out;
   try {
-    ({ stdout: out } = await execFileP('ps', PS_ARGS, { maxBuffer: 8 * 1024 * 1024 }));
+    ({ stdout: out } = await procsExecFile('ps', PS_ARGS, { maxBuffer: 8 * 1024 * 1024 }));
   } catch {
     return []; // no ps / no matches
   }
@@ -152,17 +173,15 @@ export async function killClaudePid(pid) {
   if (IS_DARWIN) {
     // Re-verify by re-scanning: the scan above found the pid only if it's
     // still a claude process. Skip the CIM re-query (Windows-only primitive);
-    // the small TOCTOU gap before process.kill is unavoidable on darwin too.
-    try { process.kill(pid); return { ok: true }; }
-    catch (e) { return { ok: false, error: e.message }; }
+    // the small TOCTOU gap before the kill is unavoidable on darwin too.
+    return killPid(pid);
   }
   try {
-    const { stdout } = await execFileP('powershell.exe', [
+    const { stdout } = await procsExecFile('powershell.exe', [
       '-NoProfile', '-NonInteractive', '-Command',
       `[bool](Get-CimInstance Win32_Process -Filter "ProcessId=${pid} AND Name='${target.name}'")`,
     ], { windowsHide: true });
     if (stdout.trim() !== 'True') return { ok: false, error: 'process changed before kill' };
   } catch (e) { return { ok: false, error: e.message }; }
-  try { process.kill(pid); return { ok: true }; }
-  catch (e) { return { ok: false, error: e.message }; }
+  return killPid(pid);
 }

@@ -52,6 +52,8 @@ struct Request {
     args: Value,
     #[serde(default)]
     timeout_ms: Value,
+    #[serde(default)]
+    pid: Value,
 }
 
 fn default_op() -> String {
@@ -188,6 +190,9 @@ fn main() -> io::Result<()> {
                 &request.args,
                 request.timeout_ms.as_f64(),
             ),
+            Ok(request) if request.op == "procs_kill" => {
+                singularity_backend::procs::kill(&request.pid)
+            }
             Ok(request) if request.op == "plan_session" => {
                 match (request.path.as_str(), request.sid.as_str()) {
                     (Some(path), Some(sid)) => singularity_backend::plans::get_session(path, sid),

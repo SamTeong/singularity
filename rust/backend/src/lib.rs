@@ -15,6 +15,7 @@ pub mod model_prices;
 pub mod models;
 pub mod oneshot;
 pub mod plans;
+pub mod procs;
 pub mod rules;
 pub mod skills;
 pub mod wiki_read;

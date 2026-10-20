@@ -315,6 +315,12 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       throw error;
     },
 
+    // Guarded PID kill for procs.mjs: { ok } | { ok:false, error } — Node keeps
+    // the scan/classification/daemon-denial/TOCTOU decisions.
+    procsKill(pid) {
+      return request({ op: 'procs_kill', pid });
+    },
+
     readFile(path) {
       return request({ op: 'read', path });
     },

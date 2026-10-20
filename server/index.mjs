@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import './migrate-state.mjs';
 import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
-import { scanClaude, killClaudePid } from './procs.mjs';
+import { scanClaude, killClaudePid, setProcsBackend } from './procs.mjs';
 import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
 import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, getConfigRoots as getCodexConfigRoots, setConfigRoots as setCodexConfigRoots } from './codex-config.mjs';
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
@@ -125,6 +125,7 @@ const app = Fastify({
 const rustBackend = createRustBackend();
 setExplorerBackend(rustBackend);
 setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, window-anchor pokes)
+setProcsBackend(rustBackend); // procs.mjs process scan execs + guarded PID kill
 setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
 setModelsBackend(rustBackend); // model-store.mjs dispatches catalogue and routing calls on the shared child
 const modelHandlers = createModelsHandlers(rustBackend, join(reg.STATE_DIR, 'models.json'), app.log);

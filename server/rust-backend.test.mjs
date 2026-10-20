@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { access, mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
@@ -831,5 +832,26 @@ test('Rust one-shot bridge execs a binary and maps stdout, failure, and timeout'
   } finally {
     await backend.stop();
     await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('Rust procs kill bridge terminates a scratch child and rejects bad pids', async () => {
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    assert.deepEqual(await backend.procsKill('x'), { ok: false, error: 'bad pid' });
+    assert.deepEqual(await backend.procsKill(0), { ok: false, error: 'kill ESRCH' });
+    const missing = await backend.procsKill(2_000_000_000);
+    assert.equal(missing.ok, false);
+    assert.match(missing.error, /^kill E/);
+    // a pid no live process owns: only the test's own scratch child, killed here
+    const slow = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' });
+    const exited = new Promise((resolve) => slow.once('exit', resolve));
+    try {
+      assert.deepEqual(await backend.procsKill(slow.pid), { ok: true });
+      await exited; // the scratch child is gone: kill really terminated it
+    } finally { slow.kill(); }
+  } finally {
+    await backend.stop();
   }
 });
