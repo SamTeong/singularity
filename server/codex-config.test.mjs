@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -8,7 +8,16 @@ import { join } from 'node:path';
 // SINGULARITY_HOME. Point it at a scratch temp dir before a dynamic import
 // (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
+process.env.CODEX_HOME = join(process.env.SINGULARITY_HOME, 'codex-home');
 const { readConfig, searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, writeConfig } = await import('./codex-config.mjs');
+
+const testBackend = {
+  async codexConfigWrite(path, content) {
+    if (typeof content !== 'string') return { ok: false, error: 'content must be a string' };
+    writeFileSync(path, content);
+    return { ok: true, mtime: statSync(path).mtimeMs };
+  },
+};
 
 function makeRoot(toml) {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-cdx-'));
@@ -70,14 +79,28 @@ test('findConfigRoots finds nested dirs holding .codex/config.toml, skips others
   assert.deepEqual(roots, [join(root, 'nested', 'a'), join(root, 'nested', 'b', 'deep')]);
 });
 
-test('writeConfig valid TOML writes + backup', async () => {
-  const cwd = makeRoot('model = "x"\n');
+test('writeConfig valid TOML writes + exact prior-content backup', async () => {
+  const prior = 'model = "x"\n';
+  const cwd = makeRoot(prior);
   setConfigRoots([cwd]); // writeConfig requires isKnownConfigRoot(cwd)
-  const r = await writeConfig(cwd, 'project', 'model = "y"\n');
+  const r = await writeConfig(cwd, 'project', 'model = "y"\n', null, false, testBackend);
   assert.equal(r.ok, true);
   assert.equal(r.path, join(cwd, '.codex', 'config.toml'));
   assert.equal(readFileSync(join(cwd, '.codex', 'config.toml'), 'utf8'), 'model = "y"\n');
   assert.equal(existsSync(r.backup), true);
+  assert.equal(readFileSync(r.backup, 'utf8'), prior);
+});
+
+test('writeConfig first write creates only its parent and returns stable result keys', async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'sing-cdx-first-write-'));
+  setConfigRoots([cwd]);
+  const target = join(cwd, '.codex', 'config.toml');
+  const r = await writeConfig(cwd, 'project', '', null, false, testBackend);
+  assert.deepEqual(Object.keys(r).sort(), ['backup', 'mtime', 'ok', 'path']);
+  assert.equal(r.ok, true);
+  assert.equal(r.backup, null);
+  assert.equal(r.path, target);
+  assert.equal(readFileSync(target, 'utf8'), '');
 });
 
 test('writeConfig invalid TOML returns ok:false and does not write', async () => {
@@ -148,8 +171,47 @@ test('writeConfig rejects a stale mtime with "changed on disk"; force overrides'
   assert.equal(rejected.error, 'changed on disk');
   assert.equal(readFileSync(p, 'utf8'), 'model = "ext"\n'); // untouched
   // force overrides the drift.
-  const forced = await writeConfig(cwd, 'project', 'model = "forced"\n', stale, true);
+  const forced = await writeConfig(cwd, 'project', 'model = "forced"\n', stale, true, testBackend);
   assert.equal(forced.ok, true);
   assert.equal(typeof forced.mtime, 'number');
   assert.equal(readFileSync(p, 'utf8'), 'model = "forced"\n');
+});
+
+test('writeConfig derives user path from CODEX_HOME while requiring home cwd', async () => {
+  setConfigRoots(['~']);
+  const result = await writeConfig(homedir(), 'user', '', null, false, testBackend);
+  assert.equal(result.ok, true);
+  assert.equal(result.path, join(process.env.CODEX_HOME, 'config.toml'));
+  assert.equal(readFileSync(result.path, 'utf8'), '');
+});
+
+test('writeConfig parses TOML before backup and backend, preserving error precedence', async () => {
+  const cwd = makeRoot('model = "prior"\n');
+  const target = join(cwd, '.codex', 'config.toml');
+  const before = readFileSync(target, 'utf8');
+  let backendCalls = 0;
+  const backend = { async codexConfigWrite() { backendCalls++; return { ok: true, mtime: 0 }; } };
+  const result = await writeConfig(cwd, 'project', 'model = "unterminated\n', null, false, backend);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /TOML/);
+  assert.equal(backendCalls, 0);
+  assert.equal(readFileSync(target, 'utf8'), before);
+});
+
+test('writeConfig passes native conflicts through and logs generic backend failures', async () => {
+  const cwd = makeRoot(null);
+  const errors = [];
+  const logger = { error: (...args) => errors.push(args) };
+  const conflict = await writeConfig(cwd, 'project', '', null, false, {
+    async codexConfigWrite() { return { ok: false, error: 'changed on disk' }; },
+  }, logger);
+  assert.deepEqual(conflict, { ok: false, error: 'changed on disk' });
+  assert.equal(errors.length, 0);
+
+  const failed = await writeConfig(cwd, 'project', '', null, false, {
+    async codexConfigWrite() { return { ok: false, error: 'native failure detail' }; },
+  }, logger);
+  assert.deepEqual(failed, { ok: false, error: 'codex config write failed' });
+  assert.equal(errors.length, 1);
+  assert.equal(errors[0][0].err, 'native failure detail');
 });

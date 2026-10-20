@@ -250,6 +250,16 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       });
     },
 
+    codexConfigWrite(path, content, mtime, force) {
+      return request({
+        op: 'codex_config_write',
+        path,
+        content,
+        mtime: mtime == null ? null : Number(mtime),
+        force: !!force,
+      });
+    },
+
     hooksWrite(path, content, mtime, force) {
       return request({
         op: 'hooks_write',

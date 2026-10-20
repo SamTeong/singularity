@@ -537,6 +537,48 @@ test('Rust stdio bridge writes Claude Config with UTF-8, mtime coercion, force, 
   }
 });
 
+test('Rust stdio bridge writes Codex Config with UTF-8, coercions, stale guard, and no parent creation', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-codex-config-write-'));
+  const path = join(base, '.codex', 'config.toml');
+  await mkdir(join(base, '.codex'), { recursive: true });
+  await writeFile(path, 'prior');
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    const saved = await backend.codexConfigWrite(path, 'model = "更新 ✓"', null, false);
+    assert.deepEqual(Object.keys(saved).sort(), ['mtime', 'ok']);
+    assert.equal(saved.ok, true);
+    assert.equal(await readFile(path, 'utf8'), 'model = "更新 ✓"');
+    assert.ok(Math.abs(saved.mtime - (await (await import('node:fs/promises')).stat(path)).mtimeMs) < 2);
+
+    const empty = await backend.codexConfigWrite(path, '', String(saved.mtime), false);
+    assert.equal(empty.ok, true);
+    assert.equal(await readFile(path, 'utf8'), '');
+
+    await writeFile(path, 'external');
+    const future = new Date(Date.now() + 5000);
+    await utimes(path, future, future);
+    const stale = await backend.codexConfigWrite(path, 'rejected', saved.mtime, false);
+    assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
+    assert.equal(await readFile(path, 'utf8'), 'external');
+
+    const forced = await backend.codexConfigWrite(path, 'forced', saved.mtime, 'false');
+    assert.equal(forced.ok, true);
+    assert.equal(await readFile(path, 'utf8'), 'forced');
+
+    const unguarded = await backend.codexConfigWrite(path, 'unguarded', 'not-a-number', false);
+    assert.equal(unguarded.ok, true);
+
+    const missing = join(base, 'absent', '.codex', 'config.toml');
+    const failed = await backend.codexConfigWrite(missing, '', null, false);
+    assert.equal(failed.ok, false);
+    assert.equal(await access(join(base, 'absent')).then(() => true, () => false), false);
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
 test('Rust stdio bridge writes authorized Hooks payloads with mtime coercion and force semantics', async () => {
   const base = await mkdtemp(join(tmpdir(), 'singularity-rust-hooks-write-'));
   const path = join(base, '.claude', 'hooks', 'pre-commit');

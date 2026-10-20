@@ -5,6 +5,7 @@ use std::fs::{self, FileType};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+pub mod codex_config_write;
 pub mod config_write;
 pub mod hooks_write;
 pub mod memory;
