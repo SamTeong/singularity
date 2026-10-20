@@ -230,6 +230,16 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       });
     },
 
+    memoryWrite(path, content, mtime, force) {
+      return request({
+        op: 'memory_write',
+        path,
+        content,
+        mtime: mtime == null ? null : Number(mtime),
+        force: !!force,
+      });
+    },
+
     readFile(path) {
       return request({ op: 'read', path });
     },

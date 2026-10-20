@@ -16,7 +16,7 @@ import { scanClaude, killClaudePid } from './procs.mjs';
 import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
 import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, getConfigRoots as getCodexConfigRoots, setConfigRoots as setCodexConfigRoots } from './codex-config.mjs';
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
-import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
+import { searchMemory, listFiles, readMemoryFile, createMemoryWriteHandler, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, readRuleFile, createRuleWriteHandler, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } from './rules.mjs';
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
 import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
@@ -743,13 +743,7 @@ app.get('/memory/file', async (req, reply) => {
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
-app.put('/memory/file', async (req, reply) => {
-  const { path, content, root, mtime, force } = req.body || {};
-  if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = await writeMemoryFile(path, content, root, mtime, force);
-  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
-  return r;
-});
+app.put('/memory/file', createMemoryWriteHandler(rustBackend, app.log));
 
 // Rules: persisted list of rule dirs (default ~/.claude/rules), each a
 // recursive .md tree — browse + search + guarded read/write.

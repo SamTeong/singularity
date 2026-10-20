@@ -494,3 +494,77 @@ test('gateway turns Rust process failure into a logged 500 response', async () =
   assert.deepEqual(response.json(), { error: 'wiki graph backend unavailable' });
   await app.close();
 });
+
+test('Rust Memory write bridge preserves mtime, coercion, force, and missing-parent behavior', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-memory-'));
+  const path = join(base, 'project', 'memory', 'fact.md');
+  await mkdir(join(base, 'project', 'memory'), { recursive: true });
+  await writeFile(path, 'prior');
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    const initial = await backend.memoryWrite(path, '更新 ✓', null, false);
+    assert.deepEqual(Object.keys(initial).sort(), ['mtime', 'ok']);
+    assert.equal(initial.ok, true);
+    assert.equal(await readFile(path, 'utf8'), '更新 ✓');
+    assert.ok(Math.abs(initial.mtime - (await (await import('node:fs/promises')).stat(path)).mtimeMs) < 2);
+
+    const empty = await backend.memoryWrite(path, '', initial.mtime + 1, false);
+    assert.equal(empty.ok, true);
+    assert.equal(await readFile(path, 'utf8'), '');
+
+    await writeFile(path, 'external');
+    const future = new Date(Date.now() + 5000);
+    await utimes(path, future, future);
+    const stale = await backend.memoryWrite(path, 'rejected', initial.mtime, false);
+    assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
+    assert.equal(await readFile(path, 'utf8'), 'external');
+    const staleNumericString = await backend.memoryWrite(path, 'rejected', String(initial.mtime), false);
+    assert.deepEqual(staleNumericString, { ok: false, error: 'changed on disk' });
+    const forced = await backend.memoryWrite(path, 'forced', initial.mtime, 'false');
+    assert.equal(forced.ok, true);
+    assert.equal(await readFile(path, 'utf8'), 'forced');
+    const unguarded = await backend.memoryWrite(path, 'unguarded', 'not-a-number', false);
+    assert.equal(unguarded.ok, true);
+
+    const missingParent = await backend.memoryWrite(join(base, 'absent', 'child.md'), 'x', null, false);
+    assert.equal(missingParent.ok, false);
+    assert.equal(await access(join(base, 'absent')).then(() => true, () => false), false);
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('Rust Memory bridge saves pre-epoch files and rejects stale pre-epoch mtimes', async (t) => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-memory-pre-epoch-'));
+  const path = join(base, 'project', 'memory', 'fact.md');
+  await mkdir(join(base, 'project', 'memory'), { recursive: true });
+  await writeFile(path, 'prior');
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    const preEpoch = new Date(Date.UTC(1960, 0, 1));
+    try { await utimes(path, preEpoch, preEpoch); }
+    catch (error) {
+      t.skip(`filesystem cannot set a pre-epoch mtime: ${error.message}`);
+      return;
+    }
+    const { mtimeMs } = await (await import('node:fs/promises')).stat(path);
+    if (mtimeMs >= 0) {
+      t.skip(`filesystem did not retain the pre-epoch mtime; observed ${mtimeMs}`);
+      return;
+    }
+
+    const stale = await backend.memoryWrite(path, 'rejected', mtimeMs + 10, false);
+    assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
+    assert.equal(await readFile(path, 'utf8'), 'prior');
+
+    const saved = await backend.memoryWrite(path, 'updated', mtimeMs, false);
+    assert.equal(saved.ok, true);
+    assert.equal(await readFile(path, 'utf8'), 'updated');
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});

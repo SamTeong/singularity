@@ -2,7 +2,6 @@
 // (<root>/<encoded-cwd>/memory/*.md, default root ~/.claude/projects). Writes are
 // confined to those dirs — a path outside any project's memory/ is rejected.
 import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
 import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
@@ -112,7 +111,7 @@ export function readMemoryFile(p, rootRaw) {
   catch (e) { return { ok: false, error: e.message }; }
 }
 
-export async function writeMemoryFile(p, content, rootRaw, mtime, force) {
+export async function writeMemoryFile(p, content, rootRaw, mtime, force, backend, logger) {
   if (!isMemoryPath(p, rootRaw)) return { ok: false, error: 'path outside memory dirs' };
   try {
     if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
@@ -124,8 +123,21 @@ export async function writeMemoryFile(p, content, rootRaw, mtime, force) {
     if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    await writeFile(p, content);
-    return { ok: true, mtime: statSync(p).mtimeMs };
+    try { return await backend.memoryWrite(p, content, mtime, force); }
+    catch (error) {
+      logger?.error({ err: error.message }, 'Rust Memory write backend failed');
+      return { ok: false, error: 'memory write backend unavailable' };
+    }
   }
   catch (e) { return { ok: false, error: e.message }; }
+}
+
+export function createMemoryWriteHandler(backend, logger) {
+  return async (req, reply) => {
+    const { path, content, root, mtime, force } = req.body || {};
+    if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
+    const result = await writeMemoryFile(path, content, root, mtime, force, backend, logger);
+    if (!result.ok) reply.code(result.error === 'changed on disk' ? 409 : 400);
+    return result;
+  };
 }
