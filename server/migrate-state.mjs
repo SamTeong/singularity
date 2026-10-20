@@ -12,8 +12,8 @@ import { backupFileSync } from './backups.mjs';
 // The durable rewrites below (tasks/crons/background/agents.json) get the same
 // backup + atomic rename every runtime writer uses — a kill or full disk
 // mid-write must never truncate the board. Inlined rather than importing
-// agents.mjs:writeAtomic: that module loads node-pty and resolves CLAUDE_BIN at
-// import time, before index.mjs's requireEnv runs. backupFileSync is cycle-free.
+// agents.mjs:writeAtomic: importing the registry resolves configured binaries
+// at import time, before index.mjs's requireEnv runs. backupFileSync is cycle-free.
 function writeJsonAtomic(file, raw) {
   backupFileSync(file);
   const tmp = `${file}.${process.pid}.tmp`;

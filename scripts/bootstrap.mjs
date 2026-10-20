@@ -16,7 +16,7 @@ if (existsSync(envPath)) {
 }
 
 // --- CLAUDE_BIN detection (best-effort, cross-platform) ---
-// node-pty on Windows does no PATH resolution, so CLAUDE_BIN must be absolute.
+// The daemon uses explicit binary paths with no PATH fallback, so CLAUDE_BIN must be absolute.
 // We try `where`/`which` first, then common install locations. First hit wins.
 function toFwd(p) { return p.replace(/\\/g, '/') }
 function detectClaudeBin() {
@@ -87,8 +87,8 @@ DAEMON_PORT=4317
 # OPTIONAL — Vite dev-server port (default: 5317).
 VITE_PORT=5317
 
-# REQUIRED — absolute path to the claude binary. No PATH fallback (Windows node-pty
-# does no PATH resolution). If detection failed, the placeholder below must be fixed.
+# REQUIRED — absolute path to the claude binary. The daemon does not use PATH fallback.
+# If detection failed, the placeholder below must be fixed.
 CLAUDE_BIN=${claudeLine}
 
 # OPTIONAL — absolute path to the ollama binary. Absent → ollama models unavailable.

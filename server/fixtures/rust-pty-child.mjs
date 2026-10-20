@@ -11,7 +11,7 @@ if (process.argv.includes('--no-read')) {
   process.stdout.write('READY\n');
   setInterval(() => {}, 1000);
 } else {
-  process.stdout.write(`READY:${process.cwd()}:${process.env.PTY_TEST_ENV ?? ''}\n`);
+  process.stdout.write(`READY:${process.cwd()}:${process.env.PTY_TEST_ENV ?? ''}:${process.pid}\n`);
   process.stdin.setEncoding('utf8');
   process.stdin.on('data', (data) => process.stdout.write(`GOT:${data}`));
 }

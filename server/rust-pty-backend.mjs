@@ -144,7 +144,8 @@ export function createRustPtyBackend({ executable, args = ['--pty'], cwd, env = 
     counters.set(id, generation);
     const handle = makeHandle(id, generation, previousGeneration);
     try {
-      await send({ op: 'spawn', id, generation, bin, args: spawnArgs, cwd: spawnCwd, env: spawnEnv, cols, rows });
+      const accepted = await send({ op: 'spawn', id, generation, bin, args: spawnArgs, cwd: spawnCwd, env: spawnEnv, cols, rows });
+      handle.pid = accepted.pid;
       return handle;
     } catch (error) {
       generations.delete(generationKey(id, generation));

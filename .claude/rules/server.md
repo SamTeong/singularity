@@ -16,7 +16,7 @@ paths:
 `state/models.json` (Settings ▸ Models) drives picker suggestions, client spawn classification (`web/src/lib/models.js`), server spawn routing (`models.mjs` via `model-store.mjs`), and the History summariser (any enabled entry, any group). `model-store.mjs` seeds it from the shipped arrays; Restore defaults re-merges missing shipped ids. History has two tiers: the configured summariser, else deterministic bullets. There is no implicit fallback LLM. Summarisers append declawed's Phase 2 (rewrite) rules to the prompt when `~/.agents/skills/declawed/SKILL.md` exists.
 
 ## Binaries, cost, config
-- `claude`/`ollama`: always absolute paths from `CLAUDE_BIN`/`OLLAMA_BIN`. There is no PATH fallback, because Windows node-pty does no PATH resolution.
+- `claude`/`ollama`: always absolute paths from `CLAUDE_BIN`/`OLLAMA_BIN`. There is no PATH fallback; the daemon uses configured binaries only.
 - Per-agent cost = turns + total tokens, plus `$` from the global statusline (`harness-usage-report` skill). `stats.mjs:readCostFile` reads `~/.agents/.harness-usage-report/state/cost-state/<id>.json` (`cost.total_cost_usd`) and honors `USAGE_REPORT_STATE`. One statusline, one store: no per-task override, no parallel capture script. `est_cost_usd` is only a pricing-table fallback.
 - The config editor writes `settings.json` + `settings.local.json` with a `.bak` backup and JSON validation. Paths are derived server-side; the client never supplies a path. User-level `~/.claude/settings.json` = pick root `~`.
 

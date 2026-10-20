@@ -1,6 +1,5 @@
 // Agent registry: spawn/kill, in-memory ptys, agents.json persistence, recent-repos.
 // Emits 'output'{id,data}, 'status'{id,status}, 'list' — pty-ws fans these out to sockets.
-import { spawn } from 'node-pty';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants } from 'node:fs';
@@ -17,8 +16,7 @@ const RECENT_MAX = 10;
 
 // --- app-data dir ---
 // APP_DIR is defined in app-dir.mjs (single source — also imported by the
-// statusline script + usage.mjs, which can't pull in agents.mjs without loading
-// node-pty). The daemon ensures it exists on load.
+// statusline script + usage.mjs, which can't pull in agents.mjs. The daemon ensures it exists on load.
 const STATE_FILE = join(STATE_DIR, 'agents.json');
 // Skill-scopes surface root (for --add-dir <scope> into spawned agents). No
 // default — SING_SCOPE_ROOT must be set in .env. Null when unset; buildSpawn
@@ -28,8 +26,7 @@ mkdirSync(APP_DIR, { recursive: true });
 mkdirSync(STATE_DIR, { recursive: true });
 
 // --- claude/ollama binaries: absolute paths from .env (no PATH fallback) ---
-// Windows node-pty does NO PATH resolution, so the daemon requires explicit
-// absolute paths. resolveBin returns the .env path if it exists, else null;
+// The daemon requires explicit absolute paths. resolveBin returns the .env path if it exists, else null;
 // index.mjs requireEnv fails the daemon fast on null.
 function resolveBin(envOverride) {
   if (envOverride && existsSync(envOverride)) return envOverride;
@@ -50,6 +47,8 @@ let recentRepos = [];
 // agents.json. While draining we keep them so init() reloads them as 'detached'
 // (resumable) instead of dropping them from the list on restart.
 let draining = false;
+let ptyBackend = null;
+export function setPtyBackend(backend) { ptyBackend = backend; }
 // persist() writes the current fleet as detached (running→detached mapping), so
 // this snapshots every live session to disk at drain time — the authoritative
 // last write. onExit then no-ops (guard below), leaving the file intact.
@@ -223,6 +222,7 @@ function rememberRepo(cwd) {
 }
 
 function wire(a) {
+  const proc = a.proc;
   // Idle heuristic: Claude Code's TUI spinner emits output continuously while
   // working; a turn waiting for user input goes quiet. No pty output for
   // IDLE_MS while 'running' → mark 'idle'; the next byte flips it back.
@@ -230,13 +230,15 @@ function wire(a) {
     clearTimeout(a.idleTimer);
     a.idleTimer = setTimeout(() => { if (a.status === 'running') setStatus(a, 'idle'); }, IDLE_MS);
   };
-  a.proc.onData((data) => {
+  proc.onData((data) => {
+    if (agents.get(a.id) !== a || a.proc !== proc) return;
     pushBuf(a, data);
     if (a.status === 'starting' || a.status === 'idle') setStatus(a, 'running');
     bus.emit('output', { id: a.id, data });
     armIdle();
   });
-  a.proc.onExit(({ exitCode }) => {
+  proc.onExit((exitCode) => {
+    if (agents.get(a.id) !== a || a.proc !== proc) return;
     clearTimeout(a.idleTimer);
     a.proc = null;
     // Daemon shutdown killed this pty: keep the entry as-is (agents.json already
@@ -283,6 +285,7 @@ function wire(a) {
       emitList();
     }).catch((error) => logger?.warn({ err: error.message, id: a.id }, 'agent exit cleanup failed'));
   });
+  proc.activate();
 }
 
 // --- codex skill-scoping ---
@@ -398,21 +401,6 @@ export function spawnEnv(mock) {
   return env;
 }
 
-// node-pty's raw spawn failure ("posix_spawnp failed." on macOS/Linux) names
-// neither the binary nor the cause. Wrap so the surfaced error is actionable —
-// the usual culprit is CLAUDE_BIN/OLLAMA_BIN pointing at a non-executable file
-// (missing +x, wrong arch, or a path that isn't the real binary).
-function spawnPty(bin, args, opts) {
-  try {
-    return spawn(bin, args, opts);
-  } catch (e) {
-    let hint = '';
-    try { accessSync(bin, constants.X_OK); }
-    catch { hint = ' — not executable; `chmod +x` it or point CLAUDE_BIN/OLLAMA_BIN at the real binary'; }
-    throw new Error(`failed to launch ${bin}: ${e.message}${hint}`, { cause: e });
-  }
-}
-
 // `~` is a shell-ism node never expands — a client that sends it raw (or whose
 // home dir hasn't loaded yet) would spawn into a literal '~' directory. Same
 // 2-liner config.mjs/hooks.mjs/rules.mjs/memory.mjs use on their own inputs.
@@ -446,7 +434,8 @@ export async function create({ cwd, title, model, scopes, sessionId, prompt, per
   const spawnedAt = createdAt || Date.now();
   const { bin, args } = await buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId }, prompt, modelRoute);
   ensureTrusted(cwd);
-  const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: spawnEnv(mock), useConptyDll: true });
+  if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
+  const proc = await ptyBackend.spawn({ id, bin, args, cwd, cols: 80, rows: 24, env: spawnEnv(mock) });
   const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, runId, modelRoute, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
@@ -490,9 +479,8 @@ export async function reattach(id) {
   const modelRoute = await getModelRoute(a.model, a.tool);
   const { bin, args } = await buildSpawn(a, undefined, modelRoute);
   ensureTrusted(a.cwd);
-  const proc = spawnPty(bin, args, {
-    cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock), useConptyDll: true,
-  });
+  if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
+  const proc = await ptyBackend.spawn({ id, bin, args, cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock) });
   a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting'; a.modelRoute = modelRoute;
   wire(a);
   persist();
@@ -502,8 +490,7 @@ export async function reattach(id) {
 
 // Resolve wt.exe: prefer the Store App-Execution-Alias path (unambiguous),
 // else fall back to PATH — winget/choco/scoop/portable installs put wt.exe
-// on PATH but not at the alias. node-pty does no PATH resolution, so we
-// resolve to an absolute path ourselves rather than handing it a bare name.
+// on PATH but not at the alias. Resolve to an absolute path before launching it.
 export function resolveWt(env = process.env) {
   if (env.LOCALAPPDATA) {
     const alias = join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'wt.exe');
@@ -565,14 +552,24 @@ export async function fork(srcId, title) {
   return await create({ cwd: src.cwd, title, model: src.model, scopes: src.scopes, sessionId: newId, tool: src.tool });
 }
 
-export function input(id, data) { agents.get(id)?.proc?.write(data); }
-export function resize(id, cols, rows) { try { agents.get(id)?.proc?.resize(cols, rows); } catch {} }
+export function input(id, data) {
+  const proc = agents.get(id)?.proc;
+  if (proc) void proc.write(data).catch((error) => logger?.warn({ err: error.message, id }, 'agent input failed'));
+}
+export function resize(id, cols, rows) {
+  try { const result = agents.get(id)?.proc?.resize(cols, rows); result?.catch(() => {}); } catch {}
+}
+
+function killPty(proc, id) {
+  try { void proc.kill().catch((error) => logger?.warn({ err: error.message, id }, 'agent kill failed')); }
+  catch (error) { logger?.warn({ err: error.message, id }, 'agent kill failed'); }
+}
 
 // kill live agent; remove dead/detached agent from registry.
 export function kill(id) {
   const a = agents.get(id);
   if (!a) return;
-  if (a.proc) { a.proc.kill(); return; } // onExit -> status exited + persist
+  if (a.proc) { killPty(a.proc, id); return; } // onExit -> status exited + persist
   agents.delete(id);
   persist();
   emitList();
@@ -586,7 +583,7 @@ export function kill(id) {
 export function remove(id) {
   const a = agents.get(id);
   if (!a) return;
-  if (a.proc) { a.removeOnExit = true; a.proc.kill(); return; } // onExit -> delete
+  if (a.proc) { a.removeOnExit = true; killPty(a.proc, id); return; } // onExit -> delete
   agents.delete(id);
   persist();
   emitList();
@@ -600,7 +597,7 @@ export function respawn(id) {
   // Pin the codex thread while the agent is still live: discovery after the kill
   // can drift to a newer codex thread in the same cwd (see rememberCodexThread).
   a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool, createdAt: a.createdAt, threadId: rememberCodexThread(a) || undefined };
-  a.proc.kill();
+  killPty(a.proc, id);
   return true;
 }
 

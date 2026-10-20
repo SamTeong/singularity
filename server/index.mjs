@@ -22,6 +22,7 @@ import { getRulesRoots, setRulesRoots, readRuleFile, createRuleWriteHandler, cre
 import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
 import { getWikiRoot, setWikiRoot, resolveRoot, isWikiPath } from './wiki.mjs';
 import { createRustBackend, createWikiGraphHandler, createModelsHandlers } from './rust-backend.mjs';
+import { createRustPtyBackend } from './rust-pty-backend.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
@@ -124,6 +125,14 @@ const app = Fastify({
   },
 });
 const rustBackend = createRustBackend();
+// portable-pty's Windows ConPTY loads bare-name conpty.dll then falls back to
+// kernel32; it cannot pin node-pty's former package-relative DLL. This is an
+// accepted compatibility difference (portable-pty 0.9.0 win/psuedocon.rs).
+const rustPtyBackend = createRustPtyBackend({
+  executable: join(__dirname, '..', 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend'),
+  cwd: join(__dirname, '..'),
+});
+reg.setPtyBackend(rustPtyBackend);
 setUsageAuthBackend(rustBackend);
 setExplorerBackend(rustBackend);
 setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, window-anchor pokes)
@@ -156,6 +165,7 @@ async function shutdown() {
   for (const a of live) reg.kill(a.id);
   const deadline = Date.now() + 5000;
   while (live.some((a) => reg.isLive(a.id)) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+  await rustPtyBackend.stop();
   try { await app.close(); } catch {}
   process.exit(0);
 }
@@ -951,19 +961,19 @@ app.post('/history/regenerate', async (req, reply) => {
 }, { prefix: '/api' });
 
 reg.init(app.log);
-initCrons(app.log);
-initBackground(app.log);
 // Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors
 // are logged (route-level failures still degrade to a live-only "today").
 ensureHistory().catch((e) => app.log.warn({ err: e.message }, 'history backfill failed'));
 
 let server;
 try {
-  await rustBackend.start();
+  await Promise.all([rustBackend.start(), rustPtyBackend.start()]);
 } catch (error) {
   app.log.error({ err: error.message }, 'Rust backend failed to start; build it with cargo build --release --manifest-path rust/backend/Cargo.toml');
   process.exit(1);
 }
+initCrons(app.log);
+initBackground(app.log);
 await initWindowAnchor({ log: app.log, storage: rustBackend });
 initUsageAutoRefresh(reg.bus);
 initTasks(app.log);

@@ -1,6 +1,6 @@
 // Single source of truth for the app data dir + subdirs. Lightweight — no side
 // effects, no heavy deps — so the statusline script (~300ms cadence, child
-// process) can import it without loading node-pty (which agents.mjs pulls in).
+// process) can import it without loading the agent registry and its dependencies.
 // APP_DIR has NO default — SINGULARITY_HOME must be set (in .env, loaded via
 // --env-file-if-exists=.env; tests point it at a scratch temp dir before
 // import). Layout: state/ = durable state + cache/ = disposable live under

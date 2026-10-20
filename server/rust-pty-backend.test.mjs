@@ -76,7 +76,7 @@ test('spawn failures reject and later generations ignore stale output', async (t
   assert.deepEqual(secondSeen.events, []);
 });
 
-test('real PTY preserves command cwd/env and round-trips input, resize, kill, and exit', { skip: !existsSync(binary) && 'Build rust/backend first' }, async (t) => {
+test('real PTY preserves command cwd/env and reports its PID while round-tripping input, resize, kill, and exit', { skip: !existsSync(binary) && 'Build rust/backend first' }, async (t) => {
   const backend = createRustPtyBackend({ executable: binary, cwd: root, env: process.env, logger: { error() {} } });
   t.after(() => backend.stop());
   t.after(() => backend.stop());
@@ -87,7 +87,8 @@ test('real PTY preserves command cwd/env and round-trips input, resize, kill, an
   const seen = handlers(handle);
   seen.activate();
   await waitForOutput(seen.events, /READY:/);
-  assert.ok(seen.events.some((event) => event.text?.includes(`${root}:bridge-env`)));
+  assert.ok(handle.pid > 0, 'spawn acceptance includes the direct child PID');
+  assert.ok(seen.events.some((event) => event.text?.includes(`${root}:bridge-env:${handle.pid}`)), 'reported PID matches the child process');
   assert.ok(!seen.events.some((event) => event.text?.includes('\u001b[6n')), 'ConPTY startup query must be handled internally');
   await handle.write('PING\r');
   await waitForOutput(seen.events, /GOT:PING/);

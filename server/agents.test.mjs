@@ -1,15 +1,12 @@
 // Unit tests for the spawn/encoding logic: encodeCwd + buildSpawn, plus fork()/
-// create()/respawnAll()/beginDrain(), which spawn a real pty (node-pty). A
+// create()/respawnAll()/beginDrain(), which spawn through the real Rust PTY service. A
 // cross-platform "keepalive" bin stands in for the claude/ollama binary: an
 // interactive process that ignores its argv and stays alive until killed —
 // cmd.exe on Windows (an interactive REPL that survives bad commands), a
 // sleep-forever shell script on POSIX. Both CLAUDE_BIN and OLLAMA_BIN point at
 // it, so every spawn path yields a genuine, cleanly-killable live pty on both
 // platforms; spawn-path tests start one and kill+wait before finishing.
-// (An invalid bin can't be used as a "spawn throws synchronously" trick here:
-// node-pty on POSIX forkpty()s and the child execvp-fails ASYNCHRONOUSLY — it
-// never throws synchronously, unlike Windows ConPTY.) SINGULARITY_HOME is
-// pointed at a scratch temp dir first (create()/fork() persist() to
+// SINGULARITY_HOME is pointed at a scratch temp dir first (create()/fork() persist() to
 // APP_DIR/state/agents.json — else it'd clobber the user's real agents.json),
 // mirroring crons.test.mjs's convention: env tweaks before a dynamic import of
 // the module graph.
@@ -21,6 +18,10 @@ import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-agents-test-'));
+const isolatedHome = join(scratch, 'home');
+mkdirSync(isolatedHome, { recursive: true });
+process.env.HOME = isolatedHome;
+process.env.USERPROFILE = isolatedHome;
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 // A long-lived process that ignores its argv and blocks until killed, so both
 // the claude-model path (CLAUDE_BIN) and the ollama-wrap path (OLLAMA_BIN)
@@ -67,19 +68,19 @@ const modelStore = await import('./model-store.mjs');
 const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
 await modelBackend.start();
 modelStore.setModelsBackend(modelBackend);
+const ptyBinary = join(process.cwd(), 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
+const ptyBackend = (await import('./rust-pty-backend.mjs')).createRustPtyBackend({ executable: ptyBinary, cwd: process.cwd() });
+await ptyBackend.start();
+const registry = await import('./agents.mjs');
+registry.setPtyBackend(ptyBackend);
 after(async () => {
+  await ptyBackend.stop();
   await modelBackend.stop();
   rmSync(scopeParent, { recursive: true, force: true });
   rmSync(scratch, { recursive: true, force: true });
-  // node-pty's spawn() (even the failed attempt inside the fork test below)
-  // leaves a ConPTY handle that never releases on its own — force this file's
-  // isolated test-runner process (node:test's default --test-isolation=process
-  // spawns one node process per file) to exit rather than hang. Deferred a
-  // tick so node:test's own result reporting flushes first.
-  setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor } = await import('./agents.mjs');
+const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor, getBuf, getWritten, getStatus, input, resize } = registry;
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -113,6 +114,55 @@ function waitForRemoval(id) {
     bus.on('list', onList);
   });
 }
+
+test('registry activates early output after registration and contains async adapter errors', async () => {
+  const id = '10000000-aaaa-bbbb-cccc-100000000002';
+  let onData;
+  let onExit;
+  let spawnArgs;
+  let unhandled = 0;
+  const onUnhandled = () => { unhandled++; };
+  const handle = {
+    pid: 4242,
+    onData(callback) { onData = callback; return handle; },
+    onExit(callback) { onExit = callback; return handle; },
+    activate() { assert.ok(snapshot().some((agent) => agent.id === id), 'entry registered before callbacks activate'); onData('EARLY'); },
+    write: async () => { throw new Error('write rejected'); },
+    resize: async () => { throw new Error('resize rejected'); },
+    kill: async () => { throw new Error('kill rejected'); },
+  };
+  registry.setPtyBackend({ spawn: async (options) => { spawnArgs = options; return handle; } });
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    const outputs = [];
+    const onOutput = (event) => { if (event.id === id) outputs.push(event); };
+    bus.on('output', onOutput);
+    const agent = await create({ cwd: scratch, title: 'adapter-test', model: 'claude', sessionId: id, mock: true });
+    bus.off('output', onOutput);
+    assert.equal(agent.pid, 4242);
+    assert.deepEqual({ bin: spawnArgs.bin, args: spawnArgs.args, cwd: spawnArgs.cwd, cols: spawnArgs.cols, rows: spawnArgs.rows }, {
+      bin: keepalive, args: (await buildSpawn({ id, title: 'adapter-test', cwd: scratch, model: 'claude' })).args,
+      cwd: scratch, cols: 80, rows: 24,
+    });
+    assert.deepEqual(spawnArgs.env, spawnEnv(true));
+    assert.equal(getBuf(id), 'EARLY');
+    assert.equal(getWritten(id), 'EARLY'.length);
+    assert.equal(getStatus(id), 'running');
+    assert.deepEqual(outputs, [{ id, data: 'EARLY' }]);
+
+    input(id, 'later');
+    resize(id, 100, 40);
+    kill(id);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(unhandled, 0);
+    onExit(0);
+    await waitForRemoval(id);
+  } finally {
+    process.off('unhandledRejection', onUnhandled);
+    registry.setPtyBackend(ptyBackend);
+    if (snapshot().some((agent) => agent.id === id)) onExit?.(0);
+  }
+});
 
 async function customModelGroup(group) {
   const doc = await modelStore.getModels();

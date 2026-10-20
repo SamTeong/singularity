@@ -7,6 +7,7 @@
 // same convention as crons.test.mjs. Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -15,7 +16,30 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-pty-ws-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
-const { stripQueries, stripColorResponses } = await import('./pty-ws.mjs');
+const { stripQueries, stripColorResponses, attachPtyWs } = await import('./pty-ws.mjs');
+const { bus } = await import('./agents.mjs');
+
+test('PTY registry events keep their WebSocket output and status payloads', () => {
+  const wss = new EventEmitter();
+  wss.clients = new Set();
+  const ws = new EventEmitter();
+  ws.OPEN = 1;
+  ws.readyState = 1;
+  ws.sent = [];
+  ws.send = (payload) => ws.sent.push(JSON.parse(payload));
+  attachPtyWs(wss, null);
+  wss.emit('connection', ws, { headers: { origin: 'http://localhost' }, url: '/ws' });
+  ws.attached.add('payload-session');
+
+  bus.emit('output', { id: 'payload-session', data: 'rendered text' });
+  bus.emit('status', { id: 'payload-session', status: 'running' });
+
+  assert.deepEqual(ws.sent.slice(-2), [
+    { t: 'output', id: 'payload-session', data: 'rendered text' },
+    { t: 'status', id: 'payload-session', status: 'running' },
+  ]);
+  ws.emit('close');
+});
 
 test('stripQueries: removes each covered query sequence', () => {
   assert.equal(stripQueries('\x1b[c'), ''); // DA1

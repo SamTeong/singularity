@@ -7,7 +7,6 @@
     "node": ">=22.13"
   },
   "scripts": {
-    "postinstall": "node scripts/fix-pty-helper.mjs",
     "bootstrap": "node --env-file-if-exists=.env scripts/bootstrap.mjs",
     "server": "node scripts/build-rust-backend.mjs && node --env-file-if-exists=.env server/index.mjs",
     "web": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js --config web/vite.config.mjs",
@@ -51,7 +50,6 @@
     "fastify": "^5.11.2",
     "framer-motion": "^12.43.0",
     "mermaid": "^11.16.1",
-    "node-pty": "^1.1.0",
     "phosphor-console-theme": "file:vendor\\phosphor-console-theme-0.1.0.tgz",
     "playwright-core": "1.62.0",
     "react": "^19.2.8",
