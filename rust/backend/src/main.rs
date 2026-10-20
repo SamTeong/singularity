@@ -62,6 +62,8 @@ struct Request {
     pid: Value,
     #[serde(default)]
     platform: Value,
+    #[serde(default)]
+    record: Value,
 }
 
 fn default_op() -> String {
@@ -257,6 +259,21 @@ fn main() -> io::Result<()> {
             ),
             Ok(request) if request.op == "models_summariser" => {
                 singularity_backend::models::summariser(request.path.as_str().unwrap_or(""))
+            }
+            Ok(request) if request.op == "window_anchor_load" => {
+                singularity_backend::window_anchor::load(request.path.as_str().unwrap_or(""))
+            }
+            Ok(request) if request.op == "window_anchor_save" => {
+                singularity_backend::window_anchor::save(
+                    request.path.as_str().unwrap_or(""),
+                    &request.state,
+                )
+            }
+            Ok(request) if request.op == "window_anchor_telemetry" => {
+                singularity_backend::window_anchor::append_telemetry(
+                    request.path.as_str().unwrap_or(""),
+                    &request.record,
+                )
             }
             Ok(request) => singularity_backend::wiki_read::dispatch(
                 &request.op,

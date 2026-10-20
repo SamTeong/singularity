@@ -21,6 +21,7 @@ pub mod rules;
 pub mod skills;
 pub mod usage_auth;
 pub mod wiki_read;
+pub mod window_anchor;
 
 const FILE_CAP: usize = 2000;
 const SKIP_DIRS: &[&str] = &[

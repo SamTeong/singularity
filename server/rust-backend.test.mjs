@@ -1013,3 +1013,26 @@ test('Rust procs kill bridge terminates a scratch child and rejects bad pids', a
     await backend.stop();
   }
 });
+
+test('Rust window-anchor bridge persists configured state and telemetry paths', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'singularity-rust-window-anchor-'));
+  const statePath = join(home, 'custom-state', 'window-anchor.json');
+  const telemetryPath = join(home, 'custom-usage', 'window-anchor-runs.jsonl');
+  const backend = createRustBackend();
+  const state = { claude: { enabled: true, lastResult: 'Ok' }, codex: { enabled: false } };
+  try {
+    await backend.start();
+    assert.equal(await backend.windowAnchorLoad(statePath), null);
+    await mkdir(join(home, 'custom-state'));
+    await backend.windowAnchorSave(statePath, state);
+    assert.equal(await readFile(statePath, 'utf8'), JSON.stringify(state, null, 2));
+    assert.deepEqual(await backend.windowAnchorLoad(statePath), state);
+    const record = { provider: 'claude', result: 'Ok', usage: { input_tokens: 3 } };
+    await backend.windowAnchorTelemetry(telemetryPath, record);
+    assert.deepEqual(JSON.parse((await readFile(telemetryPath, 'utf8')).trim()), record);
+    await assert.rejects(backend.windowAnchorSave(join(home, 'missing', 'parent.json'), state), /No such file|os error/);
+  } finally {
+    await backend.stop();
+    await rm(home, { recursive: true, force: true });
+  }
+});

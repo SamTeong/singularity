@@ -8,6 +8,7 @@
 // run. Run: pnpm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -41,7 +42,7 @@ function fakeSpawn(file, args, opts) {
 }
 
 const init = (over = {}) => initWindowAnchor({
-  log: null, spawn: fakeSpawn, usageRefresh: async () => null, now: () => fakeNow, enabled: 'claude,codex', ...over,
+  log: null, storage: modelBackend, spawn: fakeSpawn, usageRefresh: async () => null, now: () => fakeNow, enabled: 'claude,codex', ...over,
 });
 
 // Push a usage document the way usage.mjs's getUsage does.
@@ -60,8 +61,8 @@ async function until(fn, ms = 3000) {
   }
 }
 
-test('arming: a future window arms nextAnchorAt at resetsAt+5000 and dedupes', () => {
-  init();
+test('arming: a future window arms nextAnchorAt at resetsAt+5000 and dedupes', async () => {
+  await init();
   const resetsAt = fakeNow + 10 * HOUR;
   emitUsage('claude', { pctUsed: 0, resetsAt });
   assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, resetsAt + 5000);
@@ -79,8 +80,8 @@ test('arming: a future window arms nextAnchorAt at resetsAt+5000 and dedupes', (
   }
 });
 
-test('a successful read with no plan window clears a stale timer but stays enabled', () => {
-  init();
+test('a successful read with no plan window clears a stale timer but stays enabled', async () => {
+  await init();
   emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow + 10 * HOUR });
   assert.notEqual(snapshotWindowAnchor().claude.nextAnchorAt, null);
 
@@ -90,13 +91,13 @@ test('a successful read with no plan window clears a stale timer but stays enabl
   assert.equal(updated.nextAnchorAt, null);
 });
 
-test('WINDOW_ANCHOR provider list drives enablement, overriding persisted state', () => {
-  init({ enabled: ' Codex , bogus' });
+test('WINDOW_ANCHOR provider list drives enablement, overriding persisted state', async () => {
+  await init({ enabled: ' Codex , bogus' });
   assert.equal(snapshotWindowAnchor().claude.enabled, false);
   assert.equal(snapshotWindowAnchor().codex.enabled, true);
-  init({ enabled: undefined });
+  await init({ enabled: undefined });
   assert.equal(snapshotWindowAnchor().codex.enabled, false);
-  init();
+  await init();
 });
 
 test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flags', async () => {
@@ -167,6 +168,11 @@ test('dedupe: a second update for the same expired window does not re-poke', () 
 
 test('persistence: state file written and reloaded on re-init', async () => {
   const file = join(STATE_DIR, 'window-anchor.json');
+  await until(() => {
+    if (!existsSync(file)) return false;
+    try { return JSON.parse(readFileSync(file, 'utf8')).claude.lastResult === 'Skipped'; }
+    catch { return false; }
+  });
   assert.equal(existsSync(file), true);
   const saved = JSON.parse(readFileSync(file, 'utf8'));
   assert.equal(saved.codex.enabled, true);
@@ -175,15 +181,55 @@ test('persistence: state file written and reloaded on re-init', async () => {
   assert.equal(saved.claude.lastResult, 'Skipped');
 
   const freshCalls = [];
-  init({ enabled: 'codex', spawn: (file2, args) => { freshCalls.push({ file: file2, args }); return Promise.resolve({ stdout: '{}' }); } });
+  await init({ enabled: 'codex', spawn: (file2, args) => { freshCalls.push({ file: file2, args }); return Promise.resolve({ stdout: '{}' }); } });
   const s = snapshotWindowAnchor();
   assert.equal(s.claude.enabled, false);
   assert.equal(s.codex.enabled, true);
   assert.equal(s.codex.lastResult, 'Ok');
 });
 
+test('persistence queue captures ordered snapshots and emits after a failed save', async () => {
+  const localBus = new EventEmitter();
+  const saves = [];
+  const telemetry = [];
+  const events = [];
+  let releaseFirstSave;
+  let firstSaveStarted;
+  const blockedSave = new Promise((resolve) => { releaseFirstSave = resolve; });
+  const started = new Promise((resolve) => { firstSaveStarted = resolve; });
+  const storage = {
+    windowAnchorLoad: async () => ({ codex: { lastResult: 'Pending' } }),
+    windowAnchorTelemetry: async (_path, record) => { telemetry.push(record.provider); },
+    windowAnchorSave: async (_path, saved) => {
+      saves.push(saved);
+      if (saves.length === 1) {
+        firstSaveStarted();
+        await blockedSave;
+        throw new Error('synthetic storage failure');
+      }
+    },
+  };
+  localBus.on('window-anchor', (saved) => events.push(saved));
+  await init({ bus: localBus, storage });
+  const first = pokeProvider('claude', { force: true });
+  await started;
+  const second = pokeProvider('codex', { force: true });
+  await until(() => snapshotWindowAnchor().codex.lastResult === 'Ok');
+  releaseFirstSave();
+  await Promise.all([first, second]);
+
+  assert.deepEqual(telemetry, ['claude', 'codex']);
+  assert.equal(saves.length, 2);
+  assert.equal(saves[0].claude.lastResult, 'Ok');
+  assert.equal(saves[0].codex.lastResult, 'Pending');
+  assert.equal(saves[1].codex.lastResult, 'Ok');
+  assert.equal(events.length, 2);
+  assert.equal(events[0].codex.lastResult, 'Pending');
+  assert.equal(events[1].codex.lastResult, 'Ok');
+});
+
 test('timer fire: an armed timer pokes at resetsAt+5000', async () => {
-  init(); // back to the recording fakeSpawn (persistence test's re-init swapped it)
+  await init(); // back to the recording fakeSpawn (persistence test's re-init swapped it)
   const before = calls.length;
   emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow + 100 }); // arms a real ~5.1s timer
   assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, fakeNow + 100 + 5000);
@@ -194,7 +240,7 @@ test('timer fire: an armed timer pokes at resetsAt+5000', async () => {
 });
 
 test('routes: GET shape, poke route 400 on bad provider', async () => {
-  init({ enabled: '' });
+  await init({ enabled: '' });
   const Fastify = (await import('fastify')).default;
   const app = Fastify();
   // Same handler shapes as index.mjs's /api/window-anchor routes.
@@ -231,7 +277,7 @@ test('routes: GET shape, poke route 400 on bad provider', async () => {
 
 test('manual poke refreshes usage, skips an active window, and force bypasses the guard', async () => {
   let refreshes = 0;
-  init({
+  await init({
     usageRefresh: async ({ sources }) => {
       refreshes++;
       assert.deepEqual(sources, ['codex']);
@@ -257,7 +303,7 @@ test('manual poke refreshes usage, skips an active window, and force bypasses th
 // and must not poke again until the window it started has lapsed.
 test('unstarted: pokes at once, once per window span', async () => {
   fakeNow += 24 * HOUR; // past any anchor an earlier test left on codex
-  init();
+  await init();
   calls.length = 0;
   const unstarted = () => bus.emit('usage', {
     ollama: null,

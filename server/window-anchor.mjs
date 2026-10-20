@@ -10,9 +10,8 @@
 // bus pty-ws fans out). State persists to STATE_DIR/window-anchor.json and is
 // emitted on the bus as 'window-anchor' after every mutation (crons.mjs
 // pattern). Never pokes twice for the same window.
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { bus, writeAtomic, STATE_DIR } from './agents.mjs';
+import { join } from 'node:path';
+import { bus, STATE_DIR } from './agents.mjs';
 import { USAGE_SKILL_STATE } from './app-dir.mjs';
 import { groupFor } from './model-store.mjs';
 import { runOneShotPrompt, oneShotSpawn } from './one-shot.mjs';
@@ -22,7 +21,6 @@ const WINDOW_MS = 5 * 3.6e6;       // the plan window an anchor pins
 const ANCHOR_DELAY_MS = 5000;      // fire just after the reset, like usage.mjs's reset refresh (+2000)
 const POKE_TIMEOUT_MS = 90_000;
 const MIN_POKE_GAP_MS = 60_000;    // an errored poke may be retried, but no faster than this
-const TELEMETRY_MAX_RECORDS = 1000;
 
 // Cheapest route per provider (model-store SEED aliases). The ids go through
 // the model store, never hardcoded routing: an alias that moved to another
@@ -59,32 +57,34 @@ let refreshUsage = getUsage;
 let busRef = bus;
 let usageHandler = null;
 let latestUsage = null;
+let storage = null;
+let persistenceQueue = Promise.resolve();
 
 function snapshot() {
   return { claude: { ...state.claude }, codex: { ...state.codex } };
 }
 
-function persist() {
-  try {
-    writeAtomic(stateFile, JSON.stringify(state, null, 2));
-  } catch (e) {
-    logger?.warn({ err: e.message }, 'window-anchor.json write failed');
-  }
-}
-
-function persistEmit() { persist(); busRef?.emit('window-anchor', snapshot()); }
-
-function appendTelemetry(record) {
-  try {
-    mkdirSync(dirname(telemetryFile), { recursive: true });
-    appendFileSync(telemetryFile, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-    const lines = readFileSync(telemetryFile, 'utf8').trimEnd().split(/\r?\n/);
-    if (lines.length > TELEMETRY_MAX_RECORDS) {
-      writeAtomic(telemetryFile, `${lines.slice(-TELEMETRY_MAX_RECORDS).join('\n')}\n`);
+function persistEmit(record) {
+  const savedState = snapshot();
+  const savedStateFile = stateFile;
+  const savedTelemetryFile = telemetryFile;
+  const savedStorage = storage;
+  const savedBus = busRef;
+  const savedLogger = logger;
+  const operation = persistenceQueue.then(async () => {
+    if (record) {
+      try { await savedStorage.windowAnchorTelemetry(savedTelemetryFile, record); }
+      catch (e) { savedLogger?.warn({ err: e.message }, 'window-anchor telemetry write failed'); }
     }
-  } catch (e) {
-    logger?.warn({ err: e.message }, 'window-anchor telemetry write failed');
-  }
+    try { await savedStorage.windowAnchorSave(savedStateFile, savedState); }
+    catch (e) { savedLogger?.warn({ err: e.message }, 'window-anchor.json write failed'); }
+    try { savedBus?.emit('window-anchor', savedState); }
+    catch (e) { savedLogger?.warn({ err: e.message }, 'window-anchor event emit failed'); }
+  });
+  persistenceQueue = operation.catch((e) => {
+    savedLogger?.warn({ err: e.message }, 'window-anchor persistence queue failed');
+  });
+  return persistenceQueue;
 }
 
 function clearTimer(group) {
@@ -150,12 +150,11 @@ async function poke(group, windowEnd, { trigger = 'automatic', force = false, pr
   if (!force && hasActiveWindow(group)) {
     s.lastResult = 'Skipped';
     s.lastError = null;
-    appendTelemetry({
+    await persistEmit({
       started_at: new Date(startedAt).toISOString(), finished_at: new Date(now()).toISOString(),
       provider: group, trigger, window_end: new Date(windowEnd).toISOString(),
       result: 'Skipped', reason: 'window-already-started', model: null, usage: null,
     });
-    persistEmit();
     return s.lastResult;
   }
   if (!shouldPoke(group, windowEnd)) return 'Skipped';
@@ -176,13 +175,12 @@ async function poke(group, windowEnd, { trigger = 'automatic', force = false, pr
     s.lastResult = 'Error';
     s.lastError = String(e.message || e).slice(0, 200);
   }
-  appendTelemetry({
+  await persistEmit({
     started_at: new Date(startedAt).toISOString(), finished_at: new Date(now()).toISOString(),
     provider: group, trigger, window_end: new Date(windowEnd).toISOString(),
     result: s.lastResult, reason: null, model: modelId, usage,
     ...(s.lastError ? { error: s.lastError } : {}),
   });
-  persistEmit();
   return s.lastResult;
 }
 
@@ -238,14 +236,15 @@ function onUsage(result) {
   }
 }
 
-export function initWindowAnchor({
+export async function initWindowAnchor({
   bus: b = bus, log, stateDir = STATE_DIR, usageStateDir = USAGE_SKILL_STATE,
-  spawn: spawnFn = oneShotSpawn, usageRefresh = getUsage, now: nowFn, enabled = process.env.WINDOW_ANCHOR,
+  storage: storageApi, spawn: spawnFn = oneShotSpawn, usageRefresh = getUsage, now: nowFn, enabled = process.env.WINDOW_ANCHOR,
 } = {}) {
   logger = log;
   busRef = b;
   stateFile = join(stateDir, 'window-anchor.json');
   telemetryFile = join(usageStateDir, 'window-anchor-runs.jsonl');
+  storage = storageApi;
   spawn = spawnFn;
   refreshUsage = usageRefresh;
   now = nowFn ?? (() => Date.now());
@@ -256,8 +255,8 @@ export function initWindowAnchor({
   for (const group of PROVIDERS) clearTimer(group);
 
   try {
-    if (existsSync(stateFile)) {
-      const data = JSON.parse(readFileSync(stateFile, 'utf8'));
+    const data = await storage.windowAnchorLoad(stateFile);
+    if (data) {
       for (const group of PROVIDERS) {
         if (data[group] && typeof data[group] === 'object') state[group] = { ...defaultProviderState(), ...data[group], lastResult: capitalize(data[group].lastResult) };
       }

@@ -952,9 +952,7 @@ app.post('/history/regenerate', async (req, reply) => {
 
 reg.init(app.log);
 initCrons(app.log);
-initWindowAnchor({ log: app.log });
 initBackground(app.log);
-initUsageAutoRefresh(reg.bus);
 // Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors
 // are logged (route-level failures still degrade to a live-only "today").
 ensureHistory().catch((e) => app.log.warn({ err: e.message }, 'history backfill failed'));
@@ -966,6 +964,8 @@ try {
   app.log.error({ err: error.message }, 'Rust backend failed to start; build it with cargo build --release --manifest-path rust/backend/Cargo.toml');
   process.exit(1);
 }
+await initWindowAnchor({ log: app.log, storage: rustBackend });
+initUsageAutoRefresh(reg.bus);
 initTasks(app.log);
 // ponytail: retry bind — a /restart child waits for the old daemon to free the port
 for (let tries = 20; ; tries--) {

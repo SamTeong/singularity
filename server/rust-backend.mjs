@@ -181,6 +181,24 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'models_summariser', path });
     },
 
+    async windowAnchorLoad(path) {
+      const result = await request({ op: 'window_anchor_load', path });
+      if (result.error) throw new Error(result.error);
+      return result.state;
+    },
+
+    async windowAnchorSave(path, state) {
+      const result = await request({ op: 'window_anchor_save', path, state });
+      if (result.error) throw new Error(result.error);
+      return result;
+    },
+
+    async windowAnchorTelemetry(path, record) {
+      const result = await request({ op: 'window_anchor_telemetry', path, record });
+      if (result.error) throw new Error(result.error);
+      return result;
+    },
+
     ruleReference(path, root) {
       return request({ op: 'rule_reference', path, root });
     },
