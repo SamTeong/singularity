@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { access, mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -331,12 +332,19 @@ test('Rust stdio bridge writes Rules content with mtime checks and force', async
   const base = await mkdtemp(join(tmpdir(), 'singularity-rust-rules-write-'));
   const path = join(base, '.claude', 'rules', 'note.md');
   await mkdir(join(path, '..'), { recursive: true });
+  process.env.SINGULARITY_HOME = join(base, 'app-state');
   const backend = createRustBackend();
   try {
     await backend.start();
-    const saved = await backend.ruleWrite(path, 'rule ✓', null, false);
+    const { setRulesRoots, writeRuleFile } = await import('./rules.mjs');
+    const { BACKUPS_DIR } = await import('./app-dir.mjs');
+    setRulesRoots([base]);
+    await writeFile(path, 'prior rule bytes');
+    const saved = await writeRuleFile(path, 'rule ✓', null, false, backend);
     assert.equal(saved.ok, true);
     assert.equal(typeof saved.mtime, 'number');
+    const backupDir = join(BACKUPS_DIR, createHash('sha256').update(path).digest('hex').slice(0, 16));
+    await assert.rejects(access(backupDir)); // successful Rules overwrite creates no backup artifact
     const { mtimeMs } = await (await import('node:fs/promises')).stat(path);
     assert.ok(Math.abs(saved.mtime - mtimeMs) < 2);
     assert.equal(await readFile(path, 'utf8'), 'rule ✓');
