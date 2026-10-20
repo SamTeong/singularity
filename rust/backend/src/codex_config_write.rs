@@ -109,7 +109,7 @@ mod tests {
         let stale = write_file(
             Some(path.to_str().unwrap()),
             Some("rejected"),
-            Some(initial + 10.0),
+            Some(mtime_ms(&path).unwrap() + 60_000.0),
             false,
         );
         assert_eq!(stale, json!({ "ok": false, "error": "changed on disk" }));
