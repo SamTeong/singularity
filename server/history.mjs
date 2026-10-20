@@ -356,7 +356,7 @@ export async function defaultCallSummariser(digestText, { id, group }, { system 
 // callSummariser is injectable — tests stub it so no network/process call ever
 // happens. Every rung must produce a valid entry and never throw.
 export async function summarizeDay(digestText, sessions, { callSummariser = defaultCallSummariser } = {}) {
-  const summariser = getSummariser();
+  const summariser = await getSummariser();
   // No configured model, or its group's binary isn't available: same outcome
   // as no summariser at all — deterministic, no throw, no call attempted.
   if (!summariser || !binFor(summariser.group)) {

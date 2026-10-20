@@ -34,6 +34,12 @@ struct Request {
     mtime: Value,
     #[serde(default)]
     force: Value,
+    #[serde(default)]
+    model: Value,
+    #[serde(default)]
+    tool: Value,
+    #[serde(default)]
+    state: Value,
 }
 
 fn default_op() -> String {
@@ -116,6 +122,24 @@ fn main() -> io::Result<()> {
                 Some(path) => singularity_backend::model_prices::read_pricing(path),
                 None => serde_json::json!({ "error": "pricing path missing" }),
             },
+            Ok(request) if request.op == "models_get" => {
+                singularity_backend::models::get(request.path.as_str().unwrap_or(""))
+            }
+            Ok(request) if request.op == "models_set" => singularity_backend::models::set(
+                request.path.as_str().unwrap_or(""),
+                &request.state,
+            ),
+            Ok(request) if request.op == "models_restore" => {
+                singularity_backend::models::restore(request.path.as_str().unwrap_or(""))
+            }
+            Ok(request) if request.op == "model_route" => singularity_backend::models::route(
+                request.path.as_str().unwrap_or(""),
+                &request.model,
+                &request.tool,
+            ),
+            Ok(request) if request.op == "models_summariser" => {
+                singularity_backend::models::summariser(request.path.as_str().unwrap_or(""))
+            }
             Ok(request) => singularity_backend::wiki_read::dispatch(
                 &request.op,
                 &request.root,

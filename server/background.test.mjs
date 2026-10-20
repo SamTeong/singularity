@@ -21,7 +21,11 @@ process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 // up" tests, reused below for the healLiveBgTask regression test.
 delete process.env.OLLAMA_BIN;
 delete process.env.CODEX_BIN;
-after(() => rmSync(scratch, { recursive: true, force: true }));
+const modelStore = await import('./model-store.mjs');
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+after(async () => { await modelBackend.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
 const { inWindow, evalGate, pickJob, pickRunnableJob, watchdogDecision, migrateLegacyConfig, createJob, updateJob, reorderJobs, snapshotBackground, listReports, getReport, setReportFlag, runBackgroundNow } = await import('./background.mjs');
 const { normalizeTags, initTasks, snapshotTasks } = await import('./tasks.mjs');

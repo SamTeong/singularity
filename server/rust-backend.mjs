@@ -161,6 +161,26 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       });
     },
 
+    modelsGet(path) {
+      return request({ op: 'models_get', path });
+    },
+
+    modelsSet(path, state) {
+      return request({ op: 'models_set', path, state });
+    },
+
+    modelsRestore(path) {
+      return request({ op: 'models_restore', path });
+    },
+
+    modelRoute(path, model, tool) {
+      return request({ op: 'model_route', path, model: model ?? null, tool: tool ?? null });
+    },
+
+    modelsSummariser(path) {
+      return request({ op: 'models_summariser', path });
+    },
+
     ruleReference(path, root) {
       return request({ op: 'rule_reference', path, root });
     },
@@ -248,5 +268,30 @@ export function createModelPricesHandler(backend, path, logger) {
       reply.code(500);
       return { error: 'model prices backend unavailable' };
     }
+  };
+}
+
+export function createModelsHandlers(backend, path, logger) {
+  const unavailable = (error, reply) => {
+    logger.error({ err: error.message }, 'Rust models backend failed');
+    reply.code(500);
+    return { error: 'models backend unavailable' };
+  };
+  return {
+    get: async (_req, reply) => {
+      try { return await backend.modelsGet(path); }
+      catch (error) { return unavailable(error, reply); }
+    },
+    set: async (req, reply) => {
+      try {
+        const result = await backend.modelsSet(path, req.body);
+        if (!result.ok) reply.code(400);
+        return result;
+      } catch (error) { return unavailable(error, reply); }
+    },
+    restore: async (_req, reply) => {
+      try { return { ok: true, state: await backend.modelsRestore(path) }; }
+      catch (error) { return unavailable(error, reply); }
+    },
   };
 }

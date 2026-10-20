@@ -8,7 +8,7 @@ import { promisify } from 'node:util';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as reg from './agents.mjs';
-import { isClaudeModel, isCodexModel } from './models.mjs';
+import { getModelRoute } from './models.mjs';
 import { statsFor } from './stats.mjs';
 
 const TASKS_FILE = join(reg.STATE_DIR, 'tasks.json');
@@ -256,14 +256,15 @@ ${t.description}
 
 // The whole autonomous workflow lives in this prompt — the daemon only stores
 // column/state and kills the session on 'done'. Transitions are prompt-driven.
-export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
-  if (t.tool === 'codex' || isCodexModel(t.model)) return buildCodexTaskPrompt(t);
+export async function buildTaskPrompt(t, cavecrew = cavecrewAvailable(), route) {
+  route ??= await getModelRoute(t.model, t.tool);
+  if (t.tool === 'codex' || route.isCodexModel) return buildCodexTaskPrompt(t);
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
     `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   // Subagent model routing: an ollama model runs the whole fleet on that same
   // model (saves Claude budget); a claude model splits impl=sonnet, reviewer=opus.
-  const ollama = !isClaudeModel(t.model);
+  const ollama = !route.isClaudeModel;
   // Ollama models have no prompt caching — every turn resends the full
   // context, so nudge the orchestrator toward fewer, batched turns.
   const turnEconomy = ollama ? `\n- Your model has no prompt caching — every turn resends the full context. Minimize turns: batch the board status curl together with your next Bash command instead of running it alone, avoid re-reading files you have already seen, and prefer one larger subagent over many small ones.` : '';
@@ -388,8 +389,9 @@ export function normalizeTags(tags) {
 // clarifying questions, no plan approval, no impl/reviewer subagent dance — just
 // do the work, write a report, and hand the card to a human for review. The
 // daemon's watchdog (background.mjs) stops the run when the budget is spent.
-export function buildBackgroundPrompt(t) {
-  if (t.tool === 'codex' || isCodexModel(t.model)) return buildCodexBackgroundPrompt(t);
+export async function buildBackgroundPrompt(t, route) {
+  route ??= await getModelRoute(t.model, t.tool);
+  if (t.tool === 'codex' || route.isCodexModel) return buildCodexBackgroundPrompt(t);
   const cwd = t.worktree || t.repo;
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
@@ -427,8 +429,10 @@ ${t.description}
 // Max-turn cap from the dialog: positive int or null (empty/0/invalid → no cap).
 const posInt = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n > 0 ? n : null; };
 
-export function createTask({ repo, title, description, model, implModel, reviewerModel, orchestratorMaxTurns, implMaxTurns, reviewerMaxTurns, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, backgroundJobId, backgroundRunId, conclude, tool }) {
+export async function createTask({ repo, title, description, model, implModel, reviewerModel, orchestratorMaxTurns, implMaxTurns, reviewerMaxTurns, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, backgroundJobId, backgroundRunId, conclude, tool }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
+  const modelRoute = await getModelRoute(model, tool);
+  if (modelRoute.toolModelError) throw new Error(modelRoute.toolModelError);
   if (!existsSync(repo)) throw new Error('working directory does not exist');
   const kind = isGitWorkTree(repo) ? 'git' : 'plain';
   const id = randomUUID();
@@ -472,8 +476,8 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     // mock (demo only): spawn an idle claude with no workflow prompt — a live
     // session for the status pill, but no turn ever starts, so zero tokens. The
     // demo driver moves the card itself. Real tasks always get the prompt.
-    const prompt = mock ? undefined : (promptOverride ?? (background ? buildBackgroundPrompt(t) : buildTaskPrompt(t)));
-    const agent = reg.create({ cwd, title: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs, mock, tool });
+    const prompt = mock ? undefined : (promptOverride ?? (background ? await buildBackgroundPrompt(t, modelRoute) : await buildTaskPrompt(t, cavecrewAvailable(), modelRoute)));
+    const agent = await reg.create({ cwd, title: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs, mock, tool, modelRoute });
     t.sessionId = agent.id;
     taskBySession.set(agent.id, id);
     tasks.set(id, t);

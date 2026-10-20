@@ -63,7 +63,12 @@ process.env.SING_SCOPE_ROOT = scopeRoot;
 // SINGULARITY_HOME is set up front.
 const codexHome = join(scratch, 'codex-home');
 process.env.CODEX_HOME = codexHome;
-after(() => {
+const modelStore = await import('./model-store.mjs');
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+after(async () => {
+  await modelBackend.stop();
   rmSync(scopeParent, { recursive: true, force: true });
   rmSync(scratch, { recursive: true, force: true });
   // node-pty's spawn() (even the failed attempt inside the fork test below)
@@ -88,13 +93,42 @@ function killAndWait(id) {
   });
 }
 
-test('encodeCwd replaces every non-alphanumeric (incl. dots) with "-"', () => {
+function waitForOutput(id, pattern) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { bus.off('output', onOutput); reject(new Error(`timed out waiting for output matching ${pattern}`)); }, 10000);
+    const onOutput = ({ id: sid, data }) => {
+      if (sid === id && pattern.test(data)) { clearTimeout(timer); bus.off('output', onOutput); resolve(data); }
+    };
+    bus.on('output', onOutput);
+  });
+}
+
+function waitForRemoval(id) {
+  if (!snapshot().some((agent) => agent.id === id)) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { bus.off('list', onList); reject(new Error(`timed out waiting for agent ${id} removal`)); }, 10000);
+    const onList = () => {
+      if (!snapshot().some((agent) => agent.id === id)) { clearTimeout(timer); bus.off('list', onList); resolve(); }
+    };
+    bus.on('list', onList);
+  });
+}
+
+async function customModelGroup(group) {
+  const doc = await modelStore.getModels();
+  doc.models = doc.models.filter((model) => model.id !== 'gpt-custom');
+  doc.models.push({ id: 'gpt-custom', group, label: 'Custom', enabled: true });
+  await modelStore.setModels(doc);
+  return doc;
+}
+
+test('encodeCwd replaces every non-alphanumeric (incl. dots) with "-"', async () => {
   assert.equal(encodeCwd('C:\\git\\singularity'), 'C--git-singularity');
   assert.equal(encodeCwd('C:\\Users\\x\\.claude'), 'C--Users-x--claude');
   assert.equal(encodeCwd('/home/u/proj'), '-home-u-proj');
 });
 
-test('untildify expands `~` and `~/x` (a raw client cwd must not spawn into a literal "~")', () => {
+test('untildify expands `~` and `~/x` (a raw client cwd must not spawn into a literal "~")', async () => {
   assert.equal(untildify('~'), homedir());
   assert.equal(untildify('~/proj'), join(homedir(), 'proj'));
   assert.equal(untildify('C:\\git\\x'), 'C:\\git\\x'); // no leading ~ → untouched
@@ -105,8 +139,8 @@ test('untildify expands `~` and `~/x` (a raw client cwd must not spawn into a li
 const freshId = '00000000-1111-2222-3333-444444444444';
 const cwd = 'C:\\definitely\\not\\a\\real\\repo\\path\\xyz';
 
-test('buildSpawn: fresh claude session uses --session-id, --name, no --model', () => {
-  const { bin, args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude', scopes: [] });
+test('buildSpawn: fresh claude session uses --session-id, --name, no --model', async () => {
+  const { bin, args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude', scopes: [] });
   assert.equal(typeof bin, 'string');
   assert.ok(args.includes('--session-id'));
   assert.equal(args[args.indexOf('--session-id') + 1], freshId);
@@ -116,21 +150,21 @@ test('buildSpawn: fresh claude session uses --session-id, --name, no --model', (
   assert.ok(!args.includes('--model'));
 });
 
-test('buildSpawn: non-existent skill-scope is not added as --add-dir', () => {
-  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude', scopes: ['__no_such_scope__'] });
+test('buildSpawn: non-existent skill-scope is not added as --add-dir', async () => {
+  const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude', scopes: ['__no_such_scope__'] });
   assert.ok(!args.includes('--add-dir'));
 });
 
-test('buildSpawn: claude alias (opus) runs via claude bin with --model', () => {
-  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'opus', scopes: [] });
+test('buildSpawn: claude alias (opus) runs via claude bin with --model', async () => {
+  const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'opus', scopes: [] });
   assert.ok(!args.includes('launch'));
   assert.ok(args.includes('--model'));
   assert.equal(args[args.indexOf('--model') + 1], 'opus');
   assert.ok(args.includes('--session-id'));
 });
 
-test('buildSpawn: typed full claude id runs via claude bin with --model', () => {
-  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude-opus-4-8', scopes: [] });
+test('buildSpawn: typed full claude id runs via claude bin with --model', async () => {
+  const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude-opus-4-8', scopes: [] });
   assert.ok(!args.includes('launch'));
   assert.equal(args[args.indexOf('--model') + 1], 'claude-opus-4-8');
 });
@@ -139,7 +173,7 @@ test('buildSpawn: typed full claude id runs via claude bin with --model', () => 
 // user's real ~/.agents/.harness-usage-report store — spawnEnv redirects
 // USAGE_REPORT_STATE into the disposable CACHE_DIR for mock spawns only.
 // All spawns (mock and normal) carry HARNESS_LAUNCH_SOURCE: 'singularity'.
-test('spawnEnv: mock spawn gets USAGE_REPORT_STATE under CACHE_DIR; all spawns get HARNESS_LAUNCH_SOURCE', () => {
+test('spawnEnv: mock spawn gets USAGE_REPORT_STATE under CACHE_DIR; all spawns get HARNESS_LAUNCH_SOURCE', async () => {
   const mockEnv = spawnEnv(true);
   assert.equal(mockEnv.USAGE_REPORT_STATE, join(CACHE_DIR, 'mock-usage-state'));
   assert.equal(mockEnv.HARNESS_LAUNCH_SOURCE, 'singularity');
@@ -148,13 +182,13 @@ test('spawnEnv: mock spawn gets USAGE_REPORT_STATE under CACHE_DIR; all spawns g
   assert(!normalEnv.USAGE_REPORT_STATE);
 });
 
-test('buildSpawn: existing session log switches to --resume', () => {
+test('buildSpawn: existing session log switches to --resume', async () => {
   const dir = join(homedir(), '.claude', 'projects', encodeCwd(cwd));
   const log = join(dir, `${freshId}.jsonl`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(log, '{}\n');
   try {
-    const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude', scopes: [] });
+    const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'claude', scopes: [] });
     assert.ok(args.includes('--resume'));
     assert.ok(!args.includes('--session-id'));
   } finally {
@@ -180,7 +214,7 @@ test('fork: copies+rewrites the source transcript into the new session log', asy
   }));
   try {
     init(); // loads srcId into the registry as 'detached', proc: null — no spawn
-    const forked = fork(srcId, 'copyname'); // copies+rewrites the transcript, then spawns a real pty over it
+    const forked = await fork(srcId, 'copyname'); // copies+rewrites the transcript, then spawns a real pty over it
     try {
       // the copied log carries the NEW id everywhere and no trace of the source id.
       const newLog = join(dir, `${forked.id}.jsonl`);
@@ -211,7 +245,7 @@ test('create: dead (exited) dup id resumes via reattach instead of "already in u
   init(); // loads deadId as 'detached', proc: null
   // re-entering a dead id takes the resume path (reattach → spawn a live pty),
   // NOT the 'already in use' refusal — a fresh live pid on the same id proves it.
-  const a = create({ sessionId: deadId, cwd: deadCwd, model: 'claude' });
+  const a = await create({ sessionId: deadId, cwd: deadCwd, model: 'claude' });
   try {
     assert.equal(a.id, deadId);
     assert.ok(a.pid, 'reattach spawned a live pty (resume path taken, not refused)');
@@ -224,9 +258,9 @@ test('create: dead (exited) dup id resumes via reattach instead of "already in u
 // createTask() spawn through — a mismatched tool/model pairing (e.g. tool
 // 'codex' with a claude alias) must be rejected here before a pty is ever
 // spawned, rather than reaching `codex -m sonnet`.
-test('create: rejects tool "codex" paired with a claude model alias', () => {
+test('create: rejects tool "codex" paired with a claude model alias', async () => {
   const id = '25000000-bbbb-cccc-dddd-250000000002';
-  assert.throws(
+  await assert.rejects(
     () => create({ sessionId: id, cwd: scratch, model: 'sonnet', tool: 'codex' }),
     /sonnet.*codex/,
   );
@@ -238,7 +272,7 @@ test('create: rejects tool "codex" paired with a claude model alias', () => {
 // lingering as 'exited'). Seeded via init()+fake agents.json (no spawn); the
 // live-pty branch of remove() can't be exercised here for the same reason
 // kill()'s can't (no real pty in a unit test).
-test('remove: dead (detached) agent is dropped from the registry', () => {
+test('remove: dead (detached) agent is dropped from the registry', async () => {
   const goneId = '30000000-cccc-dddd-eeee-300000000003';
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
@@ -260,7 +294,7 @@ test('remove: dead (detached) agent is dropped from the registry', () => {
 test('respawnAll: kills a live agent and resumes it with the same id + new pid', async () => {
   const respawnCwd = scratch;
   const id = '40000000-dddd-eeee-ffff-400000000004';
-  const a = create({ cwd: respawnCwd, title: 'resp-test', model: 'glm-5.2:cloud', sessionId: id });
+  const a = await create({ cwd: respawnCwd, title: 'resp-test', model: 'glm-5.2:cloud', sessionId: id });
   const firstPid = a.pid;
   assert.ok(firstPid, 'agent spawned with a real pid');
 
@@ -301,9 +335,62 @@ test('respawnAll: kills a live agent and resumes it with the same id + new pid',
 // restart reloads the sessions rather than dropping them from the list. Kept
 // last: draining is a module-global one-way flag, so it must not affect the
 // tests above. Uses the ollama/cmd.exe live-pty trick (see file header).
+test('externalLaunch: existing Claude session follows changed Codex route without revalidating tool', async () => {
+  const previous = await customModelGroup('claude');
+  const id = '70000000-eeee-ffff-0000-700000000017';
+  try {
+    await create({ sessionId: id, cwd: scratch, title: 'route-change-launch', model: 'gpt-custom', tool: 'claude' });
+    await customModelGroup('codex');
+    const r = await externalLaunch(id, 'darwin');
+    assert.equal(r.ok, true);
+    const script = r.launcherArgs[r.launcherArgs.indexOf('-e') + 1];
+    assert.ok(script.includes("'-s' 'workspace-write'"), 'the fresh Codex builder is used');
+    assert.ok(script.includes('gpt-custom'));
+  } finally {
+    await killAndWait(id);
+    await modelStore.setModels(previous);
+  }
+});
+
+test('agent exit uses fresh Codex route after catalogue edit', async () => {
+  const previous = await customModelGroup('claude');
+  const id = '70000000-eeee-ffff-0000-700000000018';
+  try {
+    await create({ sessionId: id, cwd: scratch, title: 'route-change-exit', model: 'gpt-custom', tool: 'claude' });
+    await customModelGroup('codex');
+    const output = waitForOutput(id, /resume: codex/);
+    const removed = waitForRemoval(id);
+    await killAndWait(id);
+    assert.match(await output, /resume: codex/);
+    await removed;
+    assert.equal(snapshot().some((agent) => agent.id === id), false, 'exited agent is removed from lifecycle state');
+  } finally {
+    if (snapshot().some((agent) => agent.id === id)) await killAndWait(id);
+    await modelStore.setModels(previous);
+  }
+});
+
+test('agent exit bridge failure still cleans up and emits a handled resume status', async () => {
+  const previous = await customModelGroup('claude');
+  const id = '70000000-eeee-ffff-0000-700000000019';
+  try {
+    await create({ sessionId: id, cwd: scratch, title: 'route-bridge-failure', model: 'gpt-custom', tool: 'claude' });
+    const output = waitForOutput(id, /resume command unavailable/);
+    const removed = waitForRemoval(id);
+    modelStore.setModelsBackend({ modelRoute: async () => { throw new Error('test bridge failure'); } });
+    await killAndWait(id);
+    assert.match(await output, /resume command unavailable/);
+    await removed;
+    assert.equal(snapshot().some((agent) => agent.id === id), false, 'bridge failure does not retain the exited agent');
+  } finally {
+    modelStore.setModelsBackend(modelBackend);
+    await modelStore.setModels(previous);
+  }
+});
+
 test('beginDrain: live session persists to agents.json and survives its pty exit', async () => {
   const id = '50000000-aaaa-bbbb-cccc-500000000005';
-  const a = create({ cwd: scratch, title: 'drain-test', model: 'glm-5.2:cloud', sessionId: id });
+  const a = await create({ cwd: scratch, title: 'drain-test', model: 'glm-5.2:cloud', sessionId: id });
   assert.ok(a.pid, 'agent spawned live');
   const readAgents = () => JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'agents.json'), 'utf8')).agents;
 
@@ -318,7 +405,7 @@ test('beginDrain: live session persists to agents.json and survives its pty exit
   assert.ok(readAgents().find((x) => x.id === id), 'entry retained in agents.json after pty exit');
 });
 
-test('ensureTrusted: upserts hasTrustDialogAccepted:true keyed on cwd with \\→/', () => {
+test('ensureTrusted: upserts hasTrustDialogAccepted:true keyed on cwd with \\→/', async () => {
   const file = join(scratch, 'trust-upsert.json');
   writeFileSync(file, JSON.stringify({ projects: {} }));
   ensureTrusted('C:\\Users\\user', file);
@@ -326,7 +413,7 @@ test('ensureTrusted: upserts hasTrustDialogAccepted:true keyed on cwd with \\→
   assert.equal(json.projects['C:/Users/user'].hasTrustDialogAccepted, true);
 });
 
-test('ensureTrusted: flips an existing false entry to true, preserves other keys', () => {
+test('ensureTrusted: flips an existing false entry to true, preserves other keys', async () => {
   const file = join(scratch, 'trust-flip.json');
   writeFileSync(file, JSON.stringify({
     projects: { 'C:/Users/user': { hasTrustDialogAccepted: false, other: 1 } },
@@ -337,7 +424,7 @@ test('ensureTrusted: flips an existing false entry to true, preserves other keys
   assert.equal(json.projects['C:/Users/user'].other, 1); // sibling fields untouched
 });
 
-test('ensureTrusted: no-op (no write) when already trusted', () => {
+test('ensureTrusted: no-op (no write) when already trusted', async () => {
   const file = join(scratch, 'trust-noop.json');
   writeFileSync(file, JSON.stringify({ projects: { 'C:/x': { hasTrustDialogAccepted: true } } }));
   const before = readFileSync(file, 'utf8');
@@ -345,7 +432,7 @@ test('ensureTrusted: no-op (no write) when already trusted', () => {
   assert.equal(readFileSync(file, 'utf8'), before); // short-circuit → byte-identical
 });
 
-test('ensureTrusted: creates projects map when missing, never throws on bad/missing file', () => {
+test('ensureTrusted: creates projects map when missing, never throws on bad/missing file', async () => {
   const file = join(scratch, 'trust-empty.json');
   writeFileSync(file, JSON.stringify({}));
   ensureTrusted('C:\\y', file);
@@ -358,7 +445,7 @@ test('ensureTrusted: creates projects map when missing, never throws on bad/miss
 // via init()+fake agents.json (no spawn) like the fork/remove tests. Random id
 // has no session log → buildSpawn yields --session-id. Platform param exercises
 // both branches on any host.
-test('externalLaunch: win32 wraps wt.exe with -d <cwd> + resume argv', () => {
+test('externalLaunch: win32 wraps wt.exe with -d <cwd> + resume argv', async () => {
   const id = '60000000-eeee-ffff-0000-600000000006';
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
@@ -371,7 +458,7 @@ test('externalLaunch: win32 wraps wt.exe with -d <cwd> + resume argv', () => {
   mkdirSync(aliasDir, { recursive: true });
   writeFileSync(join(aliasDir, 'wt.exe'), '');
   chmodSync(join(aliasDir, 'wt.exe'), 0o755);
-  const r = externalLaunch(id, 'win32', { LOCALAPPDATA: localAppData, PATH: '' });
+  const r = await externalLaunch(id, 'win32', { LOCALAPPDATA: localAppData, PATH: '' });
   assert.equal(r.ok, true);
   assert.match(r.launcher, /WindowsApps[\\/]wt\.exe$/);
   assert.equal(r.launcherArgs[0], '-d');
@@ -381,7 +468,7 @@ test('externalLaunch: win32 wraps wt.exe with -d <cwd> + resume argv', () => {
   assert.equal(r.cwd, scratch);
 });
 
-test('externalLaunch: darwin wraps osascript do-script with cd + exec', () => {
+test('externalLaunch: darwin wraps osascript do-script with cd + exec', async () => {
   const id = '70000000-eeee-ffff-0000-700000000007';
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
   writeFileSync(stateFile, JSON.stringify({
@@ -389,7 +476,7 @@ test('externalLaunch: darwin wraps osascript do-script with cd + exec', () => {
     recentRepos: [],
   }));
   init();
-  const r = externalLaunch(id, 'darwin');
+  const r = await externalLaunch(id, 'darwin');
   assert.equal(r.ok, true);
   assert.equal(r.launcher, 'osascript');
   const script = r.launcherArgs[r.launcherArgs.indexOf('-e') + 1];
@@ -399,8 +486,8 @@ test('externalLaunch: darwin wraps osascript do-script with cd + exec', () => {
   assert.ok(script.includes(id), 'session id embedded in the shell string');
 });
 
-test('externalLaunch: unknown id + unsupported platform error cleanly', () => {
-  assert.equal(externalLaunch('no-such-id').ok, false);
+test('externalLaunch: unknown id + unsupported platform error cleanly', async () => {
+  assert.equal((await externalLaunch('no-such-id')).ok, false);
   // unsupported platform with a real agent still errors (use a seeded one)
   const id = '80000000-eeee-ffff-0000-800000000008';
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
@@ -409,18 +496,18 @@ test('externalLaunch: unknown id + unsupported platform error cleanly', () => {
     recentRepos: [],
   }));
   init();
-  const r = externalLaunch(id, 'linux');
+  const r = await externalLaunch(id, 'linux');
   assert.equal(r.ok, false);
   assert.match(r.error, /Windows\/macOS only/);
 });
 
-test('buildSpawn: ollama model on resume injects --model to override stripped transcript model', () => {
+test('buildSpawn: ollama model on resume injects --model to override stripped transcript model', async () => {
   const dir = join(homedir(), '.claude', 'projects', encodeCwd(cwd));
   const log = join(dir, `${freshId}.jsonl`);
   mkdirSync(dir, { recursive: true });
   writeFileSync(log, '{}\n');
   try {
-    const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'glm-5.2:cloud', scopes: [] });
+    const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'glm-5.2:cloud', scopes: [] });
     // ollama-wrapped: launch claude --model <m> -- ... --resume ... --model <m>
     assert.deepEqual(args.slice(0, 4), ['launch', 'claude', '--model', 'glm-5.2:cloud']);
     assert.ok(args.includes('--resume'));
@@ -438,8 +525,8 @@ test('buildSpawn: ollama model on resume injects --model to override stripped tr
 // Codex CLI has no --session-id/--name/--resume; buildSpawn returns a fresh
 // invocation with -C/-s/-a/-m + positional prompt. permissionMode set (tasks)
 // → -a never (auto-run); unset (foreground) → -a on-request (TUI prompts).
-test('buildSpawn: codex fresh spawn uses -C, -s workspace-write, -a on-request, -m, prompt; no --resume/--session-id/launch', () => {
-  const { bin, args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'do the work');
+test('buildSpawn: codex fresh spawn uses -C, -s workspace-write, -a on-request, -m, prompt; no --resume/--session-id/launch', async () => {
+  const { bin, args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'do the work');
   assert.equal(bin, process.env.CODEX_BIN);
   assert.equal(args[args.indexOf('-C') + 1], cwd);
   assert.equal(args[args.indexOf('-s') + 1], 'workspace-write');
@@ -452,25 +539,25 @@ test('buildSpawn: codex fresh spawn uses -C, -s workspace-write, -a on-request, 
   assert.ok(!args.includes('--name'));
 });
 
-test('buildSpawn: codex disables skills outside selected scopes from the current manifest shape', () => {
-  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: ['coding'], tool: 'codex' });
+test('buildSpawn: codex disables skills outside selected scopes from the current manifest shape', async () => {
+  const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: ['coding'], tool: 'codex' });
   const config = args[args.indexOf('-c') + 1];
   assert.ok(config.includes(`path="${join(harnessSkillDir, 'SKILL.md').replaceAll('\\', '/')}"`));
   assert.doesNotMatch(config, /coding-skill/);
 });
 
-test('buildSpawn: codex with permissionMode set → -a never', () => {
-  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', permissionMode: 'acceptEdits' }, 'do the work');
+test('buildSpawn: codex with permissionMode set → -a never', async () => {
+  const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', permissionMode: 'acceptEdits' }, 'do the work');
   assert.equal(args[args.indexOf('-a') + 1], 'never');
 });
 
-test('buildSpawn: codex with no model → no -m flag', () => {
-  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: '', scopes: [], tool: 'codex' }, 'work');
+test('buildSpawn: codex with no model → no -m flag', async () => {
+  const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: '', scopes: [], tool: 'codex' }, 'work');
   assert.ok(!args.includes('-m'));
 });
 
-test('buildSpawn: gpt-* model with tool="claude" routes to codex bin (model-driven)', () => {
-  const { bin, args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-6-luna', scopes: [], tool: 'claude' }, 'do the work');
+test('buildSpawn: gpt-* model with tool="claude" routes to codex bin (model-driven)', async () => {
+  const { bin, args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-6-luna', scopes: [], tool: 'claude' }, 'do the work');
   assert.equal(bin, process.env.CODEX_BIN);
   assert.equal(args[args.indexOf('-m') + 1], 'gpt-6-luna');
   assert.ok(args.includes('do the work'));
@@ -497,27 +584,27 @@ function writeCodexRollout(rolloutCwd, timestamp, threadId) {
   writeFileSync(join(dir, `rollout-${Date.now()}-${threadId}.jsonl`), JSON.stringify(meta) + '\n');
 }
 
-test('buildSpawn: codex resume — matching rollout found → argv starts with resume <uuid>, keeps -C/-s/-m', () => {
+test('buildSpawn: codex resume — matching rollout found → argv starts with resume <uuid>, keeps -C/-s/-m', async () => {
   const createdAt = Date.now();
   const threadId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
   writeCodexRollout(cwd, new Date(createdAt + 1000).toISOString(), threadId);
-  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', createdAt });
+  const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', createdAt });
   assert.deepEqual(args.slice(0, 2), ['resume', threadId]);
   assert.equal(args[args.indexOf('-C') + 1], cwd);
   assert.equal(args[args.indexOf('-s') + 1], 'workspace-write');
   assert.equal(args[args.indexOf('-m') + 1], 'gpt-5.3-codex-spark');
 });
 
-test('buildSpawn: codex resume suppresses the initial prompt (would re-submit as a new turn)', () => {
+test('buildSpawn: codex resume suppresses the initial prompt (would re-submit as a new turn)', async () => {
   const createdAt = Date.now();
   const threadId = 'aaaaaaaa-bbbb-cccc-dddd-ffffffffffff';
   writeCodexRollout(cwd, new Date(createdAt + 1000).toISOString(), threadId);
-  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', createdAt }, 'do the work');
+  const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', createdAt }, 'do the work');
   assert.ok(args.includes('resume'));
   assert.ok(!args.includes('do the work'), 'prompt not resent on resume');
 });
 
-test('buildSpawn: codex — no matching rollout (different cwd, or no createdAt) → today\'s fresh-spawn argv, unchanged', () => {
+test('buildSpawn: codex — no matching rollout (different cwd, or no createdAt) → today\'s fresh-spawn argv, unchanged', async () => {
   const createdAt = Date.now();
   // A fixture exists, but for a cwd that's neither this call's cwd nor any
   // other test's — the rollout is on disk yet must not match.
@@ -525,11 +612,11 @@ test('buildSpawn: codex — no matching rollout (different cwd, or no createdAt)
   const callCwd = 'C:\\yet\\another\\cwd\\never-fixtured';
   writeCodexRollout(rolloutCwd, new Date(createdAt + 1000).toISOString(), 'zzzzzzzz-zzzz-zzzz-zzzz-zzzzzzzzzzzz');
 
-  const { args: mismatchedCwd } = buildSpawn({ id: freshId, title: 'demo', cwd: callCwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', createdAt }, 'work');
+  const { args: mismatchedCwd } = await buildSpawn({ id: freshId, title: 'demo', cwd: callCwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex', createdAt }, 'work');
   assert.ok(!mismatchedCwd.includes('resume'));
   assert.ok(mismatchedCwd.includes('work'));
 
-  const { args: noCreatedAt } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'work');
+  const { args: noCreatedAt } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'work');
   assert.ok(!noCreatedAt.includes('resume'));
   assert.ok(noCreatedAt.includes('work'));
 });
@@ -539,23 +626,23 @@ test('buildSpawn: codex — no matching rollout (different cwd, or no createdAt)
 // Transcripts view (or a uuid typed into the New-session dialog) passes no
 // createdAt — findCodexThread has nothing to discover by, so buildSpawn must
 // fall back to confirming `id` is itself a known codex thread for this cwd.
-test('buildSpawn: codex resume by caller id, no createdAt — matching rollout for this cwd → argv starts with resume <uuid>', () => {
+test('buildSpawn: codex resume by caller id, no createdAt — matching rollout for this cwd → argv starts with resume <uuid>', async () => {
   const threadId = 'bbbbbbbb-cccc-dddd-eeee-ffffffffffff';
   writeCodexRollout(cwd, new Date().toISOString(), threadId);
-  const { args } = buildSpawn({ id: threadId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' });
+  const { args } = await buildSpawn({ id: threadId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' });
   assert.deepEqual(args.slice(0, 2), ['resume', threadId]);
 });
 
-test('buildSpawn: codex resume by caller id, no createdAt — rollout is for a different cwd → no resume', () => {
+test('buildSpawn: codex resume by caller id, no createdAt — rollout is for a different cwd → no resume', async () => {
   const threadId = 'cccccccc-dddd-eeee-ffff-000000000000';
   const otherCwd = 'C:\\some\\unrelated\\cwd\\for-this-thread';
   writeCodexRollout(otherCwd, new Date().toISOString(), threadId);
-  const { args } = buildSpawn({ id: threadId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' });
+  const { args } = await buildSpawn({ id: threadId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' });
   assert.ok(!args.includes('resume'));
 });
 
-test('buildSpawn: codex resume by caller id, no createdAt — random id with no rollout → no resume, prompt still passed', () => {
-  const { args } = buildSpawn({ id: '11111111-2222-3333-4444-555555555555', title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'do the work');
+test('buildSpawn: codex resume by caller id, no createdAt — random id with no rollout → no resume, prompt still passed', async () => {
+  const { args } = await buildSpawn({ id: '11111111-2222-3333-4444-555555555555', title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'do the work');
   assert.ok(!args.includes('resume'));
   assert.ok(args.includes('do the work'));
 });
@@ -569,7 +656,7 @@ test('buildSpawn: codex with !CODEX_BIN → throws /codex not found/', async () 
     // throws. buildSpawn is a pure function — the fresh module's own Map/bus
     // are never touched.
     const fresh = await import('./agents.mjs?test=nocodex');
-    assert.throws(
+    await assert.rejects(
       () => fresh.buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }, 'do the work'),
       /codex not found/,
     );
@@ -578,8 +665,8 @@ test('buildSpawn: codex with !CODEX_BIN → throws /codex not found/', async () 
   }
 });
 
-test('buildSpawn: codex scopes → -c skills.config=[...] disables non-chosen skills, no --add-dir', () => {
-  const { args } = buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: ['coding'], tool: 'codex' }, 'work');
+test('buildSpawn: codex scopes → -c skills.config=[...] disables non-chosen skills, no --add-dir', async () => {
+  const { args } = await buildSpawn({ id: freshId, title: 'demo', cwd, model: 'gpt-5.3-codex-spark', scopes: ['coding'], tool: 'codex' }, 'work');
   const cfgIdx = args.indexOf('-c');
   assert.ok(cfgIdx !== -1, '-c flag present');
   const cfg = args[cfgIdx + 1];
@@ -602,7 +689,7 @@ test('buildSpawn: codex scopes → -c skills.config=[...] disables non-chosen sk
 // direct agents.get(threadId) could never work. Seeded via init()+fake
 // agents.json, same pattern as fork/remove/externalLaunch above (no spawn
 // needed — the lookup only reads cwd/createdAt/scopes/tool off the entry).
-test('getLaunchConfigForCodexThread: registered codex agent + matching rollout → scopes + tool "codex"', () => {
+test('getLaunchConfigForCodexThread: registered codex agent + matching rollout → scopes + tool "codex"', async () => {
   const agentId = '90000000-aaaa-bbbb-cccc-900000000001';
   const threadId = 'dddddddd-eeee-ffff-0000-111111111111';
   const lookupCwd = join(scratch, 'codex-lookup-a');
@@ -614,12 +701,12 @@ test('getLaunchConfigForCodexThread: registered codex agent + matching rollout �
     recentRepos: [],
   }));
   init();
-  const cfg = getLaunchConfigForCodexThread(threadId, lookupCwd);
+  const cfg = await getLaunchConfigForCodexThread(threadId, lookupCwd);
   assert.deepEqual(cfg?.scopes, ['coding', 'harness']);
   assert.equal(cfg?.tool, 'codex');
 });
 
-test('getLaunchConfigForCodexThread: same thread, queried with a different cwd → null', () => {
+test('getLaunchConfigForCodexThread: same thread, queried with a different cwd → null', async () => {
   const agentId = '90000000-aaaa-bbbb-cccc-900000000002';
   const threadId = 'dddddddd-eeee-ffff-0000-222222222222';
   const lookupCwd = join(scratch, 'codex-lookup-b');
@@ -631,17 +718,17 @@ test('getLaunchConfigForCodexThread: same thread, queried with a different cwd �
     recentRepos: [],
   }));
   init();
-  assert.equal(getLaunchConfigForCodexThread(threadId, join(scratch, 'codex-lookup-other')), null);
+  assert.equal(await getLaunchConfigForCodexThread(threadId, join(scratch, 'codex-lookup-other')), null);
 });
 
-test('getLaunchConfigForCodexThread: unknown thread uuid → null', () => {
+test('getLaunchConfigForCodexThread: unknown thread uuid → null', async () => {
   // Reuses the codex agent seeded by the first test above (cwd 'codex-lookup-a',
   // still in the registry) — proves a real candidate surviving the cwd/tool
   // prefilter still yields null when its actual thread doesn't match.
-  assert.equal(getLaunchConfigForCodexThread('99999999-9999-9999-9999-999999999999', join(scratch, 'codex-lookup-a')), null);
+  assert.equal(await getLaunchConfigForCodexThread('99999999-9999-9999-9999-999999999999', join(scratch, 'codex-lookup-a')), null);
 });
 
-test('getLaunchConfigForCodexThread: registered claude agent in the same cwd, queried by its own id → null (codex-agent filter holds)', () => {
+test('getLaunchConfigForCodexThread: registered claude agent in the same cwd, queried by its own id → null (codex-agent filter holds)', async () => {
   const claudeId = '90000000-aaaa-bbbb-cccc-900000000003';
   const lookupCwd = join(scratch, 'codex-lookup-c');
   const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
@@ -650,13 +737,13 @@ test('getLaunchConfigForCodexThread: registered claude agent in the same cwd, qu
     recentRepos: [],
   }));
   init();
-  assert.equal(getLaunchConfigForCodexThread(claudeId, lookupCwd), null);
+  assert.equal(await getLaunchConfigForCodexThread(claudeId, lookupCwd), null);
 });
 
-test('getLaunchConfigForCodexThread: falsy args → null, no throw', () => {
-  assert.equal(getLaunchConfigForCodexThread(null, scratch), null);
-  assert.equal(getLaunchConfigForCodexThread('some-id', null), null);
-  assert.equal(getLaunchConfigForCodexThread('', ''), null);
+test('getLaunchConfigForCodexThread: falsy args → null, no throw', async () => {
+  assert.equal(await getLaunchConfigForCodexThread(null, scratch), null);
+  assert.equal(await getLaunchConfigForCodexThread('some-id', null), null);
+  assert.equal(await getLaunchConfigForCodexThread('', ''), null);
 });
 
 // ---- codexThreadFor ----
@@ -664,7 +751,7 @@ test('getLaunchConfigForCodexThread: falsy args → null, no throw', () => {
 // id (a randomUUID create() minted) to the codex-minted thread uuid its
 // transcript is actually filed under — same discovery buildSpawn uses to
 // resume it (time-based cwd+createdAt match against the rollout).
-test('codexThreadFor: registered codex agent + matching rollout → thread uuid', () => {
+test('codexThreadFor: registered codex agent + matching rollout → thread uuid', async () => {
   const agentId = '90000000-aaaa-bbbb-cccc-900000000004';
   const threadId = 'dddddddd-eeee-ffff-0000-333333333333';
   const lookupCwd = join(scratch, 'codex-lookup-d');
@@ -676,7 +763,7 @@ test('codexThreadFor: registered codex agent + matching rollout → thread uuid'
     recentRepos: [],
   }));
   init();
-  assert.equal(codexThreadFor(agentId), threadId);
+  assert.equal(await codexThreadFor(agentId), threadId);
 });
 
 // ---- writeAtomic (server/background.test.mjs:214 flake regression) ------------
@@ -685,7 +772,7 @@ test('codexThreadFor: registered codex agent + matching rollout → thread uuid'
 // times, then delegates to the real renameSync — writeAtomic must retry past
 // them and still land the file, but must not retry (or swallow) an unrelated
 // error code.
-test('writeAtomic: retries past transient EPERM, then succeeds', () => {
+test('writeAtomic: retries past transient EPERM, then succeeds', async () => {
   const file = join(scratch, 'retry-ok.json');
   let calls = 0;
   const fakeRename = (...args) => {
@@ -697,7 +784,7 @@ test('writeAtomic: retries past transient EPERM, then succeeds', () => {
   assert.equal(calls, 3);
   assert.equal(readFileSync(file, 'utf8'), 'hello');
 });
-test('writeAtomic: non-retryable error rethrows immediately, no retry', () => {
+test('writeAtomic: non-retryable error rethrows immediately, no retry', async () => {
   const file = join(scratch, 'retry-fatal.json');
   let calls = 0;
   const fakeRename = () => { calls++; const e = new Error('gone'); e.code = 'ENOENT'; throw e; };
@@ -708,7 +795,7 @@ test('writeAtomic: non-retryable error rethrows immediately, no retry', () => {
 // resolveWt: Store App-Execution-Alias path takes priority, PATH is the
 // fallback for winget/choco/scoop/portable installs, and a missing
 // LOCALAPPDATA must not probe a relative path.
-test('resolveWt: Store alias path present → returned, PATH not consulted', () => {
+test('resolveWt: Store alias path present → returned, PATH not consulted', async () => {
   const localAppData = mkdtempSync(join(tmpdir(), 'sing-wt-alias-'));
   const aliasDir = join(localAppData, 'Microsoft', 'WindowsApps');
   mkdirSync(aliasDir, { recursive: true });
@@ -718,18 +805,18 @@ test('resolveWt: Store alias path present → returned, PATH not consulted', () 
   const wt = resolveWt({ LOCALAPPDATA: localAppData, PATH: 'Z:\\nonexistent' });
   assert.equal(wt, alias);
 });
-test('resolveWt: no alias, wt.exe on PATH (winget/scoop-style install) → PATH hit returned', () => {
+test('resolveWt: no alias, wt.exe on PATH (winget/scoop-style install) → PATH hit returned', async () => {
   const pathDir = mkdtempSync(join(tmpdir(), 'sing-wt-path-'));
   writeFileSync(join(pathDir, 'wt.exe'), '');
   chmodSync(join(pathDir, 'wt.exe'), 0o755);
   const wt = resolveWt({ LOCALAPPDATA: join(tmpdir(), 'sing-wt-no-such-dir'), PATH: `Z:\\nonexistent;${pathDir}` });
   assert.equal(wt, join(pathDir, 'wt.exe'));
 });
-test('resolveWt: neither alias nor PATH has it → null', () => {
+test('resolveWt: neither alias nor PATH has it → null', async () => {
   const wt = resolveWt({ LOCALAPPDATA: join(tmpdir(), 'sing-wt-no-such-dir'), PATH: 'Z:\\nonexistent' });
   assert.equal(wt, null);
 });
-test('resolveWt: missing LOCALAPPDATA → skips the alias probe (no relative-path lookup), still checks PATH', () => {
+test('resolveWt: missing LOCALAPPDATA → skips the alias probe (no relative-path lookup), still checks PATH', async () => {
   const pathDir = mkdtempSync(join(tmpdir(), 'sing-wt-path2-'));
   writeFileSync(join(pathDir, 'wt.exe'), '');
   chmodSync(join(pathDir, 'wt.exe'), 0o755);

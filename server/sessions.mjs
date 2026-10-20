@@ -11,7 +11,7 @@ import { StringDecoder } from 'node:string_decoder';
 import { join, resolve, sep, normalize, basename, relative } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd } from './agents.mjs';
-import { claudeIdToAlias } from './models.mjs';
+import { getModelRoute } from './models.mjs';
 import { getModels } from './model-store.mjs';
 import { STATE_DIR } from './app-dir.mjs';
 import { CODEX_HOME } from './usage.mjs';
@@ -26,9 +26,9 @@ const DEFAULT_ROOT = join(homedir(), '.claude', 'projects');
 // Two entries sharing a base (glm-5.3:cloud + glm-5.3:local) decline to guess.
 // No match → pass through
 // (free-text model, a future preset, or a claude alias/id unchanged).
-function restoreOllamaTag(model) {
+async function restoreOllamaTag(model) {
   if (!model || model.includes(':')) return model;
-  const hits = getModels().models.filter((m) => m.group === 'ollama' && m.id.split(':')[0] === model);
+  const hits = (await getModels()).models.filter((m) => m.group === 'ollama' && m.id.split(':')[0] === model);
   return hits.length === 1 ? hits[0].id : model;
 }
 const PEEK_BYTES = 65536;     // list only peeks the head — full MB reads are deferred to open
@@ -670,7 +670,8 @@ export async function readSession(project, id, root, source = 'claude', file) {
       }
     }
   }
-  return { ok: true, meta: { cwd, title, turns, firstTs, lastTs, model: restoreOllamaTag(claudeIdToAlias(lastModel)) }, messages };
+  const alias = (await getModelRoute(lastModel, null)).claudeAlias;
+  return { ok: true, meta: { cwd, title, turns, firstTs, lastTs, model: await restoreOllamaTag(alias) }, messages };
 }
 
 // sessionText: flatten a session into a compact transcript for LLM context.

@@ -21,7 +21,7 @@ import { getRulesRoots, setRulesRoots, readRuleFile, createRuleWriteHandler, cre
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
 import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
 import { getWikiRoot, setWikiRoot, resolveRoot, isWikiPath } from './wiki.mjs';
-import { createRustBackend, createWikiGraphHandler } from './rust-backend.mjs';
+import { createRustBackend, createWikiGraphHandler, createModelsHandlers } from './rust-backend.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
@@ -41,7 +41,7 @@ import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteH
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { initWindowAnchor, snapshotWindowAnchor, pokeProvider } from './window-anchor.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
-import { getModels, setModels, restoreDefaults } from './model-store.mjs';
+import { setModelsBackend } from './model-store.mjs';
 import { getModelPricesPath, putModelPrices } from './model-prices.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -123,6 +123,8 @@ const app = Fastify({
 });
 const rustBackend = createRustBackend();
 setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
+setModelsBackend(rustBackend); // model-store.mjs dispatches catalogue and routing calls on the shared child
+const modelHandlers = createModelsHandlers(rustBackend, join(reg.STATE_DIR, 'models.json'), app.log);
 app.addHook('onClose', async () => rustBackend.stop());
 
 // Safety net: the daemon hosts live PTY agents — an unhandled rejection must be
@@ -457,18 +459,14 @@ app.get('/procs', async () => ({ procs: await scanClaude() }));
 // ALL entries including disabled ones — Settings needs to render them; the
 // picker filters on `enabled`. Free-text in the UI — these are suggestions; any
 // typed value is passed through verbatim.
-app.get('/models', async () => getModels());
+app.get('/models', modelHandlers.get);
 
 // Whole-document replace (add / remove / edit / reorder / enable / default all
 // go through this one route, like PUT /keys). Validation lives in the store.
-app.put('/models', async (req, reply) => {
-  const r = setModels(req.body);
-  if (!r.ok) reply.code(400);
-  return r;
-});
+app.put('/models', modelHandlers.set);
 
 // Re-add any shipped default the user deleted; keeps their additions and edits.
-app.post('/models/restore-defaults', async () => ({ ok: true, state: restoreDefaults() }));
+app.post('/models/restore-defaults', modelHandlers.restore);
 
 // harness-usage-report price overrides (Settings > Models > Prices). Reads
 // and writes the skill's own pricing.json manual override directly — see model-prices.mjs.
@@ -554,7 +552,7 @@ app.post('/restart', async (req, reply) => {
 app.post('/session/external', async (req, reply) => {
   const id = req.body?.id;
   if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
-  const r = reg.externalLaunch(id);
+  const r = await reg.externalLaunch(id);
   if (!r.ok) return reply.code(400).send(r);
   try {
     // r.launcher is an absolute path (agents.mjs resolves the wt.exe alias
@@ -655,7 +653,7 @@ app.put('/hooks/file', async (req, reply) => {
 // agent (curl) as well as UI drags.
 app.get('/tasks', async () => snapshotTasks());
 app.post('/tasks', async (req, reply) => {
-  try { return { ok: true, task: createTask(req.body || {}) }; }
+  try { return { ok: true, task: await createTask(req.body || {}) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/tasks/:id/status', async (req, reply) => {
@@ -687,7 +685,7 @@ app.delete('/crons/:id', async (req, reply) => {
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/crons/:id/run', async (req, reply) => {
-  try { return { ok: true, cron: runCron(req.params.id) }; }
+  try { return { ok: true, cron: await runCron(req.params.id) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 
@@ -907,7 +905,7 @@ app.get('/transcripts', async (req) => ({ sessions: await listSessions({ cap: Nu
 app.get('/transcripts/codex-thread', async (req, reply) => {
   const id = req.query?.id;
   if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
-  const threadId = reg.codexThreadFor(id);
+  const threadId = await reg.codexThreadFor(id);
   if (!threadId) return reply.code(404).send({ ok: false, error: 'not found' });
   return { ok: true, threadId };
 });
@@ -920,7 +918,7 @@ app.get('/transcript', async (req, reply) => {
     // merge them in here for the Resume prefill when the id is a known agent.
     // For codex threads, the registry lookup is by (thread uuid + cwd), not agent id.
     const lc = source === 'codex'
-      ? reg.getLaunchConfigForCodexThread(id, r.meta?.cwd)
+      ? await reg.getLaunchConfigForCodexThread(id, r.meta?.cwd)
       : reg.getLaunchConfig(id);
     if (lc?.scopes?.length) r.meta.scopes = lc.scopes;
   }

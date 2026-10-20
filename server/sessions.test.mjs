@@ -4,7 +4,7 @@
 // FS-persisted sessions root. Fixtures follow the agents.test.mjs pattern:
 // write under the real ~/.claude/projects, clean up in a finally.
 // Run: npm test  (node --test server/)
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import fsPromises, { open } from 'node:fs/promises';
@@ -19,6 +19,11 @@ import { mkdtempSync } from 'node:fs';
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 process.env.CODEX_HOME = join(tmpdir(), 'codex-nonexistent-' + Date.now());
 const CODEX_HOME = process.env.CODEX_HOME;
+const modelStore = await import('./model-store.mjs');
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+after(async () => { await modelBackend.stop(); rmSync(process.env.SINGULARITY_HOME, { recursive: true, force: true }); });
 const { readSession, sessionText, searchSessions, listSessions, getSessionsRoot, setSessionsRoot, resolveRoot } = await import('./sessions.mjs');
 
 const PROJECTS = join(homedir(), '.claude', 'projects');

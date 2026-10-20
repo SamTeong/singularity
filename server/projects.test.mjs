@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readdirSync, chmodSync, readFileSync, realpathSync } from 'node:fs';
@@ -19,9 +19,14 @@ process.env.CLAUDE_BIN = process.env.SINGULARITY_HOME;
 delete process.env.OLLAMA_BIN;
 delete process.env.CODEX_BIN;
 const { list, add, remove, reorder, gitStatus, gitOp, summary, has } = await import('./projects.mjs');
-const { getModels, setModels } = await import('./model-store.mjs');
-const DEFAULT_SUMMARISER = getModels().summariserModel;
-function setSummariser(id) { setModels({ ...getModels(), summariserModel: id }); }
+const store = await import('./model-store.mjs');
+const { getModels, setModels } = store;
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+store.setModelsBackend(modelBackend);
+after(async () => modelBackend.stop());
+const DEFAULT_SUMMARISER = (await getModels()).summariserModel;
+async function setSummariser(id) { return setModels({ ...(await getModels()), summariserModel: id }); }
 
 const PROJECTS_FILE = join(process.env.SINGULARITY_HOME, 'state', 'projects.json');
 
@@ -197,40 +202,40 @@ test('summary: no summariser configured, upstream present -> deterministic, scop
   writeFileSync(join(repo, 'f.txt'), 'unpushed change');
   execFileSync('git', ['-C', repo, 'commit', '-q', '-am', 'second commit']);
 
-  setSummariser('');
+  await setSummariser('');
   try {
     const r = await summary(repo);
     assert.equal(r.scope, 'unpushed');
     assert.deepEqual(r.committed, ['second commit']); // only the unpushed one, not 'init'
     assert.equal(r.source, 'deterministic');
     assert.equal(r.llm.reason, 'no-summariser');
-  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  } finally { await setSummariser(DEFAULT_SUMMARISER); }
   rmRepo(bare);
   rmRepo(repo);
 });
 
 test('summary: no upstream -> scope recent, deterministic commit subjects, empty uncommitted', async () => {
   const repo = initRepo(); // one commit 'init', no upstream, clean tree
-  setSummariser('');
+  await setSummariser('');
   try {
     const r = await summary(repo);
     assert.equal(r.scope, 'recent');
     assert.deepEqual(r.committed, ['init']);
     assert.deepEqual(r.uncommitted, []);
-  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  } finally { await setSummariser(DEFAULT_SUMMARISER); }
   rmRepo(repo);
 });
 
 test('summary: deterministic uncommitted = --stat file lines plus the trailing summary line', async () => {
   const repo = initRepo();
   writeFileSync(join(repo, 'f.txt'), 'changed');
-  setSummariser('');
+  await setSummariser('');
   try {
     const r = await summary(repo);
     assert.equal(r.uncommitted.length, 2);
     assert.match(r.uncommitted[0], /f\.txt/);
     assert.match(r.uncommitted[1], /file changed/);
-  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  } finally { await setSummariser(DEFAULT_SUMMARISER); }
   rmRepo(repo);
 });
 
@@ -238,17 +243,17 @@ test('summary: untracked-only tree is not reported clean', async () => {
   const repo = initRepo();
   writeFileSync(join(repo, 'new1.txt'), 'x');
   writeFileSync(join(repo, 'new2.txt'), 'y');
-  setSummariser('');
+  await setSummariser('');
   try {
     const r = await summary(repo);
     assert.deepEqual(r.uncommitted, ['2 untracked files']);
-  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  } finally { await setSummariser(DEFAULT_SUMMARISER); }
   rmRepo(repo);
 });
 
 test('summary: LLM path parses JSON and caches; a cache hit skips the stub; a changed tree busts the cache', async () => {
   const repo = initRepo();
-  setSummariser('opus'); // claude-group entry; CLAUDE_BIN existsSync-true, never actually run
+  await setSummariser('opus'); // claude-group entry; CLAUDE_BIN existsSync-true, never actually run
   let calls = 0;
   const callSummariser = async () => { calls++; return { text: JSON.stringify({ committed: ['did x'], uncommitted: ['changed y'] }) }; };
   try {
@@ -267,7 +272,7 @@ test('summary: LLM path parses JSON and caches; a cache hit skips the stub; a ch
     const r3 = await summary(repo, { callSummariser });
     assert.equal(calls, 2, 'a changed working tree busts the cache');
     assert.equal(r3.cached, undefined);
-  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  } finally { await setSummariser(DEFAULT_SUMMARISER); }
   rmRepo(repo);
 });
 
@@ -279,7 +284,7 @@ test('summary: pushing (HEAD unchanged) busts the LLM cache', async () => {
   execFileSync('git', ['-C', repo, 'push', '-q', '-u', 'origin', 'main']);
   writeFileSync(join(repo, 'f.txt'), 'unpushed change');
   execFileSync('git', ['-C', repo, 'commit', '-q', '-am', 'second commit']);
-  setSummariser('opus');
+  await setSummariser('opus');
   let calls = 0;
   const callSummariser = async () => { calls++; return { text: JSON.stringify({ committed: calls === 1 ? ['did x'] : [], uncommitted: [] }) }; };
   try {
@@ -288,19 +293,19 @@ test('summary: pushing (HEAD unchanged) busts the LLM cache', async () => {
     const r = await summary(repo, { callSummariser });
     assert.equal(calls, 2, 'push changes the unpushed set, so the cache misses');
     assert.deepEqual(r.committed, []);
-  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  } finally { await setSummariser(DEFAULT_SUMMARISER); }
   rmRepo(bare);
   rmRepo(repo);
 });
 
 test('summary: bad LLM JSON falls back to deterministic', async () => {
   const repo = initRepo();
-  setSummariser('opus');
+  await setSummariser('opus');
   try {
     const r = await summary(repo, { callSummariser: async () => ({ text: 'not json' }) });
     assert.equal(r.source, 'deterministic');
     assert.equal(r.llm.ok, false);
     assert.deepEqual(r.committed, ['init']);
-  } finally { setSummariser(DEFAULT_SUMMARISER); }
+  } finally { await setSummariser(DEFAULT_SUMMARISER); }
   rmRepo(repo);
 });

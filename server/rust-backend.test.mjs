@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { createModelPricesHandler, createRustBackend, createWikiGraphHandler } from './rust-backend.mjs';
+import { createModelPricesHandler, createModelsHandlers, createRustBackend, createWikiGraphHandler } from './rust-backend.mjs';
 
 async function wiki(root, name, files) {
   for (const [rel, text] of Object.entries(files)) {
@@ -115,6 +115,54 @@ test('Rust pricing read normalizes the explicit path without writing and maps tr
   assert.equal(response.statusCode, 500);
   assert.deepEqual(response.json(), { error: 'model prices backend unavailable' });
   await unavailable.close();
+});
+
+test('Models HTTP handlers use the fixed server path and preserve catalogue contracts', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'singularity-rust-models-'));
+  const path = join(root, 'state', 'models.json');
+  const attacker = join(root, 'attacker.json');
+  const backend = createRustBackend();
+  const app = Fastify();
+  const handlers = createModelsHandlers(backend, path, app.log);
+  app.get('/api/models', handlers.get);
+  app.put('/api/models', handlers.set);
+  app.post('/api/models/restore-defaults', handlers.restore);
+  try {
+    await backend.start();
+    const first = await app.inject({ url: `/api/models?path=${encodeURIComponent(attacker)}` });
+    assert.equal(first.statusCode, 200);
+    assert.ok(Array.isArray(first.json().models));
+    assert.equal(first.json().models.length, 21);
+    await assert.rejects(access(attacker));
+
+    const invalid = await app.inject({ method: 'PUT', url: '/api/models', payload: { path: attacker, models: 'invalid' } });
+    assert.equal(invalid.statusCode, 400);
+    assert.deepEqual(invalid.json(), { ok: false, error: 'models must be an array' });
+    await assert.rejects(access(attacker));
+
+    const custom = { models: [{ id: 'gpt-5.4', group: 'codex', label: 'Custom', enabled: true }], defaultModel: 'gpt-5.4', summariserModel: 'gpt-5.4' };
+    const written = await app.inject({ method: 'PUT', url: '/api/models', payload: { path: attacker, ...custom } });
+    assert.equal(written.statusCode, 200);
+    assert.deepEqual(written.json(), { ok: true, state: custom });
+    await assert.rejects(access(attacker));
+    const restored = await app.inject({ method: 'POST', url: '/api/models/restore-defaults' });
+    assert.equal(restored.statusCode, 200);
+    assert.equal(restored.json().ok, true);
+    assert.deepEqual(restored.json().state.models.slice(0, 1), custom.models);
+  } finally {
+    await backend.stop();
+    await app.close();
+    await rm(root, { recursive: true, force: true });
+  }
+
+  const stopped = createModelsHandlers(backend, path, app.log);
+  const failedApp = Fastify();
+  failedApp.get('/api/models', stopped.get);
+  try {
+    const failure = await failedApp.inject({ url: '/api/models' });
+    assert.equal(failure.statusCode, 500);
+    assert.deepEqual(failure.json(), { error: 'models backend unavailable' });
+  } finally { await failedApp.close(); }
 });
 
 test('Rust stdio bridge keeps concurrent graph requests matched and preserves route payloads', async () => {

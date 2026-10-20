@@ -110,13 +110,13 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     send(ws, { t: 'background', ...snapshotBackground() });
     send(ws, { t: 'window-anchor', anchor: snapshotWindowAnchor() });
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
       let m;
       try { m = JSON.parse(raw.toString()); } catch { return; }
       switch (m.t) {
         case 'create': {
           try {
-            const na = reg.create({ cwd: m.cwd, title: m.title, model: m.model, scopes: m.scopes, sessionId: m.sessionId, tool: m.tool });
+            const na = await reg.create({ cwd: m.cwd, title: m.title, model: m.model, scopes: m.scopes, sessionId: m.sessionId, tool: m.tool });
             ws.attached.add(na.id);
             send(ws, { t: 'attached', id: na.id });
           } catch (e) {
@@ -127,7 +127,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
         }
         case 'fork': {
           try {
-            const na = reg.fork(m.id, m.title);
+            const na = await reg.fork(m.id, m.title);
             ws.attached.add(na.id);
             send(ws, { t: 'attached', id: na.id });
           } catch (e) {
@@ -138,7 +138,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
         }
         case 'reattach': {
           try {
-            const a = reg.reattach(m.id);
+            const a = await reg.reattach(m.id);
             if (a) { ws.attached.add(a.id); send(ws, { t: 'attached', id: a.id }); }
           } catch (e) {
             send(ws, { t: 'error', msg: `reattach failed: ${e.message}` });

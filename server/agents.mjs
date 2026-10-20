@@ -6,7 +6,7 @@ import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { isClaudeModel, isCodexModel, validateToolModel } from './models.mjs';
+import { getModelRoute } from './models.mjs';
 import { findCodexThread, codexThreadExists, normPath } from './codex-thread.mjs';
 import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
 export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR };
@@ -154,11 +154,11 @@ export function getLaunchConfig(id) {
 // own Windows case/separator handling. Same ceiling as getLaunchConfig: wire()'s
 // onExit deletes an exited agent's registry entry, so scopes are only
 // recoverable while the entry still exists (live or detached).
-export function getLaunchConfigForCodexThread(threadId, cwd) {
+export async function getLaunchConfigForCodexThread(threadId, cwd) {
   if (!threadId || !cwd) return null;
   const wantCwd = normPath(cwd);
   for (const a of agents.values()) {
-    if (!(a.tool === 'codex' || isCodexModel(a.model))) continue;
+    if (!(a.tool === 'codex' || (await getModelRoute(a.model, a.tool)).isCodexModel)) continue;
     if (!a.cwd || normPath(a.cwd) !== wantCwd) continue; // normPath resolve()s — a cwd-less record on disk would throw
     if (findCodexThread(a.cwd, a.createdAt) === threadId) return getLaunchConfig(a.id);
   }
@@ -171,9 +171,10 @@ export function getLaunchConfigForCodexThread(threadId, cwd) {
 // not the registry id, to open a codex session. Same discovery order buildSpawn
 // uses: time-based (cwd+createdAt) else the id itself when it's already a known
 // codex thread for this cwd (agents created from the Transcripts view).
-export function codexThreadFor(id) {
+export async function codexThreadFor(id) {
   const a = agents.get(id);
   if (!a) return null;
+  a.modelRoute = await getModelRoute(a.model, a.tool);
   return rememberCodexThread(a);
 }
 // Discovery is by cwd + start-time window (codex has no --session-id to pin an
@@ -181,8 +182,8 @@ export function codexThreadFor(id) {
 // in the same cwd later on — see findCodexThread's ceiling. Pin the first
 // answer onto the agent (persisted) and reuse it from then on: restart/reattach
 // resume the SAME thread they were live on, and repeat lookups skip the walk.
-function rememberCodexThread(a) {
-  if (!(a.tool === 'codex' || isCodexModel(a.model)) || !a.cwd) return null;
+function rememberCodexThread(a, modelRoute = a.modelRoute) {
+  if (!(a.tool === 'codex' || modelRoute?.isCodexModel) || !a.cwd) return null;
   if (a.threadId) return a.threadId;
   const found = (a.createdAt && findCodexThread(a.cwd, a.createdAt))
     || (codexThreadExists(a.id, a.cwd) ? a.id : null);
@@ -248,7 +249,7 @@ function wire(a) {
     if (a.respawnAfterExit) {
       const cfg = a.respawnAfterExit;
       agents.delete(a.id); // drop the dead entry so create() takes the fresh-spawn-over-existing-log path
-      setImmediate(() => { try { create({ sessionId: a.id, ...cfg }); } catch (e) { logger?.warn({ err: e.message }, 'respawn failed'); } });
+      setImmediate(() => { void create({ sessionId: a.id, ...cfg }).catch((e) => logger?.warn({ err: e.message }, 'respawn failed')); });
       persist();
       emitList();
       return;
@@ -262,19 +263,25 @@ function wire(a) {
       return;
     }
     setStatus(a, 'exited'); // status event for crons auto-kill; tracks activeMs
-    const isCodex = a.tool === 'codex' || isCodexModel(a.model);
-    const codexThreadId = isCodex ? rememberCodexThread(a) : null;
-    const resumeCmd = isCodex
-      ? (codexThreadId ? `codex resume ${codexThreadId}` : 'codex')
-      : isClaudeModel(a.model)
-        ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
-        : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
-    bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume: ${resumeCmd}\x1b[0m\r\n` });
-    // Drop the session from the list rather than leaving a dead 'exited' row;
-    // resume still works off the on-disk session log (new session, same id).
-    agents.delete(a.id);
-    persist();
-    emitList();
+    void getModelRoute(a.model, a.tool).then((modelRoute) => {
+      const isCodex = a.tool === 'codex' || modelRoute.isCodexModel;
+      const codexThreadId = isCodex ? rememberCodexThread(a, modelRoute) : null;
+      const resumeCmd = isCodex
+        ? (codexThreadId ? `codex resume ${codexThreadId}` : 'codex')
+        : modelRoute.isClaudeModel
+          ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
+          : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
+      bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume: ${resumeCmd}\x1b[0m\r\n` });
+    }).catch((error) => {
+      logger?.warn({ err: error.message, id: a.id }, 'could not build agent resume command');
+      bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume command unavailable\x1b[0m\r\n` });
+    }).finally(() => {
+      // Drop the session from the list rather than leaving a dead 'exited' row;
+      // resume still works off the on-disk session log (new session, same id).
+      agents.delete(a.id);
+      persist();
+      emitList();
+    }).catch((error) => logger?.warn({ err: error.message, id: a.id }, 'agent exit cleanup failed'));
   });
 }
 
@@ -323,14 +330,15 @@ function codexScopeConfig(scopes) {
 // Shared by create + reattach so reattach keeps the model + scopes.
 // `prompt` (initial user message) is only sent on a fresh spawn — passing it
 // with --resume would re-submit it as a new message on every reattach.
-export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId: pinned }, prompt) {
+export async function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId: pinned }, prompt, route) {
+  route ??= await getModelRoute(model, tool);
   // ponytail: codex has no --session-id/--name flag to pin an id at spawn (it
   // mints its own uuid) and no Task tool. The uuid is recovered after the fact
   // from its rollout file (findCodexThread) so reattach can `codex resume
   // <uuid>` instead of losing history. Model-driven: a gpt-* model routes here
   // even with tool='claude'. The tool toggle still covers the empty-model case
   // (codex's own default via config.toml).
-  if (tool === 'codex' || isCodexModel(model)) {
+  if (tool === 'codex' || route.isCodexModel) {
     if (!CODEX_BIN) throw new Error('codex not found (CODEX_BIN not set in .env)');
     // Prefer time-based discovery (reattach/respawn, createdAt set); else fall
     // back to the caller-supplied id when it's itself a known codex thread for
@@ -364,7 +372,7 @@ export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extr
   if (permissionMode) claudeArgs.push('--permission-mode', permissionMode);
   claudeArgs.push(...(extraArgs || []));
   if (prompt && !resuming) claudeArgs.push(prompt);
-  if (isClaudeModel(model)) {
+  if (route.isClaudeModel) {
     // claude bin; --model only for a specific (non-default) alias or full id.
     if (model && model !== 'claude') claudeArgs.push('--model', model);
     return { bin: CLAUDE_BIN, args: claudeArgs };
@@ -414,7 +422,7 @@ export function untildify(p) {
 }
 
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt, threadId, runId }) {
+export async function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt, threadId, runId, modelRoute }) {
   cwd = untildify(cwd);
   const id = (sessionId && sessionId.trim()) || randomUUID();
   const existing = agents.get(id);
@@ -427,7 +435,8 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
     return reattach(id);
   }
   if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
-  validateToolModel(tool, model);
+  modelRoute ??= await getModelRoute(model, tool);
+  if (modelRoute.toolModelError) throw new Error(modelRoute.toolModelError);
   const displayName = title || id.slice(0, 8);
   // `createdAt` is only set by respawn() (theme toggle), where the codex thread
   // must be recovered so history survives. A genuinely fresh create must NOT
@@ -435,10 +444,10 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
   // window it would resume an unrelated codex session the user started in the
   // same cwd by hand.
   const spawnedAt = createdAt || Date.now();
-  const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId }, prompt);
+  const { bin, args } = await buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId }, prompt, modelRoute);
   ensureTrusted(cwd);
   const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: spawnEnv(mock), useConptyDll: true });
-  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, runId, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
+  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, runId, modelRoute, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -475,15 +484,16 @@ function sessionLogExists(cwd, id) {
 // else spawn fresh with the same `--session-id` (a session that never had a
 // turn has no log to resume — resuming it errors "No conversation found").
 // buildSpawn keeps the agent's model + skill-scopes from create time.
-export function reattach(id) {
+export async function reattach(id) {
   const a = agents.get(id);
   if (!a || a.proc) return a;
-  const { bin, args } = buildSpawn(a);
+  const modelRoute = await getModelRoute(a.model, a.tool);
+  const { bin, args } = await buildSpawn(a, undefined, modelRoute);
   ensureTrusted(a.cwd);
   const proc = spawnPty(bin, args, {
     cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock), useConptyDll: true,
   });
-  a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting';
+  a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting'; a.modelRoute = modelRoute;
   wire(a);
   persist();
   emitList();
@@ -513,10 +523,11 @@ export function resolveWt(env = process.env) {
 // detached-spawn (keeps node:child_process out of this module). Reuses
 // buildSpawn so the resume argv matches in-app reattach (scopes, model,
 // permission-mode, ollama wrapper). `platform` param only for testability.
-export function externalLaunch(id, platform = process.platform, env = process.env) {
+export async function externalLaunch(id, platform = process.platform, env = process.env) {
   const a = agents.get(id);
   if (!a) return { ok: false, error: 'no such session' };
-  const { bin, args } = buildSpawn(a);
+  const modelRoute = await getModelRoute(a.model, a.tool);
+  const { bin, args } = await buildSpawn(a, undefined, modelRoute);
   if (platform === 'win32') {
     // wt.exe is a Windows App Execution Alias: a reparse-point stub that
     // existsSync/statSync reports as EACCES (that's the "flaky" lookup the
@@ -540,7 +551,7 @@ export function externalLaunch(id, platform = process.platform, env = process.en
 // id so claude's own history doesn't collide with the source) into a new
 // session log, then create()s a fresh agent over it — no log yet → create()
 // falls back to a fresh --session-id spawn, i.e. a config-only copy.
-export function fork(srcId, title) {
+export async function fork(srcId, title) {
   const src = agents.get(srcId);
   if (!src) throw new Error('source not found');
   const newId = randomUUID();
@@ -551,7 +562,7 @@ export function fork(srcId, title) {
     writeFileSync(join(dir, `${newId}.jsonl`), content);
   }
   // no source log → nothing written → create() spawns fresh with --session-id (fallback = copy)
-  return create({ cwd: src.cwd, title, model: src.model, scopes: src.scopes, sessionId: newId, tool: src.tool });
+  return await create({ cwd: src.cwd, title, model: src.model, scopes: src.scopes, sessionId: newId, tool: src.tool });
 }
 
 export function input(id, data) { agents.get(id)?.proc?.write(data); }

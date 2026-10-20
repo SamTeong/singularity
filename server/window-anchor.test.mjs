@@ -16,7 +16,11 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-window-anchor-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
 mkdirSync(join(scratch, 'singularity', 'state'), { recursive: true });
-after(() => rmSync(scratch, { recursive: true, force: true }));
+const modelStore = await import('./model-store.mjs');
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+after(async () => { await modelBackend.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
 const { initWindowAnchor, snapshotWindowAnchor, pokeProvider } = await import('./window-anchor.mjs');
 const { bus, STATE_DIR, CLAUDE_BIN, CODEX_BIN } = await import('./agents.mjs');

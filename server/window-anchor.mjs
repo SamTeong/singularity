@@ -128,9 +128,9 @@ function shouldPoke(group, windowEnd) {
 
 // Resolve the anchor model through the model store: null when the SEED alias
 // moved to another group (repurposed id) — never poke a wrong-group model.
-function anchorModel(group) {
+async function anchorModel(group) {
   const id = CHEAP_MODELS[group];
-  const g = groupFor(id);
+  const g = await groupFor(id);
   return g === null || g === group ? id : null;
 }
 
@@ -167,7 +167,7 @@ async function poke(group, windowEnd, { trigger = 'automatic', force = false, pr
   let modelId = null;
   let usage = null;
   try {
-    modelId = anchorModel(group);
+    modelId = await anchorModel(group);
     if (!modelId) throw new Error(`no '${CHEAP_MODELS[group]}' model in the ${group} group`);
     const result = await runOneShotPrompt(group, modelId, 'ok', {
       timeoutMs: POKE_TIMEOUT_MS, extraArgs: EFFORT_ARGS[group] ?? [], spawn, includeMetadata: true,

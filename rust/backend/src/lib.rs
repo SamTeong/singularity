@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 pub mod model_prices;
+pub mod models;
 pub mod plans;
 pub mod rules;
 pub mod skills;

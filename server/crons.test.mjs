@@ -12,7 +12,11 @@ import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-crons-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
-after(() => rmSync(scratch, { recursive: true, force: true }));
+const modelStore = await import('./model-store.mjs');
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+after(async () => { await modelBackend.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
 const { createCron, updateCron, deleteCron, runCron, snapshotCrons } = await import('./crons.mjs');
 const { bus, STATE_DIR } = await import('./agents.mjs');
@@ -138,11 +142,11 @@ test('snapshotCrons: ISO nextFire for an enabled job, null after disabling via u
   deleteCron(job.id);
 });
 
-test('runCron: durable pending intent blocks a duplicate after an unknown spawn outcome', () => {
+test('runCron: durable pending intent blocks a duplicate after an unknown spawn outcome', async () => {
   const job = createCron({ title: 'pending', cronExpr: '0 0 * * *', description: 'p', cwd: 'C:\\x', model: 'not-a-model', enabled: false });
-  assert.throws(() => runCron(job.id), /working directory does not exist/);
+  await assert.rejects(runCron(job.id), /working directory does not exist/);
   assert.ok(findJob(job.id).pendingRunId, 'intent survives the failed post-intent spawn path');
-  assert.throws(() => runCron(job.id), /previous run still active/);
+  await assert.rejects(runCron(job.id), /previous run still active/);
 });
 
 test('scheduled tick: begin-run disk failure is contained without spawning or publishing an in-memory error', async () => {
