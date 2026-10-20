@@ -850,6 +850,19 @@ test('Rust one-shot bridge execs a binary and maps stdout, failure, and timeout'
   }
 });
 
+test('Rust usage auth bridge keeps platform and attempted-auth outcomes private', async () => {
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    assert.equal(await backend.usageKeychain('win32', process.execPath), null);
+    assert.equal(await backend.usageKeychain('darwin', process.execPath), null);
+    assert.deepEqual(await backend.usageAuthStatus(process.execPath, 10_000), { attempted: true });
+    assert.deepEqual(await backend.usageAuthStatus(join(tmpdir(), 'missing-usage-auth-cli'), 10_000), { attempted: true });
+  } finally {
+    await backend.stop();
+  }
+});
+
 test('Rust procs kill bridge terminates a scratch child and rejects bad pids', async () => {
   const backend = createRustBackend();
   try {

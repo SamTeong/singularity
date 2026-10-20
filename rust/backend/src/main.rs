@@ -58,6 +58,8 @@ struct Request {
     env: Value,
     #[serde(default)]
     pid: Value,
+    #[serde(default)]
+    platform: Value,
 }
 
 fn default_op() -> String {
@@ -196,6 +198,18 @@ fn main() -> io::Result<()> {
                 request.max_buffer.as_f64(),
                 Some(&request.env),
             ),
+            Ok(request) if request.op == "usage_keychain" => {
+                singularity_backend::usage_auth::keychain(
+                    request.platform.as_str(),
+                    request.bin.as_str(),
+                )
+            }
+            Ok(request) if request.op == "usage_auth_status" => {
+                singularity_backend::usage_auth::auth_status(
+                    request.bin.as_str(),
+                    request.timeout_ms.as_f64().unwrap_or(10_000.0),
+                )
+            }
             Ok(request) if request.op == "procs_kill" => {
                 singularity_backend::procs::kill(&request.pid)
             }

@@ -17,7 +17,6 @@
 import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, readdirSync, statSync, openSync, readSync, closeSync, linkSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
 import { fetchExternal, retryAfterMs } from './external-fetch.mjs';
@@ -26,6 +25,12 @@ import { newestSnapshotArchive } from './usage-history.mjs';
 const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
 export const OLLAMA_PROFILE_DIR = join(CACHE_DIR, 'pw-ollama-profile');
 const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
+let usageAuthBackend = null;
+let usageAuthPlatform = process.platform;
+export function setUsageAuthBackend(backend, platform = process.platform) {
+  usageAuthBackend = backend;
+  usageAuthPlatform = platform;
+}
 export const PW_STEALTH = {
   channel: 'msedge',
   args: ['--disable-blink-features=AutomationControlled'],
@@ -521,14 +526,12 @@ export function normalizeClaude(raw, plan) {
 //
 // macOS note: Claude Code stores its OAuth token in the Keychain under the
 // "Claude Code-credentials" generic password, not in .credentials.json. When
-// the file is absent or has no accessToken on darwin, fall back to
+// the file is absent on darwin, fall back to
 // `security find-generic-password -s "Claude Code-credentials" -w`, which
-// prints the same JSON blob to stdout. This stays synchronous because
-// chat.mjs calls claudeOauthToken() without await — `security` is a fast
-// local lookup so the brief event-loop block is acceptable.
-export function claudeOauthToken() {
+// prints the same JSON blob to stdout. Lookup crosses the private Rust bridge.
+export async function claudeOauthToken() {
   const fromFile = readCredentialsFile();
-  const oauth = fromFile ?? readKeychainOnDarwin();
+  const oauth = fromFile ?? await readKeychainOnDarwin();
   if (!oauth?.accessToken) return null;
   if (oauth.expiresAt && Number(oauth.expiresAt) < Date.now()) return null;
   return { accessToken: oauth.accessToken, expiresAt: oauth.expiresAt ?? null, subscriptionType: oauth.subscriptionType ?? null };
@@ -538,8 +541,8 @@ export function claudeOauthToken() {
 // without storing or returning either OAuth token. Prefer the longer-lived
 // refresh token so ordinary access-token renewal does not usually look like a
 // switch; rotation is safe to treat conservatively as one.
-function claudeCredentialFingerprint() {
-  const oauth = readCredentialsFile() ?? readKeychainOnDarwin();
+async function claudeCredentialFingerprint() {
+  const oauth = readCredentialsFile() ?? await readKeychainOnDarwin();
   const secretMaterial = oauth && (oauth.refreshToken || oauth.accessToken);
   return secretMaterial ? createHash('sha256').update(secretMaterial).digest('hex') : null;
 }
@@ -552,15 +555,10 @@ function readCredentialsFile() {
 
 // darwin-only Keychain fallback. Returns the parsed claudeAiOauth object or
 // null on any failure (no entry, user denies, parse fail) — never throws.
-function readKeychainOnDarwin() {
-  if (process.platform !== 'darwin') return null;
-  try {
-    const stdout = execFileSync(
-      'security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    );
-    return JSON.parse(stdout).claudeAiOauth;
-  } catch { return null; }
+async function readKeychainOnDarwin() {
+  if (usageAuthPlatform !== 'darwin' || !usageAuthBackend) return null;
+  try { return await usageAuthBackend.usageKeychain(usageAuthPlatform); }
+  catch { return null; }
 }
 
 // ---- Keeping the OAuth token alive ------------------------------------------
@@ -630,10 +628,9 @@ export async function refreshClaudeAuth() {
   lastAuthRefresh = Date.now();
   if (await refreshOauthGrant()) return true;
   const bin = process.env.CLAUDE_BIN;
-  if (!bin) return false;
-  return new Promise((resolve) => {
-    execFile(bin, ['auth', 'status'], { timeout: REQ_TIMEOUT_MS, windowsHide: true }, () => resolve(true));
-  });
+  if (!bin || !usageAuthBackend) return false;
+  try { await usageAuthBackend.usageAuthStatus(bin, REQ_TIMEOUT_MS); } catch {}
+  return true;
 }
 
 // The two free tiers, in freshness order. Tier 1: whoever fetched last — us or
@@ -670,9 +667,9 @@ export function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
 }
 
 async function fetchClaude(retry = true, prev = cache.claude.data, force = false) {
-  let oauth = claudeOauthToken();
+  let oauth = await claudeOauthToken();
   // Expired token → renew it here rather than making the user open a session.
-  if (!oauth && retry && await refreshClaudeAuth()) oauth = claudeOauthToken();
+  if (!oauth && retry && await refreshClaudeAuth()) oauth = await claudeOauthToken();
   if (!oauth) {
     // Distinguish no-creds vs expired for the UI's auth prompt.
     let err;
@@ -860,8 +857,9 @@ function codexAccountFingerprint() {
 // "Couldn't load this: rate-limited" on an empty card. Re-read the local tiers
 // with the gate widened to the 5h window, keep whichever of that / the cached
 // reading is newer, and hand it back marked stale.
-function claudeStaleFloor(slot, failure) {
-  const widened = readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType, CLAUDE_STALE_MAX_MS);
+async function claudeStaleFloor(slot, failure) {
+  const oauth = await claudeOauthToken();
+  const widened = readClaudeLocal(slot.data, oauth?.subscriptionType, CLAUDE_STALE_MAX_MS);
   const lastGood = slot.data?.ok ? slot.data : null;
   const best = widened && !(lastGood?.fetchedAt > widened.fetchedAt) ? widened : lastGood;
   return best ? preserveClaudeStale(best, failure) : null;
@@ -888,7 +886,7 @@ async function pull(src, fetcher, force) {
   // network leg. Only a genuinely newer reading counts; an unchanged one falls
   // through so the gates decide whether the network leg is worth it.
   if (src === 'claude') {
-    claudeFingerprint = claudeCredentialFingerprint();
+    claudeFingerprint = await claudeCredentialFingerprint();
     // The cache is in-memory only (no cross-restart persistence), so a still-null
     // slot.credentialFingerprint means "never established this process," not
     // "switched accounts." Only a fingerprint that actually moved counts.
@@ -900,7 +898,8 @@ async function pull(src, fetcher, force) {
       slot.data = null;
       slot.at = 0;
     }
-    const local = claudeAccountChanged ? null : readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType);
+    const oauth = await claudeOauthToken();
+    const local = claudeAccountChanged ? null : readClaudeLocal(slot.data, oauth?.subscriptionType);
     // Complete local windows answer the card without spending the endpoint's
     // account quota. Partial windows reach the existing network floor, with the
     // local reading retained as fallback if that request fails.
@@ -951,7 +950,7 @@ async function pull(src, fetcher, force) {
   // local tiers can fill it.
   if (src === 'claude' && claudeGate.blocked(claudeFingerprint) && slot.data) {
     if (slot.data.ok) return slot.data;
-    slot.data = claudeStaleFloor(slot, slot.data) ?? slot.data;
+    slot.data = await claudeStaleFloor(slot, slot.data) ?? slot.data;
     return slot.data;
   }
   // The network floor: once every NETWORK_FLOOR_MS per source at most for an
@@ -973,7 +972,7 @@ async function pull(src, fetcher, force) {
   // ollama/claude never set one, so they still default to "now".
   const data = { fetchedAt: new Date().toISOString(), ...fetched };
   if (src === 'claude' && data.ok) {
-    slot['credentialFingerprint'] = claudeCredentialFingerprint();
+    slot['credentialFingerprint'] = await claudeCredentialFingerprint();
     claudeGate.clear();
   }
   if (src === 'codex' && data.ok) {
@@ -998,7 +997,7 @@ async function pull(src, fetcher, force) {
   // Claude uses the same last-good semantics. This keeps the meters visible while
   // making a failed pull unambiguously stale instead of green.
   if (src === 'claude' && !data.ok) {
-    const floor = claudeStaleFloor(slot, data);
+    const floor = await claudeStaleFloor(slot, data);
     if (floor) {
       slot.data = floor;
       return slot.data;

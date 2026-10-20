@@ -316,6 +316,15 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       throw error;
     },
 
+    async usageKeychain(platform, bin = 'security') {
+      const payload = await request({ op: 'usage_keychain', platform, bin });
+      return payload?.ok ? payload.oauth ?? null : null;
+    },
+
+    async usageAuthStatus(bin, timeout) {
+      return request({ op: 'usage_auth_status', bin, timeout_ms: timeout });
+    },
+
     // Guarded PID kill for procs.mjs: { ok } | { ok:false, error } — Node keeps
     // the scan/classification/daemon-denial/TOCTOU decisions.
     procsKill(pid) {

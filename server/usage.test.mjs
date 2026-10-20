@@ -28,7 +28,7 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readCodexSnapshot, readCostStateLimits, rotateClaudeHistory, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readCodexSnapshot, readCostStateLimits, rotateClaudeHistory, claudeOauthToken, setUsageAuthBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
 
 const OLLAMA_HTML = `
   <span class="capitalize">pro</span>
@@ -498,10 +498,61 @@ test('refreshOauthGrant: dead refresh token → no request', async () => {
   assert.equal(await refreshOauthGrant(), false);
 });
 
+test('claudeOauthToken: file precedence, async Keychain fallback, and quiet failures', async () => {
+  let calls = 0;
+  setUsageAuthBackend({ usageKeychain: async () => {
+    calls++;
+    return { accessToken: 'synthetic-access', refreshToken: 'synthetic-refresh', expiresAt: Date.now() + 60_000, subscriptionType: 'pro' };
+  } }, 'darwin');
+  writeCreds({ accessToken: 'file-access', expiresAt: Date.now() + 60_000, subscriptionType: 'file-plan' });
+  const fromFile = await claudeOauthToken();
+  assert.equal(fromFile.accessToken !== undefined, true);
+  assert.equal(fromFile.subscriptionType, 'file-plan');
+  assert.equal(calls, 0);
+
+  writeCreds({ subscriptionType: 'missing-access' });
+  assert.equal(await claudeOauthToken(), null);
+  assert.equal(calls, 0, 'a present credential object retains file precedence without an access token');
+
+  rmSync(join(claudeCfg, '.credentials.json'), { force: true });
+  const fromKeychain = await claudeOauthToken();
+  assert.equal(fromKeychain.accessToken, 'synthetic-access');
+  assert.equal(fromKeychain.subscriptionType, 'pro');
+  assert.equal(calls, 1);
+
+  const logged = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args) => logged.push(args.join(' '));
+  console.warn = (...args) => logged.push(args.join(' '));
+  try {
+    setUsageAuthBackend({ usageKeychain: async () => {
+      throw new Error('synthetic process failure synthetic-access-secret synthetic-refresh-secret');
+    } }, 'darwin');
+    assert.equal(await claudeOauthToken(), null);
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+  assert.equal(logged.join('\n').includes('synthetic-access-secret'), false);
+  assert.equal(logged.join('\n').includes('synthetic-refresh-secret'), false);
+  setUsageAuthBackend({ usageKeychain: async () => { calls++; return {}; } }, 'win32');
+  assert.equal(await claudeOauthToken(), null);
+  assert.equal(calls, 1);
+  setUsageAuthBackend(null);
+});
+
 test('refreshClaudeAuth: falls back to the CLI once, then throttles', async () => {
-  process.env.CLAUDE_BIN = process.execPath; // real exe; `auth status` args just make it exit
+  process.env.CLAUDE_BIN = process.execPath;
+  writeCreds({});
+  const calls = [];
+  setUsageAuthBackend({ usageAuthStatus: async (...args) => { calls.push(args); throw new Error('synthetic spawn failure'); } }, 'win32');
   assert.equal(await refreshClaudeAuth(), true);
   assert.equal(await refreshClaudeAuth(), false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], process.execPath);
+  assert.equal(calls[0][1], 10_000);
+  setUsageAuthBackend(null);
 });
 
 // ---- getUsage({ sources }) — the per-card refresh allowlist ----------------------

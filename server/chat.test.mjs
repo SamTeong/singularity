@@ -11,13 +11,10 @@ import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-chat-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
-// claudeOauthToken() (usage.mjs) reads <homedir>/.claude/.credentials.json, not
-// SINGULARITY_HOME — redirect homedir() (checked live, not at import time) at a
-// fake one so streamChat sees a token without touching real creds.
-process.env.HOME = scratch;
-process.env.USERPROFILE = scratch;
-mkdirSync(join(scratch, '.claude'), { recursive: true });
-writeFileSync(join(scratch, '.claude', '.credentials.json'), JSON.stringify({
+// claudeOauthToken() reads CLAUDE_CONFIG_DIR, so use a scratch credentials file.
+process.env.CLAUDE_CONFIG_DIR = join(scratch, 'claude-config');
+mkdirSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
+writeFileSync(join(process.env.CLAUDE_CONFIG_DIR, '.credentials.json'), JSON.stringify({
   claudeAiOauth: { accessToken: 'fake-token', expiresAt: Date.now() + 3600_000 },
 }));
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
@@ -48,8 +45,10 @@ test('streamChat opts out of retries for the Messages POST', async () => {
   const originalFetch = globalThis.fetch;
   const events = [];
   let calls = 0;
-  globalThis.fetch = async () => {
+  let authorization;
+  globalThis.fetch = async (_url, options) => {
     calls += 1;
+    authorization = options.headers.authorization;
     return { status: 503, ok: false, json: async () => ({}) };
   };
   try {
@@ -58,6 +57,7 @@ test('streamChat opts out of retries for the Messages POST', async () => {
     globalThis.fetch = originalFetch;
   }
   assert.equal(calls, 1);
+  assert.equal(authorization?.endsWith('fake-token'), true);
   assert.deepEqual(events, [{ t: 'chat:error', chatId: 'retry-test', msg: 'HTTP 503' }]);
 });
 

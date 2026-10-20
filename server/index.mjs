@@ -33,7 +33,7 @@ import { getConfigState, setConfigState } from './config-state.mjs';
 import { getKeys, setKeys } from './keys.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
-import { getUsage, connectOllamaUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
+import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend, CODEX_HOME } from './usage.mjs';
 import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
 import { createModelPricesHandler } from './rust-backend.mjs';
 import { getStatus } from './status.mjs';
@@ -123,6 +123,7 @@ const app = Fastify({
   },
 });
 const rustBackend = createRustBackend();
+setUsageAuthBackend(rustBackend);
 setExplorerBackend(rustBackend);
 setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, window-anchor pokes)
 setProcsBackend(rustBackend); // procs.mjs process scan execs + guarded PID kill

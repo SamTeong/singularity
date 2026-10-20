@@ -18,6 +18,7 @@ pub mod plans;
 pub mod procs;
 pub mod rules;
 pub mod skills;
+pub mod usage_auth;
 pub mod wiki_read;
 
 const FILE_CAP: usize = 2000;
