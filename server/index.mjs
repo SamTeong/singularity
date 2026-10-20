@@ -31,7 +31,7 @@ import { setOneShotBackend } from './one-shot.mjs';
 import { readSkillsDir, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } from './skills.mjs';
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, setExplorerBackend } from './explorer.mjs';
 import { getConfigState, setConfigState } from './config-state.mjs';
-import { getKeys, setKeys } from './keys.mjs';
+import { getKeys, setKeys, setKeysBackend } from './keys.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend, CODEX_HOME } from './usage.mjs';
@@ -140,6 +140,7 @@ setProcsBackend(rustBackend); // procs.mjs process scan execs + guarded PID kill
 setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
 setModelsBackend(rustBackend); // model-store.mjs dispatches catalogue and routing calls on the shared child
 setTasksBackend(rustBackend);
+setKeysBackend(rustBackend);
 const modelHandlers = createModelsHandlers(rustBackend, join(reg.STATE_DIR, 'models.json'), app.log);
 app.addHook('onClose', async () => rustBackend.stop());
 
@@ -480,7 +481,7 @@ app.put('/fs/state', async (req) => {
     return { ok: false, error: error.message };
   }
 });
-app.get('/keys', async () => ({ keys: getKeys() }));
+app.get('/keys', async () => ({ keys: await getKeys() }));
 app.put('/keys', async (req) => setKeys(req.body));
 
 // Task manager: list claude.exe + this repo's dev-tooling processes, kill a stale/orphaned one by PID.

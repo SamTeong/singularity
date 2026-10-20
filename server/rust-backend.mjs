@@ -165,6 +165,14 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'models_get', path });
     },
 
+    keysGet(path) {
+      return request({ op: 'keys_get', path });
+    },
+
+    keysSet(path, patch) {
+      return request({ op: 'keys_set', path, patch });
+    },
+
     modelsSet(path, state) {
       return request({ op: 'models_set', path, state });
     },

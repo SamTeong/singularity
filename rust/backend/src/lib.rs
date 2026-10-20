@@ -11,6 +11,7 @@ pub mod detached;
 pub mod explorer_fs;
 pub mod explorer_state;
 pub mod hooks_write;
+pub mod keys;
 pub mod memory;
 pub mod model_prices;
 pub mod models;

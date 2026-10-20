@@ -41,6 +41,8 @@ struct Request {
     #[serde(default)]
     state: Value,
     #[serde(default)]
+    patch: Value,
+    #[serde(default)]
     from: Value,
     #[serde(default)]
     to: Value,
@@ -262,6 +264,12 @@ fn main() -> io::Result<()> {
             ),
             Ok(request) if request.op == "models_summariser" => {
                 singularity_backend::models::summariser(request.path.as_str().unwrap_or(""))
+            }
+            Ok(request) if request.op == "keys_get" => {
+                singularity_backend::keys::get(request.path.as_str().unwrap_or(""))
+            }
+            Ok(request) if request.op == "keys_set" => {
+                singularity_backend::keys::set(request.path.as_str().unwrap_or(""), &request.patch)
             }
             Ok(request) if request.op == "window_anchor_load" => {
                 singularity_backend::window_anchor::load(request.path.as_str().unwrap_or(""))
