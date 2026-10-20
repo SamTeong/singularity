@@ -10,13 +10,14 @@ import { join } from 'node:path';
 // (see model-store.test.mjs for the SINGULARITY_HOME dynamic-import pattern).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-modelprices-'));
 process.env.USAGE_REPORT_STATE = mkdtempSync(join(tmpdir(), 'sing-usageskill-'));
-const { getModelPrices, putModelPrices } = await import('./model-prices.mjs');
+const { getModelPricesForUsageHistory, getModelPricesPath, putModelPrices } = await import('./model-prices.mjs');
 
 const PRICING_JSON = join(process.env.USAGE_REPORT_STATE, 'pricing.json');
 const longKey = new Array(66).join('x'); // 65 chars
 
 test('get before any pricing.json exists returns empty-defaults doc', () => {
-  assert.deepEqual(getModelPrices(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+  assert.deepEqual(getModelPricesForUsageHistory(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+  assert.equal(getModelPricesPath(), PRICING_JSON);
 });
 
 test('valid put roundtrips and writes pricing.json', () => {
@@ -28,7 +29,7 @@ test('valid put roundtrips and writes pricing.json', () => {
   };
   const r = putModelPrices(doc);
   assert.deepEqual(r, doc);
-  assert.deepEqual(getModelPrices(), doc);
+  assert.deepEqual(getModelPricesForUsageHistory(), doc);
 
   const written = JSON.parse(readFileSync(PRICING_JSON, 'utf8'));
   assert.deepEqual(written, doc);
@@ -42,7 +43,7 @@ test('base key order is preserved (match order)', () => {
     default_key: '',
   };
   putModelPrices(doc);
-  assert.deepEqual(Object.keys(getModelPrices().base), ['sonnet', 'opus']);
+  assert.deepEqual(Object.keys(getModelPricesForUsageHistory().base), ['sonnet', 'opus']);
 });
 
 test('put rejects malformed documents without touching pricing.json', () => {
@@ -66,12 +67,12 @@ test('put rejects malformed documents without touching pricing.json', () => {
 
 test('bare (pre-layered) pricing.json: get reads it as base with normalized defaults', () => {
   writeFileSync(PRICING_JSON, JSON.stringify({ opus: [99, 99, 99, 99] }, null, 2));
-  assert.deepEqual(getModelPrices(), { base: { opus: [99, 99, 99, 99] }, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+  assert.deepEqual(getModelPricesForUsageHistory(), { base: { opus: [99, 99, 99, 99] }, above_200k: {}, long_context_threshold: 200000, default_key: '' });
 });
 
 test('unreadable/invalid pricing.json degrades to empty-defaults doc on get', () => {
   writeFileSync(PRICING_JSON, '{not json');
-  assert.deepEqual(getModelPrices(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+  assert.deepEqual(getModelPricesForUsageHistory(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
 
   const doc = { base: { sonnet: [3, 15, 0.3, 3.75] }, above_200k: {}, long_context_threshold: 200000, default_key: '' };
   const r = putModelPrices(doc);

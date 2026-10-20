@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { access, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 import Fastify from 'fastify';
-import { createRustBackend, createWikiGraphHandler } from './rust-backend.mjs';
+import { createModelPricesHandler, createRustBackend, createWikiGraphHandler } from './rust-backend.mjs';
 
 async function wiki(root, name, files) {
   for (const [rel, text] of Object.entries(files)) {
@@ -32,6 +32,88 @@ test('Rust bridge rejects startup when a spawned child exits before ready', asyn
 
   await assert.rejects(backend.start(), /exited before ready \(7\)/);
   await backend.stop();
+});
+
+test('Rust pricing read normalizes the explicit path without writing and maps transport failure', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'singularity-rust-prices-'));
+  process.env.SINGULARITY_HOME = root;
+  process.env.USAGE_REPORT_STATE = join(root, 'selected');
+  const { getModelPricesForUsageHistory, getModelPricesPath } = await import('./model-prices.mjs');
+  const missing = join(root, 'selected', 'pricing.json');
+  assert.equal(getModelPricesPath(), missing);
+  const backend = createRustBackend();
+  const app = Fastify();
+  app.get('/api/models/prices', createModelPricesHandler(backend, missing, app.log));
+  try {
+    await backend.start();
+    const absent = await app.inject({ url: '/api/models/prices' });
+    assert.equal(absent.statusCode, 200);
+    assert.deepEqual(absent.json(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+    await assert.rejects(access(missing));
+
+    await mkdir(join(root, 'selected'), { recursive: true });
+    const raw = '{"base":{"z":[1,2,3,4],"a":[5,6,7,8]},"above_200k":null,"long_context_threshold":12.0,"default_key":7}';
+    await writeFile(missing, raw);
+    const layered = await app.inject({ url: '/api/models/prices' });
+    assert.equal(layered.statusCode, 200);
+    assert.deepEqual(layered.json(), {
+      base: { z: [1, 2, 3, 4], a: [5, 6, 7, 8] }, above_200k: {}, long_context_threshold: 12, default_key: '',
+    });
+    assert.deepEqual(Object.keys(layered.json().base), ['z', 'a']);
+    assert.equal(await readFile(missing, 'utf8'), raw);
+    assert.deepEqual(layered.json(), getModelPricesForUsageHistory());
+
+    const numericKeys = '{"base":{"1":[1,2,3,4],"z":[1,2,3,4],"0":[1,2,3,4],"01":[1,2,3,4],"4294967295":[1,2,3,4],"4294967294":[1,2,3,4],"__proto__":[1,2,3,4],"z":[5,6,7,8]},"long_context_threshold":1e30}';
+    await writeFile(missing, numericKeys);
+    const ordered = await app.inject({ url: '/api/models/prices' });
+    const orderedDoc = ordered.json();
+    assert.deepEqual(orderedDoc, getModelPricesForUsageHistory());
+    assert.deepEqual(Object.keys(orderedDoc.base), ['0', '1', '4294967294', 'z', '01', '4294967295', '__proto__']);
+    assert.equal(Object.hasOwn(orderedDoc.base, '__proto__'), true);
+    assert.equal(orderedDoc.long_context_threshold, 1e30);
+
+    const overflowCases = [
+      '{"base":{"model":[1,2,3,4]},"ignored":1e400}',
+      '{"base":{"model":[1e400,2,3,4]},"ignored":{"nested":[1e400,{"deep":1e400}]},"long_context_threshold":1e400,"default_key":1e400}',
+    ];
+    for (const overflowCase of overflowCases) {
+      await writeFile(missing, overflowCase);
+      assert.deepEqual(await backend.modelPrices(missing), getModelPricesForUsageHistory());
+    }
+    const overflowReferenced = await backend.modelPrices(missing);
+    assert.equal(overflowReferenced.base.model[0], Infinity);
+    assert.equal(overflowReferenced.long_context_threshold, 200000);
+    assert.equal(overflowReferenced.default_key, '');
+
+    const duplicateBase = '{"base":{"z":[1,2,3,4],"a":[1,2,3,4]},"base":{"c":[1,2,3,4],"b":[1,2,3,4]}}';
+    await writeFile(missing, duplicateBase);
+    const duplicateBaseDoc = await backend.modelPrices(missing);
+    assert.deepEqual(duplicateBaseDoc, getModelPricesForUsageHistory());
+    assert.deepEqual(Object.keys(duplicateBaseDoc.base), ['c', 'b']);
+
+    const legacy = join(root, 'legacy.json');
+    await writeFile(legacy, '{"opus":[99,99,99,99]}');
+    const legacyDoc = await backend.modelPrices(legacy);
+    assert.deepEqual(legacyDoc, { base: { opus: [99, 99, 99, 99] }, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+
+    await writeFile(missing, '{not json');
+    const corrupt = await app.inject({ url: '/api/models/prices' });
+    assert.deepEqual(corrupt.json(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+    const unreadable = await backend.modelPrices(join(root, 'selected'));
+    assert.deepEqual(unreadable, { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+  } finally {
+    await backend.stop();
+    await app.close();
+    await rm(root, { recursive: true, force: true });
+  }
+
+  const stopped = createRustBackend();
+  const unavailable = Fastify();
+  unavailable.get('/api/models/prices', createModelPricesHandler(stopped, missing, unavailable.log));
+  const response = await unavailable.inject({ url: '/api/models/prices' });
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(response.json(), { error: 'model prices backend unavailable' });
+  await unavailable.close();
 });
 
 test('Rust stdio bridge keeps concurrent graph requests matched and preserves route payloads', async () => {

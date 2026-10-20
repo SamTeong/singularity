@@ -13,7 +13,7 @@ import { readFileSync, readdirSync, statSync, openSync, readSync, closeSync } fr
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { USAGE_SKILL_STATE } from './app-dir.mjs';
-import { getModelPrices } from './model-prices.mjs';
+import { getModelPricesForUsageHistory } from './model-prices.mjs';
 
 export const HISTORY_PROVIDERS = ['claude', 'codex', 'ollama'];
 // 7d = each provider's weekly account % only, no per-session split (TASK-10 option A).
@@ -349,7 +349,7 @@ function sessionEvents(provider, since, now, costPoints, files) {
 // else default_key. Rates are $/MTok.
 // shortcut: ignores the above_200k long-context tier; only the split ratio matters here.
 function pricer() {
-  const { base, default_key: def } = getModelPrices();
+  const { base, default_key: def } = getModelPricesForUsageHistory();
   const keys = Object.keys(base);
   return (model, tok) => {
     const rate = base[keys.find((k) => model.includes(k)) ?? def];
@@ -437,7 +437,7 @@ export function getUsageHistory(provider, now = Date.now(), windowKey = '5h') {
   const start = resetsAt - WINDOW_MS[windowKey];
   const files = !estimated ? [] : provider === 'claude' ? claudeFiles(start) : codexFiles(start, now);
   const logs = !estimated ? [] : provider === 'claude' ? [`${COST_HISTORY}.1`, COST_HISTORY] : [CODEX_USAGE];
-  const sig = JSON.stringify([resetsAt, totalsSig, statSig(logs), files, estimated && getModelPrices()]);
+  const sig = JSON.stringify([resetsAt, totalsSig, statSig(logs), files, estimated && getModelPricesForUsageHistory()]);
   const key = `${provider}:${windowKey}`;
   if (docs.get(key)?.sig === sig) return docs.get(key).doc;
   const doc = buildDoc(provider, windowKey, rows, resetsAt, start, estimated, now, files);

@@ -146,6 +146,21 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'plan_session', path: dir, sid });
     },
 
+    modelPrices(path) {
+      return request({ op: 'model_prices', path }).then((payload) => {
+        if (payload.error) throw new Error(payload.error);
+        const { pricing, base_keys: keys = [] } = payload;
+        const source = pricing.base;
+        const base = {};
+        const copyKey = (key) => Object.defineProperty(base, key, {
+          value: source[key], enumerable: true, configurable: true, writable: true,
+        });
+        for (const key of keys) if (Object.hasOwn(source, key)) copyKey(key);
+        for (const key of Object.keys(source)) if (!Object.hasOwn(base, key)) copyKey(key);
+        return { ...pricing, base };
+      });
+    },
+
     ruleReference(path, root) {
       return request({ op: 'rule_reference', path, root });
     },
@@ -201,6 +216,17 @@ export function createWikiGraphHandler(backend, logger) {
       logger.error({ err: error.message }, 'Rust wiki graph backend failed');
       reply.code(500);
       return { error: 'wiki graph backend unavailable' };
+    }
+  };
+}
+
+export function createModelPricesHandler(backend, path, logger) {
+  return async (req, reply) => {
+    try { return await backend.modelPrices(path); }
+    catch (error) {
+      logger.error({ err: error.message }, 'Rust model prices backend failed');
+      reply.code(500);
+      return { error: 'model prices backend unavailable' };
     }
   };
 }

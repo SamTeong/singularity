@@ -34,6 +34,7 @@ import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
 import { getUsage, connectOllamaUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
 import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
+import { createModelPricesHandler } from './rust-backend.mjs';
 import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
@@ -41,7 +42,7 @@ import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron }
 import { initWindowAnchor, snapshotWindowAnchor, pokeProvider } from './window-anchor.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
 import { getModels, setModels, restoreDefaults } from './model-store.mjs';
-import { getModelPrices, putModelPrices } from './model-prices.mjs';
+import { getModelPricesPath, putModelPrices } from './model-prices.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -471,7 +472,7 @@ app.post('/models/restore-defaults', async () => ({ ok: true, state: restoreDefa
 
 // harness-usage-report price overrides (Settings > Models > Prices). Reads
 // and writes the skill's own pricing.json manual override directly — see model-prices.mjs.
-app.get('/models/prices', async () => getModelPrices());
+app.get('/models/prices', createModelPricesHandler(rustBackend, getModelPricesPath(), app.log));
 app.put('/models/prices', async (req, reply) => {
   try {
     return putModelPrices(req.body);

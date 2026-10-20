@@ -94,6 +94,10 @@ fn main() -> io::Result<()> {
                     _ => serde_json::json!({ "ok": false, "error": "not found" }),
                 }
             }
+            Ok(request) if request.op == "model_prices" => match request.path.as_str() {
+                Some(path) => singularity_backend::model_prices::read_pricing(path),
+                None => serde_json::json!({ "error": "pricing path missing" }),
+            },
             Ok(request) => singularity_backend::wiki_read::dispatch(
                 &request.op,
                 &request.root,

@@ -5,10 +5,10 @@
 // [input, output, cacheRead, cacheWrite] $/MTok). `base`'s key order is match
 // order (first key that's a substring of the model id wins).
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { resolve } from 'node:path';
 import { USAGE_SKILL_STATE } from './app-dir.mjs';
 
-const PRICING_JSON = join(USAGE_SKILL_STATE, 'pricing.json');
+const PRICING_JSON = resolve(USAGE_SKILL_STATE, 'pricing.json');
 const MAX_KEY = 64;
 const DEFAULT_THRESHOLD = 200000;
 
@@ -71,9 +71,14 @@ function normalize(doc) {
   };
 }
 
-// GET /api/models/prices
-export function getModelPrices() {
+// Kept for synchronous cost estimation in usage-history.mjs. The public GET
+// route reads and normalizes the same file through the Rust backend.
+export function getModelPricesForUsageHistory() {
   return normalize(readPricingJson());
+}
+
+export function getModelPricesPath() {
+  return PRICING_JSON;
 }
 
 // PUT /api/models/prices — validate + write pricing.json (2-space JSON) in
