@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-chat-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
+process.env.CODEX_HOME = join(scratch, 'codex');
 // claudeOauthToken() reads CLAUDE_CONFIG_DIR, so use a scratch credentials file.
 process.env.CLAUDE_CONFIG_DIR = join(scratch, 'claude-config');
 mkdirSync(process.env.CLAUDE_CONFIG_DIR, { recursive: true });
@@ -20,6 +21,16 @@ writeFileSync(join(process.env.CLAUDE_CONFIG_DIR, '.credentials.json'), JSON.str
 after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
 const { consumeStream, streamChat } = await import('./chat.mjs');
+const { createRustBackend } = await import('./rust-backend.mjs');
+const transcriptBackend = createRustBackend();
+await transcriptBackend.start();
+const { setTranscriptBackend } = await import('./sessions.mjs');
+const modelStore = await import('./model-store.mjs');
+const transcriptRoot = join(scratch, 'claude-projects');
+mkdirSync(transcriptRoot, { recursive: true });
+setTranscriptBackend(transcriptBackend);
+modelStore.setModelsBackend(transcriptBackend);
+after(async () => { await transcriptBackend.stop(); });
 
 // Queues each entry as one reader.read() resolution (string entries are
 // UTF-8 encoded), then returns {done:true} forever.
@@ -52,7 +63,7 @@ test('streamChat opts out of retries for the Messages POST', async () => {
     return { status: 503, ok: false, json: async () => ({}) };
   };
   try {
-    await streamChat({ chatId: 'retry-test', question: 'hello' }, (event) => events.push(event));
+    await streamChat({ chatId: 'retry-test', question: 'hello', root: transcriptRoot }, (event) => events.push(event));
   } finally {
     globalThis.fetch = originalFetch;
   }

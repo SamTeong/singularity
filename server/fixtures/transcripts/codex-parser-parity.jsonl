@@ -1,0 +1,8 @@
+{"type":"session_meta","timestamp":"2026-10-21T05:00:00Z","payload":{"id":"parity-thread","cwd":"C:\\repo\ud83d"}}
+{"type":"response_item","timestamp":"2026-10-21T05:00:01Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"<environment_context>\ud83d hidden</environment_context>"},{"type":"input_text","text":"<recommended_plugins>\ud83d hidden</recommended_plugins>"}]}}
+{"type":"response_item","timestamp":"2026-10-21T05:00:02Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"same \ud83d"},{"type":"input_text","text":" prompt"}]}}
+{"type":"event_msg","timestamp":"2026-10-21T05:00:02Z","payload":{"type":"user_message","message":"same \ud83d prompt"}}
+{"type":"response_item","timestamp":"2026-10-21T05:00:03Z","payload":{"type":"function_call","name":"parity","arguments":{"10":"ten","2":"two","01":"leading","4294967295":"max","duplicate":"first","nested":{"b":1e20,"a":1e21,"six":1e-6,"seven":1e-7,"negative":-0,"large":9007199254740993},"escaped":"\ud83d","\ud83d":"surrogate key","duplicate":"last"}}}
+{"type":"response_item","timestamp":"2026-10-21T05:00:03Z","payload":{"type":"custom_tool_call","arguments":{"missing":"name \ud83d"}}}
+{"type":"response_item","timestamp":"2026-10-21T05:00:03Z","payload":{"type":"function_call","name":"tool\ud83d","arguments":{"escaped_name":"arguments \ud83d"}}}
+{"type":"response_item","timestamp":"2026-10-21T05:00:04Z","payload":{"type":"function_call_output","call_id":"parity","output":[{"type":"output_text","text":"array first "},{"type":"output_text","text":"array second \ude00"}],"unrelated":"\ud83d"}}

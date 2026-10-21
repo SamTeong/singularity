@@ -1,0 +1,2 @@
+{"type":"user","timestamp":"2026-10-21T03:00:00Z","message":{"content":[{"type":"text","text":"nested user \ud83d"},{"type":"tool_result","content":"tool result \ude00"}]}}
+{"type":"assistant","timestamp":"2026-10-21T03:00:01Z","message":{"content":[{"type":"text","text":"assistant text \ud83d"},{"type":"thinking","thinking":"assistant thinking \ude00"},{"type":"tool_use","name":"Read","input":{"query":"\ud83d"}}]}}

@@ -74,6 +74,8 @@ struct Request {
     platform: Value,
     #[serde(default)]
     record: Value,
+    #[serde(flatten)]
+    transcript: singularity_backend::transcript_bridge::TranscriptRequest,
 }
 
 fn default_op() -> String {
@@ -92,6 +94,8 @@ fn main() -> io::Result<()> {
         .expect("status runtime should start");
     let status = singularity_backend::status::StatusService::new();
     let shutting_down = Arc::new(AtomicBool::new(false));
+    let mut transcript_services =
+        singularity_backend::transcript_bridge::TranscriptServices::default();
     let stdin = io::stdin();
     write_line(&stdout, &serde_json::json!({ "ready": true }))?;
     for line in stdin.lock().lines() {
@@ -116,7 +120,22 @@ fn main() -> io::Result<()> {
             }
         }
         let id = parsed.as_ref().ok().and_then(|request| request.id.clone());
+        let mut raw_response = None;
         let response = match parsed {
+            Ok(request)
+                if matches!(
+                    request.op.as_str(),
+                    "transcript_root_get"
+                        | "transcript_root_set"
+                        | "transcripts_list"
+                        | "transcripts_read"
+                        | "transcripts_search"
+                        | "transcript_subagents"
+                ) =>
+            {
+                raw_response = Some(transcript_services.dispatch(&request.op, &request.transcript));
+                Value::Null
+            }
             Ok(request) if request.op == "sysstats_get" => {
                 serde_json::to_value(sysstats.snapshot())
                     .expect("sysstats serialization is infallible")
@@ -344,11 +363,15 @@ fn main() -> io::Result<()> {
             ),
             Err(_) => serde_json::json!({ "error": "bad request" }),
         };
-        let response = match id {
-            Some(id) => serde_json::json!({ "id": id, "response": response }),
-            None => response,
-        };
-        write_line(&stdout, &response)?;
+        if let Some(raw) = raw_response {
+            write_response_line(&stdout, id.as_ref(), raw)?;
+        } else {
+            let response = match id {
+                Some(id) => serde_json::json!({ "id": id, "response": response }),
+                None => response,
+            };
+            write_line(&stdout, &response)?;
+        }
     }
     begin_shutdown(&stdout, &shutting_down)?;
     sysstats.stop();
@@ -361,6 +384,34 @@ fn write_line<W: Write>(stdout: &Mutex<W>, value: &Value) -> io::Result<()> {
         .lock()
         .map_err(|_| io::Error::other("stdout writer poisoned"))?;
     write_value(&mut *stdout, value)
+}
+
+fn write_response_line<W: Write>(
+    stdout: &Mutex<W>,
+    id: Option<&Value>,
+    body: singularity_backend::transcript_bridge::ResponseBody,
+) -> io::Result<()> {
+    let mut stdout = stdout
+        .lock()
+        .map_err(|_| io::Error::other("stdout writer poisoned"))?;
+    match body {
+        singularity_backend::transcript_bridge::ResponseBody::Raw(raw) => match id {
+            Some(id) => serde_json::to_writer(
+                &mut *stdout,
+                &singularity_backend::transcript_bridge::RawEnvelope { id, response: &raw },
+            )?,
+            None => serde_json::to_writer(&mut *stdout, &raw)?,
+        },
+        singularity_backend::transcript_bridge::ResponseBody::Value(value) => {
+            let response = match id {
+                Some(id) => serde_json::json!({ "id": id, "response": value }),
+                None => value,
+            };
+            serde_json::to_writer(&mut *stdout, &response)?;
+        }
+    }
+    stdout.write_all(b"\n")?;
+    stdout.flush()
 }
 
 fn write_status_line<W: Write>(
@@ -432,5 +483,43 @@ mod status_shutdown_tests {
         assert!(!write_status_line(&stdout, &shutting_down, &reply).unwrap());
         assert_eq!(stdout.lock().unwrap().len(), bytes_after_shutdown);
         assert!(shutting_down.load(Ordering::Acquire));
+    }
+}
+
+#[cfg(test)]
+mod transcript_framing_tests {
+    use super::*;
+    use serde_json::value::RawValue;
+
+    #[test]
+    fn raw_transcript_body_keeps_correlated_envelope_and_newline_flush() {
+        let stdout = Mutex::new(Vec::<u8>::new());
+        let id = Value::String("transcript-1".into());
+        let raw = RawValue::from_string(r#"{"messages":[{"text":"\ud800"}]}"#.into()).unwrap();
+        write_response_line(
+            &stdout,
+            Some(&id),
+            singularity_backend::transcript_bridge::ResponseBody::Raw(raw),
+        )
+        .unwrap();
+        let output = stdout.into_inner().unwrap();
+        assert_eq!(output.last(), Some(&b'\n'));
+        assert_eq!(output.iter().filter(|byte| **byte == b'\n').count(), 1);
+        let line = std::str::from_utf8(&output).unwrap();
+        assert!(
+            line.contains(r#""id":"transcript-1","response":{"messages":[{"text":"\ud800"}]}"#)
+        );
+    }
+
+    #[test]
+    fn flat_transcript_request_fields_do_not_collide_with_legacy_root_and_query() {
+        let request: Request = serde_json::from_str(
+            r#"{"op":"transcripts_search","root":"wiki-root","q":"wiki-query","transcript_root":"claude-root","transcript_q_units":[55296]}"#,
+        )
+        .unwrap();
+        assert_eq!(request.root.as_str(), Some("wiki-root"));
+        assert_eq!(request.q.as_str(), Some("wiki-query"));
+        assert_eq!(request.transcript.root.as_deref(), Some("claude-root"));
+        assert_eq!(request.transcript.q_units.as_deref(), Some(&[0xd800][..]));
     }
 }

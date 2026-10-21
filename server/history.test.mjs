@@ -41,6 +41,8 @@ const { getModels, setModels } = store;
 const modelBackend = createRustBackend();
 await modelBackend.start();
 store.setModelsBackend(modelBackend);
+const { setTranscriptBackend } = await import('./sessions.mjs');
+setTranscriptBackend(modelBackend);
 after(async () => modelBackend.stop());
 const { readHistory, ensureHistory, regenerateDay, liveToday, scanDays, buildDigest, summarizeDay, localDay, declawedGuidance } = await import('./history.mjs');
 const DEFAULT_SUMMARISER = (await getModels()).summariserModel; // seed default ('deepseek-v4-flash:cloud', ollama)

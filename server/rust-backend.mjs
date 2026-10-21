@@ -183,6 +183,30 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'plan_session', path: dir, sid });
     },
 
+    transcriptRootGet(inputs) {
+      return request({ ...inputs, op: 'transcript_root_get' });
+    },
+
+    transcriptRootSet(inputs, root) {
+      return request({ ...inputs, op: 'transcript_root_set', transcript_root: root });
+    },
+
+    transcriptsList(inputs, options) {
+      return request({ ...inputs, ...options, op: 'transcripts_list' });
+    },
+
+    transcriptRead(inputs, options) {
+      return request({ ...inputs, ...options, op: 'transcripts_read' });
+    },
+
+    transcriptsSearch(inputs, options) {
+      return request({ ...inputs, ...options, op: 'transcripts_search' });
+    },
+
+    transcriptSubagents(inputs, options) {
+      return request({ ...inputs, ...options, op: 'transcript_subagents' });
+    },
+
     modelPrices(path) {
       return request({ op: 'model_prices', path }).then((payload) => {
         if (payload.error) throw new Error(payload.error);

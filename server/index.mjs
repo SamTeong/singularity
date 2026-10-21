@@ -25,7 +25,7 @@ import { createRustBackend, createWikiGraphHandler, createModelsHandlers } from 
 import { createRustPtyBackend } from './rust-pty-backend.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
-import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
+import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot, setTranscriptBackend } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
 import { setOneShotBackend } from './one-shot.mjs';
 import { readSkillsDir, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } from './skills.mjs';
@@ -44,6 +44,7 @@ import { initWindowAnchor, snapshotWindowAnchor, pokeProvider } from './window-a
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
 import { setModelsBackend } from './model-store.mjs';
 import { getModelPricesPath, putModelPrices } from './model-prices.mjs';
+import { registerTranscriptRoutes } from './transcript-routes.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -123,6 +124,7 @@ const app = Fastify({
   },
 });
 const rustBackend = createRustBackend();
+setTranscriptBackend(rustBackend);
 // portable-pty's Windows ConPTY loads bare-name conpty.dll then falls back to
 // kernel32; it cannot pin node-pty's former package-relative DLL. This is an
 // accepted compatibility difference (portable-pty 0.9.0 win/psuedocon.rs).
@@ -875,51 +877,7 @@ app.get('/skill', createSkillReadHandler(rustBackend, app.log));
 // Write a skill's SKILL.md (no file) or a supporting file (file present).
 app.put('/skill', createSkillWriteHandler(rustBackend, app.log));
 
-// Session history: list transcripts (reverse-chrono), read one, search across
-// all or one, under a client-selected root (default ~/.claude/projects).
-// FS-persisted root choice (survives browser cache clear). Chat goes over the
-// WS (streaming) — see pty-ws.mjs.
-app.get('/transcripts/root', async () => ({ root: getSessionsRoot() }));
-app.put('/transcripts/root', async (req) => setSessionsRoot(req.body?.root));
-app.get('/transcripts', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive, root: req.query.root, hideReviews: req.query.hideReviews === '1' }) }));
-// Resolve a registered agent's id to its codex-minted thread uuid — the Sessions
-// dock's "View transcript" button needs this before it can open a codex agent's
-// transcript (its registry id is unrelated to the rollout's thread uuid).
-app.get('/transcripts/codex-thread', async (req, reply) => {
-  const id = req.query?.id;
-  if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
-  const threadId = await reg.codexThreadFor(id);
-  if (!threadId) return reply.code(404).send({ ok: false, error: 'not found' });
-  return { ok: true, threadId };
-});
-app.get('/transcript', async (req, reply) => {
-  const { project, id, root, source, file } = req.query || {};
-  if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
-  const r = await readSession(project, id, root, source, file);
-  if (r.ok) {
-    // Skill-scopes live only in the agent registry (not the transcript), so
-    // merge them in here for the Resume prefill when the id is a known agent.
-    // For codex threads, the registry lookup is by (thread uuid + cwd), not agent id.
-    const lc = source === 'codex'
-      ? await reg.getLaunchConfigForCodexThread(id, r.meta?.cwd)
-      : reg.getLaunchConfig(id);
-    if (lc?.scopes?.length) r.meta.scopes = lc.scopes;
-  }
-  if (!r.ok) reply.code(404);
-  return r;
-});
-app.get('/transcripts/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id, root: req.query.root, hideReviews: req.query.hideReviews === '1' }));
-// Live subagents nested under the dock's agent rows (indicator only). Scoped to
-// live agents so it stays cheap — no full 500-session scan like /transcripts.
-app.get('/subagents', async () => {
-  const out = {};
-  for (const a of reg.snapshot()) {
-    if (a.status !== 'running' && a.status !== 'idle' && a.status !== 'starting') continue;
-    const subs = await subagentsFor(a.cwd, a.id, reg.isLive);
-    if (subs.length) out[a.id] = subs;
-  }
-  return { subagents: out };
-});
+registerTranscriptRoutes(app, { reg, listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot });
 // Per-session cost + token breakdown for the visible list page (batched so a
 // page flip is one request; stats.mjs caches each parse by mtime/size).
 app.post('/transcripts/stats', async (req) => {

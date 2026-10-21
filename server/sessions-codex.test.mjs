@@ -3,10 +3,9 @@
 // parses events into messages, searchSessions includes codex transcripts.
 // Fixtures write to a temp CODEX_HOME, clean up in a finally.
 // Run: npm test  (node --test server/)
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
-import { syncBuiltinESMExports } from 'node:module';
 import { mkdirSync, writeFileSync, rmSync, mkdtempSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -18,7 +17,16 @@ import { tmpdir } from 'node:os';
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 const CODEX_HOME = mkdtempSync(join(tmpdir(), 'sing-codex-'));
 process.env.CODEX_HOME = CODEX_HOME;
-const { listSessions, readSession, searchSessions } = await import('./sessions.mjs');
+const modelStore = await import('./model-store.mjs');
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+const { listSessions, readSession, searchSessions, setTranscriptBackend } = await import('./sessions.mjs');
+setTranscriptBackend(modelBackend);
+after(async () => {
+  await modelBackend.stop();
+  rmSync(process.env.SINGULARITY_HOME, { recursive: true, force: true });
+});
 
 const THREAD_ID = '019f9718-405c-7fd3-9b8a-f3af71880fe2';
 const SESSION_ID = '019f9718-405c-7fd3-9b8a-f3af71880fe2';
@@ -54,6 +62,83 @@ test('listSessions: codex rollout appears with source, cwd, sessionId', async ()
   } finally {
     rmSync(CODEX_HOME, { recursive: true, force: true });
   }
+});
+
+test('shared Codex parser fixture retains legacy readSession output', async () => {
+  const rel = 'sessions/parity/rollout-2026-10-21T02-00-00-thread-id.jsonl';
+  const path = join(CODEX_HOME, rel);
+  mkdirSync(join(CODEX_HOME, 'sessions', 'parity'), { recursive: true });
+  const raw = await fsp.readFile(new URL('./fixtures/transcripts/codex.jsonl', import.meta.url), 'utf8');
+  writeFileSync(path, raw);
+  try {
+    assert.deepEqual(await readSession(null, 'thread-id', undefined, 'codex', rel), {
+      ok: true,
+      meta: { cwd: 'C:\\repo', title: 'real prompt', turns: 1, firstTs: '2026-10-21T02:00:00Z', lastTs: '2026-10-21T02:00:06Z', model: 'gpt-6.1-sol', source: 'codex', sessionId: 'root-session' },
+      messages: [
+        { ts: '2026-10-21T02:00:02Z', role: 'user', kind: 'text', text: 'real prompt' },
+        { ts: '2026-10-21T02:00:04Z', role: 'assistant', kind: 'text', text: 'answer' },
+        { ts: '2026-10-21T02:00:05Z', role: 'assistant', kind: 'toolUse', name: 'shell_command', text: '{"command":"echo hi"}' },
+      ],
+    });
+  } finally { rmSync(path, { force: true }); }
+});
+
+test('shared Codex nested source fixture preserves escaped UTF-16 text leaves', async () => {
+  const rel = 'sessions/parity/rollout-2026-10-21T04-00-00-source-escaped.jsonl';
+  const path = join(CODEX_HOME, rel);
+  mkdirSync(join(CODEX_HOME, 'sessions', 'parity'), { recursive: true });
+  const raw = await fsp.readFile(new URL('./fixtures/transcripts/codex-source-escaped.jsonl', import.meta.url), 'utf8');
+  writeFileSync(path, raw);
+  try {
+    const parsed = await readSession(null, 'source-escaped', undefined, 'codex', rel);
+    assert.deepEqual(parsed.messages.map(({ role, kind, text }) => [role, kind, text]), [
+      ['user', 'text', `codex user ${String.fromCharCode(0xd83d)}`],
+      ['assistant', 'text', `codex assistant ${String.fromCharCode(0xde00)}`],
+      ['assistant', 'toolUse', `codex args ${String.fromCharCode(0xd83d)}`],
+      ['user', 'toolResult', `codex output ${String.fromCharCode(0xde00)}`],
+    ]);
+  } finally { rmSync(path, { force: true }); }
+});
+
+test('shared Codex parity fixture filters escaped wrappers, deduplicates prompts, and renders tool JSON like Node', async () => {
+  const rel = 'sessions/parity/rollout-2026-10-21T05-00-00-parser-parity.jsonl';
+  const path = join(CODEX_HOME, rel);
+  mkdirSync(join(CODEX_HOME, 'sessions', 'parity'), { recursive: true });
+  const raw = await fsp.readFile(new URL('./fixtures/transcripts/codex-parser-parity.jsonl', import.meta.url), 'utf8');
+  writeFileSync(path, raw);
+  try {
+    const parsed = await readSession(null, 'parser-parity', undefined, 'codex', rel);
+    const rows = raw.trim().split('\n').map((line) => JSON.parse(line));
+    const args = rows.find((row) => row.payload?.type === 'function_call').payload.arguments;
+    const defaultNameArgs = rows.find((row) => row.payload?.type === 'custom_tool_call').payload.arguments;
+    const escapedNameCall = rows.filter((row) => row.payload?.type === 'function_call')[1].payload;
+    const units = (value) => Array.from({ length: value.length }, (_, index) => value.charCodeAt(index));
+    assert.deepEqual(units(parsed.meta.cwd), [...units('C:\\repo'), 0xd83d]);
+    assert.deepEqual(units(parsed.meta.title), [...units('same '), 0xd83d, ...units(' prompt')]);
+    assert.deepEqual(parsed.messages.map(({ role, kind }) => [role, kind]), [
+      ['user', 'text'], ['assistant', 'toolUse'], ['assistant', 'toolUse'],
+      ['assistant', 'toolUse'], ['user', 'toolResult'],
+    ]);
+    assert.equal(parsed.messages[0].text, parsed.meta.title);
+    assert.deepEqual(parsed.messages.filter(({ kind }) => kind === 'toolUse'), [
+      {
+        ts: '2026-10-21T05:00:03Z', role: 'assistant', kind: 'toolUse', name: 'parity',
+        text: JSON.stringify(args),
+      },
+      {
+        ts: '2026-10-21T05:00:03Z', role: 'assistant', kind: 'toolUse', name: '?',
+        text: JSON.stringify(defaultNameArgs),
+      },
+      {
+        ts: '2026-10-21T05:00:03Z', role: 'assistant', kind: 'toolUse', name: 'tool\ud83d',
+        text: JSON.stringify(escapedNameCall.arguments),
+      },
+    ]);
+    assert.deepEqual(units(parsed.messages[3].name), [...units('tool'), 0xd83d]);
+    assert.deepEqual(units(parsed.messages[4].text), [...units('array first array second '), 0xde00]);
+    assert.ok(parsed.messages[1].text.startsWith('{"2":"two","10":"ten"'));
+    assert.ok(parsed.messages[1].text.includes('"duplicate":"last"'));
+  } finally { rmSync(path, { force: true }); }
 });
 
 test('listSessions: Codex subagent rollouts nest under their root thread while orphans remain visible', async () => {
@@ -294,34 +379,21 @@ test('hideReviews: head-miss scan skipped for string/thread_spawn source, kept f
   }
 });
 
-// F1: a rollout that vanishes between the head peek and the review scan drops
-// only its own row; the list still resolves with the other rows.
-test('hideReviews: rollout unreadable at review-scan time drops its row, list still resolves', async () => {
-  const meta = (id) => JSON.stringify({ type: 'session_meta', payload: { id, session_id: id, cwd: 'C:\\git\\van' } });
-  const pad = JSON.stringify({ type: 'response_item', payload: { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'x'.repeat(70000) }] } });
-  const vanId = '019fd000-0000-7000-8000-000000000001', okId = '019fd000-0000-7000-8000-000000000002';
+// F1: non-file rollout entries cannot be read as transcripts and do not hide
+// neighboring valid rows from the scan.
+test('hideReviews: non-file rollout entry is ignored while list still resolves', async () => {
+  const okId = '019fd000-0000-7000-8000-000000000002';
   mkdirSync(ROLLOUT_DIR, { recursive: true });
-  const vanPath = join(ROLLOUT_DIR, `rollout-2026-07-22T00-00-00-${vanId}.jsonl`);
-  writeFileSync(vanPath, [meta(vanId), pad].join('\n') + '\n');
+  mkdirSync(join(ROLLOUT_DIR, 'rollout-2026-07-22T00-00-00-019fd000-0000-7000-8000-000000000001.jsonl'));
   writeFileSync(join(ROLLOUT_DIR, `rollout-2026-07-22T00-00-00-${okId}.jsonl`),
-    [meta(okId), JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'ordinary work' } })].join('\n') + '\n');
-  // First open of vanPath (the head peek) passes through; later opens (the scan) fail as if deleted.
-  const realOpen = fsp.open;
-  let opens = 0;
-  fsp.open = async (p, ...a) => {
-    if (p === vanPath && ++opens > 1) throw Object.assign(new Error('ENOENT: vanished'), { code: 'ENOENT' });
-    return realOpen(p, ...a);
-  };
-  syncBuiltinESMExports();
+    [JSON.stringify({ type: 'session_meta', payload: { id: okId, session_id: okId, cwd: 'C:\\git\\valid' } }),
+      JSON.stringify({ type: 'event_msg', payload: { type: 'user_message', message: 'ordinary work' } })].join('\n') + '\n');
   try {
     const rows = await listSessions({ root: join(CODEX_HOME, 'nonexistent'), hideReviews: true });
-    assert.ok(opens > 1, 'scan attempted an open after the peek');
     const ids = new Set(rows.map((s) => s.id));
     assert.ok(ids.has(okId), 'other row still listed');
-    assert.ok(!ids.has(vanId), 'vanished row dropped');
+    assert.equal(rows.length, 1, 'directory-shaped rollout is ignored');
   } finally {
-    fsp.open = realOpen;
-    syncBuiltinESMExports();
     rmSync(CODEX_HOME, { recursive: true, force: true });
   }
 });
