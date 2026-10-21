@@ -76,6 +76,7 @@ fn main() -> io::Result<()> {
     if std::env::args().nth(1).as_deref() == Some("--pty") {
         return singularity_backend::pty::run();
     }
+    let mut sysstats = singularity_backend::sysstats::Sampler::start();
     let stdin = io::stdin();
     let mut stdout = io::BufWriter::new(io::stdout().lock());
     serde_json::to_writer(&mut stdout, &serde_json::json!({ "ready": true }))?;
@@ -84,6 +85,10 @@ fn main() -> io::Result<()> {
     for line in stdin.lock().lines() {
         let line = line?;
         let response = match serde_json::from_str::<Request>(&line) {
+            Ok(request) if request.op == "sysstats_get" => {
+                serde_json::to_value(sysstats.snapshot())
+                    .expect("sysstats serialization is infallible")
+            }
             Ok(request) if request.op == "graph" => {
                 let root = request.root.as_str().unwrap_or("");
                 let wiki = request.wiki.as_str().unwrap_or("");
@@ -308,5 +313,6 @@ fn main() -> io::Result<()> {
         stdout.write_all(b"\n")?;
         stdout.flush()?;
     }
+    sysstats.stop();
     Ok(())
 }

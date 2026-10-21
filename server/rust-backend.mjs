@@ -118,6 +118,10 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ root, wiki });
     },
 
+    sysStats() {
+      return request({ op: 'sysstats_get' });
+    },
+
     files(root) {
       return request({ op: 'files', root, wiki_order: wikiOrder(root) }).then((payload) => {
         payload.wikis?.sort((a, b) => a.name.localeCompare(b.name));

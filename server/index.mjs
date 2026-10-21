@@ -33,7 +33,6 @@ import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntr
 import { getConfigState, setConfigState, setConfigStateBackend } from './config-state.mjs';
 import { getKeys, setKeys, setKeysBackend } from './keys.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
-import { getSysStats } from './sysstats.mjs';
 import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend, CODEX_HOME } from './usage.mjs';
 import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
 import { createModelPricesHandler } from './rust-backend.mjs';
@@ -355,7 +354,7 @@ app.get('/health', async () => ({ ok: true, pid: process.pid, clients: wss?.clie
 app.get('/agent-stats', async () => ({ stats: await statsFor(reg.snapshot()) }));
 
 // Machine-wide CPU% + RAM readout (More menu, below Processes).
-app.get('/sysstats', async () => getSysStats());
+app.get('/sysstats', async () => rustBackend.sysStats());
 
 // Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
 // Repeated ?source=claude&source=codex limits which sources may hit the network
