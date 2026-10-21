@@ -37,7 +37,6 @@ import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend
 import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
 import { createModelPricesHandler } from './rust-backend.mjs';
 import { createExternalSessionLaunchHandler, createSessionFolderOpenHandler } from './detached-launch.mjs';
-import { getStatus } from './status.mjs';
 import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
 import { initTasks, setTasksBackend, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
@@ -378,7 +377,7 @@ app.post('/usage/ollama/connect', async (_req, reply) => {
 });
 
 // Provider status (OpenAI + Claude Atlassian Statuspage). Cached ~20s; ?force=1 bypasses.
-app.get('/status', async (req) => getStatus({ force: req.query.force === '1' }));
+app.get('/status', async (req) => rustBackend.statusGet(req.query.force === '1'));
 
 // Usage report: newest self-contained HTML from the harness-usage-report
 // skill (rendered on demand by /usagereport/refresh, served whole to a sandboxed iframe).

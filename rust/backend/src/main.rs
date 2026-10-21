@@ -1,9 +1,17 @@
 use serde::Deserialize;
 use serde_json::Value;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, BufWriter, Write};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 
 #[derive(Deserialize)]
 struct Request {
+    #[serde(default)]
+    id: Option<Value>,
+    #[serde(default, rename = "type")]
+    message_type: Option<String>,
     #[serde(default = "default_op")]
     op: String,
     #[serde(default)]
@@ -77,17 +85,44 @@ fn main() -> io::Result<()> {
         return singularity_backend::pty::run();
     }
     let mut sysstats = singularity_backend::sysstats::Sampler::start();
+    let stdout = Arc::new(Mutex::new(BufWriter::new(io::stdout())));
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("status runtime should start");
+    let status = singularity_backend::status::StatusService::new();
+    let shutting_down = Arc::new(AtomicBool::new(false));
     let stdin = io::stdin();
-    let mut stdout = io::BufWriter::new(io::stdout().lock());
-    serde_json::to_writer(&mut stdout, &serde_json::json!({ "ready": true }))?;
-    stdout.write_all(b"\n")?;
-    stdout.flush()?;
+    write_line(&stdout, &serde_json::json!({ "ready": true }))?;
     for line in stdin.lock().lines() {
         let line = line?;
-        let response = match serde_json::from_str::<Request>(&line) {
+        let parsed = serde_json::from_str::<Request>(&line);
+        if let Ok(request) = &parsed {
+            if request.op == "status_get"
+                && request.message_type.as_deref() == Some("status_request")
+            {
+                if let Some(id) = request.id.clone() {
+                    let status = status.clone();
+                    let stdout = stdout.clone();
+                    let shutting_down = shutting_down.clone();
+                    let force = request.force.as_bool().unwrap_or(false);
+                    runtime.spawn(async move {
+                        let response = status.get_status(force).await;
+                        let reply = serde_json::json!({ "id": id, "type": "status_reply", "response": response });
+                        let _ = write_status_line(&stdout, &shutting_down, &reply);
+                    });
+                    continue;
+                }
+            }
+        }
+        let id = parsed.as_ref().ok().and_then(|request| request.id.clone());
+        let response = match parsed {
             Ok(request) if request.op == "sysstats_get" => {
                 serde_json::to_value(sysstats.snapshot())
                     .expect("sysstats serialization is infallible")
+            }
+            Ok(request) if request.op == "status_get" => {
+                serde_json::json!({"error":"status request requires correlated framing"})
             }
             Ok(request) if request.op == "graph" => {
                 let root = request.root.as_str().unwrap_or("");
@@ -309,10 +344,93 @@ fn main() -> io::Result<()> {
             ),
             Err(_) => serde_json::json!({ "error": "bad request" }),
         };
-        serde_json::to_writer(&mut stdout, &response)?;
-        stdout.write_all(b"\n")?;
-        stdout.flush()?;
+        let response = match id {
+            Some(id) => serde_json::json!({ "id": id, "response": response }),
+            None => response,
+        };
+        write_line(&stdout, &response)?;
     }
+    begin_shutdown(&stdout, &shutting_down)?;
     sysstats.stop();
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
     Ok(())
+}
+
+fn write_line<W: Write>(stdout: &Mutex<W>, value: &Value) -> io::Result<()> {
+    let mut stdout = stdout
+        .lock()
+        .map_err(|_| io::Error::other("stdout writer poisoned"))?;
+    write_value(&mut *stdout, value)
+}
+
+fn write_status_line<W: Write>(
+    stdout: &Mutex<W>,
+    shutting_down: &AtomicBool,
+    value: &Value,
+) -> io::Result<bool> {
+    let mut stdout = stdout
+        .lock()
+        .map_err(|_| io::Error::other("stdout writer poisoned"))?;
+    if shutting_down.load(Ordering::Acquire) {
+        return Ok(false);
+    }
+    write_value(&mut *stdout, value)?;
+    Ok(true)
+}
+
+fn begin_shutdown<W: Write>(stdout: &Mutex<W>, shutting_down: &AtomicBool) -> io::Result<()> {
+    let _stdout = stdout
+        .lock()
+        .map_err(|_| io::Error::other("stdout writer poisoned"))?;
+    shutting_down.store(true, Ordering::Release);
+    Ok(())
+}
+
+fn write_value<W: Write>(writer: &mut W, value: &Value) -> io::Result<()> {
+    serde_json::to_writer(&mut *writer, value)?;
+    writer.write_all(b"\n")?;
+    writer.flush()
+}
+
+#[cfg(test)]
+mod status_shutdown_tests {
+    use super::*;
+    use std::sync::Barrier;
+    use std::thread;
+
+    #[test]
+    fn shutdown_and_status_reply_share_one_output_linearization_lock() {
+        let stdout = Arc::new(Mutex::new(Vec::<u8>::new()));
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        let start = Arc::new(Barrier::new(3));
+        let reply = serde_json::json!({ "type": "status_reply" });
+
+        let writer = {
+            let stdout = stdout.clone();
+            let shutting_down = shutting_down.clone();
+            let start = start.clone();
+            let reply = reply.clone();
+            thread::spawn(move || {
+                start.wait();
+                write_status_line(&stdout, &shutting_down, &reply).unwrap();
+            })
+        };
+        let shutdown = {
+            let stdout = stdout.clone();
+            let shutting_down = shutting_down.clone();
+            let start = start.clone();
+            thread::spawn(move || {
+                start.wait();
+                begin_shutdown(&stdout, &shutting_down).unwrap();
+            })
+        };
+
+        start.wait();
+        writer.join().unwrap();
+        shutdown.join().unwrap();
+        let bytes_after_shutdown = stdout.lock().unwrap().len();
+        assert!(!write_status_line(&stdout, &shutting_down, &reply).unwrap());
+        assert_eq!(stdout.lock().unwrap().len(), bytes_after_shutdown);
+        assert!(shutting_down.load(Ordering::Acquire));
+    }
 }

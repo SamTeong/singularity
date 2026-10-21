@@ -22,6 +22,7 @@ pub mod procs;
 pub mod pty;
 pub mod rules;
 pub mod skills;
+pub mod status;
 pub mod sysstats;
 pub mod usage_auth;
 pub mod wiki_read;

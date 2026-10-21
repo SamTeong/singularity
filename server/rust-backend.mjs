@@ -5,7 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, resolve } from 'node:path';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const defaultBinary = resolve(__dirname, '..', 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
+const defaultBinary = process.env.SINGULARITY_RUST_BACKEND_BINARY
+  ?? resolve(__dirname, '..', 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
 const childEnv = Object.fromEntries(['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'WINDIR']
   .filter((key) => process.env[key] !== undefined)
   .map((key) => [key, process.env[key]]));
@@ -25,12 +26,28 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
   let startPromise;
   let closed = false;
   let busy = false;
+  let nextRequestId = 0;
   const queue = [];
+  const pendingStatus = new Map();
+  const requestId = () => `rust-${++nextRequestId}`;
   const request = (body) => {
     if (!child || closed) return Promise.reject(new Error('Rust backend is not running'));
     return new Promise((resolveRequest, rejectRequest) => {
-      queue.push({ request: body, resolve: resolveRequest, reject: rejectRequest });
+      const id = requestId();
+      queue.push({ request: { ...body, id }, id, resolve: resolveRequest, reject: rejectRequest });
       pump();
+    });
+  };
+  const statusRequest = (force) => {
+    if (!child || closed) return Promise.reject(new Error('Rust backend is not running'));
+    return new Promise((resolveRequest, rejectRequest) => {
+      const id = requestId();
+      pendingStatus.set(id, { resolve: resolveRequest, reject: rejectRequest });
+      try {
+        child.stdin.write(`${JSON.stringify({ op: 'status_get', type: 'status_request', id, force })}\n`, (error) => {
+          if (error) fail(error);
+        });
+      } catch (error) { fail(error); }
     });
   };
 
@@ -38,6 +55,8 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     closed = true;
     child?.stdin?.destroy();
     while (queue.length) queue.shift().reject(error);
+    for (const pending of pendingStatus.values()) pending.reject(error);
+    pendingStatus.clear();
   };
 
   const pump = () => {
@@ -97,9 +116,19 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
             resolveStartup();
             return;
           }
+          if (response?.type === 'status_reply' && typeof response.id === 'string') {
+            const pending = pendingStatus.get(response.id);
+            if (!pending) return fail(new Error('Rust backend returned an unknown status reply ID'));
+            pendingStatus.delete(response.id);
+            pending.resolve(response.response);
+            return;
+          }
+          if (typeof response?.id !== 'string' || !Object.hasOwn(response, 'response')) {
+            return fail(new Error('Rust backend returned an uncorrelated response'));
+          }
           const item = queue.shift();
-          if (!item) return fail(new Error('Rust backend returned an unsolicited response'));
-          item.resolve(response);
+          if (!item || item.id !== response.id) return fail(new Error('Rust backend returned an out-of-order ordinary response'));
+          item.resolve(response.response);
           busy = false;
           pump();
         });
@@ -120,6 +149,10 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
 
     sysStats() {
       return request({ op: 'sysstats_get' });
+    },
+
+    statusGet(force = false) {
+      return statusRequest(force === true);
     },
 
     files(root) {
@@ -418,14 +451,17 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     async stop() {
       if (!child || closed) return;
       closed = true;
+      const error = new Error('Rust backend stopped');
       lines?.close();
+      while (queue.length) queue.shift().reject(error);
+      for (const pending of pendingStatus.values()) pending.reject(error);
+      pendingStatus.clear();
       child.stdin.end();
       const exited = new Promise((resolveExit) => child.once('exit', resolveExit));
       let timer;
       const timeout = new Promise((resolveExit) => { timer = setTimeout(() => { child.kill(); resolveExit(); }, 2000); });
       await Promise.race([exited, timeout]);
       clearTimeout(timer);
-      while (queue.length) queue.shift().reject(new Error('Rust backend stopped'));
     },
   };
 }

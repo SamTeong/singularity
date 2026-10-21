@@ -117,6 +117,78 @@ test('Rust bridge rejects startup when a spawned child exits before ready', asyn
   await backend.stop();
 });
 
+test('Rust status replies bypass ordinary FIFO and correlate out of order', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    const request = JSON.parse(String(chunk));
+    requests.push(request);
+    if (request.op !== 'status_get') queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: request.id, response: { type: 'status_reply', id: 'payload-id', ok: true } })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => {
+      child.emit('spawn');
+      child.stdout.write('{"ready":true}\n');
+    });
+    return child;
+  } });
+  try {
+    await backend.start();
+    const first = backend.statusGet();
+    const ordinary = await backend.sysStats();
+    assert.deepEqual(ordinary, { type: 'status_reply', id: 'payload-id', ok: true });
+    const second = backend.statusGet(true);
+    const statuses = requests.filter(({ op }) => op === 'status_get');
+    assert.equal(statuses.length, 2);
+    assert.notEqual(statuses[0].id, statuses[1].id);
+    assert.equal(statuses[0].force, false);
+    assert.equal(statuses[1].force, true);
+    child.stdout.write(`${JSON.stringify({ id: statuses[1].id, type: 'status_reply', response: { done: 2 } })}\n`);
+    child.stdout.write(`${JSON.stringify({ id: statuses[0].id, type: 'status_reply', response: { done: 1 } })}\n`);
+    assert.deepEqual(await second, { done: 2 });
+    assert.deepEqual(await first, { done: 1 });
+  } finally { await backend.stop(); }
+});
+
+test('Rust bridge rejects pending status requests on exit and stop', async () => {
+  const makeBackend = () => {
+    const child = new EventEmitter();
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.stdin.write = (_chunk, callback) => { callback?.(); return true; };
+    child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+    child.kill = () => { queueMicrotask(() => child.emit('exit', 0, null)); return true; };
+    const backend = createRustBackend({ spawnProcess: () => {
+      queueMicrotask(() => {
+        child.emit('spawn');
+        child.stdout.write('{"ready":true}\n');
+      });
+      return child;
+    } });
+    return { backend, child };
+  };
+
+  const exited = makeBackend();
+  await exited.backend.start();
+  const onExit = exited.backend.statusGet();
+  exited.child.emit('exit', 7, null);
+  await assert.rejects(onExit, /exited \(7\)/);
+
+  const stopped = makeBackend();
+  await stopped.backend.start();
+  const onStop = stopped.backend.statusGet();
+  await stopped.backend.stop();
+  await assert.rejects(onStop, /Rust backend stopped/);
+});
+
 test('Rust pricing read normalizes the explicit path without writing and maps transport failure', async () => {
   const root = await mkdtemp(join(tmpdir(), 'singularity-rust-prices-'));
   process.env.SINGULARITY_HOME = root;
@@ -961,7 +1033,8 @@ test('Rust usage auth bridge forwards the current environment in both private re
     const request = JSON.parse(String(chunk));
     requests.push(request);
     queueMicrotask(() => {
-      child.stdout.write(`${JSON.stringify(request.op === 'usage_keychain' ? { ok: false } : { attempted: true })}\n`);
+      const response = request.op === 'usage_keychain' ? { ok: false } : { attempted: true };
+      child.stdout.write(`${JSON.stringify({ id: request.id, response })}\n`);
       callback?.();
     });
     return true;
