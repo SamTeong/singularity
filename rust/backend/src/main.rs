@@ -271,6 +271,15 @@ fn main() -> io::Result<()> {
             Ok(request) if request.op == "keys_set" => {
                 singularity_backend::keys::set(request.path.as_str().unwrap_or(""), &request.patch)
             }
+            Ok(request) if request.op == "config_state_get" => {
+                singularity_backend::config_state::get(request.path.as_str().unwrap_or(""))
+            }
+            Ok(request) if request.op == "config_state_set" => {
+                singularity_backend::config_state::set(
+                    request.path.as_str().unwrap_or(""),
+                    &request.patch,
+                )
+            }
             Ok(request) if request.op == "window_anchor_load" => {
                 singularity_backend::window_anchor::load(request.path.as_str().unwrap_or(""))
             }

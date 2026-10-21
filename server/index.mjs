@@ -30,7 +30,7 @@ import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from '
 import { setOneShotBackend } from './one-shot.mjs';
 import { readSkillsDir, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } from './skills.mjs';
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, setExplorerBackend } from './explorer.mjs';
-import { getConfigState, setConfigState } from './config-state.mjs';
+import { getConfigState, setConfigState, setConfigStateBackend } from './config-state.mjs';
 import { getKeys, setKeys, setKeysBackend } from './keys.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
 import { getSysStats } from './sysstats.mjs';
@@ -135,6 +135,7 @@ const rustPtyBackend = createRustPtyBackend({
 reg.setPtyBackend(rustPtyBackend);
 setUsageAuthBackend(rustBackend);
 setExplorerBackend(rustBackend);
+setConfigStateBackend(rustBackend);
 setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, window-anchor pokes)
 setProcsBackend(rustBackend); // procs.mjs process scan execs + guarded PID kill
 setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
@@ -612,7 +613,7 @@ app.put('/config/:scope', async (req, reply) => {
 });
 
 // Config editor UI state (open tabs/active/autosave/expanded roots) — FS-persisted.
-app.get('/config/state', async () => ({ state: getConfigState() }));
+app.get('/config/state', async () => ({ state: await getConfigState() }));
 app.put('/config/state', async (req) => setConfigState(req.body));
 
 // Codex config.toml editor: 2-scope resolver + backup-then-write (mirrors /config).
