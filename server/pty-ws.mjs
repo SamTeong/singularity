@@ -157,8 +157,12 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
         case 'resize': reg.resize(m.id, m.cols, m.rows); break;
         case 'kill': reg.kill(m.id); break;
         case 'reorder': reg.reorder(m.ids); break;
-        case 'respawn': reg.respawn(m.id); break;
-        case 'respawnAll': reg.respawnAll(); break;
+        case 'respawn':
+          await reg.respawn(m.id).catch((error) => log?.warn({ err: error.message, id: m.id }, 'agent respawn failed'));
+          break;
+        case 'respawnAll':
+          await reg.respawnAll().catch((error) => log?.warn({ err: error.message }, 'agent respawn-all failed'));
+          break;
         case 'chat': {
           // One in-flight chat per socket: a new request cancels the prior.
           if (ws.chatAbort) ws.chatAbort.abort();

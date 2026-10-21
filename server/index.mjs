@@ -45,6 +45,7 @@ import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, re
 import { setModelsBackend } from './model-store.mjs';
 import { getModelPricesPath, putModelPrices } from './model-prices.mjs';
 import { registerTranscriptRoutes } from './transcript-routes.mjs';
+import { setCodexIdentityBackend } from './codex-thread.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -125,6 +126,7 @@ const app = Fastify({
 });
 const rustBackend = createRustBackend();
 setTranscriptBackend(rustBackend);
+setCodexIdentityBackend(rustBackend);
 // portable-pty's Windows ConPTY loads bare-name conpty.dll then falls back to
 // kernel32; it cannot pin node-pty's former package-relative DLL. This is an
 // accepted compatibility difference (portable-pty 0.9.0 win/psuedocon.rs).

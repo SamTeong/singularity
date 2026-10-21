@@ -159,7 +159,7 @@ export async function getLaunchConfigForCodexThread(threadId, cwd) {
   for (const a of agents.values()) {
     if (!(a.tool === 'codex' || (await getModelRoute(a.model, a.tool)).isCodexModel)) continue;
     if (!a.cwd || normPath(a.cwd) !== wantCwd) continue; // normPath resolve()s — a cwd-less record on disk would throw
-    if (findCodexThread(a.cwd, a.createdAt) === threadId) return getLaunchConfig(a.id);
+    if (await findCodexThread(a.cwd, a.createdAt) === threadId) return getLaunchConfig(a.id);
   }
   return null;
 }
@@ -174,18 +174,18 @@ export async function codexThreadFor(id) {
   const a = agents.get(id);
   if (!a) return null;
   a.modelRoute = await getModelRoute(a.model, a.tool);
-  return rememberCodexThread(a);
+  return await rememberCodexThread(a);
 }
 // Discovery is by cwd + start-time window (codex has no --session-id to pin an
 // id at spawn), so it can drift to an unrelated codex thread the user started
 // in the same cwd later on — see findCodexThread's ceiling. Pin the first
 // answer onto the agent (persisted) and reuse it from then on: restart/reattach
 // resume the SAME thread they were live on, and repeat lookups skip the walk.
-function rememberCodexThread(a, modelRoute = a.modelRoute) {
+async function rememberCodexThread(a, modelRoute = a.modelRoute) {
   if (!(a.tool === 'codex' || modelRoute?.isCodexModel) || !a.cwd) return null;
   if (a.threadId) return a.threadId;
-  const found = (a.createdAt && findCodexThread(a.cwd, a.createdAt))
-    || (codexThreadExists(a.id, a.cwd) ? a.id : null);
+  const found = (a.createdAt && await findCodexThread(a.cwd, a.createdAt))
+    || (await codexThreadExists(a.id, a.cwd) ? a.id : null);
   if (found) { a.threadId = found; try { persist(); } catch { /* pin is a cache — a write failure must not fail the caller */ } }
   return found;
 }
@@ -265,9 +265,9 @@ function wire(a) {
       return;
     }
     setStatus(a, 'exited'); // status event for crons auto-kill; tracks activeMs
-    void getModelRoute(a.model, a.tool).then((modelRoute) => {
+    void getModelRoute(a.model, a.tool).then(async (modelRoute) => {
       const isCodex = a.tool === 'codex' || modelRoute.isCodexModel;
-      const codexThreadId = isCodex ? rememberCodexThread(a, modelRoute) : null;
+      const codexThreadId = isCodex ? await rememberCodexThread(a, modelRoute) : null;
       const resumeCmd = isCodex
         ? (codexThreadId ? `codex resume ${codexThreadId}` : 'codex')
         : modelRoute.isClaudeModel
@@ -351,8 +351,8 @@ export async function buildSpawn({ id, title, cwd, model, scopes, permissionMode
     // A pinned thread (rememberCodexThread, carried through respawn/reattach)
     // wins over re-discovery — same thread every time, no time-window drift.
     const threadId = pinned
-      || (createdAt && findCodexThread(cwd, createdAt))
-      || (codexThreadExists(id, cwd) ? id : null);
+      || (createdAt && await findCodexThread(cwd, createdAt))
+      || (await codexThreadExists(id, cwd) ? id : null);
     const args = [];
     if (threadId) args.push('resume', threadId);
     const cfg = codexScopeConfig(scopes);
@@ -591,20 +591,21 @@ export function remove(id) {
 
 // Respawn one live agent: kill it, and its onExit resumes with the same config
 // (log survives → --resume, history kept). Used to pick up a new terminal theme.
-export function respawn(id) {
+export async function respawn(id) {
   const a = agents.get(id);
   if (!a?.proc) return false;
   // Pin the codex thread while the agent is still live: discovery after the kill
   // can drift to a newer codex thread in the same cwd (see rememberCodexThread).
-  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool, createdAt: a.createdAt, threadId: rememberCodexThread(a) || undefined };
+  const threadId = await rememberCodexThread(a);
+  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool, createdAt: a.createdAt, threadId: threadId || undefined };
   killPty(a.proc, id);
   return true;
 }
 
 // Respawn every live agent (e.g. after an app theme toggle).
-export function respawnAll() {
+export async function respawnAll() {
   const ids = [];
-  for (const a of agents.values()) if (respawn(a.id)) ids.push(a.id);
+  for (const a of [...agents.values()]) if (await respawn(a.id)) ids.push(a.id);
   return ids;
 }
 

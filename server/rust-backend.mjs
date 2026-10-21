@@ -207,6 +207,18 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ ...inputs, ...options, op: 'transcript_subagents' });
     },
 
+    codexThreadFind(codexHome, cwd, spawnedAt) {
+      return request({ op: 'codex_thread_find', identity_codex_home: codexHome, cwd, spawned_at: spawnedAt })
+        .then((threadId) => typeof threadId === 'string' ? threadId : null)
+        .catch(() => null);
+    },
+
+    codexThreadExists(codexHome, cwd, threadId) {
+      return request({ op: 'codex_thread_exists', identity_codex_home: codexHome, cwd, thread_id: threadId })
+        .then((exists) => exists === true)
+        .catch(() => false);
+    },
+
     modelPrices(path) {
       return request({ op: 'model_prices', path }).then((payload) => {
         if (payload.error) throw new Error(payload.error);

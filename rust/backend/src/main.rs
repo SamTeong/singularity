@@ -61,6 +61,13 @@ struct Request {
     #[serde(default)]
     cwd: Value,
     #[serde(default)]
+    #[serde(rename = "identity_codex_home")]
+    codex_identity_home: Value,
+    #[serde(default)]
+    spawned_at: Value,
+    #[serde(default)]
+    thread_id: Value,
+    #[serde(default)]
     args: Value,
     #[serde(default)]
     timeout_ms: Value,
@@ -139,6 +146,20 @@ fn main() -> io::Result<()> {
             Ok(request) if request.op == "sysstats_get" => {
                 serde_json::to_value(sysstats.snapshot())
                     .expect("sysstats serialization is infallible")
+            }
+            Ok(request) if request.op == "codex_thread_find" => {
+                singularity_backend::codex_thread_identity::find(
+                    request.codex_identity_home.as_str(),
+                    request.cwd.as_str(),
+                    request.spawned_at.as_i64(),
+                )
+            }
+            Ok(request) if request.op == "codex_thread_exists" => {
+                singularity_backend::codex_thread_identity::exists(
+                    request.codex_identity_home.as_str(),
+                    request.cwd.as_str(),
+                    request.thread_id.as_str(),
+                )
             }
             Ok(request) if request.op == "status_get" => {
                 serde_json::json!({"error":"status request requires correlated framing"})

@@ -68,6 +68,8 @@ const modelStore = await import('./model-store.mjs');
 const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
 await modelBackend.start();
 modelStore.setModelsBackend(modelBackend);
+const codexIdentity = await import('./codex-thread.mjs');
+codexIdentity.setCodexIdentityBackend(modelBackend);
 const ptyBinary = join(process.cwd(), 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
 const ptyBackend = (await import('./rust-pty-backend.mjs')).createRustPtyBackend({ executable: ptyBinary, cwd: process.cwd() });
 await ptyBackend.start();
@@ -80,7 +82,7 @@ after(async () => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor, getBuf, getWritten, getStatus, input, resize } = registry;
+const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawn, respawnAll, kill, isLive, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor, getBuf, getWritten, getStatus, input, resize } = registry;
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -341,6 +343,40 @@ test('remove: dead (detached) agent is dropped from the registry', async () => {
 // see the file header) so there's a genuine live proc to kill and a genuine
 // onExit/setImmediate/create() cycle to observe — the claude-model path can't
 // produce one here since CLAUDE_BIN is deliberately invalid for every other test.
+test('respawn: Codex identity lookup completes and pins before the live pty is killed', async () => {
+  const id = '40000000-dddd-eeee-ffff-400000000005';
+  let beginLookup;
+  let finishLookup;
+  const lookupStarted = new Promise((resolve) => { beginLookup = resolve; });
+  const lookupResult = new Promise((resolve) => { finishLookup = resolve; });
+  codexIdentity.setCodexIdentityBackend({
+    codexThreadFind: async () => { beginLookup(); return lookupResult; },
+    codexThreadExists: async () => false,
+  });
+  try {
+    const agent = await create({ cwd: scratch, title: 'codex-respawn-test', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: id });
+    const pendingRespawn = respawn(id);
+    await lookupStarted;
+    assert.equal(isLive(id), true, 'lookup is pending while the original pty remains live');
+    finishLookup('pinned-thread-id');
+    assert.equal(await pendingRespawn, true);
+
+    const deadline = Date.now() + 8000;
+    let resumed;
+    while (Date.now() < deadline) {
+      resumed = snapshot().find((entry) => entry.id === id);
+      if (resumed?.pid && resumed.pid !== agent.pid && isLive(id)) break;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(resumed?.pid && resumed.pid !== agent.pid, 'onExit respawned the same agent');
+    assert.equal(await codexThreadFor(id), 'pinned-thread-id', 'the resolved Codex thread stays pinned across respawn');
+    await killAndWait(id);
+  } finally {
+    codexIdentity.setCodexIdentityBackend(modelBackend);
+    if (isLive(id)) await killAndWait(id);
+  }
+});
+
 test('respawnAll: kills a live agent and resumes it with the same id + new pid', async () => {
   const respawnCwd = scratch;
   const id = '40000000-dddd-eeee-ffff-400000000004';
@@ -355,7 +391,7 @@ test('respawnAll: kills a live agent and resumes it with the same id + new pid',
   writeFileSync(join(dir, `${id}.jsonl`), `{"sessionId":"${id}","type":"user"}\n`);
 
   try {
-    respawnAll();
+    await respawnAll();
 
     // Wait for kill -> onExit -> setImmediate(create) to settle: same id back
     // in the registry with a live proc and a different pid.
