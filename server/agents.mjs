@@ -190,8 +190,12 @@ async function rememberCodexThread(a, modelRoute = a.modelRoute) {
   return found;
 }
 // PIDs of agents this daemon currently owns a live pty for (for process classification).
+export function liveProcessSnapshot() {
+  const live = [...agents.values()].filter((agent) => agent.proc);
+  return { pids: live.map((agent) => agent.pid), sessions: live.map((agent) => agent.id) };
+}
 export function livePids() {
-  return new Set([...agents.values()].filter((a) => a.proc).map((a) => a.pid));
+  return new Set(liveProcessSnapshot().pids);
 }
 
 function emitList() { bus.emit('list', snapshot()); }

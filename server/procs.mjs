@@ -15,7 +15,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
-import { livePids, isLive } from './agents.mjs';
+import { liveProcessSnapshot } from './agents.mjs';
 
 const execFileP = promisify(execFile);
 
@@ -43,122 +43,23 @@ const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
 const IS_DARWIN = process.platform === 'darwin';
 const SELF_PID = process.pid; // this daemon — its own row is always 'daemon', never killable
 
-// PS projects only the fields we need; DateTime formatted to avoid /Date()/ JSON noise.
-// `alive` is the full running-pid set, used to tell a genuinely orphaned
-// tooling process (parent gone) from one whose parent is still alive.
-const PS = [
-  '-NoProfile', '-NonInteractive', '-Command',
-  "$rows = Get-CimInstance Win32_Process -Filter \"Name='claude.exe' or Name='node.exe' or Name='esbuild.exe' or Name='OpenConsole.exe'\" | " +
-    "ForEach-Object { [PSCustomObject]@{ pid=$_.ProcessId; ppid=$_.ParentProcessId; name=$_.Name; " +
-    "started=$_.CreationDate.ToString('yyyy-MM-ddTHH:mm:ss'); cmd=$_.CommandLine } }; " +
-  "$alive = Get-Process | Select-Object -ExpandProperty Id; " +
-  "[PSCustomObject]@{ rows=$rows; alive=$alive } | ConvertTo-Json -Compress -Depth 4",
-];
-
-// `ps` columns: pid, ppid, comm (basename of executable), command (full argv
-// joined). `ps` has no reliable started-time column in this format — callers
-// tolerate null (UI shows it only informatively).
-const PS_ARGS = ['-axo', 'pid=,ppid=,comm=,command='];
-// Dev-tooling binaries we care about on macOS (no .exe; OpenConsole is Windows-only).
-const DARWIN_DEV_NAMES = new Set(['node', 'esbuild']);
-
-function extractSession(cmd) {
-  const m = cmd && cmd.match(/--(?:session-id|resume)\s+(\S+)/);
-  return m ? m[1].replace(/["']/g, '') : null;
-}
-
-// Dev-tooling rows are only ever considered if their cmdline is under this
-// repo — never match unrelated node/esbuild processes elsewhere on the box.
-function inRepo(cmd) { return !!cmd && cmd.toLowerCase().includes(REPO_ROOT.toLowerCase()); }
-
-// Classify a claude row: tracked if livePids() has it, else stale if a session
-// id is recoverable from its cmdline, else external. Shared across platforms.
-// The pid test alone misses wrapper launches (`ollama launch claude --model …`):
-// the daemon's pty child is ollama.exe and claude.exe is a grandchild with a
-// different pid — so also treat it as tracked when its --session-id names a
-// live agent (agent id IS the session id for daemon-spawned sessions).
-// sessionLive is injectable for tests.
-export function classifyClaude(row, live, sessionLive = isLive) {
-  const session = extractSession(row.cmd);
-  const owned = live.has(row.pid) || (!!session && sessionLive(session));
-  const kind = owned ? 'tracked' : session ? 'stale' : 'external';
-  return { pid: row.pid, ppid: row.ppid, name: row.name, started: row.started, session, kind };
-}
-
 export async function scanClaude() {
-  if (IS_DARWIN) return scanClaudeDarwin();
-  return scanClaudeWindows();
-}
-
-async function scanClaudeWindows() {
-  let out;
+  if (!procsBackend) return [];
+  let snapshot;
   try {
-    ({ stdout: out } = await procsExecFile('powershell.exe', PS, { windowsHide: true, maxBuffer: 8 * 1024 * 1024 }));
+    snapshot = await procsBackend.procsScanRaw();
   } catch {
-    return []; // no powershell / no matches
+    return [];
   }
-  let parsed;
-  try { parsed = JSON.parse(out.trim() || '{}'); } catch { return []; }
-  let rows = parsed.rows || [];
-  if (!Array.isArray(rows)) rows = [rows]; // ConvertTo-Json emits a bare object for a single row
-  let alivePids = parsed.alive || [];
-  if (!Array.isArray(alivePids)) alivePids = [alivePids];
-  const alive = new Set(alivePids);
-  const live = livePids();
-
-  return rows
-    .filter((r) => r.name === 'claude.exe' || inRepo(r.cmd))
-    .map((r) => {
-      if (r.name === 'claude.exe') return classifyClaude(r, live);
-      // Repo dev tooling (already scoped to this clone by inRepo): part of the
-      // live dev stack while its parent (pnpm dev/test) is alive => 'daemon',
-      // protected. Orphaned (parent gone) => 'stale', safe to stop. The daemon's
-      // own row is always 'daemon' even if detached from its launcher.
-      const kind = r.pid === SELF_PID || alive.has(r.ppid) ? 'daemon' : 'stale';
-      return { pid: r.pid, ppid: r.ppid, name: r.name, started: r.started, session: null, kind };
-    });
-}
-
-async function scanClaudeDarwin() {
-  let out;
+  // Preserve the post-query sampling point: Rust has completed the OS query
+  // and parsing before this synchronous registry snapshot is taken.
+  const live = liveProcessSnapshot();
   try {
-    ({ stdout: out } = await procsExecFile('ps', PS_ARGS, { maxBuffer: 8 * 1024 * 1024 }));
+    return await procsBackend.procsClassify(snapshot, live.pids, live.sessions, REPO_ROOT, SELF_PID);
   } catch {
-    return []; // no ps / no matches
+    return [];
   }
-  // Build a pid set of all currently-running processes for the orphan test
-  // (stand-in for Windows' Get-Process alive set). A ppid of 0/1 means the
-  // process was re-parented to launchd after its real parent died => orphaned.
-  const allPids = new Set();
-  const rows = [];
-  for (const line of out.split('\n')) {
-    if (!line.trim()) continue;
-    // pid=,ppid=,comm=,command= — the first three columns are whitespace-
-    // trimmed (trailing `=` strips padding); command is the rest of the line
-    // with spaces preserved.
-    const m = line.match(/^\s*(\d+)\s+(\d+)\s+(\S+)\s+(.*)$/);
-    if (!m) continue;
-    const pid = Number(m[1]);
-    const ppid = Number(m[2]);
-    const name = m[3];
-    const cmd = m[4] ?? '';
-    allPids.add(pid);
-    rows.push({ pid, ppid, name, started: null, cmd });
-  }
-  const live = livePids();
-  return rows
-    .filter((r) => r.name === 'claude' || (DARWIN_DEV_NAMES.has(r.name) && inRepo(r.cmd)))
-    .map((r) => {
-      if (r.name === 'claude') return classifyClaude(r, live);
-      // Repo dev tooling (scoped to this clone by inRepo): live dev stack while
-      // its parent survives => 'daemon', protected; orphaned => 'stale'. On
-      // darwin liveness = ppid is a positive pid still in the ps rows; ppid 0/1
-      // = re-parented to launchd => orphaned. Own row is always 'daemon'.
-      const kind = r.pid === SELF_PID || (r.ppid > 1 && allPids.has(r.ppid)) ? 'daemon' : 'stale';
-      return { pid: r.pid, ppid: r.ppid, name: r.name, started: r.started, session: null, kind };
-    });
 }
-
 // Kill a PID only after re-verifying it is currently the same process name
 // (loopback API guard). Two checks: the full scan above (for the caller's
 // tracked/stale/external classification), then a single-PID re-query

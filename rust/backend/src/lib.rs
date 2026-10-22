@@ -27,6 +27,7 @@ pub mod ollama_mode_config;
 pub mod oneshot;
 pub mod plans;
 pub mod procs;
+pub mod procs_discovery;
 pub mod provider_usage;
 pub mod pty;
 pub mod rules;

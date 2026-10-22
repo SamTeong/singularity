@@ -4,7 +4,7 @@ title: Complete Rust daemon runtime cutover
 status: To Do
 assignee: []
 created_date: '2026-10-20 23:52'
-updated_date: '2026-10-22 15:10'
+updated_date: '2026-10-22 15:53'
 labels: []
 dependencies: []
 modified_files:
@@ -57,4 +57,6 @@ TASK-43 completion (2026-10-22): OAuth refresh credential persistence now writes
 TASK-44 Windows finalization: Ollama browser-mode config filesystem reads and atomic writes now use the Rust backend, with Node JSON parsing, response shapes, and browser verification preserved. Independent review passed; seven-step receipt passed (206 Rust library + 3 daemon tests, focused Node 107 passed/2 skipped, full Node 721 passed/2 skipped, release build, fmt, lint, diff check) with all seven source hashes matching before/after. Unix permission behavior was code-reviewed only on Windows; TASK-42.2 Linux/macOS runtime validation remains outstanding.
 
 TASK-45 completed 2026-10-22: Codex account fingerprint lookup moved to the private Rust bridge and integrated at the existing Node pre-gate point. Independent review accepted. Continuation evidence passed focused Node (109 passed, 2 skipped), full Node (723 passed, 2 skipped), lint, and diff-check; reused original fmt, Rust (207 library + 3 daemon), and release-build checks. Nine source hashes matched the continuation receipt. The initial Cargo.lock byte transition remains unexplained; the final diff adds only the intended direct ring dependency edge. No Groma architecture owner is currently registered for the affected files.
+
+TASK-46 completed on 2026-10-22: process discovery parsing, normalization, and classification moved into Rust; Node retains registry snapshot timing and the public /procs/kill guard flow. Independent review passed. Hash-pinned verification: focused Node 38 passed/2 skipped, full Node 724 passed/2 skipped, lint and diff check passed; reused original matching Rust fmt, 210 library + 3 binary tests, and release build. Darwin live execution remains platform-validation follow-up.
 <!-- SECTION:NOTES:END -->

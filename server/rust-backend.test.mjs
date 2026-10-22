@@ -1352,6 +1352,23 @@ test('Rust Ollama config bridge preserves its private payloads and stable filesy
   }
 });
 
+test('Rust process classifier bridge uses the supplied post-query identity snapshot', async () => {
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    const rows = await backend.procsClassify({
+      platform: 'windows',
+      alive: [],
+      rows: [{ pid: 41, ppid: 1, name: 'claude.exe', started: '2025-01-02T03:04:05', cmd: 'claude.exe --resume wrapper-session' }],
+    }, [], ['wrapper-session'], 'C:/repo', 900);
+    assert.deepEqual(rows, [{
+      pid: 41, ppid: 1, name: 'claude.exe', started: '2025-01-02T03:04:05', session: 'wrapper-session', kind: 'tracked',
+    }]);
+  } finally {
+    await backend.stop();
+  }
+});
+
 test('Rust procs kill bridge terminates a scratch child and rejects bad pids', async () => {
   const backend = createRustBackend();
   try {

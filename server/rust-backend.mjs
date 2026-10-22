@@ -583,6 +583,21 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'usage_auth_status', bin, timeout_ms: timeout, env: process.env });
     },
 
+    procsScanRaw() {
+      return request({ op: 'procs_scan_raw' });
+    },
+
+    procsClassify(snapshot, livePids, liveSessions, repoRoot, hostPid) {
+      return request({
+        op: 'procs_classify',
+        procs_snapshot: snapshot,
+        live_pids: livePids,
+        live_sessions: liveSessions,
+        repo_root: repoRoot,
+        host_pid: hostPid,
+      });
+    },
+
     // Guarded PID kill for procs.mjs: { ok } | { ok:false, error } — Node keeps
     // the scan/classification/daemon-denial/TOCTOU decisions.
     procsKill(pid) {

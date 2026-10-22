@@ -92,6 +92,16 @@ struct Request {
     #[serde(default)]
     pid: Value,
     #[serde(default)]
+    procs_snapshot: Value,
+    #[serde(default)]
+    live_pids: Value,
+    #[serde(default)]
+    live_sessions: Value,
+    #[serde(default)]
+    repo_root: Value,
+    #[serde(default)]
+    host_pid: Value,
+    #[serde(default)]
     platform: Value,
     #[serde(default)]
     record: Value,
@@ -566,6 +576,18 @@ fn main() -> io::Result<()> {
                     },
                     Err(_) => serde_json::json!({"error":"bad usage report request"}),
                 }
+            }
+            Ok(request) if request.op == "procs_scan_raw" => {
+                singularity_backend::procs_discovery::scan_raw()
+            }
+            Ok(request) if request.op == "procs_classify" => {
+                singularity_backend::procs_discovery::classify(&serde_json::json!({
+                    "snapshot": request.procs_snapshot,
+                    "live_pids": request.live_pids,
+                    "live_sessions": request.live_sessions,
+                    "repo_root": request.repo_root,
+                    "host_pid": request.host_pid
+                }))
             }
             Ok(request) if request.op == "procs_kill" => {
                 singularity_backend::procs::kill(&request.pid)
