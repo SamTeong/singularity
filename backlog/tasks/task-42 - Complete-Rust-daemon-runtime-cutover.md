@@ -4,7 +4,7 @@ title: Complete Rust daemon runtime cutover
 status: To Do
 assignee: []
 created_date: '2026-10-20 23:52'
-updated_date: '2026-10-22 00:12'
+updated_date: '2026-10-22 02:23'
 labels: []
 dependencies: []
 modified_files:
@@ -35,4 +35,6 @@ The current incremental migrations move selected operations into a private Rust 
 Cutover residual from TASK-42.6: replace the configured external Node usage-report renderer with Rust before the final daemon cutover; interim refresh still invokes node <SING_USAGE_SKILL> report.
 
 TASK-42.6 finalization: all nine reviewed source hashes and their unique VERIFY anchors match; the approved server rule correction hash is 97BCF369F4FD229B36596AA594D82A50C7078777489CB18E596C31C24EDF8A7F. Serial full Rust suite passed (160 library + 3 main); Node full suite passed (699, 2 skipped); lint, release build, and fmt check passed. A parallel full Rust run recorded 159 passed and one status header-timeout failure, and a rerun hung; serial pass does not prove the cause. TASK-42.9 tracks the bounded deterministic fixture follow-up. External Node usage-report renderer remains a cutover residual.
+
+TASK-42.7 completed: Claude, Codex, and Ollama provider usage normalization now runs through the typed Rust bridge. Remaining Node ownership includes usage snapshot persistence and local reads (TASK-42.8), plus provider credentials, fetch/scrape, and coordinator behavior; final Rust daemon cutover remains incomplete.
 <!-- SECTION:NOTES:END -->

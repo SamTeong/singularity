@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use serde_json::Value;
+use serde_json::{Value, value::RawValue};
 use std::io::{self, BufRead, BufWriter, Write};
 use std::sync::{
     Arc, Mutex,
@@ -109,6 +109,30 @@ fn main() -> io::Result<()> {
     write_line(&stdout, &serde_json::json!({ "ready": true }))?;
     for line in stdin.lock().lines() {
         let line = line?;
+        if let Ok(request) = serde_json::from_str::<ProviderUsageRequest>(&line) {
+            if request.op == "provider_usage_normalize" {
+                let payload = request
+                    .payload
+                    .unwrap_or_else(|| RawValue::from_string("null".into()).unwrap());
+                let normalized = singularity_backend::provider_usage::normalize(
+                    &singularity_backend::provider_usage::Request {
+                        provider: request.provider.unwrap_or_default(),
+                        payload_present: request.payload_present,
+                        payload,
+                        plan: request.plan,
+                        fetched_at: request.fetched_at,
+                    },
+                );
+                let body = match normalized {
+                    Ok(raw) => singularity_backend::transcript_bridge::ResponseBody::Raw(raw),
+                    Err(error) => singularity_backend::transcript_bridge::ResponseBody::Value(
+                        serde_json::json!({"error": error}),
+                    ),
+                };
+                write_response_line(&stdout, request.id.as_ref(), body)?;
+                continue;
+            }
+        }
         let parsed = serde_json::from_str::<Request>(&line);
         if let Ok(request) = &parsed {
             if request.op == "status_get"
@@ -430,6 +454,24 @@ fn main() -> io::Result<()> {
     sysstats.stop();
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct ProviderUsageRequest {
+    #[serde(default)]
+    id: Option<Value>,
+    #[serde(default)]
+    op: String,
+    #[serde(default)]
+    provider: Option<String>,
+    #[serde(default)]
+    payload_present: bool,
+    #[serde(default)]
+    payload: Option<Box<RawValue>>,
+    #[serde(default)]
+    plan: Option<Box<RawValue>>,
+    #[serde(default)]
+    fetched_at: Option<String>,
 }
 
 fn write_line<W: Write>(stdout: &Mutex<W>, value: &Value) -> io::Result<()> {

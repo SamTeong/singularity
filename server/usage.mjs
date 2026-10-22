@@ -27,10 +27,12 @@ export const OLLAMA_PROFILE_DIR = join(CACHE_DIR, 'pw-ollama-profile');
 const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
 let usageAuthBackend = null;
 let usageAuthPlatform = process.platform;
+let usageNormalizationBackend = null;
 export function setUsageAuthBackend(backend, platform = process.platform) {
   usageAuthBackend = backend;
   usageAuthPlatform = platform;
 }
+export function setUsageNormalizationBackend(backend) { usageNormalizationBackend = backend; }
 export const PW_STEALTH = {
   channel: 'msedge',
   args: ['--disable-blink-features=AutomationControlled'],
@@ -417,13 +419,9 @@ function writeOllamaBrowserMode() {
   renameSync(tmp, OLLAMA_CFG);
 }
 
-export function sanitizeOllamaUsage(data) {
-  return {
-    ok: !!data?.ok, source: 'ollama', plan: data?.plan ?? null,
-    session: data?.session ?? null, weekly: data?.weekly ?? null, extra: null,
-    fetchedAt: data?.fetchedAt ?? null, stale: !!data?.stale,
-    needsAuth: !!data?.needsAuth, error: data?.error ?? null,
-  };
+export async function sanitizeOllamaUsage(data) {
+  if (!usageNormalizationBackend) throw new Error('Rust provider usage normalizer is not configured');
+  return usageNormalizationBackend.providerUsageNormalize('ollama', data);
 }
 
 export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 120_000, headlessVerifier } = {}) {
@@ -455,16 +453,16 @@ export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 
       return { ok: false, source: 'ollama', error: 'unavailable' };
     } finally { if (ctx) await ctx.close().catch(() => {}); }
   });
-  if (!interactive.ok) return sanitizeOllamaUsage(interactive);
+  if (!interactive.ok) return await sanitizeOllamaUsage(interactive);
   const verified = await (headlessVerifier ?? fetchOllamaBrowser)();
-  if (!verified.ok) return sanitizeOllamaUsage(verified);
+  if (!verified.ok) return await sanitizeOllamaUsage(verified);
   writeOllamaBrowserMode();
   cache.ollama = { data: null, at: 0 };
   historyPaused = null;
   historyBackoffMs = 0;
   ollamaGate.clear();
   startHistorySampler();
-  return sanitizeOllamaUsage({ ...verified, fetchedAt: new Date().toISOString() });
+  return await sanitizeOllamaUsage({ ...verified, fetchedAt: new Date().toISOString() });
 }
 
 export function preserveOllamaStale(lastGood, failure) {
@@ -482,40 +480,9 @@ export function preserveClaudeStale(lastGood, failure) {
 // ---- Claude: OAuth usage API --------------------------------------------------
 // Schema mirrors stats.mjs (L1795-1812): raw has five_hour, seven_day,
 // seven_day_{sonnet,opus,omelette}, extra_usage; each window {utilization,resets_at}.
-export function normalizeClaude(raw, plan) {
-  const win = (w) => {
-    if (!w || w.utilization == null) return null;
-    const pctUsed = Number(w.utilization);
-    const resetsAt = w.resets_at ?? null;
-    return {
-      pctUsed, resetsAt, models: [],
-      ...(pctUsed === 0 && resetsAt == null ? { started: false } : {}),
-    };
-  };
-  const models = [
-    ['sonnet', raw.seven_day_sonnet],
-    ['opus', raw.seven_day_opus],
-    ['design', raw.seven_day_omelette], // API key omelette → "design" (stats.mjs L1804)
-  ]
-    .filter(([, w]) => w && w.utilization != null)
-    .map(([model, w]) => ({ model, pctUsed: Number(w.utilization) }));
-
-  const weekly = win(raw.seven_day);
-  if (weekly) weekly.models = models;
-  const eu = raw.extra_usage;
-  return {
-    ok: true, source: 'claude', plan: plan ?? null,
-    session: win(raw.five_hour),
-    weekly,
-    extra: eu && typeof eu === 'object'
-      ? { enabled: eu.is_enabled ?? null, used: eu.used_credits ?? null,
-          monthlyLimit: eu.monthly_limit ?? null,
-          // Extra-usage-only subscriptions omit utilization but carry a top-level spend percentage.
-          pctUsed: eu.utilization != null ? Number(eu.utilization)
-            : raw.spend && typeof raw.spend === 'object' && raw.spend.percent != null ? Number(raw.spend.percent) : null,
-          resetsAt: eu.resets_at ?? null }
-      : null,
-  };
+async function normalizeClaude(raw, plan) {
+  if (!usageNormalizationBackend) throw new Error('Rust provider usage normalizer is not configured');
+  return usageNormalizationBackend.providerUsageNormalize('claude', raw, { payloadPresent: raw !== undefined, plan });
 }
 
 // Read the Claude Code OAuth token from ~/.claude/.credentials.json. Returns
@@ -641,10 +608,10 @@ export async function refreshClaudeAuth() {
 // (extra_usage, per-model) from the last good reading. Both are plain file reads,
 // which is why pull() runs this ahead of the TTL gate — that guards the network
 // leg only.
-export function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
+export async function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
   const snapshot = readClaudeSnapshot(maxAgeMs);
   if (snapshot) {
-    const data = normalizeClaude(snapshot.raw, plan);
+    const data = await normalizeClaude(snapshot.raw, plan);
     return {
       ...data,
       session: preferCurrentWindow(data.session, prev?.session),
@@ -685,7 +652,7 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
   // looked and found nothing fresh by the time it forces, so this is belt and
   // braces there rather than a second chance.
   if (!force) {
-    const local = readClaudeLocal(prev, oauth.subscriptionType);
+    const local = await readClaudeLocal(prev, oauth.subscriptionType);
     if (local) return local;
   }
 
@@ -712,7 +679,7 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
     // tails stay fed for sessions starting mid-idle (readClaudeSnapshot reads
     // {fetched_at, raw}). Failures and file-sourced reads append nothing.
     appendClaudeHistory({ fetched_at: localTimestamp(new Date()), raw });
-    return normalizeClaude(raw, oauth.subscriptionType);
+    return await normalizeClaude(raw, oauth.subscriptionType);
   } catch (e) {
     return { ok: false, source: 'claude', error: `parse error: ${e.message}` };
   }
@@ -732,31 +699,6 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
 export const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
 const CODEX_AUTH_PATH = join(CODEX_HOME, 'auth.json');
 const CODEX_USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
-
-function normalizeCodexLimits(plan, windows, durationKey, fetchedAt, resetKey = 'resets_at') {
-  let session = null;
-  let weekly = null;
-  for (const w of windows) {
-    const duration = Number(w?.[durationKey]);
-    if (!Number.isFinite(w?.used_percent) || !Number.isFinite(duration)) continue;
-    // A window that has not begun yet: the live API still fills in reset_at,
-    // but as a rolling projection of now + the whole window, so it slides
-    // forward on every poll (seen live: the 5h reset walking 8:31 → 8:32 →
-    // 8:33pm). That is not a reset instant, so drop it and say so — a pinned
-    // reset always has reset_after_seconds below the window length. Rollout
-    // records carry no reset_after_seconds, so they never trip this.
-    const unstarted = Number(w.reset_after_seconds) >= Number(w.limit_window_seconds);
-    const window = {
-      pctUsed: w.used_percent,
-      resetsAt: !unstarted && Number.isFinite(w[resetKey]) ? new Date(w[resetKey] * 1000).toISOString() : null,
-      models: [],
-      ...(unstarted ? { started: false } : {}),
-    };
-    if (duration >= (durationKey === 'window_minutes' ? 1440 : 86400)) weekly = window;
-    else session = window;
-  }
-  return session || weekly ? { ok: true, source: 'codex', plan: plan ?? null, fetchedAt, session, weekly } : null;
-}
 
 // The one answer both branches fall back to: nothing usable was found, either
 // on disk (no fresh Stop-hook record) or, on the live leg, no credentials.
@@ -798,7 +740,7 @@ export async function fetchCodex(force = false) {
     let raw;
     try { raw = await resp.json(); }
     catch (e) { liveError = `parse error: ${e.message}`; }
-    const live = normalizeCodexLimits(raw?.plan_type, [raw?.rate_limit?.primary_window, raw?.rate_limit?.secondary_window], 'limit_window_seconds', new Date().toISOString(), 'reset_at');
+    const live = await usageNormalizationBackend.providerUsageNormalize('codex', raw, { fetchedAt: new Date().toISOString() });
     if (live) return live;
     liveError ??= 'no usable rate limits';
   }
@@ -859,7 +801,7 @@ function codexAccountFingerprint() {
 // reading is newer, and hand it back marked stale.
 async function claudeStaleFloor(slot, failure) {
   const oauth = await claudeOauthToken();
-  const widened = readClaudeLocal(slot.data, oauth?.subscriptionType, CLAUDE_STALE_MAX_MS);
+  const widened = await readClaudeLocal(slot.data, oauth?.subscriptionType, CLAUDE_STALE_MAX_MS);
   const lastGood = slot.data?.ok ? slot.data : null;
   const best = widened && !(lastGood?.fetchedAt > widened.fetchedAt) ? widened : lastGood;
   return best ? preserveClaudeStale(best, failure) : null;
@@ -899,7 +841,7 @@ async function pull(src, fetcher, force) {
       slot.at = 0;
     }
     const oauth = await claudeOauthToken();
-    const local = claudeAccountChanged ? null : readClaudeLocal(slot.data, oauth?.subscriptionType);
+    const local = claudeAccountChanged ? null : await readClaudeLocal(slot.data, oauth?.subscriptionType);
     // Complete local windows answer the card without spending the endpoint's
     // account quota. Partial windows reach the existing network floor, with the
     // local reading retained as fallback if that request fails.

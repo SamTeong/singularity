@@ -20,6 +20,7 @@ pub mod models;
 pub mod oneshot;
 pub mod plans;
 pub mod procs;
+pub mod provider_usage;
 pub mod pty;
 pub mod rules;
 pub mod skills;

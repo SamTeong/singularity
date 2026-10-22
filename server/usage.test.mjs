@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, utimesSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createRustBackend } from './rust-backend.mjs';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-usage-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
@@ -26,9 +27,18 @@ mkdirSync(claudeCfg, { recursive: true });
 process.env.CLAUDE_CONFIG_DIR = claudeCfg;
 const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json'), JSON.stringify({ claudeAiOauth: oauth }));
 
-after(() => { rmSync(scratch, { recursive: true, force: true }); });
+let usageRustBackend;
+after(async () => { await usageRustBackend?.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readCodexSnapshot, readCostStateLimits, rotateClaudeHistory, claudeOauthToken, setUsageAuthBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, rotateClaudeHistory, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
+usageRustBackend = createRustBackend();
+await usageRustBackend.start();
+setUsageNormalizationBackend(usageRustBackend);
+async function importIsolatedUsage(specifier) {
+  const isolated = await import(specifier);
+  isolated.setUsageNormalizationBackend(usageRustBackend);
+  return isolated;
+}
 
 const OLLAMA_HTML = `
   <span class="capitalize">pro</span>
@@ -62,7 +72,7 @@ test('connectOllamaUsage: verifies the profile before selecting browser mode', a
 });
 
 test('connectOllamaUsage: resumes history collection after authentication recovers', async () => {
-  const { connectOllamaUsage: isolatedConnect, runHistorySample: isolatedSample } = await import(`./usage.mjs?history-resume=${Date.now()}`);
+  const { connectOllamaUsage: isolatedConnect, runHistorySample: isolatedSample } = await importIsolatedUsage(`./usage.mjs?history-resume=${Date.now()}`);
   const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: async () => {}, content: async () => OLLAMA_HTML };
   const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => {} }) } };
   const realNow = Date.now;
@@ -98,7 +108,7 @@ test('connectOllamaUsage: resumes history collection after authentication recove
 });
 
 test('runHistorySample: a good tick caches the reading without a second scrape', async () => {
-  const { runHistorySample: isolatedSample, getUsage: isolatedGetUsage } = await import(`./usage.mjs?history-good=${Date.now()}`);
+  const { runHistorySample: isolatedSample, getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?history-good=${Date.now()}`);
   try {
     await isolatedSample(async () => parseOllamaHtml(OLLAMA_HTML));
     // Within the network floor, getUsage must answer from the cache the tick
@@ -118,7 +128,7 @@ test('runHistorySample: a good tick caches the reading without a second scrape',
 });
 
 test('runHistorySample: a genuine failure still arms the gate (is not skipped as a floor hit)', async () => {
-  const { runHistorySample: isolatedSample } = await import(`./usage.mjs?history-fail=${Date.now()}`);
+  const { runHistorySample: isolatedSample } = await importIsolatedUsage(`./usage.mjs?history-fail=${Date.now()}`);
   const realNow = Date.now;
   try {
     await isolatedSample(async () => parseOllamaHtml(OLLAMA_HTML)); // tick 1: good reading, clears backoff
@@ -149,60 +159,6 @@ const CLAUDE_RAW = {
   seven_day_omelette: { utilization: 5, resets_at: '2026-07-19T00:00:00Z' },
   extra_usage: { is_enabled: true, used_credits: 12, monthly_limit: 40, utilization: 30 },
 };
-
-test('normalizeClaude: five_hour→session, seven_day→weekly, per-model + extra', () => {
-  const u = normalizeClaude(CLAUDE_RAW, 'max');
-  assert.equal(u.ok, true);
-  assert.equal(u.source, 'claude');
-  assert.equal(u.plan, 'max');
-
-  assert.deepEqual(u.session, { pctUsed: 42, resetsAt: '2026-07-14T13:00:00Z', models: [] });
-  assert.equal(u.weekly.pctUsed, 63.5);
-  assert.equal(u.weekly.resetsAt, '2026-07-19T00:00:00Z');
-  assert.deepEqual(u.weekly.models, [
-    { model: 'sonnet', pctUsed: 30 },
-    { model: 'opus', pctUsed: 71 },
-    { model: 'design', pctUsed: 5 },
-  ]);
-  assert.deepEqual(u.extra, {
-    enabled: true, used: 12, monthlyLimit: 40, pctUsed: 30, resetsAt: null,
-  });
-});
-
-test('normalizeClaude: zero-use window without a reset is unstarted', () => {
-  const u = normalizeClaude({ five_hour: { utilization: 0, resets_at: null }, seven_day: null }, 'max');
-  assert.deepEqual(u.session, { pctUsed: 0, resetsAt: null, models: [], started: false });
-});
-
-test('normalizeClaude: missing windows/extra → nulls, no throw', () => {
-  const u = normalizeClaude({ five_hour: null, seven_day: null }, undefined);
-  assert.equal(u.session, null);
-  assert.equal(u.weekly, null);
-  assert.equal(u.extra, null);
-  assert.equal(u.plan, null);
-});
-
-// Extra-usage-only subscription: no window utilization, spend percentage instead.
-const CLAUDE_EXTRA_ONLY = {
-  five_hour: null,
-  seven_day: null,
-  extra_usage: { is_enabled: true, used_credits: 0, monthly_limit: 20000, utilization: null },
-  spend: {
-    percent: 0,
-    used: { amount_minor: 0, currency: 'USD', exponent: 2 },
-    limit: { amount_minor: 20000, currency: 'USD', exponent: 2 },
-  },
-};
-
-test('normalizeClaude: extra-only plan falls back to top-level spend percent', () => {
-  const u = normalizeClaude(CLAUDE_EXTRA_ONLY, 'max');
-  assert.equal(u.session, null);
-  assert.equal(u.weekly, null);
-  assert.deepEqual(u.extra, {
-    enabled: true, used: 0, monthlyLimit: 20000, pctUsed: 0, resetsAt: null,
-  });
-  assert.equal(normalizeClaude({ ...CLAUDE_EXTRA_ONLY, spend: { ...CLAUDE_EXTRA_ONLY.spend, percent: 25 } }, 'max').extra.pctUsed, 25);
-});
 
 // appendOllamaHistory writes the report skill's snapshot shape and de-dupes an
 // unchanged reading (idle-debounce refreshes call this often).
@@ -277,7 +233,7 @@ test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', (
 });
 
 test('appendCodexHistory: an unchanged reading is rewritten once the 5-min heartbeat has passed', async () => {
-  const { appendCodexHistory: isolatedAppendCodexHistory } = await import(`./usage.mjs?codex-heartbeat=${Date.now()}`);
+  const { appendCodexHistory: isolatedAppendCodexHistory } = await importIsolatedUsage(`./usage.mjs?codex-heartbeat=${Date.now()}`);
   const realNow = Date.now;
   try {
     isolatedAppendCodexHistory(CODEX_READING);
@@ -785,7 +741,7 @@ test('getUsage: automatic incomplete-window retries honor the network floor', as
     calls += 1;
     return { status: 404, headers: { get: () => null } };
   };
-  const isolatedGetUsage = (await import(`./usage.mjs?automatic-floor=${Date.now()}`)).getUsage;
+  const isolatedGetUsage = (await importIsolatedUsage(`./usage.mjs?automatic-floor=${Date.now()}`)).getUsage;
   try {
     await isolatedGetUsage({ sources: ['claude'] });
     await isolatedGetUsage({ sources: ['claude'] });
@@ -834,7 +790,7 @@ test('getUsage: a local Claude reading establishes identity before an account sw
   const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'account-a.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 58, resets_at: 1789533000 }, seven_day: { used_percentage: 9, resets_at: 1790096400 } } }));
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?account-switch=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?account-switch=${Date.now()}`);
   const accountA = { expiresAt: Date.now() + 3_600_000 };
   accountA[ACCESS_TOKEN] = ['account', 'a', 'token'].join('-');
   const accountB = { expiresAt: Date.now() + 3_600_000 };
@@ -900,7 +856,7 @@ test('getUsage: a newer statusline reading outranks the TTL', async () => {
 // The statusline writes usage-snapshots.jsonl once a turn from the same
 // endpoint, so a fresh line spares the daemon a call it would only get 429ed
 // for. Tail-read: the real file is megabytes.
-test('readClaudeSnapshot: serves a fresh tail line, rejects a stale one', () => {
+test('readClaudeSnapshot: serves a fresh tail line, rejects a stale one', async () => {
   const file = join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl');
   const at = new Date();
   const stamp = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
@@ -911,7 +867,8 @@ ${JSON.stringify({ fetched_at: stamp(at), raw: CLAUDE_RAW })}\n`);
 
   const fresh = readClaudeSnapshot();
   assert.equal(fresh.raw.five_hour.utilization, 42);
-  assert.equal(normalizeClaude(fresh.raw, 'team').session.pctUsed, 42);
+  const normalized = await readClaudeLocal(null, 'team');
+  assert.equal(normalized.session.pctUsed, 42);
 
   assert.equal(readClaudeSnapshot(60_000, at.getTime() + 120_000), null);
   writeFileSync(file, 'not json\n');
@@ -993,7 +950,7 @@ test('getUsage: a valid unstarted local session does not trigger OAuth polling',
   let calls = 0;
   globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => CLAUDE_RAW }; };
   try {
-    const isolatedGetUsage = (await import(`./usage.mjs?unstarted=${Date.now()}`)).getUsage;
+    const isolatedGetUsage = (await importIsolatedUsage(`./usage.mjs?unstarted=${Date.now()}`)).getUsage;
     const doc = await isolatedGetUsage({ sources: ['claude'] });
     assert.equal(doc.claude.session.started, false);
     assert.equal(calls, 0);
@@ -1042,20 +999,20 @@ test('readClaudeLocal: a cost-state reading appends a snapshot row on change onl
   const resets = Math.floor((Date.now() + 3_600_000) / 1000);
   const write = (pct) => writeFileSync(join(dir, 'live.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: pct, resets_at: resets }, seven_day: { used_percentage: 3, resets_at: resets + 86_400 } } }));
   const rows = () => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
-  const { readClaudeLocal: isolatedReadLocal } = await import(`./usage.mjs?cost-state-append=${Date.now()}`);
+  const { readClaudeLocal: isolatedReadLocal } = await importIsolatedUsage(`./usage.mjs?cost-state-append=${Date.now()}`);
   try {
     write(40);
-    assert.equal(isolatedReadLocal(null, 'max').session.pctUsed, 40);
+    assert.equal((await isolatedReadLocal(null, 'max')).session.pctUsed, 40);
     assert.equal(rows().length, 1);
     const [row] = rows();
     assert.equal(row.source, 'cost-state');
     assert.equal(row.raw.five_hour.utilization, 40);
     assert.equal(row.raw.five_hour.resets_at, new Date(resets * 1000).toISOString());
     assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-    isolatedReadLocal(null, 'max'); // unchanged: no row
+    await isolatedReadLocal(null, 'max'); // unchanged: no row
     assert.equal(rows().length, 1);
     write(41);
-    isolatedReadLocal(null, 'max');
+    await isolatedReadLocal(null, 'max');
     assert.deepEqual(rows().map((r) => r.raw.five_hour.utilization), [40, 41]);
     // Tier 1 skips these rows: they lack extra_usage / per-model.
     assert.equal(readClaudeSnapshot(), null);
@@ -1258,7 +1215,7 @@ test('sampleCodex: a fresh codex-usage.jsonl line never reaches the live wham AP
 });
 
 test('getUsage: Codex partial snapshots recover missing windows and retain active cached windows', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-partial=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-partial=${Date.now()}`);
   writeCodexAuth({ access_token: 'mock-token', account_id: 'mock-account' });
   mkdirSync(dirname(CODEX_HISTORY_FILE), { recursive: true });
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: null, weekly: { utilization: 9, resets_at: new Date(Date.now() + 7 * 86400_000).toISOString() }, plan_type: 'plus' })}\n`);
@@ -1282,7 +1239,7 @@ test('getUsage: Codex partial snapshots recover missing windows and retain activ
 });
 
 test('getUsage: complete unstarted Codex windows avoid the endpoint, including forced refresh', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-unstarted=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-unstarted=${Date.now()}`);
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 0, resets_at: null, started: false }, weekly: { utilization: 0, resets_at: null, started: false }, plan_type: 'plus' })}\n`);
   const originalFetch = globalThis.fetch;
   let calls = 0;
@@ -1296,7 +1253,7 @@ test('getUsage: complete unstarted Codex windows avoid the endpoint, including f
 });
 
 test('getUsage: Codex account switches discard cached and unidentified snapshot data', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-account-switch=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-account-switch=${Date.now()}`);
   rmSync(CODEX_HISTORY_FILE, { force: true });
   writeCodexAuth({ access_token: 'mock-old-token', account_id: 'mock-old-account' });
   const originalFetch = globalThis.fetch;
@@ -1320,7 +1277,7 @@ test('getUsage: Codex account switches discard cached and unidentified snapshot 
 });
 
 test('getUsage: Codex partial session snapshot fetches the missing weekly window under force', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-missing-weekly=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-missing-weekly=${Date.now()}`);
   mkdirSync(dirname(CODEX_HISTORY_FILE), { recursive: true });
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 13, resets_at: new Date(Date.now() + 18000_000).toISOString() }, weekly: null, plan_type: 'plus' })}\n`);
   writeCodexAuth({ access_token: 'mock-weekly-token', account_id: 'mock-weekly-account' });
@@ -1336,7 +1293,7 @@ test('getUsage: Codex partial session snapshot fetches the missing weekly window
 });
 
 test('getUsage: Codex 429 keeps last-good data stale until Retry-After expires', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-retry-after=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-retry-after=${Date.now()}`);
   rmSync(CODEX_HISTORY_FILE, { force: true });
   writeCodexAuth({ access_token: 'mock-retry-token', account_id: 'mock-retry-account' });
   const originalFetch = globalThis.fetch;
@@ -1370,7 +1327,7 @@ test('getUsage: Codex 429 keeps last-good data stale until Retry-After expires',
 });
 
 test('getUsage: unreadable Codex auth preserves the 429 backoff until an account switch', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-auth-gap=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-auth-gap=${Date.now()}`);
   rmSync(CODEX_HISTORY_FILE, { force: true });
   writeCodexAuth({ access_token: 'mock-gap-token', account_id: 'mock-gap-account' });
   const originalFetch = globalThis.fetch;
@@ -1397,7 +1354,7 @@ test('getUsage: unreadable Codex auth preserves the 429 backoff until an account
 const staleCodexLine = (staleAt) => writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(staleAt), session: { utilization: 5, resets_at: null }, weekly: { utilization: 20, resets_at: null }, plan_type: 'plus' })}\n`);
 
 test('sampleCodex: a stale codex-usage.jsonl falls back to the live wham API, then the floor blocks an immediate repeat', async () => {
-  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-floor=${Date.now()}`);
+  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-floor=${Date.now()}`);
   const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));
   staleCodexLine(staleAt);
   writeCodexAuth({ access_token: '[REDACTED:credential-assignment]', account_id: 'codex-floor-account' });
@@ -1434,7 +1391,7 @@ test('sampleCodex: a stale codex-usage.jsonl falls back to the live wham API, th
 });
 
 test('sampleCodex: the network floor arms even on a failed attempt — a persistent failure cannot retry sooner than 60s', async () => {
-  const { sampleCodex: isolatedSampleCodex } = await import(`./usage.mjs?codex-floor-fail=${Date.now()}`);
+  const { sampleCodex: isolatedSampleCodex } = await importIsolatedUsage(`./usage.mjs?codex-floor-fail=${Date.now()}`);
   const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));
   staleCodexLine(staleAt);
   writeCodexAuth({ access_token: '[REDACTED:credential-assignment]', account_id: 'codex-floor-fail-account' });
@@ -1457,7 +1414,7 @@ test('sampleCodex: the network floor arms even on a failed attempt — a persist
 });
 
 test('getUsage: the network floor also holds on a cold cache (a concurrent automated pull does not double-fetch)', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?cold-floor=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?cold-floor=${Date.now()}`);
   let calls = 0;
   let release;
   const gate = new Promise((r) => { release = r; });
@@ -1471,7 +1428,7 @@ test('getUsage: the network floor also holds on a cold cache (a concurrent autom
 });
 
 test('getUsage: manual force=1 bypasses the network floor an automated call just armed', async () => {
-  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-floor-manual=${Date.now()}`);
+  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-floor-manual=${Date.now()}`);
   const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));
   staleCodexLine(staleAt);
   writeCodexAuth({ access_token: '[REDACTED:credential-assignment]', account_id: 'codex-floor-manual-account' });
@@ -1498,7 +1455,7 @@ test('getUsage: manual force=1 bypasses the network floor an automated call just
 // an identical WS frame; a manual/forced call (the Refresh button) always
 // pushes, since a user pressing it is not the "nothing changed" case.
 test('getUsage: an automated call does not re-emit an unchanged document; a manual one always does', async () => {
-  const { getUsage: isolatedGetUsage, initUsageAutoRefresh: isolatedInit } = await import(`./usage.mjs?emit-gate=${Date.now()}`);
+  const { getUsage: isolatedGetUsage, initUsageAutoRefresh: isolatedInit } = await importIsolatedUsage(`./usage.mjs?emit-gate=${Date.now()}`);
   let emits = 0;
   isolatedInit({ on() {}, emit(t) { if (t === 'usage') emits += 1; } });
 
