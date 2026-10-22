@@ -1,10 +1,12 @@
 use serde::Deserialize;
 use serde_json::{Value, value::RawValue};
+use std::collections::HashMap;
 use std::io::{self, BufRead, BufWriter, Write};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicBool, Ordering},
 };
+use tokio::task::{JoinError, JoinSet};
 
 #[derive(Deserialize)]
 struct Request {
@@ -131,10 +133,18 @@ fn main() -> io::Result<()> {
         singularity_backend::transcript_bridge::TranscriptServices::default();
     let mut usage_snapshots = singularity_backend::usage_snapshot::SnapshotService::default();
     let mut codex_usage_sessions = singularity_backend::codex_usage::CodexUsageSessions::default();
+    let mut one_shot_tasks = JoinSet::new();
+    let mut one_shot_request_ids = HashMap::new();
+    let mut one_shot_active = false;
+    let one_shot_work_active = Arc::new(AtomicBool::new(false));
     let stdin = io::stdin();
     write_line(&stdout, &serde_json::json!({ "ready": true }))?;
     for line in stdin.lock().lines() {
         let line = line?;
+        while let Some(result) = one_shot_tasks.try_join_next_with_id() {
+            reap_one_shot(result, &mut one_shot_request_ids, &stdout, &shutting_down)?;
+        }
+        one_shot_active = !one_shot_request_ids.is_empty();
         if let Ok(request) = serde_json::from_str::<SnapshotWireRequest>(&line) {
             if request.op == "provider_usage_snapshot" {
                 let id = request.id.clone();
@@ -177,6 +187,87 @@ fn main() -> io::Result<()> {
             }
         }
         let parsed = serde_json::from_str::<Request>(&line);
+        if let Ok(request) = &parsed {
+            if request.op == "oneshot_async" {
+                let id = request.id.as_ref().and_then(Value::as_str);
+                if let Some(id) = id {
+                    if one_shot_active {
+                        if one_shot_work_active.load(Ordering::Acquire) {
+                            write_line(
+                                &stdout,
+                                &serde_json::json!({
+                                    "type": "oneshot_reply",
+                                    "id": id,
+                                    "response": { "ok": false, "error": "async one-shot already running" }
+                                }),
+                            )?;
+                            continue;
+                        }
+                        if let Some(result) = runtime.block_on(one_shot_tasks.join_next_with_id()) {
+                            reap_one_shot(
+                                result,
+                                &mut one_shot_request_ids,
+                                &stdout,
+                                &shutting_down,
+                            )?;
+                        }
+                        one_shot_active = !one_shot_request_ids.is_empty();
+                    }
+                    let id = Value::String(id.to_owned());
+                    let bin = request.bin.as_str().map(str::to_owned);
+                    let args = request.args.clone();
+                    let timeout_ms = request.timeout_ms.as_f64();
+                    let max_buffer = request.max_buffer.as_f64();
+                    let env = request.env.clone();
+                    let task_request_id = id.clone();
+                    let task_stdout = stdout.clone();
+                    let task_shutting_down = shutting_down.clone();
+                    let task_work_active = one_shot_work_active.clone();
+                    one_shot_work_active.store(true, Ordering::Release);
+                    let abort = {
+                        let _runtime = runtime.enter();
+                        one_shot_tasks.spawn(async move {
+                            let response = match tokio::task::spawn_blocking(move || {
+                                singularity_backend::oneshot::run(
+                                    bin.as_deref(),
+                                    &args,
+                                    timeout_ms,
+                                    max_buffer,
+                                    Some(&env),
+                                )
+                            })
+                            .await
+                            {
+                                Ok(response) => response,
+                                Err(error) => serde_json::json!({
+                                    "ok": false,
+                                    "error": format!("one-shot process task failed: {error}"),
+                                }),
+                            };
+                            task_work_active.store(false, Ordering::Release);
+                            let reply = serde_json::json!({
+                                "type": "oneshot_reply",
+                                "id": task_request_id,
+                                "response": response,
+                            });
+                            let _ = write_status_line(&task_stdout, &task_shutting_down, &reply);
+                        })
+                    };
+                    one_shot_request_ids.insert(abort.id(), id);
+                    one_shot_active = true;
+                    continue;
+                }
+                write_line(
+                    &stdout,
+                    &serde_json::json!({
+                        "type": "oneshot_reply",
+                        "id": request.id,
+                        "response": { "ok": false, "error": "async one-shot requires a string ID" }
+                    }),
+                )?;
+                continue;
+            }
+        }
         if let Ok(request) = &parsed {
             if request.op == "status_get"
                 && request.message_type.as_deref() == Some("status_request")
@@ -669,6 +760,12 @@ fn main() -> io::Result<()> {
             write_line(&stdout, &response)?;
         }
     }
+    runtime.block_on(async {
+        while let Some(result) = one_shot_tasks.join_next_with_id().await {
+            reap_one_shot(result, &mut one_shot_request_ids, &stdout, &shutting_down)?;
+        }
+        Ok::<(), io::Error>(())
+    })?;
     begin_shutdown(&stdout, &shutting_down)?;
     sysstats.stop();
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
@@ -816,6 +913,33 @@ fn begin_shutdown<W: Write>(stdout: &Mutex<W>, shutting_down: &AtomicBool) -> io
         .lock()
         .map_err(|_| io::Error::other("stdout writer poisoned"))?;
     shutting_down.store(true, Ordering::Release);
+    Ok(())
+}
+
+fn reap_one_shot<W: Write>(
+    result: Result<(tokio::task::Id, ()), JoinError>,
+    request_ids: &mut HashMap<tokio::task::Id, Value>,
+    stdout: &Mutex<W>,
+    shutting_down: &AtomicBool,
+) -> io::Result<()> {
+    match result {
+        Err(error) => {
+            if let Some(id) = request_ids.remove(&error.id()) {
+                let reply = serde_json::json!({
+                    "type": "oneshot_reply",
+                    "id": id,
+                    "response": {
+                        "ok": false,
+                        "error": format!("one-shot task failed: {error}"),
+                    },
+                });
+                let _ = write_status_line(stdout, shutting_down, &reply)?;
+            }
+        }
+        Ok((id, _)) => {
+            request_ids.remove(&id);
+        }
+    }
     Ok(())
 }
 

@@ -4,7 +4,7 @@ title: Complete Rust daemon runtime cutover
 status: To Do
 assignee: []
 created_date: '2026-10-20 23:52'
-updated_date: '2026-10-22 15:53'
+updated_date: '2026-10-22 16:20'
 labels: []
 dependencies: []
 modified_files:
@@ -59,4 +59,6 @@ TASK-44 Windows finalization: Ollama browser-mode config filesystem reads and at
 TASK-45 completed 2026-10-22: Codex account fingerprint lookup moved to the private Rust bridge and integrated at the existing Node pre-gate point. Independent review accepted. Continuation evidence passed focused Node (109 passed, 2 skipped), full Node (723 passed, 2 skipped), lint, and diff-check; reused original fmt, Rust (207 library + 3 daemon), and release-build checks. Nine source hashes matched the continuation receipt. The initial Cargo.lock byte transition remains unexplained; the final diff adds only the intended direct ring dependency edge. No Groma architecture owner is currently registered for the affected files.
 
 TASK-46 completed on 2026-10-22: process discovery parsing, normalization, and classification moved into Rust; Node retains registry snapshot timing and the public /procs/kill guard flow. Independent review passed. Hash-pinned verification: focused Node 38 passed/2 skipped, full Node 724 passed/2 skipped, lint and diff check passed; reused original matching Rust fmt, 210 library + 3 binary tests, and release build. Darwin live execution remains platform-validation follow-up.
+
+TASK-47 completed on 2026-10-22: private correlated async one-shot bridge accepted with independent review PASS and all seven receipt checks passing (210 Rust library + 3 binary tests; focused Node 49 passed/2 skipped; full Node 728 passed/2 skipped; fmt, release build, lint, diff-check). Source and Cargo guard hashes matched before/after. Recorded limits: three non-blocking one_shot_active unused_assignments warnings; JoinError panic correlation lacks a dedicated test; forced-stop nested-child cleanup ownership remains unknown and cleanup/result delivery are not guaranteed. This completes TASK-47 only; whole-daemon cutover and TASK-42.2 Linux/macOS runtime validation remain open.
 <!-- SECTION:NOTES:END -->

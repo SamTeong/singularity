@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { access, mkdtemp, mkdir, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
@@ -398,6 +399,125 @@ test('Rust status replies bypass ordinary FIFO and correlate out of order', asyn
     assert.deepEqual(await second, { done: 2 });
     assert.deepEqual(await first, { done: 1 });
   } finally { await backend.stop(); }
+});
+
+test('Rust async one-shot FIFO leaves ordinary and status requests independent', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    const request = JSON.parse(String(chunk));
+    requests.push(request);
+    if (request.op === 'sysstats_get') {
+      const count = requests.filter(({ op }) => op === 'sysstats_get').length;
+      queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: request.id, response: { ordinary: count } })}\n`));
+    }
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  try {
+    await backend.start();
+    const first = backend.oneShot('synthetic-cli', ['first'], { timeout: 1000 });
+    const second = backend.oneShot('synthetic-cli', ['second'], { timeout: 1000 });
+    const ordinary = backend.sysStats();
+    const ordinaryNext = backend.sysStats();
+    const status = backend.statusGet(true);
+    assert.deepEqual(await ordinary, { ordinary: 1 });
+    assert.deepEqual(await ordinaryNext, { ordinary: 2 });
+    assert.deepEqual(requests.filter(({ op }) => op === 'sysstats_get').map(({ id }) => id), ['rust-3', 'rust-4']);
+    const statusRequest = requests.find(({ op }) => op === 'status_get');
+    child.stdout.write(`${JSON.stringify({ id: statusRequest.id, type: 'status_reply', response: { status: 'ready' } })}\n`);
+    assert.deepEqual(await status, { status: 'ready' });
+    assert.deepEqual(requests.filter(({ op }) => op === 'oneshot_async').map(({ args }) => args), [['first']]);
+
+    const firstRequest = requests.find(({ op }) => op === 'oneshot_async');
+    child.stdout.write(`${JSON.stringify({ type: 'oneshot_reply', id: firstRequest.id, response: { ok: true, stdout: 'first-output' } })}\n`);
+    assert.deepEqual(await first, { stdout: 'first-output' });
+    const oneShots = requests.filter(({ op }) => op === 'oneshot_async');
+    assert.deepEqual(oneShots.map(({ args }) => args), [['first'], ['second']]);
+    child.stdout.write(`${JSON.stringify({ type: 'oneshot_reply', id: oneShots[1].id, response: { ok: true, stdout: 'second-output' } })}\n`);
+    assert.deepEqual(await second, { stdout: 'second-output' });
+  } finally { await backend.stop(); }
+});
+
+test('Rust async one-shot rejects malformed and duplicate reply frames through bridge failure', async () => {
+  const makeBackend = () => {
+    const child = new EventEmitter();
+    child.stdin = new PassThrough();
+    child.stdout = new PassThrough();
+    child.stderr = new PassThrough();
+    child.kill = () => true;
+    const requests = [];
+    child.stdin.write = (chunk, callback) => {
+      requests.push(JSON.parse(String(chunk)));
+      callback?.();
+      return true;
+    };
+    child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+    const backend = createRustBackend({ spawnProcess: () => {
+      queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+      return child;
+    } });
+    return { backend, child, requests };
+  };
+
+  const malformed = makeBackend();
+  await malformed.backend.start();
+  const malformedPending = malformed.backend.oneShot('synthetic-cli', [], { timeout: 1000 });
+  malformed.child.stdout.write(`${JSON.stringify({ type: 'oneshot_reply', id: malformed.requests[0].id })}\n`);
+  await assert.rejects(malformedPending, /malformed one-shot reply/);
+  await malformed.backend.stop();
+
+  const duplicate = makeBackend();
+  await duplicate.backend.start();
+  const completed = duplicate.backend.oneShot('synthetic-cli', [], { timeout: 1000 });
+  const id = duplicate.requests[0].id;
+  duplicate.child.stdout.write(`${JSON.stringify({ type: 'oneshot_reply', id, response: { ok: true, stdout: 'done' } })}\n`);
+  assert.deepEqual(await completed, { stdout: 'done' });
+  const ordinaryPending = duplicate.backend.sysStats();
+  duplicate.child.stdout.write(`${JSON.stringify({ type: 'oneshot_reply', id, response: { ok: true, stdout: 'duplicate' } })}\n`);
+  await assert.rejects(ordinaryPending, /unknown one-shot reply ID/);
+  await duplicate.backend.stop();
+});
+
+test('Rust async one-shot stop rejects dispatched and queued calls and ends stdin', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    requests.push(JSON.parse(String(chunk)));
+    callback?.();
+    return true;
+  };
+  let stdinEnded = false;
+  child.stdin.end = () => {
+    stdinEnded = true;
+    queueMicrotask(() => child.emit('exit', 0, null));
+  };
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  await backend.start();
+  const dispatched = backend.oneShot('synthetic-cli', ['dispatched'], { timeout: 1000 });
+  const queued = backend.oneShot('synthetic-cli', ['queued'], { timeout: 1000 });
+  const dispatchedRejected = assert.rejects(dispatched, /Rust backend stopped/);
+  const queuedRejected = assert.rejects(queued, /Rust backend stopped/);
+  await backend.stop();
+  await Promise.all([dispatchedRejected, queuedRejected]);
+  assert.equal(stdinEnded, true);
+  assert.deepEqual(requests.filter(({ op }) => op === 'oneshot_async').map(({ args }) => args), [['dispatched']]);
 });
 
 test('Rust bridge rejects pending status requests on exit and stop', async () => {
@@ -1242,6 +1362,66 @@ test('Rust one-shot bridge execs a binary and maps stdout, failure, and timeout'
     });
   } finally {
     await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
+test('Rust async one-shot drains a synthetic child and replies before direct EOF exit', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-oneshot-eof-'));
+  const script = join(base, 'delayed.mjs');
+  const binaryPath = process.env.SINGULARITY_RUST_BACKEND_BINARY
+    ?? fileURLToPath(new URL(`../rust/backend/target/release/${process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend'}`, import.meta.url));
+  await writeFile(script, 'setTimeout(() => process.stdout.write("eof-drained"), 250);');
+  const child = spawn(binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+  const lines = createInterface({ input: child.stdout });
+  let readyResolve;
+  let readyReject;
+  const replyResolvers = new Map();
+  let replyObserved = false;
+  const ready = new Promise((resolve, reject) => { readyResolve = resolve; readyReject = reject; });
+  const exited = new Promise((resolveExit) => child.once('exit', (code, signal) => resolveExit({ code, signal })));
+  lines.on('line', (line) => {
+    const frame = JSON.parse(line);
+    if (frame.ready === true) readyResolve();
+    if (frame.type === 'oneshot_reply') {
+      replyObserved = true;
+      replyResolvers.get(frame.id)?.(frame);
+    }
+  });
+  child.once('error', (error) => {
+    readyReject(error);
+  });
+  try {
+    await ready;
+    const waitForReply = (id) => new Promise((resolveReply) => replyResolvers.set(id, resolveReply));
+    const reply = waitForReply('eof-drain-check');
+    const overlap = waitForReply('eof-overlap-check');
+    const exitBeforeReply = exited.then((exit) => ({ exitBeforeReply: exit }));
+    for (const id of ['eof-drain-check', 'eof-overlap-check']) {
+      child.stdin.write(`${JSON.stringify({
+        op: 'oneshot_async', id, bin: process.execPath, args: [script],
+        timeout_ms: 5000, max_buffer: null, env: null,
+      })}\n`);
+    }
+    child.stdin.end();
+    const overlapResult = await Promise.race([overlap.then((frame) => ({ frame })), exited.then((exit) => ({ exitBeforeOverlap: exit }))]);
+    assert.equal(Object.hasOwn(overlapResult, 'frame'), true, `Rust backend exited before rejecting overlap (${overlapResult.exitBeforeOverlap?.signal || overlapResult.exitBeforeOverlap?.code})`);
+    assert.equal(overlapResult.frame.response.error, 'async one-shot already running');
+    const result = await Promise.race([reply.then((frame) => ({ frame })), exitBeforeReply]);
+    assert.equal(Object.hasOwn(result, 'frame'), true, `Rust backend exited before its one-shot reply (${result.exitBeforeReply?.signal || result.exitBeforeReply?.code})`);
+    const { frame } = result;
+    assert.equal(child.exitCode, null, 'reply must arrive while Rust is still alive');
+    assert.equal(replyObserved, true);
+    assert.equal(frame.id, 'eof-drain-check');
+    assert.equal(frame.response.ok, true);
+    assert.equal(frame.response.stdout, 'eof-drained');
+    assert.deepEqual(await exited, { code: 0, signal: null });
+  } finally {
+    lines.close();
+    if (child.exitCode === null) {
+      child.kill();
+      await exited;
+    }
     await rm(base, { recursive: true, force: true });
   }
 });

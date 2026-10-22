@@ -26,9 +26,12 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
   let startPromise;
   let closed = false;
   let busy = false;
+  let oneShotBusy = false;
   let nextRequestId = 0;
   const queue = [];
   const pendingStatus = new Map();
+  const oneShotQueue = [];
+  const pendingOneShot = new Map();
   const requestId = () => `rust-${++nextRequestId}`;
   const request = (body, signal = null, headerTimeoutMs = null) => {
     if (!child || closed) return Promise.reject(new Error('Rust backend is not running'));
@@ -65,6 +68,14 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     });
   };
 
+  const oneShotRequest = (body) => {
+    if (!child || closed) return Promise.reject(new Error('Rust backend is not running'));
+    return new Promise((resolveRequest, rejectRequest) => {
+      oneShotQueue.push({ body, id: requestId(), resolve: resolveRequest, reject: rejectRequest });
+      pumpOneShot();
+    });
+  };
+
   const fail = (error) => {
     closed = true;
     child?.stdin?.destroy();
@@ -75,6 +86,10 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     }
     for (const pending of pendingStatus.values()) pending.reject(error);
     pendingStatus.clear();
+    for (const pending of pendingOneShot.values()) pending.reject(error);
+    pendingOneShot.clear();
+    while (oneShotQueue.length) oneShotQueue.shift().reject(error);
+    oneShotBusy = false;
   };
 
   const pump = () => {
@@ -93,6 +108,18 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     item.dispatched = true;
     try {
       child.stdin.write(`${JSON.stringify(item.request)}\n`, (error) => {
+        if (error) fail(error);
+      });
+    } catch (error) { fail(error); }
+  };
+
+  const pumpOneShot = () => {
+    if (closed || oneShotBusy || oneShotQueue.length === 0) return;
+    oneShotBusy = true;
+    const item = oneShotQueue.shift();
+    pendingOneShot.set(item.id, item);
+    try {
+      child.stdin.write(`${JSON.stringify({ ...item.body, id: item.id })}\n`, (error) => {
         if (error) fail(error);
       });
     } catch (error) { fail(error); }
@@ -149,6 +176,18 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
             if (!pending) return fail(new Error('Rust backend returned an unknown status reply ID'));
             pendingStatus.delete(response.id);
             pending.resolve(response.response);
+            return;
+          }
+          if (response?.type === 'oneshot_reply') {
+            if (typeof response.id !== 'string' || !Object.hasOwn(response, 'response')) {
+              return fail(new Error('Rust backend returned a malformed one-shot reply'));
+            }
+            const pending = pendingOneShot.get(response.id);
+            if (!pending) return fail(new Error('Rust backend returned an unknown one-shot reply ID'));
+            pendingOneShot.delete(response.id);
+            pending.resolve(response.response);
+            oneShotBusy = false;
+            pumpOneShot();
             return;
           }
           if (typeof response?.id !== 'string' || !Object.hasOwn(response, 'response')) {
@@ -514,8 +553,8 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     // error carrying the captured stdout (one-shot.mjs's claude branch reads
     // the JSON reason out of it) and the timeout/exit cause.
     async oneShot(bin, args, opts) {
-      const payload = await request({
-        op: 'oneshot', bin, args: args ?? [], timeout_ms: opts?.timeout ?? null,
+      const payload = await oneShotRequest({
+        op: 'oneshot_async', bin, args: args ?? [], timeout_ms: opts?.timeout ?? null,
         max_buffer: opts?.maxBuffer ?? null, env: opts?.env ?? null,
       });
       if (payload.ok) return { stdout: payload.stdout };
@@ -620,6 +659,10 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       }
       for (const pending of pendingStatus.values()) pending.reject(error);
       pendingStatus.clear();
+      for (const pending of pendingOneShot.values()) pending.reject(error);
+      pendingOneShot.clear();
+      while (oneShotQueue.length) oneShotQueue.shift().reject(error);
+      oneShotBusy = false;
       child.stdin.end();
       const exited = new Promise((resolveExit) => child.once('exit', resolveExit));
       let timer;
