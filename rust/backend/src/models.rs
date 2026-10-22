@@ -43,7 +43,7 @@ fn seed() -> Value {
     })
 }
 
-fn js_trim(value: &str) -> &str {
+pub(crate) fn js_trim(value: &str) -> &str {
     fn js_space(c: char) -> bool {
         matches!(
             c,

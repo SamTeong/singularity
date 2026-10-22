@@ -29,6 +29,7 @@ pub mod transcript_bridge;
 pub mod transcript_service;
 pub mod transcripts;
 pub mod usage_auth;
+pub mod usage_report;
 pub mod wiki_read;
 pub mod window_anchor;
 

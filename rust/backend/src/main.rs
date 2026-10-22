@@ -81,6 +81,8 @@ struct Request {
     platform: Value,
     #[serde(default)]
     record: Value,
+    #[serde(default)]
+    usage_report: Value,
     #[serde(flatten)]
     transcript: singularity_backend::transcript_bridge::TranscriptRequest,
 }
@@ -313,6 +315,36 @@ fn main() -> io::Result<()> {
                     request.timeout_ms.as_f64().unwrap_or(10_000.0),
                     &request.env,
                 )
+            }
+            Ok(request) if request.op.starts_with("usage_report_") => {
+                match serde_json::from_value::<singularity_backend::usage_report::Request>(
+                    request.usage_report,
+                ) {
+                    Ok(report_request) => match request.op.as_str() {
+                        "usage_report_status" => serde_json::to_value(
+                            singularity_backend::usage_report::status(&report_request),
+                        )
+                        .unwrap_or(Value::Null),
+                        "usage_report_read" => serde_json::to_value(
+                            singularity_backend::usage_report::read(&report_request),
+                        )
+                        .unwrap_or(Value::Null),
+                        "usage_report_generate" => singularity_backend::usage_report::generate(
+                            &report_request,
+                            |bin, args, timeout, cap, env| {
+                                singularity_backend::oneshot::run(
+                                    Some(bin),
+                                    &serde_json::json!(args),
+                                    Some(timeout),
+                                    Some(cap),
+                                    Some(env),
+                                )
+                            },
+                        ),
+                        _ => serde_json::json!({"error":"unknown usage report operation"}),
+                    },
+                    Err(_) => serde_json::json!({"error":"bad usage report request"}),
+                }
             }
             Ok(request) if request.op == "procs_kill" => {
                 singularity_backend::procs::kill(&request.pid)

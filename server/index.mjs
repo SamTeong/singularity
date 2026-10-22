@@ -37,7 +37,7 @@ import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend
 import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
 import { createModelPricesHandler } from './rust-backend.mjs';
 import { createExternalSessionLaunchHandler, createSessionFolderOpenHandler } from './detached-launch.mjs';
-import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
+import { createUsageReportHandlers, setUsageReportBackend } from './usagereport.mjs';
 import { initTasks, setTasksBackend, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { initWindowAnchor, snapshotWindowAnchor, pokeProvider } from './window-anchor.mjs';
@@ -139,6 +139,7 @@ setUsageAuthBackend(rustBackend);
 setExplorerBackend(rustBackend);
 setConfigStateBackend(rustBackend);
 setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, window-anchor pokes)
+setUsageReportBackend(rustBackend);
 setProcsBackend(rustBackend); // procs.mjs process scan execs + guarded PID kill
 setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
 setModelsBackend(rustBackend); // model-store.mjs dispatches catalogue and routing calls on the shared child
@@ -385,17 +386,10 @@ app.get('/status', async (req) => rustBackend.statusGet(req.query.force === '1')
 
 // Usage report: newest self-contained HTML from the harness-usage-report
 // skill (rendered on demand by /usagereport/refresh, served whole to a sandboxed iframe).
-app.get('/usagereport/status', async () => reportStatus());
-app.get('/usagereport/report', async (req, reply) => {
-  const html = latestReportHtml();
-  if (html == null) return reply.code(404).send({ ok: false, error: 'no report' });
-  return reply.type('text/html').send(html);
-});
-app.post('/usagereport/refresh', async (req, reply) => {
-  const r = await generateReport();
-  if (!r.ok) reply.code(400);
-  return r;
-});
+const usageReportHandlers = createUsageReportHandlers();
+app.get('/usagereport/status', usageReportHandlers.status);
+app.get('/usagereport/report', usageReportHandlers.report);
+app.post('/usagereport/refresh', usageReportHandlers.refresh);
 
 // Dir picker: list subdirectories of `path` (browser can't read the FS). No file listing.
 app.get('/fs/browse', async (req, reply) => {

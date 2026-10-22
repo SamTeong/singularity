@@ -219,6 +219,18 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
         .catch(() => false);
     },
 
+    usageReportStatus(reportsDir, skillPath) {
+      return request({ op: 'usage_report_status', usage_report: { reports_dir: reportsDir, skill_path: skillPath, env: process.env } });
+    },
+
+    usageReportRead(reportsDir, skillPath) {
+      return request({ op: 'usage_report_read', usage_report: { reports_dir: reportsDir, skill_path: skillPath, env: process.env } });
+    },
+
+    usageReportGenerate(reportsDir, skillPath) {
+      return request({ op: 'usage_report_generate', usage_report: { reports_dir: reportsDir, skill_path: skillPath, env: process.env } });
+    },
+
     modelPrices(path) {
       return request({ op: 'model_prices', path }).then((payload) => {
         if (payload.error) throw new Error(payload.error);
