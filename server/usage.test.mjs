@@ -30,7 +30,7 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 let usageRustBackend;
 after(async () => { await usageRustBackend?.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, setUsageClaudeBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
 usageRustBackend = createRustBackend();
 await usageRustBackend.start();
 setUsageNormalizationBackend(usageRustBackend);
@@ -57,6 +57,20 @@ const codexFixtureBackend = {
 };
 const codexResponse = (payload, status = 200, retryAfter = null) => ({ kind: 'response', status, retry_after: retryAfter, body: { ok: JSON.stringify(payload) } });
 const nativeFetch = globalThis.fetch;
+const claudeFixtureBackend = {
+  async claudeUsageFetch(accessToken) {
+    if (globalThis.fetch === nativeFetch) throw new Error('missing offline Claude fixture');
+    const response = await globalThis.fetch('https://fixture.invalid/claude-usage', {
+      method: 'GET', headers: { Authorization: `Bearer ${accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' },
+    });
+    let body = { ok: null };
+    if (response.status === 200) {
+      try { body = { ok: JSON.stringify(await response.json()) }; }
+      catch { body = { err: 'terminated' }; }
+    }
+    return { kind: 'response', status: response.status, retry_after: response.headers?.get?.('retry-after') ?? null, body };
+  },
+};
 let lastCodexAuthPath;
 codexFixture = async (authPath, tokens) => {
   if (globalThis.fetch === nativeFetch) throw new Error('missing offline Codex fixture');
@@ -73,11 +87,13 @@ codexFixture = async (authPath, tokens) => {
 };
 const codexFixtureBaseline = codexFixture;
 setUsageCodexBackend(codexFixtureBackend);
+setUsageClaudeBackend(claudeFixtureBackend);
 async function importIsolatedUsage(specifier) {
   const isolated = await import(specifier);
   isolated.setUsageNormalizationBackend(usageRustBackend);
   isolated.setUsageSnapshotBackend(usageRustBackend);
   isolated.setUsageCodexBackend(codexFixtureBackend);
+  isolated.setUsageClaudeBackend(claudeFixtureBackend);
   return isolated;
 }
 
@@ -1117,6 +1133,43 @@ const fakeCreds = () => {
   oauth[ACCESS_TOKEN] = ['fake', 'access', 'token'].join('-');
   return oauth;
 };
+
+test('getUsage: a 401 refresh sends the rotated token on the second logical fetch', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-401-refresh=${Date.now()}`);
+  writeCreds({ accessToken: 'old-access-token', refreshToken: 'fixture-refresh-token', refreshTokenExpiresAt: Date.now() + 3_600_000, expiresAt: Date.now() + 3_600_000 });
+  clearClaudeLocal();
+  const originalFetch = globalThis.fetch;
+  const accessTokens = [];
+  let refreshCalls = 0;
+  globalThis.fetch = async (url, options = {}) => {
+    if (String(url).includes('/oauth/token')) {
+      refreshCalls += 1;
+      return { status: 200, json: async () => ({ access_token: 'new-access-token', expires_in: 3600 }) };
+    }
+    assert.equal(String(url), 'https://fixture.invalid/claude-usage');
+    accessTokens.push(options.headers.Authorization);
+    return accessTokens.length === 1
+      ? { status: 401, headers: { get: () => null } }
+      : { status: 200, json: async () => CLAUDE_RAW };
+  };
+  try {
+    const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, true);
+  } finally { globalThis.fetch = originalFetch; }
+  assert.deepEqual(accessTokens, ['Bearer old-access-token', 'Bearer new-access-token']);
+  assert.equal(refreshCalls, 1);
+});
+
+test('getUsage: bridge request errors redact the in-memory access token', async () => {
+  const token = 'synthetic-token-that-must-not-escape';
+  writeCreds({ accessToken: token, expiresAt: Date.now() + 3_600_000 });
+  clearClaudeLocal();
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-token-redaction=${Date.now()}`);
+  isolated.setUsageClaudeBackend({ claudeUsageFetch: async () => { throw new Error(`failure ${token}`); } });
+  const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+  assert.equal(doc.claude.ok, false);
+  assert.equal(doc.claude.error.includes(token), false);
+});
 
 test('getUsage: a successful Claude API read is appended to usage-snapshots.jsonl', async () => {
   writeCreds(fakeCreds());

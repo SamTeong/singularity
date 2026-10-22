@@ -5,6 +5,7 @@ use std::fs::{self, FileType};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+pub mod claude_usage;
 pub mod codex_config_write;
 pub mod codex_thread_identity;
 pub mod codex_usage;
@@ -14,6 +15,7 @@ pub mod detached;
 pub mod explorer_fs;
 pub mod explorer_state;
 pub mod hooks_write;
+pub(crate) mod http_attempt;
 pub mod keys;
 pub mod memory;
 pub mod model_prices;

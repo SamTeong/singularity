@@ -156,6 +156,79 @@ test('Codex usage bridge sends correlated handle requests without credential val
   } finally { await backend.stop(); }
 });
 
+test('Claude usage bridge correlates its private token request and returns no token field', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  let sent;
+  child.stdin.write = (chunk, callback) => {
+    sent = JSON.parse(String(chunk));
+    queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: sent.id, response: { kind: 'response', status: 200, retry_after: null, body: { ok: '{}' } } })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  const token = 'synthetic-bridge-token';
+  try {
+    await backend.start();
+    const response = await backend.claudeUsageFetch(token);
+    assert.deepEqual(response, { kind: 'response', status: 200, retry_after: null, body: { ok: '{}' } });
+    assert.equal(sent.op, 'claude_usage_fetch');
+    assert.equal(sent.access_token, token);
+    assert.equal(typeof sent.id, 'string');
+    assert.equal(Object.hasOwn(response, 'access_token'), false);
+    assert.equal(JSON.stringify(response).includes(token), false);
+  } finally { await backend.stop(); }
+});
+
+test('Claude usage bridge forwards remaining header budget and cancels an expired queued request', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    requests.push(JSON.parse(String(chunk)));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  try {
+    await backend.start();
+    const blocker = backend.sysStats();
+    const controller = new AbortController();
+    const delayed = backend.claudeUsageFetch('synthetic-queued-token', controller.signal, 500);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.deepEqual(requests.map(({ op }) => op), ['sysstats_get']);
+    child.stdout.write(`${JSON.stringify({ id: requests[0].id, response: { ok: true } })}\n`);
+    assert.deepEqual(await blocker, { ok: true });
+    assert.equal(requests.length, 2);
+    assert.equal(requests[1].op, 'claude_usage_fetch');
+    assert.ok(requests[1].header_timeout_ms > 0 && requests[1].header_timeout_ms < 500);
+    child.stdout.write(`${JSON.stringify({ id: requests[1].id, response: { kind: 'response', status: 200, body: { ok: '{}' } } })}\n`);
+    assert.equal((await delayed).status, 200);
+
+    const nextBlocker = backend.sysStats();
+    const expired = backend.claudeUsageFetch('synthetic-expired-token', null, 20);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    child.stdout.write(`${JSON.stringify({ id: requests[2].id, response: { ok: true } })}\n`);
+    await nextBlocker;
+    await assert.rejects(expired, /This operation was aborted/);
+    assert.equal(requests.length, 3);
+  } finally { await backend.stop(); }
+});
+
 test('Rust status replies bypass ordinary FIFO and correlate out of order', async () => {
   const child = new EventEmitter();
   child.stdin = new PassThrough();

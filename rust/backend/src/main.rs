@@ -25,6 +25,10 @@ struct Request {
     #[serde(default)]
     credential_handle: Value,
     #[serde(default)]
+    access_token: Value,
+    #[serde(default)]
+    header_timeout_ms: Value,
+    #[serde(default)]
     wiki_order: Value,
     #[serde(default)]
     sid: Value,
@@ -234,6 +238,36 @@ fn main() -> io::Result<()> {
                             Err(singularity_backend::codex_usage::BodyReadFailure::Terminated) => {
                                 serde_json::json!({"err":"terminated"})
                             }
+                        };
+                        serde_json::json!({"kind":"response","status":status,"retry_after":retry_after,"body":body})
+                    }
+                }
+            }
+            Ok(request) if request.op == "claude_usage_fetch" => {
+                let result =
+                    runtime.block_on(singularity_backend::claude_usage::fetch_claude_usage(
+                        request.access_token.as_str().unwrap_or(""),
+                        request
+                            .header_timeout_ms
+                            .as_u64()
+                            .unwrap_or(10_000)
+                            .min(10_000),
+                    ));
+                match result {
+                    singularity_backend::claude_usage::ClaudeUsageResult::TransportFailure => {
+                        serde_json::json!({"kind":"transport_failure"})
+                    }
+                    singularity_backend::claude_usage::ClaudeUsageResult::TimeoutFailure => {
+                        serde_json::json!({"kind":"timeout_failure"})
+                    }
+                    singularity_backend::claude_usage::ClaudeUsageResult::Response {
+                        status,
+                        retry_after,
+                        body,
+                    } => {
+                        let body = match body {
+                            Ok(value) => serde_json::json!({"ok":value}),
+                            Err(_) => serde_json::json!({"err":"terminated"}),
                         };
                         serde_json::json!({"kind":"response","status":status,"retry_after":retry_after,"body":body})
                     }

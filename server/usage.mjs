@@ -30,6 +30,7 @@ let usageAuthPlatform = process.platform;
 let usageNormalizationBackend = null;
 let usageSnapshotBackend = null;
 let usageCodexBackend = null;
+let usageClaudeBackend = null;
 export function setUsageAuthBackend(backend, platform = process.platform) {
   usageAuthBackend = backend;
   usageAuthPlatform = platform;
@@ -37,6 +38,7 @@ export function setUsageAuthBackend(backend, platform = process.platform) {
 export function setUsageNormalizationBackend(backend) { usageNormalizationBackend = backend; }
 export function setUsageSnapshotBackend(backend) { usageSnapshotBackend = backend; }
 export function setUsageCodexBackend(backend) { usageCodexBackend = backend; }
+export function setUsageClaudeBackend(backend) { usageClaudeBackend = backend; }
 export const PW_STEALTH = {
   channel: 'msedge',
   args: ['--disable-blink-features=AutomationControlled'],
@@ -52,7 +54,6 @@ export async function pwHideWebdriver(ctx) {
 // can point at a scratch dir instead of the real credentials).
 const CREDENTIALS_PATH = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), '.credentials.json');
 const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
-const USAGE_API_BETA = 'oauth-2025-04-20'; // schema ref: stats.mjs L34
 // The per-source floor on network/heavy work (the OAuth usage API, the codex
 // wham/usage API, the codex rollout scan, the ollama scrape): at most one
 // attempt every NETWORK_FLOOR_MS, success or failure, for an automated caller
@@ -527,12 +528,19 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
   }
 
   let resp;
+  const accessToken = String(oauth.accessToken);
+  const safeError = (error) => String(error?.message ?? error).split(accessToken).join('[redacted]');
   try {
-    resp = await fetchExternal(USAGE_API_URL, {
-      headers: { Authorization: `Bearer ${oauth.accessToken}`, 'anthropic-beta': USAGE_API_BETA },
-    }, { timeoutMs: REQ_TIMEOUT_MS });
+    resp = await fetchExternal(USAGE_API_URL, { method: 'GET' }, {
+      timeoutMs: REQ_TIMEOUT_MS,
+      fetcher: async (url, options) => {
+        if (url !== USAGE_API_URL || options.method !== 'GET') throw new Error('fetch failed');
+        if (!usageClaudeBackend) throw new Error('fetch failed');
+        return claudeUsageResponse(await usageClaudeBackend.claudeUsageFetch(accessToken, options.signal, REQ_TIMEOUT_MS));
+      },
+    });
   } catch (e) {
-    return { ok: false, source: 'claude', error: `request failed: ${e.message}` };
+    return { ok: false, source: 'claude', error: `request failed: ${safeError(e)}` };
   }
   if (resp.status === 401) {
     // Token looked valid locally but the server rejected it — same cure, once.
@@ -551,8 +559,23 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
     await appendClaudeHistory({ fetched_at: new Date().toISOString(), raw });
     return await normalizeClaude(raw, oauth.subscriptionType);
   } catch (e) {
-    return { ok: false, source: 'claude', error: `parse error: ${e.message}` };
+    return { ok: false, source: 'claude', error: `parse error: ${safeError(e)}` };
   }
+}
+
+function claudeUsageResponse(result) {
+  if (result?.kind === 'transport_failure') throw new Error('fetch failed');
+  if (result?.kind === 'timeout_failure') throw new Error('This operation was aborted');
+  if (result?.kind !== 'response' || !Number.isInteger(result.status)) throw new Error('fetch failed');
+  return {
+    status: result.status,
+    headers: { get: (name) => name.toLowerCase() === 'retry-after' ? result.retry_after ?? null : null },
+    async json() {
+      if (result.body?.err === 'terminated') throw new Error('terminated');
+      if (typeof result.body?.ok !== 'string') throw new Error('terminated');
+      return JSON.parse(result.body.ok);
+    },
+  };
 }
 
 // ---- Codex: the Stop hook's snapshot tail, live usage API on demand ---------

@@ -1,15 +1,13 @@
-use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue, LOCATION, RETRY_AFTER};
-use reqwest::redirect::Policy;
-use reqwest::{Client, Method, StatusCode, Url};
+use crate::http_attempt::{self, AttemptResult};
 use serde_json::Value;
 use std::fs;
 use std::path::Path;
 use std::time::Duration;
-use std::time::Instant;
+
+pub use crate::http_attempt::BodyReadFailure;
 
 const USAGE_URL: &str = "https://chatgpt.com/backend-api/wham/usage";
 const HEADER_TIMEOUT: Duration = Duration::from_millis(10_000);
-const REDIRECT_LIMIT: usize = 20;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum CodexUsageResult {
@@ -21,11 +19,6 @@ pub enum CodexUsageResult {
         retry_after: Option<String>,
         body: Result<Option<String>, BodyReadFailure>,
     },
-}
-
-#[derive(Debug, PartialEq, Eq)]
-pub enum BodyReadFailure {
-    Terminated,
 }
 
 struct CredentialSnapshot {
@@ -111,118 +104,27 @@ async fn fetch_with_credentials(
     endpoint: &str,
     header_timeout: Duration,
 ) -> CodexUsageResult {
-    let Ok(mut url) = Url::parse(endpoint) else {
-        return CodexUsageResult::TransportFailure;
-    };
-    if has_userinfo(&url) || !matches!(url.scheme(), "http" | "https") {
-        return CodexUsageResult::TransportFailure;
-    }
-    let Ok(authorization) = HeaderValue::from_str(&format!("Bearer {}", credentials.token)) else {
-        return CodexUsageResult::TransportFailure;
-    };
-    let Ok(account_header) = HeaderValue::from_str(&credentials.account) else {
-        return CodexUsageResult::TransportFailure;
-    };
-    let Ok(client) = Client::builder().redirect(Policy::none()).build() else {
-        return CodexUsageResult::TransportFailure;
-    };
-    let mut authorization = Some(authorization);
-    let mut redirects = 0;
-    let deadline = Instant::now() + header_timeout;
-
-    loop {
-        let mut headers = HeaderMap::new();
-        if let Some(value) = &authorization {
-            headers.insert(AUTHORIZATION, value.clone());
-        }
-        headers.insert("ChatGPT-Account-Id", account_header.clone());
-        let request = client
-            .request(Method::GET, url.clone())
-            .headers(headers)
-            .build();
-        let Ok(request) = request else {
-            return CodexUsageResult::TransportFailure;
-        };
-        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
-            return CodexUsageResult::TimeoutFailure;
-        };
-        let response = tokio::time::timeout(remaining, client.execute(request)).await;
-        let response = match response {
-            Err(_) => return CodexUsageResult::TimeoutFailure,
-            Ok(Err(_)) => return CodexUsageResult::TransportFailure,
-            Ok(Ok(response)) => response,
-        };
-        let status = response.status();
-        let retry_after = response
-            .headers()
-            .get(RETRY_AFTER)
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_owned);
-        if is_redirect(status) {
-            let Some(location) = response.headers().get(LOCATION) else {
-                return CodexUsageResult::Response {
-                    status: status.as_u16(),
-                    retry_after,
-                    body: Ok(None),
-                };
-            };
-            if redirects >= REDIRECT_LIMIT {
-                return CodexUsageResult::TransportFailure;
-            }
-            let Ok(location) = location.to_str() else {
-                return CodexUsageResult::TransportFailure;
-            };
-            let Ok(next) = url.join(location) else {
-                return CodexUsageResult::TransportFailure;
-            };
-            if has_userinfo(&next) || !matches!(next.scheme(), "http" | "https") {
-                return CodexUsageResult::TransportFailure;
-            }
-            if origin(&url) != origin(&next) {
-                authorization = None;
-            }
-            url = next;
-            redirects += 1;
-            continue;
-        }
-        if status != StatusCode::OK {
-            return CodexUsageResult::Response {
-                status: status.as_u16(),
-                retry_after,
-                body: Ok(None),
-            };
-        }
-        let body = match response.bytes().await {
-            Ok(bytes) => {
-                let text = String::from_utf8_lossy(&bytes).into_owned();
-                Ok(Some(
-                    text.strip_prefix('\u{feff}').unwrap_or(&text).to_owned(),
-                ))
-            }
-            Err(_) => Err(BodyReadFailure::Terminated),
-        };
-        return CodexUsageResult::Response {
-            status: status.as_u16(),
+    let authorization = format!("Bearer {}", credentials.token);
+    match http_attempt::get(
+        endpoint,
+        Some(&authorization),
+        &[("ChatGPT-Account-Id", credentials.account.as_str())],
+        header_timeout,
+    )
+    .await
+    {
+        AttemptResult::TransportFailure => CodexUsageResult::TransportFailure,
+        AttemptResult::TimeoutFailure => CodexUsageResult::TimeoutFailure,
+        AttemptResult::Response {
+            status,
             retry_after,
             body,
-        };
+        } => CodexUsageResult::Response {
+            status,
+            retry_after,
+            body,
+        },
     }
-}
-
-fn has_userinfo(url: &Url) -> bool {
-    !url.username().is_empty() || url.password().is_some()
-}
-
-fn origin(url: &Url) -> (String, Option<String>, Option<u16>) {
-    (
-        url.scheme().to_owned(),
-        url.host_str().map(str::to_owned),
-        url.port_or_known_default(),
-    )
-}
-
-fn is_redirect(status: StatusCode) -> bool {
-    matches!(status.as_u16(), 301 | 302 | 303 | 307 | 308)
 }
 
 fn js_truthy(value: &Value) -> bool {

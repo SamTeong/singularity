@@ -30,11 +30,25 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
   const queue = [];
   const pendingStatus = new Map();
   const requestId = () => `rust-${++nextRequestId}`;
-  const request = (body) => {
+  const request = (body, signal = null, headerTimeoutMs = null) => {
     if (!child || closed) return Promise.reject(new Error('Rust backend is not running'));
+    if (signal?.aborted) return Promise.reject(new Error('This operation was aborted'));
     return new Promise((resolveRequest, rejectRequest) => {
       const id = requestId();
-      queue.push({ request: { ...body, id }, id, resolve: resolveRequest, reject: rejectRequest });
+      const item = {
+        request: { ...body, id }, id, resolve: resolveRequest, reject: rejectRequest, signal, dispatched: false,
+        headerDeadline: headerTimeoutMs === null ? null : Date.now() + headerTimeoutMs,
+      };
+      item.onAbort = () => {
+        if (item.dispatched) return;
+        const index = queue.indexOf(item);
+        if (index < 0) return;
+        queue.splice(index, 1);
+        signal.removeEventListener('abort', item.onAbort);
+        rejectRequest(new Error('This operation was aborted'));
+      };
+      signal?.addEventListener('abort', item.onAbort, { once: true });
+      queue.push(item);
       pump();
     });
   };
@@ -54,7 +68,11 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
   const fail = (error) => {
     closed = true;
     child?.stdin?.destroy();
-    while (queue.length) queue.shift().reject(error);
+    while (queue.length) {
+      const item = queue.shift();
+      item.signal?.removeEventListener('abort', item.onAbort);
+      item.reject(error);
+    }
     for (const pending of pendingStatus.values()) pending.reject(error);
     pendingStatus.clear();
   };
@@ -63,6 +81,16 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     if (closed || busy || queue.length === 0) return;
     busy = true;
     const item = queue[0];
+    if (item.signal?.aborted || (item.headerDeadline !== null && item.headerDeadline <= Date.now())) {
+      queue.shift();
+      item.signal?.removeEventListener('abort', item.onAbort);
+      item.reject(new Error('This operation was aborted'));
+      busy = false;
+      pump();
+      return;
+    }
+    if (item.headerDeadline !== null) item.request.header_timeout_ms = item.headerDeadline - Date.now();
+    item.dispatched = true;
     try {
       child.stdin.write(`${JSON.stringify(item.request)}\n`, (error) => {
         if (error) fail(error);
@@ -128,6 +156,7 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
           }
           const item = queue.shift();
           if (!item || item.id !== response.id) return fail(new Error('Rust backend returned an out-of-order ordinary response'));
+          item.signal?.removeEventListener('abort', item.onAbort);
           item.resolve(response.response);
           busy = false;
           pump();
@@ -256,6 +285,10 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
 
     codexUsageRelease(handle) {
       return request({ op: 'codex_usage_release', credential_handle: handle });
+    },
+
+    claudeUsageFetch(accessToken, signal, headerTimeoutMs = 10_000) {
+      return request({ op: 'claude_usage_fetch', access_token: accessToken }, signal, headerTimeoutMs);
     },
 
     modelPrices(path) {
@@ -528,7 +561,11 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       closed = true;
       const error = new Error('Rust backend stopped');
       lines?.close();
-      while (queue.length) queue.shift().reject(error);
+      while (queue.length) {
+        const item = queue.shift();
+        item.signal?.removeEventListener('abort', item.onAbort);
+        item.reject(error);
+      }
       for (const pending of pendingStatus.values()) pending.reject(error);
       pendingStatus.clear();
       child.stdin.end();
