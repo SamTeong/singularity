@@ -22,6 +22,7 @@ pub mod keys;
 pub mod memory;
 pub mod model_prices;
 pub mod models;
+pub mod ollama_mode_config;
 pub mod oneshot;
 pub mod plans;
 pub mod procs;

@@ -14,8 +14,8 @@
 // enough — no cross-session file needed.
 // SECURITY: reads full account credentials (browser profile / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
 import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
@@ -31,6 +31,7 @@ let usageNormalizationBackend = null;
 let usageSnapshotBackend = null;
 let usageCodexBackend = null;
 let usageClaudeBackend = null;
+let usageOllamaModeConfigBackend = null;
 export function setUsageAuthBackend(backend, platform = process.platform) {
   usageAuthBackend = backend;
   usageAuthPlatform = platform;
@@ -38,7 +39,11 @@ export function setUsageAuthBackend(backend, platform = process.platform) {
 export function setUsageNormalizationBackend(backend) { usageNormalizationBackend = backend; }
 export function setUsageSnapshotBackend(backend) { usageSnapshotBackend = backend; }
 export function setUsageCodexBackend(backend) { usageCodexBackend = backend; }
-export function setUsageClaudeBackend(backend) { usageClaudeBackend = backend; }
+export function setUsageClaudeBackend(backend) {
+  usageClaudeBackend = backend;
+  if (backend?.ollamaModeConfigRead && backend?.ollamaModeConfigWrite) usageOllamaModeConfigBackend = backend;
+}
+export function setUsageOllamaModeConfigBackend(backend) { usageOllamaModeConfigBackend = backend; }
 export const PW_STEALTH = {
   channel: 'msedge',
   args: ['--disable-blink-features=AutomationControlled'],
@@ -274,20 +279,25 @@ function fetchOllamaBrowser() {
 }
 
 async function fetchOllama() {
-  if (!existsSync(OLLAMA_CFG)) return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
   try {
-    if (JSON.parse(readFileSync(OLLAMA_CFG, 'utf8'))?.mode === 'browser') return fetchOllamaBrowser();
+    const config = await usageOllamaModeConfigBackend?.ollamaModeConfigRead(OLLAMA_CFG);
+    if (config.kind === 'missing') return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
+    if (JSON.parse(config.text)?.mode === 'browser') return fetchOllamaBrowser();
   } catch (e) {
-    return { ok: false, source: 'ollama', error: `bad ${OLLAMA_CFG}: ${e.message}` };
+    const error = e.message.startsWith(`bad ${OLLAMA_CFG}: `)
+      ? e.message
+      : `bad ${OLLAMA_CFG}: ${e.message}`;
+    return { ok: false, source: 'ollama', error };
   }
   return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
 }
 
-function writeOllamaBrowserMode() {
-  mkdirSync(dirname(OLLAMA_CFG), { recursive: true });
+async function writeOllamaBrowserMode() {
   const tmp = `${OLLAMA_CFG}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ mode: 'browser' }), { mode: 0o600 });
-  renameSync(tmp, OLLAMA_CFG);
+  const written = await usageOllamaModeConfigBackend?.ollamaModeConfigWrite(
+    OLLAMA_CFG, tmp, JSON.stringify({ mode: 'browser' }),
+  );
+  if (written !== true) throw new Error('Ollama mode config write failed');
 }
 
 export async function sanitizeOllamaUsage(data) {
@@ -327,7 +337,7 @@ export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 
   if (!interactive.ok) return await sanitizeOllamaUsage(interactive);
   const verified = await (headlessVerifier ?? fetchOllamaBrowser)();
   if (!verified.ok) return await sanitizeOllamaUsage(verified);
-  writeOllamaBrowserMode();
+  await writeOllamaBrowserMode();
   cache.ollama = { data: null, at: 0 };
   historyPaused = null;
   historyBackoffMs = 0;

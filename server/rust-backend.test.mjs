@@ -1269,6 +1269,49 @@ test('Rust usage auth bridge forwards the current environment in both private re
   }
 });
 
+test('Rust Ollama config bridge preserves its private payloads and stable filesystem errors', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  child.kill = () => { queueMicrotask(() => child.emit('exit', 0, null)); return true; };
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    const request = JSON.parse(String(chunk));
+    requests.push(request);
+    const response = request.op.endsWith('_read')
+      ? { kind: 'file', text: '{"mode":"browser"}' }
+      : request.path === 'failure-path'
+        ? { kind: 'error', path: request.path, operation: 'rename', error_kind: 'permission-denied' }
+        : { ok: true };
+    queueMicrotask(() => {
+      child.stdout.write(`${JSON.stringify({ id: request.id, response })}\n`);
+      callback?.();
+    });
+    return true;
+  };
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => { child.emit('spawn'); child.stdout.write('{"ready":true}\n'); });
+    return child;
+  } });
+  try {
+    await backend.start();
+    assert.deepEqual(await backend.ollamaModeConfigRead('scratch/ollama.json'), {
+      kind: 'file', text: '{"mode":"browser"}',
+    });
+    assert.equal(await backend.ollamaModeConfigWrite('scratch/ollama.json', 'scratch/ollama.json.7.9.tmp', '{"mode":"browser"}'), true);
+    assert.deepEqual(requests.map(({ op, path, temp_path, ollama_config_text }) => [op, path, temp_path, ollama_config_text]), [
+      ['ollama_mode_config_read', 'scratch/ollama.json', undefined, undefined],
+      ['ollama_mode_config_write', 'scratch/ollama.json', 'scratch/ollama.json.7.9.tmp', '{"mode":"browser"}'],
+    ]);
+    await assert.rejects(backend.ollamaModeConfigWrite('failure-path', 'failure-path.7.9.tmp', '{}'),
+      /^Error: bad failure-path: rename failed \(permission-denied\)$/);
+  } finally {
+    await backend.stop();
+  }
+});
+
 test('Rust procs kill bridge terminates a scratch child and rejects bad pids', async () => {
   const backend = createRustBackend();
   try {

@@ -27,6 +27,8 @@ struct Request {
     #[serde(default)]
     credential_text: Value,
     #[serde(default)]
+    ollama_config_text: Value,
+    #[serde(default)]
     credential_handle: Value,
     #[serde(default)]
     access_token: Value,
@@ -335,6 +337,32 @@ fn main() -> io::Result<()> {
                         text,
                     )
                 })
+            }
+            Ok(request) if request.op == "ollama_mode_config_read" => {
+                let path = request.path.as_str().unwrap_or("");
+                match singularity_backend::ollama_mode_config::read(path) {
+                    Ok(result) => serde_json::to_value(result).unwrap(),
+                    Err(error) => serde_json::json!({
+                        "kind": "error",
+                        "path": error.path,
+                        "operation": error.operation,
+                        "error_kind": error.kind,
+                    }),
+                }
+            }
+            Ok(request) if request.op == "ollama_mode_config_write" => {
+                let path = request.path.as_str().unwrap_or("");
+                let temp_path = request.temp_path.as_str().unwrap_or("");
+                let text = request.ollama_config_text.as_str().unwrap_or("");
+                match singularity_backend::ollama_mode_config::write(path, temp_path, text) {
+                    Ok(()) => serde_json::json!({ "ok": true }),
+                    Err(error) => serde_json::json!({
+                        "kind": "error",
+                        "path": error.path,
+                        "operation": error.operation,
+                        "error_kind": error.kind,
+                    }),
+                }
             }
             Ok(request) if request.op == "codex_thread_find" => {
                 singularity_backend::codex_thread_identity::find(

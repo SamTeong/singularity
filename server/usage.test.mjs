@@ -30,11 +30,12 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 let usageRustBackend;
 after(async () => { await usageRustBackend?.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, setUsageClaudeBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, setUsageClaudeBackend, setUsageOllamaModeConfigBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
 usageRustBackend = createRustBackend();
 await usageRustBackend.start();
 setUsageNormalizationBackend(usageRustBackend);
 setUsageSnapshotBackend(usageRustBackend);
+setUsageOllamaModeConfigBackend(usageRustBackend);
 let codexFixture = async () => { throw new Error('missing offline Codex fixture'); };
 const codexFixtureSnapshots = new Map();
 let nextCodexFixtureHandle = 0;
@@ -111,6 +112,7 @@ async function importIsolatedUsage(specifier) {
   const isolated = await import(specifier);
   isolated.setUsageNormalizationBackend(usageRustBackend);
   isolated.setUsageSnapshotBackend(usageRustBackend);
+  isolated.setUsageOllamaModeConfigBackend(usageRustBackend);
   isolated.setUsageCodexBackend(codexFixtureBackend);
   isolated.setUsageClaudeBackend(claudeFixtureBackend);
   return isolated;
@@ -145,6 +147,71 @@ test('connectOllamaUsage: verifies the profile before selecting browser mode', a
   const result = await connectOllamaUsage({ playwright, headlessVerifier: async () => parseOllamaHtml(OLLAMA_HTML) });
   assert.equal(result.ok, true);
   assert.deepEqual(JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'ollama.json'), 'utf8')), { mode: 'browser' });
+});
+
+test('Ollama config Rust read preserves missing, Node parse errors, BOM, and stable read failures', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?ollama-config-read=${Date.now()}`);
+  const path = join(process.env.SINGULARITY_HOME, 'state', 'ollama.json');
+  mkdirSync(dirname(path), { recursive: true });
+  const read = async () => (await isolated.getUsage({ sources: ['ollama'], force: true })).ollama;
+  try {
+    rmSync(path, { force: true });
+    const missing = await read();
+    assert.deepEqual(
+      { ok: missing.ok, source: missing.source, needsAuth: missing.needsAuth, error: missing.error },
+      { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' },
+    );
+
+    const invalidJson = '{"mode":';
+    writeFileSync(path, invalidJson);
+    let parseMessage;
+    try { JSON.parse(invalidJson); } catch (error) { parseMessage = error.message; }
+    const parse = await read();
+    assert.equal(parse.error, `bad ${path}: ${parseMessage}`);
+    assert.equal(Object.hasOwn(parse, 'needsAuth'), false);
+
+    const bomText = '\uFEFF{}';
+    writeFileSync(path, bomText);
+    let bomMessage;
+    try { JSON.parse(bomText); } catch (error) { bomMessage = error.message; }
+    assert.equal((await read()).error, `bad ${path}: ${bomMessage}`);
+
+    writeFileSync(path, Buffer.from([0xff, 0x7b, 0x7d]));
+    const lossy = await read();
+    assert.match(lossy.error, new RegExp(`^bad ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: `));
+    assert.equal(Object.hasOwn(lossy, 'needsAuth'), false);
+
+    rmSync(path);
+    mkdirSync(path);
+    const failure = await read();
+    assert.match(failure.error, new RegExp(`^bad ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: read failed \\((not-found|permission-denied|already-exists|invalid-input|invalid-data|interrupted|storage-full|other)\\)$`));
+    assert.equal(Object.hasOwn(failure, 'needsAuth'), false);
+  } finally {
+    rmSync(path, { recursive: true, force: true });
+  }
+});
+
+test('connectOllamaUsage rejects stable Rust writer errors with the exact Node temp path and text', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?ollama-config-write=${Date.now()}`);
+  const path = join(process.env.SINGULARITY_HOME, 'state', 'ollama.json');
+  const calls = [];
+  isolated.setUsageOllamaModeConfigBackend({
+    ollamaModeConfigWrite: async (...args) => {
+      calls.push(args);
+      throw new Error(`bad ${path}: rename failed (permission-denied)`);
+    },
+  });
+  const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: async () => {}, content: async () => OLLAMA_HTML };
+  const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => {} }) } };
+  const realNow = Date.now;
+  try {
+    Date.now = () => 987654321;
+    await assert.rejects(isolated.connectOllamaUsage({ playwright, headlessVerifier: async () => parseOllamaHtml(OLLAMA_HTML) }),
+      new RegExp(`^Error: bad ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: rename failed \\(permission-denied\\)$`));
+  } finally {
+    Date.now = realNow;
+  }
+  assert.deepEqual(calls, [[path, `${path}.${process.pid}.987654321.tmp`, '{"mode":"browser"}']]);
 });
 
 test('connectOllamaUsage: resumes history collection after authentication recovers', async () => {

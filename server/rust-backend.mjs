@@ -304,6 +304,25 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
         .then((payload) => payload.ok === true);
     },
 
+    ollamaModeConfigRead(path) {
+      return request({ op: 'ollama_mode_config_read', path }).then((payload) => {
+        if (payload.kind === 'error') {
+          throw new Error(`bad ${payload.path}: ${payload.operation} failed (${payload.error_kind})`);
+        }
+        return payload;
+      });
+    },
+
+    ollamaModeConfigWrite(path, tempPath, text) {
+      return request({ op: 'ollama_mode_config_write', path, temp_path: tempPath, ollama_config_text: text })
+        .then((payload) => {
+          if (payload.kind === 'error') {
+            throw new Error(`bad ${payload.path}: ${payload.operation} failed (${payload.error_kind})`);
+          }
+          return payload.ok === true;
+        });
+    },
+
     modelPrices(path) {
       return request({ op: 'model_prices', path }).then((payload) => {
         if (payload.error) throw new Error(payload.error);
