@@ -6,6 +6,7 @@
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, utimesSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -38,8 +39,18 @@ setUsageSnapshotBackend(usageRustBackend);
 setUsageOllamaModeConfigBackend(usageRustBackend);
 let codexFixture = async () => { throw new Error('missing offline Codex fixture'); };
 const codexFixtureSnapshots = new Map();
+const codexFingerprintReads = [];
 let nextCodexFixtureHandle = 0;
 const codexFixtureBackend = {
+  async codexAccountFingerprint(authPath) {
+    codexFingerprintReads.push(authPath);
+    try {
+      const accountId = JSON.parse(readFileSync(authPath, 'utf8'))?.tokens?.account_id;
+      return typeof accountId === 'string' && accountId.length > 0
+        ? createHash('sha256').update(accountId).digest('hex')
+        : null;
+    } catch { return null; }
+  },
   async codexUsageBegin(authPath) {
     try {
       const tokens = JSON.parse(readFileSync(authPath, 'utf8'))?.tokens;
@@ -1651,6 +1662,46 @@ test('getUsage: complete unstarted Codex windows avoid the endpoint, including f
     assert.equal(result.codex.weekly.started, false);
     assert.equal(calls, 0);
   } finally { globalThis.fetch = originalFetch; }
+});
+
+test('getUsage: awaits one Codex fingerprint before gates and keeps it through a successful pull', async () => {
+  const { getUsage: isolatedGetUsage, setUsageCodexBackend: isolatedSetUsageCodexBackend } = await importIsolatedUsage(`./usage.mjs?codex-fingerprint-await=${Date.now()}`);
+  const events = [];
+  let releaseFingerprint;
+  const fingerprintReady = new Promise((resolve) => { releaseFingerprint = resolve; });
+  let fingerprintReads = 0;
+  isolatedSetUsageCodexBackend({
+    async codexAccountFingerprint(authPath) {
+      fingerprintReads += 1;
+      events.push(['fingerprint-start', authPath]);
+      const fingerprint = await fingerprintReady;
+      events.push(['fingerprint-finish', fingerprint]);
+      return fingerprint;
+    },
+  });
+  rmSync(CODEX_HISTORY_FILE, { force: true });
+  const pending = isolatedGetUsage({
+    sources: ['codex'],
+    force: true,
+    fetchers: { codex: async () => {
+      events.push(['fetch']);
+      return {
+        ok: true, source: 'codex', plan: 'plus', fetchedAt: new Date().toISOString(),
+        session: { pctUsed: 41, resetsAt: null }, weekly: { pctUsed: 22, resetsAt: null },
+      };
+    } },
+  });
+  await new Promise(setImmediate);
+  assert.deepEqual(events, [['fingerprint-start', codexAuth]]);
+  releaseFingerprint('a'.repeat(64));
+  const result = await pending;
+  assert.equal(fingerprintReads, 1);
+  assert.deepEqual(events, [
+    ['fingerprint-start', codexAuth],
+    ['fingerprint-finish', 'a'.repeat(64)],
+    ['fetch'],
+  ]);
+  assert.equal(result.codex.session.pctUsed, 41);
 });
 
 test('getUsage: Codex account switches discard cached and unidentified snapshot data', async () => {

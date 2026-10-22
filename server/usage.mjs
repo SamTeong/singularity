@@ -14,7 +14,6 @@
 // enough — no cross-session file needed.
 // SECURITY: reads full account credentials (browser profile / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -748,10 +747,10 @@ const ollamaGate = rateGate();
 const codexGate = rateGate();
 const CODEX_STALE_MAX_MS = CLAUDE_STALE_MAX_MS;
 
-function codexAccountFingerprint() {
+async function codexAccountFingerprint() {
   try {
-    const accountId = JSON.parse(readFileSync(CODEX_AUTH_PATH, 'utf8'))?.tokens?.account_id;
-    return accountId ? createHash('sha256').update(accountId).digest('hex') : null;
+    const fingerprint = await usageCodexBackend?.codexAccountFingerprint(CODEX_AUTH_PATH);
+    return typeof fingerprint === 'string' && fingerprint.length > 0 ? fingerprint : null;
   } catch { return null; }
 }
 
@@ -822,7 +821,7 @@ async function pull(src, fetcher, force) {
   // snapshots retain valid windows while the missing window reaches the
   // network floor below.
   if (src === 'codex') {
-    codexFingerprint = codexAccountFingerprint();
+    codexFingerprint = await codexAccountFingerprint();
     const accountChanged = !!slot.credentialFingerprint && !!codexFingerprint && codexFingerprint !== slot.credentialFingerprint;
     if (accountChanged) {
       slot.data = null;

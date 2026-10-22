@@ -4,7 +4,7 @@ title: Complete Rust daemon runtime cutover
 status: To Do
 assignee: []
 created_date: '2026-10-20 23:52'
-updated_date: '2026-10-22 13:56'
+updated_date: '2026-10-22 15:10'
 labels: []
 dependencies: []
 modified_files:
@@ -55,4 +55,6 @@ TASK-42.15 finalization (2026-10-22): Claude OAuth refresh guard and merge crede
 TASK-43 completion (2026-10-22): OAuth refresh credential persistence now writes through the private Rust credential bridge; TASK-43 is Done with all five acceptance criteria checked after independent acceptance. The original seven-check receipt and post-test-repair three-check receipt passed with matching source hashes. The Unix mode test was not run on Windows; POSIX mode bits are not claimed as a Windows ACL guarantee. TASK-42.2 Linux/macOS daemon validation remains outstanding.
 
 TASK-44 Windows finalization: Ollama browser-mode config filesystem reads and atomic writes now use the Rust backend, with Node JSON parsing, response shapes, and browser verification preserved. Independent review passed; seven-step receipt passed (206 Rust library + 3 daemon tests, focused Node 107 passed/2 skipped, full Node 721 passed/2 skipped, release build, fmt, lint, diff check) with all seven source hashes matching before/after. Unix permission behavior was code-reviewed only on Windows; TASK-42.2 Linux/macOS runtime validation remains outstanding.
+
+TASK-45 completed 2026-10-22: Codex account fingerprint lookup moved to the private Rust bridge and integrated at the existing Node pre-gate point. Independent review accepted. Continuation evidence passed focused Node (109 passed, 2 skipped), full Node (723 passed, 2 skipped), lint, and diff-check; reused original fmt, Rust (207 library + 3 daemon), and release-build checks. Nine source hashes matched the continuation receipt. The initial Cargo.lock byte transition remains unexplained; the final diff adds only the intended direct ring dependency edge. No Groma architecture owner is currently registered for the affected files.
 <!-- SECTION:NOTES:END -->

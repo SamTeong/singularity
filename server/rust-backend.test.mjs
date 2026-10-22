@@ -156,6 +156,46 @@ test('Codex usage bridge sends correlated handle requests without credential val
   } finally { await backend.stop(); }
 });
 
+test('Codex fingerprint bridge sends only the configured path and returns digest or null', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    const sent = JSON.parse(String(chunk));
+    requests.push(sent);
+    const response = requests.length === 1 ? 'a'.repeat(64)
+      : requests.length === 2 ? null : 'synthetic-account-secret';
+    queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: sent.id, response })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  try {
+    await backend.start();
+    assert.equal(await backend.codexAccountFingerprint('C:/fixture/codex/auth.json'), 'a'.repeat(64));
+    assert.equal(await backend.codexAccountFingerprint('C:/fixture/missing-auth.json'), null);
+    assert.equal(await backend.codexAccountFingerprint('C:/fixture/unexpected-response.json'), null);
+    assert.deepEqual(requests.map(({ op, path }) => [op, path]), [
+      ['codex_account_fingerprint', 'C:/fixture/codex/auth.json'],
+      ['codex_account_fingerprint', 'C:/fixture/missing-auth.json'],
+      ['codex_account_fingerprint', 'C:/fixture/unexpected-response.json'],
+    ]);
+    for (const request of requests) {
+      assert.equal(typeof request.id, 'string');
+      assert.equal(Object.hasOwn(request, 'credential_text'), false);
+      assert.equal(Object.hasOwn(request, 'account_id'), false);
+      assert.equal(Object.hasOwn(request, 'access_token'), false);
+    }
+  } finally { await backend.stop(); }
+});
+
 test('Claude usage bridge correlates its private token request and returns no token field', async () => {
   const child = new EventEmitter();
   child.stdin = new PassThrough();

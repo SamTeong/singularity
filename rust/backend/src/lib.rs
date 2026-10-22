@@ -8,6 +8,7 @@ use std::sync::OnceLock;
 pub mod claude_credentials;
 pub mod claude_oauth;
 pub mod claude_usage;
+pub mod codex_account_fingerprint;
 pub mod codex_config_write;
 pub mod codex_thread_identity;
 pub mod codex_usage;

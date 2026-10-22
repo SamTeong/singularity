@@ -350,6 +350,12 @@ fn main() -> io::Result<()> {
                     }),
                 }
             }
+            Ok(request) if request.op == "codex_account_fingerprint" => {
+                let path = request.path.as_str().unwrap_or("");
+                serde_json::json!(singularity_backend::codex_account_fingerprint::fingerprint(
+                    path
+                ))
+            }
             Ok(request) if request.op == "ollama_mode_config_write" => {
                 let path = request.path.as_str().unwrap_or("");
                 let temp_path = request.temp_path.as_str().unwrap_or("");

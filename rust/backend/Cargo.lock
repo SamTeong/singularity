@@ -1210,6 +1210,7 @@ dependencies = [
  "portable-pty",
  "regex",
  "reqwest",
+ "ring",
  "ryu-js",
  "serde",
  "serde_json",

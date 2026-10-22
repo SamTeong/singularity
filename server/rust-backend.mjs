@@ -287,6 +287,11 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'codex_usage_release', credential_handle: handle });
     },
 
+    codexAccountFingerprint(authPath) {
+      return request({ op: 'codex_account_fingerprint', path: authPath }).then((fingerprint) =>
+        typeof fingerprint === 'string' && /^[0-9a-f]{64}$/.test(fingerprint) ? fingerprint : null);
+    },
+
     claudeUsageFetch(accessToken, signal, headerTimeoutMs = 10_000) {
       return request({ op: 'claude_usage_fetch', access_token: accessToken }, signal, headerTimeoutMs);
     },
