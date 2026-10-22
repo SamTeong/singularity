@@ -23,6 +23,8 @@ struct Request {
     #[serde(default)]
     path: Value,
     #[serde(default)]
+    credential_handle: Value,
+    #[serde(default)]
     wiki_order: Value,
     #[serde(default)]
     sid: Value,
@@ -106,6 +108,7 @@ fn main() -> io::Result<()> {
     let mut transcript_services =
         singularity_backend::transcript_bridge::TranscriptServices::default();
     let mut usage_snapshots = singularity_backend::usage_snapshot::SnapshotService::default();
+    let mut codex_usage_sessions = singularity_backend::codex_usage::CodexUsageSessions::default();
     let stdin = io::stdin();
     write_line(&stdout, &serde_json::json!({ "ready": true }))?;
     for line in stdin.lock().lines() {
@@ -190,6 +193,51 @@ fn main() -> io::Result<()> {
             Ok(request) if request.op == "sysstats_get" => {
                 serde_json::to_value(sysstats.snapshot())
                     .expect("sysstats serialization is infallible")
+            }
+            Ok(request) if request.op == "codex_usage_begin" => {
+                match codex_usage_sessions
+                    .begin(std::path::Path::new(request.path.as_str().unwrap_or("")))
+                {
+                    Some(handle) => serde_json::json!({"kind":"ready","handle":handle}),
+                    None => serde_json::json!({"kind":"no_sessions"}),
+                }
+            }
+            Ok(request) if request.op == "codex_usage_release" => {
+                let released = request
+                    .credential_handle
+                    .as_str()
+                    .is_some_and(|handle| codex_usage_sessions.release(handle));
+                serde_json::json!({"released":released})
+            }
+            Ok(request) if request.op == "codex_usage_fetch" => {
+                let result = request.credential_handle.as_str().map_or(
+                    singularity_backend::codex_usage::CodexUsageResult::NoSessions,
+                    |handle| runtime.block_on(codex_usage_sessions.fetch(handle)),
+                );
+                match result {
+                    singularity_backend::codex_usage::CodexUsageResult::NoSessions => {
+                        serde_json::json!({"kind":"no_sessions"})
+                    }
+                    singularity_backend::codex_usage::CodexUsageResult::TransportFailure => {
+                        serde_json::json!({"kind":"transport_failure"})
+                    }
+                    singularity_backend::codex_usage::CodexUsageResult::TimeoutFailure => {
+                        serde_json::json!({"kind":"timeout_failure"})
+                    }
+                    singularity_backend::codex_usage::CodexUsageResult::Response {
+                        status,
+                        retry_after,
+                        body,
+                    } => {
+                        let body = match body {
+                            Ok(value) => serde_json::json!({"ok":value}),
+                            Err(singularity_backend::codex_usage::BodyReadFailure::Terminated) => {
+                                serde_json::json!({"err":"terminated"})
+                            }
+                        };
+                        serde_json::json!({"kind":"response","status":status,"retry_after":retry_after,"body":body})
+                    }
+                }
             }
             Ok(request) if request.op == "codex_thread_find" => {
                 singularity_backend::codex_thread_identity::find(

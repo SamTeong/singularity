@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 
 pub mod codex_config_write;
 pub mod codex_thread_identity;
+pub mod codex_usage;
 pub mod config_state;
 pub mod config_write;
 pub mod detached;

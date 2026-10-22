@@ -30,15 +30,54 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 let usageRustBackend;
 after(async () => { await usageRustBackend?.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
 usageRustBackend = createRustBackend();
 await usageRustBackend.start();
 setUsageNormalizationBackend(usageRustBackend);
 setUsageSnapshotBackend(usageRustBackend);
+let codexFixture = async () => { throw new Error('missing offline Codex fixture'); };
+const codexFixtureSnapshots = new Map();
+let nextCodexFixtureHandle = 0;
+const codexFixtureBackend = {
+  async codexUsageBegin(authPath) {
+    try {
+      const tokens = JSON.parse(readFileSync(authPath, 'utf8'))?.tokens;
+      if (!tokens?.access_token || !tokens?.account_id) return { kind: 'no_sessions' };
+      const handle = `fixture-${++nextCodexFixtureHandle}`;
+      codexFixtureSnapshots.set(handle, { authPath, tokens: structuredClone(tokens) });
+      return { kind: 'ready', handle };
+    } catch { return { kind: 'no_sessions' }; }
+  },
+  codexUsageFetch(handle) {
+    const snapshot = codexFixtureSnapshots.get(handle);
+    if (!snapshot) throw new Error('fixture credential handle was released');
+    return codexFixture(snapshot.authPath, snapshot.tokens);
+  },
+  codexUsageRelease(handle) { return { released: codexFixtureSnapshots.delete(handle) }; },
+};
+const codexResponse = (payload, status = 200, retryAfter = null) => ({ kind: 'response', status, retry_after: retryAfter, body: { ok: JSON.stringify(payload) } });
+const nativeFetch = globalThis.fetch;
+let lastCodexAuthPath;
+codexFixture = async (authPath, tokens) => {
+  if (globalThis.fetch === nativeFetch) throw new Error('missing offline Codex fixture');
+  lastCodexAuthPath = authPath;
+  const response = await globalThis.fetch('https://fixture.invalid/usage', {
+    method: 'GET', headers: { Authorization: `Bearer ${tokens.access_token}`, 'ChatGPT-Account-Id': `${tokens.account_id}` },
+  });
+  let body = { ok: null };
+  if (response.status === 200) {
+    try { body = { ok: JSON.stringify(await response.json()) }; }
+    catch { body = { err: 'terminated' }; }
+  }
+  return { kind: 'response', status: response.status, retry_after: response.headers?.get?.('retry-after') ?? null, body };
+};
+const codexFixtureBaseline = codexFixture;
+setUsageCodexBackend(codexFixtureBackend);
 async function importIsolatedUsage(specifier) {
   const isolated = await import(specifier);
   isolated.setUsageNormalizationBackend(usageRustBackend);
   isolated.setUsageSnapshotBackend(usageRustBackend);
+  isolated.setUsageCodexBackend(codexFixtureBackend);
   return isolated;
 }
 
@@ -331,7 +370,7 @@ test('fetchCodex: no codex-usage.jsonl at all reports "no Codex sessions found",
 
 // The live wham/usage API is on-demand only: ?force=1 (the daemon passes force
 // through) is the one thing that makes fetchCodex spend a request.
-test('fetchCodex(true): uses live API headers and normalizes 5h + 7d windows', async () => {
+test('fetchCodex(true): dispatches the auth path and normalizes 5h + 7d windows without credential output', async () => {
   const token = 'test-token';
   const accountId = 'test-account-id';
   writeCodexAuth({ access_token: token, account_id: accountId });
@@ -349,9 +388,8 @@ test('fetchCodex(true): uses live API headers and normalizes 5h + 7d windows', a
   };
   try {
     const u = await fetchCodex(true);
-    assert.equal(request.url, 'https://chatgpt.com/backend-api/wham/usage');
     assert.equal(request.opts.method, 'GET');
-    assert.deepEqual(request.opts.headers, { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId });
+    assert.equal(lastCodexAuthPath, codexAuth);
     assert.equal(u.plan, 'plus');
     assert.equal(u.session.pctUsed, 42);
     assert.equal(u.session.resetsAt, new Date(1786000000 * 1000).toISOString());
@@ -388,12 +426,36 @@ test('fetchCodex(true): retries a transient live API response', async () => {
   assert.equal(calls, 2);
 });
 
+test('fetchCodex(true): retry keeps the first credential snapshot and releases it', async () => {
+  writeCodexAuth({ access_token: 'account-A-token', account_id: 'account-A' });
+  const originalFetch = globalThis.fetch;
+  const seen = [];
+  codexFixture = async (_authPath, tokens) => {
+    seen.push([tokens.access_token, tokens.account_id]);
+    if (seen.length === 1) {
+      writeCodexAuth({ access_token: 'account-B-token', account_id: 'account-B' });
+      return { kind: 'response', status: 503, retry_after: null, body: { ok: null } };
+    }
+    return codexResponse({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18_000, reset_at: 1786000000 } } });
+  };
+  try {
+    const result = await fetchCodex(true);
+    assert.equal(result.plan, 'plus');
+    assert.deepEqual(seen, [['account-A-token', 'account-A'], ['account-A-token', 'account-A']]);
+    assert.equal(codexFixtureSnapshots.size, 0);
+  } finally {
+    codexFixture = codexFixtureBaseline;
+    globalThis.fetch = originalFetch;
+  }
+});
+
 // An unused 5h window has not begun, and the live API fills reset_at with a
 // rolling now + the whole window, so it walks forward on every poll. That is
 // not a reset instant: drop it and flag the window unstarted, or the UI shows a
 // countdown that never lands and the window anchor arms a timer it keeps
 // pushing out of reach.
 test('fetchCodex(true): a window that has not begun drops its sliding reset', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
   const originalFetch = globalThis.fetch;
   const nowSec = Math.floor(Date.now() / 1000);
   globalThis.fetch = async () => ({ status: 200, json: async () => ({
@@ -416,6 +478,7 @@ test('fetchCodex(true): a window that has not begun drops its sliding reset', as
 });
 
 test('fetchCodex(true): classifies a weekly-only primary live window', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ status: 200, json: async () => ({
     plan_type: 'pro',
@@ -431,6 +494,7 @@ test('fetchCodex(true): classifies a weekly-only primary live window', async () 
 });
 
 test('fetchCodex(true): a failed live request reports the live error, with no rollout to fall back to', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('offline'); };
   try {
@@ -440,6 +504,40 @@ test('fetchCodex(true): a failed live request reports the live error, with no ro
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test('fetchCodex(true): malformed JSON keeps V8 parse wording and is not retried', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  let calls = 0;
+  codexFixture = async () => { calls += 1; return { kind: 'response', status: 200, retry_after: null, body: { ok: '{' } }; };
+  try {
+    const result = await fetchCodex(true);
+    assert.match(result.error, /^parse error: /);
+    assert.equal(calls, 1);
+    assert.equal(codexFixtureSnapshots.size, 0);
+  } finally { codexFixture = codexFixtureBaseline; }
+});
+
+test('fetchCodex(true): body stream failure preserves the caught message and is not retried', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  let calls = 0;
+  codexFixture = async () => { calls += 1; return { kind: 'response', status: 200, retry_after: null, body: { err: 'terminated' } }; };
+  try {
+    const result = await fetchCodex(true);
+    assert.equal(result.error, 'parse error: terminated');
+    assert.equal(calls, 1);
+  } finally { codexFixture = codexFixtureBaseline; }
+});
+
+test('fetchCodex(true): typed timeout retries and preserves the AbortController message', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  let calls = 0;
+  codexFixture = async () => { calls += 1; return { kind: 'timeout_failure' }; };
+  try {
+    const result = await fetchCodex(true);
+    assert.equal(result.error, 'request failed: This operation was aborted');
+    assert.equal(calls, 3);
+  } finally { codexFixture = codexFixtureBaseline; }
 });
 
 // The access token expires overnight, so the on-demand usage fetch renews it

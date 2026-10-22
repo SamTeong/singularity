@@ -29,12 +29,14 @@ let usageAuthBackend = null;
 let usageAuthPlatform = process.platform;
 let usageNormalizationBackend = null;
 let usageSnapshotBackend = null;
+let usageCodexBackend = null;
 export function setUsageAuthBackend(backend, platform = process.platform) {
   usageAuthBackend = backend;
   usageAuthPlatform = platform;
 }
 export function setUsageNormalizationBackend(backend) { usageNormalizationBackend = backend; }
 export function setUsageSnapshotBackend(backend) { usageSnapshotBackend = backend; }
+export function setUsageCodexBackend(backend) { usageCodexBackend = backend; }
 export const PW_STEALTH = {
   channel: 'msedge',
   args: ['--disable-blink-features=AutomationControlled'],
@@ -585,23 +587,44 @@ export async function fetchCodex(force = false) {
     return snapshot ?? noCodexData();
   }
 
-  let auth;
-  try { auth = JSON.parse(readFileSync(CODEX_AUTH_PATH, 'utf8')); }
-  catch { return noCodexData(); }
-  const token = auth?.tokens?.access_token;
-  const accountId = auth?.tokens?.account_id;
-  if (!token || !accountId) return noCodexData();
-
   let liveError;
   let resp;
+  let credentialHandle;
   try {
     resp = await fetchExternal(CODEX_USAGE_API_URL, {
       method: 'GET',
-      headers: { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId },
-    }, { timeoutMs: REQ_TIMEOUT_MS });
+    }, {
+      timeoutMs: REQ_TIMEOUT_MS,
+      fetcher: async () => {
+        if (!usageCodexBackend) throw new Error('Rust Codex usage backend is not configured');
+        if (!credentialHandle) {
+          const started = await usageCodexBackend.codexUsageBegin(CODEX_AUTH_PATH);
+          if (started?.kind === 'no_sessions') return { status: 204, noSessions: true };
+          credentialHandle = started?.handle;
+          if (!credentialHandle) throw new Error('Rust Codex usage backend returned no credential handle');
+        }
+        const result = await usageCodexBackend.codexUsageFetch(credentialHandle);
+        if (result?.kind === 'no_sessions') return { status: 204, noSessions: true };
+        if (result?.kind === 'timeout_failure') throw new Error('This operation was aborted');
+        if (result?.kind === 'transport_failure') throw new Error('fetch failed');
+        return {
+          status: result.status,
+          headers: { get: (name) => name.toLowerCase() === 'retry-after' ? result.retry_after : null },
+          json: async () => {
+            if (result.body?.err === 'terminated') throw new TypeError('terminated');
+            return JSON.parse(result.body?.ok ?? 'null');
+          },
+        };
+      },
+    });
   } catch (e) {
     liveError = `request failed: ${e.message}`;
+  } finally {
+    if (credentialHandle) {
+      try { await usageCodexBackend?.codexUsageRelease(credentialHandle); } catch { /* daemon shutdown clears its private handle table */ }
+    }
   }
+  if (resp?.noSessions) return noCodexData();
   if (resp && resp.status !== 200) {
     liveError = resp.status === 429 ? 'rate-limited' : resp.status === 401 || resp.status === 403 ? 'auth rejected' : `HTTP ${resp.status}`;
   } else if (resp) {

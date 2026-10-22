@@ -117,6 +117,45 @@ test('Rust bridge rejects startup when a spawned child exits before ready', asyn
   await backend.stop();
 });
 
+test('Codex usage bridge sends correlated handle requests without credential values', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  let sent;
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    sent = JSON.parse(String(chunk));
+    requests.push(sent);
+    const response = sent.op === 'codex_usage_begin' ? { kind: 'ready', handle: 'opaque-fixture' }
+      : sent.op === 'codex_usage_fetch' ? { kind: 'no_sessions' } : { released: true };
+    queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: sent.id, response })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  try {
+    await backend.start();
+    const begun = await backend.codexUsageBegin('C:/fixture/codex/auth.json');
+    assert.deepEqual(begun, { kind: 'ready', handle: 'opaque-fixture' });
+    assert.deepEqual(await backend.codexUsageFetch(begun.handle), { kind: 'no_sessions' });
+    assert.deepEqual(await backend.codexUsageRelease(begun.handle), { released: true });
+    assert.deepEqual(requests.map(({ op }) => op), ['codex_usage_begin', 'codex_usage_fetch', 'codex_usage_release']);
+    assert.equal(requests[0].path, 'C:/fixture/codex/auth.json');
+    assert.equal(requests[1].credential_handle, 'opaque-fixture');
+    for (const request of requests) {
+      assert.equal(typeof request.id, 'string');
+      assert.equal(Object.hasOwn(request, 'token'), false);
+      assert.equal(Object.hasOwn(request, 'account_id'), false);
+    }
+  } finally { await backend.stop(); }
+});
+
 test('Rust status replies bypass ordinary FIFO and correlate out of order', async () => {
   const child = new EventEmitter();
   child.stdin = new PassThrough();

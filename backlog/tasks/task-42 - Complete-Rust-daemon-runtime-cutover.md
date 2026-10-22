@@ -4,7 +4,7 @@ title: Complete Rust daemon runtime cutover
 status: To Do
 assignee: []
 created_date: '2026-10-20 23:52'
-updated_date: '2026-10-22 05:53'
+updated_date: '2026-10-22 06:59'
 labels: []
 dependencies: []
 modified_files:
@@ -39,4 +39,6 @@ TASK-42.6 finalization: all nine reviewed source hashes and their unique VERIFY 
 TASK-42.7 completed: Claude, Codex, and Ollama provider usage normalization now runs through the typed Rust bridge. Remaining Node ownership includes usage snapshot persistence and local reads (TASK-42.8), plus provider credentials, fetch/scrape, and coordinator behavior; final Rust daemon cutover remains incomplete.
 
 TASK-42.8 completed on 2026-10-22: provider usage snapshot persistence and local reads now use the shared Rust backend; post-repair evidence is recorded on the subtask. Remaining cutover work includes the TASK-42.6 external Node usage-report renderer and other whole-daemon criteria; Linux/macOS validation remains explicit follow-up.
+
+TASK-42.10 Windows finalization: independent review PASS with no blockers. The full serial Rust suite passed 192 library tests + 3 main tests after a test-only diagnostic was added to the status timeout assertion; the earlier full run had 190 pass and one failure at that assertion, then passed on rerun. Cause remains unknown, so this is not classified as a proven flake; determinism follow-up remains tracked by TASK-42.9 (separate pre-existing task, unchanged). Full Node suite passed 704, failed 0, with 2 known pre-epoch filesystem-mtime skips. Forced Codex transport is migrated to Rust on Windows, while Node retains retry/backoff, Retry-After Number()/Date.parse(), and JSON.parse compatibility as explicit temporary residuals. The broader Rust daemon runtime migration remains incomplete; Linux/macOS validation and TASK-42.2 remain outstanding.
 <!-- SECTION:NOTES:END -->

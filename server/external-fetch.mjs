@@ -25,6 +25,7 @@ export async function fetchExternal(url, options = {}, policy = {}) {
     timeoutMs = DEFAULT_TIMEOUT_MS,
     sleep = delay,
     random = Math.random,
+    fetcher = fetch,
   } = policy;
   const attempts = retry ? maxAttempts : 1;
 
@@ -34,7 +35,7 @@ export async function fetchExternal(url, options = {}, policy = {}) {
     const signal = options.signal ? AbortSignal.any([options.signal, ctrl.signal]) : ctrl.signal;
     let response;
     try {
-      response = await fetch(url, { ...options, signal });
+      response = await fetcher(url, { ...options, signal });
     } catch (error) {
       if (options.signal?.aborted || attempt === attempts) throw error;
       await sleep(Math.floor(Math.min(MAX_DELAY_MS, BASE_DELAY_MS * 2 ** (attempt - 1)) * random()));

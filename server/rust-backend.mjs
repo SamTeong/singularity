@@ -246,6 +246,18 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       });
     },
 
+    codexUsageBegin(authPath) {
+      return request({ op: 'codex_usage_begin', path: authPath });
+    },
+
+    codexUsageFetch(handle) {
+      return request({ op: 'codex_usage_fetch', credential_handle: handle });
+    },
+
+    codexUsageRelease(handle) {
+      return request({ op: 'codex_usage_release', credential_handle: handle });
+    },
+
     modelPrices(path) {
       return request({ op: 'model_prices', path }).then((payload) => {
         if (payload.error) throw new Error(payload.error);

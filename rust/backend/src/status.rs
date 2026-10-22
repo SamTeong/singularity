@@ -485,7 +485,16 @@ mod tests {
             &random,
             Duration::from_millis(10),
         ));
-        assert!(matches!(result, Ok(value) if value == json!({"ok":true})));
+        let result_summary = match &result {
+            Ok(value) => format!("Ok({value})"),
+            Err(FetchError::Request(message)) => format!("Request({message})"),
+            Err(FetchError::Parse(message)) => format!("Parse({message})"),
+            Err(FetchError::Http(status)) => format!("Http({status})"),
+        };
+        assert!(
+            matches!(&result, Ok(value) if value == &json!({"ok":true})),
+            "unexpected fetch result: {result_summary}"
+        );
         assert_eq!(server.join().unwrap(), 1);
     }
 
