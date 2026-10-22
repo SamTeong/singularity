@@ -4,7 +4,7 @@ title: Complete Rust daemon runtime cutover
 status: To Do
 assignee: []
 created_date: '2026-10-20 23:52'
-updated_date: '2026-10-22 12:31'
+updated_date: '2026-10-22 12:54'
 labels: []
 dependencies: []
 modified_files:
@@ -49,4 +49,6 @@ TASK-42.13 created 2026-10-22: Move Claude credential lookup reads to Rust. It d
 TASK-42.14 Windows finalization: Claude OAuth refresh transport attempt now uses the fixed Rust HTTPS POST; Node still owns OAuth JSON construction/parsing, retry and Retry-After policy, throttling, credential resolution and persistence/rotation, Keychain/CLI fallback, and 401 ordering. Independent review PASS; all seven receipt checks passed with eight source hashes matching. Nonblocking gap: private Node callback unexpected URL/method rejection has no direct test; Rust operation takes no URL/method. Remaining cutover work includes Node-owned coordinator/retry/persistence/credential/CLI policy across provider flows, the external Node usage-report renderer, and whole-daemon runtime criteria; TASK-42.2 Linux/macOS validation remains outstanding.
 
 TASK-42.14 residual wording clarification: Rust executes Keychain and claude auth-status operations in usage_auth.rs/main.rs. Node retains fallback selection/order/throttle, credential resolution, persistence/rotation, retry, JSON policy, and coordinator behavior. A planned read-only design will route duplicate credential/refresh/merge reads through the existing claudeCredentialsRead operation; no additional task has been created.
+
+TASK-42.15 finalization (2026-10-22): Claude OAuth refresh guard and merge credential reads now use claudeCredentialsRead; reviewer accepted with no blockers. Host receipt passed focused Node (103 pass, 0 fail, 2 skipped), full Node (717 pass, 0 fail, 2 skipped), lint, and diff check; matching current and pre/post SHA-256 confirms validation did not change the two source files. Baseline parity correction: parsed null/primitive merge assignment and serialization errors reject through refreshOauthGrant and bypass CLI fallback; filesystem writer failures continue returning false. This completes TASK-42.15 only; broader cutover remains incomplete.
 <!-- SECTION:NOTES:END -->

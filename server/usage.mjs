@@ -398,9 +398,12 @@ async function resolveClaudeCredential() {
   return { oauth: await readKeychainOnDarwin(), fileKind };
 }
 
-function readCredentialsFileForRefresh() {
-  if (!existsSync(CREDENTIALS_PATH)) return null;
-  try { return JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth; }
+async function readCredentialsFileForRefresh() {
+  try {
+    const result = await usageClaudeBackend?.claudeCredentialsRead(CREDENTIALS_PATH);
+    if (result?.kind !== 'file' || typeof result.text !== 'string') return null;
+    return JSON.parse(result.text).claudeAiOauth;
+  }
   catch { return null; }
 }
 
@@ -430,9 +433,12 @@ let lastAuthRefresh = 0;
 // sibling keys the file holds. tmp+rename so a crash can't truncate the file;
 // a plain write is the last resort because losing a just-rotated refresh token
 // costs the user a full re-login, which is worse than a non-atomic write.
-function persistOauth(fresh) {
+async function persistOauth(fresh) {
   let file = {};
-  try { file = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
+  try {
+    const result = await usageClaudeBackend?.claudeCredentialsRead(CREDENTIALS_PATH);
+    if (result?.kind === 'file' && typeof result.text === 'string') file = JSON.parse(result.text);
+  } catch {}
   file.claudeAiOauth = { ...file.claudeAiOauth, ...fresh };
   const data = JSON.stringify(file);
   const tmp = `${CREDENTIALS_PATH}.${process.pid}.tmp`;
@@ -448,7 +454,7 @@ function persistOauth(fresh) {
 // POST the refresh_token grant. Returns true only when a new access token was
 // obtained AND persisted — a false sends the caller on to the CLI fallback.
 export async function refreshOauthGrant() {
-  const cur = readCredentialsFileForRefresh(); // file only: the darwin Keychain path is the CLI's job
+  const cur = await readCredentialsFileForRefresh(); // file only: the darwin Keychain path is the CLI's job
   if (!cur?.refreshToken) return false;
   if (cur.refreshTokenExpiresAt && Number(cur.refreshTokenExpiresAt) < Date.now()) return false;
   let resp;

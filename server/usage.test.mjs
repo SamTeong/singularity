@@ -57,8 +57,10 @@ const codexFixtureBackend = {
 };
 const codexResponse = (payload, status = 200, retryAfter = null) => ({ kind: 'response', status, retry_after: retryAfter, body: { ok: JSON.stringify(payload) } });
 const nativeFetch = globalThis.fetch;
+const claudeCredentialReads = [];
 const claudeFixtureBackend = {
   async claudeCredentialsRead(path) {
+    claudeCredentialReads.push(path);
     try { return { kind: 'file', text: readFileSync(path, 'utf8') }; }
     catch (error) { return error.code === 'ENOENT' ? { kind: 'missing' } : { kind: 'read_failure' }; }
   },
@@ -575,8 +577,71 @@ test('refreshOauthGrant: dead refresh token → no request', async () => {
   assert.equal(await refreshOauthGrant(), false);
 });
 
+test('refreshOauthGrant: missing, unreadable, or malformed bridge data stops before OAuth and Keychain', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?refresh-guard-read=${Date.now()}`);
+  let oauthCalls = 0;
+  let keychainCalls = 0;
+  isolated.setUsageAuthBackend({ usageKeychain: async () => { keychainCalls += 1; return {}; } }, 'darwin');
+  for (const result of [{ kind: 'missing' }, { kind: 'read_failure' }, { kind: 'file', text: '{' }]) {
+    isolated.setUsageClaudeBackend({ ...claudeFixtureBackend, claudeCredentialsRead: async () => result, claudeOauthRefresh: async () => { oauthCalls += 1; } });
+    assert.equal(await isolated.refreshOauthGrant(), false);
+  }
+  assert.equal(oauthCalls, 0);
+  assert.equal(keychainCalls, 0);
+  isolated.setUsageAuthBackend(null);
+});
+
+test('refreshOauthGrant: merge read failures start empty; parsed null and primitives reject without CLI fallback', async () => {
+  const credentialPath = join(claudeCfg, '.credentials.json');
+  for (const mergeResult of [
+    { kind: 'missing' }, { kind: 'read_failure' }, { kind: 'file', text: '{' },
+  ]) {
+    const isolated = await importIsolatedUsage(`./usage.mjs?merge-read=${Date.now()}-${Math.random()}`);
+    let reads = 0;
+    isolated.setUsageClaudeBackend({
+      ...claudeFixtureBackend,
+      async claudeCredentialsRead() {
+        reads += 1;
+        return reads === 1
+          ? { kind: 'file', text: JSON.stringify({ claudeAiOauth: { refreshToken: 'synthetic-refresh' } }) }
+          : mergeResult;
+      },
+      async claudeOauthRefresh() {
+        return { kind: 'response', status: 200, retry_after: null, body: { ok: JSON.stringify({ access_token: 'synthetic-access', refresh_token: 'rotated' }) } };
+      },
+    });
+    assert.equal(await isolated.refreshOauthGrant(), true);
+    assert.equal(reads, 2);
+    assert.deepEqual(JSON.parse(readFileSync(credentialPath, 'utf8')), {
+      claudeAiOauth: { accessToken: 'synthetic-access', refreshToken: 'rotated' },
+    });
+  }
+
+  for (const text of ['null', '17']) {
+    const isolated = await importIsolatedUsage(`./usage.mjs?merge-value=${Date.now()}-${Math.random()}`);
+    let reads = 0;
+    let cliCalls = 0;
+    isolated.setUsageClaudeBackend({
+      ...claudeFixtureBackend,
+      async claudeCredentialsRead() {
+        reads += 1;
+        return { kind: 'file', text: reads === 1 ? '{"claudeAiOauth":{"refreshToken":"synthetic-refresh"}}' : text };
+      },
+      async claudeOauthRefresh() {
+        return { kind: 'response', status: 200, retry_after: null, body: { ok: '{"access_token":"synthetic-access"}' } };
+      },
+    });
+    isolated.setUsageAuthBackend({ usageAuthStatus: async () => { cliCalls += 1; } }, 'win32');
+    process.env.CLAUDE_BIN = process.execPath;
+    await assert.rejects(isolated.refreshClaudeAuth());
+    assert.equal(reads, 2);
+    assert.equal(cliCalls, 0);
+  }
+});
+
 test('refreshOauthGrant preserves JSON.stringify text, retries in Node, and merges rotated credentials', async () => {
   const isolated = await importIsolatedUsage(`./usage.mjs?oauth-body=${Date.now()}`);
+  const readStart = claudeCredentialReads.length;
   const seen = [];
   let failOnce = true;
   isolated.setUsageClaudeBackend({
@@ -595,6 +660,8 @@ test('refreshOauthGrant preserves JSON.stringify text, retries in Node, and merg
   const expected = refreshTokens.map((refreshToken) => JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e' }));
   assert.deepEqual(seen.map(({ body }) => body), [expected[0], expected[0], ...expected.slice(1)]);
   assert.equal(seen.length, 4);
+  // Three grant attempts each read guard+merge once; transport retry stays inside fetchExternal.
+  assert.deepEqual(claudeCredentialReads.slice(readStart), Array(6).fill(join(claudeCfg, '.credentials.json')));
   assert.ok(seen.every(({ timeoutMs }) => timeoutMs === 10_000));
   const saved = JSON.parse(readFileSync(join(claudeCfg, '.credentials.json'), 'utf8')).claudeAiOauth;
   assert.equal(saved.accessToken, 'new-access');
