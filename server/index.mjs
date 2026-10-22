@@ -33,7 +33,7 @@ import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntr
 import { getConfigState, setConfigState, setConfigStateBackend } from './config-state.mjs';
 import { getKeys, setKeys, setKeysBackend } from './keys.mjs';
 import { statsFor, sessionStats } from './stats.mjs';
-import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, CODEX_HOME } from './usage.mjs';
+import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, setUsageClaudeBackend, CODEX_HOME } from './usage.mjs';
 import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
 import { createModelPricesHandler } from './rust-backend.mjs';
 import { createExternalSessionLaunchHandler, createSessionFolderOpenHandler } from './detached-launch.mjs';
@@ -139,6 +139,7 @@ setUsageAuthBackend(rustBackend);
 setUsageNormalizationBackend(rustBackend);
 setUsageSnapshotBackend(rustBackend);
 setUsageCodexBackend(rustBackend);
+setUsageClaudeBackend(rustBackend);
 setExplorerBackend(rustBackend);
 setConfigStateBackend(rustBackend);
 setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, window-anchor pokes)

@@ -368,8 +368,7 @@ async function normalizeClaude(raw, plan) {
 // `security find-generic-password -s "Claude Code-credentials" -w`, which
 // prints the same JSON blob to stdout. Lookup crosses the private Rust bridge.
 export async function claudeOauthToken() {
-  const fromFile = readCredentialsFile();
-  const oauth = fromFile ?? await readKeychainOnDarwin();
+  const { oauth } = await resolveClaudeCredential();
   if (!oauth?.accessToken) return null;
   if (oauth.expiresAt && Number(oauth.expiresAt) < Date.now()) return null;
   return { accessToken: oauth.accessToken, expiresAt: oauth.expiresAt ?? null, subscriptionType: oauth.subscriptionType ?? null };
@@ -380,12 +379,26 @@ export async function claudeOauthToken() {
 // refresh token so ordinary access-token renewal does not usually look like a
 // switch; rotation is safe to treat conservatively as one.
 async function claudeCredentialFingerprint() {
-  const oauth = readCredentialsFile() ?? await readKeychainOnDarwin();
+  const { oauth } = await resolveClaudeCredential();
   const secretMaterial = oauth && (oauth.refreshToken || oauth.accessToken);
   return secretMaterial ? createHash('sha256').update(secretMaterial).digest('hex') : null;
 }
 
-function readCredentialsFile() {
+async function resolveClaudeCredential() {
+  let result;
+  try { result = await usageClaudeBackend?.claudeCredentialsRead(CREDENTIALS_PATH); }
+  catch { result = null; }
+  if (result?.kind === 'file' && typeof result.text === 'string') {
+    try { return { oauth: JSON.parse(result.text).claudeAiOauth, fileKind: 'file' }; }
+    catch {
+      return { oauth: await readKeychainOnDarwin(), fileKind: 'parse_failure' };
+    }
+  }
+  const fileKind = result?.kind === 'missing' ? 'missing' : 'read_failure';
+  return { oauth: await readKeychainOnDarwin(), fileKind };
+}
+
+function readCredentialsFileForRefresh() {
   if (!existsSync(CREDENTIALS_PATH)) return null;
   try { return JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth; }
   catch { return null; }
@@ -435,7 +448,7 @@ function persistOauth(fresh) {
 // POST the refresh_token grant. Returns true only when a new access token was
 // obtained AND persisted — a false sends the caller on to the CLI fallback.
 export async function refreshOauthGrant() {
-  const cur = readCredentialsFile(); // file only: the darwin Keychain path is the CLI's job
+  const cur = readCredentialsFileForRefresh(); // file only: the darwin Keychain path is the CLI's job
   if (!cur?.refreshToken) return false;
   if (cur.refreshTokenExpiresAt && Number(cur.refreshTokenExpiresAt) < Date.now()) return false;
   let resp;
@@ -505,17 +518,20 @@ export async function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS
 }
 
 async function fetchClaude(retry = true, prev = cache.claude.data, force = false) {
-  let oauth = await claudeOauthToken();
+  let credential = await resolveClaudeCredential();
+  let oauth = credential.oauth;
+  if (!oauth?.accessToken || (oauth.expiresAt && Number(oauth.expiresAt) < Date.now())) oauth = null;
   // Expired token → renew it here rather than making the user open a session.
-  if (!oauth && retry && await refreshClaudeAuth()) oauth = await claudeOauthToken();
+  if (!oauth && retry && await refreshClaudeAuth()) {
+    credential = await resolveClaudeCredential();
+    oauth = credential.oauth;
+    if (!oauth?.accessToken || (oauth.expiresAt && Number(oauth.expiresAt) < Date.now())) oauth = null;
+  }
   if (!oauth) {
     // Distinguish no-creds vs expired for the UI's auth prompt.
-    let err;
-    if (!existsSync(CREDENTIALS_PATH)) err = 'no-credentials';
-    else {
-      try { err = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth?.accessToken ? 'token-expired' : 'no-token'; }
-      catch { err = 'bad credentials'; }
-    }
+    const err = credential.fileKind === 'missing' ? 'no-credentials'
+      : credential.fileKind === 'read_failure' || credential.fileKind === 'parse_failure' ? 'bad credentials'
+        : credential.oauth?.accessToken ? 'token-expired' : 'no-token';
     return { ok: false, source: 'claude', needsAuth: true, error: err };
   }
 

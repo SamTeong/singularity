@@ -24,6 +24,8 @@ const { consumeStream, streamChat } = await import('./chat.mjs');
 const { createRustBackend } = await import('./rust-backend.mjs');
 const transcriptBackend = createRustBackend();
 await transcriptBackend.start();
+const { setUsageClaudeBackend } = await import('./usage.mjs');
+setUsageClaudeBackend(transcriptBackend);
 const { setTranscriptBackend } = await import('./sessions.mjs');
 const modelStore = await import('./model-store.mjs');
 const transcriptRoot = join(scratch, 'claude-projects');

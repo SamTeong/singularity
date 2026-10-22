@@ -58,6 +58,10 @@ const codexFixtureBackend = {
 const codexResponse = (payload, status = 200, retryAfter = null) => ({ kind: 'response', status, retry_after: retryAfter, body: { ok: JSON.stringify(payload) } });
 const nativeFetch = globalThis.fetch;
 const claudeFixtureBackend = {
+  async claudeCredentialsRead(path) {
+    try { return { kind: 'file', text: readFileSync(path, 'utf8') }; }
+    catch (error) { return error.code === 'ENOENT' ? { kind: 'missing' } : { kind: 'read_failure' }; }
+  },
   async claudeUsageFetch(accessToken) {
     if (globalThis.fetch === nativeFetch) throw new Error('missing offline Claude fixture');
     const response = await globalThis.fetch('https://fixture.invalid/claude-usage', {
@@ -572,12 +576,20 @@ test('refreshOauthGrant: dead refresh token → no request', async () => {
 
 test('claudeOauthToken: file precedence, async Keychain fallback, and quiet failures', async () => {
   let calls = 0;
+  const credentialPath = join(claudeCfg, '.credentials.json');
+  const readCredentialPath = claudeFixtureBackend.claudeCredentialsRead;
+  const paths = [];
+  claudeFixtureBackend.claudeCredentialsRead = async (path) => {
+    paths.push(path);
+    return readCredentialPath(path);
+  };
   setUsageAuthBackend({ usageKeychain: async () => {
     calls++;
     return { accessToken: 'synthetic-access', refreshToken: 'synthetic-refresh', expiresAt: Date.now() + 60_000, subscriptionType: 'pro' };
   } }, 'darwin');
   writeCreds({ accessToken: 'file-access', expiresAt: Date.now() + 60_000, subscriptionType: 'file-plan' });
   const fromFile = await claudeOauthToken();
+  assert.equal(paths.at(-1), credentialPath);
   assert.equal(fromFile.accessToken !== undefined, true);
   assert.equal(fromFile.subscriptionType, 'file-plan');
   assert.equal(calls, 0);
@@ -586,11 +598,24 @@ test('claudeOauthToken: file precedence, async Keychain fallback, and quiet fail
   assert.equal(await claudeOauthToken(), null);
   assert.equal(calls, 0, 'a present credential object retains file precedence without an access token');
 
-  rmSync(join(claudeCfg, '.credentials.json'), { force: true });
+  writeFileSync(credentialPath, '{');
+  const malformedFallback = await claudeOauthToken();
+  assert.equal(malformedFallback.accessToken, 'synthetic-access');
+  assert.equal(calls, 1, 'malformed JSON permits the Darwin Keychain fallback');
+  writeFileSync(credentialPath, 'null');
+  assert.equal((await claudeOauthToken()).accessToken, 'synthetic-access');
+  assert.equal(calls, 2, 'a null JSON root retains the existing parse/property failure fallback');
+
+  claudeFixtureBackend.claudeCredentialsRead = async () => ({ kind: 'read_failure' });
+  assert.equal((await claudeOauthToken()).accessToken, 'synthetic-access');
+  assert.equal(calls, 3, 'read failure permits the Darwin Keychain fallback');
+  claudeFixtureBackend.claudeCredentialsRead = readCredentialPath;
+
+  rmSync(credentialPath, { force: true });
   const fromKeychain = await claudeOauthToken();
   assert.equal(fromKeychain.accessToken, 'synthetic-access');
   assert.equal(fromKeychain.subscriptionType, 'pro');
-  assert.equal(calls, 1);
+  assert.equal(calls, 4);
 
   const logged = [];
   const originalError = console.error;
@@ -610,8 +635,24 @@ test('claudeOauthToken: file precedence, async Keychain fallback, and quiet fail
   assert.equal(logged.join('\n').includes('synthetic-refresh-secret'), false);
   setUsageAuthBackend({ usageKeychain: async () => { calls++; return {}; } }, 'win32');
   assert.equal(await claudeOauthToken(), null);
-  assert.equal(calls, 1);
+  assert.equal(calls, 4);
   setUsageAuthBackend(null);
+  claudeFixtureBackend.claudeCredentialsRead = readCredentialPath;
+});
+
+test('claudeOauthToken preserves JSON value and Number coercions', async () => {
+  setUsageAuthBackend(null);
+  writeCreds({ accessToken: 17, expiresAt: 'not-a-number', subscriptionType: false });
+  assert.deepEqual(await claudeOauthToken(), { accessToken: 17, expiresAt: 'not-a-number', subscriptionType: false });
+
+  writeCreds({ accessToken: 'synthetic-expired', expiresAt: '-1' });
+  assert.equal(await claudeOauthToken(), null);
+
+  writeFileSync(join(claudeCfg, '.credentials.json'), '\uFEFF{"claudeAiOauth":{"accessToken":"synthetic-bom"}}');
+  setUsageAuthBackend({ usageKeychain: async () => ({ accessToken: 'synthetic-keychain' }) }, 'darwin');
+  assert.equal((await claudeOauthToken()).accessToken, 'synthetic-keychain');
+  setUsageAuthBackend(null);
+  rmSync(join(claudeCfg, '.credentials.json'), { force: true });
 });
 
 test('refreshClaudeAuth: falls back to the CLI once, then throttles', async () => {
@@ -662,6 +703,42 @@ test('getUsage: filtered pull on a cold cache fetches only the listed source', a
   // stops at the pre-network auth guard rather than the real endpoint.
   assert.equal(doc.claude.source, 'claude');
   assert.equal(doc.claude.error, 'no-credentials');
+});
+
+test('getUsage keeps synthetic credential failures out of public results', async () => {
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('fixture rejection synthetic-private-secret'); };
+  try {
+    const cases = [
+      ['missing', null, 'no-credentials'],
+      ['no-token', '{"claudeAiOauth":{}}', 'no-token'],
+      ['expired', JSON.stringify({ claudeAiOauth: { accessToken: 'synthetic-expired', expiresAt: '-1' } }), 'token-expired'],
+      ['malformed', '{"claudeAiOauth":{"accessToken":"synthetic-private-secret"}', 'bad credentials'],
+      ['read-failure', null, 'bad credentials'],
+      ['rejected-fetch', JSON.stringify({ claudeAiOauth: { accessToken: 'synthetic-private-secret', expiresAt: Date.now() + 60_000 } }), 'request failed: fixture rejection [redacted]'],
+    ];
+    for (const [label, text, expected] of cases) {
+      clearClaudeLocal();
+      if (text === null) rmSync(credentialsFile, { force: true });
+      else writeFileSync(credentialsFile, text);
+      const readCredentials = claudeFixtureBackend.claudeCredentialsRead;
+      if (label === 'read-failure') claudeFixtureBackend.claudeCredentialsRead = async () => ({ kind: 'read_failure' });
+      const isolated = await importIsolatedUsage(`./usage.mjs?credential-outcome=${label}-${Date.now()}`);
+      const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+      assert.equal(doc.claude.error, expected);
+      assert.equal(JSON.stringify(doc).includes('synthetic-private-secret'), false);
+      claudeFixtureBackend.claudeCredentialsRead = readCredentials;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    claudeFixtureBackend.claudeCredentialsRead = async (path) => {
+      try { return { kind: 'file', text: readFileSync(path, 'utf8') }; }
+      catch (error) { return error.code === 'ENOENT' ? { kind: 'missing' } : { kind: 'read_failure' }; }
+    };
+    rmSync(credentialsFile, { force: true });
+    clearClaudeLocal();
+  }
 });
 
 test('getUsage: the allowlist outranks force, and an excluded source is served by reference', async () => {

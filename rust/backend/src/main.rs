@@ -273,6 +273,21 @@ fn main() -> io::Result<()> {
                     }
                 }
             }
+            Ok(request) if request.op == "claude_credentials_read" => {
+                match singularity_backend::claude_credentials::read(std::path::Path::new(
+                    request.path.as_str().unwrap_or(""),
+                )) {
+                    singularity_backend::claude_credentials::ClaudeCredentialsRead::File(text) => {
+                        serde_json::json!({"kind":"file","text":text})
+                    }
+                    singularity_backend::claude_credentials::ClaudeCredentialsRead::Missing => {
+                        serde_json::json!({"kind":"missing"})
+                    }
+                    singularity_backend::claude_credentials::ClaudeCredentialsRead::ReadFailure => {
+                        serde_json::json!({"kind":"read_failure"})
+                    }
+                }
+            }
             Ok(request) if request.op == "codex_thread_find" => {
                 singularity_backend::codex_thread_identity::find(
                     request.codex_identity_home.as_str(),

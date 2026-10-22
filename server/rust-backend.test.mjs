@@ -187,6 +187,54 @@ test('Claude usage bridge correlates its private token request and returns no to
   } finally { await backend.stop(); }
 });
 
+test('Claude credential bridge returns raw text and fixed missing/read-failure outcomes', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  const stderr = [];
+  const originalStderrWrite = process.stderr.write;
+  process.stderr.write = (chunk) => { stderr.push(String(chunk)); return true; };
+  child.stdin.write = (chunk, callback) => {
+    const sent = JSON.parse(String(chunk));
+    requests.push(sent);
+    const response = sent.path.endsWith('rejected') ? null
+      : sent.path.endsWith('missing') ? { kind: 'missing' }
+      : sent.path.endsWith('failure') ? { kind: 'read_failure' }
+        : { kind: 'file', text: '{"claudeAiOauth":{"accessToken":"synthetic-secret"}}' };
+    queueMicrotask(() => child.stdout.write(`${JSON.stringify(response === null ? { id: sent.id } : { id: sent.id, response })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  try {
+    await backend.start();
+    child.stderr.write('synthetic backend diagnostic\n');
+    const raw = await backend.claudeCredentialsRead('C:/fixture/.credentials.json');
+    assert.deepEqual(raw, { kind: 'file', text: '{"claudeAiOauth":{"accessToken":"synthetic-secret"}}' });
+    assert.deepEqual(await backend.claudeCredentialsRead('C:/fixture/missing'), { kind: 'missing' });
+    assert.deepEqual(await backend.claudeCredentialsRead('C:/fixture/failure'), { kind: 'read_failure' });
+    await assert.rejects(backend.claudeCredentialsRead('C:/fixture/rejected'), (error) => {
+      assert.equal(error.message.includes('synthetic-secret'), false);
+      return /uncorrelated response/.test(error.message);
+    });
+    assert.deepEqual(requests.map(({ op }) => op), ['claude_credentials_read', 'claude_credentials_read', 'claude_credentials_read', 'claude_credentials_read']);
+    assert.equal(requests[0].path, 'C:/fixture/.credentials.json');
+    assert.equal(JSON.stringify(raw).includes('synthetic-secret'), true);
+    assert.equal(Object.hasOwn(raw, 'error'), false);
+    assert.equal(stderr.join('').includes('synthetic-secret'), false);
+  } finally {
+    await backend.stop();
+    process.stderr.write = originalStderrWrite;
+  }
+});
+
 test('Claude usage bridge forwards remaining header budget and cancels an expired queued request', async () => {
   const child = new EventEmitter();
   child.stdin = new PassThrough();

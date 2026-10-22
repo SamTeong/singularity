@@ -291,6 +291,10 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'claude_usage_fetch', access_token: accessToken }, signal, headerTimeoutMs);
     },
 
+    claudeCredentialsRead(path) {
+      return request({ op: 'claude_credentials_read', path });
+    },
+
     modelPrices(path) {
       return request({ op: 'model_prices', path }).then((payload) => {
         if (payload.error) throw new Error(payload.error);
