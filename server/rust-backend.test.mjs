@@ -187,6 +187,36 @@ test('Claude usage bridge correlates its private token request and returns no to
   } finally { await backend.stop(); }
 });
 
+test('Claude OAuth bridge carries opaque body text with its deadline and exposes no request body in the response', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  let sent;
+  child.stdin.write = (chunk, callback) => {
+    sent = JSON.parse(String(chunk));
+    queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: sent.id, response: { kind: 'response', status: 429, retry_after: '66', body: { ok: null } } })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  const body = '{"grant_type":"refresh_token","refresh_token":{"opaque":17},"client_id":"fixed"}';
+  try {
+    await backend.start();
+    const response = await backend.claudeOauthRefresh(body, null, 800);
+    assert.deepEqual(response, { kind: 'response', status: 429, retry_after: '66', body: { ok: null } });
+    assert.equal(sent.op, 'claude_oauth_refresh');
+    assert.equal(sent.oauth_body, body);
+    assert.ok(sent.header_timeout_ms > 0 && sent.header_timeout_ms <= 800);
+    assert.equal(JSON.stringify(response).includes(body), false);
+  } finally { await backend.stop(); }
+});
+
 test('Claude credential bridge returns raw text and fixed missing/read-failure outcomes', async () => {
   const child = new EventEmitter();
   child.stdin = new PassThrough();

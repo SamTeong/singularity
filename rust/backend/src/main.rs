@@ -27,6 +27,8 @@ struct Request {
     #[serde(default)]
     access_token: Value,
     #[serde(default)]
+    oauth_body: Value,
+    #[serde(default)]
     header_timeout_ms: Value,
     #[serde(default)]
     wiki_order: Value,
@@ -261,6 +263,36 @@ fn main() -> io::Result<()> {
                         serde_json::json!({"kind":"timeout_failure"})
                     }
                     singularity_backend::claude_usage::ClaudeUsageResult::Response {
+                        status,
+                        retry_after,
+                        body,
+                    } => {
+                        let body = match body {
+                            Ok(value) => serde_json::json!({"ok":value}),
+                            Err(_) => serde_json::json!({"err":"terminated"}),
+                        };
+                        serde_json::json!({"kind":"response","status":status,"retry_after":retry_after,"body":body})
+                    }
+                }
+            }
+            Ok(request) if request.op == "claude_oauth_refresh" => {
+                let result =
+                    runtime.block_on(singularity_backend::claude_oauth::refresh_claude_oauth(
+                        request.oauth_body.as_str().unwrap_or(""),
+                        request
+                            .header_timeout_ms
+                            .as_u64()
+                            .unwrap_or(10_000)
+                            .min(10_000),
+                    ));
+                match result {
+                    singularity_backend::claude_oauth::ClaudeOauthRefreshResult::TransportFailure => {
+                        serde_json::json!({"kind":"transport_failure"})
+                    }
+                    singularity_backend::claude_oauth::ClaudeOauthRefreshResult::TimeoutFailure => {
+                        serde_json::json!({"kind":"timeout_failure"})
+                    }
+                    singularity_backend::claude_oauth::ClaudeOauthRefreshResult::Response {
                         status,
                         retry_after,
                         body,

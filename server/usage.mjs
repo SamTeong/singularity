@@ -453,11 +453,21 @@ export async function refreshOauthGrant() {
   if (cur.refreshTokenExpiresAt && Number(cur.refreshTokenExpiresAt) < Date.now()) return false;
   let resp;
   try {
+    const body = JSON.stringify({ grant_type: 'refresh_token', refresh_token: cur.refreshToken, client_id: OAUTH_CLIENT_ID });
     resp = await fetchExternal(OAUTH_TOKEN_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: cur.refreshToken, client_id: OAUTH_CLIENT_ID }),
-    }, { timeoutMs: REQ_TIMEOUT_MS });
+      body,
+    }, {
+      timeoutMs: REQ_TIMEOUT_MS,
+      fetcher: async (url, options) => {
+        if (url !== OAUTH_TOKEN_URL || options.method !== 'POST' || options.headers?.['content-type'] !== 'application/json' || typeof options.body !== 'string') {
+          throw new Error('fetch failed');
+        }
+        if (!usageClaudeBackend) throw new Error('fetch failed');
+        return claudeOauthRefreshResponse(await usageClaudeBackend.claudeOauthRefresh(options.body, options.signal, REQ_TIMEOUT_MS));
+      },
+    });
   } catch { return false; }
   if (resp.status !== 200) return false;
   let body;
@@ -580,6 +590,21 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
 }
 
 function claudeUsageResponse(result) {
+  if (result?.kind === 'transport_failure') throw new Error('fetch failed');
+  if (result?.kind === 'timeout_failure') throw new Error('This operation was aborted');
+  if (result?.kind !== 'response' || !Number.isInteger(result.status)) throw new Error('fetch failed');
+  return {
+    status: result.status,
+    headers: { get: (name) => name.toLowerCase() === 'retry-after' ? result.retry_after ?? null : null },
+    async json() {
+      if (result.body?.err === 'terminated') throw new Error('terminated');
+      if (typeof result.body?.ok !== 'string') throw new Error('terminated');
+      return JSON.parse(result.body.ok);
+    },
+  };
+}
+
+function claudeOauthRefreshResponse(result) {
   if (result?.kind === 'transport_failure') throw new Error('fetch failed');
   if (result?.kind === 'timeout_failure') throw new Error('This operation was aborted');
   if (result?.kind !== 'response' || !Number.isInteger(result.status)) throw new Error('fetch failed');

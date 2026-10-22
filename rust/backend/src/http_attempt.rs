@@ -27,6 +27,27 @@ pub async fn get(
     extra_headers: &[(&str, &str)],
     header_timeout: Duration,
 ) -> AttemptResult {
+    send(
+        endpoint,
+        Method::GET,
+        None,
+        None,
+        authorization,
+        extra_headers,
+        header_timeout,
+    )
+    .await
+}
+
+pub async fn send(
+    endpoint: &str,
+    mut method: Method,
+    mut body: Option<Vec<u8>>,
+    mut body_content_type: Option<&str>,
+    authorization: Option<&str>,
+    extra_headers: &[(&str, &str)],
+    header_timeout: Duration,
+) -> AttemptResult {
     let Ok(mut url) = Url::parse(endpoint) else {
         return AttemptResult::TransportFailure;
     };
@@ -57,14 +78,20 @@ pub async fn get(
     let mut redirects = 0;
     loop {
         let mut headers = fixed_headers.clone();
+        if let Some(content_type) = body_content_type {
+            let Ok(value) = HeaderValue::from_str(content_type) else {
+                return AttemptResult::TransportFailure;
+            };
+            headers.insert(reqwest::header::CONTENT_TYPE, value);
+        }
         if let Some(value) = &authorization {
             headers.insert(AUTHORIZATION, value.clone());
         }
-        let Ok(request) = client
-            .request(Method::GET, url.clone())
-            .headers(headers)
-            .build()
-        else {
+        let mut builder = client.request(method.clone(), url.clone()).headers(headers);
+        if let Some(bytes) = &body {
+            builder = builder.body(bytes.clone());
+        }
+        let Ok(request) = builder.build() else {
             return AttemptResult::TransportFailure;
         };
         let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
@@ -100,6 +127,19 @@ pub async fn get(
             };
             if has_userinfo(&next) || !matches!(next.scheme(), "http" | "https") {
                 return AttemptResult::TransportFailure;
+            }
+            match status.as_u16() {
+                301 | 302 if method == Method::POST => {
+                    method = Method::GET;
+                    body = None;
+                    body_content_type = None;
+                }
+                303 if method != Method::GET && method != Method::HEAD => {
+                    method = Method::GET;
+                    body = None;
+                    body_content_type = None;
+                }
+                _ => {}
             }
             if origin(&url) != origin(&next) {
                 authorization = None;

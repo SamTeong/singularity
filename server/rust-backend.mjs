@@ -291,6 +291,10 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'claude_usage_fetch', access_token: accessToken }, signal, headerTimeoutMs);
     },
 
+    claudeOauthRefresh(body, signal, headerTimeoutMs = 10_000) {
+      return request({ op: 'claude_oauth_refresh', oauth_body: body }, signal, headerTimeoutMs);
+    },
+
     claudeCredentialsRead(path) {
       return request({ op: 'claude_credentials_read', path });
     },

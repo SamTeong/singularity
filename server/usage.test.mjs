@@ -74,6 +74,7 @@ const claudeFixtureBackend = {
     }
     return { kind: 'response', status: response.status, retry_after: response.headers?.get?.('retry-after') ?? null, body };
   },
+  async claudeOauthRefresh() { throw new Error('missing offline Claude OAuth fixture'); },
 };
 let lastCodexAuthPath;
 codexFixture = async (authPath, tokens) => {
@@ -572,6 +573,64 @@ test('refreshOauthGrant: no refresh token → no request', async () => {
 test('refreshOauthGrant: dead refresh token → no request', async () => {
   writeCreds({ accessToken: 'stale', refreshToken: 'rt', refreshTokenExpiresAt: Date.now() - 1000 });
   assert.equal(await refreshOauthGrant(), false);
+});
+
+test('refreshOauthGrant preserves JSON.stringify text, retries in Node, and merges rotated credentials', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?oauth-body=${Date.now()}`);
+  const seen = [];
+  let failOnce = true;
+  isolated.setUsageClaudeBackend({
+    ...claudeFixtureBackend,
+    async claudeOauthRefresh(body, signal, timeoutMs) {
+      seen.push({ body, signal, timeoutMs });
+      if (failOnce) { failOnce = false; throw new Error('synthetic transport failure'); }
+      return { kind: 'response', status: 200, retry_after: null, body: { ok: JSON.stringify({ access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600 }) } };
+    },
+  });
+  const refreshTokens = ['synthetic-string-refresh', 17, { nested: [true, 'opaque'] }];
+  for (const refreshToken of refreshTokens) {
+    writeCreds({ accessToken: 'old-access', refreshToken, refreshTokenExpiresAt: Date.now() + 3_600_000, expiresAt: 7, subscriptionType: 'pro', rateLimitTier: 'legacy' });
+    assert.equal(await isolated.refreshOauthGrant(), true);
+  }
+  const expected = refreshTokens.map((refreshToken) => JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e' }));
+  assert.deepEqual(seen.map(({ body }) => body), [expected[0], expected[0], ...expected.slice(1)]);
+  assert.equal(seen.length, 4);
+  assert.ok(seen.every(({ timeoutMs }) => timeoutMs === 10_000));
+  const saved = JSON.parse(readFileSync(join(claudeCfg, '.credentials.json'), 'utf8')).claudeAiOauth;
+  assert.equal(saved.accessToken, 'new-access');
+  assert.equal(saved.refreshToken, 'new-refresh');
+  assert.equal(saved.subscriptionType, 'pro');
+  assert.equal(saved.rateLimitTier, 'legacy');
+});
+
+test('refreshOauthGrant keeps non-200 and invalid JSON failures in Node', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?oauth-response=${Date.now()}`);
+  const results = [
+    { kind: 'response', status: 500, retry_after: null, body: { ok: null } },
+    { kind: 'response', status: 200, retry_after: null, body: { ok: '{' } },
+  ];
+  let nextResult = 0;
+  isolated.setUsageClaudeBackend({ ...claudeFixtureBackend, claudeOauthRefresh: async () => results[Math.min(nextResult++, results.length - 1)] });
+  writeCreds({ refreshToken: 17, expiresAt: 11, subscriptionType: 'keep-me' });
+  const original = readFileSync(join(claudeCfg, '.credentials.json'), 'utf8');
+  assert.equal(await isolated.refreshOauthGrant(), false);
+  assert.equal(await isolated.refreshOauthGrant(), false);
+  assert.equal(readFileSync(join(claudeCfg, '.credentials.json'), 'utf8'), original);
+});
+
+test('refreshOauthGrant leaves raw long Retry-After handling to Node', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?oauth-retry-after=${Date.now()}`);
+  let calls = 0;
+  isolated.setUsageClaudeBackend({
+    ...claudeFixtureBackend,
+    async claudeOauthRefresh() {
+      calls += 1;
+      return { kind: 'response', status: 429, retry_after: '66', body: { ok: null } };
+    },
+  });
+  writeCreds({ refreshToken: 'synthetic-refresh', expiresAt: 22 });
+  assert.equal(await isolated.refreshOauthGrant(), false);
+  assert.equal(calls, 1);
 });
 
 test('claudeOauthToken: file precedence, async Keychain fallback, and quiet failures', async () => {
@@ -1218,11 +1277,14 @@ test('getUsage: a 401 refresh sends the rotated token on the second logical fetc
   const originalFetch = globalThis.fetch;
   const accessTokens = [];
   let refreshCalls = 0;
-  globalThis.fetch = async (url, options = {}) => {
-    if (String(url).includes('/oauth/token')) {
+  isolated.setUsageClaudeBackend({
+    ...claudeFixtureBackend,
+    async claudeOauthRefresh() {
       refreshCalls += 1;
-      return { status: 200, json: async () => ({ access_token: 'new-access-token', expires_in: 3600 }) };
-    }
+      return { kind: 'response', status: 200, retry_after: null, body: { ok: JSON.stringify({ access_token: 'new-access-token', expires_in: 3600 }) } };
+    },
+  });
+  globalThis.fetch = async (url, options = {}) => {
     assert.equal(String(url), 'https://fixture.invalid/claude-usage');
     accessTokens.push(options.headers.Authorization);
     return accessTokens.length === 1

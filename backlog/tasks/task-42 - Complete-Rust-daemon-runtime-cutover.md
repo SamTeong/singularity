@@ -4,7 +4,7 @@ title: Complete Rust daemon runtime cutover
 status: To Do
 assignee: []
 created_date: '2026-10-20 23:52'
-updated_date: '2026-10-22 09:32'
+updated_date: '2026-10-22 12:31'
 labels: []
 dependencies: []
 modified_files:
@@ -45,4 +45,8 @@ TASK-42.10 Windows finalization: independent review PASS with no blockers. The f
 TASK-42.11 Windows finalization: Claude forced live usage GET now uses a typed private one-attempt Rust bridge over the shared Codex HTTP core. Full serial Rust passed (194 library + 3 main); Node full suite passed (710 total, 2 known pre-epoch mtime skips); focused checks, lint, fmt, release build, diff check, and independent review passed. Explicit residuals in Node: Claude credential lookup/refresh/persistence, Keychain/CLI fallback, 401 coordinator, retry/Retry-After, JSON parsing, history append, normalization, and local fast path. No whole-daemon cutover claim; Linux/macOS validation and TASK-42.2 remain outstanding. Focused Node run without --test-force-exit lingered after results; cause unknown; the project-standard full run exited successfully.
 
 TASK-42.13 created 2026-10-22: Move Claude credential lookup reads to Rust. It depends on TASK-42.11 and tracks migration of lookup/fingerprint/no-credential diagnostic reads while keeping raw JSON interpretation in Node; OAuth refresh/persistence, Keychain, CLI fallback, 401 handling, and provider calls remain separate. Design: C:/Users/sate/.agents/.plan/01a156fd-39be-7992-87b0-8f45edd7a26b/claude-credential-read-service-design.md. Groma reports no component owner for server/usage.mjs, so architecture references remain empty.
+
+TASK-42.14 Windows finalization: Claude OAuth refresh transport attempt now uses the fixed Rust HTTPS POST; Node still owns OAuth JSON construction/parsing, retry and Retry-After policy, throttling, credential resolution and persistence/rotation, Keychain/CLI fallback, and 401 ordering. Independent review PASS; all seven receipt checks passed with eight source hashes matching. Nonblocking gap: private Node callback unexpected URL/method rejection has no direct test; Rust operation takes no URL/method. Remaining cutover work includes Node-owned coordinator/retry/persistence/credential/CLI policy across provider flows, the external Node usage-report renderer, and whole-daemon runtime criteria; TASK-42.2 Linux/macOS validation remains outstanding.
+
+TASK-42.14 residual wording clarification: Rust executes Keychain and claude auth-status operations in usage_auth.rs/main.rs. Node retains fallback selection/order/throttle, credential resolution, persistence/rotation, retry, JSON policy, and coordinator behavior. A planned read-only design will route duplicate credential/refresh/merge reads through the existing claudeCredentialsRead operation; no additional task has been created.
 <!-- SECTION:NOTES:END -->
