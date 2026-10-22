@@ -428,11 +428,8 @@ const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'; // Claude Code's
 const AUTH_REFRESH_THROTTLE_MS = 5 * 60_000;
 let lastAuthRefresh = 0;
 
-// Merge a fresh token response into ~/.claude/.credentials.json, preserving
-// every field we didn't get back (subscriptionType, rateLimitTier, …) and any
-// sibling keys the file holds. tmp+rename so a crash can't truncate the file;
-// a plain write is the last resort because losing a just-rotated refresh token
-// costs the user a full re-login, which is worse than a non-atomic write.
+// Merge a fresh token response into ~/.claude/.credentials.json in Node, then
+// send the serialized content and exact Node PID temp path to the Rust writer.
 async function persistOauth(fresh) {
   let file = {};
   try {
@@ -442,13 +439,8 @@ async function persistOauth(fresh) {
   file.claudeAiOauth = { ...file.claudeAiOauth, ...fresh };
   const data = JSON.stringify(file);
   const tmp = `${CREDENTIALS_PATH}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, data, { mode: 0o600 });
-    renameSync(tmp, CREDENTIALS_PATH);
-  } catch {
-    try { writeFileSync(CREDENTIALS_PATH, data, { mode: 0o600 }); } catch { return false; }
-  }
-  return true;
+  try { return await usageClaudeBackend?.claudeCredentialsWrite(CREDENTIALS_PATH, tmp, data) === true; }
+  catch { return false; }
 }
 
 // POST the refresh_token grant. Returns true only when a new access token was

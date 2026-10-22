@@ -230,7 +230,9 @@ test('Claude credential bridge returns raw text and fixed missing/read-failure o
   child.stdin.write = (chunk, callback) => {
     const sent = JSON.parse(String(chunk));
     requests.push(sent);
-    const response = sent.path.endsWith('rejected') ? null
+    const response = sent.op === 'claude_credentials_write'
+      ? { ok: !sent.path.endsWith('write-false') }
+      : sent.path.endsWith('rejected') ? null
       : sent.path.endsWith('missing') ? { kind: 'missing' }
       : sent.path.endsWith('failure') ? { kind: 'read_failure' }
         : { kind: 'file', text: '{"claudeAiOauth":{"accessToken":"synthetic-secret"}}' };
@@ -248,17 +250,28 @@ test('Claude credential bridge returns raw text and fixed missing/read-failure o
     child.stderr.write('synthetic backend diagnostic\n');
     const raw = await backend.claudeCredentialsRead('C:/fixture/.credentials.json');
     assert.deepEqual(raw, { kind: 'file', text: '{"claudeAiOauth":{"accessToken":"synthetic-secret"}}' });
+    const credentialText = '{"claudeAiOauth":{"accessToken":"synthetic-write-secret"}}';
+    assert.equal(await backend.claudeCredentialsWrite('C:/fixture/.credentials.json', 'C:/fixture/.credentials.json.321.tmp', credentialText), true);
+    assert.equal(await backend.claudeCredentialsWrite('C:/fixture/write-false', 'C:/fixture/write-false.321.tmp', credentialText), false);
     assert.deepEqual(await backend.claudeCredentialsRead('C:/fixture/missing'), { kind: 'missing' });
     assert.deepEqual(await backend.claudeCredentialsRead('C:/fixture/failure'), { kind: 'read_failure' });
     await assert.rejects(backend.claudeCredentialsRead('C:/fixture/rejected'), (error) => {
       assert.equal(error.message.includes('synthetic-secret'), false);
       return /uncorrelated response/.test(error.message);
     });
-    assert.deepEqual(requests.map(({ op }) => op), ['claude_credentials_read', 'claude_credentials_read', 'claude_credentials_read', 'claude_credentials_read']);
+    assert.deepEqual(requests.map(({ op }) => op), ['claude_credentials_read', 'claude_credentials_write', 'claude_credentials_write', 'claude_credentials_read', 'claude_credentials_read', 'claude_credentials_read']);
     assert.equal(requests[0].path, 'C:/fixture/.credentials.json');
+    assert.deepEqual(requests[1], {
+      op: 'claude_credentials_write',
+      path: 'C:/fixture/.credentials.json',
+      temp_path: 'C:/fixture/.credentials.json.321.tmp',
+      credential_text: credentialText,
+      id: 'rust-2',
+    });
     assert.equal(JSON.stringify(raw).includes('synthetic-secret'), true);
     assert.equal(Object.hasOwn(raw, 'error'), false);
     assert.equal(stderr.join('').includes('synthetic-secret'), false);
+    assert.equal(stderr.join('').includes('synthetic-write-secret'), false);
   } finally {
     await backend.stop();
     process.stderr.write = originalStderrWrite;

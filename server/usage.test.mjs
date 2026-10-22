@@ -58,11 +58,23 @@ const codexFixtureBackend = {
 const codexResponse = (payload, status = 200, retryAfter = null) => ({ kind: 'response', status, retry_after: retryAfter, body: { ok: JSON.stringify(payload) } });
 const nativeFetch = globalThis.fetch;
 const claudeCredentialReads = [];
+const claudeCredentialWrites = [];
 const claudeFixtureBackend = {
   async claudeCredentialsRead(path) {
     claudeCredentialReads.push(path);
     try { return { kind: 'file', text: readFileSync(path, 'utf8') }; }
     catch (error) { return error.code === 'ENOENT' ? { kind: 'missing' } : { kind: 'read_failure' }; }
+  },
+  async claudeCredentialsWrite(path, tempPath, text) {
+    claudeCredentialWrites.push({ path, tempPath, text });
+    try {
+      writeFileSync(tempPath, text, { mode: 0o600 });
+      renameSync(tempPath, path);
+      return true;
+    } catch {
+      try { writeFileSync(path, text, { mode: 0o600 }); return true; }
+      catch { return false; }
+    }
   },
   async claudeUsageFetch(accessToken) {
     if (globalThis.fetch === nativeFetch) throw new Error('missing offline Claude fixture');
@@ -642,6 +654,7 @@ test('refreshOauthGrant: merge read failures start empty; parsed null and primit
 test('refreshOauthGrant preserves JSON.stringify text, retries in Node, and merges rotated credentials', async () => {
   const isolated = await importIsolatedUsage(`./usage.mjs?oauth-body=${Date.now()}`);
   const readStart = claudeCredentialReads.length;
+  const writeStart = claudeCredentialWrites.length;
   const seen = [];
   let failOnce = true;
   isolated.setUsageClaudeBackend({
@@ -662,12 +675,31 @@ test('refreshOauthGrant preserves JSON.stringify text, retries in Node, and merg
   assert.equal(seen.length, 4);
   // Three grant attempts each read guard+merge once; transport retry stays inside fetchExternal.
   assert.deepEqual(claudeCredentialReads.slice(readStart), Array(6).fill(join(claudeCfg, '.credentials.json')));
+  const writes = claudeCredentialWrites.slice(writeStart);
+  assert.equal(writes.length, 3);
+  assert.ok(writes.every(({ path, tempPath }) => path === join(claudeCfg, '.credentials.json') && tempPath === `${path}.${process.pid}.tmp`));
   assert.ok(seen.every(({ timeoutMs }) => timeoutMs === 10_000));
   const saved = JSON.parse(readFileSync(join(claudeCfg, '.credentials.json'), 'utf8')).claudeAiOauth;
   assert.equal(saved.accessToken, 'new-access');
   assert.equal(saved.refreshToken, 'new-refresh');
   assert.equal(saved.subscriptionType, 'pro');
   assert.equal(saved.rateLimitTier, 'legacy');
+  assert.equal(JSON.parse(writes.at(-1).text).claudeAiOauth.refreshToken, 'new-refresh');
+});
+
+test('refreshOauthGrant maps false and rejected credential writes to false', async () => {
+  for (const claudeCredentialsWrite of [async () => false, async () => { throw new Error('synthetic writer rejection'); }]) {
+    const isolated = await importIsolatedUsage(`./usage.mjs?writer-failure=${Date.now()}-${Math.random()}`);
+    isolated.setUsageClaudeBackend({
+      ...claudeFixtureBackend,
+      claudeCredentialsWrite,
+      async claudeOauthRefresh() {
+        return { kind: 'response', status: 200, retry_after: null, body: { ok: '{"access_token":"synthetic-access"}' } };
+      },
+    });
+    writeCreds({ refreshToken: 'synthetic-refresh' });
+    assert.equal(await isolated.refreshOauthGrant(), false);
+  }
 });
 
 test('refreshOauthGrant keeps non-200 and invalid JSON failures in Node', async () => {

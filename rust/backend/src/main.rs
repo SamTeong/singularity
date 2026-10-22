@@ -23,6 +23,10 @@ struct Request {
     #[serde(default)]
     path: Value,
     #[serde(default)]
+    temp_path: Value,
+    #[serde(default)]
+    credential_text: Value,
+    #[serde(default)]
     credential_handle: Value,
     #[serde(default)]
     access_token: Value,
@@ -319,6 +323,18 @@ fn main() -> io::Result<()> {
                         serde_json::json!({"kind":"read_failure"})
                     }
                 }
+            }
+            Ok(request) if request.op == "claude_credentials_write" => {
+                let path = request.path.as_str().unwrap_or("");
+                let temp_path = request.temp_path.as_str().unwrap_or("");
+                let text = request.credential_text.as_str().unwrap_or("");
+                serde_json::json!({
+                    "ok": singularity_backend::claude_credentials::write(
+                        std::path::Path::new(path),
+                        std::path::Path::new(temp_path),
+                        text,
+                    )
+                })
             }
             Ok(request) if request.op == "codex_thread_find" => {
                 singularity_backend::codex_thread_identity::find(

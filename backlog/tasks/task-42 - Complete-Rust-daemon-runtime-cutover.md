@@ -4,7 +4,7 @@ title: Complete Rust daemon runtime cutover
 status: To Do
 assignee: []
 created_date: '2026-10-20 23:52'
-updated_date: '2026-10-22 12:54'
+updated_date: '2026-10-22 13:20'
 labels: []
 dependencies: []
 modified_files:
@@ -51,4 +51,6 @@ TASK-42.14 Windows finalization: Claude OAuth refresh transport attempt now uses
 TASK-42.14 residual wording clarification: Rust executes Keychain and claude auth-status operations in usage_auth.rs/main.rs. Node retains fallback selection/order/throttle, credential resolution, persistence/rotation, retry, JSON policy, and coordinator behavior. A planned read-only design will route duplicate credential/refresh/merge reads through the existing claudeCredentialsRead operation; no additional task has been created.
 
 TASK-42.15 finalization (2026-10-22): Claude OAuth refresh guard and merge credential reads now use claudeCredentialsRead; reviewer accepted with no blockers. Host receipt passed focused Node (103 pass, 0 fail, 2 skipped), full Node (717 pass, 0 fail, 2 skipped), lint, and diff check; matching current and pre/post SHA-256 confirms validation did not change the two source files. Baseline parity correction: parsed null/primitive merge assignment and serialization errors reject through refreshOauthGrant and bypass CLI fallback; filesystem writer failures continue returning false. This completes TASK-42.15 only; broader cutover remains incomplete.
+
+TASK-43 completion (2026-10-22): OAuth refresh credential persistence now writes through the private Rust credential bridge; TASK-43 is Done with all five acceptance criteria checked after independent acceptance. The original seven-check receipt and post-test-repair three-check receipt passed with matching source hashes. The Unix mode test was not run on Windows; POSIX mode bits are not claimed as a Windows ACL guarantee. TASK-42.2 Linux/macOS daemon validation remains outstanding.
 <!-- SECTION:NOTES:END -->
