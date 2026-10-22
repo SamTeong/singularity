@@ -30,13 +30,15 @@ const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json')
 let usageRustBackend;
 after(async () => { await usageRustBackend?.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, rotateClaudeHistory, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
 usageRustBackend = createRustBackend();
 await usageRustBackend.start();
 setUsageNormalizationBackend(usageRustBackend);
+setUsageSnapshotBackend(usageRustBackend);
 async function importIsolatedUsage(specifier) {
   const isolated = await import(specifier);
   isolated.setUsageNormalizationBackend(usageRustBackend);
+  isolated.setUsageSnapshotBackend(usageRustBackend);
   return isolated;
 }
 
@@ -172,11 +174,11 @@ const READING = {
   },
 };
 
-test('appendOllamaHistory: dedupes an unchanged reading, writes a changed one', () => {
-  appendOllamaHistory(READING);
-  appendOllamaHistory(READING); // identical → no second line
+test('appendOllamaHistory: dedupes an unchanged reading, writes a changed one', async () => {
+  await appendOllamaHistory(READING);
+  await appendOllamaHistory(READING); // identical → no second line
   const changed = { ...READING, session: { ...READING.session, pctUsed: 28.1 } };
-  appendOllamaHistory(changed);
+  await appendOllamaHistory(changed);
 
   const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
   assert.equal(lines.length, 2);
@@ -190,13 +192,13 @@ test('appendOllamaHistory: dedupes an unchanged reading, writes a changed one', 
   assert.equal(JSON.parse(lines[1]).session.utilization, 28.1);
 });
 
-test('appendOllamaHistory retries an identical reading after a failed append', () => {
+test('appendOllamaHistory retries an identical reading after a failed append', async () => {
   const retryReading = { ...READING, session: { ...READING.session, pctUsed: 99.9 } };
   rmSync(HISTORY_FILE, { recursive: true, force: true });
   mkdirSync(HISTORY_FILE);
-  appendOllamaHistory(retryReading); // path is a directory, so the append fails
+  await appendOllamaHistory(retryReading); // path is a directory, so the append fails
   rmSync(HISTORY_FILE, { recursive: true, force: true });
-  appendOllamaHistory(retryReading); // same successful result must be retried
+  await appendOllamaHistory(retryReading); // same successful result must be retried
 
   const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
   assert.equal(lines.length, 1);
@@ -214,10 +216,10 @@ const CODEX_READING = {
   weekly: { pctUsed: 12.5, resetsAt: '2026-09-12T00:00:00Z', models: [] },
 };
 
-test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', () => {
-  appendCodexHistory(CODEX_READING);
-  appendCodexHistory(CODEX_READING); // identical → no second line
-  appendCodexHistory({ ...CODEX_READING, session: { ...CODEX_READING.session, pctUsed: 44 } });
+test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', async () => {
+  await appendCodexHistory(CODEX_READING);
+  await appendCodexHistory(CODEX_READING); // identical → no second line
+  await appendCodexHistory({ ...CODEX_READING, session: { ...CODEX_READING.session, pctUsed: 44 } });
 
   const lines = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n');
   assert.equal(lines.length, 2);
@@ -236,10 +238,10 @@ test('appendCodexHistory: an unchanged reading is rewritten once the 5-min heart
   const { appendCodexHistory: isolatedAppendCodexHistory } = await importIsolatedUsage(`./usage.mjs?codex-heartbeat=${Date.now()}`);
   const realNow = Date.now;
   try {
-    isolatedAppendCodexHistory(CODEX_READING);
-    isolatedAppendCodexHistory(CODEX_READING); // within the heartbeat → deduped
+    await isolatedAppendCodexHistory(CODEX_READING);
+    await isolatedAppendCodexHistory(CODEX_READING); // within the heartbeat → deduped
     Date.now = () => realNow() + 5 * 60_000;
-    isolatedAppendCodexHistory(CODEX_READING); // heartbeat elapsed → written again
+    await isolatedAppendCodexHistory(CODEX_READING); // heartbeat elapsed → written again
     const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(rows.length, 2);
     assert.deepEqual(rows[1].session, rows[0].session);
@@ -249,7 +251,7 @@ test('appendCodexHistory: an unchanged reading is rewritten once the 5-min heart
   }
 });
 
-test('appendCodexHistory: retries an unchanged reading after a failed append', () => {
+test('appendCodexHistory: retries an unchanged reading after a failed append', async () => {
   const historyDir = dirname(CODEX_HISTORY_FILE);
   const heldDir = `${historyDir}-held`;
   const reading = { ...CODEX_READING, session: { ...CODEX_READING.session, pctUsed: 41 } };
@@ -258,14 +260,14 @@ test('appendCodexHistory: retries an unchanged reading after a failed append', (
   renameSync(historyDir, heldDir);
   writeFileSync(historyDir, 'blocks directory creation');
   try {
-    appendCodexHistory(reading); // append fails best-effort while parent path is a file
+    await appendCodexHistory(reading); // append fails best-effort while parent path is a file
   } finally {
     rmSync(historyDir, { force: true });
     renameSync(heldDir, historyDir);
   }
 
   try {
-    appendCodexHistory(reading); // same reading must retry before heartbeat expiry
+    await appendCodexHistory(reading); // same reading must retry before heartbeat expiry
     const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].session.utilization, 41);
@@ -274,15 +276,15 @@ test('appendCodexHistory: retries an unchanged reading after a failed append', (
   }
 });
 
-test('appendCodexHistory: an unstarted transition with unchanged limits appends a fresh snapshot', () => {
+test('appendCodexHistory: an unstarted transition with unchanged limits appends a fresh snapshot', async () => {
   const window = { pctUsed: 0, resetsAt: null, models: [] };
-  appendCodexHistory({ ...CODEX_READING, session: window });
-  appendCodexHistory({ ...CODEX_READING, session: { ...window, started: false } });
+  await appendCodexHistory({ ...CODEX_READING, session: window });
+  await appendCodexHistory({ ...CODEX_READING, session: { ...window, started: false } });
   const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].session.started, undefined);
   assert.equal(rows[1].session.started, false);
-  assert.equal(readCodexSnapshot().session.started, false);
+  assert.equal((await readCodexSnapshot()).session.started, false);
   rmSync(CODEX_HISTORY_FILE, { force: true });
 });
 
@@ -865,76 +867,19 @@ test('readClaudeSnapshot: serves a fresh tail line, rejects a stale one', async 
   writeFileSync(file, `${JSON.stringify({ fetched_at: stamp(at), pad: 'x'.repeat(9000), raw: { five_hour: { utilization: 1 } } })}
 ${JSON.stringify({ fetched_at: stamp(at), raw: CLAUDE_RAW })}\n`);
 
-  const fresh = readClaudeSnapshot();
+  const fresh = await readClaudeSnapshot();
   assert.equal(fresh.raw.five_hour.utilization, 42);
   const normalized = await readClaudeLocal(null, 'team');
   assert.equal(normalized.session.pctUsed, 42);
 
-  assert.equal(readClaudeSnapshot(60_000, at.getTime() + 120_000), null);
+  assert.equal(await readClaudeSnapshot(60_000, at.getTime() + 120_000), null);
   writeFileSync(file, 'not json\n');
-  assert.equal(readClaudeSnapshot(), null);
+  assert.equal(await readClaudeSnapshot(), null);
 });
 
 // Before each daemon append, a live file whose FIRST row is from an earlier month
 // moves to usage-snapshots-<that month>.jsonl. Months far from today keep the
 // real-time appends in other tests from tripping the checked-month cache.
-test('rotateClaudeHistory: earlier-month live file moves to its archive; busy link retries; existing archive skips', () => {
-  const dir = process.env.USAGE_REPORT_STATE;
-  const file = join(dir, 'usage-snapshots.jsonl');
-  const archive = join(dir, 'usage-snapshots-2098-11.jsonl');
-  const row = (at) => `${JSON.stringify({ fetched_at: at, raw: CLAUDE_RAW })}\n`;
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(file, row('2098-11-30 23:59:00'));
-  try {
-    rotateClaudeHistory(new Date(2098, 10, 30, 23, 59, 30)); // same month: kept
-    assert.equal(existsSync(archive), false);
-    // The skill appended a December row first: the first row still decides.
-    writeFileSync(file, row('2098-12-01 00:00:05'), { flag: 'a' });
-    rotateClaudeHistory(new Date(2098, 11, 1), { link: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } });
-    assert.equal(existsSync(file), true); // left in place, retried next time
-    assert.equal(existsSync(archive), false);
-    rotateClaudeHistory(new Date(2098, 11, 1));
-    assert.equal(existsSync(file), false);
-    assert.match(readFileSync(archive, 'utf8'), /2098-11-30 23:59:00[\s\S]*2098-12-01 00:00:05/);
-    // readClaudeSnapshot: a missing or empty live file falls back to the newest archive's last row.
-    assert.equal(readClaudeSnapshot(Infinity).raw.five_hour.utilization, 42);
-    writeFileSync(file, '');
-    assert.equal(readClaudeSnapshot(Infinity).raw.five_hour.utilization, 42);
-    // Archive for that month already there (EEXIST, different file): no rotation, the live file stays.
-    writeFileSync(file, row('2098-11-15 00:00:00'));
-    rotateClaudeHistory(new Date(2099, 0, 1));
-    assert.equal(existsSync(file), true);
-    assert.doesNotMatch(readFileSync(archive, 'utf8'), /2098-11-15/);
-  } finally {
-    rmSync(file, { force: true });
-    rmSync(archive, { force: true });
-  }
-});
-
-test('rotateClaudeHistory: unparseable head and failed unlink retry; a linked-but-not-unlinked live file finishes the move', () => {
-  const dir = process.env.USAGE_REPORT_STATE;
-  const file = join(dir, 'usage-snapshots.jsonl');
-  const archive = join(dir, 'usage-snapshots-2097-03.jsonl');
-  mkdirSync(dir, { recursive: true });
-  try {
-    // Partial first line (writer mid-append): nothing cached, the next append retries.
-    writeFileSync(file, '{"fetched_at":"2097-03-0');
-    rotateClaudeHistory(new Date(2097, 3, 2));
-    writeFileSync(file, `${JSON.stringify({ fetched_at: '2097-03-31 10:00:00', raw: CLAUDE_RAW })}\n`);
-    // Link succeeds, unlink fails: both names stay, nothing cached.
-    rotateClaudeHistory(new Date(2097, 3, 2), { unlink: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } });
-    assert.equal(existsSync(file), true);
-    assert.equal(existsSync(archive), true);
-    // Retry: link hits EEXIST on the same inode, so only the unlink is redone.
-    rotateClaudeHistory(new Date(2097, 3, 2));
-    assert.equal(existsSync(file), false);
-    assert.match(readFileSync(archive, 'utf8'), /2097-03-31 10:00:00/);
-  } finally {
-    rmSync(file, { force: true });
-    rmSync(archive, { force: true });
-  }
-});
-
 test('getUsage: a valid unstarted local session does not trigger OAuth polling', async () => {
   clearClaudeLocal();
   writeCreds({ accessToken: 'unstarted-window-token', expiresAt: Date.now() + 3_600_000 });
@@ -964,7 +909,7 @@ test('getUsage: a valid unstarted local session does not trigger OAuth polling',
 // cost-state/<session>.json on every turn of every session, so the newest file
 // is usually fresher than the snapshot log. Windows only — epoch seconds in,
 // ISO out.
-test('readCostStateLimits: newest usable file wins, stale and rate_limits-less ones are skipped', () => {
+test('readCostStateLimits: newest usable file wins, stale and rate_limits-less ones are skipped', async () => {
   const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
   mkdirSync(dir, { recursive: true });
   const write = (name, body, ageMs) => {
@@ -979,14 +924,14 @@ test('readCostStateLimits: newest usable file wins, stale and rate_limits-less o
   write('newest-usable.json', limits(22), 5_000);
   write('older.json', limits(99), 30_000);
 
-  const fresh = readCostStateLimits();
+  const fresh = await readCostStateLimits();
   assert.equal(fresh.session.pctUsed, 22); // not 99: newest usable, not merely newest
   assert.equal(fresh.session.resetsAt, new Date(1789533000 * 1000).toISOString());
   assert.equal(fresh.weekly.pctUsed, 3);
 
   // Every candidate outside the window → no reading at all, so the caller falls
   // through to the API instead of serving an hour-old percentage as current.
-  assert.equal(readCostStateLimits(1_000), null);
+  assert.equal(await readCostStateLimits(1_000), null);
 });
 
 // The cost-state tier never reaches fetchClaude's append, so readClaudeLocal logs
@@ -1015,7 +960,7 @@ test('readClaudeLocal: a cost-state reading appends a snapshot row on change onl
     await isolatedReadLocal(null, 'max');
     assert.deepEqual(rows().map((r) => r.raw.five_hour.utilization), [40, 41]);
     // Tier 1 skips these rows: they lack extra_usage / per-model.
-    assert.equal(readClaudeSnapshot(), null);
+    assert.equal(await readClaudeSnapshot(), null);
   } finally {
     clearClaudeLocal();
   }
@@ -1033,7 +978,7 @@ test('readCodexSnapshot: a fresh Stop-hook record answers with no network', asyn
   mkdirSync(process.env.USAGE_REPORT_STATE, { recursive: true });
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 7, resets_at: '2026-09-22T18:00:00Z' }, weekly: { utilization: 55.5, resets_at: '2026-09-25T00:00:00Z' }, plan_type: 'business' })}\n`);
 
-  const snap = readCodexSnapshot();
+  const snap = await readCodexSnapshot();
   assert.equal(snap.ok, true);
   assert.equal(snap.source, 'codex');
   assert.equal(snap.plan, 'business');
@@ -1050,17 +995,17 @@ test('readCodexSnapshot: a fresh Stop-hook record answers with no network', asyn
 test('readCodexSnapshot: stale, malformed or missing lines all report "no Codex sessions found" (no rollout to fall back to)', async () => {
   // Stale fetched_at — the same 120s gate the sampler uses.
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date(Date.now() - 10 * 60_000)), session: { utilization: 7, resets_at: null }, weekly: null, plan_type: 'business' })}\n`);
-  assert.equal(readCodexSnapshot(), null);
+  assert.equal(await readCodexSnapshot(), null);
   assert.equal((await fetchCodex()).error, 'no Codex sessions found');
 
   // A last line that does not parse is dropped, not served.
   writeFileSync(CODEX_HISTORY_FILE, 'not json\n');
-  assert.equal(readCodexSnapshot(), null);
+  assert.equal(await readCodexSnapshot(), null);
   assert.equal((await fetchCodex()).error, 'no Codex sessions found');
 
   // No file at all — the hook has never run on this install.
   rmSync(CODEX_HISTORY_FILE, { force: true });
-  assert.equal(readCodexSnapshot(), null);
+  assert.equal(await readCodexSnapshot(), null);
   assert.equal((await fetchCodex()).error, 'no Codex sessions found');
 });
 
@@ -1092,7 +1037,7 @@ test('getUsage: a successful Claude API read is appended to usage-snapshots.json
   assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   assert.equal(row.raw.five_hour.utilization, 42);
   // The reader accepts its own writer's row straight back: the local tier is fed.
-  assert.equal(readClaudeSnapshot().raw.five_hour.utilization, 42);
+  assert.equal((await readClaudeSnapshot()).raw.five_hour.utilization, 42);
 });
 
 test('getUsage: a failed Claude API read appends nothing', async () => {

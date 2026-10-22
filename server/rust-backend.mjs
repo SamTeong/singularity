@@ -239,6 +239,13 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
         });
     },
 
+    providerUsageSnapshot(input) {
+      return request({ ...input, op: 'provider_usage_snapshot' }).then((response) => {
+        if (response?.error) throw new Error(response.error);
+        return response?.result ?? null;
+      });
+    },
+
     modelPrices(path) {
       return request({ op: 'model_prices', path }).then((payload) => {
         if (payload.error) throw new Error(payload.error);

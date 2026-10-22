@@ -105,10 +105,28 @@ fn main() -> io::Result<()> {
     let shutting_down = Arc::new(AtomicBool::new(false));
     let mut transcript_services =
         singularity_backend::transcript_bridge::TranscriptServices::default();
+    let mut usage_snapshots = singularity_backend::usage_snapshot::SnapshotService::default();
     let stdin = io::stdin();
     write_line(&stdout, &serde_json::json!({ "ready": true }))?;
     for line in stdin.lock().lines() {
         let line = line?;
+        if let Ok(request) = serde_json::from_str::<SnapshotWireRequest>(&line) {
+            if request.op == "provider_usage_snapshot" {
+                let id = request.id.clone();
+                let raw = match request.into_snapshot() {
+                    Some(request) => serde_json::to_string(&usage_snapshots.execute(request))
+                        .expect("snapshot response serialization is infallible"),
+                    None => r#"{"error":"bad request"}"#.to_owned(),
+                };
+                let body = RawValue::from_string(raw).expect("serialized response is valid JSON");
+                write_response_line(
+                    &stdout,
+                    id.as_ref(),
+                    singularity_backend::transcript_bridge::ResponseBody::Raw(body),
+                )?;
+                continue;
+            }
+        }
         if let Ok(request) = serde_json::from_str::<ProviderUsageRequest>(&line) {
             if request.op == "provider_usage_normalize" {
                 let payload = request
@@ -454,6 +472,74 @@ fn main() -> io::Result<()> {
     sysstats.stop();
     runtime.shutdown_timeout(std::time::Duration::from_secs(1));
     Ok(())
+}
+
+#[derive(Deserialize)]
+struct SnapshotWireRequest {
+    #[serde(default)]
+    id: Option<Value>,
+    #[serde(default)]
+    op: String,
+    operation: Option<String>,
+    path: Option<std::path::PathBuf>,
+    live_path: Option<std::path::PathBuf>,
+    archive_dir: Option<std::path::PathBuf>,
+    selected_archive_path: Option<std::path::PathBuf>,
+    directory: Option<std::path::PathBuf>,
+    reading: Option<Box<RawValue>>,
+    raw: Option<Box<RawValue>>,
+    cost_reading: Option<singularity_backend::usage_snapshot::ClaudeCostReading>,
+    cost_state: Option<bool>,
+    fetched_at_ms: Option<i64>,
+    now_ms: Option<i64>,
+    max_age_ms: Option<i64>,
+}
+
+impl SnapshotWireRequest {
+    fn into_snapshot(self) -> Option<singularity_backend::usage_snapshot::SnapshotRequest> {
+        use singularity_backend::usage_snapshot::SnapshotRequest;
+        let now_ms = self.now_ms?;
+        Some(match self.operation.as_deref()? {
+            "append_ollama" => SnapshotRequest::AppendOllama {
+                path: self.path?,
+                reading: self.reading?,
+                now_ms,
+            },
+            "append_codex" => SnapshotRequest::AppendCodex {
+                path: self.path?,
+                reading: self.reading?,
+                now_ms,
+            },
+            "append_claude" => SnapshotRequest::AppendClaude {
+                live_path: self.live_path?,
+                archive_dir: self.archive_dir?,
+                cost_state: self.cost_state?,
+                raw: self.raw?,
+                now_ms,
+                cost_reading: self.cost_reading.map(|mut reading| {
+                    reading.fetched_at_ms = self.fetched_at_ms.or(reading.fetched_at_ms);
+                    reading
+                }),
+            },
+            "read_claude" => SnapshotRequest::ReadClaude {
+                live_path: self.live_path?,
+                selected_archive_path: self.selected_archive_path,
+                max_age_ms: self.max_age_ms?,
+                now_ms,
+            },
+            "read_codex" => SnapshotRequest::ReadCodex {
+                path: self.path?,
+                max_age_ms: self.max_age_ms?,
+                now_ms,
+            },
+            "read_cost_state" => SnapshotRequest::ReadCostState {
+                directory: self.directory?,
+                max_age_ms: self.max_age_ms?,
+                now_ms,
+            },
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Deserialize)]

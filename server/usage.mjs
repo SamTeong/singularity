@@ -14,7 +14,7 @@
 // enough — no cross-session file needed.
 // SECURITY: reads full account credentials (browser profile / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, readdirSync, statSync, openSync, readSync, closeSync, linkSync, unlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -28,11 +28,13 @@ const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
 let usageAuthBackend = null;
 let usageAuthPlatform = process.platform;
 let usageNormalizationBackend = null;
+let usageSnapshotBackend = null;
 export function setUsageAuthBackend(backend, platform = process.platform) {
   usageAuthBackend = backend;
   usageAuthPlatform = platform;
 }
 export function setUsageNormalizationBackend(backend) { usageNormalizationBackend = backend; }
+export function setUsageSnapshotBackend(backend) { usageSnapshotBackend = backend; }
 export const PW_STEALTH = {
   channel: 'msedge',
   args: ['--disable-blink-features=AutomationControlled'],
@@ -86,41 +88,13 @@ export function parseOllamaHtml(html) {
 // this scale; trim-to-last-N is the upgrade path if it ever matters.
 const OLLAMA_HISTORY = join(USAGE_SKILL_STATE, 'ollama-usage.jsonl');
 
-// Last row actually written, so a duplicate reading (idle-debounce refreshes hit
-// this often) doesn't spam the file. Simplest seed: null at daemon start, so the
-// first successful append after a restart always writes — even if it matches the
-// prior process's last line — rather than paying for a read-last-line probe.
-let lastOllamaReading = null;
-
-function pad2(n) { return String(n).padStart(2, '0'); }
-function localTimestamp(d) {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-}
-
-export function appendOllamaHistory(data) {
-  const reading = {
-    sessionUtil: data.session?.pctUsed ?? null, sessionResets: data.session?.resetsAt ?? null,
-    weeklyUtil: data.weekly?.pctUsed ?? null, weeklyResets: data.weekly?.resetsAt ?? null,
-  };
-  if (lastOllamaReading
-    && reading.sessionUtil === lastOllamaReading.sessionUtil && reading.sessionResets === lastOllamaReading.sessionResets
-    && reading.weeklyUtil === lastOllamaReading.weeklyUtil && reading.weeklyResets === lastOllamaReading.weeklyResets) return;
-  const record = {
-    fetched_at: localTimestamp(new Date()),
-    session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt } : null,
-    weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt } : null,
-    plan: data.plan ?? null,
-    models: data.weekly?.models ?? [],
-  };
-  if (appendJsonl(OLLAMA_HISTORY, record)) lastOllamaReading = reading;
-}
-
-function appendJsonl(file, record) {
+export async function appendOllamaHistory(data) {
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-    return true;
-  } catch { return false; } // best-effort, never break /usage
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'append_ollama', path: OLLAMA_HISTORY, reading: data, now_ms: Date.now(),
+    });
+    return result?.appended === true;
+  } catch { return false; }
 }
 
 // ---- Codex usage history (same skill contract as the ollama history above) ----
@@ -131,26 +105,13 @@ function appendJsonl(file, record) {
 // ingestion also appends this file; both writers dedupe against their last
 // reading, and a zero-delta duplicate line is harmless to the estimators.
 const CODEX_HISTORY = join(USAGE_SKILL_STATE, 'codex-usage.jsonl');
-let lastCodexReading = null;
-let lastCodexAt = 0;
-// Heartbeat keeps readers' 10-min freshness gate (fetched_at age) satisfied while quota is idle.
-const CODEX_HEARTBEAT_MS = 5 * 60_000;
-
-export function appendCodexHistory(data) {
-  const reading = JSON.stringify([
-    data.session?.pctUsed ?? null, data.session?.resetsAt ?? null, data.session?.started === false,
-    data.weekly?.pctUsed ?? null, data.weekly?.resetsAt ?? null, data.weekly?.started === false,
-  ]);
-  if (reading === lastCodexReading && Date.now() - lastCodexAt < CODEX_HEARTBEAT_MS) return;
-  if (appendJsonl(CODEX_HISTORY, {
-    fetched_at: localTimestamp(new Date()),
-    session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt, ...(data.session.started === false ? { started: false } : {}) } : null,
-    weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt, ...(data.weekly.started === false ? { started: false } : {}) } : null,
-    plan: data.plan ?? null,
-  })) {
-    lastCodexReading = reading;
-    lastCodexAt = Date.now();
-  }
+export async function appendCodexHistory(data) {
+  try {
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'append_codex', path: CODEX_HISTORY, reading: data, now_ms: Date.now(),
+    });
+    return result?.appended === true;
+  } catch { return false; }
 }
 
 // fetchClaude's network reads, the usage-report skill's stats.mjs fetch and
@@ -160,100 +121,35 @@ export function appendCodexHistory(data) {
 // for the network; a fresh one is the same payload for free. Tail-read a fixed
 // window rather than the whole file: this log is megabytes and append-only.
 const CLAUDE_HISTORY = join(USAGE_SKILL_STATE, 'usage-snapshots.jsonl');
-const SNAPSHOT_TAIL_BYTES = 8192;
 export const SNAPSHOT_MAX_AGE_MS = 2 * NETWORK_FLOOR_MS; // one missed ~60s statusline tick
 // How old a local reading may be before it is worse than nothing. Capped at the
 // 5h window because past that the session meter describes a window that has
 // already rolled over; anything inside it is served marked stale.
 export const CLAUDE_STALE_MAX_MS = 5 * 3.6e6;
 
-// Last line of a log as JSON; throws when missing, empty or unparseable.
-function lastJsonlRecord(file) {
-  let fd;
+async function appendClaudeHistory(record, limits) {
   try {
-    fd = openSync(file, 'r');
-    const size = statSync(file).size;
-    const len = Math.min(size, SNAPSHOT_TAIL_BYTES);
-    const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, size - len);
-    // Only the last complete line matters; a leading fragment from a mid-line
-    // window start is never read.
-    const lines = buf.toString('utf8').split('\n').filter(Boolean);
-    return JSON.parse(lines[lines.length - 1]);
-  } finally { if (fd !== undefined) closeSync(fd); }
+    const costState = record.source === 'cost-state';
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'append_claude', live_path: CLAUDE_HISTORY, archive_dir: USAGE_SKILL_STATE,
+      cost_state: costState, raw: record.raw, now_ms: Date.now(),
+      ...(limits?.fetchedAt ? { fetched_at_ms: Date.parse(limits.fetchedAt) } : {}),
+      ...(limits ? { cost_reading: {
+        session: { pctUsed: limits.session?.pctUsed, resetsAt: limits.session?.resetsAt },
+        weekly: { pctUsed: limits.weekly?.pctUsed, resetsAt: limits.weekly?.resetsAt },
+      } } : {}),
+    });
+    return result?.appended === true;
+  } catch { return false; }
 }
 
-const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-
-// First line of a log ('' when missing or empty); a partial line comes back as-is.
-function firstJsonlLine(file) {
-  let fd;
+export async function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
   try {
-    fd = openSync(file, 'r');
-    const buf = Buffer.alloc(SNAPSHOT_TAIL_BYTES);
-    const n = readSync(fd, buf, 0, buf.length, 0);
-    return buf.toString('utf8', 0, n).split('\n')[0];
-  } catch (e) {
-    if (e.code === 'ENOENT') return '';
-    throw e;
-  } finally { if (fd !== undefined) closeSync(fd); }
-}
-
-// Monthly rotation of usage-snapshots.jsonl, run before each daemon append. The
-// skill's report (stats.mjs --save) appends here too, so the decision uses the live
-// file's FIRST row: when its calendar month (local) is earlier than now, the file
-// moves to usage-snapshots-<first row's month>.jsonl and the append starts a fresh
-// one. Archive names stay monotonic because a fresh file's first row is this month;
-// an archive can still span several months when the daemon was idle across them.
-// The move is linkSync then unlinkSync: link fails atomically with EEXIST, so two
-// daemons sharing the file can never overwrite a finished archive. Any failure
-// (busy file, unparseable head, failed unlink) is not cached and retries on the
-// next append; otherwise the checked month is cached: one head read a month.
-let claudeHistoryMonth = null;
-export function rotateClaudeHistory(now = new Date(), { link = linkSync, unlink = unlinkSync } = {}) {
-  const month = ym(now);
-  if (claudeHistoryMonth === month) return;
-  let head;
-  try { head = firstJsonlLine(CLAUDE_HISTORY); } catch { return; }
-  if (head) {
-    let at = NaN;
-    try { at = Date.parse(JSON.parse(head).fetched_at); } catch { /* checked below */ }
-    if (Number.isNaN(at)) return; // partial or corrupt head row: retry next append
-    const from = ym(new Date(at));
-    if (from < month) {
-      const target = join(USAGE_SKILL_STATE, `usage-snapshots-${from}.jsonl`);
-      try { link(CLAUDE_HISTORY, target); } catch (e) {
-        if (e.code !== 'EEXIST') return;
-        // Same inode: our earlier link whose unlink failed, so finish the move.
-        let same;
-        try { same = statSync(target).ino === statSync(CLAUDE_HISTORY).ino; } catch { return; }
-        // shortcut: a different existing archive for that month is never merged into or overwritten; rotation skips and the live file keeps growing until merged by hand.
-        if (!same) { claudeHistoryMonth = month; return; }
-      }
-      try { unlink(CLAUDE_HISTORY); } catch { return; }
-    }
-  }
-  claudeHistoryMonth = month;
-}
-
-function appendClaudeHistory(record) {
-  rotateClaudeHistory();
-  return appendJsonl(CLAUDE_HISTORY, record);
-}
-
-export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
-  try {
-    // A just-rotated (missing or empty) live file: the newest archive holds the last row.
-    let file = CLAUDE_HISTORY;
-    try { if (!statSync(file).size) throw new Error('empty'); } catch { file = newestSnapshotArchive() ?? file; }
-    const record = lastJsonlRecord(file);
-    // localTimestamp's 'YYYY-MM-DD HH:MM:SS' has no zone — parsed as local, which
-    // is what wrote it.
-    const at = Date.parse(record.fetched_at);
-    // A cost-state row carries only the windows, not extra_usage or per-model, so
-    // serving it here would blank those; tier 2 answers from the same reading.
-    if (!record.raw || record.source === 'cost-state' || Number.isNaN(at) || now - at > maxAgeMs) return null;
-    return { raw: record.raw, fetchedAt: new Date(at).toISOString() };
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'read_claude', live_path: CLAUDE_HISTORY,
+      selected_archive_path: newestSnapshotArchive(), max_age_ms: Number.isFinite(maxAgeMs) ? maxAgeMs : Number.MAX_SAFE_INTEGER, now_ms: now,
+    });
+    return result ? { raw: result.raw, fetchedAt: result.fetched_at } : null;
   } catch { return null; }
 }
 
@@ -261,31 +157,23 @@ export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.no
 // end (appendCodexHistory writes daemon-sourced reads to the same file), so a
 // complete fresh tail line resolves the lane with no network. Same fixed
 // tail window, same 120s freshness gate (SNAPSHOT_MAX_AGE_MS).
-export function readCodexSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
-  let fd;
+export async function readCodexSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
   try {
-    fd = openSync(CODEX_HISTORY, 'r');
-    const size = statSync(CODEX_HISTORY).size;
-    const len = Math.min(size, SNAPSHOT_TAIL_BYTES);
-    const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, size - len);
-    const lines = buf.toString('utf8').split('\n').filter(Boolean);
-    const record = JSON.parse(lines[lines.length - 1]);
-    const at = Date.parse(record.fetched_at);
-    if (Number.isNaN(at) || now - at > maxAgeMs) return null;
-    const win = (w) => (Number.isFinite(w?.utilization)
-      ? { pctUsed: w.utilization, resetsAt: w.resets_at ?? null, models: [], ...(w.started === false ? { started: false } : {}) }
-      : null);
-    const session = win(record.session);
-    const weekly = win(record.weekly);
-    if (!session && !weekly) return null;
-    // The Stop hook writes plan_type (the API's own field name); the daemon's
-    // appendCodexHistory writes the normalized payload with `plan`.
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'read_codex', path: CODEX_HISTORY, max_age_ms: Number.isFinite(maxAgeMs) ? maxAgeMs : Number.MAX_SAFE_INTEGER, now_ms: now,
+    });
+    if (!result) return null;
+    const win = (w) => w && ({
+      pctUsed: w.utilization, resetsAt: w.resets_at ?? null, models: [],
+      ...(w.started === false ? { started: false } : {}),
+    });
+    const session = win(result.session);
+    const weekly = win(result.weekly);
     return {
-      ok: true, source: 'codex', plan: record.plan_type ?? record.plan ?? null,
-      fetchedAt: new Date(at).toISOString(), session, weekly,
+      ok: true, source: 'codex', plan: result.plan ?? null,
+      fetchedAt: result.fetched_at, session, weekly,
     };
-  } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
+  } catch { return null; }
 }
 
 // Second free source, denser than the snapshot log: the statusline writes
@@ -296,51 +184,31 @@ export function readCodexSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now
 // extra_usage / per-model carry from the last good reading in fetchClaude.
 const COST_STATE_DIR = join(USAGE_SKILL_STATE, 'cost-state');
 
-export function readCostStateLimits(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
-  let candidates;
+export async function readCostStateLimits(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
   try {
-    candidates = readdirSync(COST_STATE_DIR)
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => {
-        const file = join(COST_STATE_DIR, f);
-        try { return [file, statSync(file).mtimeMs]; } catch { return [file, 0]; }
-      })
-      .filter(([, at]) => now - at <= maxAgeMs)
-      .sort((a, b) => b[1] - a[1]);
-  } catch { return null; }
-  const win = (w) => (Number.isFinite(w?.used_percentage)
-    ? {
-        pctUsed: w.used_percentage,
-        // epoch seconds here, ISO everywhere else in this module
-        resetsAt: Number.isFinite(w.resets_at) ? new Date(w.resets_at * 1000).toISOString() : null,
-        models: [],
-      }
-    : null);
-  for (const [file, at] of candidates) {
-    try {
-      const rl = JSON.parse(readFileSync(file, 'utf8')).rate_limits;
-      const session = win(rl?.five_hour);
-      const weekly = win(rl?.seven_day);
-      if (session || weekly) return { session, weekly, fetchedAt: new Date(at).toISOString() };
-    } catch { /* unreadable or caught mid-write: fall through to the next newest */ }
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'read_cost_state', directory: COST_STATE_DIR, max_age_ms: Number.isFinite(maxAgeMs) ? maxAgeMs : Number.MAX_SAFE_INTEGER, now_ms: now,
+    });
+    if (!result) return null;
+    const win = (w) => w && ({
+      pctUsed: w.utilization, resetsAt: w.resets_at ?? null, models: [],
+    });
+    return { session: win(result.session), weekly: win(result.weekly), fetchedAt: result.fetched_at };
+  } catch {
+    return null;
   }
-  return null;
 }
 
 // While cost-state stays fresh the network leg never runs, so nothing else
 // appends usage-snapshots.jsonl and the 5h history chart would freeze. Log the
 // cost-state reading in fetchClaude's {fetched_at, raw} shape, only on a change.
-let lastClaudeCostStateReading = null;
-function appendClaudeCostStateSnapshot(limits) {
+async function appendClaudeCostStateSnapshot(limits) {
   if (!limits.session) return;
-  const reading = JSON.stringify([limits.session.pctUsed, limits.session.resetsAt]);
-  if (reading === lastClaudeCostStateReading) return;
   const win = (w) => w && { utilization: w.pctUsed, resets_at: w.resetsAt };
-  if (appendClaudeHistory({
-    fetched_at: localTimestamp(new Date(limits.fetchedAt)),
+  await appendClaudeHistory({
     source: 'cost-state',
     raw: { five_hour: win(limits.session), seven_day: win(limits.weekly) },
-  })) lastClaudeCostStateReading = reading;
+  }, limits);
 }
 
 function hasCompleteWindow(window) {
@@ -609,7 +477,7 @@ export async function refreshClaudeAuth() {
 // which is why pull() runs this ahead of the TTL gate — that guards the network
 // leg only.
 export async function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
-  const snapshot = readClaudeSnapshot(maxAgeMs);
+  const snapshot = await readClaudeSnapshot(maxAgeMs);
   if (snapshot) {
     const data = await normalizeClaude(snapshot.raw, plan);
     return {
@@ -620,9 +488,9 @@ export async function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS
     };
   }
 
-  const limits = readCostStateLimits(maxAgeMs);
+  const limits = await readCostStateLimits(maxAgeMs);
   if (!limits) return null;
-  appendClaudeCostStateSnapshot(limits);
+  await appendClaudeCostStateSnapshot(limits);
   const session = preferCurrentWindow(limits.session, prev?.session);
   const weeklyLimit = preferCurrentWindow(limits.weekly, prev?.weekly);
   const weekly = weeklyLimit && { ...weeklyLimit, models: prev?.weekly?.models ?? limits.weekly?.models ?? [] };
@@ -678,7 +546,7 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
     // Feed a fresh network reading back into the statusline's own log so R2
     // tails stay fed for sessions starting mid-idle (readClaudeSnapshot reads
     // {fetched_at, raw}). Failures and file-sourced reads append nothing.
-    appendClaudeHistory({ fetched_at: localTimestamp(new Date()), raw });
+    await appendClaudeHistory({ fetched_at: new Date().toISOString(), raw });
     return await normalizeClaude(raw, oauth.subscriptionType);
   } catch (e) {
     return { ok: false, source: 'claude', error: `parse error: ${e.message}` };
@@ -713,7 +581,7 @@ export async function fetchCodex(force = false) {
   // ?force=1 (the manual Refresh route, or pull()'s own network floor once
   // the automated 5s tick finds this stale) is the only thing that reaches.
   if (!force) {
-    const snapshot = readCodexSnapshot();
+    const snapshot = await readCodexSnapshot();
     return snapshot ?? noCodexData();
   }
 
@@ -807,8 +675,8 @@ async function claudeStaleFloor(slot, failure) {
   return best ? preserveClaudeStale(best, failure) : null;
 }
 
-function codexStaleFloor(slot, failure) {
-  const widened = slot.ignoreCodexSnapshot ? null : readCodexSnapshot(CODEX_STALE_MAX_MS);
+async function codexStaleFloor(slot, failure) {
+  const widened = slot.ignoreCodexSnapshot ? null : await readCodexSnapshot(CODEX_STALE_MAX_MS);
   const lastGood = slot.data?.ok ? slot.data : null;
   const merged = widened && lastGood ? {
     ...widened,
@@ -866,9 +734,8 @@ async function pull(src, fetcher, force) {
       slot.at = 0;
       slot.credentialFingerprint = codexFingerprint;
       slot.ignoreCodexSnapshot = true;
-      lastCodexReading = null;
     }
-    const snapshot = slot.ignoreCodexSnapshot ? null : readCodexSnapshot();
+    const snapshot = slot.ignoreCodexSnapshot ? null : await readCodexSnapshot();
     if (snapshot) {
       const previous = slot.data?.ok ? slot.data : null;
       const merged = { ...snapshot, session: preferCurrentWindow(snapshot.session, previous?.session), weekly: preferCurrentWindow(snapshot.weekly, previous?.weekly) };
@@ -881,7 +748,7 @@ async function pull(src, fetcher, force) {
       if (complete) return slot.data;
     }
     if (codexGate.blocked(codexFingerprint, true) && slot.data) {
-      slot.data = codexStaleFloor(slot, slot.data) ?? slot.data;
+      slot.data = await codexStaleFloor(slot, slot.data) ?? slot.data;
       return slot.data;
     }
   }
@@ -946,18 +813,18 @@ async function pull(src, fetcher, force) {
     }
   }
   if (src === 'codex' && !data.ok) {
-    const floor = codexStaleFloor(slot, data);
+    const floor = await codexStaleFloor(slot, data);
     if (floor) { slot.data = floor; return slot.data; }
   }
   if (src === 'ollama' && data.ok) {
-    appendOllamaHistory(data);
+    await appendOllamaHistory(data);
     // A successful ollama read from ANY path (manual Refresh, idle debounce,
     // reset timer, or the sampler itself) is the "re-enable" signal — clear a
     // prior stop-on-fail and re-arm the sampler's clock.
     historyPaused = null;
     startHistorySampler();
   }
-  if (src === 'codex' && data.ok) appendCodexHistory(data);
+  if (src === 'codex' && data.ok) await appendCodexHistory(data);
   return slot.data;
 }
 
