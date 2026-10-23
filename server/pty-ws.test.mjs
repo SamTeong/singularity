@@ -18,15 +18,43 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 const { stripQueries, stripColorResponses, attachPtyWs } = await import('./pty-ws.mjs');
 const { bus } = await import('./agents.mjs');
+const { initWindowAnchor } = await import('./window-anchor.mjs');
 
-test('PTY registry events keep their WebSocket output and status payloads', () => {
+test('PTY registry events keep their WebSocket output and status payloads', { timeout: 5000 }, async () => {
+  await initWindowAnchor({
+    bus: new EventEmitter(),
+    storage: { windowAnchorRequest: async () => ({ snapshot: {}, effects: [] }) },
+    enabled: '',
+  });
   const wss = new EventEmitter();
   wss.clients = new Set();
   const ws = new EventEmitter();
   ws.OPEN = 1;
+  ws.CLOSED = 3;
   ws.readyState = 1;
   ws.sent = [];
-  ws.send = (payload) => ws.sent.push(JSON.parse(payload));
+  ws.closed = [];
+  let resolvePayloadFrames;
+  let rejectPayloadFrames;
+  const payloadFramesRecorded = new Promise((resolve, reject) => {
+    resolvePayloadFrames = resolve;
+    rejectPayloadFrames = reject;
+  });
+  const payloadFrameTypes = new Set();
+  ws.send = (payload) => {
+    const frame = JSON.parse(payload);
+    ws.sent.push(frame);
+    if (frame.id === 'payload-session' && (frame.t === 'output' || frame.t === 'status')) {
+      payloadFrameTypes.add(frame.t);
+      if (payloadFrameTypes.has('output') && payloadFrameTypes.has('status')) resolvePayloadFrames();
+    }
+  };
+  ws.close = (code, reason) => {
+    ws.closed.push({ code, reason });
+    ws.readyState = ws.CLOSED;
+    ws.emit('close', code, reason);
+    rejectPayloadFrames(new Error(`WebSocket closed during initialization (${code}: ${reason})`));
+  };
   attachPtyWs(wss, null);
   wss.emit('connection', ws, { headers: { origin: 'http://localhost' }, url: '/ws' });
   ws.attached.add('payload-session');
@@ -34,10 +62,12 @@ test('PTY registry events keep their WebSocket output and status payloads', () =
   bus.emit('output', { id: 'payload-session', data: 'rendered text' });
   bus.emit('status', { id: 'payload-session', status: 'running' });
 
+  await payloadFramesRecorded;
   assert.deepEqual(ws.sent.slice(-2), [
     { t: 'output', id: 'payload-session', data: 'rendered text' },
     { t: 'status', id: 'payload-session', status: 'running' },
   ]);
+  assert.deepEqual(ws.closed, []);
   ws.emit('close');
 });
 

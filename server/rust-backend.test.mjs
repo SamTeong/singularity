@@ -1642,8 +1642,37 @@ test('Rust window-anchor bridge persists configured state and telemetry paths', 
   const state = { claude: { enabled: true, lastResult: 'Ok' }, codex: { enabled: false } };
   try {
     await backend.start();
+    await mkdir(join(home, 'custom-state'), { recursive: true });
+    const initialized = await backend.windowAnchorRequest('window_anchor_init', {
+      state_path: statePath,
+      telemetry_path: telemetryPath,
+      window_anchor_env: 'claude',
+      now_ms: 0,
+    });
+    assert.equal(initialized.snapshot.claude.enabled, true);
+    assert.equal(initialized.snapshot.codex.enabled, false);
+    assert.deepEqual((await backend.windowAnchorRequest('window_anchor_snapshot', { now_ms: 1 })).snapshot, initialized.snapshot);
+    const firstAdmission = await backend.windowAnchorRequest('window_anchor_poke', {
+      provider: 'claude', force: true, started_at_ms: 100_000, now_ms: 100_000,
+    });
+    const secondAdmission = await backend.windowAnchorRequest('window_anchor_poke', {
+      provider: 'claude', force: true, started_at_ms: 200_000, now_ms: 200_000,
+    });
+    const firstAction = firstAdmission.effects.find((effect) => effect.type === 'run_action');
+    const secondAction = secondAdmission.effects.find((effect) => effect.type === 'run_action');
+    assert.ok(firstAction?.action_id);
+    assert.ok(secondAction?.action_id);
+    assert.notEqual(firstAction.action_id, secondAction.action_id);
+    await backend.windowAnchorRequest('window_anchor_action_result', {
+      action_id: secondAction.action_id, outcome: 'error', error: 'later action failed', ended_at_ms: 250_000, now_ms: 250_000,
+    });
+    await backend.windowAnchorRequest('window_anchor_action_result', {
+      action_id: firstAction.action_id, outcome: 'ok', ended_at_ms: 300_000, now_ms: 300_000,
+    });
+    const completed = (await backend.windowAnchorRequest('window_anchor_snapshot', { now_ms: 300_001 })).snapshot;
+    assert.equal(completed.claude.lastResult, 'Ok');
+    assert.equal(completed.claude.lastAnchorAt, 300_000);
     assert.equal(await backend.windowAnchorLoad(statePath), null);
-    await mkdir(join(home, 'custom-state'));
     await backend.windowAnchorSave(statePath, state);
     assert.equal(await readFile(statePath, 'utf8'), JSON.stringify(state, null, 2));
     assert.deepEqual(await backend.windowAnchorLoad(statePath), state);

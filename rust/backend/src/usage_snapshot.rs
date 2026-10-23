@@ -237,6 +237,10 @@ fn parse_date_ms(value: &str) -> Option<i64> {
     }
 }
 
+pub(crate) fn window_anchor_timestamp_ms(value: &str) -> Option<i64> {
+    parse_date_ms(value)
+}
+
 fn parse_iso_date_or_datetime_ms(value: &str) -> Option<i64> {
     let expanded = value.starts_with('+') || value.starts_with('-');
     let (year, date_text, rest) = if expanded {
@@ -671,6 +675,10 @@ fn format_snapshot_timestamp(epoch_ms: i64) -> Option<String> {
     Some(format!(
         "{year}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}.{millis:03}Z"
     ))
+}
+
+pub(crate) fn window_anchor_timestamp_iso(epoch_ms: i64) -> Option<String> {
+    format_snapshot_timestamp(epoch_ms)
 }
 
 fn parse_date(s: &str) -> Option<Date> {

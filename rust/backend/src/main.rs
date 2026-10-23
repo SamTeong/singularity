@@ -109,6 +109,44 @@ struct Request {
     record: Value,
     #[serde(default)]
     usage_report: Value,
+    #[serde(default)]
+    usage: Value,
+    #[serde(default)]
+    authoritative: Value,
+    #[serde(default)]
+    preflighting: Value,
+    #[serde(default)]
+    now_ms: Value,
+    #[serde(default)]
+    state_path: Value,
+    #[serde(default)]
+    telemetry_path: Value,
+    #[serde(default)]
+    window_anchor_env: Value,
+    #[serde(default)]
+    provider: Value,
+    #[serde(default)]
+    generation: Value,
+    #[serde(default)]
+    timer_event_id: Value,
+    #[serde(default)]
+    usage_refresh: Value,
+    #[serde(default)]
+    ok: Value,
+    #[serde(default)]
+    error: Value,
+    #[serde(default)]
+    trigger: Value,
+    #[serde(default)]
+    window_end_ms: Value,
+    #[serde(default)]
+    started_at_ms: Value,
+    #[serde(default)]
+    ended_at_ms: Value,
+    #[serde(default)]
+    action_id: Value,
+    #[serde(default)]
+    outcome: Value,
     #[serde(flatten)]
     transcript: singularity_backend::transcript_bridge::TranscriptRequest,
 }
@@ -133,6 +171,7 @@ fn main() -> io::Result<()> {
         singularity_backend::transcript_bridge::TranscriptServices::default();
     let mut usage_snapshots = singularity_backend::usage_snapshot::SnapshotService::default();
     let mut codex_usage_sessions = singularity_backend::codex_usage::CodexUsageSessions::default();
+    let mut window_anchor_service = singularity_backend::window_anchor::Service::default();
     let mut one_shot_tasks = JoinSet::new();
     let mut one_shot_request_ids = HashMap::new();
     let mut one_shot_active = false;
@@ -745,6 +784,21 @@ fn main() -> io::Result<()> {
                     request.path.as_str().unwrap_or(""),
                     &request.record,
                 )
+            }
+            Ok(request) if request.op.starts_with("window_anchor_") => {
+                let input = serde_json::json!({
+                    "state_path": request.state_path, "telemetry_path": request.telemetry_path,
+                    "window_anchor_env": request.window_anchor_env, "usage": request.usage,
+                    "authoritative": request.authoritative, "preflighting": request.preflighting,
+                    "now_ms": request.now_ms, "provider": request.provider,
+                    "generation": request.generation, "timer_event_id": request.timer_event_id,
+                    "usage_refresh": request.usage_refresh, "force": request.force,
+                    "ok": request.ok, "error": request.error, "trigger": request.trigger,
+                    "window_end_ms": request.window_end_ms, "started_at_ms": request.started_at_ms,
+                    "ended_at_ms": request.ended_at_ms, "action_id": request.action_id,
+                    "outcome": request.outcome, "model": request.model,
+                });
+                window_anchor_service.dispatch(&request.op, &input)
             }
             Ok(request) => singularity_backend::wiki_read::dispatch(
                 &request.op,

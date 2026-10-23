@@ -7,7 +7,23 @@ import { snapshotWindowAnchor } from './window-anchor.mjs';
 import { streamChat } from './chat.mjs';
 
 function send(ws, msg) {
-  if (ws.readyState === ws.OPEN) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  const payload = typeof msg === 'string' ? msg : JSON.stringify(msg);
+  if (ws.readyState !== ws.OPEN) return;
+  if (ws.initializing) {
+    const bytes = Buffer.byteLength(payload, 'utf8');
+    if (ws.initialFrames.length >= 256 || ws.initialBytes + bytes > 1_048_576) {
+      ws.initializing = false;
+      ws.initialFrames.length = 0;
+      ws.initialBytes = 0;
+      ws.initialOverflow = true;
+      ws.close(1013, 'initial snapshot backlog exceeded');
+      return;
+    }
+    ws.initialFrames.push(payload);
+    ws.initialBytes += bytes;
+    return;
+  }
+  ws.send(payload);
 }
 
 // Terminal *query* escape sequences: xterm.js answers these by writing a reply
@@ -103,12 +119,17 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
     ws.attached = new Set();
+    ws.initializing = true;
+    ws.initialFrames = [];
+    ws.initialBytes = 0;
+    ws.initialOverflow = false;
     sockets.add(ws);
-    send(ws, { t: 'list', agents: reg.snapshot(), recentRepos: reg.getRecentRepos() });
-    send(ws, { t: 'tasks', ...snapshotTasks() });
-    send(ws, { t: 'crons', crons: snapshotCrons() });
-    send(ws, { t: 'background', ...snapshotBackground() });
-    send(ws, { t: 'window-anchor', anchor: snapshotWindowAnchor() });
+    const initial = [
+      { t: 'list', agents: reg.snapshot(), recentRepos: reg.getRecentRepos() },
+      { t: 'tasks', ...snapshotTasks() },
+      { t: 'crons', crons: snapshotCrons() },
+      { t: 'background', ...snapshotBackground() },
+    ];
 
     ws.on('message', async (raw) => {
       let m;
@@ -175,7 +196,41 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
       }
     });
 
-    ws.on('close', () => { ws.chatAbort?.abort(); sockets.delete(ws); });
+    ws.on('close', () => {
+      ws.chatAbort?.abort();
+      ws.initializing = false;
+      ws.initialFrames.length = 0;
+      ws.initialBytes = 0;
+      sockets.delete(ws);
+    });
+
+    void (async () => {
+      try {
+        const anchor = await snapshotWindowAnchor();
+        if (ws.initialOverflow || ws.readyState !== ws.OPEN) return;
+        const firstFrames = [...initial, { t: 'window-anchor', anchor }];
+        for (const frame of firstFrames) {
+          if (ws.readyState !== ws.OPEN) return;
+          ws.send(JSON.stringify(frame));
+        }
+        ws.initializing = false;
+        const queued = ws.initialFrames;
+        ws.initialFrames = [];
+        ws.initialBytes = 0;
+        for (const frame of queued) {
+          if (ws.readyState !== ws.OPEN) return;
+          ws.send(frame);
+        }
+      } catch (error) {
+        ws.initializing = false;
+        ws.initialFrames.length = 0;
+        ws.initialBytes = 0;
+        if (ws.readyState === ws.OPEN) {
+          log?.error({ err: error?.message ?? String(error) }, 'window-anchor snapshot failed during WebSocket initialization');
+          ws.close(1011, 'initial snapshot failed');
+        }
+      }
+    })();
   });
   log?.info('pty-ws attached at /ws');
 }

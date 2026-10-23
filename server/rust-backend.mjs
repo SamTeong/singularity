@@ -436,6 +436,10 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return result;
     },
 
+    windowAnchorRequest(op, fields = {}) {
+      return request({ op, ...fields });
+    },
+
     ruleReference(path, root) {
       return request({ op: 'rule_reference', path, root });
     },
