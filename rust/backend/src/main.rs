@@ -690,7 +690,12 @@ fn main() -> io::Result<()> {
                 }
             }
             Ok(request) if request.op == "model_prices" => match request.path.as_str() {
-                Some(path) => singularity_backend::model_prices::read_pricing(path),
+                Some(path) => {
+                    raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                        singularity_backend::model_prices::read_pricing(path),
+                    ));
+                    Value::Null
+                }
                 None => serde_json::json!({ "error": "pricing path missing" }),
             },
             Ok(request) if request.op == "models_get" => {

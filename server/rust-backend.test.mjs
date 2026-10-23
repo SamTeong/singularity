@@ -592,7 +592,7 @@ test('Rust pricing read normalizes the explicit path without writing and maps tr
 
     const overflowCases = [
       '{"base":{"model":[1,2,3,4]},"ignored":1e400}',
-      '{"base":{"model":[1e400,2,3,4]},"ignored":{"nested":[1e400,{"deep":1e400}]},"long_context_threshold":1e400,"default_key":1e400}',
+      '{"base":{"model":[1e400,-1e400,-0,4],"nested":[1e400,{"deep":-1e400,"negativeZero":-0}]},"long_context_threshold":1e400,"default_key":1e400}',
     ];
     for (const overflowCase of overflowCases) {
       await writeFile(missing, overflowCase);
@@ -600,14 +600,78 @@ test('Rust pricing read normalizes the explicit path without writing and maps tr
     }
     const overflowReferenced = await backend.modelPrices(missing);
     assert.equal(overflowReferenced.base.model[0], Infinity);
+    assert.equal(overflowReferenced.base.model[1], -Infinity);
+    assert.equal(Object.is(overflowReferenced.base.model[2], -0), true);
+    assert.equal(overflowReferenced.base.nested[0], Infinity);
+    assert.equal(overflowReferenced.base.nested[1].deep, -Infinity);
+    assert.equal(Object.is(overflowReferenced.base.nested[1].negativeZero, -0), true);
     assert.equal(overflowReferenced.long_context_threshold, 200000);
     assert.equal(overflowReferenced.default_key, '');
+
+    const rawControl = String.fromCharCode(1);
+    for (const invalidControl of [
+      `{"base":{"model":[1,2,3,4],"bad${rawControl}key":[1,2,3,4]}}`,
+      `{"base":{"model":[1,2,3,4]},"unknown":"bad${rawControl}value"}`,
+    ]) {
+      await writeFile(missing, invalidControl);
+      assert.deepEqual(await backend.modelPrices(missing), getModelPricesForUsageHistory());
+    }
+
+    await writeFile(missing, '{"base":{"\\u0001":[1,2,3,4]},"unknown":"\\u0001"}');
+    const escapedControl = await backend.modelPrices(missing);
+    assert.deepEqual(Object.keys(escapedControl.base), ['\u0001']);
+    assert.deepEqual(escapedControl.base['\u0001'], [1, 2, 3, 4]);
 
     const duplicateBase = '{"base":{"z":[1,2,3,4],"a":[1,2,3,4]},"base":{"c":[1,2,3,4],"b":[1,2,3,4]}}';
     await writeFile(missing, duplicateBase);
     const duplicateBaseDoc = await backend.modelPrices(missing);
     assert.deepEqual(duplicateBaseDoc, getModelPricesForUsageHistory());
     assert.deepEqual(Object.keys(duplicateBaseDoc.base), ['c', 'b']);
+
+    for (const depth of [127, 128, 129]) {
+      let nested = '1';
+      for (let level = 0; level < depth - 2; level += 1) nested = `[${nested}]`;
+      await writeFile(missing, `{"base":{"model":${nested}}}`);
+      const deepDoc = await backend.modelPrices(missing);
+      assert.deepEqual(deepDoc, getModelPricesForUsageHistory());
+      assert.deepEqual(Object.keys(deepDoc.base), ['model']);
+    }
+
+    const loneSurrogate = '{"base":{"\\ud800":[1,2,3,4]}}';
+    await writeFile(missing, loneSurrogate);
+    const loneDoc = await backend.modelPrices(missing);
+    assert.deepEqual(loneDoc, getModelPricesForUsageHistory());
+    assert.deepEqual(Object.keys(loneDoc.base), ['\ud800']);
+    assert.equal(Object.hasOwn(loneDoc.base, '\ud800'), true);
+
+    const binaryPath = process.env.SINGULARITY_RUST_BACKEND_BINARY
+      ?? fileURLToPath(new URL(`../rust/backend/target/release/${process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend'}`, import.meta.url));
+    const rawChild = spawn(binaryPath, [], { stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const rawLines = createInterface({ input: rawChild.stdout });
+    let rawReadyResolve;
+    let rawReplyResolve;
+    const rawReady = new Promise((resolve) => { rawReadyResolve = resolve; });
+    const rawReply = new Promise((resolve) => { rawReplyResolve = resolve; });
+    rawLines.on('line', (line) => {
+      const frame = JSON.parse(line);
+      if (frame.ready === true) rawReadyResolve();
+      if (frame.id === 'pricing-surrogate-raw') rawReplyResolve(line);
+    });
+    await rawReady;
+    rawChild.stdin.write(`${JSON.stringify({ op: 'model_prices', id: 'pricing-surrogate-raw', path: missing })}\n`);
+    const rawLine = await rawReply;
+    assert.ok(rawLine.includes('"\\ud800"'), 'raw JSON keeps the lone surrogate escaped');
+    const rawFrame = JSON.parse(rawLine);
+    assert.equal(Object.hasOwn(rawFrame.response.pricing.base, '\ud800'), true);
+    rawChild.stdin.end();
+    await new Promise((resolve) => rawChild.once('exit', resolve));
+    rawLines.close();
+
+    const malformedKey = Buffer.concat([Buffer.from('{"base":{"'), Buffer.from([0xff]), Buffer.from('":[1,2,3,4]}}')]);
+    await writeFile(missing, malformedKey);
+    const malformedDoc = await backend.modelPrices(missing);
+    assert.deepEqual(malformedDoc, getModelPricesForUsageHistory());
+    assert.deepEqual(Object.keys(malformedDoc.base), ['�']);
 
     const legacy = join(root, 'legacy.json');
     await writeFile(legacy, '{"opus":[99,99,99,99]}');

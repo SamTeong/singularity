@@ -626,6 +626,9 @@ fn decode_string_token(token: &str) -> Result<Vec<u16>, String> {
             let tail = std::str::from_utf8(&bytes[index..bytes.len() - 1])
                 .map_err(|error| error.to_string())?;
             let ch = tail.chars().next().ok_or("invalid JSON string token")?;
+            if ch <= '\u{001f}' {
+                return Err("unescaped control character in JSON string".into());
+            }
             units.extend(ch.encode_utf16(&mut [0; 2]).iter().copied());
             index += ch.len_utf8();
             continue;
@@ -712,11 +715,62 @@ fn render_json_string(units: &[u16]) -> String {
 struct JsonTokenRenderer<'a> {
     bytes: &'a [u8],
     at: usize,
+    preserve_number_tokens: bool,
+}
+
+fn is_json_number(token: &str) -> bool {
+    let bytes = token.as_bytes();
+    let mut at = 0;
+    if bytes.get(at) == Some(&b'-') {
+        at += 1;
+    }
+    match bytes.get(at) {
+        Some(b'0') => at += 1,
+        Some(b'1'..=b'9') => {
+            at += 1;
+            while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+                at += 1;
+            }
+        }
+        _ => return false,
+    }
+    if bytes.get(at) == Some(&b'.') {
+        at += 1;
+        let fraction_start = at;
+        while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+            at += 1;
+        }
+        if at == fraction_start {
+            return false;
+        }
+    }
+    if matches!(bytes.get(at), Some(b'e' | b'E')) {
+        at += 1;
+        if matches!(bytes.get(at), Some(b'+' | b'-')) {
+            at += 1;
+        }
+        let exponent_start = at;
+        while bytes.get(at).is_some_and(u8::is_ascii_digit) {
+            at += 1;
+        }
+        if at == exponent_start {
+            return false;
+        }
+    }
+    at == bytes.len()
 }
 
 impl JsonTokenRenderer<'_> {
+    fn is_json_whitespace(byte: u8) -> bool {
+        matches!(byte, b' ' | b'\t' | b'\n' | b'\r')
+    }
+
     fn whitespace(&mut self) {
-        while self.bytes.get(self.at).is_some_and(u8::is_ascii_whitespace) {
+        while self
+            .bytes
+            .get(self.at)
+            .is_some_and(|byte| Self::is_json_whitespace(*byte))
+        {
             self.at += 1;
         }
     }
@@ -742,6 +796,64 @@ impl JsonTokenRenderer<'_> {
             }
         }
         Err("unterminated JSON string".into())
+    }
+
+    fn object_entries(&mut self) -> Result<Vec<(Vec<u16>, String)>, String> {
+        if self.bytes.get(self.at) != Some(&b'{') {
+            return Err("expected JSON object".into());
+        }
+        self.at += 1;
+        self.whitespace();
+        let mut entries: Vec<(Vec<u16>, String)> = Vec::new();
+        if self.bytes.get(self.at) != Some(&b'}') {
+            loop {
+                self.whitespace();
+                if self.bytes.get(self.at) != Some(&b'"') {
+                    return Err("invalid JSON object key".into());
+                }
+                let key = self.string()?;
+                self.whitespace();
+                if self.bytes.get(self.at) != Some(&b':') {
+                    return Err("invalid JSON object separator".into());
+                }
+                self.at += 1;
+                let value = self.value()?;
+                if let Some(entry) = entries.iter_mut().find(|(prior, _)| *prior == key) {
+                    entry.1 = value;
+                } else {
+                    entries.push((key, value));
+                }
+                self.whitespace();
+                match self.bytes.get(self.at) {
+                    Some(b',') => self.at += 1,
+                    Some(b'}') => break,
+                    _ => return Err("invalid JSON object".into()),
+                }
+            }
+        }
+        self.at += 1;
+        let index = |key: &[u16]| -> Option<u32> {
+            if key.is_empty()
+                || key
+                    .iter()
+                    .any(|unit| !(b'0' as u16..=b'9' as u16).contains(unit))
+                || (key.len() > 1 && key[0] == b'0' as u16)
+            {
+                return None;
+            }
+            let text = String::from_utf16(key).ok()?;
+            let value = text.parse::<u64>().ok()?;
+            (value <= 4_294_967_294).then_some(value as u32)
+        };
+        let mut indexed: Vec<_> = entries
+            .iter()
+            .filter_map(|entry| index(&entry.0).map(|n| (n, entry)))
+            .collect();
+        indexed.sort_by_key(|(n, _)| *n);
+        let mut ordered: Vec<&(Vec<u16>, String)> =
+            indexed.into_iter().map(|(_, entry)| entry).collect();
+        ordered.extend(entries.iter().filter(|entry| index(&entry.0).is_none()));
+        Ok(ordered.into_iter().cloned().collect())
     }
 
     fn value(&mut self) -> Result<String, String> {
@@ -772,60 +884,10 @@ impl JsonTokenRenderer<'_> {
                 Ok(format!("[{}]", values.join(",")))
             }
             b'{' => {
-                self.at += 1;
-                self.whitespace();
-                let mut entries: Vec<(Vec<u16>, String)> = Vec::new();
-                if self.bytes.get(self.at) != Some(&b'}') {
-                    loop {
-                        self.whitespace();
-                        if self.bytes.get(self.at) != Some(&b'"') {
-                            return Err("invalid JSON object key".into());
-                        }
-                        let key = self.string()?;
-                        self.whitespace();
-                        if self.bytes.get(self.at) != Some(&b':') {
-                            return Err("invalid JSON object separator".into());
-                        }
-                        self.at += 1;
-                        let value = self.value()?;
-                        if let Some(entry) = entries.iter_mut().find(|(prior, _)| *prior == key) {
-                            entry.1 = value;
-                        } else {
-                            entries.push((key, value));
-                        }
-                        self.whitespace();
-                        match self.bytes.get(self.at) {
-                            Some(b',') => self.at += 1,
-                            Some(b'}') => break,
-                            _ => return Err("invalid JSON object".into()),
-                        }
-                    }
-                }
-                self.at += 1;
-                let index = |key: &[u16]| -> Option<u32> {
-                    if key.is_empty()
-                        || key
-                            .iter()
-                            .any(|unit| !(b'0' as u16..=b'9' as u16).contains(unit))
-                        || (key.len() > 1 && key[0] == b'0' as u16)
-                    {
-                        return None;
-                    }
-                    let text = String::from_utf16(key).ok()?;
-                    let value = text.parse::<u64>().ok()?;
-                    (value <= 4_294_967_294).then_some(value as u32)
-                };
-                let mut indexed: Vec<_> = entries
-                    .iter()
-                    .filter_map(|entry| index(&entry.0).map(|n| (n, entry)))
-                    .collect();
-                indexed.sort_by_key(|(n, _)| *n);
-                let mut ordered: Vec<&(Vec<u16>, String)> =
-                    indexed.into_iter().map(|(_, entry)| entry).collect();
-                ordered.extend(entries.iter().filter(|entry| index(&entry.0).is_none()));
-                let fields = ordered
+                let fields = self
+                    .object_entries()?
                     .into_iter()
-                    .map(|(key, value)| format!("{}:{}", render_json_string(key), value))
+                    .map(|(key, value)| format!("{}:{}", render_json_string(&key), value))
                     .collect::<Vec<_>>()
                     .join(",");
                 Ok(format!("{{{fields}}}"))
@@ -835,7 +897,7 @@ impl JsonTokenRenderer<'_> {
                 while self
                     .bytes
                     .get(self.at)
-                    .is_some_and(|byte| !byte.is_ascii_whitespace() && !b",]}".contains(byte))
+                    .is_some_and(|byte| !Self::is_json_whitespace(*byte) && !b",]}".contains(byte))
                 {
                     self.at += 1;
                 }
@@ -844,6 +906,12 @@ impl JsonTokenRenderer<'_> {
                 match token {
                     "true" | "false" | "null" => Ok(token.into()),
                     _ => {
+                        if !is_json_number(token) {
+                            return Err("invalid JSON number".into());
+                        }
+                        if self.preserve_number_tokens {
+                            return Ok(token.into());
+                        }
                         let number = token.parse::<f64>().map_err(|e| e.to_string())?;
                         if !number.is_finite() {
                             return Ok("null".into());
@@ -860,10 +928,31 @@ impl JsonTokenRenderer<'_> {
     }
 }
 
+pub(crate) fn ordered_json_object_entries_preserving_numbers(
+    input: &str,
+) -> Result<Vec<(String, String)>, String> {
+    let mut parser = JsonTokenRenderer {
+        bytes: input.as_bytes(),
+        at: 0,
+        preserve_number_tokens: true,
+    };
+    parser.whitespace();
+    let entries = parser.object_entries()?;
+    parser.whitespace();
+    if parser.at != parser.bytes.len() {
+        return Err("trailing JSON data".into());
+    }
+    Ok(entries
+        .into_iter()
+        .map(|(key, value)| (render_json_string(&key), value))
+        .collect())
+}
+
 fn stringify_json_token(token: &str) -> Result<String, String> {
     let mut parser = JsonTokenRenderer {
         bytes: token.as_bytes(),
         at: 0,
+        preserve_number_tokens: false,
     };
     let value = parser.value()?;
     parser.whitespace();
