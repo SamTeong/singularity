@@ -688,18 +688,26 @@ export async function fetchCodex(force = false) {
       try { await usageCodexBackend?.codexUsageRelease(credentialHandle); } catch { /* daemon shutdown clears its private handle table */ }
     }
   }
-  if (resp && resp.status !== 200) {
-    liveError = resp.status === 429 ? 'rate-limited' : resp.status === 401 || resp.status === 403 ? 'auth rejected' : `HTTP ${resp.status}`;
-  } else if (resp) {
-    let raw;
-    try { raw = await resp.json(); }
-    catch (e) { liveError = `parse error: ${e.message}`; }
-    const live = await usageNormalizationBackend.providerUsageNormalize('codex', raw, { fetchedAt: new Date().toISOString() });
-    if (live) return live;
-    liveError ??= 'no usable rate limits';
+  if (resp) {
+    let payload;
+    let parseError;
+    if (resp.status === 200) {
+      try { payload = await resp.json(); }
+      catch (e) { parseError = `parse error: ${e.message}`; }
+    }
+    const fetchedAt = new Date().toISOString();
+    return usageCodexBackend.codexUsageResult({
+      status: resp.status,
+      retryAfter: resp.headers.get('retry-after'),
+      nowMs: resp.status === 429 ? Date.now() : 0,
+      payloadPresent: resp.status === 200 && !parseError,
+      payload,
+      fetchedAt,
+      error: parseError,
+    });
   }
 
-  return { ...noCodexData(), error: liveError ?? 'no usable rate limits', ...(resp?.status === 429 ? { retryAfterMs: retryAfterMs(resp.headers?.get?.('retry-after')) } : {}) };
+  return { ...noCodexData(), error: liveError ?? 'no usable rate limits' };
 }
 
 // ---- Cache + public API -------------------------------------------------------

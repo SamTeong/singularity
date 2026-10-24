@@ -157,6 +157,37 @@ test('Codex usage bridge sends correlated handle requests without credential val
   } finally { await backend.stop(); }
 });
 
+test('Codex usage result bridge resolves failure DTOs and rejects backend errors', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  let requestCount = 0;
+  child.stdin.write = (chunk, callback) => {
+    const sent = JSON.parse(String(chunk));
+    const response = requestCount++ === 0
+      ? { ok: false, source: 'codex', error: 'auth rejected', fetchedAt: '2026-10-24T00:00:00.000Z' }
+      : { error: 'bad request' };
+    queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: sent.id, response })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  try {
+    await backend.start();
+    const failureDto = await backend.codexUsageResult({ status: 401 });
+    assert.deepEqual(failureDto, {
+      ok: false, source: 'codex', error: 'auth rejected', fetchedAt: '2026-10-24T00:00:00.000Z',
+    });
+    await assert.rejects(backend.codexUsageResult({ status: 401 }), /bad request/);
+  } finally { await backend.stop(); }
+});
+
 test('Codex fingerprint bridge sends only the configured path and returns digest or null', async () => {
   const child = new EventEmitter();
   child.stdin = new PassThrough();

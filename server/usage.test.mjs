@@ -66,6 +66,7 @@ const codexFixtureBackend = {
     return codexFixture(snapshot.authPath, snapshot.tokens);
   },
   codexUsageRelease(handle) { return { released: codexFixtureSnapshots.delete(handle) }; },
+  codexUsageResult(input) { return usageRustBackend.codexUsageResult(input); },
 };
 const codexResponse = (payload, status = 200, retryAfter = null) => ({ kind: 'response', status, retry_after: retryAfter, body: { ok: JSON.stringify(payload) } });
 const nativeFetch = globalThis.fetch;
@@ -609,6 +610,18 @@ test('fetchCodex(true): a failed live request reports the live error, with no ro
   }
 });
 
+test('fetchCodex(true): non-200 status mapping does not parse its response body', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  const previousFixture = codexFixture;
+  codexFixture = async () => ({ kind: 'response', status: 401, retry_after: null, body: { ok: '{' } });
+  try {
+    const result = await fetchCodex(true);
+    assert.equal(result.error, 'auth rejected');
+    assert.equal(result.ok, false);
+    assert.equal(result.source, 'codex');
+  } finally { codexFixture = previousFixture; }
+});
+
 test('fetchCodex(true): malformed JSON keeps V8 parse wording and is not retried', async () => {
   writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
   let calls = 0;
@@ -649,6 +662,7 @@ test('fetchCodex(true): final public Retry-After is anchored after credential re
   const originalNow = Date.now;
   const originalRelease = codexFixtureBackend.codexUsageRelease;
   let bridgeFetches = 0;
+  let mappedResult;
   Date.now = () => 1_000;
   isolated.setUsageCodexBackend({
     ...codexFixtureBackend,
@@ -660,12 +674,19 @@ test('fetchCodex(true): final public Retry-After is anchored after credential re
       originalRelease.call(codexFixtureBackend, handle);
       Date.now = () => 2_000;
     },
+    async codexUsageResult(input) {
+      mappedResult = input;
+      return usageRustBackend.codexUsageResult(input);
+    },
   });
   try {
     const result = await isolated.fetchCodex(true);
     assert.equal(bridgeFetches, 1);
     assert.equal(result.error, 'rate-limited');
     assert.equal(result.retryAfterMs, 3_000);
+    assert.equal(mappedResult.nowMs, 2_000);
+    assert.equal(mappedResult.status, 429);
+    assert.equal(mappedResult.payloadPresent, false);
     assert.equal(codexFixtureSnapshots.size, 0);
   } finally {
     Date.now = originalNow;

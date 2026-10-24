@@ -26,6 +26,132 @@ pub enum CodexUsageResult {
     },
 }
 
+#[cfg(test)]
+mod result_mapping_tests {
+    use super::{CompletedResponseRequest, map_completed_response};
+    use serde_json::Value;
+
+    fn map(status: u16, retry_after: Option<&str>, now_ms: i64, payload: &str) -> Value {
+        let request: CompletedResponseRequest = serde_json::from_str(&format!(
+            "{{\"status\":{status},\"retry_after\":{},\"now_ms\":{now_ms},\"payload_present\":true,\"payload\":{payload},\"fetched_at\":\"stamp\"}}",
+            retry_after.map(|value| serde_json::to_string(value).unwrap()).unwrap_or_else(|| "null".into())
+        )).unwrap();
+        serde_json::from_str(map_completed_response(&request).unwrap().get()).unwrap()
+    }
+
+    #[test]
+    fn successful_result_reuses_codex_normalizer_and_fetched_at() {
+        let result = map(
+            200,
+            None,
+            0,
+            r#"{"plan_type":"pro","rate_limit":{"primary_window":{"used_percent":17,"limit_window_seconds":3600,"reset_at":0}}}"#,
+        );
+        assert_eq!(result["source"], "codex");
+        assert_eq!(result["fetchedAt"], "stamp");
+        assert_eq!(result["session"]["pctUsed"], 17.0);
+        assert_eq!(result["weekly"], Value::Null);
+    }
+
+    #[test]
+    fn non_success_results_preserve_status_errors_and_optional_retry_delay() {
+        for (status, error) in [
+            (401, "auth rejected"),
+            (403, "auth rejected"),
+            (503, "HTTP 503"),
+        ] {
+            let result = map(status, Some("9"), 0, "null");
+            assert_eq!(result["error"], error);
+            assert_eq!(result["source"], "codex");
+            assert!(result.get("retryAfterMs").is_none());
+        }
+        assert_eq!(map(429, Some("3"), 0, "null")["retryAfterMs"], 3000.0);
+        assert_eq!(map(429, Some("0x10"), 0, "null")["retryAfterMs"], 16_000.0);
+        assert_eq!(
+            map(429, Some("Thu, 01 Jan 1970 00:00:05 GMT"), 2000, "null")["retryAfterMs"],
+            3000.0
+        );
+        for value in ["not a date", ""] {
+            assert_eq!(
+                map(429, Some(value), 0, "null")["retryAfterMs"],
+                Value::Null
+            );
+        }
+        assert_eq!(map(429, None, 0, "null")["retryAfterMs"], Value::Null);
+    }
+
+    #[test]
+    fn missing_codex_windows_returns_existing_no_data_error() {
+        let result = map(200, None, 0, r#"{"plan_type":"pro"}"#);
+        assert_eq!(result["error"], "no usable rate limits");
+        assert_eq!(result["fetchedAt"], "stamp");
+    }
+}
+
+#[derive(serde::Deserialize)]
+pub struct CompletedResponseRequest {
+    pub status: u16,
+    #[serde(default)]
+    pub retry_after: Option<String>,
+    #[serde(default)]
+    pub now_ms: i64,
+    #[serde(default)]
+    pub payload_present: bool,
+    pub payload: Box<serde_json::value::RawValue>,
+    #[serde(default)]
+    pub fetched_at: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Maps a completed Node-parsed response to the existing public Codex DTO.
+pub fn map_completed_response(
+    request: &CompletedResponseRequest,
+) -> Result<Box<serde_json::value::RawValue>, String> {
+    if request.status == 200 && request.error.is_none() {
+        let normalized = crate::provider_usage::normalize(&crate::provider_usage::Request {
+            provider: "codex".into(),
+            payload_present: request.payload_present,
+            payload: request.payload.clone(),
+            plan: None,
+            fetched_at: request.fetched_at.clone(),
+        })?;
+        if normalized.get() != "null" {
+            return Ok(normalized);
+        }
+    }
+    let error = request
+        .error
+        .clone()
+        .unwrap_or_else(|| match request.status {
+            200 => "no usable rate limits".into(),
+            429 => "rate-limited".into(),
+            401 | 403 => "auth rejected".into(),
+            status => format!("HTTP {status}"),
+        });
+    let retry_after_ms = if request.status == 429 {
+        request
+            .retry_after
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .and_then(|value| retry_after_ms(Some(value), request.now_ms))
+    } else {
+        None
+    };
+    let mut result = serde_json::json!({
+        "ok": false,
+        "source": "codex",
+        "error": error,
+        "fetchedAt": request.fetched_at.as_deref().unwrap_or("")
+    });
+    if request.status == 429 {
+        result["retryAfterMs"] = retry_after_ms
+            .filter(|delay| delay.is_finite())
+            .map_or(serde_json::Value::Null, |delay| serde_json::json!(delay));
+    }
+    serde_json::value::RawValue::from_string(result.to_string()).map_err(|error| error.to_string())
+}
+
 struct CredentialSnapshot {
     token: String,
     account: String,

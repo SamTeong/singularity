@@ -204,6 +204,29 @@ fn main() -> io::Result<()> {
             }
         }
         if let Ok(request) = serde_json::from_str::<ProviderUsageRequest>(&line) {
+            if request.op == "codex_usage_result" {
+                let mapping = singularity_backend::codex_usage::map_completed_response(
+                    &singularity_backend::codex_usage::CompletedResponseRequest {
+                        status: request.status.unwrap_or_default(),
+                        retry_after: request.retry_after,
+                        now_ms: request.now_ms.unwrap_or_default(),
+                        payload_present: request.payload_present,
+                        payload: request
+                            .payload
+                            .unwrap_or_else(|| RawValue::from_string("null".into()).unwrap()),
+                        fetched_at: request.fetched_at,
+                        error: request.error,
+                    },
+                );
+                let body = match mapping {
+                    Ok(raw) => singularity_backend::transcript_bridge::ResponseBody::Raw(raw),
+                    Err(error) => singularity_backend::transcript_bridge::ResponseBody::Value(
+                        serde_json::json!({"error": error}),
+                    ),
+                };
+                write_response_line(&stdout, request.id.as_ref(), body)?;
+                continue;
+            }
             if request.op == "provider_usage_normalize" {
                 let payload = request
                     .payload
@@ -928,6 +951,14 @@ struct ProviderUsageRequest {
     plan: Option<Box<RawValue>>,
     #[serde(default)]
     fetched_at: Option<String>,
+    #[serde(default)]
+    status: Option<u16>,
+    #[serde(default)]
+    retry_after: Option<String>,
+    #[serde(default)]
+    now_ms: Option<i64>,
+    #[serde(default)]
+    error: Option<String>,
 }
 
 fn write_line<W: Write>(stdout: &Mutex<W>, value: &Value) -> io::Result<()> {

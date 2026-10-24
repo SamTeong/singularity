@@ -307,6 +307,17 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
         });
     },
 
+    codexUsageResult({ status, retryAfter, nowMs, payloadPresent = false, payload, fetchedAt, error } = {}) {
+      return request({
+        op: 'codex_usage_result', status, retry_after: retryAfter, now_ms: nowMs,
+        payload_present: payloadPresent, payload: payload ?? null, fetched_at: fetchedAt, error,
+      }).then((result) => {
+        if (result?.ok === false) return result;
+        if (result?.error) throw new Error(result.error);
+        return result;
+      });
+    },
+
     providerUsageSnapshot(input) {
       return request({ ...input, op: 'provider_usage_snapshot' }).then((response) => {
         if (response?.error) throw new Error(response.error);
