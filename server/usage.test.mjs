@@ -515,46 +515,36 @@ test('fetchCodex(true): dispatches the auth path and normalizes 5h + 7d windows 
   }
 });
 
-test('fetchCodex(true): retries a transient live API response', async () => {
+test('fetchCodex(true): does not schedule a second bridge call for a terminal Rust status', async () => {
   writeCodexAuth({ access_token: 'test-token', account_id: 'test-account-id' });
-  const originalFetch = globalThis.fetch;
-  let calls = 0;
-  globalThis.fetch = async () => {
-    calls += 1;
-    if (calls === 1) return { status: 503 };
-    return {
-      status: 200,
-      json: async () => ({
-        plan_type: 'plus',
-        rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18_000, reset_at: 1786000000 } },
-      }),
-    };
+  let bridgeCalls = 0;
+  codexFixture = async () => {
+    bridgeCalls += 1;
+    return { kind: 'response', status: 503, retry_after: null, body: { ok: null } };
   };
   try {
-    const u = await fetchCodex(true);
-    assert.equal(u.plan, 'plus');
+    const result = await fetchCodex(true);
+    assert.equal(result.error, 'HTTP 503');
+    assert.equal(bridgeCalls, 1);
+    assert.equal(codexFixtureSnapshots.size, 0);
   } finally {
-    globalThis.fetch = originalFetch;
+    codexFixture = codexFixtureBaseline;
   }
-  assert.equal(calls, 2);
 });
 
-test('fetchCodex(true): retry keeps the first credential snapshot and releases it', async () => {
+test('fetchCodex(true): pins one credential snapshot and releases it after the Rust logical fetch', async () => {
   writeCodexAuth({ access_token: 'account-A-token', account_id: 'account-A' });
   const originalFetch = globalThis.fetch;
   const seen = [];
   codexFixture = async (_authPath, tokens) => {
     seen.push([tokens.access_token, tokens.account_id]);
-    if (seen.length === 1) {
-      writeCodexAuth({ access_token: 'account-B-token', account_id: 'account-B' });
-      return { kind: 'response', status: 503, retry_after: null, body: { ok: null } };
-    }
+    writeCodexAuth({ access_token: 'account-B-token', account_id: 'account-B' });
     return codexResponse({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18_000, reset_at: 1786000000 } } });
   };
   try {
     const result = await fetchCodex(true);
     assert.equal(result.plan, 'plus');
-    assert.deepEqual(seen, [['account-A-token', 'account-A'], ['account-A-token', 'account-A']]);
+    assert.deepEqual(seen, [['account-A-token', 'account-A']]);
     assert.equal(codexFixtureSnapshots.size, 0);
   } finally {
     codexFixture = codexFixtureBaseline;
@@ -642,15 +632,46 @@ test('fetchCodex(true): body stream failure preserves the caught message and is 
   } finally { codexFixture = codexFixtureBaseline; }
 });
 
-test('fetchCodex(true): typed timeout retries and preserves the AbortController message', async () => {
+test('fetchCodex(true): terminal Rust timeout preserves the AbortController message', async () => {
   writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
   let calls = 0;
   codexFixture = async () => { calls += 1; return { kind: 'timeout_failure' }; };
   try {
     const result = await fetchCodex(true);
     assert.equal(result.error, 'request failed: This operation was aborted');
-    assert.equal(calls, 3);
+    assert.equal(calls, 1);
   } finally { codexFixture = codexFixtureBaseline; }
+});
+
+test('fetchCodex(true): final public Retry-After is anchored after credential release', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?codex-result-retry-after=${Date.now()}`);
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  const originalNow = Date.now;
+  const originalRelease = codexFixtureBackend.codexUsageRelease;
+  let bridgeFetches = 0;
+  Date.now = () => 1_000;
+  isolated.setUsageCodexBackend({
+    ...codexFixtureBackend,
+    async codexUsageFetch() {
+      bridgeFetches += 1;
+      return { kind: 'response', status: 429, retry_after: 'Thu, 01 Jan 1970 00:00:05 GMT', body: { ok: null } };
+    },
+    async codexUsageRelease(handle) {
+      originalRelease.call(codexFixtureBackend, handle);
+      Date.now = () => 2_000;
+    },
+  });
+  try {
+    const result = await isolated.fetchCodex(true);
+    assert.equal(bridgeFetches, 1);
+    assert.equal(result.error, 'rate-limited');
+    assert.equal(result.retryAfterMs, 3_000);
+    assert.equal(codexFixtureSnapshots.size, 0);
+  } finally {
+    Date.now = originalNow;
+    codexFixtureBackend.codexUsageRelease = originalRelease;
+    isolated.setUsageCodexBackend(codexFixtureBackend);
+  }
 });
 
 // The access token expires overnight, so the on-demand usage fetch renews it

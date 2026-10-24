@@ -642,7 +642,6 @@ function claudeOauthRefreshResponse(result) {
 // and the live API is the only other source this lane actually needs.
 export const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
 const CODEX_AUTH_PATH = join(CODEX_HOME, 'auth.json');
-const CODEX_USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
 
 // The one answer both branches fall back to: nothing usable was found, either
 // on disk (no fresh Stop-hook record) or, on the live leg, no credentials.
@@ -665,32 +664,23 @@ export async function fetchCodex(force = false) {
   let resp;
   let credentialHandle;
   try {
-    resp = await fetchExternal(CODEX_USAGE_API_URL, {
-      method: 'GET',
-    }, {
-      timeoutMs: REQ_TIMEOUT_MS,
-      fetcher: async () => {
-        if (!usageCodexBackend) throw new Error('Rust Codex usage backend is not configured');
-        if (!credentialHandle) {
-          const started = await usageCodexBackend.codexUsageBegin(CODEX_AUTH_PATH);
-          if (started?.kind === 'no_sessions') return { status: 204, noSessions: true };
-          credentialHandle = started?.handle;
-          if (!credentialHandle) throw new Error('Rust Codex usage backend returned no credential handle');
-        }
-        const result = await usageCodexBackend.codexUsageFetch(credentialHandle);
-        if (result?.kind === 'no_sessions') return { status: 204, noSessions: true };
-        if (result?.kind === 'timeout_failure') throw new Error('This operation was aborted');
-        if (result?.kind === 'transport_failure') throw new Error('fetch failed');
-        return {
-          status: result.status,
-          headers: { get: (name) => name.toLowerCase() === 'retry-after' ? result.retry_after : null },
-          json: async () => {
-            if (result.body?.err === 'terminated') throw new TypeError('terminated');
-            return JSON.parse(result.body?.ok ?? 'null');
-          },
-        };
+    if (!usageCodexBackend) throw new Error('Rust Codex usage backend is not configured');
+    const started = await usageCodexBackend.codexUsageBegin(CODEX_AUTH_PATH);
+    if (started?.kind === 'no_sessions') return noCodexData();
+    credentialHandle = started?.handle;
+    if (!credentialHandle) throw new Error('Rust Codex usage backend returned no credential handle');
+    const result = await usageCodexBackend.codexUsageFetch(credentialHandle);
+    if (result?.kind === 'no_sessions') return noCodexData();
+    if (result?.kind === 'timeout_failure') throw new Error('This operation was aborted');
+    if (result?.kind === 'transport_failure') throw new Error('fetch failed');
+    resp = {
+      status: result.status,
+      headers: { get: (name) => name.toLowerCase() === 'retry-after' ? result.retry_after : null },
+      json: async () => {
+        if (result.body?.err === 'terminated') throw new TypeError('terminated');
+        return JSON.parse(result.body?.ok ?? 'null');
       },
-    });
+    };
   } catch (e) {
     liveError = `request failed: ${e.message}`;
   } finally {
@@ -698,7 +688,6 @@ export async function fetchCodex(force = false) {
       try { await usageCodexBackend?.codexUsageRelease(credentialHandle); } catch { /* daemon shutdown clears its private handle table */ }
     }
   }
-  if (resp?.noSessions) return noCodexData();
   if (resp && resp.status !== 200) {
     liveError = resp.status === 429 ? 'rate-limited' : resp.status === 401 || resp.status === 403 ? 'auth rejected' : `HTTP ${resp.status}`;
   } else if (resp) {
