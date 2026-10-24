@@ -31,7 +31,16 @@ fs.writeFileSync(path.join(fixtureDir, "pricing.json"), JSON.stringify({
   default_key: "opus",
 }, null, 2));
 
-const { _has_newer_input, _load_usage_snapshots, _msg_cost_tiered, _price_key } = await import("./stats.mjs");
+const { _has_newer_input, _load_usage_snapshots, _msg_cost_tiered, _parse_reset_at, _price_key } = await import("./stats.mjs");
+
+// resets_at arrives as epoch seconds (daemon live poll), epoch ms, a digit
+// string, or RFC3339 (codex.mjs rollout ingestion); all normalize to epoch s.
+assert.equal(_parse_reset_at(1785551182), 1785551182);
+assert.equal(_parse_reset_at(1785551182000), 1785551182);
+assert.equal(_parse_reset_at("1785551182"), 1785551182);
+assert.equal(_parse_reset_at("2026-10-31T00:24:14.000Z"), 1793406254);
+assert.equal(_parse_reset_at(""), null);
+assert.equal(_parse_reset_at("nonsense"), null);
 
 assert.equal(_msg_cost_tiered("gpt-6.1-sol", 272000, 0, 0, 0), 0.544);
 assert.equal(_msg_cost_tiered("gpt-6.1-sol", 272001, 0, 0, 0), 1.088004);

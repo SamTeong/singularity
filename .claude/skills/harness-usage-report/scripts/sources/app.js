@@ -332,13 +332,12 @@ function renderRateLimits(sessions){
 }
 // Ollama Cloud's own account quota (session/weekly), sampled by the daemon into
 // ollama-usage.jsonl and carried here as FORECAST.ollama.series — account-wide
-// over wall-clock, NOT filtered by the session date-range picker (there are no
-// "sessions" here, just periodic scrapes). Reuses svgRateTrend + colcards the
-// same way the Claude 5h/7d card above does; no $ stat (ollama scrapes carry no
-// cost data).
-function renderOllamaTrend(series){
-  var rl=(series||[]).map(function(r){return {ts:r.ts,r5:r.session||0,r7:r.weekly||0,dow:dowFromTs(r.ts)};}).filter(function(s){return s.r5>0||s.r7>0;});
-  if(!rl.length)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No Ollama Cloud usage yet.</h4><p>Fills in as the app samples ollama account quota.</p></div>";
+// over wall-clock (no "sessions", just periodic scrapes), filtered by day to the
+// selected timeframe. Reuses svgRateTrend + colcards the same way the Claude
+// 5h/7d card above does; no $ stat (ollama scrapes carry no cost data).
+function renderOllamaTrend(series,range){
+  var rl=(series||[]).map(function(r){return {ts:r.ts,r5:r.session||0,r7:r.weekly||0,dow:dowFromTs(r.ts)};}).filter(function(s){var d=s.ts.slice(0,10);return (s.r5>0||s.r7>0)&&d>=range.from&&d<=range.to;});
+  if(!rl.length)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No Ollama Cloud usage in the selected timeframe.</h4><p>Fills in as the app samples ollama account quota.</p></div>";
   var r5s=rl.map(function(s){return s.r5;}),r7s=rl.map(function(s){return s.r7;});
   var avg=function(a){return a.reduce(function(x,y){return x+y;},0)/a.length;};
   var maxA=function(a){return Math.max.apply(null,a);};
@@ -356,13 +355,13 @@ function renderOllamaTrend(series){
 // Codex CLI's own account quota (session = 5h window, weekly = 7d), read out
 // of the rollouts by codexIngest plus the daemon's live wham/usage polling
 // into codex-usage.jsonl and carried here as FORECAST.codex.series —
-// account-wide over wall-clock like the Ollama card above. Reuses
-// svgRateTrend + colcards the same way the Ollama card does; no $ stat
+// account-wide over wall-clock, timeframe-filtered like the Ollama card above.
+// Reuses svgRateTrend + colcards the same way the Ollama card does; no $ stat
 // (Codex is subscription-billed). Legacy weekly-only history just renders a
 // 0% 5h line until 5h readings accumulate.
-function renderCodexTrend(series){
-  var rl=(series||[]).map(function(r){return {ts:r.ts,r5:r.session||0,r7:r.weekly||0,dow:dowFromTs(r.ts)};}).filter(function(s){return s.r5>0||s.r7>0;});
-  if(!rl.length)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No Codex usage yet.</h4><p>Fills in as the app samples Codex quota.</p></div>";
+function renderCodexTrend(series,range){
+  var rl=(series||[]).map(function(r){return {ts:r.ts,r5:r.session||0,r7:r.weekly||0,dow:dowFromTs(r.ts)};}).filter(function(s){var d=s.ts.slice(0,10);return (s.r5>0||s.r7>0)&&d>=range.from&&d<=range.to;});
+  if(!rl.length)return "<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No Codex usage in the selected timeframe.</h4><p>Fills in as the app samples Codex quota.</p></div>";
   var r5s=rl.map(function(s){return s.r5;}),r7s=rl.map(function(s){return s.r7;});
   var avg=function(a){return a.reduce(function(x,y){return x+y;},0)/a.length;};
   var maxA=function(a){return Math.max.apply(null,a);};
@@ -445,12 +444,16 @@ function svgWindowBalance(wb,chartOpts){
   var yticks=[0,0.5,1].map(function(f){var v=ymax*f;return "<text x='"+(P-6)+"' y='"+(fy(v)+4).toFixed(1)+"' text-anchor='end' fill='var(--ink-faint)'>"+v.toFixed(1)+"</text>";}).join('');
   var pool=pooled>0?pathD([[P,fy(pooled)],[W-P,fy(pooled)]],'var(--ink-faint)',true,'none',1.5)+
     "<text x='"+(W-P)+"' y='"+(fy(pooled)-6).toFixed(1)+"' text-anchor='end' fill='var(--ink-faint)'>pooled "+pooled.toFixed(2)+"</text>":'';
-  // one label per distinct reset date across BOTH series, so the axis matches its
-  // own extent (the statusline series usually reaches further back than OAuth).
-  var lbl='',seenT={};
-  pts.slice().sort(function(a,b){return a.t-b.t;}).forEach(function(p,i,a){
-    if(seenT[p.t])return;seenT[p.t]=1;
-    lbl+="<text x='"+fx(p.t).toFixed(1)+"' y='"+(H-P+16)+"' text-anchor='"+(p.t===xmin?'start':(p.t===xmax?'end':'middle'))+"' fill='var(--ink-faint)'>"+esc(new Date(p.t*1000).toISOString().slice(5,10))+"</text>";
+  // one label per distinct reset date across BOTH series, thinned by stride to ~6
+  // (first + last always kept) so a long history doesn't overlap into a band.
+  var lbl='',seenT={},ts=[];
+  pts.slice().sort(function(a,b){return a.t-b.t;}).forEach(function(p){
+    if(seenT[p.t])return;seenT[p.t]=1;ts.push(p.t);
+  });
+  var step=Math.max(1,Math.ceil(ts.length/6));
+  ts.forEach(function(t,i){
+    if(i%step!==0&&i!==ts.length-1)return;
+    lbl+="<text x='"+fx(t).toFixed(1)+"' y='"+(H-P+16)+"' text-anchor='"+(t===xmin?'start':(t===xmax?'end':'middle'))+"' fill='var(--ink-faint)'>"+esc(new Date(t*1000).toISOString().slice(5,10))+"</text>";
   });
   lbl+="<text x='"+(W-P)+"' y='"+(P-10)+"' text-anchor='end' fill='var(--ink-faint)'>"+chartOpts.axis+"</text>";
   var out='';
@@ -664,6 +667,7 @@ var CODEX_FORECAST_EMPTY_HTML="<div class='empty-state'><svg viewBox='0 0 24 24'
 
 // ---- render ----
 function render(range){
+  CUR_RANGE=range;
   renderHarnessBar(range);
   syncHarnessPanels();
   syncFilterBadge(range);
@@ -673,17 +677,18 @@ function render(range){
   // the date-range picker, so it renders before (and survives) the empty-range bail.
   el('sec-window-balance').innerHTML=renderWindowBalance(FORECAST);
   // Ollama Cloud rate-limit cards: the daemon samples ollama.com's account quota
-  // independently of the session date picker (there's no ollama "session" in
-  // SESSIONS to filter), so — same reasoning as the Claude window-balance card
-  // above — these render unconditionally and stay out of the empty-range bail's
-  // id list below.
-  el('sec-ollama-util').innerHTML=renderOllamaTrend(FORECAST.ollama&&FORECAST.ollama.series);
+  // (there's no ollama "session" in SESSIONS to filter). The utilization chart
+  // follows the timeframe picker by day; window balance + forecast stay keyed to
+  // rate-limit reset windows — so these render unconditionally and stay out of
+  // the empty-range bail's id list below.
+  el('sec-ollama-util').innerHTML=renderOllamaTrend(FORECAST.ollama&&FORECAST.ollama.series,range);
   el('sec-ollama-window-balance').innerHTML=renderWindowBalance(FORECAST.ollama,OLLAMA_WB_OPTS);
   el('sec-ollama-forecast').innerHTML=renderForecast(FORECAST.ollama,['session','weekly'],{session:'5-hour window',weekly:'7-day window'},OLLAMA_FORECAST_EMPTY_HTML);
-  // Codex CLI rate-limit cards: same reasoning as the Ollama block above —
-  // sampled independently of the session date picker, so they render
-  // unconditionally and stay out of the empty-range bail's id list below.
-  el('sec-codex-util').innerHTML=renderCodexTrend(FORECAST.codex&&FORECAST.codex.series);
+  // Codex CLI rate-limit cards: same reasoning as the Ollama block above — the
+  // utilization chart follows the timeframe picker by day, window balance +
+  // forecast stay reset-window keyed; all render unconditionally and stay out of
+  // the empty-range bail's id list below.
+  el('sec-codex-util').innerHTML=renderCodexTrend(FORECAST.codex&&FORECAST.codex.series,range);
   el('sec-codex-window-balance').innerHTML=renderWindowBalance(FORECAST.codex,CODEX_WB_OPTS);
   el('sec-codex-forecast').innerHTML=renderForecast(FORECAST.codex,['session','weekly'],{session:'5-hour window',weekly:'7-day window'},CODEX_FORECAST_EMPTY_HTML);
   if(!agg.n){var msg='<p class="muted">No sessions in selected range.</p>';['kpi','burn-cards','sec-cumulative','sec-runrate','sec-cal','sec-eff-ratios','day-chart','month-chart','day-table','month-table','tok-day-bars','tok-month-bars','tok-mix','cc-ratio','sec-eff-models','sec-cadence','sec-ratelimits','sec-token-yield','sec-token-yield-summary','sec-forecast','sec-dayhour','sec-scatter','sec-pareto','sec-toptable','sec-treemap','sec-model-sessions','sec-model-cost','sec-share','sec-harness-share','sec-usage-stats','sec-tools','sec-agents','sec-skills','sec-proj-cost','sec-proj-sess'].forEach(function(id){var e=el(id);if(e)e.innerHTML=msg;});el('tok-legend').innerHTML='';el('ty-legend').innerHTML='';return;}
@@ -894,7 +899,7 @@ function _draw(){_legend();_chart(el('day-chart'),CHART.day);_chart(el('month-ch
 //   others get .off); click again = remove from set; emptied set or All = back to all-visible.
 // Empty-means-all makes independent per-pill toggle impossible without extra base-state.
 // tokVis MUST return Array.from(TOK_ACTIVE) (a Set crashes tokenBars on .indexOf).
-var TOK_ACTIVE=new Set(),CUR_AGG=null;
+var TOK_ACTIVE=new Set(),CUR_AGG=null,CUR_RANGE=null;
 function tokVis(){return TOK_ACTIVE.size?Array.from(TOK_ACTIVE):CFG.TOKEN.map(function(tk){return tk.key;});}
 function renderTokLegend(){
   var filtered=TOK_ACTIVE.size>0,target=el('tok-legend');
@@ -1001,12 +1006,27 @@ function renderTY(){
 // Ollama Cloud token yield: precomputed server-side (FORECAST.ollama.tokenYield,
 // stats.mjs _ollama_token_yield) since the split needs the scrape's per-model
 // request deltas, not per-session gauge deltas — nothing here derives from
-// CUR_AGG/SESSIONS, so it renders the same regardless of the date-range picker.
+// CUR_AGG/SESSIONS. The payload is re-filtered by day to CUR_RANGE so the chart
+// follows the timeframe picker; legend re-renders reuse the same CUR_RANGE.
 function renderTYOllama(){
-  var data=FORECAST.ollama&&FORECAST.ollama.tokenYield,lg=el('ty-legend');
+  var src=FORECAST.ollama&&FORECAST.ollama.tokenYield,lg=el('ty-legend'),data=src;
+  if(src&&src.series&&CUR_RANGE){
+    var series={},agg={},models=[],dayset={};
+    Object.keys(src.series).forEach(function(m){
+      var keep={},t=0,d=0;
+      Object.keys(src.series[m]).forEach(function(day){
+        if(day<CUR_RANGE.from||day>CUR_RANGE.to)return;
+        var v=src.series[m][day];keep[day]=v;t+=v.t;d+=v.d;dayset[day]=1;
+      });
+      if(!Object.keys(keep).length||d<0.05)return;
+      series[m]=keep;agg[m]={e:(t/1e6)/d,t:t,d:d};models.push(m);
+    });
+    models.sort();
+    data={days:Object.keys(dayset).sort(),series:series,agg:agg,models:models};
+  }
   if(!data||!data.models||!data.models.length){
     if(lg)lg.innerHTML='';
-    el('sec-token-yield').innerHTML="<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No ollama token yield yet.</h4><p>Needs samples with per-model request counts spanning some 7d-window movement. Fills in as the app samples ollama account quota.</p></div>";
+    el('sec-token-yield').innerHTML="<div class='empty-state'><svg viewBox='0 0 24 24' fill='none' stroke='currentColor' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='12' r='9'/><path d='M12 8h.01M11 12h1v4h1'/></svg><h4>No ollama token yield in the selected timeframe.</h4><p>Needs samples with per-model request counts spanning some 7d-window movement. Fills in as the app samples ollama account quota.</p></div>";
     el('sec-token-yield-summary').innerHTML='';return;
   }
   var cmap=modelColorMap(data.models);
