@@ -411,7 +411,7 @@ mod tests {
         count: usize,
         header_delay: Duration,
         body_delay: Duration,
-    ) -> (String, thread::JoinHandle<usize>) {
+    ) -> (String, thread::JoinHandle<Result<usize, String>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let address = listener.local_addr().unwrap();
         listener.set_nonblocking(true).unwrap();
@@ -420,17 +420,10 @@ mod tests {
             for _ in 0..count {
                 let mut stream = accept_bounded(&listener);
                 accepted += 1;
-                let mut bytes = [0; 4096];
-                let mut request = Vec::new();
-                loop {
-                    let read = stream.read(&mut bytes).unwrap();
-                    if read == 0 {
-                        break;
-                    }
-                    request.extend_from_slice(&bytes[..read]);
-                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
+                if let Err(error) =
+                    read_request_headers_bounded(&mut stream, Duration::from_millis(500))
+                {
+                    return Err(format!("accepted request headers: {error}"));
                 }
                 if !header_delay.is_zero() {
                     thread::sleep(header_delay);
@@ -448,9 +441,48 @@ mod tests {
                     let _ = stream.write_all(body.as_bytes());
                 }
             }
-            accepted
+            Ok(accepted)
         });
         (format!("http://{address}"), server)
+    }
+
+    fn read_request_headers_bounded(
+        stream: &mut std::net::TcpStream,
+        budget: Duration,
+    ) -> std::io::Result<()> {
+        let deadline = std::time::Instant::now() + budget;
+        let mut bytes = [0; 4096];
+        let mut request = Vec::new();
+        loop {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            if remaining.is_zero() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "request headers exceeded fixture deadline",
+                ));
+            }
+            stream.set_read_timeout(Some(remaining.min(Duration::from_millis(25))))?;
+            match stream.read(&mut bytes) {
+                Ok(0) => {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        "peer closed before request headers completed",
+                    ));
+                }
+                Ok(read) => {
+                    request.extend_from_slice(&bytes[..read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        return Ok(());
+                    }
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                Err(error) => return Err(error),
+            }
+        }
     }
 
     #[test]
@@ -461,7 +493,7 @@ mod tests {
             .enable_all()
             .build()
             .unwrap();
-        let (url, server) = delayed_loopback(3, Duration::from_millis(60), Duration::ZERO);
+        let (url, server) = delayed_loopback(3, Duration::from_millis(240), Duration::ZERO);
         let now: Clock = Arc::new(|| 0);
         let result = runtime.block_on(fetch_json_with_timeout(
             &provider_client(),
@@ -469,21 +501,21 @@ mod tests {
             &now,
             &delay,
             &random,
-            Duration::from_millis(10),
+            Duration::from_millis(80),
         ));
         assert!(
             matches!(result, Err(FetchError::Request(message)) if message == "operation timed out")
         );
-        assert_eq!(server.join().unwrap(), 3);
+        assert_eq!(server.join().unwrap().unwrap(), 3);
 
-        let (url, server) = delayed_loopback(1, Duration::ZERO, Duration::from_millis(60));
+        let (url, server) = delayed_loopback(1, Duration::ZERO, Duration::from_millis(1_200));
         let result = runtime.block_on(fetch_json_with_timeout(
             &provider_client(),
             &url,
             &now,
             &delay,
             &random,
-            Duration::from_millis(10),
+            Duration::from_millis(1_000),
         ));
         let result_summary = match &result {
             Ok(value) => format!("Ok({value})"),
@@ -495,7 +527,28 @@ mod tests {
             matches!(&result, Ok(value) if value == &json!({"ok":true})),
             "unexpected fetch result: {result_summary}"
         );
-        assert_eq!(server.join().unwrap(), 1);
+        assert_eq!(server.join().unwrap().unwrap(), 1);
+    }
+
+    #[test]
+    fn incomplete_loopback_request_headers_end_the_worker_within_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = std::net::TcpStream::connect(address).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+        let worker = thread::spawn(move || {
+            let mut stream = stream;
+            let result = read_request_headers_bounded(&mut stream, Duration::from_millis(300));
+            finished_tx.send(result).unwrap();
+        });
+
+        let result = finished_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("fixture worker did not stop after incomplete request headers");
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+        worker.join().unwrap();
+        drop(client);
     }
 
     fn loopback(responses: Vec<(u16, &'static str)>) -> (String, thread::JoinHandle<Vec<String>>) {
