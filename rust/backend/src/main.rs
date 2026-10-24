@@ -96,6 +96,10 @@ struct Request {
     #[serde(default)]
     pid: Value,
     #[serde(default)]
+    name: Value,
+    #[serde(default)]
+    is_darwin: Value,
+    #[serde(default)]
     procs_snapshot: Value,
     #[serde(default)]
     live_pids: Value,
@@ -746,6 +750,14 @@ fn main() -> io::Result<()> {
             }
             Ok(request) if request.op == "procs_kill" => {
                 singularity_backend::procs::kill(&request.pid)
+            }
+            Ok(request) if request.op == "procs_kill_guarded" => {
+                singularity_backend::procs_guard::kill_guarded(
+                    &request.pid,
+                    request.name.as_str().unwrap_or_default(),
+                    request.kind.as_str().unwrap_or_default(),
+                    request.is_darwin.as_bool().unwrap_or(false),
+                )
             }
             Ok(request) if request.op == "plan_session" => {
                 match (request.path.as_str(), request.sid.as_str()) {

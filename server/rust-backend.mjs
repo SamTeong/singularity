@@ -20,6 +20,20 @@ function wikiOrder(root) {
   } catch { return []; }
 }
 
+function oneShotError(payload, bin, args, timeout) {
+  const argv = [bin, ...(args ?? [])].join(' ');
+  const tail = String(payload.stderr || '').trim().split(/\r?\n/).pop() || '';
+  const message = payload.timed_out
+    ? `Command timed out after ${timeout}ms: ${argv}`
+    : `Command failed: ${argv}${tail ? `\n${tail}` : ''}`;
+  const error = new Error(message);
+  error.stdout = payload.stdout ?? undefined;
+  error.stderr = payload.stderr ?? undefined;
+  error.code = payload.code ?? undefined;
+  error.killed = !!payload.timed_out;
+  return error;
+}
+
 export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = spawn } = {}) {
   let child;
   let lines;
@@ -580,17 +594,7 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
         max_buffer: opts?.maxBuffer ?? null, env: opts?.env ?? null,
       });
       if (payload.ok) return { stdout: payload.stdout };
-      const argv = [bin, ...(args ?? [])].join(' ');
-      const tail = String(payload.stderr || '').trim().split(/\r?\n/).pop() || '';
-      const message = payload.timed_out
-        ? `Command timed out after ${opts?.timeout}ms: ${argv}`
-        : `Command failed: ${argv}${tail ? `\n${tail}` : ''}`;
-      const error = new Error(message);
-      error.stdout = payload.stdout ?? undefined;
-      error.stderr = payload.stderr ?? undefined;
-      error.code = payload.code ?? undefined;
-      error.killed = !!payload.timed_out;
-      throw error;
+      throw oneShotError(payload, bin, args, opts?.timeout);
     },
 
     async git(bin, args, opts) {
@@ -657,6 +661,14 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
         repo_root: repoRoot,
         host_pid: hostPid,
       });
+    },
+
+    async procsKillGuarded(pid, name, kind, isDarwin) {
+      const payload = await request({ op: 'procs_kill_guarded', pid, name, kind, is_darwin: isDarwin });
+      if (payload?.oneshot_failure) {
+        throw oneShotError(payload.oneshot_failure, payload.bin, payload.args, payload.timeout_ms);
+      }
+      return payload;
     },
 
     // Guarded PID kill for procs.mjs: { ok } | { ok:false, error } — Node keeps

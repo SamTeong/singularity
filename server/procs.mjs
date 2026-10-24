@@ -11,33 +11,12 @@
 // on Windows; node/esbuild on macOS) scoped to cmdlines under REPO_ROOT —
 // these can orphan and hold node_modules file locks open if their parent
 // (pnpm dev/test) dies or gets killed.
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { liveProcessSnapshot } from './agents.mjs';
 
-const execFileP = promisify(execFile);
-
-// The queued Rust backend owns the child-process execution once index.mjs
-// wires this in (oneshot op: argv-only spawn, windowsHide, 8MB maxBuffer,
-// timeout 0 = no deadline — parity with the scan's optionless execFile).
-// Legacy in-process execFile otherwise, so standalone imports keep working.
 let procsBackend;
 export function setProcsBackend(backend) { procsBackend = backend; }
-
-async function procsExecFile(bin, args, opts) {
-  if (!procsBackend) return execFileP(bin, args, opts);
-  return procsBackend.oneShot(bin, args, { timeout: 0 });
-}
-
-// The terminate itself runs on the Rust backend (procs_kill op — no signal
-// primitive left in Node); legacy process.kill keeps standalone imports working.
-async function killPid(pid) {
-  if (procsBackend) return procsBackend.procsKill(pid);
-  try { process.kill(pid); return { ok: true }; }
-  catch (e) { return { ok: false, error: e.message }; }
-}
 
 const REPO_ROOT = path.resolve(fileURLToPath(import.meta.url), '..', '..');
 const IS_DARWIN = process.platform === 'darwin';
@@ -70,19 +49,7 @@ export async function killClaudePid(pid) {
   const procs = await scanClaude();
   const target = procs.find((p) => p.pid === pid);
   if (!target) return { ok: false, error: 'not a tracked process' };
-  if (target.kind === 'daemon') return { ok: false, error: 'daemon process — cannot stop from here' };
-  if (IS_DARWIN) {
-    // Re-verify by re-scanning: the scan above found the pid only if it's
-    // still a claude process. Skip the CIM re-query (Windows-only primitive);
-    // the small TOCTOU gap before the kill is unavoidable on darwin too.
-    return killPid(pid);
-  }
   try {
-    const { stdout } = await procsExecFile('powershell.exe', [
-      '-NoProfile', '-NonInteractive', '-Command',
-      `[bool](Get-CimInstance Win32_Process -Filter "ProcessId=${pid} AND Name='${target.name}'")`,
-    ], { windowsHide: true });
-    if (stdout.trim() !== 'True') return { ok: false, error: 'process changed before kill' };
+    return await procsBackend.procsKillGuarded(pid, target.name, target.kind, IS_DARWIN);
   } catch (e) { return { ok: false, error: e.message }; }
-  return killPid(pid);
 }

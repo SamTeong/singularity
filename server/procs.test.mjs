@@ -11,7 +11,7 @@ process.env.USERPROFILE = process.env.HOME;
 const { killClaudePid, scanClaude, setProcsBackend } = await import('./procs.mjs'); // dynamic: app-dir.mjs needs the env var above
 const { create, liveProcessSnapshot, remove, setPtyBackend } = await import('./agents.mjs');
 
-const row = (pid, cmd) => ({ pid, ppid: 1, name: 'claude.exe', started: null, cmd });
+const row = (pid, cmd) => ({ pid, ppid: 1, name: 'claude.exe', started: null, cmd, kind: 'tracked' });
 const SID = 'b7025c66-c765-479d-865c-e507a677db55';
 const REPO_ROOT = resolve(fileURLToPath(import.meta.url), '..', '..');
 
@@ -43,7 +43,7 @@ test('registry snapshot follows completed Rust scan and passes Node host pid', a
       assert.notEqual(hostPid, snapshot.rust_pid);
       return [];
     },
-    async oneShot() { return { stdout: '' }; },
+    async procsKillGuarded() { return { ok: true }; },
     async procsKill() { return { ok: true }; },
   };
   setProcsBackend(backend);
@@ -61,13 +61,23 @@ test('registry snapshot follows completed Rust scan and passes Node host pid', a
 // --- guarded kill through the Rust backend (scan, re-query and kill recorded) ---
 function mockBackend(classifications, stdouts = []) {
   const kills = [];
+  const guards = [];
   const outputQueue = [...stdouts];
   const classificationQueue = [...classifications];
   return {
     kills,
+    guards,
     async procsScanRaw() { return { platform: 'windows', rows: [], alive: [] }; },
     async procsClassify() { return classificationQueue.shift(); },
-    async oneShot() { return { stdout: outputQueue.shift() }; },
+    async procsKillGuarded(pid, name, kind, isDarwin) {
+      guards.push({ pid, name, kind, isDarwin });
+      if (kind === 'daemon') return { ok: false, error: 'daemon process — cannot stop from here' };
+      if (isDarwin || outputQueue.shift()?.trim() === 'True') {
+        kills.push(pid);
+        return { ok: true };
+      }
+      return { ok: false, error: 'process changed before kill' };
+    },
     async procsKill(pid) { kills.push(pid); return { ok: true }; },
   };
 }
@@ -78,6 +88,19 @@ test('kill guard: unknown pid never reaches the backend kill', async () => {
   try {
     assert.deepEqual(await killClaudePid(999), { ok: false, error: 'not a tracked process' });
     assert.equal(backend.kills.length, 0);
+    assert.equal(backend.guards.length, 0);
+  } finally { setProcsBackend(null); }
+});
+
+test('kill guard: duplicate PID authorization uses the first classified row', async () => {
+  const backend = mockBackend([[
+    { ...row(4323, 'first'), name: 'first.exe' },
+    { ...row(4323, 'second'), name: 'second.exe' },
+  ]], ['True']);
+  setProcsBackend(backend);
+  try {
+    assert.deepEqual(await killClaudePid(4323), { ok: true });
+    assert.deepEqual(backend.guards, [{ pid: 4323, name: 'first.exe', kind: 'tracked', isDarwin: process.platform === 'darwin' }]);
   } finally { setProcsBackend(null); }
 });
 
@@ -88,6 +111,7 @@ test('kill guard: daemon-kind rows are refused', async () => {
   try {
     assert.deepEqual(await killClaudePid(4322), { ok: false, error: 'daemon process — cannot stop from here' });
     assert.equal(backend.kills.length, 0);
+    assert.deepEqual(backend.guards, [{ pid: 4322, name: 'node.exe', kind: 'daemon', isDarwin: process.platform === 'darwin' }]);
   } finally { setProcsBackend(null); }
 });
 
@@ -98,6 +122,7 @@ test('kill guard: win32 TOCTOU re-query gates the backend kill', { skip: process
   try {
     assert.deepEqual(await killClaudePid(4321), { ok: true });
     assert.deepEqual(backend.kills, [4321]);
+    assert.deepEqual(backend.guards, [{ pid: 4321, name: 'claude.exe', kind: 'tracked', isDarwin: false }]);
     // re-query answers False => the pid changed under us, no kill
     const changed = mockBackend([[target]], ['False']);
     setProcsBackend(changed);

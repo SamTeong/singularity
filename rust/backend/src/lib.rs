@@ -28,6 +28,7 @@ pub mod oneshot;
 pub mod plans;
 pub mod procs;
 pub mod procs_discovery;
+pub mod procs_guard;
 pub mod provider_usage;
 pub mod pty;
 pub(crate) mod retry_after;

@@ -1680,6 +1680,49 @@ test('Rust Ollama config bridge preserves its private payloads and stable filesy
   }
 });
 
+test('Rust guarded process kill bridge sends the selected row fields and formats query failures like oneShot', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  const responses = [
+    { ok: false, error: 'process changed before kill' },
+    { oneshot_failure: { ok: false, error: 'spawn failed', stderr: '', timed_out: false }, bin: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-Command', 'exact query'], timeout_ms: 0 },
+    { oneshot_failure: { ok: false, stderr: 'first\nlast stderr\n', timed_out: false }, bin: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-Command', 'exact query'], timeout_ms: 0 },
+    { oneshot_failure: { ok: false, stderr: '', timed_out: true }, bin: 'powershell.exe', args: ['-NoProfile', '-NonInteractive', '-Command', 'exact query'], timeout_ms: 0 },
+  ];
+  child.stdin.write = (chunk, callback) => {
+    const request = JSON.parse(String(chunk));
+    requests.push(request);
+    if (request.op === 'procs_kill_guarded') {
+      const response = responses.shift();
+      queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: request.id, response })}\n`));
+    }
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  try {
+    await backend.start();
+    assert.deepEqual(await backend.procsKillGuarded(4321, 'claude.exe', 'tracked', false), { ok: false, error: 'process changed before kill' });
+    await assert.rejects(backend.procsKillGuarded(4321, 'claude.exe', 'tracked', false), /^Error: Command failed: powershell.exe -NoProfile -NonInteractive -Command exact query$/);
+    await assert.rejects(backend.procsKillGuarded(4321, 'claude.exe', 'tracked', false), /^Error: Command failed: powershell.exe -NoProfile -NonInteractive -Command exact query\nlast stderr$/);
+    await assert.rejects(backend.procsKillGuarded(4321, 'claude.exe', 'tracked', false), /^Error: Command timed out after 0ms: powershell.exe -NoProfile -NonInteractive -Command exact query$/);
+    assert.deepEqual(requests.map(({ op, pid, name, kind, is_darwin }) => [op, pid, name, kind, is_darwin]), [
+      ['procs_kill_guarded', 4321, 'claude.exe', 'tracked', false],
+      ['procs_kill_guarded', 4321, 'claude.exe', 'tracked', false],
+      ['procs_kill_guarded', 4321, 'claude.exe', 'tracked', false],
+      ['procs_kill_guarded', 4321, 'claude.exe', 'tracked', false],
+    ]);
+  } finally { await backend.stop(); }
+});
+
 test('Rust process classifier bridge uses the supplied post-query identity snapshot', async () => {
   const backend = createRustBackend();
   try {
