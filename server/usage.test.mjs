@@ -1060,6 +1060,30 @@ test('getUsage: a forced Claude 429 is an error payload, not a stale reading', a
   }
 });
 
+test('getUsage: Claude transient retries are one Rust bridge operation', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-rust-retry=${Date.now()}`);
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
+  try {
+    writeCreds({ accessToken: 'retry-token', expiresAt: Date.now() + 3_600_000 });
+    clearClaudeLocal();
+    let bridgeCalls = 0;
+    isolated.setUsageClaudeBackend({
+      ...claudeFixtureBackend,
+      async claudeUsageFetch() {
+        bridgeCalls += 1;
+        return { kind: 'response', status: 503, retry_after: null, body: { ok: null } };
+      },
+    });
+    const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, false);
+    assert.equal(bridgeCalls, 1);
+  } finally {
+    if (originalCredentials) writeFileSync(credentialsFile, originalCredentials);
+    else rmSync(credentialsFile, { force: true });
+  }
+});
+
 // …unless a local reading exists at all. The 120s gate rejects an older one for
 // freshness, but once the API is out of reach that reading is the only thing the
 // card can show, and an empty error card is strictly worse. Runs with the 429

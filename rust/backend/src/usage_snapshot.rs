@@ -186,7 +186,7 @@ fn local_month(epoch_ms: i64) -> Option<String> {
     Some(format!("{year:04}-{month:02}"))
 }
 
-fn parse_date_ms(value: &str) -> Option<i64> {
+pub(crate) fn parse_date_ms(value: &str) -> Option<i64> {
     if let Ok(dt) = OffsetDateTime::parse(value, &Rfc3339) {
         return i64::try_from(dt.unix_timestamp_nanos() / 1_000_000).ok();
     }

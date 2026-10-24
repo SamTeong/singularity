@@ -564,7 +564,10 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
   const accessToken = String(oauth.accessToken);
   const safeError = (error) => String(error?.message ?? error).split(accessToken).join('[redacted]');
   try {
+    // Rust owns the transient retry loop; keep this one bridge operation
+    // inside fetchExternal's existing timeout/queued-abort boundary.
     resp = await fetchExternal(USAGE_API_URL, { method: 'GET' }, {
+      retry: false,
       timeoutMs: REQ_TIMEOUT_MS,
       fetcher: async (url, options) => {
         if (url !== USAGE_API_URL || options.method !== 'GET') throw new Error('fetch failed');

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { fetchExternal, isRetryableResponse, retryAfterMs } from './external-fetch.mjs';
 
 test('retry classification covers transient responses only', () => {
@@ -13,6 +14,13 @@ test('Retry-After accepts delta seconds and HTTP dates', () => {
   assert.equal(retryAfterMs('Wed, 21 Oct 2015 07:28:00 GMT', Date.parse('Wed, 21 Oct 2015 07:27:58 GMT')), 2_000);
   assert.equal(retryAfterMs('March 1, 2030', Date.parse('March 1, 2030') - 2_000), 2_000);
   assert.equal(retryAfterMs('invalid'), null);
+});
+
+test('Retry-After shared vectors match the supported Node oracle', () => {
+  const vectors = JSON.parse(readFileSync(new URL('./fixtures/retry-after-parity.json', import.meta.url), 'utf8'));
+  for (const { value, anchor, expected } of vectors) {
+    assert.equal(retryAfterMs(value, anchor), expected === 'Infinity' ? Infinity : expected, String(value));
+  }
 });
 
 test('fetchExternal anchors Retry-After to response time and preserves JavaScript parsing', async () => {

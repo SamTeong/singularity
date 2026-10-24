@@ -30,6 +30,7 @@ pub mod procs;
 pub mod procs_discovery;
 pub mod provider_usage;
 pub mod pty;
+pub(crate) mod retry_after;
 pub mod rules;
 pub mod skills;
 pub mod status;
