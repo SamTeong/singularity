@@ -108,9 +108,49 @@ test('history window toggle: 7d re-fetches with window=7d and labels local midni
   await expect(chart).toBeVisible();
   await expect(chart.getByText(/^(Mon|Tue|Wed|Thu|Fri|Sat|Sun) \d{1,2}$/).first()).toBeVisible();
   await expect(chart.getByTestId('usage-peak')).toHaveText('46%');
+  await expect(chart.getByText('5h %')).toBeVisible();
+
+  // Legend pills toggle series visibility. Empty selection = all visible, so a
+  // first click solos that series; clicking the other adds it back.
+  const pill = (name) => chart.getByRole('button', { name, exact: true });
+  // A hidden series keeps its slot but renders an empty path (`d=""`), so count
+  // only paths that actually carry a line.
+  const lines = chart.locator('path.MuiLineChart-line:not([d=""])');
+  await expect(pill('7d %')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pill('5h %')).toHaveAttribute('aria-pressed', 'true');
+  await expect(lines).toHaveCount(2);
+
+  await pill('5h %').click();
+  await expect(pill('5h %')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pill('7d %')).toHaveAttribute('aria-pressed', 'false');
+  await expect(lines).toHaveCount(1);
+
+  await pill('7d %').click();
+  await expect(pill('7d %')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pill('5h %')).toHaveAttribute('aria-pressed', 'true');
+  await expect(lines).toHaveCount(2);
+
+  await pill('5h %').click();
+  await expect(pill('7d %')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pill('5h %')).toHaveAttribute('aria-pressed', 'false');
+  await expect(lines).toHaveCount(1);
+
+  await pill('7d %').click();
+  await expect(pill('7d %')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pill('5h %')).toHaveAttribute('aria-pressed', 'true');
+  await expect(lines).toHaveCount(2);
 
   await page.getByRole('button', { name: '5h', exact: true }).click();
-  await expect(page.getByRole('figure', { name: '5h history chart' })).toBeVisible();
+  const chart5 = page.getByRole('figure', { name: '5h history chart' });
+  await expect(chart5).toBeVisible();
+
+  // A session pill solos its own stack; the others dim and drop out.
+  const pill5 = (name) => chart5.getByRole('button', { name, exact: true });
+  await pill5('wiki · s2').click();
+  await expect(pill5('wiki · s2')).toHaveAttribute('aria-pressed', 'true');
+  await expect(pill5('singularity · s1')).toHaveAttribute('aria-pressed', 'false');
+  await expect(pill5('Unattributed')).toHaveAttribute('aria-pressed', 'false');
+  await expect(chart5.locator('path.MuiLineChart-line:not([d=""])')).toHaveCount(1);
 });
 
 test('usage Refresh triggers GET /usage with force=1', async ({ page }) => {
