@@ -96,6 +96,15 @@ pub fn read_pricing(path: &str) -> Box<RawValue> {
     ))
 }
 
+/// Create the configured pricing parent and directly replace pricing.json.
+pub fn write_pricing(path: &str, text: &str) -> Result<(), String> {
+    let target = std::path::Path::new(path);
+    if let Some(parent) = target.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(target, text).map_err(|error| error.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use serde_json::json;
@@ -131,6 +140,17 @@ mod tests {
 
     fn value(path: &str) -> Value {
         serde_json::from_str(read_pricing(path).get()).unwrap()
+    }
+
+    #[test]
+    fn writer_creates_parents_overwrites_and_reports_io_failure() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("nested/state/pricing.json");
+        write_pricing(path.to_str().unwrap(), "{\"base\":{}}\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{\"base\":{}}\n");
+        write_pricing(path.to_str().unwrap(), "{}\n").unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "{}\n");
+        assert!(write_pricing(fixture.0.to_str().unwrap(), "{}\n").is_err());
     }
 
     #[test]

@@ -43,7 +43,7 @@ import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron }
 import { initWindowAnchor, snapshotWindowAnchor, pokeProvider } from './window-anchor.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
 import { setModelsBackend } from './model-store.mjs';
-import { getModelPricesPath, putModelPrices } from './model-prices.mjs';
+import { createModelPricesPutHandler, getModelPricesPath } from './model-prices.mjs';
 import { registerTranscriptRoutes } from './transcript-routes.mjs';
 import { setCodexIdentityBackend } from './codex-thread.mjs';
 
@@ -504,14 +504,10 @@ app.post('/models/restore-defaults', modelHandlers.restore);
 // harness-usage-report price overrides (Settings > Models > Prices). Reads
 // and writes the skill's own pricing.json manual override directly — see model-prices.mjs.
 app.get('/models/prices', createModelPricesHandler(rustBackend, getModelPricesPath(), app.log));
-app.put('/models/prices', async (req, reply) => {
-  try {
-    return putModelPrices(req.body);
-  } catch (e) {
-    reply.code(400);
-    return { error: e.message };
-  }
-});
+app.put('/models/prices', createModelPricesPutHandler(
+  (path, text) => rustBackend.modelPricesWrite(path, text),
+  getModelPricesPath(),
+));
 
 // Home dir, for the client to collapse full paths to `~` on display. Same
 // source as the window.__SING_HOME__ injection above — see displayHome().

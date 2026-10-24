@@ -556,18 +556,71 @@ test('Rust pricing read normalizes the explicit path without writing and maps tr
   const root = await mkdtemp(join(tmpdir(), 'singularity-rust-prices-'));
   process.env.SINGULARITY_HOME = root;
   process.env.USAGE_REPORT_STATE = join(root, 'selected');
-  const { getModelPricesForUsageHistory, getModelPricesPath } = await import('./model-prices.mjs');
+  const { createModelPricesPutHandler, getModelPricesForUsageHistory, getModelPricesPath } = await import('./model-prices.mjs');
   const missing = join(root, 'selected', 'pricing.json');
   assert.equal(getModelPricesPath(), missing);
   const backend = createRustBackend();
   const app = Fastify();
   app.get('/api/models/prices', createModelPricesHandler(backend, missing, app.log));
+  let writeDispatches = 0;
+  const productionPutHandler = createModelPricesPutHandler(
+    (path, text) => { writeDispatches += 1; return backend.modelPricesWrite(path, text); }, getModelPricesPath(),
+  );
+  app.put('/api/models/prices', productionPutHandler);
+  const blocked = join(root, 'blocked');
+  await writeFile(blocked, 'file blocks parent directory creation');
+  app.put('/api/models/prices-failure', createModelPricesPutHandler(
+    (path, text) => backend.modelPricesWrite(path, text), join(blocked, 'pricing.json'),
+  ));
+  let releaseWrite;
+  let writeStarted;
+  const started = new Promise((resolve) => { writeStarted = resolve; });
+  const blockedWrite = new Promise((resolve) => { releaseWrite = resolve; });
+  app.put('/api/models/prices-completion', createModelPricesPutHandler(async (path, text) => {
+    writeStarted();
+    await blockedWrite;
+    await backend.modelPricesWrite(path, text);
+  }, missing));
   try {
     await backend.start();
     const absent = await app.inject({ url: '/api/models/prices' });
     assert.equal(absent.statusCode, 200);
     assert.deepEqual(absent.json(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
     await assert.rejects(access(missing));
+
+    const submitted = {
+      base: { opus: [15, 75, 1.5, 18.75] }, above_200k: {},
+      long_context_threshold: 200000, default_key: '', path: join(root, 'attacker.json'),
+    };
+    const saved = await app.inject({ method: 'PUT', url: '/api/models/prices', payload: submitted });
+    const expected = { base: submitted.base, above_200k: {}, long_context_threshold: 200000, default_key: '' };
+    assert.equal(saved.statusCode, 200);
+    assert.deepEqual(saved.json(), expected);
+    assert.equal(await readFile(missing, 'utf8'), JSON.stringify(expected, null, 2));
+    assert.deepEqual(getModelPricesForUsageHistory(), expected);
+    await assert.rejects(access(join(root, 'attacker.json')));
+
+    let responseSettled = false;
+    const pendingResponse = app.inject({ method: 'PUT', url: '/api/models/prices-completion', payload: submitted })
+      .then((response) => { responseSettled = true; return response; });
+    await started;
+    assert.equal(responseSettled, false);
+    releaseWrite();
+    const completedResponse = await pendingResponse;
+    assert.equal(completedResponse.statusCode, 200);
+    assert.equal(responseSettled, true);
+
+    const savedBytes = await readFile(missing);
+    const dispatchesBeforeInvalid = writeDispatches;
+    const invalid = await app.inject({ method: 'PUT', url: '/api/models/prices', payload: { ...submitted, long_context_threshold: 0 } });
+    assert.equal(invalid.statusCode, 400);
+    assert.deepEqual(invalid.json(), { error: 'long_context_threshold must be a positive integer' });
+    assert.equal(writeDispatches, dispatchesBeforeInvalid);
+    assert.deepEqual(await readFile(missing), savedBytes);
+    const failedWrite = await app.inject({ method: 'PUT', url: '/api/models/prices-failure', payload: expected });
+    assert.equal(failedWrite.statusCode, 400);
+    assert.equal(typeof failedWrite.json().error, 'string');
+    assert.ok(failedWrite.json().error.length > 0);
 
     await mkdir(join(root, 'selected'), { recursive: true });
     const raw = '{"base":{"z":[1,2,3,4],"a":[5,6,7,8]},"above_200k":null,"long_context_threshold":12.0,"default_key":7}';

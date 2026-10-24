@@ -382,6 +382,13 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       });
     },
 
+    modelPricesWrite(path, text) {
+      return request({ op: 'model_prices_write', path, pricing_text: text }).then((payload) => {
+        if (payload.error) throw new Error(payload.error);
+        return payload.ok === true;
+      });
+    },
+
     modelsGet(path) {
       return request({ op: 'models_get', path });
     },

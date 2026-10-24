@@ -4,7 +4,7 @@
 // Schema: { base, above_200k, long_context_threshold, default_key } (rates are
 // [input, output, cacheRead, cacheWrite] $/MTok). `base`'s key order is match
 // order (first key that's a substring of the model id wins).
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { USAGE_SKILL_STATE } from './app-dir.mjs';
 
@@ -81,11 +81,19 @@ export function getModelPricesPath() {
   return PRICING_JSON;
 }
 
-// PUT /api/models/prices — validate + write pricing.json (2-space JSON) in
-// full; the caller always sends the whole doc, so a plain overwrite is safe.
-export function putModelPrices(body) {
-  const doc = validate(body);
-  mkdirSync(USAGE_SKILL_STATE, { recursive: true });
-  writeFileSync(PRICING_JSON, JSON.stringify(doc, null, 2));
-  return doc;
+export function validateModelPrices(body) { return validate(body); }
+
+// Shared by the production route and fixture so the configured destination,
+// validation, serialization, and response timing use one implementation.
+export function createModelPricesPutHandler(writePricing, configuredPath) {
+  return async (req, reply) => {
+    try {
+      const doc = validateModelPrices(req.body);
+      await writePricing(configuredPath, JSON.stringify(doc, null, 2));
+      return doc;
+    } catch (error) {
+      reply.code(400);
+      return { error: error.message };
+    }
+  };
 }

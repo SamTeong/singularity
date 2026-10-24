@@ -31,6 +31,8 @@ struct Request {
     #[serde(default)]
     ollama_config_text: Value,
     #[serde(default)]
+    pricing_text: Value,
+    #[serde(default)]
     credential_handle: Value,
     #[serde(default)]
     access_token: Value,
@@ -737,6 +739,17 @@ fn main() -> io::Result<()> {
                 }
                 None => serde_json::json!({ "error": "pricing path missing" }),
             },
+            Ok(request) if request.op == "model_prices_write" => {
+                match (request.path.as_str(), request.pricing_text.as_str()) {
+                    (Some(path), Some(text)) => {
+                        match singularity_backend::model_prices::write_pricing(path, text) {
+                            Ok(()) => serde_json::json!({ "ok": true }),
+                            Err(error) => serde_json::json!({ "error": error }),
+                        }
+                    }
+                    _ => serde_json::json!({ "error": "pricing path or text missing" }),
+                }
+            }
             Ok(request) if request.op == "models_get" => {
                 singularity_backend::models::get(request.path.as_str().unwrap_or(""))
             }
