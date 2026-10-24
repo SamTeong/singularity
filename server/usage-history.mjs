@@ -106,6 +106,8 @@ let lastArchive = null;
 function readTotals(provider, windowKey) {
   const { file } = TOTALS[provider];
   const win = TOTALS[provider].win[windowKey];
+  // 7d rows also carry the 5h %, the chart's second series; 5h rows stay as-is.
+  const win5 = windowKey === '7d' ? TOTALS[provider].win['5h'] : null;
   const bytes = windowKey === '7d' ? WEEK_TAIL_BYTES : TAIL_BYTES;
   const path = join(USAGE_SKILL_STATE, file);
   let lines = tailRows(path, bytes);
@@ -120,11 +122,12 @@ function readTotals(provider, windowKey) {
   const rows = [];
   for (const r of lines) {
     const w = win(r);
+    const w5 = win5?.(r);
     const t = Date.parse(r.fetched_at);
     if (!Number.isFinite(w?.utilization) || Number.isNaN(t)) continue;
     // Old Codex rows carry resets_at as epoch seconds.
     const resetsAt = typeof w.resets_at === 'number' ? w.resets_at * 1000 : w.resets_at ? Date.parse(w.resets_at) : NaN;
-    rows.push({ t, pct: w.utilization, resetsAt: Number.isNaN(resetsAt) ? null : resetsAt });
+    rows.push({ t, pct: w.utilization, pct5h: Number.isFinite(w5?.utilization) ? w5.utilization : null, resetsAt: Number.isNaN(resetsAt) ? null : resetsAt });
   }
   return rows.sort((a, b) => a.t - b.t);
 }
@@ -449,7 +452,7 @@ function buildDoc(provider, windowKey, rows, resetsAt, start, estimated, now, fi
   let points = rows.filter((r) => r.t >= start && r.t <= resetsAt);
   if (windowKey === '7d') points = points.filter((p, i) => Math.floor(p.t / WEEK_BUCKET_MS) !== Math.floor((points[i + 1]?.t ?? Infinity) / WEEK_BUCKET_MS));
   const doc = { provider, window: windowKey, windowStart: new Date(start).toISOString(), resetsAt: new Date(resetsAt).toISOString(), estimated };
-  if (!estimated) return { ...doc, points: points.map((p) => ({ ts: new Date(p.t).toISOString(), pct: p.pct, sessions: {} })), sessions: [] };
+  if (!estimated) return { ...doc, points: points.map((p) => ({ ts: new Date(p.t).toISOString(), pct: p.pct, ...(windowKey === '7d' ? { pct5h: p.pct5h ?? null } : {}), sessions: {} })), sessions: [] };
   // Statusline rows (every turn) fill the sparse snapshots: keep this window's (resets_at
   // within 60s: snapshots carry fractions), then collapse consecutive equal readings.
   const costPoints = [];
