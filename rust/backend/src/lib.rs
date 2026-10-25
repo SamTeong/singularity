@@ -45,6 +45,7 @@ pub mod usage_auth;
 pub mod usage_report;
 pub mod usage_snapshot;
 pub mod wiki_read;
+pub mod wiki_root;
 pub mod window_anchor;
 
 const FILE_CAP: usize = 2000;

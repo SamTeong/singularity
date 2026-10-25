@@ -273,6 +273,22 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ ...inputs, op: 'transcript_root_set', transcript_root: root });
     },
 
+    wikiRootGet(inputs) {
+      return request({ ...inputs, op: 'wiki_root_get' });
+    },
+
+    wikiRootSet(inputs, root) {
+      return request({ ...inputs, op: 'wiki_root_set', root });
+    },
+
+    wikiRootAuthorize(inputs, root, path) {
+      return request({ ...inputs, op: 'wiki_root_authorize', root, path });
+    },
+
+    wikiRootAvailable(inputs) {
+      return request({ ...inputs, op: 'wiki_root_available' });
+    },
+
     transcriptsList(inputs, options) {
       return request({ ...inputs, ...options, op: 'transcripts_list' });
     },

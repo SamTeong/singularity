@@ -200,6 +200,9 @@ fn main() -> io::Result<()> {
             reap_one_shot(result, &mut one_shot_request_ids, &stdout, &shutting_down)?;
         }
         one_shot_active = !one_shot_request_ids.is_empty();
+        if dispatch_wiki_wire_line(&stdout, &line)? {
+            continue;
+        }
         if let Ok(request) = serde_json::from_str::<SnapshotWireRequest>(&line) {
             if request.op == "provider_usage_snapshot" {
                 let id = request.id.clone();
@@ -1063,6 +1066,23 @@ fn write_response_line<W: Write>(
     stdout.flush()
 }
 
+fn dispatch_wiki_wire_line<W: Write>(stdout: &Mutex<W>, line: &str) -> io::Result<bool> {
+    let Ok(Some(request)) = singularity_backend::wiki_root::parse_wire_request(line) else {
+        return Ok(false);
+    };
+    let id = request.id.clone();
+    let raw = singularity_backend::wiki_root::dispatch_wire(&request).unwrap_or_else(|error| {
+        serde_json::to_string(&serde_json::json!({"error": error})).unwrap()
+    });
+    let body = RawValue::from_string(raw).expect("Wiki response is valid JSON");
+    write_response_line(
+        stdout,
+        id.as_ref(),
+        singularity_backend::transcript_bridge::ResponseBody::Raw(body),
+    )?;
+    Ok(true)
+}
+
 fn write_status_line<W: Write>(
     stdout: &Mutex<W>,
     shutting_down: &AtomicBool,
@@ -1197,5 +1217,41 @@ mod transcript_framing_tests {
         assert_eq!(request.q.as_str(), Some("wiki-query"));
         assert_eq!(request.transcript.root.as_deref(), Some("claude-root"));
         assert_eq!(request.transcript.q_units.as_deref(), Some(&[0xd800][..]));
+    }
+}
+
+#[cfg(test)]
+mod wiki_root_wire_framing_tests {
+    use super::*;
+
+    #[test]
+    fn selected_raw_wiki_dispatch_keeps_correlated_surrogate_response() {
+        let base = std::env::temp_dir().join(format!("wiki-wire-{}", std::process::id()));
+        let state = base.join("state.json");
+        let home = base.join("home");
+        let request_text = format!(
+            r#"{{"op":"wiki_root_set","id":"wiki-raw","state_file":{},"home":{},"root":"\ud800","ignored":1e400,"\ud800":18446744073709551616}}"#,
+            serde_json::to_string(&state).unwrap(),
+            serde_json::to_string(&home).unwrap()
+        );
+        let stdout = Mutex::new(Vec::<u8>::new());
+        assert!(dispatch_wiki_wire_line(&stdout, &request_text).unwrap());
+        let response = String::from_utf8(stdout.into_inner().unwrap()).unwrap();
+        assert!(response.contains(r#""id":"wiki-raw","response":{"ok":true,"root":"\ud800"}"#));
+        std::fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn wiki_line_boundary_ignores_other_ops_and_correlates_known_bad_request() {
+        let unrelated = Mutex::new(Vec::<u8>::new());
+        assert!(
+            !dispatch_wiki_wire_line(&unrelated, r#"{"op":"sysstats_get","id":"other"}"#).unwrap()
+        );
+        assert!(unrelated.into_inner().unwrap().is_empty());
+
+        let bad = Mutex::new(Vec::<u8>::new());
+        assert!(dispatch_wiki_wire_line(&bad, r#"{"op":"wiki_root_get","id":"bad"}"#).unwrap());
+        let response = String::from_utf8(bad.into_inner().unwrap()).unwrap();
+        assert!(response.contains(r#""id":"bad","response":{"error":"bad request"}"#));
     }
 }

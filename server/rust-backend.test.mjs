@@ -1913,3 +1913,43 @@ test('picker roots bridge sends explicit paths, filters before JSON serializatio
     assert.equal(new Set(requests.map((request) => request.id)).size, requests.length);
   } finally { await backend.stop(); }
 });
+
+test('Wiki root bridge sends every operation through correlated raw JSON requests', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough(); child.stdout = new PassThrough(); child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    const sent = JSON.parse(String(chunk));
+    requests.push(sent);
+    const response = sent.op === 'wiki_root_get' ? { root: '\ud800' }
+      : sent.op === 'wiki_root_authorize' ? { authorized: true }
+        : sent.op === 'wiki_root_available' ? { available: true }
+          : { ok: true, root: sent.root };
+    queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: sent.id, response })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  const inputs = { state_file: 'C:/state/wiki-root.json', home: 'C:/Users/test', cwd: 'C:/repo', drive_cwds: [{ drive: 'D', path: 'D:/cwd' }] };
+  try {
+    await backend.start();
+    assert.deepEqual(await backend.wikiRootGet(inputs), { root: '\ud800' });
+    assert.deepEqual(await backend.wikiRootSet(inputs, '\ud800'), { ok: true, root: '\ud800' });
+    assert.deepEqual(await backend.wikiRootAuthorize(inputs, '\ud800', 'D:/wiki/\ud800.md'), { authorized: true });
+    assert.deepEqual(await backend.wikiRootAvailable(inputs), { available: true });
+    assert.deepEqual(requests.map(({ op }) => op), ['wiki_root_get', 'wiki_root_set', 'wiki_root_authorize', 'wiki_root_available']);
+    for (const request of requests) {
+      assert.equal(request.state_file, inputs.state_file);
+      assert.equal(request.home, inputs.home);
+      assert.equal(request.cwd, inputs.cwd);
+      assert.deepEqual(request.drive_cwds, inputs.drive_cwds);
+    }
+    assert.equal(requests[2].path, 'D:/wiki/\ud800.md');
+    assert.equal(new Set(requests.map(({ id }) => id)).size, 4);
+  } finally { await backend.stop(); }
+});

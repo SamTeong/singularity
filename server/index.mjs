@@ -20,7 +20,7 @@ import { searchMemory, listFiles, readMemoryFile, createMemoryWriteHandler, getM
 import { getRulesRoots, setRulesRoots, readRuleFile, createRuleWriteHandler, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } from './rules.mjs';
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
 import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
-import { getWikiRoot, setWikiRoot, resolveRoot, isWikiPath } from './wiki.mjs';
+import { resolveRoot } from './wiki.mjs';
 import { createRustBackend, createWikiGraphHandler, createModelsHandlers } from './rust-backend.mjs';
 import { createRustPtyBackend } from './rust-pty-backend.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
@@ -45,6 +45,7 @@ import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, re
 import { setModelsBackend } from './model-store.mjs';
 import { createModelPricesPutHandler, getModelPricesPath } from './model-prices.mjs';
 import { registerTranscriptRoutes } from './transcript-routes.mjs';
+import { registerWikiRoutes, wikiAvailable } from './wiki-routes.mjs';
 import { setCodexIdentityBackend } from './codex-thread.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -520,13 +521,7 @@ app.get('/env', async () => ({ home: displayHome() }));
 // opaquely. No secrets — just boolean availability + a human hint per feature.
 // Not token-gated (mirrors /health) so the shell can render hints pre-auth.
 app.get('/capabilities', async () => {
-  const wikiRoot = getWikiRoot();
-  const wikiAbs = resolveRoot(wikiRoot);
-  let wikiAvailable = false;
-  if (wikiAbs && existsSync(wikiAbs)) {
-    try { wikiAvailable = readdirSync(wikiAbs, { withFileTypes: true }).some((d) => d.isDirectory() && !d.name.startsWith('.')); }
-    catch { wikiAvailable = false; }
-  }
+  const wikiIsAvailable = await wikiAvailable(rustBackend);
   const usageReportAvailable = !!(process.env.SING_USAGE_SKILL && existsSync(process.env.SING_USAGE_SKILL));
   return {
     ollama:      { available: !!reg.OLLAMA_BIN, hint: 'Set OLLAMA_BIN in .env to enable Ollama model spawns.' },
@@ -534,7 +529,7 @@ app.get('/capabilities', async () => {
     codexSpawn:  { available: !!reg.CODEX_BIN, hint: 'Set CODEX_BIN in .env to enable Codex agent/task spawns.' },
     skillScopes: { available: !!(process.env.SING_SCOPE_ROOT && existsSync(process.env.SING_SCOPE_ROOT)), hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
     usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
-    wiki:        { available: wikiAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
+    wiki:        { available: wikiIsAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
     plans:       { available: PLAN_ROOT != null, hint: 'Set SING_PLANS_ROOT in .env to enable the Plans view.' },
     token:       { available: !!process.env.SING_TOKEN, hint: 'Set SING_TOKEN in .env to require an auth token on data endpoints.' },
   };
@@ -788,8 +783,7 @@ app.post('/plans/open', createSessionFolderOpenHandler({ resolveSessionDirectory
 // Wiki: recursive .md browse + search + read-only file view under a client-
 // selected root (default ~/wiki). No write — wikis are LLM-authored.
 // FS-persisted wiki root choice (survives browser cache clear).
-app.get('/wiki/root', async () => ({ root: getWikiRoot() }));
-app.put('/wiki/root', async (req) => setWikiRoot(req.body?.root));
+registerWikiRoutes(app, rustBackend);
 app.get('/wiki/files', async (req) => rustBackend.files(resolveRoot(req.query.root)));
 app.get('/wiki/sweeps', async (req) => rustBackend.sweeps(typeof req.query.root === 'string' ? req.query.root : null));
 app.get('/wiki/search', async (req) => {
@@ -798,22 +792,6 @@ app.get('/wiki/search', async (req) => {
   return rustBackend.search(q, q ? resolveRoot(req.query.root) : null);
 });
 app.get('/wiki/graph', createWikiGraphHandler(rustBackend, app.log));
-app.get('/wiki/file', async (req, reply) => {
-  if (!isWikiPath(req.query.path, req.query.root)) {
-    reply.code(400);
-    return { ok: false, error: 'path outside wiki root' };
-  }
-  let r;
-  try { r = await rustBackend.readFile(req.query.path); }
-  catch (error) {
-    app.log.error({ err: error.message }, 'Rust wiki file backend failed');
-    reply.code(500);
-    return { ok: false, error: 'wiki file backend unavailable' };
-  }
-  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
-  return r;
-});
-
 // Projects: ordered list of git repo toplevels (STATE_DIR/projects.json),
 // each with an on-demand git status readout. Status never runs `git fetch` —
 // ahead/behind are "as of last fetch"; /projects/git runs fetch/rebase/both on click.
