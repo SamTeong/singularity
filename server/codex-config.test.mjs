@@ -9,7 +9,17 @@ import { join } from 'node:path';
 // (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 process.env.CODEX_HOME = join(process.env.SINGULARITY_HOME, 'codex-home');
-const { readConfig, searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, writeConfig } = await import('./codex-config.mjs');
+const { readConfig, searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, writeConfig, createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend } = await import('./codex-config.mjs');
+let storedRoots = ['~'];
+const rootsBackend = {
+  pickerRootsGet() { return storedRoots.length ? structuredClone(storedRoots) : ['~']; },
+  pickerRootsSet(path, roots) {
+    const clean = [...new Set((roots || []).filter((r) => typeof r === 'string' && r))].slice(0, 50);
+    storedRoots = clean;
+    return { ok: true, roots: clean };
+  },
+};
+setConfigRootsBackend(rootsBackend);
 
 const testBackend = {
   async codexConfigWrite(path, content) {
@@ -19,46 +29,62 @@ const testBackend = {
   },
 };
 
-function makeRoot(toml) {
+async function makeRoot(toml) {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-cdx-'));
   mkdirSync(join(cwd, '.codex'), { recursive: true });
   if (toml != null) writeFileSync(join(cwd, '.codex', 'config.toml'), toml);
-  setConfigRoots([cwd]); // reads/writes are gated by isKnownConfigRoot
+  await setConfigRoots([cwd]); // reads/writes are gated by isKnownConfigRoot
   return cwd;
 }
 
 // Runs first: asserts the seeded default before any makeRoot/setConfigRoots
 // writes the roots file.
-test('codex config roots persist to FS: default ~, dedup, roundtrip', () => {
-  assert.deepEqual(getConfigRoots(), ['~']); // seeded default when file absent
-  const r = setConfigRoots(['~', '/a', '/a', '/b', 123, '']);
+test('codex config roots use the async Rust adapter and preserve default, dedup, roundtrip', async () => {
+  storedRoots = [];
+  assert.deepEqual(await getConfigRoots(), ['~']); // seeded default when file absent
+  const r = await setConfigRoots(['~', '/a', '/a', '/b', 123, '']);
   assert.equal(r.ok, true);
   assert.deepEqual(r.roots, ['~', '/a', '/b']); // deduped, non-strings dropped
-  assert.deepEqual(getConfigRoots(), ['~', '/a', '/b']); // read back from disk
+  assert.deepEqual(await getConfigRoots(), ['~', '/a', '/b']); // read back from bridge
 });
 
-test('searchConfig matches content and reports scope + line', () => {
-  const cwd = makeRoot('model = "gpt-5"\ntheme = "dark"\n');
-  const hits = searchConfig([cwd], 'theme');
+test('codex root handlers preserve route responses and reject bridge failure', async () => {
+  const Fastify = (await import('fastify')).default;
+  const app = Fastify();
+  app.get('/codex-config/roots', createConfigRootsGetHandler(rootsBackend));
+  app.put('/codex-config/roots', createConfigRootsSetHandler(rootsBackend));
+  assert.deepEqual((await app.inject('/codex-config/roots')).json(), { roots: ['~', '/a', '/b'] });
+  const saved = await app.inject({ method: 'PUT', url: '/codex-config/roots', payload: { roots: null } });
+  assert.deepEqual(saved.json(), { ok: true, roots: [] });
+  await app.close();
+  const failed = Fastify();
+  failed.get('/codex-config/roots', createConfigRootsGetHandler({ async pickerRootsGet() { throw new Error('bridge down'); } }));
+  assert.equal((await failed.inject('/codex-config/roots')).statusCode, 500);
+  await failed.close();
+});
+
+test('searchConfig matches content and reports scope + line', async () => {
+  const cwd = await makeRoot('model = "gpt-5"\ntheme = "dark"\n');
+  const hits = await searchConfig([cwd], 'theme');
   const project = hits.find((h) => h.cwd === cwd && h.scope === 'project');
   assert.ok(project, 'project scope hit');
   assert.equal(project.line, 2);
   assert.match(project.text, /theme/);
 });
 
-test('searchConfig is case-insensitive and skips non-matches', () => {
-  const cwd = makeRoot('model = "x"\n');
-  assert.equal(searchConfig([cwd], 'MODEL').some((h) => h.scope === 'project'), true);
+test('searchConfig is case-insensitive and skips non-matches', async () => {
+  const cwd = await makeRoot('model = "x"\n');
+  assert.equal((await searchConfig([cwd], 'MODEL')).some((h) => h.scope === 'project'), true);
 });
 
-test('searchConfig dedups shared paths across repeated roots', () => {
-  const cwd = makeRoot('theme = "dark"\n');
-  const hits = searchConfig([cwd, cwd], 'theme');
+test('searchConfig dedups shared paths across repeated roots', async () => {
+  const cwd = await makeRoot('theme = "dark"\n');
+  const hits = await searchConfig([cwd, cwd], 'theme');
   assert.equal(hits.filter((h) => h.scope === 'project' && h.cwd === cwd).length, 1);
 });
 
-test('searchConfig empty query returns nothing', () => {
-  assert.deepEqual(searchConfig(['/whatever'], ''), []);
+test('searchConfig empty query returns nothing', async () => {
+  assert.deepEqual(await searchConfig(['/whatever'], ''), []);
 });
 
 test('findConfigRoots finds nested dirs holding .codex/config.toml, skips others', () => {
@@ -81,8 +107,8 @@ test('findConfigRoots finds nested dirs holding .codex/config.toml, skips others
 
 test('writeConfig valid TOML writes + exact prior-content backup', async () => {
   const prior = 'model = "x"\n';
-  const cwd = makeRoot(prior);
-  setConfigRoots([cwd]); // writeConfig requires isKnownConfigRoot(cwd)
+  const cwd = await makeRoot(prior);
+  await setConfigRoots([cwd]); // writeConfig requires isKnownConfigRoot(cwd)
   const r = await writeConfig(cwd, 'project', 'model = "y"\n', null, false, testBackend);
   assert.equal(r.ok, true);
   assert.equal(r.path, join(cwd, '.codex', 'config.toml'));
@@ -93,7 +119,7 @@ test('writeConfig valid TOML writes + exact prior-content backup', async () => {
 
 test('writeConfig first write creates only its parent and returns stable result keys', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-cdx-first-write-'));
-  setConfigRoots([cwd]);
+  await setConfigRoots([cwd]);
   const target = join(cwd, '.codex', 'config.toml');
   const r = await writeConfig(cwd, 'project', '', null, false, testBackend);
   assert.deepEqual(Object.keys(r).sort(), ['backup', 'mtime', 'ok', 'path']);
@@ -104,8 +130,8 @@ test('writeConfig first write creates only its parent and returns stable result 
 });
 
 test('writeConfig invalid TOML returns ok:false and does not write', async () => {
-  const cwd = makeRoot('model = "x"\n');
-  setConfigRoots([cwd]);
+  const cwd = await makeRoot('model = "x"\n');
+  await setConfigRoots([cwd]);
   const orig = readFileSync(join(cwd, '.codex', 'config.toml'), 'utf8');
   const r = await writeConfig(cwd, 'project', 'model = "unterminated\n');
   assert.equal(r.ok, false);
@@ -114,29 +140,29 @@ test('writeConfig invalid TOML returns ok:false and does not write', async () =>
 });
 
 test('writeConfig rejects cwd outside config roots', async () => {
-  const cwd = makeRoot('model = "x"\n');
-  setConfigRoots([mkdtempSync(join(tmpdir(), 'sing-other-'))]); // a different root
+  const cwd = await makeRoot('model = "x"\n');
+  await setConfigRoots([mkdtempSync(join(tmpdir(), 'sing-other-'))]); // a different root
   const r = await writeConfig(cwd, 'project', 'model = "y"\n');
   assert.equal(r.ok, false);
   assert.match(r.error, /outside config roots/);
 });
 
 test('writeConfig enforces cwd<->scope invariant', async () => {
-  const cwd = makeRoot('model = "x"\n');
-  setConfigRoots([cwd]);
+  const cwd = await makeRoot('model = "x"\n');
+  await setConfigRoots([cwd]);
   // user scope requires cwd ~ (home); a project cwd is not home.
   assert.equal((await writeConfig(cwd, 'user', 'model = "y"\n')).ok, false);
   // project scope requires a non-home cwd; home (untildified ~) is home.
-  setConfigRoots(['~']);
+  await setConfigRoots(['~']);
   const rp = await writeConfig(homedir(), 'project', 'model = "y"\n');
   assert.equal(rp.ok, false);
   assert.match(rp.error, /non-home/);
 });
 
-test('readConfig rejects cwd outside config roots', () => {
-  const cwd = makeRoot('model = "x"\n');
-  setConfigRoots([mkdtempSync(join(tmpdir(), 'sing-other-'))]); // a different root
-  const result = readConfig(cwd);
+test('readConfig rejects cwd outside config roots', async () => {
+  const cwd = await makeRoot('model = "x"\n');
+  await setConfigRoots([mkdtempSync(join(tmpdir(), 'sing-other-'))]); // a different root
+  const result = await readConfig(cwd);
   assert.equal(result.project.exists, false);
   assert.equal(result.project.content, '');
   assert.equal(result.user.exists, false);
@@ -149,19 +175,32 @@ test('readConfig rejects cwd outside config roots', () => {
   assert.equal(result.user.mtime, 0);
 });
 
-test('readConfig reports mtime on existing scopes', () => {
-  const cwd = makeRoot('model = "x"\n');
-  setConfigRoots([cwd]);
-  const cfg = readConfig(cwd);
+test('readConfig reports mtime on existing scopes', async () => {
+  const cwd = await makeRoot('model = "x"\n');
+  await setConfigRoots([cwd]);
+  const cfg = await readConfig(cwd);
   assert.equal(typeof cfg.project.mtime, 'number');
   assert.ok(cfg.project.mtime > 0);
 });
 
+test('Codex read and write fail closed when picker roots bridge rejects', async () => {
+  const cwd = await makeRoot('model = "x"\n');
+  setConfigRootsBackend({ async pickerRootsGet() { throw new Error('picker bridge unavailable'); } });
+  try {
+    await assert.rejects(readConfig(cwd), /picker bridge unavailable/);
+    let writes = 0;
+    await assert.rejects(writeConfig(cwd, 'project', 'model = "y"\n', null, false, {
+      async codexConfigWrite() { writes++; return { ok: true }; },
+    }), /picker bridge unavailable/);
+    assert.equal(writes, 0);
+  } finally { setConfigRootsBackend(rootsBackend); }
+});
+
 test('writeConfig rejects a stale mtime with "changed on disk"; force overrides', async () => {
-  const cwd = makeRoot('model = "x"\n');
-  setConfigRoots([cwd]);
+  const cwd = await makeRoot('model = "x"\n');
+  await setConfigRoots([cwd]);
   const p = join(cwd, '.codex', 'config.toml');
-  const stale = readConfig(cwd).project.mtime;
+  const stale = (await readConfig(cwd)).project.mtime;
   // Externally rewrite + bump mtime past the 1ms guard window.
   writeFileSync(p, 'model = "ext"\n');
   const future = (Date.now() + 5000) / 1000;
@@ -178,7 +217,7 @@ test('writeConfig rejects a stale mtime with "changed on disk"; force overrides'
 });
 
 test('writeConfig derives user path from CODEX_HOME while requiring home cwd', async () => {
-  setConfigRoots(['~']);
+  await setConfigRoots(['~']);
   const result = await writeConfig(homedir(), 'user', '', null, false, testBackend);
   assert.equal(result.ok, true);
   assert.equal(result.path, join(process.env.CODEX_HOME, 'config.toml'));
@@ -186,7 +225,7 @@ test('writeConfig derives user path from CODEX_HOME while requiring home cwd', a
 });
 
 test('writeConfig parses TOML before backup and backend, preserving error precedence', async () => {
-  const cwd = makeRoot('model = "prior"\n');
+  const cwd = await makeRoot('model = "prior"\n');
   const target = join(cwd, '.codex', 'config.toml');
   const before = readFileSync(target, 'utf8');
   let backendCalls = 0;
@@ -199,7 +238,7 @@ test('writeConfig parses TOML before backup and backend, preserving error preced
 });
 
 test('writeConfig passes native conflicts through and logs generic backend failures', async () => {
-  const cwd = makeRoot(null);
+  const cwd = await makeRoot(null);
   const errors = [];
   const logger = { error: (...args) => errors.push(args) };
   const conflict = await writeConfig(cwd, 'project', '', null, false, {

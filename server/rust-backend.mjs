@@ -529,6 +529,28 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       throw new Error(`Rust Skills roots backend returned invalid response: ${payload.error_code ?? 'unknown'}`);
     },
 
+    async pickerRootsGet(path) {
+      const payload = await request({ op: 'picker_roots_get', path });
+      if (typeof payload?.roots_json !== 'string') {
+        throw new Error('Rust picker roots backend returned invalid get response');
+      }
+      const roots = JSON.parse(payload.roots_json);
+      if (!Array.isArray(roots)) throw new Error('Rust picker roots backend returned invalid roots');
+      return roots;
+    },
+
+    async pickerRootsSet(path, roots) {
+      const clean = (roots || []).filter((root) => typeof root === 'string');
+      const payload = await request({ op: 'picker_roots_set', path, roots_json: JSON.stringify(clean) });
+      if (payload?.ok === false && typeof payload.error === 'string') return { ok: false, error: payload.error };
+      if (payload?.ok !== true || typeof payload.roots_json !== 'string') {
+        throw new Error('Rust picker roots backend returned invalid set response');
+      }
+      const storedRoots = JSON.parse(payload.roots_json);
+      if (!Array.isArray(storedRoots)) throw new Error('Rust picker roots backend returned invalid roots');
+      return { ok: true, roots: storedRoots };
+    },
+
     skillRead(root, scope, skill, flat) {
       return request({ op: 'skill_read', root, scope, skill, flat });
     },

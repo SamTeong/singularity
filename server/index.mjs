@@ -13,8 +13,8 @@ import './migrate-state.mjs';
 import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid, setProcsBackend } from './procs.mjs';
-import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
-import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, getConfigRoots as getCodexConfigRoots, setConfigRoots as setCodexConfigRoots } from './codex-config.mjs';
+import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend } from './config.mjs';
+import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, createConfigRootsGetHandler as createCodexConfigRootsGetHandler, createConfigRootsSetHandler as createCodexConfigRootsSetHandler, setConfigRootsBackend as setCodexConfigRootsBackend } from './codex-config.mjs';
 import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
 import { searchMemory, listFiles, readMemoryFile, createMemoryWriteHandler, getMemoryRoot, setMemoryRoot } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, readRuleFile, createRuleWriteHandler, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } from './rules.mjs';
@@ -146,6 +146,8 @@ setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, wi
 setUsageReportBackend(rustBackend);
 setProcsBackend(rustBackend); // procs.mjs process scan execs + guarded PID kill
 setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
+setConfigRootsBackend(rustBackend);
+setCodexConfigRootsBackend(rustBackend);
 setModelsBackend(rustBackend); // model-store.mjs dispatches catalogue and routing calls on the shared child
 setTasksBackend(rustBackend);
 setKeysBackend(rustBackend);
@@ -594,11 +596,11 @@ app.get('/config/scan', async (req, reply) => {
   return findConfigRoots(root);
 });
 // FS-persisted config root list (survives browser cache clear).
-app.get('/config/roots', async () => ({ roots: getConfigRoots() }));
-app.put('/config/roots', async (req) => setConfigRoots(req.body?.roots));
+app.get('/config/roots', createConfigRootsGetHandler(rustBackend));
+app.put('/config/roots', createConfigRootsSetHandler(rustBackend));
 app.post('/config/search', async (req) => {
   const { roots, q } = req.body || {};
-  return { results: searchConfig(roots, q) };
+  return { results: await searchConfig(roots, q) };
 });
 app.put('/config/:scope', async (req, reply) => {
   const { cwd, content, mtime, force } = req.body || {};
@@ -625,11 +627,11 @@ app.get('/codex-config/scan', async (req, reply) => {
   return findCodexConfigRoots(root);
 });
 // FS-persisted codex config root list (survives browser cache clear).
-app.get('/codex-config/roots', async () => ({ roots: getCodexConfigRoots() }));
-app.put('/codex-config/roots', async (req) => setCodexConfigRoots(req.body?.roots));
+app.get('/codex-config/roots', createCodexConfigRootsGetHandler(rustBackend));
+app.put('/codex-config/roots', createCodexConfigRootsSetHandler(rustBackend));
 app.post('/codex-config/search', async (req) => {
   const { roots, q } = req.body || {};
-  return { results: searchCodexConfig(roots, q) };
+  return { results: await searchCodexConfig(roots, q) };
 });
 app.put('/codex-config/:scope', async (req, reply) => {
   const { cwd, content, mtime, force } = req.body || {};

@@ -25,6 +25,7 @@ pub mod model_prices;
 pub mod models;
 pub mod ollama_mode_config;
 pub mod oneshot;
+pub mod picker_roots;
 pub mod plans;
 pub mod procs;
 pub mod procs_discovery;

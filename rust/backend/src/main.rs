@@ -602,6 +602,25 @@ fn main() -> io::Result<()> {
             Ok(request) if request.op == "skills_list" => {
                 singularity_backend::skills::list(&request.root)
             }
+            Ok(request) if request.op == "picker_roots_get" => {
+                let roots_json = singularity_backend::picker_roots::get_roots(
+                    std::path::Path::new(request.path.as_str().unwrap_or("")),
+                );
+                serde_json::json!({ "roots_json": roots_json })
+            }
+            Ok(request) if request.op == "picker_roots_set" => {
+                match singularity_backend::picker_roots::set_roots(
+                    std::path::Path::new(request.path.as_str().unwrap_or("")),
+                    request.roots_json.as_str().unwrap_or(""),
+                ) {
+                    singularity_backend::picker_roots::SetRootsResult::Success { roots_json } => {
+                        serde_json::json!({ "ok": true, "roots_json": roots_json })
+                    }
+                    singularity_backend::picker_roots::SetRootsResult::StorageFailure(error) => {
+                        serde_json::json!({ "ok": false, "error": error.to_string() })
+                    }
+                }
+            }
             Ok(request) if request.op == "skills_roots_get" => {
                 let roots_json = singularity_backend::skills_roots::get_roots(
                     std::path::Path::new(request.roots_file.as_str().unwrap_or("")),

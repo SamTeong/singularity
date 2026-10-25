@@ -1853,3 +1853,63 @@ test('Rust window-anchor bridge persists configured state and telemetry paths', 
     await rm(home, { recursive: true, force: true });
   }
 });
+
+test('picker roots bridge sends explicit paths, filters before JSON serialization, and validates replies', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    const sent = JSON.parse(String(chunk));
+    requests.push(sent);
+    let response;
+    if (sent.op === 'picker_roots_get' && sent.path.endsWith('get-malformed')) {
+      response = { roots_json: '{}' };
+    } else if (sent.op === 'picker_roots_get') {
+      response = { roots_json: '["x",1,null,false,{"key":1,"key":2},"\\ud800",18446744073709551617]' };
+    } else if (sent.path.endsWith('storage-error')) {
+      response = { ok: false, error: 'native filesystem failure' };
+    } else if (sent.path.endsWith('malformed')) {
+      response = { ok: true };
+    } else if (sent.op === 'picker_roots_set' && sent.path.endsWith('codex-config-roots.json')) {
+      response = { ok: true, roots_json: '["a","b"]' };
+    } else {
+      response = { ok: true, roots_json: sent.roots_json };
+    }
+    queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: sent.id, response })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => child.stdout.write('{"ready":true}\n'));
+    return child;
+  } });
+  try {
+    await backend.start();
+    const roots = await backend.pickerRootsGet('C:/state/config-roots.json');
+    assert.deepEqual(roots, ['x', 1, null, false, { key: 2 }, '\uD800', 18446744073709552000]);
+    const getRequest = requests.find((request) => request.path === 'C:/state/config-roots.json');
+    assert.equal(getRequest.op, 'picker_roots_get');
+    assert.equal(getRequest.path, 'C:/state/config-roots.json');
+    await assert.rejects(backend.pickerRootsGet('C:/state/get-malformed'), /invalid roots/);
+    const ignored = { toJSON() { throw new Error('must not serialize ignored values'); } };
+    const saved = await backend.pickerRootsSet('C:/state/codex-config-roots.json', [false, 'a', '', ignored, 1n, 'a', 'b']);
+    assert.deepEqual(saved, { ok: true, roots: ['a', 'b'] });
+    const setRequest = requests.find((request) => request.path === 'C:/state/codex-config-roots.json');
+    assert.equal(setRequest.op, 'picker_roots_set');
+    assert.equal(setRequest.roots_json, '["a","","a","b"]');
+    const beforeMalformedInput = requests.length;
+    await assert.rejects(backend.pickerRootsSet('C:/state/file.json', { roots: [] }), {
+      name: 'TypeError', message: '(roots || []).filter is not a function',
+    });
+    assert.equal(requests.length, beforeMalformedInput);
+    assert.deepEqual(await backend.pickerRootsSet('C:/state/storage-error', ['x']), {
+      ok: false, error: 'native filesystem failure',
+    });
+    await assert.rejects(backend.pickerRootsSet('C:/state/malformed', ['x']), /invalid set response/);
+    assert.equal(new Set(requests.map((request) => request.id)).size, requests.length);
+  } finally { await backend.stop(); }
+});

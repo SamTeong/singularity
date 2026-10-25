@@ -4,7 +4,7 @@
 // scopes are exposed. Paths are derived server-side from (cwd, scope) — the
 // client never supplies a path. Writes validate TOML (via @iarna/toml) and back
 // up the existing file (backups.mjs) before overwriting.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as tomlParse } from '@iarna/toml';
@@ -23,8 +23,8 @@ function scopePaths(cwd) {
 // Both scopes are editable (project + user). No config.local.toml analog.
 const EDIT_SCOPES = ['project', 'user'];
 
-export function readConfig(cwd) {
-  if (!isKnownConfigRoot(cwd)) {
+export async function readConfig(cwd) {
+  if (!await isKnownConfigRoot(cwd)) {
     // cwd is outside known roots; return empty configs to prevent information disclosure
     const paths = scopePaths(cwd);
     const out = {};
@@ -46,14 +46,13 @@ export function readConfig(cwd) {
 // Search config.toml content across the given roots. Dedup by path (same root
 // passed twice → one hit). Returns first matching line per file with a trimmed
 // snippet.
-export function searchConfig(roots, q) {
+export async function searchConfig(roots, q) {
   const needle = String(q || '').toLowerCase();
   if (!needle) return [];
   const seen = new Set();
   const results = [];
   for (const cwd of roots || []) {
-    let cfg;
-    try { cfg = readConfig(cwd); } catch { continue; }
+    const cfg = await readConfig(cwd);
     for (const scope of EDIT_SCOPES) {
       const { path, content } = cfg[scope];
       if (!content || seen.has(path)) continue;
@@ -93,22 +92,23 @@ export function findConfigRoots(root, cap = 20000) {
   return { roots: hits.sort((a, b) => a.localeCompare(b)), truncated: seen >= cap };
 }
 
-// Config root list: the picker's pinned roots. FS-persisted (survives browser
-// cache clear) under STATE_DIR. Seeded with '~' when absent/empty.
+// Config root list: the picker's pinned roots, persisted by Rust under STATE_DIR.
 const ROOTS_FILE = join(STATE_DIR, 'codex-config-roots.json');
-export function getConfigRoots() {
-  try {
-    const r = JSON.parse(readFileSync(ROOTS_FILE, 'utf8'));
-    return Array.isArray(r) && r.length ? r : ['~'];
-  } catch { return ['~']; }
+let rootsBackend = null;
+export function setConfigRootsBackend(backend) { rootsBackend = backend; }
+export async function getConfigRoots(backend = rootsBackend) {
+  if (!backend) throw new Error('Rust picker roots backend is not configured');
+  return backend.pickerRootsGet(ROOTS_FILE);
 }
-export function setConfigRoots(roots) {
-  const clean = [...new Set((roots || []).filter((r) => typeof r === 'string' && r))].slice(0, 50);
-  try {
-    mkdirSync(STATE_DIR, { recursive: true });
-    writeFileSync(ROOTS_FILE, JSON.stringify(clean, null, 2));
-    return { ok: true, roots: clean };
-  } catch (e) { return { ok: false, error: e.message }; }
+export async function setConfigRoots(roots, backend = rootsBackend) {
+  if (!backend) throw new Error('Rust picker roots backend is not configured');
+  return backend.pickerRootsSet(ROOTS_FILE, roots);
+}
+export function createConfigRootsGetHandler(backend) {
+  return async () => ({ roots: await getConfigRoots(backend) });
+}
+export function createConfigRootsSetHandler(backend) {
+  return async (req) => setConfigRoots(req.body?.roots, backend);
 }
 
 // Resolve a ~-prefixed client path to an absolute one (mirror rules.mjs resolveRoot).
@@ -122,11 +122,11 @@ function resolveRoot(raw) {
 // A write target's cwd must resolve under one of the pinned config roots
 // (getConfigRoots) — mirrors config.mjs isKnownConfigRoot so the editor can't
 // be pointed at an arbitrary directory to plant a config.toml.
-function isKnownConfigRoot(cwd) {
+async function isKnownConfigRoot(cwd) {
   if (!cwd) return false;
   const abs = resolveRoot(cwd); // untildify '~' → home (resolve(cwd) would leave '~' literal)
   if (!abs) return false;
-  return getConfigRoots().some((raw) => {
+  return (await getConfigRoots()).some((raw) => {
     const root = resolveRoot(raw);
     return root && (abs === root || abs.startsWith(root + sep));
   });
@@ -134,7 +134,7 @@ function isKnownConfigRoot(cwd) {
 
 export async function writeConfig(cwd, scope, content, mtime, force, backend, logger) {
   if (!EDIT_SCOPES.includes(scope)) return { ok: false, error: 'bad scope' };
-  if (!isKnownConfigRoot(cwd)) return { ok: false, error: 'cwd outside config roots' };
+  if (!await isKnownConfigRoot(cwd)) return { ok: false, error: 'cwd outside config roots' };
   // Enforce the client's cwd→scope mapping: 'user' only for cwd ~ (home),
   // 'project' only for a non-home cwd. Otherwise a project-scope write with
   // cwd ~ would target ~/.codex/config.toml (the user file) and vice versa.

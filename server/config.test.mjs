@@ -10,6 +10,17 @@ import { join } from 'node:path';
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 const { searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, readConfig, writeConfig } = await import('./config.mjs');
 const { BACKUPS_DIR } = await import('./app-dir.mjs');
+const { createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend } = await import('./config.mjs');
+let storedRoots = ['~'];
+const rootsBackend = {
+  async pickerRootsGet() { return storedRoots.length ? structuredClone(storedRoots) : ['~']; },
+  async pickerRootsSet(path, roots) {
+    const clean = [...new Set((roots || []).filter((r) => typeof r === 'string' && r))].slice(0, 50);
+    storedRoots = clean;
+    return { ok: true, roots: clean };
+  },
+};
+setConfigRootsBackend(rootsBackend);
 
 function writeBackend(onWrite = () => {}) {
   return {
@@ -29,30 +40,30 @@ function makeRoot(project, local) {
   return cwd;
 }
 
-test('searchConfig matches content and reports scope + line', () => {
+test('searchConfig matches content and reports scope + line', async () => {
   const cwd = makeRoot('{\n  "theme": "dark"\n}', null);
-  const hits = searchConfig([cwd], 'theme');
+  const hits = await searchConfig([cwd], 'theme');
   const project = hits.find((h) => h.cwd === cwd && h.scope === 'project');
   assert.ok(project, 'project scope hit');
   assert.equal(project.line, 2);
   assert.match(project.text, /theme/);
 });
 
-test('searchConfig is case-insensitive and skips non-matches', () => {
+test('searchConfig is case-insensitive and skips non-matches', async () => {
   const cwd = makeRoot('{ "model": "opus" }', '{ "other": 1 }');
-  assert.equal(searchConfig([cwd], 'MODEL').some((h) => h.scope === 'project'), true);
-  assert.equal(searchConfig([cwd], 'model').some((h) => h.scope === 'local'), false);
+  assert.equal((await searchConfig([cwd], 'MODEL')).some((h) => h.scope === 'project'), true);
+  assert.equal((await searchConfig([cwd], 'model')).some((h) => h.scope === 'local'), false);
 });
 
-test('searchConfig dedups shared paths across repeated roots', () => {
+test('searchConfig dedups shared paths across repeated roots', async () => {
   const cwd = makeRoot('{ "theme": "dark" }', null);
   // Same root twice → project path seen once, not duplicated.
-  const hits = searchConfig([cwd, cwd], 'theme');
+  const hits = await searchConfig([cwd, cwd], 'theme');
   assert.equal(hits.filter((h) => h.scope === 'project' && h.cwd === cwd).length, 1);
 });
 
-test('searchConfig empty query returns nothing', () => {
-  assert.deepEqual(searchConfig(['/whatever'], ''), []);
+test('searchConfig empty query returns nothing', async () => {
+  assert.deepEqual(await searchConfig(['/whatever'], ''), []);
 });
 
 test('findConfigRoots finds nested dirs holding .claude settings, skips others', () => {
@@ -73,17 +84,43 @@ test('findConfigRoots finds nested dirs holding .claude settings, skips others',
   assert.deepEqual(roots, [join(root, 'nested', 'a'), join(root, 'nested', 'b', 'deep')]);
 });
 
-test('config roots persist to FS: default ~, dedup, roundtrip', () => {
-  assert.deepEqual(getConfigRoots(), ['~']); // seeded default when file absent
-  const r = setConfigRoots(['~', '/a', '/a', '/b', 123, '']);
+test('config roots use the async Rust adapter and preserve default, dedup, roundtrip', async () => {
+  storedRoots = [];
+  assert.deepEqual(await getConfigRoots(), ['~']); // seeded default when absent
+  const r = await setConfigRoots(['~', '/a', '/a', '/b', 123, '']);
   assert.equal(r.ok, true);
   assert.deepEqual(r.roots, ['~', '/a', '/b']); // deduped, non-strings dropped
-  assert.deepEqual(getConfigRoots(), ['~', '/a', '/b']); // read back from disk
+  assert.deepEqual(await getConfigRoots(), ['~', '/a', '/b']); // read back from bridge
 });
 
-test('readConfig reports mtime per scope (0 when file missing)', () => {
+test('config root handlers reuse Fastify routes and reject malformed or unavailable bridge responses', async () => {
+  const Fastify = (await import('fastify')).default;
+  const app = Fastify();
+  app.get('/config/roots', createConfigRootsGetHandler(rootsBackend));
+  app.put('/config/roots', createConfigRootsSetHandler(rootsBackend));
+  assert.deepEqual((await app.inject('/config/roots')).json(), { roots: ['~', '/a', '/b'] });
+  assert.deepEqual((await app.inject({ method: 'PUT', url: '/config/roots', payload: { roots: false } })).json(), { ok: true, roots: [] });
+  const malformed = await app.inject({ method: 'PUT', url: '/config/roots', payload: { roots: 'bad' } });
+  assert.equal(malformed.statusCode, 500);
+  assert.equal(malformed.json().message, '(roots || []).filter is not a function');
+  await app.close();
+
+  const unavailable = Fastify();
+  unavailable.get('/config/roots', createConfigRootsGetHandler({ async pickerRootsGet() { throw new Error('bridge down'); } }));
+  assert.equal((await unavailable.inject('/config/roots')).statusCode, 500);
+  await unavailable.close();
+
+  const storageFailure = Fastify();
+  storageFailure.put('/config/roots', createConfigRootsSetHandler({ async pickerRootsSet() { return { ok: false, error: 'native IO failure' }; } }));
+  const failed = await storageFailure.inject({ method: 'PUT', url: '/config/roots', payload: { roots: ['x'] } });
+  assert.equal(failed.statusCode, 200);
+  assert.deepEqual(failed.json(), { ok: false, error: 'native IO failure' });
+  await storageFailure.close();
+});
+
+test('readConfig reports mtime per scope (0 when file missing)', async () => {
   const cwd = makeRoot('{ "theme": "dark" }', null);
-  setConfigRoots([cwd]);
+  await setConfigRoots([cwd]);
   const cfg = readConfig(cwd);
   assert.equal(typeof cfg.project.mtime, 'number');
   assert.ok(cfg.project.mtime > 0);
@@ -92,7 +129,7 @@ test('readConfig reports mtime per scope (0 when file missing)', () => {
 
 test('writeConfig rejects a stale mtime with "changed on disk"; force overrides', async () => {
   const cwd = makeRoot('{ "v": 1 }', null);
-  setConfigRoots([cwd]);
+  await setConfigRoots([cwd]);
   const p = join(cwd, '.claude', 'settings.json');
   const stale = readConfig(cwd).project.mtime;
   let writes = 0;
@@ -115,7 +152,7 @@ test('writeConfig rejects a stale mtime with "changed on disk"; force overrides'
 
 test('writeConfig rejects forbidden scopes, roots, and invalid JSON before backend dispatch', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-cfg-policy-'));
-  setConfigRoots([cwd]);
+  await setConfigRoots([cwd]);
   let writes = 0;
   const backend = writeBackend(() => writes++);
 
@@ -126,9 +163,20 @@ test('writeConfig rejects forbidden scopes, roots, and invalid JSON before backe
   assert.equal(writes, 0);
 });
 
+test('writeConfig rejects picker bridge failure before config write dispatch', async () => {
+  setConfigRootsBackend({ async pickerRootsGet() { throw new Error('picker bridge unavailable'); } });
+  let writes = 0;
+  try {
+    await assert.rejects(writeConfig(mkdtempSync(join(tmpdir(), 'sing-cfg-bridge-')), 'project', '{}', null, false, {
+      async configWrite() { writes++; return { ok: true }; },
+    }), /picker bridge unavailable/);
+    assert.equal(writes, 0);
+  } finally { setConfigRootsBackend(rootsBackend); }
+});
+
 test('writeConfig creates the first project parent and returns the Config success shape', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-cfg-first-write-'));
-  setConfigRoots([cwd]);
+  await setConfigRoots([cwd]);
   const p = join(cwd, '.claude', 'settings.json');
   const saved = await writeConfig(cwd, 'project', '{"theme":"更新 ✓"}', null, false, writeBackend(({ path }) => {
     assert.equal(path, p);
@@ -146,7 +194,7 @@ test('writeConfig creates the first project parent and returns the Config succes
 test('writeConfig copies exact prior bytes into a hashed backup before backend replacement', async () => {
   const prior = '{"before":"exact bytes ✓"}\n';
   const cwd = makeRoot(prior, null);
-  setConfigRoots([cwd]);
+  await setConfigRoots([cwd]);
   const p = join(cwd, '.claude', 'settings.json');
   const backupDir = join(BACKUPS_DIR, createHash('sha256').update(p).digest('hex').slice(0, 16));
   const before = existsSync(backupDir) ? new Set(readdirSync(backupDir)) : new Set();
@@ -164,7 +212,7 @@ test('writeConfig copies exact prior bytes into a hashed backup before backend r
 
 test('writeConfig masks backend transport failures and logs diagnostic details', async () => {
   const cwd = makeRoot(null, null);
-  setConfigRoots([cwd]);
+  await setConfigRoots([cwd]);
   const errors = [];
   const result = await writeConfig(cwd, 'local', '{}', null, false, {
     async configWrite() { throw new Error('pipe closed with detail'); },
