@@ -34,6 +34,7 @@ pub mod pty;
 pub(crate) mod retry_after;
 pub mod rules;
 pub mod skills;
+pub mod skills_roots;
 pub mod status;
 pub mod sysstats;
 pub mod transcript_bridge;

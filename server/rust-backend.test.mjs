@@ -1151,6 +1151,47 @@ test('Rust stdio bridge serves the Skills list, skill read, and supporting-file 
   }
 });
 
+test('Rust bridge Skills roots operations preserve fallback strings, setter bytes, domain errors, and rejection', async () => {
+  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-skills-roots-'));
+  const rootsFile = join(base, 'state', 'skills-roots.json');
+  const legacyFile = join(base, 'state', 'skills-root.json');
+  const fallback = join(base, 'default', 'skills');
+  const backend = createRustBackend();
+  try {
+    await backend.start();
+    assert.deepEqual(await backend.skillsRootsGet(rootsFile, legacyFile, fallback), [fallback]);
+    await mkdir(join(base, 'state'), { recursive: true });
+    await writeFile(legacyFile, '{"root":"legacy"}');
+    assert.deepEqual(await backend.skillsRootsGet(rootsFile, legacyFile, fallback), ['legacy']);
+    await writeFile(rootsFile, '{"roots":');
+    assert.deepEqual(await backend.skillsRootsGet(rootsFile, legacyFile, fallback), ['legacy']);
+    await writeFile(rootsFile, '{"roots":["old"],"roots":["","white","\\ud800","\\ud83d\\ude00"]}');
+    assert.deepEqual(await backend.skillsRootsGet(rootsFile, legacyFile, fallback), ['', 'white', '\uD800', '😀']);
+    await writeFile(rootsFile, Buffer.concat([Buffer.from('{"roots":["'), Buffer.from([0xff]), Buffer.from('"]}') ]));
+    assert.deepEqual(await backend.skillsRootsGet(rootsFile, legacyFile, fallback), ['\uFFFD']);
+
+    const roots = ['', ' ', 'duplicate', 'duplicate', '\uD800', ...Array.from({ length: 55 }, (_, i) => `root-${i}`)];
+    roots.push({ toJSON() { throw new Error('must not serialize'); } }, 1n);
+    const expected = [' ', 'duplicate', '\uD800', ...Array.from({ length: 55 }, (_, i) => `root-${i}`)].slice(0, 50);
+    assert.deepEqual(await backend.skillsRootsSet(rootsFile, legacyFile, fallback, roots), { ok: true, roots: expected });
+    assert.equal(await readFile(rootsFile, 'utf8'), JSON.stringify({ roots: expected }));
+    assert.deepEqual(await backend.skillsRootsSet(rootsFile, legacyFile, fallback, null), { ok: false, error: 'bad roots' });
+
+    const blockingFile = join(base, 'state', 'blocked');
+    await writeFile(blockingFile, 'file');
+    const storage = await backend.skillsRootsSet(join(blockingFile, 'roots.json'), legacyFile, fallback, ['x']);
+    assert.equal(storage.ok, false);
+    assert.equal(typeof storage.error, 'string');
+    assert.notEqual(storage.error, 'bad roots');
+    await backend.stop();
+    await assert.rejects(backend.skillsRootsGet(rootsFile, legacyFile, fallback), /not running/);
+    await assert.rejects(backend.skillsRootsSet(rootsFile, legacyFile, fallback, ['x']), /not running/);
+  } finally {
+    await backend.stop();
+    await rm(base, { recursive: true, force: true });
+  }
+});
+
 test('gateway turns Rust process failure into a logged 500 response', async () => {
   const app = Fastify();
   app.get('/api/wiki/graph', createWikiGraphHandler({ graph: async () => { throw new Error('child exited'); } }, app.log));

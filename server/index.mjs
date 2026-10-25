@@ -28,7 +28,7 @@ import { reviewStatus as projectReviewStatus, readReviewFile } from './project-r
 import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot, setTranscriptBackend } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
 import { setOneShotBackend } from './one-shot.mjs';
-import { readSkillsDir, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } from './skills.mjs';
+import { readSkillsDir, setSkillsBackend, createSkillsRootsGetHandler, createSkillsRootsSetHandler, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } from './skills.mjs';
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, setExplorerBackend } from './explorer.mjs';
 import { getConfigState, setConfigState, setConfigStateBackend } from './config-state.mjs';
 import { getKeys, setKeys, setKeysBackend } from './keys.mjs';
@@ -866,8 +866,8 @@ app.get('/projects/review/file', async (req, reply) => {
 // Read-only — no write. Paths server-derived from (scope, skill).
 // FS-persisted skills root choice (survives browser cache clear). Root layout
 // (grouped scope dir vs flat .claude/skills) is auto-detected server-side.
-app.get('/skills/roots', async () => ({ roots: getSkillsRoots() }));
-app.put('/skills/roots', async (req) => setSkillsRoots(req.body?.roots));
+app.get('/skills/roots', createSkillsRootsGetHandler(rustBackend));
+app.put('/skills/roots', createSkillsRootsSetHandler(rustBackend));
 app.get('/skills', createSkillsListHandler(rustBackend, app.log));
 app.get('/skill', createSkillReadHandler(rustBackend, app.log));
 // Write a skill's SKILL.md (no file) or a supporting file (file present).

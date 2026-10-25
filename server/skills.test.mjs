@@ -44,7 +44,7 @@ mkdirSync(join(flatRoot, 'not-a-skill'), { recursive: true }); // no SKILL.md â†
 const { createRustBackend } = await import('./rust-backend.mjs');
 const backend = createRustBackend();
 await backend.start();
-const { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } = await import('./skills.mjs');
+const { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots, setSkillsBackend, createSkillsRootsGetHandler, createSkillsRootsSetHandler, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } = await import('./skills.mjs');
 const { STATE_DIR, BACKUPS_DIR } = await import('./app-dir.mjs');
 setSkillsBackend(backend);
 after(async () => { await backend.stop(); rmSync(scratch, { recursive: true, force: true }); });
@@ -177,35 +177,127 @@ test('readSkill: flat resolves <root>/<skill>/SKILL.md, ignores scope', async ()
 
 // Runs before any roots file (new or old) exists, so this exercises the final
 // fallback: the user's ~/.claude/skills (a flat skills dir).
-test('getSkillsRoots: defaults to ~/.claude/skills when nothing is configured', () => {
-  assert.deepEqual(getSkillsRoots(), [join(homedir(), '.claude', 'skills')]);
+test('getSkillsRoots: defaults to ~/.claude/skills when nothing is configured', async () => {
+  assert.deepEqual(await getSkillsRoots(), [join(homedir(), '.claude', 'skills')]);
 });
 
 // Runs before any setSkillsRoots call, so `skills-roots.json` doesn't exist yet
 // and the old single-root file is the only thing to migrate from.
-test('getSkillsRoots: migrates from old skills-root.json when present', () => {
+test('getSkillsRoots: migrates from old skills-root.json when present', async () => {
   mkdirSync(STATE_DIR, { recursive: true });
   writeFileSync(join(STATE_DIR, 'skills-root.json'), JSON.stringify({ root }));
-  assert.deepEqual(getSkillsRoots(), [root]);
+  assert.deepEqual(await getSkillsRoots(), [root]);
 });
 
-test('setSkillsRoots: persists + getSkillsRoots reads back the array', () => {
-  const r = setSkillsRoots([root, flatRoot]);
+test('setSkillsRoots: persists compact bytes + getSkillsRoots reads back the array', async () => {
+  const r = await setSkillsRoots([root, flatRoot]);
   assert.deepEqual(r, { ok: true, roots: [root, flatRoot] });
-  assert.deepEqual(getSkillsRoots(), [root, flatRoot]);
+  assert.equal(readFileSync(join(STATE_DIR, 'skills-roots.json'), 'utf8'), JSON.stringify({ roots: [root, flatRoot] }));
+  assert.deepEqual(await getSkillsRoots(), [root, flatRoot]);
 });
 
-test('setSkillsRoots: dedups and caps at 50', () => {
+test('setSkillsRoots: filters transport candidates, dedups and caps at 50', async () => {
   const many = Array.from({ length: 60 }, (_, i) => `${root}-${i % 10}`);
-  const r = setSkillsRoots(many);
+  const r = await setSkillsRoots(many);
   assert.equal(r.ok, true);
   assert.equal(r.roots.length, 10, 'deduped to 10 unique values');
-  assert.deepEqual(getSkillsRoots(), r.roots);
+  assert.deepEqual(await getSkillsRoots(), r.roots);
+  const hostile = { toJSON() { throw new Error('must not serialize'); } };
+  assert.deepEqual(await setSkillsRoots([root, '', ' ', root, hostile, 1n]), { ok: true, roots: [root, ' '] });
+  assert.equal(readFileSync(join(STATE_DIR, 'skills-roots.json'), 'utf8'), JSON.stringify({ roots: [root, ' '] }));
 });
 
-test('setSkillsRoots: bad input (non-array) reports ok:false', () => {
-  assert.equal(setSkillsRoots('not-an-array').ok, false);
-  assert.equal(setSkillsRoots(null).ok, false);
+test('setSkillsRoots: bad input (non-array) reports ok:false', async () => {
+  assert.deepEqual(await setSkillsRoots('not-an-array'), { ok: false, error: 'bad roots' });
+  assert.deepEqual(await setSkillsRoots(null), { ok: false, error: 'bad roots' });
+});
+
+test('skills root adapters pass explicit paths and default root to the injected backend', async () => {
+  const calls = [];
+  const fake = {
+    skillsRootsGet: async (...args) => { calls.push(['get', ...args]); return ['/configured']; },
+    skillsRootsSet: async (...args) => { calls.push(['set', ...args]); return { ok: true, roots: [] }; },
+  };
+  assert.deepEqual(await getSkillsRoots(fake), ['/configured']);
+  assert.deepEqual(await setSkillsRoots([], fake), { ok: true, roots: [] });
+  assert.deepEqual(calls[0], ['get', join(STATE_DIR, 'skills-roots.json'), join(STATE_DIR, 'skills-root.json'), join(homedir(), '.claude', 'skills')]);
+  assert.deepEqual(calls[1], ['set', join(STATE_DIR, 'skills-roots.json'), join(STATE_DIR, 'skills-root.json'), join(homedir(), '.claude', 'skills'), []]);
+});
+
+test('skills roots HTTP handlers preserve configured, bad-input, and storage responses', async () => {
+  const app = Fastify();
+  const fake = {
+    skillsRootsGet: async () => ['/configured', ''],
+    skillsRootsSet: async (_rootsFile, _legacyFile, _defaultRoot, roots) => roots === 'bad'
+      ? { ok: false, error: 'bad roots' }
+      : roots.length === 1 && roots[0] === '/saved'
+        ? { ok: true, roots: ['/saved'] }
+        : { ok: false, error: 'native storage failure' },
+  };
+  app.get('/api/skills/roots', createSkillsRootsGetHandler(fake));
+  app.put('/api/skills/roots', createSkillsRootsSetHandler(fake));
+  const get = await app.inject({ method: 'GET', url: '/api/skills/roots' });
+  assert.equal(get.statusCode, 200);
+  assert.deepEqual(get.json(), { roots: ['/configured', ''] });
+  const saved = await app.inject({ method: 'PUT', url: '/api/skills/roots', payload: { roots: ['/saved'] } });
+  assert.equal(saved.statusCode, 200);
+  assert.deepEqual(saved.json(), { ok: true, roots: ['/saved'] });
+  const bad = await app.inject({ method: 'PUT', url: '/api/skills/roots', payload: { roots: 'bad' } });
+  assert.equal(bad.statusCode, 200);
+  assert.deepEqual(bad.json(), { ok: false, error: 'bad roots' });
+  const storage = await app.inject({ method: 'PUT', url: '/api/skills/roots', payload: { roots: [] } });
+  assert.equal(storage.statusCode, 200);
+  assert.deepEqual(storage.json(), { ok: false, error: 'native storage failure' });
+  await app.close();
+});
+
+test('skills roots HTTP handlers leave bridge rejections to Fastify', async () => {
+  const app = Fastify();
+  const broken = {
+    skillsRootsGet: async () => { throw new Error('child exited'); },
+    skillsRootsSet: async () => { throw new Error('child exited'); },
+  };
+  app.get('/api/skills/roots', createSkillsRootsGetHandler(broken));
+  app.put('/api/skills/roots', createSkillsRootsSetHandler(broken));
+  const get = await app.inject({ method: 'GET', url: '/api/skills/roots' });
+  assert.equal(get.statusCode, 500);
+  assert.equal(get.json().statusCode, 500);
+  assert.equal(get.json().message, 'child exited');
+  const put = await app.inject({ method: 'PUT', url: '/api/skills/roots', payload: { roots: [] } });
+  assert.equal(put.statusCode, 500);
+  assert.equal(put.json().statusCode, 500);
+  assert.equal(put.json().message, 'child exited');
+  await app.close();
+});
+
+test('all Skills helpers skip root lookup for truthy roots and use only configured index zero otherwise', async () => {
+  const requested = [];
+  let configured = ['/configured-first', '/configured-second'];
+  let lookups = 0;
+  const fake = {
+    skillsRootsGet: async () => { lookups++; return configured; },
+    skillsList: async (selected) => { requested.push(selected); return { scopes: [], flat: false }; },
+    skillRead: async (selected) => { requested.push(selected); return { ok: true }; },
+    skillFileRead: async (selected) => { requested.push(selected); return { ok: true }; },
+    skillWrite: async (selected) => { requested.push(selected); return { ok: true }; },
+  };
+  setSkillsBackend(fake);
+  try {
+    await listSkills('/explicit');
+    await readSkill('/explicit', 'scope', 'skill');
+    await readSkillFile('/explicit', 'scope', 'skill', 'file.md');
+    assert.equal((await writeSkill('/explicit', 'scope', 'skill', null)).error, 'bad content');
+    assert.equal((await writeSkillFile('/explicit', 'scope', 'skill', 'file.md', null)).error, 'bad content');
+    assert.equal(lookups, 0);
+    assert.deepEqual(requested, Array(3).fill('/explicit'));
+    await listSkills('');
+    assert.equal(requested[3], '/configured-first');
+    assert.equal(lookups, 1);
+    configured = ['', '/configured-second'];
+    const missing = await listSkills(null);
+    assert.equal(missing.error, 'skills root not configured');
+    assert.equal(requested.length, 4, 'later truthy roots are not considered');
+  } finally { setSkillsBackend(backend); }
 });
 
 test('readSkill + readSkillFile report mtime as a number', async () => {

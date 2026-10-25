@@ -5,12 +5,12 @@
 //   flat    — <root>/<skill>/SKILL.md                        (a .claude/skills dir)
 // All paths server-derived from (root, scope, skill) + layout flag; the client
 // never supplies a path. Roots persist on the daemon FS (survives cache clear).
-// Reads run in Rust (rust/backend/src/skills.rs) over the private stdio bridge:
-// Node keeps roots persistence, NAME_RE validation (its negative lookahead is
-// unsupported by the Rust regex crate, so names are checked before dispatch and
+// Reads and roots persistence run in Rust over the private stdio bridge:
+// Node supplies root paths/defaults and keeps NAME_RE validation (its negative
+// lookahead is unsupported by the Rust regex crate, so names are checked before dispatch and
 // Rust trusts them), the localeCompare sort + caps (Rust emits readdir order —
 // a Rust sort cannot match locale order byte for byte), and the guarded writes.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
@@ -34,22 +34,21 @@ const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'bmp', 'ico
 // Skills root list, FS-persisted. Falls back to the old single-root file
 // (migration) then `~/.claude/skills` (a flat skills dir) when unset.
 const ROOTS_FILE = join(STATE_DIR, 'skills-roots.json');
-export function getSkillsRoots() {
-  try {
-    const r = JSON.parse(readFileSync(ROOTS_FILE, 'utf8')).roots;
-    if (Array.isArray(r) && r.length && r.every((x) => typeof x === 'string')) return r;
-  } catch {}
-  try {
-    const r = JSON.parse(readFileSync(join(STATE_DIR, 'skills-root.json'), 'utf8')).root;
-    if (typeof r === 'string' && r) return [r];
-  } catch {}
-  return [join(homedir(), '.claude', 'skills')];
+const LEGACY_ROOTS_FILE = join(STATE_DIR, 'skills-root.json');
+const DEFAULT_SKILLS_ROOT = join(homedir(), '.claude', 'skills');
+export async function getSkillsRoots(b = backend) {
+  return b.skillsRootsGet(ROOTS_FILE, LEGACY_ROOTS_FILE, DEFAULT_SKILLS_ROOT);
 }
-export function setSkillsRoots(roots) {
-  if (!Array.isArray(roots)) return { ok: false, error: 'bad roots' };
-  const clean = [...new Set(roots.filter((r) => typeof r === 'string' && r))].slice(0, 50);
-  try { mkdirSync(STATE_DIR, { recursive: true }); writeFileSync(ROOTS_FILE, JSON.stringify({ roots: clean })); return { ok: true, roots: clean }; }
-  catch (e) { return { ok: false, error: e.message }; }
+export async function setSkillsRoots(roots, b = backend) {
+  return b.skillsRootsSet(ROOTS_FILE, LEGACY_ROOTS_FILE, DEFAULT_SKILLS_ROOT, roots);
+}
+
+export function createSkillsRootsGetHandler(backend_) {
+  return async () => ({ roots: await getSkillsRoots(backend_) });
+}
+
+export function createSkillsRootsSetHandler(backend_) {
+  return async (req) => setSkillsRoots(req.body?.roots, backend_);
 }
 
 // Bridge wiring: index.mjs injects the shared backend instance (it owns the
@@ -87,7 +86,7 @@ function skillFiles(tree) {
 // Node sorts scopes/skills and applies SKILLS_CAP (the old walk broke at
 // exactly SKILLS_CAP after a push, so the flag is set at >= cap).
 async function listSkillsOn(b, root) {
-  root = root || (getSkillsRoots()[0] || '');
+  root = root || ((await getSkillsRoots(b))[0] || '');
   if (!root) return { scopes: [], flat: false, error: 'skills root not configured' };
   const payload = await b.skillsList(root);
   if (payload.error) return { scopes: [], flat: false, error: payload.error };
@@ -120,7 +119,7 @@ export async function readSkillsDir(dir) {
 // the client-chosen root; `flat` selects the layout: flat → <root>/<skill>, else
 // grouped → <root>/<scope>/.claude/skills/<skill>.
 async function readSkillOn(b, root, scope, skill, flat) {
-  root = root || (getSkillsRoots()[0] || '');
+  root = root || ((await getSkillsRoots(b))[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
   if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };
@@ -134,7 +133,7 @@ export async function readSkill(root, scope, skill, flat) { return readSkillOn(b
 // 'markdown' (MarkdownBody), 'code' (raw <pre>), 'image' (preview note — binary
 // not shipped over JSON).
 async function readSkillFileOn(b, root, scope, skill, file, flat) {
-  root = root || (getSkillsRoots()[0] || '');
+  root = root || ((await getSkillsRoots(b))[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
   if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };
@@ -169,7 +168,7 @@ async function writeSkillContent(b, p, content, mtime, force, logger) {
 
 // Write a skill's SKILL.md (raw content, frontmatter preserved as edited).
 async function writeSkillOn(b, root, scope, skill, content, flat, mtime, force, logger) {
-  root = root || (getSkillsRoots()[0] || '');
+  root = root || ((await getSkillsRoots(b))[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
   if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };
@@ -184,7 +183,7 @@ export async function writeSkill(root, scope, skill, content, flat, mtime, force
 // Write a supporting file inside a skill dir. Same validation as readSkillFile;
 // image type is not writable (binary). Server-derived path, segment-validated.
 async function writeSkillFileOn(b, root, scope, skill, file, content, flat, mtime, force, logger) {
-  root = root || (getSkillsRoots()[0] || '');
+  root = root || ((await getSkillsRoots(b))[0] || '');
   if (!root) return { ok: false, error: 'skills root not configured' };
   if (typeof skill !== 'string' || !NAME_RE.test(skill)) return { ok: false, error: 'bad name' };
   if (!flat && (typeof scope !== 'string' || !NAME_RE.test(scope))) return { ok: false, error: 'bad name' };

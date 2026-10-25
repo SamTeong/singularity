@@ -503,6 +503,32 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       return request({ op: 'skills_list', root });
     },
 
+    async skillsRootsGet(rootsFile, legacyFile, defaultRoot) {
+      const payload = await request({
+        op: 'skills_roots_get', roots_file: rootsFile, legacy_file: legacyFile, default_root: defaultRoot,
+      });
+      return JSON.parse(payload.roots_json);
+    },
+
+    async skillsRootsSet(rootsFile, legacyFile, defaultRoot, roots) {
+      const rootsIsArray = Array.isArray(roots);
+      const rootsJson = rootsIsArray
+        ? JSON.stringify(roots.filter((value) => typeof value === 'string'))
+        : undefined;
+      const payload = await request({
+        op: 'skills_roots_set',
+        roots_file: rootsFile,
+        legacy_file: legacyFile,
+        default_root: defaultRoot,
+        roots_is_array: rootsIsArray,
+        ...(rootsIsArray ? { roots_json: rootsJson } : {}),
+      });
+      if (payload.ok === true) return { ok: true, roots: JSON.parse(payload.roots_json) };
+      if (payload.error_code === 'bad_roots') return { ok: false, error: 'bad roots' };
+      if (payload.error_code === 'storage') return { ok: false, error: payload.error };
+      throw new Error(`Rust Skills roots backend returned invalid response: ${payload.error_code ?? 'unknown'}`);
+    },
+
     skillRead(root, scope, skill, flat) {
       return request({ op: 'skill_read', root, scope, skill, flat });
     },

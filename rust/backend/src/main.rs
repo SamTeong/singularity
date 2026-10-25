@@ -47,6 +47,16 @@ struct Request {
     #[serde(default)]
     roots: Value,
     #[serde(default)]
+    roots_file: Value,
+    #[serde(default)]
+    legacy_file: Value,
+    #[serde(default)]
+    default_root: Value,
+    #[serde(default)]
+    roots_is_array: Value,
+    #[serde(default)]
+    roots_json: Value,
+    #[serde(default)]
     scope: Value,
     #[serde(default)]
     skill: Value,
@@ -591,6 +601,32 @@ fn main() -> io::Result<()> {
             ),
             Ok(request) if request.op == "skills_list" => {
                 singularity_backend::skills::list(&request.root)
+            }
+            Ok(request) if request.op == "skills_roots_get" => {
+                let roots_json = singularity_backend::skills_roots::get_roots(
+                    std::path::Path::new(request.roots_file.as_str().unwrap_or("")),
+                    std::path::Path::new(request.legacy_file.as_str().unwrap_or("")),
+                    request.default_root.as_str().unwrap_or(""),
+                );
+                serde_json::json!({ "roots_json": roots_json })
+            }
+            Ok(request) if request.op == "skills_roots_set" => {
+                let result = singularity_backend::skills_roots::set_roots(
+                    std::path::Path::new(request.roots_file.as_str().unwrap_or("")),
+                    request.roots_is_array.as_bool().unwrap_or(false),
+                    request.roots_json.as_str(),
+                );
+                match result {
+                    singularity_backend::skills_roots::SetRootsResult::BadRoots => {
+                        serde_json::json!({ "ok": false, "error_code": "bad_roots" })
+                    }
+                    singularity_backend::skills_roots::SetRootsResult::Success { roots_json } => {
+                        serde_json::json!({ "ok": true, "roots_json": roots_json })
+                    }
+                    singularity_backend::skills_roots::SetRootsResult::StorageFailure(error) => {
+                        serde_json::json!({ "ok": false, "error_code": "storage", "error": error.to_string() })
+                    }
+                }
             }
             Ok(request) if request.op == "skill_read" => singularity_backend::skills::read_skill(
                 &request.root,
