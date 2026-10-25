@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@sate'
 created_date: '2026-10-25 10:29'
-updated_date: '2026-10-25 12:29'
+updated_date: '2026-10-25 13:06'
 labels: []
 dependencies: []
 references:
@@ -17,6 +17,9 @@ modified_files:
   - rust/backend/src/usage_report_templates.rs
   - rust/backend/examples/usage_report_render_fixture.rs
   - rust/backend/tests/usage_report_render_oracle.mjs
+  - rust/backend/src/usage_report_csv.rs
+  - rust/backend/tests/usage_report_csv_oracle.mjs
+  - rust/backend/tests/usage_report_csv_oracle.rs
 parent_task_id: TASK-42
 type: feature
 ordinal: 73000
@@ -49,4 +52,6 @@ The final TASK-42 cutover residual still starts the configured Node usage-report
 
 <!-- SECTION:NOTES:BEGIN -->
 Accepted intermediate renderer slice only. Verified machine receipt C:/Users/sate/.agents/.plan/01a156fd-39be-7992-87b0-8f45edd7a26b/native-renderer-acceptance/run-20261025T122138349Z/checks-receipt.json: all seven gates exited 0 with cleanup complete; frozen input count 441, before/after maps stable, HEAD a164e6acddea93b49433a16280ea3e33f3c2affe, five renderer source hashes match both maps. Focused renderer tests 2/2; full Rust tests 278 passed/0 failed; pnpm test 744 passed/0 failed (746 total); lint, release build, fmt check, oracle passed. Production usage_report.rs Node generation dispatch remains unchanged. This slice does not complete TASK-42.25: criteria #1-#7 remain unchecked pending CSV/preparation/freshness, forecast/persistence, OAuth/provider history, roadmap, and final generation/API integration with full parity and validation.
+
+Accepted the pure CSV codec slice only. Latest isolated acceptance receipt native-csv-acceptance/run-20261025T130105630Z/checks-receipt.json is status ok, terminal cleanup complete, bound to HEAD 5b38fd678c18e478f13eda508be80e46b6d8a076, with 444 stable frozen inputs and six successful gates: release build, CSV focused tests (4/4), CSV oracle (1/1), cargo format, release Rust suite (283 passed/0 failed; doc tests 0), and pnpm lint. Actual SHA256 for lib.rs, usage_report_csv.rs, usage_report_csv_oracle.rs, usage_report_csv_oracle.mjs, and usage_report.rs matched receipt before/after maps; built binary hash was stable across checks. All seven implementation/repair VERIFY anchors occur once. CSV implementation and two source-bound oracles are accepted as this slice. Caveat: production usage_report.rs remains unchanged and dispatches Node; this does not satisfy full TASK-42.25. All seven whole-pipeline acceptance criteria remain unchecked and task stays In Progress.
 <!-- SECTION:NOTES:END -->
