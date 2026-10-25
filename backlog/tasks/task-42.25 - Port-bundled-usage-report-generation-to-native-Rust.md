@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@sate'
 created_date: '2026-10-25 10:29'
-updated_date: '2026-10-25 13:06'
+updated_date: '2026-10-25 13:31'
 labels: []
 dependencies: []
 references:
@@ -20,6 +20,9 @@ modified_files:
   - rust/backend/src/usage_report_csv.rs
   - rust/backend/tests/usage_report_csv_oracle.mjs
   - rust/backend/tests/usage_report_csv_oracle.rs
+  - rust/backend/src/usage_report_forecast.rs
+  - rust/backend/tests/usage_report_forecast_cross_language.rs
+  - rust/backend/tests/usage_report_forecast_oracle.mjs
 parent_task_id: TASK-42
 type: feature
 ordinal: 73000
@@ -54,4 +57,8 @@ The final TASK-42 cutover residual still starts the configured Node usage-report
 Accepted intermediate renderer slice only. Verified machine receipt C:/Users/sate/.agents/.plan/01a156fd-39be-7992-87b0-8f45edd7a26b/native-renderer-acceptance/run-20261025T122138349Z/checks-receipt.json: all seven gates exited 0 with cleanup complete; frozen input count 441, before/after maps stable, HEAD a164e6acddea93b49433a16280ea3e33f3c2affe, five renderer source hashes match both maps. Focused renderer tests 2/2; full Rust tests 278 passed/0 failed; pnpm test 744 passed/0 failed (746 total); lint, release build, fmt check, oracle passed. Production usage_report.rs Node generation dispatch remains unchanged. This slice does not complete TASK-42.25: criteria #1-#7 remain unchecked pending CSV/preparation/freshness, forecast/persistence, OAuth/provider history, roadmap, and final generation/API integration with full parity and validation.
 
 Accepted the pure CSV codec slice only. Latest isolated acceptance receipt native-csv-acceptance/run-20261025T130105630Z/checks-receipt.json is status ok, terminal cleanup complete, bound to HEAD 5b38fd678c18e478f13eda508be80e46b6d8a076, with 444 stable frozen inputs and six successful gates: release build, CSV focused tests (4/4), CSV oracle (1/1), cargo format, release Rust suite (283 passed/0 failed; doc tests 0), and pnpm lint. Actual SHA256 for lib.rs, usage_report_csv.rs, usage_report_csv_oracle.rs, usage_report_csv_oracle.mjs, and usage_report.rs matched receipt before/after maps; built binary hash was stable across checks. All seven implementation/repair VERIFY anchors occur once. CSV implementation and two source-bound oracles are accepted as this slice. Caveat: production usage_report.rs remains unchanged and dispatches Node; this does not satisfy full TASK-42.25. All seven whole-pipeline acceptance criteria remain unchecked and task stays In Progress.
+
+Accepted pure forecast math slice after source-bound integrated acceptance. All six combined gates passed: release build; 11 focused report tests; cargo format; full Rust release suite 289 passed/0 failed; pnpm lint; pnpm test 744 passed/0 failed/2 skipped (746 total). Receipt SHA-256 F6D5080B20410003EF1D249C46F1F4A2B6C96CF746B95BF0807B5. Receipt binds HEAD 97eef6549705ff625b4a182ad783153790c8c70b, 447 frozen inputs, cleanup complete, and stable isolated binary hash CF242C00444B2ED76E4720977F30B454FA891AD8C914512DA5BF681493EAD4F6. Forecast source and both tests were byte-matched to receipt before/after maps. This slice implements pure prepared-history forecast math and source-bound synthetic Rust/JS comparison. The bundled JS seSq/seOlsSq posterior fallback defect remains preserved for compatibility. Production usage_report.rs still invokes Node; the native whole pipeline is incomplete, so all seven whole-pipeline acceptance criteria remain unchecked and task stays In Progress. Deferred: history preparation/freshness, provider wrappers, integrations, persistence, renderer/runtime generation integration, and full native backend acceptance.
+
+Receipt hash transcription correction: the exact SHA-256 is F6D5080B20410003EF1D249C46F1F4A2B6C96CF746B95BF080D07FF0197E92B5.
 <!-- SECTION:NOTES:END -->

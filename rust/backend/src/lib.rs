@@ -44,6 +44,7 @@ pub mod transcripts;
 pub mod usage_auth;
 pub mod usage_report;
 pub mod usage_report_csv;
+pub mod usage_report_forecast;
 pub mod usage_report_render;
 pub mod usage_snapshot;
 pub mod wiki_read;
