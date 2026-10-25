@@ -16,6 +16,8 @@ playwright-report/
 test-results/
 /test-output.txt
 .pnpm-store/
+/rust/backend/target/
+/sysstats-target/
 
 .DS_Store
 references/
