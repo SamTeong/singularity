@@ -296,6 +296,29 @@ test('respawnAll: kills a live agent and resumes it with the same id + new pid',
   }
 });
 
+test('Codex transcript liveness resolves a distinct thread id and blocks duplicate owned resumes', async () => {
+  const agentId = '90000000-aaaa-bbbb-cccc-900000000005';
+  const threadId = 'dddddddd-eeee-ffff-0000-444444444444';
+  // Use the cross-platform keepalive Claude fixture for the owned pty, then
+  // model the persisted Codex identity fields that its launcher records.
+  const agent = create({ cwd: scratch, title: 'live-codex-owner', model: 'claude', sessionId: agentId });
+  agent.model = 'gpt-5.3-codex-spark';
+  agent.tool = 'codex';
+  agent.threadId = threadId;
+  try {
+    assert.notEqual(agent.id, threadId);
+    assert.equal(isLive(agentId), true, 'the registry owner has a live child process');
+    assert.equal(codexOwnerForThread(threadId, scratch), agentId);
+    assert.equal(isLiveSession(threadId, { source: 'codex', cwd: scratch }), true);
+    assert.throws(
+      () => create({ cwd: scratch, title: 'duplicate-codex-owner', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: threadId }),
+      /codex thread already in use/,
+    );
+  } finally {
+    await killAndWait(agentId);
+  }
+});
+
 // beginDrain(): daemon shutdown snapshots every live session to agents.json as
 // detached, and the ensuing pty-exit (onExit) no-ops instead of deleting — so a
 // restart reloads the sessions rather than dropping them from the list. Kept
@@ -677,32 +700,6 @@ test('codexThreadFor: registered codex agent + matching rollout → thread uuid'
   }));
   init();
   assert.equal(codexThreadFor(agentId), threadId);
-});
-
-test('Codex transcript liveness resolves a distinct thread id and blocks duplicate owned resumes', async () => {
-  const agentId = '90000000-aaaa-bbbb-cccc-900000000005';
-  const threadId = 'dddddddd-eeee-ffff-0000-444444444444';
-  // Use the cross-platform keepalive Claude fixture for the owned pty, then
-  // model the persisted Codex identity fields that its launcher records.
-  const agent = create({ cwd: scratch, title: 'live-codex-owner', model: 'claude', sessionId: agentId });
-  agent.model = 'gpt-5.3-codex-spark';
-  agent.tool = 'codex';
-  agent.threadId = threadId;
-  try {
-    assert.notEqual(agent.id, threadId);
-    assert.equal(isLive(agentId), true, 'the registry owner has a live child process');
-    assert.equal(codexOwnerForThread(threadId, scratch), agentId);
-    assert.equal(isLiveSession(threadId, { source: 'codex', cwd: scratch }), true);
-    assert.throws(
-      () => create({ cwd: scratch, title: 'duplicate-codex-owner', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: threadId }),
-      /codex thread already in use/,
-    );
-  } finally {
-    // This fixture uses cmd.exe as a PTY target on Windows; it can ignore the
-    // PTY kill notification. Request cleanup and let the file teardown close
-    // its isolated test process, as documented in the suite setup above.
-    kill(agentId);
-  }
 });
 
 // ---- writeAtomic (server/background.test.mjs:214 flake regression) ------------
