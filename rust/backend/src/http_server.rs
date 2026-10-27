@@ -67,6 +67,7 @@ pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
             services.sampler,
             services.status,
         ))
+        .merge(crate::http_models::router(services.state_dir.clone()))
         .merge(crate::http_state::router(services.state_dir))
         .merge(crate::http_reports::router(services.report_request))
         .fallback(not_found)
@@ -374,6 +375,120 @@ mod tests {
 
                 stop.send(()).unwrap();
                 server.await.unwrap().unwrap();
+            });
+    }
+
+    #[test]
+    fn http_mutation_routes_authenticate_before_parsing_or_writing() {
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let root = std::env::temp_dir().join(format!(
+                    "http-mutations-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_nanos()
+                ));
+                let services = HttpServices::new(
+                    root.clone(),
+                    crate::usage_report::Request {
+                        reports_dir: String::new(),
+                        env: serde_json::json!({}),
+                    },
+                );
+                let listener = bind(0).await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let policy = HttpPolicy {
+                    daemon_port: address.port(),
+                    vite_port: 5317,
+                    token: Some("token_1".into()),
+                };
+                let (stop, stopped) = oneshot::channel();
+                let server = tokio::spawn(serve(listener, policy, services, async {
+                    let _ = stopped.await;
+                }));
+                let client = reqwest::Client::new();
+                for path in ["/api/keys", "/api/config/state", "/api/models"] {
+                    let denied = client
+                        .put(format!("http://{address}{path}"))
+                        .header("content-type", "application/json")
+                        .body("{")
+                        .send()
+                        .await
+                        .unwrap();
+                    assert_eq!(denied.status().as_u16(), 401, "{path}");
+                }
+                let denied = client
+                    .post(format!("http://{address}/api/models/restore-defaults"))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(denied.status().as_u16(), 401);
+                assert!(!root.exists());
+                let denied = client
+                    .put(format!("http://{address}/api/keys"))
+                    .header("x-sing-token", "token_1")
+                    .header("origin", "https://evil.test")
+                    .json(&serde_json::json!({"alpha":{"key":"x"}}))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(denied.status().as_u16(), 403);
+                assert!(!root.exists());
+                let bad = client
+                    .put(format!("http://{address}/api/keys"))
+                    .header("x-sing-token", "token_1")
+                    .header("content-type", "application/json")
+                    .body("{")
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(bad.status().as_u16(), 400);
+                assert!(!root.exists());
+                let saved = client
+                    .put(format!("http://{address}/api/keys"))
+                    .header("x-sing-token", "token_1")
+                    .json(&serde_json::json!({"alpha":{"key":"x"}}))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(saved.status().as_u16(), 200);
+                assert_eq!(
+                    saved.json::<serde_json::Value>().await.unwrap()["keys"]["alpha"]["key"],
+                    "x"
+                );
+                let saved = client
+                    .put(format!("http://{address}/api/config/state"))
+                    .header("cookie", "sing_token=token_1")
+                    .json(&serde_json::json!({"active":"owned"}))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(saved.status().as_u16(), 200);
+                assert_eq!(
+                    saved.json::<serde_json::Value>().await.unwrap()["state"]["active"],
+                    "owned"
+                );
+                let restored = client
+                    .post(format!("http://{address}/api/models/restore-defaults"))
+                    .header("x-sing-token", "token_1")
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(restored.status().as_u16(), 200);
+                assert_eq!(
+                    restored.json::<serde_json::Value>().await.unwrap()["ok"],
+                    true
+                );
+                assert!(root.join("models.json").is_file());
+                drop(client);
+                stop.send(()).unwrap();
+                server.await.unwrap().unwrap();
+                std::fs::remove_dir_all(root).unwrap();
             });
     }
 

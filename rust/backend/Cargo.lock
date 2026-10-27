@@ -1423,6 +1423,7 @@ name = "singularity-backend"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "http-body-util",
  "httpdate",
  "libc",
  "portable-pty",

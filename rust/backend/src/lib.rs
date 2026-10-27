@@ -21,6 +21,8 @@ pub mod explorer_state;
 pub mod hooks_read;
 pub mod hooks_write;
 pub(crate) mod http_attempt;
+pub mod http_body;
+pub mod http_models;
 pub mod http_policy;
 pub mod http_reports;
 pub mod http_server;
