@@ -175,7 +175,7 @@ fn run_oracle(fixture_names: &[&str]) -> Value {
     serde_json::from_slice(&output.stdout).expect("parse the Node oracle result")
 }
 
-fn compare(fixture_names: &[&str]) {
+fn compare(fixture_names: &[&str], min_rows: usize) -> Vec<CodexRow> {
     let texts = fixture_names
         .iter()
         .map(|name| (fixture_text(name), fallback_id(name)))
@@ -190,7 +190,13 @@ fn compare(fixture_names: &[&str]) {
     let rows = codex_rows(&threads, epoch_from_iso, local_fmt, &cost);
     let rust = Value::Array(rows.iter().map(row_json).collect());
     let js = run_oracle(fixture_names);
+    assert!(
+        rows.len() >= min_rows,
+        "expected at least {min_rows} rows, got {}",
+        rows.len()
+    );
     assert_equivalent(&js, &rust, "$");
+    rows
 }
 
 fn row_json(row: &CodexRow) -> Value {
@@ -223,20 +229,25 @@ fn row_json(row: &CodexRow) -> Value {
 
 #[test]
 fn root_and_sub_threads_fold_into_the_same_rows() {
-    compare(&[ROOT_NAME, SUB_NAME]);
+    compare(&[ROOT_NAME, SUB_NAME], 2);
 }
 
 #[test]
 fn malformed_blank_lines_and_unknown_models_match() {
-    compare(&[MALFORMED_NAME]);
+    compare(&[MALFORMED_NAME], 1);
 }
 
 #[test]
 fn missing_rate_limits_and_equal_timestamps_match() {
-    compare(&[TIES_NAME]);
+    let rows = compare(&[TIES_NAME], 1);
+    // The tool name forces JSON escaping of quote, backslash and control chars.
+    assert!(
+        rows.iter()
+            .any(|row| row.facets_json.contains(r#"q\"w\\e\n\u0001"#))
+    );
 }
 
 #[test]
 fn every_fixture_together_matches() {
-    compare(&[ROOT_NAME, SUB_NAME, MALFORMED_NAME, TIES_NAME]);
+    compare(&[ROOT_NAME, SUB_NAME, MALFORMED_NAME, TIES_NAME], 4);
 }

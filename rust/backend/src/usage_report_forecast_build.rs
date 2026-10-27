@@ -552,8 +552,13 @@ fn ollama_token_yield(records: &[UsageRecord], sessions: Option<&[ForecastSessio
         t: i64,
         day: String,
         u: f64,
-        /// Model id -> requests, first-insertion order, last write winning:
-        /// Node accumulates into `cur[m.model]` (stats.mjs:1476-1477).
+        /// Named entries in scrape order, duplicates kept: Node sums a delta
+        /// per entry into `totalReq` (stats.mjs:1483-1491).
+        entries: Vec<(String, f64)>,
+        /// Requests over every entry, named or not (stats.mjs:1475).
+        total: f64,
+        /// Model id -> requests, first-insertion order, last write winning,
+        /// like `prevReq` (stats.mjs:1500-1501).
         models: Vec<(String, f64)>,
     }
 
@@ -588,14 +593,22 @@ fn ollama_token_yield(records: &[UsageRecord], sessions: Option<&[ForecastSessio
         if day.is_empty() {
             continue;
         }
+        let mut entries: Vec<(String, f64)> = Vec::new();
         let mut collapsed: Vec<(String, f64)> = Vec::new();
+        let mut total = 0.0;
         for model in models {
-            let Some(name) = model.get("model").and_then(Value::as_str) else {
+            let requests = fnum(model.get("requests"));
+            total += requests;
+            let Some(name) = model
+                .get("model")
+                .and_then(Value::as_str)
+                .filter(|name| !name.is_empty())
+            else {
                 continue;
             };
-            let requests = fnum(model.get("requests"));
+            entries.push((name.to_owned(), requests));
             match collapsed.iter_mut().find(|(seen, _)| seen == name) {
-                Some((_, total)) => *total = requests,
+                Some((_, value)) => *value = requests,
                 None => collapsed.push((name.to_owned(), requests)),
             }
         }
@@ -603,6 +616,8 @@ fn ollama_token_yield(records: &[UsageRecord], sessions: Option<&[ForecastSessio
             t,
             day,
             u: js_number(utilization),
+            entries,
+            total,
             models: collapsed,
         });
     }
@@ -632,7 +647,7 @@ fn ollama_token_yield(records: &[UsageRecord], sessions: Option<&[ForecastSessio
     let mut prev_u: Option<f64> = None;
     let mut prev_req: Vec<(String, f64)> = Vec::new();
     for sample in &samples {
-        let current_total: f64 = sample.models.iter().map(|(_, requests)| requests).sum();
+        let current_total = sample.total;
         let previous_total: f64 = prev_req.iter().map(|(_, value)| value).sum();
         let reset =
             prev_u.is_none() || sample.u < prev_u.unwrap() || current_total < previous_total;
@@ -645,14 +660,17 @@ fn ollama_token_yield(records: &[UsageRecord], sessions: Option<&[ForecastSessio
         if delta_pct > 0.0 {
             let mut deltas: Vec<(String, f64)> = Vec::new();
             let mut total = 0.0;
-            for (name, current) in &sample.models {
+            for (name, current) in &sample.entries {
                 let previous = if reset {
                     0.0
                 } else {
                     previous_requests(&prev_req, name)
                 };
                 let delta = (current - previous).max(0.0);
-                deltas.push((name.clone(), delta));
+                match deltas.iter_mut().find(|(seen, _)| seen == name) {
+                    Some((_, value)) => *value = delta,
+                    None => deltas.push((name.clone(), delta)),
+                }
                 total += delta;
             }
             if total > 0.0 {
@@ -951,7 +969,7 @@ mod tests {
     }
 
     #[test]
-    fn ollama_token_yield_collapses_duplicate_model_ids_last_write_wins() {
+    fn ollama_token_yield_counts_each_duplicate_model_entry_in_the_total() {
         let records = vec![
             record(
                 1_000,
@@ -978,14 +996,15 @@ mod tests {
             ),
         ];
         let yield_ = ollama_token_yield(&records, None);
-        // Node keys models by id, so `a` counts once: deltas are a=1, b=2 of 3.
+        // Node keys the delta by id but adds every entry to the total
+        // (stats.mjs:1483-1491): a=1 counted twice, b=2, so the total is 4.
         assert_eq!(
             yield_["series"]["a"]["2024-01-02"]["d"].as_f64(),
-            Some(10.0 * (1.0 / 3.0))
+            Some(10.0 * (1.0 / 4.0))
         );
         assert_eq!(
             yield_["series"]["b"]["2024-01-02"]["d"].as_f64(),
-            Some(10.0 * (2.0 / 3.0))
+            Some(10.0 * (2.0 / 4.0))
         );
     }
 

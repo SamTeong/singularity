@@ -4,3 +4,4 @@
 {"timestamp":"2026-01-01T03:00:01Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}
 {"timestamp":"2026-01-01T03:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":20,"output_tokens":5},"model_context_window":2000},"rate_limits":{"primary":{"used_percent":41,"window_minutes":10080,"resets_at":2000000000}}}}
 {"timestamp":"2026-01-01T03:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"output_tokens":2},"model_context_window":2000}}}
+{"timestamp":"2026-01-01T03:00:03Z","type":"response_item","payload":{"type":"custom_tool_call","name":"q\"w\\e\n\u0001\u007f </x>&"}}

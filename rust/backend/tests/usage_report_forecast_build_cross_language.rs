@@ -376,6 +376,59 @@ fn cases() -> Vec<Case> {
             codex: Vec::new(),
             sessions: None,
         },
+        // 6. Ollama model ids with duplicates, Unicode, quotes, backslashes and
+        // control characters: they become JSON keys and a duplicate id adds
+        // its delta to the share total once per entry (stats.mjs:1483-1491).
+        Case {
+            name: "ollama-unicode-escaped-duplicate-models",
+            claude: Vec::new(),
+            ollama: {
+                let weekly = |epoch: i64, utilization: f64, models: Value| {
+                    record(
+                        epoch,
+                        json!({"weekly": gauge(utilization, now + 86_400), "models": models}),
+                    )
+                };
+                vec![
+                    weekly(
+                        now - 7_200,
+                        10.0,
+                        json!([
+                            {"model": "qwen–ü✓", "requests": 4},
+                            {"model": "q\"w\\e\n\u{1}\u{7f}\u{2028}</x>&", "requests": 4},
+                            {"model": "", "requests": 3},
+                        ]),
+                    ),
+                    weekly(
+                        now - 3_600,
+                        30.0,
+                        json!([
+                            {"model": "qwen–ü✓", "requests": 5},
+                            {"model": "qwen–ü✓", "requests": 5},
+                            {"model": "q\"w\\e\n\u{1}\u{7f}\u{2028}</x>&", "requests": 6},
+                            {"model": "", "requests": 3},
+                        ]),
+                    ),
+                ]
+            },
+            codex: Vec::new(),
+            sessions: Some(vec![
+                SessionSpec {
+                    epoch: Some(now - 3_000),
+                    model: "qwen–ü✓:cloud",
+                    rl5: 0.0,
+                    rl7: 0.0,
+                    tok: 2_000_000.0,
+                },
+                SessionSpec {
+                    epoch: Some(now - 2_900),
+                    model: "q\"w\\e\n\u{1}\u{7f}\u{2028}</x>&",
+                    rl5: 0.0,
+                    rl7: 0.0,
+                    tok: 3_000_000.0,
+                },
+            ]),
+        },
     ]
 }
 
@@ -414,10 +467,7 @@ fn case_fixture(case: &Case) -> Value {
 #[test]
 fn compares_forecast_document_against_the_bundled_js_source() {
     let cases = cases();
-    assert!(
-        cases.len() >= 3,
-        "oracle needs at least three fixture cases"
-    );
+    assert_eq!(cases.len(), 6, "every oracle case must be compared");
     let fixture = json!({
         "nowSec": NOW_SEC,
         "fitAt": FIT_AT,
@@ -525,4 +575,11 @@ fn compares_forecast_document_against_the_bundled_js_source() {
         .expect("series array");
     assert_eq!(series.len(), 201, "strided series keeps the newest point");
     assert_eq!(series.last().unwrap()["session"].as_f64(), Some(1.0));
+
+    // Case 6 must really reach the yield split, not compare two empty maps.
+    let tokens = &documents[5]["ollama"]["tokenYield"]["series"];
+    assert!(
+        tokens.get("qwen–ü✓").is_some(),
+        "duplicate Unicode model id reached the token-yield series: {tokens}"
+    );
 }
