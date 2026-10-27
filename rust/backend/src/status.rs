@@ -961,6 +961,85 @@ mod tests {
         );
     }
 
+    #[test]
+    fn http_status_route_preserves_cache_and_force_queries() {
+        let ok = r#"{"status":{"indicator":"none"}}"#;
+        let changed = r#"{"status":{"indicator":"minor"}}"#;
+        let (url, providers) = loopback(vec![(200, ok), (200, ok), (200, changed), (200, changed)]);
+        let runtime = tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        runtime.block_on(async {
+            let mut services = crate::http_server::HttpServices::new(
+                std::env::temp_dir().join("unused-status-http-state"),
+                crate::usage_report::Request {
+                    reports_dir: String::new(),
+                    env: json!({}),
+                },
+            );
+            services.status = test_service(&url, Arc::new(AtomicU64::new(500)));
+            let listener = crate::http_server::bind(0).await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let policy = crate::http_policy::HttpPolicy {
+                daemon_port: address.port(),
+                vite_port: address.port(),
+                token: None,
+            };
+            let (stop, stopped) = tokio::sync::oneshot::channel();
+            let server = tokio::spawn(crate::http_server::serve(
+                listener,
+                policy,
+                services,
+                async {
+                    let _ = stopped.await;
+                },
+            ));
+            let client = reqwest::Client::new();
+            let first = client
+                .get(format!("http://{address}/api/status"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap();
+            assert_eq!(first["openai"]["indicator"], "none");
+            assert_eq!(first["claude"]["indicator"], "none");
+            for suffix in ["", "?force=1&force=1", "?force=0"] {
+                let cached = client
+                    .get(format!("http://{address}/api/status{suffix}"))
+                    .send()
+                    .await
+                    .unwrap()
+                    .error_for_status()
+                    .unwrap()
+                    .json::<Value>()
+                    .await
+                    .unwrap();
+                assert_eq!(cached, first);
+            }
+            let forced = client
+                .get(format!("http://{address}/api/status?%66orce=%31"))
+                .send()
+                .await
+                .unwrap()
+                .error_for_status()
+                .unwrap()
+                .json::<Value>()
+                .await
+                .unwrap();
+            assert_eq!(forced["openai"]["indicator"], "minor");
+            assert_eq!(forced["claude"]["indicator"], "minor");
+            drop(client);
+            stop.send(()).unwrap();
+            server.await.unwrap().unwrap();
+        });
+        assert_eq!(providers.join().unwrap().len(), 4);
+    }
+
     fn test_service(url: &str, now: Arc<AtomicU64>) -> StatusService {
         let providers = [
             Provider {

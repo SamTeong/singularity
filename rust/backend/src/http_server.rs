@@ -9,11 +9,68 @@ use serde_json::json;
 use std::future::Future;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::path::PathBuf;
+use std::sync::Arc;
 use tokio::net::TcpListener;
 
-pub fn router(policy: HttpPolicy) -> Router {
+#[derive(Clone)]
+pub struct HttpServices {
+    pub state_dir: PathBuf,
+    pub report_request: Arc<crate::usage_report::Request>,
+    pub sampler: Arc<crate::sysstats::Sampler>,
+    pub status: crate::status::StatusService,
+}
+
+impl HttpServices {
+    pub fn new(state_dir: PathBuf, report_request: crate::usage_report::Request) -> Self {
+        Self {
+            state_dir,
+            report_request: Arc::new(report_request),
+            sampler: Arc::new(crate::sysstats::Sampler::start()),
+            status: crate::status::StatusService::new(),
+        }
+    }
+
+    fn from_env() -> io::Result<Self> {
+        let home = std::env::var("SINGULARITY_HOME")
+            .ok()
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "SINGULARITY_HOME is required")
+            })?;
+        let env = [
+            "HOME",
+            "USERPROFILE",
+            "USAGE_REPORT_STATE",
+            "SING_USAGE_REPORTS",
+        ]
+        .into_iter()
+        .filter_map(|key| {
+            std::env::var(key)
+                .ok()
+                .map(|value| (key.to_owned(), json!(value)))
+        })
+        .collect();
+        Ok(Self::new(
+            PathBuf::from(home).join("state"),
+            crate::usage_report::Request {
+                reports_dir: String::new(),
+                env: serde_json::Value::Object(env),
+            },
+        ))
+    }
+}
+
+pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
     Router::new()
+        .merge(crate::http_telemetry::router(
+            services.sampler,
+            services.status,
+        ))
+        .merge(crate::http_state::router(services.state_dir))
+        .merge(crate::http_reports::router(services.report_request))
         .fallback(not_found)
+        .method_not_allowed_fallback(not_found)
         .layer(middleware::from_fn_with_state(
             policy,
             enforce_transport_policy,
@@ -24,11 +81,16 @@ pub async fn bind(port: u16) -> io::Result<TcpListener> {
     TcpListener::bind(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), port)).await
 }
 
-pub async fn serve<F>(listener: TcpListener, policy: HttpPolicy, shutdown: F) -> io::Result<()>
+pub async fn serve<F>(
+    listener: TcpListener,
+    policy: HttpPolicy,
+    services: HttpServices,
+    shutdown: F,
+) -> io::Result<()>
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    axum::serve(listener, router(policy))
+    axum::serve(listener, router(policy, services))
         .with_graceful_shutdown(shutdown)
         .await
 }
@@ -44,9 +106,10 @@ pub fn run_from_env() -> io::Result<()> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
+        let services = HttpServices::from_env()?;
         let listener = bind(policy.daemon_port).await?;
         eprintln!("native HTTP listener bound to {}", listener.local_addr()?);
-        serve(listener, policy, shutdown_signal()).await
+        serve(listener, policy, services, shutdown_signal()).await
     })
 }
 
@@ -142,7 +205,7 @@ fn shell_unauthorized_response() -> Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        api_unauthorized_response, bind, cookie_decode_error_response, router, serve,
+        HttpServices, api_unauthorized_response, bind, cookie_decode_error_response, router, serve,
         shell_token_cookie, shell_unauthorized_response,
     };
     use crate::http_policy::HttpPolicy;
@@ -150,6 +213,16 @@ mod tests {
     use axum::http::StatusCode;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::oneshot;
+
+    fn test_services() -> HttpServices {
+        HttpServices::new(
+            std::env::temp_dir().join(format!("unused-http-test-state-{}", std::process::id())),
+            crate::usage_report::Request {
+                reports_dir: String::new(),
+                env: serde_json::json!({}),
+            },
+        )
+    }
 
     #[test]
     fn http_listener_lifecycle_uses_ephemeral_loopback_and_injected_shutdown() {
@@ -169,6 +242,7 @@ mod tests {
                         vite_port: 5317,
                         token: None,
                     },
+                    test_services(),
                     async move {
                         let _ = stopped.await;
                     },
@@ -214,7 +288,7 @@ mod tests {
                             daemon_port: address.port(),
                             vite_port: 5317,
                             token: Some("token_1".to_owned()),
-                        }),
+                        }, test_services()),
                     )
                     .with_graceful_shutdown(async move {
                         let _ = stopped.await;
@@ -231,6 +305,33 @@ mod tests {
                 )
                 .await;
                 assert!(api.starts_with("HTTP/1.1 401"), "{api}");
+
+                for path in ["/api/sysstats", "/api/status", "/api/keys", "/api/config/state", "/api/usagereport/status", "/api/usagereport/report"] {
+                    let denied = send_request(address, &format!(
+                        "GET {path} HTTP/1.1\r\nHost: localhost:{}\r\nConnection: close\r\n\r\n", address.port()
+                    )).await;
+                    assert!(denied.starts_with("HTTP/1.1 401"), "{path}: {denied}");
+                }
+                let health = send_request(address, &format!(
+                    "GET /api/health HTTP/1.1\r\nHost: localhost:{}\r\nConnection: close\r\n\r\n", address.port()
+                )).await;
+                assert!(health.starts_with("HTTP/1.1 200"), "{health}");
+                assert!(health.contains("\"ok\":true"), "{health}");
+                for auth in ["X-Sing-Token: token_1", "Cookie: sing_token=token_1"] {
+                    let allowed = send_request(address, &format!(
+                        "GET /api/keys HTTP/1.1\r\nHost: localhost:{}\r\n{auth}\r\nConnection: close\r\n\r\n", address.port()
+                    )).await;
+                    assert!(allowed.starts_with("HTTP/1.1 200"), "{allowed}");
+                    assert!(allowed.contains("{\"keys\":{}}"), "{allowed}");
+                }
+                let bad_origin = send_request(address, &format!(
+                    "GET /api/keys HTTP/1.1\r\nHost: localhost:{}\r\nOrigin: https://evil.test\r\nX-Sing-Token: token_1\r\nConnection: close\r\n\r\n", address.port()
+                )).await;
+                assert!(bad_origin.starts_with("HTTP/1.1 403"), "{bad_origin}");
+                let wrong_method = send_request(address, &format!(
+                    "POST /api/keys HTTP/1.1\r\nHost: localhost:{}\r\nX-Sing-Token: token_1\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", address.port()
+                )).await;
+                assert!(wrong_method.starts_with("HTTP/1.1 404"), "{wrong_method}");
 
                 let evil_host = send_request(
                     address,

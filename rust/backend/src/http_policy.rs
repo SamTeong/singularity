@@ -211,7 +211,7 @@ fn query_first_value(query: Option<&str>, name: &str) -> Option<String> {
     query_values(query?, name).into_iter().next()
 }
 
-fn query_values(query: &str, name: &str) -> Vec<String> {
+pub(crate) fn query_values(query: &str, name: &str) -> Vec<String> {
     query
         .split('&')
         .filter_map(|pair| {
