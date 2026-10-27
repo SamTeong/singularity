@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@sate'
 created_date: '2026-10-25 10:29'
-updated_date: '2026-10-25 13:31'
+updated_date: '2026-10-27 06:10'
 labels: []
 dependencies: []
 references:
@@ -49,6 +49,10 @@ The final TASK-42 cutover residual still starts the configured Node usage-report
 
 <!-- SECTION:PLAN:BEGIN -->
 1. Finish source characterization for configuration/path behavior, freshness/rebuild/cache, CSV and Codex mapping, forecast math/persistence, OAuth snapshot contract, roadmap dependencies, HTML assets/interactions, and synthetic fixture seams. Do not read private state or credentials or run the report generator. 2. First code slice: own rust/backend/src/usage_report_render.rs and its Rust tests; add an explicit payload contract and callable pure renderer over all bundled HTML/assets. Keep current Node generation wired while this slice is developed. 3. Implement separately testable native preparation/freshness, forecast, optional OAuth, provider-history and roadmap responsibilities using injected time/randomness/transport and synthetic roots; reuse existing Rust APIs only where parity is demonstrated. 4. Integrate all stages behind the existing Rust generation operation, preserve output/service/HTTP behavior and caller browser suppression, then remove the Node child only when the entire pipeline is connected. 5. Run isolated differential fixtures, focused/full serial Rust and Node suites, release build, cargo fmt --check, and lint on Windows; leave Linux/macOS runtime validation to TASK-42.2.
+
+Pure roadmap slice (p1.w1.s5): add rust/backend/src/usage_report_roadmap.rs with Inventory, StatsRow, StatsProjection, Suggestion and pure build_roadmap mirroring bundled improve.mjs row order/text/status/archive branch and JS coverage/rounding/interpolation; register it in rust/backend/src/lib.rs; add source-bound Node VM oracle rust/backend/tests/usage_report_roadmap_oracle.mjs. No acquisition, renderer wiring, custom-generator policy, production generation, or whole-pipeline cutover in this slice.
+
+Pure freshness slice (p1.w2.s2): add rust/backend/src/usage_report_freshness.rs with pure decide_freshness(FreshnessInput) -> FreshnessDecision mirroring bundled stats.mjs::_ensure_fresh (900s cost-state window, 180s transcript fallback and Codex window, zero-CSV rebuild sentinel, first-strict-max ties, state-presence fallback suppression, active-SID exclusion, strict CSV-newer comparison, JS IEEE comparisons); register the module in rust/backend/src/lib.rs; add source-bound Node VM oracle rust/backend/tests/usage_report_freshness_oracle.mjs that extracts the checked-in _ensure_fresh, observes active/need even when need is false, and asserts rebuild receives the exact glob transcript snapshot. No filesystem, clock, enumeration, rebuild, adapter, generation, or pipeline cutover in this slice.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -61,4 +65,6 @@ Accepted the pure CSV codec slice only. Latest isolated acceptance receipt nativ
 Accepted pure forecast math slice after source-bound integrated acceptance. All six combined gates passed: release build; 11 focused report tests; cargo format; full Rust release suite 289 passed/0 failed; pnpm lint; pnpm test 744 passed/0 failed/2 skipped (746 total). Receipt SHA-256 F6D5080B20410003EF1D249C46F1F4A2B6C96CF746B95BF0807B5. Receipt binds HEAD 97eef6549705ff625b4a182ad783153790c8c70b, 447 frozen inputs, cleanup complete, and stable isolated binary hash CF242C00444B2ED76E4720977F30B454FA891AD8C914512DA5BF681493EAD4F6. Forecast source and both tests were byte-matched to receipt before/after maps. This slice implements pure prepared-history forecast math and source-bound synthetic Rust/JS comparison. The bundled JS seSq/seOlsSq posterior fallback defect remains preserved for compatibility. Production usage_report.rs still invokes Node; the native whole pipeline is incomplete, so all seven whole-pipeline acceptance criteria remain unchecked and task stays In Progress. Deferred: history preparation/freshness, provider wrappers, integrations, persistence, renderer/runtime generation integration, and full native backend acceptance.
 
 Receipt hash transcription correction: the exact SHA-256 is F6D5080B20410003EF1D249C46F1F4A2B6C96CF746B95BF080D07FF0197E92B5.
+
+Native pure roadmap derivation and freshness decision helpers now implemented, each with source-bound Node VM differential oracles. Accepted combined run C:/Users/sate/.agents/.plan/01a17baa-6bce-73d0-a4bb-e4439fbffb34/native-combined-acceptance/run-20261027T060147007Z: fmt/lint/release build/full Rust339pass/focused Node157pass2skip/full pnpm test756pass2skip, all exits0; source fingerprints/binaryhash/listenerowners unchanged and cleanup complete. Production report generation is still Node-dispatched; preparation/rebuild/provider history/forecast persistence/OAuth/roadmap acquisition/generation integration remain. User chose native generation with clear errors for custom JavaScript SING_USAGE_SKILL paths, no Node runtime fallback. Keep whole-task In Progress and ACs unchecked.
 <!-- SECTION:NOTES:END -->
