@@ -1,24 +1,16 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const repo = "C:/git/singularity/.worktrees/feat-rust-read-services";
-const cargoHome = process.env.HOME;
-const cargoUserProfile = process.env.USERPROFILE;
-const cargoCandidates = [
-  process.env.CARGO,
-  ...[cargoHome, cargoUserProfile].filter(Boolean).map((home) => path.join(home, ".cargo", "bin", process.platform === "win32" ? "cargo.exe" : "cargo")),
-  "C:/Users/sate/.cargo/bin/cargo.exe",
-];
-const cargoCommand = cargoCandidates.find((candidate) => candidate && fs.existsSync(candidate)) ?? "cargo";
-const scratchParent = process.env.USAGE_REPORT_RENDER_SCRATCH;
-assert.ok(scratchParent, "USAGE_REPORT_RENDER_SCRATCH must point to an empty task scratch directory");
-fs.mkdirSync(scratchParent, { recursive: true });
-const scratch = fs.mkdtempSync(path.join(scratchParent, "native-render-oracle-"));
-process.on("exit", () => fs.rmSync(scratch, { recursive: true, force: true }));
+// Called by tests/usage_report_render_cross_language.rs with a scratch directory that
+// already holds <case>.html (native output) or <case>.error (native rejection).
+const scriptDir = path.dirname(fileURLToPath(import.meta.url));
+const repo = path.resolve(scriptDir, "../../..");
+const fixtureDir = path.join(scriptDir, "fixtures/render-oracle");
+const scratch = process.argv[2];
+assert.ok(scratch, "usage: node usage_report_render_oracle.mjs <scratch-dir>");
 const sourceDir = path.join(repo, ".claude/skills/harness-usage-report/scripts");
 const copiedSkill = path.join(scratch, "synthetic-home/.agents/skills/harness-usage-report/scripts");
 const stateDir = path.join(scratch, "synthetic-state");
@@ -40,20 +32,6 @@ const stubbedRenderer = rendererSource.slice(0, fetchStart) +
   rendererSource.slice(fetchEnd + 2);
 fs.writeFileSync(path.join(copiedSkill, "render.mjs"), stubbedRenderer, "utf8");
 
-const cases = [
-  { name: "empty-fallback", payload: { sessions: [], forecast: null, roadmap: null, generated_local: "2026-10-25 01:02:03" } },
-  { name: "populated-projection", payload: {
-    sessions: [{ ts: null, sid: "lone-" + String.fromCharCode(0xd83d), cost: -0, model: "model-é🧪", in: 1e21, out: 1e-7, cr: null, cc: 4, tok: 5, dur: 6, api: 7, la: 8, lr: 9, rl5: 10, rl7: 11, turns: 12, tools: { "<tool>": 1 }, hour: 13, dow: 14,
-      facets: { tools: { "edit<&": 2 }, agents: { "agent-é": 1 }, skills: { "skill🧪": 1 }, compactions: "2.9tail", tool_errors: "Infinity", cwd: " /repo/é " } }],
-    forecast: { gauges: [{ label: "</script><x>", n: 1e21 }, "é🧪"] },
-    roadmap: [{ area: "<area>&", status: "available", text: "quote ' and \"" }, { area: "idea", status: "idea", text: "text" }, { area: "unknown", status: "future", text: "unknown status" }, { area: "done", status: "done", text: "done" }],
-    generated_local: "2026-10-25 01:02:03",
-  } },
-  { name: "forecast-array-empty-roadmap", payload: { sessions: [], forecast: ["<", 1e-7], roadmap: [], generated_local: "2026-01-02 03:04:05" } },
-  { name: "array-coercion-and-surrogate-keys", payload: { sessions: [Object.assign({ facets: { tools: { [String.fromCharCode(0xd83d)]: 1, "<key>": 2 }, compactions: ["\uFEFF2tail"], tool_errors: ["\u00853"], cwd: "\uFEFF /repo/\uD83D\uFEFF" } }, { [String.fromCharCode(0xd83d)]: "ignored" })], forecast: { escaped: "quote \" slash \\\\ line\n-é🧪", values: [-0, 1e21, 1e-7, 1e-8, 1e20] }, roadmap: null, generated_local: "2026-02-03 04:05:06" } },
-  { name: "malformed-roadmap-entry", payload: { sessions: [], forecast: {}, roadmap: [null], generated_local: "2026-01-02 03:04:05" } },
-];
-
 const nativeDate = Date;
 globalThis.Date = class FixedDate extends nativeDate {
   constructor(...args) { super(...(args.length ? args : [globalThis.__oracleTimestamp])); }
@@ -70,40 +48,37 @@ process.env.USERPROFILE = process.env.HOME;
 process.env.USAGE_REPORT_STATE = stateDir;
 const { render } = await import(pathToFileURL(path.join(copiedSkill, "render.mjs")));
 
-for (const item of cases) {
-  globalThis.__oracleTimestamp = `${item.payload.generated_local.replace(" ", "T")}Z`;
-  const inputPath = path.join(scratch, `${item.name}.json`);
-  const payloadText = JSON.stringify(item.payload).replaceAll("é", "\\u00e9").replaceAll("🧪", "\\ud83e\\uddea");
-  fs.writeFileSync(inputPath, payloadText, "utf8");
-  if (item.payload.forecast == null) {
-    fs.rmSync(path.join(stateDir, "forecast.json"), { force: true });
+const fixtures = fs.readdirSync(fixtureDir).filter((name) => name.endsWith(".json")).sort();
+assert.ok(fixtures.length >= 3, "expected at least three render fixtures");
+for (const file of fixtures) {
+  const name = file.slice(0, -".json".length);
+  const payload = JSON.parse(fs.readFileSync(path.join(fixtureDir, file), "utf8"));
+  globalThis.__oracleTimestamp = `${payload.generated_local.replace(" ", "T")}Z`;
+  const forecastPath = path.join(stateDir, "forecast.json");
+  if (payload.forecast == null) {
+    fs.rmSync(forecastPath, { force: true });
   } else {
-    fs.writeFileSync(path.join(stateDir, "forecast.json"), JSON.stringify(item.payload.forecast).replaceAll("é", "\\u00e9").replaceAll("🧪", "\\ud83e\\uddea"), "utf8");
+    fs.writeFileSync(forecastPath, JSON.stringify(payload.forecast), "utf8");
   }
-  globalThis.__syntheticRoadmap = item.payload.roadmap;
+  globalThis.__syntheticRoadmap = payload.roadmap;
   let oracleHtml;
   let oracleError;
-  try { oracleHtml = render(item.payload); } catch (error) { oracleError = error; }
+  try { oracleHtml = render(payload); } catch (error) { oracleError = error; }
 
-  let nativeHtml;
-  let nativeError;
-  try {
-    const cargoEnv = { ...process.env, HOME: cargoHome, USERPROFILE: cargoUserProfile };
-    if (cargoHome === undefined) delete cargoEnv.HOME;
-    if (cargoUserProfile === undefined) delete cargoEnv.USERPROFILE;
-    delete cargoEnv.USAGE_REPORT_STATE;
-    nativeHtml = execFileSync(cargoCommand, ["run", "--offline", "--quiet", "--manifest-path", path.join(repo, "rust/backend/Cargo.toml"), "--example", "usage_report_render_fixture", "--", inputPath], { cwd: repo, env: cargoEnv, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
-  } catch (error) { nativeError = error; }
-  assert.equal(Boolean(nativeError), Boolean(oracleError), `${item.name}: renderer error parity; native stderr=${String(nativeError?.stderr ?? "").slice(0, 1400)} stdout=${String(nativeError?.stdout ?? "").slice(0, 600)}; oracle error=${String(oracleError?.stack ?? oracleError ?? "none").slice(0, 900)}`);
-  if (!oracleError) {
+  const nativeHtmlPath = path.join(scratch, `${name}.html`);
+  const nativeErrorPath = path.join(scratch, `${name}.error`);
+  if (fs.existsSync(nativeHtmlPath)) {
+    assert.equal(oracleError, undefined, `${name}: oracle rejected a payload the native renderer accepted: ${oracleError?.stack ?? ""}`);
+    const nativeHtml = fs.readFileSync(nativeHtmlPath, "utf8");
     if (nativeHtml !== oracleHtml) {
       let at = 0; while (at < nativeHtml.length && at < oracleHtml.length && nativeHtml[at] === oracleHtml[at]) at++;
-      throw new Error(`${item.name}: HTML differs at UTF-16 offset ${at} (native ${nativeHtml.length}, oracle ${oracleHtml.length})`);
+      throw new Error(`${name}: HTML differs at UTF-16 offset ${at} (native ${nativeHtml.length}, oracle ${oracleHtml.length})`);
     }
-    process.stdout.write(`${item.name}: exact HTML match (${nativeHtml.length} code units)\n`);
+    process.stdout.write(`${name}: exact HTML match (${nativeHtml.length} code units)\n`);
   } else {
-    assert.match(String(nativeError.stderr), /render error:/, `${item.name}: native malformed-input error`);
-    process.stdout.write(`${item.name}: both renderers reject malformed roadmap input\n`);
+    assert.ok(fs.existsSync(nativeErrorPath), `${name}: native renderer produced neither HTML nor an error`);
+    assert.ok(oracleError, `${name}: oracle rendered a payload the native renderer rejected`);
+    process.stdout.write(`${name}: both renderers reject the payload\n`);
   }
 }
 
