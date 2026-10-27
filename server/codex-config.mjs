@@ -4,7 +4,7 @@
 // scopes are exposed. Paths are derived server-side from (cwd, scope) — the
 // client never supplies a path. Writes validate TOML (via @iarna/toml) and back
 // up the existing file (backups.mjs) before overwriting.
-import { existsSync, readFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as tomlParse } from '@iarna/toml';
@@ -22,23 +22,29 @@ function scopePaths(cwd) {
 
 // Both scopes are editable (project + user). No config.local.toml analog.
 const EDIT_SCOPES = ['project', 'user'];
+let configReadBackend = null;
+export function setCodexConfigReadBackend(backend) { configReadBackend = backend; }
+
+function requireCodexConfigReadBackend(backend = configReadBackend) {
+  if (!backend) throw new Error('Rust Codex config read backend is not configured');
+  return backend;
+}
 
 export async function readConfig(cwd) {
+  const backend = requireCodexConfigReadBackend();
+  const paths = scopePaths(cwd);
   if (!await isKnownConfigRoot(cwd)) {
     // cwd is outside known roots; return empty configs to prevent information disclosure
-    const paths = scopePaths(cwd);
     const out = {};
     for (const scope of EDIT_SCOPES) {
       out[scope] = { path: paths[scope], exists: false, content: '', mtime: 0 };
     }
     return out;
   }
-  const paths = scopePaths(cwd);
   const out = {};
   for (const scope of EDIT_SCOPES) {
     const p = paths[scope];
-    const exists = existsSync(p);
-    out[scope] = { path: p, exists, content: exists ? readFileSync(p, 'utf8') : '', mtime: exists ? statSync(p).mtimeMs : 0 };
+    out[scope] = { path: p, ...await backend.codexConfigRead(p) };
   }
   return out;
 }
@@ -49,47 +55,24 @@ export async function readConfig(cwd) {
 export async function searchConfig(roots, q) {
   const needle = String(q || '').toLowerCase();
   if (!needle) return [];
-  const seen = new Set();
-  const results = [];
+  const backend = requireCodexConfigReadBackend();
+  const authorized = [];
   for (const cwd of roots || []) {
-    const cfg = await readConfig(cwd);
-    for (const scope of EDIT_SCOPES) {
-      const { path, content } = cfg[scope];
-      if (!content || seen.has(path)) continue;
-      seen.add(path);
-      const lines = content.split('\n');
-      const i = lines.findIndex((l) => l.toLowerCase().includes(needle));
-      if (i < 0) continue;
-      results.push({ cwd, scope, path, line: i + 1, text: lines[i].trim().slice(0, 200) });
-    }
+    if (!await isKnownConfigRoot(cwd)) continue;
+    const paths = scopePaths(cwd);
+    authorized.push({ cwd, project: paths.project, user: paths.user });
   }
   // Stable order (by path) so clicking a hit — which reorders recent (MRU) and
   // re-runs the search — doesn't reshuffle the list under the cursor.
-  return results.sort((a, b) => a.path.localeCompare(b.path));
+  return backend.codexConfigSearch(authorized, needle);
 }
 
 // Recursively walk `root` for dirs holding .codex/config.toml. Bounded (dir cap)
 // so a huge tree can't hang the daemon; skips noise dirs + all dotdirs (except
 // detecting .codex itself). Returns matching cwd's (the dir that holds .codex),
 // sorted, + a truncated flag.
-const SCAN_SKIP = new Set(['node_modules', 'dist', 'build', 'worktrees', '.cache', 'AppData', 'Temp']);
-export function findConfigRoots(root, cap = 20000) {
-  const hits = [];
-  const stack = [root];
-  let seen = 0;
-  while (stack.length && seen < cap) {
-    const dir = stack.pop();
-    seen++;
-    let ents;
-    try { ents = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    if (ents.some((e) => e.name === '.codex')) {
-      if (existsSync(scopePaths(dir).project)) hits.push(dir);
-    }
-    for (const e of ents) {
-      if (e.isDirectory() && !e.name.startsWith('.') && !SCAN_SKIP.has(e.name)) stack.push(join(dir, e.name));
-    }
-  }
-  return { roots: hits.sort((a, b) => a.localeCompare(b)), truncated: seen >= cap };
+export async function findConfigRoots(root, cap = 20000, backend = configReadBackend) {
+  return requireCodexConfigReadBackend(backend).codexConfigScan(root, cap);
 }
 
 // Config root list: the picker's pinned roots, persisted by Rust under STATE_DIR.

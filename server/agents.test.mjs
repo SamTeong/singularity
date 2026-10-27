@@ -70,7 +70,7 @@ await modelBackend.start();
 modelStore.setModelsBackend(modelBackend);
 const codexIdentity = await import('./codex-thread.mjs');
 codexIdentity.setCodexIdentityBackend(modelBackend);
-const ptyBinary = join(process.cwd(), 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
+const ptyBinary = process.env.SINGULARITY_RUST_PTY_BINARY ?? join(process.cwd(), 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
 const ptyBackend = (await import('./rust-pty-backend.mjs')).createRustPtyBackend({ executable: ptyBinary, cwd: process.cwd() });
 await ptyBackend.start();
 const registry = await import('./agents.mjs');

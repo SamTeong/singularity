@@ -10,8 +10,7 @@ import { readFile, stat } from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { encodeCwd, getActiveMs } from './agents.mjs';
-import { pathFor } from './sessions.mjs';
-import { USAGE_SKILL_STATE } from './app-dir.mjs';
+import { USAGE_SKILL_STATE, STATE_DIR } from './app-dir.mjs';
 
 // Mirror of statusline.mjs's state root so the two never drift. Full payload
 // (cost.total_cost_usd / total_api_duration_ms / total_duration_ms) per session.
@@ -81,7 +80,7 @@ export async function parseSession(cwd, id, tool) {
 // cost + models seen. Cached by (mtime,size). Shared by agent stats (via cwd)
 // and session stats (via project dirname). Async (fs/promises) so a batch of
 // these (see /sessions/stats in index.mjs) can't stall the event loop / pty relay.
-async function parseByPath(p) {
+export async function parseByPath(p) {
   let st;
   try { st = await stat(p); } catch { return { turns: 0, tokens: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, models: [], exists: false, estCostUsd: null }; }
   const hit = cache.get(p);
@@ -218,15 +217,27 @@ export async function parseCodexRollout(p) {
   return result;
 }
 
+// /agent-stats and /transcripts/stats run in Rust (rust/backend/src/stats.rs).
+// The parsers above stay for history/background until those modules port.
+let statsBackend;
+export function setStatsBackend(backend) { statsBackend = backend; }
+
+async function statsRequest(op, fields) {
+  if (!statsBackend) throw new Error('Rust stats backend is not configured');
+  const payload = await statsBackend.statsRequest({
+    op,
+    stats_claude_home: homedir(),
+    stats_codex_home: CODEX_HOME,
+    stats_usage_state: USAGE_SKILL_STATE,
+    stats_state_dir: STATE_DIR,
+    ...fields,
+  });
+  if (payload?.error) throw new Error(payload.error);
+  return payload;
+}
+
 export async function sessionStats(project, id, root) {
-  const p = pathFor(project, id, root);
-  const session = p ? await parseByPath(p) : EMPTY_SESSION;
-  const cost = readCostFile(id);
-  return {
-    ...session,
-    costUsd: cost.costUsd ?? session.estCostUsd ?? null,
-    costSource: cost.costUsd != null ? 'statusline' : session.estCostUsd != null ? 'estimate' : null,
-  };
+  return statsRequest('transcript_stats', { stats_project: project, stats_id: id, ...(root === undefined ? {} : { stats_root: root }) });
 }
 
 // Global statusline cost-state file: exact cost + API vs. wall duration for one
@@ -308,20 +319,10 @@ export function readStatsCsvCosts() {
 // for a list of {id, cwd}. costUsd = the global statusline cost-state value when
 // present, else the pricing-table estimate; costSource labels which ('statusline'|'estimate'|null).
 export async function statsFor(agents) {
-  const out = {};
-  for (const a of agents) {
-    const session = await parseSession(a.cwd, a.id, a.tool);
-    const cost = readCostFile(a.id);
-    const costUsd = cost.costUsd ?? session.estCostUsd ?? null;
-    const costSource = cost.costUsd != null ? 'statusline' : session.estCostUsd != null ? 'estimate' : null;
-    out[a.id] = {
-      ...session,
-      costUsd,
-      costSource,
-      apiMs: cost.apiMs,
-      wallMs: cost.wallMs,
-      busyMs: getActiveMs(a.id),
-    };
-  }
+  const out = await statsRequest('agent_stats', {
+    stats_agents: agents.map(({ id, cwd, tool }) => ({ id, cwd, tool: tool ?? null })),
+  });
+  // busyMs needs the live agents registry, which stays in Node.
+  for (const a of agents) out[a.id].busyMs = getActiveMs(a.id);
   return out;
 }

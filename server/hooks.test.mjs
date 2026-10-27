@@ -1,4 +1,4 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -8,7 +8,9 @@ import { join, sep } from 'node:path';
 // hooks.mjs imports app-dir.mjs (STATE_DIR), which throws without SINGULARITY_HOME.
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
-const { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } = await import('./hooks.mjs');
+const { listHookGroups, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } = await import('./hooks.mjs');
+const rust = (await import('./rust-backend.mjs')).createRustBackend();
+await rust.start();
 const { BACKUPS_DIR } = await import('./app-dir.mjs');
 
 function makeRoot(files) {
@@ -31,22 +33,77 @@ function makeBackend() {
   };
 }
 
-test('listHooks finds files and ignores a missing hooks dir', () => {
-  const cwd = makeRoot({ 'a.mjs': 'console.log(1)', 'b.ps1': 'Write-Host x' });
-  const files = listHooks(cwd).map((f) => f.name);
-  assert.deepEqual(files, ['a.mjs', 'b.ps1']);
-  // A dir with no .claude/hooks → [].
+after(async () => { await rust.stop(); });
+
+// Pre-port Node implementation, kept as the differential oracle for the Rust walk/search.
+function oracleList(cwd, cap = 2000) {
+  const dir = join(cwd, '.claude', 'hooks');
+  if (!existsSync(dir)) return [];
+  const out = [];
+  const stack = [dir];
+  while (stack.length && out.length < cap) {
+    const d = stack.pop();
+    let ents;
+    try { ents = readdirSync(d, { withFileTypes: true }); } catch { continue; }
+    for (const e of ents) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) stack.push(p);
+      else if (e.isFile()) out.push({ path: p, rel: p.slice(dir.length + 1), name: e.name });
+    }
+  }
+  return out.sort((a, b) => a.rel.localeCompare(b.rel));
+}
+function oracleSearch(roots, q) {
+  const needle = String(q || '').toLowerCase();
+  if (!needle) return [];
+  const seen = new Set();
+  const results = [];
+  for (const cwd of roots || []) {
+    for (const { path, rel } of oracleList(cwd)) {
+      if (seen.has(path)) continue;
+      seen.add(path);
+      const lines = readFileSync(path, 'utf8').split('\n');
+      const i = lines.findIndex((l) => l.toLowerCase().includes(needle));
+      if (i < 0) continue;
+      results.push({ cwd, path, rel, line: i + 1, text: lines[i].trim().slice(0, 200) });
+    }
+  }
+  return results.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+test('Rust hooks list/search match the Node oracle on a mixed fixture', async () => {
+  const cwd = makeRoot({
+    'B.mjs': '﻿  alpha NEEDLE\r\nneedle two',
+    'a.ps1': 'Write-Host x',
+    'ü-hook.sh': `${'x'.repeat(199)}\u{1F600} needle`,
+    'bin.dat': Buffer.from([0x6e, 0x65, 0x65, 0x64, 0x6c, 0x65, 0xff]),
+  });
+  mkdirSync(join(cwd, '.claude', 'hooks', 'sub', '.dot'), { recursive: true });
+  writeFileSync(join(cwd, '.claude', 'hooks', 'sub', '.dot', 'deep.mjs'), 'ΣΑΣ needle');
+  const other = makeRoot({ 'z.mjs': 'Needle' });
   const empty = mkdtempSync(join(tmpdir(), 'sing-hooks-empty-'));
-  assert.deepEqual(listHooks(empty), []);
+  const roots = [cwd, empty, other, cwd];
+  assert.deepEqual(await listHookGroups(roots, rust), roots.map((r) => ({ cwd: r, files: oracleList(r) })));
+  for (const q of ['needle', 'NEEDLE', 'σας', 'x'.repeat(150), 'absent']) {
+    assert.deepEqual(await searchHooks(roots, q, rust), oracleSearch(roots, q), q);
+  }
 });
 
-test('searchHooks returns matching line + snippet', () => {
+test('listHookGroups finds files and ignores a missing hooks dir', async () => {
+  const cwd = makeRoot({ 'a.mjs': 'console.log(1)', 'b.ps1': 'Write-Host x' });
+  const empty = mkdtempSync(join(tmpdir(), 'sing-hooks-empty-'));
+  const [full, none] = await listHookGroups([cwd, empty], rust);
+  assert.deepEqual(full.files.map((f) => f.name), ['a.mjs', 'b.ps1']);
+  assert.deepEqual(none, { cwd: empty, files: [] }); // no .claude/hooks → []
+});
+
+test('searchHooks returns matching line + snippet', async () => {
   const cwd = makeRoot({ 'h.mjs': 'const a = 1\nconst needle = 2\n' });
-  const hits = searchHooks([cwd], 'needle');
+  const hits = await searchHooks([cwd], 'needle', rust);
   assert.equal(hits.length, 1);
   assert.equal(hits[0].line, 2);
   assert.match(hits[0].text, /needle/);
-  assert.deepEqual(searchHooks([cwd], ''), []); // empty query → nothing
+  assert.deepEqual(await searchHooks([cwd], '', rust), []); // empty query → nothing
 });
 
 test('writeHook writes a backup on second write; guard rejects non-hooks path', async () => {
@@ -75,16 +132,16 @@ test('writeHook writes a backup on second write; guard rejects non-hooks path', 
   }
 });
 
-test('readHook reads back real hook content; missing file → exists:false', () => {
+test('readHook reads back real hook content; missing file → exists:false', async () => {
   const cwd = makeRoot({ 'r.mjs': 'hello world' });
   setHookRoots(['~', cwd]);
   try {
     const p = join(cwd, '.claude', 'hooks', 'r.mjs');
-    const r = readHook(p);
+    const r = await readHook(p, rust);
     assert.equal(r.exists, true);
     assert.equal(r.content, 'hello world');
     // A path under .claude/hooks that doesn't exist → exists:false, empty content.
-    const miss = readHook(join(cwd, '.claude', 'hooks', 'nope.mjs'));
+    const miss = await readHook(join(cwd, '.claude', 'hooks', 'nope.mjs'), rust);
     assert.equal(miss.exists, false);
     assert.equal(miss.content, '');
   } finally {
@@ -104,7 +161,7 @@ test('guard rejects a hooks-shaped path outside any configured hook root', async
     assert.match(w.error, /bad path/);
     assert.equal(readFileSync(p, 'utf8'), 'v1'); // untouched
     assert.equal(backend.calls.length, 0);
-    const r = readHook(p);
+    const r = await readHook(p, rust);
     assert.equal(r.exists, false);
     assert.equal(r.error, 'bad path');
   } finally {
@@ -124,7 +181,7 @@ test('guard rejects traversal that climbs out of .claude/hooks (resolved, not ra
   assert.match(w.error, /bad path/);
   assert.equal(existsSync(join(cwd, 'escape.txt')), false); // nothing written outside
   assert.equal(backend.calls.length, 0);
-  const r = readHook(evil);
+  const r = await readHook(evil, rust);
   assert.equal(r.exists, false);
   assert.equal(r.error, 'bad path');
 });
@@ -139,17 +196,17 @@ test('hook roots persist to FS: default ~, dedup, roundtrip', () => {
 
 // mtime + 409 guard: readHook reports mtime; writeHook rejects stale mtime,
 // force overrides. Mirror explorer.mjs writeEntry contract.
-test('readHook returns mtime as a number', () => {
+test('readHook returns mtime as a number', async () => {
   const cwd = makeRoot({ 'm.mjs': 'v1' });
   setHookRoots(['~', cwd]);
   try {
     const p = join(cwd, '.claude', 'hooks', 'm.mjs');
-    const r = readHook(p);
+    const r = await readHook(p, rust);
     assert.equal(r.exists, true);
     assert.equal(typeof r.mtime, 'number');
     assert.ok(r.mtime > 0);
     // Missing file → mtime 0.
-    const miss = readHook(join(cwd, '.claude', 'hooks', 'nope.mjs'));
+    const miss = await readHook(join(cwd, '.claude', 'hooks', 'nope.mjs'), rust);
     assert.equal(miss.exists, false);
     assert.equal(miss.mtime, 0);
   } finally {
@@ -165,7 +222,7 @@ test('writeHook rejects a stale mtime with "changed on disk"; force overrides', 
     // First write establishes a baseline mtime.
     const backend = makeBackend();
     await writeHook(p, 'v2', null, false, backend);
-    const r = readHook(p);
+    const r = await readHook(p, rust);
     const stale = r.mtime;
     // Externally rewrite the file + bump mtime well past the 1ms guard window.
     writeFileSync(p, 'v-external');

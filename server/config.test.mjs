@@ -10,7 +10,7 @@ import { join } from 'node:path';
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 const { searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, readConfig, writeConfig } = await import('./config.mjs');
 const { BACKUPS_DIR } = await import('./app-dir.mjs');
-const { createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend } = await import('./config.mjs');
+const { createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend, setConfigReadBackend } = await import('./config.mjs');
 let storedRoots = ['~'];
 const rootsBackend = {
   async pickerRootsGet() { return storedRoots.length ? structuredClone(storedRoots) : ['~']; },
@@ -21,6 +21,44 @@ const rootsBackend = {
   },
 };
 setConfigRootsBackend(rootsBackend);
+setConfigReadBackend({
+  async configRead(path) {
+    const exists = existsSync(path);
+    return { exists, content: exists ? readFileSync(path, 'utf8') : '', mtime: exists ? statSync(path).mtimeMs : 0 };
+  },
+  async configSearch(scans, q) {
+    const hits = [];
+    const seen = new Set();
+    for (const { cwd, project, local } of scans) {
+      try {
+        for (const [scope, path] of [['project', project], ['local', local]]) {
+          const file = await this.configRead(path);
+          if (!file.content || seen.has(path)) continue;
+          seen.add(path);
+          const lines = file.content.split('\n');
+          const i = lines.findIndex((line) => line.toLowerCase().includes(q));
+          if (i >= 0) hits.push({ cwd, scope, path, line: i + 1, text: lines[i].trim().slice(0, 200) });
+        }
+      } catch {}
+    }
+    return hits.sort((a, b) => a.path.localeCompare(b.path));
+  },
+  async configScan(root, cap) {
+    const hits = [];
+    const stack = [root];
+    const skips = new Set(['node_modules', 'dist', 'build', 'worktrees', '.cache', 'AppData', 'Temp']);
+    let seen = 0;
+    while (stack.length && seen < cap) {
+      const dir = stack.pop(); seen++;
+      let entries;
+      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+      if (entries.some((entry) => entry.name === '.claude') &&
+          (existsSync(join(dir, '.claude', 'settings.json')) || existsSync(join(dir, '.claude', 'settings.local.json')))) hits.push(dir);
+      for (const entry of entries) if (entry.isDirectory() && !entry.name.startsWith('.') && !skips.has(entry.name)) stack.push(join(dir, entry.name));
+    }
+    return { roots: hits.sort((a, b) => a.localeCompare(b)), truncated: seen >= cap };
+  },
+});
 
 function writeBackend(onWrite = () => {}) {
   return {
@@ -66,7 +104,7 @@ test('searchConfig empty query returns nothing', async () => {
   assert.deepEqual(await searchConfig(['/whatever'], ''), []);
 });
 
-test('findConfigRoots finds nested dirs holding .claude settings, skips others', () => {
+test('findConfigRoots finds nested dirs holding .claude settings, skips others', async () => {
   const root = mkdtempSync(join(tmpdir(), 'sing-scan-'));
   // root itself: no .claude. nested/a has settings.json, nested/b/deep has local.
   mkdirSync(join(root, 'nested', 'a', '.claude'), { recursive: true });
@@ -79,7 +117,7 @@ test('findConfigRoots finds nested dirs holding .claude settings, skips others',
   // .claude dir with no settings file → not a hit.
   mkdirSync(join(root, 'empty', '.claude'), { recursive: true });
 
-  const { roots, truncated } = findConfigRoots(root);
+  const { roots, truncated } = await findConfigRoots(root);
   assert.equal(truncated, false);
   assert.deepEqual(roots, [join(root, 'nested', 'a'), join(root, 'nested', 'b', 'deep')]);
 });
@@ -121,7 +159,7 @@ test('config root handlers reuse Fastify routes and reject malformed or unavaila
 test('readConfig reports mtime per scope (0 when file missing)', async () => {
   const cwd = makeRoot('{ "theme": "dark" }', null);
   await setConfigRoots([cwd]);
-  const cfg = readConfig(cwd);
+  const cfg = await readConfig(cwd);
   assert.equal(typeof cfg.project.mtime, 'number');
   assert.ok(cfg.project.mtime > 0);
   assert.equal(cfg.local.mtime, 0); // local scope file not created
@@ -131,7 +169,7 @@ test('writeConfig rejects a stale mtime with "changed on disk"; force overrides'
   const cwd = makeRoot('{ "v": 1 }', null);
   await setConfigRoots([cwd]);
   const p = join(cwd, '.claude', 'settings.json');
-  const stale = readConfig(cwd).project.mtime;
+  const stale = (await readConfig(cwd)).project.mtime;
   let writes = 0;
   const backend = writeBackend(() => writes++);
   // Externally rewrite + bump mtime past the 1ms guard window.

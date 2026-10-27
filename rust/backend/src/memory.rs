@@ -1,7 +1,13 @@
 use serde_json::{Value, json};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
+
+fn raw<T: serde::Serialize>(value: &T) -> Box<serde_json::value::RawValue> {
+    serde_json::value::to_raw_value(value).expect("memory payload serialization is infallible")
+}
 
 fn system_time_ms(time: SystemTime) -> f64 {
     match time.duration_since(UNIX_EPOCH) {
@@ -13,6 +19,170 @@ fn system_time_ms(time: SystemTime) -> f64 {
 fn mtime_ms(path: &Path) -> Option<f64> {
     let modified = fs::metadata(path).ok()?.modified().ok()?;
     Some(system_time_ms(modified))
+}
+
+#[derive(serde::Serialize)]
+struct ListedFile {
+    project: String,
+    file: String,
+    path: String,
+}
+
+#[derive(serde::Serialize)]
+struct SearchHit {
+    project: String,
+    file: String,
+    path: String,
+    line: usize,
+    text: String,
+}
+
+static LINE_CACHE: OnceLock<Mutex<HashMap<String, (f64, Vec<String>)>>> = OnceLock::new();
+
+fn path_text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn memory_dirs(root: &Path) -> Result<Vec<(String, std::path::PathBuf)>, String> {
+    let entries = match fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.to_string()),
+    };
+    let mut dirs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| error.to_string())?;
+        if !entry
+            .file_type()
+            .map_err(|error| error.to_string())?
+            .is_dir()
+        {
+            continue;
+        }
+        let project = entry.file_name().to_string_lossy().into_owned();
+        let dir = entry.path().join("memory");
+        if dir.exists() {
+            dirs.push((project, dir));
+        }
+    }
+    Ok(dirs)
+}
+
+pub fn list_files(root: &str) -> Box<serde_json::value::RawValue> {
+    let mut files = Vec::new();
+    let dirs = match memory_dirs(Path::new(root)) {
+        Ok(dirs) => dirs,
+        Err(error) => return raw(&serde_json::json!({ "error": error })),
+    };
+    for (project, dir) in dirs {
+        let entries = match fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(error) => return raw(&serde_json::json!({ "error": error.to_string() })),
+        };
+        for entry in entries {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => return raw(&serde_json::json!({ "error": error.to_string() })),
+            };
+            let file = entry.file_name().to_string_lossy().into_owned();
+            if file.to_lowercase().ends_with(".md") {
+                files.push(ListedFile {
+                    project: project.clone(),
+                    file,
+                    path: path_text(&entry.path()),
+                });
+            }
+        }
+    }
+    raw(&files)
+}
+
+fn cached_lines(path: &Path) -> Option<Vec<String>> {
+    let modified = mtime_ms(path)?;
+    let key = path_text(path);
+    let cache = LINE_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(cache) = cache.lock() {
+        if let Some((cached_mtime, lines)) = cache.get(&key) {
+            if *cached_mtime == modified {
+                return Some(lines.clone());
+            }
+        }
+    }
+    let bytes = fs::read(path).ok()?;
+    let content = String::from_utf8_lossy(&bytes);
+    let parts: Vec<&str> = content.split('\n').collect();
+    let lines: Vec<String> = parts
+        .iter()
+        .enumerate()
+        .map(|(index, line)| {
+            let line = *line;
+            if index + 1 < parts.len() {
+                line.strip_suffix('\r').unwrap_or(line).to_owned()
+            } else {
+                line.to_owned()
+            }
+        })
+        .collect();
+    if let Ok(mut cache) = cache.lock() {
+        cache.insert(key, (modified, lines.clone()));
+    }
+    Some(lines)
+}
+
+pub fn search(files: &Value, query: &str) -> Box<serde_json::value::RawValue> {
+    let needle = query.to_lowercase();
+    if needle.is_empty() {
+        return raw(&serde_json::json!({ "results": [], "capped": false }));
+    }
+    let mut results = Vec::new();
+    for candidate in files.as_array().into_iter().flatten() {
+        let (Some(project), Some(file), Some(path)) = (
+            candidate["project"].as_str(),
+            candidate["file"].as_str(),
+            candidate["path"].as_str(),
+        ) else {
+            continue;
+        };
+        let Some(lines) = cached_lines(Path::new(path)) else {
+            continue;
+        };
+        for (index, line) in lines.iter().enumerate() {
+            if line.to_lowercase().contains(&needle) {
+                results.push(SearchHit {
+                    project: project.to_owned(),
+                    file: file.to_owned(),
+                    path: path.to_owned(),
+                    line: index + 1,
+                    text: line.clone(),
+                });
+                if results.len() >= 300 {
+                    return raw(&serde_json::json!({ "results": results, "capped": true }));
+                }
+            }
+        }
+    }
+    raw(&serde_json::json!({ "results": results, "capped": false }))
+}
+
+pub fn read_memory_file(path: &str) -> Box<serde_json::value::RawValue> {
+    let path = Path::new(path);
+    let metadata = match fs::metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return raw(&serde_json::json!({ "ok": false, "error": "not found" }));
+        }
+        Err(error) => return raw(&serde_json::json!({ "ok": false, "error": error.to_string() })),
+    };
+    let bytes = match fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(error) => return raw(&serde_json::json!({ "ok": false, "error": error.to_string() })),
+    };
+    let Some(modified) = metadata.modified().ok().map(system_time_ms) else {
+        return raw(&serde_json::json!({ "ok": false, "error": "modified time unavailable" }));
+    };
+    raw(
+        &serde_json::json!({ "ok": true, "content": String::from_utf8_lossy(&bytes), "mtime": modified }),
+    )
 }
 
 // Node authorizes the persisted Memory root and handles backups. This final

@@ -430,6 +430,13 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       });
     },
 
+    usageHistory(provider, nowMs, window, paths) {
+      return request({ op: 'usage_history', provider, now_ms: nowMs, usage_history: { window, ...paths } }).then((payload) => {
+        if (payload?.error) throw new Error(payload.error);
+        return payload;
+      });
+    },
+
     modelsGet(path) {
       return request({ op: 'models_get', path });
     },
@@ -482,6 +489,11 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       const result = await request({ op: 'window_anchor_telemetry', path, record });
       if (result.error) throw new Error(result.error);
       return result;
+    },
+
+    // agent_stats / transcript_stats (stats.mjs builds the stats_* fields).
+    statsRequest(fields) {
+      return request(fields);
     },
 
     windowAnchorRequest(op, fields = {}) {
@@ -595,6 +607,29 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       });
     },
 
+    async memoryList(root) {
+      const files = await request({ op: 'memory_list', root });
+      if (!Array.isArray(files)) throw new Error(files?.error || 'Rust Memory list failed');
+      return files.sort((a, b) => a.project.localeCompare(b.project) || a.file.localeCompare(b.file));
+    },
+
+    async memorySearch(root, q) {
+      if (!q) return { results: [], capped: false };
+      const files = await request({ op: 'memory_list', root });
+      if (!Array.isArray(files)) throw new Error(files?.error || 'Rust Memory list failed');
+      files.sort((a, b) => a.project.localeCompare(b.project) || a.file.localeCompare(b.file));
+      const result = await request({ op: 'memory_search', memory_files: files, q });
+      if (!Array.isArray(result?.results)) throw new Error(result?.error || 'Rust Memory search failed');
+      for (const hit of result.results) hit.text = hit.text.trim().slice(0, 200);
+      return result;
+    },
+
+    async memoryRead(path) {
+      const result = await request({ op: 'memory_read', path });
+      if (!result?.ok && result?.error !== 'not found') throw new Error(result?.error || 'Rust Memory read failed');
+      return result;
+    },
+
     configWrite(path, content, mtime, force) {
       return request({
         op: 'config_write',
@@ -613,6 +648,64 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
         mtime: mtime == null ? null : Number(mtime),
         force: !!force,
       });
+    },
+
+    async configRead(path) {
+      const result = await request({ op: 'config_read', path });
+      if (result?.error) throw new Error(result.error);
+      return result;
+    },
+
+    async codexConfigRead(path) {
+      const result = await request({ op: 'codex_config_read', path });
+      if (result?.error) throw new Error(result.error);
+      return result;
+    },
+
+    async configSearch(roots, q) {
+      const results = await request({ op: 'config_search', roots, q });
+      for (const result of results) result.text = result.text.slice(0, 200);
+      return results.sort((a, b) => a.path.localeCompare(b.path));
+    },
+
+    async codexConfigSearch(roots, q) {
+      const results = await request({ op: 'codex_config_search', roots, q });
+      if (!Array.isArray(results)) throw new Error(results?.error || 'Rust Codex config search failed');
+      for (const result of results) result.text = result.text.slice(0, 200);
+      return results.sort((a, b) => a.path.localeCompare(b.path));
+    },
+
+    async configScan(root, cap) {
+      const result = await request({ op: 'config_scan', root, cap });
+      result.roots.sort((a, b) => a.localeCompare(b));
+      return result;
+    },
+
+    async codexConfigScan(root, cap) {
+      const result = await request({ op: 'codex_config_scan', root, cap });
+      result.roots.sort((a, b) => a.localeCompare(b));
+      return result;
+    },
+
+    // Rust keeps readdir order; the localeCompare sorts and the JS
+    // slice(0, 200) snippet trim stay here (see hooks_read.rs).
+    async hooksList(scans) {
+      const groups = await request({ op: 'hooks_list', roots: scans });
+      for (const group of groups) group.files.sort((a, b) => a.rel.localeCompare(b.rel));
+      return groups;
+    },
+
+    async hooksSearch(scans, q) {
+      const results = await request({ op: 'hooks_search', roots: scans, q });
+      for (const result of results) result.text = result.text.slice(0, 200);
+      return results.sort((a, b) => a.path.localeCompare(b.path));
+    },
+
+    // readFileSync/statSync failures rethrow, as the Node read did.
+    async hooksRead(path) {
+      const result = await request({ op: 'hooks_read', path });
+      if (result.error) throw new Error(result.error);
+      return result;
     },
 
     hooksWrite(path, content, mtime, force) {

@@ -13,10 +13,10 @@ import './migrate-state.mjs';
 import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid, setProcsBackend } from './procs.mjs';
-import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend } from './config.mjs';
-import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, createConfigRootsGetHandler as createCodexConfigRootsGetHandler, createConfigRootsSetHandler as createCodexConfigRootsSetHandler, setConfigRootsBackend as setCodexConfigRootsBackend } from './codex-config.mjs';
-import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
-import { searchMemory, listFiles, readMemoryFile, createMemoryWriteHandler, getMemoryRoot, setMemoryRoot } from './memory.mjs';
+import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend, setConfigReadBackend } from './config.mjs';
+import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, createConfigRootsGetHandler as createCodexConfigRootsGetHandler, createConfigRootsSetHandler as createCodexConfigRootsSetHandler, setConfigRootsBackend as setCodexConfigRootsBackend, setCodexConfigReadBackend } from './codex-config.mjs';
+import { listHookGroups, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
+import { searchMemory, listFiles, readMemoryFile, createMemoryWriteHandler, getMemoryRoot, setMemoryRoot, setMemoryReadBackend } from './memory.mjs';
 import { getRulesRoots, setRulesRoots, readRuleFile, createRuleWriteHandler, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } from './rules.mjs';
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
 import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
@@ -32,7 +32,7 @@ import { readSkillsDir, setSkillsBackend, createSkillsRootsGetHandler, createSki
 import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, setExplorerBackend } from './explorer.mjs';
 import { getConfigState, setConfigState, setConfigStateBackend } from './config-state.mjs';
 import { getKeys, setKeys, setKeysBackend } from './keys.mjs';
-import { statsFor, sessionStats } from './stats.mjs';
+import { statsFor, sessionStats, setStatsBackend } from './stats.mjs';
 import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, setUsageClaudeBackend, CODEX_HOME } from './usage.mjs';
 import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
 import { createModelPricesHandler } from './rust-backend.mjs';
@@ -127,6 +127,7 @@ const app = Fastify({
 });
 const rustBackend = createRustBackend();
 setTranscriptBackend(rustBackend);
+setStatsBackend(rustBackend);
 setCodexIdentityBackend(rustBackend);
 // portable-pty's Windows ConPTY loads bare-name conpty.dll then falls back to
 // kernel32; it cannot pin node-pty's former package-relative DLL. This is an
@@ -148,7 +149,10 @@ setUsageReportBackend(rustBackend);
 setProcsBackend(rustBackend); // procs.mjs process scan execs + guarded PID kill
 setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
 setConfigRootsBackend(rustBackend);
+setConfigReadBackend(rustBackend);
 setCodexConfigRootsBackend(rustBackend);
+setCodexConfigReadBackend(rustBackend);
+setMemoryReadBackend(rustBackend);
 setModelsBackend(rustBackend); // model-store.mjs dispatches catalogue and routing calls on the shared child
 setTasksBackend(rustBackend);
 setKeysBackend(rustBackend);
@@ -378,7 +382,7 @@ app.get('/usage', async (req) => getUsage({
 }));
 // Current 5h window: account % readings + estimated per-session split (usage-history.mjs).
 app.get('/usage/history', async (req, reply) => {
-  const doc = getUsageHistory(req.query.provider, Date.now(), req.query.window ?? '5h');
+  const doc = await getUsageHistory(rustBackend, req.query.provider, Date.now(), req.query.window ?? '5h');
   if (!doc) return reply.code(400).send({ ok: false, error: `provider must be one of ${HISTORY_PROVIDERS.join(', ')}; window one of ${HISTORY_WINDOWS.join(', ')}` });
   return doc;
 });
@@ -581,14 +585,14 @@ app.post('/session/external', createExternalSessionLaunchHandler({ reg, rustBack
 app.get('/config', async (req, reply) => {
   const cwd = req.query.cwd;
   if (!cwd) return reply.code(400).send({ error: 'cwd required' });
-  return readConfig(cwd);
+  return await readConfig(cwd);
 });
-app.get('/claude/theme', async () => ({ theme: claudeTheme() }));
+app.get('/claude/theme', async () => ({ theme: await claudeTheme() }));
 // Recursively find dirs under `root` that hold a .claude/settings*.json.
 app.get('/config/scan', async (req, reply) => {
   const root = req.query.root;
   if (!root || !existsSync(root)) return reply.code(400).send({ error: 'bad root' });
-  return findConfigRoots(root);
+  return await findConfigRoots(root);
 });
 // FS-persisted config root list (survives browser cache clear).
 app.get('/config/roots', createConfigRootsGetHandler(rustBackend));
@@ -613,13 +617,13 @@ app.put('/config/state', async (req) => setConfigState(req.body));
 app.get('/codex-config', async (req, reply) => {
   const cwd = req.query.cwd;
   if (!cwd) return reply.code(400).send({ error: 'cwd required' });
-  return readCodexConfig(cwd);
+  return await readCodexConfig(cwd);
 });
 // Recursively find dirs under `root` that hold a .codex/config.toml.
 app.get('/codex-config/scan', async (req, reply) => {
   const root = req.query.root;
   if (!root || !existsSync(root)) return reply.code(400).send({ error: 'bad root' });
-  return findCodexConfigRoots(root);
+  return await findCodexConfigRoots(root);
 });
 // FS-persisted codex config root list (survives browser cache clear).
 app.get('/codex-config/roots', createCodexConfigRootsGetHandler(rustBackend));
@@ -640,15 +644,14 @@ app.put('/codex-config/:scope', async (req, reply) => {
 app.get('/hooks/roots', async () => ({ roots: getHookRoots() }));
 app.put('/hooks/roots', async (req) => setHookRoots(req.body?.roots));
 app.post('/hooks/list', async (req) => {
-  const roots = req.body?.roots || [];
-  return { groups: roots.map((cwd) => ({ cwd, files: listHooks(cwd) })) };
+  return { groups: await listHookGroups(req.body?.roots, rustBackend) };
 });
 app.post('/hooks/search', async (req) => {
   const { roots, q } = req.body || {};
-  return { results: searchHooks(roots, q) };
+  return { results: await searchHooks(roots, q, rustBackend) };
 });
 app.get('/hooks/file', async (req, reply) => {
-  const r = readHook(req.query.path);
+  const r = await readHook(req.query.path, rustBackend);
   if (r.error) return reply.code(400).send(r);
   return r;
 });
@@ -747,10 +750,13 @@ app.patch('/background/reports/:taskId/flag', async (req, reply) => {
 // Memory: cross-project search + guarded read/write under a client-selected root.
 app.get('/memory/root', async () => ({ root: getMemoryRoot() }));
 app.put('/memory/root', async (req) => setMemoryRoot(req.body?.root));
-app.get('/memory/search', async (req) => searchMemory(req.query.q, req.query.root));
-app.get('/memory/files', async (req) => ({ files: listFiles(req.query.root) }));
+app.get('/memory/search', async (req) => {
+  const result = await searchMemory(req.query.q, req.query.root);
+  return result;
+});
+app.get('/memory/files', async (req) => ({ files: await listFiles(req.query.root) }));
 app.get('/memory/file', async (req, reply) => {
-  const r = readMemoryFile(req.query.path, req.query.root);
+  const r = await readMemoryFile(req.query.path, req.query.root);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });

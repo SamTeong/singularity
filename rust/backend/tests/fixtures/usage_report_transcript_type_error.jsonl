@@ -1,0 +1,2 @@
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":{"toString":1}}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":[{"toString":1}]}]}}

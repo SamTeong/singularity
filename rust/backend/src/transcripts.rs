@@ -474,6 +474,102 @@ impl TranscriptRawText {
     }
 }
 
+/// Extract a nested JSON string without decoding it through `serde_json::Value`.
+pub(crate) fn raw_json_string_at(input: &str, path: &[&str]) -> Option<TranscriptRawText> {
+    let mut token = RawValue::from_string(input.to_owned())
+        .ok()?
+        .get()
+        .to_owned();
+    for key in path {
+        token = raw_object_member(&token, key)?.get().to_owned();
+    }
+    TranscriptRawText::from_json_token(token).ok()
+}
+
+fn raw_object_member(token: &str, wanted: &str) -> Option<Box<RawValue>> {
+    let raw = RawValue::from_string(token.to_owned()).ok()?;
+    let bytes = raw.get().as_bytes();
+    if bytes.first() != Some(&b'{') {
+        return None;
+    }
+    let mut cursor = 1;
+    raw_skip_space(bytes, &mut cursor);
+    let mut found = None;
+    while bytes.get(cursor) != Some(&b'}') {
+        let key_start = cursor;
+        raw_skip_string(bytes, &mut cursor);
+        let key =
+            TranscriptRawText::from_json_token(raw.get()[key_start..cursor].to_owned()).ok()?;
+        raw_skip_space(bytes, &mut cursor);
+        cursor += 1;
+        raw_skip_space(bytes, &mut cursor);
+        let value_start = cursor;
+        raw_skip_value(bytes, &mut cursor);
+        if key.units().ok()?.as_slice() == wanted.encode_utf16().collect::<Vec<_>>().as_slice() {
+            found = RawValue::from_string(raw.get()[value_start..cursor].to_owned()).ok();
+        }
+        raw_skip_space(bytes, &mut cursor);
+        if bytes.get(cursor) == Some(&b'}') {
+            break;
+        }
+        cursor += 1;
+        raw_skip_space(bytes, &mut cursor);
+    }
+    found
+}
+
+fn raw_skip_space(bytes: &[u8], cursor: &mut usize) {
+    while bytes
+        .get(*cursor)
+        .is_some_and(|byte| matches!(byte, b' ' | b'\n' | b'\r' | b'\t'))
+    {
+        *cursor += 1;
+    }
+}
+
+fn raw_skip_string(bytes: &[u8], cursor: &mut usize) {
+    *cursor += 1;
+    while bytes[*cursor] != b'"' {
+        if bytes[*cursor] == b'\\' {
+            *cursor += 2;
+        } else {
+            *cursor += 1;
+        }
+    }
+    *cursor += 1;
+}
+
+fn raw_skip_value(bytes: &[u8], cursor: &mut usize) {
+    match bytes[*cursor] {
+        b'"' => raw_skip_string(bytes, cursor),
+        b'{' | b'[' => {
+            let mut stack = vec![bytes[*cursor]];
+            *cursor += 1;
+            while !stack.is_empty() {
+                match bytes[*cursor] {
+                    b'"' => raw_skip_string(bytes, cursor),
+                    b'{' | b'[' => {
+                        stack.push(bytes[*cursor]);
+                        *cursor += 1;
+                    }
+                    b'}' | b']' => {
+                        stack.pop();
+                        *cursor += 1;
+                    }
+                    _ => *cursor += 1,
+                }
+            }
+        }
+        _ => {
+            while bytes.get(*cursor).is_some_and(|byte| {
+                !matches!(byte, b',' | b'}' | b']' | b' ' | b'\n' | b'\r' | b'\t')
+            }) {
+                *cursor += 1;
+            }
+        }
+    }
+}
+
 fn lowercase_utf16(units: &[u16]) -> Vec<u16> {
     let mut lowered = Vec::new();
     let mut index = 0;

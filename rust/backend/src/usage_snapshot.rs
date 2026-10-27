@@ -577,7 +577,7 @@ fn year_month_start_ms(year: i32, month: u8) -> Option<i64> {
     i64::from(date.to_julian_day() - epoch.to_julian_day()).checked_mul(86_400_000)
 }
 
-fn parse_fetched_at(raw: &RawValue) -> Option<i64> {
+pub(crate) fn parse_fetched_at(raw: &RawValue) -> Option<i64> {
     let at = parse_date_ms(&date_parse_string(raw)?)?;
     (at.abs() <= 8_640_000_000_000_000).then_some(at)
 }
@@ -1320,7 +1320,7 @@ fn system_time_ms(time: std::time::SystemTime) -> Option<i64> {
 }
 
 #[cfg(unix)]
-fn local_parts(epoch: i64) -> Option<(i32, u8, u8, u8, u8, u8)> {
+pub(crate) fn local_parts(epoch: i64) -> Option<(i32, u8, u8, u8, u8, u8)> {
     let mut value = unsafe { std::mem::zeroed::<libc::tm>() };
     let time = epoch as libc::time_t;
     if unsafe { libc::localtime_r(&time, &mut value) }.is_null() {
@@ -1402,7 +1402,7 @@ unsafe extern "system" {
 }
 
 #[cfg(windows)]
-fn local_parts(epoch: i64) -> Option<(i32, u8, u8, u8, u8, u8)> {
+pub(crate) fn local_parts(epoch: i64) -> Option<(i32, u8, u8, u8, u8, u8)> {
     let ticks = (epoch as i128 + 11_644_473_600) * 10_000_000;
     if ticks < 0 || ticks > u64::MAX as i128 {
         return None;

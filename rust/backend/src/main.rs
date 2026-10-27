@@ -47,6 +47,10 @@ struct Request {
     #[serde(default)]
     roots: Value,
     #[serde(default)]
+    memory_files: Value,
+    #[serde(default)]
+    cap: Value,
+    #[serde(default)]
     roots_file: Value,
     #[serde(default)]
     legacy_file: Value,
@@ -126,6 +130,8 @@ struct Request {
     #[serde(default)]
     usage_report: Value,
     #[serde(default)]
+    usage_history: Value,
+    #[serde(default)]
     usage: Value,
     #[serde(default)]
     authoritative: Value,
@@ -165,6 +171,8 @@ struct Request {
     outcome: Value,
     #[serde(flatten)]
     transcript: singularity_backend::transcript_bridge::TranscriptRequest,
+    #[serde(flatten)]
+    stats: singularity_backend::stats::StatsRequest,
 }
 
 fn default_op() -> String {
@@ -172,6 +180,9 @@ fn default_op() -> String {
 }
 
 fn main() -> io::Result<()> {
+    if std::env::args().nth(1).as_deref() == Some("--http") {
+        return singularity_backend::http_server::run_from_env();
+    }
     if std::env::args().nth(1).as_deref() == Some("--pty") {
         return singularity_backend::pty::run();
     }
@@ -185,6 +196,7 @@ fn main() -> io::Result<()> {
     let shutting_down = Arc::new(AtomicBool::new(false));
     let mut transcript_services =
         singularity_backend::transcript_bridge::TranscriptServices::default();
+    let mut stats_service = singularity_backend::stats::StatsService::default();
     let mut usage_snapshots = singularity_backend::usage_snapshot::SnapshotService::default();
     let mut codex_usage_sessions = singularity_backend::codex_usage::CodexUsageSessions::default();
     let mut window_anchor_service = singularity_backend::window_anchor::Service::default();
@@ -382,6 +394,10 @@ fn main() -> io::Result<()> {
                 ) =>
             {
                 raw_response = Some(transcript_services.dispatch(&request.op, &request.transcript));
+                Value::Null
+            }
+            Ok(request) if matches!(request.op.as_str(), "agent_stats" | "transcript_stats") => {
+                raw_response = Some(stats_service.dispatch(&request.op, &request.stats));
                 Value::Null
             }
             Ok(request) if request.op == "sysstats_get" => {
@@ -671,6 +687,29 @@ fn main() -> io::Result<()> {
                 request.mtime.as_f64(),
                 request.force.as_bool().unwrap_or(false),
             ),
+            Ok(request) if request.op == "memory_list" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::memory::list_files(request.root.as_str().unwrap_or("")),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "memory_search" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::memory::search(
+                        &request.memory_files,
+                        request.q.as_str().unwrap_or(""),
+                    ),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "memory_read" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::memory::read_memory_file(
+                        request.path.as_str().unwrap_or(""),
+                    ),
+                ));
+                Value::Null
+            }
             Ok(request) if request.op == "memory_write" => singularity_backend::memory::write_file(
                 request.path.as_str(),
                 request.content.as_str(),
@@ -692,6 +731,75 @@ fn main() -> io::Result<()> {
                     request.mtime.as_f64(),
                     request.force.as_bool().unwrap_or(false),
                 )
+            }
+            Ok(request) if request.op == "hooks_list" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::hooks_read::list(&request.roots),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "config_read" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::config_read::read(request.path.as_str().unwrap_or("")),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "codex_config_read" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::config_read::read(request.path.as_str().unwrap_or("")),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "config_search" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::config_read::search(
+                        &request.roots,
+                        request.q.as_str().unwrap_or(""),
+                    ),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "codex_config_search" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::config_read::search_codex(
+                        &request.roots,
+                        request.q.as_str().unwrap_or(""),
+                    ),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "config_scan" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::config_read::scan(
+                        request.root.as_str().unwrap_or(""),
+                        request.cap.as_f64().unwrap_or(20000.0),
+                    ),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "codex_config_scan" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::config_read::scan_codex(
+                        request.root.as_str().unwrap_or(""),
+                        request.cap.as_f64().unwrap_or(20000.0),
+                    ),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "hooks_search" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::hooks_read::search(
+                        &request.roots,
+                        request.q.as_str().unwrap_or(""),
+                    ),
+                ));
+                Value::Null
+            }
+            Ok(request) if request.op == "hooks_read" => {
+                raw_response = Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                    singularity_backend::hooks_read::read(request.path.as_str().unwrap_or("")),
+                ));
+                Value::Null
             }
             Ok(request) if request.op == "hooks_write" => {
                 singularity_backend::hooks_write::write_file(
@@ -832,6 +940,29 @@ fn main() -> io::Result<()> {
                 }
                 None => serde_json::json!({ "error": "pricing path missing" }),
             },
+            Ok(request) if request.op == "usage_history" => {
+                let field = |key: &str| request.usage_history[key].as_str().unwrap_or("");
+                let params = singularity_backend::usage_history::Params {
+                    provider: request.provider.as_str().unwrap_or(""),
+                    window: field("window"),
+                    now_ms: request.now_ms.as_f64().unwrap_or(f64::NAN),
+                    state_dir: field("state_dir"),
+                    pricing_path: field("pricing_path"),
+                    claude_projects: field("claude_projects"),
+                    codex_sessions: field("codex_sessions"),
+                };
+                match singularity_backend::usage_history::get(&params) {
+                    Ok(doc) => {
+                        raw_response =
+                            Some(singularity_backend::transcript_bridge::ResponseBody::Raw(
+                                RawValue::from_string(doc)
+                                    .expect("usage history doc is valid JSON"),
+                            ));
+                        Value::Null
+                    }
+                    Err(error) => serde_json::json!({ "error": error }),
+                }
+            }
             Ok(request) if request.op == "model_prices_write" => {
                 match (request.path.as_str(), request.pricing_text.as_str()) {
                     (Some(path), Some(text)) => {

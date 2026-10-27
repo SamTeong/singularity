@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync, readdirSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -9,7 +9,7 @@ import { join } from 'node:path';
 // (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 process.env.CODEX_HOME = join(process.env.SINGULARITY_HOME, 'codex-home');
-const { readConfig, searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, writeConfig, createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend } = await import('./codex-config.mjs');
+const { readConfig, searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, writeConfig, createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend, setCodexConfigReadBackend } = await import('./codex-config.mjs');
 let storedRoots = ['~'];
 const rootsBackend = {
   pickerRootsGet() { return storedRoots.length ? structuredClone(storedRoots) : ['~']; },
@@ -22,12 +22,43 @@ const rootsBackend = {
 setConfigRootsBackend(rootsBackend);
 
 const testBackend = {
+  async codexConfigRead(path) {
+    const exists = existsSync(path);
+    return { exists, content: exists ? readFileSync(path, 'utf8') : '', mtime: exists ? statSync(path).mtimeMs : 0 };
+  },
+  async codexConfigSearch(roots, q) {
+    const hits = [];
+    const seen = new Set();
+    for (const { cwd, project, user } of roots) for (const [scope, path] of [['project', project], ['user', user]]) {
+      if (seen.has(path) || !existsSync(path)) continue;
+      seen.add(path);
+      const lines = readFileSync(path, 'utf8').split('\n');
+      const i = lines.findIndex((line) => line.toLowerCase().includes(q.toLowerCase()));
+      if (i >= 0) hits.push({ cwd, scope, path, line: i + 1, text: lines[i].trim().slice(0, 200) });
+    }
+    return hits.sort((a, b) => a.path.localeCompare(b.path));
+  },
+  async codexConfigScan(root, cap) {
+    const hits = [];
+    const stack = [root];
+    let seen = 0;
+    while (stack.length && seen < cap) {
+      const dir = stack.pop();
+      seen++;
+      let entries;
+      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+      if (existsSync(join(dir, '.codex', 'config.toml'))) hits.push(dir);
+      for (const entry of entries) if (entry.isDirectory() && !entry.name.startsWith('.') && !['node_modules', 'dist', 'build', 'worktrees', '.cache', 'AppData', 'Temp'].includes(entry.name)) stack.push(join(dir, entry.name));
+    }
+    return { roots: hits.sort((a, b) => a.localeCompare(b)), truncated: seen >= cap };
+  },
   async codexConfigWrite(path, content) {
     if (typeof content !== 'string') return { ok: false, error: 'content must be a string' };
     writeFileSync(path, content);
     return { ok: true, mtime: statSync(path).mtimeMs };
   },
 };
+setCodexConfigReadBackend(testBackend);
 
 async function makeRoot(toml) {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-cdx-'));
@@ -87,7 +118,7 @@ test('searchConfig empty query returns nothing', async () => {
   assert.deepEqual(await searchConfig(['/whatever'], ''), []);
 });
 
-test('findConfigRoots finds nested dirs holding .codex/config.toml, skips others', () => {
+test('findConfigRoots finds nested dirs holding .codex/config.toml, skips others', async () => {
   const root = mkdtempSync(join(tmpdir(), 'sing-scan-'));
   // root itself: no .codex. nested/a has config.toml, nested/b/deep has config.toml.
   mkdirSync(join(root, 'nested', 'a', '.codex'), { recursive: true });
@@ -100,7 +131,7 @@ test('findConfigRoots finds nested dirs holding .codex/config.toml, skips others
   // .codex dir with no config.toml → not a hit.
   mkdirSync(join(root, 'empty', '.codex'), { recursive: true });
 
-  const { roots, truncated } = findConfigRoots(root);
+  const { roots, truncated } = await findConfigRoots(root);
   assert.equal(truncated, false);
   assert.deepEqual(roots, [join(root, 'nested', 'a'), join(root, 'nested', 'b', 'deep')]);
 });
@@ -173,6 +204,26 @@ test('readConfig rejects cwd outside config roots', async () => {
   // mtime: 0 for non-existent/outside scopes
   assert.equal(result.project.mtime, 0);
   assert.equal(result.user.mtime, 0);
+});
+
+test('Codex read and search authorize roots before calling the content backend', async () => {
+  const cwd = await makeRoot('model = "private"\n');
+  await setConfigRoots([mkdtempSync(join(tmpdir(), 'sing-other-'))]);
+  let reads = 0;
+  let searches = 0;
+  setCodexConfigReadBackend({
+    async codexConfigRead(path) { reads++; return testBackend.codexConfigRead(path); },
+    async codexConfigSearch(roots, q) { searches++; return testBackend.codexConfigSearch(roots, q); },
+    async codexConfigScan(root, cap) { return testBackend.codexConfigScan(root, cap); },
+  });
+  try {
+    const denied = await readConfig(cwd);
+    assert.equal(denied.project.content, '');
+    assert.equal(denied.user.content, '');
+    assert.deepEqual(await searchConfig([cwd], 'private'), []);
+    assert.equal(reads, 0);
+    assert.equal(searches, 1);
+  } finally { setCodexConfigReadBackend(testBackend); }
 });
 
 test('readConfig reports mtime on existing scopes', async () => {
