@@ -114,7 +114,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs::{create_dir_all, write};
+    use std::fs::{create_dir_all, remove_dir_all, write};
     use std::sync::atomic::{AtomicU64, Ordering};
 
     static NEXT: AtomicU64 = AtomicU64::new(0);
@@ -248,5 +248,87 @@ mod tests {
                 skill.display()
             )
         );
+    }
+
+    // Contract pin (usage_report.rs:73-75): absent skill_path short-circuits before
+    // the runner with the JS `undefined` wording. The set-but-missing path wording at
+    // :76-78 is already pinned by generation_reports_missing_skill_and_invalid_output.
+    #[test]
+    fn generation_pins_absent_skill_path_error_without_spawning() {
+        let dir = temp_dir();
+        let result = generate(&request(&dir), |_, _, _, _, _| {
+            unreachable!("runner must not run for absent skill_path")
+        });
+        assert_eq!(
+            result,
+            json!({"ok": false, "error": "usage-report skill not found: undefined"})
+        );
+        remove_dir_all(&dir).ok();
+    }
+
+    // Contract pin (usage_report.rs:105-111): any existing .html printed on the last
+    // stdout line is accepted even outside reports_dir; status/read keep scanning
+    // reports_dir only, so the next read can miss the generated report.
+    #[test]
+    fn generation_accepts_printed_report_outside_reports_dir() {
+        let reports = temp_dir();
+        let outside = temp_dir();
+        let skill = outside.join("stats.mjs");
+        let report = outside.join("report-outside.html");
+        write(&skill, "").unwrap();
+        write(&report, "html").unwrap();
+        let mut request = request(&reports);
+        request.skill_path = Some(skill.to_string_lossy().into_owned());
+        let result = generate(
+            &request,
+            |_, _, _, _, _| json!({"ok": true, "stdout": report.display().to_string()}),
+        );
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["at"].as_f64(), mtime_ms(&report));
+        assert_eq!(
+            status(&request),
+            Status {
+                exists: false,
+                at: None
+            }
+        );
+        assert_eq!(read(&request).html, None);
+        remove_dir_all(&reports).ok();
+        remove_dir_all(&outside).ok();
+    }
+
+    // Contract pin (stats.mjs:17,55-56): USAGE_REPORT_STATE relocates the skill's
+    // reports beside the state dir while the caller keeps reading its own
+    // reports_dir, so generate succeeds and status/read miss the new report.
+    #[test]
+    fn generation_accepts_state_derived_reports_dir_diverging_from_reports_dir() {
+        let root = temp_dir();
+        let state = root.join("state");
+        let state_reports = root.join("reports"); // dirname(state)/reports, stats.mjs:56
+        let configured = root.join("configured-reports");
+        create_dir_all(&state).unwrap();
+        create_dir_all(&state_reports).unwrap();
+        create_dir_all(&configured).unwrap();
+        let skill = root.join("stats.mjs");
+        let report = state_reports.join("report-state.html");
+        write(&skill, "").unwrap();
+        write(&report, "html").unwrap();
+        let mut request = request(&configured);
+        request.skill_path = Some(skill.to_string_lossy().into_owned());
+        let result = generate(
+            &request,
+            |_, _, _, _, _| json!({"ok": true, "stdout": report.display().to_string()}),
+        );
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["at"].as_f64(), mtime_ms(&report));
+        assert_eq!(
+            status(&request),
+            Status {
+                exists: false,
+                at: None
+            }
+        );
+        assert_eq!(read(&request).html, None);
+        remove_dir_all(&root).ok();
     }
 }
