@@ -196,9 +196,13 @@ async function listCodexSessions({ isLive = () => false, now = Date.now(), hideR
     }
     if (hideReviews && review) return null;
     threadSources.set(id, threadSource);
+    const processLive = isLive(id, { source: 'codex', cwd });
     return {
       id, project: '<codex>', cwd, title, mtime: st.mtimeMs, size: st.size,
-      running: isLive(id) || (now - st.mtimeMs) < RUNNING_MS,
+      processLive,
+      activityRecent: (now - st.mtimeMs) < RUNNING_MS,
+      processState: processLive ? 'live' : 'unknown',
+      running: processLive,
       source: 'codex', sessionId,
       file: relative(CODEX_HOME, p),
     };
@@ -494,8 +498,12 @@ export async function listSessions({ cap = 5000, isLive = () => false, now = Dat
         if (metaCache.size > CLAUDE_META_CACHE_CAP) metaCache.delete(metaCache.keys().next().value);
       }
       const id = f.slice(0, -6);
+      const processLive = isLive(id, { source: 'claude', cwd });
       const row = { id, project: proj.name, cwd, title, blurb, mtime: st.mtimeMs, size: st.size };
-      row.running = isLive(id) || (now - st.mtimeMs) < RUNNING_MS;
+      row.processLive = processLive;
+      row.activityRecent = (now - st.mtimeMs) < RUNNING_MS;
+      row.processState = processLive ? 'live' : 'unknown';
+      row.running = processLive;
       // Subagents are separate transcripts under <parent-id>/subagents/agent-*.jsonl,
       // full-session shape. Their tool_result bodies are inline in the jsonl (the
       // sibling tool-results/ dir is not referenced), so readSession renders them
@@ -546,6 +554,7 @@ async function listSubagents(parentDir, parentId, isLive, now) {
       metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, metaMtimeMs, metaSize, cwd: peeked.cwd, title: peeked.title, blurb: peeked.blurb, metaTitle });
       if (metaCache.size > CLAUDE_META_CACHE_CAP) metaCache.delete(metaCache.keys().next().value);
     }
+    const processLive = isLive(agentId, { source: 'claude-subagent' });
     return {
       id: `${parentId}/subagents/${agentId}`,
       agentId,
@@ -553,7 +562,10 @@ async function listSubagents(parentDir, parentId, isLive, now) {
       blurb,
       mtime: st.mtimeMs,
       size: st.size,
-      running: isLive(agentId) || (now - st.mtimeMs) < RUNNING_MS,
+      processLive,
+      activityRecent: (now - st.mtimeMs) < RUNNING_MS,
+      processState: processLive ? 'live' : 'unknown',
+      running: processLive,
     };
   });
   return rows.filter(Boolean);

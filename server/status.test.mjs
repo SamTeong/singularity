@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert';
-import { normalizeStatus, STATUS_PROVIDERS } from './status.mjs';
+import { createStatusService, normalizeStatus, STATUS_PROVIDERS } from './status.mjs';
 
 const PROVIDER = STATUS_PROVIDERS[1]; // claude
 
@@ -36,4 +36,50 @@ test('normalizeStatus tolerates missing optional fields', () => {
   assert.strictEqual(n.description, '');
   assert.deepStrictEqual(n.components, []);
   assert.deepStrictEqual(n.incidents, []);
+});
+
+test('status freshness keeps last-good data and isolates provider attempts', async () => {
+  let clock = Date.parse('2026-10-27T00:00:00Z');
+  const outcomes = {
+    openai: [
+      { ok: true, key: 'openai', label: 'OpenAI', indicator: 'none', description: 'All good' },
+      { ok: false, key: 'openai', label: 'OpenAI', error: 'offline' },
+      { ok: false, key: 'openai', label: 'OpenAI', error: 'still offline' },
+      { ok: true, key: 'openai', label: 'OpenAI', indicator: 'minor', description: 'Recovered' },
+    ],
+    claude: [
+      { ok: true, key: 'claude', label: 'Claude', indicator: 'none', description: 'All good' },
+      { ok: false, key: 'claude', label: 'Claude', error: 'offline' },
+      { ok: false, key: 'claude', label: 'Claude', error: 'offline' },
+      { ok: false, key: 'claude', label: 'Claude', error: 'offline' },
+    ],
+  };
+  const service = createStatusService({
+    providers: STATUS_PROVIDERS,
+    now: () => clock,
+    fetch: async (provider) => outcomes[provider.key].shift(),
+  });
+  const initial = await service.getStatus({ force: true });
+  assert.equal(initial.openai.lastSuccessAt, '2026-10-27T00:00:00.000Z');
+  clock += 60_000;
+  const firstFailure = await service.getStatus({ force: true });
+  assert.equal(firstFailure.openai.ok, true);
+  assert.equal(firstFailure.openai.indicator, 'none');
+  assert.equal(firstFailure.openai.stale, true);
+  assert.equal(firstFailure.openai.refreshError, 'offline');
+  assert.equal(firstFailure.openai.lastSuccessAt, initial.openai.lastSuccessAt);
+  assert.equal(firstFailure.openai.lastAttemptAt, '2026-10-27T00:01:00.000Z');
+  assert.equal(firstFailure.claude.lastSuccessAt, initial.claude.lastSuccessAt);
+  clock += 60_000;
+  const repeatedFailure = await service.getStatus({ force: true });
+  assert.equal(repeatedFailure.openai.refreshError, 'still offline');
+  assert.equal(repeatedFailure.openai.lastSuccessAt, initial.openai.lastSuccessAt);
+  assert.equal(repeatedFailure.openai.lastAttemptAt, '2026-10-27T00:02:00.000Z');
+  clock += 60_000;
+  const recovered = await service.getStatus({ force: true });
+  assert.equal(recovered.openai.indicator, 'minor');
+  assert.equal(recovered.openai.stale, false);
+  assert.equal(recovered.openai.refreshError, null);
+  assert.equal(recovered.openai.lastSuccessAt, '2026-10-27T00:03:00.000Z');
+  assert.equal(recovered.claude.lastSuccessAt, initial.claude.lastSuccessAt);
 });
