@@ -16,6 +16,7 @@ playwright-report/
 test-results/
 /test-output.txt
 /brag-output/
+/backlog/
 .pnpm-store/
 /rust/backend/target/
 /sysstats-target/
