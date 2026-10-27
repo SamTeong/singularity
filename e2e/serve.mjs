@@ -47,8 +47,9 @@ Object.assign(env, {
   // them in the backfill window, upgrading the seeded gap day and firing a real
   // LLM call. Point at a nonexistent path so listCodexSessions returns [] early.
   CODEX_HOME: join(HOME_DIR, 'no-codex'),
-  // SING_SCOPE_ROOT / SING_USAGE_SKILL / SING_USAGE_REPORTS stay unset on
-  // purpose — those degraded empty states are part of what we test.
+  // SING_SCOPE_ROOT stays unset on purpose (no skill-scopes). SING_USAGE_REPORTS
+  // is deleted too, so the report falls back to the sandbox default:
+  // dirname(USAGE_REPORT_STATE)/reports.
 });
 
 const child = spawn(process.execPath, [join(REPO_ROOT, 'server', 'index.mjs')], {

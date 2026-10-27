@@ -1,4 +1,4 @@
-const SKILL_STATS = process.env.SING_USAGE_SKILL;
+// Empty means "use Rust's default", derived from USAGE_REPORT_STATE/HOME.
 const REPORTS_DIR = process.env.SING_USAGE_REPORTS ?? '';
 
 let backend;
@@ -13,16 +13,16 @@ function requiredBackend() {
 }
 
 export async function reportStatus() {
-  return requiredBackend().usageReportStatus(REPORTS_DIR, SKILL_STATS);
+  return requiredBackend().usageReportStatus(REPORTS_DIR);
 }
 
 export async function latestReportHtml() {
-  const result = await requiredBackend().usageReportRead(REPORTS_DIR, SKILL_STATS);
+  const result = await requiredBackend().usageReportRead(REPORTS_DIR);
   return result?.html ?? null;
 }
 
 export async function generateReport() {
-  return requiredBackend().usageReportGenerate(REPORTS_DIR, SKILL_STATS);
+  return requiredBackend().usageReportGenerate(REPORTS_DIR);
 }
 
 export function createUsageReportHandlers() {

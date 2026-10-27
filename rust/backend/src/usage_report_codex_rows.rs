@@ -6,6 +6,7 @@
 //! discovery, the mtime cache, the `codex-usage.jsonl` history and console
 //! warnings stay with the caller.
 
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 /// Internal reviewer thread, never the model that did the session's work.
@@ -28,13 +29,13 @@ pub struct CodexThreadText<'a> {
     pub fallback_id: &'a str,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TurnContext {
     pub epoch: Option<f64>,
     pub model: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct TokenReading {
     pub epoch: Option<f64>,
     pub model: Option<String>,
@@ -45,26 +46,29 @@ pub struct TokenReading {
     pub cache_creation: f64,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Gauge {
     pub utilization: f64,
+    /// `resets_at` as the rollout carried it; the usage-history consumers
+    /// require it, so it is passed through verbatim like `codex.mjs:230`.
+    pub resets_at: Value,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RateReading {
     pub epoch: Option<f64>,
     pub session: Option<Gauge>,
     pub weekly: Option<Gauge>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ContextWindow {
     pub epoch: Option<f64>,
     pub size: f64,
 }
 
 /// One parsed rollout thread (`_new_thread_res`, codex.mjs:131-145).
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CodexThread {
     pub root_id: Option<String>,
     pub cwd: String,
@@ -235,6 +239,7 @@ pub fn parse_thread(
                         let weekly = num(window.get("window_minutes")) >= 1440.0;
                         let gauge = Some(Gauge {
                             utilization: percent,
+                            resets_at: window.get("resets_at").cloned().unwrap_or(Value::Null),
                         });
                         let reading = reading.get_or_insert_with(|| RateReading {
                             epoch: ts,
@@ -271,15 +276,31 @@ pub fn parse_thread(
 }
 
 /// Fold threads into root-session rows (`codexIngest`, codex.mjs:405-508).
+///
+/// Convenience for callers that hold rollout text; `codex_ingest` calls
+/// `codex_rows_from_threads` directly so a cache hit never re-parses.
 pub fn codex_rows(
     threads: &[CodexThreadText<'_>],
     epoch_from_iso: fn(&str) -> Option<f64>,
     local_fmt: fn(f64) -> String,
     cost: &dyn Fn(&str, f64, f64, f64, f64) -> Option<f64>,
 ) -> Vec<CodexRow> {
+    let parsed = threads
+        .iter()
+        .map(|thread| parse_thread(thread.text, thread.fallback_id, epoch_from_iso))
+        .collect::<Vec<_>>();
+    codex_rows_from_threads(&parsed, local_fmt, cost)
+}
+
+/// `codexIngest`'s row half (codex.mjs:405-508) over already-parsed threads.
+/// `local_fmt` is a closure so the caller can inject its UTC offset.
+pub fn codex_rows_from_threads(
+    threads: &[CodexThread],
+    local_fmt: impl Fn(f64) -> String,
+    cost: &dyn Fn(&str, f64, f64, f64, f64) -> Option<f64>,
+) -> Vec<CodexRow> {
     let mut sessions: Vec<(String, SessionAcc)> = Vec::new();
-    for thread_text in threads {
-        let thread = parse_thread(thread_text.text, thread_text.fallback_id, epoch_from_iso);
+    for thread in threads {
         let root_id = thread.root_id.clone().unwrap_or_default();
         let index = match sessions.iter().position(|(id, _)| *id == root_id) {
             Some(index) => index,
@@ -288,7 +309,7 @@ pub fn codex_rows(
                 sessions.len() - 1
             }
         };
-        merge_thread_into_session(&mut sessions[index].1, &thread);
+        merge_thread_into_session(&mut sessions[index].1, thread);
     }
 
     let mut rows = Vec::new();
@@ -357,7 +378,7 @@ pub fn codex_rows(
         );
 
         rows.push(CodexRow {
-            timestamp: acc.end_epoch.map(local_fmt).unwrap_or_default(),
+            timestamp: acc.end_epoch.map(&local_fmt).unwrap_or_default(),
             session_id: root_id.clone(),
             total_cost_usd: String::new(),
             last_model: last_model.to_owned(),
@@ -395,7 +416,7 @@ pub fn codex_rows(
             || auto_cost > 0.0
         {
             rows.push(CodexRow {
-                timestamp: acc.end_epoch.map(local_fmt).unwrap_or_default(),
+                timestamp: acc.end_epoch.map(&local_fmt).unwrap_or_default(),
                 session_id: format!("{root_id}:auto-review"),
                 total_cost_usd: String::new(),
                 last_model: AUTO_REVIEW_MODEL.to_owned(),

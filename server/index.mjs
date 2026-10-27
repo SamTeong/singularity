@@ -79,10 +79,9 @@ function requireEnv() {
   // OLLAMA_BIN + SING_SCOPE_ROOT are optional: absent OLLAMA_BIN fails only
   // ollama-model spawns (clear buildSpawn error); absent SING_SCOPE_ROOT just
   // means no skill-scopes to pick/add-dir. The daemon boots fine without either.
-  // SING_USAGE_SKILL + SING_USAGE_REPORTS are likewise optional (author-specific
-  // harness-usage-report skill): absent → usage-report degrade silently
-  // (usagereport.mjs existsSync-guards its skill path; stats.mjs has an est-cost
-  // fallback). /capabilities reports all of these as available:false.
+  // SING_USAGE_REPORTS is optional: absent → the Rust usage-report backend
+  // falls back to <dirname(USAGE_REPORT_STATE || ~/.agents/.harness-usage-report/state)>/reports.
+  // The report is generated natively, so /capabilities reports it available.
   if (process.env.SING_TOKEN && !/^[A-Za-z0-9_-]+$/.test(process.env.SING_TOKEN)) missing.push('SING_TOKEN (set but contains characters outside [A-Za-z0-9_-])');
   if (missing.length) {
     throw new Error(`Required env vars missing — copy .env.example → .env and fill them in:\n  - ${missing.join('\n  - ')}`);
@@ -526,13 +525,12 @@ app.get('/env', async () => ({ home: displayHome() }));
 // Not token-gated (mirrors /health) so the shell can render hints pre-auth.
 app.get('/capabilities', async () => {
   const wikiIsAvailable = await wikiAvailable(rustBackend);
-  const usageReportAvailable = !!(process.env.SING_USAGE_SKILL && existsSync(process.env.SING_USAGE_SKILL));
   return {
     ollama:      { available: !!reg.OLLAMA_BIN, hint: 'Set OLLAMA_BIN in .env to enable Ollama model spawns.' },
     codex:       { available: existsSync(join(CODEX_HOME, 'sessions')), hint: 'Run Codex CLI once to enable the Codex usage card.' },
     codexSpawn:  { available: !!reg.CODEX_BIN, hint: 'Set CODEX_BIN in .env to enable Codex agent/task spawns.' },
     skillScopes: { available: !!(process.env.SING_SCOPE_ROOT && existsSync(process.env.SING_SCOPE_ROOT)), hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
-    usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
+    usageReport: { available: true, hint: 'Optional: set SING_USAGE_REPORTS to override the default reports directory.' },
     wiki:        { available: wikiIsAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
     plans:       { available: PLAN_ROOT != null, hint: 'Set SING_PLANS_ROOT in .env to enable the Plans view.' },
     token:       { available: !!process.env.SING_TOKEN, hint: 'Set SING_TOKEN in .env to require an auth token on data endpoints.' },

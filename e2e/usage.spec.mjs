@@ -55,20 +55,21 @@ test('refresh button triggers GET /usage with force=1', async ({ page }) => {
   expect(response.ok()).toBe(true);
 });
 
-test('usage report shows unavailable state when skill not configured', async ({ page }) => {
+test('usage report is always available and shows the empty state when none exists', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
 
-  // SING_USAGE_SKILL is unset in the sandbox, so the report degrades to its
-  // not-configured empty state. ('Usage report' itself is not a usable locator —
-  // it matches the section subtitle, the iframe title and this empty state.)
-  await expect(page.getByText(/usage report not set up yet/i)).toBeVisible();
+  // The report is always available; with no report in the sandbox the view
+  // shows the empty state and an enabled Generate button. ('Usage report'
+  // itself is not a usable locator — it matches the section subtitle and the
+  // iframe title.)
+  await expect(page.getByText(/no report yet/i)).toBeVisible();
 
-  // The button reads "Generate" until a report exists, and is disabled while the
-  // skill is unavailable. Never clicked — it spawns the report skill for real.
+  // The button reads "Generate" until a report exists. Never clicked — it
+  // spawns real generation.
   const generateButton = page.getByRole('button', { name: 'Generate' });
   await expect(generateButton).toBeVisible();
-  await expect(generateButton).toBeDisabled();
+  await expect(generateButton).toBeEnabled();
 });
 
 test('usage report collapse/expand button exists', async ({ page }) => {

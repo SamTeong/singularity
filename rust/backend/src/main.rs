@@ -885,18 +885,9 @@ fn main() -> io::Result<()> {
                             singularity_backend::usage_report::read(&report_request),
                         )
                         .unwrap_or(Value::Null),
-                        "usage_report_generate" => singularity_backend::usage_report::generate(
-                            &report_request,
-                            |bin, args, timeout, cap, env| {
-                                singularity_backend::oneshot::run(
-                                    Some(bin),
-                                    &serde_json::json!(args),
-                                    Some(timeout),
-                                    Some(cap),
-                                    Some(env),
-                                )
-                            },
-                        ),
+                        "usage_report_generate" => {
+                            singularity_backend::usage_report::generate(&report_request)
+                        }
                         _ => serde_json::json!({"error":"unknown usage report operation"}),
                     },
                     Err(_) => serde_json::json!({"error":"bad usage report request"}),

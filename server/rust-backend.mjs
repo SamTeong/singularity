@@ -317,16 +317,16 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
         .catch(() => false);
     },
 
-    usageReportStatus(reportsDir, skillPath) {
-      return request({ op: 'usage_report_status', usage_report: { reports_dir: reportsDir, skill_path: skillPath, env: process.env } });
+    usageReportStatus(reportsDir) {
+      return request({ op: 'usage_report_status', usage_report: { reports_dir: reportsDir ?? '', env: process.env } });
     },
 
-    usageReportRead(reportsDir, skillPath) {
-      return request({ op: 'usage_report_read', usage_report: { reports_dir: reportsDir, skill_path: skillPath, env: process.env } });
+    usageReportRead(reportsDir) {
+      return request({ op: 'usage_report_read', usage_report: { reports_dir: reportsDir ?? '', env: process.env } });
     },
 
-    usageReportGenerate(reportsDir, skillPath) {
-      return request({ op: 'usage_report_generate', usage_report: { reports_dir: reportsDir, skill_path: skillPath, env: process.env } });
+    usageReportGenerate(reportsDir) {
+      return request({ op: 'usage_report_generate', usage_report: { reports_dir: reportsDir ?? '', env: process.env } });
     },
 
     providerUsageNormalize(provider, payload, { payloadPresent = true, plan, fetchedAt } = {}) {

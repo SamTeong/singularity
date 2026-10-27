@@ -5,7 +5,7 @@ status: In Progress
 assignee:
   - '@sate'
 created_date: '2026-10-25 10:29'
-updated_date: '2026-10-27 06:10'
+updated_date: '2026-10-27 14:13'
 labels: []
 dependencies: []
 references:
@@ -23,6 +23,27 @@ modified_files:
   - rust/backend/src/usage_report_forecast.rs
   - rust/backend/tests/usage_report_forecast_cross_language.rs
   - rust/backend/tests/usage_report_forecast_oracle.mjs
+  - rust/backend/src/usage_report_cost.rs
+  - rust/backend/src/usage_report_sessions.rs
+  - rust/backend/src/usage_report_forecast_build.rs
+  - rust/backend/src/usage_report_codex_ingest.rs
+  - rust/backend/src/usage_report_codex_rows.rs
+  - rust/backend/src/usage_report_rebuild.rs
+  - rust/backend/src/usage_report_pipeline.rs
+  - .claude/rules-reference/setup-and-layout.md
+  - .env.example
+  - README.md
+  - e2e/README.md
+  - e2e/serve.mjs
+  - e2e/usage.spec.mjs
+  - rust/backend/src/main.rs
+  - rust/backend/src/usage_report.rs
+  - scripts/bootstrap.mjs
+  - server/index.mjs
+  - server/rust-backend.mjs
+  - server/usagereport-bridge.test.mjs
+  - server/usagereport.mjs
+  - server/usagereport.test.mjs
 parent_task_id: TASK-42
 type: feature
 ordinal: 73000
@@ -53,6 +74,8 @@ The final TASK-42 cutover residual still starts the configured Node usage-report
 Pure roadmap slice (p1.w1.s5): add rust/backend/src/usage_report_roadmap.rs with Inventory, StatsRow, StatsProjection, Suggestion and pure build_roadmap mirroring bundled improve.mjs row order/text/status/archive branch and JS coverage/rounding/interpolation; register it in rust/backend/src/lib.rs; add source-bound Node VM oracle rust/backend/tests/usage_report_roadmap_oracle.mjs. No acquisition, renderer wiring, custom-generator policy, production generation, or whole-pipeline cutover in this slice.
 
 Pure freshness slice (p1.w2.s2): add rust/backend/src/usage_report_freshness.rs with pure decide_freshness(FreshnessInput) -> FreshnessDecision mirroring bundled stats.mjs::_ensure_fresh (900s cost-state window, 180s transcript fallback and Codex window, zero-CSV rebuild sentinel, first-strict-max ties, state-presence fallback suppression, active-SID exclusion, strict CSV-newer comparison, JS IEEE comparisons); register the module in rust/backend/src/lib.rs; add source-bound Node VM oracle rust/backend/tests/usage_report_freshness_oracle.mjs that extracts the checked-in _ensure_fresh, observes active/need even when need is false, and asserts rebuild receives the exact glob transcript snapshot. No filesystem, clock, enumeration, rebuild, adapter, generation, or pipeline cutover in this slice.
+
+Native generation continuation: wire completed cost/session/forecast/Codex/rebuild modules into an explicit-roots pipeline, then replace Node generation. User decisions: ignore SING_USAGE_SKILL; reports always available; output env override or state-parent/reports; skip OAuth refresh; retain documented fixed-offset behavior. Preserve protected listeners and foreign source; validate synthetic parity and full Windows gates before finalization.
 <!-- SECTION:PLAN:END -->
 
 ## Implementation Notes
@@ -67,4 +90,6 @@ Accepted pure forecast math slice after source-bound integrated acceptance. All 
 Receipt hash transcription correction: the exact SHA-256 is F6D5080B20410003EF1D249C46F1F4A2B6C96CF746B95BF080D07FF0197E92B5.
 
 Native pure roadmap derivation and freshness decision helpers now implemented, each with source-bound Node VM differential oracles. Accepted combined run C:/Users/sate/.agents/.plan/01a17baa-6bce-73d0-a4bb-e4439fbffb34/native-combined-acceptance/run-20261027T060147007Z: fmt/lint/release build/full Rust339pass/focused Node157pass2skip/full pnpm test756pass2skip, all exits0; source fingerprints/binaryhash/listenerowners unchanged and cleanup complete. Production report generation is still Node-dispatched; preparation/rebuild/provider history/forecast persistence/OAuth/roadmap acquisition/generation integration remain. User chose native generation with clear errors for custom JavaScript SING_USAGE_SKILL paths, no Node runtime fallback. Keep whole-task In Progress and ACs unchecked.
+
+Native pipeline candidate now replaces the Node generator. User-approved behavior: always available, ignore SING_USAGE_SKILL, skip OAuth, fixed local offset; output precedence explicit request then SING_USAGE_REPORTS then state-parent/reports. Full Rust acceptance 412 library plus 7 other tests PASS in clean e9a2982-based candidate with synthetic roots. JavaScript and independent final reviews pending; no activation/push. Modified-file list preserves prior entries. Groma Rust path unindexed; no invented architecture references.
 <!-- SECTION:NOTES:END -->

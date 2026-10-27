@@ -1,12 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-process.env.SING_USAGE_SKILL = 'C:/reports/skill.mjs';
 process.env.SING_USAGE_REPORTS = 'C:/reports/html';
 
 const { reportStatus, latestReportHtml, generateReport, setUsageReportBackend, createUsageReportHandlers } = await import('./usagereport.mjs');
 
-test('report adapter delegates each complete operation with configured paths', async () => {
+test('report adapter delegates each complete operation with the configured reports directory', async () => {
   const calls = [];
   setUsageReportBackend({
     async usageReportStatus(...args) { calls.push(['status', ...args]); return { exists: true, at: 1234.5 }; },
@@ -18,9 +17,9 @@ test('report adapter delegates each complete operation with configured paths', a
   assert.equal(await latestReportHtml(), '<html>✓</html>');
   assert.deepEqual(await generateReport(), { ok: true, at: null });
   assert.deepEqual(calls, [
-    ['status', 'C:/reports/html', 'C:/reports/skill.mjs'],
-    ['read', 'C:/reports/html', 'C:/reports/skill.mjs'],
-    ['generate', 'C:/reports/html', 'C:/reports/skill.mjs'],
+    ['status', 'C:/reports/html'],
+    ['read', 'C:/reports/html'],
+    ['generate', 'C:/reports/html'],
   ]);
   setUsageReportBackend(undefined);
 });

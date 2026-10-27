@@ -127,9 +127,9 @@ Seeded by `fixtures/seed.mjs`, all paths exported from `fixtures/paths.mjs`:
 
 `CLAUDE_BIN` and `OLLAMA_BIN` both point at the keepalive stub, so
 `/api/capabilities` reports both backends available and neither can start a real
-turn. `SING_SCOPE_ROOT`, `SING_USAGE_SKILL` and `SING_USAGE_REPORTS` stay unset —
-skill-scopes and the usage report render their not-configured states, which the
-specs assert.
+turn. `SING_SCOPE_ROOT` stays unset, so skill-scopes renders its not-configured
+state, which the specs assert. `SING_USAGE_REPORTS` also stays unset, so the
+usage report uses its default dir under the sandbox `USAGE_REPORT_STATE`.
 
 Wiki **categories are derived from a page's folder**, not its frontmatter
 (`category(p.rel)` in WikiPanel.jsx) — the category filter only appears when the
