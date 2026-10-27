@@ -75,8 +75,9 @@ export function parseOllamaHtml(html) {
 // new maths lives here. `models` is the weekly window's per-model requests (from
 // the API, when it reports any). fetched_at is LOCAL time (the skill parses it as
 // local), zero-padded YYYY-MM-DD HH:MM:SS, no timezone suffix.
-// ponytail: the file only ever grows (~10KB/day at 48 samples/day) — fine at
-// this scale; trim-to-last-N is the upgrade path if it ever matters.
+// ponytail: the file only ever grows — an unchanged reading adds at most one
+// row per 5-minute heartbeat — fine at this scale; trim-to-last-N is the
+// upgrade path if it ever matters.
 const OLLAMA_HISTORY = join(USAGE_SKILL_STATE, 'ollama-usage.jsonl');
 
 // Last row actually written, so duplicate readings don't spam the file while

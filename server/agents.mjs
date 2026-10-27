@@ -142,6 +142,9 @@ export function codexOwnerForThread(threadId, cwd) {
   const wantCwd = cwd ? normPath(cwd) : null;
   for (const a of agents.values()) {
     if (!(a.tool === 'codex' || isCodexModel(a.model))) continue;
+    // Only a live owned process can conflict or be "live"; skip detached records
+    // (a restart reloads them with proc:null) before discovery walks the rollout tree.
+    if (!a.proc) continue;
     if (wantCwd && (!a.cwd || normPath(a.cwd) !== wantCwd)) continue;
     if (rememberCodexThread(a) === threadId) return a.id;
   }

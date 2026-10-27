@@ -133,12 +133,15 @@ function ProviderCard({ p }) {
 export default function StatusView() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
 
   const pull = useCallback((force = false) => {
     fetch(`/api/status${force ? '?force=1' : ''}`)
-      .then((r) => r.json())
-      .then((d) => { setStatus(d); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then((r) => { if (!r.ok) throw new Error(`status ${r.status}`); return r.json(); })
+      // A failed poll keeps the last good payload; only a failure with nothing
+      // to show falls back to the error line below.
+      .then((d) => { setStatus(d); setErr(null); setLoading(false); })
+      .catch((e) => { setErr(e); setLoading(false); });
   }, []);
 
   useEffect(() => {
@@ -161,11 +164,17 @@ export default function StatusView() {
         </Typography>
         {/* auto-fit, not a theme breakpoint: the two skins ship different `md` pixels
             (ZAPAC 720, Phosphor 900), which flipped this grid's column count by skin at 768px. */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 2 }}>
-          {loading && !status
-            ? [0, 1].map((i) => <Box key={i} sx={(t) => ({ p: 2.5, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography></Box>)
-            : Object.values(status || {}).map((p) => <ProviderCard key={p.key} p={p} />)}
-        </Box>
+        {!status && err ? (
+          <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+            Couldn't load provider status — retrying every 30s.
+          </Typography>
+        ) : (
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 2 }}>
+            {loading && !status
+              ? [0, 1].map((i) => <Box key={i} sx={(t) => ({ p: 2.5, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography></Box>)
+              : Object.values(status || {}).map((p) => <ProviderCard key={p.key} p={p} />)}
+          </Box>
+        )}
       </Box>
     </Box>
   );

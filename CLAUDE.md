@@ -45,6 +45,8 @@ Not auto-loaded. Read when the trigger applies:
 
 Backlog is installed locally; run commands from its instructions as `pnpm exec backlog <command>`.
 
+Backlog data is local and untracked; in a fresh clone run `pnpm exec backlog init <name> --defaults --agent-instructions none` once.
+
 <!-- BACKLOG.MD GUIDELINES START -->
 <!-- backlog.md-instructions-version: 1.53.0 -->
 <CRITICAL_INSTRUCTION>

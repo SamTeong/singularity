@@ -50,8 +50,8 @@ test('the freshness caption renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Status');
 
-  // "updated <n> min ago" / "updated just now", from the newest fetchedAt.
-  await expect(page.getByText(/^updated .+/)).toBeVisible();
+  // Per-provider caption "Status page updated <n> min ago" — one per card, so .first().
+  await expect(page.getByText(/^Status page updated .+/).first()).toBeVisible();
 });
 
 test('provider status pages are linked out, never followed', async ({ page }) => {

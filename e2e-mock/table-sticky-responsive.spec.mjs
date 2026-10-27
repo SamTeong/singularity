@@ -75,6 +75,10 @@ test('phone: Cron Jobs and task history retain sticky headers in bounded, two-ax
   test.slow();
   await page.setViewportSize(PHONE);
   await page.goto('/cron');
+  // Mirage installs from main.jsx's dynamic import, so `load` can resolve with
+  // fetch still native: a seed fired then escapes to the preview server (404).
+  // Wait for content that can only render after startMock() returned.
+  await expect(page.getByRole('button', { name: 'Scheduled job' })).toBeVisible();
   await seedCronRows(page, 16);
   await expect(page.getByText('Sticky cron 16', { exact: true })).toBeVisible();
 
@@ -84,6 +88,7 @@ test('phone: Cron Jobs and task history retain sticky headers in bounded, two-ax
   await expectNoPageOverflow(page);
 
   await page.goto('/tasks?history=1');
+  await expect(page.getByRole('region', { name: 'Task history (scrolls horizontally)' })).toBeVisible();
   await seedHistoryRows(page, 16);
   await expect(page.getByText('Sticky history 16', { exact: true })).toBeVisible();
 
