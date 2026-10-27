@@ -179,6 +179,7 @@ fn rebuild_state(
     now_secs: f64,
     local_offset: i32,
 ) -> std::io::Result<()> {
+    fs::create_dir_all(base.join("cost-state"))?;
     let pricing = Pricing::load(base);
     let codex_rows = codex_ingest(
         codex_home,
@@ -446,8 +447,9 @@ mod tests {
         let projects = root.join("projects");
         create_dir_all(&projects).unwrap();
         let missing_codex = root.join("absent-codex");
-        rebuild_state(&root, &projects, &missing_codex, None, 1_700_000_000.0, 0).unwrap();
-        let csv = fs::read_to_string(root.join("stats.csv")).unwrap();
+        let state = root.join("state");
+        rebuild_state(&state, &projects, &missing_codex, None, 1_700_000_000.0, 0).unwrap();
+        let csv = fs::read_to_string(state.join("stats.csv")).unwrap();
         assert_eq!(csv.lines().next(), Some(CSV_COLUMNS.join(",").as_str()));
         remove_dir_all(&root).ok();
     }
