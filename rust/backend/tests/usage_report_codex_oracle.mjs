@@ -1,6 +1,7 @@
 // Synthetic differential oracle for usage_report_codex_rows.rs. Slices the
 // bundled codex.mjs parse + row-builder functions out of the checked-in source
 // and runs them over these fixture files only; no real HOME/CODEX_HOME reads.
+import console from "node:console";
 import fs from "node:fs";
 import process from "node:process";
 import { URL } from "node:url";
@@ -16,11 +17,9 @@ function declaration(name) {
   const marker = `function ${name}(`;
   const generatorMarker = `function* ${name}(`;
   let start = source.indexOf(marker);
-  let prefix = marker;
   const generatorStart = source.indexOf(generatorMarker);
   if (generatorStart >= 0 && (start < 0 || generatorStart < start)) {
     start = generatorStart;
-    prefix = generatorMarker;
   }
   if (start < 0) throw new Error(`source anchor missing: ${marker}`);
   let depth = 0;
