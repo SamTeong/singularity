@@ -129,6 +129,26 @@ fn cached_lines(path: &Path) -> Option<Vec<String>> {
     Some(lines)
 }
 
+fn utf16_prefix_cover(value: &str, limit: usize) -> String {
+    let mut remaining = limit;
+    let mut prefix = String::new();
+    for character in value.chars() {
+        if remaining == 0 {
+            break;
+        }
+        prefix.push(character);
+        remaining = remaining.saturating_sub(character.len_utf16());
+    }
+    // The gateway trims again before slicing; never end the cover on whitespace.
+    let rest = &value[prefix.len()..];
+    let tail = rest.len() - rest.trim_start().len();
+    if prefix.ends_with(char::is_whitespace) {
+        prefix.push_str(&rest[..tail]);
+        prefix.extend(rest[tail..].chars().next());
+    }
+    prefix
+}
+
 pub fn search(files: &Value, query: &str) -> Box<serde_json::value::RawValue> {
     let needle = query.to_lowercase();
     if needle.is_empty() {
@@ -153,7 +173,9 @@ pub fn search(files: &Value, query: &str) -> Box<serde_json::value::RawValue> {
                     file: file.to_owned(),
                     path: path.to_owned(),
                     line: index + 1,
-                    text: line.clone(),
+                    // Node trims then slice(0, 200) after the bridge; 200 UTF-16 units
+                    // of the trimmed line is enough cover without shipping huge lines.
+                    text: utf16_prefix_cover(line.trim(), 200),
                 });
                 if results.len() >= 300 {
                     return raw(&serde_json::json!({ "results": results, "capped": true }));
@@ -316,5 +338,28 @@ mod tests {
         let failed = write_file(missing.to_str(), Some("x"), None, false);
         assert_eq!(failed["ok"], false);
         assert!(!missing.parent().unwrap().exists());
+    }
+
+    #[test]
+    fn search_caps_hit_text_before_serialising() {
+        let fixture = Fixture::new();
+        let path = fixture.put(
+            "project/memory/fact.md",
+            &format!("  needle {}", "x".repeat(100_000)),
+        );
+        let files =
+            json!([{ "project": "project", "file": "fact.md", "path": path.to_str().unwrap() }]);
+        let result: Value = serde_json::from_str(search(&files, "needle").get()).unwrap();
+        let text = result["results"][0]["text"].as_str().unwrap();
+        assert_eq!(text.encode_utf16().count(), 200);
+        assert!(text.starts_with("needle x"));
+    }
+
+    #[test]
+    fn hit_text_cover_survives_gateway_trim_at_the_cut() {
+        let line = format!("needle{} tail", "x".repeat(193));
+        let cover = utf16_prefix_cover(&line, 200);
+        assert_eq!(cover, format!("needle{} t", "x".repeat(193)));
+        assert_eq!(utf16_prefix_cover("short", 200), "short");
     }
 }

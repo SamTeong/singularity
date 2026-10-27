@@ -780,8 +780,11 @@ struct CostFields {
 
 /// stats.mjs readCostFile: `cost-state/<id>.json`, typeof-number fields only.
 pub fn read_cost_file(cost_dir: &Path, id: &str) -> CostFile {
-    let fields = fs::read(cost_dir.join(format!("{id}.json")))
-        .ok()
+    // Node path.join never escapes the base; Path::join would on an absolute id.
+    let rooted = id.starts_with(['/', '\\']) || id.contains(':');
+    let fields = (!rooted)
+        .then(|| fs::read(cost_dir.join(format!("{id}.json"))).ok())
+        .flatten()
         .and_then(|bytes| {
             let text = String::from_utf8_lossy(&bytes).into_owned();
             serde_json::from_str::<CostDoc>(&text).ok()
@@ -876,6 +879,23 @@ mod tests {
     fn write_cost(dir: &Path, id: &str, body: &str) {
         fs::create_dir_all(dir).unwrap();
         fs::write(dir.join(format!("{id}.json")), body).unwrap();
+    }
+
+    #[test]
+    fn read_cost_file_ignores_absolute_ids() {
+        let root = scratch("abs-id");
+        write_cost(&root, "outside", r#"{"cost":{"total_cost_usd":5}}"#);
+        let cost_dir = root.join("cost-state");
+        fs::create_dir_all(&cost_dir).unwrap();
+        let absolute = root.join("outside");
+        assert!(
+            read_cost_file(&cost_dir, absolute.to_str().unwrap())
+                .cost_usd
+                .is_none()
+        );
+        assert!(read_cost_file(&cost_dir, "/outside").cost_usd.is_none());
+        write_cost(&cost_dir, "inside", r#"{"cost":{"total_cost_usd":5}}"#);
+        assert!(read_cost_file(&cost_dir, "inside").cost_usd.is_some());
     }
 
     #[test]

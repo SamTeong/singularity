@@ -100,6 +100,13 @@ test('searchConfig dedups shared paths across repeated roots', async () => {
   assert.equal(hits.filter((h) => h.scope === 'project' && h.cwd === cwd).length, 1);
 });
 
+test('searchConfig skips unusable roots instead of throwing', async () => {
+  const cwd = makeRoot('{ "theme": "dark" }', null);
+  const hits = await searchConfig([null, 123, cwd], 'theme');
+  assert.equal(hits.filter((h) => h.cwd === cwd).length, 1);
+  assert.deepEqual(await searchConfig('C:/x', 'theme'), []);
+});
+
 test('searchConfig empty query returns nothing', async () => {
   assert.deepEqual(await searchConfig(['/whatever'], ''), []);
 });

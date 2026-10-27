@@ -205,7 +205,7 @@ fn string_units(token: &str) -> Option<Vec<u16>> {
             }
             at += 1;
         } else {
-            let text = std::str::from_utf8(&bytes[at..bytes.len() - 1]).ok()?;
+            let text = token.get(at..bytes.len() - 1)?;
             let ch = text.chars().next()?;
             units.extend(ch.encode_utf16(&mut [0; 2]).iter().copied());
             at += ch.len_utf8();

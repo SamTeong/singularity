@@ -60,10 +60,13 @@ export async function readConfig(cwd, backend = configReadBackend) {
 export async function searchConfig(roots, q, backend = configReadBackend) {
   const needle = String(q || '').toLowerCase();
   if (!needle) return [];
-  const scans = (roots || []).map((cwd) => {
-    const paths = scopePaths(cwd);
-    return { cwd, project: paths.project, local: paths.local };
-  });
+  const scans = [];
+  for (const cwd of roots || []) {
+    try {
+      const paths = scopePaths(cwd);
+      scans.push({ cwd, project: paths.project, local: paths.local });
+    } catch { continue; } // a bad root is skipped, as before the Rust move
+  }
   return requireConfigReadBackend(backend).configSearch(scans, needle);
 }
 

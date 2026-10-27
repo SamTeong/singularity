@@ -194,8 +194,8 @@ fn js_radix_number(digits: &str, radix: u32) -> f64 {
         .take(53)
         .fold(0u64, |n, bit| (n << 1) | u64::from(*bit));
     if shift > 0 {
-        let guard = significant[52] != 0;
-        let sticky = significant[53..].iter().any(|bit| *bit != 0);
+        let guard = significant[53] != 0;
+        let sticky = significant[54..].iter().any(|bit| *bit != 0);
         if guard && (sticky || top & 1 == 1) {
             top += 1;
         }
@@ -546,9 +546,7 @@ fn file_stat(path: &Path) -> Option<(f64, u64)> {
 
 fn parse_row(text: &str) -> Option<Value> {
     // Arrays parse as rows in Node too, but carry none of the fields read here.
-    serde_json::from_str::<Value>(text)
-        .ok()
-        .filter(Value::is_object)
+    parse_json_value(text).filter(Value::is_object)
 }
 
 /// Parsed rows of the last `bytes` of a log (window start's partial line dropped),
@@ -1527,6 +1525,13 @@ mod tests {
         )));
         assert_eq!(js_number("0x20000000000001"), 9_007_199_254_740_992.0);
         assert_eq!(js_number("0x20000000000003"), 9_007_199_254_740_996.0);
+        assert_eq!(js_number("0x40000000000005"), 18_014_398_509_481_988.0);
+    }
+
+    #[test]
+    fn parse_row_keeps_escaped_lone_surrogates() {
+        assert!(parse_row(r#"{"model":"a\ud800b","input_tokens":1}"#).is_some());
+        assert!(parse_row("[1]").is_none());
     }
 
     const NOW: f64 = 1_768_478_400_000.0; // 2026-01-15T12:00:00Z
