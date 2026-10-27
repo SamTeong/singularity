@@ -22,7 +22,7 @@ test('seeds the file on first read', () => {
   assert.deepEqual(doc.models.find((m) => m.id === 'opus[1m]'), { id: 'opus[1m]', group: 'claude', label: 'Opus (1M context)', enabled: true });
   assert.equal(doc.models.filter((m) => m.group === 'claude').length, 9);
   assert.equal(doc.models.filter((m) => m.group === 'ollama').length, 6);
-  assert.equal(doc.models.filter((m) => m.group === 'codex').length, 6);
+  assert.equal(doc.models.filter((m) => m.group === 'codex').length, 7);
   assert.equal(doc.defaultModel, 'claude');
   assert.equal(doc.summariserModel, 'deepseek-v4-flash:cloud');
 

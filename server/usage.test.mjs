@@ -204,8 +204,8 @@ test('normalizeClaude: extra-only plan falls back to top-level spend percent', (
   assert.equal(normalizeClaude({ ...CLAUDE_EXTRA_ONLY, spend: { ...CLAUDE_EXTRA_ONLY.spend, percent: 25 } }, 'max').extra.pctUsed, 25);
 });
 
-// appendOllamaHistory writes the report skill's snapshot shape and de-dupes an
-// unchanged reading (idle-debounce refreshes call this often).
+// appendOllamaHistory writes the report skill's snapshot shape and refreshes
+// freshness for unchanged successful samples on a 5-minute heartbeat.
 const HISTORY_FILE = join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl');
 const READING = {
   plan: 'pro',
@@ -216,22 +216,35 @@ const READING = {
   },
 };
 
-test('appendOllamaHistory: dedupes an unchanged reading, writes a changed one', () => {
-  appendOllamaHistory(READING);
-  appendOllamaHistory(READING); // identical → no second line
-  const changed = { ...READING, session: { ...READING.session, pctUsed: 28.1 } };
-  appendOllamaHistory(changed);
+test('appendOllamaHistory: unchanged readings dedupe inside interval and heartbeat after 5 minutes', async () => {
+  const { appendOllamaHistory: isolatedAppendOllamaHistory } = await import(`./usage.mjs?ollama-heartbeat=${Date.now()}`);
+  const realNow = Date.now;
+  let now = realNow();
+  try {
+    rmSync(HISTORY_FILE, { force: true });
+    Date.now = () => now;
+    isolatedAppendOllamaHistory(READING);
+    isolatedAppendOllamaHistory(READING); // inside the heartbeat → no extra row
+    now += 5 * 60_000;
+    isolatedAppendOllamaHistory(READING); // heartbeat elapsed → same values, newer timestamp
+    const changed = { ...READING, session: { ...READING.session, pctUsed: 28.1 } };
+    isolatedAppendOllamaHistory(changed);
 
-  const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
-  assert.equal(lines.length, 2);
-  for (const line of lines) {
-    const row = JSON.parse(line);
-    assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-    assert.equal(typeof row.session.utilization, 'number');
-    assert.ok('resets_at' in row.weekly);
+    const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
+    assert.equal(lines.length, 3);
+    const rows = lines.map(JSON.parse);
+    for (const row of rows) {
+      assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+      assert.equal(typeof row.session.utilization, 'number');
+      assert.ok('resets_at' in row.weekly);
+    }
+    assert.equal(rows[0].session.utilization, 27.4);
+    assert.equal(rows[1].session.utilization, 27.4);
+    assert.ok(rows[1].fetched_at > rows[0].fetched_at);
+    assert.equal(rows[2].session.utilization, 28.1);
+  } finally {
+    Date.now = realNow;
   }
-  assert.equal(JSON.parse(lines[0]).session.utilization, 27.4);
-  assert.equal(JSON.parse(lines[1]).session.utilization, 28.1);
 });
 
 test('appendOllamaHistory retries an identical reading after a failed append', () => {

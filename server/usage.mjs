@@ -79,11 +79,12 @@ export function parseOllamaHtml(html) {
 // this scale; trim-to-last-N is the upgrade path if it ever matters.
 const OLLAMA_HISTORY = join(USAGE_SKILL_STATE, 'ollama-usage.jsonl');
 
-// Last row actually written, so a duplicate reading (idle-debounce refreshes hit
-// this often) doesn't spam the file. Simplest seed: null at daemon start, so the
-// first successful append after a restart always writes — even if it matches the
-// prior process's last line — rather than paying for a read-last-line probe.
+// Last row actually written, so duplicate readings don't spam the file while
+// idle. A successful scrape refreshes persisted freshness at the 5-minute
+// heartbeat, inside the reader's 10-minute freshness window.
 let lastOllamaReading = null;
+let lastOllamaAt = 0;
+const OLLAMA_HEARTBEAT_MS = 5 * 60_000;
 
 function pad2(n) { return String(n).padStart(2, '0'); }
 function localTimestamp(d) {
@@ -91,21 +92,26 @@ function localTimestamp(d) {
 }
 
 export function appendOllamaHistory(data) {
+  const now = Date.now();
   const reading = {
     sessionUtil: data.session?.pctUsed ?? null, sessionResets: data.session?.resetsAt ?? null,
     weeklyUtil: data.weekly?.pctUsed ?? null, weeklyResets: data.weekly?.resetsAt ?? null,
   };
   if (lastOllamaReading
     && reading.sessionUtil === lastOllamaReading.sessionUtil && reading.sessionResets === lastOllamaReading.sessionResets
-    && reading.weeklyUtil === lastOllamaReading.weeklyUtil && reading.weeklyResets === lastOllamaReading.weeklyResets) return;
+    && reading.weeklyUtil === lastOllamaReading.weeklyUtil && reading.weeklyResets === lastOllamaReading.weeklyResets
+    && now - lastOllamaAt < OLLAMA_HEARTBEAT_MS) return;
   const record = {
-    fetched_at: localTimestamp(new Date()),
+    fetched_at: localTimestamp(new Date(now)),
     session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt } : null,
     weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt } : null,
     plan: data.plan ?? null,
     models: data.weekly?.models ?? [],
   };
-  if (appendJsonl(OLLAMA_HISTORY, record)) lastOllamaReading = reading;
+  if (appendJsonl(OLLAMA_HISTORY, record)) {
+    lastOllamaReading = reading;
+    lastOllamaAt = now;
+  }
 }
 
 function appendJsonl(file, record) {

@@ -74,7 +74,7 @@ after(() => {
   setImmediate(() => process.exit(0));
 });
 
-const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor } = await import('./agents.mjs');
+const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawnAll, kill, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor, codexOwnerForThread, isLiveSession, isLive } = await import('./agents.mjs');
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -293,6 +293,29 @@ test('respawnAll: kills a live agent and resumes it with the same id + new pid',
     });
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Codex transcript liveness resolves a distinct thread id and blocks duplicate owned resumes', async () => {
+  const agentId = '90000000-aaaa-bbbb-cccc-900000000005';
+  const threadId = 'dddddddd-eeee-ffff-0000-444444444444';
+  // Use the cross-platform keepalive Claude fixture for the owned pty, then
+  // model the persisted Codex identity fields that its launcher records.
+  const agent = create({ cwd: scratch, title: 'live-codex-owner', model: 'claude', sessionId: agentId });
+  agent.model = 'gpt-5.3-codex-spark';
+  agent.tool = 'codex';
+  agent.threadId = threadId;
+  try {
+    assert.notEqual(agent.id, threadId);
+    assert.equal(isLive(agentId), true, 'the registry owner has a live child process');
+    assert.equal(codexOwnerForThread(threadId, scratch), agentId);
+    assert.equal(isLiveSession(threadId, { source: 'codex', cwd: scratch }), true);
+    assert.throws(
+      () => create({ cwd: scratch, title: 'duplicate-codex-owner', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: threadId }),
+      /codex thread already in use/,
+    );
+  } finally {
+    await killAndWait(agentId);
   }
 });
 

@@ -1086,6 +1086,15 @@ function initRoadmapFilter(){
 var FIRST_DATE,LAST_DATE;
 function main(){
   var ds=SESSIONS.map(function(s){return s.ts.slice(0,10);}).filter(isDate).sort();
+  var forecast=FORECAST||{};
+  [forecast.codex&&forecast.codex.series,forecast.ollama&&forecast.ollama.series].forEach(function(series){
+    (series||[]).forEach(function(r){if(r.ts)ds.push(r.ts.slice(0,10));});
+  });
+  var yieldSeries=forecast.ollama&&forecast.ollama.tokenYield&&forecast.ollama.tokenYield.series||{};
+  Object.keys(yieldSeries).forEach(function(model){
+    Object.keys(yieldSeries[model]||{}).forEach(function(day){if(isDate(day))ds.push(day);});
+  });
+  ds=ds.filter(isDate).sort();
   FIRST_DATE=ds[0];LAST_DATE=ds[ds.length-1];
   var range=loadRange();
   initControls(range);

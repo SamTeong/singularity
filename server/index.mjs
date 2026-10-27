@@ -916,7 +916,7 @@ app.put('/skill', async (req, reply) => {
 // WS (streaming) — see pty-ws.mjs.
 app.get('/transcripts/root', async () => ({ root: getSessionsRoot() }));
 app.put('/transcripts/root', async (req) => setSessionsRoot(req.body?.root));
-app.get('/transcripts', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLive, root: req.query.root, hideReviews: req.query.hideReviews === '1' }) }));
+app.get('/transcripts', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLiveSession, root: req.query.root, hideReviews: req.query.hideReviews === '1' }) }));
 // Resolve a registered agent's id to its codex-minted thread uuid — the Sessions
 // dock's "View transcript" button needs this before it can open a codex agent's
 // transcript (its registry id is unrelated to the rollout's thread uuid).

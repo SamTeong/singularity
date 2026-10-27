@@ -314,22 +314,53 @@ test('listSessions: no ai-title falls back to a blurb built from the first real 
   }
 });
 
-test('listSessions: running merges isLive with the mtime recency heuristic', async () => {
-  const project = 'sessions-test-running';
-  const liveId = 'parent-live';
-  const staleId = 'parent-stale';
-  const dir = writeSession(project, liveId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
-  writeSession(project, staleId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
+test('listSessions: owned liveness and recent activity remain separate for root, Claude child, and Codex rows', async () => {
+  const project = 'sessions-test-evidence';
+  const ids = ['root-live-quiet', 'root-unowned-recent', 'root-unowned-old'];
+  const dir = writeSession(project, ids[0], [JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
+  for (const id of ids.slice(1)) writeSession(project, id, [JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
+  const parent = ids[0];
+  const childDir = join(dir, parent, 'subagents');
+  mkdirSync(childDir, { recursive: true });
+  const childIds = ['agent-live-quiet', 'agent-unowned-recent', 'agent-unowned-old'];
+  for (const id of childIds) writeFileSync(join(childDir, `${id}.jsonl`), '{}\n');
   const old = new Date(Date.now() - 60000);
-  utimesSync(join(dir, `${staleId}.jsonl`), old, old);
+  for (const id of ['root-live-quiet', 'root-unowned-old']) utimesSync(join(dir, `${id}.jsonl`), old, old);
+  for (const id of ['agent-live-quiet', 'agent-unowned-old']) utimesSync(join(childDir, `${id}.jsonl`), old, old);
+  const threadId = 'dddddddd-eeee-ffff-0000-111111111111';
+  const codexDir = join(CODEX_HOME, 'sessions', '2026', '10', '27');
+  mkdirSync(codexDir, { recursive: true });
+  const codexFile = join(codexDir, `rollout-${threadId}.jsonl`);
+  writeFileSync(codexFile, `${JSON.stringify({ type: 'session_meta', payload: { session_id: threadId, cwd: 'C:/codex/project', source: 'cli', thread_source: 'user' } })}\n`);
+  const oldCodexId = 'eeeeeeee-ffff-0000-1111-222222222222';
+  const oldCodexFile = join(codexDir, `rollout-${oldCodexId}.jsonl`);
+  writeFileSync(oldCodexFile, `${JSON.stringify({ type: 'session_meta', payload: { session_id: oldCodexId, cwd: 'C:/codex/project', source: 'cli', thread_source: 'user' } })}\n`);
+  utimesSync(oldCodexFile, old, old);
+  const registryId = 'registry-agent-id-distinct-from-thread';
+  const liveIds = new Set([ids[0], childIds[0], registryId]);
+  const isLive = (id, context) => context?.source === 'codex'
+    ? id === threadId && context.cwd === 'C:/codex/project' && liveIds.has(registryId)
+    : liveIds.has(id);
   try {
-    const sessions = await listSessions({ isLive: (id) => id === liveId });
-    const live = sessions.find((s) => s.project === project && s.id === liveId);
-    const stale = sessions.find((s) => s.project === project && s.id === staleId);
-    assert.equal(live.running, true);
-    assert.equal(stale.running, false);
+    const sessions = await listSessions({ isLive });
+    const root = (id) => sessions.find((s) => s.project === project && s.id === id);
+    const liveRoot = root(ids[0]);
+    const recentRoot = root(ids[1]);
+    const oldRoot = root(ids[2]);
+    assert.deepEqual([liveRoot.processLive, liveRoot.activityRecent, liveRoot.running], [true, false, true]);
+    assert.deepEqual([recentRoot.processLive, recentRoot.activityRecent, recentRoot.running, recentRoot.processState], [false, true, false, 'unknown']);
+    assert.deepEqual([oldRoot.processLive, oldRoot.activityRecent, oldRoot.running], [false, false, false]);
+    const children = liveRoot.subagents;
+    assert.deepEqual([children.find((s) => s.agentId === childIds[0]).processLive, children.find((s) => s.agentId === childIds[0]).activityRecent], [true, false]);
+    assert.deepEqual([children.find((s) => s.agentId === childIds[1]).processLive, children.find((s) => s.agentId === childIds[1]).activityRecent, children.find((s) => s.agentId === childIds[1]).running], [false, true, false]);
+    assert.deepEqual([children.find((s) => s.agentId === childIds[2]).processLive, children.find((s) => s.agentId === childIds[2]).activityRecent], [false, false]);
+    const codex = sessions.find((s) => s.id === threadId);
+    const oldCodex = sessions.find((s) => s.id === oldCodexId);
+    assert.deepEqual([codex.processLive, codex.activityRecent, codex.running], [true, true, true]);
+    assert.deepEqual([oldCodex.processLive, oldCodex.activityRecent, oldCodex.running], [false, false, false]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+    rmSync(join(CODEX_HOME, 'sessions'), { recursive: true, force: true });
   }
 });
 

@@ -611,7 +611,7 @@ export function _msg_cost_tiered(model, i, o, cr, cc) {
   // not part of the pricing.json schema (which carries one global
   // long_context_threshold).
   const threshold =
-    key === "gpt-6-sol" || key === "gpt-6-luna" || key === "gpt-6.1-sol" ? 272000
+    key === "gpt-6-sol" || key === "gpt-6-luna" || key === "gpt-6.1-sol" || key === "gpt-6.1-terra" ? 272000
     : key === "haiku-5-5" ? 100000
     : LONG_CTX_THRESHOLD;
   if (above && i + cr + cc > threshold) {

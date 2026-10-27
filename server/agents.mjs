@@ -134,6 +134,23 @@ export function getBuf(id) { return agents.get(id)?.buf.join('') ?? ''; }
 export function getWritten(id) { return agents.get(id)?.written ?? 0; }
 export function getStatus(id) { return agents.get(id)?.status; }
 export function isLive(id) { return !!agents.get(id)?.proc; }
+// Resolve transcript identity to an owned process without conflating Codex's
+// rollout UUID with the registry key. A missing owner stays unknown to callers;
+// isLiveSession only answers whether this daemon owns a live process.
+export function codexOwnerForThread(threadId, cwd) {
+  if (!threadId) return null;
+  const wantCwd = cwd ? normPath(cwd) : null;
+  for (const a of agents.values()) {
+    if (!(a.tool === 'codex' || isCodexModel(a.model))) continue;
+    if (wantCwd && (!a.cwd || normPath(a.cwd) !== wantCwd)) continue;
+    if (rememberCodexThread(a) === threadId) return a.id;
+  }
+  return null;
+}
+export function isLiveSession(id, { source, cwd } = {}) {
+  if (isLive(id)) return true;
+  return source === 'codex' && isLive(codexOwnerForThread(id, cwd));
+}
 export function findByRunId(runId) { return [...agents.values()].find((a) => a.runId === runId) || null; }
 // Launch config for a registered agent (by id), for resuming a past session from
 // the Transcripts view: skill-scopes are NOT recorded in the transcript JSONL,
@@ -425,6 +442,9 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
     // The user re-entered the id to bring the conversation back → resume it
     // rather than refusing. reattach keeps the original model + skill-scopes.
     return reattach(id);
+  }
+  if ((tool === 'codex' || isCodexModel(model)) && codexOwnerForThread(id, cwd)) {
+    throw new Error('codex thread already in use');
   }
   if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
   validateToolModel(tool, model);

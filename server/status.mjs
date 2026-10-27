@@ -58,20 +58,34 @@ async function fetchProvider(provider) {
   }
 }
 
-const cache = Object.fromEntries(STATUS_PROVIDERS.map((p) => [p.key, { data: null, at: 0 }]));
+export function createStatusService({ providers = STATUS_PROVIDERS, fetch = fetchProvider, now = () => Date.now() } = {}) {
+  const cache = Object.fromEntries(providers.map((p) => [p.key, { data: null, at: 0 }]));
 
-async function pull(provider, force) {
-  const slot = cache[provider.key];
-  if (!force && slot.data && Date.now() - slot.at < TTL) return slot.data;
-  const data = { ...(await fetchProvider(provider)), fetchedAt: new Date().toISOString() };
-  // Keep last good payload on a transient failure (a blip shouldn't flip the UI
-  // to "error"), but always overwrite with a fresh successful pull.
-  if (data.ok || !slot.data) { slot.data = data; slot.at = Date.now(); }
-  return slot.data;
+  async function pull(provider, force) {
+    const slot = cache[provider.key];
+    if (!force && slot.data && now() - slot.at < TTL) return slot.data;
+    const attemptedAt = new Date(now()).toISOString();
+    const result = await fetch(provider);
+    if (result.ok) {
+      const data = { ...result, fetchedAt: attemptedAt, lastAttemptAt: attemptedAt, lastSuccessAt: attemptedAt, refreshError: null, stale: false };
+      slot.data = data;
+      slot.at = now();
+      return data;
+    }
+    const error = result.error || 'unknown error';
+    if (!slot.data) {
+      slot.data = { ...result, fetchedAt: null, lastAttemptAt: attemptedAt, lastSuccessAt: null, refreshError: error, stale: true };
+    } else {
+      slot.data = { ...slot.data, lastAttemptAt: attemptedAt, refreshError: error, stale: true };
+    }
+    return slot.data;
+  }
+
+  return { async getStatus({ force = false } = {}) {
+    const out = {};
+    for (const p of providers) out[p.key] = await pull(p, force);
+    return out;
+  } };
 }
 
-export async function getStatus({ force = false } = {}) {
-  const out = {};
-  for (const p of STATUS_PROVIDERS) out[p.key] = await pull(p, force);
-  return out;
-}
+export const { getStatus } = createStatusService();

@@ -61,9 +61,16 @@ function ProviderCard({ p }) {
       </Stack>
 
       {error ? (
-        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Couldn't load this: {p?.error || 'unknown error'}</Typography>
+        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+          Couldn't load this: {p?.refreshError || p?.error || 'unknown error'}{p?.lastAttemptAt ? ` · last attempt ${ago(p.lastAttemptAt)}` : ''}
+        </Typography>
       ) : (
         <>
+          <Typography sx={{ fontSize: 12, color: p.refreshError ? 'var(--mui-palette-warning-main)' : 'text.secondary', mb: 1 }}>
+            {p.refreshError
+              ? `Refresh failed: ${p.refreshError}. Showing last successful status from ${ago(p.lastSuccessAt || p.fetchedAt)}.`
+              : `Status page updated ${ago(p.lastSuccessAt || p.fetchedAt)}.`}
+          </Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: p.incidents?.length || p.maintenances?.length ? 1.5 : 2 }}>
             {p.description || INDICATOR_LABEL[ind]}
           </Typography>
@@ -140,17 +147,12 @@ export default function StatusView() {
     return () => clearInterval(t);
   }, [pull]);
 
-  // Most recent fetchedAt across providers → "updated N min ago".
-  const freshest = status
-    ? Object.values(status).map((p) => p?.fetchedAt).filter(Boolean).sort().at(-1)
-    : null;
-
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
         <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Provider status</Typography>
         <Box sx={{ flex: 1 }} />
-        {freshest && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>updated {ago(freshest)}</Typography>}
+        {status && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Update time shown per provider</Typography>}
         <Button size="small" startIcon={<RefreshIcon />} disabled={loading && !status} onClick={() => pull(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
       </Stack>
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
