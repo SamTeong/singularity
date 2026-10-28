@@ -69,13 +69,18 @@ const BACKGROUND_TICK_MS: i64 = 3_600_000;
 /// socket counter `/api/health` reports. `policy` supplies the `SING_TOKEN`
 /// check (`HttpPolicy::websocket_authenticated`, `http_policy.rs:112`) — a
 /// deviation from the design's field list, required because the token check
-/// lives in this route rather than the outer middleware.
+/// lives in this route rather than the outer middleware. `shutdown` is the
+/// host's drain broadcast: flipping it closes every socket `1001` so graceful
+/// HTTP shutdown never waits on an upgraded connection.
 pub struct WsDeps {
     pub registry: Arc<Registry>,
     pub anchor: Arc<Mutex<window_anchor::Service>>,
     pub chat: ChatDeps,
     pub clients: Arc<AtomicUsize>,
     pub policy: HttpPolicy,
+    /// Host shutdown broadcast: every session closes `1001` and returns when
+    /// it flips to `true`. `None` in tests that do not exercise shutdown.
+    pub shutdown: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 #[derive(Clone)]
@@ -85,6 +90,7 @@ struct WsState {
     chat: Arc<ChatDeps>,
     clients: Arc<AtomicUsize>,
     policy: HttpPolicy,
+    shutdown: Option<tokio::sync::watch::Receiver<bool>>,
 }
 
 // VERIFY: http-ws-router
@@ -96,6 +102,7 @@ pub fn router(deps: WsDeps) -> Router {
         chat: Arc::new(deps.chat),
         clients: deps.clients,
         policy: deps.policy,
+        shutdown: deps.shutdown,
     };
     Router::new().route("/ws", get(upgrade)).with_state(state)
 }
@@ -187,11 +194,18 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
     let mut heartbeat = tokio::time::interval(HEARTBEAT);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     heartbeat.tick().await; // the first tick is immediate; Node waits 30 s
+    let mut shutdown = state.shutdown.clone();
     let mut alive = true;
     let mut open = true;
 
     while open {
         tokio::select! {
+            _ = shutdown_signal(&mut shutdown) => {
+                // The host is draining: close 1001 and let the upgrade finish so
+                // graceful HTTP shutdown never waits on this socket.
+                let _ = close(socket, 1001, "").await;
+                open = false;
+            }
             result = &mut anchor_task, if !anchored => {
                 anchored = true;
                 let Ok(Some(anchor_text)) = result else {
@@ -302,6 +316,22 @@ async fn deliver_all(
         }
     }
     true
+}
+
+/// Resolves when the host broadcasts shutdown. Without a channel (tests) or
+/// after the sender is dropped it pends forever instead of closing the socket.
+async fn shutdown_signal(shutdown: &mut Option<tokio::sync::watch::Receiver<bool>>) {
+    let Some(receiver) = shutdown.as_mut() else {
+        return std::future::pending().await;
+    };
+    loop {
+        if *receiver.borrow() {
+            return;
+        }
+        if receiver.changed().await.is_err() {
+            return std::future::pending().await;
+        }
+    }
 }
 
 async fn send_text(socket: &mut WebSocket, payload: &str) -> Result<(), axum::Error> {
@@ -852,6 +882,7 @@ mod tests {
                 vite_port: 5317,
                 token: token.map(str::to_owned),
             },
+            shutdown: None,
         }
     }
 
@@ -1021,6 +1052,26 @@ mod tests {
             assert_eq!(frames[3]["liveTaskId"], Value::Null);
             assert_eq!(frames[3]["nextDueAt"], json!(BACKGROUND_TICK_MS));
             assert!(frames[4]["anchor"]["claude"].is_object(), "{:?}", frames[4]);
+        });
+    }
+
+    #[test]
+    fn host_shutdown_broadcast_closes_sockets_1001() {
+        run(async {
+            let fixture = Fixture::new();
+            let port = FakePort::new();
+            let registry = fixture.registry(port);
+            let (shutdown, shutdown_rx) = tokio::sync::watch::channel(false);
+            let mut deps = deps(&fixture, registry, Arc::new(AtomicUsize::new(0)), None);
+            deps.shutdown = Some(shutdown_rx);
+            let server = serve(deps).await;
+            let mut client = RawClient::connect(server.address, "/ws").await;
+            let _ = snapshot(&mut client).await;
+
+            shutdown.send(true).unwrap();
+            let (code, reason) = client.close().await;
+            assert_eq!(code, 1001);
+            assert_eq!(reason, "");
         });
     }
 

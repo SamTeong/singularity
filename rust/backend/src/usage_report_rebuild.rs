@@ -1107,7 +1107,11 @@ mod tests {
                 40,
             )],
         );
+        // Pin a whole-second mtime so the cache key does not depend on the
+        // clock's sub-second value that `set_mtime` has to round-trip via f64.
+        set_mtime(&path, NOW - 3_600.0);
         let original = mtime_s(&path).unwrap();
+        assert_eq!(original, NOW - 3_600.0);
         rebuild(&fixture, None, &Pricing::default()).unwrap();
         let cache_path = fixture.state.join(TOTALS_CACHE_FILE);
         let cache: Value = serde_json::from_str(&fs::read_to_string(&cache_path).unwrap()).unwrap();

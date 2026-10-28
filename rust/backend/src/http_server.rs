@@ -10,10 +10,10 @@ use std::future::Future;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 
-#[derive(Clone)]
 pub struct HttpServices {
     pub state_dir: PathBuf,
     pub plans_root: Option<PathBuf>,
@@ -23,6 +23,11 @@ pub struct HttpServices {
     pub memory: Option<crate::http_memory_root::MemoryServices>,
     pub config: Option<ConfigServices>,
     pub cutover: Option<CutoverServices>,
+    /// Shared with the `/ws` bridge; `/api/health` reports it as `clients`.
+    pub clients: Arc<AtomicUsize>,
+    /// The live registry/PTY/anchor/chat assembly; `None` in unit tests and
+    /// for `HttpServices::new`.
+    pub(crate) runtime: Option<crate::lifecycle::RuntimeServices>,
 }
 
 /// Inputs for the TASK-42 cutover routers (shell, capabilities, hooks, rules,
@@ -45,6 +50,7 @@ pub struct CutoverServices {
     pub codex_bin: Option<PathBuf>,
     pub scope_root: Option<PathBuf>,
     pub plans_available: bool,
+    pub plans_root: Option<PathBuf>,
     pub token_available: bool,
 }
 
@@ -80,6 +86,7 @@ impl CutoverServices {
             codex_bin: bin("CODEX_BIN"),
             scope_root: env("SING_SCOPE_ROOT").map(PathBuf::from),
             plans_available: env("SING_PLANS_ROOT").is_some(),
+            plans_root: env("SING_PLANS_ROOT").map(PathBuf::from),
             token_available: env("SING_TOKEN").is_some(),
             paths,
             home: config.home.clone(),
@@ -90,7 +97,11 @@ impl CutoverServices {
     }
 
     /// The routers plus the shell fallback that replaces the JSON 404.
-    fn routers(self, policy: &HttpPolicy) -> (Router, Option<Router>) {
+    fn routers(
+        self,
+        policy: &HttpPolicy,
+        runtime: Option<crate::lifecycle::RuntimeServices>,
+    ) -> (Router, Option<Router>) {
         let Self {
             paths,
             home,
@@ -108,6 +119,7 @@ impl CutoverServices {
             codex_bin,
             scope_root,
             plans_available,
+            plans_root,
             token_available,
         } = self;
         let state_dir = paths.state_dir.clone();
@@ -116,6 +128,22 @@ impl CutoverServices {
         // One queue for hook and rule file writes, like Node's single bridge queue.
         let file_lock = Arc::new(Mutex::new(()));
         let models_path = state_dir.join("models.json").to_string_lossy().into_owned();
+        // Clones the router needs after the chain below moves the originals.
+        let transcript_registry: Arc<dyn crate::http_transcripts::TranscriptRegistry> =
+            match runtime.as_ref() {
+                Some(runtime) => runtime.registry.clone(),
+                None => Arc::new(NoRegistry),
+            };
+        let agents_home = home.clone();
+        let agents_cwd = cwd.clone();
+        let agents_state_dir = state_dir.clone();
+        let agents_codex_home = codex_home.clone();
+        let agents_scope_root = scope_root.clone();
+        let agents_bins = (claude_bin.clone(), ollama_bin.clone(), codex_bin.clone());
+        let agents_cache_dir = paths.cache_dir.clone();
+        let agents_usage_state = paths.usage_skill_state.clone();
+        let services_scope_root = scope_root.clone();
+        let services_models_path = models_path.clone();
         let routes = Router::new()
             .merge(crate::http_shell::router(
                 policy.clone(),
@@ -185,7 +213,7 @@ impl CutoverServices {
                             .cloned()
                             .unwrap_or_default()
                     }),
-                    registry: Arc::new(NoRegistry),
+                    registry: transcript_registry,
                 },
             ))
             .merge(crate::http_model_prices::router(
@@ -215,6 +243,157 @@ impl CutoverServices {
                     codex_bin,
                 },
             ));
+        let routes = match runtime {
+            None => routes,
+            Some(runtime) => {
+                let (claude_bin, ollama_bin, codex_bin) = agents_bins;
+                let spawn_detached: crate::http_agents::SpawnDetached =
+                    Arc::new(|launcher, args, cwd| {
+                        let env = serde_json::json!(
+                            std::env::vars()
+                                .collect::<std::collections::BTreeMap<String, String>>()
+                        );
+                        let result = crate::detached::spawn(
+                            Some(launcher),
+                            &serde_json::json!(args),
+                            cwd,
+                            &env,
+                        );
+                        if result["ok"] == serde_json::Value::Bool(true) {
+                            Ok(())
+                        } else {
+                            Err(result["error"]
+                                .as_str()
+                                .unwrap_or("detached spawn failed")
+                                .to_owned())
+                        }
+                    });
+                let bus = runtime.registry.bus().clone();
+                // `CLAUDE_CONFIG_DIR || ~/.claude` (`usage.mjs:56-59`).
+                let claude_config = std::env::var_os("CLAUDE_CONFIG_DIR")
+                    .filter(|value| !value.is_empty())
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| agents_home.join(".claude"));
+                let history = crate::history::HistoryService::new(crate::history::HistoryDeps {
+                    state_dir: agents_state_dir.clone(),
+                    usage_state: agents_usage_state.clone(),
+                    home: agents_home.clone(),
+                    bins: crate::history::HistoryBins {
+                        claude: claude_bin.clone(),
+                        ollama: ollama_bin.clone(),
+                        codex: codex_bin.clone(),
+                    },
+                    bus: bus.clone(),
+                    clock: Arc::new(crate::history::SystemClock),
+                    transcripts: Arc::new(crate::history::NativeTranscriptSource::new(
+                        crate::transcript_service::Inputs {
+                            state_dir: agents_state_dir.clone(),
+                            claude_home: agents_home.join(".claude"),
+                            codex_home: agents_codex_home.clone(),
+                            model_catalog: crate::models::get(&services_models_path)["models"]
+                                .as_array()
+                                .cloned()
+                                .unwrap_or_default(),
+                        },
+                    )),
+                    summariser: Arc::new(crate::history::PromptRunSummariser(
+                        crate::prompt_run::PromptRunDeps {
+                            claude_bin: claude_bin.clone(),
+                            ollama_bin: ollama_bin.clone(),
+                            codex_bin: codex_bin.clone(),
+                            state_dir: agents_state_dir.clone(),
+                            env: std::env::vars().collect(),
+                        },
+                    )),
+                    models: Arc::new(crate::history::NativeModelStore {
+                        models_path: agents_state_dir.join("models.json"),
+                    }),
+                });
+                // Boot backfill like `index.mjs:904`: fire once, never block listen.
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let backfill = history.clone();
+                    handle.spawn(async move {
+                        let _ = backfill.ensure(crate::history::BACKFILL_DAYS, None).await;
+                    });
+                }
+                let usage = crate::http_usage::router(crate::http_usage::UsageDeps {
+                    bus,
+                    state_dir: agents_state_dir.clone(),
+                    usage_state: agents_usage_state.clone(),
+                    claude_home: claude_config,
+                    codex_home: agents_codex_home.clone(),
+                    platform: crate::http_agents::Platform::host(),
+                    parent_env: std::env::vars().collect(),
+                    security_bin: cfg!(target_os = "macos")
+                        .then(|| PathBuf::from("/usr/bin/security")),
+                    network: Arc::new(crate::http_usage::NativeUsageNetwork),
+                    clock: Arc::new(|| {
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .map_or(0, |elapsed| elapsed.as_millis() as i64)
+                    }),
+                });
+                let utilities = crate::http_utilities::router(crate::http_utilities::UtilityDeps {
+                    registry: runtime.registry.clone(),
+                    anchor: runtime.anchor.clone(),
+                    transcript: runtime.chat.transcripts.clone(),
+                    scope_root: services_scope_root,
+                    plans_root,
+                    claude_projects_root: agents_home.join(".claude").join("projects"),
+                    state_dir: agents_state_dir.clone(),
+                    usage_state: agents_usage_state.clone(),
+                    platform: crate::http_agents::Platform::host(),
+                    system_root: std::env::var_os("SystemRoot")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| PathBuf::from("C:\\Windows")),
+                    spawn_detached: spawn_detached.clone(),
+                    anchor_host: Arc::new(crate::lifecycle::DeferredAnchorHost),
+                });
+                let agents = crate::http_agents::router(crate::http_agents::AgentsDeps {
+                    registry: runtime.registry.clone(),
+                    bins: crate::agent_spawn::Bins {
+                        claude: claude_bin,
+                        ollama: ollama_bin,
+                        codex: codex_bin,
+                        paths: crate::agent_spawn::SpawnPaths {
+                            home: agents_home.clone(),
+                            scope_root: agents_scope_root,
+                            cache_dir: agents_cache_dir,
+                            codex_home: agents_codex_home.clone(),
+                            models_state: agents_state_dir.join("models.json"),
+                        },
+                    },
+                    parent_env: std::env::vars().collect(),
+                    repo_root: agents_cwd,
+                    host_pid: std::process::id(),
+                    platform: crate::http_agents::Platform::host(),
+                    procs: Arc::new(crate::http_agents::NativeProcs),
+                    spawn_detached,
+                    stats: crate::http_agents::StatsPaths {
+                        claude_home: agents_home.join(".claude"),
+                        codex_home: agents_codex_home,
+                        usage_state: agents_usage_state,
+                        state_dir: agents_state_dir,
+                    },
+                });
+                let ws = crate::http_ws::router(crate::http_ws::WsDeps {
+                    registry: runtime.registry.clone(),
+                    anchor: runtime.anchor,
+                    chat: runtime.chat,
+                    clients: runtime.clients.clone(),
+                    policy: policy.clone(),
+                    shutdown: Some(runtime.shutdown.subscribe()),
+                });
+                let restart = restart_router(runtime.restart_tx.clone());
+                routes
+                    .merge(ws)
+                    .merge(agents)
+                    .merge(restart)
+                    .merge(crate::http_history::router(history))
+                    .merge(usage)
+                    .merge(utilities)
+            }
+        };
         // `hasShell`: without a built web/dist Node keeps a plain 404 for unknown paths.
         // shortcut: `/` and `/assets/*` stay mounted without dist (500, Node 404); unbuilt dist is dev-only.
         let fallback = dist_dir
@@ -320,7 +499,17 @@ impl HttpServices {
             memory: None,
             config: None,
             cutover: None,
+            clients: Arc::new(AtomicUsize::new(0)),
+            runtime: None,
         }
+    }
+
+    // VERIFY: http-server-take-lifecycle
+    /// Moves the supervisor-side handles out before the router consumes the rest.
+    pub(crate) fn take_lifecycle(&mut self) -> Option<crate::lifecycle::LifecycleHandles> {
+        self.runtime
+            .as_mut()
+            .map(crate::lifecycle::RuntimeServices::handles)
     }
 
     fn from_env() -> io::Result<Self> {
@@ -366,8 +555,11 @@ impl HttpServices {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         // `server/migrate-state.mjs` runs before any state reader.
         crate::state_migration::StateMigration::from_app_paths(&paths).run()?;
+        let runtime = crate::lifecycle::RuntimeServices::from_env(&paths, &config)?;
+        services.clients = runtime.clients.clone();
         services.cutover = Some(CutoverServices::from_env(paths, &config));
         services.config = Some(config);
+        services.runtime = Some(runtime);
         if let Some(root) = std::env::var_os("SING_PLANS_ROOT").filter(|value| !value.is_empty()) {
             let root = PathBuf::from(root);
             services.plans_root = Some(if root.is_absolute() {
@@ -380,6 +572,23 @@ impl HttpServices {
     }
 }
 
+#[derive(Clone)]
+struct RestartHandle(tokio::sync::mpsc::UnboundedSender<()>);
+
+// VERIFY: http-restart-route
+/// `POST /api/restart` (`index.mjs:563-575`): acknowledge immediately; the
+/// supervisor drains, persists and only then respawns the daemon.
+fn restart_router(sender: tokio::sync::mpsc::UnboundedSender<()>) -> Router {
+    Router::new()
+        .route("/api/restart", axum::routing::post(restart))
+        .with_state(RestartHandle(sender))
+}
+
+async fn restart(State(handle): State<RestartHandle>) -> Json<serde_json::Value> {
+    let _ = handle.0.send(());
+    Json(json!({ "ok": true }))
+}
+
 pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
     let memory = services
         .memory
@@ -389,8 +598,9 @@ pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
         .config
         .map(ConfigServices::router)
         .unwrap_or_default();
+    let clients = services.clients.clone();
     let (cutover, fallback) = match services.cutover {
-        Some(cutover) => cutover.routers(&policy),
+        Some(cutover) => cutover.routers(&policy, services.runtime),
         None => (Router::new(), None),
     };
     let router = Router::new()
@@ -400,6 +610,7 @@ pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
         .merge(crate::http_telemetry::router(
             services.sampler,
             services.status,
+            clients,
         ))
         .merge(crate::http_models::router(services.state_dir.clone()))
         .merge(crate::http_plans::router(services.plans_root))
@@ -448,10 +659,22 @@ pub fn run_from_env() -> io::Result<()> {
         .enable_all()
         .build()?;
     runtime.block_on(async move {
-        let services = HttpServices::from_env()?;
-        let listener = bind(policy.daemon_port).await?;
+        let mut services = HttpServices::from_env()?;
+        let handles = services.take_lifecycle().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, "native runtime failed to initialize")
+        })?;
+        // `reg.init(app.log)`: a malformed file is a warning, not a startup failure.
+        if let Err(error) = handles.registry.load() {
+            eprintln!("agents.json load failed: {error}");
+        }
+        let listener = crate::lifecycle::bind_with_retry(
+            policy.daemon_port,
+            crate::lifecycle::BIND_ATTEMPTS,
+            crate::lifecycle::BIND_RETRY,
+        )
+        .await?;
         eprintln!("native HTTP listener bound to {}", listener.local_addr()?);
-        serve(listener, policy, services, shutdown_signal()).await
+        crate::lifecycle::run(listener, policy, services, handles).await
     })
 }
 
@@ -1026,7 +1249,7 @@ fn shell_token_cookie(token: &str) -> String {
 }
 
 #[cfg(unix)]
-async fn shutdown_signal() {
+pub(crate) async fn shutdown_signal() {
     use tokio::signal::unix::{SignalKind, signal};
 
     let Ok(mut terminate) = signal(SignalKind::terminate()) else {
@@ -1040,6 +1263,6 @@ async fn shutdown_signal() {
 }
 
 #[cfg(not(unix))]
-async fn shutdown_signal() {
+pub(crate) async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }

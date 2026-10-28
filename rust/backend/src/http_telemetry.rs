@@ -7,24 +7,36 @@ use axum::{Json, Router};
 use serde_json::{Value, json};
 use std::process;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 #[derive(Clone)]
 struct Telemetry {
     sampler: Arc<Sampler>,
     status: StatusService,
+    clients: Arc<AtomicUsize>,
 }
 
-pub fn router(sampler: Arc<Sampler>, status: StatusService) -> Router {
+// VERIFY: http-telemetry-router
+pub fn router(sampler: Arc<Sampler>, status: StatusService, clients: Arc<AtomicUsize>) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/sysstats", get(sysstats))
         .route("/api/status", get(status_get))
-        .with_state(Telemetry { sampler, status })
+        .with_state(Telemetry {
+            sampler,
+            status,
+            clients,
+        })
 }
 
-async fn health() -> Json<Value> {
-    // clients stays 0 until the native server owns the websocket.
-    Json(json!({ "ok": true, "pid": process::id(), "clients": 0 }))
+// VERIFY: http-telemetry-health
+/// `clients` is the live `/ws` socket counter the native bridge increments.
+async fn health(State(telemetry): State<Telemetry>) -> Json<Value> {
+    Json(json!({
+        "ok": true,
+        "pid": process::id(),
+        "clients": telemetry.clients.load(Ordering::SeqCst),
+    }))
 }
 
 async fn sysstats(State(telemetry): State<Telemetry>) -> Json<SysStats> {
@@ -55,6 +67,7 @@ mod tests {
     use axum::http::header::{ALLOW, CONTENT_TYPE};
     use serde_json::{Value, json};
     use std::sync::Arc;
+    use std::sync::atomic::AtomicUsize;
     use tokio::sync::oneshot;
 
     struct Fixture {
@@ -66,11 +79,15 @@ mod tests {
 
     impl Fixture {
         async fn start() -> Self {
+            Self::start_with(Arc::new(AtomicUsize::new(0))).await
+        }
+
+        async fn start_with(clients: Arc<AtomicUsize>) -> Self {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             assert!(address.ip().is_loopback());
             let (stop, stopped) = oneshot::channel::<()>();
-            let app = router(Arc::new(Sampler::start()), StatusService::new());
+            let app = router(Arc::new(Sampler::start()), StatusService::new(), clients);
             let server = tokio::spawn(async move {
                 axum::serve(listener, app)
                     .with_graceful_shutdown(async move {
@@ -160,6 +177,36 @@ mod tests {
                 .unwrap();
             assert_eq!(status_post.status(), StatusCode::METHOD_NOT_ALLOWED);
 
+            fixture.finish().await;
+        });
+    }
+
+    #[test]
+    fn health_reports_the_shared_websocket_client_counter() {
+        runtime().block_on(async {
+            let clients = Arc::new(AtomicUsize::new(2));
+            let fixture = Fixture::start_with(clients.clone()).await;
+            let body: Value = fixture
+                .client
+                .get(format!("{}/api/health", fixture.base))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(body["clients"], json!(2));
+            clients.store(0, std::sync::atomic::Ordering::SeqCst);
+            let body: Value = fixture
+                .client
+                .get(format!("{}/api/health", fixture.base))
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert_eq!(body["clients"], json!(0));
             fixture.finish().await;
         });
     }

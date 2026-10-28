@@ -118,8 +118,8 @@ pub struct ChatDeps {
     /// `security` path. Never resolved through `PATH`.
     pub keychain_platform: Option<String>,
     pub keychain_bin: Option<String>,
-    /// `Date.now()` at call time; injected so expiry is testable.
-    pub now_ms: i64,
+    /// Fixed clock for tests; `None` reads `Date.now()` at call time.
+    pub now_ms: Option<i64>,
     pub client: reqwest::Client,
 }
 
@@ -131,9 +131,13 @@ impl ChatDeps {
             credentials_path,
             keychain_platform: Some(std::env::consts::OS.to_owned()),
             keychain_bin: None,
-            now_ms: epoch_ms(),
+            now_ms: None,
             client: reqwest::Client::new(),
         }
+    }
+
+    fn now_ms(&self) -> i64 {
+        self.now_ms.unwrap_or_else(epoch_ms)
     }
 }
 
@@ -437,7 +441,7 @@ async fn list_sessions(deps: &ChatDeps, req: &ChatRequest) -> Result<Vec<Session
     let options = ListOptions {
         root: req.root.clone(),
         cap: 100,
-        now_ms: u64::try_from(deps.now_ms).unwrap_or(0),
+        now_ms: u64::try_from(deps.now_ms()).unwrap_or(0),
         hide_reviews: false,
         live_ids: Vec::new(),
     };
@@ -586,7 +590,7 @@ impl StreamDecoder {
 /// is the fallback, and an expired token reads as signed out.
 fn oauth_access_token(deps: &ChatDeps) -> Option<String> {
     if let Some(oauth) = credentials_file(deps) {
-        return access_token(&oauth, deps.now_ms);
+        return access_token(&oauth, deps.now_ms());
     }
     let response = usage_auth::keychain(
         deps.keychain_platform.as_deref(),
@@ -596,7 +600,7 @@ fn oauth_access_token(deps: &ChatDeps) -> Option<String> {
     if response.get("ok").and_then(Value::as_bool) != Some(true) {
         return None;
     }
-    access_token(response.get("oauth")?, deps.now_ms)
+    access_token(response.get("oauth")?, deps.now_ms())
 }
 
 /// `usage.mjs:554-558`: `<credentials_path>` → its `claudeAiOauth` object.
@@ -787,7 +791,7 @@ mod tests {
         );
         deps.messages_url = url.unwrap_or_else(|| MESSAGES_URL.to_owned());
         deps.keychain_platform = None;
-        deps.now_ms = NOW_MS;
+        deps.now_ms = Some(NOW_MS);
         deps
     }
 
