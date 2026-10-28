@@ -41,6 +41,7 @@
 //   * Inherited `http_body` gaps apply (JSON responses without
 //     `; charset=utf-8`).
 use crate::http_body::{RawBody, parse_raw};
+use crate::memory_backup::js_string_to_number;
 use crate::transcripts::raw_json_string_at;
 use crate::wiki_root::resolve_units;
 use axum::body::Body;
@@ -69,8 +70,9 @@ struct MemoryFileWrite {
     // `path.resolve` for drive-relative targets and roots.
     drive_cwds: Vec<(u16, PathBuf)>,
     backups_dir: PathBuf,
-    // Shared with root changes and reads, including authorization and backup.
+    // Root changes and authorization share this lock; final file I/O uses file_lock.
     lock: Arc<Mutex<()>>,
+    file_lock: Arc<Mutex<()>>,
 }
 
 // VERIFY: memory-file-write-router-injection
@@ -81,6 +83,7 @@ pub fn router(
     drive_cwds: Vec<(u16, PathBuf)>,
     backups_dir: PathBuf,
     lock: Arc<Mutex<()>>,
+    file_lock: Arc<Mutex<()>>,
 ) -> Router {
     Router::new()
         .route("/api/memory/file", put(put_file))
@@ -91,6 +94,7 @@ pub fn router(
             drive_cwds,
             backups_dir,
             lock,
+            file_lock,
         })
 }
 
@@ -270,7 +274,10 @@ fn write(state: &MemoryFileWrite, fields: WriteFields) -> Response {
         let _ = crate::memory_backup::backup_file(&backup_path, &target, &state.backups_dir);
     });
     // The Node bridge serializes final memory reads and writes after backup.
-    let _guard = state.lock.lock().unwrap_or_else(|error| error.into_inner());
+    let _guard = state
+        .file_lock
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     // Guard 2, after the backup: covers a concurrent save landing in between.
     match stale(&target, mtime_present, mtime_number, force) {
         Ok(true) => return changed(),
@@ -486,123 +493,6 @@ fn js_number_text(value: f64) -> String {
     buffer.format_finite(value).to_owned()
 }
 
-/// `Number(string)` with JavaScript's white-space set and numeric grammar.
-fn js_string_to_number(text: &str) -> f64 {
-    let trimmed = text.trim_matches(is_js_whitespace);
-    if trimmed.is_empty() {
-        return 0.0;
-    }
-    if let Some(digits) = trimmed
-        .strip_prefix("0x")
-        .or_else(|| trimmed.strip_prefix("0X"))
-    {
-        return radix_digits(digits, 16);
-    }
-    if let Some(digits) = trimmed
-        .strip_prefix("0b")
-        .or_else(|| trimmed.strip_prefix("0B"))
-    {
-        return radix_digits(digits, 2);
-    }
-    if let Some(digits) = trimmed
-        .strip_prefix("0o")
-        .or_else(|| trimmed.strip_prefix("0O"))
-    {
-        return radix_digits(digits, 8);
-    }
-    match trimmed {
-        "Infinity" | "+Infinity" => return f64::INFINITY,
-        "-Infinity" => return f64::NEG_INFINITY,
-        _ => {}
-    }
-    if !decimal_literal(trimmed) {
-        return f64::NAN;
-    }
-    trimmed.parse::<f64>().unwrap_or(f64::NAN)
-}
-
-/// `StringNumericLiteral` with a radix prefix: unsigned ASCII digits only.
-fn radix_digits(digits: &str, radix: u32) -> f64 {
-    if digits.is_empty() {
-        return f64::NAN;
-    }
-    let mut value = 0.0;
-    for byte in digits.bytes() {
-        let Some(digit) = (byte as char).to_digit(radix) else {
-            return f64::NAN;
-        };
-        value = value * radix as f64 + digit as f64;
-    }
-    value
-}
-
-/// `[+-]? (Digits '.'? Digits? | '.' Digits) Exp?`
-fn decimal_literal(text: &str) -> bool {
-    let bytes = text.as_bytes();
-    let mut index = 0;
-    if bytes
-        .first()
-        .is_some_and(|byte| *byte == b'+' || *byte == b'-')
-    {
-        index += 1;
-    }
-    let integer_start = index;
-    while bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
-        index += 1;
-    }
-    let integer_digits = index - integer_start;
-    let mut fraction_digits = 0;
-    if bytes.get(index) == Some(&b'.') {
-        index += 1;
-        let fraction_start = index;
-        while bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
-            index += 1;
-        }
-        fraction_digits = index - fraction_start;
-    }
-    if integer_digits == 0 && fraction_digits == 0 {
-        return false;
-    }
-    if bytes
-        .get(index)
-        .is_some_and(|byte| *byte == b'e' || *byte == b'E')
-    {
-        index += 1;
-        if bytes
-            .get(index)
-            .is_some_and(|byte| *byte == b'+' || *byte == b'-')
-        {
-            index += 1;
-        }
-        let exponent_start = index;
-        while bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
-            index += 1;
-        }
-        if index == exponent_start {
-            return false;
-        }
-    }
-    index == bytes.len()
-}
-
-/// JavaScript `trim()` white space: `WhiteSpace` + `LineTerminator`. Rust's
-/// `char::is_whitespace` differs (it includes U+0085, which JavaScript does not).
-fn is_js_whitespace(character: char) -> bool {
-    matches!(
-        character,
-        '\u{0009}' | '\u{000B}' | '\u{000C}' | '\u{0020}' | '\u{00A0}' | '\u{1680}' | '\u{2000}'
-            ..='\u{200A}'
-                | '\u{2028}'
-                | '\u{2029}'
-                | '\u{202F}'
-                | '\u{205F}'
-                | '\u{3000}'
-                | '\u{FEFF}'
-                | '\n'
-                | '\r'
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
@@ -664,6 +554,7 @@ mod tests {
                 drive_cwds: Vec::new(),
                 backups_dir: self.backups(),
                 lock: Arc::new(Mutex::new(())),
+                file_lock: Arc::new(Mutex::new(())),
             }
         }
 

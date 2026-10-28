@@ -80,7 +80,7 @@ fn prune(dir: &Path) -> Option<()> {
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
             let stem = name.strip_suffix(".bak")?;
-            Some((stem.parse::<f64>().unwrap_or(f64::NAN), name))
+            Some((js_string_to_number(stem), name))
         })
         .collect();
     baks.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
@@ -95,10 +95,143 @@ fn prune(dir: &Path) -> Option<()> {
     Some(())
 }
 
+/// `Number(string)` with JavaScript's white-space set and numeric grammar.
+pub(crate) fn js_string_to_number(text: &str) -> f64 {
+    let trimmed = text.trim_matches(is_js_whitespace);
+    if trimmed.is_empty() {
+        return 0.0;
+    }
+    if let Some(digits) = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+    {
+        return radix_digits(digits, 16);
+    }
+    if let Some(digits) = trimmed
+        .strip_prefix("0b")
+        .or_else(|| trimmed.strip_prefix("0B"))
+    {
+        return radix_digits(digits, 2);
+    }
+    if let Some(digits) = trimmed
+        .strip_prefix("0o")
+        .or_else(|| trimmed.strip_prefix("0O"))
+    {
+        return radix_digits(digits, 8);
+    }
+    match trimmed {
+        "Infinity" | "+Infinity" => return f64::INFINITY,
+        "-Infinity" => return f64::NEG_INFINITY,
+        _ => {}
+    }
+    if !decimal_literal(trimmed) {
+        return f64::NAN;
+    }
+    trimmed.parse::<f64>().unwrap_or(f64::NAN)
+}
+
+/// `StringNumericLiteral` with a radix prefix: unsigned ASCII digits only.
+fn radix_digits(digits: &str, radix: u32) -> f64 {
+    if digits.is_empty() {
+        return f64::NAN;
+    }
+    let mut value = 0.0;
+    for byte in digits.bytes() {
+        let Some(digit) = (byte as char).to_digit(radix) else {
+            return f64::NAN;
+        };
+        value = value * radix as f64 + digit as f64;
+    }
+    value
+}
+
+/// `[+-]? (Digits '.'? Digits? | '.' Digits) Exp?`
+fn decimal_literal(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    let mut index = 0;
+    if bytes
+        .first()
+        .is_some_and(|byte| *byte == b'+' || *byte == b'-')
+    {
+        index += 1;
+    }
+    let integer_start = index;
+    while bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
+        index += 1;
+    }
+    let integer_digits = index - integer_start;
+    let mut fraction_digits = 0;
+    if bytes.get(index) == Some(&b'.') {
+        index += 1;
+        let fraction_start = index;
+        while bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
+            index += 1;
+        }
+        fraction_digits = index - fraction_start;
+    }
+    if integer_digits == 0 && fraction_digits == 0 {
+        return false;
+    }
+    if bytes
+        .get(index)
+        .is_some_and(|byte| *byte == b'e' || *byte == b'E')
+    {
+        index += 1;
+        if bytes
+            .get(index)
+            .is_some_and(|byte| *byte == b'+' || *byte == b'-')
+        {
+            index += 1;
+        }
+        let exponent_start = index;
+        while bytes.get(index).is_some_and(|byte| byte.is_ascii_digit()) {
+            index += 1;
+        }
+        if index == exponent_start {
+            return false;
+        }
+    }
+    index == bytes.len()
+}
+
+/// JavaScript `trim()` white space: `WhiteSpace` + `LineTerminator`. Rust's
+/// `char::is_whitespace` differs (it includes U+0085, which JavaScript does not).
+fn is_js_whitespace(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0009}' | '\u{000B}' | '\u{000C}' | '\u{0020}' | '\u{00A0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200A}'
+                | '\u{2028}'
+                | '\u{2029}'
+                | '\u{202F}'
+                | '\u{205F}'
+                | '\u{3000}'
+                | '\u{FEFF}'
+                | '\n'
+                | '\r'
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicU64, Ordering as AtomicOrdering};
+
+    #[test]
+    fn backup_stems_use_javascript_number_conversion() {
+        for (stem, expected) in [
+            ("", 0.0),
+            ("  ", 0.0),
+            ("0x10", 16.0),
+            ("1e2", 100.0),
+            ("Infinity", f64::INFINITY),
+        ] {
+            assert_eq!(js_string_to_number(stem), expected, "{stem:?}");
+        }
+        for stem in ["infinity", "inf", "nan", "+0x10"] {
+            assert!(js_string_to_number(stem).is_nan(), "{stem:?}");
+        }
+    }
 
     static SEQ: AtomicU64 = AtomicU64::new(0);
 

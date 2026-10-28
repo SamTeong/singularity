@@ -48,6 +48,7 @@ struct MemoryFileRead {
     // `path.resolve` for drive-relative targets and roots.
     drive_cwds: Vec<(u16, PathBuf)>,
     lock: Arc<Mutex<()>>,
+    file_lock: Arc<Mutex<()>>,
 }
 
 // VERIFY: memory-file-router-injection
@@ -57,6 +58,7 @@ pub fn router(
     cwd: PathBuf,
     drive_cwds: Vec<(u16, PathBuf)>,
     lock: Arc<Mutex<()>>,
+    file_lock: Arc<Mutex<()>>,
 ) -> Router {
     Router::new()
         .route("/api/memory/file", get(get_file))
@@ -66,6 +68,7 @@ pub fn router(
             cwd,
             drive_cwds,
             lock,
+            file_lock,
         })
 }
 
@@ -96,7 +99,7 @@ async fn get_file(State(state): State<MemoryFileRead>, RawQuery(query): RawQuery
 }
 
 fn get_file_locked(state: &MemoryFileRead, query: Option<&str>) -> Response {
-    let _guard = state.lock.lock().unwrap_or_else(|error| error.into_inner());
+    let guard = state.lock.lock().unwrap_or_else(|error| error.into_inner());
     let windows = cfg!(windows);
     // `if (!p) return false` runs before anything else in `isMemoryPath`, and a
     // non-string path throws in `resolve` before the root is ever inspected.
@@ -131,6 +134,11 @@ fn get_file_locked(state: &MemoryFileRead, query: Option<&str>) -> Response {
     if !crate::memory_auth::is_memory_path(&target, &supplied_root, &persisted_root, windows) {
         return outside();
     }
+    drop(guard);
+    let _guard = state
+        .file_lock
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
     read(&state, &raw_target)
 }
 
@@ -363,6 +371,7 @@ mod tests {
                 cwd: self.0.clone(),
                 drive_cwds: Vec::new(),
                 lock: Arc::new(Mutex::new(())),
+                file_lock: Arc::new(Mutex::new(())),
             }
         }
     }
@@ -410,6 +419,51 @@ mod tests {
         let status = response.status().as_u16();
         let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
         (status, String::from_utf8(bytes.to_vec()).unwrap())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn blocked_file_read_does_not_hold_root_lock() {
+        use std::io::Write;
+        use std::time::{Duration, Instant};
+
+        let fixture = Fixture::new();
+        fixture.persist_root(&path_text(&fixture.root()));
+        let fifo = fixture.root().join("proj/memory/fifo.md");
+        fs::create_dir_all(fifo.parent().unwrap()).unwrap();
+        assert!(
+            std::process::Command::new("mkfifo")
+                .arg(&fifo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        let state = fixture.state();
+        let query = query(&[
+            ("path", &path_text(&fifo)),
+            ("root", &path_text(&fixture.root())),
+        ]);
+        let reader_state = state.clone();
+        let reader = std::thread::spawn(move || {
+            super::get_file_locked(&reader_state, Some(&query)).status()
+        });
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if state.file_lock.try_lock().is_err() {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "reader never reached the file lock"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let root_available = state.lock.try_lock().is_ok();
+        let mut writer = fs::OpenOptions::new().write(true).open(&fifo).unwrap();
+        writer.write_all(b"ready").unwrap();
+        drop(writer);
+        assert_eq!(reader.join().unwrap(), axum::http::StatusCode::OK);
+        assert!(root_available, "a blocked file read held the root lock");
     }
 
     #[test]

@@ -331,6 +331,24 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(search["results"].as_array().unwrap().len(), 1);
+        let mut previous = "needle".to_owned();
+        for index in 0..8 {
+            let next = if index % 2 == 0 { "a" } else { "b" }.repeat(96 * 1024);
+            let read_request = client
+                .get(format!("{url}/file"))
+                .query(&[("path", file), ("root", root)])
+                .send();
+            let write_request = client
+                .put(format!("{url}/file"))
+                .json(&json!({"path": file, "root": root, "content": next, "force": true}))
+                .send();
+            let (read, write) = tokio::join!(read_request, write_request);
+            assert_eq!(write.unwrap().status(), StatusCode::OK);
+            let read: Value = read.unwrap().json().await.unwrap();
+            let content = read["content"].as_str().unwrap();
+            assert!(content == previous || content == next);
+            previous = next;
+        }
         let denied = client
             .get(format!("{url}/file"))
             .query(&[("path", file), ("root", base.to_str().unwrap())])

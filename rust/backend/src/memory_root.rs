@@ -142,8 +142,13 @@ pub(crate) fn root_io_error(path: &Path, operation: &str, error: std::io::Error)
         })
     {
         Some("ENOENT: no such file or directory")
-    } else if cfg!(windows) && operation == "open" && error.raw_os_error() == Some(32) {
+    } else if cfg!(windows)
+        && matches!(operation, "open" | "stat")
+        && error.raw_os_error() == Some(32)
+    {
         Some("EBUSY: resource busy or locked")
+    } else if cfg!(windows) && operation == "stat" && error.raw_os_error() == Some(5) {
+        Some("EPERM: operation not permitted")
     } else if cfg!(windows)
         && operation == "open"
         && error.raw_os_error() == Some(5)
@@ -168,6 +173,21 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[cfg(windows)]
+    #[test]
+    fn stat_formats_windows_access_and_sharing_errors() {
+        let path = Path::new("C:/isolated/missing.md");
+        for (code, description) in [
+            (5, "EPERM: operation not permitted"),
+            (32, "EBUSY: resource busy or locked"),
+        ] {
+            assert_eq!(
+                super::root_io_error(path, "stat", std::io::Error::from_raw_os_error(code)),
+                format!("{description}, stat '{}'", path.display())
+            );
+        }
+    }
 
     #[cfg(windows)]
     #[test]

@@ -43,6 +43,7 @@ impl MemoryServices {
 
     pub fn router(self) -> Router {
         let lock = Arc::new(Mutex::new(()));
+        let file_lock = Arc::new(Mutex::new(()));
         router(self.state_dir.clone(), lock.clone())
             .merge(crate::http_memory_file_read::router(
                 self.state_dir.clone(),
@@ -50,6 +51,7 @@ impl MemoryServices {
                 self.cwd.clone(),
                 self.drive_cwds.clone(),
                 lock.clone(),
+                file_lock.clone(),
             ))
             .merge(crate::http_memory_file_write::router(
                 self.state_dir.clone(),
@@ -58,6 +60,7 @@ impl MemoryServices {
                 self.drive_cwds.clone(),
                 self.backups_dir,
                 lock.clone(),
+                file_lock,
             ))
             .merge(crate::http_memory_list::router(
                 self.state_dir,
