@@ -269,6 +269,8 @@ fn write(state: &MemoryFileWrite, fields: WriteFields) -> Response {
     ignore_backup_failure(|| {
         let _ = crate::memory_backup::backup_file(&backup_path, &target, &state.backups_dir);
     });
+    // The Node bridge serializes final memory reads and writes after backup.
+    let _guard = state.lock.lock().unwrap_or_else(|error| error.into_inner());
     // Guard 2, after the backup: covers a concurrent save landing in between.
     match stale(&target, mtime_present, mtime_number, force) {
         Ok(true) => return changed(),
@@ -1342,19 +1344,16 @@ mod tests {
     }
 
     #[test]
-    fn concurrent_saves_allow_node_write_race() {
+    fn concurrent_saves_reject_stale_write() {
         let fixture = Fixture::new();
         fixture.persist_root(&text(&fixture.root()));
         let file = fixture.put("proj/memory/a.md", "old");
         let old = SystemTime::now() - Duration::from_secs(60);
-        let set = File::options()
+        File::options()
             .write(true)
             .open(&file)
-            .and_then(|file| file.set_times(FileTimes::new().set_modified(old)));
-        if let Err(error) = set {
-            eprintln!("SKIP concurrent save check: file times unsupported: {error}");
-            return;
-        }
+            .and_then(|file| file.set_times(FileTimes::new().set_modified(old)))
+            .expect("set the fixture's old modification time");
         let body = json!({
             "path": text(&file),
             "content": "new",
@@ -1367,11 +1366,29 @@ mod tests {
             let (first, second) = tokio::join!(send(&state, &body), send(&state, &body));
             let mut statuses = [first.0, second.0];
             statuses.sort_unstable();
-            assert!(
-                matches!(statuses, [200, 200] | [200, 409]),
-                "{first:?} {second:?}"
-            );
+            assert_eq!(statuses, [200, 409], "{first:?} {second:?}");
         });
         assert_eq!(fs::read_to_string(&file).unwrap(), "new");
+    }
+
+    #[test]
+    fn concurrent_forced_saves_leave_one_complete_value() {
+        let fixture = Fixture::new();
+        fixture.persist_root(&text(&fixture.root()));
+        let file = fixture.put("proj/memory/a.md", "old");
+        let first = "a".repeat(128 * 1024);
+        let second = "b".repeat(96 * 1024);
+        let body = |content: &str| {
+            json!({"path": text(&file), "content": content, "root": text(&fixture.root()), "force": true}).to_string()
+        };
+        let first_body = body(&first);
+        let second_body = body(&second);
+        let state = fixture.state();
+        run(async {
+            let (a, b) = tokio::join!(send(&state, &first_body), send(&state, &second_body));
+            assert_eq!([a.0, b.0], [200, 200]);
+        });
+        let saved = fs::read_to_string(&file).unwrap();
+        assert!(saved == first || saved == second);
     }
 }

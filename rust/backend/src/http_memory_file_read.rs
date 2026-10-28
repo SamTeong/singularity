@@ -96,7 +96,7 @@ async fn get_file(State(state): State<MemoryFileRead>, RawQuery(query): RawQuery
 }
 
 fn get_file_locked(state: &MemoryFileRead, query: Option<&str>) -> Response {
-    let guard = state.lock.lock().unwrap_or_else(|error| error.into_inner());
+    let _guard = state.lock.lock().unwrap_or_else(|error| error.into_inner());
     let windows = cfg!(windows);
     // `if (!p) return false` runs before anything else in `isMemoryPath`, and a
     // non-string path throws in `resolve` before the root is ever inspected.
@@ -131,7 +131,6 @@ fn get_file_locked(state: &MemoryFileRead, query: Option<&str>) -> Response {
     if !crate::memory_auth::is_memory_path(&target, &supplied_root, &persisted_root, windows) {
         return outside();
     }
-    drop(guard);
     read(&state, &raw_target)
 }
 
