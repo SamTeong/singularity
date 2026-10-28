@@ -20,6 +20,7 @@ pub struct HttpServices {
     pub report_request: Arc<crate::usage_report::Request>,
     pub sampler: Arc<crate::sysstats::Sampler>,
     pub status: crate::status::StatusService,
+    pub memory: Option<crate::http_memory_root::MemoryServices>,
 }
 
 impl HttpServices {
@@ -30,6 +31,7 @@ impl HttpServices {
             report_request: Arc::new(report_request),
             sampler: Arc::new(crate::sysstats::Sampler::start()),
             status: crate::status::StatusService::new(),
+            memory: None,
         }
     }
 
@@ -54,12 +56,16 @@ impl HttpServices {
         })
         .collect();
         let mut services = Self::new(
-            PathBuf::from(home).join("state"),
+            PathBuf::from(&home).join("state"),
             crate::usage_report::Request {
                 reports_dir: String::new(),
                 env: serde_json::Value::Object(env),
             },
         );
+        services.memory = Some(crate::http_memory_root::MemoryServices::from_env(
+            services.state_dir.clone(),
+            PathBuf::from(home).join("cache").join("backups"),
+        )?);
         if let Some(root) = std::env::var_os("SING_PLANS_ROOT").filter(|value| !value.is_empty()) {
             let root = PathBuf::from(root);
             services.plans_root = Some(if root.is_absolute() {
@@ -73,7 +79,12 @@ impl HttpServices {
 }
 
 pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
+    let memory = services
+        .memory
+        .map(|memory| memory.router())
+        .unwrap_or_default();
     Router::new()
+        .merge(memory)
         .merge(crate::http_telemetry::router(
             services.sampler,
             services.status,

@@ -9,12 +9,20 @@
 //! Known parity gaps versus the measured Fastify probes: error bodies are sent
 //! as `application/json` (Fastify adds `charset=utf-8`), and body read failures
 //! use the invalid-JSON envelope. JSON nesting is bounded by serde_json's limit.
+//!
+//! `parse_raw` runs that same pipeline for routes that must keep the original
+//! JSON token: `RawBody::raw` is the fully validated, BOM-stripped JSON token
+//! with escapes untouched, so an escaped lone surrogate (`"\ud800"`) survives
+//! verbatim, while `RawBody::value` is the routing representation. Rust strings
+//! cannot hold a lone UTF-16 code unit, so only inside `value` unpaired
+//! surrogate escapes decode as U+FFFD; the raw token stays authoritative.
 
 use axum::Json;
 use axum::body::{Body, to_bytes};
 use axum::http::{HeaderMap, Request, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use http_body_util::LengthLimitError;
+use serde_json::value::RawValue;
 use serde_json::{Value, json};
 
 const MAX_BODY: usize = 1024 * 1024;
@@ -27,7 +35,56 @@ enum MediaKind {
     Unsupported,
 }
 
+/// Media kind plus the lossy-decoded body text every entry point dispatches on.
+struct BodyText {
+    kind: MediaKind,
+    text: String,
+}
+
 pub async fn parse(request: Request<Body>) -> Result<Value, Response> {
+    let BodyText { kind, text } = read_body(request).await?;
+    match kind {
+        MediaKind::Json => parse_json(&text),
+        MediaKind::Plain => Ok(Value::String(text)),
+        MediaKind::Absent if text.is_empty() => Ok(Value::Null),
+        MediaKind::Absent | MediaKind::Unsupported => Err(invalid_media_type()),
+    }
+}
+
+/// The parsed routing value plus the original JSON token.
+///
+/// `raw` is `Some` only for `application/json` bodies and is the whole document
+/// as validated by serde_json's raw-value scanner, which — unlike `Value` —
+/// accepts escaped lone surrogates. `value` mirrors `parse` exactly, except
+/// that unpaired surrogate escapes decode as U+FFFD. Duplicate keys stay
+/// last-wins in both. Because the parsed map is lossy, keys differing only by
+/// a lone surrogate can merge there; use `raw` when key identity matters.
+#[allow(dead_code)] // consumed by the incoming memory routes
+pub(crate) struct RawBody {
+    pub(crate) value: Value,
+    pub(crate) raw: Option<Box<RawValue>>,
+}
+
+/// `parse` for routes that must echo or persist original JSON text. Media-type,
+/// size, Content-Length, BOM, empty-body and prototype contracts are identical.
+#[allow(dead_code)] // consumed by the incoming memory routes
+pub(crate) async fn parse_raw(request: Request<Body>) -> Result<RawBody, Response> {
+    let BodyText { kind, text } = read_body(request).await?;
+    match kind {
+        MediaKind::Json => parse_json_raw(&text),
+        MediaKind::Plain => Ok(RawBody {
+            value: Value::String(text),
+            raw: None,
+        }),
+        MediaKind::Absent if text.is_empty() => Ok(RawBody {
+            value: Value::Null,
+            raw: None,
+        }),
+        MediaKind::Absent | MediaKind::Unsupported => Err(invalid_media_type()),
+    }
+}
+
+async fn read_body(request: Request<Body>) -> Result<BodyText, Response> {
     let kind = classify(request.headers());
     let length = request
         .headers()
@@ -57,19 +114,14 @@ pub async fn parse(request: Request<Body>) -> Result<Value, Response> {
             });
         }
     };
-    let text = String::from_utf8_lossy(&bytes);
+    let text = String::from_utf8_lossy(&bytes).into_owned();
     if kind != MediaKind::Absent && text.len() > MAX_BODY {
         return Err(body_too_large());
     }
     if kind != MediaKind::Absent && length.is_some_and(|value| value != text.len()) {
         return Err(invalid_content_length());
     }
-    match kind {
-        MediaKind::Json => parse_json(&text),
-        MediaKind::Plain => Ok(Value::String(text.into_owned())),
-        MediaKind::Absent if bytes.is_empty() => Ok(Value::Null),
-        MediaKind::Absent | MediaKind::Unsupported => Err(invalid_media_type()),
-    }
+    Ok(BodyText { kind, text })
 }
 
 fn classify(headers: &HeaderMap) -> MediaKind {
@@ -89,11 +141,15 @@ fn classify(headers: &HeaderMap) -> MediaKind {
     }
 }
 
-fn parse_json(text: &str) -> Result<Value, Response> {
+fn json_source(text: &str) -> Result<&str, Response> {
     if text.is_empty() {
         return Err(empty_json_body());
     }
-    let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
+    Ok(text.strip_prefix('\u{FEFF}').unwrap_or(text))
+}
+
+fn parse_json(text: &str) -> Result<Value, Response> {
+    let text = json_source(text)?;
     let Ok(value) = serde_json::from_str::<Value>(text) else {
         return Err(invalid_json_body());
     };
@@ -101,6 +157,83 @@ fn parse_json(text: &str) -> Result<Value, Response> {
         return Err(invalid_json_body());
     }
     Ok(value)
+}
+
+fn parse_json_raw(text: &str) -> Result<RawBody, Response> {
+    let text = json_source(text)?;
+    // Raw-value validation scans every token, so the whole document (including
+    // a lone surrogate that `Value` cannot decode) must be well-formed JSON.
+    let Ok(raw) = RawValue::from_string(text.to_owned()) else {
+        return Err(invalid_json_body());
+    };
+    let Ok(value) = serde_json::from_str::<Value>(text)
+        .or_else(|_| serde_json::from_str::<Value>(&lossy_surrogates(text)))
+    else {
+        return Err(invalid_json_body());
+    };
+    if !prototype_safe(&value) {
+        return Err(invalid_json_body());
+    }
+    Ok(RawBody {
+        value,
+        raw: Some(raw),
+    })
+}
+
+/// Rewrite unpaired UTF-16 surrogate escapes as `\ufffd` so serde_json can build
+/// a `Value`; Fastify accepts them because they are legal JavaScript strings.
+/// Paired escapes and escaped backslashes are left alone.
+fn lossy_surrogates(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len());
+    let mut copied = 0;
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] != b'\\' {
+            index += 1;
+            continue;
+        }
+        let Some(&escape) = bytes.get(index + 1) else {
+            break;
+        };
+        if escape != b'u' {
+            index += 2;
+            continue;
+        }
+        let Some(hex) = text.get(index + 2..index + 6) else {
+            index += 1;
+            continue;
+        };
+        let Ok(unit) = u16::from_str_radix(hex, 16) else {
+            index += 1;
+            continue;
+        };
+        if (0xD800..=0xDBFF).contains(&unit) {
+            if let Some(after) = paired_low_surrogate(text, index + 6) {
+                index = after;
+                continue;
+            }
+        }
+        if (0xD800..=0xDFFF).contains(&unit) {
+            out.push_str(&text[copied..index]);
+            out.push_str("\\ufffd");
+            copied = index + 6;
+        }
+        index += 6;
+    }
+    out.push_str(&text[copied..]);
+    out
+}
+
+/// Offset just past a low-surrogate escape at `start`, when the escape there is
+/// `\uDC00`-`\uDFFF`; a high surrogate followed by it is a valid pair.
+fn paired_low_surrogate(text: &str, start: usize) -> Option<usize> {
+    let bytes = text.as_bytes();
+    if bytes.get(start) != Some(&b'\\') || bytes.get(start + 1) != Some(&b'u') {
+        return None;
+    }
+    let unit = u16::from_str_radix(text.get(start + 2..start + 6)?, 16).ok()?;
+    (0xDC00..=0xDFFF).contains(&unit).then_some(start + 6)
 }
 
 fn prototype_safe(value: &Value) -> bool {
@@ -183,7 +316,7 @@ fn body_too_large() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{MAX_BODY, parse};
+    use super::{MAX_BODY, RawBody, parse, parse_raw};
     use axum::body::{Body, Bytes, to_bytes};
     use axum::http::{Request, header};
     use axum::response::Response;
@@ -273,6 +406,27 @@ mod tests {
             Ok(value) => panic!("expected an error, parsed {value}"),
             Err(response) => error_body(response).await,
         }
+    }
+
+    async fn expect_raw(content_type: Option<&str>, body: &[u8]) -> RawBody {
+        match parse_raw(request(content_type, body)).await {
+            Ok(parsed) => parsed,
+            Err(response) => {
+                let (status, body) = error_body(response).await;
+                panic!("expected a raw body, got {status} {body}");
+            }
+        }
+    }
+
+    async fn expect_raw_error(content_type: Option<&str>, body: &[u8]) -> (u16, Value) {
+        match parse_raw(request(content_type, body)).await {
+            Ok(parsed) => panic!("expected an error, parsed {}", parsed.value),
+            Err(response) => error_body(response).await,
+        }
+    }
+
+    fn raw_text(parsed: &RawBody) -> Option<&str> {
+        parsed.raw.as_deref().map(|raw| raw.get())
     }
 
     #[test]
@@ -495,6 +649,186 @@ mod tests {
             assert_eq!(
                 expect_error(Some("application/json"), &body).await,
                 (413, too_large())
+            );
+        });
+    }
+
+    #[test]
+    fn parse_still_rejects_lone_surrogates() {
+        run(async {
+            assert_eq!(
+                expect_error(Some("application/json"), br#"{"s":"\ud800"}"#).await,
+                (400, invalid_json())
+            );
+        });
+    }
+
+    #[test]
+    fn raw_json_keeps_surrogate_escapes_and_parses_the_rest() {
+        run(async {
+            let parsed =
+                expect_raw(Some("application/json"), br#"{"root":"\ud800","ok":true}"#).await;
+            assert_eq!(raw_text(&parsed), Some(r#"{"root":"\ud800","ok":true}"#));
+            assert_eq!(parsed.value, json!({ "root": "\u{FFFD}", "ok": true }));
+
+            // a paired escape decodes exactly and stays raw
+            let parsed = expect_raw(Some("application/json"), br#"{"s":"\uD83D\uDE00"}"#).await;
+            assert_eq!(parsed.value, json!({ "s": "\u{1F600}" }));
+            assert_eq!(raw_text(&parsed), Some(r#"{"s":"\uD83D\uDE00"}"#));
+
+            for body in [
+                br#"{"e":"\uD83D\uDE00","l":"\udc00"}"#.as_slice(),
+                br#"{"l":"\udc00","e":"\uD83D\uDE00"}"#.as_slice(),
+            ] {
+                let parsed = expect_raw(Some("application/json"), body).await;
+                assert_eq!(parsed.value, json!({ "e": "\u{1F600}", "l": "\u{FFFD}" }));
+            }
+
+            // an escaped backslash before "ud800" is text, not an escape
+            let parsed = expect_raw(Some("application/json"), br#"{"s":"\\ud800"}"#).await;
+            assert_eq!(parsed.value, json!({ "s": "\\ud800" }));
+            assert_eq!(raw_text(&parsed), Some(r#"{"s":"\\ud800"}"#));
+
+            // adjacent lone highs are both lossy; the raw token keeps both
+            let parsed = expect_raw(Some("application/json"), br#"{"s":"\ud800\ud800"}"#).await;
+            assert_eq!(parsed.value, json!({ "s": "\u{FFFD}\u{FFFD}" }));
+            assert_eq!(raw_text(&parsed), Some(r#"{"s":"\ud800\ud800"}"#));
+        });
+    }
+
+    #[test]
+    fn raw_json_rejects_prototype_poison_with_surrogates_present() {
+        run(async {
+            let polluted: [&[u8]; 5] = [
+                br#"{"__proto__":{"polluted":true},"s":"\ud800"}"#,
+                br#"{"s":"\ud800","__proto__":0}"#,
+                br#"{"constructor":{"prototype":0},"s":"\ud800"}"#,
+                br#"{"construc\u0074or":{"prototype":0},"s":"\ud800"}"#,
+                br#"{"x":[{"__proto__":null}],"s":"\ud800"}"#,
+            ];
+            for body in polluted {
+                assert_eq!(
+                    expect_raw_error(Some("application/json"), body).await,
+                    (400, invalid_json()),
+                    "{}",
+                    String::from_utf8_lossy(body)
+                );
+            }
+            // keys that only resemble poison after lossy decoding stay accepted
+            let accepted: [&[u8]; 2] = [
+                br#"{"constructor":{},"s":"\ud800"}"#,
+                br#"{"__proto__\ud800":{},"s":"\ud800"}"#,
+            ];
+            for body in accepted {
+                assert!(
+                    expect_raw(Some("application/json"), body)
+                        .await
+                        .value
+                        .is_object(),
+                    "{}",
+                    String::from_utf8_lossy(body)
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn raw_json_validates_the_whole_document() {
+        run(async {
+            assert_eq!(
+                expect_raw_error(Some("application/json"), b"").await,
+                (400, empty_json())
+            );
+            let malformed: [&[u8]; 5] = [
+                br#"{"s":"\ud800""#,
+                br#"{"s":"\ud800"} {}"#,
+                br#"{"s":"\ud800","#,
+                br#"{"s":"\u12"}"#,
+                br#"{"s":"\q","t":"\ud800"}"#,
+            ];
+            for body in malformed {
+                assert_eq!(
+                    expect_raw_error(Some("application/json"), body).await,
+                    (400, invalid_json()),
+                    "{}",
+                    String::from_utf8_lossy(body)
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn raw_json_is_last_key_wins_and_keeps_its_token() {
+        run(async {
+            let parsed = expect_raw(Some("application/json"), br#"{"a":"\ud800","a":2}"#).await;
+            assert_eq!(parsed.value, json!({ "a": 2 }));
+            assert_eq!(raw_text(&parsed), Some(r#"{"a":"\ud800","a":2}"#));
+
+            let parsed = expect_raw(Some("application/json"), br#"{"a":1,"a":"\ud800"}"#).await;
+            assert_eq!(parsed.value, json!({ "a": "\u{FFFD}" }));
+            assert_eq!(raw_text(&parsed), Some(r#"{"a":1,"a":"\ud800"}"#));
+
+            // duplicate keys holding the same lone surrogate agree with JSON.parse
+            let parsed =
+                expect_raw(Some("application/json"), br#"{"a\ud800":1,"a\ud800":2}"#).await;
+            assert_eq!(parsed.value["a\u{FFFD}"], json!(2));
+        });
+    }
+
+    #[test]
+    fn raw_entry_shares_the_transport_contracts() {
+        run(async {
+            assert_eq!(
+                expect_raw_error(Some("application/octet-stream"), br#"{"s":"\ud800"}"#).await,
+                (415, invalid_media_type())
+            );
+
+            let mut body = b"\xEF\xBB\xBF".to_vec();
+            body.extend_from_slice(br#"{"s":"\ud800"}"#);
+            let parsed = expect_raw(Some("application/json"), &body).await;
+            assert_eq!(raw_text(&parsed), Some(r#"{"s":"\ud800"}"#));
+
+            let mut framed = request(Some("application/json"), b"\"\xFF\"");
+            framed
+                .headers_mut()
+                .insert(header::CONTENT_LENGTH, 4usize.into());
+            let error = match parse_raw(framed).await {
+                Ok(parsed) => panic!("expected an error, parsed {}", parsed.value),
+                Err(response) => response,
+            };
+            assert_eq!(
+                error_body(error).await,
+                (
+                    400,
+                    envelope(
+                        400,
+                        "FST_ERR_CTP_INVALID_CONTENT_LENGTH",
+                        "Bad Request",
+                        "Request body size did not match Content-Length"
+                    )
+                )
+            );
+        });
+    }
+
+    #[test]
+    fn raw_entry_keeps_text_plain_and_absent_semantics() {
+        run(async {
+            let parsed = expect_raw(Some("text/plain"), br#"{"s":"\ud800"}"#).await;
+            assert_eq!(parsed.value, json!(r#"{"s":"\ud800"}"#));
+            assert!(parsed.raw.is_none());
+
+            let parsed = expect_raw(Some("text/plain"), b"").await;
+            assert_eq!(parsed.value, json!(""));
+            assert!(parsed.raw.is_none());
+
+            let parsed = expect_raw(None, b"").await;
+            assert_eq!(parsed.value, Value::Null);
+            assert!(parsed.raw.is_none());
+
+            assert_eq!(
+                expect_raw_error(None, b"abc").await,
+                (415, invalid_media_type())
             );
         });
     }

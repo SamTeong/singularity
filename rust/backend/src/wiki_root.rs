@@ -11,6 +11,27 @@ use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+#[cfg(any(windows, test))]
+fn drive_cwds_from(mut lookup: impl FnMut(&str) -> Option<OsString>) -> Vec<(u16, PathBuf)> {
+    (b'A'..=b'Z')
+        .filter_map(|drive| {
+            lookup(&format!("={}:", drive as char)).map(|path| (drive as u16, PathBuf::from(path)))
+        })
+        .collect()
+}
+
+#[allow(dead_code)] // consumed when the staged memory routes are assembled
+pub(crate) fn current_drive_cwds() -> Vec<(u16, PathBuf)> {
+    #[cfg(windows)]
+    {
+        drive_cwds_from(|key| std::env::var_os(key))
+    }
+    #[cfg(not(windows))]
+    {
+        Vec::new()
+    }
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct RootValue(pub TranscriptRawText);
 
@@ -309,7 +330,7 @@ pub fn get(state_file: &Path, _home: &Path) -> RootValue {
     root
 }
 
-fn stored_root(text: &str) -> Option<RootValue> {
+pub(crate) fn stored_root(text: &str) -> Option<RootValue> {
     let raw = raw_root(text).ok()??;
     RootValue::from_token(raw.get().to_owned()).ok()
 }
@@ -398,13 +419,24 @@ pub fn resolve_raw_with_drive_cwds(
 /// Pure UTF-16 lexical resolution. Keep JavaScript code units intact until the
 /// filesystem boundary; Rust strings cannot represent isolated surrogates.
 fn resolve_raw_units(units: &[u16], home: &Path, cwd: &Path, windows: bool) -> Vec<u16> {
+    resolve_raw_units_with(units, home, cwd, windows, true)
+}
+
+fn resolve_raw_units_with(
+    units: &[u16],
+    home: &Path,
+    cwd: &Path,
+    windows: bool,
+    expand_tilde: bool,
+) -> Vec<u16> {
     let home = path_units(home);
     let cwd = path_units(cwd);
     if windows {
-        return resolve_windows_units(units, &home, &cwd, &[]);
+        return resolve_windows_units_with(units, &home, &cwd, &[], expand_tilde);
     }
     let is_sep = |unit: u16| unit == b'/' as u16 || (windows && unit == b'\\' as u16);
-    let tilde = units.first() == Some(&(b'~' as u16))
+    let tilde = expand_tilde
+        && units.first() == Some(&(b'~' as u16))
         && (units.len() == 1 || units.get(1).is_some_and(|unit| is_sep(*unit)));
     let tail = if tilde { &units[1..] } else { units };
     let mut input = if tilde {
@@ -521,6 +553,16 @@ fn resolve_windows_units(
     cwd: &[u16],
     drive_cwds: &[(u16, Vec<u16>)],
 ) -> Vec<u16> {
+    resolve_windows_units_with(units, home, cwd, drive_cwds, true)
+}
+
+fn resolve_windows_units_with(
+    units: &[u16],
+    home: &[u16],
+    cwd: &[u16],
+    drive_cwds: &[(u16, Vec<u16>)],
+    expand_tilde: bool,
+) -> Vec<u16> {
     const SEP: u16 = b'\\' as u16;
     const COLON: u16 = b':' as u16;
     let is_sep = |unit: u16| unit == SEP || unit == b'/' as u16;
@@ -537,7 +579,9 @@ fn resolve_windows_units(
         }
     }
 
-    let tilde = input.first() == Some(&(b'~' as u16)) && (input.len() == 1 || is_sep(input[1]));
+    let tilde = expand_tilde
+        && input.first() == Some(&(b'~' as u16))
+        && (input.len() == 1 || is_sep(input[1]));
     if tilde {
         let mut expanded = home.to_vec();
         let tail = input[1..]
@@ -805,7 +849,49 @@ fn resolve_raw_units_with_drive_cwds(
     }
 }
 
-fn same_units(a: &[u16], b: &[u16], windows: bool) -> bool {
+/// Crate-private primitive for the memory path policy: pure UTF-16 lexical
+/// resolution with an explicit platform and Node's per-drive cwd inputs.
+///
+/// `expand_tilde` mirrors `server/memory.mjs` `resolveRoot`: `~`, `~/`, and
+/// `~\` all expand by appending the remainder to home before normalization
+/// (on POSIX `~\x` therefore keeps a literal backslash, as `memory.mjs` does).
+/// Targets pass `false`, because Node's `resolve` never expands `~`. Wiki
+/// callers keep their own tilde rules through the wrappers above.
+#[allow(dead_code)] // consumed by the incoming memory module
+pub(crate) fn resolve_units(
+    units: &[u16],
+    home: &Path,
+    cwd: &Path,
+    drive_cwds: &[(u16, PathBuf)],
+    windows: bool,
+    expand_tilde: bool,
+) -> Vec<u16> {
+    let expanded = (expand_tilde
+        && units.first() == Some(&(b'~' as u16))
+        && (units.len() == 1
+            || units
+                .get(1)
+                .is_some_and(|unit| *unit == b'/' as u16 || *unit == b'\\' as u16)))
+    .then(|| [path_units(home).as_slice(), &units[1..]].concat());
+    let units = expanded.as_deref().unwrap_or(units);
+    if windows {
+        let drive_cwds: Vec<(u16, Vec<u16>)> = drive_cwds
+            .iter()
+            .map(|(drive, path)| (*drive, path_units(path)))
+            .collect();
+        resolve_windows_units_with(
+            units,
+            &path_units(home),
+            &path_units(cwd),
+            &drive_cwds,
+            false,
+        )
+    } else {
+        resolve_raw_units_with(units, home, cwd, false, false)
+    }
+}
+
+pub(crate) fn same_units(a: &[u16], b: &[u16], windows: bool) -> bool {
     if windows {
         lowercase_units(a) == lowercase_units(b)
     } else {
@@ -813,7 +899,7 @@ fn same_units(a: &[u16], b: &[u16], windows: bool) -> bool {
     }
 }
 
-fn contained_units(root: &[u16], target: &[u16], windows: bool) -> bool {
+pub(crate) fn contained_units(root: &[u16], target: &[u16], windows: bool) -> bool {
     if !windows {
         return target == root
             || (target.starts_with(root) && target.get(root.len()) == Some(&(b'/' as u16)));
@@ -957,6 +1043,22 @@ mod tests {
     #[cfg(windows)]
     use std::os::windows::ffi::OsStrExt as TestOsStrExt;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn memory_drive_cwds_preserve_present_and_empty_values() {
+        let drives = drive_cwds_from(|key| match key {
+            "=C:" => Some(OsString::from(r"C:\work")),
+            "=D:" => Some(OsString::new()),
+            _ => None,
+        });
+        assert_eq!(
+            drives,
+            vec![
+                (b'C' as u16, PathBuf::from(r"C:\work")),
+                (b'D' as u16, PathBuf::new()),
+            ]
+        );
+    }
 
     fn fixture(owner: &str) -> PathBuf {
         let base = std::env::temp_dir().join(format!(
@@ -1504,5 +1606,99 @@ mod tests {
             file_parent.display()
         );
         cleanup_fixture("persistence_capability_and_lexical_authorization", &base);
+    }
+
+    #[test]
+    fn memory_primitive_expands_root_tilde_but_never_the_target() {
+        let home = Path::new("/home/test");
+        let cwd = Path::new("/work");
+        let units = |s: &str| s.encode_utf16().collect::<Vec<_>>();
+        assert_eq!(
+            resolve_units(&units("~"), home, cwd, &[], false, true),
+            units("/home/test")
+        );
+        assert_eq!(
+            resolve_units(&units("~/.claude/projects"), home, cwd, &[], false, true),
+            units("/home/test/.claude/projects")
+        );
+        // `memory.mjs` accepts `~\` on POSIX; the backslash stays literal.
+        assert_eq!(
+            resolve_units(&units(r"~\.claude\projects"), home, cwd, &[], false, true),
+            units(r"/home/test\.claude\projects")
+        );
+        assert_eq!(
+            resolve_units(&units("~user/a.md"), home, cwd, &[], false, true),
+            units("/work/~user/a.md")
+        );
+        assert_eq!(
+            resolve_units(&units("~/wiki/a.md"), home, cwd, &[], false, false),
+            units("/work/~/wiki/a.md")
+        );
+        assert_eq!(
+            resolve_units(&units(r"~\wiki\a.md"), home, cwd, &[], false, false),
+            units(r"/work/~\wiki\a.md")
+        );
+    }
+
+    #[test]
+    fn memory_primitive_honours_platform_and_drive_cwd_inputs() {
+        let home = Path::new(r"C:\Users\test");
+        let cwd = Path::new(r"C:\work");
+        let units = |s: &str| s.encode_utf16().collect::<Vec<_>>();
+        let drive = b'D' as u16;
+        assert_eq!(
+            resolve_units(
+                &units("D:foo"),
+                home,
+                cwd,
+                &[(drive, PathBuf::from(r"D:\docs"))],
+                true,
+                false
+            ),
+            units(r"D:\docs\foo")
+        );
+        assert_eq!(
+            resolve_units(&units("D:foo"), home, cwd, &[], true, false),
+            units(r"D:\foo")
+        );
+        assert_eq!(
+            resolve_units(&units(r"~\wiki"), home, cwd, &[], true, true),
+            units(r"C:\Users\test\wiki")
+        );
+        assert_eq!(
+            resolve_units(&units(r"~\wiki\a.md"), home, cwd, &[], true, false),
+            units(r"C:\work\~\wiki\a.md")
+        );
+        // Platform choice is explicit, so Windows rules run on any host.
+        assert_eq!(
+            resolve_units(
+                &units("C:/work/wiki/./sub/../a.md"),
+                home,
+                cwd,
+                &[],
+                true,
+                false
+            ),
+            units(r"C:\work\wiki\a.md")
+        );
+    }
+
+    #[test]
+    fn existing_wiki_resolution_keeps_its_tilde_behaviour() {
+        let home = Path::new("/home/test");
+        let cwd = Path::new("/work");
+        let units = |s: &str| s.encode_utf16().collect::<Vec<_>>();
+        assert_eq!(
+            resolve_raw_units(&units("~/wiki"), home, cwd, false),
+            units("/home/test/wiki")
+        );
+        assert_eq!(
+            resolve_raw_units(&units(r"~\wiki"), home, cwd, false),
+            units(r"/work/~\wiki")
+        );
+        assert_eq!(
+            resolve_raw_units_with_drive_cwds(&units("~/wiki/a.md"), home, cwd, false, &[]),
+            units("/home/test/wiki/a.md")
+        );
     }
 }
