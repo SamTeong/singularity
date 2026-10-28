@@ -217,7 +217,7 @@ fn raw_root(text: &str) -> Result<Option<Box<RawValue>>, String> {
     }))
 }
 
-fn raw_fields(text: &str) -> Result<Option<Vec<(Vec<u16>, Box<RawValue>)>>, String> {
+pub(crate) fn raw_fields(text: &str) -> Result<Option<Vec<(Vec<u16>, Box<RawValue>)>>, String> {
     let bytes = text.as_bytes();
     let mut start = 0;
     while bytes

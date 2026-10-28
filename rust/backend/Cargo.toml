@@ -21,3 +21,4 @@ sysinfo = "=0.39.6"
 sys-locale = "=0.3.2"
 time = { version = "=0.3.44", features = ["formatting", "parsing"] }
 tokio = { version = "=1.48.0", features = ["rt-multi-thread", "time", "net", "signal"] }
+toml_edit = { version = "=0.25.17", default-features = false, features = ["parse"] }

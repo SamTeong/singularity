@@ -10,7 +10,7 @@ use std::future::Future;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 
 #[derive(Clone)]
@@ -21,6 +21,92 @@ pub struct HttpServices {
     pub sampler: Arc<crate::sysstats::Sampler>,
     pub status: crate::status::StatusService,
     pub memory: Option<crate::http_memory_root::MemoryServices>,
+    pub config: Option<ConfigServices>,
+}
+
+/// Host paths the Claude and Codex config editor routes share.
+#[derive(Clone)]
+pub struct ConfigServices {
+    pub home: PathBuf,
+    pub codex_home: PathBuf,
+    pub state_dir: PathBuf,
+    pub backups_dir: PathBuf,
+    pub cwd: PathBuf,
+    pub drive_cwds: Vec<(u16, PathBuf)>,
+}
+
+impl ConfigServices {
+    fn from_env(state_dir: PathBuf, backups_dir: PathBuf) -> io::Result<Self> {
+        let home = crate::memory_root::current_node_home()?;
+        // `process.env.CODEX_HOME || join(homedir(), '.codex')`
+        let codex_home = std::env::var_os("CODEX_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".codex"));
+        Ok(Self {
+            home,
+            codex_home,
+            state_dir,
+            backups_dir,
+            cwd: std::env::current_dir()?,
+            drive_cwds: crate::wiki_root::current_drive_cwds(),
+        })
+    }
+
+    fn router(self) -> Router {
+        // One lock for both roots files, so reads and writes cannot interleave.
+        let lock = Arc::new(Mutex::new(()));
+        let Self {
+            home,
+            codex_home,
+            state_dir,
+            backups_dir,
+            cwd,
+            drive_cwds,
+        } = self;
+        Router::new()
+            .merge(crate::http_config_roots::router(
+                state_dir.clone(),
+                lock.clone(),
+            ))
+            .merge(crate::http_config_scan::router())
+            .merge(crate::http_claude_theme::router(home.clone()))
+            .merge(crate::http_claude_config_read::router(home.clone()))
+            .merge(crate::http_claude_config_search::router(home.clone()))
+            .merge(crate::http_claude_config_write::router(
+                home.clone(),
+                state_dir.clone(),
+                backups_dir.clone(),
+                lock.clone(),
+                cwd.clone(),
+                drive_cwds.clone(),
+            ))
+            .merge(crate::http_codex_config_read::router(
+                home.clone(),
+                codex_home.clone(),
+                state_dir.clone(),
+                lock.clone(),
+                cwd.clone(),
+                drive_cwds.clone(),
+            ))
+            .merge(crate::http_codex_config_search::router(
+                home.clone(),
+                codex_home.clone(),
+                state_dir.clone(),
+                lock.clone(),
+                cwd.clone(),
+                drive_cwds.clone(),
+            ))
+            .merge(crate::http_codex_config_write::router(
+                home,
+                codex_home,
+                state_dir,
+                backups_dir,
+                lock,
+                cwd,
+                drive_cwds,
+            ))
+    }
 }
 
 impl HttpServices {
@@ -32,6 +118,7 @@ impl HttpServices {
             sampler: Arc::new(crate::sysstats::Sampler::start()),
             status: crate::status::StatusService::new(),
             memory: None,
+            config: None,
         }
     }
 
@@ -62,9 +149,14 @@ impl HttpServices {
                 env: serde_json::Value::Object(env),
             },
         );
+        let backups_dir = PathBuf::from(home).join("cache").join("backups");
         services.memory = Some(crate::http_memory_root::MemoryServices::from_env(
             services.state_dir.clone(),
-            PathBuf::from(home).join("cache").join("backups"),
+            backups_dir.clone(),
+        )?);
+        services.config = Some(ConfigServices::from_env(
+            services.state_dir.clone(),
+            backups_dir,
         )?);
         if let Some(root) = std::env::var_os("SING_PLANS_ROOT").filter(|value| !value.is_empty()) {
             let root = PathBuf::from(root);
@@ -83,8 +175,13 @@ pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
         .memory
         .map(|memory| memory.router())
         .unwrap_or_default();
+    let config = services
+        .config
+        .map(ConfigServices::router)
+        .unwrap_or_default();
     Router::new()
         .merge(memory)
+        .merge(config)
         .merge(crate::http_telemetry::router(
             services.sampler,
             services.status,
@@ -229,8 +326,9 @@ fn shell_unauthorized_response() -> Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        HttpServices, api_unauthorized_response, bind, cookie_decode_error_response, router, serve,
-        shell_token_cookie, shell_unauthorized_response,
+        ConfigServices, HttpServices, api_unauthorized_response, bind,
+        cookie_decode_error_response, router, serve, shell_token_cookie,
+        shell_unauthorized_response,
     };
     use crate::http_policy::HttpPolicy;
     use axum::body::to_bytes;
@@ -293,6 +391,75 @@ mod tests {
                 server.await.unwrap().unwrap();
                 assert!(tokio::net::TcpStream::connect(address).await.is_err());
             });
+    }
+
+    #[test]
+    fn http_config_editor_routes_mount_beside_existing_routes() {
+        let root =
+            std::env::temp_dir().join(format!("http-config-mount-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut services = HttpServices::new(
+            root.join("state"),
+            crate::usage_report::Request {
+                reports_dir: String::new(),
+                env: serde_json::json!({}),
+            },
+        );
+        services.config = Some(ConfigServices {
+            home: root.join("home"),
+            codex_home: root.join("home").join(".codex"),
+            state_dir: root.join("state"),
+            backups_dir: root.join("backups"),
+            cwd: root.clone(),
+            drive_cwds: Vec::new(),
+        });
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let listener = bind(0).await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let (stop, stopped) = oneshot::channel::<()>();
+                let server = tokio::spawn(serve(
+                    listener,
+                    HttpPolicy {
+                        daemon_port: address.port(),
+                        vite_port: 5317,
+                        token: None,
+                    },
+                    services,
+                    async move {
+                        let _ = stopped.await;
+                    },
+                ));
+                for (path, expected) in [
+                    ("/api/config/roots", "{\"roots\":[\"~\"]}"),
+                    ("/api/codex-config/roots", "{\"roots\":[\"~\"]}"),
+                    ("/api/claude/theme", "{\"theme\":\"dark\"}"),
+                ] {
+                    let mut connection =
+                        tokio::net::TcpStream::connect(address).await.unwrap();
+                    connection
+                        .write_all(
+                            format!(
+                                "GET {path} HTTP/1.1\r\nHost: localhost:{}\r\nConnection: close\r\n\r\n",
+                                address.port()
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                    let mut response = Vec::new();
+                    connection.read_to_end(&mut response).await.unwrap();
+                    let response = String::from_utf8(response).unwrap();
+                    assert!(response.starts_with("HTTP/1.1 200"), "{path}: {response}");
+                    assert!(response.ends_with(expected), "{path}: {response}");
+                }
+                stop.send(()).unwrap();
+                server.await.unwrap().unwrap();
+            });
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
