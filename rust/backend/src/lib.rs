@@ -32,6 +32,7 @@ pub mod fetch_retry;
 pub mod fs_atomic;
 pub mod hooks_read;
 pub mod hooks_write;
+pub mod http_agents;
 pub(crate) mod http_attempt;
 pub mod http_body;
 pub mod http_capabilities;
@@ -64,6 +65,7 @@ pub mod http_state;
 pub mod http_telemetry;
 pub mod http_transcripts;
 pub mod http_wiki;
+pub mod http_ws;
 pub mod keys;
 pub mod memory;
 mod memory_auth;
@@ -118,6 +120,7 @@ pub mod usage_snapshot;
 pub mod wiki_read;
 pub mod wiki_root;
 pub mod window_anchor;
+pub mod ws_filters;
 
 const FILE_CAP: usize = 2000;
 const SKIP_DIRS: &[&str] = &[

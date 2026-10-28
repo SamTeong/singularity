@@ -1201,7 +1201,13 @@ impl Registry {
             .into_owned()
     }
 
-    fn record(&self, id: &str) -> Option<AgentRecord> {
+    /// `recentRepos` (`agents.mjs:1163-1166`), as the `/ws` list frame sends it.
+    pub fn recent_repos(&self) -> Vec<String> {
+        self.state.lock().unwrap().recent_repos.clone()
+    }
+
+    /// The full persisted record (`agents.get(id)`), for `externalLaunch`.
+    pub fn record(&self, id: &str) -> Option<AgentRecord> {
         self.state
             .lock()
             .unwrap()
