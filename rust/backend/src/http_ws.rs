@@ -91,11 +91,17 @@ struct WsState {
     clients: Arc<AtomicUsize>,
     policy: HttpPolicy,
     shutdown: Option<tokio::sync::watch::Receiver<bool>>,
+    heartbeat: Duration,
 }
 
 // VERIFY: http-ws-router
 /// Mounts `GET /ws` (`pty-ws.mjs:176`).
 pub fn router(deps: WsDeps) -> Router {
+    router_with_heartbeat(deps, HEARTBEAT)
+}
+
+/// [`router`] with an explicit ping period, so tests need not wait 30 s.
+fn router_with_heartbeat(deps: WsDeps, heartbeat: Duration) -> Router {
     let state = WsState {
         registry: deps.registry,
         anchor: deps.anchor,
@@ -103,6 +109,7 @@ pub fn router(deps: WsDeps) -> Router {
         clients: deps.clients,
         policy: deps.policy,
         shutdown: deps.shutdown,
+        heartbeat,
     };
     Router::new().route("/ws", get(upgrade)).with_state(state)
 }
@@ -191,7 +198,7 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
         initializing: true,
         ..SendState::default()
     };
-    let mut heartbeat = tokio::time::interval(HEARTBEAT);
+    let mut heartbeat = tokio::time::interval(state.heartbeat);
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     heartbeat.tick().await; // the first tick is immediate; Node waits 30 s
     let mut shutdown = state.shutdown.clone();
@@ -1148,6 +1155,37 @@ mod tests {
                 tokio::time::sleep(Duration::from_millis(10)).await;
             }
             assert_eq!(writes, vec![(agent.id.clone(), b"hithere".to_vec())]);
+        });
+    }
+
+    #[test]
+    fn heartbeat_terminates_a_socket_that_never_pongs() {
+        run(async {
+            let fixture = Fixture::new();
+            let port = FakePort::new();
+            let registry = fixture.registry(port);
+            let clients = Arc::new(AtomicUsize::new(0));
+            let deps = deps(&fixture, registry, clients.clone(), None);
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let router = router_with_heartbeat(deps, Duration::from_millis(100));
+            let _server = Server {
+                address,
+                handle: tokio::spawn(async move { axum::serve(listener, router).await }),
+            };
+            let mut client = RawClient::connect(address, "/ws").await;
+            let _ = snapshot(&mut client).await;
+            assert_eq!(clients.load(Ordering::SeqCst), 1);
+
+            // The client stays open but never reads, so pings go unanswered.
+            for _ in 0..100 {
+                if clients.load(Ordering::SeqCst) == 0 {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert_eq!(clients.load(Ordering::SeqCst), 0);
+            drop(client);
         });
     }
 
