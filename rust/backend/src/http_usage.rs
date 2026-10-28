@@ -23,9 +23,9 @@
 //!     defaulting `window` to `5h`.
 //!
 //! Deliberate scope limits (reported to the host, not silently dropped):
-//!   * no background history sampler, idle debounce or reset timers — those are
-//!     daemon automation, not the route contract; `historyPaused` is therefore
-//!     always `null`.
+//!   * the background samplers, idle debounce and reset timers live in
+//!     `usage_auto_refresh` and drive this cache through `UsageHandle`;
+//!     `historyPaused` is `null` until that sampler pauses the ollama lane.
 //!   * no Claude OAuth grant refresh: an expired token is reported as
 //!     `token-expired` / `auth-expired` with `needsAuth`, exactly what Node shows
 //!     when its own refresh fails. Credential refresh stays outside a route.
@@ -146,12 +146,76 @@ pub struct UsageDeps {
 #[derive(Clone)]
 pub struct UsageHandle(Arc<UsageState>);
 
+// VERIFY: usage-ollama-state
+/// The auto-refresh's view of the ollama lane (`usage.mjs:1215-1219`): the
+/// network floor's own clock (`cache.ollama.at`), whether the cross-request gate
+/// holds it (`ollamaGate.blocked()`), and the pause state (`historyPaused`).
+#[derive(Clone, Debug, Default)]
+pub struct UsageOllamaState {
+    pub attempt_at: i64,
+    pub blocked: bool,
+    pub history_paused: Option<Value>,
+}
+
 impl UsageHandle {
     /// Forces one lane's pull and returns the full document, exactly like
     /// `GET /api/usage?force=1&source=<provider>`. `BusEvent::Usage` is published
     /// before this returns.
     pub async fn refresh(&self, provider: &str) -> Result<Value, String> {
         self.0.clone().get_usage(true, &[provider.to_owned()]).await
+    }
+
+    /// `getUsage({sources})` with `force: false` — the automated trigger every
+    /// sampler, idle debounce and reset timer uses, so it keeps the 60s network
+    /// floor. An empty `sources` means all three lanes.
+    pub async fn refresh_auto(&self, sources: &[String]) -> Result<Value, String> {
+        self.0.clone().get_usage(false, sources).await
+    }
+
+    /// `cache[src].at = 0` (`usage.mjs:1114`): let exactly one refresh past the
+    /// network floor.
+    pub async fn reset_network_floor(&self, provider: &str) {
+        match provider {
+            "ollama" => self.0.ollama.lock().await.at = 0,
+            "claude" => self.0.claude.lock().await.at = 0,
+            "codex" => self.0.codex.lock().await.at = 0,
+            _ => {}
+        }
+    }
+
+    /// The ollama lane's floor, gate and pause together. `blocked` reads the same
+    /// gate `pull_ollama` does, so arming it here holds the lane off.
+    pub async fn ollama_state(&self) -> UsageOllamaState {
+        let now = (self.0.clock)();
+        let mut slot = self.0.ollama.lock().await;
+        UsageOllamaState {
+            attempt_at: slot.at,
+            blocked: slot.gate.blocked(None, false, now),
+            history_paused: self.0.history_paused(),
+        }
+    }
+
+    /// `historyPaused = {at, error}` (`usage.mjs:1241`).
+    pub fn pause_history(&self, error: &str) {
+        let paused = json!({ "at": iso_ms((self.0.clock)()), "error": error });
+        self.0.set_history_paused(Some(paused));
+    }
+
+    /// `historyPaused = null` (`usage.mjs:1023`): a successful ollama read from
+    /// any path re-enables the lane.
+    pub fn clear_history_paused(&self) {
+        self.0.set_history_paused(None);
+    }
+
+    /// `ollamaGate.arm(ms)` (`usage.mjs:1237`): ollama has no gate key.
+    pub async fn arm_ollama_gate(&self, delay_ms: i64) {
+        let now = (self.0.clock)();
+        self.0.ollama.lock().await.gate.arm(delay_ms, None, now);
+    }
+
+    /// `ollamaGate.clear()` (`usage.mjs:1232`).
+    pub async fn clear_ollama_gate(&self) {
+        self.0.ollama.lock().await.gate.clear();
     }
 }
 
@@ -183,6 +247,7 @@ pub fn router_with_handle(deps: UsageDeps) -> (Router, UsageHandle) {
         claude: AsyncMutex::new(ClaudeSlot::default()),
         codex: AsyncMutex::new(CodexSlot::default()),
         last_emitted: Mutex::new(None),
+        history_paused: Mutex::new(None),
     });
     let router = Router::new()
         .route("/api/usage", get(usage))
@@ -210,6 +275,40 @@ struct UsageState {
     codex: AsyncMutex<CodexSlot>,
     /// Last document pushed over the bus, as JSON text (`usage.mjs:936`).
     last_emitted: Mutex<Option<String>>,
+    /// `historyPaused` (`usage.mjs:1164`): `{at, error}` while the ollama
+    /// sampler is stopped, else `None`.
+    history_paused: Mutex<Option<Value>>,
+}
+
+impl UsageState {
+    /// `historyPaused`, as the document carries it (`null` when running).
+    fn history_paused(&self) -> Option<Value> {
+        self.history_paused
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
+    fn set_history_paused(&self, paused: Option<Value>) {
+        *self
+            .history_paused
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = paused;
+    }
+
+    /// `{...ollama, historyPaused}` (`usage.mjs:1063`).
+    fn attach_history_paused(&self, data: Value) -> Value {
+        match data {
+            Value::Object(mut fields) => {
+                fields.insert(
+                    "historyPaused".into(),
+                    self.history_paused().unwrap_or(Value::Null),
+                );
+                Value::Object(fields)
+            }
+            other => other,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -361,7 +460,7 @@ impl UsageState {
         let claude = claude.await.map_err(|_| "usage task failed".to_owned())??;
         let codex = codex.await.map_err(|_| "usage task failed".to_owned())??;
         let ollama = ollama.await.map_err(|_| "usage task failed".to_owned())??;
-        let ollama = ollama.map(attach_history_paused);
+        let ollama = ollama.map(|data| self.attach_history_paused(data));
         // A full document even for a filtered pull: the client merges it and the
         // excluded lanes answer from cache.
         let result = json!({ "ollama": ollama, "claude": claude, "codex": codex });
@@ -461,6 +560,9 @@ impl UsageState {
         }
         if json_is_ok(&data) {
             self.append_ollama_history(&data, now).await;
+            // A successful read from ANY path (manual Refresh, idle debounce,
+            // reset timer, or the sampler itself) re-enables a paused lane.
+            self.set_history_paused(None);
         }
         Ok(slot.data.clone())
     }
@@ -1274,16 +1376,6 @@ fn normalize_sources(sources: &[String]) -> [bool; 3] {
     ]
 }
 
-fn attach_history_paused(data: Value) -> Value {
-    match data {
-        Value::Object(mut fields) => {
-            fields.insert("historyPaused".into(), Value::Null);
-            Value::Object(fields)
-        }
-        other => other,
-    }
-}
-
 fn json_is_ok(data: &Value) -> bool {
     data.get("ok") == Some(&Value::Bool(true))
 }
@@ -1503,7 +1595,7 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// `new Date(ms).toISOString()`.
-fn iso_ms(ms: i64) -> String {
+pub(crate) fn iso_ms(ms: i64) -> String {
     let Ok(date) = time::OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000)
     else {
         return String::new();

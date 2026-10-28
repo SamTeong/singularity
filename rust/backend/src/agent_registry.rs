@@ -11,7 +11,7 @@
 //! | `persist` (`:87-105`) | [`Registry::persist`] (`fs_atomic::write_atomic`) |
 //! | `init` (`:107-123`) | [`Registry::load`] |
 //! | `snapshot`/`getBuf`/`getWritten`/`getStatus`/`isLive` (`:126-135`) | [`Registry::snapshot`], [`Registry::get_buf`], [`Registry::get_written`], [`Registry::get_status`], [`Registry::is_live`] |
-//! | `findByRunId` (`:136`), `getLaunchConfig` (`:141-145`), `getLaunchConfigForCodexThread` (`:156-165`), `codexThreadFor` (`:173-178`), `rememberCodexThread` (`:184-191`) | [`Registry::find_by_run_id`], [`Registry::get_launch_config`], [`Registry::get_launch_config_for_codex_thread`], [`Registry::codex_thread_for`], `remember_codex_thread` |
+//! | `findByRunId` (`:136`), `getLaunchConfig` (`:141-145`), `getLaunchConfigForCodexThread` (`:156-165`), `codexOwnerForThread` (`:140-152`), `codexThreadFor` (`:173-178`), `rememberCodexThread` (`:184-191`) | [`Registry::find_by_run_id`], [`Registry::get_launch_config`], [`Registry::get_launch_config_for_codex_thread`], `codex_owner_for_thread`, [`Registry::codex_thread_for`], `remember_codex_thread` |
 //! | `liveProcessSnapshot` (`:193-196`) | [`Registry::live_process_snapshot`] |
 //! | `setStatus`/`getActiveMs`/`pushBuf` (`:204-222`) | `set_status`, [`Registry::active_ms`], `push_buf` |
 //! | `wire` onData/onExit (`:228-293`) | [`Registry::on_pty_event`] |
@@ -466,6 +466,52 @@ impl Registry {
         None
     }
 
+    // VERIFY: registry-codex-owner
+    /// `codexOwnerForThread` (`agents.mjs:140-152`): the live codex agent whose
+    /// remembered thread uuid is `thread_id`.
+    ///
+    /// Deliberate divergence from Node: owners are matched by thread id only,
+    /// not by `cwd`. Node's `wantCwd` filter (`:148`) lets a caller-supplied
+    /// cwd bypass the duplicate-resume guard (bug O1).
+    pub(crate) fn codex_owner_for_thread(&self, thread_id: &str) -> Option<String> {
+        if thread_id.is_empty() {
+            return None;
+        }
+        // Snapshot the candidates under the lock: `remember_codex_thread` takes
+        // it itself (it may pin the discovery and persist).
+        let candidates: Vec<(String, Option<String>, Option<String>)> = {
+            let state = self.state.lock().unwrap();
+            state
+                .agents
+                .iter()
+                // A detached record owns no process: skip it before discovery
+                // walks the rollout tree (`agents.mjs:145-147`).
+                .filter(|agent| agent.live)
+                .map(|agent| {
+                    (
+                        agent.record.id.clone(),
+                        agent.record.model.clone(),
+                        agent.record.tool.clone(),
+                    )
+                })
+                .collect()
+        };
+        for (id, model, tool) in candidates {
+            let is_codex = tool.as_deref() == Some("codex")
+                || route_flag(
+                    &self.route(model.as_deref(), tool.as_deref()),
+                    "isCodexModel",
+                );
+            if !is_codex {
+                continue;
+            }
+            if self.remember_codex_thread(&id).as_deref() == Some(thread_id) {
+                return Some(id);
+            }
+        }
+        None
+    }
+
     // VERIFY: registry-codex-thread
     /// `codexThreadFor` (`agents.mjs:173-178`): the codex-minted thread uuid a
     /// registered agent's transcript is filed under.
@@ -502,6 +548,17 @@ impl Registry {
                 return resumed.ok_or_else(|| "session id already in use".to_owned());
             }
             None => {}
+        }
+        // `(tool === 'codex' || isCodexModel(model)) && codexOwnerForThread(id)`
+        // (`agents.mjs:449-451`): a codex resume may not duplicate a thread
+        // another live agent already owns.
+        let codex_spawn = input.tool.as_deref() == Some("codex")
+            || route_flag(
+                &self.route(input.model.as_deref(), input.tool.as_deref()),
+                "isCodexModel",
+            );
+        if codex_spawn && self.codex_owner_for_thread(&id).is_some() {
+            return Err("codex thread already in use".to_owned());
         }
         let Some(cwd_path) = cwd else {
             return Err("working directory does not exist: (empty)".to_owned());
@@ -2329,6 +2386,183 @@ mod tests {
             .find(|agent| agent.id == "codex-agent")
             .unwrap();
         assert_eq!(record.thread_id.as_deref(), Some(thread));
+    }
+
+    /// Model a live agent as a codex owner of `thread_id`, the way the Node test
+    /// rewrites the persisted identity fields after a claude-fixture spawn.
+    fn mark_live_codex(registry: &Registry, id: &str, thread_id: Option<&str>) {
+        let mut state = registry.state.lock().unwrap();
+        let agent = state.find_mut(id).expect("the agent is registered");
+        agent.record.model = Some("gpt-5.3-codex-spark".to_owned());
+        agent.record.tool = Some("codex".to_owned());
+        agent.record.thread_id = thread_id.map(str::to_owned);
+    }
+
+    fn codex_resume_input(fixture: &Fixture, id: &str) -> CreateAgent {
+        let mut input = create_input(fixture, id, "gpt-5.3-codex-spark");
+        input.tool = Some("codex".to_owned());
+        input
+    }
+
+    // agents.test.mjs:299-320.
+    #[test]
+    fn create_rejects_a_codex_thread_a_live_agent_already_owns() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let agent_id = "90000000-aaaa-bbbb-cccc-900000000005";
+        let thread_id = "dddddddd-eeee-ffff-0000-444444444444";
+        registry
+            .create(create_input(&fixture, agent_id, "claude"))
+            .unwrap();
+        mark_live_codex(&registry, agent_id, Some(thread_id));
+
+        assert!(registry.is_live(agent_id));
+        assert_eq!(
+            registry.codex_owner_for_thread(thread_id).as_deref(),
+            Some(agent_id)
+        );
+        assert_eq!(
+            registry
+                .create(codex_resume_input(&fixture, thread_id))
+                .unwrap_err(),
+            "codex thread already in use"
+        );
+        assert_eq!(port.spawn_count(), 1);
+        assert_eq!(registry.snapshot().len(), 1);
+    }
+
+    // agents.test.mjs:327-346.
+    #[test]
+    fn a_detached_codex_record_does_not_block_resuming_its_thread() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let stale_id = "90000000-aaaa-bbbb-cccc-900000000006";
+        let thread_id = "dddddddd-eeee-ffff-0000-555555555555";
+        fixture.write_agents(vec![json!({
+            "id": stale_id,
+            "title": "stale-codex-owner",
+            "cwd": fixture.repo(),
+            "createdAt": fixture.now(),
+            "model": "gpt-5.3-codex-spark",
+            "tool": "codex",
+            "threadId": thread_id,
+        })]);
+        let registry = fixture.registry(port.clone());
+        registry.load().unwrap();
+        assert!(!registry.is_live(stale_id));
+        assert_eq!(registry.codex_owner_for_thread(thread_id), None);
+
+        let resumed = registry
+            .create(codex_resume_input(&fixture, thread_id))
+            .unwrap();
+        assert_eq!(resumed.id, thread_id);
+        assert!(
+            resumed.pid.is_some(),
+            "resumed the detached thread instead of refusing it"
+        );
+        assert_eq!(port.spawn_count(), 1);
+    }
+
+    // agents.test.mjs:351-370 — a detached record is skipped before discovery.
+    #[test]
+    fn codex_owner_skips_a_detached_record_before_rollout_discovery() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let stale_id = "90000000-aaaa-bbbb-cccc-900000000007";
+        let thread_id = "dddddddd-eeee-ffff-0000-666666666666";
+        fixture.write_agents(vec![json!({
+            "id": stale_id,
+            "title": "detached-undiscovered",
+            "cwd": fixture.repo(),
+            "createdAt": fixture.now(),
+            "model": "gpt-5.3-codex-spark",
+            "tool": "codex",
+        })]);
+        let registry = fixture.registry(port);
+        registry.load().unwrap();
+        write_codex_rollout(&fixture, &fixture.repo(), fixture.now() + 1000, thread_id);
+
+        assert_eq!(registry.codex_owner_for_thread(thread_id), None);
+        let record = fixture
+            .read_agents()
+            .agents
+            .into_iter()
+            .find(|agent| agent.id == stale_id)
+            .unwrap();
+        assert_eq!(
+            record.thread_id, None,
+            "detached record never entered rollout discovery"
+        );
+    }
+
+    // agents.test.mjs:374-402 — live discovery pins, outranking a detached record.
+    #[test]
+    fn codex_owner_pins_a_live_discovery_ahead_of_an_earlier_detached_record() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let thread_id = "dddddddd-eeee-ffff-0000-777777777777";
+        let stale_id = "90000000-aaaa-bbbb-cccc-900000000008";
+        let agent_id = "90000000-aaaa-bbbb-cccc-900000000009";
+        fixture.write_agents(vec![json!({
+            "id": stale_id,
+            "title": "detached-before-live",
+            "cwd": fixture.repo(),
+            "createdAt": fixture.now(),
+            "model": "gpt-5.3-codex-spark",
+            "tool": "codex",
+            "threadId": thread_id,
+        })]);
+        let registry = fixture.registry(port.clone());
+        registry.load().unwrap();
+        registry
+            .create(create_input(&fixture, agent_id, "claude"))
+            .unwrap();
+        mark_live_codex(&registry, agent_id, None);
+        write_codex_rollout(&fixture, &fixture.repo(), fixture.now() + 1000, thread_id);
+
+        assert_eq!(
+            registry.codex_owner_for_thread(thread_id).as_deref(),
+            Some(agent_id)
+        );
+        assert_eq!(
+            registry.codex_thread_for(agent_id).as_deref(),
+            Some(thread_id),
+            "discovery pinned the rollout thread"
+        );
+        assert_eq!(
+            registry
+                .create(codex_resume_input(&fixture, thread_id))
+                .unwrap_err(),
+            "codex thread already in use"
+        );
+        assert_eq!(port.spawn_count(), 1);
+    }
+
+    // Deliberate divergence from Node (bug O1): a caller-supplied cwd must not
+    // bypass the guard, so ownership is matched by thread id only.
+    #[test]
+    fn create_rejects_an_owned_codex_thread_from_a_different_cwd() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let agent_id = "90000000-aaaa-bbbb-cccc-90000000000a";
+        let thread_id = "dddddddd-eeee-ffff-0000-888888888888";
+        registry
+            .create(create_input(&fixture, agent_id, "claude"))
+            .unwrap();
+        mark_live_codex(&registry, agent_id, Some(thread_id));
+
+        let other = fixture.path("other");
+        fs::create_dir_all(&other).unwrap();
+        let mut input = codex_resume_input(&fixture, thread_id);
+        input.cwd = Some(other.to_string_lossy().into_owned());
+        assert_eq!(
+            registry.create(input).unwrap_err(),
+            "codex thread already in use"
+        );
+        assert_eq!(port.spawn_count(), 1);
+        assert_eq!(registry.snapshot().len(), 1);
     }
 
     #[test]

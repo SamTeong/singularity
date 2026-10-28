@@ -161,6 +161,10 @@ impl TranscriptRegistry for Registry {
         Registry::is_live(self, agent_id)
     }
 
+    fn is_live_codex_thread(&self, thread_id: &str) -> bool {
+        self.codex_owner_for_thread(thread_id).is_some()
+    }
+
     fn codex_thread_for(&self, agent_id: &str) -> Option<String> {
         Registry::codex_thread_for(self, agent_id)
     }

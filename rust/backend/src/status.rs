@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use time::{OffsetDateTime, format_description::well_known::Rfc3339};
+use time::OffsetDateTime;
 
 const TTL_MS: u64 = 20_000;
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
@@ -103,24 +103,59 @@ impl StatusService {
             return cached.data.expect("checked above");
         }
 
-        let fetched = self.fetch_provider(provider).await;
-        let fetched_at = OffsetDateTime::from(SystemTime::now())
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| "1970-01-01T00:00:00Z".to_owned());
-        let mut data = fetched;
-        data.as_object_mut()
-            .expect("provider payload is an object")
-            .insert("fetchedAt".to_owned(), Value::String(fetched_at));
-        let success = data.get("ok").and_then(Value::as_bool) == Some(true);
+        let attempted_at = iso_ms(now);
+        let result = self.fetch_provider(provider).await;
+        let success = result.get("ok").and_then(Value::as_bool) == Some(true);
         let mut cache = self.cache.lock().expect("status cache poisoned");
         let slot = cache.entry(provider.key).or_default();
-        if success || slot.data.is_none() {
+        if success {
+            let mut data = result;
+            let object = data.as_object_mut().expect("provider payload is an object");
+            object.insert("fetchedAt".to_owned(), Value::String(attempted_at.clone()));
+            object.insert(
+                "lastAttemptAt".to_owned(),
+                Value::String(attempted_at.clone()),
+            );
+            object.insert("lastSuccessAt".to_owned(), Value::String(attempted_at));
+            object.insert("refreshError".to_owned(), Value::Null);
+            object.insert("stale".to_owned(), Value::Bool(false));
             slot.data = Some(data.clone());
             slot.at = (self.now)();
-            data
-        } else {
-            slot.data.clone().expect("checked above")
+            return data;
         }
+        // `result.error || 'unknown error'` — the fresh error wins over the cached one.
+        let error = result
+            .get("error")
+            .filter(|value| truthy(value))
+            .cloned()
+            .unwrap_or_else(|| Value::String("unknown error".to_owned()));
+        let data = match slot.data.take() {
+            // A failure after a success keeps the last-good payload and only marks it stale.
+            Some(mut previous) => {
+                let object = previous
+                    .as_object_mut()
+                    .expect("provider payload is an object");
+                object.insert("lastAttemptAt".to_owned(), Value::String(attempted_at));
+                object.insert("refreshError".to_owned(), error);
+                object.insert("stale".to_owned(), Value::Bool(true));
+                previous
+            }
+            // The first failure is cached too, with no success timestamps yet.
+            None => {
+                let mut first = result;
+                let object = first
+                    .as_object_mut()
+                    .expect("provider payload is an object");
+                object.insert("fetchedAt".to_owned(), Value::Null);
+                object.insert("lastAttemptAt".to_owned(), Value::String(attempted_at));
+                object.insert("lastSuccessAt".to_owned(), Value::Null);
+                object.insert("refreshError".to_owned(), error);
+                object.insert("stale".to_owned(), Value::Bool(true));
+                first
+            }
+        };
+        slot.data = Some(data.clone());
+        data
     }
 
     async fn fetch_provider(&self, provider: &Provider) -> Value {
@@ -247,6 +282,29 @@ fn millis(time: SystemTime) -> u64 {
         .unwrap_or_default()
         .as_millis()
         .min(u64::MAX as u128) as u64
+}
+
+/// `new Date(ms).toISOString()` for `attemptedAt`.
+fn iso_ms(ms: u64) -> String {
+    let Ok(date) = OffsetDateTime::from_unix_timestamp_nanos(i128::from(ms) * 1_000_000) else {
+        return String::new();
+    };
+    let date = date.to_offset(time::UtcOffset::UTC);
+    let year = date.year();
+    let year = if (0..=9999).contains(&year) {
+        format!("{year:04}")
+    } else {
+        format!("{year:+07}")
+    };
+    format!(
+        "{year}-{:02}-{:02}T{:02}:{:02}:{:02}.{:03}Z",
+        u8::from(date.month()),
+        date.day(),
+        date.hour(),
+        date.minute(),
+        date.second(),
+        date.millisecond()
+    )
 }
 
 fn jitter() -> f64 {
@@ -1137,22 +1195,32 @@ mod tests {
             (failure_result, success, server.join().unwrap())
         });
         assert!(successful_refresh["ok"].as_bool().unwrap());
-        assert_eq!(failed_refresh, successful_refresh);
+        assert_eq!(successful_refresh["stale"], false);
+        assert_eq!(successful_refresh["refreshError"], Value::Null);
+        // The failure that resolves after the success keeps every last-good field and only
+        // marks the payload stale, without moving `fetchedAt`/`lastSuccessAt`.
+        assert_eq!(failed_refresh["ok"], true);
+        assert_eq!(failed_refresh["updatedAt"], "winner");
+        for field in ["fetchedAt", "lastSuccessAt", "lastAttemptAt"] {
+            assert_eq!(failed_refresh[field], successful_refresh[field]);
+        }
+        assert_eq!(failed_refresh["refreshError"], "HTTP 404");
+        assert_eq!(failed_refresh["stale"], true);
         let slot = service.cache.lock().unwrap()["openai"].clone();
-        assert_eq!(slot.data.unwrap(), successful_refresh);
+        assert_eq!(slot.data.unwrap(), failed_refresh);
         assert_eq!(slot.at, 1_000);
         assert_eq!(server_result, 2);
     }
 
     #[test]
-    fn first_error_is_cached_and_failed_refresh_keeps_the_exact_slot() {
+    fn first_error_is_cached_and_refresh_only_moves_the_attempt_stamp() {
         let (url, server) = loopback(vec![
             (404, "{}"),
             (404, "{}"),
-            (404, "{}"),
-            (404, "{}"),
-            (404, "{}"),
-            (404, "{}"),
+            (410, "{}"),
+            (410, "{}"),
+            (410, "{}"),
+            (410, "{}"),
         ]);
         let now = Arc::new(AtomicU64::new(1000));
         let service = test_service(&url, now.clone());
@@ -1162,14 +1230,31 @@ mod tests {
             .unwrap();
         let first = runtime.block_on(service.get_status(false));
         assert_eq!(first["openai"]["error"], "HTTP 404");
+        assert_eq!(first["openai"]["refreshError"], "HTTP 404");
+        assert_eq!(first["openai"]["fetchedAt"], Value::Null);
+        assert_eq!(first["openai"]["lastSuccessAt"], Value::Null);
+        assert_eq!(first["openai"]["lastAttemptAt"], "1970-01-01T00:00:01.000Z");
+        assert_eq!(first["openai"]["stale"], true);
         assert_eq!(runtime.block_on(service.get_status(false)), first);
-        assert_eq!(service.cache.lock().unwrap()["openai"].at, 1000);
+        // A failed attempt never touches the cache timestamp.
+        assert_eq!(service.cache.lock().unwrap()["openai"].at, 0);
 
         now.store(21_001, Ordering::SeqCst);
-        assert_eq!(runtime.block_on(service.get_status(false)), first);
-        assert_eq!(service.cache.lock().unwrap()["openai"].at, 1000);
-        assert_eq!(runtime.block_on(service.get_status(true)), first);
-        assert_eq!(service.cache.lock().unwrap()["openai"].at, 1000);
+        let refreshed = runtime.block_on(service.get_status(false));
+        assert_eq!(
+            refreshed["openai"]["lastAttemptAt"],
+            "1970-01-01T00:00:21.001Z"
+        );
+        assert_eq!(refreshed["openai"]["fetchedAt"], Value::Null);
+        assert_eq!(refreshed["openai"]["lastSuccessAt"], Value::Null);
+        // Node spreads the cached payload, so `error` keeps the first failure's message while
+        // `refreshError` tracks the latest attempt.
+        assert_eq!(refreshed["openai"]["error"], "HTTP 404");
+        assert_eq!(refreshed["openai"]["refreshError"], "HTTP 410");
+        assert_eq!(refreshed["openai"]["stale"], true);
+        assert_eq!(service.cache.lock().unwrap()["openai"].at, 0);
+        assert_eq!(runtime.block_on(service.get_status(true)), refreshed);
+        assert_eq!(service.cache.lock().unwrap()["openai"].at, 0);
         assert_eq!(server.join().unwrap().len(), 6);
     }
 
@@ -1192,16 +1277,140 @@ mod tests {
             .build()
             .unwrap();
         let first = runtime.block_on(service.get_status(false));
+        assert_eq!(first["openai"]["stale"], false);
+        assert_eq!(first["openai"]["refreshError"], Value::Null);
+        assert_eq!(first["openai"]["lastSuccessAt"], "1970-01-01T00:00:00.500Z");
         now.store(20_501, Ordering::SeqCst);
         let stale = runtime.block_on(service.get_status(false));
-        assert_eq!(stale, first);
+        assert_eq!(stale["openai"]["ok"], true);
+        assert_eq!(stale["openai"]["updatedAt"], "old");
+        assert_eq!(stale["openai"]["indicator"], "none");
+        assert_eq!(stale["openai"]["fetchedAt"], first["openai"]["fetchedAt"]);
+        assert_eq!(
+            stale["openai"]["lastSuccessAt"],
+            first["openai"]["lastSuccessAt"]
+        );
+        assert_eq!(stale["openai"]["lastAttemptAt"], "1970-01-01T00:00:20.501Z");
+        assert_eq!(stale["openai"]["refreshError"], "HTTP 404");
+        assert_eq!(stale["openai"]["stale"], true);
+        assert!(stale["openai"].get("error").is_none());
         assert_eq!(service.cache.lock().unwrap()["openai"].at, 500);
         let recovered = runtime.block_on(service.get_status(true));
         assert_eq!(recovered["openai"]["updatedAt"], "new");
+        assert_eq!(recovered["openai"]["stale"], false);
+        assert_eq!(recovered["openai"]["refreshError"], Value::Null);
+        assert_eq!(
+            recovered["openai"]["lastSuccessAt"],
+            "1970-01-01T00:00:20.501Z"
+        );
         assert_ne!(
             recovered["openai"]["fetchedAt"],
             first["openai"]["fetchedAt"]
         );
         assert_eq!(server.join().unwrap().len(), 6);
+    }
+
+    #[test]
+    fn refresh_bookkeeping_matches_node_success_failure_recovery() {
+        let initial = r#"{"status":{"indicator":"none","description":"All good"}}"#;
+        let recovered = r#"{"status":{"indicator":"minor","description":"Recovered"}}"#;
+        let (openai_url, openai_server) = loopback(vec![
+            (200, initial),
+            (404, "{}"),
+            (410, "{}"),
+            (200, recovered),
+        ]);
+        let (claude_url, claude_server) =
+            loopback(vec![(200, initial), (404, "{}"), (410, "{}"), (415, "{}")]);
+        let now = Arc::new(AtomicU64::new(1_000));
+        let service = StatusService::with_parts(
+            provider_client(),
+            [
+                Provider {
+                    key: "openai",
+                    label: "OpenAI",
+                    page_url: openai_url,
+                },
+                Provider {
+                    key: "claude",
+                    label: "Claude",
+                    page_url: claude_url,
+                },
+            ],
+            Arc::new({
+                let now = now.clone();
+                move || now.load(Ordering::SeqCst)
+            }),
+            Arc::new(|_| Box::pin(async {})),
+            Arc::new(|| 0.5),
+        );
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+
+        let first = runtime.block_on(service.get_status(true));
+        assert_eq!(first["openai"]["lastSuccessAt"], "1970-01-01T00:00:01.000Z");
+        assert_eq!(first["openai"]["lastAttemptAt"], "1970-01-01T00:00:01.000Z");
+        assert_eq!(first["openai"]["fetchedAt"], "1970-01-01T00:00:01.000Z");
+        assert_eq!(first["openai"]["refreshError"], Value::Null);
+        assert_eq!(first["openai"]["stale"], false);
+
+        now.store(61_000, Ordering::SeqCst);
+        let first_failure = runtime.block_on(service.get_status(true));
+        assert_eq!(first_failure["openai"]["ok"], true);
+        assert_eq!(first_failure["openai"]["indicator"], "none");
+        assert_eq!(first_failure["openai"]["description"], "All good");
+        assert_eq!(first_failure["openai"]["stale"], true);
+        assert_eq!(first_failure["openai"]["refreshError"], "HTTP 404");
+        assert_eq!(
+            first_failure["openai"]["lastSuccessAt"],
+            first["openai"]["lastSuccessAt"]
+        );
+        assert_eq!(
+            first_failure["openai"]["lastAttemptAt"],
+            "1970-01-01T00:01:01.000Z"
+        );
+        assert_eq!(
+            first_failure["claude"]["lastSuccessAt"],
+            first["claude"]["lastSuccessAt"]
+        );
+
+        now.store(121_000, Ordering::SeqCst);
+        let repeated = runtime.block_on(service.get_status(true));
+        assert_eq!(repeated["openai"]["refreshError"], "HTTP 410");
+        assert_eq!(
+            repeated["openai"]["lastSuccessAt"],
+            first["openai"]["lastSuccessAt"]
+        );
+        assert_eq!(
+            repeated["openai"]["lastAttemptAt"],
+            "1970-01-01T00:02:01.000Z"
+        );
+        assert!(repeated["openai"].get("error").is_none());
+        // A failure after a success never copies the failure's `error`; only `refreshError` moves.
+        assert!(repeated["claude"].get("error").is_none());
+        assert_eq!(repeated["claude"]["refreshError"], "HTTP 410");
+        assert_eq!(
+            repeated["claude"]["lastSuccessAt"],
+            first["claude"]["lastSuccessAt"]
+        );
+
+        now.store(181_000, Ordering::SeqCst);
+        let recovery = runtime.block_on(service.get_status(true));
+        assert_eq!(recovery["openai"]["indicator"], "minor");
+        assert_eq!(recovery["openai"]["stale"], false);
+        assert_eq!(recovery["openai"]["refreshError"], Value::Null);
+        assert_eq!(
+            recovery["openai"]["lastSuccessAt"],
+            "1970-01-01T00:03:01.000Z"
+        );
+        assert_eq!(
+            recovery["claude"]["lastSuccessAt"],
+            first["claude"]["lastSuccessAt"]
+        );
+        assert!(recovery["openai"].get("error").is_none());
+        assert_eq!(openai_server.join().unwrap().len(), 4);
+        assert_eq!(claude_server.join().unwrap().len(), 4);
     }
 }

@@ -99,6 +99,9 @@ pub struct SessionRow {
     pub blurb: Option<Box<RawValue>>,
     pub mtime: f64,
     pub size: u64,
+    pub process_live: bool,
+    pub activity_recent: bool,
+    pub process_state: String,
     pub running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -126,6 +129,9 @@ pub struct SubagentRow {
     pub blurb: Option<Box<RawValue>>,
     pub mtime: f64,
     pub size: u64,
+    pub process_live: bool,
+    pub activity_recent: bool,
+    pub process_state: String,
     pub running: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
@@ -322,6 +328,7 @@ impl TranscriptService {
                     };
                     let id = name.trim_end_matches(".jsonl").to_owned();
                     let subagents = self.list_subagents(&p.path(), &id, o)?;
+                    let process_live = live(o, &id);
                     rows.push(SessionRow {
                         id: id.clone(),
                         project: project.clone(),
@@ -330,7 +337,10 @@ impl TranscriptService {
                         blurb: meta.blurb,
                         mtime: key.mtime,
                         size: key.size,
-                        running: live(o, &id) || recent(o.now_ms, key.mtime),
+                        process_live,
+                        activity_recent: recent(o.now_ms, key.mtime),
+                        process_state: process_state(process_live),
+                        running: process_live,
                         source: Some("claude".into()),
                         session_id: None,
                         file: None,
@@ -606,6 +616,7 @@ impl TranscriptService {
                 Ok(k) => k,
                 Err(_) => continue,
             };
+            let process_live = live(o, &aid);
             rows.push(SubagentRow {
                 id: format!("{parent}/subagents/{aid}"),
                 agent_id: aid.clone(),
@@ -615,7 +626,10 @@ impl TranscriptService {
                 blurb: meta.blurb,
                 mtime: key.mtime,
                 size: key.size,
-                running: live(o, &aid) || recent(o.now_ms, key.mtime),
+                process_live,
+                activity_recent: recent(o.now_ms, key.mtime),
+                process_state: process_state(process_live),
+                running: process_live,
                 source: None,
                 session_id: None,
                 file: None,
@@ -643,6 +657,7 @@ impl TranscriptService {
                 continue;
             }
             sources.insert(id.clone(), metadata.thread_source.clone());
+            let process_live = live(o, &id);
             let file = p
                 .strip_prefix(&self.inputs.codex_home)
                 .unwrap_or(&p)
@@ -656,7 +671,10 @@ impl TranscriptService {
                 blurb: None,
                 mtime: key.mtime,
                 size: key.size,
-                running: live(o, &id) || recent(o.now_ms, key.mtime),
+                process_live,
+                activity_recent: recent(o.now_ms, key.mtime),
+                process_state: process_state(process_live),
+                running: process_live,
                 source: Some("codex".into()),
                 session_id: metadata.session_id,
                 file: Some(file),
@@ -694,6 +712,9 @@ impl TranscriptService {
                     blurb: child.blurb,
                     mtime: child.mtime,
                     size: child.size,
+                    process_live: child.process_live,
+                    activity_recent: child.activity_recent,
+                    process_state: child.process_state,
                     running: child.running,
                     source: child.source,
                     session_id: child.session_id,
@@ -1296,6 +1317,9 @@ fn live(o: &ListOptions, id: &str) -> bool {
 fn recent(now: u64, mtime: f64) -> bool {
     now as f64 - mtime < RUNNING_MS as f64
 }
+fn process_state(live: bool) -> String {
+    (if live { "live" } else { "unknown" }).into()
+}
 fn encode_cwd(cwd: &str) -> String {
     cwd.replace(':', "-").replace('\\', "-").replace('/', "-")
 }
@@ -1874,5 +1898,150 @@ mod tests {
                 "source case {id}"
             );
         }
+    }
+    fn age_file(path: &Path, age: Duration) {
+        fs::File::options()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(
+                fs::FileTimes::new().set_modified(SystemTime::now().checked_sub(age).unwrap()),
+            )
+            .unwrap();
+    }
+    /// `sessions.test.mjs:317-365`: owned liveness and recent activity stay
+    /// separate for root, Claude child, and Codex rows.
+    #[test]
+    fn liveness_and_recent_activity_stay_separate_for_root_child_and_codex_rows() {
+        let t = Temp::new();
+        let service = t.service();
+        let root = t.0.join("transcripts");
+        let project = root.join("p");
+        let ids = ["root-live-quiet", "root-unowned-recent", "root-unowned-old"];
+        for id in ids {
+            create_dir_all(&project).unwrap();
+            write(
+                project.join(format!("{id}.jsonl")),
+                "{\"type\":\"user\",\"message\":{\"content\":\"hi\"}}\n",
+            )
+            .unwrap();
+        }
+        let child_dir = project.join(ids[0]).join("subagents");
+        create_dir_all(&child_dir).unwrap();
+        let child_ids = [
+            "agent-live-quiet",
+            "agent-unowned-recent",
+            "agent-unowned-old",
+        ];
+        for id in child_ids {
+            write(child_dir.join(format!("{id}.jsonl")), "{}\n").unwrap();
+        }
+        let old = Duration::from_secs(60);
+        for (dir, id) in [
+            (&project, ids[0]),
+            (&project, ids[2]),
+            (&child_dir, child_ids[0]),
+            (&child_dir, child_ids[2]),
+        ] {
+            age_file(&dir.join(format!("{id}.jsonl")), old);
+        }
+        let thread_id = "dddddddd-eeee-ffff-0000-111111111111";
+        let codex_dir = t.0.join("codex/sessions/2026/10/27");
+        create_dir_all(&codex_dir).unwrap();
+        write(
+            codex_dir.join(format!("rollout-{thread_id}.jsonl")),
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{thread_id}\",\"cwd\":\"C:/codex/project\",\"source\":\"cli\",\"thread_source\":\"user\"}}}}\n"
+            ),
+        )
+        .unwrap();
+        let old_codex_id = "eeeeeeee-ffff-0000-1111-222222222222";
+        let old_codex = codex_dir.join(format!("rollout-{old_codex_id}.jsonl"));
+        write(
+            &old_codex,
+            format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{old_codex_id}\",\"cwd\":\"C:/codex/project\",\"source\":\"cli\",\"thread_source\":\"user\"}}}}\n"
+            ),
+        )
+        .unwrap();
+        age_file(&old_codex, old);
+
+        let now_ms = node_mtime_ms(SystemTime::now().duration_since(UNIX_EPOCH).unwrap());
+        let rows = service
+            .list(&ListOptions {
+                root: Some(root.to_string_lossy().into_owned()),
+                now_ms: now_ms as u64,
+                live_ids: vec![ids[0].into(), child_ids[0].into(), thread_id.into()],
+                ..ListOptions::default()
+            })
+            .unwrap();
+        let row = |id: &str| rows.iter().find(|row| row.id == id).unwrap();
+        let live_root = row(ids[0]);
+        assert_eq!(
+            (
+                live_root.process_live,
+                live_root.activity_recent,
+                live_root.running,
+                live_root.process_state.as_str()
+            ),
+            (true, false, true, "live")
+        );
+        let recent_root = row(ids[1]);
+        assert_eq!(
+            (
+                recent_root.process_live,
+                recent_root.activity_recent,
+                recent_root.running,
+                recent_root.process_state.as_str()
+            ),
+            (false, true, false, "unknown")
+        );
+        let old_root = row(ids[2]);
+        assert_eq!(
+            (
+                old_root.process_live,
+                old_root.activity_recent,
+                old_root.running
+            ),
+            (false, false, false)
+        );
+        let children = &live_root.subagents;
+        let child = |id: &str| children.iter().find(|child| child.agent_id == id).unwrap();
+        assert_eq!(
+            (
+                child(child_ids[0]).process_live,
+                child(child_ids[0]).activity_recent
+            ),
+            (true, false)
+        );
+        assert_eq!(
+            (
+                child(child_ids[1]).process_live,
+                child(child_ids[1]).activity_recent,
+                child(child_ids[1]).running
+            ),
+            (false, true, false)
+        );
+        assert_eq!(
+            (
+                child(child_ids[2]).process_live,
+                child(child_ids[2]).activity_recent
+            ),
+            (false, false)
+        );
+        let codex = row(thread_id);
+        assert_eq!(
+            (codex.process_live, codex.activity_recent, codex.running),
+            (true, true, true)
+        );
+        let old_codex = row(old_codex_id);
+        assert_eq!(
+            (
+                old_codex.process_live,
+                old_codex.activity_recent,
+                old_codex.running
+            ),
+            (false, false, false)
+        );
     }
 }

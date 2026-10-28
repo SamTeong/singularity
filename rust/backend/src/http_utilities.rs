@@ -462,7 +462,12 @@ fn subagents_payload(
             .subagents(cwd, &agent.id, Some(root.as_str()), now, &[])
             .map_err(|error| error.to_string())?;
         for row in &mut rows {
-            row.running = is_live(&row.agent_id) || row.running;
+            // Mirror the row liveness fields: running means an owned live process.
+            if is_live(&row.agent_id) {
+                row.process_live = true;
+                row.process_state = "live".to_owned();
+                row.running = true;
+            }
         }
         if rows.is_empty() {
             continue;

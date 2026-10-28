@@ -12,6 +12,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{Date, OffsetDateTime, Time};
 
 const TAIL_BYTES: usize = 8192;
+const OLLAMA_HEARTBEAT_MS: i64 = 5 * 60 * 1000;
 const CODEX_HEARTBEAT_MS: i64 = 5 * 60 * 1000;
 
 type Fields = Vec<(String, Box<RawValue>)>;
@@ -172,6 +173,52 @@ fn field_or_omit(out: &mut Vec<String>, name: &str, value: Option<&RawValue>) {
     if let Some(value) = value {
         out.push(format!("{}:{}", json_string(name), value.get()));
     }
+}
+
+fn nullish(value: Option<&RawValue>) -> &str {
+    value
+        .map(RawValue::get)
+        .filter(|v| *v != "null")
+        .unwrap_or("null")
+}
+
+fn mapped_window(raw: Option<&RawValue>) -> String {
+    let Some(raw) = raw.filter(|v| v.get().starts_with('{') || v.get().starts_with('[')) else {
+        return "null".into();
+    };
+    let value = fields(raw);
+    format!(
+        "{{\"utilization\":{},\"resets_at\":{}}}",
+        nullish(get(&value, "utilization")),
+        nullish(get(&value, "resets_at"))
+    )
+}
+
+fn mapped_extra_usage(raw: Option<&RawValue>) -> String {
+    let Some(raw) = raw.filter(|v| v.get().starts_with('{') || v.get().starts_with('[')) else {
+        return "null".into();
+    };
+    let value = fields(raw);
+    format!(
+        "{{\"is_enabled\":{},\"monthly_limit\":{},\"used_credits\":{},\"utilization\":{}}}",
+        nullish(get(&value, "is_enabled")),
+        nullish(get(&value, "monthly_limit")),
+        nullish(get(&value, "used_credits")),
+        nullish(get(&value, "utilization"))
+    )
+}
+
+fn mapped_usage(raw: &RawValue) -> String {
+    let value = fields(raw);
+    format!(
+        "\"five_hour\":{},\"seven_day\":{},\"per_model\":{{\"sonnet\":{},\"opus\":{},\"design\":{}}},\"extra_usage\":{}",
+        mapped_window(get(&value, "five_hour")),
+        mapped_window(get(&value, "seven_day")),
+        mapped_window(get(&value, "seven_day_sonnet")),
+        mapped_window(get(&value, "seven_day_opus")),
+        mapped_window(get(&value, "seven_day_omelette")),
+        mapped_extra_usage(get(&value, "extra_usage"))
+    )
 }
 
 fn local_timestamp(epoch_ms: i64) -> Option<String> {
@@ -777,6 +824,7 @@ pub struct CostStateLimits {
 #[derive(Default)]
 pub struct SnapshotService {
     ollama_last: Option<Vec<Option<Box<RawValue>>>>,
+    ollama_last_at: i64,
     codex_last: Option<Vec<Option<Box<RawValue>>>>,
     codex_last_at: i64,
     claude_cost_last: Option<(Option<Box<RawValue>>, Option<Box<RawValue>>)>,
@@ -859,7 +907,7 @@ impl SnapshotService {
                 .zip(last)
                 .all(|(a, b)| same_js_primitive(*a, b.as_deref()))
         });
-        if same {
+        if same && now_ms.saturating_sub(self.ollama_last_at) < OLLAMA_HEARTBEAT_MS {
             return AppendResult::skipped();
         }
         let Some(fetched_at) = local_timestamp(now_ms) else {
@@ -897,6 +945,7 @@ impl SnapshotService {
         match append_line(path, &format!("{{{}}}", row.join(","))) {
             Ok(()) => {
                 self.ollama_last = Some(keys.iter().map(|v| v.map(clone_raw)).collect());
+                self.ollama_last_at = now_ms;
                 AppendResult::success()
             }
             Err(e) => AppendResult::failure(e),
@@ -994,26 +1043,22 @@ impl SnapshotService {
             let Some(fetched_at) = local_timestamp(fetched_at_ms.unwrap_or(now_ms)) else {
                 return AppendResult::failure("invalid local time");
             };
-            let mut windows = Vec::new();
-            for (key, name, value) in [
-                ("five_hour", "session", session),
-                ("seven_day", "weekly", weekly),
-            ] {
+            let mut raw_windows = Vec::new();
+            for (key, value) in [("five_hour", session), ("seven_day", weekly)] {
                 if !js_truthy(Some(value)) {
-                    windows.push(format!("{}:null", json_string(key)));
+                    raw_windows.push(format!("{}:null", json_string(key)));
                     continue;
                 }
                 let fields = fields(value);
-                let mut nested = Vec::new();
-                field_or_omit(&mut nested, "utilization", get(&fields, "pctUsed"));
-                field_or_omit(&mut nested, "resets_at", get(&fields, "resetsAt"));
-                windows.push(format!("{}:{{{}}}", json_string(key), nested.join(",")));
-                let _ = name;
+                let mut raw_nested = Vec::new();
+                field_or_omit(&mut raw_nested, "utilization", get(&fields, "pctUsed"));
+                field_or_omit(&mut raw_nested, "resets_at", get(&fields, "resetsAt"));
+                raw_windows.push(format!("{}:{{{}}}", json_string(key), raw_nested.join(",")));
             }
             let record = format!(
                 "{{\"fetched_at\":{},\"source\":\"cost-state\",\"raw\":{{{}}}}}",
                 json_string(&fetched_at),
-                windows.join(",")
+                raw_windows.join(",")
             );
             match self.append_claude_row(live_path, archive_dir, &record, now_ms) {
                 result if result.appended => {
@@ -1027,8 +1072,9 @@ impl SnapshotService {
                 return AppendResult::failure("invalid local time");
             };
             let record = format!(
-                "{{\"fetched_at\":{},\"raw\":{}}}",
+                "{{\"fetched_at\":{},{},\"raw\":{}}}",
                 json_string(&fetched_at),
+                mapped_usage(raw),
                 raw.get()
             );
             self.append_claude_row(live_path, archive_dir, &record, now_ms)
@@ -1620,6 +1666,270 @@ mod tests {
     }
 
     #[test]
+    fn claude_rows_project_main_gauges_and_preserve_raw() {
+        let f = Fixture::new();
+        let mut service = SnapshotService::default();
+        let raw_usage = raw(
+            r#"{"five_hour":{"utilization":83.5,"resets_at":"2026-10-27T00:00:00Z"},"seven_day":null,"seven_day_sonnet":{"utilization":-2},"seven_day_opus":[],"seven_day_omelette":{"resets_at":"翌日"},"extra_usage":{"is_enabled":true,"used_credits":9},"label":"雪"}"#,
+        );
+        assert!(
+            service
+                .append_claude(
+                    &f.path("regular.jsonl"),
+                    &f.0,
+                    false,
+                    &raw_usage,
+                    1_798_000_000_000,
+                    None,
+                    None
+                )
+                .appended
+        );
+        let row = fs::read_to_string(f.path("regular.jsonl")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(row.trim()).unwrap();
+        assert_eq!(value["five_hour"]["utilization"], 83.5);
+        assert_eq!(value["five_hour"]["resets_at"], "2026-10-27T00:00:00Z");
+        assert_eq!(value["seven_day"], serde_json::Value::Null);
+        assert_eq!(
+            value["per_model"]["sonnet"]["resets_at"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            value["per_model"]["opus"]["utilization"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            value["per_model"]["design"]["utilization"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            value["extra_usage"]["monthly_limit"],
+            serde_json::Value::Null
+        );
+        assert_eq!(value["raw"]["label"], "雪");
+
+        let reading = raw(r#"{"pctUsed":120,"resetsAt":"2026-10-28T00:00:00Z"}"#);
+        let weekly = raw("null");
+        let mut cost = SnapshotService::default();
+        assert!(
+            cost.append_claude(
+                &f.path("cost.jsonl"),
+                &f.0,
+                true,
+                &raw_usage,
+                1_798_000_000_000,
+                Some((&reading, &weekly)),
+                Some(1_798_000_000_000)
+            )
+            .appended
+        );
+        let row = fs::read_to_string(f.path("cost.jsonl")).unwrap();
+        let value: serde_json::Value = serde_json::from_str(row.trim()).unwrap();
+        assert_eq!(value["source"], "cost-state");
+        assert!(value.get("five_hour").is_none());
+        assert!(value.get("seven_day").is_none());
+        assert!(value.get("per_model").is_none());
+        assert_eq!(value["raw"]["five_hour"]["utilization"], 120);
+        assert_eq!(value["raw"]["seven_day"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn claude_rows_match_pinned_main_snapshot_oracle() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        const MAIN: &str = "52ce02f2d4182a674055b73df394213eb54742ec";
+        const SOURCE_PATH: &str = ".claude/skills/harness-usage-report/scripts/stats.mjs";
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let source = Command::new("git")
+            .arg("-C")
+            .arg(repo)
+            .args(["show", &format!("{MAIN}:{SOURCE_PATH}")])
+            .output()
+            .expect("read pinned main snapshot source");
+        assert!(
+            source.status.success(),
+            "git show pinned main source failed"
+        );
+        let source = String::from_utf8(source.stdout).expect("pinned main source is UTF-8");
+
+        let node = PathBuf::from(
+            std::env::var_os("NODE_BINARY")
+                .expect("NODE_BINARY must be an absolute Node executable path"),
+        );
+        assert!(node.is_absolute(), "NODE_BINARY must be absolute");
+        let oracle = repo.join("tests/usage_snapshot_claude_main_oracle.mjs");
+        let cwd = std::env::temp_dir().join(format!(
+            "singularity-usage-snapshot-oracle-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&cwd).unwrap();
+        let synthetic = [
+            ("HOME", "home"),
+            ("USERPROFILE", "profile"),
+            ("APPDATA", "appdata"),
+            ("LOCALAPPDATA", "localappdata"),
+            ("TEMP", "temp"),
+            ("TMP", "tmp"),
+            ("TMPDIR", "tmpdir"),
+        ]
+        .map(|(name, directory)| {
+            let path = cwd.join(directory);
+            fs::create_dir_all(&path).unwrap();
+            (name, path)
+        });
+
+        let f = Fixture::new();
+        let regular_path = f.path("regular.jsonl");
+        let regular_raw = raw(
+            r#"{"five_hour":{"utilization":83.5,"resets_at":"2026-10-28T00:00:00Z"},"seven_day":{"utilization":74.25,"resets_at":"2026-11-01T00:00:00Z"},"seven_day_sonnet":[],"seven_day_opus":{"utilization":112.25},"seven_day_omelette":{"resets_at":"翌日"},"extra_usage":{"is_enabled":true,"used_credits":9,"utilization":125},"label":"雪"}"#,
+        );
+        let regular_time = 1_798_000_000_000;
+        let mut regular_service = SnapshotService::default();
+        assert!(
+            regular_service
+                .append_claude(
+                    &regular_path,
+                    &f.0,
+                    false,
+                    &regular_raw,
+                    regular_time,
+                    None,
+                    None
+                )
+                .appended
+        );
+        let regular_row: serde_json::Value =
+            serde_json::from_str(fs::read_to_string(&regular_path).unwrap().trim()).unwrap();
+
+        let cost_path = f.path("cost.jsonl");
+        let cost_raw = raw("{}");
+        let session = raw(r#"{"pctUsed":57.25,"resetsAt":"2026-10-28T00:00:00Z"}"#);
+        let weekly = raw(r#"{"pctUsed":38.5,"resetsAt":"2026-11-01T00:00:00Z"}"#);
+        let cost_time = 1_798_000_000_000;
+        let mut cost_service = SnapshotService::default();
+        assert!(
+            cost_service
+                .append_claude(
+                    &cost_path,
+                    &f.0,
+                    true,
+                    &cost_raw,
+                    cost_time,
+                    Some((&session, &weekly)),
+                    Some(cost_time),
+                )
+                .appended
+        );
+        let cost_row: serde_json::Value =
+            serde_json::from_str(fs::read_to_string(&cost_path).unwrap().trim()).unwrap();
+        let fixture = serde_json::json!({
+            "source": source,
+            "regularRaw": serde_json::from_str::<serde_json::Value>(regular_raw.get()).unwrap(),
+            "regularRows": [regular_row],
+            "costRows": [cost_row],
+            "rawOnlyRows": [{"fetched_at":"2026-10-27 00:00:00","raw":{
+                "five_hour":{"utilization":99,"resets_at":"2026-10-28T00:00:00Z"},
+                "seven_day":{"utilization":88,"resets_at":"2026-11-01T00:00:00Z"}
+            }}]
+        });
+
+        let mut command = Command::new(node);
+        command
+            .arg(oracle)
+            .current_dir(&cwd)
+            .env_clear()
+            .env("USAGE_SNAPSHOT_ORACLE_BRIDGE", "1");
+        if cfg!(windows) {
+            for name in ["SystemRoot", "WINDIR", "SystemDrive", "ComSpec", "PATH"] {
+                if let Some(value) = std::env::var_os(name) {
+                    command.env(name, value);
+                }
+            }
+        }
+        for (name, path) in synthetic {
+            command.env(name, path);
+        }
+        let mut child = command
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("launch isolated main-source Node oracle");
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(fixture.to_string().as_bytes())
+            .unwrap();
+        let output = child
+            .wait_with_output()
+            .expect("wait for main-source oracle");
+        fs::remove_dir_all(&cwd).unwrap();
+        assert!(
+            output.status.success(),
+            "main-source oracle failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let expected: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(
+            expected["rawOnlyWindows"]["five_hour"],
+            serde_json::json!([])
+        );
+        assert_eq!(
+            expected["rawOnlyWindows"]["seven_day"],
+            serde_json::json!([])
+        );
+        for gauge in ["five_hour", "seven_day"] {
+            assert_eq!(
+                expected["costWindows"][gauge],
+                serde_json::json!([]),
+                "cost-state {gauge}"
+            );
+        }
+
+        let regular = &regular_row;
+        for field in ["five_hour", "seven_day", "per_model", "extra_usage"] {
+            assert_eq!(regular[field], expected["mapped"][field], "regular {field}");
+        }
+        assert_eq!(regular["raw"], fixture["regularRaw"]);
+        assert_eq!(
+            regular["per_model"]["sonnet"]["utilization"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            regular["per_model"]["opus"]["resets_at"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            regular["per_model"]["design"]["utilization"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            regular["extra_usage"]["monthly_limit"],
+            serde_json::Value::Null
+        );
+
+        assert_eq!(cost_row["source"], "cost-state");
+        assert_eq!(cost_row["fetched_at"], regular_row["fetched_at"]);
+        assert!(cost_row.get("five_hour").is_none());
+        assert!(cost_row.get("seven_day").is_none());
+        assert!(cost_row.get("per_model").is_none());
+        assert_eq!(cost_row["raw"]["five_hour"]["utilization"], 57.25);
+        assert_eq!(cost_row["raw"]["seven_day"]["utilization"], 38.5);
+        for gauge in ["five_hour", "seven_day"] {
+            let regular_windows = &expected["regularWindows"][gauge];
+            assert_eq!(
+                regular_windows.as_array().unwrap().len(),
+                1,
+                "regular {gauge}"
+            );
+        }
+        assert_eq!(expected["regularWindows"]["five_hour"][0]["uFinal"], 83.5);
+        assert_eq!(expected["regularWindows"]["seven_day"][0]["uFinal"], 74.25);
+    }
+
+    #[test]
     fn dedupe_heartbeat_and_failed_append_retry_commit_only_on_success() {
         let f = Fixture::new();
         let mut service = SnapshotService::default();
@@ -1665,6 +1975,35 @@ mod tests {
                 .error
                 .is_some()
         );
+    }
+
+    #[test]
+    fn ollama_heartbeat_appends_same_reading_after_five_minutes() {
+        let f = Fixture::new();
+        let mut service = SnapshotService::default();
+        let value = raw(r#"{"session":{"pctUsed":4},"weekly":null}"#);
+        let path = f.path("o.jsonl");
+        assert!(
+            service
+                .append_ollama(&path, &value, 1_798_000_000_000)
+                .appended
+        );
+        assert!(
+            !service
+                .append_ollama(&path, &value, 1_798_000_001_000)
+                .appended
+        );
+        assert!(
+            service
+                .append_ollama(&path, &value, 1_798_000_301_000)
+                .appended
+        );
+        assert!(
+            !service
+                .append_ollama(&path, &value, 1_798_000_302_000)
+                .appended
+        );
+        assert_eq!(fs::read_to_string(&path).unwrap().lines().count(), 2);
     }
 
     #[test]

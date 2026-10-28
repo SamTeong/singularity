@@ -6,6 +6,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, value::RawValue};
 use std::{path::PathBuf, sync::Arc};
 
+/// Node defaults `now` to `Date.now()` (`server/sessions.mjs:473`).
+fn wall_clock_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
+}
+
 #[derive(Default)]
 pub struct TranscriptServices {
     cached: Option<(ServiceKey, Arc<TranscriptService>)>,
@@ -107,7 +114,7 @@ impl TranscriptServices {
                 .list(&ListOptions {
                     root: request.root.clone(),
                     cap: request.cap.unwrap_or(5000),
-                    now_ms: request.now_ms.unwrap_or(0),
+                    now_ms: request.now_ms.unwrap_or_else(wall_clock_ms),
                     hide_reviews: request.hide_reviews.unwrap_or(false),
                     live_ids: Vec::new(),
                 })
@@ -173,7 +180,7 @@ impl TranscriptServices {
                         cwd,
                         id,
                         request.root.as_deref(),
-                        request.now_ms.unwrap_or(0),
+                        request.now_ms.unwrap_or_else(wall_clock_ms),
                         &[],
                     )
                     .and_then(|value| {

@@ -334,9 +334,9 @@ impl CutoverServices {
                     state_dir: agents_state_dir.clone(),
                     env: std::env::vars().collect(),
                 };
-                let (usage, usage_handle) =
+                let (mut usage, usage_handle) =
                     crate::http_usage::router_with_handle(crate::http_usage::UsageDeps {
-                        bus,
+                        bus: bus.clone(),
                         state_dir: agents_state_dir.clone(),
                         usage_state: agents_usage_state.clone(),
                         claude_home: claude_config,
@@ -357,6 +357,13 @@ impl CutoverServices {
                 let anchor_host: Arc<dyn crate::http_utilities::AnchorHost> =
                     match tokio::runtime::Handle::try_current() {
                         Ok(handle) => {
+                            // Samplers live as long as the usage routes (`initUsageAutoRefresh`, index.mjs:1003).
+                            let auto_refresh = crate::usage_auto_refresh::start(
+                                handle.clone(),
+                                usage_handle.clone(),
+                                bus,
+                            );
+                            usage = usage.layer(axum::Extension(Arc::new(auto_refresh)));
                             let refresh: crate::window_anchor_host::UsageRefresh =
                                 Arc::new(move |provider: &str| {
                                     let usage_handle = usage_handle.clone();

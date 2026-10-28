@@ -8,7 +8,7 @@
 //! Transcript parsing, discovery and file access stay in `transcript_service`;
 //! per-session cost/token parsing stays in `stats`. This module owns only the
 //! HTTP surface plus the pieces Node keeps in its own process: `reg.isLive` for
-//! the recomputed `running` flag (`server/sessions.mjs:86-91` and `:100`),
+//! the recomputed liveness fields (`server/sessions.mjs:199-205,501-506,557-568`),
 //! `reg.codexThreadFor` (`server/transcript-routes.mjs:11`) and the resume-scope
 //! merge (`server/transcript-routes.mjs:19-27`). They arrive as
 //! [`TranscriptRegistry`] so the host can wire the live registry later; the
@@ -46,8 +46,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-/// `RUNNING_MS` in `server/sessions.mjs:12`.
-const RUNNING_MS: f64 = 30_000.0;
 /// `Number(req.query.cap) || 5000` (`server/transcript-routes.mjs:4`).
 const DEFAULT_CAP: f64 = 5000.0;
 /// `req.body.items.slice(0, 200)` (`server/index.mjs:864`).
@@ -71,6 +69,10 @@ const SEARCH_ARRAY_MESSAGE: &str = "q.charCodeAt is not a function";
 pub trait TranscriptRegistry: Send + Sync {
     /// `!!agents.get(id)?.proc`.
     fn is_live(&self, _agent_id: &str) -> bool {
+        false
+    }
+    /// `isLiveSession(thread, {source:'codex'})`: a live agent owns this codex thread.
+    fn is_live_codex_thread(&self, _thread_id: &str) -> bool {
         false
     }
     /// Registry id to codex-minted rollout thread uuid.
@@ -256,7 +258,7 @@ fn list_response(inner: &Inner, query: Option<&str>) -> Response {
         live_ids: Vec::new(),
     }) {
         Ok(mut rows) => {
-            apply_liveness(&mut rows, now, inner.host.registry.as_ref());
+            apply_liveness(&mut rows, inner.host.registry.as_ref());
             Json(SessionsReply { sessions: rows }).into_response()
         }
         Err(error) => internal_error(&error.to_string()),
@@ -637,22 +639,30 @@ fn is_js_space(character: char) -> bool {
     character.is_whitespace() || character == '\u{FEFF}'
 }
 
-/// `updateRunning` (`server/sessions.mjs:86-91`): `isLive(agentId ?? id)` or an
-/// mtime inside `RUNNING_MS`, applied to the row and every nested subagent.
-fn apply_liveness(rows: &mut [SessionRow], now: u64, registry: &dyn TranscriptRegistry) {
+/// `isLive(id, {source, cwd})` per row (`server/sessions.mjs:199-205,501-506,557-568`):
+/// `running` is the owned live process only; recency stays in `activityRecent`.
+/// Codex rows resolve their rollout thread to an owning agent (`isLiveSession`).
+fn apply_liveness(rows: &mut [SessionRow], registry: &dyn TranscriptRegistry) {
     for row in rows {
-        let agent_id = row.agent_id.clone();
-        row.running =
-            registry.is_live(agent_id.as_deref().unwrap_or(&row.id)) || running_now(now, row.mtime);
+        let live = if row.source.as_deref() == Some("codex") {
+            registry.is_live_codex_thread(&row.id)
+        } else {
+            registry.is_live(row.agent_id.as_deref().unwrap_or(&row.id))
+        };
+        row.process_live = live;
+        row.process_state = process_state(live);
+        row.running = live;
         for child in &mut row.subagents {
-            let agent_id = child.agent_id.clone();
-            child.running = registry.is_live(&agent_id) || running_now(now, child.mtime);
+            let live = registry.is_live(&child.agent_id);
+            child.process_live = live;
+            child.process_state = process_state(live);
+            child.running = live;
         }
     }
 }
 
-fn running_now(now: u64, mtime: f64) -> bool {
-    now as f64 - mtime < RUNNING_MS
+fn process_state(live: bool) -> String {
+    if live { "live" } else { "unknown" }.to_owned()
 }
 
 fn now_ms() -> u64 {
@@ -750,8 +760,9 @@ fn internal_error(message: &str) -> Response {
 mod tests {
     use super::{
         CAP_MESSAGE, SEARCH_ARRAY_MESSAGE, SEQUENCE_MESSAGE, TranscriptHost, TranscriptRegistry,
-        codex_thread, list, read, root_get, root_put, search, stats,
+        apply_liveness, codex_thread, list, read, root_get, root_put, search, stats,
     };
+    use crate::transcript_service::{SessionRow, SubagentRow};
     use axum::body::{Body, to_bytes};
     use axum::extract::{RawQuery, State};
     use axum::http::{Method, Request, header};
@@ -1017,6 +1028,108 @@ mod tests {
         });
     }
 
+    fn row(id: &str, source: Option<&str>, subagents: Vec<SubagentRow>) -> SessionRow {
+        SessionRow {
+            id: id.into(),
+            project: "p".into(),
+            cwd: None,
+            title: None,
+            blurb: None,
+            mtime: 0.0,
+            size: 0,
+            process_live: false,
+            activity_recent: true,
+            process_state: "unknown".into(),
+            running: true,
+            source: source.map(Into::into),
+            session_id: None,
+            file: None,
+            subagents,
+            agent_id: None,
+        }
+    }
+
+    fn child(agent_id: &str) -> SubagentRow {
+        SubagentRow {
+            id: agent_id.into(),
+            agent_id: agent_id.into(),
+            project: None,
+            cwd: None,
+            title: None,
+            blurb: None,
+            mtime: 0.0,
+            size: 0,
+            process_live: false,
+            activity_recent: true,
+            process_state: "unknown".into(),
+            running: true,
+            source: None,
+            session_id: None,
+            file: None,
+        }
+    }
+
+    struct CodexOwner;
+
+    impl TranscriptRegistry for CodexOwner {
+        fn is_live(&self, agent_id: &str) -> bool {
+            agent_id == "registry-agent" || agent_id == "live-child"
+        }
+        fn is_live_codex_thread(&self, thread_id: &str) -> bool {
+            thread_id == "thread-uuid"
+        }
+    }
+
+    // VERIFY: transcripts-apply-liveness
+    /// `sessions.test.mjs:317-365`: running == processLive; recency alone never
+    /// makes a row running; codex rows resolve the thread to its owning agent.
+    #[test]
+    fn apply_liveness_keys_running_on_owned_process_only() {
+        let mut rows = vec![
+            row(
+                "dead-recent",
+                None,
+                vec![child("live-child"), child("dead-child")],
+            ),
+            row("thread-uuid", Some("codex"), Vec::new()),
+            // A codex thread id is not a registry key, even if it collides.
+            row("registry-agent", Some("codex"), Vec::new()),
+        ];
+        apply_liveness(&mut rows, &CodexOwner);
+        let flags = |live: bool, state: &str, running: bool, recent: bool| {
+            (live, state.to_owned(), running, recent)
+        };
+        let of = |r: &SessionRow| {
+            (
+                r.process_live,
+                r.process_state.clone(),
+                r.running,
+                r.activity_recent,
+            )
+        };
+        assert_eq!(of(&rows[0]), flags(false, "unknown", false, true));
+        assert_eq!(of(&rows[1]), flags(true, "live", true, true));
+        assert_eq!(of(&rows[2]), flags(false, "unknown", false, true));
+        let kids = &rows[0].subagents;
+        assert_eq!(
+            (
+                kids[0].process_live,
+                kids[0].process_state.as_str(),
+                kids[0].running
+            ),
+            (true, "live", true)
+        );
+        assert_eq!(
+            (
+                kids[1].process_live,
+                kids[1].process_state.as_str(),
+                kids[1].running,
+                kids[1].activity_recent
+            ),
+            (false, "unknown", false, true)
+        );
+    }
+
     // VERIFY: transcripts-list-liveness
     #[test]
     fn list_serves_sessions_and_recomputes_registry_liveness() {
@@ -1046,9 +1159,12 @@ mod tests {
             assert_eq!(sessions.len(), 2, "{response}");
             assert_eq!(sessions[0]["id"], json!("two"));
             assert_eq!(sessions[0]["running"], json!(false));
+            assert_eq!(sessions[0]["processLive"], json!(false));
+            assert_eq!(sessions[0]["processState"], json!("unknown"));
             assert_eq!(sessions[1]["id"], json!("one"));
-            // Registry liveness wins over the 30s mtime window.
             assert_eq!(sessions[1]["running"], json!(true));
+            assert_eq!(sessions[1]["processLive"], json!(true));
+            assert_eq!(sessions[1]["processState"], json!("live"));
             assert_eq!(sessions[1]["blurb"], json!("first"));
             assert_eq!(sessions[1]["cwd"], json!("C:/work"));
 
