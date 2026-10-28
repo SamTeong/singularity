@@ -298,6 +298,15 @@ impl NativeTranscriptSource {
             stats: Mutex::new(crate::stats::StatsService::default()),
         }
     }
+
+    /// See [`TranscriptService::with_catalog_source`].
+    pub fn with_catalog_source(
+        mut self,
+        source: Arc<dyn Fn() -> Vec<Value> + Send + Sync>,
+    ) -> Self {
+        self.transcripts = self.transcripts.with_catalog_source(source);
+        self
+    }
 }
 
 impl TranscriptSource for NativeTranscriptSource {

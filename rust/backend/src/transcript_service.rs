@@ -10,7 +10,7 @@ use std::{
     fs,
     io::{self, BufRead, BufReader, Read},
     path::{Component, Path, PathBuf},
-    sync::Mutex,
+    sync::{Arc, Mutex},
     time::UNIX_EPOCH,
 };
 
@@ -191,6 +191,7 @@ struct Cache {
 pub struct TranscriptService {
     inputs: Inputs,
     cache: Mutex<Cache>,
+    catalog_source: Option<Arc<dyn Fn() -> Vec<Value> + Send + Sync>>,
 }
 
 impl TranscriptService {
@@ -198,6 +199,22 @@ impl TranscriptService {
         Self {
             inputs,
             cache: Mutex::new(Cache::default()),
+            catalog_source: None,
+        }
+    }
+    /// Re-read the model catalogue on every parse, like Node's per-call
+    /// `modelsGet` (`model-store.mjs:16-17`), instead of `Inputs.model_catalog`.
+    pub fn with_catalog_source(
+        mut self,
+        source: Arc<dyn Fn() -> Vec<Value> + Send + Sync>,
+    ) -> Self {
+        self.catalog_source = Some(source);
+        self
+    }
+    fn catalog(&self) -> std::borrow::Cow<'_, [Value]> {
+        match &self.catalog_source {
+            Some(source) => std::borrow::Cow::Owned(source()),
+            None => std::borrow::Cow::Borrowed(&self.inputs.model_catalog),
         }
     }
     pub fn get_root(&self) -> String {
@@ -370,7 +387,7 @@ impl TranscriptService {
         let parsed = if codex {
             parse_codex(&raw)
         } else {
-            parse_claude(&raw, &self.inputs.model_catalog)
+            parse_claude(&raw, &self.catalog())
         };
         match parsed {
             Ok(v) => Ok(Some(v.to_json().map_err(Error::Parse)?)),
@@ -840,10 +857,11 @@ impl TranscriptService {
             }
         }
         let raw = read_node_utf8(path)?;
+        let catalog = self.catalog();
         let parsed = if codex {
             parse_codex_with_tool_limit(&raw, 500)
         } else {
-            parse_claude_with_tool_limit(&raw, &self.inputs.model_catalog, 500)
+            parse_claude_with_tool_limit(&raw, &catalog, 500)
         }
         .map_err(Error::Parse)?;
         let cwd = parsed.raw_meta_token("cwd").map(raw_clone);
@@ -853,8 +871,7 @@ impl TranscriptService {
             let mut learned = None;
             let mut message_cwds = Vec::new();
             for line in raw.lines() {
-                let Ok(event) = parse_claude_with_tool_limit(line, &self.inputs.model_catalog, 500)
-                else {
+                let Ok(event) = parse_claude_with_tool_limit(line, &catalog, 500) else {
                     continue;
                 };
                 if learned.is_none() {
@@ -1363,6 +1380,19 @@ mod tests {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.0);
         }
+    }
+    #[test]
+    fn catalog_source_is_read_on_every_call() {
+        let t = Temp::new();
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = calls.clone();
+        let s = t.service().with_catalog_source(Arc::new(move || {
+            let n = counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            vec![serde_json::json!({ "id": format!("m{n}") })]
+        }));
+        assert_eq!(s.catalog()[0]["id"], "m0");
+        assert_eq!(s.catalog()[0]["id"], "m1");
+        assert!(t.service().catalog().is_empty());
     }
     #[test]
     fn explicit_root_and_confined_paths() {

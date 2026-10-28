@@ -285,17 +285,22 @@ impl CutoverServices {
                     },
                     bus: bus.clone(),
                     clock: Arc::new(crate::history::SystemClock),
-                    transcripts: Arc::new(crate::history::NativeTranscriptSource::new(
-                        crate::transcript_service::Inputs {
-                            state_dir: agents_state_dir.clone(),
-                            claude_home: agents_home.join(".claude"),
-                            codex_home: agents_codex_home.clone(),
-                            model_catalog: crate::models::get(&services_models_path)["models"]
+                    transcripts: Arc::new(
+                        crate::history::NativeTranscriptSource::new(
+                            crate::transcript_service::Inputs {
+                                state_dir: agents_state_dir.clone(),
+                                claude_home: agents_home.join(".claude"),
+                                codex_home: agents_codex_home.clone(),
+                                model_catalog: Vec::new(),
+                            },
+                        )
+                        .with_catalog_source(Arc::new(move || {
+                            crate::models::get(&services_models_path)["models"]
                                 .as_array()
                                 .cloned()
-                                .unwrap_or_default(),
-                        },
-                    )),
+                                .unwrap_or_default()
+                        })),
+                    ),
                     summariser: Arc::new(crate::history::PromptRunSummariser(
                         crate::prompt_run::PromptRunDeps {
                             claude_bin: claude_bin.clone(),

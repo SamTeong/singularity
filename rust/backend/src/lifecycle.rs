@@ -389,18 +389,26 @@ impl crate::http_utilities::AnchorHost for DeferredAnchorHost {
 }
 
 fn build_chat(paths: &AppPaths, config: &ConfigServices) -> ChatDeps {
-    let models_path = paths.state_dir.join("models.json");
-    let catalog = crate::models::get(&models_path.to_string_lossy())["models"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let models_path = paths
+        .state_dir
+        .join("models.json")
+        .to_string_lossy()
+        .into_owned();
     let claude_home = config.home.join(".claude");
-    let transcripts = Arc::new(TranscriptService::new(Inputs {
-        state_dir: paths.state_dir.clone(),
-        claude_home: claude_home.clone(),
-        codex_home: config.codex_home.clone(),
-        model_catalog: catalog,
-    }));
+    let transcripts = Arc::new(
+        TranscriptService::new(Inputs {
+            state_dir: paths.state_dir.clone(),
+            claude_home: claude_home.clone(),
+            codex_home: config.codex_home.clone(),
+            model_catalog: Vec::new(),
+        })
+        .with_catalog_source(Arc::new(move || {
+            crate::models::get(&models_path)["models"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+        })),
+    );
     // `usage.mjs` honours Claude Code's own `CLAUDE_CONFIG_DIR` override for credentials.
     let credentials_home = std::env::var_os("CLAUDE_CONFIG_DIR")
         .filter(|value| !value.is_empty())
