@@ -16,6 +16,7 @@ use tokio::net::TcpListener;
 #[derive(Clone)]
 pub struct HttpServices {
     pub state_dir: PathBuf,
+    pub plans_root: Option<PathBuf>,
     pub report_request: Arc<crate::usage_report::Request>,
     pub sampler: Arc<crate::sysstats::Sampler>,
     pub status: crate::status::StatusService,
@@ -25,6 +26,7 @@ impl HttpServices {
     pub fn new(state_dir: PathBuf, report_request: crate::usage_report::Request) -> Self {
         Self {
             state_dir,
+            plans_root: None,
             report_request: Arc::new(report_request),
             sampler: Arc::new(crate::sysstats::Sampler::start()),
             status: crate::status::StatusService::new(),
@@ -51,13 +53,22 @@ impl HttpServices {
                 .map(|value| (key.to_owned(), json!(value)))
         })
         .collect();
-        Ok(Self::new(
+        let mut services = Self::new(
             PathBuf::from(home).join("state"),
             crate::usage_report::Request {
                 reports_dir: String::new(),
                 env: serde_json::Value::Object(env),
             },
-        ))
+        );
+        if let Some(root) = std::env::var_os("SING_PLANS_ROOT").filter(|value| !value.is_empty()) {
+            let root = PathBuf::from(root);
+            services.plans_root = Some(if root.is_absolute() {
+                root
+            } else {
+                std::env::current_dir()?.join(root)
+            });
+        }
+        Ok(services)
     }
 }
 
@@ -68,6 +79,7 @@ pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
             services.status,
         ))
         .merge(crate::http_models::router(services.state_dir.clone()))
+        .merge(crate::http_plans::router(services.plans_root))
         .merge(crate::http_state::router(services.state_dir))
         .merge(crate::http_reports::router(services.report_request))
         .fallback(not_found)
@@ -307,7 +319,7 @@ mod tests {
                 .await;
                 assert!(api.starts_with("HTTP/1.1 401"), "{api}");
 
-                for path in ["/api/sysstats", "/api/status", "/api/keys", "/api/config/state", "/api/usagereport/status", "/api/usagereport/report"] {
+                for path in ["/api/sysstats", "/api/status", "/api/keys", "/api/config/state", "/api/usagereport/status", "/api/usagereport/report", "/api/plans/sessions", "/api/plans/session?sid=bad"] {
                     let denied = send_request(address, &format!(
                         "GET {path} HTTP/1.1\r\nHost: localhost:{}\r\nConnection: close\r\n\r\n", address.port()
                     )).await;
