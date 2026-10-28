@@ -5,8 +5,11 @@ use std::fs::{self, FileType};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
+pub mod agent_registry;
 pub mod agent_spawn;
+pub mod agent_wire;
 pub mod app_paths;
+pub mod bus;
 pub mod chat;
 pub mod claude_credentials;
 pub mod claude_oauth;
