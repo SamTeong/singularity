@@ -15,6 +15,7 @@
 //! `path.resolve` semantics (lexical, separators normalized, no symlink
 //! resolution), and comparisons case-fold on Windows only.
 
+use crate::fs_atomic::write_atomic;
 use crate::http_body::parse;
 use crate::http_policy::query_values;
 use axum::body::Body;
@@ -30,7 +31,6 @@ use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 use std::sync::{Arc, Mutex, OnceLock};
-use std::time::Duration;
 
 const PROJECTS_FILE: &str = "projects.json";
 const SUMMARY_CACHE_DIR: &str = "projects-summary";
@@ -270,7 +270,7 @@ impl ProjectsState {
     }
 
     fn write_list(&self, list: &[String]) -> Result<(), ()> {
-        write_atomic(&self.projects_file(), pretty_array(list).as_bytes())
+        write_atomic(&self.projects_file(), pretty_array(list).as_bytes()).map_err(|_| ())
     }
 
     fn is_live_repo(&self, path: &str) -> bool {
@@ -1187,34 +1187,6 @@ fn pretty_array(list: &[String]) -> String {
         .map(|item| serde_json::to_string(item).expect("a string always serializes"))
         .collect();
     format!("[\n  {}\n]", items.join(",\n  "))
-}
-
-/// `agents.mjs:69` `writeAtomic`: scratch file beside the target, then rename
-/// with the Windows sharing-violation retry ladder.
-fn write_atomic(file: &Path, bytes: &[u8]) -> Result<(), ()> {
-    let mut scratch = file.as_os_str().to_owned();
-    scratch.push(format!(".{}.tmp", std::process::id()));
-    let scratch = PathBuf::from(scratch);
-    fs::write(&scratch, bytes).map_err(|_| ())?;
-    for attempt in 1..=5u32 {
-        match fs::rename(&scratch, file) {
-            Ok(()) => return Ok(()),
-            Err(error) => {
-                if attempt >= 5 || !retryable(&error) {
-                    return Err(());
-                }
-                std::thread::sleep(Duration::from_millis(u64::from(20 * attempt)));
-            }
-        }
-    }
-    Err(())
-}
-
-fn retryable(error: &std::io::Error) -> bool {
-    matches!(
-        error.raw_os_error(),
-        Some(5) | Some(13) | Some(32) | Some(33)
-    ) || error.kind() == std::io::ErrorKind::PermissionDenied
 }
 
 fn sha1_hex(input: &str) -> String {

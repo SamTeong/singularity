@@ -48,20 +48,6 @@ pub struct CutoverServices {
     pub token_available: bool,
 }
 
-/// `/api/projects/summary`'s LLM rung until the native one-shot runner lands.
-// shortcut: always errors (Node runs the CLI), replace with prompt_run in registry slice G.
-struct NoSummaryCall;
-
-impl crate::http_projects::SummaryCall for NoSummaryCall {
-    fn call<'a>(
-        &'a self,
-        _prompt: &'a str,
-        _model: &'a crate::http_projects::SummaryModel,
-    ) -> std::pin::Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
-        Box::pin(async { Err("summariser not available in the native daemon".to_owned()) })
-    }
-}
-
 /// No live agents yet; the native registry replaces this in registry slice C.
 struct NoRegistry;
 
@@ -207,6 +193,15 @@ impl CutoverServices {
             ))
             .merge(crate::http_projects::router(
                 crate::http_projects::ProjectsDeps {
+                    summary_call: Arc::new(crate::prompt_run::PromptRunSummary(
+                        crate::prompt_run::PromptRunDeps {
+                            claude_bin: claude_bin.clone(),
+                            ollama_bin: ollama_bin.clone(),
+                            codex_bin: codex_bin.clone(),
+                            state_dir: state_dir.clone(),
+                            env: std::env::vars().collect(),
+                        },
+                    )),
                     state_dir,
                     cache_dir: paths.cache_dir,
                     home,
@@ -218,7 +213,6 @@ impl CutoverServices {
                     claude_bin,
                     ollama_bin,
                     codex_bin,
-                    summary_call: Arc::new(NoSummaryCall),
                 },
             ));
         // `hasShell`: without a built web/dist Node keeps a plain 404 for unknown paths.
