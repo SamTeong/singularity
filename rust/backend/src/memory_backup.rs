@@ -3,7 +3,6 @@
 // write a write-once .bak to the same path and get silently clobbered.
 // Mirrors server/backups.mjs `backupFile`.
 use ring::digest;
-use std::cmp::Ordering;
 use std::fs;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
@@ -71,8 +70,7 @@ fn claim_slot(dir: &Path, mut stamp: u64) -> Option<PathBuf> {
     }
 }
 
-// Newest-first by numeric stem, keep KEEP, delete the rest. Unparsable stems rank as
-// NaN, which the comparison treats as equal — same tolerance as the Node original.
+// Keep the newest numeric backups; leave nonnumeric backup names untouched.
 fn prune(dir: &Path) -> Option<()> {
     let mut baks: Vec<(f64, String)> = fs::read_dir(dir)
         .ok()?
@@ -80,10 +78,12 @@ fn prune(dir: &Path) -> Option<()> {
         .filter_map(|entry| {
             let name = entry.file_name().into_string().ok()?;
             let stem = name.strip_suffix(".bak")?;
-            Some((js_string_to_number(stem), name))
+            let value = js_string_to_number(stem);
+            (!stem.trim_matches(is_js_whitespace).is_empty() && value.is_finite())
+                .then_some((value, name))
         })
         .collect();
-    baks.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(Ordering::Equal));
+    baks.sort_by(|a, b| b.0.partial_cmp(&a.0).expect("finite backup numbers"));
     for (_, name) in baks.iter().skip(KEEP) {
         let stale = dir.join(name);
         // A concurrent prune of the same path is harmless: only a file that still exists
@@ -373,6 +373,28 @@ mod tests {
         expected.sort();
         assert_eq!(names, expected);
         assert_eq!(fs::read(&dest).unwrap(), b"new");
+    }
+
+    #[test]
+    fn preserves_nonnumeric_backup_names_while_pruning_numeric_backups() {
+        let fixture = Fixture::new();
+        let dir = fixture.backups();
+        fs::create_dir_all(&dir).unwrap();
+        for stamp in 1..=7 {
+            fs::write(dir.join(format!("{stamp}.bak")), "numeric").unwrap();
+        }
+        for name in ["manual.bak", ".bak", "Infinity.bak", "nan.bak"] {
+            fs::write(dir.join(name), name).unwrap();
+        }
+
+        prune(&dir).unwrap();
+
+        for stamp in 1..=7 {
+            assert_eq!(dir.join(format!("{stamp}.bak")).exists(), stamp >= 3);
+        }
+        for name in ["manual.bak", ".bak", "Infinity.bak", "nan.bak"] {
+            assert_eq!(fs::read_to_string(dir.join(name)).unwrap(), name);
+        }
     }
 
     #[test]
