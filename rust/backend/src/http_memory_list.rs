@@ -1,4 +1,4 @@
-//! Staged memory list and search routes. The caller injects the Node-compatible
+//! Memory list and search routes. The caller injects the Node-compatible
 //! home, cwd and per-drive cwd, the app state directory and the system locale.
 //! Unlike file reads and writes, listing accepts a caller-selected root. ICU4X
 //! ordering can differ from Node's ICU version, including which hits reach the cap.
@@ -129,9 +129,13 @@ fn respond(state: &ListState, query: Option<&str>, search: bool) -> Response {
             return error("Rust Memory search failed");
         };
         let text = text.trim_matches(js_whitespace);
-        let token = TranscriptRawText::from_json_token(serde_json::to_string(text).unwrap())
-            .and_then(|text| text.slice_units(0, 200))
-            .unwrap();
+        let Some(token) = serde_json::to_string(text)
+            .ok()
+            .and_then(|token| TranscriptRawText::from_json_token(token).ok())
+            .and_then(|text| text.slice_units(0, 200).ok())
+        else {
+            return error("Rust Memory search failed");
+        };
         tokens.push(json_hit(hit, token));
     }
     let body = SearchResult {

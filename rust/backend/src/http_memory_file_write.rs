@@ -3,8 +3,7 @@
 // `writeMemoryFile` (69-88), plus `backups.mjs` `backupFile` (57-78) and the Rust
 // final check `memory::write_file`.
 //
-// Staged: `http_server::router` does not mount this module. The host injects the
-// state dir (SINGULARITY_HOME/state), a
+// The host injects the state dir (SINGULARITY_HOME/state), a
 // resolved home, Node's cwd and per-drive cwd values, and the backups dir
 // (`<home>/cache/backups`); this module reads no process env and no user data on
 // its own. The injected `cwd` must be the daemon's process cwd: authorization
@@ -262,17 +261,19 @@ fn write(state: &MemoryFileWrite, fields: WriteFields) -> Response {
     match stale(&target, mtime_present, mtime_number, force) {
         Ok(true) => return changed(),
         Ok(false) => {}
-        Err(error) => return failure(&error.to_string()),
+        Err(error) => return failure(&crate::memory_root::root_io_error(&target, "stat", error)),
     }
     // Node yields while the backup runs, allowing other memory requests to start.
     drop(guard);
     // Best effort: any backup failure is swallowed and the save continues.
-    let _ = crate::memory_backup::backup_file(&backup_path, &target, &state.backups_dir);
+    ignore_backup_failure(|| {
+        let _ = crate::memory_backup::backup_file(&backup_path, &target, &state.backups_dir);
+    });
     // Guard 2, after the backup: covers a concurrent save landing in between.
     match stale(&target, mtime_present, mtime_number, force) {
         Ok(true) => return changed(),
         Ok(false) => {}
-        Err(error) => return failure(&error.to_string()),
+        Err(error) => return failure(&crate::memory_root::root_io_error(&target, "stat", error)),
     }
 
     // The bridge cannot decode an escaped lone surrogate in `path`/`content`;
@@ -288,6 +289,10 @@ fn write(state: &MemoryFileWrite, fields: WriteFields) -> Response {
         force,
     );
     payload_response(payload)
+}
+
+fn ignore_backup_failure(backup: impl FnOnce()) {
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(backup));
 }
 
 /// `existsSync` + `statSync().mtimeMs` against the raw path, exactly like Node:
@@ -599,9 +604,10 @@ fn is_js_whitespace(character: char) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        MemoryFileWrite, js_string_to_number, js_truthy, js_value_number, put_file, stale_after,
-        system_time_ms,
+        MemoryFileWrite, ignore_backup_failure, js_string_to_number, js_truthy, js_value_number,
+        put_file, stale_after, system_time_ms,
     };
+
     use axum::body::{Body, to_bytes};
     use axum::extract::State;
     use axum::http::{Method, Request, header};
@@ -611,6 +617,11 @@ mod tests {
     use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn backup_panic_is_caught() {
+        ignore_backup_failure(|| panic!("backup failure"));
+    }
 
     static FIXTURE_ID: AtomicU64 = AtomicU64::new(0);
 

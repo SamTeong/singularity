@@ -20,7 +20,6 @@ fn drive_cwds_from(mut lookup: impl FnMut(&str) -> Option<OsString>) -> Vec<(u16
         .collect()
 }
 
-#[allow(dead_code)] // consumed when the staged memory routes are assembled
 pub(crate) fn current_drive_cwds() -> Vec<(u16, PathBuf)> {
     #[cfg(windows)]
     {
@@ -857,7 +856,6 @@ fn resolve_raw_units_with_drive_cwds(
 /// (on POSIX `~\x` therefore keeps a literal backslash, as `memory.mjs` does).
 /// Targets pass `false`, because Node's `resolve` never expands `~`. Wiki
 /// callers keep their own tilde rules through the wrappers above.
-#[allow(dead_code)] // consumed by the incoming memory module
 pub(crate) fn resolve_units(
     units: &[u16],
     home: &Path,

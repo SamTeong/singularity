@@ -35,7 +35,6 @@ fn node_home_value(value: OsString, validate_profile: bool) -> std::io::Result<P
     Ok(PathBuf::from(text))
 }
 
-#[allow(dead_code)] // consumed when the staged memory routes are assembled
 pub(crate) fn current_node_home() -> std::io::Result<PathBuf> {
     #[cfg(windows)]
     let key = "USERPROFILE";
@@ -123,7 +122,7 @@ pub(crate) fn set_root(state_dir: &Path, root: Option<RootValue>) -> SetResponse
 
 // Node labels these common failure cases by the attempted operation and path.
 // Other platform errors retain their native text until their mapping is verified.
-fn root_io_error(path: &Path, operation: &str, error: std::io::Error) -> String {
+pub(crate) fn root_io_error(path: &Path, operation: &str, error: std::io::Error) -> String {
     let description = if operation == "mkdir" && path.is_file() {
         Some("EEXIST: file already exists")
     } else if operation == "mkdir" && path.ancestors().skip(1).any(Path::is_file) {
@@ -212,7 +211,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn setter_formats_posix_permission_errors_like_node() {
-        for operation in ["mkdir", "open"] {
+        for operation in ["mkdir", "open", "stat"] {
             let path = Path::new("/missing/isolated-path");
             assert_eq!(
                 super::root_io_error(path, operation, std::io::Error::from_raw_os_error(13)),

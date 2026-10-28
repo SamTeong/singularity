@@ -1,8 +1,7 @@
 // Memory file read HTTP surface: `GET /api/memory/file`, mirroring
 // `server/index.mjs:756-760` -> `memory.mjs` `readMemoryFile` (31-66).
 //
-// Staged: `http_server::router` does not mount this module yet. The host injects
-// the state dir (SINGULARITY_HOME/state),
+// The host injects the state dir (SINGULARITY_HOME/state),
 // home, cwd and Node's per-drive cwd values; this module reads no process env
 // and no user data of its own.
 //

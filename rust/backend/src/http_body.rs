@@ -59,7 +59,6 @@ pub async fn parse(request: Request<Body>) -> Result<Value, Response> {
 /// that unpaired surrogate escapes decode as U+FFFD. Duplicate keys stay
 /// last-wins in both. Because the parsed map is lossy, keys differing only by
 /// a lone surrogate can merge there; use `raw` when key identity matters.
-#[allow(dead_code)] // consumed by the incoming memory routes
 pub(crate) struct RawBody {
     pub(crate) value: Value,
     pub(crate) raw: Option<Box<RawValue>>,
@@ -67,7 +66,6 @@ pub(crate) struct RawBody {
 
 /// `parse` for routes that must echo or persist original JSON text. Media-type,
 /// size, Content-Length, BOM, empty-body and prototype contracts are identical.
-#[allow(dead_code)] // consumed by the incoming memory routes
 pub(crate) async fn parse_raw(request: Request<Body>) -> Result<RawBody, Response> {
     let BodyText { kind, text } = read_body(request).await?;
     match kind {
