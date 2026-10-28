@@ -321,23 +321,68 @@ impl CutoverServices {
                         let _ = backfill.ensure(crate::history::BACKFILL_DAYS, None).await;
                     });
                 }
-                let usage = crate::http_usage::router(crate::http_usage::UsageDeps {
-                    bus,
-                    state_dir: agents_state_dir.clone(),
-                    usage_state: agents_usage_state.clone(),
-                    claude_home: claude_config,
-                    codex_home: agents_codex_home.clone(),
-                    platform: crate::http_agents::Platform::host(),
-                    parent_env: std::env::vars().collect(),
-                    security_bin: cfg!(target_os = "macos")
-                        .then(|| PathBuf::from("/usr/bin/security")),
-                    network: Arc::new(crate::http_usage::NativeUsageNetwork),
-                    clock: Arc::new(|| {
-                        std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .map_or(0, |elapsed| elapsed.as_millis() as i64)
-                    }),
+                let anchor_core = Arc::new(crate::window_anchor_host::AnchorCore {
+                    anchor: runtime.anchor.clone(),
+                    bus: bus.clone(),
+                    state_path: agents_state_dir.join("window-anchor.json"),
+                    telemetry_path: agents_usage_state.join("window-anchor-runs.jsonl"),
                 });
+                let anchor_runner_deps = crate::prompt_run::PromptRunDeps {
+                    claude_bin: claude_bin.clone(),
+                    ollama_bin: ollama_bin.clone(),
+                    codex_bin: codex_bin.clone(),
+                    state_dir: agents_state_dir.clone(),
+                    env: std::env::vars().collect(),
+                };
+                let (usage, usage_handle) =
+                    crate::http_usage::router_with_handle(crate::http_usage::UsageDeps {
+                        bus,
+                        state_dir: agents_state_dir.clone(),
+                        usage_state: agents_usage_state.clone(),
+                        claude_home: claude_config,
+                        codex_home: agents_codex_home.clone(),
+                        platform: crate::http_agents::Platform::host(),
+                        parent_env: std::env::vars().collect(),
+                        security_bin: cfg!(target_os = "macos")
+                            .then(|| PathBuf::from("/usr/bin/security")),
+                        network: Arc::new(crate::http_usage::NativeUsageNetwork),
+                        clock: Arc::new(|| {
+                            std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map_or(0, |elapsed| elapsed.as_millis() as i64)
+                        }),
+                    });
+                // Timers and fire-and-forget actions need tokio; plain router
+                // construction outside a runtime keeps the inert host.
+                let anchor_host: Arc<dyn crate::http_utilities::AnchorHost> =
+                    match tokio::runtime::Handle::try_current() {
+                        Ok(handle) => {
+                            let refresh: crate::window_anchor_host::UsageRefresh =
+                                Arc::new(move |provider: &str| {
+                                    let usage_handle = usage_handle.clone();
+                                    let provider = provider.to_owned();
+                                    Box::pin(async move { usage_handle.refresh(&provider).await })
+                                });
+                            let host = crate::window_anchor_host::NativeAnchorHost::new(
+                                anchor_core,
+                                handle.clone(),
+                                refresh,
+                                crate::window_anchor_host::native_runner(
+                                    anchor_runner_deps,
+                                    agents_state_dir.join("models.json"),
+                                    handle,
+                                ),
+                                Arc::new(|| {
+                                    std::time::SystemTime::now()
+                                        .duration_since(std::time::UNIX_EPOCH)
+                                        .map_or(0, |elapsed| elapsed.as_millis() as i64)
+                                }),
+                            );
+                            host.subscribe_usage();
+                            host
+                        }
+                        Err(_) => Arc::new(crate::lifecycle::DeferredAnchorHost),
+                    };
                 let utilities = crate::http_utilities::router(crate::http_utilities::UtilityDeps {
                     registry: runtime.registry.clone(),
                     anchor: runtime.anchor.clone(),
@@ -352,7 +397,7 @@ impl CutoverServices {
                         .map(PathBuf::from)
                         .unwrap_or_else(|| PathBuf::from("C:\\Windows")),
                     spawn_detached: spawn_detached.clone(),
-                    anchor_host: Arc::new(crate::lifecycle::DeferredAnchorHost),
+                    anchor_host,
                 });
                 let agents = crate::http_agents::router(crate::http_agents::AgentsDeps {
                     registry: runtime.registry.clone(),

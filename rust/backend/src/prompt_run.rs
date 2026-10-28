@@ -138,7 +138,7 @@ fn codex_answer(
     })
 }
 
-fn run_blocking(
+pub(crate) fn run_blocking(
     deps: &PromptRunDeps,
     group: &str,
     model_id: &str,

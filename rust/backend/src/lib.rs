@@ -125,6 +125,7 @@ pub mod usage_snapshot;
 pub mod wiki_read;
 pub mod wiki_root;
 pub mod window_anchor;
+pub mod window_anchor_host;
 pub mod ws_filters;
 
 const FILE_CAP: usize = 2000;

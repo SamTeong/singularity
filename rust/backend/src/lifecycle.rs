@@ -366,9 +366,8 @@ fn init_anchor(paths: &AppPaths, bus: &Bus) -> window_anchor::Service {
     service
 }
 
-/// `AnchorHost` for the native daemon: the window-anchor routes answer and
-/// persist, but no native timer, anchor prompt or live usage refresh exists.
-// shortcut: anchor automation stays Node-only (init already skips `arm_timer`); port with the timer lane.
+/// Inert `AnchorHost` for routers built outside a tokio runtime (unit-test
+/// construction); the serving daemon uses `window_anchor_host::NativeAnchorHost`.
 pub(crate) struct DeferredAnchorHost;
 
 impl crate::http_utilities::AnchorHost for DeferredAnchorHost {

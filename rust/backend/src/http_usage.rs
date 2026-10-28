@@ -140,10 +140,30 @@ pub struct UsageDeps {
     pub clock: Arc<dyn Fn() -> i64 + Send + Sync>,
 }
 
+// VERIFY: usage-handle
+/// A cloneable handle onto the cache shared with the routes, so a non-HTTP
+/// caller can force a pull without going through the route (`UsageHandle`).
+#[derive(Clone)]
+pub struct UsageHandle(Arc<UsageState>);
+
+impl UsageHandle {
+    /// Forces one lane's pull and returns the full document, exactly like
+    /// `GET /api/usage?force=1&source=<provider>`. `BusEvent::Usage` is published
+    /// before this returns.
+    pub async fn refresh(&self, provider: &str) -> Result<Value, String> {
+        self.0.clone().get_usage(true, &[provider.to_owned()]).await
+    }
+}
+
 // VERIFY: usage-router
 /// Mounts `/api/usage` and `/api/usage/history`. The outer server layer owns auth,
 /// origin and token checks.
 pub fn router(deps: UsageDeps) -> Router {
+    router_with_handle(deps).0
+}
+
+/// `router` plus the handle sharing its cache, for callers that also force pulls.
+pub fn router_with_handle(deps: UsageDeps) -> (Router, UsageHandle) {
     let state = Arc::new(UsageState {
         bus: deps.bus,
         state_dir: deps.state_dir,
@@ -164,10 +184,11 @@ pub fn router(deps: UsageDeps) -> Router {
         codex: AsyncMutex::new(CodexSlot::default()),
         last_emitted: Mutex::new(None),
     });
-    Router::new()
+    let router = Router::new()
         .route("/api/usage", get(usage))
         .route("/api/usage/history", get(usage_history))
-        .with_state(state)
+        .with_state(state.clone());
+    (router, UsageHandle(state))
 }
 
 struct UsageState {
@@ -2041,6 +2062,48 @@ mod tests {
             assert_eq!(row["session"]["utilization"].as_f64(), Some(5.0));
 
             shutdown(server).await;
+        });
+    }
+
+    #[test]
+    fn the_usage_handle_forces_a_pull_filters_the_lanes_and_emits() {
+        let fixture = Fixture::new("handle");
+        fixture.write_credentials();
+        let network = Arc::new(StubNetwork::default());
+        let bus = Bus::new();
+        runtime().block_on(async {
+            let seen = Arc::new(Mutex::new(Vec::new()));
+            {
+                let seen = Arc::clone(&seen);
+                bus.subscribe(Arc::new(move |event| {
+                    if let BusEvent::Usage(document) = event {
+                        seen.lock().unwrap().push(document.clone());
+                    }
+                }));
+            }
+            let (_router, handle) =
+                router_with_handle(deps(&fixture, network.clone(), bus.clone()));
+
+            let document = handle.refresh("claude").await.unwrap();
+            assert_eq!(document["claude"]["ok"], true, "{document}");
+            assert_eq!(
+                document["claude"]["session"]["pctUsed"].as_f64(),
+                Some(42.0)
+            );
+            assert!(document["codex"].is_null(), "{document}");
+            assert!(document["ollama"].is_null(), "{document}");
+            assert_eq!(network.claude_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(network.codex_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(network.ollama_calls.load(Ordering::SeqCst), 0);
+
+            // `refresh` is forced: the 60s floor never answers it from cache.
+            fixture.clear_claude_local();
+            let _ = handle.refresh("claude").await.unwrap();
+            assert_eq!(network.claude_calls.load(Ordering::SeqCst), 2);
+
+            let seen = seen.lock().unwrap();
+            assert_eq!(seen.len(), 2, "every forced refresh pushes");
+            assert_eq!(seen[0], document);
         });
     }
 

@@ -21,9 +21,10 @@
 //! - `POST /plans/open` repeats `plans.mjs:12-24` containment here because that
 //!   resolver is private to `http_plans`; the sid grammar and status mapping are
 //!   identical.
-//! - Window-anchor policy lives in [`window_anchor`]; this module applies the
-//!   effects it emits. `save_state`, `append_telemetry` and `emit_snapshot` are
-//!   native (the injected paths plus the registry bus); `arm_timer`/`clear_timer`
+//! - Window-anchor policy lives in [`window_anchor`]; the effect engine lives in
+//!   [`window_anchor_host`] (`submit` applies persistence under the anchor lock,
+//!   `apply` drives the host seams), so the poke route and the daemon-side
+//!   timers/usage subscription share one code path. `arm_timer`/`clear_timer`
 //!   and `run_action` cross into [`AnchorHost`], and an unknown effect is logged
 //!   instead of being dropped silently, like `window-anchor.mjs:135-137`.
 
@@ -44,11 +45,11 @@ use serde_json::{Value, json};
 
 use crate::agent_registry::Registry;
 use crate::agent_wire::{AgentWire, Status};
-use crate::bus::BusEvent;
 use crate::http_agents::{Platform, SpawnDetached};
 use crate::http_body::parse_raw;
 use crate::transcript_service::TranscriptService;
 use crate::window_anchor;
+use crate::window_anchor_host;
 
 /// `SKILLS_CAP` (`server/skills.mjs:19`): per-scope backstop.
 const SKILLS_CAP: usize = 200;
@@ -117,13 +118,11 @@ pub struct UtilityDeps {
 
 struct Inner {
     registry: Arc<Registry>,
-    anchor: Arc<Mutex<window_anchor::Service>>,
+    core: Arc<window_anchor_host::AnchorCore>,
     transcript: Arc<TranscriptService>,
     scope_root: Option<PathBuf>,
     plans_root: Option<PathBuf>,
     claude_projects_root: PathBuf,
-    anchor_state: PathBuf,
-    anchor_telemetry: PathBuf,
     platform: Platform,
     system_root: PathBuf,
     spawn_detached: SpawnDetached,
@@ -144,15 +143,19 @@ pub fn router(deps: UtilityDeps) -> Router {
 }
 
 fn state(deps: UtilityDeps) -> Arc<Inner> {
+    let core = Arc::new(window_anchor_host::AnchorCore {
+        anchor: deps.anchor,
+        bus: deps.registry.bus().clone(),
+        state_path: deps.state_dir.join("window-anchor.json"),
+        telemetry_path: deps.usage_state.join("window-anchor-runs.jsonl"),
+    });
     Arc::new(Inner {
         registry: deps.registry,
-        anchor: deps.anchor,
+        core,
         transcript: deps.transcript,
         scope_root: deps.scope_root,
         plans_root: deps.plans_root,
         claude_projects_root: deps.claude_projects_root,
-        anchor_state: deps.state_dir.join("window-anchor.json"),
-        anchor_telemetry: deps.usage_state.join("window-anchor-runs.jsonl"),
         platform: deps.platform,
         system_root: deps.system_root,
         spawn_detached: deps.spawn_detached,
@@ -340,8 +343,8 @@ fn sid_re() -> &'static Regex {
 /// `window-anchor.mjs:221-224`): the full state, bare.
 async fn window_anchor_get(State(inner): State<Arc<Inner>>) -> Response {
     match tokio::task::spawn_blocking(move || {
-        let response = dispatch(
-            &inner.anchor,
+        let response = window_anchor_host::submit(
+            &inner.core,
             "window_anchor_snapshot",
             &json!({ "now_ms": now_ms() }),
         );
@@ -400,10 +403,10 @@ fn poke_payload(inner: &Inner, provider: &str, force: bool) -> Value {
     if let Some(usage) = usage {
         request["usage"] = usage;
     }
-    let response = dispatch(&inner.anchor, "window_anchor_poke", &request);
-    apply_effects(inner, &response["effects"]);
-    let snapshot = dispatch(
-        &inner.anchor,
+    let response = window_anchor_host::submit(&inner.core, "window_anchor_poke", &request);
+    window_anchor_host::apply(&inner.core, &inner.anchor_host, &response["effects"], true);
+    let snapshot = window_anchor_host::submit(
+        &inner.core,
         "window_anchor_snapshot",
         &json!({ "now_ms": now_ms() }),
     );
@@ -415,54 +418,6 @@ fn poke_payload(inner: &Inner, provider: &str, force: bool) -> Value {
         last
     };
     json!({ "ok": true, "provider": provider, "result": result })
-}
-
-fn dispatch(anchor: &Arc<Mutex<window_anchor::Service>>, op: &str, request: &Value) -> Value {
-    let mut service = anchor.lock().unwrap_or_else(|error| error.into_inner());
-    service.dispatch(op, request)
-}
-
-/// `applyEffects` (`window-anchor.mjs:111-140`). This port is synchronous: the
-/// host callbacks own whatever waiting they need, so `awaitActions` has no
-/// separate case. `run_action` completions are dispatched back into the policy
-/// service and their own effects applied, exactly like `runAction`.
-fn apply_effects(inner: &Inner, effects: &Value) {
-    for effect in effects.as_array().into_iter().flatten() {
-        match effect["type"].as_str() {
-            Some("append_telemetry") => {
-                let _ = window_anchor::append_telemetry(
-                    &inner.anchor_telemetry.to_string_lossy(),
-                    &effect["record"],
-                );
-            }
-            Some("save_state") => {
-                let _ =
-                    window_anchor::save(&inner.anchor_state.to_string_lossy(), &effect["state"]);
-            }
-            Some("emit_snapshot") => {
-                inner
-                    .registry
-                    .bus()
-                    .emit(&BusEvent::WindowAnchor(effect["snapshot"].clone()));
-            }
-            Some("arm_timer") | Some("clear_timer") => inner.anchor_host.schedule(effect),
-            Some("run_action") => {
-                let request = match inner.anchor_host.run_action(effect) {
-                    Ok(fields) => fields,
-                    Err(error) => json!({
-                        "action_id": effect["action_id"],
-                        "provider": effect["provider"],
-                        "outcome": "error",
-                        "error": error,
-                        "ended_at_ms": now_ms(),
-                    }),
-                };
-                let response = dispatch(&inner.anchor, "window_anchor_action_result", &request);
-                apply_effects(inner, &response["effects"]);
-            }
-            other => eprintln!("window-anchor effect ignored: {other:?}"),
-        }
-    }
 }
 
 // VERIFY: utilities-subagents
