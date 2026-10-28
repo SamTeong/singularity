@@ -22,6 +22,212 @@ pub struct HttpServices {
     pub status: crate::status::StatusService,
     pub memory: Option<crate::http_memory_root::MemoryServices>,
     pub config: Option<ConfigServices>,
+    pub cutover: Option<CutoverServices>,
+}
+
+/// Inputs for the TASK-42 cutover routers (shell, capabilities, hooks, rules,
+/// explorer, skills, wiki, transcripts, model prices, projects).
+#[derive(Clone)]
+pub struct CutoverServices {
+    pub paths: crate::app_paths::AppPaths,
+    pub home: PathBuf,
+    pub codex_home: PathBuf,
+    pub cwd: PathBuf,
+    pub drive_cwds: Vec<(u16, PathBuf)>,
+    pub dist_dir: PathBuf,
+    pub display_home: String,
+    pub rules_reference_dir: PathBuf,
+    pub git_bin: String,
+    pub git_timeout_ms: u64,
+    pub review_dir: Option<PathBuf>,
+    pub claude_bin: Option<PathBuf>,
+    pub ollama_bin: Option<PathBuf>,
+    pub codex_bin: Option<PathBuf>,
+    pub scope_root: Option<PathBuf>,
+    pub plans_available: bool,
+    pub token_available: bool,
+}
+
+/// `/api/projects/summary`'s LLM rung until the native one-shot runner lands.
+// shortcut: always errors (Node runs the CLI), replace with prompt_run in registry slice G.
+struct NoSummaryCall;
+
+impl crate::http_projects::SummaryCall for NoSummaryCall {
+    fn call<'a>(
+        &'a self,
+        _prompt: &'a str,
+        _model: &'a crate::http_projects::SummaryModel,
+    ) -> std::pin::Pin<Box<dyn Future<Output = Result<String, String>> + Send + 'a>> {
+        Box::pin(async { Err("summariser not available in the native daemon".to_owned()) })
+    }
+}
+
+/// No live agents yet; the native registry replaces this in registry slice C.
+struct NoRegistry;
+
+impl crate::http_transcripts::TranscriptRegistry for NoRegistry {}
+
+impl CutoverServices {
+    fn from_env(paths: crate::app_paths::AppPaths, config: &ConfigServices) -> Self {
+        let env = |key: &str| std::env::var_os(key).filter(|value| !value.is_empty());
+        let bin = |key: &str| crate::http_capabilities::resolve_bin(env(key).as_deref());
+        let rules_reference_dir = match env("SING_RULES_REF") {
+            Some(value) => crate::app_paths::resolve_from(&PathBuf::from(value), &config.cwd),
+            None => config.home.join(".agents").join("rules-reference"),
+        };
+        Self {
+            dist_dir: config.cwd.join("web").join("dist"),
+            display_home: crate::http_shell::display_home()
+                .unwrap_or_else(|_| config.home.to_string_lossy().into_owned()),
+            rules_reference_dir,
+            git_bin: env("GIT_BIN")
+                .map(|value| value.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "git".to_owned()),
+            // `Number(SING_GIT_TIMEOUT_MS) || 10_000`
+            git_timeout_ms: env("SING_GIT_TIMEOUT_MS")
+                .and_then(|value| value.to_str()?.trim().parse::<u64>().ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(10_000),
+            review_dir: env("PROJECT_REVIEW_DIR").map(PathBuf::from),
+            claude_bin: bin("CLAUDE_BIN"),
+            ollama_bin: bin("OLLAMA_BIN"),
+            codex_bin: bin("CODEX_BIN"),
+            scope_root: env("SING_SCOPE_ROOT").map(PathBuf::from),
+            plans_available: env("SING_PLANS_ROOT").is_some(),
+            token_available: env("SING_TOKEN").is_some(),
+            paths,
+            home: config.home.clone(),
+            codex_home: config.codex_home.clone(),
+            cwd: config.cwd.clone(),
+            drive_cwds: config.drive_cwds.clone(),
+        }
+    }
+
+    /// The routers plus the shell fallback that replaces the JSON 404.
+    fn routers(self, policy: &HttpPolicy) -> (Router, Option<Router>) {
+        let Self {
+            paths,
+            home,
+            codex_home,
+            cwd,
+            drive_cwds,
+            dist_dir,
+            display_home,
+            rules_reference_dir,
+            git_bin,
+            git_timeout_ms,
+            review_dir,
+            claude_bin,
+            ollama_bin,
+            codex_bin,
+            scope_root,
+            plans_available,
+            token_available,
+        } = self;
+        let state_dir = paths.state_dir.clone();
+        let backups_dir = paths.backups_dir.clone();
+        let locale = crate::memory_collation::system_locale();
+        // One queue for hook and rule file writes, like Node's single bridge queue.
+        let file_lock = Arc::new(Mutex::new(()));
+        let models_path = state_dir.join("models.json").to_string_lossy().into_owned();
+        let routes = Router::new()
+            .merge(crate::http_shell::router(
+                policy.clone(),
+                dist_dir.clone(),
+                display_home.clone(),
+            ))
+            .merge(crate::http_capabilities::router(
+                crate::http_capabilities::CapabilitiesDeps {
+                    state_dir: state_dir.clone(),
+                    home: home.clone(),
+                    cwd: cwd.clone(),
+                    drive_cwds: drive_cwds.clone(),
+                    codex_home: codex_home.clone(),
+                    ollama_bin: ollama_bin.clone(),
+                    codex_bin: codex_bin.clone(),
+                    scope_root,
+                    plans_available,
+                    token_available,
+                },
+            ))
+            .merge(crate::http_hooks::router(
+                state_dir.clone(),
+                home.clone(),
+                cwd.clone(),
+                drive_cwds.clone(),
+                backups_dir.clone(),
+                locale.clone(),
+                Arc::new(Mutex::new(())),
+                file_lock.clone(),
+            ))
+            .merge(crate::http_rules::router(
+                state_dir.clone(),
+                home.clone(),
+                cwd.clone(),
+                drive_cwds.clone(),
+                rules_reference_dir,
+                Arc::new(Mutex::new(())),
+                file_lock,
+            ))
+            .merge(crate::http_fs::router(
+                state_dir.clone(),
+                backups_dir.clone(),
+                locale,
+            ))
+            .merge(crate::http_skills::router(
+                state_dir.clone(),
+                home.clone(),
+                backups_dir,
+                Arc::new(Mutex::new(())),
+            ))
+            .merge(crate::http_wiki::router(
+                state_dir.clone(),
+                home.clone(),
+                cwd.clone(),
+                drive_cwds.clone(),
+                Arc::new(Mutex::new(())),
+            ))
+            .merge(crate::http_transcripts::router(
+                crate::http_transcripts::TranscriptHost {
+                    state_dir: state_dir.clone(),
+                    claude_home: home.join(".claude"),
+                    codex_home,
+                    usage_state: paths.usage_skill_state.clone(),
+                    model_catalog: Arc::new(move || {
+                        crate::models::get(&models_path)["models"]
+                            .as_array()
+                            .cloned()
+                            .unwrap_or_default()
+                    }),
+                    registry: Arc::new(NoRegistry),
+                },
+            ))
+            .merge(crate::http_model_prices::router(
+                paths.usage_skill_state.join("pricing.json"),
+            ))
+            .merge(crate::http_projects::router(
+                crate::http_projects::ProjectsDeps {
+                    state_dir,
+                    cache_dir: paths.cache_dir,
+                    home,
+                    cwd,
+                    drive_cwds,
+                    git_bin,
+                    git_timeout_ms,
+                    review_dir,
+                    claude_bin,
+                    ollama_bin,
+                    codex_bin,
+                    summary_call: Arc::new(NoSummaryCall),
+                },
+            ));
+        // `hasShell`: without a built web/dist Node keeps a plain 404 for unknown paths.
+        // shortcut: `/` and `/assets/*` stay mounted without dist (500, Node 404); unbuilt dist is dev-only.
+        let fallback = dist_dir
+            .exists()
+            .then(|| crate::http_shell::fallback(policy.clone(), dist_dir, display_home));
+        (routes, fallback)
+    }
 }
 
 /// Host paths the Claude and Codex config editor routes share.
@@ -119,6 +325,7 @@ impl HttpServices {
             status: crate::status::StatusService::new(),
             memory: None,
             config: None,
+            cutover: None,
         }
     }
 
@@ -154,10 +361,19 @@ impl HttpServices {
             services.state_dir.clone(),
             backups_dir.clone(),
         )?);
-        services.config = Some(ConfigServices::from_env(
-            services.state_dir.clone(),
-            backups_dir,
-        )?);
+        let config = ConfigServices::from_env(services.state_dir.clone(), backups_dir)?;
+        // `server/app-dir.mjs` resolves the repo root from its own location; the
+        // daemon starts from the repo root, so cwd stands in for it.
+        let paths = crate::app_paths::AppPaths::resolve(
+            &crate::app_paths::AppEnv::from_process_env(),
+            &config.home,
+            &config.cwd,
+        )
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
+        // `server/migrate-state.mjs` runs before any state reader.
+        crate::state_migration::StateMigration::from_app_paths(&paths).run()?;
+        services.cutover = Some(CutoverServices::from_env(paths, &config));
+        services.config = Some(config);
         if let Some(root) = std::env::var_os("SING_PLANS_ROOT").filter(|value| !value.is_empty()) {
             let root = PathBuf::from(root);
             services.plans_root = Some(if root.is_absolute() {
@@ -179,9 +395,14 @@ pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
         .config
         .map(ConfigServices::router)
         .unwrap_or_default();
-    Router::new()
+    let (cutover, fallback) = match services.cutover {
+        Some(cutover) => cutover.routers(&policy),
+        None => (Router::new(), None),
+    };
+    let router = Router::new()
         .merge(memory)
         .merge(config)
+        .merge(cutover)
         .merge(crate::http_telemetry::router(
             services.sampler,
             services.status,
@@ -189,8 +410,12 @@ pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
         .merge(crate::http_models::router(services.state_dir.clone()))
         .merge(crate::http_plans::router(services.plans_root))
         .merge(crate::http_state::router(services.state_dir))
-        .merge(crate::http_reports::router(services.report_request))
-        .fallback(not_found)
+        .merge(crate::http_reports::router(services.report_request));
+    let router = match fallback {
+        Some(fallback) => router.fallback_service(fallback),
+        None => router.fallback(not_found),
+    };
+    router
         .method_not_allowed_fallback(not_found)
         .layer(middleware::from_fn_with_state(
             policy,
@@ -222,6 +447,7 @@ pub async fn collect_raw_body(body: Body, limit: usize) -> Result<Bytes, axum::E
 }
 
 pub fn run_from_env() -> io::Result<()> {
+    load_dotenv()?;
     let policy = HttpPolicy::from_env()
         .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -233,6 +459,26 @@ pub fn run_from_env() -> io::Result<()> {
         eprintln!("native HTTP listener bound to {}", listener.local_addr()?);
         serve(listener, policy, services, shutdown_signal()).await
     })
+}
+
+/// `node --env-file-if-exists=.env` plus `requireEnv`: file values fill only unset
+/// variables, then every missing required variable fails startup at once.
+fn load_dotenv() -> io::Result<()> {
+    let path = std::path::Path::new(".env");
+    let mut env = crate::env_file::process_env();
+    let before = env.clone();
+    let load = crate::env_file::load_env_file(path, &mut env)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidData, message))?;
+    if let Some(notice) = load.notice(path) {
+        eprintln!("{notice}");
+    }
+    crate::env_file::require_env(&env)
+        .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
+    for (key, value) in env.iter().filter(|(key, _)| !before.contains_key(*key)) {
+        // SAFETY: called once at startup before the runtime spawns any thread.
+        unsafe { std::env::set_var(key, value) };
+    }
+    Ok(())
 }
 
 async fn enforce_transport_policy(
