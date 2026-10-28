@@ -49,7 +49,16 @@ async fn get_theme(State(state): State<Theme>) -> Response {
     let theme = tokio::task::spawn_blocking(move || theme_from_file(&state.settings)).await;
     match theme {
         Ok(theme) => Json(ThemeReply { theme }).into_response(),
-        Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        // Fastify's default 500 envelope; Node never reaches this (claudeTheme catches all).
+        Err(_) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({
+                "statusCode": 500,
+                "error": "Internal Server Error",
+                "message": "Internal Server Error",
+            })),
+        )
+            .into_response(),
     }
 }
 

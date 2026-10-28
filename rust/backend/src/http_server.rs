@@ -196,6 +196,7 @@ pub fn router(policy: HttpPolicy, services: HttpServices) -> Router {
             policy,
             enforce_transport_policy,
         ))
+        .layer(middleware::from_fn(fastify_json_charset))
 }
 
 pub async fn bind(port: u16) -> io::Result<TcpListener> {
@@ -284,6 +285,21 @@ async fn enforce_transport_policy(
     }
 
     next.run(request).await
+}
+
+/// Fastify serializes object payloads as `application/json; charset=utf-8`;
+/// axum's `Json` emits bare `application/json`.
+async fn fastify_json_charset(request: Request<Body>, next: Next) -> Response {
+    let mut response = next.run(request).await;
+    if response.headers().get(header::CONTENT_TYPE)
+        == Some(&HeaderValue::from_static("application/json"))
+    {
+        response.headers_mut().insert(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        );
+    }
+    response
 }
 
 async fn not_found() -> Response {
@@ -386,6 +402,10 @@ mod tests {
                 let response = String::from_utf8(response).unwrap();
                 assert!(response.starts_with("HTTP/1.1 404"), "{response}");
                 assert!(response.contains("{\"error\":\"not found\"}"), "{response}");
+                assert!(
+                    response.contains("content-type: application/json; charset=utf-8\r\n"),
+                    "{response}"
+                );
 
                 stop.send(()).unwrap();
                 server.await.unwrap().unwrap();
@@ -455,6 +475,10 @@ mod tests {
                     let response = String::from_utf8(response).unwrap();
                     assert!(response.starts_with("HTTP/1.1 200"), "{path}: {response}");
                     assert!(response.ends_with(expected), "{path}: {response}");
+                    assert!(
+                        response.contains("content-type: application/json; charset=utf-8\r\n"),
+                        "{path}: {response}"
+                    );
                 }
                 stop.send(()).unwrap();
                 server.await.unwrap().unwrap();
