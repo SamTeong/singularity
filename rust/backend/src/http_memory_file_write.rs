@@ -227,6 +227,16 @@ fn authorized(state: &MemoryFileWrite, path: &[u16], root: &Field) -> bool {
 
 // VERIFY: memory-file-write-order
 fn write(state: &MemoryFileWrite, fields: WriteFields) -> Response {
+    write_with_backup(state, fields, |raw_path, target, backups| {
+        let _ = crate::memory_backup::backup_file(raw_path, target, backups);
+    })
+}
+
+fn write_with_backup(
+    state: &MemoryFileWrite,
+    fields: WriteFields,
+    backup: impl FnOnce(&str, &Path, &Path),
+) -> Response {
     if fields.path.is_null() || fields.content.is_null() {
         return required();
     }
@@ -271,7 +281,7 @@ fn write(state: &MemoryFileWrite, fields: WriteFields) -> Response {
     drop(guard);
     // Best effort: any backup failure is swallowed and the save continues.
     ignore_backup_failure(|| {
-        let _ = crate::memory_backup::backup_file(&backup_path, &target, &state.backups_dir);
+        backup(&backup_path, &target, &state.backups_dir);
     });
     // The Node bridge serializes final memory reads and writes after backup.
     let _guard = state
@@ -1232,6 +1242,34 @@ mod tests {
             );
         });
         assert!(backup_dirs(&fixture.backups()).is_empty());
+    }
+
+    #[test]
+    fn post_backup_guard_rejects_a_newer_file_before_bridge_validation() {
+        let fixture = Fixture::new();
+        fixture.persist_root(&text(&fixture.root()));
+        let file = fixture.put("proj/memory/a.md", "old");
+        let old = SystemTime::now() - Duration::from_secs(120);
+        let set_time = |time| {
+            File::options()
+                .write(true)
+                .open(&file)
+                .and_then(|file| file.set_times(FileTimes::new().set_modified(time)))
+                .unwrap();
+        };
+        set_time(old);
+        let fields = super::WriteFields {
+            path: super::Field::Text(text(&file).encode_utf16().collect()),
+            content: super::Field::Text(vec![0xd800]),
+            root: super::Field::Text(text(&fixture.root()).encode_utf16().collect()),
+            mtime: super::Field::Other(json!(mtime_ms(&file))),
+            force: false,
+        };
+        let response = super::write_with_backup(&fixture.state(), fields, |_, _, _| {
+            set_time(old + Duration::from_secs(60));
+        });
+        assert_eq!(response.status(), axum::http::StatusCode::CONFLICT);
+        assert_eq!(fs::read_to_string(&file).unwrap(), "old");
     }
 
     #[test]
