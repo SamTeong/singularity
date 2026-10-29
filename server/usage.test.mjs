@@ -32,6 +32,8 @@ let usageRustBackend;
 after(async () => { await usageRustBackend?.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
 const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, setUsageClaudeBackend, setUsageOllamaModeConfigBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
+// The resets lane is its own endpoint; keep it out of every fetch-count assertion below.
+process.env.SING_CODEX_RESETS = '0';
 usageRustBackend = createRustBackend();
 await usageRustBackend.start();
 setUsageNormalizationBackend(usageRustBackend);
@@ -1989,5 +1991,39 @@ test('getUsage: an automated call does not re-emit an unchanged document; a manu
     assert.equal(emits, 2); // always emits, unchanged or not
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('fetchCodexResets: count plus sorted expiries, null on a bad answer', async () => {
+  const { fetchCodexResets } = await import('./usage.mjs');
+  const originalFetch = globalThis.fetch;
+  writeCodexAuth({ access_token: 't', account_id: 'a' });
+  let urlSeen;
+  globalThis.fetch = async (url) => { urlSeen = String(url); return { status: 200, json: async () => ({
+    available_count: 2,
+    credits: [{ expires_at: '2026-12-01T00:00:00Z' }, { expires_at: 1795000000 }, { id: 'no-expiry' }],
+  }) }; };
+  try {
+    const r = await fetchCodexResets();
+    assert.match(urlSeen, /wham\/rate-limit-reset-credits$/);
+    assert.deepEqual(r, { available: 2, expiresAt: [new Date(1795000000 * 1000).toISOString(), '2026-12-01T00:00:00.000Z'].sort() });
+    globalThis.fetch = async () => ({ status: 500, json: async () => ({}) });
+    assert.equal(await fetchCodexResets(), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('getUsage: attaches codex resets and keeps the last count on a failed read', async () => {
+  const codex = async () => ({ ok: true, source: 'codex', plan: 'pro', session: null, weekly: { pctUsed: 1, resetsAt: null, models: [] } });
+  const quiet = { ollama: async () => ({ ok: false, error: 'off' }), claude: async () => ({ ok: false, error: 'off' }), codex };
+  delete process.env.SING_CODEX_RESETS;
+  try {
+    const first = await getUsage({ force: true, sources: ['codex'], fetchers: { ...quiet, codexResets: async () => ({ available: 1, expiresAt: [] }) } });
+    assert.deepEqual(first.codex.resets, { available: 1, expiresAt: [] });
+    const second = await getUsage({ force: true, sources: ['codex'], fetchers: { ...quiet, codexResets: async () => null } });
+    assert.deepEqual(second.codex.resets, { available: 1, expiresAt: [] });
+  } finally {
+    process.env.SING_CODEX_RESETS = '0';
   }
 });

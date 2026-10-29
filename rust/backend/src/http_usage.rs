@@ -77,6 +77,8 @@ const HISTORY_PROVIDERS: [&str; 3] = ["claude", "codex", "ollama"];
 const HISTORY_WINDOWS: [&str; 2] = ["5h", "7d"];
 /// Header timeout handed to the native usage transports (`usage.mjs:68`).
 const REQ_TIMEOUT_MS: u64 = 10_000;
+/// `CODEX_RESETS_TTL_MS` (`usage.mjs`): the resets lane's own refresh floor.
+const CODEX_RESETS_TTL_MS: i64 = 10 * 60_000;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -89,6 +91,12 @@ pub trait UsageNetwork: Send + Sync {
     fn claude_usage<'a>(&'a self, access_token: &'a str) -> BoxFuture<'a, ClaudeUsageResult>;
     fn codex_usage<'a>(&'a self, auth_path: &'a Path) -> BoxFuture<'a, CodexUsageResult>;
     fn ollama_usage(&self) -> BoxFuture<'_, Value>;
+    /// `fetchCodexResets` (`usage.mjs`): `{available, expiresAt[]}` or `None`.
+    /// The default answers `None`, so a stub network never reaches the endpoint.
+    fn codex_resets<'a>(&'a self, _auth_path: &'a Path) -> BoxFuture<'a, Option<Value>> {
+        Box::pin(async { None })
+    }
+
 }
 
 // VERIFY: usage-native-network
@@ -106,6 +114,10 @@ impl UsageNetwork for NativeUsageNetwork {
 
     fn codex_usage<'a>(&'a self, auth_path: &'a Path) -> BoxFuture<'a, CodexUsageResult> {
         Box::pin(async move { codex_usage::fetch_codex_usage(auth_path).await })
+    }
+
+    fn codex_resets<'a>(&'a self, auth_path: &'a Path) -> BoxFuture<'a, Option<Value>> {
+        Box::pin(async move { codex_usage::fetch_codex_resets(auth_path).await })
     }
 
     fn ollama_usage(&self) -> BoxFuture<'_, Value> {
@@ -246,6 +258,7 @@ pub fn router_with_handle(deps: UsageDeps) -> (Router, UsageHandle) {
         ollama: AsyncMutex::new(OllamaSlot::default()),
         claude: AsyncMutex::new(ClaudeSlot::default()),
         codex: AsyncMutex::new(CodexSlot::default()),
+        codex_resets: AsyncMutex::new((0, None)),
         last_emitted: Mutex::new(None),
         history_paused: Mutex::new(None),
     });
@@ -273,6 +286,9 @@ struct UsageState {
     ollama: AsyncMutex<OllamaSlot>,
     claude: AsyncMutex<ClaudeSlot>,
     codex: AsyncMutex<CodexSlot>,
+    /// `cache.codexResets` (`usage.mjs`): last attempt time and last good
+    /// `{available, expiresAt}`, refreshed on its own 10-minute lane.
+    codex_resets: AsyncMutex<(i64, Option<Value>)>,
     /// Last document pushed over the bus, as JSON text (`usage.mjs:936`).
     last_emitted: Mutex<Option<String>>,
     /// `historyPaused` (`usage.mjs:1164`): `{at, error}` while the ollama
@@ -461,11 +477,34 @@ impl UsageState {
         let codex = codex.await.map_err(|_| "usage task failed".to_owned())??;
         let ollama = ollama.await.map_err(|_| "usage task failed".to_owned())??;
         let ollama = ollama.map(|data| self.attach_history_paused(data));
+        let codex = self.attach_codex_resets(codex, force, allow[2], now).await;
         // A full document even for a filtered pull: the client merges it and the
         // excluded lanes answer from cache.
         let result = json!({ "ollama": ollama, "claude": claude, "codex": codex });
         self.publish(&result, force);
         Ok(result)
+    }
+
+    /// The resets lane (`usage.mjs` getUsage): its own endpoint, because a
+    /// complete Stop-hook snapshot keeps the codex lane off the network.
+    /// `SING_CODEX_RESETS=0` switches it off; a failed read keeps the last count.
+    async fn attach_codex_resets(&self, codex: Option<Value>, force: bool, allowed: bool, now: i64) -> Option<Value> {
+        let mut slot = self.codex_resets.lock().await;
+        let enabled = std::env::var("SING_CODEX_RESETS").as_deref() != Ok("0");
+        if enabled && allowed && (force || now - slot.0 >= CODEX_RESETS_TTL_MS) {
+            slot.0 = now;
+            let auth_path = self.codex_home.join("auth.json");
+            if let Some(resets) = self.network.codex_resets(&auth_path).await {
+                slot.1 = Some(resets);
+            }
+        }
+        match (codex, &slot.1) {
+            (Some(Value::Object(mut fields)), Some(resets)) => {
+                fields.insert("resets".into(), resets.clone());
+                Some(Value::Object(fields))
+            }
+            (codex, _) => codex,
+        }
     }
 
     fn publish(&self, result: &Value, force: bool) {
@@ -1786,6 +1825,7 @@ mod tests {
         ollama_calls: AtomicUsize,
         claude: Mutex<ClaudeReply>,
         codex_ok: AtomicBool,
+        resets: Mutex<Option<Value>>,
         ollama: Mutex<Value>,
     }
 
@@ -1810,6 +1850,7 @@ mod tests {
                     }),
                 }),
                 codex_ok: AtomicBool::new(false),
+                resets: Mutex::new(None),
                 ollama: Mutex::new(json!({
                     "ok": false,
                     "source": "ollama",
@@ -1867,6 +1908,11 @@ mod tests {
                     body: Ok(Some(payload)),
                 }
             })
+        }
+
+        fn codex_resets<'a>(&'a self, _auth_path: &'a Path) -> BoxFuture<'a, Option<Value>> {
+            let value = self.resets.lock().unwrap().clone();
+            Box::pin(async move { value })
         }
 
         fn ollama_usage(&self) -> BoxFuture<'_, Value> {
@@ -1989,6 +2035,26 @@ mod tests {
                 "the codex lane asks the seam, which reports no sessions"
             );
 
+            shutdown(server).await;
+        });
+    }
+
+    #[test]
+    fn codex_resets_attach_and_a_failed_read_keeps_the_last_count() {
+        let fixture = Fixture::new("resets");
+        let network = Arc::new(StubNetwork::default());
+        network.codex_ok.store(true, Ordering::SeqCst);
+        *network.resets.lock().unwrap() = Some(json!({ "available": 1, "expiresAt": [] }));
+        runtime().block_on(async {
+            let server = start(deps(&fixture, network.clone(), Bus::new())).await;
+            let url = format!("{}/api/usage?force=1&source=codex", server.0);
+            let (status, body) = get_json(&url).await;
+            assert_eq!(status, 200);
+            assert_eq!(body["codex"]["resets"], json!({ "available": 1, "expiresAt": [] }), "{body}");
+
+            *network.resets.lock().unwrap() = None;
+            let (_, body) = get_json(&url).await;
+            assert_eq!(body["codex"]["resets"], json!({ "available": 1, "expiresAt": [] }), "{body}");
             shutdown(server).await;
         });
     }

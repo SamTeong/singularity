@@ -14,6 +14,7 @@
 // enough — no cross-session file needed.
 // SECURITY: reads full account credentials (browser profile / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
@@ -710,6 +711,40 @@ export async function fetchCodex(force = false) {
   return { ...noCodexData(), error: liveError ?? 'no usable rate limits' };
 }
 
+// Redeemable "usage limit resets" (chatgpt.com Settings ▸ Usage). Separate lane:
+// a complete Stop-hook snapshot answers the codex card without the network, so
+// this count would never refresh if it rode on fetchCodex's live leg.
+const CODEX_RESETS_API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
+const CODEX_RESETS_TTL_MS = 10 * 60_000;
+// shortcut: credits[] was empty when probed, so the expiry key is a guess; pin it once a real credit is seen.
+const RESET_EXPIRY_KEYS = ['expires_at', 'expiration_time', 'expires', 'expiry'];
+
+function resetExpiry(credit) {
+  const v = RESET_EXPIRY_KEYS.map((k) => credit?.[k]).find((x) => x != null);
+  const d = typeof v === 'number' ? new Date(v * 1000) : typeof v === 'string' ? new Date(v) : null;
+  return d && Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+export async function fetchCodexResets() {
+  let auth;
+  try { auth = JSON.parse(readFileSync(CODEX_AUTH_PATH, 'utf8')); }
+  catch { return null; }
+  const token = auth?.tokens?.access_token;
+  const accountId = auth?.tokens?.account_id;
+  if (!token || !accountId) return null;
+  try {
+    const resp = await fetchExternal(CODEX_RESETS_API_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId },
+    }, { timeoutMs: REQ_TIMEOUT_MS });
+    if (resp.status !== 200) return null;
+    const raw = await resp.json();
+    if (!Number.isFinite(raw?.available_count)) return null;
+    const expiresAt = (Array.isArray(raw.credits) ? raw.credits : []).map(resetExpiry).filter(Boolean).sort();
+    return { available: raw.available_count, expiresAt };
+  } catch { return null; }
+}
+
 // ---- Cache + public API -------------------------------------------------------
 // `at` is the timestamp of the last network/heavy-work ATTEMPT for that source
 // (stamped in pull(), success or failure) — the network floor's own clock, not
@@ -719,6 +754,7 @@ const cache = {
   ollama: { data: null, at: 0 },
   claude: { data: null, at: 0, credentialFingerprint: null },
   codex: { data: null, at: 0, credentialFingerprint: null, ignoreCodexSnapshot: false },
+  codexResets: { data: null, at: 0 },
 };
 const SOURCES = ['ollama', 'claude', 'codex'];
 const CLAUDE_RATE_LIMIT_BACKOFF_MS = 5 * 60_000;
@@ -955,7 +991,14 @@ export async function getUsage({ force = false, sources, fetchers } = {}) {
   // every source's reset timer from what it is handed, so a partial document
   // would clear the timers it does not mention and never recreate them, and the
   // ollama slot is what carries historyPaused.
-  const result = { ollama: ollama ? { ...ollama, historyPaused } : null, claude, codex };
+  const resetsSlot = cache.codexResets;
+  // SING_CODEX_RESETS=0 switches the lane off (the usage tests do, so their fetch counts see one endpoint).
+  if (process.env.SING_CODEX_RESETS !== '0' && allow.has('codex') && (force || Date.now() - resetsSlot.at >= CODEX_RESETS_TTL_MS)) {
+    resetsSlot.at = Date.now();
+    // A failed read keeps the last count rather than blanking the badge.
+    resetsSlot.data = (await (fetchers?.codexResets ?? fetchCodexResets)()) ?? resetsSlot.data;
+  }
+  const result = { ollama: ollama ? { ...ollama, historyPaused } : null, claude, codex: codex && resetsSlot.data ? { ...codex, resets: resetsSlot.data } : codex };
   // Manual/forced calls (the Refresh button, force=1) always push — a user who
   // pressed the button waiting on an unchanged reading is not a bug. Automated
   // calls (every 5s/60s sampler tick, idle-debounce, reset timers) only push
