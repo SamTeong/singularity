@@ -117,6 +117,7 @@ export function registerTelemetry(server) {
         fetchedAt: iso(now - 3.6e6), // push-only: last rollout write, can be stale
         session: null,
         weekly: { pctUsed: 8, resetsAt: iso(now + 5 * 86_400_000), models: [] },
+        resets: { available: 2, expiresAt: [iso(now + 7 * 86_400_000), iso(now + 21 * 86_400_000)] },
       },
     };
   });

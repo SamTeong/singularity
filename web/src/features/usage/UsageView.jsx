@@ -156,6 +156,13 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
           </Tooltip>
         )}
         {refreshing && <CircularProgress size={14} sx={{ alignSelf: 'center' }} />}
+        {u?.resets && (
+          <Tooltip slotProps={tipSlots} title={u.resets.expiresAt.length ? <>{u.resets.expiresAt.map((t, i) => <div key={`${t}-${i}`}>Expires {stamp(t)}</div>)}</> : 'No expiry dates reported'}>
+            <Typography data-testid={`${sourceKey}-resets`} sx={{ fontSize: 12, color: 'text.secondary', alignSelf: 'center' }}>
+              {u.resets.available} usage limit reset{u.resets.available === 1 ? '' : 's'} available
+            </Typography>
+          </Tooltip>
+        )}
         <Box sx={{ flex: 1 }} />
         {/* Manual anchor: the daemon pokes regardless of WINDOW_ANCHOR. Hidden
             once the window is anchored — the prompt would just burn tokens
