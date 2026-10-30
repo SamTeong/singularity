@@ -245,6 +245,28 @@ test('codex: model pricing includes same-second transitions but excludes later-s
   }
 });
 
+test('codex: a Stop row spanning several readings keeps its rollout events\' timestamps', () => {
+  rmSync(join(scratch, 'codex'), { recursive: true, force: true });
+  // One long turn: the row at T[0] is only the baseline, the next lands at T[2], past
+  // both readings the turn's spend was measured by.
+  const hook = (ms, input) => ({ fetched_at: local(ms), session: null, weekly: null, session_id: 'thread-l', last_token_usage: null, total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input } });
+  const gauge = (ms, u) => ({ fetched_at: local(ms), session: { utilization: u, resets_at: new Date(RESET).toISOString() } });
+  jsonl(join(STATE, 'codex-usage.jsonl'), [gauge(T[0], 5), hook(T[0] + 61_000, 1000), gauge(T[1], 15), gauge(T[2], 25), hook(T[2] + 61_000, 1300)]);
+  const d = new Date(T[0]);
+  const dir = join(scratch, 'codex', 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
+  const tc = (ms, total, last) => ({ timestamp: new Date(ms).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: total }, last_token_usage: { input_tokens: last } } } });
+  jsonl(join(dir, 'rollout-l.jsonl'), [
+    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: 'thread-l', cwd: join(scratch, 'proj') } },
+    { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6' } },
+    tc(T[0] + 90_000, 1100, 100), tc(T[1] + 90_000, 1300, 200),
+  ]);
+  const doc = getUsageHistory('codex', NOW);
+  // Each interval's rise lands on the event recorded in it; stamping the whole 300 at
+  // the Stop row would leave thread-l at 0 and both rises unattributed.
+  assert.deepEqual(doc.points.map((p) => p.sessions['thread-l']), [0, 10, 20]);
+  assert.deepEqual(doc.points[2].sessions, { 'thread-l': 20, _unattributed: 5 });
+});
+
 test('statusline: appends a row only when cost or 5h % moves; rotates to .1 above 2 MB', () => {
   const sl = join(scratch, 'statusline-state');
   const hist = join(sl, 'cost-history.jsonl');

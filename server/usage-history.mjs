@@ -293,7 +293,7 @@ function codexTurnEvents() {
     if (u.total_tokens < s.base.total_tokens) s.mixed = true;
     const d = (k) => Math.max(0, (u[k] ?? 0) - (s.base[k] ?? 0));
     const cached = d('cached_input_tokens'); // input includes cached, as in parseCodexRollout
-    s.events.push({ t, tok: [Math.max(0, d('input_tokens') - cached), d('output_tokens'), cached, d('cache_write_input_tokens')] });
+    s.events.push({ t, from: s.last, tok: [Math.max(0, d('input_tokens') - cached), d('output_tokens'), cached, d('cache_write_input_tokens')] });
     s.base = u;
     s.last = t;
   }
@@ -301,8 +301,8 @@ function codexTurnEvents() {
 }
 
 // Map sessionId -> {label, events}.
-// `files` = claudeFiles / codexFiles for this window.
-function sessionEvents(provider, since, now, costPoints, files) {
+// `files` = claudeFiles / codexFiles for this window; `cost` = pricer().
+function sessionEvents(provider, since, now, costPoints, files, cost) {
   const out = new Map();
   const add = (id, cwd, events) => {
     // Last 8 chars: UUIDv7 (Codex) ids share their time prefix within a second.
@@ -337,7 +337,18 @@ function sessionEvents(provider, since, now, costPoints, files) {
       add(id, r.cwd, r.events.filter((e) => e.t < s.first + 1000 || e.t >= s.last + 1000));
       // Rows carry no model: price each at the rollout model active at its time.
       const modelAt = (t) => (r.models.findLast((x) => x.t < (Math.floor(t / 1000) + 1) * 1000) ?? r.models[0] ?? r.events[0])?.model ?? '';
-      add(id, null, s.events.map((e) => ({ ...e, model: modelAt(e.t) })));
+      // A row's delta is its whole turn stamped at the Stop time, which on a long turn is
+      // hours after the spend. Its cost splits over the rollout events inside the turn,
+      // which keep their own timestamps; what they do not cover stays at the row.
+      for (const e of s.events) {
+        const inside = r.events.filter((x) => x.t >= e.from + 1000 && x.t < e.t + 1000);
+        const spent = inside.map((x) => cost(modelAt(x.t), x.tok));
+        const sum = spent.reduce((a, b) => a + b, 0);
+        const turn = cost(modelAt(e.t), e.tok);
+        const parts = sum > 0 ? inside.map((x, i) => ({ t: x.t, tok: x.tok, usd: turn * spent[i] / sum })) : [];
+        const rest = turn - parts.reduce((a, p) => a + p.usd, 0);
+        add(id, null, rest > 0 ? [...parts, { t: e.t, tok: e.tok, usd: rest }] : parts);
+      }
     }
     pruneCache(parseCodexRollout, new Set(files.map(([path]) => path)));
     // shortcut: rows whose id joins no rollout in codexFiles' day range are dropped (a
@@ -456,11 +467,12 @@ function buildDoc(provider, windowKey, rows, resetsAt, start, estimated, now, fi
   // Statusline rows (every turn) fill the sparse snapshots: keep this window's (resets_at
   // within 60s: snapshots carry fractions), then collapse consecutive equal readings.
   const costPoints = [];
-  const sessions = sessionEvents(provider, start, now, costPoints, files);
+  const cost = pricer();
+  const sessions = sessionEvents(provider, start, now, costPoints, files, cost);
   if (provider === 'claude') {
     points = [...points, ...costPoints.filter((p) => Math.abs(p.resetsAt - resetsAt) <= 60_000 && p.t >= start && p.t <= resetsAt)]
       .sort((a, b) => a.t - b.t)
       .filter((p, i, a) => p.pct !== a[i - 1]?.pct);
   }
-  return { ...doc, ...attribute(points, sessions, pricer()) };
+  return { ...doc, ...attribute(points, sessions, cost) };
 }
