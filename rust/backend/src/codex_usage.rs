@@ -223,21 +223,30 @@ const RESET_EXPIRY_KEYS: [&str; 4] = ["expires_at", "expiration_time", "expires"
 pub async fn fetch_codex_resets(auth_path: &Path) -> Option<Value> {
     let credentials = load_codex_credentials(auth_path)?;
     match fetch_with_credentials(&credentials, RESETS_URL, HEADER_TIMEOUT).await {
-        CodexUsageResult::Response { status: 200, body: Ok(Some(body)), .. } => parse_resets(&body),
+        CodexUsageResult::Response {
+            status: 200,
+            body: Ok(Some(body)),
+            ..
+        } => parse_resets(&body),
         _ => None,
     }
 }
 
 fn parse_resets(body: &str) -> Option<Value> {
     let raw: Value = serde_json::from_str(body).ok()?;
-    let available = raw.get("available_count").filter(|v| v.is_number())?.clone();
+    let available = raw
+        .get("available_count")
+        .filter(|v| v.is_number())?
+        .clone();
     let mut expires_at: Vec<String> = raw
         .get("credits")
         .and_then(Value::as_array)
         .into_iter()
         .flatten()
         .filter_map(|credit| {
-            let value = RESET_EXPIRY_KEYS.iter().find_map(|key| credit.get(*key).filter(|v| !v.is_null()))?;
+            let value = RESET_EXPIRY_KEYS
+                .iter()
+                .find_map(|key| credit.get(*key).filter(|v| !v.is_null()))?;
             let ms = match value {
                 Value::Number(n) => n.as_f64().map(|s| (s * 1000.0) as i64),
                 Value::String(s) => crate::usage_snapshot::window_anchor_timestamp_ms(s),
@@ -258,9 +267,15 @@ mod resets_tests {
     #[test]
     fn count_plus_sorted_expiries_and_null_on_a_bad_answer() {
         let body = r#"{"available_count":2,"credits":[{"expires_at":"2026-12-01T00:00:00Z"},{"expires_at":1795000000},{"id":"no-expiry"}]}"#;
-        let mut expected = vec![crate::http_usage::iso_ms(1_795_000_000_000), "2026-12-01T00:00:00.000Z".to_owned()];
+        let mut expected = vec![
+            crate::http_usage::iso_ms(1_795_000_000_000),
+            "2026-12-01T00:00:00.000Z".to_owned(),
+        ];
         expected.sort();
-        assert_eq!(parse_resets(body), Some(json!({ "available": 2, "expiresAt": expected })));
+        assert_eq!(
+            parse_resets(body),
+            Some(json!({ "available": 2, "expiresAt": expected }))
+        );
         assert_eq!(parse_resets(r#"{"credits":[]}"#), None);
         assert_eq!(parse_resets("not json"), None);
     }

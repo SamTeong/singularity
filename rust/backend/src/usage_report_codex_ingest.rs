@@ -4,13 +4,13 @@
 //! `_rollout_files` (:78-93), `_thread_id_from_filename` (:94-99), the
 //! `codex-cache.json` cache (:241-266), `_maybe_warn_unknown_model` (:303-311)
 //! and `_append_usage_jsonl` (:324-352). Row production stays in
-//! `usage_report_codex_rows`; this module owns paths, the clock offset and the
+//! `usage_report_codex_rows`; this module owns paths, the local zone and the
 //! `CodexRow` -> `reconcile::Row` mapping.
 //!
-//! Deviations from the Node source: the cache stores this crate's thread
-//! struct (the Node cache is not read or written after the native cutover),
-//! the unknown-model condition is injected as a predicate, and
-//! `epoch_from_iso` accepts RFC 3339 only.
+//! Deviations from the Node source: the cache uses the same camelCase
+//! `codex-cache.json` schema as `codex.mjs`, so the two implementations reuse
+//! each other's entries; the unknown-model condition is injected as a
+//! predicate, and `epoch_from_iso` accepts RFC 3339 only.
 
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -28,6 +28,7 @@ use crate::usage_report_codex_rows::{
 };
 use crate::usage_report_csv::CsvValue;
 use crate::usage_report_reconcile::Row;
+use crate::usage_snapshot::LocalZone;
 
 /// codex.mjs:11.
 const CACHE_VERSION: u32 = 1;
@@ -37,15 +38,15 @@ const USAGE_FILE: &str = "codex-usage.jsonl";
 /// Ingest every Codex rollout under `codex_home` and produce report rows.
 ///
 /// `now` is accepted for the pipeline's uniform signature; `codexIngest` is
-/// clock-free. `local_offset` is the UTC offset in seconds used for the row
-/// timestamp and the `codex-usage.jsonl` `fetched_at`. Errors are returned for
-/// the caller to swallow: the Node caller logs and keeps the pre-existing
-/// Codex rows (stats.mjs:858-870).
+/// clock-free. `local_zone` formats the row timestamp and the
+/// `codex-usage.jsonl` `fetched_at`. Errors are returned for the caller to
+/// swallow: the Node caller logs and keeps the pre-existing Codex rows
+/// (stats.mjs:858-870).
 pub fn codex_ingest(
     codex_home: &Path,
     state_dir: &Path,
     _now: f64,
-    local_offset: i32,
+    local_zone: LocalZone,
     // Row costs: `Some` when the model is priced at those token counts.
     cost_fn: &dyn Fn(&str, f64, f64, f64, f64) -> Option<f64>,
     // The whole `_maybe_warn_unknown_model` condition (codex.mjs:303-311):
@@ -54,7 +55,7 @@ pub fn codex_ingest(
 ) -> io::Result<Vec<Row>> {
     let cache_path = state_dir.join(CACHE_FILE);
     let usage_path = state_dir.join(USAGE_FILE);
-    let local_fmt = |epoch: f64| format_local(epoch, local_offset);
+    let local_fmt = |epoch: f64| format_local(epoch, local_zone);
     let mut cache = load_cache(&cache_path);
 
     let mut threads: Vec<CodexThread> = Vec::new();
@@ -235,8 +236,9 @@ fn epoch_from_iso(text: &str) -> Option<f64> {
 
 /// `fmtLocal` in `local_fmt` (stats.mjs:281-305); an invalid epoch renders
 /// empty because the row field is a string here.
-fn format_local(epoch: f64, local_offset: i32) -> String {
-    let offset = UtcOffset::from_whole_seconds(local_offset).unwrap_or(UtcOffset::UTC);
+fn format_local(epoch: f64, local_zone: LocalZone) -> String {
+    let offset =
+        UtcOffset::from_whole_seconds(local_zone.offset_at(epoch)).unwrap_or(UtcOffset::UTC);
     let Ok(stamp) = OffsetDateTime::from_unix_timestamp(epoch as i64) else {
         return String::new();
     };
@@ -610,7 +612,8 @@ mod tests {
             &rollout_text(ROOT_ID, "gpt-6-sol", 500, 0),
         );
 
-        let rows = codex_ingest(&home, &state, 0.0, 0, &cost, &no_warn).expect("ingest");
+        let rows =
+            codex_ingest(&home, &state, 0.0, LocalZone::Fixed(0), &cost, &no_warn).expect("ingest");
         assert_eq!(rows.len(), 1, "sub thread folds into the root session");
         let row = &rows[0];
         assert_eq!(row.len(), CSV_COLUMNS.len());
@@ -640,7 +643,14 @@ mod tests {
         assert_eq!(threads.len(), 2, "one entry per rollout file");
         assert!(threads.contains_key(ROOT_ID));
         assert!(threads.contains_key(SUB_ID));
-        assert!(threads[ROOT_ID]["res"]["root_id"] == ROOT_ID);
+        // The on-disk shape is `codex.mjs`'s `_new_thread_res`, so the pinned
+        // Node reader can consume a Rust-written entry.
+        assert_eq!(threads[ROOT_ID]["res"]["rootId"], ROOT_ID);
+        assert_eq!(threads[ROOT_ID]["res"]["tokenReadings"][0]["i"], 800.0);
+        assert_eq!(
+            threads[ROOT_ID]["res"]["contextWindowSize"]["size"],
+            200000.0
+        );
 
         let usage = fs::read_to_string(state.join("codex-usage.jsonl")).expect("usage file");
         let lines = usage.lines().collect::<Vec<_>>();
@@ -664,7 +674,8 @@ mod tests {
             &rollout_text(ROOT_ID, "gpt-6-sol", 10, 0),
         );
 
-        let rows = codex_ingest(&home, &state, 0.0, 3600, &cost, &no_warn).expect("ingest");
+        let rows = codex_ingest(&home, &state, 0.0, LocalZone::Fixed(3600), &cost, &no_warn)
+            .expect("ingest");
         assert_eq!(cell(&rows[0], "timestamp"), "2026-01-01 01:00:03");
     }
 
@@ -679,11 +690,13 @@ mod tests {
             &rollout_text(ROOT_ID, "gpt-6-sol", 1000, 200),
         );
 
-        let first = codex_ingest(&home, &state, 0.0, 0, &cost, &no_warn).expect("first ingest");
+        let first = codex_ingest(&home, &state, 0.0, LocalZone::Fixed(0), &cost, &no_warn)
+            .expect("first ingest");
         let cache_before = fs::read(state.join("codex-cache.json")).expect("cache");
         let usage_before = fs::read(state.join("codex-usage.jsonl")).expect("usage");
 
-        let second = codex_ingest(&home, &state, 0.0, 0, &cost, &no_warn).expect("second ingest");
+        let second = codex_ingest(&home, &state, 0.0, LocalZone::Fixed(0), &cost, &no_warn)
+            .expect("second ingest");
         assert_eq!(first, second);
         assert_eq!(
             fs::read(state.join("codex-cache.json")).unwrap(),
@@ -706,10 +719,12 @@ mod tests {
             &format!("rollout-2026-01-01T00-00-00-{ROOT_ID}.jsonl"),
             &rollout_text(ROOT_ID, "gpt-6-sol", 10, 0),
         );
-        codex_ingest(&home, &state, 0.0, 0, &cost, &no_warn).expect("first ingest");
+        codex_ingest(&home, &state, 0.0, LocalZone::Fixed(0), &cost, &no_warn)
+            .expect("first ingest");
 
         fs::remove_file(&path).expect("remove rollout");
-        let rows = codex_ingest(&home, &state, 0.0, 0, &cost, &no_warn).expect("second ingest");
+        let rows = codex_ingest(&home, &state, 0.0, LocalZone::Fixed(0), &cost, &no_warn)
+            .expect("second ingest");
         assert!(rows.is_empty());
 
         let cache: Value = serde_json::from_str(
@@ -736,7 +751,8 @@ mod tests {
         )
         .unwrap();
 
-        let rows = codex_ingest(&home, &state, 0.0, 0, &cost, &no_warn).expect("ingest");
+        let rows =
+            codex_ingest(&home, &state, 0.0, LocalZone::Fixed(0), &cost, &no_warn).expect("ingest");
         assert_eq!(rows.len(), 1);
         let cache: Value = serde_json::from_str(
             &fs::read_to_string(state.join("codex-cache.json")).expect("cache"),
@@ -768,7 +784,8 @@ mod tests {
             .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1))
             .unwrap();
 
-        let rows = codex_ingest(&home, &state, 0.0, 0, &cost, &no_warn).expect("ingest");
+        let rows =
+            codex_ingest(&home, &state, 0.0, LocalZone::Fixed(0), &cost, &no_warn).expect("ingest");
         assert_eq!(rows.len(), 1);
         assert_eq!(
             number(&rows[0], "input_tokens"),
@@ -813,7 +830,8 @@ mod tests {
         // Captures its prefix and is not `Copy`; both `Option::map` sites in
         // `codex_rows_from_threads` must borrow it rather than move it.
         let prefix = String::from("local ");
-        let formatter = move |epoch: f64| format!("{prefix}{}", format_local(epoch, 0));
+        let formatter =
+            move |epoch: f64| format!("{prefix}{}", format_local(epoch, LocalZone::Fixed(0)));
 
         let rows = codex_rows_from_threads(&threads, formatter, &cost);
         assert_eq!(rows.len(), 2, "one row per root session");
@@ -855,7 +873,7 @@ mod tests {
         );
         fs::write(state.join("codex-usage.jsonl"), existing).unwrap();
 
-        codex_ingest(&home, &state, 0.0, 0, &cost, &no_warn).expect("ingest");
+        codex_ingest(&home, &state, 0.0, LocalZone::Fixed(0), &cost, &no_warn).expect("ingest");
         assert_eq!(
             fs::read_to_string(state.join("codex-usage.jsonl")).unwrap(),
             existing,

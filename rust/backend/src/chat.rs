@@ -17,7 +17,7 @@ use crate::transcript_service::{ListOptions, ReadOptions, SessionRow, Transcript
 use crate::usage_auth;
 use reqwest::Response;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json, value::RawValue};
+use serde_json::{Map, Value, json, value::RawValue};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -52,19 +52,22 @@ const RATE_LIMITED_MESSAGE: &str = "rate-limited — try again shortly";
 pub enum ChatFrame {
     #[serde(rename = "chat:delta")]
     Delta {
-        #[serde(rename = "chatId")]
-        chat_id: String,
+        // VERIFY: wave12-chat_raw_id-4 — `chatId: m.chatId` is forwarded as the
+        // caller sent it: JSON.stringify drops `undefined` (absent) and keeps
+        // `""`, `null` and numbers verbatim.
+        #[serde(rename = "chatId", skip_serializing_if = "Option::is_none")]
+        chat_id: Option<Value>,
         text: String,
     },
     #[serde(rename = "chat:done")]
     Done {
-        #[serde(rename = "chatId")]
-        chat_id: String,
+        #[serde(rename = "chatId", skip_serializing_if = "Option::is_none")]
+        chat_id: Option<Value>,
     },
     #[serde(rename = "chat:error")]
     Error {
-        #[serde(rename = "chatId")]
-        chat_id: String,
+        #[serde(rename = "chatId", skip_serializing_if = "Option::is_none")]
+        chat_id: Option<Value>,
         #[serde(rename = "needsAuth", skip_serializing_if = "Option::is_none")]
         needs_auth: Option<bool>,
         msg: String,
@@ -73,36 +76,61 @@ pub enum ChatFrame {
 
 /// The `/ws` `chat` message (`pty-ws.mjs:162-168`, destructured at
 /// `chat.mjs:98`). `scope` defaults to `one`, `history` to `[]`; every other
-/// field is optional.
+/// field is optional. Nothing here is typed further than `Value`, because Node
+/// destructures without validating: a field's type only matters at its use
+/// site, where it either coerces, passes through, or throws a `TypeError`.
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ChatRequest {
-    pub chat_id: String,
-    pub question: String,
-    pub scope: String,
-    pub project: Option<String>,
-    pub id: Option<String>,
-    pub source: Option<String>,
-    pub file: Option<String>,
+    /// VERIFY: wave15-chat-1 — raw `chatId` (`m.chatId`): Node never validates
+    /// it and forwards it unchanged to every frame. `present_raw` keeps a
+    /// present `null`, which serde's `Option` would otherwise read as absent.
+    #[serde(default, deserialize_with = "present_raw")]
+    pub chat_id: Option<Value>,
+    /// Raw `content` for the user turn — `{ role: 'user', content: question }`
+    /// (`chat.mjs:105`) with `content` omitted only when `question` is
+    /// `undefined`; a present `null` is forwarded.
+    #[serde(default, deserialize_with = "present_raw")]
+    pub question: Option<Value>,
+    /// `scope = 'one'` is a default, not a type: Node compares `=== 'one'`, so
+    /// any other JSON value takes the `all` branch.
+    pub scope: Value,
+    /// `project`/`id`/`source`/`file`/`root` are raw: each is coerced or
+    /// rejected only where `chat.mjs`/`sessions.mjs` use it.
+    pub project: Option<Value>,
+    pub id: Option<Value>,
+    pub source: Option<Value>,
+    pub file: Option<Value>,
     /// Turn objects (`{role, content}`) passed straight through to the API.
-    pub history: Vec<Value>,
-    pub root: Option<String>,
+    /// Absent means `[]`; any other non-array (including `null`) throws.
+    #[serde(default, deserialize_with = "present_raw")]
+    pub history: Option<Value>,
+    pub root: Option<Value>,
 }
 
 impl Default for ChatRequest {
     fn default() -> Self {
         Self {
-            chat_id: String::new(),
-            question: String::new(),
-            scope: "one".to_owned(),
+            chat_id: None,
+            question: None,
+            scope: json!("one"),
             project: None,
             id: None,
             source: None,
             file: None,
-            history: Vec::new(),
+            history: None,
             root: None,
         }
     }
+}
+
+/// Keep a present JSON `null` as `Some(Value::Null)`, so it stays
+/// distinguishable from an absent field (Node's `undefined`).
+fn present_raw<'de, D>(deserializer: D) -> Result<Option<Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Value::deserialize(deserializer).map(Some)
 }
 
 /// Everything `chat.mjs` reaches outside itself: the endpoint (so tests can
@@ -215,8 +243,18 @@ pub async fn stream_chat(
         return Ok(());
     };
     let system = format!("{IDENTITY}{}", context_for(&req, deps).await?);
-    let mut messages = req.history.clone();
-    messages.push(json!({ "role": "user", "content": req.question }));
+    // VERIFY: wave15-chat-2 — `const messages = [...history, {...}]`
+    // (`chat.mjs:105`): a string spreads to characters, any other non-array is
+    // a `TypeError` that `pty-ws.mjs:166-167` turns into `chat:error`.
+    let mut messages = history_messages(req.history.as_ref())?;
+    // `{ role: 'user', content: question }` (`chat.mjs:105`): a missing
+    // `question` is `undefined`, which JSON.stringify drops from the body.
+    let mut user_turn = Map::new();
+    user_turn.insert("role".into(), json!("user"));
+    if let Some(content) = req.question.clone() {
+        user_turn.insert("content".into(), content);
+    }
+    messages.push(Value::Object(user_turn));
 
     let body = json!({
         "model": MODEL,
@@ -350,20 +388,27 @@ pub async fn stream_chat(
 
 /// `chat.mjs:41-56` — the block prepended to the identity string.
 async fn context_for(req: &ChatRequest, deps: &ChatDeps) -> Result<String, String> {
-    if req.scope == "one" {
-        if let (Some(project), Some(id)) = (truthy(&req.project), truthy(&req.id)) {
-            let text = session_text(deps, project, id, req).await?;
-            if text.is_empty() {
-                return Ok("\n\nThe selected session transcript is empty.".to_owned());
-            }
-            return Ok(format!(
-                "\n\nYou are answering questions about ONE Claude Code session. Below is its transcript. Cite turns by role when useful.\n\n<session>\n{text}\n</session>"
-            ));
+    // VERIFY: wave15-chat-3 — `scope === 'one' && project && id`: JS truthiness
+    // on the raw values, so `0`, `false`, `null` and `""` take the `all` branch.
+    if req.scope.as_str() == Some("one")
+        && js_truthy_opt(req.project.as_ref())
+        && js_truthy_opt(req.id.as_ref())
+    {
+        let project = req.project.clone().unwrap_or(Value::Null);
+        let id = req.id.clone().unwrap_or(Value::Null);
+        let text = session_text(deps, &project, &id, req).await?;
+        if text.is_empty() {
+            return Ok("\n\nThe selected session transcript is empty.".to_owned());
         }
+        return Ok(format!(
+            "\n\nYou are answering questions about ONE Claude Code session. Below is its transcript. Cite turns by role when useful.\n\n<session>\n{text}\n</session>"
+        ));
     }
     // Scope `all`: a directory of the most recent sessions (metadata only — the
-    // full text of every session will not fit).
-    let rows = list_sessions(deps, req).await?;
+    // full text of every session will not fit). `listSessions` resolves the
+    // root first, so a truthy non-string `root` throws before any read.
+    let root = root_arg(req.root.as_ref())?;
+    let rows = list_sessions(deps, root).await?;
     if rows.is_empty() {
         return Ok("\n\nNo sessions found.".to_owned());
     }
@@ -384,18 +429,47 @@ async fn context_for(req: &ChatRequest, deps: &ChatDeps) -> Result<String, Strin
 /// `sessions.mjs:691-704`: flatten a session into a compact transcript.
 async fn session_text(
     deps: &ChatDeps,
-    project: &str,
-    id: &str,
+    project: &Value,
+    id: &Value,
     req: &ChatRequest,
 ) -> Result<String, String> {
-    let service = Arc::clone(&deps.transcripts);
-    let options = ReadOptions {
-        root: req.root.clone(),
-        source: req.source.clone(),
-        file: req.file.clone(),
+    // VERIFY: wave15-chat-4 — reproduce `readSession` (`sessions.mjs:627-635`)
+    // field by field: `source === 'codex'` is strict, the codex branch reads
+    // neither `project` nor `root`, and only the claude branch coerces `id` and
+    // validates `project` (through `path.join`) and `root`.
+    let (project, id, options) = if is_codex_source(req) {
+        let file = codex_file(req)?;
+        if file.is_none() && !id.is_string() {
+            // `findCodexById` compares the raw value strictly against a string
+            // id, so a non-string can never match: not found, empty transcript.
+            return Ok(String::new());
+        }
+        (
+            js_to_string(project),
+            js_to_string(id),
+            ReadOptions {
+                root: None,
+                source: Some("codex".to_owned()),
+                file,
+            },
+        )
+    } else {
+        // `pathFor` resolves the root before `path.join` rejects a non-string
+        // project (`sessions.mjs:590-600`), so the root error wins; a
+        // separator project reaches the same `resolveRoot` through the
+        // `findById` fallback (`:633-634`), so the root still wins there.
+        let root = root_arg(req.root.as_ref())?;
+        (
+            claude_project(project)?,
+            js_to_string(id),
+            ReadOptions {
+                root,
+                source: None,
+                file: None,
+            },
+        )
     };
-    let project = project.to_owned();
-    let id = id.to_owned();
+    let service = Arc::clone(&deps.transcripts);
     let raw = tokio::task::spawn_blocking(move || service.read(&project, &id, &options))
         .await
         .map_err(|error| error.to_string())?
@@ -436,10 +510,10 @@ async fn session_text(
 }
 
 /// `sessions.mjs:50,473-522` with Node's defaults: `cap: 100`, no live ids.
-async fn list_sessions(deps: &ChatDeps, req: &ChatRequest) -> Result<Vec<SessionRow>, String> {
+async fn list_sessions(deps: &ChatDeps, root: Option<String>) -> Result<Vec<SessionRow>, String> {
     let service = Arc::clone(&deps.transcripts);
     let options = ListOptions {
-        root: req.root.clone(),
+        root,
         cap: 100,
         now_ms: u64::try_from(deps.now_ms()).unwrap_or(0),
         hide_reviews: false,
@@ -479,7 +553,7 @@ fn utc_date(mtime_ms: f64) -> String {
 async fn consume_stream(
     response: &mut Response,
     send: &impl Fn(ChatFrame),
-    chat_id: &str,
+    chat_id: &Option<Value>,
     cancel: &Cancel,
     deadline: tokio::time::Instant,
 ) -> Result<bool, String> {
@@ -586,6 +660,20 @@ impl StreamDecoder {
     }
 }
 
+/// VERIFY: wave12-chat_auth_first-3 — `streamChat` awaits `claudeOauthToken()`
+/// before destructuring the payload (`chat.mjs:98-103`), so a signed-out daemon
+/// answers `needsAuth` for *any* payload shape, even one [`ChatRequest`] cannot
+/// deserialize. The frame carries the raw `chatId`.
+pub(crate) fn auth_preflight(deps: &ChatDeps, chat_id: Option<Value>) -> Option<ChatFrame> {
+    oauth_access_token(deps)
+        .is_none()
+        .then(|| ChatFrame::Error {
+            chat_id,
+            needs_auth: Some(true),
+            msg: NO_TOKEN_MESSAGE.to_owned(),
+        })
+}
+
 /// `usage.mjs:536-542` `claudeOauthToken()`: the file wins, the darwin Keychain
 /// is the fallback, and an expired token reads as signed out.
 fn oauth_access_token(deps: &ChatDeps) -> Option<String> {
@@ -645,9 +733,119 @@ fn epoch_ms() -> i64 {
         .unwrap_or(0)
 }
 
-/// JS falsiness for the optional request fields (`project`, `id`).
-fn truthy(value: &Option<String>) -> Option<&str> {
-    value.as_deref().filter(|value| !value.is_empty())
+/// JS truthiness of an optional raw request field (absent = `undefined`).
+fn js_truthy_opt(value: Option<&Value>) -> bool {
+    value.is_some_and(js_truthy)
+}
+
+/// `String(value)` for the template-literal and `RegExp.test` coercions
+/// (`${id}.jsonl`, `SUBAGENT_ID.test(id)` — `sessions.mjs:590-595`).
+fn js_to_string(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(flag) => flag.to_string(),
+        Value::Number(number) => number.to_string(),
+        Value::String(text) => text.clone(),
+        Value::Array(items) => items
+            .iter()
+            .map(|item| match item {
+                Value::Null => String::new(),
+                other => js_to_string(other),
+            })
+            .collect::<Vec<_>>()
+            .join(","),
+        Value::Object(_) => "[object Object]".to_owned(),
+    }
+}
+
+/// V8's `Received ...` tail for a non-string `path` argument.
+fn js_received(value: &Value) -> String {
+    match value {
+        Value::Null => "null".to_owned(),
+        Value::Bool(flag) => format!("type boolean ({flag})"),
+        Value::Number(number) => format!("type number ({number})"),
+        Value::Array(_) => "an instance of Array".to_owned(),
+        Value::Object(_) => "an instance of Object".to_owned(),
+        Value::String(_) => "type string".to_owned(),
+    }
+}
+
+/// `resolveRoot(raw)` (`sessions.mjs:381-385`): a truthy non-string throws
+/// (`p.startsWith is not a function`); every falsy value uses the default root.
+/// The text is `String(e)` as `pty-ws.mjs:167` forwards it.
+fn root_arg(raw: Option<&Value>) -> Result<Option<String>, String> {
+    match raw {
+        Some(Value::String(text)) if !text.is_empty() => Ok(Some(text.clone())),
+        // VERIFY: wave17-chat-2 — `msg: String(e)` (`pty-ws.mjs:167`): V8's
+        // `Error.prototype.toString` prefixes the error name, not just `.message`.
+        Some(value) if js_truthy(value) => {
+            Err("TypeError: p.startsWith is not a function".to_owned())
+        }
+        _ => Ok(None),
+    }
+}
+
+/// `source === 'codex'` (`sessions.mjs:628`): strict, no coercion.
+fn is_codex_source(req: &ChatRequest) -> bool {
+    req.source.as_ref().and_then(Value::as_str) == Some("codex")
+}
+
+/// `pathForCodex(file)` (`sessions.mjs:224-230`): a truthy non-string fails
+/// `path.resolve`'s string validation, which surfaces as `chat:error` with
+/// `String(e)` — Node's error name and `code` included.
+fn codex_file(req: &ChatRequest) -> Result<Option<String>, String> {
+    match req.file.as_ref() {
+        Some(Value::String(file)) if !file.is_empty() => Ok(Some(file.clone())),
+        // VERIFY: wave17-chat-3 — measured `String(e)` from
+        // `resolve(CODEX_HOME, file)`: `TypeError [ERR_INVALID_ARG_TYPE]: ...`.
+        Some(value) if js_truthy(value) => Err(format!(
+            "TypeError [ERR_INVALID_ARG_TYPE]: The \"paths[1]\" argument must be of type string. Received {}",
+            js_received(value)
+        )),
+        _ => Ok(None),
+    }
+}
+
+/// `pathFor` (`sessions.mjs:590-595`): `/[\\/]/.test(project)` coerces the value
+/// *before* `path.join` validates it, so a non-string whose `String()` holds a
+/// separator makes `pathFor` return null; `readSession` then falls through to
+/// `findById` — the same miss path as a stale project slug, not a throw. Any
+/// other non-string reaches `path.join` and fails its string check.
+fn claude_project(project: &Value) -> Result<String, String> {
+    match project {
+        Value::String(text) => Ok(text.clone()),
+        other => {
+            // VERIFY: wave17-chat-5 — M2: separator in the coerced value →
+            // `pathFor` returns null. Handing the coerced string to the
+            // transcript service reproduces that exactly: its `path_for`
+            // rejects separators and then runs its own `findById` scan.
+            let coerced = js_to_string(other);
+            if coerced.contains(['/', '\\']) {
+                return Ok(coerced);
+            }
+            // VERIFY: wave17-chat-4 — measured `String(e)` from
+            // `join(root, project, ...)`: the name and code are both present.
+            Err(format!(
+                "TypeError [ERR_INVALID_ARG_TYPE]: The \"path\" argument must be of type string. Received {}",
+                js_received(other)
+            ))
+        }
+    }
+}
+
+/// `[...history]` (`chat.mjs:105`): absent → `[]`, a string spreads to its
+/// characters, every other non-array throws. `String(e)` names the spread
+/// operand, so the text is constant for every non-iterable value.
+fn history_messages(raw: Option<&Value>) -> Result<Vec<Value>, String> {
+    match raw {
+        None => Ok(Vec::new()),
+        Some(Value::Array(items)) => Ok(items.clone()),
+        Some(Value::String(text)) => Ok(text.chars().map(|ch| json!(ch.to_string())).collect()),
+        // VERIFY: wave17-chat-1 — `String(e)` for `[...history, {...}]` is
+        // `TypeError: history is not iterable` for every non-iterable value
+        // (V8 uses the source text of the spread operand, not the value).
+        Some(_) => Err("TypeError: history is not iterable".to_owned()),
+    }
 }
 
 fn js_truthy(value: &Value) -> bool {
@@ -731,7 +929,7 @@ mod tests {
     use axum::extract::State;
     use axum::http::StatusCode;
     use axum::routing::post;
-    use serde_json::json;
+    use serde_json::{Value, json};
     use std::net::Ipv4Addr;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -823,8 +1021,8 @@ mod tests {
 
     fn question(chat_id: &str) -> ChatRequest {
         ChatRequest {
-            chat_id: chat_id.to_owned(),
-            question: "hello".to_owned(),
+            chat_id: Some(json!(chat_id)),
+            question: Some(json!("hello")),
             ..ChatRequest::default()
         }
     }
@@ -885,24 +1083,22 @@ mod tests {
 
     #[test]
     fn frame_json_matches_the_node_objects() {
+        let c1 = || Some(json!("c1"));
         assert_eq!(
             serde_json::to_string(&ChatFrame::Delta {
-                chat_id: "c1".into(),
+                chat_id: c1(),
                 text: "hi".into()
             })
             .unwrap(),
             r#"{"t":"chat:delta","chatId":"c1","text":"hi"}"#
         );
         assert_eq!(
-            serde_json::to_string(&ChatFrame::Done {
-                chat_id: "c1".into()
-            })
-            .unwrap(),
+            serde_json::to_string(&ChatFrame::Done { chat_id: c1() }).unwrap(),
             r#"{"t":"chat:done","chatId":"c1"}"#
         );
         assert_eq!(
             serde_json::to_string(&ChatFrame::Error {
-                chat_id: "c1".into(),
+                chat_id: c1(),
                 needs_auth: None,
                 msg: "HTTP 503".into()
             })
@@ -911,12 +1107,38 @@ mod tests {
         );
         assert_eq!(
             serde_json::to_string(&ChatFrame::Error {
-                chat_id: "c1".into(),
+                chat_id: c1(),
                 needs_auth: Some(true),
                 msg: "auth expired — re-run `claude` to log in".into()
             })
             .unwrap(),
             r#"{"t":"chat:error","chatId":"c1","needsAuth":true,"msg":"auth expired — re-run `claude` to log in"}"#
+        );
+        // VERIFY: wave12-chat_raw_id-4 — JSON.stringify keeps `""`, `null` and
+        // numbers, and drops only `undefined` (which has no JSON spelling).
+        let raw = |chat_id: Option<serde_json::Value>| {
+            serde_json::to_string(&ChatFrame::Error {
+                chat_id,
+                needs_auth: Some(true),
+                msg: "needs auth".into(),
+            })
+            .unwrap()
+        };
+        assert_eq!(
+            raw(Some(json!(""))),
+            r#"{"t":"chat:error","chatId":"","needsAuth":true,"msg":"needs auth"}"#
+        );
+        assert_eq!(
+            raw(Some(json!(null))),
+            r#"{"t":"chat:error","chatId":null,"needsAuth":true,"msg":"needs auth"}"#
+        );
+        assert_eq!(
+            raw(Some(json!(42))),
+            r#"{"t":"chat:error","chatId":42,"needsAuth":true,"msg":"needs auth"}"#
+        );
+        assert_eq!(
+            raw(None),
+            r#"{"t":"chat:error","needsAuth":true,"msg":"needs auth"}"#
         );
     }
 
@@ -924,9 +1146,94 @@ mod tests {
     fn request_defaults_match_node_destructuring() {
         let request: ChatRequest =
             serde_json::from_value(json!({ "chatId": "c", "question": "q" })).unwrap();
-        assert_eq!(request.scope, "one");
-        assert!(request.history.is_empty());
+        assert_eq!(request.scope, json!("one"));
+        assert_eq!(request.history, None);
         assert_eq!(request.project, None);
+        assert_eq!(request.chat_id, Some(json!("c")));
+        assert_eq!(request.question, Some(json!("q")));
+        // An absent `chatId`/`question` stays absent (Node's `undefined`).
+        let empty: ChatRequest = serde_json::from_value(json!({})).unwrap();
+        assert_eq!(empty.chat_id, None);
+        assert_eq!(empty.question, None);
+        assert_eq!(empty.scope, json!("one"));
+        // VERIFY: wave15-chat-1 — a present `null` is not `undefined`: serde's
+        // `Option` would collapse it to `None`, `present_raw` keeps it.
+        let nulls: ChatRequest = serde_json::from_value(json!({
+            "chatId": null, "question": null, "history": null, "scope": null,
+        }))
+        .unwrap();
+        assert_eq!(nulls.chat_id, Some(Value::Null));
+        assert_eq!(nulls.question, Some(Value::Null));
+        assert_eq!(nulls.history, Some(Value::Null));
+        assert_eq!(nulls.scope, Value::Null);
+    }
+
+    #[test]
+    fn raw_fields_follow_the_node_coercions() {
+        use super::{claude_project, codex_file, history_messages, js_to_string, root_arg};
+        let request = |fields: Value| serde_json::from_value::<ChatRequest>(fields).unwrap();
+
+        // `id` coerces through the template literal / `RegExp.test`.
+        assert_eq!(js_to_string(&json!(9)), "9");
+        assert_eq!(js_to_string(&json!(null)), "null");
+        assert_eq!(js_to_string(&json!([1, null, "a"])), "1,,a");
+        assert_eq!(js_to_string(&json!({ "k": 1 })), "[object Object]");
+
+        // `project` is rejected by `path.join` only when it is truthy; the text
+        // is V8's `String(e)`, which `pty-ws.mjs:167` forwards.
+        assert_eq!(
+            claude_project(&json!(5)).unwrap_err(),
+            "TypeError [ERR_INVALID_ARG_TYPE]: The \"path\" argument must be of type string. Received type number (5)"
+        );
+        assert!(claude_project(&json!({})).is_err());
+        assert_eq!(claude_project(&json!("demo")).unwrap(), "demo");
+        // M2: `/[\\/]/.test(project)` coerces first, so a separator in the
+        // coerced value returns null from `pathFor` rather than throwing.
+        assert_eq!(claude_project(&json!(["a/b"])).unwrap(), "a/b");
+        assert_eq!(claude_project(&json!([["x\\y"]])).unwrap(), "x\\y");
+
+        // `root`: truthy non-string throws, falsy takes the default root.
+        assert_eq!(
+            root_arg(Some(&json!(true))).unwrap_err(),
+            "TypeError: p.startsWith is not a function"
+        );
+        assert_eq!(root_arg(Some(&json!(0))).unwrap(), None);
+        assert_eq!(root_arg(Some(&json!(false))).unwrap(), None);
+        assert_eq!(root_arg(Some(&json!(null))).unwrap(), None);
+        assert_eq!(root_arg(Some(&json!(""))).unwrap(), None);
+        assert_eq!(root_arg(Some(&json!("~/x"))).unwrap(), Some("~/x".into()));
+
+        // `file` is validated only on the codex branch.
+        assert_eq!(
+            codex_file(&request(json!({ "file": 7 }))).unwrap_err(),
+            "TypeError [ERR_INVALID_ARG_TYPE]: The \"paths[1]\" argument must be of type string. Received type number (7)"
+        );
+        assert_eq!(
+            codex_file(&request(json!({ "file": "rollout.jsonl" }))).unwrap(),
+            Some("rollout.jsonl".into())
+        );
+        assert_eq!(
+            codex_file(&request(json!({ "file": false }))).unwrap(),
+            None
+        );
+
+        // `history`: absent → [], string spreads to chars, everything else throws.
+        assert_eq!(history_messages(None).unwrap(), Vec::<Value>::new());
+        assert_eq!(
+            history_messages(Some(&json!("ab"))).unwrap(),
+            vec![json!("a"), json!("b")]
+        );
+        assert_eq!(
+            history_messages(Some(&json!([{ "role": "user" }]))).unwrap(),
+            vec![json!({ "role": "user" })]
+        );
+        for bad in [json!(3), json!(null), json!(true), json!({})] {
+            assert_eq!(
+                history_messages(Some(&bad)).unwrap_err(),
+                "TypeError: history is not iterable",
+                "{bad}"
+            );
+        }
     }
 
     async fn unavailable(State(calls): State<Arc<AtomicUsize>>) -> StatusCode {
@@ -960,7 +1267,7 @@ mod tests {
             assert_eq!(
                 frames,
                 vec![ChatFrame::Error {
-                    chat_id: "retry-test".into(),
+                    chat_id: Some(json!("retry-test")),
                     needs_auth: None,
                     msg: "HTTP 503".into(),
                 }]
@@ -995,11 +1302,11 @@ mod tests {
                 frames,
                 vec![
                     ChatFrame::Delta {
-                        chat_id: "c1".into(),
+                        chat_id: Some(json!("c1")),
                         text: "hello world".into()
                     },
                     ChatFrame::Done {
-                        chat_id: "c1".into()
+                        chat_id: Some(json!("c1"))
                     },
                 ]
             );
@@ -1030,11 +1337,11 @@ mod tests {
                 frames,
                 vec![
                     ChatFrame::Delta {
-                        chat_id: "c5".into(),
+                        chat_id: Some(json!("c5")),
                         text: "héllo ✓".into()
                     },
                     ChatFrame::Done {
-                        chat_id: "c5".into()
+                        chat_id: Some(json!("c5"))
                     },
                 ]
             );
@@ -1057,7 +1364,7 @@ mod tests {
             assert_eq!(
                 frames,
                 vec![ChatFrame::Done {
-                    chat_id: "c2".into()
+                    chat_id: Some(json!("c2"))
                 }]
             );
         });
@@ -1079,7 +1386,7 @@ mod tests {
             assert_eq!(
                 frames,
                 vec![ChatFrame::Error {
-                    chat_id: "c3".into(),
+                    chat_id: Some(json!("c3")),
                     needs_auth: None,
                     msg: "boom".into(),
                 }]
@@ -1099,7 +1406,7 @@ mod tests {
             assert_eq!(
                 frames,
                 vec![ChatFrame::Done {
-                    chat_id: "c4".into()
+                    chat_id: Some(json!("c4"))
                 }]
             );
         });
@@ -1115,7 +1422,7 @@ mod tests {
             assert_eq!(
                 frames,
                 vec![ChatFrame::Error {
-                    chat_id: "c6".into(),
+                    chat_id: Some(json!("c6")),
                     needs_auth: Some(true),
                     msg: "Claude not signed in — run `claude` to log in".into(),
                 }]
@@ -1137,7 +1444,7 @@ mod tests {
             assert_eq!(
                 frames,
                 vec![ChatFrame::Error {
-                    chat_id: "c7".into(),
+                    chat_id: Some(json!("c7")),
                     needs_auth: Some(true),
                     msg: "Claude not signed in — run `claude` to log in".into(),
                 }]
@@ -1203,7 +1510,7 @@ mod tests {
                 assert_eq!(
                     frames[0],
                     ChatFrame::Error {
-                        chat_id: "c9".into(),
+                        chat_id: Some(json!("c9")),
                         needs_auth: (status == StatusCode::UNAUTHORIZED).then_some(true),
                         msg: expected.into(),
                     }
@@ -1241,7 +1548,7 @@ mod tests {
             assert_eq!(
                 frames,
                 vec![ChatFrame::Error {
-                    chat_id: "c10".into(),
+                    chat_id: Some(json!("c10")),
                     needs_auth: None,
                     msg: "bad request shape".into(),
                 }]
@@ -1284,7 +1591,7 @@ mod tests {
             });
             let deps = deps(&scratch.0, Some(format!("http://{address}/v1/messages")));
             let mut request = question("c11");
-            request.scope = "all".into();
+            request.scope = json!("all");
             let (_frames, result) = chat(request, &deps, &Cancel::new()).await;
             assert!(result.is_ok());
             let body = captured.lock().unwrap().clone().expect("request body");
@@ -1335,9 +1642,9 @@ mod tests {
             });
             let deps = deps(&scratch.0, Some(format!("http://{address}/v1/messages")));
             let mut request = question("c12");
-            request.project = Some("demo".into());
-            request.id = Some("sess-2".into());
-            request.history = vec![json!({ "role": "user", "content": "earlier" })];
+            request.project = Some(json!("demo"));
+            request.id = Some(json!("sess-2"));
+            request.history = Some(json!([{ "role": "user", "content": "earlier" }]));
             let (_frames, result) = chat(request, &deps, &Cancel::new()).await;
             assert!(result.is_ok());
             let body = captured.lock().unwrap().clone().expect("request body");
@@ -1349,6 +1656,64 @@ mod tests {
             assert_eq!(messages.len(), 2);
             assert_eq!(messages[0]["content"], "earlier");
             assert_eq!(messages[1]["content"], "hello");
+            server.abort();
+        });
+    }
+
+    // VERIFY: wave12-chat_raw_id-4 — `{ role: 'user', content: question }`
+    // (`chat.mjs:105`) forwards the raw value: a non-string question is sent as
+    // that JSON value, and an absent one leaves `content` out (JSON.stringify
+    // drops `undefined`). Node performs no coercion.
+    #[test]
+    fn raw_question_value_is_forwarded_without_coercion() {
+        run(async {
+            let scratch = TempDir::new("raw-question");
+            signed_in(&scratch.0);
+            let captured = Arc::new(Mutex::new(Vec::<serde_json::Value>::new()));
+            let seen = Arc::clone(&captured);
+            let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+            let address = listener.local_addr().unwrap();
+            let server = tokio::spawn(async move {
+                axum::serve(
+                    listener,
+                    Router::new().route(
+                        "/v1/messages",
+                        post(move |body: String| async move {
+                            seen.lock()
+                                .unwrap()
+                                .push(serde_json::from_str(&body).unwrap());
+                            sse(json!({ "type": "message_stop" }))
+                        }),
+                    ),
+                )
+                .await
+                .unwrap();
+            });
+            let deps = deps(&scratch.0, Some(format!("http://{address}/v1/messages")));
+
+            let mut numeric = question("c13");
+            numeric.question = Some(json!(7));
+            let (frames, result) = chat(numeric, &deps, &Cancel::new()).await;
+            assert!(result.is_ok());
+            assert_eq!(
+                frames,
+                vec![ChatFrame::Done {
+                    chat_id: Some(json!("c13"))
+                }]
+            );
+
+            let mut absent = question("c14");
+            absent.question = None;
+            let (_, result) = chat(absent, &deps, &Cancel::new()).await;
+            assert!(result.is_ok());
+
+            let bodies = captured.lock().unwrap().clone();
+            assert_eq!(bodies.len(), 2);
+            assert_eq!(
+                bodies[0]["messages"][0],
+                json!({ "role": "user", "content": 7 })
+            );
+            assert_eq!(bodies[1]["messages"][0], json!({ "role": "user" }));
             server.abort();
         });
     }

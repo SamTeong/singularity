@@ -53,8 +53,11 @@ fn fnum(value: Option<&Value>) -> f64 {
 fn js_number(value: &Value) -> f64 {
     match value {
         Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
-        Value::String(text) if text.trim().is_empty() => 0.0,
-        Value::String(text) => text.trim().parse().unwrap_or(f64::NAN),
+        // `Number(string)`: the ECMAScript whitespace set, radix literals, exact
+        // `Infinity`, and `NaN` for Rust-only `inf`/`NaN` spellings. The previous
+        // `text.trim().parse()` diverged on all of these (`"inf"` parsed as
+        // infinity where JS gives NaN). VERIFY: wave4-hostedits-8
+        Value::String(text) => crate::memory_backup::js_string_to_number(text),
         Value::Bool(true) => 1.0,
         Value::Bool(false) => 0.0,
         Value::Null => 0.0,
@@ -1245,5 +1248,37 @@ mod tests {
         assert_eq!(document.window_balance, Value::Null);
         assert!(document.ollama.is_none());
         assert!(document.codex.is_none());
+    }
+
+    // VERIFY: wave4-hostedits-9
+    /// `Number(string)` pairs shared with `usage_report_history::js_number`: the
+    /// string arm must reject Rust-only spellings and accept JS's whitespace and
+    /// radix forms.
+    #[test]
+    fn js_number_matches_javascript_string_coercion() {
+        for (text, expected) in [
+            ("inf", f64::NAN),
+            ("infinity", f64::NAN),
+            ("NaN", f64::NAN),
+            ("+inf", f64::NAN),
+            ("1_000", f64::NAN),
+            ("Infinity", f64::INFINITY),
+            ("-Infinity", f64::NEG_INFINITY),
+            ("1e400", f64::INFINITY),
+            ("1e-400", 0.0),
+            ("40", 40.0),
+            (" 40 ", 40.0),
+            ("\u{FEFF}40", 40.0),
+            ("", 0.0),
+            ("0x10", 16.0),
+            ("0b101", 5.0),
+            ("0o17", 15.0),
+            (".5", 0.5),
+        ] {
+            let value = js_number(&Value::String(text.to_owned()));
+            assert_eq!(value.to_bits(), expected.to_bits(), "{text:?}");
+        }
+        // review-wave2 F3's trigger: `{"utilization":"inf"}` is a NaN window, not inf.
+        assert!(js_number(&json!("inf")).is_nan());
     }
 }

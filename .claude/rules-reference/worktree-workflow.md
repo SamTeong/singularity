@@ -29,7 +29,7 @@ The main checkout's dev app (`pnpm --dir C:/git/singularity dev`) owns daemon `:
 | `SINGULARITY_HOME` | `~/.singularity` | `~/.singularity-wt-<slug>` | daemon state (must differ, see below) |
 | `DAEMON_PORT` | 4317 | 4327 | daemon; Vite dev proxy target |
 | `VITE_PORT` | 5317 | 5327 | `dev` and `dev-mock` (`strictPort`, so a clash fails at startup) |
-| `E2E_PORT` | 4319 | 4329 | `test:e2e` sandbox daemon + its `e2e/.tmp-<port>` dir |
+| `E2E_PORT` | 4319 | 4329 | `test:e2e` sandbox daemon + its `<os tmpdir>/singularity-e2e/<checkout-id>/<port>` dir (`E2E_TMP_ROOT` overrides the base) |
 | `E2E_MOCK_PORT` | 4173 | 4183 | `test:e2e-mock` Vite preview |
 
 - Both daemon and Vite ports feed the daemon's origin allowlist (`SELF_HOSTS`, `server/index.mjs:186`), so browser requests keep working.

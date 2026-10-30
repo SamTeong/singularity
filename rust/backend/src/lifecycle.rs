@@ -14,6 +14,7 @@
 //!   drains, persists and only then respawns `current_exe --http` detached.
 
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::io;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -53,6 +54,7 @@ const IDLE_TICK: Duration = Duration::from_millis(250);
 /// [`HttpServices`], consumed by [`LifecycleHandles`] before serving.
 pub struct RuntimeServices {
     pub(crate) registry: Arc<Registry>,
+    pub(crate) tasks: Arc<crate::task_service::TaskService>,
     pub(crate) pty: Arc<PtyHost>,
     pub(crate) clients: Arc<AtomicUsize>,
     pub(crate) shutdown: watch::Sender<bool>,
@@ -60,6 +62,13 @@ pub struct RuntimeServices {
     restart_rx: Option<mpsc::UnboundedReceiver<()>>,
     pub(crate) anchor: Arc<Mutex<window_anchor::Service>>,
     pub(crate) chat: ChatDeps,
+    /// VERIFY: wave4-lifecycle-8
+    /// Filled by the router (which builds them from this runtime) and read by
+    /// [`shutdown`] through the cloned handles, so the cron tick, the cron
+    /// status listener, the scheduler loops and their in-flight attempts are
+    /// all stopped before the shutdown broadcast.
+    pub(crate) crons: Arc<Mutex<Option<Arc<crate::crons::CronsService>>>>,
+    pub(crate) background: Arc<Mutex<Option<crate::background_schedule::BackgroundScheduler>>>,
 }
 
 /// What the supervisor needs after the router took the rest.
@@ -69,6 +78,11 @@ pub struct LifecycleHandles {
     pub clients: Arc<AtomicUsize>,
     pub shutdown: watch::Sender<bool>,
     pub restart: mpsc::UnboundedReceiver<()>,
+    /// The same slots as [`RuntimeServices`], cloned before the router is built.
+    pub crons: Arc<Mutex<Option<Arc<crate::crons::CronsService>>>>,
+    pub background: Arc<Mutex<Option<crate::background_schedule::BackgroundScheduler>>>,
+    /// `None` in tests that do not build a board.
+    pub tasks: Option<Arc<crate::task_service::TaskService>>,
 }
 
 // VERIFY: lifecycle-runtime-from-env
@@ -120,14 +134,18 @@ impl RuntimeServices {
             },
         ));
         let _ = registry_slot.set(registry.clone());
+        let tasks = crate::runtime_domains::tasks(paths, config, registry.clone());
 
         let (shutdown, _) = watch::channel(false);
         let (restart_tx, restart_rx) = mpsc::unbounded_channel();
         let anchor = Arc::new(Mutex::new(init_anchor(paths, &bus)));
         let chat = build_chat(paths, config);
+        let crons = Arc::new(Mutex::new(None));
+        let background = Arc::new(Mutex::new(None));
 
         Ok(Self {
             registry,
+            tasks,
             pty,
             clients: Arc::new(AtomicUsize::new(0)),
             shutdown,
@@ -135,6 +153,8 @@ impl RuntimeServices {
             restart_rx: Some(restart_rx),
             anchor,
             chat,
+            crons,
+            background,
         })
     }
 
@@ -150,6 +170,9 @@ impl RuntimeServices {
                 .restart_rx
                 .take()
                 .expect("the lifecycle handles are taken once"),
+            crons: self.crons.clone(),
+            background: self.background.clone(),
+            tasks: Some(self.tasks.clone()),
         }
     }
 }
@@ -161,8 +184,10 @@ impl TranscriptRegistry for Registry {
         Registry::is_live(self, agent_id)
     }
 
-    fn is_live_codex_thread(&self, thread_id: &str) -> bool {
-        self.codex_owner_for_thread(thread_id).is_some()
+    fn is_live_codex_thread(&self, thread_id: &str, cwd: Option<&str>) -> bool {
+        // `isLiveSession(id, { source: 'codex', cwd })` -> `codexOwnerForThread`
+        // (`agents.mjs:140-156`). VERIFY: wave4-hostedits-2
+        self.codex_owner_for_thread_in_cwd(thread_id, cwd).is_some()
     }
 
     fn codex_thread_for(&self, agent_id: &str) -> Option<String> {
@@ -203,9 +228,22 @@ pub async fn bind_with_retry(port: u16, attempts: u32, delay: Duration) -> io::R
     unreachable!("the loop returns on the last attempt")
 }
 
+/// Spawns the replacement daemon once the restart drain has finished.
+///
+/// VERIFY: wave9-restart_seam-1
+/// Production passes [`respawn_current_exe`], so spawning behaviour is
+/// unchanged; tests pass a recorder, so the restart path is covered without
+/// starting a real process.
+pub type Respawn = fn() -> Result<(), String>;
+
 // VERIFY: lifecycle-shutdown
 /// `shutdown()` (`index.mjs:174-186`) plus the native socket broadcast.
-pub async fn shutdown(handles: &LifecycleHandles, restart: bool, guard: &AtomicBool) {
+pub async fn shutdown(
+    handles: &LifecycleHandles,
+    restart: bool,
+    guard: &AtomicBool,
+    respawn: Respawn,
+) {
     // `if (shuttingDown) return; shuttingDown = true;`
     if guard.swap(true, Ordering::SeqCst) {
         return;
@@ -225,16 +263,35 @@ pub async fn shutdown(handles: &LifecycleHandles, restart: bool, guard: &AtomicB
     while live.iter().any(|id| handles.registry.is_live(id)) && Instant::now() < deadline {
         tokio::time::sleep(DRAIN_POLL).await;
     }
-    let persisted = match handles.registry.persist() {
-        Ok(()) => true,
-        Err(error) => {
-            eprintln!("agents.json write failed: {error}");
-            false
-        }
-    };
+    // VERIFY: wave8-shutdown-1
+    // A failed write is logged, never a reason to skip the respawn: Node's
+    // restart route always respawns (`index.mjs:538-543`), so a write error
+    // must not turn Restart into Stop.
+    if let Err(error) = handles.registry.persist() {
+        eprintln!("agents.json write failed: {error}");
+    }
     handles.pty.shutdown();
-    if restart && persisted {
-        if let Err(error) = respawn_current_exe() {
+    // VERIFY: wave4-lifecycle-8
+    // Stop the router-installed services before the broadcast so nothing
+    // re-arms work after it. They stop only after the drain poll and persist,
+    // so a cron tick or idle-kill timer can still run inside that window, as
+    // in Node (its intervals are never stopped). Node relies on process exit
+    // (`.unref()`); this keeps that outcome without leaving the loops,
+    // listeners and in-flight attempts alive in Rust.
+    if let Some(crons) = handles.crons.lock().unwrap().take() {
+        crons.shutdown();
+    }
+    if let Some(mut scheduler) = handles.background.lock().unwrap().take() {
+        scheduler.stop();
+    }
+    if let Some(tasks) = &handles.tasks {
+        tasks.shutdown();
+    }
+    if restart {
+        // VERIFY: wave9-restart_seam-2
+        // `respawn` is the injected seam; production binds it to
+        // `respawn_current_exe` in [`run`].
+        if let Err(error) = respawn() {
             eprintln!("restart failed: {error}");
         }
     }
@@ -275,7 +332,7 @@ pub async fn run(
     listener: TcpListener,
     policy: HttpPolicy,
     services: HttpServices,
-    mut handles: LifecycleHandles,
+    handles: LifecycleHandles,
 ) -> io::Result<()> {
     let ticker = handles.registry.clone();
     tokio::spawn(async move {
@@ -289,16 +346,44 @@ pub async fn run(
     });
 
     let (graceful_tx, graceful_rx) = oneshot::channel::<()>();
-    let mut server = tokio::spawn(async move {
+    let server = tokio::spawn(async move {
         crate::http_server::serve(listener, policy, services, async move {
             let _ = graceful_rx.await;
         })
         .await
     });
 
+    supervise(
+        server,
+        graceful_tx,
+        handles,
+        respawn_current_exe,
+        crate::http_server::shutdown_signal(),
+    )
+    .await
+}
+
+// VERIFY: wave9-restart_seam-3
+/// The supervisor after the listener, ticker and server task exist. Split out
+/// of [`run`] so a test can drive it with a finished server task, a closed
+/// restart channel and a recording respawn seam; everything else is identical
+/// to the serving daemon.
+async fn supervise<F>(
+    mut server: tokio::task::JoinHandle<io::Result<()>>,
+    graceful_tx: oneshot::Sender<()>,
+    mut handles: LifecycleHandles,
+    respawn: Respawn,
+    signal: F,
+) -> io::Result<()>
+where
+    F: Future<Output = ()>,
+{
     let stop = tokio::select! {
-        _ = crate::http_server::shutdown_signal() => Stop::Signal,
-        _ = handles.restart.recv() => Stop::Restart,
+        _ = signal => Stop::Signal,
+        // VERIFY: wave8-shutdown-3
+        // Only a real request restarts; a closed channel (the server future
+        // ended) disables this branch so the server result is reported.
+        Some(()) = handles.restart.recv() => Stop::Restart,
         result = &mut server => {
             return match result {
                 Ok(result) => result,
@@ -318,7 +403,7 @@ pub async fn run(
         std::thread::sleep(DRAIN_LIMIT + GRACEFUL_LIMIT);
         std::process::exit(0);
     });
-    shutdown(&handles, restart, &guard).await;
+    shutdown(&handles, restart, &guard, respawn).await;
     let _ = graceful_tx.send(());
     let _ = tokio::time::timeout(GRACEFUL_LIMIT, async {
         while handles.clients.load(Ordering::SeqCst) > 0 {
@@ -401,7 +486,8 @@ fn build_chat(paths: &AppPaths, config: &ConfigServices) -> ChatDeps {
     let transcripts = Arc::new(
         TranscriptService::new(Inputs {
             state_dir: paths.state_dir.clone(),
-            claude_home: claude_home.clone(),
+            // VERIFY: wave31-transcript-home-6 — `~` expands from the user home.
+            claude_home: config.home.clone(),
             codex_home: config.codex_home.clone(),
             model_catalog: Vec::new(),
         })
@@ -422,7 +508,7 @@ fn build_chat(paths: &AppPaths, config: &ConfigServices) -> ChatDeps {
 
 #[cfg(test)]
 mod tests {
-    use super::{LifecycleHandles, bind_with_retry, shutdown};
+    use super::{LifecycleHandles, bind_with_retry, shutdown, supervise};
     use crate::agent_registry::{PtyPort, Registry, RegistryConfig};
     use crate::agent_spawn::{Bins, LaunchSpec, SpawnPaths};
     use crate::bus::Bus;
@@ -454,6 +540,24 @@ mod tests {
             .enable_all()
             .build()
             .unwrap()
+    }
+
+    // VERIFY: wave9-restart_seam-4
+    // The injected respawn seam: records the call instead of spawning
+    // `current_exe --http`. Thread-local so concurrently running tests keep
+    // their own count (the current-thread runtime runs the future on the
+    // calling thread).
+    thread_local! {
+        static RESPAWNS: std::cell::Cell<usize> = std::cell::Cell::new(0);
+    }
+
+    fn record_respawn() -> Result<(), String> {
+        RESPAWNS.with(|count| count.set(count.get() + 1));
+        Ok(())
+    }
+
+    fn respawns() -> usize {
+        RESPAWNS.with(|count| count.get())
     }
 
     struct Fixture(PathBuf);
@@ -546,22 +650,133 @@ mod tests {
             let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
             let clients = Arc::new(AtomicUsize::new(0));
             let (_restart_tx, restart_rx) = tokio::sync::mpsc::unbounded_channel();
+            // VERIFY: wave4-lifecycle-15
+            // A router-installed cron service in the slot is stopped by the
+            // lifecycle before the broadcast (the slot is drained), which is
+            // what makes its tick and status listener die with the daemon.
+            let crons = Arc::new(crate::crons::CronsService::new(
+                registry.clone(),
+                registry.bus().clone(),
+                crate::crons::CronsConfig {
+                    state_file: fixture.0.join("state/crons.json"),
+                    clock: crate::agent_registry::system_clock(),
+                    tick: crate::crons::TICK_INTERVAL,
+                    idle_kill_after: crate::crons::KILL_CONFIRM,
+                },
+                Arc::new(crate::crons::NoopTimers),
+            ));
+            crons.init(None);
             let handles = LifecycleHandles {
                 registry: registry.clone(),
                 pty,
                 clients,
                 shutdown: shutdown_tx,
                 restart: restart_rx,
+                crons: Arc::new(std::sync::Mutex::new(Some(crons.clone()))),
+                background: Arc::new(std::sync::Mutex::new(None)),
+                tasks: None,
             };
             let guard = AtomicBool::new(false);
-            shutdown(&handles, false, &guard).await;
+            shutdown(&handles, false, &guard, record_respawn).await;
             assert!(*shutdown_rx.borrow());
+            // VERIFY: wave9-restart_seam-5
+            // A plain shutdown signal never respawns.
+            assert_eq!(respawns(), 0, "a plain shutdown never respawns");
+            assert!(
+                handles.crons.lock().unwrap().is_none(),
+                "the lifecycle took and stopped the cron service"
+            );
+            assert_eq!(Arc::strong_count(&crons), 1, "no listener owns the service");
             let persisted = std::fs::read_to_string(fixture.0.join("state/agents.json")).unwrap();
             assert!(persisted.contains("\"id\": \"a1\""), "{persisted}");
 
             // Re-entrant call returns immediately and still reports 0 clients.
-            shutdown(&handles, false, &guard).await;
+            shutdown(&handles, false, &guard, record_respawn).await;
             assert_eq!(handles.clients.load(Ordering::SeqCst), 0);
+            assert_eq!(respawns(), 0, "the re-entrant call respawns nothing");
+        });
+    }
+
+    // VERIFY: wave9-restart_seam-6
+    #[test]
+    fn restart_respawns_once_when_the_final_persist_fails() {
+        runtime().block_on(async {
+            let fixture = Fixture::new();
+            fixture.write_agents(
+                r#"{"agents":[{"id":"a1","cwd":"/work","scopes":["s1"],"tool":"claude","status":"detached"}],"recentRepos":[]}"#,
+            );
+            let registry = fixture.registry();
+            registry.load().unwrap();
+            // Deterministic persist failure: `state` becomes a regular file, so
+            // the agents.json write (and its staged tmp file) cannot be created.
+            std::fs::remove_dir_all(fixture.0.join("state")).unwrap();
+            std::fs::write(fixture.0.join("state"), b"not a directory").unwrap();
+            let pty = Arc::new(crate::pty::PtyHost::new(Arc::new(|_event| {})));
+            let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+            let (_restart_tx, restart_rx) = tokio::sync::mpsc::unbounded_channel();
+            let handles = LifecycleHandles {
+                registry,
+                pty,
+                clients: Arc::new(AtomicUsize::new(0)),
+                shutdown: shutdown_tx,
+                restart: restart_rx,
+                crons: Arc::new(std::sync::Mutex::new(None)),
+                background: Arc::new(std::sync::Mutex::new(None)),
+                tasks: None,
+            };
+            let guard = AtomicBool::new(false);
+            shutdown(&handles, true, &guard, record_respawn).await;
+            assert!(!fixture.0.join("state/agents.json").exists());
+            // VERIFY: wave8-shutdown-1
+            // The failed write is logged, never a reason to skip the respawn
+            // (`index.mjs:538-543`): exactly one respawn, not zero.
+            assert_eq!(respawns(), 1, "a restart respawns exactly once");
+        });
+    }
+
+    // VERIFY: wave9-restart_seam-7
+    #[test]
+    fn a_closed_restart_channel_reports_the_server_result_without_respawning() {
+        runtime().block_on(async {
+            let fixture = Fixture::new();
+            let registry = fixture.registry();
+            let pty = Arc::new(crate::pty::PtyHost::new(Arc::new(|_event| {})));
+            let (shutdown_tx, _shutdown_rx) = tokio::sync::watch::channel(false);
+            let (restart_tx, restart_rx) = tokio::sync::mpsc::unbounded_channel();
+            // The router is gone: nothing can ever send a restart request.
+            drop(restart_tx);
+            let handles = LifecycleHandles {
+                registry,
+                pty,
+                clients: Arc::new(AtomicUsize::new(0)),
+                shutdown: shutdown_tx,
+                restart: restart_rx,
+                crons: Arc::new(std::sync::Mutex::new(None)),
+                background: Arc::new(std::sync::Mutex::new(None)),
+                tasks: None,
+            };
+            let server = tokio::spawn(async {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    "server ended",
+                ))
+            });
+            let (graceful_tx, graceful_rx) = tokio::sync::oneshot::channel::<()>();
+            let result = supervise(
+                server,
+                graceful_tx,
+                handles,
+                record_respawn,
+                std::future::pending::<()>(),
+            )
+            .await;
+            drop(graceful_rx);
+            assert_eq!(result.unwrap_err().to_string(), "server ended");
+            assert_eq!(
+                respawns(),
+                0,
+                "an ended server is reported, not treated as a restart"
+            );
         });
     }
 

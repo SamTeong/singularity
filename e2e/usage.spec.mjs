@@ -5,11 +5,13 @@ test('provider meter cards render from usage stub', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Usage');
 
-  // The meter labels are unique to the full-size ProviderCard — the sidebar
-  // The rail's UsagePanel renders the same provider with '5h'/'7d' labels instead, which is
-  // why the provider name alone is ambiguous here.
-  await expect(page.getByText('Session (5h)')).toBeVisible();
-  await expect(page.getByText('Weekly (7d)')).toBeVisible();
+  // The full-size provider card renders the meter label inside <strong>
+  // ("5h: 42% · …"); the sidebar rail's compact meters render a bare
+  // "5h"/"7d" (Sidebar.jsx), so anchor on the <strong> label instead of a
+  // bare text match, which is ambiguous in the rail.
+  // VERIFY: wave15-e2e-1
+  await expect(page.locator('strong', { hasText: /^5h$/ })).toBeVisible();
+  await expect(page.locator('strong', { hasText: /^7d$/ })).toBeVisible();
   await expect(page.getByText('Claude', { exact: true }).first()).toBeVisible();
 });
 

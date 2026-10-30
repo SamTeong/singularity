@@ -457,18 +457,18 @@ app.put('/fs/write', { bodyLimit: 4 * 1024 * 1024 }, async (req, reply) => {
 });
 app.post('/fs/entry', async (req, reply) => {
   const { path, kind } = req.body || {};
-  const r = createEntry(path, kind);
+  const r = await createEntry(path, kind);
   if (!r.ok) reply.code(400);
   return r;
 });
 app.delete('/fs/entry', async (req, reply) => {
-  const r = deleteEntry(req.query.path);
+  const r = await deleteEntry(req.query.path);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
 app.patch('/fs/rename', async (req, reply) => {
   const { from, to } = req.body || {};
-  const r = renameEntry(from, to);
+  const r = await renameEntry(from, to);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
@@ -898,6 +898,9 @@ app.post('/history/regenerate', async (req, reply) => {
 
 }, { prefix: '/api' });
 
+// Boot sweep: drop tmp files a hard-killed previous daemon left mid-write. Runs
+// after migrate-state (import above) and before init() loads state from disk.
+reg.sweepTmpFiles({ log: app.log });
 reg.init(app.log);
 // Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors
 // are logged (route-level failures still degrade to a live-only "today").

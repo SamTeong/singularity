@@ -61,9 +61,16 @@ function ProviderCard({ p }) {
       </Stack>
 
       {error ? (
-        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Couldn't load this: {p?.error || 'unknown error'}</Typography>
+        <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+          Couldn't load this: {p?.refreshError || p?.error || 'unknown error'}{p?.lastAttemptAt ? ` · last attempt ${ago(p.lastAttemptAt)}` : ''}
+        </Typography>
       ) : (
         <>
+          <Typography sx={{ fontSize: 12, color: p.refreshError ? 'var(--mui-palette-warning-main)' : 'text.secondary', mb: 1 }}>
+            {p.refreshError
+              ? `Refresh failed: ${p.refreshError}. Showing last successful status from ${ago(p.lastSuccessAt || p.fetchedAt)}.`
+              : `Status page updated ${ago(p.lastSuccessAt || p.fetchedAt)}.`}
+          </Typography>
           <Typography sx={{ fontSize: 13, color: 'text.secondary', mb: p.incidents?.length || p.maintenances?.length ? 1.5 : 2 }}>
             {p.description || INDICATOR_LABEL[ind]}
           </Typography>
@@ -126,12 +133,15 @@ function ProviderCard({ p }) {
 export default function StatusView() {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState(null);
 
   const pull = useCallback((force = false) => {
     fetch(`/api/status${force ? '?force=1' : ''}`)
-      .then((r) => r.json())
-      .then((d) => { setStatus(d); setLoading(false); })
-      .catch(() => setLoading(false));
+      .then((r) => { if (!r.ok) throw new Error(`status ${r.status}`); return r.json(); })
+      // A failed poll keeps the last good payload; only a failure with nothing
+      // to show falls back to the error line below.
+      .then((d) => { setStatus(d); setErr(null); setLoading(false); })
+      .catch((e) => { setErr(e); setLoading(false); });
   }, []);
 
   useEffect(() => {
@@ -140,17 +150,12 @@ export default function StatusView() {
     return () => clearInterval(t);
   }, [pull]);
 
-  // Most recent fetchedAt across providers → "updated N min ago".
-  const freshest = status
-    ? Object.values(status).map((p) => p?.fetchedAt).filter(Boolean).sort().at(-1)
-    : null;
-
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Stack direction="row" spacing={1.5} sx={{ p: 2, pb: 1.5, alignItems: 'center', flexWrap: 'wrap', borderBottom: (t) => `1px solid ${getTokens(t).glass.stroke}` }}>
         <Typography sx={{ fontSize: 20, fontWeight: 600 }}>Provider status</Typography>
         <Box sx={{ flex: 1 }} />
-        {freshest && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>updated {ago(freshest)}</Typography>}
+        {status && <Typography sx={{ fontSize: 12, color: 'text.secondary' }}>Update time shown per provider</Typography>}
         <Button size="small" startIcon={<RefreshIcon />} disabled={loading && !status} onClick={() => pull(true)} sx={{ '& .MuiButton-startIcon': { marginRight: 0.5 } }}>Refresh</Button>
       </Stack>
       <Box sx={{ flex: 1, minHeight: 0, overflow: 'auto', p: 2 }}>
@@ -159,11 +164,17 @@ export default function StatusView() {
         </Typography>
         {/* auto-fit, not a theme breakpoint: the two skins ship different `md` pixels
             (ZAPAC 720, Phosphor 900), which flipped this grid's column count by skin at 768px. */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 2 }}>
-          {loading && !status
-            ? [0, 1].map((i) => <Box key={i} sx={(t) => ({ p: 2.5, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography></Box>)
-            : Object.values(status || {}).map((p) => <ProviderCard key={p.key} p={p} />)}
-        </Box>
+        {!status && err ? (
+          <Typography sx={{ fontSize: 13, color: 'text.secondary' }}>
+            Couldn't load provider status — retrying every 30s.
+          </Typography>
+        ) : (
+          <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 2 }}>
+            {loading && !status
+              ? [0, 1].map((i) => <Box key={i} sx={(t) => ({ p: 2.5, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}><Typography sx={{ fontSize: 13, color: 'text.secondary' }}>Loading…</Typography></Box>)
+              : Object.values(status || {}).map((p) => <ProviderCard key={p.key} p={p} />)}
+          </Box>
+        )}
       </Box>
     </Box>
   );

@@ -204,7 +204,8 @@ impl CutoverServices {
             .merge(crate::http_transcripts::router(
                 crate::http_transcripts::TranscriptHost {
                     state_dir: state_dir.clone(),
-                    claude_home: home.join(".claude"),
+                    // VERIFY: wave31-transcript-home-3 — `~` expands from the user home.
+                    claude_home: agents_home.clone(),
                     codex_home,
                     usage_state: paths.usage_skill_state.clone(),
                     model_catalog: Arc::new(move || {
@@ -289,7 +290,8 @@ impl CutoverServices {
                         crate::history::NativeTranscriptSource::new(
                             crate::transcript_service::Inputs {
                                 state_dir: agents_state_dir.clone(),
-                                claude_home: agents_home.join(".claude"),
+                                // VERIFY: wave31-transcript-home-4
+                                claude_home: agents_home.clone(),
                                 codex_home: agents_codex_home.clone(),
                                 model_catalog: Vec::new(),
                             },
@@ -345,13 +347,93 @@ impl CutoverServices {
                         parent_env: std::env::vars().collect(),
                         security_bin: cfg!(target_os = "macos")
                             .then(|| PathBuf::from("/usr/bin/security")),
-                        network: Arc::new(crate::http_usage::NativeUsageNetwork),
+                        // The browser executable is resolved per launch inside
+                        // `NativeUsageNetwork` (Node parity). VERIFY: wave4-hostedits-13
+                        network: Arc::new(crate::http_usage::NativeUsageNetwork::new(
+                            agents_cache_dir.join("pw-ollama-profile"),
+                        )),
                         clock: Arc::new(|| {
                             std::time::SystemTime::now()
                                 .duration_since(std::time::UNIX_EPOCH)
                                 .map_or(0, |elapsed| elapsed.as_millis() as i64)
                         }),
                     });
+                let tasks = runtime.tasks.clone();
+                // VERIFY: wave3-hostreview-4
+                // Built unconditionally: the routes and the persisted list are
+                // contract, not a function of a runtime being available at
+                // router-build time. `init(None)` skips the tick.
+                let crons = {
+                    let handle = tokio::runtime::Handle::try_current().ok();
+                    let timers: Arc<dyn crate::crons::TimerPort> = match &handle {
+                        Some(handle) => Arc::new(crate::crons::NativeTimers::new(handle.clone())),
+                        None => Arc::new(crate::crons::NoopTimers),
+                    };
+                    let service = Arc::new(crate::crons::CronsService::new(
+                        runtime.registry.clone(),
+                        bus.clone(),
+                        crate::crons::CronsConfig {
+                            state_file: agents_state_dir.join("crons.json"),
+                            clock: crate::agent_registry::system_clock(),
+                            tick: crate::crons::TICK_INTERVAL,
+                            idle_kill_after: crate::crons::KILL_CONFIRM,
+                        },
+                        timers,
+                    ));
+                    service.init(handle);
+                    // VERIFY: wave4-lifecycle-6
+                    // The lifecycle owns it, so its tick and listener stop
+                    // before the shutdown broadcast.
+                    *runtime.crons.lock().unwrap() = Some(service.clone());
+                    service
+                };
+                let background =
+                    crate::background::Service::new(crate::background::BackgroundDeps {
+                        state_dir: agents_state_dir.clone(),
+                        reports_dir: paths.reports_dir.clone(),
+                        bus: bus.clone(),
+                        registry: runtime.registry.clone(),
+                        tasks: Arc::new(crate::runtime_domains::TaskAdapter(tasks.clone())),
+                        usage: Arc::new(usage_handle.clone()),
+                        route: Arc::new({
+                            let path = agents_state_dir
+                                .join("models.json")
+                                .to_string_lossy()
+                                .into_owned();
+                            move |model, tool| crate::models::route(&path, model, tool)
+                        }),
+                        tokens: Arc::new(crate::runtime_domains::Tokens {
+                            home: agents_home.clone(),
+                            codex_home: agents_codex_home.clone(),
+                            usage_state: agents_usage_state.clone(),
+                            stats: Mutex::new(crate::stats::StatsService::default()),
+                        }),
+                        clock: crate::agent_registry::system_clock(),
+                        write_atomic: Arc::new(crate::fs_atomic::write_atomic),
+                    });
+                let mut domain_routes = crate::http_tasks::router(crate::http_tasks::TasksDeps {
+                    tasks: tasks.clone(),
+                })
+                .merge(crate::http_background::router(
+                    crate::http_background::HttpDeps {
+                        service: background.clone(),
+                    },
+                ));
+                domain_routes = domain_routes.merge(crate::http_crons::router(crons.clone()));
+                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                    let scheduler =
+                        crate::background_schedule::start(handle, background.clone(), &bus);
+                    // VERIFY: wave4-lifecycle-7
+                    // Owned by the lifecycle rather than an `Extension` layer, so
+                    // `stop()` aborts the loops and their in-flight attempts
+                    // before the shutdown broadcast.
+                    *runtime.background.lock().unwrap() = Some(scheduler);
+                }
+                let snapshots = crate::http_ws::DomainSnapshots {
+                    tasks: Arc::new(move || tasks.snapshot()),
+                    crons: Arc::new(move || crons.snapshot_value()),
+                    background: Arc::new(move || background.snapshot()),
+                };
                 // Timers and fire-and-forget actions need tokio; plain router
                 // construction outside a runtime keeps the inert host.
                 let anchor_host: Arc<dyn crate::http_utilities::AnchorHost> =
@@ -426,12 +508,13 @@ impl CutoverServices {
                     platform: crate::http_agents::Platform::host(),
                     procs: Arc::new(crate::http_agents::NativeProcs),
                     spawn_detached,
-                    stats: crate::http_agents::StatsPaths {
-                        claude_home: agents_home.join(".claude"),
-                        codex_home: agents_codex_home,
-                        usage_state: agents_usage_state,
-                        state_dir: agents_state_dir,
-                    },
+                    stats: agents_stats_paths(
+                        // VERIFY: wave3-hostreview-1 — stats.rs appends `.claude` itself.
+                        &agents_home,
+                        agents_codex_home,
+                        agents_usage_state,
+                        agents_state_dir,
+                    ),
                 });
                 let ws = crate::http_ws::router(crate::http_ws::WsDeps {
                     registry: runtime.registry.clone(),
@@ -440,9 +523,11 @@ impl CutoverServices {
                     clients: runtime.clients.clone(),
                     policy: policy.clone(),
                     shutdown: Some(runtime.shutdown.subscribe()),
+                    snapshots: Some(snapshots),
                 });
                 let restart = restart_router(runtime.restart_tx.clone());
                 routes
+                    .merge(domain_routes)
                     .merge(ws)
                     .merge(agents)
                     .merge(restart)
@@ -457,6 +542,23 @@ impl CutoverServices {
             .exists()
             .then(|| crate::http_shell::fallback(policy.clone(), dist_dir, display_home));
         (routes, fallback)
+    }
+}
+
+// VERIFY: wave4-lifecycle-1
+/// The `/api/agent-stats` inputs. `stats.mjs:77` appends `.claude/projects`
+/// itself, so the router wants the home directory — not `<home>/.claude`.
+fn agents_stats_paths(
+    home: &std::path::Path,
+    codex_home: PathBuf,
+    usage_state: PathBuf,
+    state_dir: PathBuf,
+) -> crate::http_agents::StatsPaths {
+    crate::http_agents::StatsPaths {
+        claude_home: home.to_owned(),
+        codex_home,
+        usage_state,
+        state_dir,
     }
 }
 
@@ -612,6 +714,12 @@ impl HttpServices {
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
         // `server/migrate-state.mjs` runs before any state reader.
         crate::state_migration::StateMigration::from_app_paths(&paths).run()?;
+        // Debris from a hard-killed writer: state/cache scratch files, after the
+        // migration has created those dirs, before any state is loaded.
+        crate::fs_atomic::sweep_stale_scratch(
+            &[paths.state_dir.as_path(), paths.cache_dir.as_path()],
+            std::time::SystemTime::now(),
+        );
         let runtime = crate::lifecycle::RuntimeServices::from_env(&paths, &config)?;
         services.clients = runtime.clients.clone();
         services.cutover = Some(CutoverServices::from_env(paths, &config));
@@ -633,9 +741,16 @@ impl HttpServices {
 struct RestartHandle(tokio::sync::mpsc::UnboundedSender<()>);
 
 // VERIFY: http-restart-route
-/// `POST /api/restart` (`index.mjs:563-575`): acknowledge immediately; the
+// VERIFY: wave5-restart-1
+/// `POST /api/restart` (`server/index.mjs:532-533`, inside the `/api` plugin
+/// registered at `:996`): acknowledge immediately with `{ok:true}`; the
 /// supervisor drains, persists and only then respawns the daemon.
-fn restart_router(sender: tokio::sync::mpsc::UnboundedSender<()>) -> Router {
+///
+/// Public so an integration test can mount the real route. The sender is the
+/// injected exit/restart seam: production wires the supervisor's channel
+/// (`:520`), while a test supplies its own receiver and never lets the signal
+/// reach a respawn.
+pub fn restart_router(sender: tokio::sync::mpsc::UnboundedSender<()>) -> Router {
     Router::new()
         .route("/api/restart", axum::routing::post(restart))
         .with_state(RestartHandle(sender))
@@ -699,6 +814,13 @@ pub async fn serve<F>(
 where
     F: Future<Output = ()> + Send + 'static,
 {
+    if let Some(runtime) = services.runtime.as_ref() {
+        runtime.tasks.load().await;
+        runtime.tasks.start_background(
+            &tokio::runtime::Handle::current(),
+            runtime.shutdown.subscribe(),
+        );
+    }
     axum::serve(listener, router(policy, services))
         .with_graceful_shutdown(shutdown)
         .await
@@ -760,8 +882,22 @@ async fn enforce_transport_policy(
     request: Request<Body>,
     next: Next,
 ) -> Response {
+    // VERIFY: wave8-ws_origin-3
+    // `pty-ws.mjs:98` answers a disallowed Origin after the upgrade (close 1008),
+    // so the bridge handler owns that verdict for `/ws` (`http_ws.rs`). A plain
+    // HTTP request to `/ws` still gets Node's `onRequest` 403 (wave9-ws_upgrade-1).
+    // Host checks on upgrades are intentionally stricter than pinned Node's raw
+    // upgrade listener, which bypasses Fastify; approved parity exception.
     if let Err(error) = policy.request_allowed(request.headers()) {
-        return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
+        let ws_upgrade = request.uri().path() == "/ws"
+            && request
+                .headers()
+                .get("upgrade")
+                .and_then(|value| value.to_str().ok())
+                .is_some_and(|value| value.eq_ignore_ascii_case("websocket"));
+        if !(ws_upgrade && error == "forbidden origin") {
+            return (StatusCode::FORBIDDEN, Json(json!({ "error": error }))).into_response();
+        }
     }
 
     let path = request.uri().path();
@@ -862,11 +998,12 @@ fn shell_unauthorized_response() -> Response {
 #[cfg(test)]
 mod tests {
     use super::{
-        ConfigServices, HttpServices, api_unauthorized_response, bind,
-        cookie_decode_error_response, router, serve, shell_token_cookie,
-        shell_unauthorized_response,
+        ConfigServices, CutoverServices, HttpServices, agents_stats_paths,
+        api_unauthorized_response, bind, cookie_decode_error_response, router, serve,
+        shell_token_cookie, shell_unauthorized_response,
     };
     use crate::http_policy::HttpPolicy;
+    use axum::Router;
     use axum::body::to_bytes;
     use axum::http::StatusCode;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -1297,6 +1434,529 @@ mod tests {
                     serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
                     expected["body"]
                 );
+            });
+    }
+
+    // VERIFY: wave4-lifecycle-3
+    /// The router hands `/api/agent-stats` the home directory; `stats.rs`
+    /// appends `.claude/projects` itself. Pins the H1 call-site regression
+    /// without needing a live daemon (see `http_agents` for the read-through).
+    #[test]
+    fn agents_stats_paths_use_the_home_directory_not_its_dot_claude() {
+        let home = std::path::Path::new("/home/u");
+        let paths = agents_stats_paths(
+            home,
+            std::path::PathBuf::from("/codex"),
+            std::path::PathBuf::from("/usage"),
+            std::path::PathBuf::from("/state"),
+        );
+        assert_eq!(paths.claude_home, std::path::PathBuf::from("/home/u"));
+        assert_ne!(
+            paths.claude_home,
+            std::path::PathBuf::from("/home/u/.claude"),
+            "stats.rs joins `.claude` itself"
+        );
+    }
+
+    // VERIFY: wave31-transcript-home-5
+    #[test]
+    fn assembled_router_lists_transcripts_from_the_default_root_under_home() {
+        let fixture = ShellFixture::new("transcripts-default-root");
+        let project = fixture.root.join("home/.claude/projects/p");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("one.jsonl"),
+            "{\"type\":\"user\",\"cwd\":\"C:/work\",\"message\":{\"content\":\"default root\"}}\n",
+        )
+        .unwrap();
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let listener = bind(0).await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let app = assembled(
+                    &fixture,
+                    HttpPolicy {
+                        daemon_port: address.port(),
+                        vite_port: 5317,
+                        token: None,
+                    },
+                );
+                let server = tokio::spawn(async move { axum::serve(listener, app).await });
+                let response = reqwest::Client::new()
+                    .get(format!("http://{address}/api/transcripts"))
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(response.status().as_u16(), 200);
+                let payload: serde_json::Value = response.json().await.unwrap();
+                let sessions = payload["sessions"].as_array().unwrap();
+                assert_eq!(sessions.len(), 1, "{payload}");
+                assert_eq!(sessions[0]["id"], serde_json::json!("one"));
+                assert_eq!(sessions[0]["project"], serde_json::json!("p"));
+                assert_eq!(sessions[0]["processLive"], serde_json::json!(false));
+                server.abort();
+            });
+    }
+
+    // VERIFY: wave4-lifecycle-16
+    /// H5 is kept as a deliberate deviation: axum ranks the static
+    /// `/api/config/search` and `/api/config/scan` routes above the `{scope}`
+    /// parameter route, so `PUT` on them is a 404 instead of Fastify's write to
+    /// a nonsense scope. `PUT /api/config/roots` (a real static) still works.
+    #[test]
+    fn config_param_route_does_not_shadow_the_static_scan_and_search_routes() {
+        let root =
+            std::env::temp_dir().join(format!("http-config-shadow-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let mut services = HttpServices::new(
+            root.join("state"),
+            crate::usage_report::Request {
+                reports_dir: String::new(),
+                env: serde_json::json!({}),
+            },
+        );
+        services.config = Some(ConfigServices {
+            home: root.join("home"),
+            codex_home: root.join("home").join(".codex"),
+            state_dir: root.join("state"),
+            backups_dir: root.join("backups"),
+            cwd: root.clone(),
+            drive_cwds: Vec::new(),
+        });
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let listener = bind(0).await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let (stop, stopped) = oneshot::channel::<()>();
+                let server = tokio::spawn(serve(
+                    listener,
+                    HttpPolicy {
+                        daemon_port: address.port(),
+                        vite_port: 5317,
+                        token: None,
+                    },
+                    services,
+                    async move {
+                        let _ = stopped.await;
+                    },
+                ));
+                for (path, expected) in [
+                    ("/api/config/scan", "HTTP/1.1 404"),
+                    ("/api/config/search", "HTTP/1.1 404"),
+                    ("/api/codex-config/search", "HTTP/1.1 404"),
+                    ("/api/config/roots", "HTTP/1.1 200"),
+                ] {
+                    let mut connection =
+                        tokio::net::TcpStream::connect(address).await.unwrap();
+                    let body = r#"{"roots":["~/x"]}"#;
+                    connection
+                        .write_all(
+                            format!(
+                                "PUT {path} HTTP/1.1\r\nHost: localhost:{}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                                address.port(),
+                                body.len()
+                            )
+                            .as_bytes(),
+                        )
+                        .await
+                        .unwrap();
+                    let mut response = Vec::new();
+                    connection.read_to_end(&mut response).await.unwrap();
+                    let response = String::from_utf8(response).unwrap();
+                    assert!(response.starts_with(expected), "{path}: {response}");
+                }
+                stop.send(()).unwrap();
+                server.await.unwrap().unwrap();
+            });
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    const SHELL_HOME: &str = "C:/assembled-fixture/home";
+    const INDEX_HTML: &str = "<!doctype html><html><head><title>shell</title></head>\
+<body><div id=\"root\"></div></body></html>";
+
+    /// `web/src/shell/views.mjs` on main `66591a9`: `NAV` (`Sidebar.jsx:45`) plus
+    /// `NAV_ITEMS` (`AppMenu.jsx:35`), deduped by view id. `App.jsx:10-20` mounts
+    /// each as the real root URL `/<v>`.
+    const VIEW_PATHS: [&str; 17] = [
+        "tasks",
+        "cron",
+        "usage",
+        "config",
+        "hooks",
+        "skills",
+        "rules",
+        "memory",
+        "explorer",
+        "transcripts",
+        "history",
+        "wiki",
+        "projects",
+        "plans",
+        "appearance",
+        "status",
+        "settings",
+    ];
+
+    /// Temp home/state/repo dirs plus a built `web/dist`, so `routers` installs
+    /// the shell fallback exactly as it does for a `pnpm start` daemon.
+    struct ShellFixture {
+        root: std::path::PathBuf,
+    }
+
+    impl ShellFixture {
+        fn new(tag: &str) -> Self {
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos();
+            let root = std::env::temp_dir().join(format!(
+                "singularity-http-assembled-{tag}-{}-{nanos}",
+                std::process::id()
+            ));
+            for dir in [
+                "home",
+                "codex-home",
+                "repo",
+                "state",
+                "cache",
+                "usage",
+                "dist",
+            ] {
+                std::fs::create_dir_all(root.join(dir)).unwrap();
+            }
+            std::fs::write(root.join("dist").join("index.html"), INDEX_HTML).unwrap();
+            Self { root }
+        }
+
+        fn dist(&self) -> std::path::PathBuf {
+            self.root.join("dist")
+        }
+
+        fn paths(&self) -> crate::app_paths::AppPaths {
+            crate::app_paths::AppPaths {
+                app_dir: self.root.join("app"),
+                state_dir: self.root.join("state"),
+                cache_dir: self.root.join("cache"),
+                backups_dir: self.root.join("cache").join("backups"),
+                usage_skill_state: self.root.join("usage"),
+                trusted_root: self.root.join("repo"),
+                worktrees_dir: self.root.join("repo").join(".worktrees"),
+                tickets_dir: self.root.join("repo").join(".tickets"),
+                reports_dir: self.root.join("repo").join(".reports"),
+            }
+        }
+
+        fn config(&self) -> ConfigServices {
+            ConfigServices {
+                home: self.root.join("home"),
+                codex_home: self.root.join("codex-home"),
+                state_dir: self.root.join("state"),
+                backups_dir: self.root.join("cache").join("backups"),
+                cwd: self.root.join("repo"),
+                drive_cwds: Vec::new(),
+            }
+        }
+
+        fn cutover(
+            &self,
+            paths: &crate::app_paths::AppPaths,
+            config: &ConfigServices,
+        ) -> CutoverServices {
+            CutoverServices {
+                paths: paths.clone(),
+                home: config.home.clone(),
+                codex_home: config.codex_home.clone(),
+                cwd: config.cwd.clone(),
+                drive_cwds: config.drive_cwds.clone(),
+                dist_dir: self.dist(),
+                display_home: SHELL_HOME.to_owned(),
+                rules_reference_dir: self.root.join("rules-reference"),
+                git_bin: "git".to_owned(),
+                git_timeout_ms: 10_000,
+                review_dir: None,
+                claude_bin: None,
+                ollama_bin: None,
+                codex_bin: None,
+                scope_root: None,
+                plans_available: false,
+                plans_root: None,
+                token_available: false,
+            }
+        }
+    }
+
+    impl Drop for ShellFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    /// The same router `serve` mounts: every production router, the live
+    /// runtime (`/ws` included) and the shell fallback from the built `dist`.
+    fn assembled(fixture: &ShellFixture, policy: HttpPolicy) -> Router {
+        let paths = fixture.paths();
+        let config = fixture.config();
+        let cutover = fixture.cutover(&paths, &config);
+        let runtime = crate::lifecycle::RuntimeServices::from_env(&paths, &config)
+            .expect("the fixture runtime builds");
+        let mut services = HttpServices::new(
+            paths.state_dir.clone(),
+            crate::usage_report::Request {
+                reports_dir: String::new(),
+                env: serde_json::json!({}),
+            },
+        );
+        services.config = Some(config);
+        services.cutover = Some(cutover);
+        services.runtime = Some(runtime);
+        router(policy, services)
+    }
+
+    /// `sendShell` (`server/index.mjs:272-284`): the built index plus the home
+    /// script injected before the first `</head>`.
+    fn expected_shell() -> String {
+        INDEX_HTML.replace(
+            "</head>",
+            format!("<script>window.__SING_HOME__=\"{SHELL_HOME}\";</script></head>").as_str(),
+        )
+    }
+
+    fn html(response: &reqwest::Response) -> Option<String> {
+        response
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned)
+    }
+
+    // VERIFY: wave9-shell_e2e-1
+    /// On the assembled router every catalog view URL is an HTML navigation to an
+    /// unknown client route: Node's `setNotFoundHandler` → `isShellRequest` →
+    /// `sendShell` (`server/index.mjs:163-170`, `:272-284`, `:293-297`).
+    #[test]
+    fn assembled_router_serves_every_ui_view_path_as_the_node_shell() {
+        let fixture = ShellFixture::new("views");
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let listener = bind(0).await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let app = assembled(
+                    &fixture,
+                    HttpPolicy {
+                        daemon_port: address.port(),
+                        vite_port: 5317,
+                        token: None,
+                    },
+                );
+                let server = tokio::spawn(async move { axum::serve(listener, app).await });
+
+                let client = reqwest::Client::new();
+                let shell = expected_shell();
+                for view in VIEW_PATHS {
+                    let response = client
+                        .get(format!("http://{address}/{view}"))
+                        .header("accept", "text/html")
+                        .send()
+                        .await
+                        .unwrap();
+                    assert_eq!(response.status().as_u16(), 200, "{view}");
+                    assert_eq!(
+                        html(&response).as_deref(),
+                        Some("text/html; charset=utf-8"),
+                        "{view}"
+                    );
+                    assert_eq!(response.text().await.unwrap(), shell, "{view}");
+                }
+                server.abort();
+            });
+    }
+
+    // VERIFY: wave9-shell_e2e-2
+    /// The same fallback for paths outside the catalog: an HTML navigation gets
+    /// the shell; `/api`, `/assets` and non-GET requests keep Node's
+    /// `404 {"error":"not found"}` (`server/index.mjs:163-170`, `:293-297`).
+    #[test]
+    fn assembled_router_matches_the_node_fallback_for_unknown_paths() {
+        let fixture = ShellFixture::new("fallback");
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let listener = bind(0).await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let app = assembled(
+                    &fixture,
+                    HttpPolicy {
+                        daemon_port: address.port(),
+                        vite_port: 5317,
+                        token: None,
+                    },
+                );
+                let server = tokio::spawn(async move { axum::serve(listener, app).await });
+
+                let client = reqwest::Client::new();
+                let navigation = client
+                    .get(format!("http://{address}/not-a-view"))
+                    .header("accept", "text/html")
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(navigation.status().as_u16(), 200);
+                assert_eq!(
+                    html(&navigation).as_deref(),
+                    Some("text/html; charset=utf-8")
+                );
+                assert_eq!(navigation.text().await.unwrap(), expected_shell());
+
+                for (method, path, accept) in [
+                    ("GET", "/not-a-view", "application/json"),
+                    ("POST", "/not-a-view", "text/html"),
+                    ("GET", "/api/not-a-route", "text/html"),
+                    ("GET", "/assets/missing.js", "text/html"),
+                ] {
+                    let response = client
+                        .request(method.parse().unwrap(), format!("http://{address}{path}"))
+                        .header("accept", accept)
+                        .send()
+                        .await
+                        .unwrap();
+                    assert_eq!(response.status().as_u16(), 404, "{method} {path}");
+                    assert_eq!(
+                        html(&response).as_deref(),
+                        Some("application/json; charset=utf-8"),
+                        "{method} {path}"
+                    );
+                    assert_eq!(
+                        response.json::<serde_json::Value>().await.unwrap(),
+                        serde_json::json!({ "error": "not found" }),
+                        "{method} {path}"
+                    );
+                }
+                server.abort();
+            });
+    }
+
+    /// A minimal RFC 6455 handshake over a raw socket: a valid upgrade carrying
+    /// `origin`. The 101 assert is the point — a pre-upgrade rejection fails here.
+    async fn ws_upgrade(address: std::net::SocketAddr, origin: &str) -> tokio::net::TcpStream {
+        let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+        stream
+            .write_all(
+                format!(
+                    "GET /ws HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nOrigin: {origin}\r\n\
+Upgrade: websocket\r\nConnection: Upgrade\r\n\
+Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+                    address.port()
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut head = Vec::new();
+        let mut byte = [0u8; 1];
+        loop {
+            stream.read_exact(&mut byte).await.unwrap();
+            head.push(byte[0]);
+            if head.ends_with(b"\r\n\r\n") {
+                break;
+            }
+        }
+        let head = String::from_utf8(head).unwrap();
+        assert!(head.starts_with("HTTP/1.1 101"), "{head}");
+        stream
+    }
+
+    /// The server's close frame: unmasked, `code` then the UTF-8 reason.
+    async fn ws_close(stream: &mut tokio::net::TcpStream) -> (u16, String) {
+        let limit = std::time::Duration::from_secs(2);
+        let mut head = [0u8; 2];
+        tokio::time::timeout(limit, stream.read_exact(&mut head))
+            .await
+            .expect("a close frame within 2s")
+            .unwrap();
+        assert_eq!(head[0] & 0x0f, 0x8, "expected a close frame");
+        let mut payload = vec![0u8; usize::from(head[1] & 0x7f)];
+        tokio::time::timeout(limit, stream.read_exact(&mut payload))
+            .await
+            .expect("a close payload within 2s")
+            .unwrap();
+        assert!(payload.len() >= 2, "close frame without a status code");
+        (
+            u16::from_be_bytes([payload[0], payload[1]]),
+            String::from_utf8_lossy(&payload[2..]).into_owned(),
+        )
+    }
+
+    // VERIFY: wave9-shell_e2e-3
+    /// The assembled router hands the `/ws` Origin verdict to the bridge
+    /// (`enforce_transport_policy`'s `wave8-ws_origin-3` carve-out): a valid
+    /// upgrade carrying a disallowed Origin completes with 101 and is then closed
+    /// `1008 forbidden origin` (`pty-ws.mjs:96-98`). Rejecting a forbidden Host
+    /// before an upgrade is the approved stricter policy, not Node equivalence.
+    #[test]
+    fn assembled_router_defers_the_ws_origin_verdict_but_rejects_a_forbidden_host() {
+        let fixture = ShellFixture::new("ws-origin");
+        tokio::runtime::Builder::new_multi_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(async {
+                let listener = bind(0).await.unwrap();
+                let address = listener.local_addr().unwrap();
+                let app = assembled(
+                    &fixture,
+                    HttpPolicy {
+                        daemon_port: address.port(),
+                        vite_port: 5317,
+                        token: None,
+                    },
+                );
+                let server = tokio::spawn(async move { axum::serve(listener, app).await });
+
+                let mut socket = ws_upgrade(address, "https://evil.test").await;
+                assert_eq!(ws_close(&mut socket).await, (1008, "forbidden origin".to_owned()));
+
+                // Read the framed HTTP body: a rejected Upgrade need not close
+                // its keep-alive connection, so read_to_end would wait forever.
+                let denied = reqwest::Client::builder()
+                    .timeout(std::time::Duration::from_secs(2))
+                    .build()
+                    .unwrap()
+                    .get(format!("http://{address}/ws"))
+                    .header("Host", format!("evil.test:{}", address.port()))
+                    .header("Connection", "Upgrade")
+                    .header("Upgrade", "websocket")
+                    .header("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+                    .header("Sec-WebSocket-Version", "13")
+                    .send()
+                    .await
+                    .unwrap();
+                assert_eq!(denied.status(), reqwest::StatusCode::FORBIDDEN);
+                assert_eq!(denied.text().await.unwrap(), "{\"error\":\"forbidden host\"}");
+
+                // VERIFY: wave9-ws_upgrade-1 — no Upgrade header: Node's onRequest 403.
+                let plain = send_request(
+                    address,
+                    &format!(
+                        "GET /ws HTTP/1.1\r\nHost: localhost:{}\r\nOrigin: https://evil.test\r\nConnection: close\r\n\r\n",
+                        address.port()
+                    ),
+                )
+                .await;
+                assert!(plain.starts_with("HTTP/1.1 403"), "{plain}");
+                assert!(plain.contains("{\"error\":\"forbidden origin\"}"), "{plain}");
+                server.abort();
             });
     }
 }

@@ -58,6 +58,8 @@ const folder = (rel) => { const i = rel.lastIndexOf('/'); return i < 0 ? '' : re
 // Category = top-level subfolder of the page (concepts/flows/entities); a page
 // lives in exactly one, so filtering is single-membership.
 const category = (rel) => { const i = rel.indexOf('/'); return i < 0 ? '' : rel.slice(0, i); };
+const STALE_AFTER_MS = 14 * 24 * 60 * 60 * 1000;
+const isStale = (day) => Boolean(day) && Date.now() - Date.parse(day) > STALE_AFTER_MS;
 
 export default function WikiPanel() {
   // null until /wiki/root resolves — keeps the file list from being fetched
@@ -310,7 +312,7 @@ export default function WikiPanel() {
                   <TableRow key={wiki.name}>
                     <TableCell sx={{ fontSize: 10, px: 0.75, whiteSpace: 'nowrap' }}>{wiki.name}</TableCell>
                     {['shallow', 'deep', 'horizon'].map((type) => (
-                      <TableCell key={type} sx={{ fontSize: 10, px: 0.5, whiteSpace: 'nowrap' }}>
+                      <TableCell key={type} sx={{ fontSize: 10, px: 0.5, whiteSpace: 'nowrap', color: isStale(wiki[type]) ? 'error.main' : undefined }}>
                         {wiki[type] || <span aria-label="No completed sweep recorded">—</span>}
                       </TableCell>
                     ))}

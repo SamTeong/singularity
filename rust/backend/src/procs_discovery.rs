@@ -13,7 +13,7 @@ pub fn scan_raw() -> Value {
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
-                "$rows = Get-CimInstance Win32_Process -Filter \"Name='claude.exe' or Name='node.exe' or Name='esbuild.exe' or Name='OpenConsole.exe'\" | ForEach-Object { [PSCustomObject]@{ pid=$_.ProcessId; ppid=$_.ParentProcessId; name=$_.Name; started=$_.CreationDate.ToString('yyyy-MM-ddTHH:mm:ss'); cmd=$_.CommandLine } }; $alive = Get-Process | Select-Object -ExpandProperty Id; [PSCustomObject]@{ rows=$rows; alive=$alive } | ConvertTo-Json -Compress -Depth 4"
+                windows_scan_command(std::process::id())
             ]),
             false,
         )
@@ -32,12 +32,39 @@ pub fn scan_raw() -> Value {
     }
 }
 
+// VERIFY: wave19-procs-1
+/// The Windows scan. Node's own node.exe matches the name filter; the native
+/// host exe does not, so its pid is selected explicitly (wave10-procs_scan-1).
+/// `[Console]::OutputEncoding` forces UTF-8 stdout: powershell.exe otherwise
+/// writes its console code page, and a cmdline holding a character that page
+/// cannot represent came back as a raw 0x1A that poisoned the whole JSON
+/// document (see `clean_json`).
+fn windows_scan_command(host_pid: u32) -> String {
+    format!(
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $rows = Get-CimInstance Win32_Process -Filter \"Name='claude.exe' or Name='node.exe' or Name='esbuild.exe' or Name='OpenConsole.exe' or ProcessId={host_pid}\" | ForEach-Object {{ [PSCustomObject]@{{ pid=$_.ProcessId; ppid=$_.ParentProcessId; name=$_.Name; started=$_.CreationDate.ToString('yyyy-MM-ddTHH:mm:ss'); cmd=$_.CommandLine }} }}; $alive = Get-Process | Select-Object -ExpandProperty Id; [PSCustomObject]@{{ rows=$rows; alive=$alive }} | ConvertTo-Json -Compress -Depth 4"
+    )
+}
+
+// VERIFY: wave19-procs-2
+/// `ConvertTo-Json` leaves raw control characters inside strings (a 0x1A from
+/// an unrepresentable cmdline character is enough) and `JSON.parse`/serde both
+/// reject those, which used to drop every row — the daemon's own included.
+/// Outside strings only insignificant whitespace is affected, so flattening
+/// every control character to a space keeps the document parseable.
+fn clean_json(raw: &str) -> String {
+    raw.trim()
+        .trim_start_matches('\u{feff}')
+        .chars()
+        .map(|ch| if (ch as u32) < 0x20 { ' ' } else { ch })
+        .collect()
+}
+
 fn empty_snapshot(darwin: bool) -> Value {
     json!({ "platform": if darwin { "darwin" } else { "windows" }, "rows": [], "alive": [] })
 }
 
 fn parse_windows(stdout: &str) -> Value {
-    let Ok(parsed) = serde_json::from_str::<Value>(stdout.trim()) else {
+    let Ok(parsed) = serde_json::from_str::<Value>(&clean_json(stdout)) else {
         return empty_snapshot(false);
     };
     let rows = as_array(parsed.get("rows"))
@@ -159,7 +186,12 @@ pub fn classify(request: &Value) -> Value {
         } else {
             name == "node.exe" || name == "esbuild.exe" || name == "OpenConsole.exe"
         };
-        if !is_claude && !(is_dev_tool && cmd.to_lowercase().contains(&root)) {
+        // VERIFY: wave9-procs_self-1
+        // Node lists its own process as `daemon` because it is a node.exe under
+        // the repo root; the native daemon's exe matches neither filter, so the
+        // host pid is admitted explicitly to keep that row.
+        let is_host = Some(pid) == host_pid;
+        if !is_claude && !is_host && !(is_dev_tool && cmd.to_lowercase().contains(&root)) {
             continue;
         }
         let (session, kind) = if is_claude {
@@ -223,6 +255,30 @@ fn extract_session(command: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    // VERIFY: wave19-procs-3
+    /// A cmdline carrying a character the console code page cannot encode used
+    /// to arrive as a raw 0x1A and wipe out the whole table. The daemon's own
+    /// row must survive it.
+    #[test]
+    fn windows_scan_survives_raw_control_characters_in_a_cmdline() {
+        let raw = "{\"rows\":[{\"pid\":7,\"ppid\":1,\"name\":\"claude.exe\",\"started\":\"time\",\"cmd\":\"claude.exe \u{1a} --add-dir x\"},\u{1a}{\"pid\":9,\"ppid\":1,\"name\":\"singularity-backend.exe\",\"started\":\"time\",\"cmd\":\"C:/target/singularity-backend.exe --http\"}],\"alive\":[1,7]}\r\n";
+        let result = parse_windows(raw);
+        assert_eq!(result["rows"].as_array().unwrap().len(), 2);
+        assert_eq!(result["rows"][0]["cmd"], "claude.exe   --add-dir x");
+        assert_eq!(result["rows"][1]["name"], "singularity-backend.exe");
+        assert_eq!(result["alive"], json!([1, 7]));
+        assert_eq!(clean_json("\u{feff}{\"rows\":[]}"), "{\"rows\":[]}");
+    }
+
+    // VERIFY: wave19-procs-4
+    #[test]
+    fn windows_scan_command_selects_the_host_pid_and_forces_utf8_stdout() {
+        let command = windows_scan_command(4242);
+        assert!(command.contains("ProcessId=4242"));
+        assert!(command.contains("[Console]::OutputEncoding = [System.Text.Encoding]::UTF8"));
+        assert!(command.contains("ConvertTo-Json -Compress -Depth 4"));
+    }
+
     #[test]
     fn windows_singleton_rows_and_missing_collections_normalize() {
         let result = parse_windows(
@@ -268,5 +324,28 @@ mod tests {
         assert_eq!(result[1]["kind"], "daemon");
         assert_eq!(result[2]["kind"], "daemon");
         assert_eq!(result[0]["session"], "wrapper-session");
+    }
+
+    // VERIFY: wave9-procs_self-2
+    #[test]
+    fn classifier_lists_the_native_host_process_as_daemon() {
+        let request = json!({
+            "repo_root": "C:/repo",
+            "host_pid": 50,
+            "live_pids": [],
+            "live_sessions": [],
+            "snapshot": {
+                "platform": "windows",
+                "alive": [1],
+                "rows": [
+                    { "pid": 50, "ppid": 1, "name": "singularity-backend.exe", "started": "time", "cmd": "D:/target/singularity-backend.exe --http" },
+                    { "pid": 51, "ppid": 1, "name": "singularity-backend.exe", "started": "time", "cmd": "D:/target/singularity-backend.exe --http" }
+                ]
+            }
+        });
+        let result = classify(&request);
+        assert_eq!(result.as_array().unwrap().len(), 1);
+        assert_eq!(result[0]["pid"], 50);
+        assert_eq!(result[0]["kind"], "daemon");
     }
 }

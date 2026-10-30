@@ -1,4 +1,4 @@
-// HTML report renderer for harness-usage-report: render(c) -> full self-contained document,
+// HTML report renderer for harness-usage-report: render(c, roadmap?) -> full self-contained document,
 // in the "paper-and-clay" design language.
 // The page layout lives in sources/base.html ({{PLACEHOLDER}} slots) and the larger
 // hero/header block in sources/hero.html; short section markup is inlined as
@@ -257,8 +257,9 @@ const MODELS_HTML = `<header class='shead' id='sec-models'><div class='shead-tit
 const ROADMAP_HTML = `<header class='shead' id='sec-insights-roadmap-what-could-come-next'><div class='shead-title'><h2>Usage roadmap</h2><span class='sub'>what could come next</span></div></header>
 {{ROADMAP_BODY}}`;
 
-function render_roadmap() {
-  return _fill(ROADMAP_HTML, { ROADMAP_BODY: _render_suggestions(_fetch_roadmap()) });
+// sg: roadmap rows; undefined = collect the live inventory, null = omit it.
+function render_roadmap(sg) {
+  return _fill(ROADMAP_HTML, { ROADMAP_BODY: _render_suggestions(sg === undefined ? _fetch_roadmap() : sg) });
 }
 
 const FOOTER_HTML = `<footer>Generated locally from ~/.agents/.harness-usage-report/state/stats.csv. All session data stays on this machine. Line counts, API time and rate-limit data are captured from the statusline going forward; older sessions show them as 0/—. Tool usage, projects, subagents, skills and compactions are derived from transcripts (retroactive). Run <code>/harness-usage-report-suggestions</code> for the roadmap as text.</footer>`;
@@ -401,7 +402,7 @@ function render_motion() {
 
 // ---- render ----
 
-export function render(c) {
+export function render(c, roadmap) {
   return _fill(_source("base.html"), {
     STYLE: render_style(),
     HERO: render_hero(),
@@ -416,7 +417,7 @@ export function render(c) {
     USAGE_PATTERNS: USAGE_PATTERNS_HTML,
     PROJECTS: PROJECTS_HTML,
     MODELS: MODELS_HTML,
-    ROADMAP: render_roadmap(),
+    ROADMAP: render_roadmap(roadmap),
     FOOTER: FOOTER_HTML,
     SCRIPTS: render_scripts(c.sessions),
     MOTION: render_motion(),

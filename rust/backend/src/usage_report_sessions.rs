@@ -2,13 +2,14 @@
 //!
 //! Mirrors `_load_stats` (stats.mjs:952-1007) and `parseDateTime`/`jsWeekdayPy`
 //! (stats.mjs:1009-1019). Pure: the caller supplies the already-read CSV text
-//! and a fixed local UTC offset (Node reads the system zone).
+//! and the local zone (Node reads the system zone).
 
 use serde_json::Value;
 use serde_json::value::RawValue;
 
 use crate::usage_report_cost::{Pricing, fnum, inum, js_json, js_trim, json_number, json_string};
 use crate::usage_report_csv::{CsvTable, dict_reader, row_value};
+use crate::usage_snapshot::LocalZone;
 
 /// Forecast-facing projection of one CSV session row.
 #[derive(Debug, Clone, PartialEq)]
@@ -57,8 +58,12 @@ impl SessionRow {
 
 /// `_load_stats` (stats.mjs:952-1007) sessions half: one JSON object per CSV
 /// row, with third-party cost precedence and local `hour`/`dow`.
-pub fn load_sessions(csv_text: &str, pricing: &Pricing, local_offset: i32) -> Vec<Box<RawValue>> {
-    parse_rows(csv_text, local_offset)
+pub fn load_sessions(
+    csv_text: &str,
+    pricing: &Pricing,
+    local_zone: LocalZone,
+) -> Vec<Box<RawValue>> {
+    parse_rows(csv_text, local_zone)
         .iter()
         .map(|row| {
             RawValue::from_string(session_json(row, pricing))
@@ -69,8 +74,8 @@ pub fn load_sessions(csv_text: &str, pricing: &Pricing, local_offset: i32) -> Ve
 
 /// Forecast-facing half of the same projection (`SessionView`): `ts` becomes
 /// epoch seconds; unparseable timestamps stay `None`.
-pub fn load_session_views(csv_text: &str, local_offset: i32) -> Vec<SessionView> {
-    parse_rows(csv_text, local_offset)
+pub fn load_session_views(csv_text: &str, local_zone: LocalZone) -> Vec<SessionView> {
+    parse_rows(csv_text, local_zone)
         .iter()
         .map(|row| SessionView {
             ts: row.ts_epoch,
@@ -84,7 +89,7 @@ pub fn load_session_views(csv_text: &str, local_offset: i32) -> Vec<SessionView>
 
 /// Shared CSV projection: the header-row skip (stats.mjs:960-961) and every
 /// field both loaders need, parsed once.
-fn parse_rows(csv_text: &str, local_offset: i32) -> Vec<SessionRow> {
+fn parse_rows(csv_text: &str, local_zone: LocalZone) -> Vec<SessionRow> {
     let table = dict_reader(csv_text);
     let mut rows = Vec::new();
     for row in &table.rows {
@@ -92,7 +97,7 @@ fn parse_rows(csv_text: &str, local_offset: i32) -> Vec<SessionRow> {
         if ts == "timestamp" || trimmed(&table, row, "total_cost_usd") == "total_cost_usd" {
             continue;
         }
-        let (ts_epoch, hour, dow) = match parse_local_timestamp(ts, local_offset) {
+        let (ts_epoch, hour, dow) = match parse_local_timestamp(ts, local_zone) {
             Some((epoch, hour, dow)) => (Some(epoch), Some(hour as f64), Some(dow as f64)),
             None => (None, None, None),
         };
@@ -193,10 +198,10 @@ fn optional_number(value: Option<f64>) -> String {
 }
 
 /// `parseDateTime` (stats.mjs:1009-1014) + `jsWeekdayPy` (stats.mjs:1016-1019)
-/// under a fixed local offset: `(epoch seconds, local hour, Python weekday)`.
+/// under the run's local zone: `(epoch seconds, local hour, Python weekday)`.
 /// The strict `%Y-%m-%d %H:%M:%S` shape is the whole grammar; unparseable
 /// timestamps yield `None`, as the JS regex does.
-fn parse_local_timestamp(ts: &str, local_offset: i32) -> Option<(f64, i64, i64)> {
+fn parse_local_timestamp(ts: &str, local_zone: LocalZone) -> Option<(f64, i64, i64)> {
     let (year, month, day, hour, minute, second) = split_timestamp(ts)?;
     // Local civil time linearized, then shifted to UTC. Out-of-range components
     // (e.g. Feb 30) normalize exactly like `new Date(y, m - 1, ...)`.
@@ -204,7 +209,7 @@ fn parse_local_timestamp(ts: &str, local_offset: i32) -> Option<(f64, i64, i64)>
         days_from_civil(year, month, day) * 86_400 + hour * 3_600 + minute * 60 + second;
     let local_day = local_secs.div_euclid(86_400);
     Some((
-        (local_secs - i64::from(local_offset)) as f64,
+        local_zone.to_epoch_secs(local_secs)? as f64,
         local_secs.div_euclid(3_600).rem_euclid(24),
         // 1970-01-01 was a Thursday: Python weekday 3.
         (local_day + 3).rem_euclid(7),
@@ -280,7 +285,7 @@ not-a-date,sid-4,,claude-opus-4,1,2,3,4,,,0,0,0,0,,,0,0,0,0,0,,
 
     #[test]
     fn sessions_project_cost_precedence_facets_and_local_hour() {
-        let sessions = load_sessions(&csv_text(), &pricing(), 3_600);
+        let sessions = load_sessions(&csv_text(), &pricing(), LocalZone::Fixed(3_600));
         assert_eq!(sessions.len(), 4, "the repeated header row is skipped");
         assert_eq!(
             sessions[0].get(),
@@ -318,7 +323,7 @@ not-a-date,sid-4,,claude-opus-4,1,2,3,4,,,0,0,0,0,,,0,0,0,0,0,,
 
     #[test]
     fn views_project_epoch_tokens_and_unparseable_timestamps() {
-        let views = load_session_views(&csv_text(), 3_600);
+        let views = load_session_views(&csv_text(), LocalZone::Fixed(3_600));
         assert_eq!(views.len(), 4);
         assert_eq!(
             views[0].ts,
@@ -332,14 +337,14 @@ not-a-date,sid-4,,claude-opus-4,1,2,3,4,,,0,0,0,0,,,0,0,0,0,0,,
         );
         assert_eq!(views[3].ts, None);
         assert_eq!(views[1].tok, 100.0);
-        assert!(load_sessions("", &Pricing::default(), 0).is_empty());
+        assert!(load_sessions("", &Pricing::default(), LocalZone::Fixed(0)).is_empty());
 
         // Short rows fill the missing columns with the JS defaults.
         let overflow = format!("{HEADER}\n2026-02-30 01:00:00,s\n");
         let march = format!("{HEADER}\n2026-03-02 01:00:00,s\n");
         assert_eq!(
-            load_session_views(&overflow, 0)[0].ts,
-            load_session_views(&march, 0)[0].ts,
+            load_session_views(&overflow, LocalZone::Fixed(0))[0].ts,
+            load_session_views(&march, LocalZone::Fixed(0))[0].ts,
             "Feb 30 normalizes to Mar 2"
         );
     }

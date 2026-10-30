@@ -1,6 +1,7 @@
-use serde_json::{Value, value::RawValue};
+use serde_json::value::RawValue;
 use std::fs;
 
+#[cfg(test)]
 const DEFAULT_THRESHOLD: u64 = 200_000;
 
 fn raw_json(json: String) -> Box<RawValue> {
@@ -107,7 +108,7 @@ pub fn write_pricing(path: &str, text: &str) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Value, json};
 
     use super::*;
     use std::fs::{create_dir, remove_dir_all, write};

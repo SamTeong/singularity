@@ -1,12 +1,13 @@
-//! Native HTTP routes for provider usage: `GET /api/usage` and
-//! `GET /api/usage/history`.
+//! Native HTTP routes for provider usage: `GET /api/usage`,
+//! `GET /api/usage/history` and `POST /api/usage/ollama/connect`.
 //!
-//! Port of `server/index.mjs:378-387` over `server/usage.mjs` (the cached,
-//! per-source pull with its network floor and forced refresh) and
+//! Port of `server/index.mjs:349-353,378-387` over `server/usage.mjs` (the
+//! cached, per-source pull with its network floor and forced refresh),
 //! `server/usage-history.mjs` (provider/window validation plus the injected
-//! history roots). The transport adapters live in `claude_usage`, `codex_usage`
-//! and `usage_snapshot`; this module only orchestrates them, so no Node bridge
-//! and no Playwright are involved.
+//! history roots) and `connectOllamaUsage`. The transport adapters live in
+//! `claude_usage`, `codex_usage`, `ollama_browser` and `usage_snapshot`; this
+//! module only orchestrates them, so no Node bridge and no Playwright are
+//! involved.
 //!
 //! Contracts preserved from Node:
 //!   * `?force=1` bypasses the 60s per-source network floor; `force` repeated or
@@ -21,6 +22,11 @@
 //!   * `/api/usage/history` validates `provider`/`window` first and answers
 //!     `400 {"ok":false,"error":"provider must be one of ...; window one of ..."}`,
 //!     defaulting `window` to `5h`.
+//!   * `POST /api/usage/ollama/connect` runs the interactive browser login, then
+//!     a headless verification, and only then persists `{"mode":"browser"}`; a
+//!     failed connect changes nothing. It answers `400` with the sanitized
+//!     ollama document on failure and `200` with that document plus a fresh
+//!     `fetchedAt` on success.
 //!
 //! Deliberate scope limits (reported to the host, not silently dropped):
 //!   * the background samplers, idle debounce and reset timers live in
@@ -29,9 +35,9 @@
 //!   * no Claude OAuth grant refresh: an expired token is reported as
 //!     `token-expired` / `auth-expired` with `needsAuth`, exactly what Node shows
 //!     when its own refresh fails. Credential refresh stays outside a route.
-//!   * no native Ollama scrape exists, so the `NativeUsageNetwork` default
-//!     reports `unavailable` for browser mode; a host-provided `UsageNetwork`
-//!     can supply the scrape.
+//!   * the Ollama scrape and connect are native (`ollama_browser`); a
+//!     host-provided `UsageNetwork` can still replace them, and an install with
+//!     no Chromium-family browser reports `unavailable`.
 use crate::bus::{Bus, BusEvent};
 use crate::claude_credentials::{self, ClaudeCredentialsRead};
 use crate::claude_usage::{self, ClaudeUsageResult};
@@ -39,6 +45,7 @@ use crate::codex_usage::{self, CodexUsageResult};
 use crate::http_agents::Platform;
 use crate::http_attempt::BodyReadFailure;
 use crate::http_policy::query_values;
+use crate::ollama_browser;
 use crate::ollama_mode_config::{self, ReadResult};
 use crate::provider_usage;
 use crate::retry_after::retry_after_ms;
@@ -50,7 +57,7 @@ use crate::usage_snapshot::{
 use axum::extract::{RawQuery, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde_json::value::RawValue;
 use serde_json::{Map, Value, json};
@@ -85,25 +92,64 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 // VERIFY: usage-network
 /// The live-network seam. `NativeUsageNetwork` performs the real transport through
 /// the existing Rust modules; tests inject a stub so no route test reaches a
-/// socket. The Ollama lane has no native scrape, so an injected implementation is
-/// the only way to serve browser-mode installs.
+/// socket or a browser.
 pub trait UsageNetwork: Send + Sync {
     fn claude_usage<'a>(&'a self, access_token: &'a str) -> BoxFuture<'a, ClaudeUsageResult>;
     fn codex_usage<'a>(&'a self, auth_path: &'a Path) -> BoxFuture<'a, CodexUsageResult>;
     fn ollama_usage(&self) -> BoxFuture<'_, Value>;
+
     /// `fetchCodexResets` (`usage.mjs`): `{available, expiresAt[]}` or `None`.
     /// The default answers `None`, so a stub network never reaches the endpoint.
     fn codex_resets<'a>(&'a self, _auth_path: &'a Path) -> BoxFuture<'a, Option<Value>> {
         Box::pin(async { None })
     }
 
+    /// `connectOllamaUsage` (`usage.mjs:431`): interactive login, then headless
+    /// verification, serialized on the shared persistent profile. Returns the
+    /// raw browser result — the route sanitizes it — and never writes the mode.
+    /// The default keeps a transport that has no browser on `unavailable`.
+    fn ollama_connect(&self) -> BoxFuture<'_, Value> {
+        Box::pin(async { json!({ "ok": false, "source": "ollama", "error": "unavailable" }) })
+    }
 }
 
 // VERIFY: usage-native-network
 /// The production network seam. Claude and Codex use the existing native
-/// transports; Ollama reports `unavailable` because no native scrape exists.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct NativeUsageNetwork;
+/// transports; Ollama drives the shared persistent browser profile.
+#[derive(Clone)]
+pub struct NativeUsageNetwork {
+    profile_dir: PathBuf,
+    /// Node imports playwright and serializes every browser leg on one
+    /// module-level tail (`ollamaProfileTail`, `usage.mjs:359-363`). The browser
+    /// is now built per launch, so its own lock is per instance; this outer lock
+    /// keeps a sampler tick and a Connect press from interleaving.
+    profile_lock: Arc<AsyncMutex<()>>,
+    resolve_browser: Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>,
+}
+
+impl NativeUsageNetwork {
+    /// `profile_dir` is `CACHE_DIR/pw-ollama-profile` (`usage.mjs:27`). The
+    /// executable is resolved per launch, as Node does, so a browser installed
+    /// after boot needs no daemon restart. VERIFY: wave4-hostedits-7
+    pub fn new(profile_dir: PathBuf) -> Self {
+        Self::with_resolver(profile_dir, Arc::new(ollama_browser::installed_browser))
+    }
+
+    fn with_resolver(
+        profile_dir: PathBuf,
+        resolve_browser: Arc<dyn Fn() -> Option<PathBuf> + Send + Sync>,
+    ) -> Self {
+        Self {
+            profile_dir,
+            profile_lock: Arc::new(AsyncMutex::new(())),
+            resolve_browser,
+        }
+    }
+
+    fn browser(&self) -> ollama_browser::OllamaBrowser {
+        ollama_browser::OllamaBrowser::new(self.profile_dir.clone(), (self.resolve_browser)())
+    }
+}
 
 impl UsageNetwork for NativeUsageNetwork {
     fn claude_usage<'a>(&'a self, access_token: &'a str) -> BoxFuture<'a, ClaudeUsageResult> {
@@ -121,8 +167,35 @@ impl UsageNetwork for NativeUsageNetwork {
     }
 
     fn ollama_usage(&self) -> BoxFuture<'_, Value> {
-        Box::pin(async { json!({ "ok": false, "source": "ollama", "error": "unavailable" }) })
+        Box::pin(async move {
+            let _profile = self.profile_lock.lock().await;
+            self.browser().scrape().await
+        })
     }
+
+    fn ollama_connect(&self) -> BoxFuture<'_, Value> {
+        Box::pin(async move {
+            let _profile = self.profile_lock.lock().await;
+            self.browser().connect().await
+        })
+    }
+}
+
+/// `sanitizeOllamaUsage` (`usage.mjs:422`) through the shared projection, so the
+/// body is the ten-key ollama document with truthiness-coerced booleans rather
+/// than whatever shape a transport produced.
+fn sanitize_ollama(data: Value) -> Value {
+    let payload =
+        RawValue::from_string(data.to_string()).expect("a serialized value is valid JSON");
+    let request = provider_usage::Request {
+        provider: "ollama".into(),
+        payload_present: true,
+        payload,
+        plan: None,
+        fetched_at: None,
+    };
+    let normalized = provider_usage::normalize(&request).expect("ollama normalization cannot fail");
+    serde_json::from_str(normalized.get()).expect("the normalized ollama document is valid JSON")
 }
 
 // VERIFY: usage-deps
@@ -195,8 +268,8 @@ impl UsageHandle {
         }
     }
 
-    /// The ollama lane's floor, gate and pause together. `blocked` reads the same
-    /// gate `pull_ollama` does, so arming it here holds the lane off.
+    /// The history sampler's floor, gate and pause together. Manual refreshes
+    /// bypass the sampler gate.
     pub async fn ollama_state(&self) -> UsageOllamaState {
         let now = (self.0.clock)();
         let mut slot = self.0.ollama.lock().await;
@@ -229,11 +302,22 @@ impl UsageHandle {
     pub async fn clear_ollama_gate(&self) {
         self.0.ollama.lock().await.gate.clear();
     }
+
+    /// `historyBackoffMs` (`usage.mjs:1165`): the ladder the ollama sampler is on.
+    pub fn ollama_backoff_ms(&self) -> i64 {
+        self.0.ollama_backoff_ms()
+    }
+
+    /// `historyBackoffMs = 0` (`usage.mjs:465`): a successful connect restarts
+    /// the ladder while the sampler keeps running.
+    pub fn set_ollama_backoff_ms(&self, backoff_ms: i64) {
+        self.0.set_ollama_backoff_ms(backoff_ms);
+    }
 }
 
 // VERIFY: usage-router
-/// Mounts `/api/usage` and `/api/usage/history`. The outer server layer owns auth,
-/// origin and token checks.
+/// Mounts `/api/usage`, `/api/usage/history` and `/api/usage/ollama/connect`.
+/// The outer server layer owns auth, origin and token checks.
 pub fn router(deps: UsageDeps) -> Router {
     router_with_handle(deps).0
 }
@@ -261,10 +345,12 @@ pub fn router_with_handle(deps: UsageDeps) -> (Router, UsageHandle) {
         codex_resets: AsyncMutex::new((0, None)),
         last_emitted: Mutex::new(None),
         history_paused: Mutex::new(None),
+        ollama_backoff: Mutex::new(0),
     });
     let router = Router::new()
         .route("/api/usage", get(usage))
         .route("/api/usage/history", get(usage_history))
+        .route("/api/usage/ollama/connect", post(ollama_connect))
         .with_state(state.clone());
     (router, UsageHandle(state))
 }
@@ -294,6 +380,9 @@ struct UsageState {
     /// `historyPaused` (`usage.mjs:1164`): `{at, error}` while the ollama
     /// sampler is stopped, else `None`.
     history_paused: Mutex<Option<Value>>,
+    /// `historyBackoffMs` (`usage.mjs:1165`): module state in Node, so a
+    /// successful connect can zero it while the sampler is running.
+    ollama_backoff: Mutex<i64>,
 }
 
 impl UsageState {
@@ -324,6 +413,30 @@ impl UsageState {
             }
             other => other,
         }
+    }
+
+    fn ollama_backoff_ms(&self) -> i64 {
+        *self
+            .ollama_backoff
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+    }
+
+    fn set_ollama_backoff_ms(&self, backoff_ms: i64) {
+        *self
+            .ollama_backoff
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = backoff_ms;
+    }
+
+    /// `cache.ollama = {data:null, at:0}` (`usage.mjs:464`): drop the reading
+    /// *and* the floor stamp, so the next read attempts the network instead of
+    /// serving the pre-connect reading, and `preserve_stale` has no last-good
+    /// value to fall back to.
+    async fn clear_ollama_cache(&self) {
+        let mut slot = self.ollama.lock().await;
+        slot.data = None;
+        slot.at = 0;
     }
 }
 
@@ -453,6 +566,51 @@ async fn usage_history(
     }
 }
 
+// ---- Ollama connect ---------------------------------------------------------
+
+/// `POST /api/usage/ollama/connect` (`index.mjs:349-353`): the interactive
+/// browser login, the headless verification, then the mode write and the five
+/// cache resets. No body, no query, no `force`.
+async fn ollama_connect(State(state): State<Arc<UsageState>>) -> Response {
+    let result = sanitize_ollama(state.network.ollama_connect().await);
+    if !json_is_ok(&result) {
+        return (StatusCode::BAD_REQUEST, Json(result)).into_response();
+    }
+
+    // `writeOllamaBrowserMode` (`usage.mjs:415`): temp file at 0600, rename onto
+    // `ollama.json`. Node throws on failure and Fastify answers 500.
+    let path = state.state_dir.join("ollama.json");
+    let temp = format!(
+        "{}.{}.{}.tmp",
+        path.to_string_lossy(),
+        std::process::id(),
+        (state.clock)()
+    );
+    let configured = path.to_string_lossy().into_owned();
+    let written =
+        blocking(move || ollama_mode_config::write(&configured, &temp, r#"{"mode":"browser"}"#))
+            .await;
+    match written {
+        Some(Ok(())) => {}
+        // Node throws the `fs` error and Fastify copies its message verbatim.
+        // VERIFY: wave4-hostedits-6
+        Some(Err(failure)) => return fastify_internal(&failure.message),
+        None => return fastify_internal("ollama mode write failed"),
+    }
+
+    // `cache.ollama = {data:null, at:0}`, `historyPaused = null`,
+    // `historyBackoffMs = 0`, `ollamaGate.clear()`. `startHistorySampler()` has
+    // no native equivalent: the samplers are armed at boot and never disarmed.
+    state.clear_ollama_cache().await;
+    state.set_history_paused(None);
+    state.ollama.lock().await.gate.clear();
+    state.set_ollama_backoff_ms(0);
+
+    let mut fields = object_fields(result);
+    fields.insert("fetchedAt".into(), Value::String(iso_ms((state.clock)())));
+    Json(Value::Object(fields)).into_response()
+}
+
 // ---- Document assembly ------------------------------------------------------
 
 impl UsageState {
@@ -488,7 +646,13 @@ impl UsageState {
     /// The resets lane (`usage.mjs` getUsage): its own endpoint, because a
     /// complete Stop-hook snapshot keeps the codex lane off the network.
     /// `SING_CODEX_RESETS=0` switches it off; a failed read keeps the last count.
-    async fn attach_codex_resets(&self, codex: Option<Value>, force: bool, allowed: bool, now: i64) -> Option<Value> {
+    async fn attach_codex_resets(
+        &self,
+        codex: Option<Value>,
+        force: bool,
+        allowed: bool,
+        now: i64,
+    ) -> Option<Value> {
         let mut slot = self.codex_resets.lock().await;
         let enabled = std::env::var("SING_CODEX_RESETS").as_deref() != Ok("0");
         if enabled && allowed && (force || now - slot.0 >= CODEX_RESETS_TTL_MS) {
@@ -574,11 +738,6 @@ impl UsageState {
         force: bool,
         now: i64,
     ) -> Result<Option<Value>, String> {
-        if slot.gate.blocked(None, false, now) {
-            if let Some(data) = slot.data.clone() {
-                return Ok(Some(data));
-            }
-        }
         if !force && slot.at != 0 && now - slot.at < NETWORK_FLOOR_MS {
             return Ok(slot.data.clone());
         }
@@ -629,7 +788,12 @@ impl UsageState {
             Some(Err(failure)) => json!({
                 "ok": false,
                 "source": "ollama",
-                "error": format!("bad {configured}: {}", failure.kind),
+                // Node catches the `readFileSync` failure and answers
+                // `bad ${OLLAMA_CFG}: ${e.message}` with libuv's text, not the
+                // error kind (`usage.mjs:405-412`). `message` is the same
+                // reconstruction the write path puts in its 500 body.
+                // VERIFY: wave6-small_parity-1
+                "error": format!("bad {configured}: {}", failure.message),
             }),
             None => json!({
                 "ok": false,
@@ -1823,10 +1987,12 @@ mod tests {
         claude_calls: AtomicUsize,
         codex_calls: AtomicUsize,
         ollama_calls: AtomicUsize,
+        connect_calls: AtomicUsize,
         claude: Mutex<ClaudeReply>,
         codex_ok: AtomicBool,
         resets: Mutex<Option<Value>>,
         ollama: Mutex<Value>,
+        connect: Mutex<Value>,
     }
 
     impl Default for StubNetwork {
@@ -1835,6 +2001,7 @@ mod tests {
                 claude_calls: AtomicUsize::new(0),
                 codex_calls: AtomicUsize::new(0),
                 ollama_calls: AtomicUsize::new(0),
+                connect_calls: AtomicUsize::new(0),
                 claude: Mutex::new(ClaudeReply {
                     status: 200,
                     retry_after: None,
@@ -1852,6 +2019,11 @@ mod tests {
                 codex_ok: AtomicBool::new(false),
                 resets: Mutex::new(None),
                 ollama: Mutex::new(json!({
+                    "ok": false,
+                    "source": "ollama",
+                    "error": "unavailable",
+                })),
+                connect: Mutex::new(json!({
                     "ok": false,
                     "source": "ollama",
                     "error": "unavailable",
@@ -1920,6 +2092,12 @@ mod tests {
             let value = self.ollama.lock().unwrap().clone();
             Box::pin(async move { value })
         }
+
+        fn ollama_connect(&self) -> BoxFuture<'_, Value> {
+            self.connect_calls.fetch_add(1, Ordering::SeqCst);
+            let value = self.connect.lock().unwrap().clone();
+            Box::pin(async move { value })
+        }
     }
 
     fn clock() -> Arc<dyn Fn() -> i64 + Send + Sync> {
@@ -1955,11 +2133,15 @@ mod tests {
     }
 
     async fn start(deps: UsageDeps) -> Server {
+        start_router(router(deps)).await
+    }
+
+    async fn start_router(router: Router) -> Server {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
         let (stop, stopped) = oneshot::channel::<()>();
         let server = tokio::spawn(async move {
-            axum::serve(listener, router(deps))
+            axum::serve(listener, router)
                 .with_graceful_shutdown(async move {
                     let _ = stopped.await;
                 })
@@ -1979,6 +2161,38 @@ mod tests {
         let status = response.status().as_u16();
         let text = response.text().await.unwrap();
         (status, serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+
+    /// `POST` with no body, like the Connect button.
+    async fn post_json(url: &str) -> (u16, Value) {
+        let response = reqwest::Client::new().post(url).send().await.unwrap();
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap();
+        (status, serde_json::from_str(&text).unwrap_or(Value::Null))
+    }
+
+    /// A successful `connectOllamaUsage` result before sanitization.
+    fn connect_ok() -> Value {
+        json!({
+            "ok": true,
+            "source": "ollama",
+            "plan": "pro",
+            "session": {
+                "pctUsed": 40,
+                "resetsAt": "2026-10-29T05:00:00.000Z",
+                "models": [{ "model": "llama3.3:70b", "requests": 7 }],
+            },
+            "weekly": {
+                "pctUsed": 5,
+                "resetsAt": "2026-11-04T00:00:00.000Z",
+                "models": [],
+            },
+            "extra": null,
+        })
+    }
+
+    fn ollama_json(fixture: &Fixture) -> PathBuf {
+        fixture.state_dir().join("ollama.json")
     }
 
     fn snapshot_row() -> String {
@@ -2050,11 +2264,19 @@ mod tests {
             let url = format!("{}/api/usage?force=1&source=codex", server.0);
             let (status, body) = get_json(&url).await;
             assert_eq!(status, 200);
-            assert_eq!(body["codex"]["resets"], json!({ "available": 1, "expiresAt": [] }), "{body}");
+            assert_eq!(
+                body["codex"]["resets"],
+                json!({ "available": 1, "expiresAt": [] }),
+                "{body}"
+            );
 
             *network.resets.lock().unwrap() = None;
             let (_, body) = get_json(&url).await;
-            assert_eq!(body["codex"]["resets"], json!({ "available": 1, "expiresAt": [] }), "{body}");
+            assert_eq!(
+                body["codex"]["resets"],
+                json!({ "available": 1, "expiresAt": [] }),
+                "{body}"
+            );
             shutdown(server).await;
         });
     }
@@ -2342,5 +2564,325 @@ mod tests {
 
             shutdown(server).await;
         });
+    }
+
+    // VERIFY: ollama-sanitize-shape
+    #[test]
+    fn the_sanitized_ollama_document_is_the_ten_key_projection() {
+        let sanitized = sanitize_ollama(json!({
+            "ok": 1,
+            "source": "ignored",
+            "plan": "pro",
+            "session": { "pctUsed": 40, "resetsAt": null, "models": [] },
+            "weekly": null,
+            "extra": { "dropped": true },
+            "needsAuth": "yes",
+        }));
+        assert_eq!(
+            sanitized
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<Vec<String>>(),
+            vec![
+                "ok",
+                "source",
+                "plan",
+                "session",
+                "weekly",
+                "extra",
+                "fetchedAt",
+                "stale",
+                "needsAuth",
+                "error",
+            ],
+            "{sanitized}"
+        );
+        assert_eq!(sanitized["source"], json!("ollama"), "the source is forced");
+        assert_eq!(sanitized["ok"], json!(true), "`!!data.ok`");
+        assert_eq!(sanitized["needsAuth"], json!(true), "`!!data.needsAuth`");
+        assert_eq!(sanitized["extra"], Value::Null);
+        assert_eq!(sanitized["fetchedAt"], Value::Null);
+        assert_eq!(sanitized["stale"], json!(false));
+        assert_eq!(sanitized["error"], Value::Null);
+        assert_eq!(sanitized["session"]["pctUsed"].as_f64(), Some(40.0));
+    }
+
+    // VERIFY: ollama-connect-400
+    #[test]
+    fn a_failed_connect_answers_400_and_writes_no_mode() {
+        let fixture = Fixture::new("connect-fail");
+        let network = Arc::new(StubNetwork::default());
+        runtime().block_on(async {
+            let server = start(deps(&fixture, network.clone(), Bus::new())).await;
+
+            let (status, body) = post_json(&format!("{}/api/usage/ollama/connect", server.0)).await;
+            assert_eq!(status, 400);
+            assert_eq!(body["ok"], json!(false));
+            assert_eq!(body["source"], json!("ollama"));
+            assert_eq!(body["error"], json!("unavailable"));
+            assert_eq!(body["needsAuth"], json!(false));
+            assert_eq!(body["extra"], Value::Null);
+            assert_eq!(network.connect_calls.load(Ordering::SeqCst), 1);
+            assert!(
+                !ollama_json(&fixture).exists(),
+                "a failed connect never persists the mode"
+            );
+
+            shutdown(server).await;
+        });
+    }
+
+    #[test]
+    fn an_expired_login_answers_400_with_needs_auth() {
+        let fixture = Fixture::new("connect-auth");
+        let network = Arc::new(StubNetwork::default());
+        *network.connect.lock().unwrap() = json!({
+            "ok": false,
+            "source": "ollama",
+            "needsAuth": true,
+            "error": "auth-expired",
+        });
+        runtime().block_on(async {
+            let server = start(deps(&fixture, network.clone(), Bus::new())).await;
+
+            let (status, body) = post_json(&format!("{}/api/usage/ollama/connect", server.0)).await;
+            assert_eq!(status, 400);
+            assert_eq!(body["error"], json!("auth-expired"));
+            assert_eq!(body["needsAuth"], json!(true));
+            assert!(!ollama_json(&fixture).exists());
+
+            shutdown(server).await;
+        });
+    }
+
+    // VERIFY: ollama-connect-200
+    // VERIFY: ollama-mode-atomic
+    #[test]
+    fn a_successful_connect_writes_the_mode_atomically_and_returns_the_reading() {
+        let fixture = Fixture::new("connect-ok");
+        let network = Arc::new(StubNetwork::default());
+        *network.connect.lock().unwrap() = connect_ok();
+        runtime().block_on(async {
+            let server = start(deps(&fixture, network.clone(), Bus::new())).await;
+
+            let (status, body) = post_json(&format!("{}/api/usage/ollama/connect", server.0)).await;
+            assert_eq!(status, 200, "{body}");
+            assert_eq!(body["ok"], json!(true));
+            assert_eq!(body["source"], json!("ollama"));
+            assert_eq!(body["plan"], json!("pro"));
+            assert_eq!(body["session"]["pctUsed"].as_f64(), Some(40.0));
+            assert_eq!(
+                body["fetchedAt"],
+                json!(iso_ms(NOW)),
+                "connect stamps the moment it verified"
+            );
+            assert_eq!(network.connect_calls.load(Ordering::SeqCst), 1);
+
+            assert_eq!(
+                std::fs::read_to_string(ollama_json(&fixture)).unwrap(),
+                r#"{"mode":"browser"}"#
+            );
+            let leftovers: Vec<String> = std::fs::read_dir(fixture.state_dir())
+                .unwrap()
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .filter(|name| name.ends_with(".tmp"))
+                .collect();
+            assert!(leftovers.is_empty(), "no temp file survives: {leftovers:?}");
+
+            shutdown(server).await;
+        });
+    }
+
+    // VERIFY: ollama-cache-clear
+    #[test]
+    fn a_successful_connect_clears_the_cache_so_a_later_failure_is_not_served_stale() {
+        let fixture = Fixture::new("connect-cache");
+        fixture.write(ollama_json(&fixture), r#"{"mode":"browser"}"#);
+        let network = Arc::new(StubNetwork::default());
+        *network.ollama.lock().unwrap() = json!({
+            "ok": true,
+            "source": "ollama",
+            "plan": "pro",
+            "session": { "pctUsed": 1, "resetsAt": null, "models": [] },
+            "weekly": { "pctUsed": 2, "resetsAt": null, "models": [] },
+            "extra": null,
+        });
+        *network.connect.lock().unwrap() = connect_ok();
+        runtime().block_on(async {
+            let server = start(deps(&fixture, network.clone(), Bus::new())).await;
+
+            let (status, body) = get_json(&format!("{}/api/usage?source=ollama", server.0)).await;
+            assert_eq!(status, 200);
+            assert_eq!(body["ollama"]["ok"], json!(true));
+            assert_eq!(network.ollama_calls.load(Ordering::SeqCst), 1);
+
+            let (status, _) = post_json(&format!("{}/api/usage/ollama/connect", server.0)).await;
+            assert_eq!(status, 200);
+
+            // The next read must reach the seam (floor reset) and must not fall
+            // back to the pre-connect reading as `stale` (data cleared).
+            *network.ollama.lock().unwrap() = json!({
+                "ok": false,
+                "source": "ollama",
+                "error": "boom",
+            });
+            let (status, body) = get_json(&format!("{}/api/usage?source=ollama", server.0)).await;
+            assert_eq!(status, 200);
+            assert_eq!(network.ollama_calls.load(Ordering::SeqCst), 2);
+            assert_eq!(body["ollama"]["ok"], json!(false), "{body}");
+            assert_eq!(body["ollama"]["error"], json!("boom"));
+            assert_ne!(body["ollama"]["stale"], json!(true), "{body}");
+
+            shutdown(server).await;
+        });
+    }
+
+    // VERIFY: ollama-gate-clear
+    // VERIFY: ollama-pause-clear
+    #[test]
+    fn a_successful_connect_clears_the_gate_and_a_paused_lane() {
+        let fixture = Fixture::new("connect-gate");
+        fixture.write(ollama_json(&fixture), r#"{"mode":"browser"}"#);
+        let network = Arc::new(StubNetwork::default());
+        *network.ollama.lock().unwrap() = json!({
+            "ok": true,
+            "source": "ollama",
+            "plan": "pro",
+            "session": { "pctUsed": 1, "resetsAt": null, "models": [] },
+            "weekly": { "pctUsed": 2, "resetsAt": null, "models": [] },
+            "extra": null,
+        });
+        *network.connect.lock().unwrap() = connect_ok();
+        runtime().block_on(async {
+            let (router, handle) = router_with_handle(deps(&fixture, network.clone(), Bus::new()));
+            let server = start_router(router).await;
+
+            // The history sampler gate must not suppress an explicit refresh.
+            let (_, body) =
+                get_json(&format!("{}/api/usage?force=1&source=ollama", server.0)).await;
+            assert_eq!(body["ollama"]["ok"], json!(true));
+            assert_eq!(network.ollama_calls.load(Ordering::SeqCst), 1);
+
+            handle.arm_ollama_gate(60_000).await;
+            let (_, body) =
+                get_json(&format!("{}/api/usage?force=1&source=ollama", server.0)).await;
+            assert_eq!(
+                network.ollama_calls.load(Ordering::SeqCst),
+                2,
+                "manual refresh bypasses the history sampler gate"
+            );
+            assert_eq!(body["ollama"]["ok"], json!(true));
+
+            handle.pause_history("auth-expired");
+            assert_eq!(
+                handle.ollama_state().await.history_paused.unwrap()["error"],
+                json!("auth-expired")
+            );
+
+            let (status, _) = post_json(&format!("{}/api/usage/ollama/connect", server.0)).await;
+            assert_eq!(status, 200);
+
+            let (_, body) =
+                get_json(&format!("{}/api/usage?force=1&source=ollama", server.0)).await;
+            assert_eq!(
+                network.ollama_calls.load(Ordering::SeqCst),
+                3,
+                "manual refresh remains available before and after connect"
+            );
+            assert_eq!(
+                body["ollama"]["historyPaused"],
+                Value::Null,
+                "a successful connect re-enables the paused lane"
+            );
+
+            shutdown(server).await;
+        });
+    }
+
+    #[test]
+    fn a_mode_write_failure_answers_the_fastify_internal_error() {
+        let fixture = Fixture::new("connect-write-fail");
+        // A directory where `ollama.json` belongs makes the rename step fail.
+        std::fs::create_dir_all(ollama_json(&fixture)).unwrap();
+        let network = Arc::new(StubNetwork::default());
+        *network.connect.lock().unwrap() = connect_ok();
+        runtime().block_on(async {
+            let server = start(deps(&fixture, network.clone(), Bus::new())).await;
+
+            let (status, body) = post_json(&format!("{}/api/usage/ollama/connect", server.0)).await;
+            assert_eq!(status, 500, "{body}");
+            assert_eq!(body["statusCode"], json!(500));
+            assert_eq!(body["error"], json!("Internal Server Error"));
+            // Node throws the `fs` error, so Fastify's body carries the libuv
+            // message; the fixed native string is gone. VERIFY: wave4-hostedits-11
+            let message = body["message"].as_str().unwrap_or_default();
+            assert!(
+                message.contains(", rename '") && message.contains("ollama.json"),
+                "{message}"
+            );
+            assert_ne!(body["message"], json!("ollama mode write failed"));
+
+            shutdown(server).await;
+        });
+    }
+
+    // VERIFY: wave6-small_parity-2
+    /// Node's `fetchOllama` catches the `readFileSync` error and answers
+    /// `bad ${OLLAMA_CFG}: ${e.message}` with libuv's text (`usage.mjs:405-412`).
+    /// A directory where `ollama.json` belongs makes the read fail.
+    #[test]
+    fn an_ollama_read_failure_answers_the_libuv_message() {
+        let fixture = Fixture::new("usage-read-fail");
+        std::fs::create_dir_all(ollama_json(&fixture)).unwrap();
+        let path = ollama_json(&fixture).to_string_lossy().into_owned();
+        let network = Arc::new(StubNetwork::default());
+        runtime().block_on(async {
+            let server = start(deps(&fixture, network.clone(), Bus::new())).await;
+
+            let (status, body) =
+                get_json(&format!("{}/api/usage?force=1&source=ollama", server.0)).await;
+            assert_eq!(status, 200, "{body}");
+            assert_eq!(body["ollama"]["ok"], false);
+            let error = body["ollama"]["error"].as_str().unwrap_or_default();
+            // Node: `readFileSync(<dir>)` opens, then `read` fails with EISDIR.
+            assert_eq!(
+                error,
+                format!("bad {path}: EISDIR: illegal operation on a directory, read")
+            );
+            assert_eq!(
+                network.ollama_calls.load(Ordering::SeqCst),
+                0,
+                "an unreadable config never scrapes"
+            );
+
+            shutdown(server).await;
+        });
+    }
+
+    // VERIFY: wave4-hostedits-12
+    /// Node resolves the browser executable inside every launch
+    /// (`usage.mjs:394-399`), so installing Edge after boot needs no restart.
+    #[test]
+    fn the_ollama_browser_is_resolved_on_every_launch() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+        let network = NativeUsageNetwork::with_resolver(
+            PathBuf::from("profile"),
+            Arc::new(move || {
+                counter.fetch_add(1, Ordering::SeqCst);
+                None
+            }),
+        );
+        let _ = network.browser();
+        let _ = network.browser();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "each launch re-resolves the executable, like playwright import"
+        );
+        assert_eq!(network.profile_dir, PathBuf::from("profile"));
     }
 }

@@ -7,8 +7,8 @@
 //    (README: "the tree renders collapsed") — every skill test has to expand
 //    root then scope before a skill/file button exists.
 //
-// Mutating: Save really writes under e2e/.tmp(-<port>)/corpus/... — asserted
-// with node:fs. Each save uses a fresh marker so tests don't depend on order.
+// Mutating: Save really writes under <TMP>/corpus/... — asserted with node:fs.
+// Each save uses a fresh marker so tests don't depend on order. // VERIFY: wave4-f5-1
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test, expect } from './fixtures/test.mjs';

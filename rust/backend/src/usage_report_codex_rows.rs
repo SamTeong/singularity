@@ -12,9 +12,10 @@ use serde_json::Value;
 /// Internal reviewer thread, never the model that did the session's work.
 const AUTO_REVIEW_MODEL: &str = "codex-auto-review";
 
-/// `MODEL_DISPLAY_NAMES` (codex.mjs:32-40); unknown ids fall back to "".
+/// `MODEL_DISPLAY_NAMES` (codex.mjs:32-41); unknown ids fall back to "".
 const MODEL_DISPLAY_NAMES: &[(&str, &str)] = &[
     ("gpt-6.1-sol", "GPT-6.1 Sol"),
+    ("gpt-6.1-terra", "GPT-6.1 Terra"),
     ("gpt-6-sol", "GPT-6 Sol"),
     ("gpt-6-luna", "GPT-6 Luna"),
     ("gpt-5.6-sol", "GPT-5.6 Sol"),
@@ -40,9 +41,13 @@ pub struct TokenReading {
     pub epoch: Option<f64>,
     pub model: Option<String>,
     /// Input tokens excluding the cached ones, so input and cache stay disjoint.
+    #[serde(rename = "i")]
     pub input: f64,
+    #[serde(rename = "o")]
     pub output: f64,
+    #[serde(rename = "cr")]
     pub cache_read: f64,
+    #[serde(rename = "cc")]
     pub cache_creation: f64,
 }
 
@@ -68,7 +73,12 @@ pub struct ContextWindow {
 }
 
 /// One parsed rollout thread (`_new_thread_res`, codex.mjs:131-145).
+///
+/// The field names and the `tools` shape are the on-disk `codex-cache.json`
+/// schema, shared with `codex.mjs`: camelCase keys, and `tools` an object in
+/// first-seen order rather than serde's array of pairs.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodexThread {
     pub root_id: Option<String>,
     pub cwd: String,
@@ -77,11 +87,40 @@ pub struct CodexThread {
     pub turns: f64,
     pub tool_calls: f64,
     /// Tool counts in first-seen order, as the JS object literal preserves them.
+    #[serde(with = "tools_map")]
     pub tools: Vec<(String, f64)>,
     pub turn_contexts: Vec<TurnContext>,
     pub token_readings: Vec<TokenReading>,
     pub rate_readings: Vec<RateReading>,
+    #[serde(rename = "contextWindowSize")]
     pub context_window: Option<ContextWindow>,
+}
+
+/// `tools` on disk is a JS object literal; `preserve_order` (Cargo.toml) keeps
+/// its first-seen order through `serde_json::Map`.
+mod tools_map {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use serde_json::{Map, Value};
+
+    pub fn serialize<S: Serializer>(
+        tools: &[(String, f64)],
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut map = Map::with_capacity(tools.len());
+        for (name, count) in tools {
+            map.insert(name.clone(), Value::from(*count));
+        }
+        serde::Serialize::serialize(&map, serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Vec<(String, f64)>, D::Error> {
+        Ok(Map::<String, Value>::deserialize(deserializer)?
+            .into_iter()
+            .map(|(name, count)| (name, count.as_f64().unwrap_or(0.0)))
+            .collect())
+    }
 }
 
 /// One `stats.mjs`-shaped report row; `None` and an empty string both render blank.
@@ -175,7 +214,7 @@ pub fn parse_thread(
                     Some("custom_tool_call" | "function_call")
                 ) {
                     thread.tool_calls += 1.0;
-                    let name = field("name").and_then(non_empty_str).unwrap_or("?");
+                    let name = facet_key(field("name"));
                     add_count(&mut thread.tools, &format!("codex:{name}"), 1.0);
                 }
             }
@@ -183,10 +222,9 @@ pub fn parse_thread(
                 Some("user_message") => thread.turns += 1.0,
                 Some("mcp_tool_call_end") => {
                     thread.tool_calls += 1.0;
-                    let tool = field("invocation")
-                        .and_then(|invocation| invocation.get("tool"))
-                        .and_then(non_empty_str)
-                        .unwrap_or("?");
+                    let tool = facet_key(
+                        field("invocation").and_then(|invocation| invocation.get("tool")),
+                    );
                     add_count(&mut thread.tools, &format!("codex:{tool}"), 1.0);
                 }
                 Some("token_count") => {
@@ -564,14 +602,41 @@ fn js_number(value: f64) -> String {
     }
 }
 
-/// JS `Number.prototype.toFixed(4)`; like JS, ties round away from zero.
+/// JS `Number.prototype.toFixed(4)`: correct rounding of the exact binary
+/// value, exact midpoints away from zero, and `ToString` at or above 1e21.
+/// A 4-decimal midpoint is exactly `odd/32` (20000 = 2^5·5^4, and a dyadic
+/// numerator must cancel 5^4), and Rust's `{:.4}` already rounds every other
+/// case correctly, so only those midpoints need the nudge.
+// VERIFY: wave3-fix-forecast-1
 fn to_fixed4(value: f64) -> String {
-    let scaled = value * 10_000.0;
-    if scaled.is_finite() && scaled.fract().abs() == 0.5 {
-        let rounded = scaled.trunc() + scaled.signum() * 0.5;
-        return format!("{:.4}", rounded / 10_000.0);
+    if !value.is_finite() {
+        return crate::http_hooks::js_number_text(value);
+    }
+    // JS prints `0.0000` for both zeros.
+    if value == 0.0 {
+        return "0.0000".to_owned();
+    }
+    if value.abs() >= 1e21 {
+        return crate::http_hooks::js_number_text(value);
+    }
+    let scaled = value.abs() * 32.0;
+    if scaled.fract() == 0.0 && (scaled / 2.0).fract() != 0.0 {
+        // odd/32: 10^4 * odd/32 = (odd * 625 + 1) / 2 units of 10^-4, rounded up.
+        let units = ((scaled as i64) * 625 + 1) / 2;
+        let sign = if value < 0.0 { "-" } else { "" };
+        return format!("{sign}{}.{:04}", units / 10_000, units % 10_000);
     }
     format!("{value:.4}")
+}
+
+/// JS `` `codex:${value || "?"}` ``: `||` keeps every truthy value, then the
+/// template literal coerces it with `String()`.
+// VERIFY: wave3-fix-forecast-6
+fn facet_key(value: Option<&Value>) -> String {
+    match value {
+        Some(value) if crate::http_hooks::js_truthy(value) => crate::http_hooks::js_string(value),
+        _ => "?".to_owned(),
+    }
 }
 
 /// JS `Number(v)` kept only when finite (`_num`, codex.mjs:62-65).
@@ -728,6 +793,87 @@ mod tests {
     }
 
     #[test]
+    fn est_cost_rounds_like_javascript_to_fixed4() {
+        // Pairs derived from `(v).toFixed(4)` on the exact doubles.
+        // VERIFY: wave3-fix-forecast-8
+        for (value, expected) in [
+            (0.0, "0.0000"),
+            (-0.0, "0.0000"),
+            (0.03125, "0.0313"),
+            (0.09375, "0.0938"),
+            (0.15625, "0.1563"),
+            (0.21875, "0.2188"),
+            (0.28125, "0.2813"),
+            (0.96875, "0.9688"),
+            (1.03125, "1.0313"),
+            (10.40625, "10.4063"),
+            (31.21875, "31.2188"),
+            (97.65625, "97.6563"),
+            (385.78125, "385.7813"),
+            (0.00004, "0.0000"),
+            (0.00005, "0.0001"),
+            (0.00015, "0.0001"),
+            (1.00005, "1.0001"),
+            (2.675, "2.6750"),
+            (1234.56785, "1234.5678"),
+            (0.1 + 0.2, "0.3000"),
+            (0.99995, "1.0000"),
+            (123456.78905, "123456.7891"),
+            (0.1875, "0.1875"),
+            (7.00005, "7.0000"),
+            (-0.03125, "-0.0313"),
+            (-0.00005, "-0.0001"),
+            (-1.00005, "-1.0001"),
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+            (1e20, "100000000000000000000.0000"),
+            (1e21, "1e+21"),
+        ] {
+            assert_eq!(to_fixed4(value), expected, "{value:?}");
+        }
+    }
+
+    #[test]
+    fn facet_keys_follow_javascript_string_coercion() {
+        // Pairs derived from JS `` `codex:${p.name || "?"}` ``: `||` drops
+        // falsy values, then the template literal applies `String()`.
+        // VERIFY: wave3-fix-forecast-7
+        let text = concat!(
+            r#"{"timestamp":"2026-01-01T00:00:00Z","type":"response_item","payload":{"type":"function_call","name":5}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:01Z","type":"response_item","payload":{"type":"function_call","name":true}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:02Z","type":"response_item","payload":{"type":"function_call","name":false}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:03Z","type":"response_item","payload":{"type":"function_call","name":0}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:04Z","type":"response_item","payload":{"type":"function_call","name":{"a":1}}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:05Z","type":"response_item","payload":{"type":"function_call","name":[1,2]}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:06Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","invocation":{"tool":7}}}"#,
+            "\n",
+            r#"{"timestamp":"2026-01-01T00:00:07Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","invocation":{"tool":"apply_patch"}}}"#,
+            "\n",
+        );
+        let thread = parse_thread(text, "fallback", epoch_from_iso);
+        assert_eq!(thread.tool_calls, 8.0);
+        assert_eq!(
+            thread.tools,
+            vec![
+                ("codex:5".to_owned(), 1.0),
+                ("codex:true".to_owned(), 1.0),
+                ("codex:?".to_owned(), 2.0),
+                ("codex:[object Object]".to_owned(), 1.0),
+                ("codex:1,2".to_owned(), 1.0),
+                ("codex:7".to_owned(), 1.0),
+                ("codex:apply_patch".to_owned(), 1.0),
+            ]
+        );
+    }
+
+    #[test]
     fn malformed_lines_are_skipped_and_a_missing_meta_falls_back_to_the_filename_id() {
         let text = concat!(
             "not json\n",
@@ -781,6 +927,14 @@ mod tests {
     }
 
     #[test]
+    fn display_names_cover_terra_and_unknown_ids_fall_back_to_blank() {
+        assert_eq!(display_name("gpt-6.1-terra"), "GPT-6.1 Terra");
+        assert_eq!(display_name("gpt-6.1-sol"), "GPT-6.1 Sol");
+        assert_eq!(display_name("gpt-5.6-terra"), "GPT-5.6 Terra");
+        assert_eq!(display_name("gpt-6.1-unlisted"), "");
+    }
+
+    #[test]
     fn auto_review_tokens_never_inflate_the_primary_row() {
         let text = concat!(
             r#"{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"session_id":"ar"}}"#,
@@ -799,5 +953,88 @@ mod tests {
         assert_eq!(rows[1].session_id, "ar:auto-review");
         assert_eq!(rows[1].input_tokens, 5.0);
         assert_eq!(rows[1].output_tokens, 1.0);
+    }
+
+    /// `codex-cache.json` exactly as the pinned `codex.mjs` wrote it for the
+    /// wave29 fixture (two threads: one empty `tools`, one with tools in
+    /// first-seen order and a weekly gauge without `resets_at`).
+    const NODE_CACHE: &str = concat!(
+        r#"{"version":1,"threads":{"11111111-2222-4333-8444-555555555555":{"mtime":1767225600,"res":{"rootId":"11111111-2222-4333-8444-555555555555","cwd":"C:\\proj","startEpoch":1767225600,"endEpoch":1767225603,"turns":1,"toolCalls":0,"tools":{},"turnContexts":[{"epoch":1767225601,"model":"gpt-6-sol"}],"tokenReadings":[{"epoch":1767225603,"model":"gpt-6-sol","i":800,"o":10,"cr":200,"cc":0}],"rateReadings":[{"epoch":1767225603,"session":{"utilization":25,"resets_at":1767225600},"weekly":{"utilization":40,"resets_at":1767225600}}],"contextWindowSize":{"epoch":1767225603,"size":200000}}},"#,
+        r#""11111111-2222-4333-8444-666666666666":{"mtime":1767225605,"res":{"rootId":"11111111-2222-4333-8444-666666666666","cwd":"C:\\proj\\sub","startEpoch":1767312000,"endEpoch":1767312005,"turns":0,"toolCalls":3,"tools":{"codex:exec":2,"codex:wait":1},"turnContexts":[{"epoch":1767312001,"model":"gpt-6.1-terra"}],"tokenReadings":[{"epoch":1767312005,"model":"gpt-6.1-terra","i":300,"o":20,"cr":0,"cc":50}],"rateReadings":[{"epoch":1767312005,"session":{"utilization":15,"resets_at":1767225605},"weekly":{"utilization":15,"resets_at":null}}],"contextWindowSize":{"epoch":1767312005,"size":200000}}}}}"#,
+    );
+
+    /// Numbers compare by value: Node writes `1` where serde writes `1.0`.
+    fn normalised(value: &Value) -> Value {
+        match value {
+            Value::Number(number) => Value::from(number.as_f64().unwrap_or(0.0)),
+            Value::Array(items) => Value::Array(items.iter().map(normalised).collect()),
+            Value::Object(map) => Value::Object(
+                map.iter()
+                    .map(|(k, v)| (k.clone(), normalised(v)))
+                    .collect(),
+            ),
+            other => other.clone(),
+        }
+    }
+
+    fn object_keys(value: &Value) -> Vec<&str> {
+        value
+            .as_object()
+            .expect("object")
+            .keys()
+            .map(String::as_str)
+            .collect()
+    }
+
+    #[test]
+    fn node_written_cache_entries_load_and_re_serialize_to_the_same_json() {
+        // VERIFY: wave29-b9-1
+        let document: Value = serde_json::from_str(NODE_CACHE).expect("node cache");
+        let threads = document["threads"].as_object().expect("threads");
+        assert_eq!(threads.len(), 2);
+        let mut saw_tools = false;
+        for (key, entry) in threads {
+            let res = &entry["res"];
+            let thread: CodexThread = serde_json::from_value(res.clone()).expect("load res");
+            let written = serde_json::to_value(&thread).expect("serialize res");
+            assert_eq!(normalised(&written), normalised(res), "{key}");
+            assert_eq!(object_keys(&written), object_keys(res), "{key} key order");
+            if !res["tools"].as_object().unwrap().is_empty() {
+                saw_tools = true;
+                assert_eq!(
+                    object_keys(&written["tools"]),
+                    ["codex:exec", "codex:wait"],
+                    "first-seen tool order survives the round trip"
+                );
+            }
+        }
+        assert!(saw_tools, "fixture must cover a non-empty tools map");
+    }
+
+    #[test]
+    fn rust_written_thread_has_exactly_the_node_cache_keys() {
+        let node: Value = serde_json::from_str(NODE_CACHE).expect("node cache");
+        let node_res = &node["threads"]["11111111-2222-4333-8444-555555555555"]["res"];
+
+        let thread = parse_thread(ROOT_ROLLOUT, ROOT_ID, epoch_from_iso);
+        let written = serde_json::to_value(&thread).expect("serialize");
+        assert_eq!(object_keys(&written), object_keys(node_res));
+        assert_eq!(
+            object_keys(&written["tokenReadings"][0]),
+            ["epoch", "model", "i", "o", "cr", "cc"]
+        );
+        assert_eq!(object_keys(&written["turnContexts"][0]), ["epoch", "model"]);
+        assert_eq!(
+            object_keys(&written["rateReadings"][0]),
+            ["epoch", "session", "weekly"]
+        );
+        assert_eq!(
+            object_keys(&written["rateReadings"][0]["weekly"]),
+            ["utilization", "resets_at"]
+        );
+        assert_eq!(
+            object_keys(&written["contextWindowSize"]),
+            ["epoch", "size"]
+        );
     }
 }

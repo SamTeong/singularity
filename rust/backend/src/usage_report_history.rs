@@ -3,24 +3,20 @@
 //! Mirrors `_load_usage_snapshots` (stats.mjs:1201), `_gauge_windows` (:1223),
 //! `_forecast_stale` (:1409), the write half of `_build_forecast`
 //! (:1635-1689) and `_load_forecast` (:1693) from the bundled harness
-//! usage-report script. Paths, the clock and the local UTC offset are
-//! parameters; nothing here reads environment variables, the real clock or
-//! real user state.
-//!
-//! Known deviation: Node resolves `fetched_at` with the offset in force at each
-//! record (DST-aware); this takes one fixed offset, so records across a DST
-//! change shift by the DST delta. Callers in DST zones must account for it.
+//! usage-report script. Paths, the clock and the local zone are parameters;
+//! nothing here reads environment variables, the real clock or real user state.
 
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
+use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use time::{Date, Month, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset};
 
 use serde_json::{Map, Value};
 
 use crate::usage_report_forecast::Snapshot;
+use crate::usage_snapshot::LocalZone;
 
 /// stats.mjs:1409 default `max_age_days = 7`.
 const FORECAST_MAX_AGE_S: f64 = 7.0 * 86400.0;
@@ -34,13 +30,14 @@ pub struct UsageRecord {
 }
 
 /// JS `Number(v)`, which the Node code applies to `utilization` and accepts
-/// anything (`"abc"` becomes `NaN`).
-// shortcut: hex strings and single-element arrays become NaN here (JS coerces them); add if real data carries them.
+/// anything (`"abc"` becomes `NaN`). Strings use the crate's full JavaScript
+/// numeric grammar, so Rust-only spellings (`"inf"`, `"NaN"`) stay `NaN`.
+// VERIFY: wave3-fix-forecast-4
+// shortcut: arrays become NaN here (JS coerces them: `Number([])` is 0); add if real data carries them.
 fn js_number(value: &Value) -> f64 {
     match value {
         Value::Number(number) => number.as_f64().unwrap_or(f64::NAN),
-        Value::String(text) if text.trim().is_empty() => 0.0,
-        Value::String(text) => text.trim().parse().unwrap_or(f64::NAN),
+        Value::String(text) => crate::memory_backup::js_string_to_number(text),
         Value::Bool(true) => 1.0,
         Value::Bool(false) => 0.0,
         Value::Null => 0.0,
@@ -48,33 +45,91 @@ fn js_number(value: &Value) -> f64 {
     }
 }
 
-/// `fetched_at` is local `YYYY-MM-DD HH:MM:SS` (stats.mjs:1190-1195).
-fn parse_fetched_at(text: &str, utc_offset_secs: i32) -> Option<i64> {
-    let (date, clock) = text.trim().split_once(' ')?;
-    let mut fields = date.split('-');
-    let year: i32 = fields.next()?.parse().ok()?;
-    let month = Month::try_from(fields.next()?.parse::<u8>().ok()?).ok()?;
-    let day: u8 = fields.next()?.parse().ok()?;
-    let mut fields = clock.split(':');
-    let hour: u8 = fields.next()?.parse().ok()?;
-    let minute: u8 = fields.next()?.parse().ok()?;
-    let second: u8 = fields.next()?.split('.').next()?.parse().ok()?;
-    let offset = UtcOffset::from_whole_seconds(utc_offset_secs).ok()?;
-    let local = PrimitiveDateTime::new(
-        Date::from_calendar_date(year, month, day).ok()?,
-        Time::from_hms(hour, minute, second).ok()?,
-    );
-    Some(local.assume_offset(offset).unix_timestamp())
-}
-
-/// stats.mjs:1175-1179.
-fn parse_reset_at(text: &str) -> Option<i64> {
-    if text.is_empty() {
+/// `parseDateTime` (stats.mjs:1009-1014): strictly `YYYY-MM-DD HH:MM:SS`, then
+/// JS `new Date(year, month - 1, day, hour, minute, second)`, which offsets
+/// two-digit years by 1900 and rolls out-of-range fields over. The zone
+/// resolves the offset per record, as Node does.
+// VERIFY: wave3-fix-forecast-2
+fn parse_fetched_at(text: &str, zone: LocalZone) -> Option<i64> {
+    let bytes = text.as_bytes();
+    if bytes.len() != 19
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || bytes[10] != b' '
+        || bytes[13] != b':'
+        || bytes[16] != b':'
+    {
         return None;
     }
-    OffsetDateTime::parse(text, &Rfc3339)
-        .ok()
-        .map(|reset| reset.unix_timestamp())
+    let digits = |start: usize, end: usize| -> Option<i64> {
+        let part = text.get(start..end)?;
+        if !part.bytes().all(|byte| byte.is_ascii_digit()) {
+            return None;
+        }
+        part.parse().ok()
+    };
+    let year = digits(0, 4)?;
+    let day = digits(8, 10)?;
+    let hour = digits(11, 13)?;
+    let minute = digits(14, 16)?;
+    let second = digits(17, 19)?;
+    // `new Date(y, ...)` maps 0..=99 to 1900..=1999 before normalizing months.
+    let year = if year <= 99 { year + 1900 } else { year };
+    let month_index = digits(5, 7)? - 1;
+    let year = year + month_index.div_euclid(12);
+    let month = month_index.rem_euclid(12) + 1;
+    let days = days_from_civil(year, month, 1) + day - 1;
+    let local_secs = days * 86_400 + hour * 3_600 + minute * 60 + second;
+    zone.to_epoch_secs(local_secs)
+}
+
+/// Days since 1970-01-01 for a proleptic Gregorian date (Hinnant's
+/// `days_from_civil`), reproducing JS `MakeDay` for rolled-over dates.
+fn days_from_civil(year: i64, month: i64, day: i64) -> i64 {
+    let year = year - if month <= 2 { 1 } else { 0 };
+    let era = year.div_euclid(400);
+    let year_of_era = year - era * 400;
+    let month_prime = if month > 2 { month - 3 } else { month + 9 };
+    let day_of_year = (153 * month_prime + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    era * 146_097 + day_of_era - 719_468
+}
+
+/// stats.mjs:1176-1184 `_parse_reset_at`: RFC3339, or a numeric epoch. A JSON
+/// number or a string matching `/^\d+(\.\d+)?$/` is an epoch in seconds, or in
+/// milliseconds when the magnitude is at least 1e12 inclusive, floored.
+fn parse_reset_at(value: &Value) -> Option<i64> {
+    match value {
+        Value::Number(number) => number.as_f64().map(epoch_secs),
+        Value::String(text) if text.is_empty() => None,
+        Value::String(text) if is_unsigned_decimal(text) => {
+            text.parse::<f64>().ok().map(epoch_secs)
+        }
+        Value::String(text) => OffsetDateTime::parse(text, &Rfc3339)
+            .ok()
+            .map(|reset| reset.unix_timestamp()),
+        _ => None,
+    }
+}
+
+/// stats.mjs:1180 — `Math.floor(n >= 1e12 ? n / 1000 : n)`.
+fn epoch_secs(epoch: f64) -> i64 {
+    (if epoch >= 1e12 { epoch / 1000.0 } else { epoch }).floor() as i64
+}
+
+/// stats.mjs:1178 `/^\d+(\.\d+)?$/`: ASCII digits with an optional single
+/// decimal part. No sign, whitespace or exponent.
+fn is_unsigned_decimal(text: &str) -> bool {
+    let (whole, fraction) = match text.split_once('.') {
+        Some((_, fraction)) if fraction.contains('.') => return false,
+        Some((whole, fraction)) => (whole, Some(fraction)),
+        None => (text, None),
+    };
+    let fraction_ok = match fraction {
+        None => true,
+        Some(part) => !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()),
+    };
+    !whole.is_empty() && whole.bytes().all(|byte| byte.is_ascii_digit()) && fraction_ok
 }
 
 /// stats.mjs:1183-1188: round to the nearest minute (JS `Math.round`, i.e.
@@ -100,7 +155,7 @@ fn is_file(path: &Path) -> bool {
 pub fn load_usage_snapshots(
     path: &Path,
     include_archives: bool,
-    utc_offset_secs: i32,
+    zone: LocalZone,
 ) -> io::Result<Vec<UsageRecord>> {
     let mut files: Vec<PathBuf> = Vec::new();
     if include_archives {
@@ -139,7 +194,7 @@ pub fn load_usage_snapshots(
             let fetched_epoch = raw
                 .get("fetched_at")
                 .and_then(Value::as_str)
-                .and_then(|text| parse_fetched_at(text, utc_offset_secs));
+                .and_then(|text| parse_fetched_at(text, zone));
             out.push(UsageRecord { fetched_epoch, raw });
         }
     }
@@ -187,7 +242,7 @@ pub fn gauge_windows(records: &[UsageRecord], gauge: &str) -> Vec<GaugeWindow> {
         if utilization.is_null() {
             continue;
         }
-        let Some(resets_at) = window.get("resets_at").and_then(Value::as_str) else {
+        let Some(resets_at) = window.get("resets_at").filter(|value| !value.is_null()) else {
             continue;
         };
         let Some(fetched_epoch) = record.fetched_epoch else {
@@ -467,19 +522,19 @@ mod tests {
             "{\"fetched_at\":\"2024-03-01 00:00:00\"}\n\n{broken\n{\"gauge\":null}\n",
         );
 
-        let records = load_usage_snapshots(&live, true, 0).unwrap();
+        let records = load_usage_snapshots(&live, true, LocalZone::Fixed(0)).unwrap();
         let order: Vec<Option<i64>> = records.iter().map(|record| record.fetched_epoch).collect();
-        let january = parse_fetched_at("2024-01-02 00:00:00", 0);
-        let february = parse_fetched_at("2024-02-01 00:00:00", 0);
-        let march = parse_fetched_at("2024-03-01 00:00:00", 0);
+        let january = parse_fetched_at("2024-01-02 00:00:00", LocalZone::Fixed(0));
+        let february = parse_fetched_at("2024-02-01 00:00:00", LocalZone::Fixed(0));
+        let march = parse_fetched_at("2024-03-01 00:00:00", LocalZone::Fixed(0));
         assert_eq!(order, vec![january, february, march, None]);
 
         // A non-Claude path reads that single file only.
-        let single = load_usage_snapshots(&live, false, 0).unwrap();
+        let single = load_usage_snapshots(&live, false, LocalZone::Fixed(0)).unwrap();
         assert_eq!(single.len(), 2);
         assert_eq!(single[1].fetched_epoch, None);
         assert_eq!(
-            parse_fetched_at("2024-01-02 00:00:00", 3600),
+            parse_fetched_at("2024-01-02 00:00:00", LocalZone::Fixed(3600)),
             january.map(|secs| secs - 3600)
         );
     }
@@ -559,6 +614,191 @@ mod tests {
             ]
         );
         assert_eq!(windows[1].u_final, 40.0);
+    }
+
+    fn reset_record(fetched: i64, resets_at: Value) -> UsageRecord {
+        record(
+            serde_json::json!({
+                "five_hour": { "utilization": 10, "resets_at": resets_at },
+            }),
+            Some(fetched),
+        )
+    }
+
+    fn reset_sec(resets_at: Value) -> i64 {
+        let windows = gauge_windows(&[reset_record(100, resets_at)], "five_hour");
+        assert_eq!(windows.len(), 1);
+        windows[0].reset_sec
+    }
+
+    #[test]
+    fn gauge_windows_accepts_numeric_epochs_and_numeric_strings() {
+        // 2026-01-01T00:00:00Z, the canonical spelling native formats to.
+        const ISO: &str = "2026-01-01T00:00:00Z";
+        const SECS: i64 = 1_767_225_600;
+        let iso = gauge_windows(&[reset_record(100, serde_json::json!(ISO))], "five_hour");
+        assert_eq!(iso[0].reset_sec, SECS);
+        assert_eq!(iso[0].resets_at_canon, ISO);
+
+        // A JSON number in seconds and the same epoch as a numeric string are
+        // equivalent to the RFC3339 spelling, down to the canonical form.
+        for epoch in [
+            serde_json::json!(SECS),
+            serde_json::json!("1767225600"),
+            serde_json::json!("001767225600"),
+            serde_json::json!("1767225600.9"),
+            serde_json::json!(1_767_225_600.9_f64),
+        ] {
+            let windows = gauge_windows(&[reset_record(100, epoch)], "five_hour");
+            assert_eq!(windows.len(), 1);
+            assert_eq!(windows[0].reset_sec, SECS);
+            assert_eq!(windows[0].resets_at_canon, iso[0].resets_at_canon);
+        }
+
+        // Milliseconds normalize to the same second; 1e12 is the inclusive
+        // boundary between seconds and milliseconds.
+        for millis in [
+            serde_json::json!(1_767_225_600_000_i64),
+            serde_json::json!("1767225600000"),
+        ] {
+            let windows = gauge_windows(&[reset_record(100, millis)], "five_hour");
+            assert_eq!(windows[0].reset_sec, SECS);
+            assert_eq!(windows[0].resets_at_canon, iso[0].resets_at_canon);
+        }
+        assert_eq!(
+            reset_sec(serde_json::json!(1_000_000_000_000_i64)),
+            1_000_000_000
+        );
+        assert_eq!(
+            reset_sec(serde_json::json!(999_999_999_999_i64)),
+            999_999_999_999
+        );
+
+        // Math.floor, not truncation toward zero.
+        assert_eq!(reset_sec(serde_json::json!(-1.5_f64)), -2);
+    }
+
+    #[test]
+    fn gauge_windows_drops_unparseable_resets() {
+        // Inputs pinned main `_parse_reset_at` also rejects.
+        for resets_at in [
+            serde_json::json!(null),
+            serde_json::json!(""),
+            serde_json::json!("yesterday"),
+            serde_json::json!("not-a-date"),
+            serde_json::json!("1e5"),
+            serde_json::json!(" 1767225600"),
+            serde_json::json!("1767225600 "),
+            serde_json::json!([]),
+            serde_json::json!({}),
+        ] {
+            let label = resets_at.to_string();
+            assert!(
+                gauge_windows(&[reset_record(100, resets_at)], "five_hour").is_empty(),
+                "{label} must be dropped"
+            );
+        }
+    }
+
+    #[test]
+    fn parse_fetched_at_matches_node_strict_shape_and_date_rollover() {
+        // Pairs derived from stats.mjs:1009-1014 (`new Date(y, m-1, d, H, M, S)`)
+        // under a UTC local zone.
+        // VERIFY: wave3-fix-forecast-3
+        for (text, expected) in [
+            ("2024-01-02 05:00:00", 1_704_171_600),
+            ("2024-13-01 00:00:00", 1_735_689_600),
+            ("2024-00-01 00:00:00", 1_701_388_800),
+            ("2024-02-30 00:00:00", 1_709_251_200),
+            ("2024-01-00 00:00:00", 1_703_980_800),
+            ("2024-01-32 00:00:00", 1_706_745_600),
+            ("2024-01-02 24:00:00", 1_704_240_000),
+            ("2024-01-02 99:99:99", 1_704_516_039),
+            ("0024-01-01 00:00:00", -1_451_692_800),
+            ("0099-12-31 23:59:59", 946_684_799),
+            ("0100-01-01 00:00:00", -59_011_459_200),
+            ("0000-01-01 00:00:00", -2_208_988_800),
+            ("9999-99-99 99:99:99", 253_637_152_839),
+            ("2024-12-31 23:59:59", 1_735_689_599),
+            ("1970-01-01 00:00:00", 0),
+            ("1969-12-31 23:59:59", -1),
+        ] {
+            assert_eq!(
+                parse_fetched_at(text, LocalZone::Fixed(0)),
+                Some(expected),
+                "{text}"
+            );
+        }
+        // Shapes the anchored two-digit regex rejects.
+        for rejected in [
+            "2024-01-02 05:00:00.500",
+            "2024-1-2 5:0:0",
+            "2024-01-02-03 00:00:00",
+            "2024-01-02 00:00:00:00",
+            " 2024-01-02 05:00:00",
+            "2024-01-02 05:00:00 ",
+            "2024-01-02T05:00:00",
+            "2024-01-02 05:00:00\n",
+            "",
+        ] {
+            assert_eq!(
+                parse_fetched_at(rejected, LocalZone::Fixed(0)),
+                None,
+                "{rejected:?}"
+            );
+        }
+        assert_eq!(
+            parse_fetched_at("2024-01-02 05:00:00", LocalZone::Fixed(3600)),
+            Some(1_704_171_600 - 3600)
+        );
+    }
+
+    #[test]
+    fn js_number_matches_javascript_string_forms() {
+        // Pairs derived from JS `Number(s)`: the Rust-only `inf`/`NaN` spellings
+        // are `NaN`, while the exact `Infinity` spelling is not.
+        // VERIFY: wave3-fix-forecast-5
+        for (text, expected) in [
+            ("inf", f64::NAN),
+            ("infinity", f64::NAN),
+            ("NaN", f64::NAN),
+            ("nan", f64::NAN),
+            ("+inf", f64::NAN),
+            ("-inf", f64::NAN),
+            ("1_000", f64::NAN),
+            ("Infinity", f64::INFINITY),
+            ("+Infinity", f64::INFINITY),
+            ("-Infinity", f64::NEG_INFINITY),
+            ("1e400", f64::INFINITY),
+            ("40", 40.0),
+            (" 40 ", 40.0),
+            ("\u{feff}40", 40.0),
+            ("", 0.0),
+            (" ", 0.0),
+            ("0x10", 16.0),
+            ("0b101", 5.0),
+            ("0o17", 15.0),
+            (".5", 0.5),
+            ("1.", 1.0),
+            ("+.5", 0.5),
+            ("1e-400", 0.0),
+        ] {
+            assert_eq!(
+                js_number(&Value::String(text.to_owned())).to_bits(),
+                expected.to_bits(),
+                "{text:?}"
+            );
+        }
+        assert!(js_number(&Value::String("-0".to_owned())).is_sign_negative());
+        // `Number("inf")` is NaN in Node, so the window folds to NaN rather than inf.
+        let windows = gauge_windows(
+            &[record(
+                serde_json::json!({"five_hour": {"utilization": "inf", "resets_at": 1_767_225_600_i64}}),
+                Some(100),
+            )],
+            "five_hour",
+        );
+        assert!(windows[0].u_final.is_nan());
     }
 
     #[test]

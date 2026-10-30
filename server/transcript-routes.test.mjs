@@ -60,7 +60,7 @@ test('transcript root GET/PUT preserve success and setter error responses', asyn
 });
 
 test('transcript list forwards cap, root, live callback, and review filter', async (t) => {
-  const { app, calls, deps } = setup({ listSessions: async (options) => { calls.list = options; return [{ id: 'one' }]; } });
+  const { app, calls, deps, reg } = setup({ listSessions: async (options) => { calls.list = options; return [{ id: 'one' }]; } });
   t.after(() => app.close());
   const response = await app.inject('/api/transcripts?cap=12&root=%2Froot&hideReviews=1');
   assert.equal(response.statusCode, 200);
@@ -68,7 +68,28 @@ test('transcript list forwards cap, root, live callback, and review filter', asy
   assert.equal(calls.list.cap, 12);
   assert.equal(calls.list.root, '/root');
   assert.equal(calls.list.hideReviews, true);
-  assert.equal(calls.list.isLive, deps.reg.isLive);
+  // Main passed the codex-aware `reg.isLiveSession` (`66591a9:server/index.mjs:919`):
+  // a codex row's id is its rollout thread uuid, so liveness resolves to the live owner.
+  // VERIFY: wave5-js_followup-2
+  reg.snapshot = () => [
+    { id: 'codex-live', cwd: '/repo', tool: 'codex' },
+    { id: 'codex-dead', cwd: '/repo', tool: 'codex' },
+    { id: 'claude-live', cwd: '/other', tool: 'claude' },
+  ];
+  reg.isLive = (id) => id === 'codex-live' || id === 'claude-live';
+  reg.codexThreadFor = async (id) => ({ 'codex-live': 'thread-live', 'codex-dead': 'thread-dead' }[id] ?? null);
+  await app.inject('/api/transcripts');
+  const isLive = calls.list.isLive;
+  assert.equal(isLive('claude-live', { source: 'claude', cwd: '/other' }), true);
+  assert.equal(isLive('thread-live', { source: 'codex', cwd: '/repo' }), true);
+  assert.equal(isLive('thread-live', { source: 'codex', cwd: '/elsewhere' }), false);
+  assert.equal(isLive('thread-dead', { source: 'codex', cwd: '/repo' }), false);
+  assert.equal(isLive('thread-live', { source: 'claude', cwd: '/repo' }), false);
+  // An async thread lookup failure leaves the row non-live; the list still serves.
+  reg.codexThreadFor = async () => { throw new Error('lookup failed'); };
+  const degraded = await app.inject('/api/transcripts');
+  assert.equal(degraded.statusCode, 200);
+  assert.equal(calls.list.isLive('thread-live', { source: 'codex', cwd: '/repo' }), false);
   const defaultCap = await app.inject('/api/transcripts?cap=0&hideReviews=0');
   assert.equal(defaultCap.statusCode, 200);
   assert.equal(calls.list.cap, 5000);

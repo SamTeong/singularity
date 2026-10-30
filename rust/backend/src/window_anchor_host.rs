@@ -762,8 +762,9 @@ mod tests {
 
         // Fire the armed deadline a few milliseconds out.
         harness.fire_soon("claude", 20);
+        // preflighting_seen is pushed after refreshes, so wait on it.
         wait_until("the forced preflight", || {
-            !harness.probe.refreshes.lock().unwrap().is_empty()
+            !harness.probe.preflighting_seen.lock().unwrap().is_empty()
         });
         assert_eq!(
             harness.probe.refreshes.lock().unwrap().as_slice(),

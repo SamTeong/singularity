@@ -35,6 +35,7 @@ pub async fn fetch_claude_usage(access_token: &str, header_timeout_ms: u64) -> C
     .await
 }
 
+#[cfg(test)]
 async fn fetch_claude_usage_at(
     access_token: &str,
     endpoint: &str,

@@ -1258,7 +1258,14 @@ pub fn parse_claude_with_tool_limit(
         if !event.is_object() {
             continue;
         }
-        if !cwd_seen && event.get("__rawCwdToken").and_then(Value::as_str).is_some() {
+        // `if (e.cwd && !cwd)` (`sessions.mjs:729`): an empty cwd is not seen.
+        // VERIFY: wave10-claude_cwd-1
+        if !cwd_seen
+            && event
+                .get("__rawCwdToken")
+                .and_then(Value::as_str)
+                .is_some_and(|token| token != "\"\"")
+        {
             raw_cwd = event["__rawCwdToken"]
                 .as_str()
                 .and_then(|token| TranscriptRawText::from_json_token(token.to_owned()).ok());
@@ -1495,14 +1502,17 @@ pub fn parse_codex_with_tool_limit(
                         .cloned()
                         .unwrap_or(Value::Null);
                 }
-                if cwd.is_null() {
-                    raw_cwd =
-                        event
-                            .get("__rawCwdToken")
-                            .and_then(Value::as_str)
-                            .and_then(|token| {
-                                TranscriptRawText::from_json_token(token.to_owned()).ok()
-                            });
+                // `if (!cwd && payload.cwd) cwd = payload.cwd` (`sessions.mjs:267`):
+                // the first truthy cwd wins; later records never replace or clear it.
+                // VERIFY: wave10-codex_cwd-1
+                if cwd.is_null() && raw_cwd.is_none() {
+                    raw_cwd = event
+                        .get("__rawCwdToken")
+                        .and_then(Value::as_str)
+                        .filter(|token| *token != "\"\"")
+                        .and_then(|token| {
+                            TranscriptRawText::from_json_token(token.to_owned()).ok()
+                        });
                 }
                 if cwd.is_null() && raw_cwd.is_none() && truthy(&payload["cwd"]) {
                     cwd = payload["cwd"].clone();
@@ -1786,6 +1796,30 @@ mod tests {
                 ]
             })
         );
+    }
+
+    #[test]
+    fn first_truthy_cwd_wins_and_empty_cwd_reads_null() {
+        // VERIFY: wave10-codex_cwd-2 — `sessions.mjs:267` / `:729`.
+        let meta_cwd = |parsed: TranscriptOutput| {
+            serde_json::to_value(&parsed).unwrap()["meta"]["cwd"].clone()
+        };
+        let codex = |lines: &[&str]| meta_cwd(parse_codex(&lines.join("\n")).unwrap());
+        let a = r#"{"type":"session_meta","payload":{"session_id":"S","cwd":"C:/a"}}"#;
+        let seven = r#"{"type":"session_meta","payload":{"session_id":"S","cwd":7}}"#;
+        let empty = r#"{"type":"session_meta","payload":{"session_id":"S","cwd":""}}"#;
+        let none = r#"{"type":"session_meta","payload":{"session_id":"S"}}"#;
+        assert_eq!(codex(&[a, seven]), json!("C:/a"));
+        assert_eq!(codex(&[seven, a]), json!(7));
+        assert_eq!(codex(&[a, none]), json!("C:/a"));
+        assert_eq!(codex(&[empty, a]), json!("C:/a"));
+        assert_eq!(codex(&[empty]), Value::Null);
+        let claude = parse_claude(
+            r#"{"type":"user","cwd":"","message":{"content":"hi"}}"#,
+            &catalog(),
+        )
+        .unwrap();
+        assert_eq!(meta_cwd(claude), Value::Null);
     }
 
     #[test]

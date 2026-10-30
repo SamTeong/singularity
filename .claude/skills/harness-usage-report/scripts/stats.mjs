@@ -611,7 +611,7 @@ export function _msg_cost_tiered(model, i, o, cr, cc) {
   // not part of the pricing.json schema (which carries one global
   // long_context_threshold).
   const threshold =
-    key === "gpt-6-sol" || key === "gpt-6-luna" || key === "gpt-6.1-sol" ? 272000
+    key === "gpt-6-sol" || key === "gpt-6-luna" || key === "gpt-6.1-sol" || key === "gpt-6.1-terra" ? 272000
     : key === "haiku-5-5" ? 100000
     : LONG_CTX_THRESHOLD;
   if (above && i + cr + cc > threshold) {
@@ -1171,9 +1171,14 @@ function _read_access_token() {
 // polling is off — no open window to project then, but the rate prior still
 // renders so the panel isn't blank for local-only users.
 
-// RFC3339 → epoch seconds; null when unparseable.
-function _parse_reset_at(s) {
+// RFC3339 or epoch → epoch seconds; null when unparseable. Numeric input is an
+// epoch in seconds (daemon) or milliseconds (magnitude >= 1e12).
+export function _parse_reset_at(s) {
   if (s == null || s === "") return null;
+  if (typeof s === "number" || (typeof s === "string" && /^\d+(\.\d+)?$/.test(s))) {
+    const n = Number(s);
+    return Math.floor(n >= 1e12 ? n / 1000 : n);
+  }
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : Math.floor(d.getTime() / 1000);
 }

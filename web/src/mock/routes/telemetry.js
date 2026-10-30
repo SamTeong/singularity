@@ -125,7 +125,7 @@ export function registerTelemetry(server) {
   // /usage/history?provider=&window= — usage-history.mjs getUsageHistory: the
   // current 5h window (started 3h ago), one reading every 10 min. Claude/Codex carry an
   // estimated two-session split; Ollama is the total line only. window=7d: the
-  // weekly % total line only (started 3 days ago), one reading every 3h.
+  // weekly % total line plus the 5h % line (started 3 days ago), one reading every 3h.
   server.get('/usage/history', (_schema, request) => {
     const { provider, window = '5h' } = request.queryParams;
     if (!['claude', 'codex', 'ollama'].includes(provider) || !['5h', '7d'].includes(window)) {
@@ -134,7 +134,7 @@ export function registerTelemetry(server) {
     const now = Date.now();
     if (window === '7d') {
       const start = now - 3 * 86_400_000;
-      const points = Array.from({ length: 25 }, (_, i) => ({ ts: iso(start + i * 3 * 3.6e6), pct: 10 + i * 1.5, sessions: {} }));
+      const points = Array.from({ length: 25 }, (_, i) => ({ ts: iso(start + i * 3 * 3.6e6), pct: 10 + i * 1.5, pct5h: 20 + (i % 8) * 6, sessions: {} }));
       return { provider, window, windowStart: iso(start), resetsAt: iso(start + 7 * 86_400_000), points, sessions: [], estimated: false };
     }
     const start = now - 3 * 3.6e6;
@@ -160,6 +160,8 @@ export function registerTelemetry(server) {
   // /status — { claude, openai }, each a normalized Statuspage payload
   // (status.mjs getStatus). Mirrors the e2e STATUS_STUB so the view renders
   // the same cards: Claude operational, OpenAI degraded with one incident.
+  // The freshness metadata (lastAttemptAt/lastSuccessAt/refreshError/stale) is
+  // part of the daemon payload on every path, so the mock carries it too.
   server.get('/status', () => {
     const now = iso(Date.now());
     return {
@@ -168,6 +170,7 @@ export function registerTelemetry(server) {
         updatedAt: now, indicator: 'none', description: 'All Systems Operational',
         components: [{ name: 'Claude on the web', status: 'operational' }, { name: 'API', status: 'operational' }],
         incidents: [], maintenances: [], fetchedAt: now,
+        lastAttemptAt: now, lastSuccessAt: now, refreshError: null, stale: false,
       },
       openai: {
         ok: true, key: 'openai', label: 'OpenAI', pageUrl: 'https://status.openai.com',
@@ -175,6 +178,7 @@ export function registerTelemetry(server) {
         components: [{ name: 'API', status: 'degraded_performance' }],
         incidents: [{ name: 'Elevated error rates', status: 'monitoring', impact: 'minor', shortlink: 'https://status.openai.com', createdAt: now }],
         maintenances: [], fetchedAt: now,
+        lastAttemptAt: now, lastSuccessAt: now, refreshError: null, stale: false,
       },
     };
   });

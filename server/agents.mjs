@@ -2,7 +2,7 @@
 // Emits 'output'{id,data}, 'status'{id,status}, 'list' — pty-ws fans these out to sockets.
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { getModelRoute } from './models.mjs';
@@ -81,6 +81,35 @@ export function writeAtomic(file, data, rename = renameSync) {
       Atomics.wait(retrySignal, 0, 0, 20 * attempt);
     }
   }
+}
+
+// A hard kill between writeFileSync and rename leaves `<file>.<pid>.tmp` behind,
+// and a pid-scoped name is never reused. Swept once at boot (index.mjs) before
+// init() loads state: top level of the state/cache dirs only, regular files
+// only, and nothing younger than 60 s — a write in flight is milliseconds old.
+const TMP_RE = /^.+\.\d+\.tmp$/;
+const TMP_STALE_MS = 60_000;
+export function sweepTmpFiles({ dirs = [STATE_DIR, CACHE_DIR], log = logger, now = Date.now() } = {}) {
+  let removed = 0;
+  for (const dir of dirs) {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); }
+    catch (e) {
+      if (e.code !== 'ENOENT') log?.warn({ err: e.message, dir }, 'tmp sweep failed'); // a missing dir just has nothing to sweep
+      continue;
+    }
+    for (const entry of entries) {
+      if (!TMP_RE.test(entry.name) || !entry.isFile()) continue; // skips dirs + symlinks
+      const file = join(dir, entry.name);
+      try {
+        if (now - statSync(file).mtimeMs <= TMP_STALE_MS) continue;
+        unlinkSync(file);
+        removed++;
+      } catch (e) { log?.warn({ err: e.message, file }, 'tmp sweep failed'); }
+    }
+  }
+  if (removed) log?.info({ removed }, 'removed stale tmp files');
+  return removed;
 }
 
 let logger = null;

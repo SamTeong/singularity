@@ -27,7 +27,7 @@ test('seeds the file on first read', async () => {
   assert.deepEqual(doc.models.find((m) => m.id === 'opus[1m]'), { id: 'opus[1m]', group: 'claude', label: 'Opus (1M context)', enabled: true });
   assert.equal(doc.models.filter((m) => m.group === 'claude').length, 9);
   assert.equal(doc.models.filter((m) => m.group === 'ollama').length, 6);
-  assert.equal(doc.models.filter((m) => m.group === 'codex').length, 6);
+  assert.equal(doc.models.filter((m) => m.group === 'codex').length, 7); // VERIFY: wave8-catalogue-1 — main 6ad27f8 added gpt-6.1-terra
   assert.equal(doc.defaultModel, 'claude');
   assert.equal(doc.summariserModel, 'deepseek-v4-flash:cloud');
 
@@ -39,7 +39,7 @@ test('corrupt catalogue falls back to the seed without clobbering the file', asy
   const corrupt = '{not-json';
   writeFileSync(FILE, corrupt);
   const doc = await getModels();
-  assert.equal(doc.models.length, 21);
+  assert.equal(doc.models.length, 22); // VERIFY: wave8-catalogue-2 — 9 claude + 6 ollama + 7 codex shipped ids
   assert.equal(readFileSync(FILE, 'utf8'), corrupt);
 });
 

@@ -11,7 +11,7 @@ github-pages/public/*.glb
 .tickets/
 .reports/
 .idea
-e2e/.tmp*/
+# e2e sandbox is <os tmp>/singularity-e2e/<checkout-id>/<port>, never in-repo — VERIFY: wave5-js_followup-3
 playwright-report/
 test-results/
 /test-output.txt

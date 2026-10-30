@@ -3,7 +3,7 @@
 //! Mirrors `_rebuild_stats_csv` (stats.mjs:771-930), the totals cache
 //! (:353-407), session aggregation (:307-331), cost-state extraction
 //! (:245-260) and the archive record (:735-742). Roots, the clock and the
-//! local UTC offset are parameters; nothing here reads the environment, the
+//! local zone are parameters; nothing here reads the environment, the
 //! real home directory or a live service, and Codex rows arrive pre-built as
 //! `reconcile::Row`s so this module never depends on the Codex adapter.
 //!
@@ -32,6 +32,7 @@ use crate::usage_report_reconcile::{ReconcileInput, Row, ZERO_UUID, dedup_existi
 use crate::usage_report_transcript::{
     CountValue, JsonText, TranscriptFacets, TranscriptTotals, session_totals,
 };
+use crate::usage_snapshot::LocalZone;
 
 const TOTALS_CACHE_FILE: &str = "totals-cache.json";
 /// Rust-specific cache version; Node's `_v:1` entries are ignored and rebuilt.
@@ -68,7 +69,7 @@ pub fn rebuild_stats_csv(
     active_sid: Option<&str>,
     codex_rows: &[Row],
     cost: &Pricing,
-    local_offset: i32,
+    local_zone: LocalZone,
     now: f64,
 ) -> io::Result<RebuildSummary> {
     let existing_csv = read_existing_csv(roots.csv_path)?;
@@ -100,7 +101,7 @@ pub fn rebuild_stats_csv(
             existing: existing.get(sid),
             state: state.as_ref(),
             cost,
-            local_offset,
+            local_zone,
         });
         // Node counts the fresh cell untrimmed (stats.mjs:800-801).
         if !cell(&row, "total_cost_usd").is_empty() {
@@ -139,7 +140,7 @@ pub fn rebuild_stats_csv(
         roots.state_dir,
         active_sid,
         &rows,
-        local_offset,
+        local_zone,
         now,
     )?;
     save_totals_cache(&cache_path, &cache);
@@ -441,7 +442,7 @@ struct FreshInput<'a> {
     existing: Option<&'a Row>,
     state: Option<&'a CostState>,
     cost: &'a Pricing,
-    local_offset: i32,
+    local_zone: LocalZone,
 }
 
 fn build_row(input: FreshInput<'_>) -> Row {
@@ -494,9 +495,9 @@ fn build_row(input: FreshInput<'_>) -> Row {
         } else {
             totals
                 .end_epoch
-                .and_then(|epoch| local_fmt(epoch, input.local_offset))
+                .and_then(|epoch| local_fmt(epoch, input.local_zone))
                 .or_else(|| {
-                    mtime_s(input.main_path).and_then(|mtime| local_fmt(mtime, input.local_offset))
+                    mtime_s(input.main_path).and_then(|mtime| local_fmt(mtime, input.local_zone))
                 })
                 .unwrap_or_default()
         }
@@ -725,11 +726,11 @@ fn clear_cost_state(
     state_dir: &Path,
     active_sid: Option<&str>,
     rows: &[Row],
-    local_offset: i32,
+    local_zone: LocalZone,
     now: f64,
 ) -> io::Result<(usize, usize)> {
     let written: Vec<&str> = rows.iter().map(|row| cell(row, "session_id")).collect();
-    let recorded_at = local_fmt(now, local_offset).unwrap_or_default();
+    let recorded_at = local_fmt(now, local_zone).unwrap_or_default();
     let mut cleared = 0;
     let mut reaped = 0;
     for (name, path) in listed(cost_state_dir) {
@@ -825,12 +826,13 @@ fn mtime_s(path: &Path) -> Option<f64> {
     })
 }
 
-/// `local_fmt` (stats.mjs:295-300) with the offset injected instead of the OS zone.
-fn local_fmt(epoch_s: f64, offset_s: i32) -> Option<String> {
+/// `local_fmt` (stats.mjs:295-300) with the row's own instant resolved through
+/// the run's local zone instead of the OS zone.
+fn local_fmt(epoch_s: f64, local_zone: LocalZone) -> Option<String> {
     if !epoch_s.is_finite() {
         return None;
     }
-    let offset = time::UtcOffset::from_whole_seconds(offset_s).ok()?;
+    let offset = time::UtcOffset::from_whole_seconds(local_zone.offset_at(epoch_s)).ok()?;
     let stamp = time::OffsetDateTime::from_unix_timestamp(epoch_s.floor() as i64)
         .ok()?
         .to_offset(offset);
@@ -985,7 +987,14 @@ mod tests {
         active: Option<&str>,
         cost: &Pricing,
     ) -> io::Result<RebuildSummary> {
-        rebuild_stats_csv(&fixture.roots(), active, &[], cost, 0, NOW)
+        rebuild_stats_csv(
+            &fixture.roots(),
+            active,
+            &[],
+            cost,
+            LocalZone::Fixed(0),
+            NOW,
+        )
     }
 
     fn json_path(path: &Path) -> String {
@@ -1070,7 +1079,10 @@ mod tests {
         let sessions = fs::read_to_string(fixture.state.join(SESSIONS_FILE)).unwrap();
         let record: Value = serde_json::from_str(sessions.trim()).unwrap();
         assert_eq!(record["session_id"], "s2");
-        assert_eq!(record["recorded_at"], local_fmt(NOW, 0).unwrap());
+        assert_eq!(
+            record["recorded_at"],
+            local_fmt(NOW, LocalZone::Fixed(0)).unwrap()
+        );
         assert_eq!(record["statusline"]["cost"]["total_cost_usd"], 0.5);
     }
 
@@ -1303,5 +1315,48 @@ mod tests {
         let error = rebuild(&fixture, None, &Pricing::default()).unwrap_err();
         assert!(error.to_string().contains("depth"));
         assert!(!fixture.csv.exists());
+    }
+
+    const DST_CHILD_ENV: &str = "SINGULARITY_USAGE_REPORT_DST_CHILD";
+
+    /// Node formats every row with the offset in force at that row's instant
+    /// (`fmtLocal` over each `Date`); a single offset sampled at `now` wrote
+    /// summer rows an hour off in winter. `TZ` is process-wide, so the proof
+    /// runs in a child and the parent only spawns.
+    // VERIFY: wave27-f3-1
+    #[test]
+    fn host_zone_renders_each_instant_with_its_own_offset() {
+        if std::env::var_os(DST_CHILD_ENV).is_some() {
+            let winter = 1_768_478_400.0; // 2026-01-15T12:00:00Z
+            let summer = 1_782_907_200.0; // 2026-07-01T12:00:00Z
+            assert_eq!(LocalZone::Host.offset_at(winter), -18_000, "EST");
+            assert_eq!(LocalZone::Host.offset_at(summer), -14_400, "EDT");
+            assert_eq!(
+                local_fmt(summer, LocalZone::Host).as_deref(),
+                Some("2026-07-01 08:00:00")
+            );
+            return;
+        }
+        let exe = std::env::current_exe().expect("current test executable");
+        let output = std::process::Command::new(exe)
+            .arg("usage_report_rebuild::tests::host_zone_renders_each_instant_with_its_own_offset")
+            .arg("--exact")
+            .arg("--nocapture")
+            .env("TZ", "America/New_York")
+            .env(DST_CHILD_ENV, "1")
+            .output()
+            .expect("spawn the pinned-zone DST child");
+        assert!(
+            output.status.success(),
+            "TZ=America/New_York DST proof failed:\n--- stdout ---\n{}\n--- stderr ---\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        // A renamed test would run zero tests and exit 0 silently.
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+            "child did not run the proof:\n{}",
+            String::from_utf8_lossy(&output.stdout)
+        );
     }
 }

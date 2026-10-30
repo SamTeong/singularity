@@ -92,9 +92,12 @@ pub struct RootResult {
 pub struct SessionRow {
     pub id: String,
     pub project: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Always emitted; Node's list rows carry `cwd: null` rather than omitting it.
+    /// VERIFY: wave3-transcripts-1
     pub cwd: Option<Box<RawValue>>,
     pub title: Option<Box<RawValue>>,
+    /// Claude rows always carry `blurb` (null when absent); Codex rows omit it.
+    /// VERIFY: wave3-transcripts-2
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blurb: Option<Box<RawValue>>,
     pub mtime: f64,
@@ -123,7 +126,8 @@ pub struct SubagentRow {
     pub project: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cwd: Option<Box<RawValue>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Always emitted; Node's subagent rows carry `title: null` rather than omitting it.
+    /// VERIFY: wave3-transcripts-3
     pub title: Option<Box<RawValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub blurb: Option<Box<RawValue>>,
@@ -145,7 +149,8 @@ pub struct SubagentRow {
 pub struct SearchResult {
     pub project: String,
     pub id: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Always emitted; Node's search results carry `cwd: null` rather than omitting it.
+    /// VERIFY: wave3-transcripts-4
     pub cwd: Option<Box<RawValue>>,
     pub line_index: usize,
     pub role: String,
@@ -194,10 +199,13 @@ struct Cache {
     search_fifo: VecDeque<PathBuf>,
     codex_fifo: VecDeque<PathBuf>,
 }
+/// Per-file metadata read; injected so tests can fail one entry without OS permissions.
+type StatFn = dyn Fn(&Path) -> io::Result<Key> + Send + Sync;
 pub struct TranscriptService {
     inputs: Inputs,
     cache: Mutex<Cache>,
     catalog_source: Option<Arc<dyn Fn() -> Vec<Value> + Send + Sync>>,
+    stat: Arc<StatFn>,
 }
 
 impl TranscriptService {
@@ -206,7 +214,13 @@ impl TranscriptService {
             inputs,
             cache: Mutex::new(Cache::default()),
             catalog_source: None,
+            stat: Arc::new(file_key),
         }
+    }
+    #[cfg(test)]
+    fn with_stat(mut self, stat: Arc<StatFn>) -> Self {
+        self.stat = stat;
+        self
     }
     /// Re-read the model catalogue on every parse, like Node's per-call
     /// `modelsGet` (`model-store.mjs:16-17`), instead of `Inputs.model_catalog`.
@@ -248,9 +262,13 @@ impl TranscriptService {
             });
         }
         fs::create_dir_all(&self.inputs.state_dir)?;
-        fs::write(
-            self.inputs.state_dir.join("sessions-root.json"),
-            serde_json::to_vec(&RootDocRef { root })
+        static ROOT_WRITE: Mutex<()> = Mutex::new(());
+        let _write = ROOT_WRITE
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
+        crate::fs_atomic::write_atomic(
+            &self.inputs.state_dir.join("sessions-root.json"),
+            &serde_json::to_vec(&RootDocRef { root })
                 .map_err(|error| Error::Parse(error.to_string()))?,
         )?;
         Ok(RootResult {
@@ -319,14 +337,18 @@ impl TranscriptService {
                         continue;
                     }
                     let path = e.path();
-                    let Some(meta) = self.peek_meta(&path, None)? else {
+                    // Per-file metadata failure drops the row, like Node's `stat` catch
+                    // in `listSessions`; an unreadable root stays fatal above.
+                    let Some(meta) = self.peek_meta(&path, None).ok().flatten() else {
                         continue;
                     };
                     let key = match file_key(&path) {
                         Ok(v) => v,
                         Err(_) => continue,
                     };
-                    let id = name.trim_end_matches(".jsonl").to_owned();
+                    // `f.slice(0, -6)`: exactly one suffix, not every repetition.
+                    // VERIFY: wave3-transcripts-9
+                    let id = name.strip_suffix(".jsonl").unwrap_or_default().to_owned();
                     let subagents = self.list_subagents(&p.path(), &id, o)?;
                     let process_live = live(o, &id);
                     rows.push(SessionRow {
@@ -334,7 +356,7 @@ impl TranscriptService {
                         project: project.clone(),
                         cwd: meta.cwd,
                         title: meta.title,
-                        blurb: meta.blurb,
+                        blurb: Some(meta.blurb.unwrap_or_else(raw_null)),
                         mtime: key.mtime,
                         size: key.size,
                         process_live,
@@ -465,10 +487,13 @@ impl TranscriptService {
                 results.push(SearchResult {
                     project,
                     id: id.clone(),
+                    // Node's `items?.[0]?.cwd || null`: a falsy cwd becomes null.
+                    // VERIFY: wave3-transcripts-11
                     cwd: items
                         .as_ref()
                         .and_then(|items| items.first())
-                        .and_then(|i| i.cwd.clone()),
+                        .and_then(|i| i.cwd.clone())
+                        .filter(|cwd| raw_truthy(cwd)),
                     line_index: 0,
                     role: "id".into(),
                     snippet: string_token(&id),
@@ -508,7 +533,7 @@ impl TranscriptService {
         })
     }
     fn peek_meta(&self, path: &Path, sidecar: Option<&Path>) -> Result<Option<Meta>, Error> {
-        let key = match file_key(path) {
+        let key = match (self.stat)(path) {
             Ok(v) => v,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(e.into()),
@@ -549,11 +574,11 @@ impl TranscriptService {
                             .units()
                             .map(|u| String::from_utf16_lossy(&u))
                             .unwrap_or_default();
-                        if !command_wrapper(&display) {
-                            blurb = Some(
-                                RawValue::from_string(utf16_json_token(&flatten_units(&text, 140)))
-                                    .unwrap(),
-                            );
+                        // Node: `const flat = text.replace(...).trim(); if (flat) blurb = ...`
+                        // VERIFY: wave3-transcripts-5
+                        let flat = flatten_units(&text, 140);
+                        if !flat.is_empty() && !command_wrapper(&display) {
+                            blurb = Some(RawValue::from_string(utf16_json_token(&flat)).unwrap());
                         }
                     }
                 }
@@ -562,13 +587,20 @@ impl TranscriptService {
         if let Some(sidecar) = sidecar {
             if let Ok(raw) = read_node_utf8(sidecar) {
                 if let Ok(m) = serde_json::from_str::<Sidecar>(&raw) {
-                    if let Some(kind) = m.agent_type {
-                        title = Some(match m.description {
-                            Some(description) => {
-                                concat_raw_strings(&kind, Some(&description), ": ")
-                            }
-                            None => kind,
-                        })
+                    // Node: `if (meta.agentType) metaTitle = meta.description
+                    // ? `${agentType}: ${description}` : agentType`, then
+                    // `title: metaTitle || peekTitle`. Both checks are JS
+                    // truthiness, and the template literal stringifies non-strings.
+                    // VERIFY: wave3-transcripts-6
+                    if let Some(kind) = m.agent_type.filter(|kind| js_truthy(kind)) {
+                        let mut units = js_string_units(&kind);
+                        if let Some(description) = m.description.filter(|d| js_truthy(d)) {
+                            units.extend(": ".encode_utf16());
+                            units.extend(js_string_units(&description));
+                        }
+                        if !units.is_empty() {
+                            title = Some(RawValue::from_string(utf16_json_token(&units)).unwrap());
+                        }
                     }
                 }
             }
@@ -607,9 +639,10 @@ impl TranscriptService {
             if !name.ends_with(".jsonl") {
                 continue;
             }
-            let aid = name.trim_end_matches(".jsonl").to_owned();
+            let aid = name.strip_suffix(".jsonl").unwrap_or_default().to_owned();
             let side = e.path().with_file_name(format!("{aid}.meta.json"));
-            let Some(meta) = self.peek_meta(&e.path(), Some(&side))? else {
+            // Same per-entry skip as `listSubagents` in Node; one bad entry keeps its siblings.
+            let Some(meta) = self.peek_meta(&e.path(), Some(&side)).ok().flatten() else {
                 continue;
             };
             let key = match file_key(&e.path()) {
@@ -622,8 +655,8 @@ impl TranscriptService {
                 agent_id: aid.clone(),
                 project: None,
                 cwd: None,
-                title: meta.title,
-                blurb: meta.blurb,
+                title: Some(meta.title.unwrap_or_else(raw_null)),
+                blurb: Some(meta.blurb.unwrap_or_else(raw_null)),
                 mtime: key.mtime,
                 size: key.size,
                 process_live,
@@ -707,7 +740,7 @@ impl TranscriptService {
                     id: child.id.clone(),
                     agent_id: child.id,
                     project: Some(child.project),
-                    cwd: child.cwd,
+                    cwd: child.cwd.or_else(|| Some(raw_null())),
                     title: child.title,
                     blurb: child.blurb,
                     mtime: child.mtime,
@@ -778,7 +811,12 @@ impl TranscriptService {
                 });
             let review = title.as_ref().map(|value| raw_token_starts_review(value));
             metadata = Some(CodexMeta {
-                cwd: parsed.raw_meta_token("cwd").map(raw_clone),
+                // `if (!cwd && e.payload.cwd) cwd = e.payload.cwd` (`sessions.mjs:129`):
+                // a falsy token (notably `""`) stays `null` in the list row, and
+                // the raw token keeps Node's JSON type for a non-string cwd.
+                // VERIFY: wave5-task-reg-11
+                // VERIFY: wave8-numeric_cwd-13
+                cwd: codex_cwd(&head),
                 title: title.unwrap_or_else(|| string_token("")),
                 session_id,
                 thread_source,
@@ -787,8 +825,13 @@ impl TranscriptService {
         }
         let mut metadata = metadata?;
         if raw_string(&metadata.title).as_deref() == Some("") {
-            let id = codex_id(path);
-            metadata.title = string_token(&format!("Codex {}", &id[id.len().saturating_sub(8)..]));
+            // Node's `` `Codex ${id.slice(-8)}` `` slices UTF-16 units, so use
+            // units here too; a byte slice can panic inside a multibyte name.
+            // VERIFY: wave3-transcripts-7
+            let id_units: Vec<u16> = codex_id(path).encode_utf16().collect();
+            let mut units: Vec<u16> = "Codex ".encode_utf16().collect();
+            units.extend_from_slice(&id_units[id_units.len().saturating_sub(8)..]);
+            metadata.title = RawValue::from_string(utf16_json_token(&units)).unwrap();
         }
         if hide_reviews && metadata.review.is_none() {
             let first_user = scan_codex_first_user_text(path).ok()?;
@@ -848,7 +891,7 @@ impl TranscriptService {
                         if n.ends_with(".jsonl") {
                             out.push((
                                 os_string(p.file_name()),
-                                n.trim_end_matches(".jsonl").into(),
+                                n.strip_suffix(".jsonl").unwrap_or_default().into(),
                                 "claude".into(),
                                 f.path(),
                             ))
@@ -885,24 +928,27 @@ impl TranscriptService {
             parse_claude_with_tool_limit(&raw, &catalog, 500)
         }
         .map_err(Error::Parse)?;
-        let cwd = parsed.raw_meta_token("cwd").map(raw_clone);
         let message_cwds = if codex {
+            // Node: `cwd = e.payload.cwd || null` — a falsy token stays null, and
+            // the raw token keeps a non-string cwd's JSON type.
+            // VERIFY: wave3-transcripts-12
+            // VERIFY: wave8-numeric_cwd-14
+            let cwd = codex_cwd(&raw);
             vec![cwd; parsed.raw_messages().count()]
         } else {
             let mut learned = None;
             let mut message_cwds = Vec::new();
             for line in raw.lines() {
+                // `if (e.cwd && !cwd) cwd = e.cwd` (`sessions.mjs:648`) reads the
+                // event Node's `JSON.parse` kept, so learn it before the stricter
+                // transcript parse can drop the line. Any truthy raw token counts.
+                // VERIFY: wave8-numeric_cwd-16
+                if learned.is_none() {
+                    learned = claude_event_cwd(line);
+                }
                 let Ok(event) = parse_claude_with_tool_limit(line, &catalog, 500) else {
                     continue;
                 };
-                if learned.is_none() {
-                    if let Some(token) = event
-                        .raw_meta_token("cwd")
-                        .filter(|token| raw_truthy(token))
-                    {
-                        learned = Some(raw_clone(token));
-                    }
-                }
                 for _ in 0..event.raw_messages().count() {
                     message_cwds.push(learned.clone());
                 }
@@ -988,6 +1034,46 @@ struct CodexHeaderPayload {
     thread_source: Option<Box<RawValue>>,
     source: Option<Box<RawValue>>,
 }
+#[derive(Deserialize)]
+struct CwdEvent {
+    cwd: Option<Box<RawValue>>,
+}
+#[derive(Deserialize)]
+struct CodexCwdPayload {
+    cwd: Option<Box<RawValue>>,
+}
+/// `if (!cwd && e.payload.cwd) cwd = e.payload.cwd` (`sessions.mjs:129`): the
+/// first truthy `session_meta.payload.cwd`, kept as a raw token so a non-string
+/// value keeps Node's JSON type. The transcript parser stores only string cwd
+/// tokens, so the list and search rows read the events themselves.
+/// VERIFY: wave8-numeric_cwd-12
+fn codex_cwd(raw: &str) -> Option<Box<RawValue>> {
+    for line in raw.lines() {
+        let Ok(event) = serde_json::from_str::<CodexHeaderEvent>(line.trim_end_matches('\r'))
+        else {
+            continue;
+        };
+        if event.kind != "session_meta" {
+            continue;
+        }
+        let Some(payload) = event.payload else {
+            continue;
+        };
+        let Ok(payload) = serde_json::from_str::<CodexCwdPayload>(payload.get()) else {
+            continue;
+        };
+        if let Some(cwd) = payload.cwd.filter(|token| raw_truthy(token)) {
+            return Some(cwd);
+        }
+    }
+    None
+}
+/// `if (e.cwd && !cwd) cwd = e.cwd` (`sessions.mjs:648`) for one Claude event.
+/// VERIFY: wave8-numeric_cwd-11
+fn claude_event_cwd(line: &str) -> Option<Box<RawValue>> {
+    let event = serde_json::from_str::<CwdEvent>(line.trim_end_matches('\r')).ok()?;
+    event.cwd.filter(|token| raw_truthy(token))
+}
 fn first_user_text(raw: Box<RawValue>) -> Option<Box<RawValue>> {
     if raw.get().starts_with('"') {
         return Some(raw);
@@ -1030,10 +1116,14 @@ fn confined(base: &Path, path: &Path) -> bool {
 }
 fn valid_subagent(id: &str) -> bool {
     let p: Vec<_> = id.split('/').collect();
+    // Node's `/^[^\\/]+\/subagents\/agent-[^\\/]+$/` needs a non-empty suffix.
+    // VERIFY: wave3-transcripts-10
     p.len() == 3
         && p[0..2].iter().all(|s| !s.is_empty())
         && p[1] == "subagents"
-        && p[2].starts_with("agent-")
+        && p[2]
+            .strip_prefix("agent-")
+            .is_some_and(|suffix| !suffix.is_empty())
         && !id.contains('\\')
 }
 fn file_key(path: &Path) -> io::Result<Key> {
@@ -1085,26 +1175,63 @@ fn os_string(s: std::ffi::OsString) -> String {
 fn string_token(s: &str) -> Box<RawValue> {
     RawValue::from_string(serde_json::to_string(s).unwrap()).unwrap()
 }
-fn raw_clone(value: &RawValue) -> Box<RawValue> {
-    RawValue::from_string(value.get().to_owned()).expect("valid raw JSON token")
+/// An explicit JSON `null` token for keys Node always emits.
+fn raw_null() -> Box<RawValue> {
+    RawValue::from_string("null".into()).unwrap()
 }
-fn concat_raw_strings(
-    first: &RawValue,
-    second: Option<&RawValue>,
-    separator: &str,
-) -> Box<RawValue> {
-    let mut units = TranscriptRawText::from_json_token(first.get().to_owned())
-        .and_then(|text| text.units())
-        .unwrap_or_default();
-    if let Some(second) = second {
-        units.extend(separator.encode_utf16());
-        if let Ok(value) = TranscriptRawText::from_json_token(second.get().to_owned())
-            .and_then(|text| text.units())
-        {
-            units.extend(value);
-        }
+/// JavaScript truthiness of a raw JSON value: false for null, false, 0 and "".
+fn js_truthy(token: &RawValue) -> bool {
+    if token.get().starts_with('"') {
+        return token.get() != "\"\"";
     }
-    RawValue::from_string(utf16_json_token(&units)).unwrap()
+    serde_json::from_str::<Value>(token.get())
+        .map(|value| match value {
+            Value::Null => false,
+            Value::Bool(value) => value,
+            Value::Number(value) => value.as_f64().unwrap_or(0.0) != 0.0,
+            Value::String(value) => !value.is_empty(),
+            Value::Array(_) | Value::Object(_) => true,
+        })
+        .unwrap_or(true)
+}
+/// JavaScript `String(value)` as UTF-16 units; a string token keeps lone surrogates.
+fn js_string_units(token: &RawValue) -> Vec<u16> {
+    if token.get().starts_with('"') {
+        return TranscriptRawText::from_json_token(token.get().to_owned())
+            .and_then(|text| text.units())
+            .unwrap_or_default();
+    }
+    let mut units = Vec::new();
+    if let Ok(value) = serde_json::from_str::<Value>(token.get()) {
+        js_string_value(&value, &mut units);
+    }
+    units
+}
+fn js_string_value(value: &Value, units: &mut Vec<u16>) {
+    match value {
+        Value::Null => units.extend("null".encode_utf16()),
+        Value::Bool(value) => units.extend(value.to_string().encode_utf16()),
+        Value::Number(value) => units.extend(
+            match (value.as_i64(), value.as_u64()) {
+                (Some(int), _) => int.to_string(),
+                (_, Some(uint)) => uint.to_string(),
+                _ => value.as_f64().unwrap_or(0.0).to_string(),
+            }
+            .encode_utf16(),
+        ),
+        Value::String(value) => units.extend(value.encode_utf16()),
+        Value::Array(items) => {
+            for (index, item) in items.iter().enumerate() {
+                if index > 0 {
+                    units.push(',' as u16);
+                }
+                if !item.is_null() {
+                    js_string_value(item, units);
+                }
+            }
+        }
+        Value::Object(_) => units.extend("[object Object]".encode_utf16()),
+    }
 }
 fn flatten_units(text: &TranscriptRawText, limit: usize) -> Vec<u16> {
     let Ok(units) = text.units() else {
@@ -1226,8 +1353,12 @@ fn snippet_token_raw_units(text: &TranscriptRawText, at: usize, query_len: usize
     let Ok(units) = text.units() else {
         return string_token("");
     };
-    let mut start = at.saturating_sub(60);
     let mut end = (at + query_len + 60).min(units.len());
+    // `at` indexes the lowercased buffer, which can be longer than `units`
+    // (İ lowercases to two units), so `start` may exceed `end`; JS slice
+    // returns "" there instead of panicking.
+    // VERIFY: wave3-transcripts-8
+    let mut start = at.saturating_sub(60).min(end);
     while start < end && is_js_whitespace(units[start]) {
         start += 1;
     }
@@ -1272,8 +1403,13 @@ fn raw_token_starts_review(token: &RawValue) -> bool {
     TranscriptRawText::from_json_token(token.get().to_owned())
         .is_ok_and(|text| raw_text_starts_review(&text))
 }
+/// JavaScript truthiness of a raw token, used where Node guards with `if (x)`.
+/// Numeric tokens are compared as `f64` via [`js_truthy`], so every JSON
+/// spelling of zero (`0`, `0.0`, `-0`, `-0.0`, `0e0`) is falsy; a text compare
+/// against `"0"` alone would let those forms through.
+// VERIFY: wave7-truthy-1
 fn raw_truthy(token: &RawValue) -> bool {
-    !matches!(token.get(), "null" | "false" | "0" | "\"\"")
+    js_truthy(token)
 }
 fn scan_codex_first_user_text(path: &Path) -> io::Result<Option<TranscriptRawText>> {
     let mut reader = BufReader::new(fs::File::open(path)?);
@@ -1350,12 +1486,13 @@ fn collect_rollouts(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 fn codex_id(path: &Path) -> String {
-    let base = path
+    let name = path
         .file_name()
         .map(|name| os_string(name.to_owned()))
-        .unwrap_or_default()
-        .trim_end_matches(".jsonl")
-        .to_owned();
+        .unwrap_or_default();
+    // `filename.slice(0, -6)` removes exactly one extension. Every caller only
+    // passes `rollout-*.jsonl` names, so a plain suffix strip is equivalent.
+    let base = name.strip_suffix(".jsonl").unwrap_or(&name).to_owned();
     let tail = base.get(base.len().saturating_sub(36)..).unwrap_or("");
     if tail.len() == 36
         && base.len() > 36
@@ -1478,6 +1615,72 @@ mod tests {
                 .as_deref(),
             Some("hello")
         )
+    }
+    /// Injects a stat failure for one path and delegates every other path to the real read.
+    fn stat_error_for(path: PathBuf) -> Arc<StatFn> {
+        Arc::new(move |p: &Path| {
+            if p == path.as_path() {
+                Err(io::Error::new(
+                    io::ErrorKind::PermissionDenied,
+                    "injected stat failure",
+                ))
+            } else {
+                file_key(p)
+            }
+        })
+    }
+    #[test]
+    fn list_skips_entries_whose_metadata_cannot_be_read() {
+        let t = Temp::new();
+        let root = t.0.join("transcripts");
+        let project = root.join("p");
+        create_dir_all(&project).unwrap();
+        write(
+            project.join("good.jsonl"),
+            b"{\"type\":\"user\",\"cwd\":\"C:/work\",\"message\":{\"content\":\"hello\"}}\n",
+        )
+        .unwrap();
+        write(project.join("bad.jsonl"), b"{}\n").unwrap();
+        let s = t
+            .service()
+            .with_stat(stat_error_for(project.join("bad.jsonl")));
+        let rows = s
+            .list(&ListOptions {
+                root: Some(root.to_string_lossy().into_owned()),
+                now_ms: 1,
+                ..ListOptions::default()
+            })
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].id, "good");
+    }
+    #[test]
+    fn subagent_list_skips_entries_whose_metadata_cannot_be_read() {
+        let t = Temp::new();
+        let root = t.0.join("transcripts");
+        let project = root.join("p");
+        let subagents = project.join("parent").join("subagents");
+        create_dir_all(&subagents).unwrap();
+        write(
+            project.join("parent.jsonl"),
+            b"{\"type\":\"user\",\"cwd\":\"C:/work\",\"message\":{\"content\":\"parent\"}}\n",
+        )
+        .unwrap();
+        write(subagents.join("agent-good.jsonl"), b"{}\n").unwrap();
+        write(subagents.join("agent-bad.jsonl"), b"{}\n").unwrap();
+        let s = t
+            .service()
+            .with_stat(stat_error_for(subagents.join("agent-bad.jsonl")));
+        let rows = s
+            .list(&ListOptions {
+                root: Some(root.to_string_lossy().into_owned()),
+                now_ms: 1,
+                ..ListOptions::default()
+            })
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].subagents.len(), 1);
+        assert_eq!(rows[0].subagents[0].agent_id, "agent-good");
     }
     #[test]
     fn lowercase_units_matches_node_context_for_sigma_and_surrogate_boundaries() {
@@ -1707,6 +1910,51 @@ mod tests {
             raw_string(response.results[1].cwd.as_ref().unwrap()).as_deref(),
             Some("C:/work")
         );
+    }
+    /// Node's search items carry the raw cwd token (`sessions.mjs:648,795,803`),
+    /// so a non-string cwd keeps its JSON type instead of collapsing to null.
+    // VERIFY: wave8-numeric_cwd-17
+    #[test]
+    fn search_keeps_non_string_cwd_tokens() {
+        let t = Temp::new();
+        let service = t.service();
+        let root = t.0.join("transcripts");
+        let claude = root.join("p").join("numeric-cwd.jsonl");
+        create_dir_all(claude.parent().unwrap()).unwrap();
+        write(
+            &claude,
+            "{\"type\":\"user\",\"cwd\":7,\"message\":{\"content\":\"needle claude\"}}\n",
+        )
+        .unwrap();
+        let sessions = t.0.join("codex/sessions");
+        create_dir_all(&sessions).unwrap();
+        write(
+            sessions.join("rollout-numeric-cwd.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"c\",\"cwd\":true}}\n{\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\"needle codex\"}}\n",
+        )
+        .unwrap();
+
+        let response = service
+            .search(
+                "needle",
+                &SearchOptions {
+                    root: Some(root.to_string_lossy().into_owned()),
+                    ..SearchOptions::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(response.results.len(), 2);
+        let cwd_of = |source: &str| {
+            let result = response
+                .results
+                .iter()
+                .find(|result| result.source == source)
+                .unwrap();
+            serde_json::from_str::<Value>(result.cwd.as_ref().unwrap().get()).unwrap()
+        };
+        assert_eq!(cwd_of("claude"), serde_json::json!(7));
+        assert_eq!(cwd_of("codex"), Value::Bool(true));
     }
     #[test]
     fn search_still_synthesizes_id_hit_when_discovered_content_cannot_be_read() {
@@ -2042,6 +2290,449 @@ mod tests {
                 old_codex.running
             ),
             (false, false, false)
+        );
+    }
+    /// `İ` lowercases to two UTF-16 units, so the lowered match offset can sit
+    /// past the original buffer. Node's `slice` returns "" there; the port must
+    /// not panic on the out-of-order range.
+    #[test]
+    fn search_snippet_does_not_panic_when_lowercasing_expands_the_buffer() {
+        let t = Temp::new();
+        let service = t.service();
+        let root = t.0.join("transcripts");
+        let path = root.join("p").join("turkish.jsonl");
+        create_dir_all(path.parent().unwrap()).unwrap();
+        let content = format!("{}x", "İ".repeat(62));
+        write(
+            &path,
+            serde_json::json!({ "type": "user", "message": { "content": content } }).to_string(),
+        )
+        .unwrap();
+        let response = service
+            .search(
+                "x",
+                &SearchOptions {
+                    root: Some(root.to_string_lossy().into_owned()),
+                    ..SearchOptions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].snippet.get(), "\"…\"");
+    }
+    /// Node's `` `Codex ${id.slice(-8)}` `` slices UTF-16 units; a byte slice
+    /// panics when `len - 8` lands inside a multibyte character.
+    #[test]
+    fn codex_fallback_title_slices_the_id_by_utf16_units() {
+        let t = Temp::new();
+        let service = t.service();
+        let sessions = t.0.join("codex/sessions");
+        create_dir_all(&sessions).unwrap();
+        write(
+            sessions.join("rollout-€€€.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"x\"}}\n",
+        )
+        .unwrap();
+        let rows = service.list(&ListOptions::default()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(
+            raw_string(rows[0].title.as_ref().unwrap()).as_deref(),
+            Some("Codex lout-€€€")
+        );
+    }
+    /// A falsy `session_meta.payload.cwd` stays null in the list row
+    /// (`sessions.mjs:129`); `""` must not survive as a cwd.
+    // VERIFY: wave5-task-reg-11
+    #[test]
+    fn codex_list_treats_an_empty_metadata_cwd_as_null() {
+        let t = Temp::new();
+        let service = t.service();
+        let sessions = t.0.join("codex/sessions");
+        create_dir_all(&sessions).unwrap();
+        write(
+            sessions.join("rollout-empty-cwd.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"a\",\"cwd\":\"\"}}\n",
+        )
+        .unwrap();
+        write(
+            sessions.join("rollout-set-cwd.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"b\",\"cwd\":\"C:/work\"}}\n",
+        )
+        .unwrap();
+        let rows = service.list(&ListOptions::default()).unwrap();
+        let cwd_of = |id: &str| {
+            let row = rows.iter().find(|row| row.id == id).unwrap();
+            serde_json::to_value(row).unwrap()["cwd"].clone()
+        };
+        assert_eq!(cwd_of("rollout-empty-cwd"), Value::Null);
+        assert_eq!(cwd_of("rollout-set-cwd"), serde_json::json!("C:/work"));
+    }
+    /// Node's `if (!cwd && e.payload.cwd)` is JavaScript truthiness, so every
+    /// JSON spelling of numeric zero is falsy, not just the integer `0`.
+    // VERIFY: wave7-truthy-2
+    #[test]
+    fn raw_truthy_matches_javascript_numeric_truthiness() {
+        let truthy = |token: &str| raw_truthy(&RawValue::from_string(token.to_owned()).unwrap());
+        for falsy in [
+            "null", "false", "0", "0.0", "-0", "-0.0", "0e0", "0E0", "-0e5", "\"\"",
+        ] {
+            assert!(!truthy(falsy), "{falsy} must be falsy");
+        }
+        for value in ["true", "1", "-1", "0.1", "\"0\"", "\"false\"", "[]", "{}"] {
+            assert!(truthy(value), "{value} must be truthy");
+        }
+    }
+    /// The codex list row applies that same guard to `payload.cwd`: a numeric
+    /// zero stays null while any truthy value survives with Node's JSON type.
+    // VERIFY: wave7-truthy-3
+    // VERIFY: wave8-numeric_cwd-15
+    #[test]
+    fn codex_list_applies_javascript_cwd_truthiness() {
+        let t = Temp::new();
+        let service = t.service();
+        let sessions = t.0.join("codex/sessions");
+        create_dir_all(&sessions).unwrap();
+        for (id, cwd) in [
+            ("rollout-zero-fraction", "0.0"),
+            ("rollout-negative-zero", "-0"),
+            ("rollout-zero-exponent", "0e0"),
+            ("rollout-nonzero-number", "7"),
+            ("rollout-true", "true"),
+            ("rollout-array", "[1]"),
+            ("rollout-object", "{\"a\":1}"),
+        ] {
+            let line = format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{id}\",\"cwd\":{cwd}}}}}\n"
+            );
+            write(sessions.join(format!("{id}.jsonl")), line).unwrap();
+        }
+        let rows = service.list(&ListOptions::default()).unwrap();
+        let cwd_of = |id: &str| {
+            let row = rows.iter().find(|row| row.id == id).unwrap();
+            serde_json::to_value(row).unwrap()["cwd"].clone()
+        };
+        for id in [
+            "rollout-zero-fraction",
+            "rollout-negative-zero",
+            "rollout-zero-exponent",
+        ] {
+            assert_eq!(cwd_of(id), Value::Null, "{id}");
+        }
+        // Node keeps the raw value, so the row's JSON type follows the token.
+        assert_eq!(cwd_of("rollout-nonzero-number"), serde_json::json!(7));
+        assert_eq!(cwd_of("rollout-true"), serde_json::json!(true));
+        assert_eq!(cwd_of("rollout-array"), serde_json::json!([1]));
+        assert_eq!(cwd_of("rollout-object"), serde_json::json!({"a": 1}));
+    }
+
+    /// Node guards its blurb with `if (flat)`, so an empty or whitespace-only
+    /// prompt keeps `blurb` null instead of `""`.
+    #[test]
+    fn empty_prompt_content_yields_null_blurb() {
+        let t = Temp::new();
+        let service = t.service();
+        let root = t.0.join("transcripts");
+        let project = root.join("p");
+        create_dir_all(&project).unwrap();
+        write(
+            project.join("empty.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":\"\"}}\n",
+        )
+        .unwrap();
+        write(
+            project.join("spaces.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":\"   \"}}\n",
+        )
+        .unwrap();
+        write(
+            project.join("block.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"\"}]}}\n",
+        )
+        .unwrap();
+        let rows = service
+            .list(&ListOptions {
+                root: Some(root.to_string_lossy().into_owned()),
+                now_ms: u64::MAX,
+                ..ListOptions::default()
+            })
+            .unwrap();
+        for id in ["empty", "spaces", "block"] {
+            let row = rows.iter().find(|row| row.id == id).unwrap();
+            let json = serde_json::to_string(row).unwrap();
+            assert!(json.contains("\"blurb\":null"), "{id}: {json}");
+        }
+    }
+    /// Node joins the sidecar description only when it is truthy and stringifies
+    /// a non-string `agentType`, falling back to the peeked title when the
+    /// joined value is empty.
+    #[test]
+    fn subagent_sidecar_title_uses_js_truthiness_and_stringification() {
+        let t = Temp::new();
+        let service = t.service();
+        let root = t.0.join("transcripts");
+        let project = root.join("p");
+        let subagents = project.join("parent").join("subagents");
+        create_dir_all(&subagents).unwrap();
+        write(
+            project.join("parent.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":\"parent\"}}\n",
+        )
+        .unwrap();
+        let cases = [
+            (
+                "agent-empty-description",
+                "{\"agentType\":\"worker\",\"description\":\"\"}",
+                "worker",
+            ),
+            (
+                "agent-false-description",
+                "{\"agentType\":\"worker\",\"description\":false}",
+                "worker",
+            ),
+            ("agent-number", "{\"agentType\":5}", "5"),
+            ("agent-falsy", "{\"agentType\":\"\"}", "peeked"),
+        ];
+        for (id, sidecar, _) in cases {
+            write(
+                subagents.join(format!("{id}.jsonl")),
+                "{\"type\":\"ai-title\",\"aiTitle\":\"peeked\"}\n",
+            )
+            .unwrap();
+            write(subagents.join(format!("{id}.meta.json")), sidecar).unwrap();
+        }
+        let rows = service
+            .list(&ListOptions {
+                root: Some(root.to_string_lossy().into_owned()),
+                now_ms: u64::MAX,
+                ..ListOptions::default()
+            })
+            .unwrap();
+        let parent = rows.iter().find(|row| row.id == "parent").unwrap();
+        for (id, _, expected) in cases {
+            let child = parent
+                .subagents
+                .iter()
+                .find(|child| child.agent_id == id)
+                .unwrap();
+            assert_eq!(
+                raw_string(child.title.as_ref().unwrap()).as_deref(),
+                Some(expected),
+                "{id}"
+            );
+        }
+    }
+    /// Node's `f.slice(0, -6)` removes exactly one `.jsonl`, never every repetition.
+    #[test]
+    fn file_ids_strip_exactly_one_jsonl_suffix() {
+        let t = Temp::new();
+        let service = t.service();
+        let root = t.0.join("transcripts");
+        let project = root.join("p");
+        create_dir_all(&project).unwrap();
+        write(
+            project.join("a.jsonl.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":\"needle\"}}\n",
+        )
+        .unwrap();
+        write(
+            project.join("b.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":\"plain\"}}\n",
+        )
+        .unwrap();
+        let subagents = project.join("b").join("subagents");
+        create_dir_all(&subagents).unwrap();
+        write(subagents.join("agent-y.jsonl.jsonl"), "{}\n").unwrap();
+        let sessions = t.0.join("codex/sessions");
+        create_dir_all(&sessions).unwrap();
+        write(
+            sessions.join("rollout-z.jsonl.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"id\":\"z\"}}\n",
+        )
+        .unwrap();
+
+        let rows = service
+            .list(&ListOptions {
+                root: Some(root.to_string_lossy().into_owned()),
+                now_ms: 1,
+                ..ListOptions::default()
+            })
+            .unwrap();
+        assert!(rows.iter().any(|row| row.id == "a.jsonl"));
+        let parent = rows.iter().find(|row| row.id == "b").unwrap();
+        assert_eq!(parent.subagents[0].agent_id, "agent-y.jsonl");
+        assert!(rows.iter().any(|row| row.id == "rollout-z.jsonl"));
+
+        let response = service
+            .search(
+                "needle",
+                &SearchOptions {
+                    root: Some(root.to_string_lossy().into_owned()),
+                    ..SearchOptions::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(response.results.len(), 1);
+        assert_eq!(response.results[0].id, "a.jsonl");
+    }
+    /// Node's `/^[^\\/]+\/subagents\/agent-[^\\/]+$/` needs a character after `agent-`.
+    #[test]
+    fn subagent_path_requires_a_suffix_after_agent_dash() {
+        let t = Temp::new();
+        let s = t.service();
+        assert!(s.path_for("p", "parent/subagents/agent-x", None).is_some());
+        assert!(s.path_for("p", "parent/subagents/agent-", None).is_none());
+    }
+    /// Node always emits `cwd`, `title` and (for Claude rows) `blurb`, as null
+    /// when absent; Codex rows carry no `blurb` key at all.
+    #[test]
+    fn list_and_search_serialize_absent_optionals_as_null() {
+        let t = Temp::new();
+        let service = t.service();
+        let root = t.0.join("transcripts");
+        let project = root.join("p");
+        create_dir_all(&project).unwrap();
+        write(
+            project.join("no-cwd.jsonl"),
+            "{\"type\":\"user\",\"message\":{\"content\":\"<command-name> needle\"}}\n",
+        )
+        .unwrap();
+        let sessions = t.0.join("codex/sessions");
+        create_dir_all(&sessions).unwrap();
+        write(
+            sessions.join("rollout-11111111-1111-4111-8111-111111111111.jsonl"),
+            "{\"type\":\"session_meta\",\"payload\":{\"session_id\":\"11111111-1111-4111-8111-111111111111\"}}\n",
+        )
+        .unwrap();
+
+        let rows = service
+            .list(&ListOptions {
+                root: Some(root.to_string_lossy().into_owned()),
+                now_ms: u64::MAX,
+                ..ListOptions::default()
+            })
+            .unwrap();
+        let claude = rows.iter().find(|row| row.id == "no-cwd").unwrap();
+        let json = serde_json::to_string(claude).unwrap();
+        assert!(json.contains("\"cwd\":null"), "{json}");
+        assert!(json.contains("\"title\":null"), "{json}");
+        assert!(json.contains("\"blurb\":null"), "{json}");
+        let codex = rows
+            .iter()
+            .find(|row| row.source.as_deref() == Some("codex"))
+            .unwrap();
+        let json = serde_json::to_string(codex).unwrap();
+        assert!(json.contains("\"cwd\":null"), "{json}");
+        assert!(!json.contains("\"blurb\""), "{json}");
+
+        let options = SearchOptions {
+            root: Some(root.to_string_lossy().into_owned()),
+            project: Some("p".into()),
+            id: Some("no-cwd".into()),
+            ..SearchOptions::default()
+        };
+        let text_hit = service.search("needle", &options).unwrap();
+        assert_eq!(text_hit.results.len(), 1);
+        assert!(
+            serde_json::to_string(&text_hit.results[0])
+                .unwrap()
+                .contains("\"cwd\":null")
+        );
+        let id_hit = service.search("no-cwd", &options).unwrap();
+        assert_eq!(id_hit.results[0].role, "id");
+        assert!(
+            serde_json::to_string(&id_hit.results[0])
+                .unwrap()
+                .contains("\"cwd\":null")
+        );
+    }
+    /// A rejected root must not disturb the root an earlier call acknowledged.
+    // VERIFY: wave32-root-1
+    #[test]
+    fn invalid_root_is_rejected_without_touching_the_stored_root() {
+        let t = Temp::new();
+        let service = t.service();
+        assert!(service.set_root("kept").ok);
+        let file = t.0.join("state").join("sessions-root.json");
+        let before = fs::read(&file).unwrap();
+        let rejected = service.set_root("");
+        assert!(!rejected.ok);
+        assert!(rejected.root.is_none());
+        assert_eq!(rejected.error.as_deref(), Some("bad root"));
+        assert_eq!(fs::read(&file).unwrap(), before);
+        assert_eq!(service.get_root(), "kept");
+    }
+    /// `set_root` reports a filesystem failure as `{ok:false,error}` instead of
+    /// panicking, and `get_root` still falls back to the default root.
+    // VERIFY: wave32-root-2
+    #[test]
+    fn root_write_failure_is_reported_and_keeps_the_default_root() {
+        let t = Temp::new();
+        // A regular file where the state directory belongs makes `create_dir_all` fail.
+        write(t.0.join("state"), b"blocked").unwrap();
+        let service = t.service();
+        let result = service.set_root("elsewhere");
+        assert!(!result.ok);
+        assert!(result.root.is_none());
+        assert!(result.error.is_some());
+        assert_eq!(service.get_root(), DEFAULT_ROOT);
+    }
+    /// Separate service instances share one state dir and, being one process,
+    /// one pid-scoped scratch file. Concurrent setter calls must serialize: every
+    /// observed document is complete and the final document is one of the roots
+    /// actually written.
+    // VERIFY: wave32-root-3
+    #[test]
+    fn concurrent_cross_instance_root_writes_stay_complete() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let t = Temp::new();
+        let state = t.0.join("state");
+        let file = state.join("sessions-root.json");
+        assert!(t.service().set_root("seed").ok);
+        let (writers, rounds) = (8, 40);
+        let gate = Arc::new(std::sync::Barrier::new(writers + 1));
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut handles = Vec::new();
+        for writer in 0..writers {
+            let service = t.service();
+            let gate = gate.clone();
+            handles.push(std::thread::spawn(move || {
+                gate.wait();
+                for round in 0..rounds {
+                    assert!(service.set_root(&format!("root-{writer}-{round}")).ok);
+                }
+            }));
+        }
+        let reader_file = file.clone();
+        let reader_gate = gate.clone();
+        let reader_stop = stop.clone();
+        let reader = std::thread::spawn(move || {
+            reader_gate.wait();
+            let mut observed = 0usize;
+            loop {
+                let bytes = fs::read(&reader_file).unwrap();
+                let doc: RootDoc = serde_json::from_slice(&bytes)
+                    .unwrap_or_else(|error| panic!("torn root document {bytes:?}: {error}"));
+                assert!(!doc.root.is_empty());
+                observed += 1;
+                if reader_stop.load(Ordering::SeqCst) {
+                    return observed;
+                }
+            }
+        });
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        stop.store(true, Ordering::SeqCst);
+        assert!(reader.join().unwrap() > 0);
+        let doc: RootDoc = serde_json::from_slice(&fs::read(&file).unwrap()).unwrap();
+        assert_eq!(doc.root, t.service().get_root());
+        assert!(doc.root == "seed" || doc.root.starts_with("root-"));
+        assert!(
+            fs::read_dir(&state)
+                .unwrap()
+                .flatten()
+                .all(|entry| entry.file_name().to_string_lossy() == "sessions-root.json"),
+            "a scratch file survived the setters"
         );
     }
 }

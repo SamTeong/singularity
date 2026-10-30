@@ -50,7 +50,7 @@ const TOOLS = new Set(['all', 'claude', 'codex']);
 
 const shortModel = (id) => id.match(/opus|sonnet|haiku|fable|mythos/i)?.[0].toLowerCase() || id;
 
-// Small pulsing status dot for running sessions/subagents.
+// Small pulsing status dot for a registry-owned live process.
 function PulseDot({ sx }) {
   return (
     <Box
@@ -294,7 +294,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
 
   // True when the selected transcript's session is already a live dock agent —
   // resuming it would hit backend "session id already in use", so disable.
-  const sessionLive = sel ? !!liveSessionIds?.has(sel.id) : false;
+  const selectedRow = sel && sessions.find((s) => s.id === sel.id && s.project === sel.project);
+  const sessionLive = sel ? !!(selectedRow?.processLive || liveSessionIds?.has(sel.id)) : false;
   // Header: "<name> - <session-id>" when a name is present, else just the id.
   // Use sel.title (the list row's title) — NOT transcript.meta.title: the list
   // peeks the file head for ai-title while readSession scans the full file, and
@@ -389,13 +390,14 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
                           )}
                           <Typography variant="subtitle2" noWrap title={s.title || s.blurb || s.id} sx={{ flex: 1, minWidth: 0 }}>{s.title || s.blurb || `${s.id.slice(0, 8)}…`}</Typography>
                           {s.source === 'codex' && <Chip label="Codex" size="small" sx={{ height: 16, '& .MuiChip-label': { px: 0.5, fontSize: 10 } }} />}
-                          {s.running && <PulseDot />}
+                          {s.processLive && <PulseDot />}
                           {hasSubs && !isExpanded && (
                             <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>⚡{s.subagents.length} subagents</Typography>
                           )}
                         </Stack>
                         <Stack direction="row" spacing={1} sx={{ mt: 0.25, alignItems: 'center' }}>
                           <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }} noWrap>{tildify(s.cwd) || s.project}</Typography>
+                          {!s.processLive && s.activityRecent && <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11 }}>recent activity</Typography>}
                         </Stack>
                         <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>
                           {relTime(s.mtime)}{stats[s.id]?.costUsd != null ? ` · ${fmtUsd(stats[s.id].costUsd)}` : ''}
@@ -412,7 +414,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
                             >
                               <Stack direction="row" spacing={0.5} sx={{ alignItems: 'center' }}>
                                 <Typography variant="subtitle2" noWrap title={sub.title || sub.blurb || sub.agentId} sx={{ flex: 1, minWidth: 0, fontSize: 12 }}>{sub.title || sub.blurb || sub.agentId}</Typography>
-                                {sub.running && <PulseDot />}
+                                {sub.processLive && <PulseDot />}
+                                {!sub.processLive && sub.activityRecent && <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 10 }}>recent activity</Typography>}
                               </Stack>
                               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, display: 'block' }}>{relTime(sub.mtime)}</Typography>
                             </ListItemButton>

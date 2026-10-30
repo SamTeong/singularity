@@ -202,7 +202,7 @@ fn main() -> io::Result<()> {
     let mut window_anchor_service = singularity_backend::window_anchor::Service::default();
     let mut one_shot_tasks = JoinSet::new();
     let mut one_shot_request_ids = HashMap::new();
-    let mut one_shot_active = false;
+    let mut one_shot_active;
     let one_shot_work_active = Arc::new(AtomicBool::new(false));
     let stdin = io::stdin();
     write_line(&stdout, &serde_json::json!({ "ready": true }))?;
@@ -304,7 +304,6 @@ fn main() -> io::Result<()> {
                                 &shutting_down,
                             )?;
                         }
-                        one_shot_active = !one_shot_request_ids.is_empty();
                     }
                     let id = Value::String(id.to_owned());
                     let bin = request.bin.as_str().map(str::to_owned);
@@ -347,7 +346,6 @@ fn main() -> io::Result<()> {
                         })
                     };
                     one_shot_request_ids.insert(abort.id(), id);
-                    one_shot_active = true;
                     continue;
                 }
                 write_line(

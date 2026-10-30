@@ -9,13 +9,75 @@
 // pinning the child process's OS home to the sandbox, so neither state nor user
 // configuration can leak in from the parent shell.
 //
+// E2E_BACKEND picks the daemon: `node` (default) runs NODE_ROOT/server/index.mjs,
+// `rust` spawns the native `singularity-backend --http` binary directly — no
+// Node gateway in front of it. The backend is validated by paths.mjs at import
+// time, so an invalid value exits before seed() wipes the sandbox.
+//
 // Run standalone (useful when writing a spec):  node e2e/serve.mjs
 import { spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, statSync, symlinkSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { join } from 'node:path';
-import { REPO_ROOT, PORT, TOKEN, HOME_DIR, TRUSTED_DIR, USAGE_STATE_DIR, BASE_URL } from './fixtures/paths.mjs';
+import { BACKEND, NODE_ROOT, REPO_ROOT, PORT, TOKEN, HOME_DIR, TRUSTED_DIR, USAGE_STATE_DIR, TMP, BASE_URL } from './fixtures/paths.mjs';
 import { seed } from './fixtures/seed.mjs';
 
+const EXE_NAME = process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend';
+
+// Resolve the native binary before seeding: a missing build is a startup error,
+// not a half-rebuilt sandbox. Prefer the newest profile like
+// scripts/native-daemon-e2e.mjs — a stale release binary would test old code.
+function nativeBinary() {
+  const override = process.env.SINGULARITY_NATIVE_BIN;
+  // VERIFY: wave3-e2e-3 — a typo'd override must fail here, not as an uncaught
+  // spawn error after seed() rebuilt the sandbox.
+  if (override) {
+    if (!existsSync(override)) {
+      console.error(`[e2e] SINGULARITY_NATIVE_BIN does not exist: ${override}`);
+      process.exit(1);
+    }
+    return override;
+  }
+  const built = ['release', 'debug']
+    .map((profile) => join(REPO_ROOT, 'rust', 'backend', 'target', profile, EXE_NAME))
+    .filter((path) => existsSync(path))
+    .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
+  if (built.length) return built[0];
+  console.error('[e2e] native backend binary not found; run: cargo build --release --manifest-path rust/backend/Cargo.toml');
+  process.exit(1);
+}
+
+// VERIFY: wave3-e2e-2 — refuse a port another daemon already owns (another
+// checkout at its default, or a side-run) before seed() touches the sandbox,
+// instead of handing the specs a foreign daemon or a bind stack trace.
+async function assertPortFree() {
+  await new Promise((done) => {
+    const probe = createServer();
+    probe.once('error', (err) => {
+      console.error(`[e2e] cannot bind port ${PORT} (${err.code}); another daemon or run owns it — set E2E_PORT to a free port`);
+      process.exit(1);
+    });
+    probe.once('listening', () => probe.close(done));
+    probe.listen(PORT, '127.0.0.1');
+  });
+}
+
+const native = BACKEND === 'rust' ? nativeBinary() : null;
+
+await assertPortFree();
 const { claudeBin } = seed();
+
+// The native daemon reads `.env` from its cwd and serves the shell from
+// cwd/web/dist. Run it from a sandbox cwd so a checkout `.env` cannot re-supply
+// the SING_* keys deleted below, and link the checkout's web tree in so the
+// built shell is still served.
+function nativeCwd() {
+  const cwd = join(TMP, 'cwd');
+  const web = join(cwd, 'web');
+  mkdirSync(cwd, { recursive: true });
+  if (!existsSync(web)) symlinkSync(join(REPO_ROOT, 'web'), web, process.platform === 'win32' ? 'junction' : 'dir');
+  return cwd;
+}
 
 const env = { ...process.env };
 // Anything the daemon reads for state placement is set explicitly below or must
@@ -52,13 +114,23 @@ Object.assign(env, {
   // dirname(USAGE_REPORT_STATE)/reports.
 });
 
-const child = spawn(process.execPath, [join(REPO_ROOT, 'server', 'index.mjs')], {
-  cwd: REPO_ROOT, env, stdio: ['ignore', 'inherit', 'inherit'],
+const [command, args, cwd] = BACKEND === 'rust'
+  ? [native, ['--http'], nativeCwd()]
+  : [process.execPath, [join(NODE_ROOT, 'server', 'index.mjs')], NODE_ROOT];
+
+const child = spawn(command, args, {
+  cwd, env, stdio: ['ignore', 'inherit', 'inherit'],
 });
 
-console.log(`[e2e] sandbox daemon → ${BASE_URL} (home=${HOME_DIR})`);
+console.log(`[e2e] sandbox ${BACKEND} daemon → ${BASE_URL} (home=${HOME_DIR})`);
 
 child.on('exit', (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+// VERIFY: wave3-e2e-4 — a spawn failure (missing/non-executable binary) is a
+// startup diagnosis, not an uncaught exception.
+child.on('error', (err) => {
+  console.error(`[e2e] failed to start ${command}: ${err.message}`);
+  process.exit(1);
+});
 // child.kill() only signals this one process — on Windows it does not reap the
 // daemon's own pty children, so a Ctrl-C mid-run would leak them. taskkill /T
 // kills the whole tree; POSIX has no such gap, so child.kill() stays enough there.

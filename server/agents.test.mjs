@@ -13,7 +13,7 @@
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, renameSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, chmodSync, renameSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 
@@ -82,7 +82,7 @@ after(async () => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawn, respawnAll, kill, isLive, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor, getBuf, getWritten, getStatus, input, resize } = registry;
+const { encodeCwd, untildify, buildSpawn, init, fork, create, remove, snapshot, respawn, respawnAll, kill, isLive, bus, ensureTrusted, beginDrain, externalLaunch, resolveWt, writeAtomic, spawnEnv, CACHE_DIR, getLaunchConfigForCodexThread, codexThreadFor, getBuf, getWritten, getStatus, input, resize, sweepTmpFiles } = registry;
 
 // Kill a live pty and wait for its onExit to settle (status 'exited'), so a
 // test never leaks a running child into the next test or file teardown.
@@ -876,6 +876,33 @@ test('writeAtomic: non-retryable error rethrows immediately, no retry', async ()
   const fakeRename = () => { calls++; const e = new Error('gone'); e.code = 'ENOENT'; throw e; };
   assert.throws(() => writeAtomic(file, 'x', fakeRename), /gone/);
   assert.equal(calls, 1);
+});
+
+// ---- sweepTmpFiles (startup debris sweep) -------------------------------------
+// A hard kill between writeFileSync and rename leaves `<file>.<pid>.tmp` behind,
+// and a pid-scoped name is never reused. The boot sweep must remove only stale
+// matching regular files at the top level — never a write in flight, a
+// non-matching name, or a subdirectory's contents.
+// VERIFY: wave30-sweep-node-1
+test('sweepTmpFiles: removes only stale top-level `<name>.<pid>.tmp` files', async () => {
+  const dir = join(scratch, 'sweep');
+  const nested = join(dir, 'nested');
+  mkdirSync(nested, { recursive: true });
+  const now = Date.now();
+  const old = new Date(now - 120_000);
+  const make = (path, mtime) => { writeFileSync(path, 'x'); utimesSync(path, mtime, mtime); return path; };
+  const stale = make(join(dir, 'state.json.123.tmp'), old);
+  const fresh = make(join(dir, 'agents.json.456.tmp'), new Date(now));
+  const kept = [join(dir, 'x.tmp'), join(dir, 'x.abc.tmp'), join(dir, 'state.json')].map((p) => make(p, old));
+  const nestedTmp = make(join(nested, 'nested.json.9.tmp'), old);
+  const warnings = [];
+  const removed = sweepTmpFiles({ dirs: [dir], now, log: { warn: (o, m) => warnings.push(m), info: () => {} } });
+  assert.equal(removed, 1);
+  assert.equal(existsSync(stale), false);
+  assert.equal(existsSync(fresh), true);
+  for (const p of kept) assert.equal(existsSync(p), true);
+  assert.equal(existsSync(nestedTmp), true);
+  assert.deepEqual(warnings, []);
 });
 
 // resolveWt: Store App-Execution-Alias path takes priority, PATH is the

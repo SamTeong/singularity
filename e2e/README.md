@@ -10,7 +10,33 @@ can reach the user's real `:4317` daemon, `~/.claude`, `~/wiki`, or spawn a real
 pnpm test:e2e        # build web/dist, then run everything
 pnpm test:e2e:ui     # interactive, reuses the dist already on disk
 pnpm exec playwright test e2e/wiki.spec.mjs    # one spec, no rebuild
+E2E_BACKEND=rust pnpm exec playwright test e2e/wiki.spec.mjs   # native daemon
 ```
+
+## Backends
+
+`E2E_BACKEND` selects the daemon under test. The default is `node`, and any
+other value fails before the sandbox is seeded.
+
+| value | daemon |
+|---|---|
+| `node` (default) | `<E2E_NODE_ROOT>/server/index.mjs`, the reference Node implementation |
+| `rust` | `rust/backend/target/{release,debug}/singularity-backend --http` — spawned directly, no Node gateway (`SINGULARITY_NATIVE_BIN` overrides the path) |
+
+`E2E_NODE_ROOT` defaults to this checkout. Point it at another clone — for
+example the pinned `main` — to run the same specs against a reference Node
+daemon while comparing a native build from this worktree.
+
+The native backend must be built first:
+
+```sh
+cargo build --release --manifest-path rust/backend/Cargo.toml
+```
+
+It serves the shell from the checkout's `web/dist`, so the same `pnpm test:e2e`
+build step covers both backends. The binary is started from a sandbox cwd with
+no `.env`, so a checkout's `.env` cannot re-supply the sandbox env that
+`serve.mjs` deleted.
 
 ## Two suites — which one gets your spec
 
@@ -24,7 +50,8 @@ same box.
 | backend | real daemon in a sandbox | Mirage + mock-socket in the page |
 | proves | the daemon's own behaviour and the client↔daemon contract | UI behaviour given a response |
 | execution | serial (`workers: 1`), one shared mutable sandbox | parallel, one DB per page |
-| mutations | real files under `e2e/.tmp/corpus/` | in-memory, reset per page load |
+| mutations | real files under `<TMP>/corpus/` | in-memory, reset per page load |
+<!-- VERIFY: wave3-e2e-5 -->
 
 **Default to `e2e-mock/`.** A spec belongs *here* only if it needs something a
 mock cannot honestly stand in for:
@@ -49,9 +76,9 @@ handler fails the mock suite immediately rather than drifting silently.
 
 | file | role |
 |---|---|
-| `../playwright.config.mjs` | serial (`workers: 1`), bundled chromium, `webServer: node e2e/serve.mjs` |
-| `serve.mjs` | wipes + seeds the sandbox, then boots the daemon with an explicit env |
-| `fixtures/paths.mjs` | sandbox layout constants + fixture ids — import these, never hard-code a path |
+| `../playwright.config.mjs` | serial (`workers: 1`), bundled chromium, `webServer: node e2e/serve.mjs`; test output + html report under `TMP` |
+| `serve.mjs` | wipes + seeds the sandbox, then boots the `E2E_BACKEND` daemon with an explicit env |
+| `fixtures/paths.mjs` | sandbox layout constants, backend selection + fixture ids — import these, never hard-code a path |
 | `fixtures/seed.mjs` | writes the corpora and the `state/*.json` root files |
 | `fixtures/test.mjs` | **import `test`/`expect` from here**, plus `onceConfirm` |
 | `helpers/nav.mjs` | `goto` / `gotoView` / `setSkin` / `visible` |
@@ -106,6 +133,14 @@ expect(await msg).toMatch(/delete/i);
 
 ## What the sandbox contains
 
+The sandbox root is `TMP = <root>/<port>`, outside the repository. `<root>`
+defaults to `<os tmp>/singularity-e2e/<checkout-id>`, where `<checkout-id>` is a
+short hash of the checkout path — so two checkouts at their default port never
+share (or wipe) each other's fixtures. `E2E_TMP_ROOT` replaces `<root>` verbatim.
+Every run gets its own per-port directory, which `serve.mjs` wipes on boot, and
+`serve.mjs` exits with a clear message if that port is already taken. Playwright
+writes its `test-results/` and `playwright-report/` inside the same directory.
+
 Seeded by `fixtures/seed.mjs`, all paths exported from `fixtures/paths.mjs`:
 
 - **Transcripts / Memory** — `PROJECTS_DIR`: `workspace-alpha` (30 sessions, so
@@ -135,7 +170,7 @@ Wiki **categories are derived from a page's folder**, not its frontmatter
 (`category(p.rel)` in WikiPanel.jsx) — the category filter only appears when the
 corpus has pages in subdirectories.
 
-Mutations are real: a Save writes the file under `e2e/.tmp/corpus/...` and a spec
+Mutations are real: a Save writes the file under `<TMP>/corpus/...` and a spec
 may assert it with `node:fs`. The sandbox is rebuilt from scratch on every boot,
 so specs must not depend on another spec's writes.
 
@@ -157,9 +192,11 @@ They have no safe path even in the sandbox:
 
 ## Developing several specs at once
 
-The suite is serial and the sandbox is a single directory, so two concurrent
-`playwright test` runs would fight over port 4319 and over `e2e/.tmp`. Set
-`E2E_PORT` to give a run its own port *and* its own `e2e/.tmp-<port>`:
+The suite is serial and the sandbox is a single directory per port, so two
+concurrent `playwright test` runs on one port would fight over it — the second
+now fails fast on the busy port. Set `E2E_PORT` to give a run its own port *and*
+its own `<root>/<port>` directory (fixtures, test output and html report all
+move with it):
 
 ```sh
 E2E_PORT=4321 pnpm exec playwright test e2e/wiki.spec.mjs

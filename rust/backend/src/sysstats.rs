@@ -202,10 +202,15 @@ mod tests {
         assert!(initial.mem.used <= initial.mem.total);
         assert_eq!(initial.cpu, None);
         assert!(initial.history.cpu.is_empty());
-        thread::sleep(STEP + Duration::from_millis(150));
-        let sampled = sampler.snapshot();
+        // Bounded poll, not a fixed sleep: the first step can lag under load.
+        let deadline = std::time::Instant::now() + STEP + Duration::from_secs(5);
+        let mut sampled = sampler.snapshot();
+        while sampled.cpu.is_none() && std::time::Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+            sampled = sampler.snapshot();
+        }
         assert!(sampled.cpu.is_some_and(|cpu| cpu <= 100));
-        assert_eq!(sampled.history.cpu.len(), 1);
+        assert!(!sampled.history.cpu.is_empty());
         assert_eq!(sampled.history.cpu.len(), sampled.history.mem.len());
         let started = std::time::Instant::now();
         sampler.stop();

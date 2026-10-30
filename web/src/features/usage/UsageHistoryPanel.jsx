@@ -10,7 +10,9 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import TimelineIcon from '@mui/icons-material/Timeline';
+import { useColorScheme } from '@mui/material/styles';
 import { LineChart } from '@mui/x-charts/LineChart';
+import { rainbowSurgePalette } from '@mui/x-charts/colorPalettes';
 import { useDrawingArea, useXScale, useYScale } from '@mui/x-charts/hooks';
 import { stepTicks, firstTickOfEachLocalDate } from './stepTicks.mjs';
 
@@ -59,6 +61,14 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
   const [win, setWin] = useState('5h');
   const [doc, setDoc] = useState(null);
   const [error, setError] = useState(null);
+  // Clicked legend pills; empty set = every series visible.
+  const [sel, setSel] = useState(() => new Set());
+  const [selScope, setSelScope] = useState(`${provider}:${win}`);
+  // Legend selection belongs to one provider+window; reset it during render when the scope changes.
+  if (selScope !== `${provider}:${win}`) { setSelScope(`${provider}:${win}`); if (sel.size) setSel(new Set()); }
+  // The chart's own default palette, so toggling a series never recolors the rest.
+  const scheme = useColorScheme() ?? {};
+  const seriesColors = rainbowSurgePalette((scheme.mode === 'system' ? scheme.systemMode : scheme.mode) ?? 'light');
 
   useEffect(() => {
     if (!open || !active || !provider) return undefined;
@@ -75,9 +85,25 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
 
   const d = doc?.provider === provider && doc.window === win ? doc : null;
   const times = d?.points.map((p) => new Date(p.ts)) ?? [];
-  const series = !d ? [] : d.estimated
+  const baseSeries = !d ? [] : d.estimated
     ? d.sessions.map((s) => ({ id: s.id, label: s.label, data: d.points.map((p) => p.sessions[s.id] ?? 0), area: true, stack: 'total', showMark: false, valueFormatter: (v) => `${v}%` }))
-    : [{ id: 'total', label: `${win} %`, data: d.points.map((p) => p.pct), showMark: false, valueFormatter: (v) => `${v}%` }];
+    : [
+      { id: 'total', label: `${win} %`, data: d.points.map((p) => p.pct), showMark: false, valueFormatter: (v) => `${v}%` },
+      ...(d.points.some((p) => p.pct5h != null) ? [{ id: 'five', label: '5h %', data: d.points.map((p) => p.pct5h ?? null), showMark: false, valueFormatter: (v) => `${v}%` }] : []),
+    ];
+  // A hidden series keeps its slot and color; only its points go null.
+  const series = baseSeries.map((s, i) => ({
+    ...s,
+    color: seriesColors[i % seriesColors.length],
+    ...(sel.size === 0 || sel.has(s.id) ? {} : { data: s.data.map(() => null) }),
+  }));
+  const toggleSeries = (id) => setSel((prev) => {
+    const next = new Set(prev);
+    if (next.size === 0) next.add(id);
+    else if (next.has(id)) next.delete(id);
+    else next.add(id);
+    return next;
+  });
   const ticks = d ? stepTicks(new Date(d.windowStart).getTime(), new Date(d.resetsAt).getTime(), STEP[win]) : [];
   const dateLabelTicks = firstTickOfEachLocalDate(ticks);
 
@@ -113,9 +139,35 @@ export default function UsageHistoryPanel({ open, onToggle, active, providers })
             <Typography sx={{ py: 2, fontSize: 13, color: 'text.secondary' }}>No usage in the current {win} window yet.</Typography>
           ) : (
             <Box role="figure" aria-label={`${win} history chart`}>
+              {series.length > 1 && (
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, pb: 1 }}>
+                  {series.map((s) => {
+                    const visible = sel.size === 0 || sel.has(s.id);
+                    return (
+                      <Box
+                        key={s.id}
+                        component="button"
+                        type="button"
+                        aria-pressed={visible}
+                        onClick={() => toggleSeries(s.id)}
+                        sx={{
+                          display: 'inline-flex', alignItems: 'center', gap: '6px',
+                          px: 1, py: 0.25, fontSize: 11, color: 'text.secondary',
+                          bgcolor: 'transparent', border: '1px solid', borderColor: 'divider',
+                          borderRadius: 999, cursor: 'pointer', opacity: visible ? 1 : 0.45,
+                        }}
+                      >
+                        <Box component="span" sx={{ width: 11, height: 11, borderRadius: '4px', flex: 'none', backgroundColor: s.color }} />
+                        {s.label}
+                      </Box>
+                    );
+                  })}
+                </Box>
+              )}
               <LineChart
                 height={260}
                 series={series}
+                hideLegend
                 xAxis={[{
                   data: times, scaleType: 'time', min: new Date(d.windowStart), max: new Date(d.resetsAt),
                   tickInterval: ticks,

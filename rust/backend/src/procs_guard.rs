@@ -61,8 +61,8 @@ pub fn kill_guarded(pid: &Value, name: &str, kind: &str, is_darwin: bool) -> Val
 }
 
 fn kill_guarded_with<Q, K>(
-    pid: &Value,
-    name: &str,
+    _pid: &Value,
+    _name: &str,
     kind: &str,
     is_darwin: bool,
     mut query: Q,

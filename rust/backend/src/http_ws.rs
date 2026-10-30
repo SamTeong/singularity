@@ -4,9 +4,12 @@
 //! Port of `server/pty-ws.mjs` (`attachPtyWs`, `:59-236`). Behaviour parity
 //! points:
 //!
+//! - **Origin** (`:96-98`): a disallowed `Origin` upgrades the connection and
+//!   then closes it `1008 forbidden origin` — never an HTTP 403 before the
+//!   handshake, which a browser reports differently. The transport layer must
+//!   therefore not pre-reject `/ws` on Origin (`http_server.rs`).
 //! - **Token** (`:115-118`): a missing/wrong `?token=` upgrades the connection
-//!   and then closes it `1008 unauthorized`. Origin is already enforced by the
-//!   outer transport layer (`http_server.rs:478`), so it is not re-checked here.
+//!   and then closes it `1008 unauthorized`.
 //! - **Initial snapshot** (`:107-132`, `:207-233`): the list/tasks/crons/
 //!   background frames are computed synchronously on connect; the
 //!   window-anchor frame is awaited, then all five are sent in that order and
@@ -20,8 +23,11 @@
 //!   per-socket unbounded channel, so the bus is never blocked.
 //! - **Heartbeat** (`:87-93`, `:103-109`): a 30 s ping; a socket that has not
 //!   ponged by the next tick is terminated.
-//! - **Close** (`:199-205`): abort the in-flight chat, unsubscribe from the
-//!   bus and decrement the live-client counter `/api/health` reports.
+//! - **Close** (`:199-205`): a client-initiated `Close` is echoed with the
+//!   peer's own code and reason (tungstenite queues the reply; the task flushes
+//!   it so the peer never observes 1006/EOF), then the in-flight chat is
+//!   aborted, the socket unsubscribes from the bus and the live-client counter
+//!   `/api/health` reports is decremented.
 //!
 //! Deviances from Node:
 //! - The empty `tasks`/`crons`/`background` snapshots are the native placeholders
@@ -40,8 +46,10 @@ use axum::Router;
 use axum::body::Bytes;
 use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{RawQuery, State};
+use axum::http::HeaderMap;
 use axum::response::Response;
 use axum::routing::get;
+use futures_util::SinkExt;
 use serde_json::{Map, Value, json};
 use tokio::sync::mpsc;
 
@@ -72,12 +80,20 @@ const BACKGROUND_TICK_MS: i64 = 3_600_000;
 /// lives in this route rather than the outer middleware. `shutdown` is the
 /// host's drain broadcast: flipping it closes every socket `1001` so graceful
 /// HTTP shutdown never waits on an upgraded connection.
+#[derive(Clone)]
+pub struct DomainSnapshots {
+    pub tasks: Arc<dyn Fn() -> Value + Send + Sync>,
+    pub crons: Arc<dyn Fn() -> Value + Send + Sync>,
+    pub background: Arc<dyn Fn() -> Value + Send + Sync>,
+}
+
 pub struct WsDeps {
     pub registry: Arc<Registry>,
     pub anchor: Arc<Mutex<window_anchor::Service>>,
     pub chat: ChatDeps,
     pub clients: Arc<AtomicUsize>,
     pub policy: HttpPolicy,
+    pub snapshots: Option<DomainSnapshots>,
     /// Host shutdown broadcast: every session closes `1001` and returns when
     /// it flips to `true`. `None` in tests that do not exercise shutdown.
     pub shutdown: Option<tokio::sync::watch::Receiver<bool>>,
@@ -90,6 +106,7 @@ struct WsState {
     chat: Arc<ChatDeps>,
     clients: Arc<AtomicUsize>,
     policy: HttpPolicy,
+    snapshots: Option<DomainSnapshots>,
     shutdown: Option<tokio::sync::watch::Receiver<bool>>,
     heartbeat: Duration,
 }
@@ -108,6 +125,7 @@ fn router_with_heartbeat(deps: WsDeps, heartbeat: Duration) -> Router {
         chat: Arc::new(deps.chat),
         clients: deps.clients,
         policy: deps.policy,
+        snapshots: deps.snapshots,
         shutdown: deps.shutdown,
         heartbeat,
     };
@@ -118,11 +136,31 @@ async fn upgrade(
     State(state): State<WsState>,
     upgrade: WebSocketUpgrade,
     RawQuery(query): RawQuery,
+    headers: HeaderMap,
 ) -> Response {
-    upgrade.on_upgrade(move |socket| connection(socket, state, query))
+    // A browser always sends Origin on a WS upgrade (`pty-ws.mjs:96-98`), so the
+    // verdict has to be taken here: Node finishes the upgrade first and only
+    // then closes, and a pre-upgrade 403 is a different answer to the page.
+    //
+    // VERIFY: wave12-ws_dup_origin-2 — the whole header map goes to the
+    // bridge, because Node judges the `, `-joined field: two `Origin` lines
+    // (even identical ones) must close 1008, not pass on the first value.
+    upgrade.on_upgrade(move |socket| connection(socket, state, query, headers))
 }
 
-async fn connection(mut socket: WebSocket, state: WsState, query: Option<String>) {
+async fn connection(
+    mut socket: WebSocket,
+    state: WsState,
+    query: Option<String>,
+    headers: HeaderMap,
+) {
+    // VERIFY: wave8-ws_origin-1 — `if (!originAllowed(req.headers.origin)) {
+    // ws.close(1008, 'forbidden origin'); return; }` (`pty-ws.mjs:98`). Node's
+    // `originAllowed` has no `Sec-Fetch-Site` argument, so only Origin decides.
+    if !state.policy.websocket_origin_allowed(&headers) {
+        let _ = close(&mut socket, 1008, "forbidden origin").await;
+        return;
+    }
     // `if (t !== token) { ws.close(1008, 'unauthorized'); return; }` (`:115-118`).
     if !state.policy.websocket_authenticated(query.as_deref()) {
         let _ = close(&mut socket, 1008, "unauthorized").await;
@@ -182,7 +220,8 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
     ));
 
     // `const initial = [...]` (`:127-132`): computed before the anchor await.
-    let mut initial: VecDeque<String> = initial_frames(&state.registry).into();
+    let mut initial: VecDeque<String> =
+        initial_frames(&state.registry, state.snapshots.as_ref()).into();
     let anchor = state.anchor.clone();
     let mut anchor_task = tokio::task::spawn_blocking(move || anchor_frame(&anchor));
     let mut anchored = false;
@@ -198,9 +237,14 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
         initializing: true,
         ..SendState::default()
     };
-    let mut heartbeat = tokio::time::interval(state.heartbeat);
+    // Node's first ping is one period out. Starting there also skips awaiting an
+    // immediate first tick, which still waits for a time-driver turn (~15 ms
+    // on Windows) and so delayed every connection's first frame.
+    let mut heartbeat = tokio::time::interval_at(
+        tokio::time::Instant::now() + state.heartbeat,
+        state.heartbeat,
+    );
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    heartbeat.tick().await; // the first tick is immediate; Node waits 30 s
     let mut shutdown = state.shutdown.clone();
     let mut alive = true;
     let mut open = true;
@@ -264,6 +308,7 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
                 match message {
                     Some(Ok(Message::Text(text))) => {
                         let replies = client.handle(text.as_str()).await;
+                        let replies = queued_then(&mut frames, replies);
                         if !deliver_all(&mut session, socket, replies).await {
                             open = false;
                         }
@@ -273,6 +318,7 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
                     Some(Ok(Message::Binary(bytes))) => {
                         let raw = String::from_utf8_lossy(&bytes).into_owned();
                         let replies = client.handle(&raw).await;
+                        let replies = queued_then(&mut frames, replies);
                         if !deliver_all(&mut session, socket, replies).await {
                             open = false;
                         }
@@ -283,7 +329,23 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
                             open = false;
                         }
                     }
-                    Some(Ok(Message::Close(_))) | None | Some(Err(_)) => open = false,
+                    // `ws` answers a protocol violation with close 1002 before
+                    // destroying the socket; tungstenite only returns the error.
+                    Some(Err(_)) => {
+                        let _ = close(socket, 1002, "protocol error").await;
+                        open = false;
+                    }
+                    // VERIFY: wave21-wsclose-1 — `ws` completes the
+                    // client-initiated Close handshake: the peer's own code and
+                    // reason are echoed (tungstenite has already queued that
+                    // reply, normalizing a non-wire code to 1002), so flush it
+                    // before the transport is dropped — otherwise the peer
+                    // observes 1006/EOF.
+                    Some(Ok(Message::Close(_))) => {
+                        let _ = socket.flush().await;
+                        open = false;
+                    }
+                    None => open = false,
                 }
             }
             _ = heartbeat.tick() => {
@@ -305,6 +367,19 @@ async fn session(socket: &mut WebSocket, state: &WsState) {
         cancel.cancel();
     }
     state.registry.bus().unsubscribe(subscription);
+}
+
+// VERIFY: wave10-ws_order-1
+/// Node runs a handler synchronously, so bus frames it emitted (e.g. the
+/// `list` from `reg.create`) reach the wire before its direct replies
+/// (`pty-ws.mjs:139-158`). Drain what the handler queued first.
+fn queued_then(
+    frames: &mut mpsc::UnboundedReceiver<Arc<str>>,
+    replies: Vec<Arc<str>>,
+) -> Vec<Arc<str>> {
+    let mut out: Vec<Arc<str>> = std::iter::from_fn(|| frames.try_recv().ok()).collect();
+    out.extend(replies);
+    out
 }
 
 async fn deliver_all(
@@ -422,8 +497,18 @@ fn frame_for(
     }
 }
 
-/// `{ t: 'list', ... }` + the empty placeholders (`:128-131`).
-fn initial_frames(registry: &Registry) -> Vec<String> {
+/// Read each domain at connection time, in Node's initial frame order.
+fn initial_frames(registry: &Registry, snapshots: Option<&DomainSnapshots>) -> Vec<String> {
+    let tasks = snapshots
+        .map(|s| (s.tasks)())
+        .unwrap_or_else(|| json!({"tasks": [], "history": []}));
+    let crons = snapshots.map(|s| (s.crons)()).unwrap_or_else(|| json!([]));
+    let background = snapshots.map(|s| (s.background)()).unwrap_or_else(|| {
+        json!({
+            "config": {"jobs": []}, "lastTick": null, "liveTaskId": null,
+            "nextDueAt": BACKGROUND_TICK_MS,
+        })
+    });
     vec![
         serde_json::to_string(&json!({
             "t": "list",
@@ -431,18 +516,11 @@ fn initial_frames(registry: &Registry) -> Vec<String> {
             "recentRepos": registry.recent_repos(),
         }))
         .expect("a list frame serializes"),
-        serde_json::to_string(&json!({ "t": "tasks", "tasks": [], "history": [] }))
-            .expect("a tasks frame serializes"),
-        serde_json::to_string(&json!({ "t": "crons", "crons": [] }))
+        serde_json::to_string(&tagged("tasks", &tasks)).expect("a tasks frame serializes"),
+        serde_json::to_string(&json!({ "t": "crons", "crons": crons }))
             .expect("a crons frame serializes"),
-        serde_json::to_string(&json!({
-            "t": "background",
-            "config": { "jobs": [] },
-            "lastTick": Value::Null,
-            "liveTaskId": Value::Null,
-            "nextDueAt": BACKGROUND_TICK_MS,
-        }))
-        .expect("a background frame serializes"),
+        serde_json::to_string(&tagged("background", &background))
+            .expect("a background frame serializes"),
     ]
 }
 
@@ -493,12 +571,15 @@ impl Client {
             }
             "txmeta" => {
                 let id = string_field(&message, "id").unwrap_or_default();
-                vec![text(&json!({
-                    "t": "txmeta",
-                    "id": id,
-                    "written": self.registry.get_written(&id),
-                    "ringMax": RING_MAX,
-                }))]
+                let mut reply = serde_json::Map::new();
+                reply.insert("t".into(), json!("txmeta"));
+                // `id: m.id`: JSON.stringify drops an absent id, keeps null.
+                if let Some(raw) = message.get("id") {
+                    reply.insert("id".into(), raw.clone());
+                }
+                reply.insert("written".into(), json!(self.registry.get_written(&id)));
+                reply.insert("ringMax".into(), json!(RING_MAX));
+                vec![text(&Value::Object(reply))]
             }
             "resize" => {
                 let id = string_field(&message, "id").unwrap_or_default();
@@ -513,8 +594,14 @@ impl Client {
                 Vec::new()
             }
             "reorder" => {
-                let ids = strings_field(&message, "ids");
-                let _ = self.registry.reorder(&ids);
+                // `if (!Array.isArray(ids) || ...) return;` (`agents.mjs:629`):
+                // a missing/non-array field must not become an empty-registry
+                // "permutation". Non-string elements never match a key.
+                if let Some(items) = message.get("ids").and_then(Value::as_array) {
+                    if items.iter().all(Value::is_string) {
+                        let _ = self.registry.reorder(&strings(items));
+                    }
+                }
                 Vec::new()
             }
             "respawn" => {
@@ -633,8 +720,29 @@ impl Client {
         }
         let cancel = Cancel::new();
         self.cancel = Some(cancel.clone());
-        let Ok(request) = serde_json::from_value::<ChatRequest>(message.clone()) else {
-            return Vec::new();
+        // VERIFY: wave12-chat_auth_first-3 — `streamChat` awaits
+        // `claudeOauthToken()` before destructuring the payload
+        // (`chat.mjs:98-103`), so a signed-out daemon answers `needsAuth` for
+        // any payload shape, malformed fields included, and echoes the raw
+        // `chatId` (`m.chatId`) exactly as received.
+        if let Some(frame) = chat::auth_preflight(&self.chat, message.get("chatId").cloned()) {
+            return serde_json::to_string(&frame)
+                .map_or_else(|_| Vec::new(), |payload| vec![Arc::from(payload)]);
+        }
+        // VERIFY: wave15-chat-5 — every wrong-typed field is now raw, so an
+        // object payload cannot fail here; this frame is the last-resort
+        // terminal answer (with the raw `chatId`) so the UI never waits forever.
+        let request = match serde_json::from_value::<ChatRequest>(message.clone()) {
+            Ok(request) => request,
+            Err(error) => {
+                let frame = chat::ChatFrame::Error {
+                    chat_id: message.get("chatId").cloned(),
+                    needs_auth: None,
+                    msg: format!("invalid chat request: {error}"),
+                };
+                return serde_json::to_string(&frame)
+                    .map_or_else(|_| Vec::new(), |payload| vec![Arc::from(payload)]);
+            }
         };
         let chat_id = request.chat_id.clone();
         let deps = self.chat.clone();
@@ -673,14 +781,6 @@ fn string_field(message: &Value, key: &str) -> Option<String> {
     message.get(key).and_then(Value::as_str).map(str::to_owned)
 }
 
-fn strings_field(message: &Value, key: &str) -> Vec<String> {
-    message
-        .get(key)
-        .and_then(Value::as_array)
-        .map(|items| strings(items))
-        .unwrap_or_default()
-}
-
 fn strings(items: &[Value]) -> Vec<String> {
     items
         .iter()
@@ -713,6 +813,13 @@ mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpStream;
+
+    // Per-tag protocol tests, split so they can grow independently; they reuse
+    // this module's private fixture, fake port and raw client.
+    mod events;
+    mod tags_a;
+    mod tags_b;
+    mod tags_c;
 
     fn run<F: std::future::Future>(future: F) -> F::Output {
         tokio::runtime::Builder::new_multi_thread()
@@ -890,6 +997,7 @@ mod tests {
                 token: token.map(str::to_owned),
             },
             shutdown: None,
+            snapshots: None,
         }
     }
 
@@ -920,9 +1028,28 @@ mod tests {
 
     impl RawClient {
         async fn connect(address: SocketAddr, path: &str) -> Self {
+            Self::connect_with_origin(address, path, None).await
+        }
+
+        async fn connect_with_origin(
+            address: SocketAddr,
+            path: &str,
+            origin: Option<&str>,
+        ) -> Self {
+            let origins: Vec<&str> = origin.into_iter().collect();
+            Self::connect_with_origins(address, path, &origins).await
+        }
+
+        /// One `Origin` line per entry, so the server sees a repeated field
+        /// exactly as a hostile client can send it.
+        async fn connect_with_origins(address: SocketAddr, path: &str, origins: &[&str]) -> Self {
             let mut stream = TcpStream::connect(address).await.unwrap();
+            let origin: String = origins
+                .iter()
+                .map(|origin| format!("Origin: {origin}\r\n"))
+                .collect();
             let request = format!(
-                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
+                "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{}\r\n{origin}Upgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n",
                 address.port()
             );
             stream.write_all(request.as_bytes()).await.unwrap();
@@ -1060,6 +1187,35 @@ mod tests {
             assert_eq!(frames[3]["nextDueAt"], json!(BACKGROUND_TICK_MS));
             assert!(frames[4]["anchor"]["claude"].is_object(), "{:?}", frames[4]);
         });
+    }
+
+    #[test]
+    fn initial_frames_read_current_domain_snapshots() {
+        let fixture = Fixture::new();
+        let registry = fixture.registry(FakePort::new());
+        let tasks = Arc::new(Mutex::new(
+            json!({"tasks": [{"id": "task-1"}], "history": []}),
+        ));
+        let task_state = tasks.clone();
+        let snapshots = DomainSnapshots {
+            tasks: Arc::new(move || task_state.lock().unwrap().clone()),
+            crons: Arc::new(|| json!([{"id": "cron-1"}])),
+            background: Arc::new(
+                || json!({"config": {"jobs": [{"id": "job-1"}]}, "liveTaskId": "task-1"}),
+            ),
+        };
+        let frames: Vec<Value> = initial_frames(&registry, Some(&snapshots))
+            .iter()
+            .map(|frame| serde_json::from_str(frame).unwrap())
+            .collect();
+        assert_eq!(frames[1]["tasks"][0]["id"], "task-1");
+        assert_eq!(frames[2]["crons"][0]["id"], "cron-1");
+        assert_eq!(frames[3]["config"]["jobs"][0]["id"], "job-1");
+        assert_eq!(frames[3]["liveTaskId"], "task-1");
+        tasks.lock().unwrap()["tasks"] = json!([{"id": "task-2"}]);
+        let next: Value =
+            serde_json::from_str(&initial_frames(&registry, Some(&snapshots))[1]).unwrap();
+        assert_eq!(next["tasks"][0]["id"], "task-2");
     }
 
     #[test]
@@ -1206,6 +1362,75 @@ mod tests {
 
             let mut missing = RawClient::connect(server.address, "/ws").await;
             assert_eq!(missing.close().await.0, 1008);
+        });
+    }
+
+    // VERIFY: wave8-ws_origin-2 — the answer to a disallowed Origin is a
+    // completed upgrade followed by `1008 forbidden origin`, not a 403.
+    #[test]
+    fn a_disallowed_origin_upgrades_then_closes_1008_forbidden_origin() {
+        run(async {
+            let fixture = Fixture::new();
+            let port = FakePort::new();
+            let registry = fixture.registry(port);
+            let clients = Arc::new(AtomicUsize::new(0));
+            let server = serve(deps(&fixture, registry, clients.clone(), None)).await;
+
+            // `connect_with_origin` asserts the 101, so a pre-upgrade rejection fails here.
+            let mut denied =
+                RawClient::connect_with_origin(server.address, "/ws", Some("https://evil.test"))
+                    .await;
+            let (code, reason) = denied.close().await;
+            assert_eq!(code, 1008);
+            assert_eq!(reason, "forbidden origin");
+            assert_eq!(clients.load(Ordering::SeqCst), 0);
+
+            // `SELF_HOSTS` holds both the daemon and Vite origins (`index.mjs:191`).
+            let mut trusted = RawClient::connect_with_origin(
+                server.address,
+                "/ws",
+                Some("http://127.0.0.1:4317"),
+            )
+            .await;
+            assert_eq!(snapshot(&mut trusted).await.len(), 5);
+            assert_eq!(clients.load(Ordering::SeqCst), 1);
+        });
+    }
+
+    // VERIFY: wave12-ws_dup_origin-2 — Node judges the `, `-joined Origin
+    // field, so a repeated Origin upgrades and then closes `1008 forbidden
+    // origin` — even when the allowlisted origin is first, and even when both
+    // lines are identical. It is never a pre-upgrade 403.
+    #[test]
+    fn duplicate_origin_headers_upgrade_then_close_1008_forbidden_origin() {
+        run(async {
+            let fixture = Fixture::new();
+            let port = FakePort::new();
+            let registry = fixture.registry(port);
+            let clients = Arc::new(AtomicUsize::new(0));
+            let server = serve(deps(&fixture, registry, clients.clone(), None)).await;
+
+            for origins in [
+                ["http://127.0.0.1:4317", "https://evil.test"],
+                ["https://evil.test", "http://127.0.0.1:4317"],
+                ["http://127.0.0.1:4317", "http://127.0.0.1:4317"],
+            ] {
+                // `connect_with_origins` asserts the 101, so a pre-upgrade
+                // rejection fails here instead of reaching the close.
+                let mut denied =
+                    RawClient::connect_with_origins(server.address, "/ws", &origins).await;
+                let (code, reason) = denied.close().await;
+                assert_eq!(code, 1008, "{origins:?}");
+                assert_eq!(reason, "forbidden origin", "{origins:?}");
+                assert_eq!(clients.load(Ordering::SeqCst), 0, "{origins:?}");
+            }
+
+            // A single allowlisted Origin still completes normally.
+            let mut trusted =
+                RawClient::connect_with_origins(server.address, "/ws", &["http://127.0.0.1:4317"])
+                    .await;
+            assert_eq!(snapshot(&mut trusted).await.len(), 5);
+            assert_eq!(clients.load(Ordering::SeqCst), 1);
         });
     }
 

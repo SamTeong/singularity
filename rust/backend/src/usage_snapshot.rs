@@ -233,11 +233,18 @@ fn local_month(epoch_ms: i64) -> Option<String> {
     Some(format!("{year:04}-{month:02}"))
 }
 
-pub(crate) fn parse_date_ms(value: &str) -> Option<i64> {
+/// `pub` only so the differential Node oracle in `tests/date_parse_cross_language.rs`
+/// can reach it: integration tests see the public surface only, and no public
+/// wrapper exposes this parser. Every in-crate caller needs no wider visibility.
+pub fn parse_date_ms(value: &str) -> Option<i64> {
     if let Ok(dt) = OffsetDateTime::parse(value, &Rfc3339) {
         return i64::try_from(dt.unix_timestamp_nanos() / 1_000_000).ok();
     }
     if let Some(at) = parse_legacy_date_ms(value) {
+        return Some(at);
+    }
+    // VERIFY: wave15-date-2
+    if let Some(at) = parse_zero_year_legacy_ms(value) {
         return Some(at);
     }
     if let Some(epoch) = parse_iso_date_or_datetime_ms(value) {
@@ -436,6 +443,34 @@ fn parse_legacy_date_ms(value: &str) -> Option<i64> {
         return year_month_start_ms(year, month);
     }
     None
+}
+
+/// V8 v24.19.0 reads a six-zero-digit year as a zone-like token, leaving a
+/// month-day date with the legacy default year: `-` → 2001, unsigned → 2000.
+/// Only date-only and space-separated forms take this path.
+// VERIFY: wave15-date-1
+fn parse_zero_year_legacy_ms(value: &str) -> Option<i64> {
+    // shortcut: "T" and zone-suffixed zero-year forms stay None; V8 accepts the Z form.
+    let (year, rest) = match value.strip_prefix("-000000") {
+        Some(rest) => (2001, rest),
+        None => (2000, value.strip_prefix("000000")?),
+    };
+    let (date, time) = match rest.split_once(' ') {
+        Some((date, clock)) if !clock.contains(['Z', '+', '-']) => (date, parse_clock(clock)?),
+        Some(_) => return None,
+        None => (rest, Time::MIDNIGHT),
+    };
+    let mut parts = date.strip_prefix('-')?.split('-');
+    let month = parts.next()?.parse::<u8>().ok()?.try_into().ok()?;
+    let day = match parts.next() {
+        Some(day) => day.parse::<i32>().ok()?,
+        None => 1,
+    };
+    if parts.next().is_some() || !(1..=31).contains(&day) {
+        return None;
+    }
+    let first = Date::from_calendar_date(year, month, 1).ok()?;
+    local_to_epoch_ms(first + time::Duration::days(i64::from(day - 1)), time)
 }
 
 fn parse_slash_date_ms(value: &str) -> Option<i64> {
@@ -1365,48 +1400,158 @@ fn system_time_ms(time: std::time::SystemTime) -> Option<i64> {
     i64::try_from(time.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis()).ok()
 }
 
-#[cfg(unix)]
+/// Local civil parts of an epoch second in the same zone the parser uses.
+///
+/// The writer and the parser must resolve local time through one zone: the OS
+/// APIs used here before ignored `TZ` on Windows, so a daemon started with a
+/// non-system `TZ` wrote in the OS zone and read back in another. `TimeZone`
+/// `system` honours `TZ` on every platform and otherwise maps the Windows zone
+/// id through CLDR, the same source ICU uses.
+// VERIFY: wave23-date-1
 pub(crate) fn local_parts(epoch: i64) -> Option<(i32, u8, u8, u8, u8, u8)> {
-    let mut value = unsafe { std::mem::zeroed::<libc::tm>() };
-    let time = epoch as libc::time_t;
-    if unsafe { libc::localtime_r(&time, &mut value) }.is_null() {
-        return None;
-    }
+    let at = jiff::Timestamp::from_millisecond(epoch.checked_mul(1_000)?).ok()?;
+    let dt = host_time_zone().to_datetime(at);
     Some((
-        value.tm_year + 1900,
-        (value.tm_mon + 1) as u8,
-        value.tm_mday as u8,
-        value.tm_hour as u8,
-        value.tm_min as u8,
-        value.tm_sec as u8,
+        i32::from(dt.year()),
+        dt.month() as u8,
+        dt.day() as u8,
+        dt.hour() as u8,
+        dt.minute() as u8,
+        dt.second() as u8,
     ))
 }
 
-#[cfg(unix)]
-fn local_to_epoch_ms(date: Date, time: Time) -> Option<i64> {
+/// Local UTC offset in seconds east of UTC at one instant (DST-aware), from the
+/// same zone `local_parts` uses. History, the background scheduler and the
+/// usage report each kept a private OS wrapper; those ignored `TZ` on Windows,
+/// so a daemon under a pinned zone read one zone and wrote another.
+// VERIFY: wave24-date-1
+pub(crate) fn local_offset_secs_at(epoch_secs: i64) -> i32 {
+    // Outside Jiff's representable range the offset is unknowable; 0 is the
+    // pre-existing fallback every consumer already handled.
+    let Some(at) = jiff::Timestamp::from_second(epoch_secs).ok() else {
+        return 0;
+    };
+    host_time_zone().to_offset(at).seconds()
+}
+
+/// Local zone for one usage-report run. `Fixed` is the injected test seam;
+/// `Host` resolves each instant's own offset, as Node's per-`Date` formatting
+/// does. Threading one zone through the whole run keeps the writer and the
+/// parser agreeing on every row, including across a DST change.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LocalZone {
+    /// Seconds east of UTC; the injected test seam.
+    #[allow(dead_code)]
+    Fixed(i32),
+    Host,
+}
+
+impl LocalZone {
+    /// Local UTC offset in seconds east of UTC at one instant.
+    pub(crate) fn offset_at(self, epoch_secs: f64) -> i32 {
+        match self {
+            Self::Fixed(secs) => secs,
+            // Outside the representable range the offset is unknowable; 0 is
+            // the fallback every consumer already handled.
+            Self::Host => local_offset_secs_at(epoch_secs.floor() as i64),
+        }
+    }
+
+    /// Epoch seconds for a local civil time given as linear local seconds since
+    /// 1970-01-01T00:00:00 local (`days * 86_400 + h * 3_600 + ...`). Any field
+    /// may overflow; the value rolls over exactly like `new Date(y, m - 1, ...)`.
+    pub(crate) fn to_epoch_secs(self, local_secs: i64) -> Option<i64> {
+        match self {
+            Self::Fixed(offset) => local_secs.checked_sub(i64::from(offset)),
+            Self::Host => {
+                let epoch = Date::from_calendar_date(1970, time::Month::January, 1).ok()?;
+                let date =
+                    epoch.checked_add(time::Duration::days(local_secs.div_euclid(86_400)))?;
+                let rem = local_secs.rem_euclid(86_400);
+                let time = Time::from_hms(
+                    u8::try_from(rem / 3_600).ok()?,
+                    u8::try_from(rem % 3_600 / 60).ok()?,
+                    u8::try_from(rem % 60).ok()?,
+                )
+                .ok()?;
+                local_to_epoch_ms(date, time).map(|ms| ms.div_euclid(1_000))
+            }
+        }
+    }
+}
+
+/// V8-compatible local civil time → epoch milliseconds, shared with callers
+/// that need a calendar-day boundary (history's local midnight) to match
+/// `new Date(y, m - 1, d, ...)`.
+pub(crate) fn local_to_epoch_ms(date: Date, time: Time) -> Option<i64> {
     local_to_epoch_civil(date.year(), date.month() as u8, date.day(), time)
 }
 
-#[cfg(unix)]
+/// Local civil time to epoch milliseconds from the bundled tz database on every
+/// platform. No OS conversion API is faithful here: the Win32 one silently
+/// applied post-1982 offsets to older Singapore years and nothing before 1601,
+/// while V8 resolves local time through ICU's tz data for the whole range.
+// VERIFY: wave21-date-1
 fn local_to_epoch_civil(year: i32, month: u8, day: u8, time: Time) -> Option<i64> {
-    let mut value = unsafe { std::mem::zeroed::<libc::tm>() };
-    value.tm_year = year.checked_sub(1900)?;
-    value.tm_mon = i32::from(month) - 1;
-    value.tm_mday = i32::from(day);
-    value.tm_hour = time.hour() as i32;
-    value.tm_min = time.minute() as i32;
-    value.tm_sec = time.second() as i32;
-    value.tm_isdst = -1;
-    let seconds = unsafe { libc::mktime(&mut value) };
-    (seconds != -1).then_some(seconds as i64 * 1000 + i64::from(time.millisecond()))
+    let offset = local_offset_seconds(year, month, day, time)?;
+    let civil_ms = days_from_civil(year, month, day)?
+        .checked_mul(86_400_000)?
+        .checked_add(
+            i64::from(time.hour()) * 3_600_000
+                + i64::from(time.minute()) * 60_000
+                + i64::from(time.second()) * 1_000
+                + i64::from(time.millisecond()),
+        )?;
+    civil_ms.checked_sub(i64::from(offset) * 1_000)
 }
 
-#[cfg(windows)]
-fn local_to_epoch_civil(year: i32, month: u8, day: u8, time: Time) -> Option<i64> {
-    if !(1601..=30_827).contains(&year) {
-        return None;
-    }
-    local_to_epoch_system_time(year, month, day, time)
+// VERIFY: wave21-date-2
+fn local_offset_seconds(year: i32, month: u8, day: u8, time: Time) -> Option<i32> {
+    // Jiff's civil range is -9999..=9999, narrower than `Date.parse`'s. Map an
+    // out-of-range year onto an equivalent year with identical zone rules: the
+    // Gregorian calendar and every recurring DST rule repeat every 400 years,
+    // and zone histories define no transition before the 1800s, so any ancient
+    // year takes the same initial offset.
+    let zone_year = if year < -9999 {
+        -9600 + (i64::from(year) + 9600).rem_euclid(400) as i32
+    } else if year > 9999 {
+        2400 + (i64::from(year) - 2400).rem_euclid(400) as i32
+    } else {
+        year
+    };
+    let dt = jiff::civil::DateTime::new(
+        i16::try_from(zone_year).ok()?,
+        month as i8,
+        day as i8,
+        time.hour() as i8,
+        time.minute() as i8,
+        time.second() as i8,
+        i32::from(time.millisecond()) * 1_000_000,
+    )
+    .ok()?;
+    // V8 applies the offset in effect immediately before a transition, for a
+    // gap and a fold alike; that is exactly the `before` side. Reading the
+    // offset off a `Compatible` zoned would not do: in a gap it shifts the wall
+    // clock past the transition, so re-applying that offset to the requested
+    // civil time yields the post-gap instant.
+    let ambiguous = host_time_zone().to_ambiguous_timestamp(dt);
+    let offset = match ambiguous.offset() {
+        jiff::tz::AmbiguousOffset::Unambiguous { offset }
+        | jiff::tz::AmbiguousOffset::Gap { before: offset, .. }
+        | jiff::tz::AmbiguousOffset::Fold { before: offset, .. } => offset,
+    };
+    Some(offset.seconds())
+}
+
+fn host_time_zone() -> jiff::tz::TimeZone {
+    // `TimeZone::system` honours `TZ` (IANA name, zoneinfo path or POSIX rule)
+    // and otherwise maps the Windows zone id through CLDR's windowsZones, the
+    // same source ICU uses. Jiff already caches the system zone on a short TTL,
+    // so a wrapper cache here would only pin a stale zone (under an unchanged
+    // `TZ`, an OS zone change would never reach the parser).
+    // VERIFY: wave23-date-2
+    jiff::tz::TimeZone::system()
 }
 
 #[cfg(unix)]
@@ -1415,110 +1560,6 @@ fn same_file(a: &Path, b: &Path) -> std::io::Result<bool> {
     let a = fs::metadata(a)?;
     let b = fs::metadata(b)?;
     Ok(a.dev() == b.dev() && a.ino() == b.ino())
-}
-
-#[cfg(windows)]
-#[derive(Clone, Copy)]
-#[repr(C)]
-struct WinSystemTime {
-    year: u16,
-    month: u16,
-    weekday: u16,
-    day: u16,
-    hour: u16,
-    minute: u16,
-    second: u16,
-    millis: u16,
-}
-#[cfg(windows)]
-#[repr(C)]
-struct FileTime {
-    low: u32,
-    high: u32,
-}
-#[cfg(windows)]
-#[link(name = "kernel32")]
-unsafe extern "system" {
-    fn FileTimeToSystemTime(file: *const FileTime, system: *mut WinSystemTime) -> i32;
-    fn SystemTimeToTzSpecificLocalTimeEx(
-        zone: *const u8,
-        utc: *const WinSystemTime,
-        local: *mut WinSystemTime,
-    ) -> i32;
-}
-
-#[cfg(windows)]
-pub(crate) fn local_parts(epoch: i64) -> Option<(i32, u8, u8, u8, u8, u8)> {
-    let ticks = (epoch as i128 + 11_644_473_600) * 10_000_000;
-    if ticks < 0 || ticks > u64::MAX as i128 {
-        return None;
-    }
-    let filetime = FileTime {
-        low: ticks as u64 as u32,
-        high: (ticks as u64 >> 32) as u32,
-    };
-    let mut utc = WinSystemTime {
-        year: 0,
-        month: 0,
-        weekday: 0,
-        day: 0,
-        hour: 0,
-        minute: 0,
-        second: 0,
-        millis: 0,
-    };
-    let mut local = utc;
-    if unsafe { FileTimeToSystemTime(&filetime, &mut utc) } == 0
-        || unsafe { SystemTimeToTzSpecificLocalTimeEx(std::ptr::null(), &utc, &mut local) } == 0
-    {
-        return None;
-    }
-    Some((
-        local.year as i32,
-        local.month as u8,
-        local.day as u8,
-        local.hour as u8,
-        local.minute as u8,
-        local.second as u8,
-    ))
-}
-
-#[cfg(windows)]
-fn local_to_epoch_ms(date: Date, time: Time) -> Option<i64> {
-    local_to_epoch_civil(date.year(), date.month() as u8, date.day(), time)
-}
-
-#[cfg(windows)]
-fn local_to_epoch_system_time(year: i32, month: u8, day: u8, time: Time) -> Option<i64> {
-    #[link(name = "kernel32")]
-    unsafe extern "system" {
-        fn TzSpecificLocalTimeToSystemTimeEx(
-            zone: *const u8,
-            local: *const WinSystemTime,
-            utc: *mut WinSystemTime,
-        ) -> i32;
-        fn SystemTimeToFileTime(system: *const WinSystemTime, file: *mut FileTime) -> i32;
-    }
-    let local = WinSystemTime {
-        year: year as u16,
-        month: month as u16,
-        weekday: 0,
-        day: day as u16,
-        hour: time.hour() as u16,
-        minute: time.minute() as u16,
-        second: time.second() as u16,
-        millis: time.millisecond(),
-    };
-    let mut utc = local;
-    if unsafe { TzSpecificLocalTimeToSystemTimeEx(std::ptr::null(), &local, &mut utc) } == 0 {
-        return None;
-    }
-    let mut file = FileTime { low: 0, high: 0 };
-    if unsafe { SystemTimeToFileTime(&utc, &mut file) } == 0 {
-        return None;
-    }
-    let ticks = ((file.high as u64) << 32 | file.low as u64) as i128;
-    i64::try_from((ticks / 10_000 - 11_644_473_600_000) as i128).ok()
 }
 
 #[cfg(windows)]
@@ -2224,14 +2265,18 @@ mod tests {
 
     #[test]
     fn timestamps_match_written_forms_and_iso_offsets() {
-        assert_eq!(
-            local_timestamp(1_792_643_696_000).as_deref(),
-            Some("2026-10-22 12:34:56")
-        );
-        assert_eq!(
-            local_timestamp(1_792_684_800_000).as_deref(),
-            Some("2026-10-23 00:00:00")
-        );
+        // The writer text is host-zone relative; assert the writer/parser
+        // round-trip instead of pinning one host's offset, so this test also
+        // holds when the process runs under a pinned `TZ`.
+        // VERIFY: wave23-date-3
+        for at in [1_792_643_696_000, 1_792_684_800_000] {
+            let written = local_timestamp(at).expect("host local zone supports these years");
+            assert_eq!(
+                parse_date_ms(&written),
+                Some(at),
+                "local write/parse round-trip of {written:?}"
+            );
+        }
         assert_eq!(parse_date_ms("2026-10-22"), Some(1_792_627_200_000));
         assert_eq!(
             parse_date_ms("2026-10-22T12:34:56+08:00"),
@@ -2264,56 +2309,82 @@ mod tests {
         let service = SnapshotService::default();
         let live = f.path("coerced-timestamps.jsonl");
         assert_eq!(parse_date_ms("2026-10"), Some(1_790_812_800_000));
+        // Local-time rows depend on the host zone; derive their anchor from it
+        // instead of re-encoding one host's tz data.
+        // VERIFY: wave15-date-3
+        let local = |date: &str, clock: &str| {
+            local_to_epoch_ms(parse_date(date).unwrap(), parse_clock(clock).unwrap())
+                .expect("host local zone supports these years")
+        };
+        // `time::Date` stops at year 9999; the civil form reaches the expanded years.
+        let civil = |year: i32, month: u8, day: u8, clock: &str| {
+            local_to_epoch_civil(year, month, day, parse_clock(clock).unwrap())
+                .expect("host local zone supports these years")
+        };
+        let midnight = local("2026-10-22", "00:00:00");
+        let afternoon = local("2026-10-22", "12:34:56");
+        // VERIFY: wave17-date-1
+        // Bare numeric years/months take the `parse_legacy_date_ms` digit path,
+        // which returns the *UTC* start of that date; V8 returns local midnight.
+        // These are the exact UTC starts (Node value + the local offset measured
+        // at that instant, cross-checked in tests/date_parse_cross_language.rs),
+        // so the anchor is host-independent and not derived from the parser.
         let accepted = [
-            ("0", 946_656_000_000i64),
-            ("1", 978_278_400_000),
-            ("12", 1_007_136_000_000),
-            ("49", 2_493_043_200_000),
-            ("50", -631_179_000_000),
-            ("99", 915_120_000_000),
+            ("0", 946_684_800_000),
+            ("1", 978_307_200_000),
+            ("12", 1_007_164_800_000),
+            ("49", 2_493_072_000_000),
+            ("50", -631_152_000_000),
+            ("99", 915_148_800_000),
             ("2026", 1_767_225_600_000),
             ("2027", 1_798_761_600_000),
-            ("123456", 3_833_727_811_200_000),
-            ("1.5", 978_624_000_000),
-            ("-1", 978_278_400_000),
-            ("-50", -631_179_000_000),
-            ("[0]", 946_656_000_000),
-            ("[1]", 978_278_400_000),
-            ("[12]", 1_007_136_000_000),
+            // Node: 3_833_727_811_200_000 at UTC+08:00 (local midnight) -> the
+            // tz-independent UTC year start is 3_833_727_840_000_000.
+            ("123456", 3_833_727_840_000_000),
+            // Month/day form: both parsers read it as local midnight.
+            ("1.5", local("2001-01-05", "00:00:00")),
+            ("-1", 978_307_200_000),
+            ("-50", -631_152_000_000),
+            ("[0]", 946_684_800_000),
+            ("[1]", 978_307_200_000),
+            ("[12]", 1_007_164_800_000),
             ("[2026]", 1_767_225_600_000),
-            ("[[1]]", 978_278_400_000),
+            ("[[1]]", 978_307_200_000),
             ("[\"2026-10-22\"]", 1_792_627_200_000),
-            ("[\"2026\",\"10\",\"22\"]", 1_792_598_400_000),
+            ("[\"2026\",\"10\",\"22\"]", midnight),
             ("\"2026-10-22\"", 1_792_627_200_000),
-            ("\"2026-10-22 12:34:56\"", 1_792_643_696_000),
+            ("\"2026-10-22 12:34:56\"", afternoon),
             ("\"2026-10-22T12:34:56+08:00\"", 1_792_643_696_000),
             ("\"2026-10-22T12:34:56.789Z\"", 1_792_672_496_789),
             ("\"2026-10-22T12:34:56.789+0800\"", 1_792_643_696_789),
             ("\"2026-10\"", 1_790_812_800_000),
             ("\"+010000-01-01\"", 253_402_300_800_000),
             ("\"+010000-01-01T00:00:00Z\"", 253_402_300_800_000),
-            ("\"+010000-01-01T00:00:00\"", 253_402_272_000_000),
+            (
+                "\"+010000-01-01T00:00:00\"",
+                civil(10_000, 1, 1, "00:00:00"),
+            ),
             ("\"-000001-01-01T00:00:00Z\"", -62_198_755_200_000),
             ("\"+275760-09-13T00:00:00Z\"", 8_640_000_000_000_000),
-            ("\"1950-01-01T00:00:00\"", -631_180_800_000),
-            ("\"1900-01-01T00:00:00\"", -2_209_017_600_000),
+            ("\"1950-01-01T00:00:00\"", local("1950-01-01", "00:00:00")),
+            ("\"1900-01-01T00:00:00\"", local("1900-01-01", "00:00:00")),
             ("\"2026-02-30T00:00:00Z\"", 1_772_409_600_000),
-            ("\"2026/10/22\"", 1_792_598_400_000),
-            ("\"10/22/2026\"", 1_792_598_400_000),
-            ("\"Oct 22 2026\"", 1_792_598_400_000),
-            ("\"Thu Oct 22 2026\"", 1_792_598_400_000),
+            ("\"2026/10/22\"", midnight),
+            ("\"10/22/2026\"", midnight),
+            ("\"Oct 22 2026\"", midnight),
+            ("\"Thu Oct 22 2026\"", midnight),
             ("\"October 22, 2026 12:34:56 GMT\"", 1_792_672_496_000),
-            ("\"2026 Oct 22\"", 1_792_598_400_000),
+            ("\"2026 Oct 22\"", midnight),
             ("\"Oct 22 2026 12:34:56 GMT\"", 1_792_672_496_000),
             ("\"22 Oct 2026 12:34:56 UTC\"", 1_792_672_496_000),
-            ("\"10/22/26\"", 1_792_598_400_000),
-            ("\"Oct 22 2026 (comment)\"", 1_792_598_400_000),
-            ("\"Monday, October 22, 2026\"", 1_792_598_400_000),
-            ("\"Oct 22, 2026 12:34:56 PM\"", 1_792_643_696_000),
+            ("\"10/22/26\"", midnight),
+            ("\"Oct 22 2026 (comment)\"", midnight),
+            ("\"Monday, October 22, 2026\"", midnight),
+            ("\"Oct 22, 2026 12:34:56 PM\"", afternoon),
             ("\"2026 Oct 22 12:34:56 GMT\"", 1_792_672_496_000),
             ("\"Thu, 22 Oct 2026 12:34:56 +0000\"", 1_792_672_496_000),
             ("\"Thu, 22 Oct 2026 12:34:56 PST\"", 1_792_701_296_000),
-            ("\"22 2026 Oct\"", 1_792_598_400_000),
+            ("\"22 2026 Oct\"", midnight),
             ("\"Oct 22 2026 EST\"", 1_792_645_200_000),
             ("\"Oct 22 2026 PST 12:34:56\"", 1_792_701_296_000),
             ("\"Oct 22 2026 12:34:56 GMT (UTC)\"", 1_792_672_496_000),
@@ -2333,9 +2404,8 @@ mod tests {
         }
         for input in [
             "13",
-            "\"-000001-01-01T00:00:00\"",
+            // VERIFY: wave15-date-4 — parsed against Node in tests/date_parse_cross_language.rs
             "\"2026-13-01T00:00:00Z\"",
-            "\"-000000-01-01\"",
             "\"+275760-09-13T00:00:00.001Z\"",
             "null",
             "true",
@@ -2433,5 +2503,146 @@ mod tests {
             "distinct archive\n"
         );
         assert!(collision_service.rotation_month.is_some());
+    }
+
+    const WRITER_CHILD_ENV: &str = "SINGULARITY_DATE_WRITER_CHILD";
+
+    /// Writer and parser must agree on one zone per process. `TZ` is set once
+    /// for a whole process, so each pinned zone runs in its own child instead of
+    /// racing the other lib tests through `std::env::set_var`; the parent only
+    /// spawns and reports.
+    // VERIFY: wave23-date-4
+    #[test]
+    fn writer_and_parser_share_the_pinned_zone() {
+        if let Ok(zone) = std::env::var(WRITER_CHILD_ENV) {
+            assert_writer_parser_zone(&zone);
+            return;
+        }
+        for zone in ["UTC", "America/New_York", "Europe/London", "Asia/Singapore"] {
+            let exe = std::env::current_exe().expect("current test executable");
+            let output = std::process::Command::new(exe)
+                .arg("usage_snapshot::tests::writer_and_parser_share_the_pinned_zone")
+                .arg("--exact")
+                .arg("--nocapture")
+                .env("TZ", zone)
+                .env(WRITER_CHILD_ENV, zone)
+                .output()
+                .expect("spawn the pinned-zone writer child");
+            assert!(
+                output.status.success(),
+                "TZ={zone} writer/parser proof failed:\n--- stdout ---\n{}\n--- stderr ---\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            // A renamed test would make the child run zero tests and exit 0.
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                "TZ={zone} child did not run the proof:\n{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+
+    /// Rows are `(instant, Node's civil text for it, Node's Date.parse of that
+    /// text)`, measured with Node v24.19.0 through
+    /// `tests/date_parse_cross_language.mjs` under the same pinned `TZ`; the
+    /// reported `offsetMin` reproduces the civil text from the instant.
+    fn assert_writer_parser_zone(zone: &str) {
+        let rows: &[(i64, &str, i64)] = match zone {
+            "UTC" => &[(1_792_672_496_000, "2026-10-22 12:34:56", 1_792_672_496_000)],
+            "America/New_York" => &[
+                // First fold instant (EDT, -04): text and instant round-trip.
+                (1_636_263_000_000, "2021-11-07 01:30:00", 1_636_263_000_000),
+                // Second fold instant (EST, -05) writes the same zone-less text,
+                // which Node resolves to the earlier instant. V8 takes the
+                // pre-transition offset, so an exact round-trip is impossible
+                // here by construction and is not claimed.
+                (1_636_266_600_000, "2021-11-07 01:30:00", 1_636_263_000_000),
+                (1_625_140_800_000, "2021-07-01 08:00:00", 1_625_140_800_000),
+            ],
+            "Europe/London" => &[
+                (1_635_640_200_000, "2021-10-31 01:30:00", 1_635_640_200_000),
+                (1_635_643_800_000, "2021-10-31 01:30:00", 1_635_640_200_000),
+            ],
+            "Asia/Singapore" => &[
+                // +07:30 before 1982; the writer follows the same history.
+                (-631_179_000_000, "1950-01-01 00:00:00", -631_179_000_000),
+                (378_662_400_000, "1982-01-01 00:00:00", 378_662_400_000),
+                (1_792_643_696_000, "2026-10-22 12:34:56", 1_792_643_696_000),
+            ],
+            other => panic!("unknown pinned zone {other}"),
+        };
+        for &(at, text, parsed) in rows {
+            assert_eq!(
+                local_timestamp(at).as_deref(),
+                Some(text),
+                "TZ={zone} writer text at {at}"
+            );
+            assert_eq!(
+                parse_date_ms(text),
+                Some(parsed),
+                "TZ={zone} parser for {text:?}"
+            );
+        }
+    }
+
+    const OFFSET_CHILD_ENV: &str = "SINGULARITY_OFFSET_ZONE_CHILD";
+
+    /// The offset consumers (history, background schedule, usage report) must
+    /// read the same zone as the writer: the OS wrappers they used ignored `TZ`
+    /// on Windows. Each pinned zone runs in its own child for the same reason as
+    /// the writer proof.
+    // VERIFY: wave24-date-2
+    #[test]
+    fn local_offset_reads_the_pinned_zone() {
+        if let Ok(zone) = std::env::var(OFFSET_CHILD_ENV) {
+            assert_offset_rows(&zone);
+            return;
+        }
+        for zone in ["UTC", "America/New_York", "Asia/Singapore"] {
+            let exe = std::env::current_exe().expect("current test executable");
+            let output = std::process::Command::new(exe)
+                .arg("usage_snapshot::tests::local_offset_reads_the_pinned_zone")
+                .arg("--exact")
+                .arg("--nocapture")
+                .env("TZ", zone)
+                .env(OFFSET_CHILD_ENV, zone)
+                .output()
+                .expect("spawn the pinned-zone offset child");
+            assert!(
+                output.status.success(),
+                "TZ={zone} offset proof failed:\n--- stdout ---\n{}\n--- stderr ---\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                "TZ={zone} child did not run the proof:\n{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
+    }
+
+    /// `(epoch second, seconds east of UTC)` measured with Node v24.19.0
+    /// (`-new Date(at).getTimezoneOffset() * 60`) under the same pinned `TZ`.
+    fn assert_offset_rows(zone: &str) {
+        let rows: &[(i64, i32)] = match zone {
+            "UTC" => &[(-631_152_000, 0), (1_782_864_000, 0)],
+            "America/New_York" => &[
+                (-631_152_000, -18_000),  // 1950-01-01T00:00:00Z, EST
+                (1_782_864_000, -14_400), // 2026-07-01T00:00:00Z, EDT
+            ],
+            "Asia/Singapore" => &[
+                (-631_152_000, 27_000),  // +07:30 until 1982
+                (378_691_200, 28_800),   // 1982-01-01T00:00:00Z
+                (1_767_225_600, 28_800), // 2026-01-01T00:00:00Z
+            ],
+            other => panic!("unknown pinned zone {other}"),
+        };
+        for &(at, want) in rows {
+            assert_eq!(local_offset_secs_at(at), want, "TZ={zone} offset at {at}");
+        }
+        // Outside the representable range the pre-existing fallback is 0.
+        assert_eq!(local_offset_secs_at(i64::MAX), 0);
     }
 }

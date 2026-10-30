@@ -147,7 +147,7 @@ impl Pricing {
         // Sol/Luna surcharge above 272k and haiku-5-5 above 100k are
         // model-specific quirks, not part of the pricing.json schema.
         let threshold = match key {
-            "gpt-6-sol" | "gpt-6-luna" | "gpt-6.1-sol" => 272_000.0,
+            "gpt-6-sol" | "gpt-6-luna" | "gpt-6.1-sol" | "gpt-6.1-terra" => 272_000.0,
             "haiku-5-5" => 100_000.0,
             _ => self.long_context_threshold,
         };
@@ -658,9 +658,9 @@ mod tests {
     #[test]
     fn tiered_cost_applies_model_specific_thresholds() {
         let table = pricing(
-            r#"{"base":{"gpt-6-sol":[1,1,1,1],"gpt-6-luna":[1,1,1,1],"gpt-6.1-sol":[1,1,1,1],"haiku-5-5":[1,1,1,1],"sonnet":[1,1,1,1]},"above_200k":{"gpt-6-sol":[10,10,10,10],"gpt-6-luna":[10,10,10,10],"gpt-6.1-sol":[10,10,10,10],"haiku-5-5":[10,10,10,10],"sonnet":[10,10,10,10]}}"#,
+            r#"{"base":{"gpt-6-sol":[1,1,1,1],"gpt-6-luna":[1,1,1,1],"gpt-6.1-sol":[1,1,1,1],"gpt-6.1-terra":[1,1,1,1],"haiku-5-5":[1,1,1,1],"sonnet":[1,1,1,1]},"above_200k":{"gpt-6-sol":[10,10,10,10],"gpt-6-luna":[10,10,10,10],"gpt-6.1-sol":[10,10,10,10],"gpt-6.1-terra":[10,10,10,10],"haiku-5-5":[10,10,10,10],"sonnet":[10,10,10,10]}}"#,
         );
-        for model in ["gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol"] {
+        for model in ["gpt-6-sol", "gpt-6-luna", "gpt-6.1-sol", "gpt-6.1-terra"] {
             assert_eq!(
                 table.msg_cost_tiered(model, 272_000.0, 0.0, 0.0, 0.0),
                 Some(272_000.0 / 1e6),

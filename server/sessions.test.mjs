@@ -378,21 +378,63 @@ test('listSessions: no ai-title falls back to a blurb built from the first real 
   }
 });
 
-test('listSessions: running merges isLive with the mtime recency heuristic', async () => {
+test('listSessions: running is the live process only; a recent mtime stays in activityRecent', async () => {
   const root = mkdtempSync(join(tmpdir(), 'sing-sessions-running-'));
   const project = 'sessions-test-running';
   const liveId = 'parent-live';
-  const staleId = 'parent-stale';
+  const idleId = 'parent-idle';
   const dir = writeSession(project, liveId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })], root);
-  writeSession(project, staleId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })], root);
+  writeSession(project, idleId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })], root);
   const old = new Date(Date.now() - 60000);
-  utimesSync(join(dir, `${staleId}.jsonl`), old, old);
+  utimesSync(join(dir, `${liveId}.jsonl`), old, old); // live but stale on disk
+  const calls = [];
   try {
-    const sessions = await listSessions({ isLive: (id) => id === liveId, root });
+    const sessions = await listSessions({
+      isLive: (id, context) => { calls.push([id, context]); return id === liveId; },
+      root,
+    });
     const live = sessions.find((s) => s.project === project && s.id === liveId);
-    const stale = sessions.find((s) => s.project === project && s.id === staleId);
-    assert.equal(live.running, true);
-    assert.equal(stale.running, false);
+    const idle = sessions.find((s) => s.project === project && s.id === idleId);
+    // VERIFY: wave4-f3-2
+    assert.equal(live.running, true); // the live process wins over a 60s-old mtime
+    assert.equal(live.processLive, true);
+    assert.equal(live.processState, 'live');
+    assert.equal(live.activityRecent, false); // recency is reported separately
+    assert.equal(idle.running, false); // a fresh mtime alone never makes a row running
+    assert.equal(idle.processLive, false);
+    assert.equal(idle.processState, 'unknown');
+    assert.equal(idle.activityRecent, true);
+    const context = calls.find(([id]) => id === liveId)[1];
+    assert.equal(context.source, 'claude');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('listSessions: a subagent runs on its own agentId with the claude-subagent liveness context', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-sessions-subagent-running-'));
+  const project = 'sessions-test-subagent-running';
+  const parentId = 'parent-sub';
+  const dir = writeSession(project, parentId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })], root);
+  const subDir = join(dir, parentId, 'subagents');
+  mkdirSync(subDir, { recursive: true });
+  const subFile = join(subDir, 'agent-live.jsonl');
+  writeFileSync(subFile, JSON.stringify({ type: 'user', message: { content: 'sub' } }) + '\n');
+  const old = new Date(Date.now() - 60000);
+  utimesSync(subFile, old, old); // live subagent, stale mtime
+  const calls = [];
+  try {
+    // VERIFY: wave4-f3-3
+    const sessions = await listSessions({
+      isLive: (id, context) => { calls.push([id, context]); return id === 'agent-live'; },
+      root,
+    });
+    const parent = sessions.find((s) => s.project === project && s.id === parentId);
+    assert.equal(parent.running, false); // the parent itself has no live process
+    assert.equal(parent.subagents[0].running, true);
+    assert.equal(parent.subagents[0].processLive, true);
+    assert.equal(parent.subagents[0].activityRecent, false);
+    assert.equal(calls.find(([id]) => id === 'agent-live')[1].source, 'claude-subagent');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

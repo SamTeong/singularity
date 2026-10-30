@@ -118,16 +118,11 @@ fn local_day_at(ts_ms: f64) -> String {
 fn local_midnight_ymd(year: i32, month: u8, day: u8) -> Option<f64> {
     let date =
         time::Date::from_calendar_date(year, time::Month::try_from(month).ok()?, day).ok()?;
-    let civil = date
-        .with_time(time::Time::MIDNIGHT)
-        .assume_utc()
-        .unix_timestamp();
-    // Two passes settle the offset across a DST transition at midnight.
-    let mut offset = local_offset_secs_at(civil);
-    let mut guess = civil - i64::from(offset);
-    offset = local_offset_secs_at(guess);
-    guess = civil - i64::from(offset);
-    Some(guess as f64 * 1000.0)
+    // A two-pass offset fixed point converged to the later midnight when a
+    // zone folds at 00:00 east of UTC (Asia/Amman 2018-10-26), while V8's
+    // `new Date(y, m - 1, d)` takes the earlier instant. Share the parser's
+    // V8-compatible civil conversion instead.
+    crate::usage_snapshot::local_to_epoch_ms(date, time::Time::MIDNIGHT).map(|ms| ms as f64)
 }
 
 fn iso_from_ms(ts_ms: f64) -> String {
@@ -147,73 +142,10 @@ fn iso_from_ms(ts_ms: f64) -> String {
     )
 }
 
-/// Local UTC offset in seconds at one instant (DST-aware).
-#[cfg(unix)]
+/// Local UTC offset in seconds east of UTC at one instant (DST-aware), from the
+/// zone the writer and parser share.
 fn local_offset_secs_at(utc_secs: i64) -> i32 {
-    let time = utc_secs as libc::time_t;
-    let mut value = unsafe { std::mem::zeroed::<libc::tm>() };
-    if unsafe { libc::localtime_r(&time, &mut value) }.is_null() {
-        return 0;
-    }
-    value.tm_gmtoff as i32
-}
-
-#[cfg(windows)]
-fn local_offset_secs_at(utc_secs: i64) -> i32 {
-    #[repr(C)]
-    struct SystemTime {
-        year: u16,
-        month: u16,
-        weekday: u16,
-        day: u16,
-        hour: u16,
-        minute: u16,
-        second: u16,
-        milliseconds: u16,
-    }
-    unsafe extern "system" {
-        fn SystemTimeToTzSpecificLocalTime(
-            zone: *const core::ffi::c_void,
-            utc: *const SystemTime,
-            local: *mut SystemTime,
-        ) -> i32;
-    }
-    let Ok(stamp) = time::OffsetDateTime::from_unix_timestamp(utc_secs) else {
-        return 0;
-    };
-    let utc = SystemTime {
-        year: stamp.year() as u16,
-        month: u8::from(stamp.month()) as u16,
-        weekday: stamp.weekday().number_days_from_sunday() as u16,
-        day: stamp.day() as u16,
-        hour: stamp.hour() as u16,
-        minute: stamp.minute() as u16,
-        second: stamp.second() as u16,
-        milliseconds: 0,
-    };
-    let mut local: SystemTime = unsafe { std::mem::zeroed() };
-    if unsafe { SystemTimeToTzSpecificLocalTime(std::ptr::null(), &utc, &mut local) } == 0 {
-        return 0;
-    }
-    let Some(month) = time::Month::try_from(local.month as u8).ok() else {
-        return 0;
-    };
-    let Some(date) = time::Date::from_calendar_date(local.year as i32, month, local.day as u8).ok()
-    else {
-        return 0;
-    };
-    let Some(clock) =
-        time::Time::from_hms(local.hour as u8, local.minute as u8, local.second as u8).ok()
-    else {
-        return 0;
-    };
-    let local_secs = date.with_time(clock).assume_utc().unix_timestamp();
-    (local_secs - utc_secs) as i32
-}
-
-#[cfg(not(any(unix, windows)))]
-fn local_offset_secs_at(_utc_secs: i64) -> i32 {
-    0
+    crate::usage_snapshot::local_offset_secs_at(utc_secs)
 }
 
 fn parse_ymd(text: &str) -> Option<(i32, u8, u8)> {
@@ -1671,13 +1603,28 @@ impl HistoryService {
     /// `regenerateDay` — atomic rewrite of the whole file with one entry
     /// replaced/appended.
     pub async fn regenerate(&self, date: &str, root: Option<String>) -> Result<Value, String> {
-        let (year, month, day) = parse_ymd(date).ok_or_else(|| "invalid date".to_owned())?;
-        let window_start = self
-            .deps
-            .clock
-            .start_of_local_day_ymd(year, month, day)
-            .ok_or_else(|| "invalid date".to_owned())?;
-        let scanned = self.scan_days(window_start, root).await?;
+        // VERIFY: wave6-history_parity-1
+        // Node never rejects a date here. The window comes from
+        // `startOfLocalDay(new Date(\`${date}T00:00:00\`)).getTime()`
+        // (`server/history.mjs:458`) but the day is looked up by the *raw* body
+        // string (`scanned.get(date)`, `:460`), whose key only a canonical
+        // calendar date can produce. An impossible one (`2026-02-30`) therefore
+        // misses, and `buildDayEntry(date, emptyDayAgg())` writes an empty entry
+        // under the literal key (`:460-466`); the route answers
+        // `200 {ok:true, entry}` (`server/index.mjs:992`). No usable calendar
+        // date therefore means no window and an empty aggregate, not an error.
+        // (Verified in V8: some out-of-range ISO days are normalised instead of
+        // yielding NaN — `2026-02-30` becomes Mar 2 — but the raw-key lookup
+        // still misses, so the entry Node writes is empty either way. Rust
+        // skips the scan rather than scanning a day it will never read; the one
+        // difference is that a failing session list on such a day surfaces as a
+        // 400 in Node (`errStatus`, `index.mjs:253`) and cannot in Rust.)
+        let scanned = match parse_ymd(date)
+            .and_then(|(year, month, day)| self.deps.clock.start_of_local_day_ymd(year, month, day))
+        {
+            Some(window_start) => self.scan_days(window_start, root).await?,
+            None => BTreeMap::new(),
+        };
         let aggregate = scanned.get(date).cloned().unwrap_or_else(empty_day_agg);
         let entry = self.build_day_entry(date, &aggregate).await?;
         let file = self.file();
@@ -2401,7 +2348,7 @@ mod tests {
     }
 
     #[test]
-    fn regenerate_replaces_exactly_one_date_and_rejects_a_bad_date() {
+    fn regenerate_replaces_exactly_one_date_and_persists_a_bad_date_as_empty() {
         let now = at(2026, 10, 20, 12);
         let h = harness("regen", now);
         std::fs::create_dir_all(h.dir.path("state")).unwrap();
@@ -2419,9 +2366,25 @@ mod tests {
         assert_eq!(raw_entries(&file_of(&h)).len(), 1);
         block_on(h.service.regenerate(&date, None)).unwrap();
         assert_eq!(raw_entries(&file_of(&h)).len(), 1);
+        // VERIFY: wave6-history_parity-3
+        // Node rewrites an entry under whatever raw string it was given
+        // (`server/history.mjs:460-466`), so an unusable date is persisted as an
+        // empty entry rather than rejected.
+        let bad = block_on(h.service.regenerate("not-a-date", None)).unwrap();
+        assert_eq!(entry_date(&bad), "not-a-date");
+        assert_eq!(bad["llm"]["reason"], json!("empty"));
+        assert_eq!(bad["sessions"], json!([]));
+        let dates = raw_entries(&file_of(&h))
+            .iter()
+            .map(|entry| entry_date(entry).to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(dates.len(), 2);
         assert_eq!(
-            block_on(h.service.regenerate("not-a-date", None)).unwrap_err(),
-            "invalid date"
+            dates
+                .iter()
+                .filter(|date| date.as_str() == "not-a-date")
+                .count(),
+            1
         );
     }
 
@@ -2640,5 +2603,54 @@ mod tests {
         );
         assert_eq!(events[0]["pending"].as_array().unwrap().len(), 1);
         assert!(events[1]["pending"].as_array().unwrap().is_empty());
+    }
+
+    const MIDNIGHT_CHILD_ENV: &str = "SINGULARITY_HISTORY_MIDNIGHT_ZONE_CHILD";
+
+    /// `start_of_local_day_ymd` must match V8's `new Date(y, m - 1, d)` under
+    /// the pinned zone, including a midnight fold. Asia/Amman fell back from
+    /// 01:00 to 00:00 on 2018-10-26, so local midnight occurs twice; V8's
+    /// compatible rule takes the earlier instant. `TZ` is process-wide, so each
+    /// zone runs in its own child and the parent only spawns.
+    // VERIFY: wave26-calendar-1
+    #[test]
+    fn local_midnight_matches_v8_fold_choice() {
+        if let Ok(zone) = std::env::var(MIDNIGHT_CHILD_ENV) {
+            let midnight = match zone.as_str() {
+                // 2018-10-25T21:00:00Z (pre-fold), not 22:00:00Z.
+                "Asia/Amman" => (2018, 10, 26, 1_540_501_200_000.0),
+                "UTC" => (2026, 10, 27, 1_793_059_200_000.0),
+                other => panic!("unknown pinned zone {other}"),
+            };
+            assert_eq!(
+                SystemClock.start_of_local_day_ymd(midnight.0, midnight.1, midnight.2),
+                Some(midnight.3),
+                "TZ={zone} local midnight"
+            );
+            return;
+        }
+        for zone in ["UTC", "Asia/Amman"] {
+            let exe = std::env::current_exe().expect("current test executable");
+            let output = std::process::Command::new(exe)
+                .arg("history::tests::local_midnight_matches_v8_fold_choice")
+                .arg("--exact")
+                .arg("--nocapture")
+                .env("TZ", zone)
+                .env(MIDNIGHT_CHILD_ENV, zone)
+                .output()
+                .expect("spawn the pinned-zone midnight child");
+            assert!(
+                output.status.success(),
+                "TZ={zone} midnight proof failed:\n--- stdout ---\n{}\n--- stderr ---\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            // A renamed test would run zero tests and exit 0 silently.
+            assert!(
+                String::from_utf8_lossy(&output.stdout).contains("1 passed"),
+                "TZ={zone} child did not run the proof:\n{}",
+                String::from_utf8_lossy(&output.stdout)
+            );
+        }
     }
 }

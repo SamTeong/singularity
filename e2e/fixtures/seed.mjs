@@ -48,10 +48,11 @@ function richTranscript(cwd) {
   ];
 }
 
-// Transcript mtime drives both the list order and the "running" pill (a file
-// touched within 30s counts as a live external session). Freshly written fixture
-// files would all read as running and then flip mid-run, so backdate them —
-// spaced a minute apart for a stable reverse-chronological order.
+// Transcript mtime drives the list order and the "recent activity" note
+// (`activityRecent`); the "running" pill is the live process only, which a
+// static fixture transcript never is. Freshly written fixture files would all
+// show the recent note and then lose it mid-run, so backdate them — spaced a
+// minute apart for a stable reverse-chronological order. // VERIFY: wave4-f5-2
 function backdate(p, i) {
   const t = new Date(T0 + i * 60_000);
   utimesSync(p, t, t);
@@ -273,7 +274,7 @@ export function stubClaudeBin() {
 }
 
 // Wipe and rebuild the whole sandbox. Idempotent — a killed run leaves a dirty
-// e2e/.tmp behind and the next run must still be green.
+// <TMP> behind and the next run must still be green. // VERIFY: wave4-f5-3
 export function seed() {
   rmSync(TMP, { recursive: true, force: true });
   [HOME_DIR, TRUSTED_DIR, USAGE_STATE_DIR, BIN_DIR].forEach(dir);

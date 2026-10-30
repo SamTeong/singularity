@@ -3,7 +3,7 @@
 //! Mirrors `cmd_report`/`_ensure_fresh` (stats.mjs:1033-1119), the forecast
 //! lazy-rebuild (stats.mjs:1693-1697), and the roadmap acquisition that
 //! render.mjs performs by spawning improve.mjs (render.mjs:99-160). Every root,
-//! the clock, and the local UTC offset are injected; this module never reads the
+//! the clock, and the local zone are injected; this module never reads the
 //! environment, a real home directory, credentials, or the network.
 
 use crate::usage_report_cost::Pricing;
@@ -20,6 +20,7 @@ use crate::usage_report_render::{ReportPayload, render_html};
 use crate::usage_report_roadmap::build_roadmap;
 use crate::usage_report_roadmap_inputs::{InventoryInput, build_inventory, build_stats_projection};
 use crate::usage_report_sessions::{load_session_views, load_sessions};
+use crate::usage_snapshot::LocalZone;
 use serde_json::value::{RawValue, to_raw_value};
 use serde_json::{Value, json};
 use std::fs;
@@ -42,8 +43,8 @@ pub struct PipelineEnv {
     pub claude_inventory_root: PathBuf,
     pub codex_home: PathBuf,
     pub now_secs: f64,
-    /// Fixed local offset in seconds east of UTC.
-    pub local_offset_secs: i32,
+    /// Local zone shared by the CSV writer, row parsers and formatters.
+    pub local_zone: LocalZone,
 }
 
 /// stats.mjs:1085-1119 + render.mjs:415-421. `rebuild` writes stats.csv (and
@@ -75,32 +76,31 @@ pub fn generate_native(
     })?;
     let table = dict_reader(&csv_text);
     let pricing = Pricing::load(&env.base_state_dir);
-    let sessions = load_sessions(&csv_text, &pricing, env.local_offset_secs);
-    let forecast_sessions: Vec<ForecastSession> =
-        load_session_views(&csv_text, env.local_offset_secs)
-            .into_iter()
-            .map(|view| ForecastSession {
-                ts_epoch: view.ts,
-                model: view.model,
-                rl5: view.rl5,
-                rl7: view.rl7,
-                day: local_day(view.ts, env.local_offset_secs),
-                tok: view.tok,
-            })
-            .collect();
+    let sessions = load_sessions(&csv_text, &pricing, env.local_zone);
+    let forecast_sessions: Vec<ForecastSession> = load_session_views(&csv_text, env.local_zone)
+        .into_iter()
+        .map(|view| ForecastSession {
+            ts_epoch: view.ts,
+            model: view.model,
+            rl5: view.rl5,
+            rl7: view.rl7,
+            day: local_day(view.ts, env.local_zone),
+            tok: view.tok,
+        })
+        .collect();
 
-    let stamp = local_stamp(env.now_secs, env.local_offset_secs)?;
+    let stamp = local_stamp(env.now_secs, env.local_zone)?;
     let forecast = load_forecast(
         &ForecastPaths::new(&env.base_state_dir, &env.claude_projects_root),
         env.now_secs,
         || {
             let paths = ForecastPaths::new(&env.base_state_dir, &env.claude_projects_root);
             let claude_snaps =
-                load_usage_snapshots(&paths.snapshots_jsonl(), true, env.local_offset_secs)?;
+                load_usage_snapshots(&paths.snapshots_jsonl(), true, env.local_zone)?;
             let ollama_snaps =
-                load_usage_snapshots(&paths.ollama_usage_jsonl(), false, env.local_offset_secs)?;
+                load_usage_snapshots(&paths.ollama_usage_jsonl(), false, env.local_zone)?;
             let codex_snaps =
-                load_usage_snapshots(&paths.codex_usage_jsonl(), false, env.local_offset_secs)?;
+                load_usage_snapshots(&paths.codex_usage_jsonl(), false, env.local_zone)?;
             let document = build_forecast_document(&ForecastBuildInputs {
                 claude_snaps: &claude_snaps,
                 ollama_snaps: &ollama_snaps,
@@ -108,7 +108,8 @@ pub fn generate_native(
                 sessions: Some(&forecast_sessions),
                 now_sec: env.now_secs.floor(),
                 fit_at: stamp.clone(),
-                now_local_offset: env.local_offset_secs,
+                // Caller-parity field: Node's forecast stores the offset at `now`.
+                now_local_offset: env.local_zone.offset_at(env.now_secs),
             });
             write_forecast(&paths, &document)?;
             Ok(())
@@ -140,7 +141,7 @@ pub fn generate_native(
     })?;
     let path = env.reports_dir.join(format!(
         "report-{}.html",
-        local_file_stamp(env.now_secs, env.local_offset_secs)?
+        local_file_stamp(env.now_secs, env.local_zone)?
     ));
     write_report(&path, &html)?;
     Ok(path)
@@ -187,14 +188,14 @@ fn count_entries(dir: &Path) -> Result<usize, String> {
     Ok(count)
 }
 
-fn local_time(secs: f64, offset_secs: i32) -> Result<OffsetDateTime, String> {
-    OffsetDateTime::from_unix_timestamp(secs.floor() as i64 + i64::from(offset_secs))
+fn local_time(secs: f64, local_zone: LocalZone) -> Result<OffsetDateTime, String> {
+    OffsetDateTime::from_unix_timestamp(secs.floor() as i64 + i64::from(local_zone.offset_at(secs)))
         .map_err(|error| format!("local time for {secs} is out of range: {error}"))
 }
 
 /// `now_local()` (stats.mjs:280-299): `YYYY-MM-DD HH:MM:SS` in local time.
-fn local_stamp(secs: f64, offset_secs: i32) -> Result<String, String> {
-    let t = local_time(secs, offset_secs)?;
+fn local_stamp(secs: f64, local_zone: LocalZone) -> Result<String, String> {
+    let t = local_time(secs, local_zone)?;
     Ok(format!(
         "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
         t.year(),
@@ -207,16 +208,19 @@ fn local_stamp(secs: f64, offset_secs: i32) -> Result<String, String> {
 }
 
 /// `reportStamp` (stats.mjs:1108-1114): local `YYYY-MM-DD_HHMMSS`.
-fn local_file_stamp(secs: f64, offset_secs: i32) -> Result<String, String> {
-    Ok(local_stamp(secs, offset_secs)?
+fn local_file_stamp(secs: f64, local_zone: LocalZone) -> Result<String, String> {
+    Ok(local_stamp(secs, local_zone)?
         .replacen(' ', "_", 1)
         .replace(':', ""))
 }
 
 /// `ts.slice(0, 10)` is the local date of the CSV timestamp.
-fn local_day(ts: Option<f64>, offset_secs: i32) -> String {
+fn local_day(ts: Option<f64>, local_zone: LocalZone) -> String {
     ts.and_then(|secs| {
-        OffsetDateTime::from_unix_timestamp(secs.floor() as i64 + i64::from(offset_secs)).ok()
+        OffsetDateTime::from_unix_timestamp(
+            secs.floor() as i64 + i64::from(local_zone.offset_at(secs)),
+        )
+        .ok()
     })
     .map(|t| format!("{:04}-{:02}-{:02}", t.year(), t.month() as u8, t.day()))
     .unwrap_or_default()
@@ -287,7 +291,7 @@ mod tests {
                 claude_inventory_root: self.root.join("claude"),
                 codex_home: self.root.join("codex"),
                 now_secs,
-                local_offset_secs: 0,
+                local_zone: LocalZone::Fixed(0),
             }
         }
 

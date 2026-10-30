@@ -9,7 +9,6 @@ import { getModels } from './model-store.mjs';
 
 const DEFAULT_ROOT = join(homedir(), '.claude', 'projects');
 const ROOT_FILE = join(STATE_DIR, 'sessions-root.json');
-const RUNNING_MS = 30000;
 const TEXT_CAP = 80000;
 let transcriptBackend;
 
@@ -83,10 +82,22 @@ export function pathForCodex(file) {
   return abs !== base && !abs.startsWith(base + sep) ? null : abs;
 }
 
-function updateRunning(row, isLive, now) {
+// Main derives all four liveness fields from the injected `isLive`
+// (`66591a9:server/sessions.mjs:199-205,501-506,557-568`): `running` is the owned
+// live process only and recency stays in `activityRecent`. The Rust sidecar has
+// no agent registry — `transcript_bridge.rs:119,184` passes an empty live-id
+// list, so its `processLive`/`processState` are always the idle values — so the
+// adapter overlays the same contract here. Context shapes match main: root rows
+// `{source, cwd}`, Claude subagent rows `{source: 'claude-subagent'}`.
+// VERIFY: wave4-f3-1
+function updateRunning(row, isLive) {
   const id = row.agentId ?? row.id;
-  row.running = isLive(id) || now - row.mtime < RUNNING_MS;
-  for (const child of row.subagents ?? []) updateRunning(child, isLive, now);
+  const source = row.source ?? (row.agentId == null ? 'claude' : 'claude-subagent');
+  const live = isLive(id, { source, cwd: row.cwd ?? undefined });
+  row.processLive = live;
+  row.processState = live ? 'live' : 'unknown';
+  row.running = live;
+  for (const child of row.subagents ?? []) updateRunning(child, isLive);
   return row;
 }
 
@@ -97,7 +108,7 @@ export async function listSessions({ cap = 5000, isLive = () => false, now = Dat
     now_ms: now,
     hide_reviews: hideReviews,
   }));
-  return payload.map((row) => updateRunning(row, isLive, now));
+  return payload.map((row) => updateRunning(row, isLive));
 }
 
 export async function subagentsFor(cwd, id, isLive = () => false, now = Date.now(), root = DEFAULT_ROOT) {
@@ -108,7 +119,7 @@ export async function subagentsFor(cwd, id, isLive = () => false, now = Date.now
     transcript_root: root,
     now_ms: now,
   }));
-  return payload.map((row) => updateRunning(row, isLive, now));
+  return payload.map((row) => updateRunning(row, isLive));
 }
 
 export async function readSession(project, id, root, source = 'claude', file) {

@@ -797,7 +797,7 @@ test('Models HTTP handlers use the fixed server path and preserve catalogue cont
     const first = await app.inject({ url: `/api/models?path=${encodeURIComponent(attacker)}` });
     assert.equal(first.statusCode, 200);
     assert.ok(Array.isArray(first.json().models));
-    assert.equal(first.json().models.length, 21);
+    assert.equal(first.json().models.length, 22); // VERIFY: wave8-catalogue-3 — Rust seed mirrors main model-store.mjs SEED (9 claude + 6 ollama + 7 codex)
     await assert.rejects(access(attacker));
 
     const invalid = await app.inject({ method: 'PUT', url: '/api/models', payload: { path: attacker, models: 'invalid' } });

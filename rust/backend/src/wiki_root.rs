@@ -361,7 +361,12 @@ pub fn set(state_file: &Path, _home: &Path, root: Option<RootValue>) -> SetRespo
             };
         }
     }
-    match fs::write(state_file, bytes) {
+    // write_atomic stages into a pid-scoped scratch name, so setters must not run it concurrently.
+    static ROOT_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let _write = ROOT_WRITE
+        .lock()
+        .unwrap_or_else(|poison| poison.into_inner());
+    match crate::fs_atomic::write_atomic(state_file, &bytes) {
         Ok(()) => SetResponse {
             ok: true,
             root: Some(root),
@@ -808,13 +813,36 @@ pub fn authorize_raw_with_drive_cwds(
     cwd: &Path,
     drive_cwds: &[(u16, PathBuf)],
 ) -> bool {
+    // VERIFY: wave15-platform-1
+    authorize_raw_with_windows(
+        root,
+        target,
+        persisted,
+        home,
+        cwd,
+        drive_cwds,
+        cfg!(windows),
+    )
+}
+
+/// Platform-explicit form of [`authorize_raw_with_drive_cwds`], so tests can
+/// exercise the Windows path rules on any host.
+// VERIFY: wave15-platform-2
+pub fn authorize_raw_with_windows(
+    root: &RootValue,
+    target: &RootValue,
+    persisted: &RootValue,
+    home: &Path,
+    cwd: &Path,
+    drive_cwds: &[(u16, PathBuf)],
+    windows: bool,
+) -> bool {
     let Ok(expected_input) = persisted.units() else {
         return false;
     };
     let Ok(supplied_input) = root.units() else {
         return false;
     };
-    let windows = cfg!(windows);
     let drive_cwds: Vec<(u16, Vec<u16>)> = drive_cwds
         .iter()
         .map(|(drive, path)| (*drive, path_units(path)))
@@ -915,6 +943,7 @@ pub(crate) fn contained_units(root: &[u16], target: &[u16], windows: bool) -> bo
                 || target.get(root.len()) == Some(&(b'\\' as u16))))
 }
 
+#[cfg(test)]
 fn same_path_raw(a: &Path, b: &Path) -> bool {
     #[cfg(windows)]
     {
@@ -1038,8 +1067,11 @@ pub fn correlated_root_json(id: &str, root: &RootValue) -> Result<String, serde_
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
     #[cfg(windows)]
     use std::os::windows::ffi::OsStrExt as TestOsStrExt;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, Barrier};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -1395,22 +1427,35 @@ mod tests {
         ));
         let root_value = RootValue::from_token(r#""C:\\work\\wiki""#.into()).unwrap();
         let target_value = RootValue::from_token(r#""C:/work/WIKI/child/../a.MD""#.into()).unwrap();
-        assert!(authorize_raw(
+        // VERIFY: wave15-platform-3
+        assert!(authorize_raw_with_windows(
             &root_value,
             &target_value,
             &root_value,
             home,
-            cwd
+            cwd,
+            &[],
+            true
         ));
-        assert!(!authorize_raw(
+        assert!(!authorize_raw_with_windows(
             &root_value,
             &root_value,
             &root_value,
             home,
-            cwd
+            cwd,
+            &[],
+            true
         ));
         let md_root = RootValue::from_token(r#""C:\\work\\root.MD""#.into()).unwrap();
-        assert!(authorize_raw(&md_root, &md_root, &md_root, home, cwd));
+        assert!(authorize_raw_with_windows(
+            &md_root,
+            &md_root,
+            &md_root,
+            home,
+            cwd,
+            &[],
+            true
+        ));
         assert!(same_units(
             &resolve_raw_units(&units("~\\wiki"), home, cwd, true),
             &units(r"C:\Users\test\wiki"),
@@ -1524,16 +1569,26 @@ mod tests {
 
         let root = scalar_path_value(r"C:\work\wiki");
         let root_relative = scalar_path_value(r"\work\wiki\a.md");
-        assert!(authorize_raw(&root, &root_relative, &root, home, cwd));
+        // VERIFY: wave16-platform-1 — host-independent Windows semantics
+        assert!(authorize_raw_with_windows(
+            &root,
+            &root_relative,
+            &root,
+            home,
+            cwd,
+            &[],
+            true
+        ));
         let drive_relative = scalar_path_value("D:a.md");
         let drive_root = scalar_path_value(r"D:\docs");
-        assert!(authorize_raw_with_drive_cwds(
+        assert!(authorize_raw_with_windows(
             &drive_root,
             &drive_relative,
             &drive_root,
             home,
             cwd,
             &[(b'D' as u16, PathBuf::from(r"D:\docs"))],
+            true
         ));
     }
 
@@ -1698,5 +1753,189 @@ mod tests {
             resolve_raw_units_with_drive_cwds(&units("~/wiki/a.md"), home, cwd, false, &[]),
             units("/home/test/wiki/a.md")
         );
+    }
+
+    fn root_for(text: &str) -> RootValue {
+        RootValue::from_token(serde_json::to_string(text).unwrap()).unwrap()
+    }
+
+    // VERIFY: wave32-wiki-root-atomic-1
+    #[test]
+    fn concurrent_setters_all_succeed_and_leave_one_complete_root() {
+        let owner = "concurrent_setters_all_succeed_and_leave_one_complete_root";
+        let base = fixture(owner);
+        let state = base.join("state/wiki-root.json");
+        let roots: Vec<String> = (0..8)
+            .map(|index| format!("{}/wiki-{index}", base.display()))
+            .collect();
+        let expected: Vec<Vec<u16>> = roots
+            .iter()
+            .map(|root| root.encode_utf16().collect())
+            .collect();
+        let barrier = Arc::new(Barrier::new(roots.len()));
+        let handles: Vec<_> = roots
+            .iter()
+            .map(|root| {
+                let state = state.clone();
+                let home = base.clone();
+                let barrier = Arc::clone(&barrier);
+                let root = root_for(root);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let response = set(&state, &home, Some(root));
+                    (
+                        response.ok,
+                        response.error,
+                        response.root.map(|root| root.units().unwrap()),
+                    )
+                })
+            })
+            .collect();
+        for handle in handles {
+            let (ok, error, root) = handle.join().unwrap();
+            assert!(ok, "concurrent set failed: {error:?}");
+            assert!(error.is_none());
+            let units = root.expect("a successful set must echo the root");
+            assert!(
+                expected.contains(&units),
+                "echoed root is not a submitted root: {:?}",
+                String::from_utf16_lossy(&units)
+            );
+        }
+        let text = fs::read_to_string(&state).unwrap();
+        let stored = stored_root(&text).expect("final file must be valid JSON with a root");
+        let units = stored.units().unwrap();
+        assert!(
+            expected.contains(&units),
+            "final root must equal one completed write, got {:?}",
+            String::from_utf16_lossy(&units)
+        );
+        cleanup_fixture(owner, &base);
+    }
+
+    // VERIFY: wave32-wiki-root-atomic-2
+    #[test]
+    fn reader_never_observes_a_torn_root_while_setters_write() {
+        let owner = "reader_never_observes_a_torn_root_while_setters_write";
+        let base = fixture(owner);
+        let state = base.join("state/wiki-root.json");
+        let initial = base.join("initial").display().to_string();
+        assert!(set(&state, &base, Some(root_for(&initial))).ok);
+        let padding = "p".repeat(4096);
+        let written: Vec<String> = (0..40)
+            .map(|index| format!("{padding}{index:02}"))
+            .collect();
+        let allowed: HashSet<Vec<u16>> = std::iter::once(initial)
+            .chain(written.iter().cloned())
+            .map(|root| root.encode_utf16().collect())
+            .collect();
+        let done = Arc::new(AtomicBool::new(false));
+        let reader = {
+            let state = state.clone();
+            let done = Arc::clone(&done);
+            let allowed = allowed.clone();
+            std::thread::spawn(move || {
+                let mut reads = 0usize;
+                while !done.load(Ordering::Relaxed) && reads < 20_000 {
+                    if let Ok(text) = fs::read_to_string(&state) {
+                        reads += 1;
+                        let units = stored_root(&text)
+                            .map(|root| root.units().unwrap())
+                            .unwrap_or_default();
+                        assert!(
+                            allowed.contains(&units),
+                            "torn root observed: {:?}",
+                            String::from_utf16_lossy(&units)
+                        );
+                    }
+                }
+                reads
+            })
+        };
+        for text in &written {
+            assert!(set(&state, &base, Some(root_for(text))).ok);
+        }
+        done.store(true, Ordering::Relaxed);
+        assert!(reader.join().unwrap() > 0, "reader must sample the state");
+        let units = stored_root(&fs::read_to_string(&state).unwrap())
+            .unwrap()
+            .units()
+            .unwrap();
+        assert_eq!(
+            units,
+            written.last().unwrap().encode_utf16().collect::<Vec<_>>()
+        );
+        cleanup_fixture(owner, &base);
+    }
+
+    // VERIFY: wave32-wiki-root-atomic-3
+    #[test]
+    fn rejected_root_leaves_the_stored_bytes_untouched() {
+        let owner = "rejected_root_leaves_the_stored_bytes_untouched";
+        let base = fixture(owner);
+        let state = base.join("state/wiki-root.json");
+        assert!(set(&state, &base, Some(root_for(r"C:\wiki\kept"))).ok);
+        let before = fs::read(&state).unwrap();
+        let rejected = set(&state, &base, None);
+        assert!(!rejected.ok);
+        assert_eq!(rejected.error.as_deref(), Some("bad root"));
+        assert!(rejected.root.is_none());
+        assert_eq!(fs::read(&state).unwrap(), before);
+        assert_eq!(
+            get(&state, &base).units().unwrap(),
+            r"C:\wiki\kept".encode_utf16().collect::<Vec<_>>()
+        );
+        // The raw token lands byte-for-byte, lone surrogates included.
+        let lone = RootValue::from_token(r#""\ud800""#.into()).unwrap();
+        assert!(set(&state, &base, Some(lone)).ok);
+        assert_eq!(fs::read(&state).unwrap(), br#"{"root":"\ud800"}"#);
+        assert_eq!(
+            stored_root(&fs::read_to_string(&state).unwrap())
+                .unwrap()
+                .units()
+                .unwrap(),
+            vec![0xd800]
+        );
+        cleanup_fixture(owner, &base);
+    }
+
+    // VERIFY: wave32-wiki-root-atomic-4
+    #[test]
+    fn filesystem_errors_surface_and_preserve_existing_state() {
+        let owner = "filesystem_errors_surface_and_preserve_existing_state";
+        let base = fixture(owner);
+        let state = base.join("state/wiki-root.json");
+        assert!(set(&state, &base, Some(root_for(r"C:\wiki\old"))).ok);
+        let before = fs::read(&state).unwrap();
+
+        // The rename target is a directory, so write_atomic fails after staging.
+        let directory_target = base.join("dir-target/wiki-root.json");
+        fs::create_dir_all(&directory_target).unwrap();
+        let blocked = set(&directory_target, &base, Some(root_for(r"C:\wiki\new")));
+        assert!(!blocked.ok);
+        assert!(blocked.root.is_none());
+        assert!(blocked.error.is_some());
+        assert!(
+            directory_target.is_dir(),
+            "a failed set must not replace the directory"
+        );
+
+        // A path component is a file, so the parent cannot be created.
+        let file_parent = base.join("file-parent");
+        fs::write(&file_parent, "not a directory").unwrap();
+        let blocked = set(
+            &file_parent.join("wiki-root.json"),
+            &base,
+            Some(root_for(r"C:\wiki\new")),
+        );
+        assert!(!blocked.ok);
+        assert!(blocked.error.is_some());
+
+        assert_eq!(fs::read(&state).unwrap(), before);
+        assert_eq!(
+            get(&state, &base).units().unwrap(),
+            r"C:\wiki\old".encode_utf16().collect::<Vec<_>>()
+        );
+        cleanup_fixture(owner, &base);
     }
 }

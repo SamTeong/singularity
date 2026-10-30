@@ -6,10 +6,12 @@ edition = "2024"
 [dependencies]
 axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio", "ws"] }
 http-body-util = "=0.1.5"
+futures-util = { version = "=0.3.34", default-features = false, features = ["sink", "std"] }
 libc = "0.2"
 httpdate = "=1.0.3"
 icu_collator = "=2.3.1"
 icu_locale_core = "=2.3.0"
+jiff = { version = "=0.2.38", default-features = false, features = ["std", "tz-system", "tzdb-bundle-always"] }
 portable-pty = "=0.9.0"
 regex = "1.11"
 ring = "=0.17.14"
@@ -21,4 +23,5 @@ sysinfo = "=0.39.6"
 sys-locale = "=0.3.2"
 time = { version = "=0.3.44", features = ["formatting", "parsing"] }
 tokio = { version = "=1.48.0", features = ["rt-multi-thread", "time", "net", "signal"] }
+tokio-tungstenite = "=0.29.0"
 toml_edit = { version = "=0.25.17", default-features = false, features = ["parse"] }

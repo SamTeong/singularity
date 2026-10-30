@@ -26,6 +26,7 @@ const SEED_ROWS: &[(&str, &str, &str)] = &[
     ("gpt-6-luna", "codex", ""),
     ("gpt-6-sol", "codex", ""),
     ("gpt-6.1-sol", "codex", ""),
+    ("gpt-6.1-terra", "codex", ""),
     ("gpt-5.4", "codex", ""),
     ("gpt-5.4-mini", "codex", ""),
     ("gpt-5.4-pro", "codex", ""),
@@ -383,9 +384,38 @@ mod tests {
         let fixture = Fixture::new();
         let path = fixture.file();
         let doc = get(&path);
-        assert_eq!(doc["models"].as_array().unwrap().len(), 21);
+        assert_eq!(doc["models"].as_array().unwrap().len(), 22);
         assert_eq!(doc["defaultModel"], "claude");
         assert_eq!(doc["summariserModel"], "deepseek-v4-flash:cloud");
+        let codex = doc["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|model| model["group"] == "codex")
+            .map(|model| model["id"].as_str().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            codex,
+            [
+                "gpt-6-luna",
+                "gpt-6-sol",
+                "gpt-6.1-sol",
+                "gpt-6.1-terra",
+                "gpt-5.4",
+                "gpt-5.4-mini",
+                "gpt-5.4-pro"
+            ],
+            "codex seed mirrors model-store.mjs, terra directly after gpt-6.1-sol"
+        );
+        let terra = doc["models"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|model| model["id"] == "gpt-6.1-terra")
+            .unwrap();
+        assert_eq!(terra["group"], "codex");
+        assert_eq!(terra["label"], "");
+        assert_eq!(terra["enabled"], true);
         assert_eq!(
             serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap(),
             doc
@@ -501,7 +531,7 @@ mod tests {
         assert_eq!(rows[0]["enabled"], false);
         assert_eq!(rows[1]["id"], "custom");
         assert_eq!(rows[2]["id"], "claude");
-        assert_eq!(rows.len(), 22);
+        assert_eq!(rows.len(), 23);
         assert_eq!(restore(&path), restored);
     }
 

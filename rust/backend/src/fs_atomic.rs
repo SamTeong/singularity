@@ -10,7 +10,7 @@
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 /// `for (let attempt = 1; ; attempt++)` with `attempt >= 5` giving up.
 const ATTEMPTS: u32 = 5;
@@ -64,6 +64,68 @@ fn retryable(error: &io::Error) -> bool {
         error.raw_os_error(),
         Some(5) | Some(13) | Some(32) | Some(33)
     ) || error.kind() == io::ErrorKind::PermissionDenied
+}
+
+/// Age past which a `<file>.<pid>.tmp` scratch file is debris from a hard-killed
+/// writer rather than a write in flight (a live one is milliseconds old).
+const STALE_SCRATCH: Duration = Duration::from_secs(60);
+
+// VERIFY: wave30-sweep-rust-1
+/// Deletes stale `write_atomic` scratch files left in `dirs` by a killed process.
+/// Top level only — one `read_dir`, never recursive. Best-effort: every failure
+/// is logged once and startup continues.
+pub fn sweep_stale_scratch(dirs: &[&Path], now: SystemTime) {
+    let mut removed = 0usize;
+    for dir in dirs {
+        // A missing dir is normal on a first run.
+        let Ok(entries) = fs::read_dir(dir) else {
+            continue;
+        };
+        for entry in entries.filter_map(Result::ok) {
+            let path = entry.path();
+            let is_file = entry
+                .file_type()
+                .map(|kind| kind.is_file())
+                .unwrap_or(false);
+            if !is_file || !is_pid_scratch(&path) {
+                continue;
+            }
+            // `DirEntry::metadata` does not follow symlinks; a future mtime
+            // (clock skew) reads as "not old" on the `duration_since` error.
+            let stale = entry
+                .metadata()
+                .and_then(|meta| meta.modified())
+                .is_ok_and(|modified| {
+                    now.duration_since(modified)
+                        .is_ok_and(|age| age > STALE_SCRATCH)
+                });
+            if !stale {
+                continue;
+            }
+            match fs::remove_file(&path) {
+                Ok(()) => removed += 1,
+                Err(error) => eprintln!("tmp sweep failed for {}: {error}", path.display()),
+            }
+        }
+    }
+    if removed > 0 {
+        eprintln!("tmp sweep removed {removed} stale scratch file(s)");
+    }
+}
+
+/// `^.+\.\d+\.tmp$` — the pid-scoped name [`write_atomic`] stages into.
+fn is_pid_scratch(path: &Path) -> bool {
+    let Some(rest) = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .and_then(|name| name.strip_suffix(".tmp"))
+    else {
+        return false;
+    };
+    let Some((name, pid)) = rest.rsplit_once('.') else {
+        return false;
+    };
+    !name.is_empty() && !pid.is_empty() && pid.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[cfg(test)]
@@ -153,5 +215,55 @@ mod tests {
         assert_eq!(fs::read(&file).unwrap(), b"new");
         let entries: Vec<_> = fs::read_dir(&fixture.0).unwrap().flatten().collect();
         assert_eq!(entries.len(), 1, "only the target file remains");
+    }
+
+    fn age_to(path: &Path, seconds: u64) {
+        let modified = SystemTime::now() - Duration::from_secs(seconds);
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+    }
+
+    // VERIFY: wave30-sweep-rust-1
+    #[test]
+    fn sweeps_only_stale_pid_scratch_files() {
+        let fixture = Fixture::new();
+        let dir = fixture.0.as_path();
+        for (name, age) in [
+            ("state.json.1234.tmp", 120),
+            ("agents.json.42.tmp", 3600),
+            ("fresh.json.1234.tmp", 5),
+            ("x.tmp", 120),
+            ("x.abc.tmp", 120),
+            ("state.json", 120),
+        ] {
+            let path = dir.join(name);
+            fs::write(&path, b"x").unwrap();
+            age_to(&path, age);
+        }
+        // A directory that matches the name pattern is not a regular file.
+        fs::create_dir(dir.join("backups.7.tmp")).unwrap();
+        fs::create_dir(dir.join("sub")).unwrap();
+        fs::write(dir.join("sub").join("nested.json.1.tmp"), b"x").unwrap();
+        age_to(&dir.join("sub").join("nested.json.1.tmp"), 120);
+
+        sweep_stale_scratch(&[dir], SystemTime::now());
+
+        for removed in ["state.json.1234.tmp", "agents.json.42.tmp"] {
+            assert!(!dir.join(removed).exists(), "{removed} should be swept");
+        }
+        for kept in [
+            "fresh.json.1234.tmp",
+            "x.tmp",
+            "x.abc.tmp",
+            "state.json",
+            "backups.7.tmp",
+            "sub/nested.json.1.tmp",
+        ] {
+            assert!(dir.join(kept).exists(), "{kept} should be kept");
+        }
     }
 }

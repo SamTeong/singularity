@@ -119,6 +119,11 @@ pub fn router(
     drive_cwds: Vec<(u16, PathBuf)>,
 ) -> Router {
     Router::new()
+        // VERIFY: wave3-hostreview-5
+        // Deliberate deviation: axum ranks the static `/api/config/search` and
+        // `/api/config/scan` routes above this parameter, so `PUT` on them is a
+        // 404 where Fastify writes scope "search"/"scan". Failing closed is
+        // safer than a nonsense write, so the quirk is not reproduced.
         .route("/api/config/{scope}", put(put_config))
         .with_state(ConfigWrite {
             home,

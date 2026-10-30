@@ -88,6 +88,13 @@ test.describe('Explorer', () => {
   test('closing a dirty tab prompts to discard, then removes it', async ({ page }) => {
     await gotoView(page, 'Explorer');
     await page.getByRole('button', { name: 'notes.md', exact: true }).click();
+    // Opening a file is async: the click only starts the /fs/read, and the
+    // previous tab's editor stays on screen until it resolves (openFile's
+    // selection guard then switches). Type before that and the edit lands in
+    // whichever file was restored here — under load the restored tab can be
+    // script.mjs alone, which is the state this spec must not assume away.
+    await expect(tab(page, NOTES)).toHaveAttribute('aria-selected', 'true');
+    await expect(cm(page)).toContainText('Explorer fixture markdown.');
     await cm(page).click();
     await page.keyboard.press('Control+End');
     await page.keyboard.insertText('unsaved edit');

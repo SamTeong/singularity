@@ -1,4 +1,5 @@
 use axum::http::{HeaderMap, Method, Uri};
+use std::borrow::Cow;
 
 #[derive(Clone, Debug)]
 pub struct HttpPolicy {
@@ -63,13 +64,57 @@ impl HttpPolicy {
         if !self.host_allowed(host) {
             return Err("forbidden host");
         }
-        if headers.contains_key("origin") && header(headers, "origin").is_none() {
+        // VERIFY: wave12-dup_origin-1 — Node's parser joins repeated fields
+        // with `", "` (`IncomingMessage.headers`), so two `Origin` lines — even
+        // identical ones — never equal an allowlisted origin. Reading only the
+        // first value would accept `Origin: <allowed>` followed by an
+        // attacker's second line.
+        let joined_origin = joined_header(headers, "origin");
+        if headers.contains_key("origin") && joined_origin.is_none() {
             return Err("forbidden origin");
         }
-        if !self.origin_allowed(header(headers, "origin"), header(headers, "sec-fetch-site")) {
+        // VERIFY: wave15-origin-1 — Node `if (origin)` treats `Origin: ""` as
+        // absent (`index.mjs:212`), so an empty value takes the Sec-Fetch-Site
+        // path instead of being parsed as an origin.
+        let origin = joined_origin.as_deref().filter(|value| !value.is_empty());
+        // VERIFY: wave21-policy-1 — Node reads only the parser-joined
+        // `sec-fetch-site`, and only when `origin` is falsy (`index.mjs:212-214`).
+        // Duplicate lines join with `", "` and never match `same-origin`/`none`;
+        // an empty single value stays falsy (`!site`) and is allowed. Reading
+        // only the first value would let `same-origin`, `cross-site` pass, while
+        // a single empty value was wrongly rejected.
+        let site = if origin.is_some() {
+            None
+        } else {
+            let site = joined_header(headers, "sec-fetch-site");
+            // Present but unreadable joins to `None`; Node's latin1 decode never
+            // equals an allowlisted value, so both reject.
+            if site.is_none() && headers.contains_key("sec-fetch-site") {
+                return Err("forbidden origin");
+            }
+            site.filter(|value| !value.is_empty())
+        };
+        if !self.origin_allowed(origin, site.as_deref()) {
             return Err("forbidden origin");
         }
         Ok(())
+    }
+
+    /// `pty-ws.mjs:96-98` — `originAllowed(req.headers.origin)`, with `origin`
+    /// as Node's `", "`-joined field. Absent means allowed; an unreadable value
+    /// joins to `None`, which the allowlist rejects just as `new URL()` throws.
+    pub fn websocket_origin_allowed(&self, headers: &HeaderMap) -> bool {
+        if !headers.contains_key("origin") {
+            return true;
+        }
+        match joined_header(headers, "origin") {
+            // VERIFY: wave15-origin-2 — `originAllowed("")` returns true at
+            // `if (!origin)` (`index.mjs:195`), while `""` is falsy for the
+            // `!originAllowed(...)` guard in `pty-ws.mjs:98`.
+            Some(origin) if origin.is_empty() => true,
+            Some(origin) => self.origin_allowed(Some(origin.as_ref()), None),
+            None => false,
+        }
     }
 
     pub fn api_authenticated(
@@ -162,6 +207,22 @@ fn format_origin_host(host: &str, port: u16) -> String {
 
 fn header<'a>(headers: &'a HeaderMap, name: &str) -> Option<&'a str> {
     headers.get(name)?.to_str().ok()
+}
+
+/// A field as Node's HTTP parser presents it: repeated values are joined with
+/// `", "`. `None` means absent, or a value that is not valid UTF-8 — Node
+/// decodes bytes as latin1, which no allowlisted origin matches.
+fn joined_header<'a>(headers: &'a HeaderMap, name: &str) -> Option<Cow<'a, str>> {
+    let values: Vec<&str> = headers
+        .get_all(name)
+        .iter()
+        .map(|value| value.to_str().ok())
+        .collect::<Option<Vec<_>>>()?;
+    match values.as_slice() {
+        [] => None,
+        [single] => Some(Cow::Borrowed(*single)),
+        many => Some(Cow::Owned(many.join(", "))),
+    }
 }
 
 fn cookie_value(headers: &HeaderMap, name: &str) -> Result<Option<String>, CookieDecodeError> {
@@ -375,6 +436,164 @@ mod tests {
         headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
         assert_eq!(policy.request_allowed(&headers), Ok(()));
         headers.insert("sec-fetch-site", HeaderValue::from_static("cross-site"));
+        assert_eq!(policy.request_allowed(&headers), Err("forbidden origin"));
+    }
+
+    // VERIFY: wave12-dup_origin-1 — duplicate `Origin` lines are forbidden for
+    // HTTP (Node 403) and for the WS upgrade verdict (upgrade then close 1008),
+    // both when the allowlisted origin comes first and when it comes second.
+    #[test]
+    fn duplicate_origin_values_are_forbidden_even_when_one_is_allowlisted() {
+        let policy = policy();
+        for origins in [
+            ["http://127.0.0.1:4317", "https://evil.test"],
+            ["https://evil.test", "http://127.0.0.1:4317"],
+            ["http://127.0.0.1:4317", "http://127.0.0.1:4317"],
+            ["http://127.0.0.1:4317", "http://localhost:5317"],
+        ] {
+            let mut headers = HeaderMap::new();
+            for origin in origins {
+                headers.append("origin", HeaderValue::from_str(origin).unwrap());
+            }
+            assert_eq!(
+                policy.request_allowed(&headers),
+                Err("forbidden origin"),
+                "{origins:?}"
+            );
+            assert!(!policy.websocket_origin_allowed(&headers), "{origins:?}");
+        }
+
+        // A single allowlisted Origin still passes both verdicts.
+        let mut single = HeaderMap::new();
+        single.insert("origin", HeaderValue::from_static("http://localhost:5317"));
+        assert_eq!(policy.request_allowed(&single), Ok(()));
+        assert!(policy.websocket_origin_allowed(&single));
+
+        // No Origin at all stays allowed (`if (!origin) return true`).
+        assert!(policy.websocket_origin_allowed(&HeaderMap::new()));
+
+        // One unreadable value among duplicates still rejects.
+        let mut unreadable = HeaderMap::new();
+        unreadable.append("origin", HeaderValue::from_static("http://127.0.0.1:4317"));
+        unreadable.append(
+            "origin",
+            HeaderValue::from_bytes(b"http://127.0.0.1:4317\x80").unwrap(),
+        );
+        assert_eq!(policy.request_allowed(&unreadable), Err("forbidden origin"));
+        assert!(!policy.websocket_origin_allowed(&unreadable));
+    }
+
+    // VERIFY: wave15-origin-3 — an empty `Origin` is falsy in Node, so it
+    // follows the no-Origin path for HTTP (`requestAllowed`) and is allowed for
+    // WS (`originAllowed("")` → `!origin` → true).
+    #[test]
+    fn empty_origin_follows_the_absent_origin_path() {
+        let policy = policy();
+
+        let mut empty = HeaderMap::new();
+        empty.insert("origin", HeaderValue::from_static(""));
+        assert_eq!(policy.request_allowed(&empty), Ok(()));
+        assert!(policy.websocket_origin_allowed(&empty));
+
+        // No-Origin HTTP behaviour is unchanged: Sec-Fetch-Site still decides.
+        empty.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
+        assert_eq!(policy.request_allowed(&empty), Ok(()));
+        empty.insert("sec-fetch-site", HeaderValue::from_static("cross-site"));
+        assert_eq!(policy.request_allowed(&empty), Err("forbidden origin"));
+
+        // Missing Origin stays allowed for both.
+        let absent = HeaderMap::new();
+        assert_eq!(policy.request_allowed(&absent), Ok(()));
+        assert!(policy.websocket_origin_allowed(&absent));
+
+        // Duplicates still join to a non-empty value and are forbidden, even
+        // when one of the two lines is empty (Node joins to `", "`).
+        for origins in [["", "http://127.0.0.1:4317"], ["http://127.0.0.1:4317", ""]] {
+            let mut headers = HeaderMap::new();
+            for origin in origins {
+                headers.append("origin", HeaderValue::from_static(origin));
+            }
+            assert_eq!(
+                policy.request_allowed(&headers),
+                Err("forbidden origin"),
+                "{origins:?}"
+            );
+            assert!(!policy.websocket_origin_allowed(&headers), "{origins:?}");
+        }
+    }
+
+    // VERIFY: wave21-policy-2 — `sec-fetch-site` is Node's parser-joined field
+    // and decides only when `Origin` is falsy (`index.mjs:210-215`).
+    #[test]
+    fn sec_fetch_site_joins_duplicates_and_treats_empty_as_falsy() {
+        let policy = policy();
+
+        // Absent Origin: absent / same-origin / none / empty are allowed;
+        // same-site and cross-site are not.
+        for (values, allowed) in [
+            (vec![], true),
+            (vec!["same-origin"], true),
+            (vec!["none"], true),
+            (vec![""], true),
+            (vec!["same-site"], false),
+            (vec!["cross-site"], false),
+            // Duplicates join with `", "` and can never match the allowlist, in
+            // either order, even when both lines are identical or empty.
+            (vec!["same-origin", "cross-site"], false),
+            (vec!["cross-site", "same-origin"], false),
+            (vec!["same-origin", "same-origin"], false),
+            (vec!["", "same-origin"], false),
+            (vec!["same-origin", ""], false),
+            (vec!["", ""], false),
+        ] {
+            let mut headers = HeaderMap::new();
+            for &value in &values {
+                headers.append("sec-fetch-site", HeaderValue::from_static(value));
+            }
+            assert_eq!(
+                policy.request_allowed(&headers),
+                if allowed {
+                    Ok(())
+                } else {
+                    Err("forbidden origin")
+                },
+                "{values:?}"
+            );
+        }
+
+        // Origin present and allowlisted: it decides, `sec-fetch-site` is unread.
+        for values in [
+            vec![],
+            vec!["cross-site"],
+            vec!["same-origin", "cross-site"],
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.insert("origin", HeaderValue::from_static("http://127.0.0.1:5317"));
+            for &value in &values {
+                headers.append("sec-fetch-site", HeaderValue::from_static(value));
+            }
+            assert_eq!(policy.request_allowed(&headers), Ok(()), "{values:?}");
+        }
+
+        // Origin present but not allowlisted stays rejected regardless of site.
+        let mut headers = HeaderMap::new();
+        headers.insert("origin", HeaderValue::from_static("https://evil.test:5317"));
+        headers.insert("sec-fetch-site", HeaderValue::from_static("same-origin"));
+        assert_eq!(policy.request_allowed(&headers), Err("forbidden origin"));
+
+        // Empty Origin is falsy, so `sec-fetch-site` decides for it too.
+        let mut headers = HeaderMap::new();
+        headers.insert("origin", HeaderValue::from_static(""));
+        assert_eq!(policy.request_allowed(&headers), Ok(()));
+        headers.insert("sec-fetch-site", HeaderValue::from_static("cross-site"));
+        assert_eq!(policy.request_allowed(&headers), Err("forbidden origin"));
+
+        // Present but unreadable site values never match the allowlist.
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "sec-fetch-site",
+            HeaderValue::from_bytes(b"same-origin\x80").unwrap(),
+        );
         assert_eq!(policy.request_allowed(&headers), Err("forbidden origin"));
     }
 

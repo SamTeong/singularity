@@ -336,9 +336,18 @@ impl PtyHost {
         let writer_cancelled = cancelled.clone();
         let writer_thread =
             thread::spawn(move || writer_loop(writer, write_rx, writer_cancelled, cfg!(windows)));
-        let reader_sink = self.inner.sink.clone();
+        let output_open = Arc::new(Mutex::new(true));
+        let gate = output_open.clone();
+        let host_sink = self.inner.sink.clone();
+        let reader_sink: PtySink = Arc::new(move |event| {
+            let open = gate.lock().unwrap();
+            if *open {
+                host_sink(event);
+            }
+        });
         let reader_id = spec.id.clone();
         let reader_writes = write_tx.clone();
+        let (reader_done_tx, reader_done) = mpsc::channel();
         let reader_thread = thread::spawn(move || {
             reader_loop(
                 reader,
@@ -347,7 +356,8 @@ impl PtyHost {
                 &reader_sink,
                 reader_writes,
                 cfg!(windows),
-            )
+            );
+            let _ = reader_done_tx.send(());
         });
         let waiter_inner = self.inner.clone();
         let waiter_id = spec.id.clone();
@@ -361,6 +371,8 @@ impl PtyHost {
                 write_tx,
                 writer_thread,
                 reader_thread,
+                reader_done,
+                output_open,
                 &waiter_inner,
             )
         });
@@ -600,6 +612,9 @@ impl StartupFilter {
     }
 }
 
+/// How long `waiter_loop` waits for the reader to hit EOF after the child exits.
+const READER_DRAIN_GRACE: std::time::Duration = std::time::Duration::from_secs(2);
+
 fn waiter_loop(
     child: &mut Box<dyn Child + Send + Sync>,
     id: &str,
@@ -609,6 +624,8 @@ fn waiter_loop(
     writes: mpsc::Sender<WriteMessage>,
     writer: JoinHandle<()>,
     reader: JoinHandle<()>,
+    reader_done: mpsc::Receiver<()>,
+    output_open: Arc<Mutex<bool>>,
     inner: &Arc<HostInner>,
 ) {
     let exit_code = child.wait().ok().map(|status| status.exit_code());
@@ -618,7 +635,17 @@ fn waiter_loop(
         handle.take();
     }
     let _ = writer.join();
-    let _ = reader.join();
+    // A process spawned concurrently elsewhere (std `Command` inherits handles
+    // on Windows) can hold the output pipe's write end, so EOF waits for that
+    // foreign process. Drain for a bounded grace, then close the output gate so
+    // a detached reader can never emit after `Exit`.
+    match reader_done.recv_timeout(READER_DRAIN_GRACE) {
+        Err(mpsc::RecvTimeoutError::Timeout) => {}
+        _ => {
+            let _ = reader.join();
+        }
+    }
+    *output_open.lock().unwrap() = false;
     {
         let mut sessions = inner.sessions.lock().unwrap();
         if sessions.get(id).map(|session| session.generation) == Some(generation) {
@@ -970,6 +997,53 @@ mod tests {
             }),
             json!({"type":"event","event":"exit","id":"a","generation":2,"exitCode":null})
         );
+    }
+
+    /// A foreign child spawned concurrently can inherit the output pipe's write
+    /// end (Windows), so reader EOF waits for it; `Exit` must still arrive, last.
+    #[test]
+    fn exit_arrives_while_a_concurrent_child_holds_the_output_pipe() {
+        let stop = Arc::new(AtomicBool::new(false));
+        let spawner_stop = stop.clone();
+        let spawner = thread::spawn(move || {
+            let sleeper = if cfg!(windows) {
+                vec!["/c", "ping -n 6 127.0.0.1 >NUL"]
+            } else {
+                vec!["-c", "sleep 5"]
+            };
+            let mut kids = Vec::new();
+            while !spawner_stop.load(Ordering::SeqCst) {
+                if let Ok(kid) = std::process::Command::new(shell_path())
+                    .args(&sleeper)
+                    .stdout(std::process::Stdio::null())
+                    .spawn()
+                {
+                    kids.push(kid);
+                }
+                thread::sleep(Duration::from_millis(20));
+            }
+            for mut kid in kids {
+                let _ = kid.kill();
+                let _ = kid.wait();
+            }
+        });
+        let exits: Vec<_> = (0..4)
+            .map(|round| {
+                let (sink, events) = recording_sink();
+                let host = PtyHost::new(sink);
+                host.spawn(&echo_spec("echo", round)).expect("spawn");
+                let exit = wait_for_exit(&events);
+                let last_is_exit =
+                    matches!(events.lock().unwrap().last(), Some(PtyEvent::Exit { .. }));
+                (exit, last_is_exit)
+            })
+            .collect();
+        stop.store(true, Ordering::SeqCst);
+        spawner.join().unwrap();
+        for (round, (exit, last_is_exit)) in exits.into_iter().enumerate() {
+            assert_eq!(exit, Some(Some(0)), "round {round}");
+            assert!(last_is_exit, "round {round}: no output after Exit");
+        }
     }
 
     #[test]

@@ -68,6 +68,11 @@ pub trait UsageAutoRefreshTarget: Send + Sync + 'static {
     fn pause_history(&self, error: &str);
     fn arm_ollama_gate<'a>(&'a self, delay_ms: i64) -> BoxFuture<'a, ()>;
     fn clear_ollama_gate<'a>(&'a self) -> BoxFuture<'a, ()>;
+    /// `historyBackoffMs` (`usage.mjs:1165`). It is module state in Node rather
+    /// than sampler state, so the connect action can restart the ladder while
+    /// the sampler keeps running.
+    fn ollama_backoff_ms(&self) -> i64;
+    fn set_ollama_backoff_ms(&self, backoff_ms: i64);
 }
 
 impl UsageAutoRefreshTarget for UsageHandle {
@@ -93,6 +98,14 @@ impl UsageAutoRefreshTarget for UsageHandle {
 
     fn clear_ollama_gate<'a>(&'a self) -> BoxFuture<'a, ()> {
         Box::pin(UsageHandle::clear_ollama_gate(self))
+    }
+
+    fn ollama_backoff_ms(&self) -> i64 {
+        UsageHandle::ollama_backoff_ms(self)
+    }
+
+    fn set_ollama_backoff_ms(&self, backoff_ms: i64) {
+        UsageHandle::set_ollama_backoff_ms(self, backoff_ms);
     }
 }
 
@@ -238,11 +251,9 @@ pub fn start_with(
     {
         let config = config.clone();
         tasks.push(handle.spawn(async move {
-            // `historyBackoffMs`: doubles per failed attempt, cleared by success.
-            let mut backoff_ms = 0;
             loop {
                 tokio::time::sleep(config.ollama_poll).await;
-                run_history_sample(&*usage, &config, &mut backoff_ms).await;
+                run_history_sample(&*usage, &config).await;
             }
         }));
     }
@@ -310,11 +321,10 @@ fn spawn_file_sampler(
 /// Classifying only happens when the tick made its own network attempt:
 /// `cache.ollama.at` unchanged means another caller's pull answered from the
 /// floor and there is nothing of this tick's to classify.
-async fn run_history_sample(
-    usage: &dyn UsageAutoRefreshTarget,
-    config: &Config,
-    backoff_ms: &mut i64,
-) {
+///
+/// The backoff lives in the shared target (`historyBackoffMs` is module state in
+/// Node), so a successful connect can zero it while this loop is running.
+async fn run_history_sample(usage: &dyn UsageAutoRefreshTarget, config: &Config) {
     let state = usage.ollama_state().await;
     if state.history_paused.is_some() || state.blocked {
         return;
@@ -329,7 +339,7 @@ async fn run_history_sample(
     }
     if is_true(ollama.get("ok")) && !is_true(ollama.get("stale")) {
         // A success clears an accumulated backoff.
-        *backoff_ms = 0;
+        usage.set_ollama_backoff_ms(0);
         usage.clear_ollama_gate().await;
     } else if ollama.get("error").and_then(Value::as_str) == Some("no-config") {
         // Never configured is not a failure worth backing off for; check back
@@ -346,13 +356,15 @@ async fn run_history_sample(
         usage.pause_history(error);
     } else {
         let cap = config.ollama_backoff_cap.as_millis() as i64;
-        let next = if *backoff_ms == 0 {
+        let backoff_ms = usage.ollama_backoff_ms();
+        let next = if backoff_ms == 0 {
             config.ollama_poll.as_millis() as i64
         } else {
             backoff_ms.saturating_mul(2)
         };
-        *backoff_ms = next.min(cap);
-        usage.arm_ollama_gate(*backoff_ms).await;
+        let next = next.min(cap);
+        usage.set_ollama_backoff_ms(next);
+        usage.arm_ollama_gate(next).await;
     }
 }
 
@@ -441,6 +453,8 @@ mod tests {
         paused: Mutex<Option<String>>,
         blocked_until: AtomicI64,
         attempt_at: AtomicI64,
+        /// `historyBackoffMs`, shared exactly as the daemon shares it.
+        backoff_ms: AtomicI64,
         /// The document a pull answers with; the ollama entry drives the sample.
         response: Mutex<Value>,
         /// When false, an ollama pull is answered from the floor without an
@@ -530,6 +544,14 @@ mod tests {
             self.clears.fetch_add(1, Ordering::SeqCst);
             self.blocked_until.store(0, Ordering::SeqCst);
             Box::pin(async {})
+        }
+
+        fn ollama_backoff_ms(&self) -> i64 {
+            self.backoff_ms.load(Ordering::SeqCst)
+        }
+
+        fn set_ollama_backoff_ms(&self, backoff_ms: i64) {
+            self.backoff_ms.store(backoff_ms, Ordering::SeqCst);
         }
     }
 
@@ -744,6 +766,44 @@ mod tests {
         );
     }
 
+    // VERIFY: ollama-backoff-reset
+    #[test]
+    fn a_connect_style_reset_restarts_the_ollama_backoff_ladder() {
+        let runtime = runtime();
+        let bus = Bus::new();
+        let recorder = Recorder::new(json!({
+            "ollama": { "ok": false, "source": "ollama", "error": "boom" },
+        }));
+        let config = Config {
+            ollama_poll: Duration::from_millis(10),
+            ollama_backoff_cap: Duration::from_millis(40),
+            ..quiet_config()
+        };
+        let _automation = start_with(runtime.handle().clone(), recorder.clone(), bus, config);
+
+        std::thread::sleep(Duration::from_millis(200));
+        assert_eq!(
+            recorder.ollama_backoff_ms(),
+            40,
+            "the ladder climbed to the cap: {:?}",
+            recorder.armed()
+        );
+        let before = recorder.armed().len();
+
+        // `connectOllamaUsage` sets `historyBackoffMs = 0` and clears the gate
+        // (`usage.mjs:465-466`); the next failure must start the ladder over at
+        // the poll interval instead of staying at the cap.
+        recorder.set_ollama_backoff_ms(0);
+        recorder.blocked_until.store(0, Ordering::SeqCst);
+        std::thread::sleep(Duration::from_millis(80));
+
+        let armed = recorder.armed();
+        assert!(
+            armed[before..].contains(&10),
+            "the first failure after a connect reset arms the poll interval: {armed:?}"
+        );
+    }
+
     #[test]
     fn an_expired_login_pauses_the_lane_and_no_config_arms_the_cap() {
         let runtime = runtime();
@@ -768,7 +828,11 @@ mod tests {
             config,
         );
 
-        std::thread::sleep(Duration::from_millis(120));
+        // Bounded poll, not a fixed sleep: the first sample can lag under load.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while recorder.paused.lock().unwrap().is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert_eq!(
             recorder.paused.lock().unwrap().as_deref(),
             Some("auth-expired")
@@ -812,7 +876,11 @@ mod tests {
             config,
         );
 
-        std::thread::sleep(Duration::from_millis(80));
+        // Poll rather than a fixed sleep: the 20 ms timers can lag under full-suite load.
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while recorder.refreshes().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(
             !recorder.refreshes().is_empty(),
             "the timers ran before the stop"

@@ -4,13 +4,14 @@
 //! Replaces the Node skill subprocess. `SING_USAGE_SKILL` and `skill_path` are
 //! ignored, so the report is always available. All three operations share one
 //! resolved reports root: `Request.reports_dir`, then `SING_USAGE_REPORTS`, then
-//! `<dirname(state)>/reports`. Tests inject the clock and offset; production
-//! uses the OS local offset once per report (historic DST deviation accepted).
+//! `<dirname(state)>/reports`. Tests inject the clock and zone; production uses
+//! the host zone, resolving each row's own offset (DST-aware).
 
 use crate::usage_report_codex_ingest::codex_ingest;
 use crate::usage_report_cost::Pricing;
 use crate::usage_report_pipeline::{PipelineEnv, generate_native};
 use crate::usage_report_rebuild::{RebuildRoots, rebuild_stats_csv};
+use crate::usage_snapshot::LocalZone;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::fs;
@@ -123,17 +124,21 @@ pub fn read(request: &Request) -> Report {
 }
 
 pub fn generate(request: &Request) -> Value {
-    generate_with(request, now_secs(), local_offset_secs())
+    generate_with(request, now_secs(), LocalZone::Host)
 }
 
-fn generate_with(request: &Request, now_secs: f64, local_offset: i32) -> Value {
-    match run_generation(request, now_secs, local_offset) {
+fn generate_with(request: &Request, now_secs: f64, local_zone: LocalZone) -> Value {
+    match run_generation(request, now_secs, local_zone) {
         Ok(path) => json!({"ok": true, "at": mtime_ms(&path)}),
         Err(error) => json!({"ok": false, "error": error}),
     }
 }
 
-fn run_generation(request: &Request, now_secs: f64, local_offset: i32) -> Result<PathBuf, String> {
+fn run_generation(
+    request: &Request,
+    now_secs: f64,
+    local_zone: LocalZone,
+) -> Result<PathBuf, String> {
     let base = base_state_dir(&request.env)
         .ok_or_else(|| "cannot resolve HOME to locate the usage report state".to_owned())?;
     let reports_dir = resolved_reports_dir(request)
@@ -154,7 +159,7 @@ fn run_generation(request: &Request, now_secs: f64, local_offset: i32) -> Result
         claude_inventory_root: claude_root,
         codex_home: codex_home.clone(),
         now_secs,
-        local_offset_secs: local_offset,
+        local_zone,
     };
     let mut rebuild = |active_sid: Option<&str>| {
         rebuild_state(
@@ -163,7 +168,7 @@ fn run_generation(request: &Request, now_secs: f64, local_offset: i32) -> Result
             &codex_home,
             active_sid,
             now_secs,
-            local_offset,
+            local_zone,
         )
     };
     generate_native(&env, &mut rebuild)
@@ -177,7 +182,7 @@ fn rebuild_state(
     codex_home: &Path,
     active_sid: Option<&str>,
     now_secs: f64,
-    local_offset: i32,
+    local_zone: LocalZone,
 ) -> std::io::Result<()> {
     fs::create_dir_all(base.join("cost-state"))?;
     let pricing = Pricing::load(base);
@@ -185,7 +190,7 @@ fn rebuild_state(
         codex_home,
         base,
         now_secs,
-        local_offset,
+        local_zone,
         &|model, input, output, cache_read, cache_create| {
             pricing.msg_cost_tiered(model, input, output, cache_read, cache_create)
         },
@@ -207,7 +212,7 @@ fn rebuild_state(
         active_sid,
         &codex_rows,
         &pricing,
-        local_offset,
+        local_zone,
         now_secs,
     )?;
     Ok(())
@@ -218,66 +223,6 @@ fn now_secs() -> f64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs_f64())
         .unwrap_or(0.0)
-}
-
-/// Local offset in seconds east of UTC, fixed for the whole report.
-#[cfg(unix)]
-fn local_offset_secs() -> i32 {
-    let Ok(now) = std::time::SystemTime::now().duration_since(UNIX_EPOCH) else {
-        return 0;
-    };
-    let time = now.as_secs() as libc::time_t;
-    let mut value = unsafe { std::mem::zeroed::<libc::tm>() };
-    if unsafe { libc::localtime_r(&time, &mut value) }.is_null() {
-        return 0;
-    }
-    value.tm_gmtoff as i32
-}
-
-#[cfg(windows)]
-fn local_offset_secs() -> i32 {
-    #[repr(C)]
-    struct SystemTime {
-        year: u16,
-        month: u16,
-        weekday: u16,
-        day: u16,
-        hour: u16,
-        minute: u16,
-        second: u16,
-        milliseconds: u16,
-    }
-    #[repr(C)]
-    struct TimeZoneInformation {
-        bias: i32,
-        standard_name: [u16; 32],
-        standard_date: SystemTime,
-        standard_bias: i32,
-        daylight_name: [u16; 32],
-        daylight_date: SystemTime,
-        daylight_bias: i32,
-    }
-    unsafe extern "system" {
-        fn GetTimeZoneInformation(info: *mut TimeZoneInformation) -> u32;
-    }
-    let mut info: TimeZoneInformation = unsafe { std::mem::zeroed() };
-    let id = unsafe { GetTimeZoneInformation(&mut info) };
-    if id == u32::MAX {
-        return 0;
-    }
-    // Win32 bias is minutes west of UTC; ids 1/2 add the active rule's bias.
-    let bias_minutes = info.bias
-        + match id {
-            1 => info.standard_bias,
-            2 => info.daylight_bias,
-            _ => 0,
-        };
-    -bias_minutes * 60
-}
-
-#[cfg(not(any(unix, windows)))]
-fn local_offset_secs() -> i32 {
-    0
 }
 
 #[cfg(test)]
@@ -386,7 +331,7 @@ mod tests {
         };
         // An unavailable custom skill is ignored: generation never spawns it.
         request.env["SING_USAGE_SKILL"] = json!(root.join("missing.mjs").to_string_lossy());
-        let result = generate_with(&request, 1_700_000_000.0, 0);
+        let result = generate_with(&request, 1_700_000_000.0, LocalZone::Fixed(0));
         assert_eq!(result["ok"], true, "{result}");
         assert!(result["at"].as_f64().is_some());
         let report = root.join("reports").join(
@@ -412,7 +357,7 @@ mod tests {
             reports_dir: String::new(),
             env: root_env(&root),
         };
-        let result = generate_with(&request, 1_700_000_000.0, 0);
+        let result = generate_with(&request, 1_700_000_000.0, LocalZone::Fixed(0));
         assert_eq!(result["ok"], true, "{result}");
         assert!(root.join("reports").is_dir());
         assert_eq!(status(&request).exists, true);
@@ -429,7 +374,7 @@ mod tests {
             env: root_env(&root),
         };
         request.env["CODEX_HOME"] = json!(root.join("codex").to_string_lossy());
-        let result = generate_with(&request, 1_700_000_000.0, 0);
+        let result = generate_with(&request, 1_700_000_000.0, LocalZone::Fixed(0));
         assert_eq!(result["ok"], false);
         assert!(
             result["error"]
@@ -448,7 +393,15 @@ mod tests {
         create_dir_all(&projects).unwrap();
         let missing_codex = root.join("absent-codex");
         let state = root.join("state");
-        rebuild_state(&state, &projects, &missing_codex, None, 1_700_000_000.0, 0).unwrap();
+        rebuild_state(
+            &state,
+            &projects,
+            &missing_codex,
+            None,
+            1_700_000_000.0,
+            LocalZone::Fixed(0),
+        )
+        .unwrap();
         let csv = fs::read_to_string(state.join("stats.csv")).unwrap();
         assert_eq!(csv.lines().next(), Some(CSV_COLUMNS.join(",").as_str()));
         remove_dir_all(&root).ok();

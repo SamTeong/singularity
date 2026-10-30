@@ -1627,6 +1627,43 @@ mod tests {
         });
     }
 
+    // VERIFY: wave4-lifecycle-2
+    /// H1 regression: the adapter is handed the home directory, and
+    /// `stats.rs` appends `.claude/projects` itself. A call site passing
+    /// `<home>/.claude` would look in `<home>/.claude/.claude/projects` and
+    /// report `exists:false`, `turns:0`, `tokens:0` for every agent.
+    #[test]
+    fn agent_stats_reads_sessions_under_the_home_dot_claude() {
+        let fixture = Fixture::new();
+        let cwd = fixture.repo();
+        let projects = fixture
+            .path("home")
+            .join(".claude/projects")
+            .join(crate::stats::encode_cwd(&cwd));
+        fs::create_dir_all(&projects).unwrap();
+        fs::write(
+            projects.join(format!("{SESSION}.jsonl")),
+            r#"{"type":"assistant","message":{"model":"claude-sonnet-4-5-20250929","usage":{"input_tokens":1000,"output_tokens":500}}}"#,
+        )
+        .unwrap();
+        let registry = fixture.registry();
+        fixture.seed_detached(&registry);
+        let inner = state(base_deps(
+            &fixture,
+            registry,
+            Arc::new(FakeProcs::default()),
+        ));
+        run(async {
+            let (status, body) = collect(agent_stats(State(inner)).await).await;
+            assert_eq!(status, 200);
+            let payload: Value = serde_json::from_str(&body).unwrap();
+            let entry = &payload["stats"][SESSION];
+            assert_eq!(entry["exists"], json!(true), "{body}");
+            assert_eq!(entry["turns"], json!(1), "{body}");
+            assert_eq!(entry["tokens"], json!(1_500), "{body}");
+        });
+    }
+
     // VERIFY: http-agents-tests-external-launch-direct
     /// The builder itself: unknown ids are rejected before the argv builder.
     #[test]

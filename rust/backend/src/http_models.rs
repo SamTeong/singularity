@@ -232,7 +232,7 @@ mod tests {
             let client = Client::new();
             let (status, body) = send(&client, address, Method::GET, "/api/models", None).await;
             assert_eq!(status, 200);
-            assert_eq!(body["models"].as_array().unwrap().len(), 21);
+            assert_eq!(body["models"].as_array().unwrap().len(), 22);
             assert_eq!(body["defaultModel"], "claude");
             assert_eq!(body["summariserModel"], "deepseek-v4-flash:cloud");
             assert!(body.get("ok").is_none());
@@ -360,7 +360,7 @@ mod tests {
             assert_eq!(status, 200);
             assert_eq!(first["ok"], true);
             let models = first["state"]["models"].as_array().unwrap();
-            assert_eq!(models.len(), 22);
+            assert_eq!(models.len(), 23);
             assert_eq!(models[0]["id"], "custom");
             assert_eq!(models[0]["label"], "Mine");
             assert_eq!(models[1]["id"], "opus");
@@ -393,7 +393,7 @@ mod tests {
             let client = Client::new();
             let (status, seed) = send(&client, address, Method::GET, "/api/models", None).await;
             assert_eq!(status, 200);
-            assert_eq!(seed["models"].as_array().unwrap().len(), 21);
+            assert_eq!(seed["models"].as_array().unwrap().len(), 22);
 
             let (status, body) = send(
                 &client,

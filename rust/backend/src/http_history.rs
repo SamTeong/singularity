@@ -18,10 +18,14 @@ use axum::{Json, Router};
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-/// `POST /api/history/regenerate` without a date (`server/index.mjs:894`).
+/// `POST /api/history/regenerate` without a date (`server/index.mjs:991`).
 const DATE_REQUIRED: &str = "date required";
-/// The Node route has no explicit parse guard; an unusable calendar date is
-/// rejected instead of persisting an entry under a garbage key.
+/// A truthy non-string `date` (`42`, `true`, an array) has no single Node
+/// contract to copy: `regenerateDay` builds an entry with that value and then
+/// sorts with `a.date.localeCompare(b.date)` (`server/history.mjs:464`), which
+/// throws once the file holds a second entry, so Node answers 200 for a
+/// one-entry file and an error otherwise. The Rust surface answers a
+/// deterministic `invalid date` instead; disclosed deviation.
 const INVALID_DATE: &str = "invalid date";
 
 // VERIFY: http_history-router-injection
@@ -34,7 +38,7 @@ pub fn router(service: Arc<HistoryService>) -> Router {
         .with_state(service)
 }
 
-/// `GET /api/history` (`server/index.mjs:875`).
+/// `GET /api/history` (`server/index.mjs:972`).
 async fn history_get(
     State(service): State<Arc<HistoryService>>,
     RawQuery(raw): RawQuery,
@@ -50,7 +54,7 @@ async fn history_get(
     }
 }
 
-/// `POST /api/history/regenerate` (`server/index.mjs:892`).
+/// `POST /api/history/regenerate` (`server/index.mjs:989`).
 async fn history_regenerate(
     State(service): State<Arc<HistoryService>>,
     request: Request<Body>,

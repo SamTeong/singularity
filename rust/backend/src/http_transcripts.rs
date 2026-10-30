@@ -71,8 +71,12 @@ pub trait TranscriptRegistry: Send + Sync {
     fn is_live(&self, _agent_id: &str) -> bool {
         false
     }
-    /// `isLiveSession(thread, {source:'codex'})`: a live agent owns this codex thread.
-    fn is_live_codex_thread(&self, _thread_id: &str) -> bool {
+    /// The codex half of `isLiveSession(thread, {source:'codex', cwd})`: a live
+    /// agent owns this codex thread. `apply_liveness` checks `is_live` first,
+    /// exactly like `agents.mjs:153-156`. The cwd filters the owner exactly like
+    /// `codexOwnerForThread(threadId, cwd)` (`agents.mjs:140-152`); `None` means
+    /// no filter. VERIFY: wave4-hostedits-1
+    fn is_live_codex_thread(&self, _thread_id: &str, _cwd: Option<&str>) -> bool {
         false
     }
     /// Registry id to codex-minted rollout thread uuid.
@@ -250,7 +254,11 @@ fn list_response(inner: &Inner, query: Option<&str>) -> Response {
     let service = inner.transcript();
     match service.list(&ListOptions {
         root,
-        cap,
+        // Node maps every row through `isLive` before `slice(0, cap)`
+        // (`sessions.mjs:199,517-520`), so the codex cwd guard must see rows the
+        // cap would drop; the slice moves after `apply_liveness`.
+        // VERIFY: wave8-numeric_cwd-10
+        cap: usize::MAX,
         now_ms: now,
         hide_reviews,
         // Liveness is recomputed below from the registry, so the service needs no
@@ -258,7 +266,10 @@ fn list_response(inner: &Inner, query: Option<&str>) -> Response {
         live_ids: Vec::new(),
     }) {
         Ok(mut rows) => {
-            apply_liveness(&mut rows, inner.host.registry.as_ref());
+            if let Err(message) = apply_liveness(&mut rows, inner.host.registry.as_ref()) {
+                return invalid_path_argument(message);
+            }
+            rows.truncate(cap);
             Json(SessionsReply { sessions: rows }).into_response()
         }
         Err(error) => internal_error(&error.to_string()),
@@ -327,10 +338,17 @@ fn read_response(inner: &Inner, query: Option<&str>) -> Response {
             // Skill scopes live only in the registry: claude sessions key on the
             // agent id, codex threads on (thread uuid, transcript cwd).
             let scopes = if codex {
-                inner
-                    .host
-                    .registry
-                    .codex_thread_scopes(&id, meta_cwd(&raw).as_deref())
+                // `getLaunchConfigForCodexThread(id, r.meta?.cwd)` (`index.mjs:939`):
+                // a falsy cwd returns null before `normPath`, a truthy non-string
+                // makes it throw. VERIFY: wave8-numeric_cwd-18
+                match meta_cwd(&raw) {
+                    Ok(CwdFilter::Path(cwd)) => inner
+                        .host
+                        .registry
+                        .codex_thread_scopes(&id, Some(cwd.as_str())),
+                    Ok(CwdFilter::Unfiltered | CwdFilter::Unmatchable) => None,
+                    Err(message) => return invalid_path_argument(message),
+                }
             } else {
                 inner.host.registry.launch_scopes(&id)
             };
@@ -642,10 +660,17 @@ fn is_js_space(character: char) -> bool {
 /// `isLive(id, {source, cwd})` per row (`server/sessions.mjs:199-205,501-506,557-568`):
 /// `running` is the owned live process only; recency stays in `activityRecent`.
 /// Codex rows resolve their rollout thread to an owning agent (`isLiveSession`).
-fn apply_liveness(rows: &mut [SessionRow], registry: &dyn TranscriptRegistry) {
+///
+/// `Err` carries the `ERR_INVALID_ARG_TYPE` message a codex row's truthy
+/// non-string cwd raises in Node's `normPath` (`codex-thread.mjs:13`); the whole
+/// list request fails with Fastify's 500. VERIFY: wave8-numeric_cwd-5
+fn apply_liveness(
+    rows: &mut [SessionRow],
+    registry: &dyn TranscriptRegistry,
+) -> Result<(), String> {
     for row in rows {
         let live = if row.source.as_deref() == Some("codex") {
-            registry.is_live_codex_thread(&row.id)
+            codex_live(&row.id, row.cwd.as_deref(), registry)?
         } else {
             registry.is_live(row.agent_id.as_deref().unwrap_or(&row.id))
         };
@@ -653,12 +678,42 @@ fn apply_liveness(rows: &mut [SessionRow], registry: &dyn TranscriptRegistry) {
         row.process_state = process_state(live);
         row.running = live;
         for child in &mut row.subagents {
-            let live = registry.is_live(&child.agent_id);
+            // Node computes codex liveness per rollout before nesting
+            // (`sessions.mjs:199`, `:213-216`), so children hit `normPath` too.
+            // VERIFY: wave10-child_cwd-1
+            let live = if child.source.as_deref() == Some("codex") {
+                codex_live(&child.agent_id, child.cwd.as_deref(), registry)?
+            } else {
+                registry.is_live(&child.agent_id)
+            };
             child.process_live = live;
             child.process_state = process_state(live);
             child.running = live;
         }
     }
+    Ok(())
+}
+
+fn codex_live(
+    id: &str,
+    cwd: Option<&RawValue>,
+    registry: &dyn TranscriptRegistry,
+) -> Result<bool, String> {
+    // `isLiveSession` answers `isLive(id)` first and only then the
+    // cwd-aware codex owner (`agents.mjs:153-156`), so a live row never
+    // reaches `normPath`. VERIFY: wave6-small_parity-3
+    if registry.is_live(id) {
+        return Ok(true);
+    }
+    // `isLive(id, { source: 'codex', cwd })` (`sessions.mjs:199`) ->
+    // `codexOwnerForThread(threadId, cwd)`: `cwd ? normPath(cwd) : null`.
+    // VERIFY: wave4-hostedits-3
+    Ok(match cwd_filter(cwd)? {
+        CwdFilter::Unfiltered => registry.is_live_codex_thread(id, None),
+        CwdFilter::Path(cwd) => registry.is_live_codex_thread(id, Some(cwd.as_str())),
+        // Node filters on a path no registry cwd can equal.
+        CwdFilter::Unmatchable => false,
+    })
 }
 
 fn process_state(live: bool) -> String {
@@ -711,16 +766,95 @@ fn with_scopes(raw: &str, scopes: Option<&[String]>) -> String {
     out
 }
 
-/// `r.meta?.cwd`, as the codex scope lookup needs it. Only a JSON string counts;
-/// Node would throw for any other truthy value and the route has no scopes then.
-fn meta_cwd(raw: &str) -> Option<String> {
-    let document = serde_json::from_str::<Document>(raw).ok()?;
-    let fields = crate::wiki_root::raw_fields(document.meta.get())
-        .ok()
-        .flatten()?;
+/// How Node's `normPath(cwd)` (`codex-thread.mjs:13`) sees a transcript cwd.
+/// `getLaunchConfigForCodexThread` / `codexOwnerForThread` guard with `!cwd`
+/// first and then call `resolve(cwd)`, which throws `ERR_INVALID_ARG_TYPE` for
+/// any truthy non-string. VERIFY: wave8-numeric_cwd-1
+#[derive(Debug, PartialEq)]
+enum CwdFilter {
+    /// `!cwd`: Node never reaches `normPath`.
+    Unfiltered,
+    /// A string cwd Node normalizes and compares.
+    Path(String),
+    /// A string Rust cannot decode (escaped lone surrogate). Node still filters
+    /// on it, but no registry cwd can equal that path, so nothing matches.
+    Unmatchable,
+}
+
+/// Classify a raw cwd token exactly as Node's `normPath` guard would.
+/// VERIFY: wave8-numeric_cwd-3
+fn cwd_filter(token: Option<&RawValue>) -> Result<CwdFilter, String> {
+    let Some(token) = token else {
+        return Ok(CwdFilter::Unfiltered);
+    };
+    let text = token.get();
+    if text.starts_with('"') {
+        // JS string truthiness: only `""` is falsy.
+        return Ok(match serde_json::from_str::<String>(text) {
+            Ok(cwd) if cwd.is_empty() => CwdFilter::Unfiltered,
+            Ok(cwd) => CwdFilter::Path(cwd),
+            Err(_) => CwdFilter::Unmatchable,
+        });
+    }
+    match serde_json::from_str::<Value>(text) {
+        Ok(Value::Null) | Ok(Value::Bool(false)) => Ok(CwdFilter::Unfiltered),
+        Ok(Value::Number(number)) if number.as_f64() == Some(0.0) => Ok(CwdFilter::Unfiltered),
+        _ => Err(format!(
+            "The \"paths[0]\" argument must be of type string. Received {}",
+            received_description(token)
+        )),
+    }
+}
+
+/// `util.inspect`'s value description inside `ERR_INVALID_ARG_TYPE`.
+/// VERIFY: wave8-numeric_cwd-2
+fn received_description(token: &RawValue) -> String {
+    match serde_json::from_str::<Value>(token.get()) {
+        Ok(Value::Null) => "null".to_owned(),
+        Ok(Value::Bool(flag)) => format!("type boolean ({flag})"),
+        Ok(Value::Number(number)) => format!(
+            "type number ({})",
+            number
+                .as_f64()
+                .map(crate::http_hooks::js_number_text)
+                .unwrap_or_else(|| number.to_string())
+        ),
+        Ok(Value::Array(_)) => "an instance of Array".to_owned(),
+        _ => "an instance of Object".to_owned(),
+    }
+}
+
+/// `r.meta?.cwd` (`index.mjs:939`), as the codex scope lookup sees it.
+/// VERIFY: wave8-numeric_cwd-4
+fn meta_cwd(raw: &str) -> Result<CwdFilter, String> {
+    let Ok(document) = serde_json::from_str::<Document>(raw) else {
+        return Ok(CwdFilter::Unfiltered);
+    };
+    let Ok(Some(fields)) = crate::wiki_root::raw_fields(document.meta.get()) else {
+        return Ok(CwdFilter::Unfiltered);
+    };
     let key = "cwd".encode_utf16().collect::<Vec<_>>();
-    let token = fields.into_iter().rev().find(|(field, _)| field == &key)?.1;
-    serde_json::from_str::<String>(token.get()).ok()
+    let token = fields
+        .into_iter()
+        .rev()
+        .find(|(field, _)| field == &key)
+        .map(|(_, token)| token);
+    cwd_filter(token.as_deref())
+}
+
+/// Fastify's default envelope for a thrown `ERR_INVALID_ARG_TYPE`.
+/// VERIFY: wave8-numeric_cwd-6
+fn invalid_path_argument(message: String) -> Response {
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({
+            "statusCode": 500,
+            "code": "ERR_INVALID_ARG_TYPE",
+            "error": "Internal Server Error",
+            "message": message,
+        })),
+    )
+        .into_response()
 }
 
 fn raw_json(text: &str) -> Response {
@@ -1069,20 +1203,29 @@ mod tests {
         }
     }
 
-    struct CodexOwner;
+    #[derive(Default)]
+    struct CodexOwner {
+        /// Thread ids the owner lookup was asked to resolve.
+        lookups: Mutex<Vec<String>>,
+    }
 
     impl TranscriptRegistry for CodexOwner {
         fn is_live(&self, agent_id: &str) -> bool {
             agent_id == "registry-agent" || agent_id == "live-child"
         }
-        fn is_live_codex_thread(&self, thread_id: &str) -> bool {
+        fn is_live_codex_thread(&self, thread_id: &str, _cwd: Option<&str>) -> bool {
+            self.lookups
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(thread_id.to_owned());
             thread_id == "thread-uuid"
         }
     }
 
     // VERIFY: transcripts-apply-liveness
-    /// `sessions.test.mjs:317-365`: running == processLive; recency alone never
-    /// makes a row running; codex rows resolve the thread to its owning agent.
+    /// `sessions.test.mjs:381-412`: running == processLive; recency alone never
+    /// makes a row running; codex rows answer `isLive(id)` first, then resolve
+    /// the thread to its owning agent (`agents.mjs:153-156`).
     #[test]
     fn apply_liveness_keys_running_on_owned_process_only() {
         let mut rows = vec![
@@ -1092,10 +1235,21 @@ mod tests {
                 vec![child("live-child"), child("dead-child")],
             ),
             row("thread-uuid", Some("codex"), Vec::new()),
-            // A codex thread id is not a registry key, even if it collides.
+            // `isLiveSession`'s first disjunct: a codex row whose id is a live
+            // registry key is live even though no owner resolves.
             row("registry-agent", Some("codex"), Vec::new()),
         ];
-        apply_liveness(&mut rows, &CodexOwner);
+        let owner = CodexOwner::default();
+        apply_liveness(&mut rows, &owner).unwrap();
+        // `isLive(id)` answers first, so the owner walk is skipped for a live id
+        // (`agents.mjs:154`).
+        assert_eq!(
+            *owner
+                .lookups
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()),
+            ["thread-uuid".to_owned()]
+        );
         let flags = |live: bool, state: &str, running: bool, recent: bool| {
             (live, state.to_owned(), running, recent)
         };
@@ -1109,7 +1263,7 @@ mod tests {
         };
         assert_eq!(of(&rows[0]), flags(false, "unknown", false, true));
         assert_eq!(of(&rows[1]), flags(true, "live", true, true));
-        assert_eq!(of(&rows[2]), flags(false, "unknown", false, true));
+        assert_eq!(of(&rows[2]), flags(true, "live", true, true));
         let kids = &rows[0].subagents;
         assert_eq!(
             (
@@ -1128,6 +1282,84 @@ mod tests {
             ),
             (false, "unknown", false, true)
         );
+    }
+
+    // VERIFY: wave4-hostedits-4
+    /// `sessions.mjs:199` -> `isLiveSession(id, { source:'codex', cwd })` ->
+    /// `codexOwnerForThread(threadId, cwd)`: the row cwd reaches the owner
+    /// lookup, and the lookup's filter decides liveness.
+    #[test]
+    fn apply_liveness_passes_the_codex_row_cwd_to_the_owner_lookup() {
+        struct CwdOwner(Mutex<Vec<Option<String>>>);
+        impl TranscriptRegistry for CwdOwner {
+            fn is_live_codex_thread(&self, thread_id: &str, cwd: Option<&str>) -> bool {
+                self.0
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner())
+                    .push(cwd.map(str::to_owned));
+                // `!cwd` means "no filter" in Node (`agents.mjs:142`).
+                thread_id == "thread-uuid" && (cwd.is_none() || cwd == Some("C:/work"))
+            }
+        }
+        let raw = |text: &str| serde_json::value::RawValue::from_string(text.to_owned()).ok();
+        let codex_row = |cwd| SessionRow {
+            cwd,
+            ..row("thread-uuid", Some("codex"), Vec::new())
+        };
+        let mut rows = vec![
+            codex_row(raw("\"C:/work\"")),
+            codex_row(raw("\"C:/elsewhere\"")),
+            // `cwd: null` is falsy in Node, so it applies no cwd filter.
+            codex_row(raw("null")),
+        ];
+        let owner = CwdOwner(Mutex::new(Vec::new()));
+        apply_liveness(&mut rows, &owner).unwrap();
+        assert_eq!(
+            rows.iter().map(|r| r.process_live).collect::<Vec<_>>(),
+            vec![true, false, true]
+        );
+        assert_eq!(
+            *owner.0.lock().unwrap_or_else(|error| error.into_inner()),
+            vec![
+                Some("C:/work".to_owned()),
+                Some("C:/elsewhere".to_owned()),
+                None
+            ]
+        );
+    }
+
+    // VERIFY: wave10-child_cwd-2
+    /// Codex children take the same `normPath` guard as top-level rows
+    /// (`sessions.mjs:199`, `:213-216`); a live child id short-circuits it.
+    #[test]
+    fn apply_liveness_guards_nested_codex_child_cwds() {
+        let raw = |text: &str| serde_json::value::RawValue::from_string(text.to_owned()).ok();
+        let codex_child = |id: &str, cwd| SubagentRow {
+            cwd,
+            source: Some("codex".into()),
+            ..child(id)
+        };
+        let owner = CodexOwner::default();
+        let mut rows = vec![row(
+            "parent",
+            Some("codex"),
+            vec![codex_child("thread-uuid", raw("\"C:/work\""))],
+        )];
+        apply_liveness(&mut rows, &owner).unwrap();
+        assert!(rows[0].subagents[0].process_live);
+        let mut rows = vec![row(
+            "parent",
+            Some("codex"),
+            vec![codex_child("live-child", raw("7"))],
+        )];
+        apply_liveness(&mut rows, &owner).unwrap();
+        assert!(rows[0].subagents[0].process_live);
+        let mut rows = vec![row(
+            "parent",
+            Some("codex"),
+            vec![codex_child("dead-child", raw("7"))],
+        )];
+        assert!(apply_liveness(&mut rows, &owner).is_err());
     }
 
     // VERIFY: transcripts-list-liveness
@@ -1223,6 +1455,79 @@ mod tests {
                     .as_str()
                     .is_some_and(|message| !message.is_empty())
             );
+        });
+    }
+
+    // VERIFY: wave8-numeric_cwd-8
+    /// `sessions.mjs:199` -> `isLiveSession(id, { source:'codex', cwd })` ->
+    /// `codexOwnerForThread`: a truthy non-string rollout cwd reaches
+    /// `normPath` and throws, so Fastify answers 500 for the whole list.
+    #[test]
+    fn list_rejects_truthy_non_string_codex_cwd_like_node() {
+        const NUM_ID: &str = "22222222-2222-4222-8222-222222222222";
+        const LATE_ID: &str = "66666666-6666-4666-8666-666666666666";
+        let fixture = Fixture::new();
+        fixture.write(
+            &[
+                "codex",
+                "sessions",
+                &format!("rollout-2026-{NUM_ID}.jsonl"),
+            ],
+            &format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{NUM_ID}\",\"cwd\":7}}}}\n"
+            ),
+        );
+        fixture.write(
+            &[
+                "codex",
+                "sessions",
+                &format!("rollout-2026-{LATE_ID}.jsonl"),
+            ],
+            &format!(
+                "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{LATE_ID}\",\"cwd\":\"C:/work\"}}}}\n"
+            ),
+        );
+        old_file(
+            &fixture.path(&["codex", "sessions", &format!("rollout-2026-{NUM_ID}.jsonl")]),
+            120,
+        );
+        let root = encode(&fixture.root());
+        let state = inner(fixture.host(StubRegistry::default()));
+        run(async {
+            // Node maps every codex row through `isLive` before `slice(0, cap)`,
+            // so a row the cap would drop still throws.
+            for query in [format!("root={root}"), format!("root={root}&cap=1")] {
+                let (status, response) = send_list(&state, Some(&query)).await;
+                assert_eq!(status, 500, "{query}: {response}");
+                let payload: Value = serde_json::from_str(&response).unwrap();
+                assert_eq!(payload["code"], json!("ERR_INVALID_ARG_TYPE"));
+                assert_eq!(
+                    payload["message"],
+                    json!(
+                        "The \"paths[0]\" argument must be of type string. Received type number (7)"
+                    )
+                );
+            }
+        });
+
+        // `isLive(id)` answers before `normPath`, so a live rollout id keeps the
+        // row and emits the numeric cwd unchanged.
+        let state = inner(fixture.host(StubRegistry {
+            live: vec![NUM_ID],
+            ..StubRegistry::default()
+        }));
+        run(async {
+            let (status, response) = send_list(&state, Some(&format!("root={root}"))).await;
+            assert_eq!(status, 200, "{response}");
+            let payload: Value = serde_json::from_str(&response).unwrap();
+            let row = payload["sessions"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["id"] == json!(NUM_ID))
+                .unwrap();
+            assert_eq!(row["cwd"], json!(7));
+            assert_eq!(row["running"], json!(true));
         });
     }
 
@@ -1356,6 +1661,71 @@ mod tests {
                 serde_json::from_str::<Value>(&response).unwrap()["statusCode"],
                 json!(500)
             );
+        });
+    }
+
+    // VERIFY: wave8-numeric_cwd-9
+    /// Node's read route passes `r.meta?.cwd` to `getLaunchConfigForCodexThread`
+    /// (`index.mjs:939`): a truthy non-string makes `normPath` throw (500),
+    /// while a falsy cwd returns null before it and keeps the 200 path. Claude
+    /// transcripts never reach `normPath`, so a numeric cwd surfaces raw.
+    #[test]
+    fn read_matches_node_cwd_norm_path_guards() {
+        const NUM_ID: &str = "33333333-3333-4333-8333-333333333333";
+        const ZERO_ID: &str = "44444444-4444-4444-8444-444444444444";
+        const OBJ_ID: &str = "55555555-5555-4555-8555-555555555555";
+        let fixture = Fixture::new();
+        for (id, cwd) in [(NUM_ID, "7"), (ZERO_ID, "0"), (OBJ_ID, "{\"a\":1}")] {
+            fixture.write(
+                &[
+                    "codex",
+                    "sessions",
+                    &format!("rollout-2026-{id}.jsonl"),
+                ],
+                &format!(
+                    "{{\"type\":\"session_meta\",\"payload\":{{\"session_id\":\"{id}\",\"cwd\":{cwd}}}}}\n{{\"type\":\"event_msg\",\"payload\":{{\"type\":\"user_message\",\"message\":\"hi\"}}}}\n"
+                ),
+            );
+        }
+        fixture.transcript(
+            "p",
+            "numeric-cwd",
+            "{\"type\":\"user\",\"cwd\":7,\"message\":{\"content\":\"hi\"}}\n",
+        );
+        let root = encode(&fixture.root());
+        let state = inner(fixture.host(StubRegistry::default()));
+        let codex_query = |id: &str| format!("project=%3Ccodex%3E&id={id}&source=codex");
+        run(async {
+            for (id, received) in [
+                (NUM_ID, "type number (7)"),
+                (OBJ_ID, "an instance of Object"),
+            ] {
+                let (status, response) = send_read(&state, Some(&codex_query(id))).await;
+                assert_eq!(status, 500, "{response}");
+                let payload: Value = serde_json::from_str(&response).unwrap();
+                assert_eq!(payload["code"], json!("ERR_INVALID_ARG_TYPE"));
+                assert_eq!(
+                    payload["message"],
+                    json!(format!(
+                        "The \"paths[0]\" argument must be of type string. Received {received}"
+                    ))
+                );
+            }
+            // `!cwd` returns null before `normPath`: the route succeeds unscoped.
+            let (status, response) = send_read(&state, Some(&codex_query(ZERO_ID))).await;
+            assert_eq!(status, 200, "{response}");
+            let payload: Value = serde_json::from_str(&response).unwrap();
+            assert_eq!(payload["meta"]["cwd"], Value::Null);
+            assert!(payload["meta"].get("scopes").is_none(), "{response}");
+
+            let (status, response) = send_read(
+                &state,
+                Some(&format!("project=p&id=numeric-cwd&root={root}")),
+            )
+            .await;
+            assert_eq!(status, 200, "{response}");
+            let payload: Value = serde_json::from_str(&response).unwrap();
+            assert_eq!(payload["meta"]["cwd"], json!(7));
         });
     }
 
@@ -1522,18 +1892,52 @@ mod tests {
     }
 
     // VERIFY: transcripts-meta-cwd
+    // VERIFY: wave8-numeric_cwd-7
+    /// Node's `getLaunchConfigForCodexThread(id, r.meta?.cwd)` (`index.mjs:939`)
+    /// guards with `!cwd` and then calls `normPath` (`codex-thread.mjs:13`):
+    /// a string filters, falsy values skip the lookup entirely, and every truthy
+    /// non-string makes `path.resolve` throw `ERR_INVALID_ARG_TYPE`.
     #[test]
-    fn meta_cwd_reads_only_a_json_string() {
-        assert_eq!(
-            super::meta_cwd(r#"{"meta":{"cwd":"C:/work"},"messages":[]}"#).as_deref(),
-            Some("C:/work")
-        );
-        assert_eq!(super::meta_cwd(r#"{"meta":{},"messages":[]}"#), None);
-        assert_eq!(
-            super::meta_cwd(r#"{"meta":{"cwd":null},"messages":[]}"#),
-            None
-        );
-        assert_eq!(super::meta_cwd(r#"{"meta":{"cwd":7},"messages":[]}"#), None);
+    fn meta_cwd_matches_node_norm_path_guards() {
+        use super::CwdFilter;
+        let classify =
+            |cwd: &str| super::meta_cwd(&format!(r#"{{"meta":{{"cwd":{cwd}}},"messages":[]}}"#));
+        assert!(matches!(classify(r#""C:/work""#), Ok(CwdFilter::Path(cwd)) if cwd == "C:/work"));
+        // Missing cwd is `undefined`, which is falsy in the same guard.
+        assert!(matches!(
+            super::meta_cwd(r#"{"meta":{},"messages":[]}"#),
+            Ok(CwdFilter::Unfiltered)
+        ));
+        for falsy in [r#"null"#, r#"false"#, r#"0"#, r#"0.0"#, r#"-0"#, r#""""#] {
+            assert!(
+                matches!(classify(falsy), Ok(CwdFilter::Unfiltered)),
+                "{falsy}"
+            );
+        }
+        // `path.resolve` rejects every truthy non-string with this text
+        // (verified against node v24 `path.resolve(7)` etc.).
+        for (cwd, received) in [
+            (r#"7"#, "type number (7)"),
+            (r#"7.5"#, "type number (7.5)"),
+            (r#"1e21"#, "type number (1e+21)"),
+            (r#"true"#, "type boolean (true)"),
+            (r#"[]"#, "an instance of Array"),
+            (r#"{"a":1}"#, "an instance of Object"),
+        ] {
+            assert_eq!(
+                classify(cwd),
+                Err(format!(
+                    "The \"paths[0]\" argument must be of type string. Received {received}"
+                )),
+                "{cwd}"
+            );
+        }
+        // An escaped lone surrogate is a JS string, so `normPath` accepts it; no
+        // registry cwd can equal that path.
+        assert!(matches!(
+            classify(r#""\ud800""#),
+            Ok(CwdFilter::Unmatchable)
+        ));
     }
 
     // VERIFY: transcripts-cap-coercion

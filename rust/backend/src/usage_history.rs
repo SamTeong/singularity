@@ -34,6 +34,8 @@ pub struct Params<'a> {
 struct Point {
     t: f64,
     pct: f64,
+    /// Concurrent 5h reading carried on 7d rows; `None` is a gap, not 0.
+    pct5h: Option<f64>,
     resets_at: Option<f64>,
 }
 
@@ -255,7 +257,6 @@ fn js_array_string(values: &[Value]) -> String {
             Value::Object(_) => "[object Object]".to_owned(),
             Value::Number(n) => n.as_f64().map(js_number_string).unwrap_or_default(),
             Value::Bool(b) => b.to_string(),
-            _ => String::new(),
         })
         .collect::<Vec<_>>()
         .join(",")
@@ -443,6 +444,7 @@ fn iso(t: f64) -> Result<String, String> {
 }
 
 /// Node `path.basename` (win32 flavour on Windows).
+#[cfg(test)]
 fn basename(path: &str) -> &str {
     let is_sep = |c: char| c == '/' || (cfg!(windows) && c == '\\');
     let mut p = path;
@@ -458,6 +460,7 @@ fn basename(path: &str) -> &str {
 }
 
 /// `id.slice(-8)` in UTF-16 code units, including a split surrogate pair.
+#[cfg(test)]
 fn last8_units(id: &str) -> Vec<u16> {
     let units: Vec<u16> = id.encode_utf16().collect();
     if units.len() <= 8 {
@@ -645,6 +648,14 @@ fn read_totals(provider: &str, window: &str, state_dir: &Path) -> Result<Vec<Poi
         if t.is_nan() {
             continue;
         }
+        // 7d rows also carry the concurrent 5h %, the chart's second series; a
+        // missing reading is a gap (null), never 0. 5h rows stay as-is.
+        // VERIFY: usage-history-7d-pct5h
+        let pct5h = if window == "7d" {
+            finite(totals_window(provider, "5h", r).and_then(|w5| w5.get("utilization")))
+        } else {
+            None
+        };
         // Old Codex rows carry resets_at as epoch seconds.
         let raw = w.and_then(|w| w.get("resets_at"));
         let resets_at = match raw {
@@ -655,6 +666,7 @@ fn read_totals(provider: &str, window: &str, state_dir: &Path) -> Result<Vec<Poi
         rows.push(Point {
             t,
             pct,
+            pct5h,
             resets_at: (!resets_at.is_nan()).then_some(resets_at),
         });
     }
@@ -950,6 +962,7 @@ fn claude_cost_events(state_dir: &Path, pts: &mut Vec<Point>) -> OMap<Vec<Event>
             pts.push(Point {
                 t,
                 pct,
+                pct5h: None,
                 resets_at: Some(reset * 1000.0),
             });
         }
@@ -1446,8 +1459,15 @@ pub fn get(p: &Params) -> Result<String, String> {
         let pts = points
             .iter()
             .map(|pt| {
+                // 7d points carry the concurrent 5h %; 5h points omit the field.
+                // VERIFY: usage-history-5h-omits-pct5h
+                let pct5h = if p.window == "7d" {
+                    format!(",\"pct5h\":{}", pt.pct5h.map_or("null".to_owned(), js_num))
+                } else {
+                    String::new()
+                };
                 Ok(format!(
-                    "{{\"ts\":{},\"pct\":{},\"sessions\":{{}}}}",
+                    "{{\"ts\":{},\"pct\":{}{pct5h},\"sessions\":{{}}}}",
                     js_str(&iso(pt.t)?),
                     js_num(pt.pct)
                 ))
@@ -1632,7 +1652,9 @@ mod tests {
         ),
     ];
 
-    // Captured from `node s1-oracle.mjs server/usage-history.mjs` at 90a0858.
+    // Captured from `node s1-oracle.mjs server/usage-history.mjs` at 90a0858; the
+    // codex 7d row now carries `pct5h` too (main 66591a9), derived from that
+    // commit's readTotals/buildDoc rather than a re-run of the oracle.
     const ORACLE: &[(&str, &str, &str)] = &[
         (
             "claude",
@@ -1647,7 +1669,7 @@ mod tests {
         (
             "codex",
             "7d",
-            r#"{"provider":"codex","window":"7d","windowStart":"2026-01-13T00:00:00.000Z","resetsAt":"2026-01-20T00:00:00.000Z","estimated":false,"points":[{"ts":"2026-01-15T10:00:00.000Z","pct":40,"sessions":{}},{"ts":"2026-01-15T11:05:00.000Z","pct":42,"sessions":{}}],"sessions":[]}"#,
+            r#"{"provider":"codex","window":"7d","windowStart":"2026-01-13T00:00:00.000Z","resetsAt":"2026-01-20T00:00:00.000Z","estimated":false,"points":[{"ts":"2026-01-15T10:00:00.000Z","pct":40,"pct5h":15,"sessions":{}},{"ts":"2026-01-15T11:05:00.000Z","pct":42,"pct5h":25,"sessions":{}}],"sessions":[]}"#,
         ),
         (
             "ollama",
@@ -1713,5 +1735,110 @@ mod tests {
             "234567😀".encode_utf16().collect::<Vec<_>>()
         );
         assert_eq!(basename("/work/repo/"), "repo");
+    }
+
+    /// 7d points carry each surviving row's concurrent 5h reading; a row with no
+    /// 5h window is a null gap, and the 15-min downsample keeps the last row's
+    /// own value (main `server/usage-history.test.mjs:279-297`).
+    #[test]
+    fn seven_day_points_carry_concurrent_five_hour_pct() {
+        let root =
+            std::env::temp_dir().join(format!("usage-history-pct5h-7d-{}", std::process::id()));
+        let state = root.join("state");
+        fs::create_dir_all(&state).unwrap();
+        let w_reset = NOW + 2.0 * DAY_MS; // weekly window started 5 days ago
+        let reset = NOW + 2.0 * 3.6e6;
+        let bucket = 15.0 * 60_000.0;
+        let tb = ((NOW - DAY_MS) / bucket).floor() * bucket + 60_000.0; // two rows share this bucket
+        let rows = [
+            (NOW - 8.0 * DAY_MS, 40.0, Some(10.0)), // 8 days ago: outside the window
+            (NOW - 3.0 * DAY_MS, 50.0, Some(20.0)),
+            (tb, 60.0, Some(30.0)), // folds into the next row's bucket
+            (tb + 120_000.0, 61.0, Some(31.0)),
+            (tb + 30.0 * 60_000.0, 62.0, None), // weekly only: 5h line is a gap
+            (tb + 45.0 * 60_000.0, 63.0, Some(33.0)),
+        ];
+        let mut text = String::new();
+        for (at, weekly, five) in rows {
+            let mut raw = serde_json::json!({
+                "seven_day": {"utilization": weekly, "resets_at": iso(w_reset).unwrap()},
+            });
+            if let Some(pct) = five {
+                raw["five_hour"] =
+                    serde_json::json!({"utilization": pct, "resets_at": iso(reset).unwrap()});
+            }
+            text.push_str(
+                &serde_json::json!({"fetched_at": iso(at).unwrap(), "raw": raw}).to_string(),
+            );
+            text.push('\n');
+        }
+        fs::write(state.join("usage-snapshots.jsonl"), text).unwrap();
+        let state_s = state.to_string_lossy().into_owned();
+        let params = Params {
+            provider: "claude",
+            window: "7d",
+            now_ms: NOW,
+            state_dir: &state_s,
+            pricing_path: &state_s,
+            claude_projects: &state_s,
+            codex_sessions: &state_s,
+        };
+        let doc: Value = serde_json::from_str(&get(&params).unwrap()).unwrap();
+        let points = doc["points"].as_array().unwrap();
+        assert!(points.iter().all(|p| p.get("pct5h").is_some()));
+        assert_eq!(
+            points
+                .iter()
+                .map(|p| p["pct"].as_f64().unwrap())
+                .collect::<Vec<_>>(),
+            vec![50.0, 61.0, 62.0, 63.0]
+        );
+        assert_eq!(
+            points
+                .iter()
+                .map(|p| p["pct5h"].as_f64())
+                .collect::<Vec<_>>(),
+            vec![Some(20.0), Some(31.0), None, Some(33.0)]
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    /// 5h points never carry `pct5h` (main `usage-history.mjs:455` adds it only for 7d).
+    #[test]
+    fn five_hour_points_omit_pct5h() {
+        let root =
+            std::env::temp_dir().join(format!("usage-history-pct5h-5h-{}", std::process::id()));
+        let state = root.join("state");
+        fs::create_dir_all(&state).unwrap();
+        let reset = NOW + 2.0 * 3.6e6;
+        let row = |at: f64, pct: f64| {
+            serde_json::json!({
+                "fetched_at": iso(at).unwrap(),
+                "session": {"utilization": pct, "resets_at": iso(reset).unwrap()},
+            })
+        };
+        let text = [row(NOW - 2.0 * 3.6e6, 12.0), row(NOW - 1.0 * 3.6e6, 18.0)]
+            .iter()
+            .map(Value::to_string)
+            .collect::<Vec<_>>()
+            .join("\n")
+            + "\n";
+        fs::write(state.join("ollama-usage.jsonl"), text).unwrap();
+        let state_s = state.to_string_lossy().into_owned();
+        let params = Params {
+            provider: "ollama",
+            window: "5h",
+            now_ms: NOW,
+            state_dir: &state_s,
+            pricing_path: &state_s,
+            claude_projects: &state_s,
+            codex_sessions: &state_s,
+        };
+        let doc = get(&params).unwrap();
+        assert!(!doc.contains("pct5h"), "5h points must omit pct5h: {doc}");
+        let value: Value = serde_json::from_str(&doc).unwrap();
+        assert_eq!(value["estimated"], false);
+        assert_eq!(value["points"].as_array().unwrap().len(), 2);
+        fs::remove_dir_all(&root).unwrap();
     }
 }

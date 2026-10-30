@@ -26,6 +26,17 @@
 //! the lock and emit them after unlocking (the `persist` file write also
 //! happens outside the lock). Registry methods are synchronous: `models::route`
 //! and `codex_thread_identity` are sync in this crate, so nothing awaits.
+//! `create`/`reattach` hold `reserve_lock` across the identity decision — the
+//! duplicate guard, the codex-owner check, the generation assignment and the
+//! entry registration — and release it before `port.spawn`, so Node's atomic
+//! `agents.get`/`agents.set` pair becomes one reservation and a spawn may
+//! re-enter the registry (early output/exit) without deadlocking. A
+//! `kill`/`remove`/`respawn` that lands while the reservation has no pty yet is
+//! recorded on the entry and applied by `launch_reserved` right after
+//! `port.spawn` returns; Node's synchronous turn cannot expose that window.
+//! `build_launch` and `ensure_trusted` run outside the reservation, and the
+//! codex rollout-tree walk is warmed before it, so no file work happens under
+//! `reserve_lock` on the common path.
 //!
 //! Runtime-only agent state (pid, ring buffer, decoder carry, idle stamp,
 //! pending respawn/removal flags) is kept beside the persisted
@@ -184,6 +195,7 @@ struct RespawnConfig {
 }
 
 /// One registry entry: the persisted fields plus runtime-only state.
+#[derive(Clone)]
 struct Agent {
     record: AgentRecord,
     pid: Option<u32>,
@@ -201,6 +213,61 @@ struct Agent {
     decoder_carry: Vec<u8>,
     respawn_after_exit: Option<RespawnConfig>,
     remove_on_exit: bool,
+    /// A `kill`/`remove`/`respawn` that arrived after the reservation but before
+    /// the pty existed. Applied by `launch_reserved` the moment `port.spawn`
+    /// returns (Node's single turn can never observe that window).
+    // VERIFY: wave3-registry-f1-defer
+    pending_lifecycle: Option<PendingLifecycle>,
+}
+
+/// See [`Agent::pending_lifecycle`]. `Drop` covers `kill` and `remove`, which only
+/// differ in whether the entry outlives its exit; a failed spawn leaves nothing in
+/// either case. `Respawn` restores the detached entry instead: Node's `respawn`
+/// returns false for an agent it never registered.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PendingLifecycle {
+    Drop,
+    Respawn,
+}
+
+/// Record a lifecycle call that arrived while the reservation had no pty yet.
+/// `Drop` outranks `Respawn` for the deferred *kill*, but an armed
+/// `respawn_after_exit` still wins in `on_exit`: Node checks `respawnAfterExit`
+/// before `removeOnExit` (`agents.mjs:255-290`), so a remove-then-respawn inside
+/// the window ends in a respawn there too.
+fn defer_lifecycle(agent: &mut Agent, intent: PendingLifecycle) {
+    if agent.pending_lifecycle != Some(PendingLifecycle::Drop) {
+        agent.pending_lifecycle = Some(intent);
+    }
+}
+
+/// A `kill`/`remove` that arrived while `reserve_fresh` was still validating a
+/// brand-new id, so there was no entry to [`defer_lifecycle`] onto.
+/// `reserve_fresh` folds it onto the entry it publishes, with the same merge rule
+/// plus the `removeOnExit` flag the live path sets directly.
+///
+/// `respawn` never records an intent here: Node answers `false` for an id with no
+/// live pty (`agents.mjs:611`) and arms nothing, and a reservation that is still
+/// being validated may be refused, so a `true` recorded on the marker could report
+/// a respawn that the same `create` then discards.
+// VERIFY: wave5-task-reg-2
+#[derive(Clone, Copy, Default)]
+struct PrePublishIntent {
+    lifecycle: Option<PendingLifecycle>,
+    /// `remove` (not `kill`) arrived: Node sets `removeOnExit` before killing
+    /// (`agents.mjs:587-594`), so the entry leaves without a resume banner.
+    remove_on_exit: bool,
+}
+
+impl PrePublishIntent {
+    fn kill(&mut self) {
+        self.lifecycle = Some(PendingLifecycle::Drop);
+    }
+
+    fn remove(&mut self) {
+        self.remove_on_exit = true;
+        self.kill();
+    }
 }
 
 #[derive(Default)]
@@ -211,6 +278,11 @@ struct State {
     /// Per-id generation counter; strictly increasing, never reset
     /// (`rust-pty-backend.mjs:143`).
     generations: HashMap<String, u64>,
+    /// Fresh reservations accepted by `reserve_fresh` whose entry is not published
+    /// yet. A lifecycle call that finds no entry records its intent here instead of
+    /// being lost; Node's single synchronous turn can never observe the window.
+    // VERIFY: wave5-task-reg-1
+    reserving: HashMap<String, PrePublishIntent>,
     draining: bool,
 }
 
@@ -227,6 +299,40 @@ impl State {
         let index = self.agents.iter().position(|agent| agent.record.id == id)?;
         Some(self.agents.remove(index))
     }
+
+    /// Per-id generation, incremented before every spawn and never reset
+    /// (`rust-pty-backend.mjs:141-145`). Callers hold the state lock.
+    fn next_generation(&mut self, id: &str) -> u64 {
+        let generation = self.generations.entry(id.to_owned()).or_insert(0);
+        *generation += 1;
+        *generation
+    }
+}
+
+/// The `respawnAfterExit` config `respawn` arms from a live entry
+/// (`agents.mjs:598-607`); an empty thread id is `undefined` in Node.
+fn respawn_config_for(record: &AgentRecord, thread_id: Option<String>) -> RespawnConfig {
+    RespawnConfig {
+        title: record.title.clone(),
+        cwd: record.cwd.clone(),
+        model: record.model.clone(),
+        scopes: record.scopes.clone(),
+        permission_mode: record.permission_mode.clone(),
+        extra_args: record.extra_args.clone(),
+        tool: record.tool.clone(),
+        created_at: record.created_at,
+        thread_id: thread_id.filter(|thread| !thread.is_empty()),
+    }
+}
+
+/// Fold a [`PrePublishIntent`] onto the entry `reserve_fresh` is about to publish.
+/// `launch_reserved` then issues the deferred kill once the pty exists, and
+/// `on_exit` removes the entry (`remove_on_exit` included), so the result is what
+/// Node's synchronous turn would have produced.
+// VERIFY: wave5-task-reg-3
+fn apply_pre_publish_intent(agent: &mut Agent, intent: PrePublishIntent) {
+    agent.remove_on_exit = intent.remove_on_exit;
+    agent.pending_lifecycle = intent.lifecycle;
 }
 
 /// What `on_exit` does after the exit has been observed (`agents.mjs:244-291`).
@@ -254,6 +360,48 @@ struct BannerInput {
     exit_code: Option<i32>,
 }
 
+/// A registered identity whose pty is not spawned yet: the result of the atomic
+/// decision in `create`/`reattach`, handed to [`Registry::launch_reserved`]
+/// after the reservation lock is released.
+// VERIFY: registry-reservation
+struct Reservation {
+    id: String,
+    generation: u64,
+    /// Projected when a re-entrant exit already retired the entry during spawn.
+    fallback: AgentRecord,
+    rollback: Rollback,
+    /// Built (`buildSpawn`) in `launch_reserved`, outside the reservation, because
+    /// it is the same file work Node does synchronously before its `agents.set`.
+    launch: LaunchInput,
+    /// `rememberRepo` after a successful `create` (`agents.mjs:467`).
+    remember_repo: bool,
+}
+
+/// What a failed spawn undoes, applied only while the reservation still owns the
+/// id (a re-entrant exit or a newer reservation must survive untouched).
+enum Rollback {
+    /// Fresh create: drop the reservation.
+    Remove,
+    /// Resume: put the detached entry back exactly as it was, like Node's
+    /// `reattach`, which throws from `spawnPty` before touching the entry.
+    Restore(Box<Agent>),
+}
+
+/// Test seam: `create`/`reattach` announce that they entered the registry and
+/// that they hold the identity reservation, so concurrency tests can interleave
+/// two callers deterministically instead of relying on thread scheduling.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum InterleaveStage {
+    /// The call reached the registry, before it looks at the id.
+    Enter,
+    /// The call passed the duplicate guard and is about to register the spawn.
+    Reserved,
+}
+
+#[cfg(test)]
+type InterleaveHook = Arc<dyn Fn(&str, InterleaveStage) + Send + Sync>;
+
 // VERIFY: registry-struct
 /// The agent registry: state, bus, PTY port and injected configuration.
 pub struct Registry {
@@ -261,6 +409,15 @@ pub struct Registry {
     /// Serialises persists so a stale snapshot never lands after a newer one
     /// and two writers never share `write_atomic`'s pid-scoped scratch file.
     persist_lock: Mutex<()>,
+    /// Serialises the identity decision in `create`/`reattach` (duplicate guard,
+    /// codex-owner check, generation assignment, entry registration). Held only
+    /// for that section — never across `port.spawn`, the bus or `persist`.
+    reserve_lock: Mutex<()>,
+    #[cfg(test)]
+    interleave: Mutex<Option<InterleaveHook>>,
+    /// Counts rollout-tree discovery calls made while `reserve_lock` was held.
+    #[cfg(test)]
+    discovery_under_lock: Mutex<usize>,
     bus: Bus,
     port: Arc<dyn PtyPort>,
     config: RegistryConfig,
@@ -272,9 +429,22 @@ impl Registry {
         Self {
             state: Mutex::new(State::default()),
             persist_lock: Mutex::new(()),
+            reserve_lock: Mutex::new(()),
+            #[cfg(test)]
+            interleave: Mutex::new(None),
+            #[cfg(test)]
+            discovery_under_lock: Mutex::new(0),
             bus,
             port,
             config,
+        }
+    }
+
+    #[cfg(test)]
+    fn interleave(&self, id: &str, stage: InterleaveStage) {
+        let hook = self.interleave.lock().unwrap().clone();
+        if let Some(hook) = hook {
+            hook(id, stage);
         }
     }
 
@@ -313,6 +483,7 @@ impl Registry {
                 decoder_carry: Vec::new(),
                 respawn_after_exit: None,
                 remove_on_exit: false,
+                pending_lifecycle: None,
             };
             // A Map keyed by id keeps the last occurrence; mirror that.
             match state
@@ -467,19 +638,46 @@ impl Registry {
     }
 
     // VERIFY: registry-codex-owner
-    /// `codexOwnerForThread` (`agents.mjs:140-152`): the live codex agent whose
-    /// remembered thread uuid is `thread_id`.
+    /// `codexOwnerForThread(threadId, cwd)` (`agents.mjs:140-152`) with Node's
+    /// `wantCwd` filter: the live codex agent that owns `thread_id`, restricted to
+    /// `cwd` when one is supplied. This is the transcript liveness contract
+    /// (`isLiveSession(id, { source: 'codex', cwd })`, `:153-156`): a thread live in
+    /// another repo must not answer as live for this row.
+    // VERIFY: wave3-registry-f2-liveness
+    pub fn codex_owner_for_thread_in_cwd(
+        &self,
+        thread_id: &str,
+        cwd: Option<&str>,
+    ) -> Option<String> {
+        self.codex_owner_for_thread_matching(thread_id, cwd)
+    }
+
+    // VERIFY: registry-codex-owner-guard
+    /// The duplicate-resume guard's variant (`agents.mjs:449-451`): owners are
+    /// matched by thread id only.
     ///
-    /// Deliberate divergence from Node: owners are matched by thread id only,
-    /// not by `cwd`. Node's `wantCwd` filter (`:148`) lets a caller-supplied
-    /// cwd bypass the duplicate-resume guard (bug O1).
+    /// Deliberate divergence from Node: `create` passes the caller's `cwd` to
+    /// `codexOwnerForThread`, so a caller-supplied cwd can bypass the
+    /// duplicate-resume guard (bug O1). Dropping the filter here fixes that; the
+    /// cwd-aware main contract lives in [`Self::codex_owner_for_thread_in_cwd`].
+    // VERIFY: wave3-registry-f2-guard
     pub(crate) fn codex_owner_for_thread(&self, thread_id: &str) -> Option<String> {
+        self.codex_owner_for_thread_matching(thread_id, None)
+    }
+
+    fn codex_owner_for_thread_matching(
+        &self,
+        thread_id: &str,
+        cwd: Option<&str>,
+    ) -> Option<String> {
         if thread_id.is_empty() {
             return None;
         }
+        // `const wantCwd = cwd ? normPath(cwd) : null` — an empty cwd is falsy.
+        let want_cwd = cwd.filter(|value| !value.is_empty()).map(norm_path);
         // Snapshot the candidates under the lock: `remember_codex_thread` takes
         // it itself (it may pin the discovery and persist).
-        let candidates: Vec<(String, Option<String>, Option<String>)> = {
+        let candidates: Vec<(String, Option<String>, Option<String>, Option<String>)> = {
             let state = self.state.lock().unwrap();
             state
                 .agents
@@ -492,11 +690,12 @@ impl Registry {
                         agent.record.id.clone(),
                         agent.record.model.clone(),
                         agent.record.tool.clone(),
+                        agent.record.cwd.clone(),
                     )
                 })
                 .collect()
         };
-        for (id, model, tool) in candidates {
+        for (id, model, tool, agent_cwd) in candidates {
             let is_codex = tool.as_deref() == Some("codex")
                 || route_flag(
                     &self.route(model.as_deref(), tool.as_deref()),
@@ -504,6 +703,15 @@ impl Registry {
                 );
             if !is_codex {
                 continue;
+            }
+            // `if (wantCwd && (!a.cwd || normPath(a.cwd) !== wantCwd)) continue;`
+            if let Some(want_cwd) = want_cwd.as_deref() {
+                let Some(agent_cwd) = agent_cwd.as_deref().filter(|value| !value.is_empty()) else {
+                    continue;
+                };
+                if norm_path(agent_cwd) != want_cwd {
+                    continue;
+                }
             }
             if self.remember_codex_thread(&id).as_deref() == Some(thread_id) {
                 return Some(id);
@@ -524,7 +732,10 @@ impl Registry {
     /// the PTY spawn so output emitted during the spawn is not lost (Node's
     /// backend buffers frames until `activate()`; this registry has the entry
     /// in place already, which is the same guarantee `agents.test.mjs:120`
-    /// asserts).
+    /// asserts). The duplicate guard and the registration are one reservation
+    /// under `reserve_lock`, so two concurrent callers for one id yield one
+    /// spawn and one `session id already in use`, like Node's synchronous
+    /// `agents.get`/`agents.set` pair.
     pub fn create(&self, input: CreateAgent) -> Result<AgentWire, String> {
         let home = self.config.bins.paths.home.clone();
         let cwd = input.cwd.as_deref().map(|raw| untildify_cwd(raw, &home));
@@ -535,29 +746,160 @@ impl Registry {
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
             .unwrap_or_else(new_id);
-        // Copy the liveness out first: `reattach` takes the state lock itself.
-        let existing_live = {
-            let state = self.state.lock().unwrap();
-            state.find(&id).map(|agent| agent.live)
-        };
-        match existing_live {
-            Some(true) => return Err("session id already in use".to_owned()),
-            // A dead/detached entry keeps its model + scopes: resume it.
-            Some(false) => {
-                let resumed = self.reattach(&id)?;
-                return resumed.ok_or_else(|| "session id already in use".to_owned());
-            }
-            None => {}
+        #[cfg(test)]
+        self.interleave(&id, InterleaveStage::Enter);
+        let route = self.route(input.model.as_deref(), input.tool.as_deref());
+        let codex_spawn =
+            input.tool.as_deref() == Some("codex") || route_flag(&route, "isCodexModel");
+        // Node's codex-owner check walks `~/.codex/sessions` for every live codex
+        // agent it has not pinned yet (`rememberCodexThread`). Warm those pins
+        // before taking the reservation so a concurrent create/reattach does not
+        // queue behind this daemon's rollout-tree walk; the in-lock check then
+        // compares pinned ids only. An entry registered after this pass is still
+        // walked under the lock, so the guard stays exact.
+        // VERIFY: wave3-registry-f6-prewarm
+        if codex_spawn && self.record(&id).is_none() {
+            let _ = self.codex_owner_for_thread(&id);
         }
+        let reservation = {
+            // Identity decision and registration are one critical section; it is
+            // released before `launch_reserved` spawns.
+            let _reserved = self.reserve_lock.lock().unwrap();
+            let existing_live = {
+                let state = self.state.lock().unwrap();
+                state.find(&id).map(|agent| agent.live)
+            };
+            match existing_live {
+                Some(true) => {
+                    return Err("session id already in use".to_owned());
+                }
+                // A dead/detached entry keeps its model + scopes: resume it.
+                Some(false) => {
+                    // No in-flight marker: the entry exists, so a `kill`/`remove`
+                    // acts on it directly, and `respawn` must answer `false` for a
+                    // detached agent (`agents.mjs:611`) — which the plain `is_live`
+                    // test gives without one.
+                    #[cfg(test)]
+                    self.interleave(&id, InterleaveStage::Reserved);
+                    match self.reserve_resume(&id)? {
+                        Some(reservation) => reservation,
+                        // The detached entry was removed between the branch
+                        // decision and the reservation (a concurrent kill/remove of
+                        // a detached id deletes it under the state lock only).
+                        // Node's `agents.get(id)` is null by now, so `create` takes
+                        // the fresh-spawn path instead of reporting "already in use"
+                        // for an id that no longer exists (`agents.mjs:421-431`).
+                        // VERIFY: wave3-registry-f4-vanished
+                        None if self.record(&id).is_none() => {
+                            self.reserve_fresh(&id, &input, cwd, &route, codex_spawn)?
+                        }
+                        None => return Err("session id already in use".to_owned()),
+                    }
+                }
+                None => {
+                    // The fresh path registers nothing until `reserve_fresh` has
+                    // walked the codex rollout tree and checked the filesystem.
+                    // Publish an in-flight marker before it starts: a `kill`/`remove`
+                    // for this id that lands in that window finds no entry and
+                    // records its intent on the marker instead of being lost
+                    // (Node's single synchronous turn can never observe the window).
+                    // `respawn` deliberately ignores the marker: its answer has to
+                    // agree with what this `create` does, and a refused reservation
+                    // must not leave a `true` for a respawn that never happens.
+                    // VERIFY: wave5-task-reg-1
+                    // VERIFY: wave7-respawn_marker-2
+                    self.state
+                        .lock()
+                        .unwrap()
+                        .reserving
+                        .entry(id.clone())
+                        .or_default();
+                    #[cfg(test)]
+                    self.interleave(&id, InterleaveStage::Reserved);
+                    self.reserve_fresh(&id, &input, cwd, &route, codex_spawn)?
+                }
+            }
+        };
+        self.launch_reserved(reservation)
+    }
+
+    // VERIFY: registry-reattach
+    /// `reattach` (`agents.mjs:480-493`): resume a detached agent, keeping its
+    /// model and skill scopes; `Ok(None)` when no such agent exists. A live entry
+    /// is returned unchanged (Node's `if (!a || a.proc) return a`), and the
+    /// reservation makes that check atomic with the registration.
+    pub fn reattach(&self, id: &str) -> Result<Option<AgentWire>, String> {
+        #[cfg(test)]
+        self.interleave(id, InterleaveStage::Enter);
+        let reservation = {
+            let _reserved = self.reserve_lock.lock().unwrap();
+            let existing_live = {
+                let state = self.state.lock().unwrap();
+                state.find(id).map(|agent| agent.live)
+            };
+            match existing_live {
+                None => return Ok(None),
+                Some(true) => return Ok(self.wire(id)),
+                Some(false) => {
+                    #[cfg(test)]
+                    self.interleave(id, InterleaveStage::Reserved);
+                    match self.reserve_resume(id)? {
+                        Some(reservation) => reservation,
+                        None => return Ok(None),
+                    }
+                }
+            }
+        };
+        self.launch_reserved(reservation).map(Some)
+    }
+
+    /// Reserve a brand-new identity. The caller holds `reserve_lock`, so no other
+    /// `create`/`reattach` can interleave between the codex-owner check and the
+    /// registration; `build_launch`/`ensure_trusted` run later, in
+    /// `launch_reserved`, outside that section.
+    // VERIFY: registry-reserve-fresh
+    fn reserve_fresh(
+        &self,
+        id: &str,
+        input: &CreateAgent,
+        cwd: Option<PathBuf>,
+        route: &Value,
+        codex_spawn: bool,
+    ) -> Result<Reservation, String> {
+        // `create` publishes the in-flight marker before calling this for a fresh
+        // id, so a `kill`/`remove` that lands while the checks below walk the codex
+        // rollout tree and touch the filesystem records its intent on the marker.
+        // This call keeps that marker present (the vanished-entry fallback reaches
+        // here without one) and clears it if the reservation is refused.
+        // VERIFY: wave5-task-reg-1
+        self.state
+            .lock()
+            .unwrap()
+            .reserving
+            .entry(id.to_owned())
+            .or_default();
+        let result = self.reserve_fresh_checked(id, input, cwd, route, codex_spawn);
+        if result.is_err() {
+            self.state.lock().unwrap().reserving.remove(id);
+        }
+        result
+    }
+
+    fn reserve_fresh_checked(
+        &self,
+        id: &str,
+        input: &CreateAgent,
+        cwd: Option<PathBuf>,
+        route: &Value,
+        codex_spawn: bool,
+    ) -> Result<Reservation, String> {
         // `(tool === 'codex' || isCodexModel(model)) && codexOwnerForThread(id)`
         // (`agents.mjs:449-451`): a codex resume may not duplicate a thread
-        // another live agent already owns.
-        let codex_spawn = input.tool.as_deref() == Some("codex")
-            || route_flag(
-                &self.route(input.model.as_deref(), input.tool.as_deref()),
-                "isCodexModel",
-            );
-        if codex_spawn && self.codex_owner_for_thread(&id).is_some() {
+        // another live agent already owns. The rollout-tree walk for agents not
+        // pinned yet is normally done by `create`'s pre-reservation warm pass, so
+        // this call only compares ids; an agent registered since that pass is
+        // still discovered here, keeping the guard exact.
+        if codex_spawn && self.codex_owner_for_thread(id).is_some() {
             return Err("codex thread already in use".to_owned());
         }
         let Some(cwd_path) = cwd else {
@@ -570,7 +912,6 @@ impl Registry {
         if !cwd_path.exists() {
             return Err(format!("working directory does not exist: {cwd}"));
         }
-        let route = self.route(input.model.as_deref(), input.tool.as_deref());
         if let Some(error) = route.get("toolModelError").and_then(Value::as_str) {
             return Err(error.to_owned());
         }
@@ -581,9 +922,26 @@ impl Registry {
         // Only respawn() passes `createdAt`; a genuinely fresh create must not,
         // or codex discovery could resume an unrelated session (`:432-438`).
         let spawned_at = input.created_at.unwrap_or_else(|| (self.config.clock)());
+        let record = AgentRecord {
+            id: id.to_owned(),
+            title: Some(display_title.clone()),
+            cwd: Some(cwd.clone()),
+            created_at: Some(spawned_at),
+            model: input.model.clone(),
+            scopes: input.scopes.clone(),
+            permission_mode: input.permission_mode.clone(),
+            extra_args: input.extra_args.clone(),
+            mock: Some(input.mock),
+            tool: input.tool.clone(),
+            thread_id: input.thread_id.clone(),
+            run_id: input.run_id.clone(),
+            active_ms: Some(0),
+            status: Status::Starting,
+            name: None,
+        };
         let launch = LaunchInput {
-            id: id.clone(),
-            title: display_title.clone(),
+            id: id.to_owned(),
+            title: display_title,
             cwd: cwd.clone(),
             model: input.model.clone().unwrap_or_default(),
             scopes: input.scopes.clone().unwrap_or_default(),
@@ -595,29 +953,11 @@ impl Registry {
             prompt: input.prompt.clone(),
             mock: input.mock,
         };
-        let spec = agent_spawn::build_launch(&launch, &self.config.bins, &self.config.parent_env)?;
-        self.ensure_trusted(&cwd);
-        let generation = self.next_generation(&id);
-        {
+        let generation = {
             let mut state = self.state.lock().unwrap();
-            state.agents.push(Agent {
-                record: AgentRecord {
-                    id: id.clone(),
-                    title: Some(display_title),
-                    cwd: Some(cwd.clone()),
-                    created_at: Some(spawned_at),
-                    model: input.model.clone(),
-                    scopes: input.scopes.clone(),
-                    permission_mode: input.permission_mode.clone(),
-                    extra_args: input.extra_args.clone(),
-                    mock: Some(input.mock),
-                    tool: input.tool.clone(),
-                    thread_id: input.thread_id.clone(),
-                    run_id: input.run_id.clone(),
-                    active_ms: Some(0),
-                    status: Status::Starting,
-                    name: None,
-                },
+            let generation = state.next_generation(id);
+            let mut agent = Agent {
+                record: record.clone(),
                 pid: None,
                 live: true,
                 generation,
@@ -629,85 +969,218 @@ impl Registry {
                 decoder_carry: Vec::new(),
                 respawn_after_exit: None,
                 remove_on_exit: false,
-            });
+                pending_lifecycle: None,
+            };
+            // A lifecycle call that landed before this publish recorded its intent
+            // on the marker; apply it exactly as the live path would have.
+            // VERIFY: wave5-task-reg-3
+            if let Some(intent) = state.reserving.remove(id) {
+                apply_pre_publish_intent(&mut agent, intent);
+            }
+            state.agents.push(agent);
+            generation
+        };
+        Ok(Reservation {
+            id: id.to_owned(),
+            generation,
+            fallback: record,
+            rollback: Rollback::Remove,
+            launch,
+            remember_repo: true,
+        })
+    }
+
+    /// Reserve an existing detached entry for a spawn. The caller holds
+    /// `reserve_lock`; `Ok(None)` when the entry vanished before the state-lock
+    /// re-read.
+    // VERIFY: registry-reserve-resume
+    fn reserve_resume(&self, id: &str) -> Result<Option<Reservation>, String> {
+        // The launch spec is rebuilt from the persisted record and built in
+        // `launch_reserved`; a launch error there restores this snapshot, exactly
+        // as Node's `reattach` throws from `spawnPty` before mutating the entry.
+        let launch = {
+            let state = self.state.lock().unwrap();
+            let Some(agent) = state.find(id) else {
+                return Ok(None);
+            };
+            if agent.live {
+                return Ok(None);
+            }
+            let record = &agent.record;
+            LaunchInput {
+                id: record.id.clone(),
+                title: record.title.clone().unwrap_or_default(),
+                cwd: record.cwd.clone().unwrap_or_default(),
+                model: record.model.clone().unwrap_or_default(),
+                scopes: record.scopes.clone().unwrap_or_default(),
+                permission_mode: record.permission_mode.clone(),
+                extra_args: record.extra_args.clone().unwrap_or_default(),
+                tool: record.tool.clone(),
+                created_at: record.created_at,
+                thread_id: record.thread_id.clone(),
+                prompt: None,
+                mock: record.mock.unwrap_or(false),
+            }
+        };
+        let mut state = self.state.lock().unwrap();
+        let Some(agent) = state.find(id) else {
+            return Ok(None);
+        };
+        if agent.live {
+            return Ok(None);
         }
+        let previous = agent.clone();
+        let mut fallback = agent.record.clone();
+        fallback.status = Status::Starting;
+        let generation = state.next_generation(id);
+        let agent = state.find_mut(id).expect("the entry was found above");
+        // Node assigns these fields directly (`:488`), bypassing setStatus,
+        // so no status event is emitted here.
+        agent.live = true;
+        agent.pid = None;
+        agent.generation = generation;
+        agent.ring.clear();
+        agent.ring_bytes = 0;
+        agent.written = 0;
+        agent.decoder_carry.clear();
+        agent.running_since = None;
+        agent.last_output = None;
+        agent.record.status = Status::Starting;
+        Ok(Some(Reservation {
+            id: id.to_owned(),
+            generation,
+            fallback,
+            rollback: Rollback::Restore(Box::new(previous)),
+            launch,
+            remember_repo: false,
+        }))
+    }
+
+    /// Build the launch spec, spawn the PTY of a reserved identity, then stamp the
+    /// pid, remember the repo, persist and emit the list. Runs without the
+    /// reservation or state lock, so a `spawn` that re-enters the registry (early
+    /// output or exit) cannot deadlock; a failed build or spawn rolls back only the
+    /// reservation that still carries `generation`.
+    // VERIFY: registry-launch-reserved
+    fn launch_reserved(&self, reservation: Reservation) -> Result<AgentWire, String> {
+        let Reservation {
+            id,
+            generation,
+            fallback,
+            rollback,
+            launch,
+            remember_repo,
+        } = reservation;
+        // `buildSpawn` then `ensureTrusted` then `spawnPty` (`agents.mjs:455-462`).
+        // Both are file work, so they run here rather than under `reserve_lock`; a
+        // failure undoes the reservation like a failed spawn does.
+        // VERIFY: wave3-registry-f6-build
+        let spec =
+            match agent_spawn::build_launch(&launch, &self.config.bins, &self.config.parent_env) {
+                Ok(spec) => spec,
+                Err(error) => {
+                    self.abandon_reservation(&id, generation, rollback);
+                    return Err(error);
+                }
+            };
+        self.ensure_trusted(&launch.cwd);
         let pid = match self.port.spawn(&id, generation, spec) {
             Ok(pid) => pid,
             Err(error) => {
-                self.state.lock().unwrap().remove(&id);
+                self.abandon_reservation(&id, generation, rollback);
                 return Err(error);
             }
         };
-        if let Some(agent) = self.state.lock().unwrap().find_mut(&id) {
-            agent.pid = Some(pid);
+        let (wire, pending_lifecycle) = {
+            let mut state = self.state.lock().unwrap();
+            match state.find_mut(&id) {
+                Some(agent) if agent.generation == generation => {
+                    agent.pid = Some(pid);
+                    // A kill/remove/respawn that arrived while the pty did not exist
+                    // yet was deferred onto the reservation; apply it now that it does.
+                    // Reading and clearing the intent under the same lock that stamps
+                    // the pid is what closes the window: a later caller sees the pid
+                    // and kills directly.
+                    // VERIFY: wave3-registry-f1-apply
+                    (wire(agent), std::mem::take(&mut agent.pending_lifecycle))
+                }
+                // A newer reservation already owns the id (only reachable after an
+                // exit respawned into it): answer for the entry that is there. The
+                // pty just spawned for this generation had already exited inside
+                // `spawn` — that exit is what created the newer reservation — and the
+                // PTY host reaps a session as soon as its child is waited for
+                // (`pty.rs:614-632`), so the discarded pid leaves no process, thread
+                // or session behind; a `port.kill(id)` here would hit the newer pty.
+                // VERIFY: wave5-task-reg-6
+                Some(agent) => (wire(agent), None),
+                // The child died inside `spawn` and the exit path already retired the
+                // entry: answer for what was launched, like Node's `create` returns
+                // the agent it registered. The entry can only disappear here through
+                // an exit (kill/remove defer, drain keeps it), so its terminal state
+                // is `exited` — never the `starting` the reservation recorded.
+                // VERIFY: wave3-registry-f3-exited
+                None => {
+                    let mut record = fallback.clone();
+                    record.status = Status::Exited;
+                    (wire_from_record(&record, Some(pid)), None)
+                }
+            }
+        };
+        if pending_lifecycle.is_some() {
+            let _ = self.port.kill(&id);
         }
-        self.remember_repo(&cwd);
+        if remember_repo {
+            if let Some(cwd) = fallback.cwd.as_deref() {
+                self.remember_repo(cwd);
+            }
+        }
         self.persist()?;
         self.emit_list();
-        Ok(self.wire(&id).expect("the entry was inserted above"))
+        Ok(wire)
     }
 
-    // VERIFY: registry-reattach
-    /// `reattach` (`agents.mjs:480-493`): resume a detached agent, keeping its
-    /// model and skill scopes; `Ok(None)` when no such agent exists.
-    pub fn reattach(&self, id: &str) -> Result<Option<AgentWire>, String> {
-        let Some(record) = self.record(id) else {
-            return Ok(None);
+    /// Undo a reservation after a failed build or spawn. Only the entry that still
+    /// owns `generation` is touched: a re-entrant exit may already have retired it,
+    /// and a newer reservation must survive. Returns whether anything changed.
+    // VERIFY: registry-rollback-reservation
+    fn rollback_reservation(&self, id: &str, generation: u64, rollback: Rollback) -> bool {
+        let mut state = self.state.lock().unwrap();
+        let Some(index) = state
+            .agents
+            .iter()
+            .position(|agent| agent.record.id == id && agent.generation == generation)
+        else {
+            return false;
         };
-        if self.is_live(id) {
-            return Ok(self.wire(id));
+        // A kill/remove that deferred onto this reservation still has to take
+        // effect: Node's kill/remove of the now-detached entry would have dropped
+        // it. A deferred respawn does not — Node's `respawn` returns false for an
+        // agent that never ran, and `Rollback::Restore` drops the armed config.
+        // VERIFY: wave3-registry-f1-rollback
+        if state.agents[index].pending_lifecycle == Some(PendingLifecycle::Drop) {
+            state.agents.remove(index);
+            return true;
         }
-        let launch = LaunchInput {
-            id: record.id.clone(),
-            title: record.title.clone().unwrap_or_default(),
-            cwd: record.cwd.clone().unwrap_or_default(),
-            model: record.model.clone().unwrap_or_default(),
-            scopes: record.scopes.clone().unwrap_or_default(),
-            permission_mode: record.permission_mode.clone(),
-            extra_args: record.extra_args.clone().unwrap_or_default(),
-            tool: record.tool.clone(),
-            created_at: record.created_at,
-            thread_id: record.thread_id.clone(),
-            prompt: None,
-            mock: record.mock.unwrap_or(false),
-        };
-        let spec = agent_spawn::build_launch(&launch, &self.config.bins, &self.config.parent_env)?;
-        self.ensure_trusted(&launch.cwd);
-        let generation = self.next_generation(id);
-        {
-            let mut state = self.state.lock().unwrap();
-            let agent = state
-                .find_mut(id)
-                .ok_or_else(|| "no such agent".to_owned())?;
-            // Node assigns these fields directly (`:488`), bypassing setStatus,
-            // so no status event is emitted here.
-            agent.live = true;
-            agent.pid = None;
-            agent.generation = generation;
-            agent.ring.clear();
-            agent.ring_bytes = 0;
-            agent.written = 0;
-            agent.decoder_carry.clear();
-            agent.running_since = None;
-            agent.last_output = None;
-            agent.record.status = Status::Starting;
-        }
-        match self.port.spawn(id, generation, spec) {
-            Ok(pid) => {
-                if let Some(agent) = self.state.lock().unwrap().find_mut(id) {
-                    agent.pid = Some(pid);
-                }
+        match rollback {
+            Rollback::Remove => {
+                state.agents.remove(index);
             }
-            Err(error) => {
-                if let Some(agent) = self.state.lock().unwrap().find_mut(id) {
-                    agent.live = false;
-                }
-                return Err(error);
-            }
+            Rollback::Restore(agent) => state.agents[index] = *agent,
         }
-        self.persist()?;
-        self.emit_list();
-        Ok(self.wire(id))
+        true
+    }
+
+    /// Roll a failed build/spawn back and tell the clients. Node never registered
+    /// the entry at all, so the reservation was the only frame that exposed it: the
+    /// `list` is what makes it disappear for everyone, and the persist drops any pin
+    /// `remember_codex_thread` wrote while the reservation existed.
+    // VERIFY: registry-abandon-reservation
+    // VERIFY: wave3-registry-f4-list
+    fn abandon_reservation(&self, id: &str, generation: u64, rollback: Rollback) {
+        if self.rollback_reservation(id, generation, rollback) {
+            let _ = self.persist();
+            self.emit_list();
+        }
     }
 
     // VERIFY: registry-fork
@@ -752,8 +1225,32 @@ impl Registry {
     /// `kill` (`agents.mjs:573-580`): a live agent's pty is killed and its
     /// `onExit` does the removal; a dead/detached entry is dropped here.
     pub fn kill(&self, id: &str) -> Result<(), String> {
-        let Some(live) = self.state.lock().unwrap().find(id).map(|agent| agent.live) else {
-            return Ok(());
+        let live = {
+            let mut state = self.state.lock().unwrap();
+            if state.find(id).is_none() {
+                // A fresh reservation's entry is not published yet. Record the kill
+                // on the reservation instead of reporting success against nothing:
+                // Node's single synchronous turn would have seen the live agent this
+                // `create` is registering.
+                // VERIFY: wave5-task-reg-4
+                if let Some(intent) = state.reserving.get_mut(id) {
+                    intent.kill();
+                }
+                return Ok(());
+            }
+            let agent = state.find_mut(id).expect("the entry was checked above");
+            if !agent.live {
+                false
+            } else if agent.pid.is_none() {
+                // Reserved, pty not spawned yet: a `port.kill` now addresses nothing
+                // and would be lost. Defer it onto the reservation; `launch_reserved`
+                // applies it the moment the pty exists.
+                // VERIFY: wave3-registry-f1-kill
+                defer_lifecycle(agent, PendingLifecycle::Drop);
+                return Ok(());
+            } else {
+                true
+            }
         };
         if live {
             let _ = self.port.kill(id);
@@ -769,13 +1266,33 @@ impl Registry {
     /// `remove` (`agents.mjs:587-594`): unlike `kill`, a live agent is dropped
     /// for good when its pty exits (`removeOnExit`).
     pub fn remove(&self, id: &str) -> Result<(), String> {
-        let Some(live) = self.state.lock().unwrap().find(id).map(|agent| agent.live) else {
-            return Ok(());
+        let live = {
+            let mut state = self.state.lock().unwrap();
+            if state.find(id).is_none() {
+                // Same pre-publish window as `kill`; `remove` additionally arms the
+                // drop, so the entry leaves without a resume banner.
+                // VERIFY: wave5-task-reg-4
+                if let Some(intent) = state.reserving.get_mut(id) {
+                    intent.remove();
+                }
+                return Ok(());
+            }
+            let agent = state.find_mut(id).expect("the entry was checked above");
+            if !agent.live {
+                false
+            } else {
+                agent.remove_on_exit = true;
+                if agent.pid.is_none() {
+                    // Same reservation window as `kill`: the drop is armed now and
+                    // the kill follows the spawn.
+                    // VERIFY: wave3-registry-f1-remove
+                    defer_lifecycle(agent, PendingLifecycle::Drop);
+                    return Ok(());
+                }
+                true
+            }
         };
         if live {
-            if let Some(agent) = self.state.lock().unwrap().find_mut(id) {
-                agent.remove_on_exit = true;
-            }
             let _ = self.port.kill(id);
             return Ok(());
         }
@@ -791,10 +1308,19 @@ impl Registry {
     /// config. Returns false when the agent is not live.
     pub fn respawn(&self, id: &str) -> bool {
         if !self.is_live(id) {
+            // `if (!a?.proc) return false` (`agents.mjs:611`): a detached entry and
+            // an id `create` has not published yet both have no live pty. A fresh
+            // reservation may still be refused, so recording an intent on its
+            // in-flight marker could answer `true` for a respawn the same `create`
+            // then discards; answer `false` and arm nothing, and let a `create` that
+            // does publish stand on its own. Node's single synchronous turn cannot
+            // observe the window either way.
+            // VERIFY: wave5-task-reg-5
+            // VERIFY: wave7-respawn_marker-1
             return false;
         }
         let thread_id = self.remember_codex_thread(id);
-        {
+        let spawned = {
             let mut state = self.state.lock().unwrap();
             let Some(agent) = state.find_mut(id) else {
                 return false;
@@ -802,19 +1328,20 @@ impl Registry {
             if !agent.live {
                 return false;
             }
-            agent.respawn_after_exit = Some(RespawnConfig {
-                title: agent.record.title.clone(),
-                cwd: agent.record.cwd.clone(),
-                model: agent.record.model.clone(),
-                scopes: agent.record.scopes.clone(),
-                permission_mode: agent.record.permission_mode.clone(),
-                extra_args: agent.record.extra_args.clone(),
-                tool: agent.record.tool.clone(),
-                created_at: agent.record.created_at,
-                thread_id: thread_id.filter(|thread| !thread.is_empty()),
-            });
+            agent.respawn_after_exit = Some(respawn_config_for(&agent.record, thread_id));
+            if agent.pid.is_none() {
+                // The config is armed on the reservation; the kill follows the spawn
+                // so the pty that replaces it is the one the client asked to replace.
+                // VERIFY: wave3-registry-f1-respawn
+                defer_lifecycle(agent, PendingLifecycle::Respawn);
+                false
+            } else {
+                true
+            }
+        };
+        if spawned {
+            let _ = self.port.kill(id);
         }
-        let _ = self.port.kill(id);
         true
     }
 
@@ -1130,6 +1657,14 @@ impl Registry {
         created_at: Option<i64>,
         id: &str,
     ) -> Option<String> {
+        // Test probe: `create`'s warm pass must do this walk before it takes
+        // `reserve_lock`, so `try_lock` succeeding is the expected outcome.
+        #[cfg(test)]
+        {
+            if self.reserve_lock.try_lock().is_err() {
+                *self.discovery_under_lock.lock().unwrap() += 1;
+            }
+        }
         let cwd = cwd.filter(|value| !value.is_empty())?;
         let home = self.codex_home();
         created_at
@@ -1229,15 +1764,6 @@ impl Registry {
             .collect();
     }
 
-    /// Per-id generation, incremented before every spawn and never reset
-    /// (`rust-pty-backend.mjs:141-145`).
-    fn next_generation(&self, id: &str) -> u64 {
-        let mut state = self.state.lock().unwrap();
-        let generation = state.generations.entry(id.to_owned()).or_insert(0);
-        *generation += 1;
-        *generation
-    }
-
     /// `getModelRoute(model, tool)` (`server/models.mjs`, `models.rs:308`).
     fn route(&self, model: Option<&str>, tool: Option<&str>) -> Value {
         let model = model.map_or(Value::Null, |model| Value::String(model.to_owned()));
@@ -1283,16 +1809,23 @@ impl Registry {
 
 /// `snapshot()`'s projection (`agents.mjs:126-128`).
 fn wire(agent: &Agent) -> AgentWire {
+    wire_from_record(&agent.record, agent.pid)
+}
+
+/// The same projection from a bare record, for a reservation whose entry a
+/// re-entrant exit already retired during `spawn`.
+// VERIFY: registry-wire-from-record
+fn wire_from_record(record: &AgentRecord, pid: Option<u32>) -> AgentWire {
     AgentWire {
-        id: agent.record.id.clone(),
-        title: agent.record.title.clone(),
-        cwd: agent.record.cwd.clone(),
-        status: agent.record.status,
-        pid: agent.pid,
-        created_at: agent.record.created_at,
-        model: agent.record.model.clone(),
-        scopes: agent.record.scopes.clone(),
-        tool: agent.record.tool.clone(),
+        id: record.id.clone(),
+        title: record.title.clone(),
+        cwd: record.cwd.clone(),
+        status: record.status,
+        pid,
+        created_at: record.created_at,
+        model: record.model.clone(),
+        scopes: record.scopes.clone(),
+        tool: record.tool.clone(),
     }
 }
 
@@ -1613,7 +2146,14 @@ mod tests {
         writes: Mutex<Vec<(String, Vec<u8>)>>,
         resizes: Mutex<Vec<(String, u16, u16)>>,
         kills: Mutex<Vec<String>>,
+        /// Ids whose `spawn` has returned, i.e. a pty exists for them.
+        spawned: Mutex<Vec<String>>,
+        /// `kill` calls that addressed an id whose spawn had not returned yet.
+        kill_without_pty: AtomicUsize,
         fail_spawn: Mutex<Option<String>>,
+        /// Fail *after* the spawn hook, so a test can emit output/exit into the
+        /// registry and still exercise the failed-spawn rollback.
+        fail_spawn_after_hook: Mutex<Option<String>>,
         next_pid: AtomicU32,
         on_spawn: Mutex<Option<Arc<dyn Fn(&str, u64) + Send + Sync>>>,
     }
@@ -1628,6 +2168,15 @@ mod tests {
 
         fn set_fail_spawn(&self, message: &str) {
             *self.fail_spawn.lock().unwrap() = Some(message.to_owned());
+        }
+
+        fn set_fail_spawn_after_hook(&self, message: &str) {
+            *self.fail_spawn_after_hook.lock().unwrap() = Some(message.to_owned());
+        }
+
+        fn clear_spawn_failure(&self) {
+            *self.fail_spawn.lock().unwrap() = None;
+            *self.fail_spawn_after_hook.lock().unwrap() = None;
         }
 
         fn on_spawn(&self, hook: Arc<dyn Fn(&str, u64) + Send + Sync>) {
@@ -1659,6 +2208,10 @@ mod tests {
         fn kills(&self) -> Vec<String> {
             self.kills.lock().unwrap().clone()
         }
+
+        fn kill_without_pty(&self) -> usize {
+            self.kill_without_pty.load(Ordering::SeqCst)
+        }
     }
 
     impl PtyPort for FakePort {
@@ -1674,6 +2227,10 @@ mod tests {
             if let Some(hook) = self.on_spawn.lock().unwrap().clone() {
                 hook(id, generation);
             }
+            if let Some(message) = self.fail_spawn_after_hook.lock().unwrap().clone() {
+                return Err(message);
+            }
+            self.spawned.lock().unwrap().push(id.to_owned());
             Ok(self.next_pid.fetch_add(1, Ordering::SeqCst))
         }
 
@@ -1694,6 +2251,15 @@ mod tests {
         }
 
         fn kill(&self, id: &str) -> Result<(), String> {
+            if !self
+                .spawned
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|spawned| spawned == id)
+            {
+                self.kill_without_pty.fetch_add(1, Ordering::SeqCst);
+            }
             self.kills.lock().unwrap().push(id.to_owned());
             Err("kill rejected".to_owned())
         }
@@ -1760,6 +2326,48 @@ mod tests {
             generation,
             exit_code: code,
         });
+    }
+
+    fn set_interleave(registry: &Registry, hook: InterleaveHook) {
+        *registry.interleave.lock().unwrap() = Some(hook);
+    }
+
+    /// Deterministic interleave for the duplicate guard: the caller that passed
+    /// the guard waits until a second caller has entered the registry, so both
+    /// have read the guard before either registers. Every wait is bounded, so a
+    /// broken implementation fails the test instead of hanging the suite.
+    #[derive(Default)]
+    struct InterleaveGate {
+        state: Mutex<GateState>,
+        changed: std::sync::Condvar,
+    }
+
+    #[derive(Default)]
+    struct GateState {
+        entered: usize,
+    }
+
+    impl InterleaveGate {
+        fn hook(self: &Arc<Self>) -> InterleaveHook {
+            let gate = Arc::clone(self);
+            Arc::new(move |_id, stage| match stage {
+                InterleaveStage::Enter => {
+                    gate.state.lock().unwrap().entered += 1;
+                    gate.changed.notify_all();
+                }
+                InterleaveStage::Reserved => {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+                    let mut state = gate.state.lock().unwrap();
+                    while state.entered < 2 {
+                        let now = std::time::Instant::now();
+                        if now >= deadline {
+                            break;
+                        }
+                        state = gate.changed.wait_timeout(state, deadline - now).unwrap().0;
+                    }
+                }
+            })
+        }
     }
 
     fn write_codex_rollout(fixture: &Fixture, cwd: &str, timestamp_ms: i64, thread_id: &str) {
@@ -1900,7 +2508,746 @@ mod tests {
         assert_eq!(port.spawn_count(), 1);
     }
 
-    // agents.test.mjs:309-320 — a mismatched tool/model pairing never spawns.
+    /// Run `call` on two threads released together and collect both results.
+    /// Bounded, so a wedged registry fails the test instead of the suite.
+    fn race_two<T, F>(call: F) -> Vec<Result<T, String>>
+    where
+        T: Send,
+        F: Fn() -> Result<T, String> + Sync,
+    {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let barrier = std::sync::Barrier::new(2);
+        std::thread::scope(|scope| {
+            for _ in 0..2 {
+                let tx = tx.clone();
+                let barrier = &barrier;
+                let call = &call;
+                scope.spawn(move || {
+                    barrier.wait();
+                    let _ = tx.send(call());
+                });
+            }
+            drop(tx);
+            (0..2)
+                .map(|_| {
+                    rx.recv_timeout(std::time::Duration::from_secs(30))
+                        .expect("both callers finish")
+                })
+                .collect()
+        })
+    }
+
+    // Regression: the duplicate guard and the entry insert are one reservation,
+    // so two racers cannot both read `agents.get(id)` as absent before either
+    // registers (Node's synchronous guard/`set` pair).
+    #[test]
+    fn concurrent_duplicate_create_spawns_once() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        set_interleave(&registry, Arc::new(InterleaveGate::default()).hook());
+
+        let results = race_two(|| registry.create(create_input(&fixture, "dup", "claude")));
+
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert!(
+            results
+                .iter()
+                .any(|result| result.as_ref().err().map(String::as_str)
+                    == Some("session id already in use")),
+            "{results:?}"
+        );
+        assert_eq!(port.spawn_count(), 1);
+        let snapshot = registry.snapshot();
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].id, "dup");
+        assert!(snapshot[0].pid.is_some());
+    }
+
+    // The codex-owner check sits inside the same reservation, so a concurrent
+    // create cannot register an owner between the check and the insert.
+    #[test]
+    fn concurrent_duplicate_codex_create_spawns_once() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        set_interleave(&registry, Arc::new(InterleaveGate::default()).hook());
+
+        let results = race_two(|| registry.create(codex_resume_input(&fixture, "dup-codex")));
+
+        assert_eq!(
+            results.iter().filter(|result| result.is_ok()).count(),
+            1,
+            "{results:?}"
+        );
+        assert_eq!(port.spawn_count(), 1);
+        assert_eq!(registry.snapshot().len(), 1);
+    }
+
+    // Regression: two resumes of one detached id must attach one pty, not two
+    // (the loser of the reservation echoes the live entry, like Node's `return a`).
+    #[test]
+    fn concurrent_duplicate_reattach_resumes_once() {
+        let fixture = Fixture::new();
+        let dead = "20000000-bbbb-cccc-dddd-200000000021";
+        fixture.write_agents(vec![json!({
+            "id": dead,
+            "title": "deadname",
+            "cwd": fixture.repo(),
+            "createdAt": fixture.now(),
+            "model": "claude",
+            "scopes": [],
+        })]);
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        registry.load().unwrap();
+        set_interleave(&registry, Arc::new(InterleaveGate::default()).hook());
+
+        let results = race_two(|| registry.reattach(dead));
+
+        assert_eq!(port.spawn_count(), 1, "{results:?}");
+        let entries: Vec<AgentWire> = registry
+            .snapshot()
+            .into_iter()
+            .filter(|agent| agent.id == dead)
+            .collect();
+        assert_eq!(entries.len(), 1);
+        let pid = entries[0]
+            .pid
+            .expect("the resumed entry carries the spawn pid");
+        for result in &results {
+            let wire = result
+                .as_ref()
+                .expect("reattaching a detached id succeeds")
+                .as_ref()
+                .expect("the entry is registered");
+            assert_eq!(wire.id, dead);
+            // The loser may read the reservation before the pid is stamped; it
+            // must never name a different pty.
+            assert!(wire.pid.is_none() || wire.pid == Some(pid), "{wire:?}");
+        }
+    }
+
+    // A child that dies inside `spawn` runs the exit path against the reserved
+    // entry; `create` must still answer for what it launched instead of panicking,
+    // and the answer must carry the terminal state the exit path recorded rather
+    // than the reservation's `starting`.
+    #[test]
+    fn a_reentrant_exit_during_spawn_answers_with_the_launched_agent() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let weak = Arc::downgrade(&registry);
+        port.on_spawn(Arc::new(move |id, generation| {
+            let registry = weak.upgrade().expect("registry outlives the spawn");
+            registry.on_pty_event(PtyEvent::Exit {
+                id: id.to_owned(),
+                generation,
+                exit_code: Some(0),
+            });
+        }));
+
+        let agent = registry
+            .create(create_input(&fixture, "instant-exit", "claude"))
+            .expect("the exit path retired the entry, not the create");
+
+        assert_eq!(agent.id, "instant-exit");
+        assert_eq!(agent.pid, Some(1000));
+        assert_eq!(
+            agent.status,
+            Status::Exited,
+            "the entry was retired by the exit path, so `starting` would be a lie"
+        );
+        assert_eq!(port.spawn_count(), 1);
+        assert!(
+            registry.snapshot().is_empty(),
+            "the exit path already retired the entry"
+        );
+    }
+
+    // Early output is buffered on the reservation; a failed spawn rolls the
+    // reservation back, so neither the entry nor a second owner survives.
+    #[test]
+    fn a_reentrant_output_before_a_failed_spawn_leaves_no_entry() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let outputs = record_outputs(&registry);
+        let weak = Arc::downgrade(&registry);
+        port.on_spawn(Arc::new(move |id, generation| {
+            let registry = weak.upgrade().expect("registry outlives the spawn");
+            registry.on_pty_event(PtyEvent::Output {
+                id: id.to_owned(),
+                generation,
+                bytes: b"EARLY".to_vec(),
+            });
+        }));
+        port.set_fail_spawn_after_hook("spawn exploded");
+
+        assert_eq!(
+            registry
+                .create(create_input(&fixture, "early-fail", "claude"))
+                .unwrap_err(),
+            "spawn exploded"
+        );
+        assert!(registry.snapshot().is_empty());
+        assert!(!registry.is_live("early-fail"));
+        assert_eq!(port.spawn_count(), 1);
+        assert_eq!(
+            *outputs.lock().unwrap(),
+            [("early-fail".to_owned(), "EARLY".to_owned())]
+        );
+    }
+
+    // Generation-safe rollback: the exit path already retired the reservation, so
+    // the failed spawn must not resurrect it.
+    #[test]
+    fn a_reentrant_exit_then_failed_spawn_does_not_resurrect_the_entry() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let weak = Arc::downgrade(&registry);
+        port.on_spawn(Arc::new(move |id, generation| {
+            let registry = weak.upgrade().expect("registry outlives the spawn");
+            registry.on_pty_event(PtyEvent::Exit {
+                id: id.to_owned(),
+                generation,
+                exit_code: Some(0),
+            });
+        }));
+        port.set_fail_spawn_after_hook("spawn exploded");
+
+        assert_eq!(
+            registry
+                .create(create_input(&fixture, "exit-then-fail", "claude"))
+                .unwrap_err(),
+            "spawn exploded"
+        );
+        assert!(registry.snapshot().is_empty());
+        assert!(!registry.is_live("exit-then-fail"));
+    }
+
+    // Node's `reattach` throws from `spawnPty` before touching the entry, so a
+    // failed resume must leave the detached record exactly resumable.
+    #[test]
+    fn a_failed_resume_restores_the_detached_entry() {
+        let fixture = Fixture::new();
+        let dead = "20000000-bbbb-cccc-dddd-200000000022";
+        fixture.write_agents(vec![json!({
+            "id": dead,
+            "title": "kept",
+            "cwd": fixture.repo(),
+            "createdAt": fixture.now(),
+            "model": "claude",
+            "scopes": ["demo"],
+        })]);
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        registry.load().unwrap();
+        port.set_fail_spawn("spawn exploded");
+
+        assert_eq!(registry.reattach(dead).unwrap_err(), "spawn exploded");
+        assert!(!registry.is_live(dead));
+        assert_eq!(registry.get_status(dead), Some(Status::Detached));
+        let record = registry.record(dead).expect("the detached entry survives");
+        assert_eq!(record.title.as_deref(), Some("kept"));
+        assert_eq!(record.scopes, Some(vec!["demo".to_owned()]));
+
+        port.clear_spawn_failure();
+        let resumed = registry
+            .reattach(dead)
+            .unwrap()
+            .expect("resume after the failure");
+        assert!(resumed.pid.is_some());
+        assert_eq!(port.spawn_count(), 1);
+    }
+
+    // The rollback is generation-guarded: it may only undo the reservation it
+    // made, never an entry a later generation has since registered.
+    #[test]
+    fn rollback_only_touches_the_generation_it_reserved() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port);
+        registry
+            .create(create_input(&fixture, "keep", "claude"))
+            .unwrap();
+
+        registry.rollback_reservation("keep", 0, Rollback::Remove);
+        assert!(
+            registry.is_live("keep"),
+            "a stale generation must not remove the live entry"
+        );
+
+        registry.rollback_reservation("keep", 1, Rollback::Remove);
+        assert!(registry.snapshot().is_empty());
+    }
+
+    /// `port.on_spawn` hook that calls `op` on the reserved id while `spawn` is
+    /// still running — the window where the entry is live but has no pty.
+    fn lifecycle_during_spawn(
+        registry: &Arc<Registry>,
+        port: &Arc<FakePort>,
+        op: Arc<dyn Fn(&Registry, &str) + Send + Sync>,
+    ) {
+        let weak = Arc::downgrade(registry);
+        port.on_spawn(Arc::new(move |id, _generation| {
+            let registry = weak.upgrade().expect("registry outlives the spawn");
+            op(&registry, id);
+        }));
+    }
+
+    // A kill that lands while the reservation has no pty yet must not be lost:
+    // `launch_reserved` issues it once the spawn has returned, so the process that
+    // was just created is the one that dies (Node's single turn cannot land here).
+    #[test]
+    fn kill_during_spawn_kills_the_pty_once_it_exists() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        lifecycle_during_spawn(
+            &registry,
+            &port,
+            Arc::new(|registry: &Registry, id: &str| {
+                registry.kill(id).unwrap();
+            }),
+        );
+
+        let agent = registry
+            .create(create_input(&fixture, "kill-mid-spawn", "claude"))
+            .unwrap();
+        assert_eq!(agent.id, "kill-mid-spawn");
+        assert_eq!(port.kills(), ["kill-mid-spawn"]);
+        assert_eq!(
+            port.kill_without_pty(),
+            0,
+            "the kill was issued before the pty existed"
+        );
+        assert!(registry.is_live("kill-mid-spawn"));
+        exit(&registry, "kill-mid-spawn", 1, Some(0));
+        assert!(registry.snapshot().is_empty());
+    }
+
+    // `remove` in the same window arms `removeOnExit` and defers the kill; the
+    // entry leaves with its pty, exactly as Node's `remove` of a live agent does.
+    #[test]
+    fn remove_during_spawn_drops_the_entry_when_its_pty_exits() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        lifecycle_during_spawn(
+            &registry,
+            &port,
+            Arc::new(|registry: &Registry, id: &str| {
+                registry.remove(id).unwrap();
+            }),
+        );
+
+        registry
+            .create(create_input(&fixture, "remove-mid-spawn", "claude"))
+            .unwrap();
+        assert_eq!(port.kills(), ["remove-mid-spawn"]);
+        assert_eq!(port.kill_without_pty(), 0);
+        exit(&registry, "remove-mid-spawn", 1, Some(0));
+        assert!(registry.snapshot().is_empty());
+        assert!(fixture.read_agents().agents.is_empty());
+    }
+
+    // A respawn in the same window arms the config and defers the kill, so the
+    // pty that is killed is the fresh one and the exit resumes the same id.
+    #[test]
+    fn respawn_during_spawn_kills_the_fresh_pty_and_resumes() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        lifecycle_during_spawn(
+            &registry,
+            &port,
+            Arc::new(|registry: &Registry, id: &str| {
+                assert!(registry.respawn(id));
+            }),
+        );
+
+        registry
+            .create(create_input(&fixture, "respawn-mid-spawn", "claude"))
+            .unwrap();
+        assert_eq!(port.kills(), ["respawn-mid-spawn"]);
+        assert_eq!(port.kill_without_pty(), 0);
+        exit(&registry, "respawn-mid-spawn", 1, Some(0));
+        let resumed = registry
+            .snapshot()
+            .into_iter()
+            .find(|agent| agent.id == "respawn-mid-spawn")
+            .expect("onExit respawned the same agent");
+        assert!(resumed.pid.is_some());
+        assert!(registry.is_live("respawn-mid-spawn"));
+        assert_eq!(port.spawn_count(), 2);
+    }
+
+    /// One-shot `InterleaveStage::Reserved` hook: the pre-publish window, after the
+    /// duplicate guard and before `reserve_fresh` registers the entry. The hook also
+    /// fires for a respawn-triggered `create`, which the one-shot guard ignores.
+    fn pre_publish_hook(registry: &Arc<Registry>, op: Arc<dyn Fn(&Registry, &str) + Send + Sync>) {
+        let weak = Arc::downgrade(registry);
+        let fired = Arc::new(AtomicUsize::new(0));
+        set_interleave(
+            registry,
+            Arc::new(move |id: &str, stage| {
+                if stage == InterleaveStage::Reserved && fired.swap(1, Ordering::SeqCst) == 0 {
+                    let registry = weak.upgrade().expect("registry outlives the create");
+                    assert!(
+                        registry.snapshot().is_empty(),
+                        "the entry must not be published yet"
+                    );
+                    op(&registry, id);
+                }
+            }),
+        );
+    }
+
+    // VERIFY: wave5-task-reg-7
+    #[test]
+    fn lifecycle_before_the_entry_is_published_is_applied_to_it() {
+        // kill: the deferred kill is issued once the pty exists, then the exit drops
+        // the entry. Without the reservation marker the call would report success
+        // against no entry and the spawned process would keep running.
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        pre_publish_hook(
+            &registry,
+            Arc::new(|registry: &Registry, id: &str| {
+                registry.kill(id).unwrap();
+            }),
+        );
+        registry
+            .create(create_input(&fixture, "kill-pre-publish", "claude"))
+            .unwrap();
+        assert_eq!(port.kills(), ["kill-pre-publish"]);
+        assert_eq!(port.kill_without_pty(), 0);
+        exit(&registry, "kill-pre-publish", 1, Some(0));
+        assert!(registry.snapshot().is_empty());
+
+        // remove: same window, but the entry leaves without a resume banner.
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        pre_publish_hook(
+            &registry,
+            Arc::new(|registry: &Registry, id: &str| {
+                registry.remove(id).unwrap();
+            }),
+        );
+        registry
+            .create(create_input(&fixture, "remove-pre-publish", "claude"))
+            .unwrap();
+        assert_eq!(port.kills(), ["remove-pre-publish"]);
+        assert_eq!(port.kill_without_pty(), 0);
+        exit(&registry, "remove-pre-publish", 1, Some(0));
+        assert!(registry.snapshot().is_empty());
+        assert!(fixture.read_agents().agents.is_empty());
+    }
+
+    // Node's `respawn` is `if (!a?.proc) return false` (`agents.mjs:611`): while
+    // `create` is still validating a fresh id there is no live pty, so the answer is
+    // false and nothing is armed even when the create goes on to publish. Answering
+    // true and folding the intent would report a respawn the create can still discard.
+    // VERIFY: wave7-respawn_marker-3
+    #[test]
+    fn respawn_is_false_before_a_fresh_entry_is_published() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        pre_publish_hook(
+            &registry,
+            Arc::new(|registry: &Registry, id: &str| {
+                assert!(!registry.respawn(id));
+            }),
+        );
+        registry
+            .create(create_input(&fixture, "respawn-pre-publish", "claude"))
+            .unwrap();
+        assert!(port.kills().is_empty(), "a false answer must not kill");
+        exit(&registry, "respawn-pre-publish", 1, Some(0));
+        assert!(
+            registry.snapshot().is_empty(),
+            "no respawn was armed, so the exit is not resumed"
+        );
+        assert_eq!(port.spawn_count(), 1);
+    }
+
+    // Same window, but the reservation is refused (`reserve_fresh_checked` fails and
+    // drops the marker): the answer already given must not claim a respawn, and the
+    // id must stay unregistered afterwards.
+    // VERIFY: wave7-respawn_marker-4
+    #[test]
+    fn respawn_is_false_when_the_fresh_reservation_is_refused() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        pre_publish_hook(
+            &registry,
+            Arc::new(|registry: &Registry, id: &str| {
+                assert!(!registry.respawn(id));
+            }),
+        );
+        let missing = fixture.path("missing-repo");
+        let error = registry
+            .create(CreateAgent {
+                cwd: Some(missing.to_string_lossy().into_owned()),
+                model: Some("claude".to_owned()),
+                session_id: Some("refused-pre-publish".to_owned()),
+                ..CreateAgent::default()
+            })
+            .unwrap_err();
+        assert!(error.starts_with("working directory does not exist: "));
+        assert!(port.kills().is_empty());
+        assert_eq!(port.spawn_count(), 0);
+        assert!(registry.snapshot().is_empty());
+        assert!(!registry.respawn("refused-pre-publish"));
+    }
+
+    // A detached entry being resumed has no live pty either: Node answers false and
+    // arms nothing, unlike the pre-publish marker the fresh path used to publish.
+    // VERIFY: wave7-respawn_marker-5
+    #[test]
+    fn respawn_is_false_for_a_detached_entry_being_resumed() {
+        let fixture = Fixture::new();
+        let dead = "20000000-bbbb-cccc-dddd-200000000026";
+        fixture.write_agents(vec![json!({
+            "id": dead,
+            "title": "deadname",
+            "cwd": fixture.repo(),
+            "createdAt": fixture.now(),
+            "model": "claude",
+            "scopes": [],
+        })]);
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        registry.load().unwrap();
+        let weak = Arc::downgrade(&registry);
+        set_interleave(
+            &registry,
+            Arc::new(move |id: &str, stage| {
+                if stage == InterleaveStage::Reserved {
+                    assert!(
+                        !weak
+                            .upgrade()
+                            .expect("registry outlives the create")
+                            .respawn(id),
+                        "a detached agent has no live pty"
+                    );
+                }
+            }),
+        );
+
+        registry
+            .create(CreateAgent {
+                cwd: Some(fixture.repo()),
+                model: Some("claude".to_owned()),
+                session_id: Some(dead.to_owned()),
+                ..CreateAgent::default()
+            })
+            .unwrap();
+        assert!(port.kills().is_empty());
+        assert_eq!(port.spawn_count(), 1, "the resume itself must still spawn");
+        assert!(registry.is_live(dead));
+    }
+
+    // A kill deferred onto a reservation survives the spawn failing: the entry is
+    // dropped rather than restored as detached, as Node's kill of a detached id
+    // would have deleted it.
+    #[test]
+    fn a_kill_deferred_by_a_failed_resume_drops_the_detached_entry() {
+        let fixture = Fixture::new();
+        let dead = "20000000-bbbb-cccc-dddd-200000000024";
+        fixture.write_agents(vec![json!({
+            "id": dead,
+            "title": "deadname",
+            "cwd": fixture.repo(),
+            "createdAt": fixture.now(),
+            "model": "claude",
+            "scopes": [],
+        })]);
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        registry.load().unwrap();
+        lifecycle_during_spawn(
+            &registry,
+            &port,
+            Arc::new(|registry: &Registry, id: &str| {
+                registry.kill(id).unwrap();
+            }),
+        );
+        port.set_fail_spawn_after_hook("spawn exploded");
+
+        assert_eq!(registry.reattach(dead).unwrap_err(), "spawn exploded");
+        assert!(
+            registry.snapshot().is_empty(),
+            "the deferred kill applies to the entry the rollback would restore"
+        );
+        assert!(!registry.is_live(dead));
+        assert!(
+            port.kills().is_empty(),
+            "the pty never existed, so no kill was issued"
+        );
+    }
+
+    // Node never registered an unspawned entry, so this registry's reservation is
+    // the only frame that exposes one. A failed spawn must emit a `list` telling
+    // clients it vanished, and must not leave it in `agents.json`.
+    #[test]
+    fn a_failed_spawn_emits_a_list_for_the_vanished_reservation() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let lists = record_lists(&registry);
+        port.set_fail_spawn("spawn exploded");
+
+        assert_eq!(
+            registry
+                .create(create_input(&fixture, "no-phantom", "claude"))
+                .unwrap_err(),
+            "spawn exploded"
+        );
+        assert_eq!(
+            lists.lock().unwrap().last().map(Vec::len),
+            Some(0),
+            "clients must learn the reservation vanished"
+        );
+        assert!(fixture.read_agents().agents.is_empty());
+    }
+
+    // A create that decided to resume a detached id must not report "already in
+    // use" when a concurrent kill removed that entry: Node's `agents.get(id)` is
+    // null by then, so `create` takes the fresh-spawn path (`agents.mjs:421-431`).
+    #[test]
+    fn create_starts_fresh_when_the_detached_entry_vanishes_mid_decision() {
+        let fixture = Fixture::new();
+        let dead = "20000000-bbbb-cccc-dddd-200000000025";
+        fixture.write_agents(vec![json!({
+            "id": dead,
+            "title": "deadname",
+            "cwd": fixture.repo(),
+            "createdAt": fixture.now(),
+            "model": "claude",
+            "scopes": [],
+        })]);
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        registry.load().unwrap();
+        let weak = Arc::downgrade(&registry);
+        set_interleave(
+            &registry,
+            Arc::new(move |id: &str, stage| {
+                if stage == InterleaveStage::Reserved {
+                    weak.upgrade()
+                        .expect("registry outlives the create")
+                        .kill(id)
+                        .unwrap();
+                }
+            }),
+        );
+
+        let agent = registry
+            .create(CreateAgent {
+                cwd: Some(fixture.repo()),
+                model: Some("claude".to_owned()),
+                session_id: Some(dead.to_owned()),
+                ..CreateAgent::default()
+            })
+            .unwrap();
+        assert_eq!(agent.id, dead);
+        assert_eq!(port.spawn_count(), 1);
+        assert!(registry.is_live(dead));
+    }
+
+    // The transcript liveness contract (`isLiveSession`) is cwd-aware: a thread
+    // live in one repo must not answer as live for a row in another
+    // (`agents.mjs:140-156`). The duplicate-resume guard keeps its cwd-agnostic
+    // semantics (documented bug-O1 divergence).
+    #[test]
+    fn codex_owner_for_liveness_filters_by_working_directory() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port);
+        let agent_id = "90000000-aaaa-bbbb-cccc-90000000000b";
+        let thread_id = "dddddddd-eeee-ffff-0000-999999999999";
+        registry
+            .create(create_input(&fixture, agent_id, "claude"))
+            .unwrap();
+        mark_live_codex(&registry, agent_id, Some(thread_id));
+        let other = fixture.path("other");
+        fs::create_dir_all(&other).unwrap();
+        let other = other.to_string_lossy().into_owned();
+
+        assert_eq!(
+            registry
+                .codex_owner_for_thread_in_cwd(thread_id, Some(fixture.repo().as_str()))
+                .as_deref(),
+            Some(agent_id)
+        );
+        assert_eq!(
+            registry.codex_owner_for_thread_in_cwd(thread_id, Some(other.as_str())),
+            None
+        );
+        assert_eq!(
+            registry
+                .codex_owner_for_thread_in_cwd(thread_id, None)
+                .as_deref(),
+            Some(agent_id),
+            "no cwd means no filter, like Node's null wantCwd"
+        );
+        assert_eq!(
+            registry
+                .codex_owner_for_thread_in_cwd(thread_id, Some(""))
+                .as_deref(),
+            Some(agent_id),
+            "an empty cwd is falsy in Node"
+        );
+        assert_eq!(
+            registry.codex_owner_for_thread(thread_id).as_deref(),
+            Some(agent_id)
+        );
+    }
+
+    // The rollout-tree walk of Node's codex-owner check runs outside the
+    // reservation: `create` warms the pins first, so a concurrent create/reattach
+    // does not queue behind a `~/.codex/sessions` scan, and the in-lock check only
+    // compares the ids it recorded.
+    #[test]
+    fn codex_owner_discovery_runs_outside_the_reservation_lock() {
+        let fixture = Fixture::new();
+        let port = FakePort::new();
+        let registry = fixture.registry(port.clone());
+        let first = "90000000-aaaa-bbbb-cccc-90000000000c";
+        registry
+            .create(codex_resume_input(&fixture, first))
+            .unwrap();
+        write_codex_rollout(
+            &fixture,
+            &fixture.repo(),
+            fixture.now() + 1000,
+            "dddddddd-eeee-ffff-0000-aaaaaaaaaaaa",
+        );
+        *registry.discovery_under_lock.lock().unwrap() = 0;
+
+        registry
+            .create(codex_resume_input(&fixture, "second-codex"))
+            .unwrap();
+
+        assert_eq!(
+            *registry.discovery_under_lock.lock().unwrap(),
+            0,
+            "rollout-tree discovery ran with reserve_lock held"
+        );
+        assert_eq!(port.spawn_count(), 2);
+    }
+
     #[test]
     fn create_rejects_a_codex_tool_paired_with_a_claude_model() {
         let fixture = Fixture::new();
