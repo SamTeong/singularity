@@ -8,6 +8,7 @@ import { promisify } from 'node:util';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as reg from './agents.mjs';
+import { SHADOW } from './app-dir.mjs';
 import { isClaudeModel, isCodexModel } from './models.mjs';
 import { statsFor } from './stats.mjs';
 
@@ -58,7 +59,7 @@ const GIT_TIMEOUT_MS = Number(process.env.SING_GIT_TIMEOUT_MS) || 10_000;
 const GIT_BIN = process.env.GIT_BIN || 'git';
 const GIT_OPTS = {
   encoding: 'utf8', timeout: GIT_TIMEOUT_MS, killSignal: 'SIGKILL',
-  env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: 'echo' },
+  env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never', GIT_ASKPASS: 'echo', ...(SHADOW && { GIT_OPTIONAL_LOCKS: '0' }) },
 };
 
 // Async — used by every request-path caller so a slow/hung git process can't
@@ -150,6 +151,7 @@ export function initTasks(log) {
       log?.info({ tasks: tasks.size, history: history.length }, 'loaded tasks.json');
     }
   } catch (e) { log?.warn({ err: e.message }, 'tasks.json load failed'); }
+  if (SHADOW) return; // read-only: no recovery, sweep, interval or listeners
   // Crash between `git worktree add` and persist leaves an orphaned worktree
   // dir with no task record — flag it (log-only, no auto-delete).
   if (existsSync(WORKTREE_ROOT)) {

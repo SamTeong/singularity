@@ -19,7 +19,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
+import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE, SHADOW } from './app-dir.mjs';
 import { fetchExternal, retryAfterMs } from './external-fetch.mjs';
 import { newestSnapshotArchive } from './usage-history.mjs';
 
@@ -116,6 +116,7 @@ export function appendOllamaHistory(data) {
 }
 
 function appendJsonl(file, record) {
+  if (SHADOW) return false;
   try {
     mkdirSync(dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
@@ -211,6 +212,7 @@ function firstJsonlLine(file) {
 // next append; otherwise the checked month is cached: one head read a month.
 let claudeHistoryMonth = null;
 export function rotateClaudeHistory(now = new Date(), { link = linkSync, unlink = unlinkSync } = {}) {
+  if (SHADOW) return;
   const month = ym(now);
   if (claudeHistoryMonth === month) return;
   let head;
@@ -393,6 +395,7 @@ export async function scrapeOllamaOnce(pw, headless) {
 
 let ollamaBrowserInflight = null;
 function fetchOllamaBrowser() {
+  if (SHADOW) return Promise.resolve({ ok: false, error: 'shadow mode' });
   if (ollamaBrowserInflight) return ollamaBrowserInflight;
   ollamaBrowserInflight = (async () => {
     const pw = await import('playwright-core').catch(() => null);
@@ -589,6 +592,7 @@ let lastAuthRefresh = 0;
 // a plain write is the last resort because losing a just-rotated refresh token
 // costs the user a full re-login, which is worse than a non-atomic write.
 function persistOauth(fresh) {
+  if (SHADOW) return;
   let file = {};
   try { file = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
   file.claudeAiOauth = { ...file.claudeAiOauth, ...fresh };
@@ -633,6 +637,7 @@ export async function refreshOauthGrant() {
 // Throttled as a pair so a genuinely signed-out user doesn't get a request +
 // spawn on every usage pull.
 export async function refreshClaudeAuth() {
+  if (SHADOW) return false; // the grant rotates the refresh token shared with the primary daemon
   if (Date.now() - lastAuthRefresh < AUTH_REFRESH_THROTTLE_MS) return false;
   lastAuthRefresh = Date.now();
   if (await refreshOauthGrant()) return true;
@@ -1166,6 +1171,7 @@ function scheduleResetRefreshes(result) {
 // network floor as the sampler ticks — not the user's own Refresh press.
 export function initUsageAutoRefresh(bus) {
   usageBus = bus;
+  if (SHADOW) return; // read-only: no idle-triggered pulls, no history sampler
   bus.on('status', ({ status }) => {
     if (status !== 'idle') return;
     clearTimeout(idleTimer);

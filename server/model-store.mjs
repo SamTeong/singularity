@@ -11,7 +11,7 @@
 // migrate-state.mjs inlines its own.
 import { readFileSync, writeFileSync, renameSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { STATE_DIR } from './app-dir.mjs';
+import { STATE_DIR, SHADOW } from './app-dir.mjs';
 
 const STATE_FILE = join(STATE_DIR, 'models.json');
 
@@ -107,7 +107,7 @@ export function getModels() {
     if (r.ok) return r.state;
   } catch { /* absent or corrupt — fall through to the seed */ }
   const seed = seedDoc();
-  if (!existsSync(STATE_FILE)) {
+  if (!SHADOW && !existsSync(STATE_FILE)) {
     try { persist(seed); } catch { /* read-only state dir: still serve the seed */ }
   }
   return seed;
@@ -149,6 +149,7 @@ export function getSummariserModel() {
 // { id, group } for the configured summariser, or null when unset or when the
 // id no longer resolves to an entry in the store.
 export function getSummariser() {
+  if (SHADOW) return null; // no LLM spawn: callers take the deterministic path
   const { summariserModel, models } = getModels();
   if (!summariserModel) return null;
   const m = models.find((m) => m.id === summariserModel);
