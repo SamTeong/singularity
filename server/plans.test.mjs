@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, symlinkSync } from 'node:fs';
 import { realpath } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import Fastify from 'fastify';
 
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
@@ -16,7 +16,8 @@ mkdirSync(join(ROOT, SID), { recursive: true });
 mkdirSync(join(ROOT, 'outside'), { recursive: true });
 
 test('Plans root is configured at import and resolver keeps SID and realpath containment checks', async () => {
-  assert.equal(PLAN_ROOT, await realpath(ROOT));
+  // PLAN_ROOT is only resolve()d; realpath would expand 8.3 temp names (RUNNER~1) on CI.
+  assert.equal(PLAN_ROOT, resolve(ROOT));
   const valid = await resolveSessionDirectory(SID);
   assert.deepEqual(valid, { ok: true, dir: await realpath(join(ROOT, SID)) });
   assert.deepEqual(await resolveSessionDirectory('not-a-sid!'), { ok: false, error: 'bad sid' });
