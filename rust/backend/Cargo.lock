@@ -1564,7 +1564,7 @@ checksum = "3a219298ac11a56ea9a6d2120044824d6f01aeb034955e7af7bc16858527deea"
 
 [[package]]
 name = "singularity-backend"
-version = "0.1.0"
+version = "2.0.0"
 dependencies = [
  "axum",
  "futures-util",
