@@ -75,9 +75,9 @@ function richTranscript(cwd) {
   ];
 }
 
-// mtime drives both list order and the "running" pill (a session touched
-// within 30s reads as a live external session) — spaced a minute apart, oldest
-// first, so freshly-seeded sessions never all read as concurrently running.
+// mtime drives list order and "recent activity" (activityRecent, inside
+// RUNNING_MS); the "running" pill is processLive, not mtime — spaced a minute
+// apart, oldest first, so freshly-seeded sessions never all read as recent.
 export function seedSessions() {
   const sessions = { [PROJECT_A]: [], [PROJECT_B]: [] };
   for (let i = 0; i < SESSION_COUNT_A; i++) {

@@ -19,7 +19,7 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
+import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE, SHADOW } from './app-dir.mjs';
 import { fetchExternal, retryAfterMs } from './external-fetch.mjs';
 import { newestSnapshotArchive } from './usage-history.mjs';
 
@@ -75,8 +75,9 @@ export function parseOllamaHtml(html) {
 // new maths lives here. `models` is the weekly window's per-model requests (from
 // the API, when it reports any). fetched_at is LOCAL time (the skill parses it as
 // local), zero-padded YYYY-MM-DD HH:MM:SS, no timezone suffix.
-// ponytail: the file only ever grows (~10KB/day at 48 samples/day) — fine at
-// this scale; trim-to-last-N is the upgrade path if it ever matters.
+// ponytail: the file only ever grows — an unchanged reading adds at most one
+// row per 5-minute heartbeat — fine at this scale; trim-to-last-N is the
+// upgrade path if it ever matters.
 const OLLAMA_HISTORY = join(USAGE_SKILL_STATE, 'ollama-usage.jsonl');
 
 // Last row actually written, so duplicate readings don't spam the file while
@@ -115,6 +116,7 @@ export function appendOllamaHistory(data) {
 }
 
 function appendJsonl(file, record) {
+  if (SHADOW) return false;
   try {
     mkdirSync(dirname(file), { recursive: true });
     appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
@@ -210,6 +212,7 @@ function firstJsonlLine(file) {
 // next append; otherwise the checked month is cached: one head read a month.
 let claudeHistoryMonth = null;
 export function rotateClaudeHistory(now = new Date(), { link = linkSync, unlink = unlinkSync } = {}) {
+  if (SHADOW) return;
   const month = ym(now);
   if (claudeHistoryMonth === month) return;
   let head;
@@ -392,6 +395,7 @@ export async function scrapeOllamaOnce(pw, headless) {
 
 let ollamaBrowserInflight = null;
 function fetchOllamaBrowser() {
+  if (SHADOW) return Promise.resolve({ ok: false, error: 'shadow mode' });
   if (ollamaBrowserInflight) return ollamaBrowserInflight;
   ollamaBrowserInflight = (async () => {
     const pw = await import('playwright-core').catch(() => null);
@@ -588,6 +592,7 @@ let lastAuthRefresh = 0;
 // a plain write is the last resort because losing a just-rotated refresh token
 // costs the user a full re-login, which is worse than a non-atomic write.
 function persistOauth(fresh) {
+  if (SHADOW) return;
   let file = {};
   try { file = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
   file.claudeAiOauth = { ...file.claudeAiOauth, ...fresh };
@@ -632,6 +637,7 @@ export async function refreshOauthGrant() {
 // Throttled as a pair so a genuinely signed-out user doesn't get a request +
 // spawn on every usage pull.
 export async function refreshClaudeAuth() {
+  if (SHADOW) return false; // the grant rotates the refresh token shared with the primary daemon
   if (Date.now() - lastAuthRefresh < AUTH_REFRESH_THROTTLE_MS) return false;
   lastAuthRefresh = Date.now();
   if (await refreshOauthGrant()) return true;
@@ -815,6 +821,40 @@ export async function fetchCodex(force = false) {
   return { ...noCodexData(), error: liveError ?? 'no usable rate limits', ...(resp?.status === 429 ? { retryAfterMs: retryAfterMs(resp.headers?.get?.('retry-after')) } : {}) };
 }
 
+// Redeemable "usage limit resets" (chatgpt.com Settings ▸ Usage). Separate lane:
+// a complete Stop-hook snapshot answers the codex card without the network, so
+// this count would never refresh if it rode on fetchCodex's live leg.
+const CODEX_RESETS_API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
+const CODEX_RESETS_TTL_MS = 10 * 60_000;
+// shortcut: credits[] was empty when probed, so the expiry key is a guess; pin it once a real credit is seen.
+const RESET_EXPIRY_KEYS = ['expires_at', 'expiration_time', 'expires', 'expiry'];
+
+function resetExpiry(credit) {
+  const v = RESET_EXPIRY_KEYS.map((k) => credit?.[k]).find((x) => x != null);
+  const d = typeof v === 'number' ? new Date(v * 1000) : typeof v === 'string' ? new Date(v) : null;
+  return d && Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
+export async function fetchCodexResets() {
+  let auth;
+  try { auth = JSON.parse(readFileSync(CODEX_AUTH_PATH, 'utf8')); }
+  catch { return null; }
+  const token = auth?.tokens?.access_token;
+  const accountId = auth?.tokens?.account_id;
+  if (!token || !accountId) return null;
+  try {
+    const resp = await fetchExternal(CODEX_RESETS_API_URL, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId },
+    }, { timeoutMs: REQ_TIMEOUT_MS });
+    if (resp.status !== 200) return null;
+    const raw = await resp.json();
+    if (!Number.isFinite(raw?.available_count)) return null;
+    const expiresAt = (Array.isArray(raw.credits) ? raw.credits : []).map(resetExpiry).filter(Boolean).sort();
+    return { available: raw.available_count, expiresAt };
+  } catch { return null; }
+}
+
 // ---- Cache + public API -------------------------------------------------------
 // `at` is the timestamp of the last network/heavy-work ATTEMPT for that source
 // (stamped in pull(), success or failure) — the network floor's own clock, not
@@ -824,6 +864,7 @@ const cache = {
   ollama: { data: null, at: 0 },
   claude: { data: null, at: 0, credentialFingerprint: null },
   codex: { data: null, at: 0, credentialFingerprint: null, ignoreCodexSnapshot: false },
+  codexResets: { data: null, at: 0 },
 };
 const SOURCES = ['ollama', 'claude', 'codex'];
 const CLAUDE_RATE_LIMIT_BACKOFF_MS = 5 * 60_000;
@@ -1059,7 +1100,14 @@ export async function getUsage({ force = false, sources, fetchers } = {}) {
   // every source's reset timer from what it is handed, so a partial document
   // would clear the timers it does not mention and never recreate them, and the
   // ollama slot is what carries historyPaused.
-  const result = { ollama: ollama ? { ...ollama, historyPaused } : null, claude, codex };
+  const resetsSlot = cache.codexResets;
+  // SING_CODEX_RESETS=0 switches the lane off (the usage tests do, so their fetch counts see one endpoint).
+  if (process.env.SING_CODEX_RESETS !== '0' && allow.has('codex') && (force || Date.now() - resetsSlot.at >= CODEX_RESETS_TTL_MS)) {
+    resetsSlot.at = Date.now();
+    // A failed read keeps the last count rather than blanking the badge.
+    resetsSlot.data = (await (fetchers?.codexResets ?? fetchCodexResets)()) ?? resetsSlot.data;
+  }
+  const result = { ollama: ollama ? { ...ollama, historyPaused } : null, claude, codex: codex && resetsSlot.data ? { ...codex, resets: resetsSlot.data } : codex };
   // Manual/forced calls (the Refresh button, force=1) always push — a user who
   // pressed the button waiting on an unchanged reading is not a bug. Automated
   // calls (every 5s/60s sampler tick, idle-debounce, reset timers) only push
@@ -1123,6 +1171,7 @@ function scheduleResetRefreshes(result) {
 // network floor as the sampler ticks — not the user's own Refresh press.
 export function initUsageAutoRefresh(bus) {
   usageBus = bus;
+  if (SHADOW) return; // read-only: no idle-triggered pulls, no history sampler
   bus.on('status', ({ status }) => {
     if (status !== 'idle') return;
     clearTimeout(idleTimer);

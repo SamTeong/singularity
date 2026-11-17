@@ -13,8 +13,9 @@ import { ROOTS } from '../fixtures.js';
 import { parseBody } from '../helpers.js';
 import { modelsDoc } from './core.js';
 import { untildify } from '@/lib/paths.js';
+import { isLive } from '@/lib/agentStatus.js';
 
-const RUNNING_MS = 30000;        // mtime within this window reads as a live session (sessions.mjs)
+const RUNNING_MS = 30000;        // mtime within this window counts as recent activity (sessions.mjs)
 const RESULT_CAP = 200;          // search result cap (sessions.mjs)
 const TOOL_TRUNC = 300;          // tool_use inputs / tool_result bodies in the view payload
 const SEARCH_TOOL_TRUNC = 500;   // tool bodies in the search payload
@@ -210,7 +211,8 @@ export function registerSessions(server) {
 
   // /transcripts — every transcript, reverse-chrono by mtime, capped. Row shape
   // matches listSessions: { id, project, cwd, title, blurb, mtime, size,
-  // running, source }. The mock has no subagents, so no subagents field.
+  // processLive, activityRecent, processState, running, source }. The mock has
+  // no subagents, so no subagents field.
   // hideReviews=1 is accepted; this Claude-only corpus has no Codex review rows.
   server.get('/transcripts', (schema, req) => {
     const cap = Number(req.queryParams.cap) || 5000;
@@ -223,10 +225,14 @@ export function registerSessions(server) {
     const root = req.queryParams.root;
     if (root && untildify(root) !== ROOTS.projects) return { sessions: [] };
     const now = Date.now();
+    // isLive is the same predicate the daemon's registry uses (server/agents.mjs):
+    // a transcript is process-live only while a dock agent holds that session id.
+    const liveIds = new Set(db.agents.filter((a) => isLive(a.status)).map((a) => a.id));
     const rows = [];
     for (const [project, sessions] of Object.entries(db.sessions)) {
       for (const s of sessions) {
         const { cwd, title, blurb } = peekMeta(s.events);
+        const processLive = liveIds.has(s.id);
         rows.push({
           id: s.id,
           project,
@@ -235,7 +241,10 @@ export function registerSessions(server) {
           blurb,
           mtime: s.mtimeMs,
           size: JSON.stringify(s.events).length,
-          running: (now - s.mtimeMs) < RUNNING_MS,
+          processLive,
+          activityRecent: (now - s.mtimeMs) < RUNNING_MS,
+          processState: processLive ? 'live' : 'unknown',
+          running: processLive,
           source: 'claude',
         });
       }

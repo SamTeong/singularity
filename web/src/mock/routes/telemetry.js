@@ -117,6 +117,7 @@ export function registerTelemetry(server) {
         fetchedAt: iso(now - 3.6e6), // push-only: last rollout write, can be stale
         session: null,
         weekly: { pctUsed: 8, resetsAt: iso(now + 5 * 86_400_000), models: [] },
+        resets: { available: 2, expiresAt: [iso(now + 7 * 86_400_000), iso(now + 21 * 86_400_000)] },
       },
     };
   });
@@ -159,6 +160,8 @@ export function registerTelemetry(server) {
   // /status — { claude, openai }, each a normalized Statuspage payload
   // (status.mjs getStatus). Mirrors the e2e STATUS_STUB so the view renders
   // the same cards: Claude operational, OpenAI degraded with one incident.
+  // The freshness metadata (lastAttemptAt/lastSuccessAt/refreshError/stale) is
+  // part of the daemon payload on every path, so the mock carries it too.
   server.get('/status', () => {
     const now = iso(Date.now());
     return {
@@ -167,6 +170,7 @@ export function registerTelemetry(server) {
         updatedAt: now, indicator: 'none', description: 'All Systems Operational',
         components: [{ name: 'Claude on the web', status: 'operational' }, { name: 'API', status: 'operational' }],
         incidents: [], maintenances: [], fetchedAt: now,
+        lastAttemptAt: now, lastSuccessAt: now, refreshError: null, stale: false,
       },
       openai: {
         ok: true, key: 'openai', label: 'OpenAI', pageUrl: 'https://status.openai.com',
@@ -174,6 +178,7 @@ export function registerTelemetry(server) {
         components: [{ name: 'API', status: 'degraded_performance' }],
         incidents: [{ name: 'Elevated error rates', status: 'monitoring', impact: 'minor', shortlink: 'https://status.openai.com', createdAt: now }],
         maintenances: [], fetchedAt: now,
+        lastAttemptAt: now, lastSuccessAt: now, refreshError: null, stale: false,
       },
     };
   });

@@ -36,7 +36,7 @@ const SCAN_CHUNK = 65536;     // codex review scan reads this much per step, sto
 const RESULT_CAP = 200;
 const TOOL_TRUNC = 300;       // tool_use inputs / tool_result bodies in the view payload
 const TEXT_CAP = 80000;       // sessionText head+tail cap (chars)
-const RUNNING_MS = 30000;     // external-session recency heuristic: mtime within this window counts as running
+const RUNNING_MS = 30000;     // external-session recency heuristic: mtime within this window counts as recent activity
 const SCAN_CONCURRENCY = 16;
 const CLAUDE_META_CACHE_CAP = 20000;
 

@@ -1,0 +1,141 @@
+{
+  "fitAt": "2026-08-15 12:00:00",
+  "modelVersion": "v2.1-js",
+  "gauges": {
+    "five_hour": {
+      "ok": true,
+      "source": "oauth",
+      "nWindows": 24,
+      "prior": { "mu0": 9.5 },
+      "result": {
+        "forecast": { "f": 62.5, "sigmaF": 8.2, "lower": 49.5, "upper": 76.0 },
+        "etas": { "80": { "pInf": 0.35 }, "100": { "pInf": 0.12 } },
+        "openResetSec": 1787763600,
+        "uNow": 38.0
+      }
+    },
+    "seven_day": {
+      "ok": true,
+      "source": "oauth",
+      "nWindows": 8,
+      "prior": { "mu0": 0.8 },
+      "result": null
+    }
+  },
+  "windowBalance": {
+    "pooled": { "source": "oauth", "r": 6.4, "d5": 940, "d7": 148, "nWindows": 3, "gated": true, "hoursPer7dDay": 4.57, "daysPer5hWindow": 1.09 },
+    "windows": [
+      { "resetsAt": "2026-08-05T17:00:00Z", "resetSec": 1785949200, "d5": 280, "d7": 44, "r": 6.36, "coverage": 0.55, "n5": 9, "nSnaps": 120, "included": true },
+      { "resetsAt": "2026-08-12T17:00:00Z", "resetSec": 1786554000, "d5": 310, "d7": 49, "r": 6.33, "coverage": 0.61, "n5": 11, "nSnaps": 140, "included": true },
+      { "resetsAt": "2026-08-19T17:00:00Z", "resetSec": 1787158800, "d5": 350, "d7": 55, "r": 6.36, "coverage": 0.58, "n5": 13, "nSnaps": 150, "included": true }
+    ],
+    "statuslineWindows": [],
+    "minCoverage": 0.5,
+    "minD7": 20
+  },
+  "ollama": {
+    "modelVersion": "v2.1-js",
+    "fitAt": "2026-08-15 12:00:00",
+    "gauges": {
+      "session": {
+        "ok": true,
+        "source": "ollama",
+        "nWindows": 18,
+        "prior": { "mu0": 5.4 },
+        "result": {
+          "forecast": { "f": 71.0, "sigmaF": 6.5, "lower": 58.0, "upper": 84.0 },
+          "etas": { "80": { "pInf": 0.55 }, "100": { "pInf": 0.3 } },
+          "openResetSec": 1787529600,
+          "uNow": 44.0
+        }
+      },
+      "weekly": {
+        "ok": true,
+        "source": "ollama",
+        "nWindows": 6,
+        "prior": { "mu0": 0.6 },
+        "result": {
+          "forecast": { "f": 88.0, "sigmaF": 4.2, "lower": 80.0, "upper": 96.0 },
+          "etas": { "80": { "pInf": 0.42 }, "100": { "pInf": 0.08 } },
+          "openResetSec": 1787529600,
+          "uNow": 73.5
+        }
+      }
+    },
+    "series": [
+      { "ts": "2026-08-03T08:00:00Z", "session": 22, "weekly": 41 },
+      { "ts": "2026-08-10T08:00:00Z", "session": 35, "weekly": 58 },
+      { "ts": "2026-08-17T08:00:00Z", "session": 44, "weekly": 73 }
+    ],
+    "windowBalance": {
+      "pooled": { "source": "ollama", "r": 5.6, "d5": 4100, "d7": 732, "nWindows": 3, "gated": false, "hoursPer7dDay": 4.0, "daysPer5hWindow": 1.25 },
+      "windows": [
+        { "resetsAt": "2026-08-03T00:00:00Z", "resetSec": 1785715200, "d5": 181.7, "d7": 18.1, "r": 10.04, "coverage": 0.11, "n5": 5, "nSnaps": 81, "included": false },
+        { "resetsAt": "2026-08-10T00:00:00Z", "resetSec": 1786320000, "d5": 328.7, "d7": 78, "r": 4.21, "coverage": 0.38, "n5": 14, "nSnaps": 109, "included": false },
+        { "resetsAt": "2026-08-17T00:00:00Z", "resetSec": 1786924800, "d5": 387.8, "d7": 99.6, "r": 3.89, "coverage": 0.53, "n5": 18, "nSnaps": 207, "included": true }
+      ],
+      "statuslineWindows": [],
+      "minCoverage": 0.5,
+      "minD7": 20
+    },
+    "tokenYield": {
+      "days": ["2026-08-10", "2026-08-17"],
+      "series": {
+        "glm-4.6": {
+          "2026-08-10": { "e": 2.4, "t": 48000000, "d": 20.0 },
+          "2026-08-17": { "e": 3.1, "t": 62000000, "d": 20.0 }
+        },
+        "minimax-m2": {
+          "2026-08-10": { "e": 1.2, "t": 24000000, "d": 20.0 },
+          "2026-08-17": { "e": 1.6, "t": 32000000, "d": 20.0 }
+        }
+      }
+    }
+  },
+  "codex": {
+    "modelVersion": "v2.1-js",
+    "fitAt": "2026-08-15 12:00:00",
+    "gauges": {
+      "session": {
+        "ok": true,
+        "source": "codex",
+        "nWindows": 12,
+        "prior": { "mu0": 7.2 },
+        "result": {
+          "forecast": { "f": 54.0, "sigmaF": 7.1, "lower": 42.0, "upper": 68.0 },
+          "etas": { "80": { "pInf": 0.4 }, "100": { "pInf": 0.15 } },
+          "openResetSec": 1787529600,
+          "uNow": 31.0
+        }
+      },
+      "weekly": {
+        "ok": true,
+        "source": "codex",
+        "nWindows": 5,
+        "prior": { "mu0": 0.7 },
+        "result": {
+          "forecast": { "f": 68.0, "sigmaF": 5.4, "lower": 57.0, "upper": 81.0 },
+          "etas": { "80": { "pInf": 0.45 }, "100": { "pInf": 0.18 } },
+          "openResetSec": 1787529600,
+          "uNow": 52.5
+        }
+      }
+    },
+    "series": [
+      { "ts": "2026-08-03T09:00:00Z", "session": 12, "weekly": 28 },
+      { "ts": "2026-08-10T09:00:00Z", "session": 24, "weekly": 41 },
+      { "ts": "2026-08-17T09:00:00Z", "session": 31, "weekly": 52 }
+    ],
+    "windowBalance": {
+      "pooled": { "source": "codex", "r": 6.0, "d5": 720, "d7": 120, "nWindows": 3, "gated": false, "hoursPer7dDay": 4.29, "daysPer5hWindow": 1.17 },
+      "windows": [
+        { "resetsAt": "2026-08-03T00:00:00Z", "resetSec": 1785715200, "d5": 210, "d7": 36, "r": 5.83, "coverage": 0.42, "n5": 7, "nSnaps": 60, "included": false },
+        { "resetsAt": "2026-08-10T00:00:00Z", "resetSec": 1786320000, "d5": 240, "d7": 39, "r": 6.15, "coverage": 0.49, "n5": 8, "nSnaps": 72, "included": false },
+        { "resetsAt": "2026-08-17T00:00:00Z", "resetSec": 1786924800, "d5": 270, "d7": 45, "r": 6.0, "coverage": 0.51, "n5": 9, "nSnaps": 80, "included": true }
+      ],
+      "statuslineWindows": [],
+      "minCoverage": 0.5,
+      "minD7": 20
+    }
+  }
+}

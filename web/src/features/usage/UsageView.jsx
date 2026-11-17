@@ -133,15 +133,15 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
   };
   return (
     <Box sx={(t) => ({ p: 2, borderRadius: `${getTokens(t).radius.md}px`, border: `1px solid ${getTokens(t).glass.stroke}` })}>
-      <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'baseline', flexWrap: 'wrap' }}>
+      {/* Centre, not baseline: the Anchor button is taller than the text and
+          would otherwise leave the title pinned above the rest of the row. */}
+      <Stack direction="row" spacing={1} sx={{ mb: 1.5, alignItems: 'center', flexWrap: 'wrap' }}>
         <Typography sx={{ fontSize: 15, fontWeight: 600 }}>{label}</Typography>
         {u?.plan && <Typography variant="code" sx={{ fontSize: 11, px: 0.75, py: 0.25, borderRadius: 1, bgcolor: 'action.selected', color: 'text.secondary', textTransform: 'capitalize' }}>{u.plan}</Typography>}
-        {/* Jump-out sits right of the plan pill. alignSelf overrides the header
-            Stack's baseline alignment — an icon has no text baseline of its
-            own to sit on. */}
+        {/* Jump-out sits right of the plan pill. */}
         {usageUrl && (
           <Tooltip title="Open usage page" placement="top" slotProps={tipSlots}>
-            <Link href={usageUrl} target="_blank" rel="noreferrer" sx={{ display: 'inline-flex', alignItems: 'center', alignSelf: 'center' }} color="text.secondary">
+            <Link href={usageUrl} target="_blank" rel="noreferrer" sx={{ display: 'inline-flex', alignItems: 'center' }} color="text.secondary">
               <OpenInNewIcon fontSize="small" />
             </Link>
           </Tooltip>
@@ -155,13 +155,20 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
             <Box role="img" data-status={statusKind} aria-label={`${label} status — ${statusLines.join(' · ')}`} sx={dotSx(statusKind)} />
           </Tooltip>
         )}
-        {refreshing && <CircularProgress size={14} sx={{ alignSelf: 'center' }} />}
+        {refreshing && <CircularProgress size={14} />}
+        {u?.resets && (
+          <Tooltip slotProps={tipSlots} title={u.resets.expiresAt.length ? <>{u.resets.expiresAt.map((t, i) => <div key={`${t}-${i}`}>Expires {stamp(t)}</div>)}</> : 'No expiry dates reported'}>
+            <Typography data-testid={`${sourceKey}-resets`} sx={{ fontSize: 12, color: 'text.secondary' }}>
+              {u.resets.available} usage limit reset{u.resets.available === 1 ? '' : 's'} available
+            </Typography>
+          </Tooltip>
+        )}
         <Box sx={{ flex: 1 }} />
         {/* Manual anchor: the daemon pokes regardless of WINDOW_ANCHOR. Hidden
             once the window is anchored — the prompt would just burn tokens
             against a window whose reset is already pinned. */}
         {showAnchor && !anchored && (
-          <Button size="small" disabled={poking} onClick={poke} sx={{ alignSelf: 'center' }}>
+          <Button size="small" disabled={poking} onClick={poke}>
             {poking ? 'Anchoring…' : 'Anchor'}
           </Button>
         )}

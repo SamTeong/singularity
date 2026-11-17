@@ -38,6 +38,10 @@ test('all four columns render with their seeded counts', async ({ page }) => {
 
 test('rejected task update leaves the task and transition history unchanged', async ({ page }) => {
   await page.goto('/');
+  // Mock install is async (web/src/main.jsx dynamic import): a fetch fired
+  // before the app renders can escape to the preview server. Wait for the
+  // board's always-present Board|History toggle, then seed.
+  await expect(page.getByRole('button', { name: 'Board', exact: true })).toBeVisible();
 
   const result = await page.evaluate(async () => {
     const before = await fetch('/api/tasks').then((response) => response.json());
@@ -314,6 +318,8 @@ async function seedHistoryRows(page, count) {
 
 test('history pager: the page-size Select offers 25/50/100 and prev/next paginate', async ({ page }) => {
   await page.goto('/tasks?history=1');
+  // Same mock-startup race: wait for the always-rendered View toggle before seeding.
+  await expect(page.getByRole('button', { name: 'Board', exact: true })).toBeVisible();
   await seedHistoryRows(page, 30);
 
   const pageLabel = page.getByText(/^\d+\/\d+$/);

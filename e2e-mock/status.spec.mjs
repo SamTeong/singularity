@@ -48,8 +48,36 @@ test('the freshness caption renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Status');
 
-  // "updated <n> min ago" / "updated just now", from the newest fetchedAt.
-  await expect(page.getByText(/^updated .+/)).toBeVisible();
+  // Per-provider caption "Status page updated <n> min ago" — one per card, so .first().
+  await expect(page.getByText(/^Status page updated .+/).first()).toBeVisible();
+});
+
+test('a failed initial load shows a retry message and recovers on the next pull', async ({ page }) => {
+  // The mock answers /status through Mirage inside the page, so a failing
+  // request is injected at the fetch layer (same pattern as transcripts.spec).
+  await page.addInitScript(() => {
+    let failing = true;
+    window.__recoverStatus = () => { failing = false; };
+    const wrap = (originalFetch) => (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      if (url.pathname === '/api/status' && failing) return Promise.resolve(new Response('', { status: 503 }));
+      return originalFetch(input, init);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  });
+
+  await page.goto('/');
+  await goto(page, 'Status');
+
+  await expect(page.getByText(/^Couldn't load provider status/)).toBeVisible();
+  await expect(page.getByText('All Systems Operational')).toHaveCount(0);
+
+  await page.evaluate(() => window.__recoverStatus());
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByText('All Systems Operational')).toBeVisible();
+  await expect(page.getByText(/^Couldn't load provider status/)).toHaveCount(0);
 });
 
 test('provider status pages are linked out, never followed', async ({ page }) => {

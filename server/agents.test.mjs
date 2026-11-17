@@ -319,6 +319,88 @@ test('Codex transcript liveness resolves a distinct thread id and blocks duplica
   }
 });
 
+// A daemon stop/restart persists live Codex agents as detached records and
+// init() reloads them with proc:null. Such a record owns no process, so
+// re-entering its thread uuid must resume — the in-lifetime exit path deletes
+// entries, making init() the only way to reproduce this. Seeded via init()+fake
+// agents.json (no spawn).
+test('create: a detached Codex record from a restart does not block resuming its thread', async () => {
+  const staleId = '90000000-aaaa-bbbb-cccc-900000000006';
+  const threadId = 'dddddddd-eeee-ffff-0000-555555555555';
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: staleId, title: 'stale-codex-owner', cwd: scratch, createdAt: Date.now(), model: 'gpt-5.3-codex-spark', tool: 'codex', threadId }],
+    recentRepos: [],
+  }));
+  init(); // loads staleId as 'detached', proc: null
+  assert.equal(isLive(staleId), false);
+  assert.equal(codexOwnerForThread(threadId, scratch), null);
+  assert.equal(isLiveSession(threadId, { source: 'codex', cwd: scratch }), false);
+  const resumed = create({ cwd: scratch, title: 'resumed-codex', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: threadId });
+  try {
+    assert.equal(resumed.id, threadId);
+    assert.ok(resumed.pid, 'resumed the detached thread instead of refusing it');
+  } finally {
+    await killAndWait(threadId);
+  }
+});
+
+// Detached records must be skipped BEFORE rememberCodexThread's rollout
+// discovery: otherwise every Codex transcript row re-walks the rollout tree for
+// an agent that can never be live, and pins a threadId as a side effect.
+test('codexOwnerForThread: a detached record is skipped before rollout discovery', () => {
+  const staleId = '90000000-aaaa-bbbb-cccc-900000000007';
+  const discoveryCwd = join(scratch, 'detached-discovery');
+  mkdirSync(discoveryCwd, { recursive: true });
+  const createdAt = Date.now();
+  const threadId = 'dddddddd-eeee-ffff-0000-666666666666';
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: staleId, title: 'detached-undiscovered', cwd: discoveryCwd, createdAt, model: 'gpt-5.3-codex-spark', tool: 'codex' }],
+    recentRepos: [],
+  }));
+  init(); // loads staleId as 'detached', proc: null
+  // A rollout that WOULD match cwd+createdAt sits on disk: without the skip,
+  // discovery pins it (and persists) although no process exists.
+  writeCodexRollout(discoveryCwd, new Date(createdAt + 1000).toISOString(), threadId);
+  assert.equal(isLiveSession(threadId, { source: 'codex', cwd: discoveryCwd }), false);
+  assert.equal(codexOwnerForThread(threadId, discoveryCwd), null);
+  assert.equal(JSON.parse(readFileSync(stateFile, 'utf8')).agents.find((a) => a.id === staleId).threadId, undefined,
+    'detached record never entered rollout discovery');
+});
+
+// Live entries still discover and pin their thread, and an earlier detached
+// record for the same thread never wins ownership.
+test('codexOwnerForThread: live discovery still pins, outranking an earlier detached record', async () => {
+  const liveCwd = join(scratch, 'live-owner-order');
+  mkdirSync(liveCwd, { recursive: true });
+  const createdAt = Date.now();
+  const threadId = 'dddddddd-eeee-ffff-0000-777777777777';
+  const staleId = '90000000-aaaa-bbbb-cccc-900000000008';
+  const agentId = '90000000-aaaa-bbbb-cccc-900000000009';
+  const stateFile = join(scratch, 'singularity', 'state', 'agents.json');
+  writeFileSync(stateFile, JSON.stringify({
+    agents: [{ id: staleId, title: 'detached-before-live', cwd: liveCwd, createdAt, model: 'gpt-5.3-codex-spark', tool: 'codex', threadId }],
+    recentRepos: [],
+  }));
+  init(); // the detached record enters the registry first
+  writeCodexRollout(liveCwd, new Date(createdAt + 1000).toISOString(), threadId);
+  const agent = create({ cwd: liveCwd, title: 'live-codex-owner', model: 'claude', sessionId: agentId });
+  agent.model = 'gpt-5.3-codex-spark';
+  agent.tool = 'codex';
+  try {
+    assert.equal(codexOwnerForThread(threadId, liveCwd), agentId);
+    assert.equal(agent.threadId, threadId, 'discovery pinned the rollout thread');
+    assert.equal(isLiveSession(threadId, { source: 'codex', cwd: liveCwd }), true);
+    assert.throws(
+      () => create({ cwd: liveCwd, title: 'duplicate-live-owner', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: threadId }),
+      /codex thread already in use/,
+    );
+  } finally {
+    await killAndWait(agentId);
+  }
+});
+
 // beginDrain(): daemon shutdown snapshots every live session to agents.json as
 // detached, and the ensuing pty-exit (onExit) no-ops instead of deleting — so a
 // restart reloads the sessions rather than dropping them from the list. Kept
