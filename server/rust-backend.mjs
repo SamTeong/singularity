@@ -748,7 +748,7 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     async oneShot(bin, args, opts) {
       const payload = await oneShotRequest({
         op: 'oneshot_async', bin, args: args ?? [], timeout_ms: opts?.timeout ?? null,
-        max_buffer: opts?.maxBuffer ?? null, env: opts?.env ?? null,
+        max_buffer: opts?.maxBuffer ?? null, env: { ...(opts?.env ?? process.env) },
       });
       if (payload.ok) return { stdout: payload.stdout };
       throw oneShotError(payload, bin, args, opts?.timeout);
@@ -757,7 +757,7 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     async git(bin, args, opts) {
       const payload = await request({
         op: 'git', bin, args: args ?? [], timeout_ms: opts?.timeout ?? null,
-        max_buffer: opts?.maxBuffer ?? null, env: opts?.env ?? null,
+        max_buffer: opts?.maxBuffer ?? null, env: { ...(opts?.env ?? process.env) },
       });
       if (payload.ok) return { stdout: payload.stdout };
       const argv = [bin, ...(args ?? [])].join(' ');

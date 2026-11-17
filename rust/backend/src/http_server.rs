@@ -30,6 +30,22 @@ pub struct HttpServices {
     pub(crate) runtime: Option<crate::lifecycle::RuntimeServices>,
 }
 
+fn report_request_environment(get: impl Fn(&str) -> Option<String>) -> serde_json::Value {
+    const KEYS: [&str; 6] = [
+        "HOME",
+        "USERPROFILE",
+        "USAGE_REPORT_STATE",
+        "SING_USAGE_REPORTS",
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+    ];
+    serde_json::Value::Object(
+        KEYS.into_iter()
+            .filter_map(|key| get(key).map(|value| (key.to_owned(), json!(value))))
+            .collect(),
+    )
+}
+
 /// Inputs for the TASK-42 cutover routers (shell, capabilities, hooks, rules,
 /// explorer, skills, wiki, transcripts, model prices, projects).
 #[derive(Clone)]
@@ -691,24 +707,12 @@ impl HttpServices {
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "SINGULARITY_HOME is required")
             })?;
-        let env = [
-            "HOME",
-            "USERPROFILE",
-            "USAGE_REPORT_STATE",
-            "SING_USAGE_REPORTS",
-        ]
-        .into_iter()
-        .filter_map(|key| {
-            std::env::var(key)
-                .ok()
-                .map(|value| (key.to_owned(), json!(value)))
-        })
-        .collect();
+        let env = report_request_environment(|key| std::env::var(key).ok());
         let mut services = Self::new(
             PathBuf::from(&home).join("state"),
             crate::usage_report::Request {
                 reports_dir: String::new(),
-                env: serde_json::Value::Object(env),
+                env,
             },
         );
         let backups_dir = PathBuf::from(home).join("cache").join("backups");
@@ -1037,8 +1041,8 @@ fn shell_unauthorized_response() -> Response {
 mod tests {
     use super::{
         ConfigServices, CutoverServices, HttpServices, agents_stats_paths,
-        api_unauthorized_response, bind, cookie_decode_error_response, router, serve,
-        shell_token_cookie, shell_unauthorized_response,
+        api_unauthorized_response, bind, cookie_decode_error_response, report_request_environment,
+        router, serve, shell_token_cookie, shell_unauthorized_response,
     };
     use crate::http_policy::HttpPolicy;
     use axum::Router;
@@ -1046,6 +1050,30 @@ mod tests {
     use axum::http::StatusCode;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::oneshot;
+
+    #[test]
+    fn report_request_keeps_configured_provider_roots_separate_from_defaults() {
+        let vars = [
+            ("HOME", "C:/users/default"),
+            ("USERPROFILE", "C:/users/profile"),
+            ("CODEX_HOME", "D:/configured/codex"),
+            ("CLAUDE_CONFIG_DIR", "E:/configured/claude"),
+            ("UNRELATED", "ignored"),
+        ];
+        let env = report_request_environment(|key| {
+            vars.iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(key))
+                .map(|(_, value)| (*value).to_owned())
+        });
+        let request = crate::usage_report::Request {
+            reports_dir: String::new(),
+            env,
+        };
+        assert_eq!(request.env["HOME"], "C:/users/default");
+        assert_eq!(request.env["CODEX_HOME"], "D:/configured/codex");
+        assert_eq!(request.env["CLAUDE_CONFIG_DIR"], "E:/configured/claude");
+        assert!(request.env.get("UNRELATED").is_none());
+    }
 
     #[test]
     fn shadow_guard_denies_only_api_writes_when_enabled() {

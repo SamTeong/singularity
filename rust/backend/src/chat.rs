@@ -234,6 +234,16 @@ pub async fn stream_chat(
     send: impl Fn(ChatFrame),
     cancel: &Cancel,
 ) -> Result<(), String> {
+    stream_chat_with_timeout(req, deps, send, cancel, FETCH_TIMEOUT).await
+}
+
+async fn stream_chat_with_timeout(
+    req: ChatRequest,
+    deps: &ChatDeps,
+    send: impl Fn(ChatFrame),
+    cancel: &Cancel,
+    timeout: Duration,
+) -> Result<(), String> {
     let Some(token) = oauth_access_token(deps) else {
         send(ChatFrame::Error {
             chat_id: req.chat_id.clone(),
@@ -293,7 +303,7 @@ pub async fn stream_chat(
     if cancel.is_cancelled() {
         return Ok(());
     }
-    let deadline = tokio::time::Instant::now() + FETCH_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + timeout;
     let policy = RetryPolicy {
         retry: false,
         max_attempts: 1,
@@ -348,7 +358,12 @@ pub async fn stream_chat(
     }
     if !status.is_success() {
         let mut msg = format!("HTTP {}", status.as_u16());
-        if let Ok(payload) = response.json::<Value>().await {
+        let payload = tokio::select! {
+            _ = cancel.cancelled() => return Ok(()),
+            _ = tokio::time::sleep_until(deadline) => None,
+            result = response.json::<Value>() => result.ok(),
+        };
+        if let Some(payload) = payload {
             if let Some(message) = payload
                 .get("error")
                 .and_then(|error| error.get("message"))
@@ -923,7 +938,7 @@ fn utf16_suffix(text: &str, units: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Cancel, ChatDeps, ChatFrame, ChatRequest, MESSAGES_URL, stream_chat};
+    use super::{Cancel, ChatDeps, ChatFrame, ChatRequest, MESSAGES_URL};
     use crate::transcript_service::{Inputs, TranscriptService};
     use axum::Router;
     use axum::extract::State;
@@ -1006,13 +1021,23 @@ mod tests {
         deps: &ChatDeps,
         cancel: &Cancel,
     ) -> (Vec<ChatFrame>, Result<(), String>) {
+        chat_with_timeout(req, deps, cancel, super::FETCH_TIMEOUT).await
+    }
+
+    async fn chat_with_timeout(
+        req: ChatRequest,
+        deps: &ChatDeps,
+        cancel: &Cancel,
+        timeout: Duration,
+    ) -> (Vec<ChatFrame>, Result<(), String>) {
         let frames = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&frames);
-        let result = stream_chat(
+        let result = super::stream_chat_with_timeout(
             req,
             deps,
             move |frame| sink.lock().unwrap().push(frame),
             cancel,
+            timeout,
         )
         .await;
         let collected = frames.lock().unwrap().clone();
@@ -1048,6 +1073,32 @@ mod tests {
             }
         });
         format!("http://{address}/v1/messages")
+    }
+
+    async fn serve_stalled_error_body() -> (
+        String,
+        tokio::sync::oneshot::Receiver<()>,
+        tokio::task::JoinHandle<()>,
+    ) {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        assert!(address.ip().is_loopback());
+        let (headers_sent, headers_received) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            drain_request(&mut stream).await;
+            stream.write_all(
+                b"HTTP/1.1 500 Internal Server Error\r\ncontent-type: application/json\r\ncontent-length: 100\r\nconnection: keep-alive\r\n\r\n",
+            ).await.unwrap();
+            stream.flush().await.unwrap();
+            let _ = headers_sent.send(());
+            std::future::pending::<()>().await;
+        });
+        (
+            format!("http://{address}/v1/messages"),
+            headers_received,
+            server,
+        )
     }
 
     async fn drain_request(stream: &mut TcpStream) {
@@ -1474,6 +1525,82 @@ mod tests {
             assert!(result.is_ok());
             assert!(frames.is_empty());
             assert_eq!(hits.load(Ordering::SeqCst), 0);
+            server.abort();
+        });
+    }
+
+    #[test]
+    fn cancelling_stalled_error_body_suppresses_chat_error_frame() {
+        run(async {
+            let scratch = TempDir::new("cancel-error-body");
+            signed_in(&scratch.0);
+            let (url, headers_sent, server) = serve_stalled_error_body().await;
+            let deps = deps(&scratch.0, Some(url));
+            let cancel = Cancel::new();
+            let chat_task = tokio::spawn({
+                let cancel = cancel.clone();
+                async move {
+                    let frames = Arc::new(Mutex::new(Vec::new()));
+                    let sink = Arc::clone(&frames);
+                    let result = super::stream_chat_with_timeout(
+                        question("cancel-error-body"),
+                        &deps,
+                        move |frame| sink.lock().unwrap().push(frame),
+                        &cancel,
+                        Duration::from_secs(5),
+                    )
+                    .await;
+                    (frames.lock().unwrap().clone(), result)
+                }
+            });
+            tokio::time::timeout(Duration::from_secs(5), headers_sent)
+                .await
+                .expect("server should send stalled headers")
+                .unwrap();
+            cancel.cancel();
+            let (frames, result) = tokio::time::timeout(Duration::from_secs(2), chat_task)
+                .await
+                .expect("cancellation should release the stalled body")
+                .unwrap();
+            assert!(result.is_ok());
+            assert!(frames.is_empty());
+            server.abort();
+        });
+    }
+
+    #[test]
+    fn stalled_error_body_deadline_keeps_http_fallback_message() {
+        run(async {
+            let scratch = TempDir::new("deadline-error-body");
+            signed_in(&scratch.0);
+            let (url, headers_sent, server) = serve_stalled_error_body().await;
+            let deps = deps(&scratch.0, Some(url));
+            let chat_task = tokio::spawn(async move {
+                chat_with_timeout(
+                    question("deadline-error-body"),
+                    &deps,
+                    &Cancel::new(),
+                    Duration::from_secs(1),
+                )
+                .await
+            });
+            tokio::time::timeout(Duration::from_secs(5), headers_sent)
+                .await
+                .expect("server should send stalled headers")
+                .unwrap();
+            let (frames, result) = tokio::time::timeout(Duration::from_secs(3), chat_task)
+                .await
+                .expect("deadline should release the stalled body")
+                .unwrap();
+            assert!(result.is_ok());
+            assert_eq!(
+                frames,
+                vec![ChatFrame::Error {
+                    chat_id: Some(json!("deadline-error-body")),
+                    needs_auth: None,
+                    msg: "HTTP 500".into(),
+                }]
+            );
             server.abort();
         });
     }

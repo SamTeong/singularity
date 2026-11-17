@@ -32,14 +32,14 @@
 //!   * the background samplers, idle debounce and reset timers live in
 //!     `usage_auto_refresh` and drive this cache through `UsageHandle`;
 //!     `historyPaused` is `null` until that sampler pauses the ollama lane.
-//!   * no Claude OAuth grant refresh: an expired token is reported as
-//!     `token-expired` / `auth-expired` with `needsAuth`, exactly what Node shows
-//!     when its own refresh fails. Credential refresh stays outside a route.
+//!   * Claude OAuth grant refresh is throttled and persisted through the existing
+//!     credential writer, with the configured CLI auth-status fallback.
 //!   * the Ollama scrape and connect are native (`ollama_browser`); a
 //!     host-provided `UsageNetwork` can still replace them, and an install with
 //!     no Chromium-family browser reports `unavailable`.
 use crate::bus::{Bus, BusEvent};
 use crate::claude_credentials::{self, ClaudeCredentialsRead};
+use crate::claude_oauth::{self, ClaudeOauthRefreshResult};
 use crate::claude_usage::{self, ClaudeUsageResult};
 use crate::codex_usage::{self, CodexUsageResult};
 use crate::http_agents::Platform;
@@ -88,6 +88,8 @@ const REQ_TIMEOUT_MS: u64 = 10_000;
 const CODEX_RESETS_TTL_MS: i64 = 10 * 60_000;
 /// Claude resets refresh floor behind a complete local reading.
 const CLAUDE_RESETS_TTL_MS: i64 = 10 * 60_000;
+const CLAUDE_AUTH_REFRESH_THROTTLE_MS: i64 = 5 * 60_000;
+const CLAUDE_OAUTH_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -97,6 +99,15 @@ type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 /// socket or a browser.
 pub trait UsageNetwork: Send + Sync {
     fn claude_usage<'a>(&'a self, access_token: &'a str) -> BoxFuture<'a, ClaudeUsageResult>;
+    fn claude_oauth_refresh<'a>(
+        &'a self,
+        _body: &'a str,
+    ) -> BoxFuture<'a, ClaudeOauthRefreshResult> {
+        Box::pin(async { ClaudeOauthRefreshResult::TransportFailure })
+    }
+    fn claude_auth_status(&self, _bin: Option<&Path>, _env: &Value) -> bool {
+        false
+    }
     fn codex_usage<'a>(&'a self, auth_path: &'a Path) -> BoxFuture<'a, CodexUsageResult>;
     fn ollama_usage(&self) -> BoxFuture<'_, Value>;
 
@@ -158,6 +169,23 @@ impl UsageNetwork for NativeUsageNetwork {
         Box::pin(
             async move { claude_usage::fetch_claude_usage(access_token, REQ_TIMEOUT_MS).await },
         )
+    }
+
+    fn claude_oauth_refresh<'a>(
+        &'a self,
+        body: &'a str,
+    ) -> BoxFuture<'a, ClaudeOauthRefreshResult> {
+        Box::pin(async move { claude_oauth::refresh_claude_oauth(body, REQ_TIMEOUT_MS).await })
+    }
+
+    fn claude_auth_status(&self, bin: Option<&Path>, env: &Value) -> bool {
+        if let Some(bin) = bin.filter(|bin| bin.is_absolute()) {
+            let bin = bin.to_string_lossy();
+            let _ = usage_auth::auth_status(Some(&bin), REQ_TIMEOUT_MS as f64, env);
+            true
+        } else {
+            false
+        }
     }
 
     fn codex_usage<'a>(&'a self, auth_path: &'a Path) -> BoxFuture<'a, CodexUsageResult> {
@@ -342,6 +370,14 @@ pub fn router_with_handle(deps: UsageDeps) -> (Router, UsageHandle) {
             &deps.parent_env,
         ),
         network: deps.network,
+        auth_refresh_at: Mutex::new(0),
+        claude_bin: deps.parent_env.get("CLAUDE_BIN").map(PathBuf::from),
+        parent_env: Value::Object(
+            deps.parent_env
+                .iter()
+                .map(|(key, value)| (key.clone(), Value::String(value.clone())))
+                .collect(),
+        ),
         clock: deps.clock,
         snapshots: Arc::new(Mutex::new(SnapshotService::default())),
         ollama: AsyncMutex::new(OllamaSlot::default()),
@@ -368,6 +404,9 @@ struct UsageState {
     codex_home: PathBuf,
     credentials: CredentialSource,
     network: Arc<dyn UsageNetwork>,
+    auth_refresh_at: Mutex<i64>,
+    claude_bin: Option<PathBuf>,
+    parent_env: Value,
     clock: Arc<dyn Fn() -> i64 + Send + Sync>,
     /// One cache for the daemon's lifetime, like Node's module-level cache
     /// (`usage.mjs:718`).
@@ -872,9 +911,7 @@ impl UsageState {
                     slot.data.as_ref().and_then(|data| data.get("resets")),
                     next.as_object_mut(),
                 ) {
-                    fields
-                        .entry("resets")
-                        .or_insert_with(|| resets.clone());
+                    fields.entry("resets").or_insert_with(|| resets.clone());
                 }
                 slot.data = Some(next);
             }
@@ -969,10 +1006,9 @@ impl UsageState {
                 let resets = serde_json::from_str::<Value>(&text)
                     .ok()
                     .and_then(|raw| claude_usage::parse_resets(&raw));
-                if let (Some(resets), Some(fields)) = (
-                    resets,
-                    slot.data.as_mut().and_then(Value::as_object_mut),
-                ) {
+                if let (Some(resets), Some(fields)) =
+                    (resets, slot.data.as_mut().and_then(Value::as_object_mut))
+                {
                     fields.insert("resets".into(), resets);
                 }
             }
@@ -1115,19 +1151,27 @@ impl UsageState {
         .await;
     }
 
-    /// `fetchClaude` (`usage.mjs:537`) without the OAuth grant refresh.
+    /// `fetchClaude` (`usage.mjs:537`) including the shared OAuth grant refresh.
     async fn fetch_claude(
         &self,
         prev: Option<&Value>,
         force: bool,
         now: i64,
     ) -> Result<Value, String> {
-        let resolved = self.credentials.resolve();
-        let oauth = resolved
+        let mut resolved = self.credentials.resolve();
+        let mut oauth = resolved
             .oauth
             .clone()
             .filter(|oauth| oauth.valid(now as f64));
-        let Some(oauth) = oauth else {
+        if oauth.is_none() {
+            self.refresh_claude_auth(now).await;
+            resolved = self.credentials.resolve();
+            oauth = resolved
+                .oauth
+                .clone()
+                .filter(|oauth| oauth.valid(now as f64));
+        };
+        let Some(mut oauth) = oauth else {
             return Ok(claude_credential_error(&resolved));
         };
         if !force {
@@ -1144,12 +1188,26 @@ impl UsageState {
                 return Ok(local);
             }
         }
-        let Some(access_token) = oauth.access_token.clone().filter(|token| !token.is_empty())
+        let Some(mut access_token) = oauth.access_token.clone().filter(|token| !token.is_empty())
         else {
             return Ok(claude_credential_error(&resolved));
         };
 
-        let result = self.network.claude_usage(&access_token).await;
+        let mut result = self.network.claude_usage(&access_token).await;
+        if matches!(result, ClaudeUsageResult::Response { status: 401, .. }) {
+            let should_retry = self.refresh_claude_auth(now).await;
+            let refreshed = self.credentials.resolve();
+            if should_retry {
+                if let Some(next) = refreshed.oauth.filter(|oauth| oauth.valid(now as f64)) {
+                    if let Some(token) = next.access_token.clone().filter(|token| !token.is_empty())
+                    {
+                        oauth = next;
+                        access_token = token;
+                        result = self.network.claude_usage(&access_token).await;
+                    }
+                }
+            }
+        }
         let (status, retry_after, body) = match result {
             ClaudeUsageResult::TransportFailure => {
                 return Ok(claude_failure("request failed: fetch failed"));
@@ -1201,6 +1259,121 @@ impl UsageState {
             }
             status => Ok(claude_failure(&format!("HTTP {status}"))),
         }
+    }
+
+    async fn refresh_claude_auth(&self, now: i64) -> bool {
+        if crate::shadow::enabled() {
+            return false;
+        }
+        {
+            let mut last = self
+                .auth_refresh_at
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            if now - *last < CLAUDE_AUTH_REFRESH_THROTTLE_MS {
+                return false;
+            }
+            *last = now;
+        }
+
+        // The grant is file-only. A keychain credential is left for Claude CLI's
+        // configured auth-status flow, matching usage.mjs.
+        if self.refresh_claude_grant(now).await {
+            return true;
+        }
+        let network = Arc::clone(&self.network);
+        let bin = self.claude_bin.clone();
+        let env = self.parent_env.clone();
+        blocking(move || network.claude_auth_status(bin.as_deref(), &env))
+            .await
+            .unwrap_or(false)
+    }
+
+    async fn refresh_claude_grant(&self, now: i64) -> bool {
+        let ClaudeCredentialsRead::File(text) = claude_credentials::read(&self.credentials.path)
+        else {
+            return false;
+        };
+        let Ok(mut envelope) = serde_json::from_str::<Value>(&text) else {
+            return false;
+        };
+        let Some(oauth) = envelope.get("claudeAiOauth").and_then(Value::as_object) else {
+            return false;
+        };
+        let Some(refresh_token) = oauth
+            .get("refreshToken")
+            .and_then(Value::as_str)
+            .filter(|token| !token.is_empty())
+            .map(str::to_owned)
+        else {
+            return false;
+        };
+        let refresh_expired = oauth
+            .get("refreshTokenExpiresAt")
+            .is_some_and(|value| truthy(value) && js_number(value) < now as f64);
+        if refresh_expired {
+            return false;
+        }
+
+        let request = json!({
+            "grant_type": "refresh_token",
+            "refresh_token": &refresh_token,
+            "client_id": CLAUDE_OAUTH_CLIENT_ID,
+        })
+        .to_string();
+        let ClaudeOauthRefreshResult::Response {
+            status: 200,
+            body: Ok(Some(text)),
+            ..
+        } = self.network.claude_oauth_refresh(&request).await
+        else {
+            return false;
+        };
+        let Ok(response) = serde_json::from_str::<Value>(&text) else {
+            return false;
+        };
+        let Some(access) = response
+            .get("access_token")
+            .and_then(Value::as_str)
+            .filter(|token| !token.is_empty())
+        else {
+            return false;
+        };
+        let Some(entry) = envelope
+            .get_mut("claudeAiOauth")
+            .and_then(Value::as_object_mut)
+        else {
+            return false;
+        };
+
+        entry.insert("accessToken".into(), json!(access));
+        entry.insert(
+            "refreshToken".into(),
+            response
+                .get("refresh_token")
+                .filter(|value| !value.is_null())
+                .cloned()
+                .unwrap_or_else(|| json!(refresh_token)),
+        );
+        if truthy(response.get("expires_in").unwrap_or(&Value::Null)) {
+            entry.insert(
+                "expiresAt".into(),
+                json!(now as f64 + js_number(&response["expires_in"]) * 1000.0),
+            );
+        }
+        if let Some(scope) = response
+            .get("scope")
+            .and_then(Value::as_str)
+            .filter(|scope| !scope.is_empty())
+        {
+            entry.insert("scopes".into(), json!(scope.split(' ').collect::<Vec<_>>()));
+        }
+        let data = envelope.to_string();
+        let temp = self
+            .credentials
+            .path
+            .with_extension(format!("json.{}.tmp", std::process::id()));
+        claude_credentials::write(&self.credentials.path, &temp, &data)
     }
 
     async fn append_claude_network(&self, raw: &Value, now: i64) {
@@ -2182,6 +2355,85 @@ mod tests {
         }
     }
 
+    struct OAuthNetwork {
+        statuses: Mutex<std::collections::VecDeque<u16>>,
+        refresh_status: u16,
+        refresh_body: String,
+        usage_calls: AtomicUsize,
+        refresh_calls: AtomicUsize,
+        auth_calls: AtomicUsize,
+        tokens: Mutex<Vec<String>>,
+    }
+
+    impl OAuthNetwork {
+        fn new(statuses: &[u16]) -> Self {
+            Self {
+                statuses: Mutex::new(statuses.iter().copied().collect()),
+                refresh_status: 200,
+                refresh_body: json!({ "access_token": "rotated-access", "expires_in": 3600, "scope": "user:profile user:usage" }).to_string(),
+                usage_calls: AtomicUsize::new(0),
+                refresh_calls: AtomicUsize::new(0),
+                auth_calls: AtomicUsize::new(0),
+                tokens: Mutex::new(Vec::new()),
+            }
+        }
+
+        fn with_refresh(statuses: &[u16], refresh_status: u16, refresh_body: Value) -> Self {
+            let mut network = Self::new(statuses);
+            network.refresh_status = refresh_status;
+            network.refresh_body = refresh_body.to_string();
+            network
+        }
+    }
+
+    impl UsageNetwork for OAuthNetwork {
+        fn claude_usage<'a>(&'a self, token: &'a str) -> BoxFuture<'a, ClaudeUsageResult> {
+            self.usage_calls.fetch_add(1, Ordering::SeqCst);
+            self.tokens.lock().unwrap().push(token.to_owned());
+            let status = self.statuses.lock().unwrap().pop_front().unwrap_or(200);
+            Box::pin(async move {
+                ClaudeUsageResult::Response {
+                    status,
+                    retry_after: None,
+                    body: Ok(Some(json!({
+                        "five_hour": { "utilization": 42, "resets_at": iso_ms(NOW + 3_600_000) },
+                        "seven_day": { "utilization": 7, "resets_at": iso_ms(NOW + 3 * 86_400_000) }
+                    }).to_string())),
+                }
+            })
+        }
+
+        fn claude_oauth_refresh<'a>(
+            &'a self,
+            body: &'a str,
+        ) -> BoxFuture<'a, ClaudeOauthRefreshResult> {
+            self.refresh_calls.fetch_add(1, Ordering::SeqCst);
+            assert!(body.contains(CLAUDE_OAUTH_CLIENT_ID));
+            let status = self.refresh_status;
+            let response = self.refresh_body.clone();
+            Box::pin(async move {
+                ClaudeOauthRefreshResult::Response {
+                    status,
+                    retry_after: None,
+                    body: Ok(Some(response)),
+                }
+            })
+        }
+
+        fn claude_auth_status(&self, _bin: Option<&Path>, _env: &Value) -> bool {
+            self.auth_calls.fetch_add(1, Ordering::SeqCst);
+            true
+        }
+
+        fn codex_usage<'a>(&'a self, _path: &'a Path) -> BoxFuture<'a, CodexUsageResult> {
+            Box::pin(async { CodexUsageResult::NoSessions })
+        }
+
+        fn ollama_usage(&self) -> BoxFuture<'_, Value> {
+            Box::pin(async { json!({ "ok": false }) })
+        }
+    }
+
     fn clock() -> Arc<dyn Fn() -> i64 + Send + Sync> {
         Arc::new(|| NOW)
     }
@@ -2199,6 +2451,167 @@ mod tests {
             network,
             clock: clock(),
         }
+    }
+
+    #[test]
+    fn oauth_expired_access_refreshes_and_merges_rotated_credentials_once() {
+        let fixture = Fixture::new("oauth-expired");
+        let network = Arc::new(OAuthNetwork::new(&[200]));
+        fixture.write(
+            fixture.claude_home().join(".credentials.json"),
+            &json!({ "unknownEnvelope": "kept", "claudeAiOauth": {
+                "accessToken": "old-access", "refreshToken": "old-refresh",
+                "expiresAt": NOW - 1, "refreshTokenExpiresAt": NOW + 86_400_000,
+                "subscriptionType": "pro", "unknownOauth": 17, "scopes": ["old"]
+            }})
+            .to_string(),
+        );
+        let (_, handle) = router_with_handle(deps(&fixture, network.clone(), Bus::new()));
+        runtime().block_on(async {
+            let result = handle.0.fetch_claude(None, true, NOW).await.unwrap();
+            assert_eq!(result["ok"], true, "{result}");
+            let saved: Value = serde_json::from_str(
+                &std::fs::read_to_string(fixture.claude_home().join(".credentials.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(saved["unknownEnvelope"], "kept");
+            assert_eq!(saved["claudeAiOauth"]["unknownOauth"], 17);
+            assert_eq!(saved["claudeAiOauth"]["accessToken"], "rotated-access");
+            assert_eq!(saved["claudeAiOauth"]["refreshToken"], "old-refresh");
+            assert_eq!(
+                saved["claudeAiOauth"]["scopes"],
+                json!(["user:profile", "user:usage"])
+            );
+            assert_eq!(network.refresh_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(network.auth_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(&*network.tokens.lock().unwrap(), &["rotated-access"]);
+        });
+    }
+
+    #[test]
+    fn oauth_401_refresh_retries_at_most_once() {
+        let fixture = Fixture::new("oauth-401");
+        let network = Arc::new(OAuthNetwork::new(&[401, 401]));
+        fixture.write_credentials();
+        let (_, handle) = router_with_handle(deps(&fixture, network.clone(), Bus::new()));
+        runtime().block_on(async {
+            let result = handle.0.fetch_claude(None, true, NOW).await.unwrap();
+            assert_eq!(result["error"], "auth-expired");
+            assert_eq!(network.usage_calls.load(Ordering::SeqCst), 2);
+            assert_eq!(network.refresh_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(
+                &*network.tokens.lock().unwrap(),
+                &["synthetic-access-token", "rotated-access"]
+            );
+        });
+    }
+
+    #[test]
+    fn oauth_null_rotation_and_empty_scopes_preserve_existing_values() {
+        let fixture = Fixture::new("oauth-optional");
+        let network = Arc::new(OAuthNetwork::with_refresh(
+            &[200],
+            200,
+            json!({ "access_token": "rotated-access", "refresh_token": null, "scope": "" }),
+        ));
+        fixture.write(
+            fixture.claude_home().join(".credentials.json"),
+            &json!({ "claudeAiOauth": {
+                "accessToken": "old-access", "refreshToken": "old-refresh", "expiresAt": NOW - 1,
+                "scopes": ["existing-scope"]
+            }})
+            .to_string(),
+        );
+        let (_, handle) = router_with_handle(deps(&fixture, network, Bus::new()));
+        runtime().block_on(async {
+            let _ = handle.0.fetch_claude(None, true, NOW).await.unwrap();
+            let saved: Value = serde_json::from_str(
+                &std::fs::read_to_string(fixture.claude_home().join(".credentials.json")).unwrap(),
+            )
+            .unwrap();
+            assert_eq!(saved["claudeAiOauth"]["refreshToken"], "old-refresh");
+            assert_eq!(saved["claudeAiOauth"]["scopes"], json!(["existing-scope"]));
+        });
+    }
+
+    #[test]
+    fn oauth_refresh_failure_and_cli_fallback_are_throttled_together() {
+        let fixture = Fixture::new("oauth-throttle");
+        let network = Arc::new(OAuthNetwork::with_refresh(
+            &[],
+            401,
+            json!({ "error": "rejected" }),
+        ));
+        fixture.write(
+            fixture.claude_home().join(".credentials.json"),
+            &json!({ "claudeAiOauth": {
+                "accessToken": "old-access", "refreshToken": "old-refresh", "expiresAt": NOW - 1
+            }})
+            .to_string(),
+        );
+        let (_, handle) = router_with_handle(deps(&fixture, network.clone(), Bus::new()));
+        runtime().block_on(async {
+            for _ in 0..2 {
+                let result = handle.0.fetch_claude(None, true, NOW).await.unwrap();
+                assert_eq!(result["error"], "token-expired");
+            }
+            assert_eq!(network.refresh_calls.load(Ordering::SeqCst), 1);
+            assert_eq!(network.auth_calls.load(Ordering::SeqCst), 1);
+        });
+    }
+
+    /// `oauth-fix-spec.md`: shadow mode returns before any grant, CLI or write
+    /// activity. `crate::shadow::enabled()` caches a `OnceLock`, so the proof
+    /// runs in a child of this same binary started with `SINGULARITY_SHADOW=1`;
+    /// the marker variable stops that child from recursing.
+    #[test]
+    fn shadow_mode_suppresses_claude_auth_refresh() {
+        const MARKER: &str = "SINGULARITY_SHADOW_REGRESSION_CHILD";
+        const CHILD_TEST: &str = "http_usage::tests::shadow_mode_suppresses_claude_auth_refresh";
+
+        if std::env::var(MARKER).is_ok() {
+            let fixture = Fixture::new("shadow-suppression");
+            fixture.write_credentials();
+            let credentials = fixture.claude_home().join(".credentials.json");
+            let before = std::fs::read(&credentials).unwrap();
+            let network = Arc::new(OAuthNetwork::new(&[200]));
+            let (_, handle) = router_with_handle(deps(&fixture, network.clone(), Bus::new()));
+            assert!(crate::shadow::enabled(), "child must run in shadow mode");
+            runtime().block_on(async {
+                assert!(!handle.0.refresh_claude_auth(NOW).await);
+            });
+            assert_eq!(network.refresh_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(network.auth_calls.load(Ordering::SeqCst), 0);
+            assert_eq!(
+                std::fs::read(&credentials).unwrap(),
+                before,
+                "shadow mode must not rewrite credentials"
+            );
+            assert_eq!(
+                *handle.0.auth_refresh_at.lock().unwrap(),
+                0,
+                "shadow mode must not consume the refresh throttle"
+            );
+            println!("shadow-suppression-ok");
+            return;
+        }
+
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", CHILD_TEST, "--nocapture"])
+            .env("SINGULARITY_SHADOW", "1")
+            .env(MARKER, "1")
+            .output()
+            .expect("spawn shadow child");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success(),
+            "shadow child failed ({}): {stdout}",
+            output.status
+        );
+        assert!(
+            stdout.contains("shadow-suppression-ok"),
+            "child assertions did not run: {stdout}"
+        );
     }
 
     type Server = (
@@ -2393,9 +2806,8 @@ mod tests {
             deps.clock = Arc::new(move || handle.load(Ordering::SeqCst));
             let server = start(deps).await;
             let url = format!("{}/api/usage?force=1&source=claude", server.0);
-            let want = |left: u64| {
-                json!({ "available": left, "expiresAt": ["2026-12-10T22:00:00.000Z"] })
-            };
+            let want =
+                |left: u64| json!({ "available": left, "expiresAt": ["2026-12-10T22:00:00.000Z"] });
 
             let (_, body) = get_json(&url).await;
             assert_eq!(body["claude"]["resets"], want(2), "{body}");

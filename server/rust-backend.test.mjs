@@ -96,7 +96,9 @@ test('Rust detached spawn returns immediately, inherits cwd and environment, and
     if (oldValue === undefined) delete process.env.SINGULARITY_DETACHED_VALUE;
     else process.env.SINGULARITY_DETACHED_VALUE = oldValue;
     await backend.stop();
-    await rm(root, { recursive: true, force: true });
+    // The detached child inherits root as cwd and exits on its own after writing the marker;
+    // retry EBUSY briefly while Windows still holds that inherited CWD handle.
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 });
 
@@ -1524,6 +1526,18 @@ test('Rust one-shot bridge execs a binary and maps stdout, failure, and timeout'
 
     const ok = await backend.oneShot(process.execPath, [okScript], { timeout: 10_000 });
     assert.equal(ok.stdout, 'bridge-ok');
+
+    const previousProbe = process.env.SING_BRIDGE_PROBE;
+    process.env.SING_BRIDGE_PROBE = 'bridge-default-env-ok';
+    try {
+      const inherited = await backend.oneShot(process.execPath, [envScript], { timeout: 10_000 });
+      assert.equal(inherited.stdout, 'bridge-default-env-ok');
+      const inheritedGit = await backend.git(process.execPath, [envScript], { timeout: 10_000 });
+      assert.equal(inheritedGit.stdout, 'bridge-default-env-ok');
+    } finally {
+      if (previousProbe === undefined) delete process.env.SING_BRIDGE_PROBE;
+      else process.env.SING_BRIDGE_PROBE = previousProbe;
+    }
 
     const env = await backend.oneShot(process.execPath, [envScript], {
       timeout: 10_000, env: { SING_BRIDGE_PROBE: 'bridge-env-ok' },

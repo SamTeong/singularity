@@ -7,12 +7,14 @@
 //! `<dirname(state)>/reports`. Tests inject the clock and zone; production uses
 //! the host zone, resolving each row's own offset (DST-aware).
 
+use crate::claude_usage::ClaudeUsageResult;
 use crate::usage_report_codex_ingest::codex_ingest;
 use crate::usage_report_cost::Pricing;
 use crate::usage_report_pipeline::{PipelineEnv, generate_native};
 use crate::usage_report_rebuild::{RebuildRoots, rebuild_stats_csv};
-use crate::usage_snapshot::LocalZone;
+use crate::usage_snapshot::{LocalZone, SnapshotService};
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use serde_json::{Value, json};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -124,11 +126,21 @@ pub fn read(request: &Request) -> Report {
 }
 
 pub fn generate(request: &Request) -> Value {
-    generate_with(request, now_secs(), LocalZone::Host)
+    generate_with_sampler(request, now_secs(), LocalZone::Host, sample_claude_usage)
 }
 
+#[cfg(test)]
 fn generate_with(request: &Request, now_secs: f64, local_zone: LocalZone) -> Value {
-    match run_generation(request, now_secs, local_zone) {
+    generate_with_sampler(request, now_secs, local_zone, |_, _, _| {})
+}
+
+fn generate_with_sampler(
+    request: &Request,
+    now_secs: f64,
+    local_zone: LocalZone,
+    sampler: impl FnOnce(&str, &Path, f64),
+) -> Value {
+    match run_generation(request, now_secs, local_zone, sampler) {
         Ok(path) => json!({"ok": true, "at": mtime_ms(&path)}),
         Err(error) => json!({"ok": false, "error": error}),
     }
@@ -138,6 +150,7 @@ fn run_generation(
     request: &Request,
     now_secs: f64,
     local_zone: LocalZone,
+    sampler: impl FnOnce(&str, &Path, f64),
 ) -> Result<PathBuf, String> {
     let base = base_state_dir(&request.env)
         .ok_or_else(|| "cannot resolve HOME to locate the usage report state".to_owned())?;
@@ -156,11 +169,16 @@ fn run_generation(
         base_state_dir: base.clone(),
         reports_dir,
         claude_projects_root,
-        claude_inventory_root: claude_root,
+        claude_inventory_root: claude_root.clone(),
         codex_home: codex_home.clone(),
         now_secs,
         local_zone,
     };
+    if !crate::shadow::enabled() {
+        if let Some(token) = saved_claude_token(&claude_root) {
+            sampler(&token, &base, now_secs);
+        }
+    }
     let mut rebuild = |active_sid: Option<&str>| {
         rebuild_state(
             &base,
@@ -172,6 +190,56 @@ fn run_generation(
         )
     };
     generate_native(&env, &mut rebuild)
+}
+
+/// Report sampling mirrors stats.mjs: use only the saved OAuth access token and
+/// let any credential, transport, response, or append failure fall through.
+fn saved_claude_token(claude_root: &Path) -> Option<String> {
+    let credentials = crate::claude_credentials::read(&claude_root.join(".credentials.json"));
+    let crate::claude_credentials::ClaudeCredentialsRead::File(text) = credentials else {
+        return None;
+    };
+    serde_json::from_str::<Value>(&text)
+        .ok()?
+        .get("claudeAiOauth")
+        .and_then(|oauth| oauth.get("accessToken"))
+        .and_then(Value::as_str)
+        .filter(|token| !token.is_empty())
+        .map(str::to_owned)
+}
+
+fn sample_claude_usage(token: &str, state_dir: &Path, now_secs: f64) {
+    if crate::shadow::enabled() {
+        return;
+    }
+    let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    else {
+        return;
+    };
+    let result = runtime.block_on(crate::claude_usage::fetch_claude_usage(token, 10_000));
+    let ClaudeUsageResult::Response {
+        status: 200,
+        body: Ok(Some(body)),
+        ..
+    } = result
+    else {
+        return;
+    };
+    let Ok(raw) = RawValue::from_string(body) else {
+        return;
+    };
+    if !serde_json::from_str::<Value>(raw.get()).is_ok_and(|value| value.is_object()) {
+        return;
+    }
+    let live = state_dir.join("usage-snapshots.jsonl");
+    let mut snapshots = SnapshotService::default();
+    let now_ms = (now_secs * 1000.0) as i64;
+    let result = snapshots.append_claude(&live, state_dir, false, &raw, now_ms, None, None);
+    if let Some(error) = result.error {
+        eprintln!("usage-report: Claude snapshot append failed: {error}");
+    }
 }
 
 /// stats.mjs:858-870: a Codex failure is logged and the pre-existing Codex rows
@@ -347,6 +415,106 @@ mod tests {
         assert!(html.contains("var SESSIONS="));
         assert_eq!(status(&request).exists, true);
         assert!(read(&request).html.unwrap().contains("var SESSIONS="));
+        remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn configured_credentials_sample_before_generation_and_append_snapshot() {
+        let root = temp_dir();
+        let mut request = Request {
+            reports_dir: String::new(),
+            env: root_env(&root),
+        };
+        let claude_root = root.join("claude");
+        write(
+            claude_root.join(".credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"synthetic-token"}}"#,
+        )
+        .unwrap();
+        request.env["CLAUDE_CONFIG_DIR"] = json!(claude_root.to_string_lossy());
+        let sampled = std::cell::Cell::new(false);
+        let result = generate_with_sampler(
+            &request,
+            1_700_000_000.0,
+            LocalZone::Fixed(0),
+            |token, state, now| {
+                assert_eq!(token, "synthetic-token");
+                let samples = [
+                    (1_698_990_000.0, 1_699_000_000.0, 10.0),
+                    (1_698_995_000.0, 1_699_000_000.0, 20.0),
+                    (1_699_490_000.0, 1_699_500_000.0, 15.0),
+                    (1_699_495_000.0, 1_699_500_000.0, 30.0),
+                    (1_699_990_000.0, 1_700_100_000.0, 35.0),
+                    (now, 1_700_100_000.0, 42.0),
+                ];
+                let mut snapshots = SnapshotService::default();
+                for (fetched_at, reset_at, utilization) in samples {
+                    let raw = RawValue::from_string(format!(
+                        r#"{{"five_hour":{{"utilization":{utilization},"resets_at":{reset_at}}}}}"#
+                    ))
+                    .unwrap();
+                    let appended = snapshots.append_claude(
+                        &state.join("usage-snapshots.jsonl"),
+                        state,
+                        false,
+                        &raw,
+                        (fetched_at * 1000.0) as i64,
+                        None,
+                        None,
+                    );
+                    assert!(appended.appended);
+                }
+                sampled.set(true);
+            },
+        );
+        assert_eq!(result["ok"], true, "{result}");
+        assert!(sampled.get());
+        assert!(root.join("state/usage-snapshots.jsonl").exists());
+        assert!(status(&request).exists);
+        let forecast: Value =
+            serde_json::from_slice(&fs::read(root.join("state/forecast.json")).unwrap()).unwrap();
+        assert_eq!(forecast["gauges"]["five_hour"]["source"], "oauth");
+        assert_eq!(forecast["gauges"]["five_hour"]["result"]["uNow"], 42.0);
+        remove_dir_all(&root).ok();
+    }
+
+    #[test]
+    fn sampling_failure_and_missing_credentials_still_generate() {
+        let root = temp_dir();
+        let request = Request {
+            reports_dir: String::new(),
+            env: root_env(&root),
+        };
+        let state = root.join("state");
+        let prior = b"{\"fetched_at\":\"2026-11-17T00:00:00Z\",\"raw\":{}}\n";
+        write(state.join("usage-snapshots.jsonl"), prior).unwrap();
+        let calls = std::cell::Cell::new(0);
+        let failed_sample =
+            generate_with_sampler(&request, 1_700_000_000.0, LocalZone::Fixed(0), |_, _, _| {
+                calls.set(calls.get() + 1)
+            });
+        assert_eq!(failed_sample["ok"], true, "{failed_sample}");
+        assert_eq!(calls.get(), 0, "missing credentials must skip sampling");
+        assert_eq!(
+            fs::read(state.join("usage-snapshots.jsonl")).unwrap(),
+            prior
+        );
+        assert!(status(&request).exists);
+
+        let claude_root = root.join("claude");
+        write(
+            claude_root.join(".credentials.json"),
+            r#"{"claudeAiOauth":{"accessToken":"synthetic-token"}}"#,
+        )
+        .unwrap();
+        let failed_sample =
+            generate_with_sampler(&request, 1_700_000_001.0, LocalZone::Fixed(0), |_, _, _| {});
+        assert_eq!(failed_sample["ok"], true, "{failed_sample}");
+        assert_eq!(
+            fs::read(state.join("usage-snapshots.jsonl")).unwrap(),
+            prior
+        );
+        assert!(status(&request).exists);
         remove_dir_all(&root).ok();
     }
 
