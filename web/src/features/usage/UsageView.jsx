@@ -151,7 +151,9 @@ function ProviderCard({ sourceKey, label, usageUrl, u, onConnect, connecting, co
             that a Codex record is a day old), but it costs the header ~150px it
             does not have at 320px. Same affordance as the Automation page. */}
         {u?.fetchedAt && !refreshing && (
-          <Tooltip slotProps={tipSlots} disableInteractive={!(anchorOn && anchor.lastError)} title={<>{statusLines.map((l) => <div key={l}>{l}</div>)}</>}>
+          // Interactive + leaveDelay so the text can be selected; max-content keeps short
+          // lines whole, the viewport cap wraps a long anchor error instead of clipping it.
+          <Tooltip slotProps={{ ...tipSlots, tooltip: { sx: { width: 'max-content', maxWidth: 'calc(100vw - 32px)', overflowWrap: 'anywhere', userSelect: 'text' } } }} leaveDelay={300} title={<>{statusLines.map((l) => <div key={l}>{l}</div>)}</>}>
             <Box role="img" data-status={statusKind} aria-label={`${label} status — ${statusLines.join(' · ')}`} sx={dotSx(statusKind)} />
           </Tooltip>
         )}
