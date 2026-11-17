@@ -3,7 +3,9 @@ use crate::retry_after::retry_after_ms;
 use std::future::Future;
 use std::time::Duration;
 
-const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
+// cedar_ember=1 adds the redeemable resets to the usage document; the endpoint answers
+// eligible:false to any User-Agent that is not the claude CLI's.
+const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1";
 const HEADER_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_ATTEMPTS: u32 = 3;
 const RETRYABLE: &[u16] = &[408, 429, 500, 502, 503, 504];
@@ -24,7 +26,12 @@ pub async fn fetch_claude_usage(access_token: &str, header_timeout_ms: u64) -> C
     let initial_timeout =
         Duration::from_millis(header_timeout_ms.min(HEADER_TIMEOUT.as_millis() as u64));
     let authorization = format!("Bearer {access_token}");
-    let extra_headers = [("anthropic-beta", "oauth-2025-04-20")];
+    let user_agent = format!("claude-cli/{CLAUDE_CLI_VERSION} (external, cli)");
+    let extra_headers = [
+        ("anthropic-beta", "oauth-2025-04-20"),
+        ("content-type", "application/json"),
+        ("user-agent", user_agent.as_str()),
+    ];
     fetch_with(
         initial_timeout,
         |timeout| http_attempt::get(USAGE_URL, Some(&authorization), &extra_headers, timeout),
@@ -33,6 +40,51 @@ pub async fn fetch_claude_usage(access_token: &str, header_timeout_ms: u64) -> C
         jitter,
     )
     .await
+}
+
+// shortcut: pinned CLI version, any recent claude-cli UA passes; bump if the endpoint starts refusing it.
+const CLAUDE_CLI_VERSION: &str = "2.1.326";
+
+/// The usage body's cedar_ember grants as `{available, expiresAt[]}`; `None` when absent or ineligible.
+pub(crate) fn parse_resets(raw: &serde_json::Value) -> Option<serde_json::Value> {
+    let ember = raw.get("cedar_ember")?;
+    if ember.get("eligible") != Some(&serde_json::Value::Bool(true)) {
+        return None;
+    }
+    let mut available = 0u64;
+    let mut expires_at = Vec::new();
+    for grant in ember.get("grants")?.as_array()? {
+        let Some(left) = grant.get("resets_left").and_then(|v| v.as_u64()).filter(|n| *n > 0) else {
+            continue;
+        };
+        available += left;
+        if let Some(ms) = grant
+            .get("ends_at")
+            .and_then(|v| v.as_str())
+            .and_then(crate::usage_snapshot::window_anchor_timestamp_ms)
+        {
+            expires_at.push(crate::http_usage::iso_ms(ms));
+        }
+    }
+    expires_at.sort();
+    Some(serde_json::json!({ "available": available, "expiresAt": expires_at }))
+}
+
+#[cfg(test)]
+mod resets_tests {
+    use super::parse_resets;
+    use serde_json::json;
+
+    #[test]
+    fn sums_resets_sorts_expiries_and_null_on_a_bad_answer() {
+        let body = json!({"cedar_ember":{"eligible":true,"grants":[{"resets_left":1,"ends_at":"2026-12-10T22:00:00+00:00"},{"resets_left":1,"ends_at":"2026-11-17T07:59:00+00:00"},{"resets_left":0,"ends_at":"2027-01-01T00:00:00+00:00"},{"resets_left":"x"}]}});
+        assert_eq!(
+            parse_resets(&body),
+            Some(json!({ "available": 2, "expiresAt": ["2026-11-17T07:59:00.000Z", "2026-12-10T22:00:00.000Z"] }))
+        );
+        assert_eq!(parse_resets(&json!({"cedar_ember":{"eligible":false,"grants":[]}})), None);
+        assert_eq!(parse_resets(&json!({"other":1})), None);
+    }
 }
 
 #[cfg(test)]
@@ -197,7 +249,7 @@ mod http_contract_tests {
         assert!(headers.starts_with("get /api/oauth/usage http/1.1\r\n"));
         assert!(headers.contains("authorization: bearer synthetic-claude-token\r\n"));
         assert!(headers.contains("anthropic-beta: oauth-2025-04-20\r\n"));
-        assert_eq!(USAGE_URL, "https://api.anthropic.com/api/oauth/usage");
+        assert_eq!(USAGE_URL, "https://api.anthropic.com/api/oauth/usage?cedar_ember=1");
     }
 
     #[test]

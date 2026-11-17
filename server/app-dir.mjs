@@ -14,6 +14,11 @@ const home = process.env.SINGULARITY_HOME;
 if (!home) {
   throw new Error('SINGULARITY_HOME required — set it in .env (no default). State root.');
 }
+// Read-only follower mode: another daemon (Rust) is the only writer of this state dir.
+export const SHADOW = process.env.SINGULARITY_SHADOW === '1';
+const SHADOW_POSTS = new Set(['/config/search', '/codex-config/search', '/hooks/list', '/hooks/search', '/rules/files', '/rules/search', '/transcripts/stats']);
+// Pure allow decision for the /api guard: path is the URL without /api prefix or query.
+export const shadowAllows = (method, path) => ['GET', 'HEAD', 'OPTIONS'].includes(method) || (method === 'POST' && SHADOW_POSTS.has(path));
 export const APP_DIR = home;
 export const STATE_DIR = join(APP_DIR, 'state');
 export const CACHE_DIR = join(APP_DIR, 'cache');

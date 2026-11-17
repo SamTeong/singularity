@@ -65,16 +65,20 @@ impl GitPort for NativeGit {
             "core.askpass=".to_owned(),
         ];
         argv.extend(args.iter().map(|arg| (*arg).to_owned()));
+        let mut env = json!({
+            "GIT_TERMINAL_PROMPT": "0",
+            "GCM_INTERACTIVE": "never",
+            "GIT_ASKPASS": "echo",
+        });
+        if crate::shadow::enabled() {
+            env["GIT_OPTIONAL_LOCKS"] = json!("0"); // shadow: never take the index lock
+        }
         let payload = crate::oneshot::run_git(
             Some(&self.bin),
             &Value::Array(argv.into_iter().map(Value::String).collect()),
             Some(self.timeout_ms as f64),
             Some(GIT_MAX_BUFFER),
-            Some(&json!({
-                "GIT_TERMINAL_PROMPT": "0",
-                "GCM_INTERACTIVE": "never",
-                "GIT_ASKPASS": "echo",
-            })),
+            Some(&env),
         );
         if payload.get("ok").and_then(Value::as_bool) == Some(true) {
             return Ok(payload

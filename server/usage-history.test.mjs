@@ -338,6 +338,28 @@ test('codex: model pricing includes same-second transitions but excludes later-s
   }
 });
 
+test('codex: a Stop row spanning several readings keeps its rollout events\' timestamps', async () => {
+  rmSync(join(scratch, 'codex'), { recursive: true, force: true });
+  // One long turn: the row at T[0] is only the baseline, the next lands at T[2], past
+  // both readings the turn's spend was measured by.
+  const hook = (ms, input) => ({ fetched_at: local(ms), session: null, weekly: null, session_id: 'thread-l', last_token_usage: null, total_token_usage: { input_tokens: input, cached_input_tokens: 0, output_tokens: 0, total_tokens: input } });
+  const gauge = (ms, u) => ({ fetched_at: local(ms), session: { utilization: u, resets_at: new Date(RESET).toISOString() } });
+  jsonl(join(STATE, 'codex-usage.jsonl'), [gauge(T[0], 5), hook(T[0] + 61_000, 1000), gauge(T[1], 15), gauge(T[2], 25), hook(T[2] + 61_000, 1300)]);
+  const d = new Date(T[0]);
+  const dir = join(scratch, 'codex', 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
+  const tc = (ms, total, last) => ({ timestamp: new Date(ms).toISOString(), type: 'event_msg', payload: { type: 'token_count', info: { total_token_usage: { total_tokens: total }, last_token_usage: { input_tokens: last } } } });
+  jsonl(join(dir, 'rollout-l.jsonl'), [
+    { timestamp: new Date(T[0]).toISOString(), type: 'session_meta', payload: { id: 'thread-l', cwd: join(scratch, 'proj') } },
+    { timestamp: new Date(T[0]).toISOString(), type: 'turn_context', payload: { model: 'gpt-6' } },
+    tc(T[0] + 90_000, 1100, 100), tc(T[1] + 90_000, 1300, 200),
+  ]);
+  const doc = await getUsageHistory('codex', NOW);
+  // Each interval's rise lands on the event recorded in it; stamping the whole 300 at
+  // the Stop row would leave thread-l at 0 and both rises unattributed.
+  assert.deepEqual(doc.points.map((p) => p.sessions['thread-l']), [0, 10, 20]);
+  assert.deepEqual(doc.points[2].sessions, { 'thread-l': 20, _unattributed: 5 });
+});
+
 test('statusline: appends a row only when cost or 5h % moves; rotates to .1 above 2 MB', () => {
   const sl = join(scratch, 'statusline-state');
   const hist = join(sl, 'cost-history.jsonl');
@@ -370,13 +392,14 @@ test('7d: weekly % line per provider from resets_at - 7d, no session split, one 
   const wReset = NOW + 2 * DAY; // weekly window started 5 days ago
   const tb = Math.floor((NOW - DAY) / B) * B + 60_000; // two readings inside one 15-min bucket
   const W = [NOW - 8 * DAY, NOW - 3 * DAY, tb, tb + 120_000];
-  jsonl(join(STATE, 'usage-snapshots.jsonl'), [40, 50, 60, 61].map((u, i) => ({ fetched_at: local(W[i]), raw: { five_hour: { utilization: 1, resets_at: new Date(RESET).toISOString() }, seven_day: { utilization: u, resets_at: new Date(wReset).toISOString() } } })));
+  jsonl(join(STATE, 'usage-snapshots.jsonl'), [40, 50, 60, 61].map((u, i) => ({ fetched_at: local(W[i]), raw: { five_hour: { utilization: [10, 20, 30, 31][i], resets_at: new Date(RESET).toISOString() }, seven_day: { utilization: u, resets_at: new Date(wReset).toISOString() } } })));
   const claude = await getUsageHistory('claude', NOW, '7d');
   assert.equal(claude.window, '7d');
   assert.equal(claude.estimated, false);
   assert.deepEqual(claude.sessions, []);
   assert.equal(claude.windowStart, new Date(wReset - 7 * DAY).toISOString());
   assert.deepEqual(claude.points.map((p) => p.pct), [50, 61]); // 8 days ago is outside; 60 folds into 61
+  assert.deepEqual(claude.points.map((p) => p.pct5h), [20, 31]);
   assert.deepEqual(claude.points[1].sessions, {});
   // 5h on the same rows still reads five_hour: its window, not the weekly one.
   assert.equal((await getUsageHistory('claude', NOW)).windowStart, new Date(RESET - 5 * 3.6e6).toISOString());
@@ -389,7 +412,10 @@ test('7d: weekly % line per provider from resets_at - 7d, no session split, one 
   assert.equal(codex.resetsAt, new Date(Math.floor(wReset / 1000) * 1000).toISOString());
 
   jsonl(join(STATE, 'ollama-usage.jsonl'), [{ fetched_at: local(W[1]), weekly: { utilization: 96.4, resets_at: new Date(wReset).toISOString() } }]);
-  assert.deepEqual((await getUsageHistory('ollama', NOW, '7d')).points.map((p) => p.pct), [96.4]);
+  const ollama = await getUsageHistory('ollama', NOW, '7d');
+  assert.deepEqual(ollama.points.map((p) => p.pct), [96.4]);
+  // No session (5h) window on that row, so the 5h line is a gap, not 0.
+  assert.deepEqual(ollama.points.map((p) => p.pct5h), [null]);
 });
 
 test('unknown window is rejected (route 400s)', async () => {

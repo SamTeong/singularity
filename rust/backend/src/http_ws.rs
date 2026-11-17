@@ -539,6 +539,12 @@ fn anchor_frame(anchor: &Mutex<window_anchor::Service>) -> Option<String> {
     )
 }
 
+/// `SHADOW && !SHADOW_WS_OK.has(m.t)` (`pty-ws.mjs`): a missing or non-string
+/// `t` is not in the allow set either.
+fn shadow_ws_denies(shadow: bool, tag: Option<&str>) -> bool {
+    shadow && !tag.is_some_and(crate::shadow::ws_allows)
+}
+
 /// One socket's message handler (`:134-196`).
 struct Client {
     registry: Arc<Registry>,
@@ -554,7 +560,11 @@ impl Client {
         let Ok(message) = serde_json::from_str::<Value>(raw) else {
             return Vec::new();
         };
-        let Some(tag) = message.get("t").and_then(Value::as_str) else {
+        let tag = message.get("t").and_then(Value::as_str);
+        if shadow_ws_denies(crate::shadow::enabled(), tag) {
+            return vec![text(&json!({ "t": "error", "msg": crate::shadow::ERROR }))];
+        }
+        let Some(tag) = tag else {
             return Vec::new();
         };
         match tag {
@@ -800,6 +810,17 @@ fn number_field(message: &Value, key: &str) -> u16 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn shadow_ws_gate_allows_only_read_only_messages() {
+        assert!(!shadow_ws_denies(true, Some("attach")));
+        assert!(!shadow_ws_denies(true, Some("txmeta")));
+        assert!(!shadow_ws_denies(true, Some("chat:stop")));
+        assert!(shadow_ws_denies(true, Some("create")));
+        assert!(shadow_ws_denies(true, Some("chat")));
+        assert!(shadow_ws_denies(true, None));
+        assert!(!shadow_ws_denies(false, Some("create")));
+    }
     use crate::agent_registry::{PtyPort, RegistryConfig};
     use crate::agent_spawn::{Bins, LaunchSpec, SpawnPaths};
     use crate::bus::Bus;

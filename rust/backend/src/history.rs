@@ -1532,6 +1532,9 @@ impl HistoryService {
     }
 
     async fn ensure_inner(&self, days: f64, root: Option<String>) -> Result<Vec<Value>, String> {
+        if crate::shadow::enabled() {
+            return Ok(Vec::new()); // read-only: no appends, no summariser spawn
+        }
         let now = self.deps.clock.now_ms();
         let today = self.deps.clock.local_day(now);
         let mut wanted = Vec::new();

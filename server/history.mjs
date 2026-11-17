@@ -10,6 +10,7 @@ import { mkdirSync, readFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR, bus, writeAtomic, CLAUDE_BIN, OLLAMA_BIN, CODEX_BIN } from './agents.mjs';
+import { SHADOW } from './app-dir.mjs';
 import { listSessions, readSession, pathForCodex } from './sessions.mjs';
 import { parseSession, parseCodexRollout, readCostFile, readStatsCsvCosts } from './stats.mjs';
 import { getSummariser } from './model-store.mjs';
@@ -413,6 +414,7 @@ async function buildDayEntry(date, dayAgg, deps) {
 // re-checkable (rescanned, never re-appended while still empty) so a day that
 // does turn out to have work gets upgraded on a later call.
 async function _ensureHistory({ days = BACKFILL_DAYS, callSummariser, root } = {}) {
+  if (SHADOW) return { built: [] }; // read-only: no appends, no summariser spawn
   const today = localDay();
   const wanted = [];
   for (let i = 1; i <= days; i++) wanted.push(localDay(Date.now() - i * 86_400_000));

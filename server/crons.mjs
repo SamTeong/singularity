@@ -55,6 +55,7 @@ export function initCrons(log) {
       log?.info({ crons: crons.size }, 'loaded crons.json');
     }
   } catch (e) { log?.warn({ err: e.message }, 'crons.json load failed'); }
+  if (reg.SHADOW) return; // read-only: no recovery, kills or tick interval
 
   // A pending run is a durable unknown outcome. Only finalize it when the
   // registry carries the same stable run id; otherwise leave it blocked rather

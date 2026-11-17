@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
+import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE, SHADOW } from './app-dir.mjs';
 import { fetchExternal, retryAfterMs } from './external-fetch.mjs';
 import { newestSnapshotArchive } from './usage-history.mjs';
 
@@ -58,7 +58,9 @@ export async function pwHideWebdriver(ctx) {
 // the refresh below reads and rewrites the same file the CLI does (and so tests
 // can point at a scratch dir instead of the real credentials).
 const CREDENTIALS_PATH = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), '.credentials.json');
-const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
+// cedar_ember=1 adds the redeemable resets to the usage document. The request itself
+// (this URL, claude-cli User-Agent) is made by the Rust claudeUsageFetch bridge.
+const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage?cedar_ember=1';
 // The per-source floor on network/heavy work (the OAuth usage API, the codex
 // wham/usage API, the codex rollout scan, the ollama scrape): at most one
 // attempt every NETWORK_FLOOR_MS, success or failure, for an automated caller
@@ -92,11 +94,13 @@ export function parseOllamaHtml(html) {
 // new maths lives here. `models` is the weekly window's per-model requests (from
 // the API, when it reports any). fetched_at is LOCAL time (the skill parses it as
 // local), zero-padded YYYY-MM-DD HH:MM:SS, no timezone suffix.
-// ponytail: the file only ever grows (~10KB/day at 48 samples/day) — fine at
-// this scale; trim-to-last-N is the upgrade path if it ever matters.
+// ponytail: the file only ever grows — an unchanged reading adds at most one
+// row per 5-minute heartbeat — fine at this scale; trim-to-last-N is the
+// upgrade path if it ever matters.
 const OLLAMA_HISTORY = join(USAGE_SKILL_STATE, 'ollama-usage.jsonl');
 
 export async function appendOllamaHistory(data) {
+  if (SHADOW) return false;
   try {
     const result = await usageSnapshotBackend.providerUsageSnapshot({
       operation: 'append_ollama', path: OLLAMA_HISTORY, reading: data, now_ms: Date.now(),
@@ -114,6 +118,7 @@ export async function appendOllamaHistory(data) {
 // reading, and a zero-delta duplicate line is harmless to the estimators.
 const CODEX_HISTORY = join(USAGE_SKILL_STATE, 'codex-usage.jsonl');
 export async function appendCodexHistory(data) {
+  if (SHADOW) return false;
   try {
     const result = await usageSnapshotBackend.providerUsageSnapshot({
       operation: 'append_codex', path: CODEX_HISTORY, reading: data, now_ms: Date.now(),
@@ -136,6 +141,7 @@ export const SNAPSHOT_MAX_AGE_MS = 2 * NETWORK_FLOOR_MS; // one missed ~60s stat
 export const CLAUDE_STALE_MAX_MS = 5 * 3.6e6;
 
 async function appendClaudeHistory(record, limits) {
+  if (SHADOW) return false;
   try {
     const costState = record.source === 'cost-state';
     const result = await usageSnapshotBackend.providerUsageSnapshot({
@@ -269,6 +275,7 @@ export async function scrapeOllamaOnce(pw, headless) {
 
 let ollamaBrowserInflight = null;
 function fetchOllamaBrowser() {
+  if (SHADOW) return Promise.resolve({ ok: false, error: 'shadow mode' });
   if (ollamaBrowserInflight) return ollamaBrowserInflight;
   ollamaBrowserInflight = (async () => {
     const pw = await import('playwright-core').catch(() => null);
@@ -441,6 +448,7 @@ let lastAuthRefresh = 0;
 // Merge a fresh token response into ~/.claude/.credentials.json in Node, then
 // send the serialized content and exact Node PID temp path to the Rust writer.
 async function persistOauth(fresh) {
+  if (SHADOW) return;
   let file = {};
   try {
     const result = await usageClaudeBackend?.claudeCredentialsRead(CREDENTIALS_PATH);
@@ -493,6 +501,7 @@ export async function refreshOauthGrant() {
 // Throttled as a pair so a genuinely signed-out user doesn't get a request +
 // spawn on every usage pull.
 export async function refreshClaudeAuth() {
+  if (SHADOW) return false; // the grant rotates the refresh token shared with the primary daemon
   if (Date.now() - lastAuthRefresh < AUTH_REFRESH_THROTTLE_MS) return false;
   lastAuthRefresh = Date.now();
   if (await refreshOauthGrant()) return true;
@@ -565,17 +574,7 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
   const accessToken = String(oauth.accessToken);
   const safeError = (error) => String(error?.message ?? error).split(accessToken).join('[redacted]');
   try {
-    // Rust owns the transient retry loop; keep this one bridge operation
-    // inside fetchExternal's existing timeout/queued-abort boundary.
-    resp = await fetchExternal(USAGE_API_URL, { method: 'GET' }, {
-      retry: false,
-      timeoutMs: REQ_TIMEOUT_MS,
-      fetcher: async (url, options) => {
-        if (url !== USAGE_API_URL || options.method !== 'GET') throw new Error('fetch failed');
-        if (!usageClaudeBackend) throw new Error('fetch failed');
-        return claudeUsageResponse(await usageClaudeBackend.claudeUsageFetch(accessToken, options.signal, REQ_TIMEOUT_MS));
-      },
-    });
+    resp = await requestClaudeUsage(accessToken);
   } catch (e) {
     return { ok: false, source: 'claude', error: `request failed: ${safeError(e)}` };
   }
@@ -594,10 +593,42 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
     // tails stay fed for sessions starting mid-idle (readClaudeSnapshot reads
     // {fetched_at, raw}). Failures and file-sourced reads append nothing.
     await appendClaudeHistory({ fetched_at: new Date().toISOString(), raw });
-    return await normalizeClaude(raw, oauth.subscriptionType);
+    const data = await normalizeClaude(raw, oauth.subscriptionType);
+    const resets = parseClaudeResets(raw);
+    return resets && data && typeof data === 'object' ? { ...data, resets } : data;
   } catch (e) {
     return { ok: false, source: 'claude', error: `parse error: ${safeError(e)}` };
   }
+}
+
+function requestClaudeUsage(accessToken) {
+  // Rust owns the transient retry loop; keep this one bridge operation
+  // inside fetchExternal's existing timeout/queued-abort boundary.
+  return fetchExternal(USAGE_API_URL, { method: 'GET' }, {
+    retry: false,
+    timeoutMs: REQ_TIMEOUT_MS,
+    fetcher: async (url, options) => {
+      if (url !== USAGE_API_URL || options.method !== 'GET') throw new Error('fetch failed');
+      if (!usageClaudeBackend) throw new Error('fetch failed');
+      return claudeUsageResponse(await usageClaudeBackend.claudeUsageFetch(accessToken, options.signal, REQ_TIMEOUT_MS));
+    },
+  });
+}
+
+// The one resets-only usage call behind a complete local reading. Any failure
+// keeps the old resets; a 429 arms the gate like the network leg.
+async function refreshClaudeResets(slot, fingerprint) {
+  const oauth = await claudeOauthToken();
+  if (!oauth?.accessToken) return;
+  try {
+    const resp = await requestClaudeUsage(String(oauth.accessToken));
+    if (resp.status === 429) {
+      claudeGate.arm(retryAfterMs(resp.headers?.get?.('retry-after')) ?? CLAUDE_RATE_LIMIT_BACKOFF_MS, fingerprint);
+    } else if (resp.status === 200) {
+      const resets = parseClaudeResets(await resp.json());
+      if (resets && slot.data?.ok) slot.data = { ...slot.data, resets };
+    }
+  } catch { /* keep the old resets */ }
 }
 
 function claudeUsageResponse(result) {
@@ -716,6 +747,7 @@ export async function fetchCodex(force = false) {
 // this count would never refresh if it rode on fetchCodex's live leg.
 const CODEX_RESETS_API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
 const CODEX_RESETS_TTL_MS = 10 * 60_000;
+const CLAUDE_RESETS_TTL_MS = 10 * 60_000;
 // shortcut: credits[] was empty when probed, so the expiry key is a guess; pin it once a real credit is seen.
 const RESET_EXPIRY_KEYS = ['expires_at', 'expiration_time', 'expires', 'expiry'];
 
@@ -743,6 +775,21 @@ export async function fetchCodexResets() {
     const expiresAt = (Array.isArray(raw.credits) ? raw.credits : []).map(resetExpiry).filter(Boolean).sort();
     return { available: raw.available_count, expiresAt };
   } catch { return null; }
+}
+
+// Claude's redeemable usage-limit resets ("cedar_ember" grants), read from the usage body.
+export function parseClaudeResets(raw) {
+  const ember = raw?.cedar_ember;
+  if (!ember || typeof ember !== 'object' || ember.eligible !== true || !Array.isArray(ember.grants)) return null;
+  let available = 0;
+  const expiresAt = [];
+  for (const g of ember.grants) {
+    if (!Number.isFinite(g?.resets_left) || g.resets_left <= 0) continue;
+    available += g.resets_left;
+    const d = typeof g.ends_at === 'string' ? new Date(g.ends_at) : null;
+    if (d && Number.isFinite(d.getTime())) expiresAt.push(d.toISOString());
+  }
+  return { available, expiresAt: expiresAt.sort() };
 }
 
 // ---- Cache + public API -------------------------------------------------------
@@ -846,8 +893,16 @@ async function pull(src, fetcher, force) {
     if (local) {
       if (!slot.credentialFingerprint && claudeFingerprint) slot.credentialFingerprint = claudeFingerprint;
       const unchanged = slot.data?.ok && !slot.data.stale && slot.data.fetchedAt === local.fetchedAt;
-      if (!unchanged) slot.data = local;
-      if (hasCompleteWindow(local.session) && hasCompleteWindow(local.weekly)) return slot.data;
+      // A local reading has no resets of its own: keep the last ones.
+      if (!unchanged) slot.data = slot.data?.resets && !local.resets ? { ...local, resets: slot.data.resets } : local;
+      if (hasCompleteWindow(local.session) && hasCompleteWindow(local.weekly)) {
+        // One usage call per TTL keeps resets fresh; never on force alone, never past a blocked gate.
+        if (Date.now() - (slot.resetsAt ?? 0) >= CLAUDE_RESETS_TTL_MS && !claudeGate.blocked(claudeFingerprint)) {
+          slot.resetsAt = Date.now();
+          await refreshClaudeResets(slot, claudeFingerprint);
+        }
+        return slot.data;
+      }
     }
     // Both tiers stale → the network is the only way to fill the card, gated by
     // claudeGate and the network floor below.
@@ -913,6 +968,7 @@ async function pull(src, fetcher, force) {
   if (src === 'claude' && data.ok) {
     slot['credentialFingerprint'] = await claudeCredentialFingerprint();
     claudeGate.clear();
+    slot.resetsAt = Date.now(); // the network body just answered resets, present or not
   }
   if (src === 'codex' && data.ok) {
     slot.credentialFingerprint = codexFingerprint;
@@ -998,7 +1054,11 @@ export async function getUsage({ force = false, sources, fetchers } = {}) {
     // A failed read keeps the last count rather than blanking the badge.
     resetsSlot.data = (await (fetchers?.codexResets ?? fetchCodexResets)()) ?? resetsSlot.data;
   }
-  const result = { ollama: ollama ? { ...ollama, historyPaused } : null, claude, codex: codex && resetsSlot.data ? { ...codex, resets: resetsSlot.data } : codex };
+  const result = {
+    ollama: ollama ? { ...ollama, historyPaused } : null,
+    claude,
+    codex: codex && resetsSlot.data ? { ...codex, resets: resetsSlot.data } : codex,
+  };
   // Manual/forced calls (the Refresh button, force=1) always push — a user who
   // pressed the button waiting on an unchanged reading is not a bug. Automated
   // calls (every 5s/60s sampler tick, idle-debounce, reset timers) only push
@@ -1062,6 +1122,7 @@ function scheduleResetRefreshes(result) {
 // network floor as the sampler ticks — not the user's own Refresh press.
 export function initUsageAutoRefresh(bus) {
   usageBus = bus;
+  if (SHADOW) return; // read-only: no idle-triggered pulls, no history sampler
   bus.on('status', ({ status }) => {
     if (status !== 'idle') return;
     clearTimeout(idleTimer);

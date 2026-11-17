@@ -187,7 +187,7 @@ fn read(path: &str) -> Value {
         }
     }
     let fallback = seed();
-    if !Path::new(path).exists() {
+    if !crate::shadow::enabled() && !Path::new(path).exists() {
         let _ = persist(path, &fallback);
     }
     fallback
@@ -331,6 +331,9 @@ pub fn route(path: &str, model: &Value, tool: &Value) -> Value {
 }
 
 pub fn summariser(path: &str) -> Value {
+    if crate::shadow::enabled() {
+        return Value::Null; // no LLM spawn: callers take the deterministic path
+    }
     let state = read(path);
     let id = state["summariserModel"].as_str().unwrap_or("");
     if id.is_empty() {

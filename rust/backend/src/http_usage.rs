@@ -86,6 +86,8 @@ const HISTORY_WINDOWS: [&str; 2] = ["5h", "7d"];
 const REQ_TIMEOUT_MS: u64 = 10_000;
 /// `CODEX_RESETS_TTL_MS` (`usage.mjs`): the resets lane's own refresh floor.
 const CODEX_RESETS_TTL_MS: i64 = 10 * 60_000;
+/// Claude resets refresh floor behind a complete local reading.
+const CLAUDE_RESETS_TTL_MS: i64 = 10 * 60_000;
 
 type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -168,6 +170,9 @@ impl UsageNetwork for NativeUsageNetwork {
 
     fn ollama_usage(&self) -> BoxFuture<'_, Value> {
         Box::pin(async move {
+            if crate::shadow::enabled() {
+                return json!({ "ok": false, "error": "shadow mode" });
+            }
             let _profile = self.profile_lock.lock().await;
             self.browser().scrape().await
         })
@@ -452,6 +457,8 @@ struct ClaudeSlot {
     data: Option<Value>,
     at: i64,
     fingerprint: Option<String>,
+    /// When `resets` was last fetched (0 = never).
+    resets_at_ms: i64,
     gate: RateGate,
 }
 
@@ -859,12 +866,31 @@ impl UsageState {
                     && data.get("fetchedAt") == local.get("fetchedAt")
             });
             if !unchanged {
-                slot.data = Some(local.clone());
+                let mut next = local.clone();
+                // A local reading has no resets of its own: keep the last ones.
+                if let (Some(resets), Some(fields)) = (
+                    slot.data.as_ref().and_then(|data| data.get("resets")),
+                    next.as_object_mut(),
+                ) {
+                    fields
+                        .entry("resets")
+                        .or_insert_with(|| resets.clone());
+                }
+                slot.data = Some(next);
             }
             // Complete local windows answer the card without spending the
             // endpoint's account quota.
             if has_complete_window(local.get("session")) && has_complete_window(local.get("weekly"))
             {
+                // One usage call per TTL keeps resets fresh; never on `force`
+                // alone and never past a blocked gate.
+                if now - slot.resets_at_ms >= CLAUDE_RESETS_TTL_MS
+                    && !slot.gate.blocked(fingerprint.as_deref(), false, now)
+                {
+                    slot.resets_at_ms = now;
+                    self.refresh_claude_resets(slot, oauth.as_ref(), fingerprint, now)
+                        .await;
+                }
                 return Ok(slot.data.clone());
             }
         }
@@ -892,6 +918,8 @@ impl UsageState {
         if json_is_ok(&data) {
             slot.fingerprint = self.credential_fingerprint().await;
             slot.gate.clear();
+            // The network body just answered resets, present or not.
+            slot.resets_at_ms = now;
         }
         let last_good = slot.data.as_ref().filter(|data| json_is_ok(data)).cloned();
         if json_is_ok(&data) || last_good.is_none() {
@@ -915,6 +943,52 @@ impl UsageState {
             }
         }
         Ok(slot.data.clone())
+    }
+
+    /// The single resets-only usage call behind a complete local reading. Any
+    /// failure keeps the old resets; a 429 arms the gate like the network leg.
+    async fn refresh_claude_resets(
+        &self,
+        slot: &mut ClaudeSlot,
+        oauth: Option<&ClaudeOauth>,
+        fingerprint: Option<String>,
+        now: i64,
+    ) {
+        let Some(token) = oauth
+            .and_then(|oauth| oauth.access_token.clone())
+            .filter(|token| !token.is_empty())
+        else {
+            return;
+        };
+        match self.network.claude_usage(&token).await {
+            ClaudeUsageResult::Response {
+                status: 200,
+                body: Ok(Some(text)),
+                ..
+            } => {
+                let resets = serde_json::from_str::<Value>(&text)
+                    .ok()
+                    .and_then(|raw| claude_usage::parse_resets(&raw));
+                if let (Some(resets), Some(fields)) = (
+                    resets,
+                    slot.data.as_mut().and_then(Value::as_object_mut),
+                ) {
+                    fields.insert("resets".into(), resets);
+                }
+            }
+            ClaudeUsageResult::Response {
+                status: 429,
+                retry_after,
+                ..
+            } => {
+                let delay = retry_after_ms(retry_after.as_deref(), now)
+                    .filter(|v| v.is_finite())
+                    .unwrap_or(CLAUDE_RATE_LIMIT_BACKOFF_MS)
+                    .max(0.0) as i64;
+                slot.gate.arm(delay, fingerprint, now);
+            }
+            _ => {}
+        }
     }
 
     /// `readClaudeLocal` (`usage.mjs:512`): the snapshot log first, then the
@@ -1097,7 +1171,15 @@ impl UsageState {
                         // own log.
                         self.append_claude_network(&raw, now).await;
                         match normalize_claude(&to_raw(&raw), oauth.subscription_type.as_deref()) {
-                            Ok(data) => Ok(data),
+                            Ok(mut data) => {
+                                // The same body carries the cedar_ember grants.
+                                if let (Some(resets), Some(fields)) =
+                                    (claude_usage::parse_resets(&raw), data.as_object_mut())
+                                {
+                                    fields.insert("resets".into(), resets);
+                                }
+                                Ok(data)
+                            }
                             Err(message) => Ok(claude_failure(&format!("parse error: {message}"))),
                         }
                     }
@@ -1898,7 +1980,7 @@ fn with_snapshots<T>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering};
     use tokio::sync::oneshot;
 
     /// 2027-01-15T08:00:00.000Z.
@@ -2254,6 +2336,90 @@ mod tests {
     }
 
     #[test]
+    fn claude_body_cedar_ember_becomes_resets_in_one_request_per_forced_refresh() {
+        let fixture = Fixture::new("claude-resets");
+        fixture.write_credentials();
+        let network = Arc::new(StubNetwork::default());
+        network.claude.lock().unwrap().body = json!({
+            "five_hour": { "utilization": 42, "resets_at": iso_ms(NOW + 3_600_000) },
+            "seven_day": { "utilization": 7, "resets_at": iso_ms(NOW + 3 * 86_400_000) },
+            "cedar_ember": { "eligible": true, "grants": [
+                { "resets_left": 2, "ends_at": "2026-12-10T22:00:00+00:00" },
+            ] },
+        });
+        runtime().block_on(async {
+            let server = start(deps(&fixture, network.clone(), Bus::new())).await;
+            let (status, body) =
+                get_json(&format!("{}/api/usage?force=1&source=claude", server.0)).await;
+            assert_eq!(status, 200);
+            assert_eq!(
+                body["claude"]["resets"],
+                json!({ "available": 2, "expiresAt": ["2026-12-10T22:00:00.000Z"] }),
+                "{body}"
+            );
+            assert_eq!(network.claude_calls.load(Ordering::SeqCst), 1);
+            shutdown(server).await;
+        });
+    }
+
+    #[test]
+    fn local_claude_reading_keeps_resets_and_refetches_them_once_per_ttl() {
+        let fixture = Fixture::new("claude-local-resets");
+        fixture.write_credentials();
+        let network = Arc::new(StubNetwork::default());
+        let grants = |left: u64| {
+            json!({
+                "five_hour": { "utilization": 42, "resets_at": iso_ms(NOW + 3_600_000) },
+                "seven_day": { "utilization": 7, "resets_at": iso_ms(NOW + 3 * 86_400_000) },
+                "cedar_ember": { "eligible": true, "grants": [
+                    { "resets_left": left, "ends_at": "2026-12-10T22:00:00+00:00" },
+                ] },
+            })
+        };
+        network.claude.lock().unwrap().body = grants(2);
+        let clock_ms = Arc::new(AtomicI64::new(NOW));
+        let write_local = |at: i64| {
+            let mut row: Value = serde_json::from_str(&snapshot_row()).unwrap();
+            row["fetched_at"] = json!(iso_ms(at - 1_000));
+            fixture.write(
+                fixture.usage_dir().join("usage-snapshots.jsonl"),
+                &format!("{row}\n"),
+            );
+        };
+        write_local(NOW);
+        runtime().block_on(async {
+            let mut deps = deps(&fixture, network.clone(), Bus::new());
+            let handle = clock_ms.clone();
+            deps.clock = Arc::new(move || handle.load(Ordering::SeqCst));
+            let server = start(deps).await;
+            let url = format!("{}/api/usage?force=1&source=claude", server.0);
+            let want = |left: u64| {
+                json!({ "available": left, "expiresAt": ["2026-12-10T22:00:00.000Z"] })
+            };
+
+            let (_, body) = get_json(&url).await;
+            assert_eq!(body["claude"]["resets"], want(2), "{body}");
+            assert_eq!(network.claude_calls.load(Ordering::SeqCst), 1);
+
+            // Fresh local reading inside the TTL: resets carried, no call.
+            clock_ms.store(NOW + 5 * 60_000, Ordering::SeqCst);
+            write_local(NOW + 5 * 60_000);
+            network.claude.lock().unwrap().body = grants(5);
+            let (_, body) = get_json(&url).await;
+            assert_eq!(body["claude"]["resets"], want(2), "{body}");
+            assert_eq!(network.claude_calls.load(Ordering::SeqCst), 1);
+
+            // Past the TTL: exactly one call, resets updated.
+            clock_ms.store(NOW + 11 * 60_000, Ordering::SeqCst);
+            write_local(NOW + 11 * 60_000);
+            let (_, body) = get_json(&url).await;
+            assert_eq!(body["claude"]["resets"], want(5), "{body}");
+            assert_eq!(network.claude_calls.load(Ordering::SeqCst), 2);
+            shutdown(server).await;
+        });
+    }
+
+    #[test]
     fn codex_resets_attach_and_a_failed_read_keeps_the_last_count() {
         let fixture = Fixture::new("resets");
         let network = Arc::new(StubNetwork::default());
@@ -2366,7 +2532,10 @@ mod tests {
             assert_eq!(claude["weekly"]["pctUsed"].as_f64(), Some(7.0));
             let fetched_at = iso_ms(NOW - 1_000);
             assert_eq!(claude["fetchedAt"].as_str(), Some(fetched_at.as_str()));
-            assert_eq!(network.claude_calls.load(Ordering::SeqCst), 0);
+            // The card comes from the local file; the only call is the
+            // resets-only one (the stub body has no grants).
+            assert_eq!(network.claude_calls.load(Ordering::SeqCst), 1);
+            assert!(claude.get("resets").is_none(), "{body}");
 
             shutdown(server).await;
         });

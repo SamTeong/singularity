@@ -378,6 +378,9 @@ impl CronsService {
         self.stopped.store(false, Ordering::SeqCst);
         self.timers.attach(self);
         self.load();
+        if crate::shadow::enabled() {
+            return; // read-only: no recovery, kills or tick interval
+        }
         self.recover_pending();
         self.sweep_dead();
         self.recompute_enabled();

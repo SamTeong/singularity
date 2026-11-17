@@ -329,22 +329,34 @@ const READING = {
   },
 };
 
-test('appendOllamaHistory: dedupes an unchanged reading, writes a changed one', async () => {
-  await appendOllamaHistory(READING);
-  await appendOllamaHistory(READING); // identical → no second line
-  const changed = { ...READING, session: { ...READING.session, pctUsed: 28.1 } };
-  await appendOllamaHistory(changed);
+test('appendOllamaHistory: unchanged readings dedupe inside interval and heartbeat after 5 minutes', async () => {
+  const realNow = Date.now;
+  let now = realNow();
+  try {
+    rmSync(HISTORY_FILE, { force: true });
+    Date.now = () => now;
+    await appendOllamaHistory(READING);
+    await appendOllamaHistory(READING); // inside the heartbeat → no extra row
+    now += 5 * 60_000;
+    await appendOllamaHistory(READING); // heartbeat elapsed → same values, newer timestamp
+    const changed = { ...READING, session: { ...READING.session, pctUsed: 28.1 } };
+    await appendOllamaHistory(changed);
 
-  const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
-  assert.equal(lines.length, 2);
-  for (const line of lines) {
-    const row = JSON.parse(line);
-    assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-    assert.equal(typeof row.session.utilization, 'number');
-    assert.ok('resets_at' in row.weekly);
+    const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
+    assert.equal(lines.length, 3);
+    const rows = lines.map(JSON.parse);
+    for (const row of rows) {
+      assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+      assert.equal(typeof row.session.utilization, 'number');
+      assert.ok('resets_at' in row.weekly);
+    }
+    assert.equal(rows[0].session.utilization, 27.4);
+    assert.equal(rows[1].session.utilization, 27.4);
+    assert.ok(rows[1].fetched_at > rows[0].fetched_at);
+    assert.equal(rows[2].session.utilization, 28.1);
+  } finally {
+    Date.now = realNow;
   }
-  assert.equal(JSON.parse(lines[0]).session.utilization, 27.4);
-  assert.equal(JSON.parse(lines[1]).session.utilization, 28.1);
 });
 
 test('appendOllamaHistory retries an identical reading after a failed append', async () => {
@@ -1393,7 +1405,8 @@ test('getUsage: a valid unstarted local session does not trigger OAuth polling',
     const isolatedGetUsage = (await importIsolatedUsage(`./usage.mjs?unstarted=${Date.now()}`)).getUsage;
     const doc = await isolatedGetUsage({ sources: ['claude'] });
     assert.equal(doc.claude.session.started, false);
-    assert.equal(calls, 0);
+    // The local reading answers the card; the only call is the one resets-only fetch.
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
     clearClaudeLocal();
@@ -2025,5 +2038,95 @@ test('getUsage: attaches codex resets and keeps the last count on a failed read'
     assert.deepEqual(second.codex.resets, { available: 1, expiresAt: [] });
   } finally {
     process.env.SING_CODEX_RESETS = '0';
+  }
+});
+
+test('getUsage: a complete local claude reading keeps resets and refetches them once per TTL', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-local-resets=${Date.now()}`);
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
+  const originalFetch = globalThis.fetch;
+  const realNow = Date.now;
+  const base = realNow();
+  try {
+    writeCreds({ accessToken: 'local-resets-token', expiresAt: base + 3_600_000 * 4, subscriptionType: 'max' });
+    clearClaudeLocal();
+    let calls = 0;
+    let left = 2;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return { status: 200, headers: { get: () => null }, json: async () => ({
+        five_hour: { utilization: 10, resets_at: new Date(base + 3_600_000).toISOString() },
+        seven_day: { utilization: 5, resets_at: new Date(base + 86_400_000).toISOString() },
+        cedar_ember: { eligible: true, grants: [{ resets_left: left, ends_at: '2026-12-10T22:00:00+00:00' }] },
+      }) };
+    };
+    const writeLocal = (at) => writeFileSync(join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl'), `${JSON.stringify({
+      fetched_at: new Date(at - 1000).toISOString(),
+      raw: {
+        five_hour: { utilization: 10, resets_at: new Date(base + 3_600_000).toISOString() },
+        seven_day: { utilization: 5, resets_at: new Date(base + 86_400_000).toISOString() },
+      },
+    })}\n`);
+    const want = (n) => ({ available: n, expiresAt: ['2026-12-10T22:00:00.000Z'] });
+    writeLocal(base);
+    const first = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.deepEqual(first.claude.resets, want(2));
+    assert.equal(calls, 1);
+
+    left = 5;
+    Date.now = () => base + 5 * 60_000;
+    writeLocal(Date.now());
+    const within = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.deepEqual(within.claude.resets, want(2));
+    assert.equal(calls, 1);
+
+    Date.now = () => base + 11 * 60_000;
+    writeLocal(Date.now());
+    const past = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.deepEqual(past.claude.resets, want(5));
+    assert.equal(calls, 2);
+  } finally {
+    Date.now = realNow;
+    globalThis.fetch = originalFetch;
+    clearClaudeLocal();
+    if (originalCredentials) writeFileSync(credentialsFile, originalCredentials);
+    else rmSync(credentialsFile, { force: true });
+  }
+});
+
+test('getUsage: a claude 200 body with cedar_ember yields claude.resets in one usage request', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-resets=${Date.now()}`);
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
+  const originalFetch = globalThis.fetch;
+  try {
+    writeCreds({ accessToken: 'resets-token', expiresAt: Date.now() + 3_600_000, subscriptionType: 'max' });
+    clearClaudeLocal();
+    let calls = 0;
+    const grants = [
+      { resets_left: 1, ends_at: '2026-12-10T22:00:00+00:00' },
+      { resets_left: 1, ends_at: '2026-11-17T07:59:00+00:00' },
+      { resets_left: 0, ends_at: '2027-01-01T00:00:00+00:00' },
+      { resets_left: 'x' },
+    ];
+    globalThis.fetch = async () => {
+      calls += 1;
+      return { status: 200, headers: { get: () => null }, json: async () => ({
+        five_hour: { utilization: 10, resets_at: new Date(Date.now() + 3_600_000).toISOString() },
+        seven_day: { utilization: 5, resets_at: new Date(Date.now() + 86_400_000).toISOString() },
+        cedar_ember: { eligible: true, grants },
+      }) };
+    };
+    const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, true);
+    assert.deepEqual(doc.claude.resets, { available: 2, expiresAt: ['2026-11-17T07:59:00.000Z', '2026-12-10T22:00:00.000Z'] });
+    assert.equal(calls, 1);
+    assert.equal(isolated.parseClaudeResets({ cedar_ember: { eligible: false, grants: [] } }), null);
+    assert.equal(isolated.parseClaudeResets({}), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalCredentials) writeFileSync(credentialsFile, originalCredentials);
+    else rmSync(credentialsFile, { force: true });
   }
 });

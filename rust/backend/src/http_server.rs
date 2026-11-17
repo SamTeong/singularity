@@ -317,7 +317,11 @@ impl CutoverServices {
                     }),
                 });
                 // Boot backfill like `index.mjs:904`: fire once, never block listen.
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                // Shadow builds no history, so the spawn is skipped.
+                if let (false, Ok(handle)) = (
+                    crate::shadow::enabled(),
+                    tokio::runtime::Handle::try_current(),
+                ) {
                     let backfill = history.clone();
                     handle.spawn(async move {
                         let _ = backfill.ensure(crate::history::BACKFILL_DAYS, None).await;
@@ -420,7 +424,11 @@ impl CutoverServices {
                     },
                 ));
                 domain_routes = domain_routes.merge(crate::http_crons::router(crons.clone()));
-                if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                // Shadow: no background recovery, intervals or listeners.
+                if let (false, Ok(handle)) = (
+                    crate::shadow::enabled(),
+                    tokio::runtime::Handle::try_current(),
+                ) {
                     let scheduler =
                         crate::background_schedule::start(handle, background.clone(), &bus);
                     // VERIFY: wave4-lifecycle-7
@@ -440,12 +448,15 @@ impl CutoverServices {
                     match tokio::runtime::Handle::try_current() {
                         Ok(handle) => {
                             // Samplers live as long as the usage routes (`initUsageAutoRefresh`, index.mjs:1003).
-                            let auto_refresh = crate::usage_auto_refresh::start(
-                                handle.clone(),
-                                usage_handle.clone(),
-                                bus,
-                            );
-                            usage = usage.layer(axum::Extension(Arc::new(auto_refresh)));
+                            // Shadow: no idle-triggered pulls, no history sampler.
+                            if !crate::shadow::enabled() {
+                                let auto_refresh = crate::usage_auto_refresh::start(
+                                    handle.clone(),
+                                    usage_handle.clone(),
+                                    bus,
+                                );
+                                usage = usage.layer(axum::Extension(Arc::new(auto_refresh)));
+                            }
                             let refresh: crate::window_anchor_host::UsageRefresh =
                                 Arc::new(move |provider: &str| {
                                     let usage_handle = usage_handle.clone();
@@ -467,7 +478,9 @@ impl CutoverServices {
                                         .map_or(0, |elapsed| elapsed.as_millis() as i64)
                                 }),
                             );
-                            host.subscribe_usage();
+                            if !crate::shadow::enabled() {
+                                host.subscribe_usage();
+                            }
                             host
                         }
                         Err(_) => Arc::new(crate::lifecycle::DeferredAnchorHost),
@@ -712,14 +725,19 @@ impl HttpServices {
             &config.cwd,
         )
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-        // `server/migrate-state.mjs` runs before any state reader.
-        crate::state_migration::StateMigration::from_app_paths(&paths).run()?;
-        // Debris from a hard-killed writer: state/cache scratch files, after the
-        // migration has created those dirs, before any state is loaded.
-        crate::fs_atomic::sweep_stale_scratch(
-            &[paths.state_dir.as_path(), paths.cache_dir.as_path()],
-            std::time::SystemTime::now(),
-        );
+        // Shadow: the primary daemon owns migration and scratch cleanup.
+        if crate::shadow::enabled() {
+            eprintln!("{}", crate::shadow::ERROR);
+        } else {
+            // `server/migrate-state.mjs` runs before any state reader.
+            crate::state_migration::StateMigration::from_app_paths(&paths).run()?;
+            // Debris from a hard-killed writer: state/cache scratch files, after the
+            // migration has created those dirs, before any state is loaded.
+            crate::fs_atomic::sweep_stale_scratch(
+                &[paths.state_dir.as_path(), paths.cache_dir.as_path()],
+                std::time::SystemTime::now(),
+            );
+        }
         let runtime = crate::lifecycle::RuntimeServices::from_env(&paths, &config)?;
         services.clients = runtime.clients.clone();
         services.cutover = Some(CutoverServices::from_env(paths, &config));
@@ -816,10 +834,13 @@ where
 {
     if let Some(runtime) = services.runtime.as_ref() {
         runtime.tasks.load().await;
-        runtime.tasks.start_background(
-            &tokio::runtime::Handle::current(),
-            runtime.shutdown.subscribe(),
-        );
+        // Shadow: no retention interval or `output` listener (`initTasks`).
+        if !crate::shadow::enabled() {
+            runtime.tasks.start_background(
+                &tokio::runtime::Handle::current(),
+                runtime.shutdown.subscribe(),
+            );
+        }
     }
     axum::serve(listener, router(policy, services))
         .with_graceful_shutdown(shutdown)
@@ -877,6 +898,15 @@ fn load_dotenv() -> io::Result<()> {
     Ok(())
 }
 
+/// The shadow `/api` guard decision (`index.mjs` `onRequest`): `path` is the
+/// URI path (no query); only `/api`-prefixed requests are checked.
+fn shadow_denies(shadow: bool, method: &str, path: &str) -> bool {
+    let Some(rest) = path.strip_prefix("/api") else {
+        return false;
+    };
+    shadow && (rest.is_empty() || rest.starts_with('/')) && !crate::shadow::allows(method, rest)
+}
+
 async fn enforce_transport_policy(
     State(policy): State<HttpPolicy>,
     request: Request<Body>,
@@ -903,6 +933,14 @@ async fn enforce_transport_policy(
     let path = request.uri().path();
     let method = request.method();
     let is_api = path == "/api" || path.starts_with("/api/");
+    // Node registers the shadow hook before the token gate in the `/api` plugin.
+    if shadow_denies(crate::shadow::enabled(), method.as_str(), path) {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({ "error": crate::shadow::ERROR })),
+        )
+            .into_response();
+    }
     let api_exempt = matches!(path, "/api/health" | "/api/capabilities");
     let open_asset = path == "/assets" || path.starts_with("/assets/");
     if is_api && !api_exempt && !open_asset {
@@ -1008,6 +1046,20 @@ mod tests {
     use axum::http::StatusCode;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::sync::oneshot;
+
+    #[test]
+    fn shadow_guard_denies_only_api_writes_when_enabled() {
+        use super::shadow_denies;
+        assert!(shadow_denies(true, "POST", "/api/models/restore-defaults"));
+        assert!(shadow_denies(true, "PUT", "/api/keys"));
+        assert!(shadow_denies(true, "DELETE", "/api/tasks/1"));
+        assert!(!shadow_denies(true, "GET", "/api/usage"));
+        assert!(!shadow_denies(true, "POST", "/api/config/search"));
+        // Off the `/api` prefix the guard does not apply (Node's plugin scope).
+        assert!(!shadow_denies(true, "POST", "/ws"));
+        assert!(!shadow_denies(true, "POST", "/apix/models"));
+        assert!(!shadow_denies(false, "PUT", "/api/keys"));
+    }
 
     fn test_services() -> HttpServices {
         HttpServices::new(

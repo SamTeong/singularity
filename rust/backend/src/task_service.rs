@@ -945,6 +945,9 @@ impl TaskService {
             state.history = history;
             state.task_by_session = task_by_session;
         }
+        if crate::shadow::enabled() {
+            return; // read-only: no recovery or sweep
+        }
         self.scan_orphan_worktrees();
         for task in self.tasks() {
             if task.column == "done" {

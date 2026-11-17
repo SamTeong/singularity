@@ -1,10 +1,13 @@
 // WebSocket wiring — fans agents.bus events to sockets, routes client messages to the registry.
 import * as reg from './agents.mjs';
+import { SHADOW } from './app-dir.mjs';
 import { snapshotTasks } from './tasks.mjs';
 import { snapshotCrons } from './crons.mjs';
 import { snapshotBackground } from './background.mjs';
 import { snapshotWindowAnchor } from './window-anchor.mjs';
 import { streamChat } from './chat.mjs';
+
+const SHADOW_WS_OK = new Set(['attach', 'txmeta', 'chat:stop']); // read-only: chat spends tokens
 
 function send(ws, msg) {
   const payload = typeof msg === 'string' ? msg : JSON.stringify(msg);
@@ -134,6 +137,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     ws.on('message', async (raw) => {
       let m;
       try { m = JSON.parse(raw.toString()); } catch { return; }
+      if (SHADOW && !SHADOW_WS_OK.has(m.t)) { send(ws, { t: 'error', msg: 'shadow mode: read-only' }); return; }
       switch (m.t) {
         case 'create': {
           try {

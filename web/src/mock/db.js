@@ -49,7 +49,11 @@ export const db = {
         sonnet: [3.0, 15.0, 0.3, 3.75],
         haiku: [1.0, 5.0, 0.1, 1.25],
       },
-      above_200k: { 'gpt-6.1-sol': [4.0, 15.0, 0.2, 5.0], 'gpt-6.1-terra': [2.0, 7.5, 0.1, 2.5], 'gpt-6-sol': [4.0, 15.0, 0.4, 5.0] },
+      above_200k: {
+        'gpt-6.1-sol': [4.0, 15.0, 0.2, 5.0],
+        'gpt-6.1-terra': [2.0, 7.5, 0.1, 2.5],
+        'gpt-6-sol': [4.0, 15.0, 0.4, 5.0],
+      },
       long_context_threshold: 200000,
       default_key: 'opus',
     },

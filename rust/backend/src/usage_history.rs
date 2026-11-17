@@ -994,7 +994,8 @@ struct Turns {
     first: f64,
     last: f64,
     base: Value,
-    events: Vec<Event>,
+    /// (previous row time, turn event): the turn spans from the previous row to this one.
+    events: Vec<(f64, Event)>,
     mixed: bool,
 }
 
@@ -1043,14 +1044,17 @@ fn codex_turn_events(state_dir: &Path) -> OMap<Turns> {
         ]
         .iter()
         .any(|k| token_conversion_error(u.get(*k)) || token_conversion_error(s.base.get(*k)));
-        s.events.push(Event {
-            t,
-            model: Vec::new(),
-            tok,
-            usd: None,
-            coercion_error,
-            conversion_throws_immediately: true,
-        });
+        s.events.push((
+            s.last,
+            Event {
+                t,
+                model: Vec::new(),
+                tok,
+                usd: None,
+                coercion_error,
+                conversion_throws_immediately: true,
+            },
+        ));
         s.base = u.clone();
         s.last = t;
     }
@@ -1134,7 +1138,12 @@ fn claude_sessions(
     out
 }
 
-fn codex_sessions(p: &Params, since: f64, files: &[PathBuf]) -> OMap<Session> {
+fn codex_sessions(
+    p: &Params,
+    since: f64,
+    files: &[PathBuf],
+    cost: &impl Fn(&[u16], &[f64; 4]) -> f64,
+) -> OMap<Session> {
     let mut out = OMap::new();
     let turns = codex_turn_events(Path::new(p.state_dir));
     for path in files {
@@ -1182,18 +1191,46 @@ fn codex_sessions(p: &Params, since: f64, files: &[PathBuf]) -> OMap<Session> {
                 .or_else(|| r.events.first().map(|e| e.model.clone()))
                 .unwrap_or_default()
         };
-        let priced = s.events.iter().map(|e| Event {
-            model: model_at(e.t),
-            ..e.clone()
-        });
-        add(
-            &mut out,
-            &id,
-            None,
-            priced.collect::<Vec<_>>(),
-            since,
-            p.now_ms,
-        );
+        // A row's delta is its whole turn stamped at the Stop time, which on a long turn is
+        // hours after the spend. Its cost splits over the rollout events inside the turn,
+        // which keep their own timestamps; what they do not cover stays at the row.
+        for (from, e) in &s.events {
+            let model = model_at(e.t);
+            if e.coercion_error {
+                // Unpriceable row: keep it whole so attribute() reports the JS TypeError.
+                add(&mut out, &id, None, [Event { model, ..e.clone() }], since, p.now_ms);
+                continue;
+            }
+            let inside: Vec<&Event> = r
+                .events
+                .iter()
+                .filter(|x| x.t >= from + 1000.0 && x.t < e.t + 1000.0)
+                .collect();
+            let spent: Vec<f64> = inside.iter().map(|x| cost(&model_at(x.t), &x.tok)).collect();
+            let sum = spent.iter().fold(0.0, |a, b| a + b);
+            let turn = cost(&model, &e.tok);
+            let mut parts: Vec<Event> = if sum > 0.0 {
+                inside
+                    .iter()
+                    .zip(&spent)
+                    .map(|(x, c)| Event {
+                        usd: Some(turn * c / sum),
+                        ..(*x).clone()
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            let rest = turn - parts.iter().fold(0.0, |a, x| a + x.usd.unwrap_or(0.0));
+            if rest > 0.0 {
+                parts.push(Event {
+                    model,
+                    usd: Some(rest),
+                    ..e.clone()
+                });
+            }
+            add(&mut out, &id, None, parts, since, p.now_ms);
+        }
     }
     prune_cache(&CODEX_CACHE, &files.iter().map(PathBuf::as_path).collect());
     out
@@ -1479,12 +1516,13 @@ pub fn get(p: &Params) -> Result<String, String> {
         ));
     }
     let mut cost_points = Vec::new();
+    let cost = pricer(p.pricing_path);
     let sessions = if p.provider == "claude" {
         let files = claude_files(Path::new(p.claude_projects), start);
         claude_sessions(p, start, &files, &mut cost_points)
     } else {
         let files = codex_files(Path::new(p.codex_sessions), start, p.now_ms);
-        codex_sessions(p, start, &files)
+        codex_sessions(p, start, &files, &cost)
     };
     if p.provider == "claude" {
         // Statusline rows fill the sparse snapshots: this window's (resets_at within 60s),
@@ -1503,7 +1541,7 @@ pub fn get(p: &Params) -> Result<String, String> {
     }
     Ok(format!(
         "{{{doc},{}}}",
-        attribute(&points, &sessions, pricer(p.pricing_path))?
+        attribute(&points, &sessions, cost)?
     ))
 }
 

@@ -106,6 +106,7 @@ pub mod skills;
 pub mod skills_roots;
 pub mod state_migration;
 pub mod stats;
+pub mod shadow;
 pub mod status;
 pub mod sysstats;
 pub mod task_git;

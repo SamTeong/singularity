@@ -490,6 +490,9 @@ pub fn load(path: &str) -> Value {
 }
 
 pub fn save(path: &str, state: &Value) -> Value {
+    if crate::shadow::enabled() {
+        return json!({ "error": crate::shadow::ERROR });
+    }
     let contents = match serde_json::to_string_pretty(state) {
         Ok(contents) => contents,
         Err(error) => return json!({ "error": error.to_string() }),
@@ -501,6 +504,9 @@ pub fn save(path: &str, state: &Value) -> Value {
 }
 
 pub fn append_telemetry(path: &str, record: &Value) -> Value {
+    if crate::shadow::enabled() {
+        return json!({ "error": crate::shadow::ERROR });
+    }
     let file = Path::new(path);
     if let Some(parent) = file.parent() {
         if let Err(error) = fs::create_dir_all(parent) {

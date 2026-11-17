@@ -108,6 +108,7 @@ export function registerTelemetry(server) {
         ok: true, source: 'claude', plan: 'pro',
         session: { pctUsed: 42, resetsAt: iso(now + 3.6e6), models: [] },
         weekly: { pctUsed: 61, resetsAt: iso(now + 4 * 86_400_000), models: [{ model: 'sonnet', pctUsed: 55 }, { model: 'opus', pctUsed: 70 }] },
+        resets: { available: 2, expiresAt: [iso(now + 10 * 86_400_000), iso(now + 30 * 86_400_000)] },
         extra: { enabled: true, used: 1200, monthlyLimit: 5000, pctUsed: 24, resetsAt: iso(now + 20 * 86_400_000) },
         fetchedAt: iso(now),
       },
