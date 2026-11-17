@@ -204,15 +204,13 @@ fn walk(dir: &Path, prefix: &str, pages: &mut Vec<Page>) {
     if pages.len() >= FILE_CAP {
         return;
     }
-    let entries = match fs::read_dir(dir) {
-        Ok(entries) => entries,
+    let mut entries: Vec<_> = match fs::read_dir(dir) {
+        Ok(entries) => entries.filter_map(Result::ok).collect(),
         Err(_) => return,
     };
+    // Node's readdir is byte-sorted (libuv); read_dir order is filesystem-dependent.
+    entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
-        let entry = match entry {
-            Ok(entry) => entry,
-            Err(_) => continue,
-        };
         let name = entry.file_name().to_string_lossy().into_owned();
         if skipped(&name) {
             continue;
