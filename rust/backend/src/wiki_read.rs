@@ -161,6 +161,16 @@ fn walk(dir: &Path, wiki_root: &Path, out: &mut Vec<Page>) {
     }
 }
 
+// read_dir order is filesystem-dependent (sorted on NTFS, not on ext4).
+fn sort_pages(pages: &mut [Page]) {
+    pages.sort_by(|a, b| {
+        a.rel
+            .to_lowercase()
+            .cmp(&b.rel.to_lowercase())
+            .then_with(|| a.rel.cmp(&b.rel))
+    });
+}
+
 fn files(root_value: &Value, order: &Value) -> Value {
     let Some(raw) = string(root_value).filter(|raw| !raw.is_empty()) else {
         return json!({ "wikis": [], "capped": false, "error": "bad path" });
@@ -177,12 +187,7 @@ fn files(root_value: &Value, order: &Value) -> Value {
     for (name, path) in directories {
         let mut pages = Vec::new();
         walk(&path, &path, &mut pages);
-        pages.sort_by(|a, b| {
-            a.rel
-                .to_lowercase()
-                .cmp(&b.rel.to_lowercase())
-                .then_with(|| a.rel.cmp(&b.rel))
-        });
+        sort_pages(&mut pages);
         if pages.len() >= FILE_CAP {
             capped = true;
         }
@@ -381,6 +386,7 @@ fn search(query_value: &Value, root_value: &Value, order: &Value) -> Value {
     for (wiki, path) in directories {
         let mut pages = Vec::new();
         walk(&path, &path, &mut pages);
+        sort_pages(&mut pages);
         append_search_pages(&mut results, &wiki, pages, &query);
         if results.len() >= RESULT_CAP {
             return json!({ "results": results, "capped": true });
