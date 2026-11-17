@@ -524,6 +524,28 @@ mod tests {
     }
 
     #[test]
+    fn search_orders_pages_like_files_not_by_read_dir() {
+        // NTFS lists a.md before _b.md ('A' < '_'); the lowercase sort puts _b.md first,
+        // so this fails on Windows too when search skips the sort.
+        let f = Fixture::new();
+        f.put("wiki/a.md", "needle");
+        f.put("wiki/_b.md", "needle");
+        f.put("wiki/sub/c.md", "needle");
+        let result = search(
+            &json!("needle"),
+            &json!(f.0.to_string_lossy()),
+            &Value::Null,
+        );
+        let rels: Vec<_> = result["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|hit| hit["rel"].as_str().unwrap().to_owned())
+            .collect();
+        assert_eq!(rels, ["wiki/_b.md", "wiki/a.md", "wiki/sub/c.md"]);
+    }
+
+    #[test]
     fn search_skips_unreadable_page_and_keeps_readable_hits() {
         let f = Fixture::new();
         f.put("wiki/readable.md", "needle remains searchable");
