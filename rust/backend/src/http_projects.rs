@@ -692,7 +692,7 @@ impl ProjectsState {
         {
             return Vec::new();
         }
-        let Ok(entries) = fs::read_dir(&dir) else {
+        let Ok(entries) = crate::fs_sorted::read_dir(&dir) else {
             return Vec::new();
         };
         let mut names: Vec<String> = entries
@@ -1645,7 +1645,7 @@ mod tests {
 
     /// git writes loose objects read-only, which Windows refuses to unlink.
     fn force_remove(path: &Path) {
-        let Ok(entries) = fs::read_dir(path) else {
+        let Ok(entries) = crate::fs_sorted::read_dir(path) else {
             let _ = fs::remove_file(path);
             return;
         };

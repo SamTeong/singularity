@@ -308,7 +308,7 @@ impl TranscriptService {
     pub fn list(&self, o: &ListOptions) -> Result<Vec<SessionRow>, Error> {
         let root = self.resolve_root(o.root.as_deref());
         let mut rows = Vec::new();
-        let project_entries = match fs::read_dir(&root) {
+        let project_entries = match crate::fs_sorted::read_dir(&root) {
             Ok(entries) => Some(entries),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
@@ -323,7 +323,7 @@ impl TranscriptService {
                     continue;
                 }
                 let project = os_string(p.file_name());
-                let entries = match fs::read_dir(p.path()) {
+                let entries = match crate::fs_sorted::read_dir(p.path()) {
                     Ok(v) => v,
                     Err(_) => continue,
                 };
@@ -390,7 +390,7 @@ impl TranscriptService {
                 .path_for(project, id, o.root.as_deref())
                 .filter(|p| p.is_file());
             if p.is_none() && !id.contains(['/', '\\']) {
-                match fs::read_dir(self.resolve_root(o.root.as_deref())) {
+                match crate::fs_sorted::read_dir(self.resolve_root(o.root.as_deref())) {
                     Ok(dirs) => {
                         for d in dirs {
                             let d = match d {
@@ -628,7 +628,7 @@ impl TranscriptService {
         o: &ListOptions,
     ) -> Result<Vec<SubagentRow>, Error> {
         let dir = project.join(parent).join("subagents");
-        let entries = match fs::read_dir(dir) {
+        let entries = match crate::fs_sorted::read_dir(dir) {
             Ok(v) => v,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
             Err(_) => return Ok(Vec::new()),
@@ -875,7 +875,7 @@ impl TranscriptService {
             }
             return Ok(out);
         }
-        let projects = match fs::read_dir(self.resolve_root(o.root.as_deref())) {
+        let projects = match crate::fs_sorted::read_dir(self.resolve_root(o.root.as_deref())) {
             Ok(projects) => Some(projects),
             Err(error) if error.kind() == io::ErrorKind::NotFound => None,
             Err(error) => return Err(error.into()),
@@ -885,7 +885,7 @@ impl TranscriptService {
                 if !p.file_type().map(|t| t.is_dir()).unwrap_or(false) {
                     continue;
                 }
-                if let Ok(files) = fs::read_dir(p.path()) {
+                if let Ok(files) = crate::fs_sorted::read_dir(p.path()) {
                     for f in files.flatten() {
                         let n = os_string(f.file_name());
                         if n.ends_with(".jsonl") {
@@ -1467,7 +1467,7 @@ fn collect_rollouts(dir: &Path, out: &mut Vec<PathBuf>) {
     if out.len() >= CODEX_CAP {
         return;
     }
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
         return;
     };
     for e in entries.flatten() {
@@ -2728,7 +2728,7 @@ mod tests {
         assert_eq!(doc.root, t.service().get_root());
         assert!(doc.root == "seed" || doc.root.starts_with("root-"));
         assert!(
-            fs::read_dir(&state)
+            crate::fs_sorted::read_dir(&state)
                 .unwrap()
                 .flatten()
                 .all(|entry| entry.file_name().to_string_lossy() == "sessions-root.json"),

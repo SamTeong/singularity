@@ -44,7 +44,7 @@ fn path_text(path: &Path) -> String {
 }
 
 fn memory_dirs(root: &Path) -> Result<Vec<(String, std::path::PathBuf)>, String> {
-    let entries = match fs::read_dir(root) {
+    let entries = match crate::fs_sorted::read_dir(root) {
         Ok(entries) => entries,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
         Err(error) => return Err(error.to_string()),
@@ -75,7 +75,7 @@ pub fn list_files(root: &str) -> Box<serde_json::value::RawValue> {
         Err(error) => return raw(&serde_json::json!({ "error": error })),
     };
     for (project, dir) in dirs {
-        let entries = match fs::read_dir(&dir) {
+        let entries = match crate::fs_sorted::read_dir(&dir) {
             Ok(entries) => entries,
             Err(error) => return raw(&serde_json::json!({ "error": error.to_string() })),
         };

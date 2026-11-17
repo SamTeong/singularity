@@ -93,7 +93,7 @@ impl StateMigration {
 
     /// `Report.md` left in `.tickets/<short>/` moves to `.reports/<short>/`.
     fn move_report_files(&self) {
-        let Ok(entries) = fs::read_dir(&self.tickets_dir) else {
+        let Ok(entries) = crate::fs_sorted::read_dir(&self.tickets_dir) else {
             return;
         };
         for entry in entries.filter_map(Result::ok) {
@@ -327,7 +327,7 @@ fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
     let metadata = fs::symlink_metadata(from)?;
     if metadata.is_dir() {
         fs::create_dir_all(to)?;
-        for entry in fs::read_dir(from)? {
+        for entry in crate::fs_sorted::read_dir(from)? {
             let entry = entry?;
             copy_tree(&entry.path(), &to.join(entry.file_name()))?;
         }
@@ -451,7 +451,7 @@ mod tests {
         let key = sha256_prefix(crons.to_str().unwrap());
         let backup_dir = fixture.migration.backups_dir.join(&key);
         assert!(backup_dir.exists(), "backup dir was created");
-        let bak = fs::read_dir(&backup_dir)
+        let bak = crate::fs_sorted::read_dir(&backup_dir)
             .unwrap()
             .filter_map(Result::ok)
             .map(|entry| entry.path())
@@ -471,7 +471,7 @@ mod tests {
 
         fixture.run();
 
-        let leftovers: Vec<String> = fs::read_dir(&fixture.migration.state_dir)
+        let leftovers: Vec<String> = crate::fs_sorted::read_dir(&fixture.migration.state_dir)
             .unwrap()
             .filter_map(Result::ok)
             .map(|entry| entry.file_name().to_string_lossy().into_owned())
@@ -740,7 +740,7 @@ mod tests {
     }
 
     fn bak_count(dir: &Path) -> usize {
-        let Ok(entries) = fs::read_dir(dir) else {
+        let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
             return 0;
         };
         entries

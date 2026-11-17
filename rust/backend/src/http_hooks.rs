@@ -1390,11 +1390,11 @@ mod tests {
     }
 
     fn bak_count(backups: &Path) -> usize {
-        fs::read_dir(backups)
+        crate::fs_sorted::read_dir(backups)
             .map(|entries| {
                 entries
                     .filter_map(|entry| entry.ok())
-                    .flat_map(|entry| fs::read_dir(entry.path()).into_iter().flatten())
+                    .flat_map(|entry| crate::fs_sorted::read_dir(entry.path()).into_iter().flatten())
                     .filter_map(|entry| entry.ok())
                     .filter(|entry| entry.file_name().to_string_lossy().ends_with(".bak"))
                     .count()

@@ -40,7 +40,7 @@ pub struct Report {
 }
 
 fn latest_file(reports_dir: &Path) -> Option<PathBuf> {
-    let mut names = fs::read_dir(reports_dir)
+    let mut names = crate::fs_sorted::read_dir(reports_dir)
         .ok()?
         .filter_map(Result::ok)
         .filter_map(|entry| {
@@ -403,7 +403,7 @@ mod tests {
         assert_eq!(result["ok"], true, "{result}");
         assert!(result["at"].as_f64().is_some());
         let report = root.join("reports").join(
-            fs::read_dir(root.join("reports"))
+            crate::fs_sorted::read_dir(root.join("reports"))
                 .unwrap()
                 .filter_map(Result::ok)
                 .map(|entry| entry.file_name())

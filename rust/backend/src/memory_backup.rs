@@ -72,7 +72,7 @@ fn claim_slot(dir: &Path, mut stamp: u64) -> Option<PathBuf> {
 
 // Keep the newest numeric backups; leave nonnumeric backup names untouched.
 fn prune(dir: &Path) -> Option<()> {
-    let mut baks: Vec<(f64, String)> = fs::read_dir(dir)
+    let mut baks: Vec<(f64, String)> = crate::fs_sorted::read_dir(dir)
         .ok()?
         .filter_map(|entry| entry.ok())
         .filter_map(|entry| {
@@ -268,7 +268,7 @@ mod tests {
     }
 
     fn bak_names(dir: &Path) -> Vec<String> {
-        fs::read_dir(dir)
+        crate::fs_sorted::read_dir(dir)
             .unwrap()
             .filter_map(|entry| entry.ok())
             .filter_map(|entry| entry.file_name().into_string().ok())

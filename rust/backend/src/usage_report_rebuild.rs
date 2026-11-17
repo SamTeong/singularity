@@ -234,7 +234,7 @@ fn walk_nested(
 
 // fs.globSync returns matches in sorted order; list the same way.
 fn listed(dir: &Path) -> Vec<(String, PathBuf)> {
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
         return Vec::new();
     };
     let mut out: Vec<(String, PathBuf)> = entries

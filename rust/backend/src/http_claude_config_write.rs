@@ -692,7 +692,7 @@ mod tests {
     }
 
     fn backup_dirs(root: &Path) -> Vec<PathBuf> {
-        match fs::read_dir(root) {
+        match crate::fs_sorted::read_dir(root) {
             Ok(entries) => entries
                 .filter_map(|entry| entry.ok())
                 .map(|entry| entry.path())
@@ -703,7 +703,7 @@ mod tests {
     }
 
     fn bak_names(dir: &Path) -> Vec<String> {
-        fs::read_dir(dir)
+        crate::fs_sorted::read_dir(dir)
             .unwrap()
             .filter_map(|entry| entry.ok())
             .filter_map(|entry| entry.file_name().into_string().ok())

@@ -1271,7 +1271,7 @@ impl SnapshotService {
         max_age_ms: i64,
         now_ms: i64,
     ) -> Option<CostStateLimits> {
-        let entries = fs::read_dir(directory).ok()?;
+        let entries = crate::fs_sorted::read_dir(directory).ok()?;
         let mut candidates = Vec::new();
         for entry in entries.flatten() {
             if !entry.file_name().to_string_lossy().ends_with(".json") {

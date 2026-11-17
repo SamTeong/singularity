@@ -45,7 +45,7 @@ fn scans(roots: &Value) -> Vec<(String, PathBuf)> {
 
 // readdir order preserved (no sort); missing/unreadable dirs skip silently.
 fn walk(root: &str, scan_dir: &Path, dir: &Path, out: &mut Vec<RuleFile>) {
-    let entries = match fs::read_dir(dir) {
+    let entries = match crate::fs_sorted::read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return,
     };

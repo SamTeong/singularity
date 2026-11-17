@@ -709,7 +709,7 @@ fn codex_rollout_cwd(path: &Path, want: &str) -> bool {
 }
 
 fn names(dir: &Path, dirs_only: bool) -> Option<Vec<String>> {
-    let mut names: Vec<String> = fs::read_dir(dir)
+    let mut names: Vec<String> = crate::fs_sorted::read_dir(dir)
         .ok()?
         .filter_map(Result::ok)
         .filter(|entry| !dirs_only || entry.file_type().is_ok_and(|kind| kind.is_dir()))

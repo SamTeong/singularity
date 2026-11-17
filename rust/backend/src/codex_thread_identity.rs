@@ -98,7 +98,7 @@ fn rollout_files(home: &str, cap: usize) -> Option<Vec<PathBuf>> {
         if files.len() >= cap {
             return;
         }
-        let Ok(entries) = fs::read_dir(dir) else {
+        let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
             return;
         };
         for entry in entries.flatten() {

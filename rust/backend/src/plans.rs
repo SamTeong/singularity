@@ -50,24 +50,17 @@ fn file_type(entry: &fs::DirEntry) -> Option<FileType> {
 }
 
 fn markdown_names(dir: &Path) -> Option<Vec<String>> {
-    let entries = fs::read_dir(dir).ok()?;
-    let mut names: Vec<String> = entries
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let kind = file_type(&entry)?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            (kind.is_file() && name.to_lowercase().ends_with(".md")).then_some(name)
-        })
-        .collect();
-    names.sort();
-    Some(names)
-}
-
-// Node's readdir returns names byte-sorted (libuv); Rust's read_dir order is filesystem-dependent.
-fn sorted_entries(root: &str) -> Option<Vec<fs::DirEntry>> {
-    let mut entries: Vec<_> = fs::read_dir(root).ok()?.filter_map(Result::ok).collect();
-    entries.sort_by_key(|entry| entry.file_name());
-    Some(entries)
+    let entries = crate::fs_sorted::read_dir(dir).ok()?;
+    Some(
+        entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| {
+                let kind = file_type(&entry)?;
+                let name = entry.file_name().to_string_lossy().into_owned();
+                (kind.is_file() && name.to_lowercase().ends_with(".md")).then_some(name)
+            })
+            .collect(),
+    )
 }
 
 fn strip_emphasis(value: &str) -> String {
@@ -250,12 +243,12 @@ fn state_value(dir: &Path, summary: bool) -> Value {
 
 pub fn list_sessions(root: Option<&str>) -> Value {
     let Some(root) = root else { return json!([]) };
-    let Some(entries) = sorted_entries(root) else {
+    let Ok(entries) = crate::fs_sorted::read_dir(root) else {
         return json!([]);
     };
     let mut result = Vec::new();
     let mut scanned = 0;
-    for entry in entries {
+    for entry in entries.filter_map(Result::ok) {
         let name = entry.file_name().to_string_lossy().into_owned();
         let Some(kind) = file_type(&entry) else {
             continue;

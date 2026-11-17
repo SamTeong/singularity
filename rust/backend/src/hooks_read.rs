@@ -71,7 +71,7 @@ fn walk(dir: &Path) -> Vec<HookFile> {
     let mut stack = vec![dir.to_path_buf()];
     while out.len() < FILE_CAP {
         let Some(current) = stack.pop() else { break };
-        let Ok(entries) = fs::read_dir(&current) else {
+        let Ok(entries) = crate::fs_sorted::read_dir(&current) else {
             continue;
         };
         for entry in entries.flatten() {

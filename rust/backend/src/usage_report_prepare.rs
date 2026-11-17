@@ -82,7 +82,7 @@ fn csv_mtime(path: &Path) -> f64 {
 // fs.globSync returns matches in sorted order; list the same way so equal
 // mtimes resolve to the same first entry (stats.mjs:1037-1038).
 fn listed(dir: &Path) -> Vec<(String, PathBuf)> {
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
         return Vec::new();
     };
     let mut out: Vec<(String, PathBuf)> = entries
@@ -144,7 +144,7 @@ fn codex_mtimes(codex_home: &Path) -> Vec<f64> {
 }
 
 fn collect_rollouts(dir: &Path, out: &mut Vec<PathBuf>) {
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
         return; // absent root: nothing to scan (codex.mjs:81)
     };
     for entry in entries.flatten() {

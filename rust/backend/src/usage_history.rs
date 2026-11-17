@@ -521,7 +521,7 @@ fn raw_units(input: &str, path: &[&str], fallback: Option<&Value>) -> Option<Vec
 }
 
 fn safe_dir(dir: &Path) -> Vec<String> {
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
         return Vec::new();
     };
     #[allow(unused_mut)]

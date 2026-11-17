@@ -981,7 +981,7 @@ impl TaskService {
     /// Log-only orphan scan (`tasks.mjs:147-154`): a worktree directory no task
     /// references is warned about, never deleted.
     fn scan_orphan_worktrees(&self) {
-        let Ok(entries) = std::fs::read_dir(&self.config.worktrees_dir) else {
+        let Ok(entries) = crate::fs_sorted::read_dir(&self.config.worktrees_dir) else {
             return;
         };
         let referenced: HashSet<PathBuf> = self

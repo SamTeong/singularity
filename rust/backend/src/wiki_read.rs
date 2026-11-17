@@ -78,7 +78,7 @@ fn skipped(name: &str) -> bool {
 }
 
 fn wiki_dirs(root: &Path) -> Vec<(String, PathBuf)> {
-    let mut wikis = match fs::read_dir(root) {
+    let mut wikis = match crate::fs_sorted::read_dir(root) {
         Ok(entries) => entries
             .filter_map(Result::ok)
             .filter_map(|entry| {
@@ -122,7 +122,7 @@ fn walk(dir: &Path, wiki_root: &Path, out: &mut Vec<Page>) {
     if out.len() >= FILE_CAP {
         return;
     }
-    let entries = match fs::read_dir(dir) {
+    let entries = match crate::fs_sorted::read_dir(dir) {
         Ok(entries) => entries,
         Err(_) => return,
     };

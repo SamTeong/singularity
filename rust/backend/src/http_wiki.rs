@@ -246,7 +246,7 @@ fn wiki_order(root: Option<&str>, collator: &icu_collator::CollatorBorrowed<'sta
     let Some(root) = root else {
         return json!([]);
     };
-    let Ok(entries) = std::fs::read_dir(root) else {
+    let Ok(entries) = crate::fs_sorted::read_dir(root) else {
         return json!([]);
     };
     let mut names = entries

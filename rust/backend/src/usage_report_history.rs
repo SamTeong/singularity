@@ -161,7 +161,7 @@ pub fn load_usage_snapshots(
     if include_archives {
         let dir = path.parent().unwrap_or(Path::new("."));
         // stats.mjs:1205 — a missing state dir simply means no archives.
-        let mut archives: Vec<PathBuf> = fs::read_dir(dir)
+        let mut archives: Vec<PathBuf> = crate::fs_sorted::read_dir(dir)
             .map(|entries| {
                 entries
                     .flatten()
@@ -332,11 +332,11 @@ fn mtime_secs(path: &Path) -> io::Result<f64> {
 /// stats.mjs:1415-1417 — newest `projects/*/*.jsonl` mtime, `0` when none.
 fn newest_project_jsonl_mtime(projects_dir: &Path) -> io::Result<f64> {
     let mut newest = 0.0_f64;
-    let Ok(projects) = fs::read_dir(projects_dir) else {
+    let Ok(projects) = crate::fs_sorted::read_dir(projects_dir) else {
         return Ok(0.0);
     };
     for project in projects.flatten() {
-        let Ok(files) = fs::read_dir(project.path()) else {
+        let Ok(files) = crate::fs_sorted::read_dir(project.path()) else {
             continue;
         };
         for file in files.flatten() {

@@ -138,7 +138,7 @@ fn browse_response(locale: &str, path: &str) -> Response {
     if !target.exists() {
         return browse_bad_path();
     }
-    let read = match fs::read_dir(target) {
+    let read = match crate::fs_sorted::read_dir(target) {
         Ok(read) => read,
         Err(error) => return browse_failure(&error.to_string()),
     };
@@ -179,7 +179,7 @@ async fn list(State(state): State<Explorer>, RawQuery(query): RawQuery) -> Respo
 }
 
 fn list_response(locale: &str, dir: &str) -> Response {
-    let read = match fs::read_dir(dir) {
+    let read = match crate::fs_sorted::read_dir(dir) {
         Ok(read) => read,
         Err(error) => return failure(StatusCode::BAD_REQUEST, &error.to_string()),
     };
@@ -290,7 +290,7 @@ fn search_response(root: &str, source: &str) -> Response {
         visited += batch.len();
         for dir in batch {
             // `readdir` failures behave like the Node `catch(() => null)`.
-            let Ok(read) = fs::read_dir(&dir) else {
+            let Ok(read) = crate::fs_sorted::read_dir(&dir) else {
                 continue;
             };
             for entry in read {
@@ -1101,11 +1101,11 @@ mod tests {
 
         fn bak_contents(&self) -> Vec<Vec<u8>> {
             let mut found = Vec::new();
-            let Ok(dirs) = fs::read_dir(&self.backups) else {
+            let Ok(dirs) = crate::fs_sorted::read_dir(&self.backups) else {
                 return found;
             };
             for dir in dirs.flatten() {
-                let Ok(files) = fs::read_dir(dir.path()) else {
+                let Ok(files) = crate::fs_sorted::read_dir(dir.path()) else {
                     continue;
                 };
                 for file in files.flatten() {

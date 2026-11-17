@@ -199,7 +199,7 @@ fn scan_config(
     while !stack.is_empty() && (seen as f64) < cap {
         let dir = stack.pop().expect("stack is nonempty");
         seen += 1;
-        let Ok(entries) = fs::read_dir(&dir) else {
+        let Ok(entries) = crate::fs_sorted::read_dir(&dir) else {
             continue;
         };
         let entries: Vec<_> = entries.flatten().collect();

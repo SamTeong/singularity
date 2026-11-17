@@ -103,7 +103,7 @@ fn children_of(dir: &Path, depth: u32) -> Value {
     if depth > FILE_DEPTH {
         return json!(out);
     }
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
         return json!(out);
     };
     for entry in entries.flatten() {
@@ -126,7 +126,7 @@ fn children_of(dir: &Path, depth: u32) -> Value {
 // skill whose SKILL.md exists but cannot be read still ships, with empty
 // description/raw, matching the old swallow-and-continue.
 fn read_skills_dir(dir: &Path) -> Option<Vec<Value>> {
-    let entries = fs::read_dir(dir).ok()?;
+    let entries = crate::fs_sorted::read_dir(dir).ok()?;
     let mut skills = Vec::new();
     for entry in entries {
         let entry = entry.ok()?;
@@ -170,7 +170,7 @@ pub fn list(root: &Value) -> Value {
         return json!({ "scopes": [], "flat": false, "error": "skills root not found" });
     }
     let mut subdirs: Vec<String> = Vec::new();
-    match fs::read_dir(root_path) {
+    match crate::fs_sorted::read_dir(root_path) {
         Ok(entries) => {
             for entry in entries.flatten() {
                 let Ok(kind) = entry.file_type() else {

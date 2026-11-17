@@ -155,7 +155,7 @@ fn rollout_files(codex_home: &Path) -> Vec<PathBuf> {
 }
 
 fn collect_rollouts(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match fs::read_dir(dir) {
+    let entries = match crate::fs_sorted::read_dir(dir) {
         Ok(entries) => entries,
         Err(error) => {
             eprintln!("codex.mjs: glob failed under {}: {error}", dir.display());

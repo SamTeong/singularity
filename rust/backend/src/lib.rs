@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 pub mod agent_registry;
+pub mod fs_sorted;
 pub mod agent_spawn;
 pub mod agent_wire;
 pub mod app_paths;
@@ -204,12 +205,10 @@ fn walk(dir: &Path, prefix: &str, pages: &mut Vec<Page>) {
     if pages.len() >= FILE_CAP {
         return;
     }
-    let mut entries: Vec<_> = match fs::read_dir(dir) {
-        Ok(entries) => entries.filter_map(Result::ok).collect(),
+    let entries = match crate::fs_sorted::read_dir(dir) {
+        Ok(entries) => entries.filter_map(Result::ok),
         Err(_) => return,
     };
-    // Node's readdir is byte-sorted (libuv); read_dir order is filesystem-dependent.
-    entries.sort_by_key(|entry| entry.file_name());
     for entry in entries {
         let name = entry.file_name().to_string_lossy().into_owned();
         if skipped(&name) {
@@ -260,7 +259,7 @@ pub fn wiki_graph(root: &str, wiki: &str) -> Result<Graph, GraphError> {
     if !root.exists() {
         return Err(GraphError { error: "not found" });
     }
-    let wiki_path = match fs::read_dir(&root).ok().and_then(|entries| {
+    let wiki_path = match crate::fs_sorted::read_dir(&root).ok().and_then(|entries| {
         entries.filter_map(Result::ok).find(|entry| {
             entry.file_name().to_string_lossy() == wiki
                 && !skipped(&entry.file_name().to_string_lossy())

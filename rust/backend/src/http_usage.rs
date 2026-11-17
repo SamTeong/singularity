@@ -2079,7 +2079,7 @@ pub(crate) fn iso_ms(ms: i64) -> String {
 /// `newestSnapshotArchive()` (`usage-history.mjs:17`): newest monthly archive in
 /// the usage-report state root.
 fn newest_snapshot_archive(directory: &Path) -> Option<PathBuf> {
-    let entries = std::fs::read_dir(directory).ok()?;
+    let entries = crate::fs_sorted::read_dir(directory).ok()?;
     let mut names: Vec<String> = entries
         .flatten()
         .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
@@ -3265,7 +3265,7 @@ mod tests {
                 std::fs::read_to_string(ollama_json(&fixture)).unwrap(),
                 r#"{"mode":"browser"}"#
             );
-            let leftovers: Vec<String> = std::fs::read_dir(fixture.state_dir())
+            let leftovers: Vec<String> = crate::fs_sorted::read_dir(fixture.state_dir())
                 .unwrap()
                 .flatten()
                 .map(|entry| entry.file_name().to_string_lossy().into_owned())

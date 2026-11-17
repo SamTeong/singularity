@@ -171,7 +171,7 @@ fn roadmap_payload(env: &PipelineEnv, table: &CsvTable) -> Result<Option<Box<Raw
 
 /// improve.mjs `countDir`: immediate entries only; a missing directory counts 0.
 fn count_entries(dir: &Path) -> Result<usize, String> {
-    let Ok(entries) = fs::read_dir(dir) else {
+    let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
         return Ok(0);
     };
     let mut count = 0usize;

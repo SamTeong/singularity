@@ -81,7 +81,7 @@ pub fn sweep_stale_scratch(dirs: &[&Path], now: SystemTime) {
     let mut removed = 0usize;
     for dir in dirs {
         // A missing dir is normal on a first run.
-        let Ok(entries) = fs::read_dir(dir) else {
+        let Ok(entries) = crate::fs_sorted::read_dir(dir) else {
             continue;
         };
         for entry in entries.filter_map(Result::ok) {
@@ -216,7 +216,7 @@ mod tests {
         fs::write(&file, b"old").unwrap();
         write_atomic(&file, b"new").unwrap();
         assert_eq!(fs::read(&file).unwrap(), b"new");
-        let entries: Vec<_> = fs::read_dir(&fixture.0).unwrap().flatten().collect();
+        let entries: Vec<_> = crate::fs_sorted::read_dir(&fixture.0).unwrap().flatten().collect();
         assert_eq!(entries.len(), 1, "only the target file remains");
     }
 

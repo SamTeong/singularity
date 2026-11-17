@@ -1025,7 +1025,7 @@ pub fn available_with_drive_cwds(
         .collect();
     let root = resolve_raw_units_with_drive_cwds(&root, home, cwd, cfg!(windows), &drive_cwds);
     let root = filesystem_path(&root);
-    fs::read_dir(root).ok().is_some_and(|entries| {
+    crate::fs_sorted::read_dir(root).ok().is_some_and(|entries| {
         entries.filter_map(Result::ok).any(|entry| {
             let name = entry.file_name();
             !name.to_string_lossy().starts_with('.')

@@ -198,7 +198,7 @@ fn skill_scopes_payload(inner: &Inner) -> Result<Value, ()> {
     };
     let collator = collator()?;
     let mut scopes: Vec<String> = Vec::new();
-    if let Ok(entries) = std::fs::read_dir(root) {
+    if let Ok(entries) = crate::fs_sorted::read_dir(root) {
         for entry in entries.flatten() {
             // `d.isDirectory()` on a `Dirent` is false for a symlink, and a
             // per-entry throw is swallowed (`index.mjs:548`).

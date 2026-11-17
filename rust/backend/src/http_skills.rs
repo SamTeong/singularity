@@ -1108,7 +1108,7 @@ mod tests {
             assert_eq!(body["ok"], json!(true));
             assert!(body["mtime"].as_f64().unwrap() > 0.0);
             assert_eq!(fs::read_to_string(&skill_path).unwrap(), "技能 🧪");
-            let backups = fs::read_dir(&state.backups_dir).unwrap().count();
+            let backups = crate::fs_sorted::read_dir(&state.backups_dir).unwrap().count();
             assert_eq!(backups, 1, "one hashed backup dir for the written path");
 
             let stale = body["mtime"].as_f64().unwrap();
