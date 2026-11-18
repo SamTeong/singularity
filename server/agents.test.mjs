@@ -357,6 +357,13 @@ test('respawn: Codex identity lookup completes and pins before the live pty is k
   const respawnErrors = [];
   const onRespawnFailed = (e) => { if (e.id === id) respawnErrors.push(e.error); };
   bus.on('respawn-failed', onRespawnFailed);
+  // Record pty spawn progress so a hang shows whether create() stalled before or inside spawn.
+  const spawnLog = [];
+  registry.setPtyBackend({ ...ptyBackend, spawn: async (opts) => {
+    const n = spawnLog.push(`call@${Date.now() % 100000}`);
+    try { const h = await ptyBackend.spawn(opts); spawnLog[n - 1] += `→pid ${h.pid}@${Date.now() % 100000}`; return h; }
+    catch (e) { spawnLog[n - 1] += `→err ${e.message}`; throw e; }
+  } });
   try {
     const agent = await create({ cwd: scratch, title: 'codex-respawn-test', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: id });
     const pendingRespawn = respawn(id);
@@ -373,11 +380,12 @@ test('respawn: Codex identity lookup completes and pins before the live pty is k
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.ok(resumed?.pid && resumed.pid !== agent.pid,
-      `onExit respawned the same agent (old pid ${agent.pid}; entry ${JSON.stringify(resumed && { pid: resumed.pid, status: resumed.status })}; live ${isLive(id)}; respawn errors ${JSON.stringify(respawnErrors)})`);
+      `onExit respawned the same agent (old pid ${agent.pid}; entry ${JSON.stringify(resumed && { pid: resumed.pid, status: resumed.status })}; live ${isLive(id)}; respawn errors ${JSON.stringify(respawnErrors)}; spawns ${JSON.stringify(spawnLog)}; now ${Date.now() % 100000})`);
     assert.equal(await codexThreadFor(id), 'pinned-thread-id', 'the resolved Codex thread stays pinned across respawn');
     await killAndWait(id);
   } finally {
     bus.off('respawn-failed', onRespawnFailed);
+    registry.setPtyBackend(ptyBackend);
     codexIdentity.setCodexIdentityBackend(modelBackend);
     if (isLive(id)) await killAndWait(id);
   }
