@@ -193,8 +193,34 @@ test('board arrow keys traverse sessions and their plan stack; session-id search
   await page.goto('/plans?sid=b0000000-0000-4000-8000-000000000005');
   await expect(selected).toContainText(/^b0000000bulk\/51k tokens/);
   await expect(selected).toHaveAttribute('aria-expanded', 'true');
+
+  // Status chips multi-select as repeated ?status= params; drop 'active' so 'done' hides the selected sid.
+  await page.getByRole('button', { name: 'Filter plans' }).click();
+  await page.getByRole('tab', { name: /status/i }).click();
+  await page.getByText('done', { exact: true }).click();
+  await page.getByText('active', { exact: true }).click();
+  await expect(page).toHaveURL(/status=active/);
+  await expect(page).toHaveURL(/status=done/);
+  await page.getByText('active', { exact: true }).click();
+  await expect(page).not.toHaveURL(/status=active/);
+  await page.keyboard.press('Escape');
+  // Searching the already-selected sid clears the hiding filter, keeps it selected and expanded.
+  await search.fill('b0000000-0000-4000-8000-000000000005');
+  await search.press('Enter');
+  await expect(page).not.toHaveURL(/status=/);
+  await expect(page).toHaveURL(/sid=b0000000-0000-4000-8000-000000000005/);
+  await expect(selected).toContainText(/^b0000000bulk\/51k tokens/);
+  await expect(selected).toHaveAttribute('aria-expanded', 'true');
+
   await selected.click();
   await expect(selected).toHaveAttribute('aria-expanded', 'false');
   await page.waitForTimeout(500);
   await expect(selected).toHaveAttribute('aria-expanded', 'false');
+
+  // Invalid ?status/?layout are stripped; unrelated params survive.
+  await page.goto('/plans?status=bogus&layout=invalid&keep=here');
+  await expect.poll(() => page.evaluate(() => {
+    const params = new URLSearchParams(location.search);
+    return [params.has('status'), params.has('layout'), params.get('keep')];
+  })).toEqual([false, false, 'here']);
 });

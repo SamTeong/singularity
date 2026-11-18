@@ -23,7 +23,16 @@ test('phone drawer replaces the rail, traps focus, closes on Escape, and reaches
   await focusable.first().focus();
   await page.keyboard.press('Shift+Tab');
   await expect(focusable.last()).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(focusable.first()).toBeFocused();
   await page.keyboard.press('Escape');
+  await expect(drawer).toBeHidden();
+  await expect(trigger).toBeFocused();
+
+  await trigger.click();
+  await page.locator('.MuiBackdrop-root:not(.MuiBackdrop-invisible)').click({
+    position: { x: PHONE.width - 5, y: PHONE.height / 2 },
+  });
   await expect(drawer).toBeHidden();
   await expect(trigger).toBeFocused();
 

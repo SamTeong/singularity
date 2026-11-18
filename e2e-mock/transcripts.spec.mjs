@@ -95,3 +95,28 @@ test('list order, rich transcript render, URL write + cold reload, and Resume pr
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
+
+test('a successful empty poll clears the prior transcript list error', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__recoverTranscriptList = false;
+    const wrap = (originalFetch) => (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      if (url.pathname === '/api/transcripts') {
+        if (!window.__recoverTranscriptList) return Promise.resolve(new Response('', { status: 503 }));
+        return Promise.resolve(new Response(JSON.stringify({ sessions: [] }), { headers: { 'content-type': 'application/json' } }));
+      }
+      return originalFetch(input, init);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  });
+  await gotoView(page, 'Transcripts');
+  await expect(visible(page.getByText('Failed to load transcripts.', { exact: true })).first()).toBeVisible();
+
+  await page.evaluate(() => { window.__recoverTranscriptList = true; });
+  // Changing this filter restarts the list effect and triggers its recovery poll.
+  await page.getByRole('checkbox', { name: 'Hide automated reviews' }).click();
+  await expect(visible(page.getByText('No transcripts.', { exact: true })).first()).toBeVisible();
+  await expect(page.getByText('Failed to load transcripts.', { exact: true })).not.toBeVisible();
+});

@@ -35,3 +35,29 @@ test('provider cards, components, incident, freshness, outbound links and Refres
   await page.getByRole('button', { name: 'Refresh' }).click();
   await expect.poll(() => fetchCalls(page)).toContain('GET /api/status?force=1');
 });
+
+test('a failed initial load shows a retry message and recovers on the next pull', async ({ page }) => {
+  // The mock answers /status through Mirage inside the page, so a failing
+  // request is injected at the fetch layer.
+  await page.addInitScript(() => {
+    let failing = true;
+    window.__recoverStatus = () => { failing = false; };
+    const wrap = (originalFetch) => (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      if (url.pathname === '/api/status' && failing) return Promise.resolve(new Response('', { status: 503 }));
+      return originalFetch(input, init);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  });
+
+  await gotoUrl(page, 'Status');
+  await expect(page.getByText(/^Couldn't load provider status/)).toBeVisible();
+  await expect(page.getByText('All Systems Operational')).toHaveCount(0);
+
+  await page.evaluate(() => window.__recoverStatus());
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(page.getByText('All Systems Operational')).toBeVisible();
+  await expect(page.getByText(/^Couldn't load provider status/)).toHaveCount(0);
+});

@@ -96,6 +96,21 @@ test('phone: one-lane board, create a task, move a card by tap, history scrolls 
     await expect(page.getByRole('region', { name: /scrolls horizontally/ })).toHaveCount(0);
     await expect(page.locator('tr').filter({ hasText: 'Concluded fixture run' })).toBeVisible();
   });
+
+  await test.step('live 599/600 crossing keeps an open task detail and swaps four lanes for the switcher', async () => {
+    const switcher = page.getByRole('group', { name: 'Board lane', exact: true });
+    await page.setViewportSize({ width: 600, height: PHONE.height });
+    await page.goto('/tasks');
+    await expect(switcher).toHaveCount(0);
+    await page.getByRole('button', { name: 'Seeded todo card', exact: true }).click();
+    const detail = page.getByRole('dialog', { name: 'Task detail', exact: true });
+    await expect(detail).toBeVisible();
+    await page.setViewportSize({ width: 599, height: PHONE.height });
+    await expect(detail).toBeVisible();
+    await detail.getByRole('button', { name: 'Close' }).click();
+    await expect(switcher).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Seeded done card', exact: true })).toHaveCount(0);
+  });
 });
 
 test('automation creates survive a lost response without duplicates', async ({ page }) => {

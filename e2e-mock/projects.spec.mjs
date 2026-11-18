@@ -10,6 +10,14 @@ const cardFor = (page, path) => cards(page).filter({ hasText: repoName(path) });
 // Cards start collapsed; clicking blank card space (top-left padding corner)
 // expands details (counts, last commit, summary).
 const toggle = (card) => card.click({ position: { x: 4, y: 4 } });
+const gripIn = (card) => card.locator('[aria-label*="Drag to change the order"]');
+async function html5Drag(page, source, target) {
+  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
+  await source.dispatchEvent('dragstart', { dataTransfer });
+  await target.dispatchEvent('dragover', { dataTransfer });
+  await target.dispatchEvent('drop', { dataTransfer });
+  await source.dispatchEvent('dragend', { dataTransfer });
+}
 const cardOrder = (page) => cards(page).evaluateAll((els) => els.map((el) => el.querySelector('button[aria-expanded]')?.textContent));
 
 test('git actions and refreshes report outcomes; Refresh all re-fetches every card', async ({ page }) => {
@@ -126,4 +134,22 @@ test('add via picker (no duplicates), delete, and Undo restores the card to its 
   await page.getByRole('button', { name: 'Undo' }).click();
   await expect(cardFor(page, PROJECT_PATHS.dirty)).toBeVisible();
   await expect.poll(() => cardOrder(page)).toEqual(before);
+
+  // Stacked adjacent deletions undo to the original order in either undo order.
+  for (const firstUndo of [0, 1]) {
+    await cardFor(page, PROJECT_PATHS.dirty).getByRole('button', { name: 'Remove project' }).click();
+    await cardFor(page, PROJECT_PATHS.noUpstream).getByRole('button', { name: 'Remove project' }).click();
+    await expect(page.getByRole('button', { name: 'Undo' })).toHaveCount(2);
+    await page.getByRole('button', { name: 'Undo' }).nth(firstUndo).click();
+    await page.getByRole('button', { name: 'Undo' }).nth(0).click();
+    await expect.poll(() => cardOrder(page)).toEqual(before);
+  }
+
+  // Undo keeps a drag-reorder of the surviving cards made after the delete.
+  await cardFor(page, PROJECT_PATHS.dirty).getByRole('button', { name: 'Remove project' }).click();
+  await expect(cardFor(page, PROJECT_PATHS.dirty)).toHaveCount(0);
+  await html5Drag(page, gripIn(cardFor(page, PROJECT_PATHS.noUpstream)), cardFor(page, PROJECT_PATHS.clean));
+  await expect.poll(() => cardOrder(page)).toEqual([repoName(PROJECT_PATHS.noUpstream), repoName(PROJECT_PATHS.clean), 'sing-new']);
+  await page.getByRole('button', { name: 'Undo' }).click();
+  await expect.poll(() => cardOrder(page)).toEqual([repoName(PROJECT_PATHS.noUpstream), repoName(PROJECT_PATHS.clean), repoName(PROJECT_PATHS.dirty), 'sing-new']);
 });

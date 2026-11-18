@@ -26,6 +26,7 @@ test('phone dock opens collapsed; list ⇄ terminal switch and collapse keep eac
   test.slow();
   const restore = page.locator('[role="button"][title="Restore"]');
   const dockMin = () => page.evaluate(() => localStorage.getItem('sing-dock-min'));
+  await page.addInitScript(() => window.localStorage.setItem('sing-list-w', '640'));
 
   // Phone and landscape phone open collapsed; expanding there writes nothing.
   await page.setViewportSize(PHONE);
@@ -78,4 +79,9 @@ test('phone dock opens collapsed; list ⇄ terminal switch and collapse keep eac
   await sessionRow('Fixture pane B').click();
   const termNodeB2 = await page.locator('.term:visible').elementHandle();
   expect(await page.evaluate(([a, b]) => a === b, [termNodeB2, termNodeB1])).toBe(true);
+
+  // A saved 640px list width survives the phone -> desktop crossing untouched.
+  await page.setViewportSize(DESKTOP);
+  await expect(listSeparator(page)).toHaveAttribute('aria-valuenow', '640');
+  expect(await page.evaluate(() => localStorage.getItem('sing-list-w'))).toBe('640');
 });
