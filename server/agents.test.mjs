@@ -357,6 +357,10 @@ test('respawn: Codex identity lookup completes and pins before the live pty is k
   const respawnErrors = [];
   const onRespawnFailed = (e) => { if (e.id === id) respawnErrors.push(e.error); };
   bus.on('respawn-failed', onRespawnFailed);
+  // Record pty exits (onExit's "[agent exited code=N]" note) to tell a kill (TerminateProcess → 1) from a self-exit.
+  const exitNotes = [];
+  const onOutput = (e) => { const m = e.id === id && /agent exited code=\S+/.exec(e.data); if (m) exitNotes.push(`${m[0]}@${Date.now() % 100000}`); };
+  bus.on('output', onOutput);
   // Record pty spawn progress so a hang shows whether create() stalled before or inside spawn.
   const spawnLog = [];
   registry.setPtyBackend({ ...ptyBackend, spawn: async (opts) => {
@@ -380,11 +384,12 @@ test('respawn: Codex identity lookup completes and pins before the live pty is k
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
     assert.ok(resumed?.pid && resumed.pid !== agent.pid,
-      `onExit respawned the same agent (old pid ${agent.pid}; entry ${JSON.stringify(resumed && { pid: resumed.pid, status: resumed.status })}; live ${isLive(id)}; respawn errors ${JSON.stringify(respawnErrors)}; spawns ${JSON.stringify(spawnLog)}; now ${Date.now() % 100000})`);
+      `onExit respawned the same agent (old pid ${agent.pid}; entry ${JSON.stringify(resumed && { pid: resumed.pid, status: resumed.status })}; live ${isLive(id)}; respawn errors ${JSON.stringify(respawnErrors)}; spawns ${JSON.stringify(spawnLog)}; exits ${JSON.stringify(exitNotes)}; now ${Date.now() % 100000})`);
     assert.equal(await codexThreadFor(id), 'pinned-thread-id', 'the resolved Codex thread stays pinned across respawn');
     await killAndWait(id);
   } finally {
     bus.off('respawn-failed', onRespawnFailed);
+    bus.off('output', onOutput);
     registry.setPtyBackend(ptyBackend);
     codexIdentity.setCodexIdentityBackend(modelBackend);
     if (isLive(id)) await killAndWait(id);
