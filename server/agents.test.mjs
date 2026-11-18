@@ -71,7 +71,10 @@ modelStore.setModelsBackend(modelBackend);
 const codexIdentity = await import('./codex-thread.mjs');
 codexIdentity.setCodexIdentityBackend(modelBackend);
 const ptyBinary = process.env.SINGULARITY_RUST_PTY_BINARY ?? join(process.cwd(), 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
-const ptyBackend = (await import('./rust-pty-backend.mjs')).createRustPtyBackend({ executable: ptyBinary, cwd: process.cwd() });
+const rawPtyBackend = (await import('./rust-pty-backend.mjs')).createRustPtyBackend({ executable: ptyBinary, cwd: process.cwd() });
+// cmd.exe scans its whole command line for switches: codex's forward-slashed `-c` skill paths under a CI temp dir
+// (C:/Users/RUNNER~1/...) contain `/R` (= /C), so cmd ran `UNNER~1` and exited. The keepalive must ignore argv; drop it.
+const ptyBackend = process.platform === 'win32' ? { ...rawPtyBackend, spawn: (opts) => rawPtyBackend.spawn({ ...opts, args: [] }) } : rawPtyBackend;
 await ptyBackend.start();
 const registry = await import('./agents.mjs');
 registry.setPtyBackend(ptyBackend);
@@ -353,27 +356,6 @@ test('respawn: Codex identity lookup completes and pins before the live pty is k
     codexThreadFind: async () => { beginLookup(); return lookupResult; },
     codexThreadExists: async () => false,
   });
-  // Surface why onExit's re-create failed (it is otherwise only logged, and tests run without a logger).
-  const respawnErrors = [];
-  const onRespawnFailed = (e) => { if (e.id === id) respawnErrors.push(e.error); };
-  bus.on('respawn-failed', onRespawnFailed);
-  // Record pty exits (onExit's "[agent exited code=N]" note) to tell a kill (TerminateProcess → 1) from a self-exit.
-  const exitNotes = [];
-  let ptyText = '';
-  const onOutput = (e) => {
-    if (e.id !== id) return;
-    ptyText += e.data;
-    const m = /agent exited code=\S+/.exec(e.data);
-    if (m) exitNotes.push(`${m[0]}@${Date.now() % 100000}`);
-  };
-  bus.on('output', onOutput);
-  // Record pty spawn progress so a hang shows whether create() stalled before or inside spawn.
-  const spawnLog = [];
-  registry.setPtyBackend({ ...ptyBackend, spawn: async (opts) => {
-    const n = spawnLog.push(`call@${Date.now() % 100000}`);
-    try { const h = await ptyBackend.spawn(opts); spawnLog[n - 1] += `→pid ${h.pid}@${Date.now() % 100000}`; return h; }
-    catch (e) { spawnLog[n - 1] += `→err ${e.message}`; throw e; }
-  } });
   try {
     const agent = await create({ cwd: scratch, title: 'codex-respawn-test', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: id });
     const pendingRespawn = respawn(id);
@@ -389,14 +371,10 @@ test('respawn: Codex identity lookup completes and pins before the live pty is k
       if (resumed?.pid && resumed.pid !== agent.pid && isLive(id)) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    assert.ok(resumed?.pid && resumed.pid !== agent.pid,
-      `onExit respawned the same agent (old pid ${agent.pid}; entry ${JSON.stringify(resumed && { pid: resumed.pid, status: resumed.status })}; live ${isLive(id)}; respawn errors ${JSON.stringify(respawnErrors)}; spawns ${JSON.stringify(spawnLog)}; exits ${JSON.stringify(exitNotes)}; pty tail ${JSON.stringify(ptyText.slice(-600))}; now ${Date.now() % 100000})`);
+    assert.ok(resumed?.pid && resumed.pid !== agent.pid, 'onExit respawned the same agent');
     assert.equal(await codexThreadFor(id), 'pinned-thread-id', 'the resolved Codex thread stays pinned across respawn');
     await killAndWait(id);
   } finally {
-    bus.off('respawn-failed', onRespawnFailed);
-    bus.off('output', onOutput);
-    registry.setPtyBackend(ptyBackend);
     codexIdentity.setCodexIdentityBackend(modelBackend);
     if (isLive(id)) await killAndWait(id);
   }
