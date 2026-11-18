@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 // hoisted above this assignment, so a dynamic import is required.
 const scratch = mkdtempSync(join(tmpdir(), 'sing-tasks-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
+process.env.SING_TRUSTED_ROOT = join(scratch, 'trusted');
 // agents.mjs captures OLLAMA_BIN/CODEX_BIN once at load. Clear them here (before
 // import) so the "failed spawn cleans up" tests get a deterministic buildSpawn
 // throw regardless of whether ollama/codex is installed on the machine running
@@ -70,7 +71,16 @@ function rmRepo(dir) {
     if (e.isDirectory()) rmRepo(p);
     else chmodSync(p, 0o666);
   }
-  rmSync(dir, { recursive: true, force: true });
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (let retries = 0; ; retries++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      break;
+    } catch (error) {
+      if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error.code) || retries >= 5) throw error;
+      Atomics.wait(pause, 0, 0, 100);
+    }
+  }
 }
 
 const baseTask = {

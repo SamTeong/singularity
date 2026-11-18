@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       unit: ${{ steps.select.outputs.unit }}
+      unit_groups: ${{ steps.select.outputs.unit_groups }}
       mock: ${{ steps.select.outputs.mock }}
       mock_specs: ${{ steps.select.outputs.mock_specs }}
       shards: ${{ steps.select.outputs.shards }}
@@ -67,7 +68,7 @@ jobs:
       # Gate the step, not the job: main's required checks are these two matrix
       # names, and a job-level skip would leave them pending.
       - if: needs.plan.outputs.unit == 'true'
-        run: pnpm test
+        run: node scripts/test-changed.mjs --unit ${{ needs.plan.outputs.unit_groups }}
 
       # pnpm v9 supports --audit-level; fails the step only on moderate+.
       # Advisory for low/info — keeps supply-chain signal without breaking

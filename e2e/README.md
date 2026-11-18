@@ -7,11 +7,16 @@ can reach the user's real `:4317` daemon, `~/.claude`, `~/wiki`, or spawn a real
 `claude` turn.
 
 ```
-pnpm test:e2e        # build web/dist, then run everything
+pnpm test:e2e        # build web/dist, then run the daemon suite
 pnpm test:e2e:ui     # interactive, reuses the dist already on disk
 pnpm exec playwright test e2e/smoke.spec.mjs    # one spec, no rebuild
 E2E_BACKEND=rust pnpm exec playwright test e2e/smoke.spec.mjs   # native daemon
 ```
+
+For affected-test selection, unit/Rust checks and CI behavior, see
+[Testing](../docs/testing.md). For the default Node host plus Rust services and
+the explicit native HTTP mode, see [Backend runtime](../docs/backend.md).
+The daemon browser suite remains local-only; CI runs the selected mock specs.
 
 ## Backends
 
@@ -33,6 +38,11 @@ The native backend must be built first:
 cargo build --release --manifest-path rust/backend/Cargo.toml
 ```
 
+`node scripts/build-rust-backend.mjs` is the cross-platform release-build helper.
+For a separate native lifecycle/protocol check without the browser UI, run
+`node scripts/native-daemon-e2e.mjs` after building. It uses temporary roots and
+fake provider binaries and does not spawn a coding agent.
+
 It serves the shell from the checkout's `web/dist`, so the same `pnpm test:e2e`
 build step covers both backends. The binary is started from a sandbox cwd with
 no `.env`, so a checkout's `.env` cannot re-supply the sandbox env that
@@ -42,8 +52,7 @@ no `.env`, so a checkout's `.env` cannot re-supply the sandbox env that
 
 `e2e-mock/` is a sibling suite covering the same UI against the in-browser mock
 backend (`web/src/mock/`, `playwright.mock.config.mjs`). It needs no daemon and
-no `.env`, and it runs `fullyParallel` — roughly 1.5× faster than this one on the
-same box.
+no `.env`, and it runs `fullyParallel` with page-local state.
 
 | | `e2e/` (here) | `e2e-mock/` |
 |---|---|---|

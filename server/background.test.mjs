@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-background-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
+process.env.SING_TRUSTED_ROOT = join(scratch, 'trusted');
 // Cleared so a non-claude model makes reg.create's buildSpawn throw
 // synchronously ("ollama not found") instead of spawning a real process — the
 // deterministic-failure trick tasks.test.mjs uses for its "failed spawn cleans

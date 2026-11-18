@@ -116,6 +116,8 @@ test('phone: one-lane board, create a task, move a card by tap, history scrolls 
 test('automation creates survive a lost response without duplicates', async ({ page }) => {
   test.slow();
   await page.goto('/cron');
+  const scheduledJob = page.getByRole('button', { name: 'Scheduled job' });
+  await expect(scheduledJob).toBeVisible();
   await page.evaluate(() => {
     const lost = new Set();
     window.__automationKeys = [];
@@ -123,19 +125,25 @@ test('automation creates survive a lost response without duplicates', async ({ p
     window.fetch = async (...args) => {
       const [input, init] = args;
       const url = typeof input === 'string' ? input : input.url;
+      const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+      const headers = new Headers(init?.headers ?? (input instanceof Request ? input.headers : undefined));
       const response = await original(...args);
       const path = new URL(url, location.origin).pathname;
-      if (/\/(crons|background\/jobs)$/.test(path) && !lost.has(path)) {
+      if (method === 'POST' && /\/(crons|background\/jobs)$/.test(path) && !lost.has(path)) {
         lost.add(path);
-        window.__automationKeys.push(init.headers['Idempotency-Key']);
+        window.__automationKeys.push(headers.get('Idempotency-Key'));
         throw new TypeError('lost response');
       }
-      if (/\/(crons|background\/jobs)$/.test(path)) window.__automationKeys.push(init.headers['Idempotency-Key']);
+      if (method === 'POST' && /\/(crons|background\/jobs)$/.test(path)) window.__automationKeys.push(headers.get('Idempotency-Key'));
       return response;
     };
   });
 
-  await page.getByRole('button', { name: 'Scheduled job' }).click();
+  // Reads must not consume the one-shot POST response loss.
+  const cronReadSucceeded = await page.evaluate(() => fetch('/api/crons').then((response) => response.ok));
+  expect(cronReadSucceeded).toBe(true);
+
+  await scheduledJob.click();
   const cronDialog = page.getByRole('dialog');
   await cronDialog.getByLabel('title').fill('Retry-safe cron');
   await cronDialog.getByLabel('description').fill('The first response is lost.');
