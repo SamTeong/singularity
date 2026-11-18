@@ -309,7 +309,12 @@ function wire(a) {
     if (a.respawnAfterExit) {
       const cfg = a.respawnAfterExit;
       agents.delete(a.id); // drop the dead entry so create() takes the fresh-spawn-over-existing-log path
-      setImmediate(() => { void create({ sessionId: a.id, ...cfg }).catch((e) => logger?.warn({ err: e.message }, 'respawn failed')); });
+      setImmediate(() => {
+        void create({ sessionId: a.id, ...cfg }).catch((e) => {
+          logger?.warn({ err: e.message }, 'respawn failed');
+          bus.emit('respawn-failed', { id: a.id, error: e.message });
+        });
+      });
       persist();
       emitList();
       return;

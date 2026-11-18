@@ -353,6 +353,10 @@ test('respawn: Codex identity lookup completes and pins before the live pty is k
     codexThreadFind: async () => { beginLookup(); return lookupResult; },
     codexThreadExists: async () => false,
   });
+  // Surface why onExit's re-create failed (it is otherwise only logged, and tests run without a logger).
+  const respawnErrors = [];
+  const onRespawnFailed = (e) => { if (e.id === id) respawnErrors.push(e.error); };
+  bus.on('respawn-failed', onRespawnFailed);
   try {
     const agent = await create({ cwd: scratch, title: 'codex-respawn-test', model: 'gpt-5.3-codex-spark', tool: 'codex', sessionId: id });
     const pendingRespawn = respawn(id);
@@ -368,10 +372,12 @@ test('respawn: Codex identity lookup completes and pins before the live pty is k
       if (resumed?.pid && resumed.pid !== agent.pid && isLive(id)) break;
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    assert.ok(resumed?.pid && resumed.pid !== agent.pid, 'onExit respawned the same agent');
+    assert.ok(resumed?.pid && resumed.pid !== agent.pid,
+      `onExit respawned the same agent (old pid ${agent.pid}; entry ${JSON.stringify(resumed && { pid: resumed.pid, status: resumed.status })}; live ${isLive(id)}; respawn errors ${JSON.stringify(respawnErrors)})`);
     assert.equal(await codexThreadFor(id), 'pinned-thread-id', 'the resolved Codex thread stays pinned across respawn');
     await killAndWait(id);
   } finally {
+    bus.off('respawn-failed', onRespawnFailed);
     codexIdentity.setCodexIdentityBackend(modelBackend);
     if (isLive(id)) await killAndWait(id);
   }
