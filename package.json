@@ -13,7 +13,7 @@
     "web": "node --env-file-if-exists=.env node_modules/vite/bin/vite.js --config web/vite.config.mjs",
     "build": "node scripts/reap-build-orphans.mjs && vite build --config web/vite.config.mjs",
     "clean": "node scripts/reap-build-orphans.mjs",
-    "dev": "concurrently -k \"npm:server\" \"npm:web\"",
+    "dev": "node scripts/build-rust-backend.mjs && concurrently -k -n server,web \"npm:server\" \"node scripts/wait-daemon.mjs && npm run web\"",
     "start": "npm run build && npm run server",
     "start:rust": "npm run build && node scripts/build-rust-backend.mjs && \"rust/backend/target/release/singularity-backend\" --http",
     "ollama-login": "node --env-file-if-exists=.env scripts/ollama-login.mjs",
@@ -73,6 +73,7 @@
     "groma.md": "0.6.6",
     "miragejs": "^0.1.48",
     "mock-socket": "^9.3.1",
-    "vite": "^6.4.3"
+    "vite": "^6.4.3",
+    "wait-on": "^9.5.1"
   }
 }

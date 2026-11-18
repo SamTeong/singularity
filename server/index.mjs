@@ -902,9 +902,6 @@ app.post('/history/regenerate', async (req, reply) => {
 // after migrate-state (import above) and before init() loads state from disk.
 reg.sweepTmpFiles({ log: app.log });
 reg.init(app.log);
-// Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors
-// are logged (route-level failures still degrade to a live-only "today").
-ensureHistory().catch((e) => app.log.warn({ err: e.message }, 'history backfill failed'));
 
 let server;
 try {
@@ -913,6 +910,10 @@ try {
   app.log.error({ err: error.message }, 'Rust backend failed to start; build it with cargo build --release --manifest-path rust/backend/Cargo.toml');
   process.exit(1);
 }
+// Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors
+// are logged (route-level failures still degrade to a live-only "today").
+// Must run after the Rust backend starts: the backfill reads through it.
+ensureHistory().catch((e) => app.log.warn({ err: e.message }, 'history backfill failed'));
 initCrons(app.log);
 initBackground(app.log);
 await initWindowAnchor({ log: app.log, storage: rustBackend });
