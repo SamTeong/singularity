@@ -198,9 +198,6 @@ impl UsageNetwork for NativeUsageNetwork {
 
     fn ollama_usage(&self) -> BoxFuture<'_, Value> {
         Box::pin(async move {
-            if crate::shadow::enabled() {
-                return json!({ "ok": false, "error": "shadow mode" });
-            }
             let _profile = self.profile_lock.lock().await;
             self.browser().scrape().await
         })
@@ -1262,9 +1259,6 @@ impl UsageState {
     }
 
     async fn refresh_claude_auth(&self, now: i64) -> bool {
-        if crate::shadow::enabled() {
-            return false;
-        }
         {
             let mut last = self
                 .auth_refresh_at
@@ -2558,60 +2552,6 @@ mod tests {
             assert_eq!(network.refresh_calls.load(Ordering::SeqCst), 1);
             assert_eq!(network.auth_calls.load(Ordering::SeqCst), 1);
         });
-    }
-
-    /// `oauth-fix-spec.md`: shadow mode returns before any grant, CLI or write
-    /// activity. `crate::shadow::enabled()` caches a `OnceLock`, so the proof
-    /// runs in a child of this same binary started with `SINGULARITY_SHADOW=1`;
-    /// the marker variable stops that child from recursing.
-    #[test]
-    fn shadow_mode_suppresses_claude_auth_refresh() {
-        const MARKER: &str = "SINGULARITY_SHADOW_REGRESSION_CHILD";
-        const CHILD_TEST: &str = "http_usage::tests::shadow_mode_suppresses_claude_auth_refresh";
-
-        if std::env::var(MARKER).is_ok() {
-            let fixture = Fixture::new("shadow-suppression");
-            fixture.write_credentials();
-            let credentials = fixture.claude_home().join(".credentials.json");
-            let before = std::fs::read(&credentials).unwrap();
-            let network = Arc::new(OAuthNetwork::new(&[200]));
-            let (_, handle) = router_with_handle(deps(&fixture, network.clone(), Bus::new()));
-            assert!(crate::shadow::enabled(), "child must run in shadow mode");
-            runtime().block_on(async {
-                assert!(!handle.0.refresh_claude_auth(NOW).await);
-            });
-            assert_eq!(network.refresh_calls.load(Ordering::SeqCst), 0);
-            assert_eq!(network.auth_calls.load(Ordering::SeqCst), 0);
-            assert_eq!(
-                std::fs::read(&credentials).unwrap(),
-                before,
-                "shadow mode must not rewrite credentials"
-            );
-            assert_eq!(
-                *handle.0.auth_refresh_at.lock().unwrap(),
-                0,
-                "shadow mode must not consume the refresh throttle"
-            );
-            println!("shadow-suppression-ok");
-            return;
-        }
-
-        let output = std::process::Command::new(std::env::current_exe().unwrap())
-            .args(["--exact", CHILD_TEST, "--nocapture"])
-            .env("SINGULARITY_SHADOW", "1")
-            .env(MARKER, "1")
-            .output()
-            .expect("spawn shadow child");
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        assert!(
-            output.status.success(),
-            "shadow child failed ({}): {stdout}",
-            output.status
-        );
-        assert!(
-            stdout.contains("shadow-suppression-ok"),
-            "child assertions did not run: {stdout}"
-        );
     }
 
     type Server = (

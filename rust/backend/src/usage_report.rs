@@ -174,10 +174,8 @@ fn run_generation(
         now_secs,
         local_zone,
     };
-    if !crate::shadow::enabled() {
-        if let Some(token) = saved_claude_token(&claude_root) {
-            sampler(&token, &base, now_secs);
-        }
+    if let Some(token) = saved_claude_token(&claude_root) {
+        sampler(&token, &base, now_secs);
     }
     let mut rebuild = |active_sid: Option<&str>| {
         rebuild_state(
@@ -209,9 +207,6 @@ fn saved_claude_token(claude_root: &Path) -> Option<String> {
 }
 
 fn sample_claude_usage(token: &str, state_dir: &Path, now_secs: f64) {
-    if crate::shadow::enabled() {
-        return;
-    }
     let Ok(runtime) = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()

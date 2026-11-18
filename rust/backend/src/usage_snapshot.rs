@@ -928,9 +928,6 @@ impl SnapshotService {
     }
 
     pub fn append_ollama(&mut self, path: &Path, reading: &RawValue, now_ms: i64) -> AppendResult {
-        if crate::shadow::enabled() {
-            return AppendResult::skipped(); // read-only follower: no usage-log appends
-        }
         let root = fields(reading);
         let session = fields(get(&root, "session").unwrap_or_else(|| raw_null()));
         let weekly = fields(get(&root, "weekly").unwrap_or_else(|| raw_null()));
@@ -991,9 +988,6 @@ impl SnapshotService {
     }
 
     pub fn append_codex(&mut self, path: &Path, reading: &RawValue, now_ms: i64) -> AppendResult {
-        if crate::shadow::enabled() {
-            return AppendResult::skipped(); // read-only follower: no usage-log appends
-        }
         let root = fields(reading);
         let session = fields(get(&root, "session").unwrap_or_else(|| raw_null()));
         let weekly = fields(get(&root, "weekly").unwrap_or_else(|| raw_null()));
@@ -1129,9 +1123,6 @@ impl SnapshotService {
         record: &str,
         now_ms: i64,
     ) -> AppendResult {
-        if crate::shadow::enabled() {
-            return AppendResult::skipped(); // read-only follower: no usage-log appends
-        }
         self.rotate_claude(live, archives, now_ms);
         match append_line(live, record) {
             Ok(()) => AppendResult::success(),

@@ -8,7 +8,7 @@
 //! test) and `Cargo.toml` must not change. Everything is injected: temp-dir
 //! state, a fixed clock, fake transcript/summariser stores and a fake
 //! [`PtyPort`], so no test spawns `claude`, reads the real home or binds
-//! 4317/4318.
+//! 4317.
 //!
 //! Covered rows:
 //! - `GET /api/history` and `POST /api/history/regenerate` (matrix rows

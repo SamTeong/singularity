@@ -224,7 +224,7 @@ mod tests {
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        assert!(![4317, 5317, 4318, 6317].contains(&address.port()));
+        assert!(![4317, 5317, 6317].contains(&address.port()));
         let mut services = crate::http_server::HttpServices::new(
             state,
             crate::usage_report::Request {

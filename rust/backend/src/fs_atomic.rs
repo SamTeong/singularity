@@ -21,9 +21,6 @@ const BACKOFF_MS: u64 = 20;
 /// `writeAtomic(file, data)`: stage `bytes` in a pid-scoped scratch file beside
 /// `file`, then rename it into place with the sharing-violation retry ladder.
 pub fn write_atomic(file: &Path, bytes: &[u8]) -> io::Result<()> {
-    if crate::shadow::enabled() {
-        return Ok(()); // read-only follower: writeAtomic is a silent no-op, as in Node
-    }
     // A closure (not the `fs::rename` item) so the higher-ranked
     // `FnMut(&Path, &Path)` bound infers cleanly.
     let rename = |from: &Path, to: &Path| fs::rename(from, to);

@@ -90,11 +90,8 @@ impl RuntimeServices {
     /// Builds the PTY host, registry, anchor service, chat deps and the shared
     /// shutdown/restart channels from the injected host config.
     pub fn from_env(paths: &AppPaths, config: &ConfigServices) -> io::Result<Self> {
-        // Shadow mode is read-only: nothing may be written under SINGULARITY_HOME (Node skips this mkdir too).
-        if !crate::shadow::enabled() {
-            std::fs::create_dir_all(&paths.state_dir)?;
-            std::fs::create_dir_all(&paths.cache_dir)?;
-        }
+        std::fs::create_dir_all(&paths.state_dir)?;
+        std::fs::create_dir_all(&paths.cache_dir)?;
 
         let bus = Bus::new();
         // Break the registry ⇄ PTY cycle: the sink resolves the registry once it
@@ -442,12 +439,7 @@ fn init_anchor(paths: &AppPaths, bus: &Bus) -> window_anchor::Service {
         &json!({
             "state_path": state_path,
             "telemetry_path": telemetry_path,
-            // Shadow behaves as `WINDOW_ANCHOR=''` (`initWindowAnchor({enabled: ''})`).
-            "window_anchor_env": if crate::shadow::enabled() {
-                String::new()
-            } else {
-                std::env::var("WINDOW_ANCHOR").unwrap_or_default()
-            },
+            "window_anchor_env": std::env::var("WINDOW_ANCHOR").unwrap_or_default(),
             "now_ms": now_ms(),
         }),
     );

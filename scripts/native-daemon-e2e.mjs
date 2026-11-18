@@ -3,7 +3,7 @@
 // Everything runs in a throwaway temp root: own SINGULARITY_HOME, HOME,
 // USERPROFILE, CODEX_HOME, USAGE_REPORT_STATE, fake absolute CLAUDE_BIN /
 // OLLAMA_BIN / CODEX_BIN and a work directory with no `.env`. The daemon gets
-// an ephemeral loopback port, so no protected listener (4317/5317/4318/6317)
+// an ephemeral loopback port, so no protected listener (4317/5317/6317)
 // is touched. No coding agent is ever spawned.
 //
 // Checks:
