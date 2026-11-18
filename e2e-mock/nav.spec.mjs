@@ -1,19 +1,25 @@
 import { test, expect } from './fixtures/test.mjs';
 import { goto, gotoView, visible, RAIL_VIEWS, MENU_VIEWS, VIEW_IDS } from '../e2e/helpers/nav.mjs';
 
-test('every rail and More-menu view is reachable by click; active rail item toggles collapse', async ({ page }) => {
-  test.slow();
-  // Start off-rail: clicking the already-active Tasks item would collapse the sidebar.
+// Split in two so CI shards can run the halves in parallel (one walk took 2.4 min).
+for (const [group, labels] of [['rail', RAIL_VIEWS], ['More-menu', MENU_VIEWS]]) {
+  test(`every ${group} view is reachable by click`, async ({ page }) => {
+    test.slow();
+    // Start off-rail: clicking the already-active Tasks item would collapse the sidebar.
+    await page.goto('/config');
+
+    // goto() waits on each view's own landmark, so each step proves the mount.
+    for (const label of labels) {
+      await test.step(label, async () => {
+        await goto(page, label);
+        await expect(page).toHaveURL(new RegExp(`/${VIEW_IDS[label]}(\\?|$)`));
+      });
+    }
+  });
+}
+
+test('active rail item toggles collapse', async ({ page }) => {
   await page.goto('/config');
-
-  // goto() waits on each view's own landmark, so each step proves the mount.
-  for (const label of [...RAIL_VIEWS, ...MENU_VIEWS]) {
-    await test.step(label, async () => {
-      await goto(page, label);
-      await expect(page).toHaveURL(new RegExp(`/${VIEW_IDS[label]}(\\?|$)`));
-    });
-  }
-
   // Clicking the already-active rail item collapses the sidebar; clicking it
   // again expands it. The width change is a CSS transition, so poll the box.
   await goto(page, 'Tasks');
