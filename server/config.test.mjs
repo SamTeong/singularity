@@ -9,7 +9,7 @@ import { join } from 'node:path';
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 const { searchConfig, findConfigRoots, getConfigRoots, setConfigRoots, readConfig, writeConfig } = await import('./config.mjs');
-const { BACKUPS_DIR } = await import('./app-dir.mjs');
+const { BACKUPS_DIR, STATE_DIR } = await import('./app-dir.mjs');
 const { createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend, setConfigReadBackend } = await import('./config.mjs');
 let storedRoots = ['~'];
 const rootsBackend = {
@@ -43,21 +43,6 @@ setConfigReadBackend({
     }
     return hits.sort((a, b) => a.path.localeCompare(b.path));
   },
-  async configScan(root, cap) {
-    const hits = [];
-    const stack = [root];
-    const skips = new Set(['node_modules', 'dist', 'build', 'worktrees', '.cache', 'AppData', 'Temp']);
-    let seen = 0;
-    while (stack.length && seen < cap) {
-      const dir = stack.pop(); seen++;
-      let entries;
-      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-      if (entries.some((entry) => entry.name === '.claude') &&
-          (existsSync(join(dir, '.claude', 'settings.json')) || existsSync(join(dir, '.claude', 'settings.local.json')))) hits.push(dir);
-      for (const entry of entries) if (entry.isDirectory() && !entry.name.startsWith('.') && !skips.has(entry.name)) stack.push(join(dir, entry.name));
-    }
-    return { roots: hits.sort((a, b) => a.localeCompare(b)), truncated: seen >= cap };
-  },
 });
 
 function writeBackend(onWrite = () => {}) {
@@ -78,28 +63,6 @@ function makeRoot(project, local) {
   return cwd;
 }
 
-test('searchConfig matches content and reports scope + line', async () => {
-  const cwd = makeRoot('{\n  "theme": "dark"\n}', null);
-  const hits = await searchConfig([cwd], 'theme');
-  const project = hits.find((h) => h.cwd === cwd && h.scope === 'project');
-  assert.ok(project, 'project scope hit');
-  assert.equal(project.line, 2);
-  assert.match(project.text, /theme/);
-});
-
-test('searchConfig is case-insensitive and skips non-matches', async () => {
-  const cwd = makeRoot('{ "model": "opus" }', '{ "other": 1 }');
-  assert.equal((await searchConfig([cwd], 'MODEL')).some((h) => h.scope === 'project'), true);
-  assert.equal((await searchConfig([cwd], 'model')).some((h) => h.scope === 'local'), false);
-});
-
-test('searchConfig dedups shared paths across repeated roots', async () => {
-  const cwd = makeRoot('{ "theme": "dark" }', null);
-  // Same root twice → project path seen once, not duplicated.
-  const hits = await searchConfig([cwd, cwd], 'theme');
-  assert.equal(hits.filter((h) => h.scope === 'project' && h.cwd === cwd).length, 1);
-});
-
 test('searchConfig skips unusable roots instead of throwing', async () => {
   const cwd = makeRoot('{ "theme": "dark" }', null);
   const hits = await searchConfig([null, 123, cwd], 'theme');
@@ -111,31 +74,34 @@ test('searchConfig empty query returns nothing', async () => {
   assert.deepEqual(await searchConfig(['/whatever'], ''), []);
 });
 
-test('findConfigRoots finds nested dirs holding .claude settings, skips others', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'sing-scan-'));
-  // root itself: no .claude. nested/a has settings.json, nested/b/deep has local.
-  mkdirSync(join(root, 'nested', 'a', '.claude'), { recursive: true });
-  writeFileSync(join(root, 'nested', 'a', '.claude', 'settings.json'), '{}');
-  mkdirSync(join(root, 'nested', 'b', 'deep', '.claude'), { recursive: true });
-  writeFileSync(join(root, 'nested', 'b', 'deep', '.claude', 'settings.local.json'), '{}');
-  // node_modules is skipped even with a matching config inside.
-  mkdirSync(join(root, 'node_modules', 'pkg', '.claude'), { recursive: true });
-  writeFileSync(join(root, 'node_modules', 'pkg', '.claude', 'settings.json'), '{}');
-  // .claude dir with no settings file → not a hit.
-  mkdirSync(join(root, 'empty', '.claude'), { recursive: true });
-
-  const { roots, truncated } = await findConfigRoots(root);
-  assert.equal(truncated, false);
-  assert.deepEqual(roots, [join(root, 'nested', 'a'), join(root, 'nested', 'b', 'deep')]);
+// Matching, case folding, dedup and the scan walk live in Rust (rust-backend.test.mjs
+// "Claude config read, search, and scan use the Rust stdio bridge"); Node only
+// resolves scope paths and forwards.
+test('searchConfig forwards resolved scope paths and the lowercased query; findConfigRoots forwards root and cap', async () => {
+  const calls = [];
+  const backend = {
+    async configSearch(scans, q) { calls.push(['search', scans, q]); return []; },
+    async configScan(root, cap) { calls.push(['scan', root, cap]); return { roots: [], truncated: false }; },
+  };
+  const cwd = makeRoot('{}', null);
+  await searchConfig([cwd], 'MODEL', backend);
+  await findConfigRoots(cwd, 7, backend);
+  assert.deepEqual(calls, [
+    ['search', [{ cwd, project: join(cwd, '.claude', 'settings.json'), local: join(cwd, '.claude', 'settings.local.json') }], 'model'],
+    ['scan', cwd, 7],
+  ]);
 });
 
-test('config roots use the async Rust adapter and preserve default, dedup, roundtrip', async () => {
-  storedRoots = [];
-  assert.deepEqual(await getConfigRoots(), ['~']); // seeded default when absent
-  const r = await setConfigRoots(['~', '/a', '/a', '/b', 123, '']);
-  assert.equal(r.ok, true);
-  assert.deepEqual(r.roots, ['~', '/a', '/b']); // deduped, non-strings dropped
-  assert.deepEqual(await getConfigRoots(), ['~', '/a', '/b']); // read back from bridge
+test('config roots forward the fixed state file and the raw roots to the Rust adapter', async () => {
+  const calls = [];
+  const backend = {
+    async pickerRootsGet(path) { calls.push(['get', path]); return ['~']; },
+    async pickerRootsSet(path, roots) { calls.push(['set', path, roots]); return { ok: true, roots }; },
+  };
+  assert.deepEqual(await getConfigRoots(backend), ['~']);
+  assert.deepEqual(await setConfigRoots(['/a', 123], backend), { ok: true, roots: ['/a', 123] });
+  const file = join(STATE_DIR, 'config-roots.json');
+  assert.deepEqual(calls, [['get', file], ['set', file, ['/a', 123]]]);
 });
 
 test('config root handlers reuse Fastify routes and reject malformed or unavailable bridge responses', async () => {
@@ -143,11 +109,10 @@ test('config root handlers reuse Fastify routes and reject malformed or unavaila
   const app = Fastify();
   app.get('/config/roots', createConfigRootsGetHandler(rootsBackend));
   app.put('/config/roots', createConfigRootsSetHandler(rootsBackend));
-  assert.deepEqual((await app.inject('/config/roots')).json(), { roots: ['~', '/a', '/b'] });
+  assert.deepEqual((await app.inject('/config/roots')).json(), { roots: ['~'] });
   assert.deepEqual((await app.inject({ method: 'PUT', url: '/config/roots', payload: { roots: false } })).json(), { ok: true, roots: [] });
   const malformed = await app.inject({ method: 'PUT', url: '/config/roots', payload: { roots: 'bad' } });
   assert.equal(malformed.statusCode, 500);
-  assert.equal(malformed.json().message, '(roots || []).filter is not a function');
   await app.close();
 
   const unavailable = Fastify();

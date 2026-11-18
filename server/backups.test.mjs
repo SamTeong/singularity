@@ -17,40 +17,36 @@ function makeFile(content) {
   return p;
 }
 
-test('backs up an existing file; content matches the original', async () => {
-  const p = makeFile('hello world');
-  const backup = await backupFile(p);
-  assert.ok(backup);
-  assert.equal(existsSync(backup), true);
-  assert.equal(readFileSync(backup, 'utf8'), 'hello world');
-});
+// Async and sync twins share one contract (backupFileSync serves migrate-state.mjs's boot path).
+for (const [name, backup] of [['backupFile', backupFile], ['backupFileSync', backupFileSync]]) {
+  test(`${name}: backs up an existing file; content matches; source.txt holds the absolute path`, async () => {
+    const p = makeFile('hello world');
+    const dest = await backup(p);
+    assert.ok(dest);
+    assert.equal(existsSync(dest), true);
+    assert.equal(readFileSync(dest, 'utf8'), 'hello world');
+    assert.equal(readFileSync(join(dest, '..', 'source.txt'), 'utf8'), p);
+  });
+
+  test(`${name} retention: 6 successive backups leave exactly 5 .bak files, oldest gone`, async () => {
+    const p = makeFile('v0');
+    let first;
+    for (let i = 1; i <= 6; i++) {
+      writeFileSync(p, `v${i}`);
+      const dest = await backup(p);
+      if (i === 1) first = dest;
+    }
+    const baks = readdirSync(join(first, '..')).filter((f) => f.endsWith('.bak'));
+    assert.equal(baks.length, 5);
+    assert.equal(existsSync(first), false); // the oldest (1st) backup was pruned
+  });
+}
 
 test('returns null for a missing source, does not create a dir', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'sing-bak-src-'));
   const missing = join(dir, 'nope.txt');
   const backup = await backupFile(missing);
   assert.equal(backup, null);
-});
-
-test('retention: 6 successive backups leave exactly 5 .bak files, oldest gone', async () => {
-  const p = makeFile('v0');
-  let first;
-  for (let i = 1; i <= 6; i++) {
-    writeFileSync(p, `v${i}`);
-    const backup = await backupFile(p);
-    if (i === 1) first = backup;
-  }
-  const dir = join(first, '..');
-  const baks = readdirSync(dir).filter((f) => f.endsWith('.bak'));
-  assert.equal(baks.length, 5);
-  assert.equal(existsSync(first), false); // the oldest (1st) backup was pruned
-});
-
-test('source.txt contains the original absolute path', async () => {
-  const p = makeFile('content');
-  const backup = await backupFile(p);
-  const sourceFile = join(backup, '..', 'source.txt');
-  assert.equal(readFileSync(sourceFile, 'utf8'), p);
 });
 
 // Regression test for the sync->async conversion: planBackup's collision
@@ -79,27 +75,4 @@ test('a burst of concurrent backups over the retention cap never returns null (l
   writeFileSync(p, 'v6');
   const results = await Promise.all(Array.from({ length: 5 }, () => backupFile(p)));
   assert.ok(results.every(Boolean), 'every concurrent backup succeeded despite a shared prune race');
-});
-
-// backupFileSync: same contract, used only by migrate-state.mjs's boot path.
-test('sync twin: backs up an existing file; content matches the original', () => {
-  const p = makeFile('hello sync');
-  const backup = backupFileSync(p);
-  assert.ok(backup);
-  assert.equal(existsSync(backup), true);
-  assert.equal(readFileSync(backup, 'utf8'), 'hello sync');
-});
-
-test('sync twin retention: 6 successive backups leave exactly 5 .bak files, oldest gone', () => {
-  const p = makeFile('v0');
-  let first;
-  for (let i = 1; i <= 6; i++) {
-    writeFileSync(p, `v${i}`);
-    const backup = backupFileSync(p);
-    if (i === 1) first = backup;
-  }
-  const dir = join(first, '..');
-  const baks = readdirSync(dir).filter((f) => f.endsWith('.bak'));
-  assert.equal(baks.length, 5);
-  assert.equal(existsSync(first), false);
 });

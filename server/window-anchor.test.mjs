@@ -14,11 +14,10 @@ mkdirSync(join(scratch, 'singularity', 'state'), { recursive: true });
 mkdirSync(process.env.USAGE_REPORT_STATE, { recursive: true });
 const modelStore = await import('./model-store.mjs');
 const { createRustBackend } = await import('./rust-backend.mjs');
-let modelBackend = createRustBackend();
-await modelBackend.start();
-modelStore.setModelsBackend(modelBackend);
+// Fresh backend per test: window_anchor_init does not clear Rust last_attempt/
+// actions/generations, so a shared backend would leak state between tests.
+let modelBackend;
 beforeEach(async () => {
-  await modelBackend.stop();
   modelBackend = createRustBackend();
   await modelBackend.start();
   modelStore.setModelsBackend(modelBackend);

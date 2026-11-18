@@ -40,6 +40,7 @@ import { getDomainState, DOMAIN_STATE_ORDER } from '@/lib/domainState.js';
 import { insetQuery } from '@/lib/sheetInset.js';
 import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
 import { COLUMNS, COLUMN_DOMAIN, cardDomainId } from '@/features/tasks/taskDomain.js';
+import { matchesTags as matchesAnyTag, compareHistory } from '@/features/tasks/historySort.mjs';
 
 // Read the reduced-motion preference once at mount for the transcript sheet —
 // mirrors TaskDetailPanel.jsx's own helper (kept local rather than shared: a
@@ -468,36 +469,15 @@ export default function TasksBoard({ tasks, history, agents, stats, onSelect, on
   // A ?tag= no task or history row carries — a stale shared link — is dropped:
   // it renders no pill, so keeping it would empty the board with nothing to clear.
   const activeTags = useMemo(() => new Set(tagList.filter((t) => allTags.includes(t))), [tagList, allTags]);
-  const matchesTags = (item) => activeTags.size === 0 || (item.tags || []).some((t) => activeTags.has(t));
+  const matchesTags = (item) => matchesAnyTag(activeTags, item);
   const toggleTag = (tag) => setTagList(activeTags.has(tag) ? tagList.filter((t) => t !== tag) : [...tagList, tag]);
 
   // Live subtitle for the view topbar: task count + count of agents currently
   // in a live state (starting/running/idle).
   const runningCount = agents.filter((a) => isLive(a.status)).length;
 
-  // Sort value per header key. Numeric fields fall back to 0; strings to ''.
-  const sortValue = (h, key) => {
-    const s = h.finalStats;
-    switch (key) {
-      case 'title': return h.title;
-      case 'repo': return repoName(h.repo);
-      case 'branch': return h.branch || '';
-      case 'outcome': return h.outcome;
-      case 'busyMs': return s?.busyMs ?? 0;
-      case 'apiMs': return s?.apiMs ?? 0;
-      case 'costUsd': return s?.costUsd ?? 0;
-      case 'tokens': return s?.tokens ?? 0;
-      case 'concludedAt': return h.concludedAt ? new Date(h.concludedAt).getTime() : 0;
-      default: return 0;
-    }
-  };
   const sortedHistory = useMemo(() => {
-    const dir = sort.dir === 'desc' ? -1 : 1;
-    return history.filter(matchesTags).slice().sort((a, b) => {
-      const va = sortValue(a, sort.key), vb = sortValue(b, sort.key);
-      if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
-      return String(va).localeCompare(String(vb)) * dir;
-    });
+    return history.filter(matchesTags).slice().sort(compareHistory(sort));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [history, activeTags, sort]);
 

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync, readdirSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, statSync, utimesSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -38,20 +38,6 @@ const testBackend = {
     }
     return hits.sort((a, b) => a.path.localeCompare(b.path));
   },
-  async codexConfigScan(root, cap) {
-    const hits = [];
-    const stack = [root];
-    let seen = 0;
-    while (stack.length && seen < cap) {
-      const dir = stack.pop();
-      seen++;
-      let entries;
-      try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-      if (existsSync(join(dir, '.codex', 'config.toml'))) hits.push(dir);
-      for (const entry of entries) if (entry.isDirectory() && !entry.name.startsWith('.') && !['node_modules', 'dist', 'build', 'worktrees', '.cache', 'AppData', 'Temp'].includes(entry.name)) stack.push(join(dir, entry.name));
-    }
-    return { roots: hits.sort((a, b) => a.localeCompare(b)), truncated: seen >= cap };
-  },
   async codexConfigWrite(path, content) {
     if (typeof content !== 'string') return { ok: false, error: 'content must be a string' };
     writeFileSync(path, content);
@@ -68,15 +54,16 @@ async function makeRoot(toml) {
   return cwd;
 }
 
-// Runs first: asserts the seeded default before any makeRoot/setConfigRoots
-// writes the roots file.
-test('codex config roots use the async Rust adapter and preserve default, dedup, roundtrip', async () => {
-  storedRoots = [];
-  assert.deepEqual(await getConfigRoots(), ['~']); // seeded default when file absent
-  const r = await setConfigRoots(['~', '/a', '/a', '/b', 123, '']);
-  assert.equal(r.ok, true);
-  assert.deepEqual(r.roots, ['~', '/a', '/b']); // deduped, non-strings dropped
-  assert.deepEqual(await getConfigRoots(), ['~', '/a', '/b']); // read back from bridge
+test('codex config roots forward the fixed state file and the raw roots to the Rust adapter', async () => {
+  const calls = [];
+  const backend = {
+    async pickerRootsGet(path) { calls.push(['get', path]); return ['~']; },
+    async pickerRootsSet(path, roots) { calls.push(['set', path, roots]); return { ok: true, roots }; },
+  };
+  assert.deepEqual(await getConfigRoots(backend), ['~']);
+  assert.deepEqual(await setConfigRoots(['/a', 123], backend), { ok: true, roots: ['/a', 123] });
+  const file = join(process.env.SINGULARITY_HOME, 'state', 'codex-config-roots.json');
+  assert.deepEqual(calls, [['get', file], ['set', file, ['/a', 123]]]);
 });
 
 test('codex root handlers preserve route responses and reject bridge failure', async () => {
@@ -84,7 +71,7 @@ test('codex root handlers preserve route responses and reject bridge failure', a
   const app = Fastify();
   app.get('/codex-config/roots', createConfigRootsGetHandler(rootsBackend));
   app.put('/codex-config/roots', createConfigRootsSetHandler(rootsBackend));
-  assert.deepEqual((await app.inject('/codex-config/roots')).json(), { roots: ['~', '/a', '/b'] });
+  assert.deepEqual((await app.inject('/codex-config/roots')).json(), { roots: ['~'] });
   const saved = await app.inject({ method: 'PUT', url: '/codex-config/roots', payload: { roots: null } });
   assert.deepEqual(saved.json(), { ok: true, roots: [] });
   await app.close();
@@ -94,46 +81,28 @@ test('codex root handlers preserve route responses and reject bridge failure', a
   await failed.close();
 });
 
-test('searchConfig matches content and reports scope + line', async () => {
-  const cwd = await makeRoot('model = "gpt-5"\ntheme = "dark"\n');
-  const hits = await searchConfig([cwd], 'theme');
-  const project = hits.find((h) => h.cwd === cwd && h.scope === 'project');
-  assert.ok(project, 'project scope hit');
-  assert.equal(project.line, 2);
-  assert.match(project.text, /theme/);
-});
-
-test('searchConfig is case-insensitive and skips non-matches', async () => {
-  const cwd = await makeRoot('model = "x"\n');
-  assert.equal((await searchConfig([cwd], 'MODEL')).some((h) => h.scope === 'project'), true);
-});
-
-test('searchConfig dedups shared paths across repeated roots', async () => {
-  const cwd = await makeRoot('theme = "dark"\n');
-  const hits = await searchConfig([cwd, cwd], 'theme');
-  assert.equal(hits.filter((h) => h.scope === 'project' && h.cwd === cwd).length, 1);
-});
-
 test('searchConfig empty query returns nothing', async () => {
   assert.deepEqual(await searchConfig(['/whatever'], ''), []);
 });
 
-test('findConfigRoots finds nested dirs holding .codex/config.toml, skips others', async () => {
-  const root = mkdtempSync(join(tmpdir(), 'sing-scan-'));
-  // root itself: no .codex. nested/a has config.toml, nested/b/deep has config.toml.
-  mkdirSync(join(root, 'nested', 'a', '.codex'), { recursive: true });
-  writeFileSync(join(root, 'nested', 'a', '.codex', 'config.toml'), 'model = "x"\n');
-  mkdirSync(join(root, 'nested', 'b', 'deep', '.codex'), { recursive: true });
-  writeFileSync(join(root, 'nested', 'b', 'deep', '.codex', 'config.toml'), 'model = "y"\n');
-  // node_modules is skipped even with a matching config inside.
-  mkdirSync(join(root, 'node_modules', 'pkg', '.codex'), { recursive: true });
-  writeFileSync(join(root, 'node_modules', 'pkg', '.codex', 'config.toml'), 'model = "z"\n');
-  // .codex dir with no config.toml → not a hit.
-  mkdirSync(join(root, 'empty', '.codex'), { recursive: true });
-
-  const { roots, truncated } = await findConfigRoots(root);
-  assert.equal(truncated, false);
-  assert.deepEqual(roots, [join(root, 'nested', 'a'), join(root, 'nested', 'b', 'deep')]);
+// Matching, case folding, dedup and the scan walk live in Rust (rust-backend.test.mjs
+// "Codex config read, search, and scan use the Rust stdio bridge"); Node gates
+// roots, resolves scope paths and forwards.
+test('searchConfig forwards pinned scope paths and the lowercased query; findConfigRoots forwards root and cap', async () => {
+  const cwd = await makeRoot('theme = "dark"\n');
+  const calls = [];
+  setCodexConfigReadBackend({
+    async codexConfigSearch(roots, q) { calls.push(['search', roots, q]); return []; },
+    async codexConfigScan(root, cap) { calls.push(['scan', root, cap]); return { roots: [], truncated: false }; },
+  });
+  try {
+    await searchConfig([cwd], 'THEME');
+    await findConfigRoots(cwd, 7);
+  } finally { setCodexConfigReadBackend(testBackend); }
+  assert.deepEqual(calls, [
+    ['search', [{ cwd, project: join(cwd, '.codex', 'config.toml'), user: join(process.env.CODEX_HOME, 'config.toml') }], 'theme'],
+    ['scan', cwd, 7],
+  ]);
 });
 
 test('writeConfig valid TOML writes + exact prior-content backup', async () => {

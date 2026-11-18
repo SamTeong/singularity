@@ -9,8 +9,8 @@ can reach the user's real `:4317` daemon, `~/.claude`, `~/wiki`, or spawn a real
 ```
 pnpm test:e2e        # build web/dist, then run everything
 pnpm test:e2e:ui     # interactive, reuses the dist already on disk
-pnpm exec playwright test e2e/wiki.spec.mjs    # one spec, no rebuild
-E2E_BACKEND=rust pnpm exec playwright test e2e/wiki.spec.mjs   # native daemon
+pnpm exec playwright test e2e/smoke.spec.mjs    # one spec, no rebuild
+E2E_BACKEND=rust pnpm exec playwright test e2e/smoke.spec.mjs   # native daemon
 ```
 
 ## Backends
@@ -61,6 +61,32 @@ mock cannot honestly stand in for:
   state migration, spawn/env construction
 - anything under **Never drive these** below — those stay unported entirely,
   because passing against a mock would assert nothing about them
+
+UI behaviour, routing, skins and `localStorage` persistence stay in `e2e-mock/`
+only: the mock runs the same client, so a copy here proves nothing extra.
+
+## Specs (16 tests)
+
+Each one proves a daemon-only contract: real WS frames, real response shapes,
+real filesystem effects, server-side persistence, or token gating.
+
+| spec | tests | daemon contract |
+|---|---|---|
+| `smoke` | 3 | shell served + WS `tasks` frame; panels read the sandbox corpora; SING_TOKEN gating (401 on `/api` and the shell without the cookie) |
+| `console` | 1 | every view renders real payloads with a clean console (shape drift) |
+| `nav` | 1 | SPA fallback serves the shell for deep links, reloads and unknown views |
+| `processes` | 1 | the real `/procs` scan finds its own daemon and the UI disables its kill button |
+| `history` | 1 | real `/history` shape: newest-first days and the gap day |
+| `automation` | 1 | `/crons` and `/background/jobs` create/edit/delete shapes |
+| `config` | 1 | `settings.json` (+ backup) and codex `config.toml` saves land on disk |
+| `create-dialogs` | 1 | folder browser resolves `~` and `..` against the sandbox HOME |
+| `editors` | 1 | hook, rule, memory and skill saves land on disk |
+| `explorer` | 3 | save and create/delete on disk; `/fs/state` survives a reload |
+| `tasks` | 1 | a real status mutation re-renders the board via the daemon WS frame |
+| `transcripts` | 1 | real JSONL listing order and parse of the rich transcript |
+
+Not covered here: PTY/terminals (no agent is ever spawned) and persistence
+across a daemon restart (one boot per run).
 
 Both suites must stay green. When a flow exists in both, keep the assertions
 identical — a divergence means one of them is lying. Fixture-driven differences
@@ -163,7 +189,7 @@ Seeded by `fixtures/seed.mjs`, all paths exported from `fixtures/paths.mjs`:
 `CLAUDE_BIN` and `OLLAMA_BIN` both point at the keepalive stub, so
 `/api/capabilities` reports both backends available and neither can start a real
 turn. `SING_SCOPE_ROOT` stays unset, so skill-scopes renders its not-configured
-state, which the specs assert. `SING_USAGE_REPORTS` also stays unset, so the
+state. `SING_USAGE_REPORTS` also stays unset, so the
 usage report uses its default dir under the sandbox `USAGE_REPORT_STATE`.
 
 Wiki **categories are derived from a page's folder**, not its frontmatter
@@ -199,7 +225,7 @@ its own `<root>/<port>` directory (fixtures, test output and html report all
 move with it):
 
 ```sh
-E2E_PORT=4321 pnpm exec playwright test e2e/wiki.spec.mjs
+E2E_PORT=4321 pnpm exec playwright test e2e/smoke.spec.mjs
 ```
 
 Use `playwright test`, not `pnpm test:e2e` — the latter rebuilds `web/dist`,
