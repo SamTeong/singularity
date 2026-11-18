@@ -4,7 +4,7 @@
 // caveman plugin enabled) the cavecrew fallback.
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync, readdirSync, chmodSync, renameSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync, readdirSync, chmodSync, renameSync, readFileSync, cpSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -40,17 +40,25 @@ after(async () => {
   rmSync(scratch, { recursive: true, force: true });
 });
 
-const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, buildCodexBackgroundPrompt, createTask, updateTask, concludeTask, snapshotTasks, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree, git } = taskModule;
+const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, buildCodexBackgroundPrompt, createTask, updateTask, concludeTask, snapshotTasks, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree } = taskModule;
 const reg = await import('./agents.mjs');
 
-function initRepo() {
-  const repo = mkdtempSync(join(tmpdir(), 'sing-repo-'));
+// Built once; each test copies it (git spawns are the cost on Windows).
+const TEMPLATE_REPO = (() => {
+  const repo = mkdtempSync(join(tmpdir(), 'sing-repo-tpl-'));
   execFileSync('git', ['-C', repo, 'init', '-q']);
   execFileSync('git', ['-C', repo, 'config', 'user.email', 'x@x.com']);
   execFileSync('git', ['-C', repo, 'config', 'user.name', 'x']);
   writeFileSync(join(repo, 'f.txt'), 'x');
   execFileSync('git', ['-C', repo, 'add', '.']);
   execFileSync('git', ['-C', repo, 'commit', '-q', '-m', 'init']);
+  return repo;
+})();
+after(() => rmRepo(TEMPLATE_REPO));
+
+function initRepo() {
+  const repo = mkdtempSync(join(tmpdir(), 'sing-repo-'));
+  cpSync(TEMPLATE_REPO, repo, { recursive: true });
   return repo;
 }
 
@@ -379,9 +387,15 @@ test('concludeTask: concurrent calls on the same task conclude it exactly once',
 // `hash-object --stdin` blocks reading a stdin that execFile never closes —
 // a portable stand-in for that hang. It must lose to the timeout, not hang.
 test('git: a hung subprocess loses to the hard timeout instead of blocking forever', async () => {
+  // GIT_TIMEOUT_MS is read at module load: load a fresh copy with a 200 ms bound
+  // so the hang costs 0.2 s, not the file-wide 3 s (usage.test.mjs isolated-import pattern).
+  process.env.SING_GIT_TIMEOUT_MS = '200';
+  const shortTasks = await import('./tasks.mjs?git-timeout-200');
+  process.env.SING_GIT_TIMEOUT_MS = '3000';
+  shortTasks.setTasksBackend(modelBackend);
   const repo = initRepo();
   try {
-    await assert.rejects(() => git(repo, 'hash-object', '--stdin'), (error) => {
+    await assert.rejects(() => shortTasks.git(repo, 'hash-object', '--stdin'), (error) => {
       assert.match(error.message, /git hash-object --stdin failed: Command failed:/);
       assert.equal(error.cause.signal, 'SIGKILL');
       assert.equal(error.cause.killed, true);

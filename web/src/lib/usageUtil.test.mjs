@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { windowAnchorAvailable, windowAnchored } from './usageUtil.js';
+import { visibleProviders, windowAnchorAvailable, windowAnchored } from './usageUtil.js';
+
+test('visibleProviders hides only providers explicitly unavailable', () => {
+  const keys = (caps) => visibleProviders(caps).map((p) => p.key);
+  assert.deepEqual(keys(null), ['claude', 'codex', 'ollama']);
+  assert.deepEqual(keys({ codex: { available: false }, ollama: { available: true } }), ['claude', 'ollama']);
+  assert.deepEqual(keys({ claude: {} }), ['claude', 'codex', 'ollama']);
+});
 
 const iso = (ms) => new Date(Date.now() + ms).toISOString();
 

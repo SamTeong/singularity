@@ -2,14 +2,14 @@
 // .jsonl (valid lines + garbage), sessionText head+tail truncation, the
 // pathFor path-containment guard (project/id from the client), and the
 // FS-persisted sessions root. Fixtures follow the agents.test.mjs pattern:
-// write under the real ~/.claude/projects, clean up in a finally.
+// write under a temp projects root (never the real ~/.claude/projects).
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import fsPromises from 'node:fs/promises';
 import { join } from 'node:path';
-import { homedir, tmpdir } from 'node:os';
+import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
 
 // sessions.mjs imports app-dir.mjs (STATE_DIR), which throws without
@@ -25,7 +25,8 @@ after(async () => { await modelBackend.stop(); rmSync(process.env.SINGULARITY_HO
 const { readSession, sessionText, searchSessions, listSessions, subagentsFor, getSessionsRoot, setSessionsRoot, resolveRoot, setTranscriptBackend } = await import('./sessions.mjs');
 setTranscriptBackend(modelBackend);
 
-const PROJECTS = join(homedir(), '.claude', 'projects');
+const PROJECTS = mkdtempSync(join(tmpdir(), 'sing-projects-'));
+after(() => rmSync(PROJECTS, { recursive: true, force: true }));
 
 function writeSession(project, id, lines, root = PROJECTS) {
   const dir = join(root, project);
@@ -43,7 +44,7 @@ test('readSession: valid lines parse, a garbage/truncated line is skipped, no th
     JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi there' }] }, timestamp: '2026-07-15T00:00:01Z' }),
   ]);
   try {
-    const s = await readSession(project, id);
+    const s = await readSession(project, id, PROJECTS);
     assert.equal(s.ok, true);
     assert.equal(s.meta.turns, 1);
     assert.deepEqual(s.messages, [
@@ -154,51 +155,25 @@ test('shared Ollama fixture leaves ambiguous tag aliases unresolved', async () =
   }
 });
 
-test('readSession: meta.model is the last assistant message.model (a /model switch shows the latest)', async () => {
-  const project = 'sessions-test-model';
-  const id = 'fixture-model';
-  const dir = writeSession(project, id, [
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'first' }], model: 'sonnet' }, timestamp: '2026-07-15T00:00:00Z' }),
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'second' }], model: 'opus' }, timestamp: '2026-07-15T00:00:01Z' }),
-  ]);
-  try {
-    const s = await readSession(project, id);
-    assert.equal(s.ok, true);
-    assert.equal(s.meta.model, 'opus');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('readSession: ollama model logged with :tag stripped is restored to the full preset', async () => {
-  const project = 'sessions-test-ollama-tag';
-  const id = 'fixture-ollama-tag';
-  const dir = writeSession(project, id, [
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], model: 'glm-5.3' }, timestamp: '2026-07-15T00:00:00Z' }),
-  ]);
-  try {
-    const s = await readSession(project, id);
-    assert.equal(s.ok, true);
-    assert.equal(s.meta.model, 'glm-5.3:cloud');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test('readSession: resolved claude-* id (from opus[1m]) maps back to the opus alias', async () => {
-  const project = 'sessions-test-claude-alias';
-  const id = 'fixture-claude-alias';
-  const dir = writeSession(project, id, [
-    JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }], model: 'claude-opus-5' }, timestamp: '2026-07-15T00:00:00Z' }),
-  ]);
-  try {
-    const s = await readSession(project, id);
-    assert.equal(s.ok, true);
-    assert.equal(s.meta.model, 'opus');
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+for (const [name, models, expected] of [
+  ['meta.model is the last assistant message.model (a /model switch shows the latest)', ['sonnet', 'opus'], 'opus'],
+  ['ollama model logged with :tag stripped is restored to the full preset', ['glm-5.3'], 'glm-5.3:cloud'],
+  ['resolved claude-* id (from opus[1m]) maps back to the opus alias', ['claude-opus-5'], 'opus'],
+]) {
+  test(`readSession: ${name}`, async () => {
+    const project = 'sessions-test-model';
+    const id = 'fixture-model';
+    const dir = writeSession(project, id, models.map((model, i) =>
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: `turn ${i}` }], model }, timestamp: `2026-07-15T00:00:0${i}Z` })));
+    try {
+      const s = await readSession(project, id, PROJECTS);
+      assert.equal(s.ok, true);
+      assert.equal(s.meta.model, expected);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test('sessionText: head+tail truncation keeps the opening and latest text plus the marker', async () => {
   const project = 'sessions-test-trunc';
@@ -210,7 +185,7 @@ test('sessionText: head+tail truncation keeps the opening and latest text plus t
     JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'TAIL_MARKER' }] } }),
   ]);
   try {
-    const text = await sessionText(project, id, 50); // small custom cap forces truncation
+    const text = await sessionText(project, id, 50, PROJECTS); // small custom cap forces truncation
     assert.ok(text.includes('HEAD_MARKER'), text);
     assert.ok(text.includes('TAIL_MARKER'), text);
     assert.ok(text.includes('[…truncated…]'), text);
@@ -227,7 +202,7 @@ test('searchSessions: a target that stats fine but fails to read (e.g. a directo
   // real deleted-between-stat-and-read race), but readFile() throws (EISDIR).
   mkdirSync(join(dir, `${id}.jsonl`), { recursive: true });
   try {
-    const result = await searchSessions('anything', { project, id });
+    const result = await searchSessions('anything', { project, id, root: PROJECTS });
     assert.deepEqual(result, { results: [], capped: false });
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -345,12 +320,12 @@ test('readSession: nested subagent id opens via the pathFor relaxation; escapes 
   mkdirSync(subDir, { recursive: true });
   writeFileSync(join(subDir, 'agent-x.jsonl'), JSON.stringify({ type: 'user', message: { content: 'sub reply' }, timestamp: '2026-07-15T00:00:01Z' }) + '\n');
   try {
-    const nested = await readSession(project, `${parentId}/subagents/agent-x`);
+    const nested = await readSession(project, `${parentId}/subagents/agent-x`, PROJECTS);
     assert.equal(nested.ok, true);
     assert.equal(nested.messages[0].text, 'sub reply');
 
-    assert.deepEqual(await readSession(project, '../evil/subagents/agent-x'), { ok: false, error: 'not found' });
-    assert.deepEqual(await readSession(project, 'a/b'), { ok: false, error: 'not found' });
+    assert.deepEqual(await readSession(project, '../evil/subagents/agent-x', PROJECTS), { ok: false, error: 'not found' });
+    assert.deepEqual(await readSession(project, 'a/b', PROJECTS), { ok: false, error: 'not found' });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -412,10 +387,12 @@ test('listSessions: running is the live process only; a recent mtime stays in ac
 });
 
 test('listSessions: owned liveness and recent activity remain separate for root, Claude child, and Codex rows', async () => {
+  // Temp root: the default root is the developer's real ~/.claude/projects.
+  const projectsRoot = mkdtempSync(join(tmpdir(), 'sing-sessions-evidence-'));
   const project = 'sessions-test-evidence';
   const ids = ['root-live-quiet', 'root-unowned-recent', 'root-unowned-old'];
-  const dir = writeSession(project, ids[0], [JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
-  for (const id of ids.slice(1)) writeSession(project, id, [JSON.stringify({ type: 'user', message: { content: 'hi' } })]);
+  const dir = writeSession(project, ids[0], [JSON.stringify({ type: 'user', message: { content: 'hi' } })], projectsRoot);
+  for (const id of ids.slice(1)) writeSession(project, id, [JSON.stringify({ type: 'user', message: { content: 'hi' } })], projectsRoot);
   const parent = ids[0];
   const childDir = join(dir, parent, 'subagents');
   mkdirSync(childDir, { recursive: true });
@@ -440,7 +417,7 @@ test('listSessions: owned liveness and recent activity remain separate for root,
     ? id === threadId && context.cwd === 'C:/codex/project' && liveIds.has(registryId)
     : liveIds.has(id);
   try {
-    const sessions = await listSessions({ isLive });
+    const sessions = await listSessions({ root: projectsRoot, isLive });
     const root = (id) => sessions.find((s) => s.project === project && s.id === id);
     const liveRoot = root(ids[0]);
     const recentRoot = root(ids[1]);
@@ -457,7 +434,7 @@ test('listSessions: owned liveness and recent activity remain separate for root,
     assert.deepEqual([codex.processLive, codex.activityRecent, codex.running], [true, true, true]);
     assert.deepEqual([oldCodex.processLive, oldCodex.activityRecent, oldCodex.running], [false, false, false]);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(projectsRoot, { recursive: true, force: true });
     rmSync(join(CODEX_HOME, 'sessions'), { recursive: true, force: true });
   }
 });

@@ -5,9 +5,10 @@
 //
 // Unlike Hooks/Rules/Memory/Skills, this panel persists its UI state
 // (root/expanded/tabs/active) server-side via a debounced PUT /fs/state,
-// restored on every mount — so tests in this file are deliberately ordered:
-// later tests build on tabs/expansion left open by earlier ones, the same
-// way a real user's session would carry state across a reload.
+// restored on every mount — so tabs/expansion left open by one test carry
+// into the next; the reload test reads /api/fs/state first to stay
+// self-sufficient. Listing, tabs, the dirty-tab guard and search are covered
+// by e2e-mock/explorer.
 //
 // Not covered: the image/binary/toolarge panes (no assertion-worthy behavior
 // beyond "shows a placeholder") and autosave's 5s timer (not worth a
@@ -30,39 +31,6 @@ const NOTES = join(EXPLORER_DIR, 'notes.md');
 const SCRIPT = join(EXPLORER_DIR, 'script.mjs');
 
 test.describe('Explorer', () => {
-  test('rail lists the seeded top-level entries incl. the dotfile, dirs before files', async ({ page }) => {
-    await gotoView(page, 'Explorer');
-    const rows = page.getByRole('button', { name: /^(subdir|\.hidden|notes\.md|pixel\.png|script\.mjs)$/ });
-    await expect(rows).toHaveCount(5);
-    expect(await rows.allTextContents()).toEqual(['subdir', '.hidden', 'notes.md', 'pixel.png', 'script.mjs']);
-  });
-
-  test('lazy expand: the nested file is absent until its folder is clicked', async ({ page }) => {
-    await gotoView(page, 'Explorer');
-    await expect(page.getByRole('button', { name: 'nested.txt', exact: true })).toHaveCount(0);
-    await page.getByRole('button', { name: 'subdir', exact: true }).click();
-    await expect(page.getByRole('button', { name: 'nested.txt', exact: true })).toBeVisible();
-  });
-
-  test('clicking a file opens a tab and loads its content into the editor', async ({ page }) => {
-    await gotoView(page, 'Explorer');
-    await page.getByRole('button', { name: 'notes.md', exact: true }).click();
-    await expect(tab(page, NOTES)).toContainText('notes.md');
-    await expect(cm(page)).toContainText('Explorer fixture markdown.');
-  });
-
-  test('opening a second file adds a tab; clicking the first tab switches content back', async ({ page }) => {
-    await gotoView(page, 'Explorer');
-    await page.getByRole('button', { name: 'notes.md', exact: true }).click();
-    await page.getByRole('button', { name: 'script.mjs', exact: true }).click();
-    await expect(tab(page, NOTES)).toBeVisible();
-    await expect(tab(page, SCRIPT)).toBeVisible();
-    await expect(cm(page)).toContainText('explorerFixture');
-
-    await tab(page, NOTES).click();
-    await expect(cm(page)).toContainText('Explorer fixture markdown.');
-  });
-
   test('editing and saving a file writes the new bytes to disk', async ({ page }) => {
     await gotoView(page, 'Explorer');
     await page.getByRole('button', { name: 'script.mjs', exact: true }).click();
@@ -83,27 +51,6 @@ test.describe('Explorer', () => {
     await expect(page.getByText('Saved', { exact: true })).toBeVisible();
 
     expect(readFileSync(SCRIPT, 'utf8')).toContain(marker);
-  });
-
-  test('closing a dirty tab prompts to discard, then removes it', async ({ page }) => {
-    await gotoView(page, 'Explorer');
-    await page.getByRole('button', { name: 'notes.md', exact: true }).click();
-    // Opening a file is async: the click only starts the /fs/read, and the
-    // previous tab's editor stays on screen until it resolves (openFile's
-    // selection guard then switches). Type before that and the edit lands in
-    // whichever file was restored here — under load the restored tab can be
-    // script.mjs alone, which is the state this spec must not assume away.
-    await expect(tab(page, NOTES)).toHaveAttribute('aria-selected', 'true');
-    await expect(cm(page)).toContainText('Explorer fixture markdown.');
-    await cm(page).click();
-    await page.keyboard.press('Control+End');
-    await page.keyboard.insertText('unsaved edit');
-
-    // The dirty guard is an MUI Dialog (useDirtyGuard), not a native confirm —
-    // click Discard to drop the edit and proceed with the close.
-    await tab(page, NOTES).locator('button').click();
-    await page.getByRole('dialog').getByRole('button', { name: 'Discard' }).click();
-    await expect(tab(page, NOTES)).toHaveCount(0);
   });
 
   test('context menu New File creates it on disk; Delete removes it', async ({ page }) => {
@@ -173,32 +120,5 @@ test.describe('Explorer', () => {
     await expect(tab(page, NOTES)).toBeVisible();
     await expect(tab(page, SCRIPT)).toBeVisible();
     await expect(cm(page)).toContainText('explorerFixture');
-  });
-
-  // Search is server-side and recursive (GET /fs/search), unlike Hooks/Rules/
-  // Memory/Skills' client-side filter over the already-loaded tree — the case
-  // that behavior can't handle is a match inside a folder that's never been
-  // expanded. Force a collapsed starting point (toggleAll always collapses,
-  // regardless of its current Collapse-all/Expand-all label) so this doesn't
-  // depend on whichever expand state an earlier test left behind.
-  test('search finds a nested file by name from a collapsed tree', async ({ page }) => {
-    await gotoView(page, 'Explorer');
-    // Explorer has no global collapse-all toggle; collapse the folder directly
-    // (idempotent — only toggle if the lazy-loaded nested leaf is in the DOM).
-    const nested = page.getByRole('button', { name: 'nested.txt', exact: true });
-    if ((await nested.count()) > 0) {
-      await page.getByRole('button', { name: 'subdir', exact: true }).click();
-    }
-    await expect(nested).toHaveCount(0);
-
-    await page.getByPlaceholder('Search files…').fill('nested');
-    const hit = page.getByRole('button', { name: /nested\.txt/ });
-    await expect(hit).toBeVisible();
-
-    await hit.click();
-    await expect(cm(page)).toContainText('Nested file content.');
-    // Unlike a folder hit (which expands the chain and clears the box), a file
-    // hit just opens the tab — the search box is left as-is.
-    await expect(page.getByPlaceholder('Search files…')).toHaveValue('nested');
   });
 });

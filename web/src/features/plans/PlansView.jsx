@@ -34,6 +34,7 @@ import { useCapabilities } from '@/hooks/useCapabilities.js';
 import RailSearch from '@/components/panelkit/RailSearch.jsx';
 import { EmptyState } from '@/components/EmptyState.jsx';
 import { planBadge } from './plansMockData.mjs';
+import { BUCKETS, parseSavedTimeframe, urlTimeframe, validStatuses, validLayout } from './plansQuery.mjs';
 import { getTokens } from '@/theme/contract.js';
 
 const NODE_W = 280;
@@ -50,19 +51,10 @@ const RING_DRAG_PX = 160;
 const RING_ANGLE = 48;
 const RING_WINDOW = 3;
 
-// Recognised ?preset= values; anything else falls back to the default. Same
-// URL contract as History (?preset=3|7|30|all|custom plus ?from/?to ISO days).
-const PRESETS = new Set(['3', '7', '30', 'all', 'custom']);
-const ISO_DAY = /^\d{4}-\d{2}-\d{2}$/;
-const isoDay = (v) => (ISO_DAY.test(v) ? v : '');
 const readSavedTimeframe = () => {
-  try {
-    const saved = JSON.parse(localStorage.getItem(TIMEFRAME_KEY));
-    if (saved && PRESETS.has(saved.preset)) {
-      return { preset: saved.preset, from: isoDay(saved.from), to: isoDay(saved.to) };
-    }
-  } catch { /* storage unavailable or invalid */ }
-  return { preset: '3', from: '', to: '' };
+  let raw = null;
+  try { raw = localStorage.getItem(TIMEFRAME_KEY); } catch { /* storage unavailable */ }
+  return parseSavedTimeframe(raw);
 };
 // mtime (epoch ms) as a local ISO day, for the custom-range string compare.
 const localDay = (ms) => {
@@ -70,8 +62,6 @@ const localDay = (ms) => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
-const BUCKETS = ['active', 'done', 'blocked', 'superseded', 'other'];
-const LAYOUTS = ['carousel', 'board'];
 const STATUS_COLOR = { active: 'primary', done: 'success', blocked: 'error', superseded: 'warning', other: 'default' };
 const statusColor = (s) => STATUS_COLOR[s] ?? 'default';
 const dotColor = (s) => (s === 'other' ? 'text.disabled' : `${statusColor(s)}.main`);
@@ -389,8 +379,8 @@ export default function PlansView({ onToast }) {
   // ?sid= deep-links a loaded session's plan (?sid=<full sid>); absent by default.
   const [sidParam, setSid] = useQueryState('sid');
   const [layoutParam, setLayout] = useQueryState('layout', 'carousel');
-  const status = useMemo(() => statusList.filter((v) => BUCKETS.includes(v)), [statusList]);
-  const layout = LAYOUTS.includes(layoutParam) ? layoutParam : 'carousel';
+  const status = useMemo(() => validStatuses(statusList), [statusList]);
+  const layout = validLayout(layoutParam);
   const carousel = layout === 'carousel';
   const [deckPosition, setDeckPosition] = useState(0);
   const [ringDragging, setRingDragging] = useState(false);
@@ -412,17 +402,12 @@ export default function PlansView({ onToast }) {
   // Timeframe in the URL, same contract as History: ?preset=3|7|30|all|custom
   // plus ?from/?to ISO days. An unrecognised preset degrades to the default.
   const timeframeInUrl = ['preset', 'from', 'to'].some((key) => searchParams.has(key));
-  const urlPreset = searchParams.get('preset') ?? '3';
-  const urlTimeframe = {
-    preset: PRESETS.has(urlPreset) ? urlPreset : '3',
-    from: isoDay(searchParams.get('from')),
-    to: isoDay(searchParams.get('to')),
-  };
-  if (timeframeInUrl && (savedTimeframe.preset !== urlTimeframe.preset
-    || savedTimeframe.from !== urlTimeframe.from || savedTimeframe.to !== urlTimeframe.to)) {
-    setSavedTimeframe(urlTimeframe);
+  const fromUrl = urlTimeframe(searchParams);
+  if (timeframeInUrl && (savedTimeframe.preset !== fromUrl.preset
+    || savedTimeframe.from !== fromUrl.from || savedTimeframe.to !== fromUrl.to)) {
+    setSavedTimeframe(fromUrl);
   }
-  const { preset, from, to } = timeframeInUrl ? urlTimeframe : savedTimeframe;
+  const { preset, from, to } = timeframeInUrl ? fromUrl : savedTimeframe;
   const updateQuery = useUpdateQuery();
   useEffect(() => {
     if (statusList.length === status.length && layoutParam === layout) return;

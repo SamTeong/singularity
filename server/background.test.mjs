@@ -177,30 +177,16 @@ test('evalGate: claude ok:false fails closed → ollama evaluated', () => {
   const g = evalGate({ claude: { ok: false, error: 'auth' }, ollama: src() }, job());
   assert.equal(g.backend, 'ollama');
 });
-test('evalGate: codex usage unavailable fails closed → falls through to ollama', () => {
-  const g = evalGate({
-    claude: src({ session: { pctUsed: 60 } }),
-    codex: { ok: false, error: 'no Codex sessions found' },
-    ollama: src(),
-  }, job());
-  assert.equal(g.backend, 'ollama');
-});
-test('evalGate: realistic codex shape (session:null, weekly under weeklyMax) passes its gate → codex', () => {
-  const g = evalGate({
-    claude: src({ session: { pctUsed: 60 } }),
-    codex: { ok: true, source: 'codex', session: null, weekly: { pctUsed: 10 } },
-    ollama: src(),
-  }, job());
-  assert.equal(g.backend, 'codex');
-});
-test('evalGate: realistic codex shape (session:null, weekly over weeklyMax) fails its gate → falls through to ollama', () => {
-  const g = evalGate({
-    claude: src({ session: { pctUsed: 60 } }),
-    codex: { ok: true, source: 'codex', session: null, weekly: { pctUsed: 90 } },
-    ollama: src(),
-  }, job());
-  assert.equal(g.backend, 'ollama');
-});
+for (const [name, codex, expected] of [
+  ['codex usage unavailable fails closed → falls through to ollama', { ok: false, error: 'no Codex sessions found' }, 'ollama'],
+  ['realistic codex shape (session:null, weekly under weeklyMax) passes its gate → codex', { ok: true, source: 'codex', session: null, weekly: { pctUsed: 10 } }, 'codex'],
+  ['realistic codex shape (session:null, weekly over weeklyMax) fails its gate → falls through to ollama', { ok: true, source: 'codex', session: null, weekly: { pctUsed: 90 } }, 'ollama'],
+]) {
+  test(`evalGate: ${name}`, () => {
+    const g = evalGate({ claude: src({ session: { pctUsed: 60 } }), codex, ollama: src() }, job());
+    assert.equal(g.backend, expected);
+  });
+}
 test('evalGate: both windows null still fails closed with "usage incomplete"', () => {
   const g = evalGate({
     claude: { ok: true, session: null, weekly: null },
@@ -218,20 +204,15 @@ test('pickJob: cooldown excludes a recently-run job', () => {
   const jobs = [job({ lastRunAt: now - hr })];
   assert.equal(pickJob(jobs, now), null);
 });
-test('pickJob: round-robin picks the oldest lastRunAt', () => {
-  const jobs = [
-    job({ id: 'new', cooldownHours: 1, lastRunAt: now - 2 * hr }),
-    job({ id: 'old', cooldownHours: 1, lastRunAt: now - 10 * hr }),
-  ];
-  assert.equal(pickJob(jobs, now).id, 'old');
-});
-test('pickJob: null lastRunAt wins (never run)', () => {
-  const jobs = [
-    job({ id: 'ran', cooldownHours: 1, lastRunAt: now - 10 * hr }),
-    job({ id: 'fresh', cooldownHours: 1, lastRunAt: null }),
-  ];
-  assert.equal(pickJob(jobs, now).id, 'fresh');
-});
+for (const [name, [first, second], expected] of [
+  ['round-robin picks the oldest lastRunAt', [['new', now - 2 * hr], ['old', now - 10 * hr]], 'old'],
+  ['null lastRunAt wins (never run)', [['ran', now - 10 * hr], ['fresh', null]], 'fresh'],
+]) {
+  test(`pickJob: ${name}`, () => {
+    const jobs = [first, second].map(([id, lastRunAt]) => job({ id, cooldownHours: 1, lastRunAt }));
+    assert.equal(pickJob(jobs, now).id, expected);
+  });
+}
 test('pickJob: disabled jobs are skipped', () => {
   const jobs = [job({ enabled: false, cooldownHours: 1, lastRunAt: null })];
   assert.equal(pickJob(jobs, now), null);

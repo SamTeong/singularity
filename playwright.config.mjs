@@ -34,7 +34,8 @@ export default defineConfig({
     // The sandbox daemon runs with SING_TOKEN set, and the shell itself is now
     // gated (a bare GET / used to hand out window.__SING_TOKEN__ to anyone).
     // Seeding the cookie the daemon would mint from ?token= keeps every spec's
-    // plain `page.goto('/')` working without a token in 100+ call sites.
+    // plain `page.goto('/')` working without a token. smoke.spec.mjs opens a
+    // cookie-less request context to prove the gate itself.
     storageState: {
       cookies: [{ name: 'sing_token', value: TOKEN, domain: '127.0.0.1', path: '/', expires: -1, httpOnly: true, secure: false, sameSite: 'Strict' }],
       origins: [],

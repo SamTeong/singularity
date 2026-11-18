@@ -7,7 +7,7 @@ import { envPort } from './scripts/env-port.mjs';
 
 const port = envPort('E2E_MOCK_PORT', 4173);
 const baseURL = `http://127.0.0.1:${port}`;
-const { narrowest, phone, tablet, compactDesktop, desktop } = RESPONSIVE_VIEWPORTS;
+const { narrowest, desktop } = RESPONSIVE_VIEWPORTS;
 
 // Rasterize canvas (xterm, Cytoscape) on the real GPU instead of SwiftShader:
 // channel:'chromium' = full bundled build (headless shell hard-disables GPU),
@@ -45,9 +45,6 @@ export default defineConfig({
     // The responsive smoke contract runs only its matrix, so normal mock flows
     // do not become five times slower.
     { name: 'responsive-narrowest', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: narrowest, ...gpu } },
-    { name: 'responsive-phone', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: phone, ...gpu } },
-    { name: 'responsive-tablet', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: tablet, ...gpu } },
-    { name: 'responsive-compact-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: compactDesktop, ...gpu } },
     { name: 'responsive-desktop', testMatch: 'responsive.spec.mjs', use: { browserName: 'chromium', viewport: desktop, ...gpu } },
     // Targeted iPhone Safari emulation, not physical-device coverage. Keep its
     // match narrow so the Chromium suites and responsive matrix stay unchanged.

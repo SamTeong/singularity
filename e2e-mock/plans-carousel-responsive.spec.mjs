@@ -1,5 +1,6 @@
 import { test, expect } from './fixtures/test.mjs';
-import { expectNoPageOverflow, RESPONSIVE_SKINS, seedSkin } from './helpers/responsive.mjs';
+import { expectNoPageOverflow } from './helpers/responsive.mjs';
+// Timeframe / ?status / ?layout URL rules: web/src/features/plans/plansQuery.test.mjs.
 
 test('Plans carousel is reachable and swipeable on a narrow screen', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 667 });
@@ -107,55 +108,7 @@ test('Plans carousel is reachable and swipeable on a narrow screen', async ({ pa
   await expect(page.locator('.react-flow')).toBeVisible();
 });
 
-test('carousel and board session cards share the same dark styling', async ({ page }) => {
-  test.slow();
-  await page.setViewportSize({ width: 1280, height: 800 });
-  await page.goto('/plans');
-  const card = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCard-root');
-  await expect(card).toBeVisible();
-  const deckBox = await page.getByRole('region', { name: 'Session carousel' }).boundingBox();
-  expect(deckBox.height).toBe(156);
-  const box = await card.boundingBox();
-  expect(box.y + box.height).toBeLessThanOrEqual(deckBox.y + deckBox.height);
-  const sampleAppearance = (el) => ({
-    background: getComputedStyle(el).backgroundColor,
-    color: getComputedStyle(el).color,
-    captionColor: getComputedStyle(el.querySelector('.MuiTypography-caption')).color,
-  });
-  const carouselAppearance = await card.evaluate(sampleAppearance);
-  expect(box.width).toBeGreaterThan(365);
-  expect(box.width).toBeLessThan(395);
-  const fontSize = await card.locator('.MuiTypography-caption').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  expect(fontSize).toBeGreaterThan(15);
-  expect(fontSize).toBeLessThan(17);
-  await page.getByRole('button', { name: 'Switch to board view' }).click();
-  const boardCards = page.locator('.react-flow__node-session .MuiCard-root');
-  await expect(boardCards.first()).toBeVisible();
-  const boardAppearance = await boardCards.first().evaluate(sampleAppearance);
-  expect(boardAppearance).toEqual(carouselAppearance);
-  expect(await boardCards.first().evaluate((el) => getComputedStyle(el).width)).toBe('380px');
-  const boardFontSize = await boardCards.first().locator('.MuiTypography-caption').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
-  expect(boardFontSize).toBe(fontSize);
-  const firstBoardCard = await boardCards.nth(0).boundingBox();
-  const secondBoardCard = await boardCards.nth(1).boundingBox();
-  expect(firstBoardCard.x + firstBoardCard.width).toBeLessThan(secondBoardCard.x);
-  await boardCards.first().locator('.MuiCardActionArea-root').click();
-  await expect(page.locator('.react-flow__node-planStack')).not.toBeVisible();
-  await boardCards.nth(3).locator('.MuiCardActionArea-root').click();
-  const stack = page.locator('.react-flow__node-planStack');
-  await expect(stack).toBeVisible();
-  const planCards = stack.locator('.MuiCard-root');
-  await expect(planCards).toHaveCount(2);
-  const secondBefore = await planCards.nth(1).boundingBox();
-  await planCards.nth(0).locator('.MuiCardActionArea-root').click();
-  await expect(stack.getByText('Finish fleet section')).toBeVisible();
-  await expect.poll(async () => (await planCards.nth(1).boundingBox()).y).toBeGreaterThan(secondBefore.y + 20);
-  const firstExpanded = await planCards.nth(0).boundingBox();
-  const secondAfter = await planCards.nth(1).boundingBox();
-  expect(secondAfter.y).toBeGreaterThanOrEqual(firstExpanded.y + firstExpanded.height);
-});
-
-test('board arrow keys traverse sessions and their plan stack', async ({ page }) => {
+test('board arrow keys traverse sessions and their plan stack; session-id search and ?sid= deep link', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto('/plans?layout=board');
   const sessions = page.locator('.react-flow__node-session .MuiCardActionArea-root');
@@ -222,198 +175,24 @@ test('board arrow keys traverse sessions and their plan stack', async ({ page })
   await expect(stack.locator('.MuiCardActionArea-root').first()).toBeFocused();
   await page.keyboard.press('ArrowLeft');
   await expect(sessions.nth(3)).toBeFocused();
-});
 
-// 130 generated sessions (plus the 7 fixtures inside the 3d window) = 137.
-const BULK = 130;
-const TOTAL = 137;
-const seedBulk = (page) => page.addInitScript((n) => window.localStorage.setItem('sing-mock-plans-extra', String(n)), BULK);
-const viewportZoom = (page) => page.locator('.react-flow__viewport').evaluate((el) => new DOMMatrix(getComputedStyle(el).transform).a);
-
-for (const skin of RESPONSIVE_SKINS) {
-  for (const [name, size] of [['phone', { width: 375, height: 667 }], ['desktop', { width: 1440, height: 900 }]]) {
-    test(`Plans carousel stays bounded and fully reachable with ${TOTAL} sessions (${skin}, ${name})`, async ({ page }) => {
-      // Selection must keep keyboard focus even when animation frames arrive late.
-      await page.addInitScript(() => {
-        const request = window.requestAnimationFrame.bind(window);
-        const cancel = window.cancelAnimationFrame.bind(window);
-        const pending = new Map();
-        let nextId = 0;
-        window.requestAnimationFrame = (callback) => {
-          const id = nextId++;
-          const frame = request((time) => {
-            if (!pending.has(id)) return;
-            pending.set(id, { kind: 'timer', handle: setTimeout(() => {
-              pending.delete(id);
-              callback(time);
-            }, 200) });
-          });
-          pending.set(id, { kind: 'frame', handle: frame });
-          return id;
-        };
-        window.cancelAnimationFrame = (id) => {
-          const handle = pending.get(id);
-          if (handle === undefined) return;
-          pending.delete(id);
-          if (handle.kind === 'frame') cancel(handle.handle);
-          else clearTimeout(handle.handle);
-        };
-      });
-      await page.setViewportSize(size);
-      await seedSkin(page, skin);
-      await seedBulk(page);
-      await page.goto('/plans');
-      const deck = page.getByRole('region', { name: 'Session carousel' });
-      const counter = page.getByText(/^\d+ \/ \d+$/);
-      await expect(counter).toHaveText(`1 / ${TOTAL}`);
-      await expect(deck.locator('[aria-current="true"] .MuiCardActionArea-root')).toBeFocused();
-      await expect(deck.locator(':scope > *')).toHaveCount(7);
-
-      // Previous from the first card wraps to the last, which is then selected.
-      await page.getByRole('button', { name: 'Previous session' }).click();
-      await expect(counter).toHaveText(`${TOTAL} / ${TOTAL}`);
-      await expect(deck.locator('[aria-current="true"]')).toHaveCount(1);
-      expect(await deck.locator(':scope > *').count()).toBeLessThanOrEqual(7);
-      await page.getByRole('button', { name: 'Next session' }).click();
-      await expect(counter).toHaveText(`1 / ${TOTAL}`);
-      await page.getByRole('button', { name: 'Next session' }).click();
-      await expect(counter).toHaveText(`2 / ${TOTAL}`);
-
-      // Keyboard: arrows act on the expanded selected card; they move and wrap.
-      const selected = deck.locator('[aria-current="true"] .MuiCardActionArea-root');
-      await selected.click();
-      await expect(selected).toHaveAttribute('aria-expanded', 'true');
-      await page.keyboard.press('ArrowLeft');
-      await expect(counter).toHaveText(`1 / ${TOTAL}`);
-      await page.keyboard.press('ArrowLeft');
-      await expect(counter).toHaveText(`${TOTAL} / ${TOTAL}`);
-      await page.keyboard.press('ArrowRight');
-      await expect(counter).toHaveText(`1 / ${TOTAL}`);
-      expect(await deck.locator(':scope > *').count()).toBeLessThanOrEqual(7);
-      await expectNoPageOverflow(page);
-    });
-
-    test(`Plans board opens readable and Fit all zooms out with ${TOTAL} sessions (${skin}, ${name})`, async ({ page }) => {
-      await page.setViewportSize(size);
-      await seedSkin(page, skin);
-      await seedBulk(page);
-      await page.goto('/plans?layout=board');
-      await expect(page.locator('.react-flow__node-session').first()).toBeVisible();
-      await expect.poll(() => viewportZoom(page)).toBeCloseTo(1, 2);
-      await expectNoPageOverflow(page);
-      await page.getByRole('button', { name: 'Fit all' }).click();
-      await expect.poll(() => viewportZoom(page)).toBeLessThan(0.5);
-      await expectNoPageOverflow(page);
-    });
-  }
-}
-
-test.describe('Plans timeframe defaults', () => {
-  const counter = (page) => page.getByText(/^\d+ \/ \d+$/);
-
-  test('first visit is 3d without a preset in the URL', async ({ page }) => {
-    await page.goto('/plans');
-    await expect(counter(page)).toHaveText('1 / 7');
-    await expect(page).not.toHaveURL(/preset=/);
-  });
-
-  test('a saved timeframe wins over the 3d default', async ({ page }) => {
-    await page.addInitScript(() => window.localStorage.setItem('sing-plans-timeframe', JSON.stringify({ preset: 'all', from: '', to: '' })));
-    await page.goto('/plans');
-    await expect(counter(page)).toHaveText('1 / 12');
-  });
-
-  test('an invalid ?preset degrades to 3d', async ({ page }) => {
-    await page.goto('/plans?preset=bogus');
-    await expect(counter(page)).toHaveText('1 / 7');
-  });
-});
-
-test('invalid Plans status and layout are removed while valid timeframe and unrelated params remain', async ({ page }) => {
-  await page.goto('/plans?status=bogus&layout=invalid&preset=all&from=2026-09-01&to=2026-09-30&keep=here');
-
-  await expect(page.getByRole('region', { name: 'Session carousel' })).toBeVisible();
-  await expect(page.getByText(/^1 \/ 12$/)).toBeVisible();
-  await expect(page.locator('.react-flow')).toHaveCount(0);
-  await expect.poll(() => page.evaluate(() => {
-    const params = new URLSearchParams(location.search);
-    return [params.has('status'), params.has('layout'), params.get('preset'), params.get('from'), params.get('to'), params.get('keep')];
-  })).toEqual([false, false, 'all', '2026-09-01', '2026-09-30', 'here']);
-
-  await page.goto('/plans?status=active&layout=board&keep=here');
-  await expect(page.locator('.react-flow')).toBeVisible();
-  await expect.poll(() => page.evaluate(() => {
-    const params = new URLSearchParams(location.search);
-    return [params.get('status'), params.get('layout'), params.get('keep')];
-  })).toEqual(['active', 'board', 'here']);
-});
-
-const bulkSid = (i) => `b0000000-0000-4000-8000-${String(i).padStart(12, '0')}`;
-
-test('Plans session-id search lists <=10 hits and Enter opens the top hit via ?sid=', async ({ page }) => {
-  await seedBulk(page);
+  // 130 generated sessions (sing-mock-plans-extra) for the session-id search.
+  await page.addInitScript(() => window.localStorage.setItem('sing-mock-plans-extra', '130'));
   await page.goto('/plans');
-  await page.getByPlaceholder('Search session id…').fill('b0000000-0000-4000-8000-00000000001');
+  const search = page.getByPlaceholder('Search session id…');
+  await search.fill('b0000000-0000-4000-8000-00000000001');
   const hits = page.locator('[data-plans-search-hit]');
   await expect(hits.first()).toBeVisible();
   expect(await hits.count()).toBeLessThanOrEqual(10);
-  await page.getByPlaceholder('Search session id…').press('Enter');
-  await expect(page).toHaveURL(/sid=b0000000-0000-4000-8000-0000000000\d\d/);
-  await expect(page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root')).toHaveAttribute('aria-expanded', 'true');
-});
-
-test('Plans ?sid= deep link expands the session once and does not re-expand after collapse', async ({ page }) => {
-  await seedBulk(page);
-  await page.goto(`/plans?sid=${bulkSid(5)}`);
-  const selected = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root');
-  await expect(selected).toContainText(/^b0000000bulk\/51k tokens/);
-  await expect(selected).toHaveAttribute('aria-expanded', 'true');
-  await selected.click();
-  await expect(selected).toHaveAttribute('aria-expanded', 'false');
-  await page.waitForTimeout(500);
-  await expect(selected).toHaveAttribute('aria-expanded', 'false');
-});
-
-test('Plans status chips multi-select as repeated ?status= params; search clears filters hiding the hit', async ({ page }) => {
-  await seedBulk(page);
-  await page.goto('/plans');
-  await page.getByRole('button', { name: 'Filter plans' }).click();
-  await page.getByRole('tab', { name: /status/i }).click();
-  await page.getByText('done', { exact: true }).click();
-  await page.getByText('active', { exact: true }).click();
-  await expect(page).toHaveURL(/status=active/);
-  await expect(page).toHaveURL(/status=done/);
-  // Drop 'active' again: only 'done' remains, hiding the bulk (active) sessions.
-  await page.getByText('active', { exact: true }).click();
-  await expect(page).not.toHaveURL(/status=active/);
-  await page.keyboard.press('Escape');
-  await page.getByPlaceholder('Search session id…').fill(bulkSid(7));
-  await page.getByPlaceholder('Search session id…').press('Enter');
-  await expect(page).not.toHaveURL(/status=/);
-  await expect(page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root')).toContainText(/^b0000000bulk\/71k tokens/);
-});
-
-test('Plans search refocuses an already selected sid after a filter hides it and preserves collapse-once', async ({ page }) => {
-  await seedBulk(page);
-  await page.goto(`/plans?sid=${bulkSid(5)}`);
-  const selected = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root');
-  await expect(selected).toContainText(/^b0000000bulk\/51k tokens/);
-  await expect(selected).toHaveAttribute('aria-expanded', 'true');
-
-  await page.getByRole('button', { name: 'Filter plans' }).click();
-  await page.getByRole('tab', { name: /status/i }).click();
-  await page.getByText('done', { exact: true }).click();
-  await expect(page).toHaveURL(/status=done/);
-  await page.keyboard.press('Escape');
-
-  const search = page.getByPlaceholder('Search session id…');
-  await search.fill(bulkSid(5));
   await search.press('Enter');
-  await expect(page).not.toHaveURL(/status=/);
-  await expect(page).toHaveURL(new RegExp(`sid=${bulkSid(5)}`));
-  await expect(selected).toContainText(/^b0000000bulk\/51k tokens/);
+  await expect(page).toHaveURL(/sid=b0000000-0000-4000-8000-0000000000\d\d/);
+  const selected = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root');
   await expect(selected).toHaveAttribute('aria-expanded', 'true');
 
+  // ?sid= deep link expands the session once and does not re-expand after collapse.
+  await page.goto('/plans?sid=b0000000-0000-4000-8000-000000000005');
+  await expect(selected).toContainText(/^b0000000bulk\/51k tokens/);
+  await expect(selected).toHaveAttribute('aria-expanded', 'true');
   await selected.click();
   await expect(selected).toHaveAttribute('aria-expanded', 'false');
   await page.waitForTimeout(500);

@@ -2,29 +2,32 @@
 // the Models editor is wired to the picker — an entry added here shows up in
 // the New session dropdown without a reload. Mirage owns /api/models
 // (db.ui.models), so the round trip exercises the same "no restart" contract
-// the daemon gives.
+// the daemon gives. Fallback-key delete/rename rules: pricesDraft.test.mjs.
 import { test, expect } from './fixtures/test.mjs';
 
-test('Settings: tab switching via URL — ?tab=models deep-links, unknown degrades to shortcuts', async ({ page }) => {
-  // The per-tab action button is the panel landmark (the tab title moved into
-  // the shared Settings header in phase 3, so there is no "Keyboard shortcuts"
-  // text to assert on).
+test('Settings: tab via URL, keyboard reorder, and an added model reaches the New session dropdown', async ({ page }) => {
+  // The per-tab action button is the panel landmark.
+  await page.goto('/settings');
+  await expect(page.getByText('Reset all')).toBeVisible();
+  await expect(page.getByText('Restore defaults')).toHaveCount(0);
+  // An unknown tab degrades to the default rather than rendering an empty view.
+  await page.goto('/settings?tab=bogus');
+  await expect(page.getByText('Reset all')).toBeVisible();
+
   await page.goto('/settings?tab=models');
   await expect(page.getByText('Restore defaults')).toBeVisible();
   await expect(page.getByText('Reset all')).toHaveCount(0);
 
-  await page.goto('/settings');
-  await expect(page.getByText('Reset all')).toBeVisible();
-  await expect(page.getByText('Restore defaults')).toHaveCount(0);
-
-  // An unknown tab degrades to the default rather than rendering an empty view.
-  await page.goto('/settings?tab=bogus');
-  await expect(page.getByText('Reset all')).toBeVisible();
-});
-
-test('Settings: an added model appears in the New session dropdown without a reload', async ({ page }) => {
-  await page.goto('/settings?tab=models');
-  await expect(page.getByText('Restore defaults')).toBeVisible();
+  // Two textboxes per row (id, label); the handle's ArrowDown is the keyboard
+  // path over the same reorder() drag-and-drop uses.
+  const boxes = () => page.getByRole('textbox');
+  const first = await boxes().nth(0).inputValue();
+  const second = await boxes().nth(2).inputValue();
+  expect(first).not.toBe(second);
+  await page.getByRole('button', { name: 'Reorder' }).nth(0).focus();
+  await page.keyboard.press('ArrowDown');
+  await expect(boxes().nth(0)).toHaveValue(second);
+  await expect(boxes().nth(2)).toHaveValue(first);
 
   // Add row: id only (no label — the dropdown renders the id bare).
   await page.getByPlaceholder('id — e.g. sonnet[1m]').fill('probe-model');
@@ -34,188 +37,10 @@ test('Settings: an added model appears in the New session dropdown without a rel
   await page.getByRole('button', { name: 'New session' }).click();
   const dialog = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'New session' }) });
   await expect(dialog).toBeVisible();
-  const model = dialog.getByLabel('model', { exact: true });
-  await model.click();
+  await dialog.getByLabel('model', { exact: true }).click();
   await page.keyboard.press('ArrowDown'); // open the option popper
   await expect(page.getByRole('option', { name: /probe-model/ })).toBeVisible();
-
   await page.keyboard.press('Escape'); // close the popper, then the dialog
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-});
-
-test('Settings: the drag handle reorders a model with the keyboard', async ({ page }) => {
-  await page.goto('/settings?tab=models');
-  await expect(page.getByText('Restore defaults')).toBeVisible();
-
-  // Two textboxes per row (id, label) — the add row's pair comes after them.
-  const boxes = () => page.getByRole('textbox');
-  const first = await boxes().nth(0).inputValue();
-  const second = await boxes().nth(2).inputValue();
-  expect(first).not.toBe(second);
-
-  // Drag-and-drop is the primary gesture; the handle's ArrowUp/ArrowDown is the
-  // keyboard path over the same reorder(), so this covers both.
-  await page.getByRole('button', { name: 'Reorder' }).nth(0).focus();
-  await page.keyboard.press('ArrowDown');
-
-  await expect(boxes().nth(0)).toHaveValue(second);
-  await expect(boxes().nth(2)).toHaveValue(first);
-});
-
-// Playwright's dragTo()/mouse.down+move+up does not reliably fire React's
-// onDragStart/onDragOver/onDrop under headless Chromium (no real OS-level
-// drag). Dispatching the events with a shared DataTransfer does. (Copied
-// verbatim from e2e-mock/automation.spec.mjs.)
-async function html5Drag(page, source, target) {
-  const dataTransfer = await page.evaluateHandle(() => new DataTransfer());
-  await source.dispatchEvent('dragstart', { dataTransfer });
-  await target.dispatchEvent('dragover', { dataTransfer });
-  await target.dispatchEvent('drop', { dataTransfer });
-  await source.dispatchEvent('dragend', { dataTransfer });
-}
-
-test('Settings: History summariser accepts a claude-group model and persists it', async ({ page }) => {
-  await page.goto('/settings?tab=models');
-  await expect(page.getByText('Restore defaults')).toBeVisible();
-
-  // The summariser select now lists every enabled entry across groups
-  // (claude/ollama/codex), not just ollama — pick a claude-group option.
-  // `getByRole('combobox', {name})`, not `getByLabel` — MUI's Select renders
-  // both a hidden native input and the visible combobox against the same
-  // label, so `getByLabel` resolves to two elements (the pre-existing
-  // strict-mode collision recorded in Phases 2, 3, 6 and 7). Matches the
-  // working idiom at editors-settings-responsive.spec.mjs:135.
-  const summariser = page.getByRole('combobox', { name: 'History summariser' });
-  await summariser.click();
-  await page.getByRole('option', { name: 'Best available' }).click();
-  await expect(summariser).toHaveText('Best available');
-
-  // Round trip: the PUT landed in the mock's document, not just local draft
-  // state — GET /api/models directly. (A page.reload() would reset Mirage's
-  // in-memory db, which is not the contract under test here.)
-  const doc = await page.evaluate(() => fetch('/api/models').then((r) => r.json()));
-  expect(doc.summariserModel).toBe('best');
-});
-
-test('Settings: dragging a model onto a lower row moves it there', async ({ page }) => {
-  await page.goto('/settings?tab=models');
-  await expect(page.getByText('Restore defaults')).toBeVisible();
-
-  const boxes = () => page.getByRole('textbox');
-  const [a, b, c] = [await boxes().nth(0).inputValue(), await boxes().nth(2).inputValue(), await boxes().nth(4).inputValue()];
-
-  // Non-adjacent drop: the row moves to the target slot, it is not swapped
-  // with it — so the two rows it passed shift up rather than jumping.
-  const handle = page.getByRole('button', { name: 'Reorder' }).nth(0);
-  await html5Drag(page, handle, boxes().nth(4));
-
-  await expect(boxes().nth(0)).toHaveValue(b);
-  await expect(boxes().nth(2)).toHaveValue(c);
-  await expect(boxes().nth(4)).toHaveValue(a);
-});
-
-test('Settings: dragging an API rate row onto a lower row moves it there', async ({ page }) => {
-  await page.goto('/settings?tab=models');
-  await page.getByText('API Rates').click();
-  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
-
-  // One textbox per base row (the above_200k table's rows follow them).
-  const keys = () => prices.getByPlaceholder('e.g. opus');
-  const [a, b, c] = [await keys().nth(0).inputValue(), await keys().nth(1).inputValue(), await keys().nth(2).inputValue()];
-
-  // Non-adjacent drop: the row moves to the target slot, it is not swapped
-  // with it — so the two rows it passed shift up rather than jumping. Base's
-  // order IS match order, so this is the real reorder path (PUT round trip).
-  const handle = prices.getByRole('button', { name: 'Reorder' }).nth(0);
-  await html5Drag(page, handle, keys().nth(2));
-
-  await expect(keys().nth(0)).toHaveValue(b);
-  await expect(keys().nth(1)).toHaveValue(c);
-  await expect(keys().nth(2)).toHaveValue(a);
-});
-
-test('Settings: dragging an above-threshold rate row reorders and persists it', async ({ page }) => {
-  await page.goto('/settings?tab=models');
-  await page.getByText('API Rates').click();
-  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
-
-  // The add row is the second "Key"/"Input"… group — base's comes
-  // first — and every rate box must be filled or Add stays disabled.
-  await prices.getByPlaceholder('Key').nth(1).fill('probe-above');
-  for (const col of ['Input', 'Output', 'Cache read', 'Cache write']) {
-    await prices.getByPlaceholder(col).nth(1).fill('1');
-  }
-  await prices.getByRole('button', { name: 'Add', exact: true }).nth(1).click();
-
-  // Base's rows come first; the above table's rows follow them. Read the
-  // current document so this remains valid as seed rates are added.
-  const keys = () => prices.getByPlaceholder('e.g. opus');
-  const before = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
-  const nBase = Object.keys(before.base).length;
-  const above0 = await keys().nth(nBase).inputValue();
-  const above1 = await keys().nth(nBase + 1).inputValue();
-  const handle = prices.getByRole('button', { name: 'Reorder' }).nth(nBase);
-  await html5Drag(page, handle, keys().nth(nBase + 1));
-
-  await expect(keys().nth(nBase)).toHaveValue(above1);
-  await expect(keys().nth(nBase + 1)).toHaveValue(above0);
-
-  // Same whole-doc PUT as the base table — above_200k order round-trips.
-  const expected = Object.keys(before.above_200k);
-  [expected[0], expected[1]] = [above1, above0];
-  const doc = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
-  expect(Object.keys(doc.above_200k)).toEqual(expected);
-});
-
-test('Settings: deleting the selected fallback chooses next and clears the last row', async ({ page }) => {
-  await page.goto('/settings?tab=models');
-  await page.getByText('API Rates').click();
-  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
-  const saved = () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
-
-  const initialKeys = Object.keys((await saved()).base);
-  for (let remaining = initialKeys.length; remaining > 0; remaining--) {
-    const current = await saved();
-    const baseKeys = Object.keys(current.base);
-    const fallbackIndex = baseKeys.indexOf(current.default_key);
-    const key = current.default_key;
-    const expected = baseKeys[fallbackIndex + 1] || baseKeys[fallbackIndex - 1] || '';
-    await prices.getByRole('button', { name: `Delete ${key}`, exact: true }).first().click();
-    await expect.poll(async () => (await saved()).default_key).toBe(expected);
-  }
-  const empty = await saved();
-  expect(Object.keys(empty.base)).toHaveLength(0);
-  expect(empty.default_key).toBe('');
-});
-
-test('Settings: deleting the selected last fallback chooses the preceding base row', async ({ page }) => {
-  await page.goto('/settings?tab=models');
-  await page.getByText('API Rates').click();
-  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
-  const fallback = prices.getByRole('combobox');
-  await fallback.click();
-  const before = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
-  const keys = Object.keys(before.base);
-  const last = keys.at(-1);
-  const preceding = keys.at(-2) || '';
-  await page.getByRole('option', { name: last, exact: true }).click();
-
-  await prices.getByRole('button', { name: `Delete ${last}` }).click();
-  await expect.poll(async () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json())))
-    .toMatchObject({ default_key: preceding });
-});
-
-test('Settings: renaming the selected fallback keeps it selected', async ({ page }) => {
-  await page.goto('/settings?tab=models');
-  await page.getByText('API Rates').click();
-  const prices = page.locator('.MuiAccordion-root').filter({ hasText: 'API Rates' });
-  const doc = await page.evaluate(() => fetch('/api/models/prices').then((r) => r.json()));
-  const selectedIndex = Object.keys(doc.base).indexOf(doc.default_key);
-  const selectedRow = prices.getByPlaceholder('e.g. opus').nth(selectedIndex);
-  await selectedRow.fill(`${doc.default_key}-renamed`);
-  await selectedRow.press('Tab');
-
-  await expect.poll(async () => page.evaluate(() => fetch('/api/models/prices').then((r) => r.json())))
-    .toMatchObject({ default_key: `${doc.default_key}-renamed` });
 });

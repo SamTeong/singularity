@@ -11,7 +11,10 @@ pnpm dev             # daemon (:4317) + Vite (:5317); browse 127.0.0.1:5317
 pnpm dev-mock        # UI only, no daemon/.env: Vite (:5317) + in-browser mock backend
 pnpm test            # node --test --test-force-exit "server/*.test.mjs" "web/src/**/*.test.mjs"
 pnpm test:e2e-mock   # build:mock + parallel Playwright suite in e2e-mock/
+pnpm test:changed    # only the suites/specs your diff vs origin/main can affect (--all, --base <ref>, --plan)
 ```
+
+Test selection maps paths to suites in `scripts/test-changed.mjs`; CI uses the same map. A new `web/src/features/<dir>` needs a matching `e2e-mock/<dir>*.spec.mjs` or a `FEATURE_SPEC_ALIASES` entry (its test enforces this).
 
 The daemon builds its Rust backend before starting. Install stable Rust; Windows also needs Visual Studio C++ Build Tools (MSVC).
 

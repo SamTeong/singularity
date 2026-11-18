@@ -8,9 +8,19 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 import { PassThrough } from 'node:stream';
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import Fastify from 'fastify';
 import { createModelPricesHandler, createModelsHandlers, createRustBackend, createWikiGraphHandler } from './rust-backend.mjs';
+
+// One real backend for the stateless bridge tests (explicit per-call paths, no
+// stop mid-test); each real start costs ~0.4 s. Tests that stop, restart, or rely
+// on in-process state (window-anchor) keep a private backend.
+let shared;
+async function sharedBackend() {
+  if (!shared) { shared = createRustBackend(); await shared.start(); }
+  return shared;
+}
+after(() => shared?.stop());
 
 test('Rust Git subprocess preserves argv, environment, streams, stdin, timeout, and errors', async () => {
   const backend = createRustBackend();
@@ -880,9 +890,8 @@ test('Rust stdio bridge serves wiki files, sweeps, cached search, and guarded pa
   await wiki(wikiRoot, 'agentic-coding', { 'meta/websearch-log.md': '## [2026-10-12] shallow | lanes: all\n- NEW: —\n## [2026-10-13] shallow\n- Interrupted.' });
   await wiki(wikiRoot, 'dotnet', { 'meta/websearch-log.md': '## [2026-10-11] deep | lanes: all\n- Sweep completed.' });
   await wiki(wikiRoot, 'iap', { 'wiki-sync.json': JSON.stringify({ lastIngestedAt: '2026-10-10' }) });
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
     const listing = await backend.files(wikiRoot);
     const wikiNames = listing.wikis.map(({ name }) => name);
     assert.deepEqual(wikiNames, [...wikiNames].sort((a, b) => a.localeCompare(b)));
@@ -914,7 +923,6 @@ test('Rust stdio bridge serves wiki files, sweeps, cached search, and guarded pa
     assert.deepEqual(await backend.files(join(root, 'absent')), { wikis: [], capped: false, error: 'not found' });
     assert.deepEqual(await backend.search('needle', join(root, 'absent')), { results: [], capped: false });
   } finally {
-    await backend.stop();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -933,9 +941,8 @@ test('Rust stdio bridge serves configured Plans list and resolved-session detail
   await mkdir(unreadableStateDir);
   await writeFile(join(unreadableStateDir, 'plan.md'), '# Plan B\nStatus: blocked');
   await mkdir(join(unreadableStateDir, 'state.json'));
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
     const sessions = await backend.planSessions(root);
     assert.equal(sessions.length, 2);
     assert.equal(sessions[0].sid, sid);
@@ -967,7 +974,6 @@ test('Rust stdio bridge serves configured Plans list and resolved-session detail
     assert.deepEqual(await backend.planSession(join(root, 'missing'), sid), { ok: false, error: 'not found' });
     assert.deepEqual(await backend.planSessions(null), []);
   } finally {
-    await backend.stop();
     await rm(root, { recursive: true, force: true });
   }
 });
@@ -977,9 +983,8 @@ test('Rust stdio bridge serves the Rules companion-reference lookup', async () =
   await writeFile(join(refDir, 'skills-reference.md'), '# reference body');
   await writeFile(join(refDir, 'term-reference.md'), 'mixed case stem');
   await mkdir(join(refDir, 'fail-reference.md')); // exists, but unreadable as a file
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
     assert.deepEqual(await backend.ruleReference(join(refDir, 'nested', 'skills.md'), refDir), {
       ok: true, path: join(refDir, 'skills-reference.md'), content: '# reference body',
     });
@@ -992,7 +997,6 @@ test('Rust stdio bridge serves the Rules companion-reference lookup', async () =
     assert.equal(unreadable.ok, false);
     assert.ok(unreadable.error.length > 0);
   } finally {
-    await backend.stop();
     await rm(refDir, { recursive: true, force: true });
   }
 });
@@ -1009,9 +1013,8 @@ test('Rust stdio bridge serves the Rules file walk and content search', async ()
   await writeFile(join(dir, '.dot.md'), 'FIND me');
   await writeFile(join(dir, '.hidden', 'x.md'), 'FIND me');
   await writeFile(join(dir, 'node_modules', 'dep', 'y.md'), 'FIND me');
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
     const scans = [{ root: 'raw-base', dir }];
     const listing = await backend.ruleFiles(scans);
     assert.equal(listing.capped, false);
@@ -1038,7 +1041,6 @@ test('Rust stdio bridge serves the Rules file walk and content search', async ()
     assert.equal(clip.results[0].text, `${'x'.repeat(199)}\ud83d`);
     assert.equal(clip.results[0].line, 1);
   } finally {
-    await backend.stop();
     await rm(base, { recursive: true, force: true });
   }
 });
@@ -1104,10 +1106,8 @@ test('Rust stdio bridge serves the Skills list, skill read, and supporting-file 
   const flatRoot = join(base, 'flat');
   await mkdir(join(flatRoot, 'declawed'), { recursive: true });
   await writeFile(join(flatRoot, 'declawed', 'SKILL.md'), '---\nname: declawed\n---\n');
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
-
     const listed = await backend.skillsList(scopesRoot);
     assert.equal(listed.flat, false);
     const coding = listed.scopes.find((s) => s.name === 'coding'); // scopes ship in readdir order
@@ -1148,7 +1148,6 @@ test('Rust stdio bridge serves the Skills list, skill read, and supporting-file 
     assert.deepEqual(await backend.skillFileRead(scopesRoot, 'coding', 'freeze', 'missing.md', false),
       { ok: false, error: 'not found' });
   } finally {
-    await backend.stop();
     await rm(base, { recursive: true, force: true });
   }
 });
@@ -1203,98 +1202,57 @@ test('gateway turns Rust process failure into a logged 500 response', async () =
   await app.close();
 });
 
-test('Rust stdio bridge writes Claude Config with UTF-8, mtime coercion, force, and no parent creation', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-config-write-'));
-  const path = join(base, '.claude', 'settings.json');
-  await mkdir(join(base, '.claude'), { recursive: true });
-  await writeFile(path, 'prior');
-  const backend = createRustBackend();
-  try {
-    await backend.start();
-    const saved = await backend.configWrite(path, '{"theme":"更新 ✓"}', null, false);
-    assert.deepEqual(Object.keys(saved).sort(), ['mtime', 'ok']);
-    assert.equal(saved.ok, true);
-    assert.equal(await readFile(path, 'utf8'), '{"theme":"更新 ✓"}');
-    assert.ok(Math.abs(saved.mtime - (await (await import('node:fs/promises')).stat(path)).mtimeMs) < 2);
+for (const { name, write, dir, file, content } of [
+  { name: 'Claude Config with UTF-8, mtime coercion, force', write: 'configWrite', dir: '.claude', file: 'settings.json', content: '{"theme":"更新 ✓"}' },
+  { name: 'Codex Config with UTF-8, coercions, stale guard', write: 'codexConfigWrite', dir: '.codex', file: 'config.toml', content: 'model = "更新 ✓"' },
+]) {
+  test(`Rust stdio bridge writes ${name}, and no parent creation`, async () => {
+    const base = await mkdtemp(join(tmpdir(), `singularity-rust-${write}-`));
+    const path = join(base, dir, file);
+    await mkdir(join(base, dir), { recursive: true });
+    await writeFile(path, 'prior');
+    const backend = await sharedBackend();
+    try {
+      const saved = await backend[write](path, content, null, false);
+      assert.deepEqual(Object.keys(saved).sort(), ['mtime', 'ok']);
+      assert.equal(saved.ok, true);
+      assert.equal(await readFile(path, 'utf8'), content);
+      assert.ok(Math.abs(saved.mtime - (await (await import('node:fs/promises')).stat(path)).mtimeMs) < 2);
 
-    const matchingStringMtime = await backend.configWrite(path, '', String(saved.mtime), false);
-    assert.equal(matchingStringMtime.ok, true); // string mtime is Number-coerced
-    assert.equal(await readFile(path, 'utf8'), '');
+      const matchingStringMtime = await backend[write](path, '', String(saved.mtime), false);
+      assert.equal(matchingStringMtime.ok, true); // string mtime is Number-coerced
+      assert.equal(await readFile(path, 'utf8'), '');
 
-    await writeFile(path, 'external');
-    const future = new Date(Date.now() + 5000);
-    await utimes(path, future, future);
-    const stale = await backend.configWrite(path, 'rejected', saved.mtime, false);
-    assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
-    assert.equal(await readFile(path, 'utf8'), 'external');
+      await writeFile(path, 'external');
+      const future = new Date(Date.now() + 5000);
+      await utimes(path, future, future);
+      const stale = await backend[write](path, 'rejected', saved.mtime, false);
+      assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
+      assert.equal(await readFile(path, 'utf8'), 'external');
 
-    const forced = await backend.configWrite(path, 'forced', saved.mtime, 'false');
-    assert.equal(forced.ok, true); // truthy force follows JavaScript coercion
-    assert.equal(await readFile(path, 'utf8'), 'forced');
+      const forced = await backend[write](path, 'forced', saved.mtime, 'false');
+      assert.equal(forced.ok, true); // truthy force follows JavaScript coercion
+      assert.equal(await readFile(path, 'utf8'), 'forced');
 
-    const unguarded = await backend.configWrite(path, 'unguarded', 'not-a-number', false);
-    assert.equal(unguarded.ok, true); // Number(NaN) serializes as null and disables the guard
+      const unguarded = await backend[write](path, 'unguarded', 'not-a-number', false);
+      assert.equal(unguarded.ok, true); // Number(NaN) serializes as null and disables the guard
 
-    const missing = join(base, 'absent', '.claude', 'settings.json');
-    const failed = await backend.configWrite(missing, '{}', null, false);
-    assert.equal(failed.ok, false);
-    assert.equal(await access(join(base, 'absent')).then(() => true, () => false), false);
-  } finally {
-    await backend.stop();
-    await rm(base, { recursive: true, force: true });
-  }
-});
-
-test('Rust stdio bridge writes Codex Config with UTF-8, coercions, stale guard, and no parent creation', async () => {
-  const base = await mkdtemp(join(tmpdir(), 'singularity-rust-codex-config-write-'));
-  const path = join(base, '.codex', 'config.toml');
-  await mkdir(join(base, '.codex'), { recursive: true });
-  await writeFile(path, 'prior');
-  const backend = createRustBackend();
-  try {
-    await backend.start();
-    const saved = await backend.codexConfigWrite(path, 'model = "更新 ✓"', null, false);
-    assert.deepEqual(Object.keys(saved).sort(), ['mtime', 'ok']);
-    assert.equal(saved.ok, true);
-    assert.equal(await readFile(path, 'utf8'), 'model = "更新 ✓"');
-    assert.ok(Math.abs(saved.mtime - (await (await import('node:fs/promises')).stat(path)).mtimeMs) < 2);
-
-    const empty = await backend.codexConfigWrite(path, '', String(saved.mtime), false);
-    assert.equal(empty.ok, true);
-    assert.equal(await readFile(path, 'utf8'), '');
-
-    await writeFile(path, 'external');
-    const future = new Date(Date.now() + 5000);
-    await utimes(path, future, future);
-    const stale = await backend.codexConfigWrite(path, 'rejected', saved.mtime, false);
-    assert.deepEqual(stale, { ok: false, error: 'changed on disk' });
-    assert.equal(await readFile(path, 'utf8'), 'external');
-
-    const forced = await backend.codexConfigWrite(path, 'forced', saved.mtime, 'false');
-    assert.equal(forced.ok, true);
-    assert.equal(await readFile(path, 'utf8'), 'forced');
-
-    const unguarded = await backend.codexConfigWrite(path, 'unguarded', 'not-a-number', false);
-    assert.equal(unguarded.ok, true);
-
-    const missing = join(base, 'absent', '.codex', 'config.toml');
-    const failed = await backend.codexConfigWrite(missing, '', null, false);
-    assert.equal(failed.ok, false);
-    assert.equal(await access(join(base, 'absent')).then(() => true, () => false), false);
-  } finally {
-    await backend.stop();
-    await rm(base, { recursive: true, force: true });
-  }
-});
+      const failed = await backend[write](join(base, 'absent', dir, file), '{}', null, false);
+      assert.equal(failed.ok, false);
+      assert.equal(await access(join(base, 'absent')).then(() => true, () => false), false);
+    } finally {
+      await rm(base, { recursive: true, force: true });
+    }
+  });
+}
 
 test('Rust stdio bridge writes authorized Hooks payloads with mtime coercion and force semantics', async () => {
   const base = await mkdtemp(join(tmpdir(), 'singularity-rust-hooks-write-'));
   const path = join(base, '.claude', 'hooks', 'pre-commit');
   await mkdir(join(base, '.claude', 'hooks'), { recursive: true });
   await writeFile(path, 'prior');
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
     const saved = await backend.hooksWrite(path, 'echo 更新 ✓', null, false);
     assert.deepEqual(Object.keys(saved).sort(), ['mtime', 'ok']);
     assert.equal(saved.ok, true);
@@ -1321,7 +1279,6 @@ test('Rust stdio bridge writes authorized Hooks payloads with mtime coercion and
     assert.equal(failed.ok, false);
     assert.equal(await access(join(base, 'absent')).then(() => true, () => false), false);
   } finally {
-    await backend.stop();
     await rm(base, { recursive: true, force: true });
   }
 });
@@ -1331,9 +1288,8 @@ test('Rust Config bridge preserves and checks pre-epoch mtimes', async (t) => {
   const path = join(base, '.claude', 'settings.json');
   await mkdir(join(base, '.claude'), { recursive: true });
   await writeFile(path, 'prior');
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
     const preEpoch = new Date(Date.UTC(1960, 0, 1));
     try { await utimes(path, preEpoch, preEpoch); }
     catch (error) {
@@ -1354,7 +1310,6 @@ test('Rust Config bridge preserves and checks pre-epoch mtimes', async (t) => {
     assert.equal(saved.ok, true);
     assert.equal(await readFile(path, 'utf8'), 'updated');
   } finally {
-    await backend.stop();
     await rm(base, { recursive: true, force: true });
   }
 });
@@ -1364,9 +1319,8 @@ test('Rust Memory write bridge preserves mtime, coercion, force, and missing-par
   const path = join(base, 'project', 'memory', 'fact.md');
   await mkdir(join(base, 'project', 'memory'), { recursive: true });
   await writeFile(path, 'prior');
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
     const initial = await backend.memoryWrite(path, '更新 ✓', null, false);
     assert.deepEqual(Object.keys(initial).sort(), ['mtime', 'ok']);
     assert.equal(initial.ok, true);
@@ -1395,7 +1349,6 @@ test('Rust Memory write bridge preserves mtime, coercion, force, and missing-par
     assert.equal(missingParent.ok, false);
     assert.equal(await access(join(base, 'absent')).then(() => true, () => false), false);
   } finally {
-    await backend.stop();
     await rm(base, { recursive: true, force: true });
   }
 });
@@ -1405,9 +1358,8 @@ test('Rust Memory bridge saves pre-epoch files and rejects stale pre-epoch mtime
   const path = join(base, 'project', 'memory', 'fact.md');
   await mkdir(join(base, 'project', 'memory'), { recursive: true });
   await writeFile(path, 'prior');
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
     const preEpoch = new Date(Date.UTC(1960, 0, 1));
     try { await utimes(path, preEpoch, preEpoch); }
     catch (error) {
@@ -1428,7 +1380,6 @@ test('Rust Memory bridge saves pre-epoch files and rejects stale pre-epoch mtime
     assert.equal(saved.ok, true);
     assert.equal(await readFile(path, 'utf8'), 'updated');
   } finally {
-    await backend.stop();
     await rm(base, { recursive: true, force: true });
   }
 });
@@ -1436,10 +1387,9 @@ test('Rust Memory bridge saves pre-epoch files and rejects stale pre-epoch mtime
 test('Rust Explorer state bridge reads and merges one fresh fixed state file', async () => {
   const home = await mkdtemp(join(tmpdir(), 'singularity-rust-explorer-state-'));
   const statePath = join(home, 'state', 'explorer-state.json');
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   const defaults = { root: '~', expanded: [], tabs: [], active: null, autosave: false };
   try {
-    await backend.start();
     assert.deepEqual(await backend.explorerStateGet(statePath), defaults);
     const saved = await backend.explorerStateSet(statePath, {
       root: ' ~/work ', tabs: ['/a', 1, '/b'], expanded: ['/z', 1, '/a'],
@@ -1471,17 +1421,15 @@ test('Rust Explorer state bridge reads and merges one fresh fixed state file', a
     assert.equal(failed.ok, false);
     assert.equal(typeof failed.error, 'string');
   } finally {
-    await backend.stop();
     await rm(home, { recursive: true, force: true });
   }
 });
 
 test('Rust Explorer filesystem bridge mutates isolated files and directories', async () => {
   const home = await mkdtemp(join(tmpdir(), 'singularity-rust-explorer-fs-'));
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   const path = (...parts) => join(home, ...parts);
   try {
-    await backend.start();
     const target = path('nested', 'file.txt');
     const parentFailure = await backend.explorerCreate(path('missing', 'file.txt'), 'unknown');
     assert.equal(parentFailure.ok, false);
@@ -1503,16 +1451,14 @@ test('Rust Explorer filesystem bridge mutates isolated files and directories', a
     assert.equal((await backend.explorerDelete(path('nested'))).ok, false);
     assert.equal(await readFile(collision, 'utf8'), 'keep');
   } finally {
-    await backend.stop();
     await rm(home, { recursive: true, force: true });
   }
 });
 
 test('Rust one-shot bridge execs a binary and maps stdout, failure, and timeout', async () => {
   const base = await mkdtemp(join(tmpdir(), 'singularity-rust-oneshot-'));
-  const backend = createRustBackend();
+  const backend = await sharedBackend();
   try {
-    await backend.start();
     const okScript = join(base, 'ok.mjs');
     const failScript = join(base, 'fail.mjs');
     const slowScript = join(base, 'slow.mjs');
@@ -1564,7 +1510,6 @@ test('Rust one-shot bridge execs a binary and maps stdout, failure, and timeout'
       return true;
     });
   } finally {
-    await backend.stop();
     await rm(base, { recursive: true, force: true });
   }
 });
@@ -1630,16 +1575,11 @@ test('Rust async one-shot drains a synthetic child and replies before direct EOF
 });
 
 test('Rust usage auth bridge keeps platform and attempted-auth outcomes private', async () => {
-  const backend = createRustBackend();
-  try {
-    await backend.start();
-    assert.equal(await backend.usageKeychain('win32', process.execPath), null);
-    assert.equal(await backend.usageKeychain('darwin', process.execPath), null);
-    assert.deepEqual(await backend.usageAuthStatus(process.execPath, 10_000), { attempted: true });
-    assert.deepEqual(await backend.usageAuthStatus(join(tmpdir(), 'missing-usage-auth-cli'), 10_000), { attempted: true });
-  } finally {
-    await backend.stop();
-  }
+  const backend = await sharedBackend();
+  assert.equal(await backend.usageKeychain('win32', process.execPath), null);
+  assert.equal(await backend.usageKeychain('darwin', process.execPath), null);
+  assert.deepEqual(await backend.usageAuthStatus(process.execPath, 10_000), { attempted: true });
+  assert.deepEqual(await backend.usageAuthStatus(join(tmpdir(), 'missing-usage-auth-cli'), 10_000), { attempted: true });
 });
 
 test('Rust usage auth bridge forwards the current environment in both private requests', async () => {
@@ -1779,20 +1719,15 @@ test('Rust guarded process kill bridge sends the selected row fields and formats
 });
 
 test('Rust process classifier bridge uses the supplied post-query identity snapshot', async () => {
-  const backend = createRustBackend();
-  try {
-    await backend.start();
-    const rows = await backend.procsClassify({
-      platform: 'windows',
-      alive: [],
-      rows: [{ pid: 41, ppid: 1, name: 'claude.exe', started: '2025-01-02T03:04:05', cmd: 'claude.exe --resume wrapper-session' }],
-    }, [], ['wrapper-session'], 'C:/repo', 900);
-    assert.deepEqual(rows, [{
-      pid: 41, ppid: 1, name: 'claude.exe', started: '2025-01-02T03:04:05', session: 'wrapper-session', kind: 'tracked',
-    }]);
-  } finally {
-    await backend.stop();
-  }
+  const backend = await sharedBackend();
+  const rows = await backend.procsClassify({
+    platform: 'windows',
+    alive: [],
+    rows: [{ pid: 41, ppid: 1, name: 'claude.exe', started: '2025-01-02T03:04:05', cmd: 'claude.exe --resume wrapper-session' }],
+  }, [], ['wrapper-session'], 'C:/repo', 900);
+  assert.deepEqual(rows, [{
+    pid: 41, ppid: 1, name: 'claude.exe', started: '2025-01-02T03:04:05', session: 'wrapper-session', kind: 'tracked',
+  }]);
 });
 
 test('Rust procs kill bridge terminates a scratch child and rejects bad pids', async () => {
@@ -1967,3 +1902,65 @@ test('Wiki root bridge sends every operation through correlated raw JSON request
     assert.equal(new Set(requests.map(({ id }) => id)).size, 4);
   } finally { await backend.stop(); }
 });
+
+// Formerly config-native.test.mjs + codex-config-native.test.mjs (copy-paste twins).
+for (const c of [
+  {
+    name: 'Claude', read: 'configRead', search: 'configSearch', scan: 'configScan', dir: '.claude', file: 'settings.json',
+    secondKey: 'local', second: (scratch, root) => join(root, '.claude', 'settings.local.json'), secondContent: 'local settings',
+    theme: '"theme":"ΟΣ"', broken: [0x7b, 0xff, 0x7d], brokenText: '{\u{fffd}}', scanContent: '{}',
+  },
+  {
+    name: 'Codex', read: 'codexConfigRead', search: 'codexConfigSearch', scan: 'codexConfigScan', dir: '.codex', file: 'config.toml',
+    secondKey: 'user', second: (scratch) => join(scratch, 'user-config.toml'), secondContent: 'theme = "light"\n',
+    theme: '"theme" = "ΟΣ"', broken: [0x6b, 0x65, 0x79, 0x20, 0x3d, 0x20, 0xff], brokenText: 'key = \u{fffd}', scanContent: 'model = "x"',
+    secondScopeQuery: 'theme',
+  },
+]) {
+  test(`${c.name} config read, search, and scan use the Rust stdio bridge`, async () => {
+    const scratch = await mkdtemp(join(tmpdir(), `sing-${c.name.toLowerCase()}-config-native-`));
+    const backend = await sharedBackend();
+    try {
+      assert.deepEqual(await backend[c.read](join(scratch, 'missing')), { exists: false, content: '', mtime: 0 });
+
+      const root = join(scratch, 'project');
+      await mkdir(join(root, c.dir), { recursive: true });
+      const project = join(root, c.dir, c.file);
+      const second = c.second(scratch, root);
+      const longLine = `needle ${'x'.repeat(192)}😀tail`;
+      await writeFile(project, `ignored\n${longLine}\nneedle duplicate\n${c.theme}\n`);
+      await writeFile(second, c.secondContent);
+
+      const brokenUtf8 = join(scratch, 'replacement');
+      await writeFile(brokenUtf8, Buffer.from(c.broken));
+      const read = await backend[c.read](brokenUtf8);
+      assert.equal(read.exists, true);
+      assert.equal(read.content, c.brokenText);
+      assert.equal(typeof read.mtime, 'number');
+
+      const scope = { cwd: root, project, [c.secondKey]: second };
+      const matches = await backend[c.search]([scope, scope], 'needle'); // repeated roots dedup
+      assert.equal(matches.length, 1);
+      assert.deepEqual(matches[0], { cwd: root, scope: 'project', path: project, line: 2, text: longLine.trim().slice(0, 200) });
+      assert.equal(matches[0].text.length, 200);
+      assert.equal(matches[0].text.charCodeAt(199), 0xd83d);
+      if (c.secondScopeQuery) {
+        const both = await backend[c.search]([scope], c.secondScopeQuery);
+        assert.deepEqual(both.map(({ scope: s }) => s).sort(), ['project', c.secondKey]);
+      }
+      const greek = await backend[c.search]([scope], 'ος');
+      assert.equal(greek.length, 1);
+      assert.equal(greek[0].line, 4);
+
+      const child = join(root, 'child');
+      for (const dir of [child, join(root, '.hidden'), join(root, 'node_modules', 'pkg')]) {
+        await mkdir(join(dir, c.dir), { recursive: true });
+        await writeFile(join(dir, c.dir, c.file), c.scanContent);
+      }
+      assert.deepEqual(await backend[c.scan](root, 20000), { roots: [root, child].sort((a, b) => a.localeCompare(b)), truncated: false });
+      assert.deepEqual(await backend[c.scan](root, 1), { roots: [root], truncated: true });
+    } finally {
+      await rm(scratch, { recursive: true, force: true });
+    }
+  });
+}

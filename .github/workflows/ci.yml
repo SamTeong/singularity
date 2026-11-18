@@ -12,8 +12,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Changed-file test selection (scripts/test-changed.mjs). A PR runs only the
+  # suites and mock specs its diff can affect; a push to main runs everything.
+  plan:
+    name: Select tests
+    runs-on: ubuntu-latest
+    outputs:
+      unit: ${{ steps.select.outputs.unit }}
+      mock: ${{ steps.select.outputs.mock }}
+      mock_specs: ${{ steps.select.outputs.mock_specs }}
+      shards: ${{ steps.select.outputs.shards }}
+      shard_total: ${{ steps.select.outputs.shard_total }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: select
+        run: node scripts/test-changed.mjs --plan ${{ github.event_name == 'pull_request' && format('--base origin/{0}', github.base_ref) || '--all' }}
+
   test:
     name: Test (${{ matrix.os }})
+    needs: plan
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,7 +64,10 @@ jobs:
 
       - run: pnpm lint
 
-      - run: pnpm test
+      # Gate the step, not the job: main's required checks are these two matrix
+      # names, and a job-level skip would leave them pending.
+      - if: needs.plan.outputs.unit == 'true'
+        run: pnpm test
 
       # pnpm v9 supports --audit-level; fails the step only on moderate+.
       # Advisory for low/info — keeps supply-chain signal without breaking
@@ -54,8 +76,14 @@ jobs:
         continue-on-error: true
 
   e2e-mock:
-    name: E2E mock (drift alarm)
+    name: E2E mock (${{ matrix.shard }}/${{ needs.plan.outputs.shard_total }})
+    needs: plan
+    if: needs.plan.outputs.mock != 'none'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(needs.plan.outputs.shards) }}
     defaults:
       run:
         shell: bash
@@ -68,12 +96,14 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium webkit
-      - run: pnpm test:e2e-mock
+      - run: pnpm build:mock
+      # mock_specs is empty when every spec is selected. A shard can get no tests.
+      - run: pnpm exec playwright test --config playwright.mock.config.mjs --shard ${{ matrix.shard }}/${{ needs.plan.outputs.shard_total }} --pass-with-no-tests ${{ needs.plan.outputs.mock_specs }}
       - name: Upload mock E2E failure artifacts
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: mock-e2e-failure
+          name: mock-e2e-failure-${{ matrix.shard }}
           path: test-results/mock/
           retention-days: 7
           if-no-files-found: warn

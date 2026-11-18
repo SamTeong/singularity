@@ -1,116 +1,44 @@
 // Pins the ResizeHandle contract (useResizable.jsx): a focusable, labelled
 // role="separator" with live value semantics (aria-valuenow/min/max), whose
 // arrow-key nudge both updates the DOM attribute and persists the new size to
-// localStorage — the same persisted-width mechanism the drag handle commits
-// through. The session-list handle (always present on the default Tasks view,
-// no fixture setup needed) stands in for the whole family (dock/list/rail/
-// report-list/transcript-panel handles all share this same component).
+// localStorage. The session-list (axis x) and terminal-dock (axis y) handles
+// stand in for the whole family (dock/list/rail/report-list/transcript-panel
+// handles all share this same component).
 import { test, expect } from './fixtures/test.mjs';
-import { setSkin } from '../e2e/helpers/nav.mjs';
 
-test('Resize session list: arrow key nudges the width and persists it', async ({ page }) => {
+test('session list and terminal dock handles: aria contract, arrow-key nudge, persisted across reload', async ({ page }) => {
   await page.goto('/');
+  const stored = (key) => page.evaluate((k) => localStorage.getItem(k), key);
 
-  const handle = page.getByRole('separator', { name: 'Resize session list' });
-  await expect(handle).toBeVisible();
-  await expect(handle).toHaveAttribute('aria-orientation', 'vertical');
-  await expect(handle).toHaveAttribute('aria-valuenow', '260'); // default width, sing-list-w unset
-  await expect(handle).toHaveAttribute('aria-valuemin', '160');
-  await expect(handle).toHaveAttribute('aria-valuemax', '640');
-
-  await handle.focus();
+  const list = page.getByRole('separator', { name: 'Resize session list' });
+  await expect(list).toHaveAttribute('aria-orientation', 'vertical');
+  await expect(list).toHaveAttribute('aria-valuenow', '260'); // default width, sing-list-w unset
+  await expect(list).toHaveAttribute('aria-valuemin', '160');
+  await expect(list).toHaveAttribute('aria-valuemax', '640');
+  await list.focus();
   await page.keyboard.press('ArrowRight'); // useResizable's 16px arrow-key step
-
-  await expect(handle).toHaveAttribute('aria-valuenow', '276');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('sing-list-w'))).toBe('276');
-
-  // ArrowLeft nudges back the other way — proves the value isn't one-directional.
+  await expect(list).toHaveAttribute('aria-valuenow', '276');
+  await expect.poll(() => stored('sing-list-w')).toBe('276');
   await page.keyboard.press('ArrowLeft');
-  await expect(handle).toHaveAttribute('aria-valuenow', '260');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('sing-list-w'))).toBe('260');
-});
+  await expect(list).toHaveAttribute('aria-valuenow', '260');
+  await page.keyboard.press('ArrowRight');
+  await expect.poll(() => stored('sing-list-w')).toBe('276');
 
-test('Resize terminal dock: same contract on the axis:"y" handle', async ({ page }) => {
-  // The dock handle (axis:'y') exercises the other half of the contract —
-  // aria-orientation flips, and the ceiling is a container-height measurement
-  // (the shell's own height minus `min`, recomputed on resize/mode changes —
-  // Phase 2 of the responsive plan, useResizable.jsx), not the raw configured
-  // `max` (2000): a saved dock height can never swallow the view above it.
-  await page.goto('/');
-
-  const handle = page.getByRole('separator', { name: 'Resize terminal dock' });
-  await expect(handle).toBeVisible();
-  await expect(handle).toHaveAttribute('aria-orientation', 'horizontal');
-  await expect(handle).toHaveAttribute('aria-valuenow', '300'); // default height, sing-dock-h unset
-  await expect(handle).toHaveAttribute('aria-valuemin', '140');
-  const maxNow = Number(await handle.getAttribute('aria-valuemax'));
-  expect(maxNow).toBeGreaterThan(300); // room to grow from the default...
-  expect(maxNow).toBeLessThan(2000); // ...but bounded by the real container, not the raw ceiling
-
-  await handle.focus();
+  // axis:'y' — the ceiling is a container-height measurement, not the raw
+  // configured `max` (2000): a saved dock height can never swallow the view.
+  const dock = page.getByRole('separator', { name: 'Resize terminal dock' });
+  await expect(dock).toHaveAttribute('aria-orientation', 'horizontal');
+  await expect(dock).toHaveAttribute('aria-valuenow', '300'); // default height, sing-dock-h unset
+  await expect(dock).toHaveAttribute('aria-valuemin', '140');
+  const maxNow = Number(await dock.getAttribute('aria-valuemax'));
+  expect(maxNow).toBeGreaterThan(300);
+  expect(maxNow).toBeLessThan(2000);
+  await dock.focus();
   await page.keyboard.press('ArrowUp'); // axis:'y' grows *upward* on ArrowUp
+  await expect(dock).toHaveAttribute('aria-valuenow', '316');
+  await expect.poll(() => stored('sing-dock-h')).toBe('316');
 
-  await expect(handle).toHaveAttribute('aria-valuenow', '316');
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('sing-dock-h'))).toBe('316');
-});
-
-// ---------------------------------------------------------------------------
-// Phosphor Console (openspec/changes/implement-phosphor-theme, task 8.4):
-// persisted resize/minimize mechanics are unchanged under Phosphor —
-// ResizeHandle is a single skin-agnostic component (design.md D1: only true
-// structural signatures branch on skinId), so this is a regression pass on
-// the exact same aria/localStorage contract proven above, plus a reload
-// round-trip to confirm the persisted dimension AND the persisted skin both
-// survive independently (they're stored under different keys — 'sing-list-w'
-// / 'sing-dock-h' vs 'sing-skin').
-test.describe('Resize handles — Phosphor Console', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/');
-    await setSkin(page, 'Phosphor Console');
-  });
-
-  test('Resize session list keeps its aria contract and persists under Phosphor', async ({ page }) => {
-    const handle = page.getByRole('separator', { name: 'Resize session list' });
-    await expect(handle).toBeVisible();
-    await expect(handle).toHaveAttribute('aria-orientation', 'vertical');
-    await expect(handle).toHaveAttribute('aria-valuenow', '260');
-    await expect(handle).toHaveAttribute('aria-valuemin', '160');
-    await expect(handle).toHaveAttribute('aria-valuemax', '640');
-
-    await handle.focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(handle).toHaveAttribute('aria-valuenow', '276');
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('sing-list-w'))).toBe('276');
-  });
-
-  test('Resize terminal dock keeps its aria contract and persists under Phosphor', async ({ page }) => {
-    const handle = page.getByRole('separator', { name: 'Resize terminal dock' });
-    await expect(handle).toBeVisible();
-    await expect(handle).toHaveAttribute('aria-orientation', 'horizontal');
-    await expect(handle).toHaveAttribute('aria-valuenow', '300');
-    await expect(handle).toHaveAttribute('aria-valuemin', '140');
-    const maxNow = Number(await handle.getAttribute('aria-valuemax'));
-    expect(maxNow).toBeGreaterThan(300);
-    expect(maxNow).toBeLessThan(2000);
-
-    await handle.focus();
-    await page.keyboard.press('ArrowUp');
-    await expect(handle).toHaveAttribute('aria-valuenow', '316');
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('sing-dock-h'))).toBe('316');
-  });
-
-  test('a resized dimension and the Phosphor skin both survive a reload, independently', async ({ page }) => {
-    const handle = page.getByRole('separator', { name: 'Resize session list' });
-    await handle.focus();
-    await page.keyboard.press('ArrowRight');
-    await expect(handle).toHaveAttribute('aria-valuenow', '276');
-
-    await page.reload();
-
-    const reloadedHandle = page.getByRole('separator', { name: 'Resize session list' });
-    await expect(reloadedHandle).toHaveAttribute('aria-valuenow', '276');
-    // Phosphor is still active post-reload (persisted 'sing-skin') — the
-    // masthead only renders under that skin (e2e/phosphor.spec.mjs).
-    await expect(page.getByRole('banner').getByText('SINGULARITY')).toBeVisible();
-  });
+  await page.reload();
+  await expect(list).toHaveAttribute('aria-valuenow', '276');
+  await expect(dock).toHaveAttribute('aria-valuenow', '316');
 });

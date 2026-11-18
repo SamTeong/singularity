@@ -1,15 +1,18 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createRustBackend } from './rust-backend.mjs';
 
+// One backend for the file: every request carries explicit per-test paths.
+const backend = createRustBackend();
+await backend.start();
+after(() => backend.stop());
+
 test('snapshot bridge preserves raw lone surrogates and correlates concurrent requests', async () => {
   const scratch = mkdtempSync(join(tmpdir(), 'snapshot-bridge-'));
-  const backend = createRustBackend();
   try {
-    await backend.start();
     const live = join(scratch, 'usage-snapshots.jsonl');
     const raw = { five_hour: { utilization: 42 }, seven_day: { utilization: 17 }, label: '\ud800' };
     const appends = await Promise.all(Array.from({ length: 8 }, (_, i) => backend.providerUsageSnapshot({
@@ -26,16 +29,13 @@ test('snapshot bridge preserves raw lone surrogates and correlates concurrent re
     });
     assert.equal(row.raw.label, '\ud800');
   } finally {
-    await backend.stop();
     rmSync(scratch, { recursive: true, force: true });
   }
 });
 
 test('snapshot bridge forwards cost-state source mtime across a local month boundary', async () => {
   const scratch = mkdtempSync(join(tmpdir(), 'snapshot-cost-mtime-'));
-  const backend = createRustBackend();
   try {
-    await backend.start();
     const live = join(scratch, 'usage-snapshots.jsonl');
     const source = join(scratch, 'cost-state.json');
     writeFileSync(source, '{}');
@@ -68,16 +68,13 @@ test('snapshot bridge forwards cost-state source mtime across a local month boun
     const lines = readFileSync(live, 'utf8').trim().split(/\r?\n/);
     assert(lines[1].includes('\\ud800'));
   } finally {
-    await backend.stop();
     rmSync(scratch, { recursive: true, force: true });
   }
 });
 
 test('snapshot bridge rotates by the first local month and reads the selected archive', async () => {
   const scratch = mkdtempSync(join(tmpdir(), 'snapshot-rotation-'));
-  const backend = createRustBackend();
   try {
-    await backend.start();
     const live = join(scratch, 'usage-snapshots.jsonl');
     const archive = join(scratch, 'usage-snapshots-2098-11.jsonl');
     const raw = { five_hour: { utilization: 42 }, seven_day: { utilization: 17 } };
@@ -96,16 +93,13 @@ test('snapshot bridge rotates by the first local month and reads the selected ar
     });
     assert.equal(archived.raw.five_hour.utilization, 42);
   } finally {
-    await backend.stop();
     rmSync(scratch, { recursive: true, force: true });
   }
 });
 
 test('snapshot bridge preserves a distinct archive on collision and leaves the live file readable', async () => {
   const scratch = mkdtempSync(join(tmpdir(), 'snapshot-collision-'));
-  const backend = createRustBackend();
   try {
-    await backend.start();
     const live = join(scratch, 'usage-snapshots.jsonl');
     const archive = join(scratch, 'usage-snapshots-2098-11.jsonl');
     const raw = { five_hour: { utilization: 42 }, seven_day: { utilization: 17 } };
@@ -121,7 +115,6 @@ test('snapshot bridge preserves a distinct archive on collision and leaves the l
     assert.equal(readFileSync(archive, 'utf8'), 'existing distinct archive\n');
     assert.match(readFileSync(live, 'utf8'), /2098-11-30 23:59:00/);
   } finally {
-    await backend.stop();
     rmSync(scratch, { recursive: true, force: true });
   }
 });

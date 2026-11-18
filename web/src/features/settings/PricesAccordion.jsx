@@ -20,6 +20,7 @@ import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import useMediaQuery from '@mui/material/useMediaQuery';
 import { PHONE_QUERY, TABLET_QUERY } from '@/shell/breakpoints.js';
+import { defaultKeyAfterDelete, defaultKeyAfterRename } from './pricesDraft.mjs';
 
 const VALUE_COLS = ['Input', 'Output', 'Cache read', 'Cache write'];
 // Header text is uppercase; 'CACHE WRITE' needs a little more room than the rest.
@@ -133,10 +134,9 @@ export default function PricesAccordion() {
   };
   const deleteRow = (table, i) => {
     const rows = draft[table].filter((_, j) => j !== i);
-    let defaultKey = draft.defaultKey;
-    if (table === 'base' && draft.base[i]?.key.trim() === defaultKey) {
-      defaultKey = rows[i]?.key.trim() || rows[i - 1]?.key.trim() || '';
-    }
+    const defaultKey = table === 'base'
+      ? defaultKeyAfterDelete(draft.defaultKey, draft.base[i]?.key, rows, i)
+      : draft.defaultKey;
     save({ ...draft, [table]: rows, defaultKey });
   };
   const addRow = (table, add, setAdd, atTop) => {
@@ -216,8 +216,8 @@ export default function PricesAccordion() {
             value={row.key}
             onChange={(e) => {
               const key = e.target.value;
-              const defaultKey = tableKey === 'base' && row.key.trim() === draft.defaultKey
-                ? key.trim()
+              const defaultKey = tableKey === 'base'
+                ? defaultKeyAfterRename(draft.defaultKey, row.key, key)
                 : draft.defaultKey;
               setDraft({ ...draft, [tableKey]: replaceRow(tableKey, i, { key }), defaultKey });
             }}
