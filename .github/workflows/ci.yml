@@ -80,6 +80,10 @@ jobs:
     needs: plan
     if: needs.plan.outputs.mock != 'none'
     runs-on: ubuntu-latest
+    # Browsers + OS deps preinstalled; `playwright install --with-deps` hit a
+    # 22 min apt stall. Keep the tag equal to the @playwright/test pin.
+    container:
+      image: mcr.microsoft.com/playwright:v1.62.0-noble
     strategy:
       fail-fast: false
       matrix:
@@ -95,7 +99,6 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec playwright install --with-deps chromium webkit
       - run: pnpm build:mock
       # mock_specs is empty when every spec is selected. A shard can get no tests.
       - run: pnpm exec playwright test --config playwright.mock.config.mjs --shard ${{ matrix.shard }}/${{ needs.plan.outputs.shard_total }} --pass-with-no-tests ${{ needs.plan.outputs.mock_specs }}

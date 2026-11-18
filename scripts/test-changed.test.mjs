@@ -36,7 +36,7 @@ test('unrecognised or shared paths fail safe to everything', () => {
 test('shard count scales with selected specs, capped at 4', () => {
   assert.equal(shardCount(['a'], 30), 1);
   assert.equal(shardCount(['a', 'b', 'c', 'd', 'e'], 30), 2);
-  assert.equal(shardCount('all', 30), 4);
+  assert.equal(shardCount('all', 30), 8);
 });
 
 // Drift guard: a new feature dir or a renamed spec must not silently fall back

@@ -119,10 +119,10 @@ function changedFiles(base) {
 
 const listMockSpecs = () => readdirSync(join(ROOT, 'e2e-mock')).filter((f) => f.endsWith('.spec.mjs'));
 
-// Mock e2e shard count for CI: one runner per ~4 specs, at most 4.
+// Mock e2e shard count for CI: one runner per ~4 specs, at most 8 (CI runs tests ~10x slower than a dev box).
 export function shardCount(mock, specTotal) {
-  if (mock === ALL) return Math.min(4, Math.ceil(specTotal / 4));
-  return Math.min(4, Math.max(1, Math.ceil(mock.length / 4)));
+  if (mock === ALL) return Math.min(8, Math.ceil(specTotal / 4));
+  return Math.min(8, Math.max(1, Math.ceil(mock.length / 4)));
 }
 
 function run(cmd, args) {
