@@ -227,3 +227,20 @@ test('board arrow keys traverse sessions and their plan stack; session-id search
     return [params.has('status'), params.has('layout'), params.get('keep')];
   })).toEqual([false, false, 'here']);
 });
+
+test('search Enter opens the hit without its keypress collapsing the focused card', async ({ page }) => {
+  // Enter moves focus onto the opened card before keypress; a fresh load is
+  // what reproduces it (from an already-open card the click lands differently).
+  await page.addInitScript(() => window.localStorage.setItem('sing-mock-plans-extra', '130'));
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/plans');
+  const search = page.getByPlaceholder('Search session id…');
+  await search.fill('b0000000-0000-4000-8000-000000000010');
+  await expect(page.locator('[data-plans-search-hit]').first()).toBeVisible();
+  await search.press('Enter');
+  const selected = page.getByRole('region', { name: 'Session carousel' }).locator('[aria-current="true"] .MuiCardActionArea-root');
+  await expect(selected).toContainText(/bulk\/10/);
+  // Let a stray keypress click land before asserting.
+  await page.waitForTimeout(300);
+  await expect(selected).toHaveAttribute('aria-expanded', 'true');
+});
