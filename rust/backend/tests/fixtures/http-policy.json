@@ -1,0 +1,61 @@
+{
+  "environment": [
+    { "input": " 4317 ", "number": 4317, "port": 4317 },
+    { "input": "0x1535", "number": 5429, "port": 5429 },
+    { "input": "0o102", "number": 66, "port": 66 },
+    { "input": "0b1010", "number": 10, "port": 10 },
+    { "input": "4317.0", "number": 4317, "port": 4317 },
+    { "input": "", "number": 0, "port": 0 },
+    { "input": "   ", "number": 0, "port": 0 },
+    { "input": "4317.5", "number": 4317.5, "port": null },
+    { "input": "Infinity", "number": "Infinity", "port": null }
+  ],
+  "tokens": [
+    { "input": null, "token": null },
+    { "input": "", "token": null },
+    { "input": "fixture-token", "token": "fixture-token" }
+  ],
+  "request_policy": [
+    { "host": null, "origin": null, "fetch_site": null, "allowed": true },
+    { "host": "localhost:4317", "origin": "http://127.0.0.1:5317", "fetch_site": "cross-site", "allowed": true },
+    { "host": null, "origin": "http://LOCALHOST:4317", "fetch_site": "cross-site", "allowed": true },
+    { "host": "evil.test", "origin": null, "fetch_site": null, "allowed": false, "error": "forbidden host" },
+    { "host": null, "origin": "http://evil.test:5317", "fetch_site": "same-origin", "allowed": false, "error": "forbidden origin" },
+    { "host": null, "origin": null, "fetch_site": "cross-site", "allowed": false, "error": "forbidden origin" }
+  ],
+  "api_auth": [
+    { "header": null, "query": "token=token_1", "cookie": null, "allowed": true },
+    { "header": "wrong", "query": "token=token_1", "cookie": "sing_token=token_1", "allowed": false },
+    { "header": "", "query": "token=token_1", "cookie": null, "allowed": true },
+    { "header": null, "query": "token=wrong", "cookie": "sing_token=token_1", "allowed": false },
+    { "header": "", "query": "token=", "cookie": "sing_token=token_1", "allowed": true },
+    { "header": null, "query": null, "cookie": "sing_token=%74oken_1", "allowed": true },
+    { "header": null, "query": "token=token_1&token=wrong", "cookie": "sing_token=token_1", "allowed": false },
+    { "header": null, "query": "to%6ben=token_1", "cookie": null, "allowed": true },
+    { "header": null, "query": null, "cookie": "sing_token=token_1", "allowed": true }
+  ],
+  "cookie_policy": {
+    "malformed": ["sing_token=%ZZ", "sing_token=%FF"],
+    "error_response": { "status": 500, "body": { "statusCode": 500, "error": "Internal Server Error", "message": "URI malformed" } },
+    "cookie_ordering": { "cookie": "other=first; sing_token=token_1; sing_token=wrong", "allowed": true },
+    "header_short_circuit": { "header": "token_1", "cookie": "sing_token=%ZZ", "allowed": true },
+    "duplicate_query_short_circuit": { "query": "token=token_1&token=other", "cookie": "sing_token=token_1", "allowed": false }
+  },
+  "websocket_auth": [
+    { "query": "token=token_1&token=other", "allowed": true },
+    { "query": "token=other&token=token_1", "allowed": false },
+    { "query": null, "allowed": false }
+  ],
+  "shell_duplicate": { "query": "token=token_1&token=other", "status": 401 },
+  "redirects": [
+    { "path": "/", "query": "q=a+b&token=token_1&bad=%&x=%2f", "location": "/?q=a+b&bad=%25&x=%2F" },
+    { "path": "/", "query": "na%C3%AFve=%E2%9C%93&token=token_1", "location": "/?na%C3%AFve=%E2%9C%93" },
+    { "path": "/", "query": "x=%E0%A4%A&token=token_1", "location": "/?x=%EF%BF%BD%25A" },
+    { "path": "/", "query": "token=token_1", "location": "/" }
+  ],
+  "responses": {
+    "shell_cookie": "sing_token=token_1; HttpOnly; SameSite=Strict; Path=/",
+    "shell_unauthorized": "Unauthorized — open this URL with ?token=<your SING_TOKEN>",
+    "api_unauthorized": { "status": 401, "body": { "error": "unauthorized" } }
+  }
+}

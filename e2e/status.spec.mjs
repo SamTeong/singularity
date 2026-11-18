@@ -50,8 +50,16 @@ test('the freshness caption renders', async ({ page }) => {
   await page.goto('/');
   await goto(page, 'Status');
 
-  // Per-provider caption "Status page updated <n> min ago" — one per card, so .first().
-  await expect(page.getByText(/^Status page updated .+/).first()).toBeVisible();
+  // The caption moved from the view header into each provider card
+  // (StatusView.jsx ProviderCard): "Status page updated just now." /
+  // "Status page updated <n> min ago." from that provider's fetchedAt. The stub
+  // stamps fetchedAt at module load, so accept both forms rather than a run
+  // slow enough to pass the minute boundary.
+  // VERIFY: wave19-status-1
+  const captions = page.getByText(/^Status page updated (just now|\d+ min ago)\.$/);
+  await expect(captions.first()).toBeVisible();
+  // One per operational provider card: Claude + OpenAI in STATUS_STUB.
+  expect(await captions.count()).toBe(2);
 });
 
 test('provider status pages are linked out, never followed', async ({ page }) => {

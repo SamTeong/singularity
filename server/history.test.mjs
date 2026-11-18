@@ -35,10 +35,18 @@ after(() => rmSync(scratch, { recursive: true, force: true }));
 
 const { encodeCwd } = await import('./agents.mjs');
 const { USAGE_SKILL_STATE } = await import('./app-dir.mjs');
-const { getModels, setModels } = await import('./model-store.mjs');
+const { createRustBackend } = await import('./rust-backend.mjs');
+const store = await import('./model-store.mjs');
+const { getModels, setModels } = store;
+const modelBackend = createRustBackend();
+await modelBackend.start();
+store.setModelsBackend(modelBackend);
+const { setTranscriptBackend } = await import('./sessions.mjs');
+setTranscriptBackend(modelBackend);
+after(async () => modelBackend.stop());
 const { readHistory, ensureHistory, regenerateDay, liveToday, scanDays, buildDigest, summarizeDay, localDay, declawedGuidance } = await import('./history.mjs');
-const DEFAULT_SUMMARISER = getModels().summariserModel; // seed default ('deepseek-v4-flash:cloud', ollama)
-function setSummariser(id) { setModels({ ...getModels(), summariserModel: id }); }
+const DEFAULT_SUMMARISER = (await getModels()).summariserModel; // seed default ('deepseek-v4-flash:cloud', ollama)
+async function setSummariser(id) { return setModels({ ...(await getModels()), summariserModel: id }); }
 
 const SESSIONS_ROOT = join(scratch, 'claude-projects');
 
@@ -151,7 +159,7 @@ test('ensureHistory: a trivial day (<3 assistant turns) is deterministic, llm.ok
 
 test('summarizeDay: a configured model (claude group) returning valid JSON -> llm.ok true, provider/model from the store', async () => {
   const sessions = [{ id: 's1', title: 'fix flaky test', turns: 5, cwd: 'C:\\fake\\x', project: 'p', source: 'claude' }];
-  setSummariser('opus'); // seed claude-group entry
+  await setSummariser('opus'); // seed claude-group entry
   try {
     const r = await summarizeDay('digest', sessions, {
       callSummariser: async (text, summariser) => {
@@ -164,13 +172,13 @@ test('summarizeDay: a configured model (claude group) returning valid JSON -> ll
     assert.equal(r.llm.model, 'opus');
     assert.deepEqual(r.projects, [{ path: 'C:\\fake\\x', bullets: ['did X'] }]);
   } finally {
-    setSummariser(DEFAULT_SUMMARISER);
+    await setSummariser(DEFAULT_SUMMARISER);
   }
 });
 
 test('summarizeDay: a configured model that throws -> deterministic, llm.ok false, reason unavailable, error set', async () => {
   const sessions = [{ id: 's1', title: 'fix flaky test', turns: 5, cwd: 'C:\\fake\\x', project: 'p', source: 'claude' }];
-  setSummariser(DEFAULT_SUMMARISER); // seed ollama-group entry
+  await setSummariser(DEFAULT_SUMMARISER); // seed ollama-group entry
   const r = await summarizeDay('digest', sessions, {
     callSummariser: async () => { throw new Error('ollama down'); },
   });
@@ -182,7 +190,7 @@ test('summarizeDay: a configured model that throws -> deterministic, llm.ok fals
 
 test('summarizeDay: no configured model -> deterministic, reason no-summariser, the stub is never called', async () => {
   const sessions = [{ id: 's1', title: 'fix flaky test', turns: 5, cwd: 'C:\\fake\\x', project: 'p', source: 'claude' }];
-  setSummariser('');
+  await setSummariser('');
   let called = false;
   try {
     const r = await summarizeDay('digest', sessions, { callSummariser: async () => { called = true; return { text: '{}' }; } });
@@ -190,13 +198,13 @@ test('summarizeDay: no configured model -> deterministic, reason no-summariser, 
     assert.equal(r.llm.reason, 'no-summariser');
     assert.equal(called, false, 'the stub must never be called when nothing is configured');
   } finally {
-    setSummariser(DEFAULT_SUMMARISER);
+    await setSummariser(DEFAULT_SUMMARISER);
   }
 });
 
 test('summarizeDay: a configured model whose group binary is absent (codex, CODEX_BIN unset) behaves exactly like no configured model', async () => {
   const sessions = [{ id: 's1', title: 'fix flaky test', turns: 5, cwd: 'C:\\fake\\x', project: 'p', source: 'claude' }];
-  setSummariser('gpt-6-luna'); // seed codex-group entry
+  await setSummariser('gpt-6-luna'); // seed codex-group entry
   let called = false;
   try {
     const r = await summarizeDay('digest', sessions, { callSummariser: async () => { called = true; return { text: '{}' }; } });
@@ -204,7 +212,7 @@ test('summarizeDay: a configured model whose group binary is absent (codex, CODE
     assert.equal(r.llm.reason, 'no-summariser');
     assert.equal(called, false, 'the stub must never be called when the group binary is missing');
   } finally {
-    setSummariser(DEFAULT_SUMMARISER);
+    await setSummariser(DEFAULT_SUMMARISER);
   }
 });
 

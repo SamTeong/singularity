@@ -1,14 +1,9 @@
-// Unit tests for window-anchor.mjs: arms a poke timer at a 5h window's
-// resetsAt+5000, pokes the cheap route when a window expires with pctUsed===0,
-// stands down when real work anchored it (pctUsed>0), never pokes twice for
-// the same window, persists to APP_DIR/window-anchor.json (APP_DIR derives from
-// process.env.SINGULARITY_HOME via agents.mjs), so SINGULARITY_HOME is pointed
-// at a scratch temp dir *before* the module graph is imported (dynamic import
-// after the env tweak). `now` and `spawn` are injected — no real CLI is ever
-// run. Run: pnpm test  (node --test server/)
-import { test, after } from 'node:test';
+// Deterministic adapter coverage using the correlated Rust bridge and fake
+// timers/CLI execution. No external provider is invoked.
+import { test, beforeEach, afterEach, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -16,17 +11,32 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-window-anchor-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'singularity');
 process.env.USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
 mkdirSync(join(scratch, 'singularity', 'state'), { recursive: true });
-after(() => rmSync(scratch, { recursive: true, force: true }));
+mkdirSync(process.env.USAGE_REPORT_STATE, { recursive: true });
+const modelStore = await import('./model-store.mjs');
+const { createRustBackend } = await import('./rust-backend.mjs');
+let modelBackend = createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+beforeEach(async () => {
+  await modelBackend.stop();
+  modelBackend = createRustBackend();
+  await modelBackend.start();
+  modelStore.setModelsBackend(modelBackend);
+});
+afterEach(async () => { await modelBackend.stop(); });
+after(() => { rmSync(scratch, { recursive: true, force: true }); });
 
 const { initWindowAnchor, snapshotWindowAnchor, pokeProvider } = await import('./window-anchor.mjs');
-const { bus, STATE_DIR, CLAUDE_BIN, CODEX_BIN } = await import('./agents.mjs');
+const { bus } = await import('./agents.mjs');
 
 const HOUR = 3_600_000;
-let fakeNow = 1_700_000_000_000;
-const calls = []; // one entry per spawn: { file, args, opts }
+let fakeNow = 1_900_000_000_000;
+let setupId = 0;
+const calls = [];
+let timerHistory = [];
+let activeTimers = new Map();
+let nextTimer = 0;
 
-// execFile-shaped fake: records argv, resolves on demand. Codex's answer
-// channel is the -o file, so the fake writes it; claude's is stdout JSON.
 function fakeSpawn(file, args, opts) {
   calls.push({ file, args, opts });
   if (args[0] === 'exec') {
@@ -36,243 +46,361 @@ function fakeSpawn(file, args, opts) {
   return Promise.resolve({ stdout: JSON.stringify({ result: 'ok', usage: { input_tokens: 3, output_tokens: 1 } }) });
 }
 
-const init = (over = {}) => initWindowAnchor({
-  log: null, spawn: fakeSpawn, usageRefresh: async () => null, now: () => fakeNow, enabled: 'claude,codex', ...over,
-});
+const freshClock = () => {
+  activeTimers = new Map();
+  timerHistory = [];
+  nextTimer = 0;
+  return {
+    setTimeout(fn, delay) {
+      const timer = { id: ++nextTimer, fn, delay };
+      activeTimers.set(timer.id, timer);
+      timerHistory.push(timer);
+      return timer.id;
+    },
+    clearTimeout(id) { activeTimers.delete(id); },
+  };
+};
 
-// Push a usage document the way usage.mjs's getUsage does.
-function emitUsage(group, { pctUsed, resetsAt }) {
-  bus.emit('usage', {
-    ollama: null,
-    [group]: { ok: true, source: group, session: { pctUsed, resetsAt: new Date(resetsAt).toISOString() } },
+async function init(over = {}) {
+  const id = ++setupId;
+  const stateDir = join(scratch, `state-${id}`);
+  mkdirSync(stateDir, { recursive: true });
+  const timers = freshClock();
+  return initWindowAnchor({
+    log: null, storage: modelBackend, stateDir, usageStateDir: process.env.USAGE_REPORT_STATE,
+    spawn: fakeSpawn, usageRefresh: async () => null, now: () => fakeNow,
+    enabled: 'claude,codex', ...timers, ...over,
   });
 }
 
-async function until(fn, ms = 3000) {
-  const start = Date.now();
-  while (!fn()) {
-    if (Date.now() - start > ms) throw new Error('condition not met within timeout');
-    await new Promise((r) => setTimeout(r, 10));
-  }
+const documentFor = (provider, session) => ({
+  ollama: null,
+  [provider]: { ok: true, source: provider, session },
+});
+
+async function emitUsage(provider, session) {
+  bus.emit('usage', documentFor(provider, session));
+  return snapshotWindowAnchor(); // correlated FIFO read flushes the usage request
 }
 
-test('arming: a future window arms nextAnchorAt at resetsAt+5000 and dedupes', () => {
-  init();
-  const resetsAt = fakeNow + 10 * HOUR;
-  emitUsage('claude', { pctUsed: 0, resetsAt });
-  assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, resetsAt + 5000);
+async function fire(timer) {
+  assert.ok(timer, 'timer callback was captured');
+  fakeNow += timer.delay;
+  return timer.fn();
+}
 
-  // Same window again: already armed for this resetsAt — no re-arm, no emit.
-  const events = [];
-  const onState = (s) => events.push(s);
-  bus.on('window-anchor', onState);
+function deferred() {
+  let resolve;
+  const promise = new Promise((yes) => { resolve = yes; });
+  return { promise, resolve };
+}
+
+function waitForSave(promise, label) {
+  let timeout;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(`timed out waiting for ${label}`)), 1000);
+    }),
+  ]).finally(() => clearTimeout(timeout));
+}
+
+test('Rust owns enabled snapshot and returns generation-tagged timer effects', async () => {
+  const state = await init({ enabled: ' Codex , bogus' });
+  assert.equal(state.claude.enabled, false);
+  assert.equal(state.codex.enabled, true);
+  const resetsAt = fakeNow + 10 * HOUR;
+  const armed = await emitUsage('codex', { pctUsed: 0, resetsAt: new Date(resetsAt).toISOString() });
+  assert.equal(armed.codex.nextAnchorAt, resetsAt + 5000);
+  assert.equal(activeTimers.size, 1);
+  assert.equal((await snapshotWindowAnchor()).codex.nextAnchorAt, resetsAt + 5000);
+});
+
+test('stale timer generations skip preflight; accepted firing survives replacement and admits', async () => {
+  let refreshes = 0;
+  const refreshStarted = deferred();
+  const refreshGate = deferred();
+  await init({ usageRefresh: async ({ sources }) => {
+    refreshes++;
+    assert.deepEqual(sources, ['claude']);
+    assert.equal((await snapshotWindowAnchor()).claude.nextAnchorAt, null);
+    refreshStarted.resolve();
+    return refreshGate.promise;
+  } });
+  const firstReset = fakeNow + HOUR;
+  await emitUsage('claude', { pctUsed: 0, started: true, resetsAt: new Date(firstReset).toISOString() });
+  const oldTimer = timerHistory.at(-1);
+  await emitUsage('claude', { pctUsed: 0, started: true, resetsAt: new Date(firstReset + HOUR).toISOString() });
+  const currentTimer = timerHistory.at(-1);
+  await fire(oldTimer);
+  assert.equal(refreshes, 0);
+  const firing = fire(currentTimer);
+  await refreshStarted.promise;
+
+  // A new usage update can replace the next deadline while this accepted
+  // timer event still owns its post-refresh admission.
+  await emitUsage('claude', { pctUsed: 0, started: true, resetsAt: new Date(fakeNow + 2 * HOUR).toISOString() });
+  const usage = documentFor('claude', { pctUsed: 0, started: true, resetsAt: new Date(fakeNow + HOUR).toISOString() });
+  bus.emit('usage', usage);
+  refreshGate.resolve(usage);
+  await firing;
+  assert.equal(refreshes, 1);
+  assert.equal((await snapshotWindowAnchor()).claude.lastResult, 'Skipped');
+});
+
+test('failed timer preflight admits from the cached expired idle window', async () => {
+  const spawnStarted = deferred();
+  let refreshes = 0;
+  calls.length = 0;
+  await init({
+    usageRefresh: async () => { refreshes++; throw new Error('synthetic timer refresh failure'); },
+    spawn: (file, args, opts) => {
+      calls.push({ file, args, opts });
+      spawnStarted.resolve();
+      return Promise.resolve({ stdout: JSON.stringify({ result: 'ok', usage: {} }) });
+    },
+  });
+  const resetsAt = fakeNow + 100;
+  await emitUsage('claude', { pctUsed: 0, started: true, resetsAt: new Date(resetsAt).toISOString() });
+  const timer = timerHistory.at(-1);
+  await fire(timer);
+  await spawnStarted.promise;
+  assert.equal(refreshes, 1);
+  assert.equal(calls.length, 1);
+});
+
+test('manual preflight marker is queued before admission; force bypasses refresh', async () => {
+  let refreshes = 0;
+  calls.length = 0;
+  await init({ usageRefresh: async () => {
+    refreshes++;
+    const usage = documentFor('codex', { pctUsed: 0, started: false, resetsAt: null });
+    bus.emit('usage', usage);
+    return usage;
+  } });
+  assert.deepEqual(await pokeProvider('codex'), { provider: 'codex', result: 'Ok' });
+  assert.equal(refreshes, 1);
+  assert.equal(calls.length, 1); // the synchronous usage event did not start a second action
+  assert.deepEqual(await pokeProvider('codex', { force: true }), { provider: 'codex', result: 'Ok' });
+  assert.equal(refreshes, 1);
+  assert.equal(calls.length, 1, 'immediate force still obeys successful-attempt dedupe');
+  fakeNow += 5 * HOUR;
+  assert.deepEqual(await pokeProvider('codex', { force: true }), { provider: 'codex', result: 'Ok' });
+  assert.equal(refreshes, 1, 'eligible force still bypasses preflight refresh');
+  assert.equal(calls.length, 2);
+});
+
+test('failed manual preflight continues from Rust cached usage and force makes no refresh', async () => {
+  let refreshes = 0;
+  calls.length = 0;
+  await init({ usageRefresh: async () => {
+    refreshes++;
+    if (refreshes === 1) throw new Error('synthetic refresh failure');
+    return null;
+  } });
+  assert.deepEqual(await pokeProvider('claude'), { provider: 'claude', result: 'Ok' });
+  assert.equal(refreshes, 1);
+  assert.deepEqual(await pokeProvider('codex', { force: true }), { provider: 'codex', result: 'Ok' });
+  assert.equal(refreshes, 1);
+  assert.equal(calls.length, 2);
+});
+
+test('ordered telemetry/save/event effects continue after both persistence failures', async () => {
+  const localBus = new EventEmitter();
+  const order = [];
+  localBus.on('window-anchor', () => order.push('emit_snapshot'));
+  const storage = {
+    ...modelBackend,
+    windowAnchorTelemetry: async () => { order.push('append_telemetry'); throw new Error('telemetry denied'); },
+    windowAnchorSave: async () => { order.push('save_state'); throw new Error('state denied'); },
+  };
+  await init({ bus: localBus, storage, usageRefresh: async () => {
+    const usage = documentFor('claude', { pctUsed: 1, started: true, resetsAt: new Date(fakeNow + HOUR).toISOString() });
+    localBus.emit('usage', usage);
+    return usage;
+  } });
+  assert.deepEqual(await pokeProvider('claude'), { provider: 'claude', result: 'Skipped' });
+  assert.deepEqual(order.slice(-3), ['append_telemetry', 'save_state', 'emit_snapshot']);
+});
+
+test('ordinary snapshot and policy requests progress while manual one-shot is pending', async () => {
+  const spawnStarted = deferred();
+  const spawnResult = deferred();
+  calls.length = 0;
+  await init({ spawn: (file, args, opts) => {
+    calls.push({ file, args, opts });
+    spawnStarted.resolve();
+    return spawnResult.promise;
+  } });
+  const manual = pokeProvider('claude', { force: true });
   try {
-    emitUsage('claude', { pctUsed: 0, resetsAt });
-    assert.equal(events.length, 0);
-    assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, resetsAt + 5000);
+    await waitForSave(spawnStarted.promise, 'manual one-shot spawn');
+    const resetsAt = fakeNow + HOUR;
+    await emitUsage('codex', { pctUsed: 0, started: true, resetsAt: new Date(resetsAt).toISOString() });
+    assert.equal((await snapshotWindowAnchor()).codex.nextAnchorAt, resetsAt + 5000);
+    spawnResult.resolve({ stdout: JSON.stringify({ result: 'ok', usage: { input_tokens: 1, output_tokens: 1 } }) });
+    assert.deepEqual(await waitForSave(manual, 'manual poke completion'), { provider: 'claude', result: 'Ok' });
   } finally {
-    bus.off('window-anchor', onState);
+    spawnResult.resolve({ stdout: JSON.stringify({ result: 'ok', usage: {} }) });
+    await init({ enabled: '' });
   }
 });
 
-test('a successful read with no plan window clears a stale timer but stays enabled', () => {
-  init();
-  emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow + 10 * HOUR });
-  assert.notEqual(snapshotWindowAnchor().claude.nextAnchorAt, null);
-
-  bus.emit('usage', { claude: { ok: true, source: 'claude', session: null } });
-  const updated = snapshotWindowAnchor().claude;
-  assert.equal(updated.enabled, true);
-  assert.equal(updated.nextAnchorAt, null);
-});
-
-test('WINDOW_ANCHOR provider list drives enablement, overriding persisted state', () => {
-  init({ enabled: ' Codex , bogus' });
-  assert.equal(snapshotWindowAnchor().claude.enabled, false);
-  assert.equal(snapshotWindowAnchor().codex.enabled, true);
-  init({ enabled: undefined });
-  assert.equal(snapshotWindowAnchor().codex.enabled, false);
-  init();
-});
-
-test('expiry poke: pctUsed===0 pokes the cheap route with headless + effort flags', async () => {
-  const before = calls.length;
-  emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow - HOUR });
-  await until(() => snapshotWindowAnchor().claude.lastResult === 'Ok');
-  emitUsage('codex', { pctUsed: 0, resetsAt: fakeNow - HOUR });
-  await until(() => snapshotWindowAnchor().codex.lastResult === 'Ok');
-
-  const cla = calls[before];
-  assert.equal(cla.file, CLAUDE_BIN);
-  assert.equal(cla.args[0], '-p');
-  assert.equal(cla.args[1], 'ok');
-  assert.deepEqual(cla.args.slice(2), [
-    '--model', 'haiku',
-    '--output-format', 'json',
-    '--no-session-persistence',
-    '--safe-mode',
-    '--tools', '',
-    '--system-prompt', 'Reply exactly: ok',
-    '--effort', 'low',
-  ]);
-  assert.equal(cla.opts.timeout, 90_000);
-
-  const codex = calls[before + 1];
-  assert.equal(codex.file, CODEX_BIN);
-  assert.equal(codex.args[0], 'exec');
-  assert.deepEqual(codex.args.slice(1), [
-    '-m', 'gpt-6-luna',
-    '-s', 'read-only',
-    '--skip-git-repo-check',
-    '--ephemeral',
-    '-C', STATE_DIR,
-    '-o', codex.args[codex.args.indexOf('-o') + 1],
-    '--ignore-user-config',
-    '--ignore-rules',
-    '--json',
-    '-c', 'model_reasoning_effort=none',
-    'ok',
-  ]);
-  assert.equal(codex.opts.timeout, 90_000);
-
-  const s = snapshotWindowAnchor();
-  assert.equal(s.claude.lastAnchorAt, fakeNow);
-  assert.equal(s.codex.lastResult, 'Ok');
-  assert.equal(s.claude.nextAnchorAt, null);
-
-  const records = readFileSync(join(process.env.USAGE_REPORT_STATE, 'window-anchor-runs.jsonl'), 'utf8')
-    .trim().split('\n').map((line) => JSON.parse(line));
-  assert.deepEqual(records.findLast((r) => r.provider === 'claude').usage, { input_tokens: 3, output_tokens: 1 });
-  assert.deepEqual(records.findLast((r) => r.provider === 'codex').usage, { input_tokens: 12, output_tokens: 1 });
-});
-
-test('skipped: an expired window with pctUsed>0 stands down without a poke', async () => {
-  const before = calls.length;
-  emitUsage('claude', { pctUsed: 40, resetsAt: fakeNow - HOUR });
-  await until(() => snapshotWindowAnchor().claude.lastResult === 'Skipped');
-  assert.equal(calls.length, before);
-  assert.equal(snapshotWindowAnchor().claude.lastError, null);
-});
-
-test('dedupe: a second update for the same expired window does not re-poke', () => {
-  const before = calls.length;
-  emitUsage('codex', { pctUsed: 0, resetsAt: fakeNow - HOUR }); // same window as the poke test
-  assert.equal(calls.length, before);
-  assert.equal(snapshotWindowAnchor().codex.lastResult, 'Ok');
-});
-
-test('persistence: state file written and reloaded on re-init', async () => {
-  const file = join(STATE_DIR, 'window-anchor.json');
-  assert.equal(existsSync(file), true);
-  const saved = JSON.parse(readFileSync(file, 'utf8'));
-  assert.equal(saved.codex.enabled, true);
-  assert.equal(saved.codex.lastResult, 'Ok');
-  assert.equal(saved.claude.enabled, true);
-  assert.equal(saved.claude.lastResult, 'Skipped');
-
-  const freshCalls = [];
-  init({ enabled: 'codex', spawn: (file2, args) => { freshCalls.push({ file: file2, args }); return Promise.resolve({ stdout: '{}' }); } });
-  const s = snapshotWindowAnchor();
-  assert.equal(s.claude.enabled, false);
-  assert.equal(s.codex.enabled, true);
-  assert.equal(s.codex.lastResult, 'Ok');
-});
-
-test('timer fire: an armed timer pokes at resetsAt+5000', async () => {
-  init(); // back to the recording fakeSpawn (persistence test's re-init swapped it)
-  const before = calls.length;
-  emitUsage('claude', { pctUsed: 0, resetsAt: fakeNow + 100 }); // arms a real ~5.1s timer
-  assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, fakeNow + 100 + 5000);
-  fakeNow += 101;
-  await until(() => calls.length > before, 8000);
-  assert.equal(snapshotWindowAnchor().claude.lastResult, 'Ok');
-  assert.equal(snapshotWindowAnchor().claude.nextAnchorAt, null);
-});
-
-test('routes: GET shape, poke route 400 on bad provider', async () => {
-  init({ enabled: '' });
+test('test-only /api route retains its known prefix mismatch and snapshot body', async () => {
+  await init({ enabled: '' });
   const Fastify = (await import('fastify')).default;
   const app = Fastify();
-  // Same handler shapes as index.mjs's /api/window-anchor routes.
   app.get('/api/window-anchor', async () => snapshotWindowAnchor());
-  app.post('/api/window-anchor/poke', async (req, reply) => {
-    try { return { ok: true, ...(await pokeProvider(req.body?.provider, { force: req.body?.force === true })) }; }
-    catch (e) { return reply.code(e.persistFailure ? 500 : 400).send({ ok: false, error: e.message }); }
+  app.post('/api/window-anchor/poke', async (request, reply) => {
+    try { return { ok: true, ...(await pokeProvider(request.body?.provider, { force: request.body?.force === true })) }; }
+    catch (error) { return reply.code(400).send({ ok: false, error: error.message }); }
   });
-
-  const get = await app.inject({ method: 'GET', url: '/api/window-anchor' });
-  assert.equal(get.statusCode, 200);
-  const body = JSON.parse(get.body);
-  for (const p of ['claude', 'codex']) {
-    for (const k of ['enabled', 'nextAnchorAt', 'lastAnchorAt', 'lastResult', 'lastError']) {
-      assert.ok(k in body[p], `${p}.${k} present`);
-    }
+  const response = await app.inject({ method: 'GET', url: '/api/window-anchor' });
+  assert.equal(response.statusCode, 200);
+  const body = JSON.parse(response.body);
+  for (const provider of ['claude', 'codex']) {
+    for (const field of ['enabled', 'nextAnchorAt', 'lastAnchorAt', 'lastResult', 'lastError']) assert.ok(field in body[provider]);
   }
-
-  emitUsage('claude', { pctUsed: 1, resetsAt: fakeNow + HOUR });
-
-  const bad = await app.inject({ method: 'POST', url: '/api/window-anchor/poke', payload: { provider: 'ollama' } });
-  assert.equal(bad.statusCode, 400);
-  assert.equal(JSON.parse(bad.body).ok, false);
-
-  const poke = await app.inject({ method: 'POST', url: '/api/window-anchor/poke', payload: { provider: 'claude' } });
-  assert.equal(poke.statusCode, 200);
-  assert.deepEqual(JSON.parse(poke.body), { ok: true, provider: 'claude', result: 'Skipped' });
-
-  const forced = await app.inject({ method: 'POST', url: '/api/window-anchor/poke', payload: { provider: 'claude', force: true } });
-  assert.equal(forced.statusCode, 200);
-  assert.deepEqual(JSON.parse(forced.body), { ok: true, provider: 'claude', result: 'Ok' });
+  const invalid = await app.inject({ method: 'POST', url: '/api/window-anchor/poke', payload: { provider: 'ollama' } });
+  assert.equal(invalid.statusCode, 400);
+  assert.equal(JSON.parse(invalid.body).ok, false);
   await app.close();
 });
 
-test('manual poke refreshes usage, skips an active window, and force bypasses the guard', async () => {
-  let refreshes = 0;
-  init({
-    usageRefresh: async ({ sources }) => {
-      refreshes++;
-      assert.deepEqual(sources, ['codex']);
-      bus.emit('usage', {
-        codex: { ok: true, source: 'codex', session: { pctUsed: 1, resetsAt: new Date(fakeNow + HOUR).toISOString() } },
-      });
+test('WebSocket waits for the Rust snapshot and flushes live and direct frames in order', async () => {
+  const { attachPtyWs } = await import('./pty-ws.mjs');
+  const pendingSnapshots = [];
+  const snapshot = { claude: { enabled: true }, codex: { enabled: false } };
+  const storage = {
+    windowAnchorRequest: async (op) => {
+      if (op === 'window_anchor_init') return { snapshot, effects: [] };
+      if (op === 'window_anchor_snapshot') return new Promise((resolve) => pendingSnapshots.push(() => resolve({ snapshot })));
+      throw new Error(`unexpected window-anchor operation: ${op}`);
     },
-  });
-  const before = calls.length;
+  };
+  await init({ storage, enabled: 'claude,codex' });
 
-  assert.deepEqual(await pokeProvider('codex'), { provider: 'codex', result: 'Skipped' });
-  assert.equal(refreshes, 1);
-  assert.equal(calls.length, before);
+  const wss = new EventEmitter();
+  wss.clients = new Set();
+  const sockets = [];
+  const makeSocket = () => {
+    const ws = new EventEmitter();
+    ws.OPEN = 1;
+    ws.readyState = ws.OPEN;
+    ws.sent = [];
+    ws.closed = [];
+    ws.send = (payload) => ws.sent.push(JSON.parse(payload));
+    ws.close = (code, reason) => {
+      ws.closed.push({ code, reason });
+      ws.readyState = 3;
+      ws.emit('close');
+    };
+    sockets.push(ws);
+    wss.clients.add(ws);
+    wss.emit('connection', ws, { headers: { origin: 'http://localhost' }, url: '/ws' });
+    return ws;
+  };
+  attachPtyWs(wss, null);
 
-  assert.deepEqual(await pokeProvider('codex', { force: true }), { provider: 'codex', result: 'Ok' });
-  assert.equal(refreshes, 1);
-  assert.equal(calls.length, before + 1);
+  const ws = makeSocket();
+  const sevenFramesSent = deferred();
+  ws.send = (payload) => {
+    ws.sent.push(JSON.parse(payload));
+    if (ws.sent.length === 7) sevenFramesSent.resolve();
+  };
+  assert.equal(ws.sent.length, 0, 'initial frames wait for the correlated Rust snapshot');
+  ws.emit('message', Buffer.from(JSON.stringify({ t: 'txmeta', id: 'missing-session' })));
+  bus.emit('status', { id: 'live-session', status: 'running' });
+  assert.equal(ws.sent.length, 0, 'direct replies and bus events are both buffered');
+  pendingSnapshots[0]();
+  await waitForSave(sevenFramesSent.promise, 'five initial and two queued WebSocket frames');
+  assert.deepEqual(ws.sent.slice(0, 5).map((frame) => frame.t), ['list', 'tasks', 'crons', 'background', 'window-anchor']);
+  assert.deepEqual(ws.sent.slice(5).map((frame) => frame.t), ['txmeta', 'status']);
+  assert.deepEqual(ws.sent[4], { t: 'window-anchor', anchor: snapshot });
+
+  const frameLimited = makeSocket();
+  for (let i = 0; i < 257; i++) bus.emit('usage', { i });
+  assert.deepEqual(frameLimited.closed, [{ code: 1013, reason: 'initial snapshot backlog exceeded' }]);
+  assert.equal(frameLimited.initialFrames.length, 0, 'overflow clears the queued frames');
+  pendingSnapshots[1]();
+  await Promise.resolve();
+  assert.equal(frameLimited.sent.length, 0);
+
+  const byteLimited = makeSocket();
+  bus.emit('usage', 'é'.repeat(524300));
+  assert.deepEqual(byteLimited.closed, [{ code: 1013, reason: 'initial snapshot backlog exceeded' }]);
+  pendingSnapshots[2]();
+  await Promise.resolve();
+  assert.equal(byteLimited.sent.length, 0);
+
+  const closed = makeSocket();
+  bus.emit('usage', { queued: true });
+  closed.close(1000, 'client closed');
+  assert.equal(closed.initialFrames.length, 0, 'close clears pending frames');
+  pendingSnapshots[3]();
+  await Promise.resolve();
+  assert.equal(closed.sent.length, 0, 'a closed socket receives no initial frames');
+  for (const socket of sockets) if (socket.readyState === socket.OPEN) socket.close(1000, 'test complete');
+  await init({ enabled: '' });
 });
 
-// A Codex window that has not begun: usage.mjs strips the sliding reset
-// projection and flags started:false, so there is nothing to arm against. The
-// anchor must poke immediately instead of sitting on a timer that never fires,
-// and must not poke again until the window it started has lapsed.
-test('unstarted: pokes at once, once per window span', async () => {
-  fakeNow += 24 * HOUR; // past any anchor an earlier test left on codex
-  init();
-  calls.length = 0;
-  const unstarted = () => bus.emit('usage', {
-    ollama: null,
-    codex: { ok: true, source: 'codex', session: { pctUsed: 0, resetsAt: null, started: false } },
+test('manual poke does not wait for unrelated later persistence effects', async () => {
+  const ownSaveStarted = deferred();
+  const releaseOwnSave = deferred();
+  const unrelatedSaveStarted = deferred();
+  const releaseUnrelatedSave = deferred();
+  let snapshotReads = 0;
+  const snapshot = { claude: { lastResult: 'Ok' }, codex: {} };
+  const storage = {
+    windowAnchorSave: async (_path, state) => {
+      if (state?.kind === 'manual-action') {
+        ownSaveStarted.resolve();
+        return releaseOwnSave.promise;
+      }
+      unrelatedSaveStarted.resolve();
+      return releaseUnrelatedSave.promise;
+    },
+    windowAnchorRequest: async (op) => {
+      if (op === 'window_anchor_init') return { snapshot, effects: [] };
+      if (op === 'window_anchor_poke') return {
+        snapshot,
+        result: { result: 'Ok' },
+        effects: [{ type: 'run_action', action_id: 'manual-action', provider: 'claude', trigger: 'manual', force: true }],
+      };
+      if (op === 'window_anchor_usage') return { snapshot, effects: [{ type: 'save_state', state: {} }] };
+      if (op === 'window_anchor_action_result') {
+        return { snapshot, effects: [{ type: 'save_state', state: { kind: 'manual-action' } }] };
+      }
+      if (op === 'window_anchor_snapshot') {
+        snapshotReads++;
+        return { snapshot };
+      }
+      throw new Error(`unexpected window-anchor operation: ${op}`);
+    },
+  };
+  await init({ storage, enabled: 'claude,codex' });
+
+  let manualSettled = false;
+  const manual = pokeProvider('claude', { force: true }).then((result) => {
+    manualSettled = true;
+    return result;
   });
-
-  unstarted();
-  await until(() => calls.length === 1);
-  assert.equal(snapshotWindowAnchor().codex.lastResult, 'Ok');
-  assert.equal(snapshotWindowAnchor().codex.nextAnchorAt, null);
-
-  // Still unstarted on the next poll (the API lags the turn): no second poke.
-  fakeNow += 60_000;
-  unstarted();
-  await new Promise((r) => setTimeout(r, 20));
-  assert.equal(calls.length, 1);
-
-  // A window later the anchor it placed has lapsed — poke again.
-  fakeNow += 5 * HOUR;
-  unstarted();
-  await until(() => calls.length === 2);
+  try {
+    await waitForSave(ownSaveStarted.promise, 'manual action-result save');
+    assert.equal(manualSettled, false, 'manual poke waits for its own action-result persistence');
+    const unrelated = emitUsage('codex', { pctUsed: 25, started: true, resetsAt: new Date(fakeNow - HOUR).toISOString() });
+    assert.equal(snapshotReads, 1, 'emitUsage helper FIFO flush read');
+    releaseOwnSave.resolve();
+    const result = await manual;
+    assert.deepEqual(result, { provider: 'claude', result: 'Ok' });
+    assert.equal(snapshotReads, 2, 'helper FIFO flush plus manual final snapshot');
+    await waitForSave(unrelatedSaveStarted.promise, 'unrelated usage save');
+    assert.equal(manualSettled, true, 'manual poke completes while a later usage save is pending');
+    releaseUnrelatedSave.resolve();
+    await unrelated;
+  } finally {
+    releaseOwnSave.resolve();
+    releaseUnrelatedSave.resolve();
+    await init({ enabled: '' });
+  }
 });

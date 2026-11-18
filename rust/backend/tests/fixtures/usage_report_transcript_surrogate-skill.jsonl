@@ -1,0 +1,2 @@
+{"type":"user","message":{"content":"\ud83d<command-name>/foo</command-name>"}}
+{"type":"user","message":{"content":[{"type":"text","text":"\ud83d<command-name>/bar</command-name>"}]}}

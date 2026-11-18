@@ -5,8 +5,7 @@
 // (resolve-then-containment against known roots), not a bare path-segment check
 // (which can't stop a write to ANY */.claude/hooks/ on the machine — hooks are
 // auto-executed by Claude). Roots are an independent FS-persisted list under STATE_DIR.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, sep, resolve, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
@@ -40,58 +39,34 @@ function guard(path) {
   return inRoot ? abs : null;
 }
 
-// Bounded recursive walk of <cwd>/.claude/hooks — files only, sorted by rel.
-// Missing dir → []. Cap protects the daemon from a pathological tree.
-export function listHooks(cwd, cap = 2000) {
-  const dir = join(cwd, '.claude', 'hooks');
-  if (!existsSync(dir)) return [];
-  const out = [];
-  const stack = [dir];
-  while (stack.length && out.length < cap) {
-    const d = stack.pop();
-    let ents;
-    try { ents = readdirSync(d, { withFileTypes: true }); } catch { continue; }
-    for (const e of ents) {
-      const p = join(d, e.name);
-      if (e.isDirectory()) stack.push(p);
-      else if (e.isFile()) out.push({ path: p, rel: p.slice(dir.length + 1), name: e.name });
-    }
-  }
-  return out.sort((a, b) => a.rel.localeCompare(b.rel));
+// Scan pair handed to Rust: the verbatim client cwd + its <cwd>/.claude/hooks
+// dir (joined here, unresolved, exactly as the Node walk did).
+const scan = (cwd) => ({ root: cwd, dir: join(cwd, '.claude', 'hooks') });
+
+// Bounded recursive walk of each <cwd>/.claude/hooks (Rust hooks_read.rs) —
+// files only, sorted by rel per cwd. Missing dir → no files.
+export function listHookGroups(roots, backend) {
+  return backend.hooksList((roots || []).map(scan));
 }
 
-// Search hook file content across roots. First matching line per file →
+// Search hook file content across roots (Rust). First matching line per file →
 // { cwd, path, rel, line, text } (trimmed snippet). Dedup by path, sorted by path.
-export function searchHooks(roots, q) {
-  const needle = String(q || '').toLowerCase();
+export async function searchHooks(roots, q, backend) {
+  const needle = String(q || '');
   if (!needle) return [];
-  const seen = new Set();
-  const results = [];
-  for (const cwd of roots || []) {
-    for (const { path, rel } of listHooks(cwd)) {
-      if (seen.has(path)) continue;
-      seen.add(path);
-      let content;
-      try { content = readFileSync(path, 'utf8'); } catch { continue; }
-      const lines = content.split('\n');
-      const i = lines.findIndex((l) => l.toLowerCase().includes(needle));
-      if (i < 0) continue;
-      results.push({ cwd, path, rel, line: i + 1, text: lines[i].trim().slice(0, 200) });
-    }
-  }
-  return results.sort((a, b) => a.path.localeCompare(b.path));
+  return backend.hooksSearch([...(roots || [])].map(scan), needle);
 }
 
-export function readHook(path) {
+// Node keeps the root guard; the read itself runs in Rust.
+export async function readHook(path, backend) {
   const abs = guard(path);
   if (!abs) return { path, exists: false, error: 'bad path' };
-  const exists = existsSync(abs);
-  return { path: abs, exists, content: exists ? readFileSync(abs, 'utf8') : '', mtime: exists ? statSync(abs).mtimeMs : 0 };
+  return { path: abs, ...await backend.hooksRead(abs) };
 }
 
 // Write raw content back with a backup (mirror writeConfig). No JSON
 // validation — hook files are scripts, not JSON.
-export async function writeHook(path, content, mtime, force) {
+export async function writeHook(path, content, mtime, force, backend, logger) {
   const abs = guard(path);
   if (!abs) return { ok: false, error: 'bad path' };
   try {
@@ -104,8 +79,19 @@ export async function writeHook(path, content, mtime, force) {
     if (mtime != null && !force && existsSync(abs) && Math.abs(statSync(abs).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    await writeFile(abs, content);
-    return { ok: true, backup, path: abs, mtime: statSync(abs).mtimeMs };
+    if (typeof content !== 'string') return { ok: false, error: 'content must be a string' };
+    let result;
+    try { result = await backend.hooksWrite(abs, content, mtime, force); }
+    catch (e) {
+      logger?.error({ err: e.message }, 'Rust Hooks write backend failed');
+      return { ok: false, error: 'hook write failed' };
+    }
+    if (!result.ok) {
+      if (result.error === 'changed on disk') return result;
+      logger?.error({ err: result.error }, 'Rust Hooks write backend failed');
+      return { ok: false, error: 'hook write failed' };
+    }
+    return { ...result, backup, path: abs };
   } catch (e) {
     return { ok: false, error: e.message };
   }

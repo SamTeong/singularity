@@ -4,11 +4,11 @@
 // Schema: { base, above_200k, long_context_threshold, default_key } (rates are
 // [input, output, cacheRead, cacheWrite] $/MTok). `base`'s key order is match
 // order (first key that's a substring of the model id wins).
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { USAGE_SKILL_STATE } from './app-dir.mjs';
 
-const PRICING_JSON = join(USAGE_SKILL_STATE, 'pricing.json');
+const PRICING_JSON = resolve(USAGE_SKILL_STATE, 'pricing.json');
 const MAX_KEY = 64;
 const DEFAULT_THRESHOLD = 200000;
 
@@ -71,16 +71,29 @@ function normalize(doc) {
   };
 }
 
-// GET /api/models/prices
-export function getModelPrices() {
+// Kept for synchronous cost estimation in usage-history.mjs. The public GET
+// route reads and normalizes the same file through the Rust backend.
+export function getModelPricesForUsageHistory() {
   return normalize(readPricingJson());
 }
 
-// PUT /api/models/prices — validate + write pricing.json (2-space JSON) in
-// full; the caller always sends the whole doc, so a plain overwrite is safe.
-export function putModelPrices(body) {
-  const doc = validate(body);
-  mkdirSync(USAGE_SKILL_STATE, { recursive: true });
-  writeFileSync(PRICING_JSON, JSON.stringify(doc, null, 2));
-  return doc;
+export function getModelPricesPath() {
+  return PRICING_JSON;
+}
+
+export function validateModelPrices(body) { return validate(body); }
+
+// Shared by the production route and fixture so the configured destination,
+// validation, serialization, and response timing use one implementation.
+export function createModelPricesPutHandler(writePricing, configuredPath) {
+  return async (req, reply) => {
+    try {
+      const doc = validateModelPrices(req.body);
+      await writePricing(configuredPath, JSON.stringify(doc, null, 2));
+      return doc;
+    } catch (error) {
+      reply.code(400);
+      return { error: error.message };
+    }
+  };
 }

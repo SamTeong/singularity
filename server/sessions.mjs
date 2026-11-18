@@ -1,808 +1,164 @@
-// Session history backend: enumerate, read, and search the Claude Code
-// transcripts at <root>/<project>/<id>.jsonl (root is FS-persisted and client-
-// selectable, default ~/.claude/projects — mirrors memory.mjs's root pattern).
-// Each .jsonl is one session; `project` is the encoded-cwd dirname (we pull
-// the real cwd out of the events themselves rather than decoding the lossy
-// dirname). The chat module reuses readSession()/sessionText() to build LLM
-// context.
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
-import { readdir, stat, readFile, open } from 'node:fs/promises';
-import { StringDecoder } from 'node:string_decoder';
-import { join, resolve, sep, normalize, basename, relative } from 'node:path';
+// Session service adapter. Transcript parsing, discovery, and file access live
+// in the Rust backend; Node retains route-facing helpers and local path guards.
+import { readFileSync } from 'node:fs';
+import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
-import { encodeCwd } from './agents.mjs';
-import { claudeIdToAlias } from './models.mjs';
-import { getModels } from './model-store.mjs';
 import { STATE_DIR } from './app-dir.mjs';
 import { CODEX_HOME } from './usage.mjs';
+import { getModels } from './model-store.mjs';
 
 const DEFAULT_ROOT = join(homedir(), '.claude', 'projects');
+const ROOT_FILE = join(STATE_DIR, 'sessions-root.json');
+const TEXT_CAP = 80000;
+let transcriptBackend;
 
-// The claude bin logs an ollama model on assistant events with its `:tag`
-// stripped (glm-5.2:cloud -> glm-5.2). That stripped name is what readSession()
-// would otherwise return as meta.model, and what the Transcripts Resume button
-// prefills — but ollama rejects it at spawn. Restore the full preset when the
-// stripped base uniquely matches exactly one ollama entry in the model store.
-// Two entries sharing a base (glm-5.3:cloud + glm-5.3:local) decline to guess.
-// No match → pass through
-// (free-text model, a future preset, or a claude alias/id unchanged).
-function restoreOllamaTag(model) {
-  if (!model || model.includes(':')) return model;
-  const hits = getModels().models.filter((m) => m.group === 'ollama' && m.id.split(':')[0] === model);
-  return hits.length === 1 ? hits[0].id : model;
-}
-const PEEK_BYTES = 65536;     // list only peeks the head — full MB reads are deferred to open
-const SCAN_CHUNK = 65536;     // codex review scan reads this much per step, stopping at the first user record
-const RESULT_CAP = 200;
-const TOOL_TRUNC = 300;       // tool_use inputs / tool_result bodies in the view payload
-const TEXT_CAP = 80000;       // sessionText head+tail cap (chars)
-const RUNNING_MS = 30000;     // external-session recency heuristic: mtime within this window counts as recent activity
-const SCAN_CONCURRENCY = 16;
-const CLAUDE_META_CACHE_CAP = 20000;
-
-// ---- Codex CLI transcripts (~/.codex/sessions/**/rollout-*.jsonl) ----
-// Codex stores one JSONL per thread under CODEX_HOME/sessions/ (and
-// archived_sessions/). The filename embeds the thread uuid (rollout-<ts>-<uuid>.jsonl);
-// we use it as the row id. session_meta carries the root session_id + cwd.
-const CODEX_FILE_CAP = 5000;
-const CODEX_THREAD_RE = /-([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$/;
-const CODEX_REVIEW_PREFIX = 'the following is the codex agent history whose request action you are assessing.';
-const isCodexReview = (text) => typeof text === 'string' && text.trimStart().toLowerCase().startsWith(CODEX_REVIEW_PREFIX);
-
-function codexThreadId(filename) {
-  const base = filename.slice(0, -6); // strip .jsonl
-  const m = CODEX_THREAD_RE.exec(base);
-  return m ? m[1] : base;
+export function setTranscriptBackend(backend) {
+  transcriptBackend = backend;
 }
 
-const codexContentText = (content) => (content || []).map((part) => part.text || '').join('');
-const codexOutputText = (output) => Array.isArray(output) ? codexContentText(output) : output || '';
-const isCodexContextText = (text) => typeof text === 'string' && (
-  /^# AGENTS\.md instructions\s*<INSTRUCTIONS>[\s\S]*<\/INSTRUCTIONS>$/.test(text.trim())
-  || /^<environment_context>[\s\S]*<\/environment_context>$/.test(text.trim())
-  || /^<recommended_plugins>[\s\S]*<\/recommended_plugins>$/.test(text.trim())
-  || /^<(user_instructions|turn_aborted)>[\s\S]*<\/\1>$/.test(text.trim())
-);
-const codexUserText = (content) => codexContentText((content || []).filter((part) => !isCodexContextText(part.text)));
+async function inputs() {
+  return {
+    state_dir: STATE_DIR,
+    claude_home: homedir(),
+    codex_home: CODEX_HOME,
+    model_catalog: (await getModels()).models,
+  };
+}
 
-// Some rollouts contain both a response_item user message and an event_msg
-// user_message for the same turn. Prefer the response_item and consume only
-// the matching number of event duplicates, preserving repeated prompts.
-function codexItemUserCounts(events) {
-  const counts = new Map();
-  for (const e of events) {
-    const p = e?.payload;
-    if (e?.type !== 'response_item' || p?.type !== 'message' || p.role !== 'user') continue;
-    const text = codexUserText(p.content);
-    if (text) counts.set(text, (counts.get(text) || 0) + 1);
+function backend() {
+  if (!transcriptBackend) throw new Error('Rust transcript backend is not configured');
+  return transcriptBackend;
+}
+
+function unwrap(payload) {
+  if (payload?.error) {
+    const error = new Error(payload.error);
+    error.code = payload.code;
+    throw error;
   }
-  return counts;
+  return payload;
 }
 
-function isDuplicateCodexUserEvent(text, counts) {
-  const count = counts.get(text) || 0;
-  if (!count) return false;
-  counts.set(text, count - 1);
-  return true;
-}
-
-function firstCodexUserText(events) {
-  for (const e of events) {
-    const p = e?.payload;
-    if (e?.type === 'response_item' && p?.type === 'message' && p.role === 'user') {
-      const text = codexUserText(p.content);
-      if (text) return text;
-    }
-    if (e?.type === 'event_msg' && p?.type === 'user_message' && (p.message || p.text)) return p.message || p.text;
-  }
-  return null;
-}
-
-// firstCodexUserText over the whole rollout, but read in chunks and stopped at
-// the first deciding record. Same /\r?\n/ split + parseEvents, so the answer
-// matches a full read. A deciding record must carry a "user" role/type string
-// (literal or \u-escaped), so other lines skip JSON.parse.
-async function scanFirstCodexUserText(p) {
-  const fh = await open(p, 'r');
+function savedRoot() {
   try {
-    const buf = Buffer.alloc(SCAN_CHUNK);
-    const dec = new StringDecoder('utf8');
-    let rest = '';
-    for (;;) {
-      const { bytesRead } = await fh.read(buf, 0, SCAN_CHUNK, null);
-      const chunk = bytesRead ? dec.write(buf.subarray(0, bytesRead)) : dec.end();
-      if (bytesRead && !chunk.includes('\n')) { rest += chunk; continue; } // huge single line: avoid re-splitting
-      const lines = (rest + chunk).split(/\r?\n/);
-      rest = bytesRead ? lines.pop() : '';
-      const text = firstCodexUserText(parseEvents(lines.filter((l) => l.includes('user') || l.includes('\\u')).join('\n')));
-      if (text || !bytesRead) return text;
-    }
-  } finally { await fh.close(); }
+    const root = JSON.parse(readFileSync(ROOT_FILE, 'utf8')).root;
+    return typeof root === 'string' && root ? root : '~/.claude/projects';
+  } catch { return '~/.claude/projects'; }
 }
 
-// Reduce a peek's events to {cwd, sessionId, threadSource, title}. session_meta gives cwd +
-// session_id; the first user message gives the title (fallback: Codex <uuid>).
-function peekCodexMeta(events) {
-  let cwd = null, sessionId = null, threadSource = null, title = null, notReview = false;
-  for (const e of events) {
-    if (e.type === 'session_meta' && e.payload) {
-      // Reviews are always guardian-source; cli/exec/vscode and thread_spawn never are, so skip their full scan.
-      // thread_source is unsafe here (58 reviews carry "subagent"); other strings and unknown shapes stay scanned.
-      const src = e.payload.source;
-      if (['cli', 'exec', 'vscode'].includes(src) || src?.subagent?.thread_spawn) notReview = true;
-      if (!sessionId) sessionId = e.payload.session_id || e.payload.id || null;
-      if (!cwd && e.payload.cwd) cwd = e.payload.cwd;
-      if (!threadSource) threadSource = e.payload.thread_source || null;
-    }
-    if (!title && e.type === 'event_msg' && e.payload?.type === 'user_message' && e.payload.message) {
-      title = e.payload.message;
-    }
-    if (!title && e.type === 'response_item' && e.payload?.type === 'message' && e.payload.role === 'user') {
-      title = codexUserText(e.payload.content) || null;
-    }
-  }
-  return { cwd, sessionId, threadSource, title, notReview };
+export async function getSessionsRoot() {
+  return unwrap(await backend().transcriptRootGet(await inputs()));
 }
 
-// Bounded recursive walk collecting rollout-*.jsonl under base. Stops at
-// CODEX_FILE_CAP files (logs once) — guards against an exploded sessions tree.
-async function listCodexRollouts(base, acc) {
-  if (acc.length >= CODEX_FILE_CAP) return;
-  let entries;
-  try { entries = await readdir(base, { withFileTypes: true }); } catch { return; }
-  for (const ent of entries) {
-    if (acc.length >= CODEX_FILE_CAP) return;
-    const p = join(base, ent.name);
-    if (ent.isDirectory()) await listCodexRollouts(p, acc);
-    else if (ent.name.startsWith('rollout-') && ent.name.endsWith('.jsonl')) acc.push(p);
-  }
+export async function setSessionsRoot(root) {
+  if (typeof root !== 'string' || !root) return { ok: false, error: 'bad root' };
+  try { return unwrap(await backend().transcriptRootSet(await inputs(), root)); }
+  catch (error) { return { ok: false, error: error.message }; }
 }
 
-const codexMetaCache = new Map(); // path -> { mtimeMs, size, cwd, sessionId, threadSource, title }
-// Callers pass `cap`, but codex rollouts have never been capped — the param was
-// accepted and ignored. Dropped from the signature rather than left as dead
-// weight; wire it up here if the rollout count ever needs bounding.
-async function listCodexSessions({ isLive = () => false, now = Date.now(), hideReviews = false } = {}) {
-  if (!existsSync(CODEX_HOME)) return [];
-  const files = [];
-  for (const sub of ['sessions', 'archived_sessions']) await listCodexRollouts(join(CODEX_HOME, sub), files);
-  if (files.length >= CODEX_FILE_CAP) console.error('[codex] hit file cap, truncating');
-  const out = [];
-  const threadSources = new Map();
-  const rows = await mapConcurrent(files, async (p) => {
-    let st;
-    try { st = await stat(p); } catch { return null; }
-    const id = codexThreadId(basename(p));
-    let cwd, sessionId, threadSource, title, review;
-    const hit = codexMetaCache.get(p);
-    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) {
-      ({ cwd, sessionId, threadSource, title, review } = hit);
-    } else {
-      const pk = await peek(p, st);
-      let notReview;
-      ({ cwd, sessionId, threadSource, title, notReview } = peekCodexMeta(parseEvents(pk.head)));
-      review = title ? isCodexReview(title) : (notReview ? false : undefined);
-      // Slice the tail, not the head: a codex thread uuid is time-ordered, so
-      // its first 8 chars are a timestamp prefix shared by every thread started
-      // in the same window — 69 of 246 rollouts here collide on it.
-      if (!title) title = `Codex ${id.slice(-8)}`;
-      codexMetaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, sessionId, threadSource, title, review });
-      if (codexMetaCache.size > CODEX_FILE_CAP) codexMetaCache.delete(codexMetaCache.keys().next().value);
-    }
-    if (hideReviews && review === undefined) {
-      try { review = isCodexReview(await scanFirstCodexUserText(p)); } catch { return null; } // rollout vanished/unreadable since peek
-      const cached = codexMetaCache.get(p);
-      if (cached) cached.review = review;
-    }
-    if (hideReviews && review) return null;
-    threadSources.set(id, threadSource);
-    const processLive = isLive(id, { source: 'codex', cwd });
-    return {
-      id, project: '<codex>', cwd, title, mtime: st.mtimeMs, size: st.size,
-      processLive,
-      activityRecent: (now - st.mtimeMs) < RUNNING_MS,
-      processState: processLive ? 'live' : 'unknown',
-      running: processLive,
-      source: 'codex', sessionId,
-      file: relative(CODEX_HOME, p),
-    };
-  });
-  out.push(...rows.filter(Boolean));
-  const byId = new Map(out.map((row) => [row.id, row]));
-  const roots = out.filter((row) => {
-    const parent = threadSources.get(row.id) === 'subagent' && byId.get(row.sessionId);
-    if (!parent || parent === row) return true;
-    (parent.subagents ??= []).push({ ...row, agentId: row.id });
-    return false;
-  });
-  for (const row of roots) row.subagents?.sort((a, b) => b.mtime - a.mtime);
-  return roots;
+// Synchronous compatibility for stats/history consumers. Rust owns root
+// persistence; this reads only the tiny saved preference, never transcripts.
+export function resolveRoot(raw) {
+  let path = raw || savedRoot();
+  if (path === '~' || path.startsWith('~/') || path.startsWith('~\\')) path = normalize(homedir() + path.slice(1));
+  try { return resolve(path); } catch { return DEFAULT_ROOT; }
 }
 
-// Resolve a codex rollout relpath (stored in the row) to an absolute path,
-// guarded to stay under CODEX_HOME — mirrors pathFor's claude guard.
+export function pathFor(project, id, root) {
+  if (!project || !id || /[\\/]/.test(project)) return null;
+  const nested = /^[^\\/]+\/subagents\/agent-[^\\/]+$/.test(id);
+  if (!nested && /[\\/]/.test(id)) return null;
+  const projects = resolveRoot(root);
+  const path = join(projects, project, `${id}.jsonl`);
+  const rootAbs = resolve(projects);
+  const abs = resolve(path);
+  return abs !== rootAbs && !abs.startsWith(rootAbs + sep) ? null : path;
+}
+
 export function pathForCodex(file) {
   if (!file) return null;
   const base = resolve(CODEX_HOME);
   const abs = resolve(CODEX_HOME, file);
-  if (abs !== base && !abs.startsWith(base + sep)) return null;
-  return abs;
+  return abs !== base && !abs.startsWith(base + sep) ? null : abs;
 }
 
-// Locate a codex rollout by thread uuid (filename trailing UUID). Bounded walk
-// of CODEX_HOME — used as a fallback when the caller has no stored relpath.
-async function findCodexById(id) {
-  if (!id || !existsSync(CODEX_HOME)) return null;
-  const files = [];
-  for (const sub of ['sessions', 'archived_sessions']) await listCodexRollouts(join(CODEX_HOME, sub), files);
-  for (const p of files) if (codexThreadId(basename(p)) === id) return p;
-  return null;
+// Main derives all four liveness fields from the injected `isLive`
+// (`66591a9:server/sessions.mjs:199-205,501-506,557-568`): `running` is the owned
+// live process only and recency stays in `activityRecent`. The Rust sidecar has
+// no agent registry — `transcript_bridge.rs:119,184` passes an empty live-id
+// list, so its `processLive`/`processState` are always the idle values — so the
+// adapter overlays the same contract here. Context shapes match main: root rows
+// `{source, cwd}`, Claude subagent rows `{source: 'claude-subagent'}`.
+// VERIFY: wave4-f3-1
+function updateRunning(row, isLive) {
+  const id = row.agentId ?? row.id;
+  const source = row.source ?? (row.agentId == null ? 'claude' : 'claude-subagent');
+  const live = isLive(id, { source, cwd: row.cwd ?? undefined });
+  row.processLive = live;
+  row.processState = live ? 'live' : 'unknown';
+  row.running = live;
+  for (const child of row.subagents ?? []) updateRunning(child, isLive);
+  return row;
 }
 
-// Parse a codex rollout into the same {ok, meta, messages} shape as readSession.
-// session_meta → meta only; event_msg user_message → user text; response_item
-// message/reasoning/function_call/custom_tool_call → assistant entries.
-// ponytail: codex cost notional, wire stats when needed
-async function readCodexSession(p) {
-  let raw;
-  try {
-    raw = await readFile(p, 'utf8');
-  } catch (e) {
-    // A Codex rollout may disappear after path lookup.
-    if (e?.code === 'ENOENT') return { ok: false, error: 'not found' };
-    throw e;
-  }
-  const events = parseEvents(raw);
-  const duplicateUsers = codexItemUserCounts(events);
-  const messages = [];
-  let cwd = null, sessionId = null, title = null, turns = 0, firstTs = null, lastTs = null, lastModel = null;
-  for (const e of events) {
-    if (!e || typeof e !== 'object') continue;
-    const ts = e.timestamp ?? null;
-    if (ts) { if (!firstTs) firstTs = ts; lastTs = ts; }
-    const typ = e.type;
-    const payload = e.payload || {};
-    if (typ === 'session_meta') {
-      if (!sessionId) sessionId = payload.session_id || payload.id || null;
-      if (!cwd && payload.cwd) cwd = payload.cwd;
-      continue;
-    }
-    if (typ === 'turn_context') { if (payload.model) lastModel = payload.model; continue; }
-    if (typ === 'response_item') {
-      if (payload.type === 'message') {
-        if (payload.role === 'user') {
-          const text = codexUserText(payload.content);
-          if (text) {
-            messages.push({ ts, role: 'user', kind: 'text', text });
-            if (!title) title = text.slice(0, 120);
-          }
-        } else if (payload.role === 'assistant') {
-          turns++;
-          const text = codexContentText(payload.content);
-          if (text) messages.push({ ts, role: 'assistant', kind: 'text', text });
-        }
-      } else if (payload.type === 'reasoning') {
-        const text = [...(payload.summary || []), ...(payload.content || [])].map((c) => c.text || '').join('');
-        if (text) messages.push({ ts, role: 'assistant', kind: 'thinking', text });
-      } else if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
-        const name = payload.name || '?';
-        const args = payload.arguments || payload.input || '';
-        messages.push({ ts, role: 'assistant', kind: 'toolUse', name, text: trunc(args, TOOL_TRUNC) });
-      } else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
-        messages.push({ ts, role: 'user', kind: 'toolResult', text: trunc(codexOutputText(payload.output), TOOL_TRUNC) });
-      } else if (payload.type === 'agent_message') {
-        const text = codexContentText(payload.content);
-        if (text) messages.push({ ts, role: 'assistant', kind: 'text', text: `${payload.author || 'agent'}: ${text}` });
-      }
-      continue;
-    }
-    if (typ === 'event_msg') {
-      if (payload.type === 'user_message') {
-        const text = payload.message || payload.text || '';
-        if (text && !isDuplicateCodexUserEvent(text, duplicateUsers)) {
-          messages.push({ ts, role: 'user', kind: 'text', text });
-          if (!title) title = text.slice(0, 120);
-        }
-      } else if (payload.type === 'mcp_tool_call_end') {
-        const name = payload.invocation?.tool || '?';
-        messages.push({ ts, role: 'assistant', kind: 'toolUse', name, text: name });
-      }
-      // token_count and other event_msg types skipped
-    }
-  }
-  return { ok: true, meta: { cwd, title, turns, firstTs, lastTs, model: lastModel, source: 'codex', sessionId }, messages };
-}
-
-// Codex search: text items from a rollout, cached by (mtime,size) like the
-// claude textCache. Lighter than readCodexSession — text only, no meta.
-const codexTextCache = new Map();
-async function codexTextItems(p) {
-  let st;
-  try { st = await stat(p); } catch { return null; }
-  const hit = codexTextCache.get(p);
-  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.items;
-  let s;
-  try { s = await readCodexForSearch(p); } catch { return null; }
-  codexTextCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, items: s });
-  if (codexTextCache.size > 200) codexTextCache.delete(codexTextCache.keys().next().value);
-  return s;
-}
-async function readCodexForSearch(p) {
-  const events = parseEvents(await readFile(p, 'utf8'));
-  const duplicateUsers = codexItemUserCounts(events);
-  const items = [];
-  let cwd = null;
-  for (const e of events) {
-    if (!e || typeof e !== 'object') continue;
-    if (e.type === 'session_meta' && e.payload && !cwd) cwd = e.payload.cwd || null;
-    const payload = e.payload || {};
-    if (e.type === 'event_msg' && payload.type === 'user_message') {
-      const text = payload.message || payload.text || '';
-      if (text && !isDuplicateCodexUserEvent(text, duplicateUsers)) items.push({ idx: items.length, role: 'user', text, cwd });
-    } else if (e.type === 'response_item') {
-      if (payload.type === 'message' && (payload.role === 'assistant' || payload.role === 'user')) {
-        const text = payload.role === 'user' ? codexUserText(payload.content) : codexContentText(payload.content);
-        if (text) items.push({ idx: items.length, role: payload.role, text, cwd });
-      } else if (payload.type === 'reasoning') {
-        const text = [...(payload.summary || []), ...(payload.content || [])].map((c) => c.text || '').join('');
-        if (text) items.push({ idx: items.length, role: 'assistant', text, cwd });
-      } else if (payload.type === 'function_call' || payload.type === 'custom_tool_call') {
-        const name = payload.name || '?';
-        items.push({ idx: items.length, role: 'assistant', text: `[tool: ${name}] ${trunc(payload.arguments || payload.input || '', 500)}`, cwd });
-      } else if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
-        items.push({ idx: items.length, role: 'user', text: trunc(codexOutputText(payload.output), 500), cwd });
-      } else if (payload.type === 'agent_message') {
-        const text = codexContentText(payload.content);
-        if (text) items.push({ idx: items.length, role: 'assistant', text: `${payload.author || 'agent'}: ${text}`, cwd });
-      }
-    } else if (e.type === 'event_msg' && payload.type === 'mcp_tool_call_end') {
-      const name = payload.invocation?.tool || '?';
-      items.push({ idx: items.length, role: 'assistant', text: `[tool: ${name}]`, cwd });
-    }
-  }
-  return items;
-}
-
-// Sessions root choice, FS-persisted (survives browser cache clear). Defaults
-// to ~/.claude/projects.
-const ROOT_FILE = join(STATE_DIR, 'sessions-root.json');
-export function getSessionsRoot() {
-  try { const r = JSON.parse(readFileSync(ROOT_FILE, 'utf8')).root; return typeof r === 'string' && r ? r : '~/.claude/projects'; }
-  catch { return '~/.claude/projects'; }
-}
-export function setSessionsRoot(root) {
-  if (typeof root !== 'string' || !root) return { ok: false, error: 'bad root' };
-  try { mkdirSync(STATE_DIR, { recursive: true }); writeFileSync(ROOT_FILE, JSON.stringify({ root })); return { ok: true, root }; }
-  catch (e) { return { ok: false, error: e.message }; }
-}
-
-// Resolve a ~-prefixed client path to an absolute one. Falls back to the
-// FS-persisted root (then the default) when raw is empty.
-export function resolveRoot(raw) {
-  let p = raw || getSessionsRoot();
-  if (p === '~' || p.startsWith('~/') || p.startsWith('~\\')) p = normalize(homedir() + p.slice(1));
-  try { return resolve(p); } catch { return DEFAULT_ROOT; }
-}
-
-// Parse JSONL text (head chunk or full file) into event objects, skipping
-// unparseable lines. Pure, no FS — shared by peek + full read.
-function parseEvents(text) {
-  const out = [];
-  for (const line of text.split(/\r?\n/)) {
-    if (!line) continue;
-    try { out.push(JSON.parse(line)); } catch { /* partial/locked */ }
-  }
-  return out;
-}
-
-// Read only the first PEEK_BYTES of a file — stat the size + head chunk so the
-// list endpoint never reads whole multi-MB transcripts. Returns null if gone.
-async function peek(p, knownStat) {
-  let st = knownStat;
-  if (!st) {
-    try { st = await stat(p); } catch { return null; }
-  }
-  let head = '';
-  try {
-    const fh = await open(p, 'r');
-    try {
-      const buf = Buffer.alloc(PEEK_BYTES);
-      const { bytesRead } = await fh.read(buf, 0, Math.min(PEEK_BYTES, st.size), 0);
-      head = buf.slice(0, bytesRead).toString('utf8');
-    } finally { await fh.close(); }
-  } catch {}
-  return { st, head };
-}
-
-async function mapConcurrent(items, fn) {
-  const results = new Array(items.length);
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(SCAN_CONCURRENCY, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await fn(items[index]);
-    }
-  }));
-  return results;
-}
-
-// First text out of a user event's content — mirrors readSession's own
-// string-vs-array handling (tool_result blocks are never text).
-function firstUserText(content) {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    const b = content.find((x) => x.type === 'text');
-    return b ? b.text : null;
-  }
-  return null;
-}
-// Slash-command echoes (`/exit`, etc.) surface as ordinary user events —
-// `<command-name>`/`<local-command...>` wrappers, not isMeta-flagged — so a
-// text-prefix check is needed alongside the isMeta/isCompactSummary flags.
-function isCommandWrapper(text) {
-  const t = text.trimStart();
-  return t.startsWith('<command-name') || t.startsWith('<local-command');
-}
-
-// Reduce a peek's events to {cwd, title, blurb}. cwd = first event carrying
-// one; title = last `ai-title` seen (Claude Code refines it across the
-// session); blurb = the first real user prompt, flattened to one line —
-// title fallback for sessions that never got an ai-title.
-function peekMeta(events) {
-  let cwd = null;
-  let title = null;
-  let blurb = null;
-  for (const e of events) {
-    if (!cwd && e.cwd) cwd = e.cwd;
-    if (e.type === 'ai-title' && e.aiTitle) title = e.aiTitle;
-    if (!blurb && e.type === 'user' && !e.isMeta && !e.isCompactSummary) {
-      const text = firstUserText(e.message?.content);
-      if (text && !isCommandWrapper(text)) {
-        const flat = text.replace(/\s+/g, ' ').trim();
-        if (flat) blurb = flat.slice(0, 140);
-      }
-    }
-  }
-  return { cwd, title, blurb };
-}
-
-// listSessions: every *.jsonl under the resolved root, reverse-chrono by
-// mtime. The (mtime,size)-keyed cache holds the peeked meta so repeated list
-// calls don't re-read heads of unchanged files.
-const metaCache = new Map(); // path -> { mtimeMs, size, cwd, title, blurb, metaTitle (subagent entries only) }
 export async function listSessions({ cap = 5000, isLive = () => false, now = Date.now(), root, hideReviews = false } = {}) {
-  const PROJECTS = resolveRoot(root);
-  if (!existsSync(PROJECTS)) {
-    const codexOnly = await listCodexSessions({ isLive, now, hideReviews });
-    codexOnly.sort((a, b) => b.mtime - a.mtime);
-    return codexOnly.slice(0, cap);
-  }
-  const out = [];
-  for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {
-    if (!proj.isDirectory()) continue;
-    const dir = join(PROJECTS, proj.name);
-    let files;
-    try { files = await readdir(dir); } catch { continue; }
-    const rows = await mapConcurrent(files.filter((f) => f.endsWith('.jsonl')), async (f) => {
-      const p = join(dir, f);
-      let st;
-      try { st = await stat(p); } catch { return null; }
-      let cwd, title, blurb;
-      const hit = metaCache.get(p);
-      if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.blurb !== undefined) {
-        cwd = hit.cwd; title = hit.title; blurb = hit.blurb;
-      } else {
-        const pk = await peek(p, st);
-        ({ cwd, title, blurb } = peekMeta(parseEvents(pk.head)));
-        metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, cwd, title, blurb });
-        if (metaCache.size > CLAUDE_META_CACHE_CAP) metaCache.delete(metaCache.keys().next().value);
-      }
-      const id = f.slice(0, -6);
-      const processLive = isLive(id, { source: 'claude', cwd });
-      const row = { id, project: proj.name, cwd, title, blurb, mtime: st.mtimeMs, size: st.size };
-      row.processLive = processLive;
-      row.activityRecent = (now - st.mtimeMs) < RUNNING_MS;
-      row.processState = processLive ? 'live' : 'unknown';
-      row.running = processLive;
-      // Subagents are separate transcripts under <parent-id>/subagents/agent-*.jsonl,
-      // full-session shape. Their tool_result bodies are inline in the jsonl (the
-      // sibling tool-results/ dir is not referenced), so readSession renders them
-      // unchanged — no ref resolution needed.
-      const subagents = await listSubagents(dir, id, isLive, now);
-      if (subagents.length) row.subagents = subagents;
-      return row;
-    });
-    out.push(...rows.filter(Boolean));
-  }
-  for (const r of out) r.source = 'claude';
-  const codex = await listCodexSessions({ isLive, now, hideReviews });
-  const all = out.concat(codex);
-  all.sort((a, b) => b.mtime - a.mtime);
-  return all.slice(0, cap);
+  const payload = unwrap(await backend().transcriptsList(await inputs(), {
+    ...(root === undefined ? {} : { transcript_root: root }),
+    cap,
+    now_ms: now,
+    hide_reviews: hideReviews,
+  }));
+  return payload.map((row) => updateRunning(row, isLive));
 }
 
-// Scan <parentDir>/<parentId>/subagents/agent-*.jsonl and reduce each to a row.
-// Reuses peek/peekMeta/metaCache for title fallback — same as the parent loop.
-async function listSubagents(parentDir, parentId, isLive, now) {
-  const subDir = join(parentDir, parentId, 'subagents');
-  let files;
-  try { files = await readdir(subDir); } catch { return []; }
-  const rows = await mapConcurrent(files.filter((f) => f.endsWith('.jsonl')), async (f) => {
-    const p = join(subDir, f);
-    let st;
-    try { st = await stat(p); } catch { return null; }
-    const agentId = f.slice(0, -6);
-    // Track the sidecar separately so its appearance or edits refresh the
-    // title without making unchanged transcripts miss the warm cache.
-    let metaTitle = null, peekTitle, blurb;
-    const metaPath = join(subDir, `${agentId}.meta.json`);
-    let metaStat;
-    try { metaStat = await stat(metaPath); } catch {}
-    const metaMtimeMs = metaStat?.mtimeMs ?? null;
-    const metaSize = metaStat?.size ?? null;
-    const hit = metaCache.get(p);
-    if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size && hit.metaMtimeMs === metaMtimeMs && hit.metaSize === metaSize && hit.blurb !== undefined && hit.metaTitle !== undefined) {
-      peekTitle = hit.title; blurb = hit.blurb; metaTitle = hit.metaTitle;
-    } else {
-      const pk = await peek(p, st);
-      try {
-        const meta = JSON.parse(await readFile(metaPath, 'utf8'));
-        if (meta.agentType) metaTitle = meta.description ? `${meta.agentType}: ${meta.description}` : meta.agentType;
-      } catch {}
-      const peeked = peekMeta(parseEvents(pk.head));
-      peekTitle = peeked.title; blurb = peeked.blurb;
-      metaCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, metaMtimeMs, metaSize, cwd: peeked.cwd, title: peeked.title, blurb: peeked.blurb, metaTitle });
-      if (metaCache.size > CLAUDE_META_CACHE_CAP) metaCache.delete(metaCache.keys().next().value);
-    }
-    const processLive = isLive(agentId, { source: 'claude-subagent' });
-    return {
-      id: `${parentId}/subagents/${agentId}`,
-      agentId,
-      title: metaTitle || peekTitle,
-      blurb,
-      mtime: st.mtimeMs,
-      size: st.size,
-      processLive,
-      activityRecent: (now - st.mtimeMs) < RUNNING_MS,
-      processState: processLive ? 'live' : 'unknown',
-      running: processLive,
-    };
-  });
-  return rows.filter(Boolean);
-}
-
-// Live subagents for one agent session: the daemon agent's id IS its Claude
-// session id (agents.mjs create()), logged under <encodeCwd(cwd)>/<id>.jsonl,
-// so its subagents live in the sibling <id>/subagents/ dir. Reuses listSubagents.
 export async function subagentsFor(cwd, id, isLive = () => false, now = Date.now(), root = DEFAULT_ROOT) {
   if (!cwd || !id) return [];
-  const PROJECTS = resolveRoot(root);
-  return listSubagents(join(PROJECTS, encodeCwd(cwd)), id, isLive, now);
+  const payload = unwrap(await backend().transcriptSubagents(await inputs(), {
+    transcript_cwd: cwd,
+    transcript_id: id,
+    transcript_root: root,
+    now_ms: now,
+  }));
+  return payload.map((row) => updateRunning(row, isLive));
 }
 
-// Path guard: project/id come from the client query — reject separators (no
-// nested traversal) and confirm the joined path still resolves under the
-// active root (mirrors isWikiPath/isMemoryPath in wiki.mjs/memory.mjs). The
-// one relaxation: a subagent open-ref shaped "<parent-id>/subagents/agent-x"
-// is allowed through as a nested relative path; anything else with a
-// separator in id stays banned.
-const SUBAGENT_ID = /^[^\\/]+\/subagents\/agent-[^\\/]+$/;
-export function pathFor(project, id, root) {
-  if (!project || !id || /[\\/]/.test(project)) return null;
-  const nested = SUBAGENT_ID.test(id);
-  if (!nested && /[\\/]/.test(id)) return null;
-  const PROJECTS = resolveRoot(root);
-  const p = join(PROJECTS, project, `${id}.jsonl`);
-  const rootAbs = resolve(PROJECTS);
-  const abs = resolve(p);
-  if (abs !== rootAbs && !abs.startsWith(rootAbs + sep)) return null;
-  return p;
-}
-
-// Fallback resolver: the session id is a globally-unique UUID, so when the
-// caller's project slug is stale (worktree relocated by a state migration,
-// cleaned-up worktree, session that ran in the repo not the worktree) the file
-// still lives under *some* project dir. Scan for <id>.jsonl. Skipped for nested
-// subagent ids — their project dir is authoritative. Miss-path only.
-async function findById(id, root) {
-  const PROJECTS = resolveRoot(root);
-  if (/[\\/]/.test(id)) return null;
-  if (existsSync(PROJECTS)) {
-    for (const proj of await readdir(PROJECTS)) {
-      const p = join(PROJECTS, proj, `${id}.jsonl`);
-      if (existsSync(p)) return p;
-    }
-  }
-  return null;
-}
-
-function trunc(s, n) {
-  s = typeof s === 'string' ? s : JSON.stringify(s);
-  return s.length > n ? `${s.slice(0, n)}…` : s;
-}
-
-// readSession: full parse into a renderable message list + meta. tool_use inputs
-// and tool_result bodies are truncated in the payload (the raw file is the
-// source of truth); text/thinking are kept whole for the chat context.
 export async function readSession(project, id, root, source = 'claude', file) {
-  if (source === 'codex') {
-    let p = file ? pathForCodex(file) : await findCodexById(id);
-    if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
-    return readCodexSession(p);
-  }
-  let p = pathFor(project, id, root);
-  if (!p || !existsSync(p)) p = await findById(id, root); // stale project slug → locate by unique id
-  if (!p || !existsSync(p)) return { ok: false, error: 'not found' };
-  let raw;
-  try {
-    raw = await readFile(p, 'utf8');
-  } catch (e) {
-    // A Claude transcript may disappear after path lookup.
-    if (e?.code === 'ENOENT') return { ok: false, error: 'not found' };
-    throw e;
-  }
-  const events = parseEvents(raw);
-  const messages = [];
-  let cwd = null, title = null, turns = 0, firstTs = null, lastTs = null, lastModel = null;
-  for (const e of events) {
-    if (e.cwd && !cwd) cwd = e.cwd;
-    if (e.type === 'ai-title' && e.aiTitle) title = e.aiTitle;
-    if (e.timestamp) {
-      if (!firstTs) firstTs = e.timestamp;
-      lastTs = e.timestamp;
-    }
-    const msg = e.message;
-    if (!msg) continue;
-    const ts = e.timestamp ?? null;
-    if (e.type === 'user') {
-      const c = msg.content;
-      // Recap (context-compaction summary) events are flagged isCompactSummary;
-      // tag them so the history digest can compress long sessions to recap +
-      // last assistant instead of dropping them. Conditional spread keeps the
-      // message shape identical for non-recap events (deepEqual tests rely on it).
-      const extra = e.isCompactSummary ? { recap: true } : {};
-      if (typeof c === 'string') {
-        messages.push({ ts, role: 'user', kind: 'text', text: c, ...extra });
-      } else if (Array.isArray(c)) {
-        for (const b of c) {
-          if (b.type === 'tool_result') messages.push({ ts, role: 'user', kind: 'toolResult', text: trunc(b.content, TOOL_TRUNC) });
-          else if (b.type === 'text') messages.push({ ts, role: 'user', kind: 'text', text: b.text, ...extra });
-        }
-      }
-    } else if (e.type === 'assistant') {
-      turns++;
-      // Last model used in the session — assistant events carry it on the
-      // message. A /model switch mid-session shows up here as a later event,
-      // so the last assistant turn wins (matches "last configuration").
-      if (msg.model) lastModel = msg.model;
-      for (const b of (msg.content || [])) {
-        if (b.type === 'text') messages.push({ ts, role: 'assistant', kind: 'text', text: b.text });
-        else if (b.type === 'thinking') messages.push({ ts, role: 'assistant', kind: 'thinking', text: b.thinking });
-        else if (b.type === 'tool_use') messages.push({ ts, role: 'assistant', kind: 'toolUse', name: b.name, text: trunc(b.input, TOOL_TRUNC) });
-      }
-    }
-  }
-  return { ok: true, meta: { cwd, title, turns, firstTs, lastTs, model: restoreOllamaTag(claudeIdToAlias(lastModel)) }, messages };
+  const result = await backend().transcriptRead(await inputs(), {
+    transcript_project: project ?? (source === 'codex' ? '<codex>' : project),
+    transcript_id: id,
+    ...(root === undefined ? {} : { transcript_root: root }),
+    transcript_source: source,
+    ...(file === undefined ? {} : { transcript_file: file }),
+  });
+  if (result?.code === 'not_found') return { ok: false, error: 'not found' };
+  return unwrap(result);
 }
 
-// sessionText: flatten a session into a compact transcript for LLM context.
-// [user]/[assistant] turns + [tool: name] calls; head+tail cap keeps both the
-// opening problem statement and the most recent turns when the log is long.
 export async function sessionText(project, id, cap = TEXT_CAP, root, source, file) {
-  const s = await readSession(project, id, root, source, file);
-  if (!s.ok) return '';
+  const session = await readSession(project, id, root, source, file);
+  if (!session.ok) return '';
   const lines = [];
-  for (const m of s.messages) {
-    if (m.kind === 'toolResult') lines.push(`[tool_result] ${m.text}`);
-    else if (m.kind === 'toolUse') lines.push(`[tool: ${m.name}] ${m.text}`);
-    else lines.push(`[${m.role}] ${m.text}`);
+  for (const message of session.messages) {
+    if (message.kind === 'toolResult') lines.push(`[tool_result] ${message.text}`);
+    else if (message.kind === 'toolUse') lines.push(`[tool: ${message.name}] ${message.text}`);
+    else lines.push(`[${message.role}] ${message.text}`);
   }
-  let text = lines.join('\n');
+  const text = lines.join('\n');
   if (text.length <= cap) return text;
   const half = Math.floor(cap / 2);
   return `${text.slice(0, half)}\n\n[…truncated…]\n\n${text.slice(-half)}`;
 }
 
-// searchSessions: substring search over session text. Scoped to one file when
-// {project,id} given, else every *.jsonl under the resolved root. Returns
-// line-indexed matches capped at RESULT_CAP. The text per message is cached
-// by (mtime,size) like memory.mjs.
-const textCache = new Map(); // path -> { mtimeMs, size, items: [{role,text}] }
-async function sessionTextItems(p) {
-  let st;
-  try { st = await stat(p); } catch { return null; }
-  const hit = textCache.get(p);
-  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.items;
-  let s;
-  try { s = await readSessionForSearch(p); } catch { return null; }
-  textCache.set(p, { mtimeMs: st.mtimeMs, size: st.size, items: s });
-  if (textCache.size > 200) textCache.delete(textCache.keys().next().value);
-  return s;
-}
-// Cheaper than readSession: keep text/thinking/tool whole-ish (truncate tool
-// bodies to a search-friendly 500) and drop the meta — search only needs text.
-async function readSessionForSearch(p) {
-  const events = parseEvents(await readFile(p, 'utf8'));
-  const items = [];
-  let cwd = null;
-  for (const e of events) {
-    if (e.cwd && !cwd) cwd = e.cwd;
-    const msg = e.message;
-    if (!msg) continue;
-    if (e.type === 'user') {
-      const c = msg.content;
-      if (typeof c === 'string') items.push({ idx: items.length, role: 'user', text: c, cwd });
-      else if (Array.isArray(c)) for (const b of c) {
-        if (b.type === 'text') items.push({ idx: items.length, role: 'user', text: b.text, cwd });
-        else if (b.type === 'tool_result') items.push({ idx: items.length, role: 'user', text: trunc(b.content, 500), cwd });
-      }
-    } else if (e.type === 'assistant') {
-      for (const b of (msg.content || [])) {
-        if (b.type === 'text') items.push({ idx: items.length, role: 'assistant', text: b.text, cwd });
-        else if (b.type === 'thinking') items.push({ idx: items.length, role: 'assistant', text: b.thinking, cwd });
-        else if (b.type === 'tool_use') items.push({ idx: items.length, role: 'assistant', text: `[tool: ${b.name}] ${trunc(b.input, 500)}`, cwd });
-      }
-    }
-  }
-  return items;
-}
-
-function snippet(text, at, q) {
-  const start = Math.max(0, at - 60);
-  const end = Math.min(text.length, at + q.length + 60);
-  return (start > 0 ? '…' : '') + text.slice(start, end).trim() + (end < text.length ? '…' : '');
-}
-
 export async function searchSessions(q, { project, id, root, hideReviews = false } = {}) {
-  const ql = (q || '').toLowerCase();
-  if (!ql) return { results: [], capped: false };
-  const PROJECTS = resolveRoot(root);
-  const targets = [];
-  if (project && id) {
-    if (project === '<codex>') {
-      const p = await findCodexById(id);
-      if (p) targets.push({ project, id, path: p, source: 'codex' });
-    } else {
-      const p = pathFor(project, id, root);
-      if (p && existsSync(p)) targets.push({ project, id, path: p, source: 'claude' });
-    }
-  } else {
-    if (existsSync(PROJECTS)) {
-      for (const proj of await readdir(PROJECTS, { withFileTypes: true })) {
-        if (!proj.isDirectory()) continue;
-        const dir = join(PROJECTS, proj.name);
-        let files;
-        try { files = await readdir(dir); } catch { continue; }
-        for (const f of files) if (f.endsWith('.jsonl')) targets.push({ project: proj.name, id: f.slice(0, -6), path: join(dir, f), source: 'claude' });
-      }
-    }
-    if (existsSync(CODEX_HOME)) {
-      const codexFiles = [];
-      for (const sub of ['sessions', 'archived_sessions']) await listCodexRollouts(join(CODEX_HOME, sub), codexFiles);
-      for (const p of codexFiles) targets.push({ project: '<codex>', id: codexThreadId(basename(p)), path: p, source: 'codex' });
-    }
-  }
-  const results = [];
-  for (const t of targets) {
-    const items = t.source === 'codex' ? await codexTextItems(t.path) : await sessionTextItems(t.path);
-    if (hideReviews && t.source === 'codex' && isCodexReview(items?.find((item) => item.role === 'user')?.text)) continue;
-    // Match the query against the session id (filename stem) itself — the id
-    // lives in event metadata (sessionId field), never in message text, so a
-    // pure-id search otherwise returns nothing.
-    if (t.id.toLowerCase().includes(ql)) {
-      // id lives in event metadata, not message text — synthesize one hit and
-      // skip the (always-empty) message-text scan for the same id.
-      results.push({ project: t.project, id: t.id, cwd: items?.[0]?.cwd || null, lineIndex: 0, role: 'id', snippet: t.id, source: t.source });
-      if (results.length >= RESULT_CAP) return { results, capped: true };
-      continue;
-    }
-    if (!items) continue;
-    for (const it of items) {
-      const at = it.text.toLowerCase().indexOf(ql);
-      if (at < 0) continue;
-      results.push({ project: t.project, id: t.id, cwd: it.cwd, lineIndex: it.idx, role: it.role, snippet: snippet(it.text, at, ql), source: t.source });
-      if (results.length >= RESULT_CAP) return { results, capped: true };
-    }
-  }
-  return { results, capped: false };
+  if (!q) return { results: [], capped: false };
+  const queryUnits = [];
+  for (let i = 0; i < q.length; i++) queryUnits.push(q.charCodeAt(i));
+  const payload = unwrap(await backend().transcriptsSearch(await inputs(), {
+    transcript_q_units: queryUnits,
+    ...(project === undefined ? {} : { transcript_project: project }),
+    ...(id === undefined ? {} : { transcript_id: id }),
+    ...(root === undefined ? {} : { transcript_root: root }),
+    hide_reviews: hideReviews,
+  }));
+  return payload;
 }

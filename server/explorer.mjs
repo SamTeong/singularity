@@ -5,10 +5,9 @@
 // either), and the feature's whole point is "edit anywhere". The only check
 // is bad(p): must be a non-empty absolute path. Tildify/untildify is the
 // client's job (like DirPicker) — paths here are absolute only.
-import { existsSync, readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, rmSync, renameSync } from 'node:fs';
-import { readdir, writeFile } from 'node:fs/promises';
+import { existsSync, readFileSync, readdirSync, statSync, mkdirSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
 import { join, dirname, parse as parsePath, isAbsolute, extname } from 'node:path';
-import { STATE_DIR } from './app-dir.mjs';
 import { backupFile } from './backups.mjs';
 
 const ENTRY_CAP = 2000;
@@ -18,6 +17,9 @@ const SKIP_DIRS = new Set(['node_modules', '.git', '.cache', 'dist', 'build', '.
 const TOOLARGE = 2 * 1024 * 1024;
 const IMAGE_EXT = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg']);
 const MIME = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml' };
+let mutationBackend;
+
+export function setExplorerBackend(backend) { mutationBackend = backend; }
 
 function bad(p) { return typeof p !== 'string' || !p || !isAbsolute(p); }
 
@@ -113,36 +115,31 @@ export async function writeEntry(path, content, mtime, force) {
     if (mtime != null && !force && existsSync(path) && Math.abs(statSync(path).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    await writeFile(path, content);
-    return { ok: true, mtime: statSync(path).mtimeMs };
+    return await mutationBackend.explorerWrite(path, content, mtime, force);
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
-export function createEntry(path, kind) {
+export async function createEntry(path, kind) {
   if (bad(path)) return { ok: false, error: 'bad path' };
   if (existsSync(path)) return { ok: false, error: 'already exists' };
   try {
-    if (kind === 'dir') mkdirSync(path, { recursive: true });
-    else writeFileSync(path, '');
-    return { ok: true };
+    return await mutationBackend.explorerCreate(path, kind);
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
-export function deleteEntry(path) {
+export async function deleteEntry(path) {
   if (bad(path)) return { ok: false, error: 'bad path' };
   if (!existsSync(path)) return { ok: false, error: 'not found' };
   try {
-    // recursive: true deletes non-empty dirs in one call — client confirms first.
-    rmSync(path, { recursive: true });
-    return { ok: true };
+    return await mutationBackend.explorerDelete(path);
   } catch (e) { return { ok: false, error: e.message }; }
 }
 
-export function renameEntry(from, to) {
+export async function renameEntry(from, to) {
   if (bad(from) || bad(to)) return { ok: false, error: 'bad path' };
   if (!existsSync(from)) return { ok: false, error: 'not found' };
   if (existsSync(to)) return { ok: false, error: 'already exists' };
-  try { renameSync(from, to); return { ok: true }; }
+  try { return await mutationBackend.explorerRename(from, to); }
   catch (e) { return { ok: false, error: e.message }; }
 }
 
@@ -152,38 +149,5 @@ export function rawEntry(path) {
   try {
     const mime = MIME[extname(path).toLowerCase()] || 'application/octet-stream';
     return { ok: true, buf: readFileSync(path), mime };
-  } catch (e) { return { ok: false, error: e.message }; }
-}
-
-// Explorer UI state (root/expanded tree/open tabs): FS-persisted under
-// STATE_DIR, same pattern as memory.mjs's ROOT_FILE / hooks.mjs's ROOTS_FILE.
-const STATE_FILE = join(STATE_DIR, 'explorer-state.json');
-const DEFAULT_STATE = { root: '~', expanded: [], tabs: [], active: null, autosave: false };
-
-export function getState() {
-  try {
-    const s = JSON.parse(readFileSync(STATE_FILE, 'utf8'));
-    return { ...DEFAULT_STATE, ...s };
-  } catch { return { ...DEFAULT_STATE }; }
-}
-
-function strArray(v) {
-  return Array.isArray(v) ? v.filter((x) => typeof x === 'string').slice(0, 500) : undefined;
-}
-
-export function setState(patch) {
-  const cur = getState();
-  const next = { ...cur };
-  if (patch && typeof patch.root === 'string' && patch.root) next.root = patch.root;
-  const expanded = strArray(patch?.expanded);
-  if (expanded) next.expanded = expanded;
-  const tabs = strArray(patch?.tabs);
-  if (tabs) next.tabs = tabs;
-  if (patch && (typeof patch.active === 'string' || patch.active === null)) next.active = patch.active;
-  if (patch && typeof patch.autosave === 'boolean') next.autosave = patch.autosave;
-  try {
-    mkdirSync(STATE_DIR, { recursive: true });
-    writeFileSync(STATE_FILE, JSON.stringify(next));
-    return { ok: true, state: next };
   } catch (e) { return { ok: false, error: e.message }; }
 }

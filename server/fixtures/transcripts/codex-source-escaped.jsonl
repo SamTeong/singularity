@@ -1,0 +1,4 @@
+{"type":"response_item","timestamp":"2026-10-21T04:00:00Z","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"codex user \ud83d"}]}}
+{"type":"response_item","timestamp":"2026-10-21T04:00:01Z","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"codex assistant \ude00"}]}}
+{"type":"response_item","timestamp":"2026-10-21T04:00:02Z","payload":{"type":"function_call","name":"shell_command","arguments":"codex args \ud83d"}}
+{"type":"response_item","timestamp":"2026-10-21T04:00:03Z","payload":{"type":"function_call_output","output":"codex output \ude00"}}

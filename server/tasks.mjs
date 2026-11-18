@@ -3,13 +3,11 @@
 // the task's own agent (curl, prompt-instructed) or by a UI drag. Emits
 // 'tasks' on the shared agents bus; pty-ws fans it out.
 import { randomUUID } from 'node:crypto';
-import { execFile, execFileSync } from 'node:child_process';
-import { promisify } from 'node:util';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as reg from './agents.mjs';
 import { SHADOW } from './app-dir.mjs';
-import { isClaudeModel, isCodexModel } from './models.mjs';
+import { getModelRoute } from './models.mjs';
 import { statsFor } from './stats.mjs';
 
 const TASKS_FILE = join(reg.STATE_DIR, 'tasks.json');
@@ -47,7 +45,7 @@ let logger = null;
 // conclude) so this never grows across a daemon's lifetime.
 const tails = new Map();
 
-const execFileP = promisify(execFile);
+let gitBackend = null;
 // Hard timeout + non-interactive flags on every git call: this runs on the
 // request path (route handlers, awaited below), and a hung subprocess — a
 // credential-helper prompt is the classic case — must never block forever.
@@ -64,27 +62,21 @@ const GIT_OPTS = {
 
 // Async — used by every request-path caller so a slow/hung git process can't
 // block the event loop (and freeze live PTY agents + WS clients).
+export function setTasksBackend(backend) { gitBackend = backend; }
+
 export async function git(repo, ...args) {
+  if (!gitBackend) throw new Error('Rust backend is not configured for Git');
   try {
-    return (await execFileP(GIT_BIN, ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS)).stdout.trim();
+    return (await gitBackend.git(GIT_BIN, ['-C', repo, '-c', 'core.askpass=', ...args], {
+      timeout: GIT_TIMEOUT_MS, maxBuffer: 1024 * 1024,
+      env: GIT_OPTS.env,
+    })).stdout.trim();
   } catch (e) {
     throw new Error(`git ${args.join(' ')} failed: ${e.message}`, { cause: e });
   }
 }
-
-// Sync variant, for createTask only: its callers (the POST /tasks route,
-// background.mjs) call it un-awaited, so it can't become async without
-// changing those call sites. Same timeout/non-interactive guards as git().
-export function gitSync(repo, ...args) {
-  try {
-    return execFileSync(GIT_BIN, ['-C', repo, '-c', 'core.askpass=', ...args], GIT_OPTS).trim();
-  } catch (e) {
-    throw new Error(`git ${args.join(' ')} failed: ${e.message}`, { cause: e });
-  }
-}
-
-function isGitWorkTree(repo) {
-  try { return gitSync(repo, 'rev-parse', '--is-inside-work-tree') === 'true'; }
+async function isGitWorkTree(repo) {
+  try { return await git(repo, 'rev-parse', '--is-inside-work-tree') === 'true'; }
   catch { return false; }
 }
 
@@ -258,14 +250,15 @@ ${t.description}
 
 // The whole autonomous workflow lives in this prompt — the daemon only stores
 // column/state and kills the session on 'done'. Transitions are prompt-driven.
-export function buildTaskPrompt(t, cavecrew = cavecrewAvailable()) {
-  if (t.tool === 'codex' || isCodexModel(t.model)) return buildCodexTaskPrompt(t);
+export async function buildTaskPrompt(t, cavecrew = cavecrewAvailable(), route) {
+  route ??= await getModelRoute(t.model, t.tool);
+  if (t.tool === 'codex' || route.isCodexModel) return buildCodexTaskPrompt(t);
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
     `curl -s -X POST http://127.0.0.1:${PORT}/api/tasks/${t.id}/status${tokenHeader} -H "content-type: application/json" -d '{"column":"${column}","state":"${state}"}'`;
   // Subagent model routing: an ollama model runs the whole fleet on that same
   // model (saves Claude budget); a claude model splits impl=sonnet, reviewer=opus.
-  const ollama = !isClaudeModel(t.model);
+  const ollama = !route.isClaudeModel;
   // Ollama models have no prompt caching — every turn resends the full
   // context, so nudge the orchestrator toward fewer, batched turns.
   const turnEconomy = ollama ? `\n- Your model has no prompt caching — every turn resends the full context. Minimize turns: batch the board status curl together with your next Bash command instead of running it alone, avoid re-reading files you have already seen, and prefer one larger subagent over many small ones.` : '';
@@ -390,8 +383,9 @@ export function normalizeTags(tags) {
 // clarifying questions, no plan approval, no impl/reviewer subagent dance — just
 // do the work, write a report, and hand the card to a human for review. The
 // daemon's watchdog (background.mjs) stops the run when the budget is spent.
-export function buildBackgroundPrompt(t) {
-  if (t.tool === 'codex' || isCodexModel(t.model)) return buildCodexBackgroundPrompt(t);
+export async function buildBackgroundPrompt(t, route) {
+  route ??= await getModelRoute(t.model, t.tool);
+  if (t.tool === 'codex' || route.isCodexModel) return buildCodexBackgroundPrompt(t);
   const cwd = t.worktree || t.repo;
   const tokenHeader = process.env.SING_TOKEN ? ' -H "x-sing-token: $SING_TOKEN"' : '';
   const status = (column, state) =>
@@ -429,19 +423,21 @@ ${t.description}
 // Max-turn cap from the dialog: positive int or null (empty/0/invalid → no cap).
 const posInt = (v) => { const n = Math.trunc(Number(v)); return Number.isFinite(n) && n > 0 ? n : null; };
 
-export function createTask({ repo, title, description, model, implModel, reviewerModel, orchestratorMaxTurns, implMaxTurns, reviewerMaxTurns, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, backgroundJobId, backgroundRunId, conclude, tool }) {
+export async function createTask({ repo, title, description, model, implModel, reviewerModel, orchestratorMaxTurns, implMaxTurns, reviewerMaxTurns, scopes, requirePlanApproval, mergeMode, mock, tags, promptOverride, permissionSettings, background, backgroundJobId, backgroundRunId, conclude, tool }) {
   if (!repo || !title?.trim() || !description?.trim()) throw new Error('repo, title and description required');
+  const modelRoute = await getModelRoute(model, tool);
+  if (modelRoute.toolModelError) throw new Error(modelRoute.toolModelError);
   if (!existsSync(repo)) throw new Error('working directory does not exist');
-  const kind = isGitWorkTree(repo) ? 'git' : 'plain';
+  const kind = await isGitWorkTree(repo) ? 'git' : 'plain';
   const id = randomUUID();
   const short = id.slice(0, 8);
   let baseBranch = null, branch = null, worktree = null, cwd = repo;
   if (kind === 'git') {
-    baseBranch = gitSync(repo, 'rev-parse', '--abbrev-ref', 'HEAD');
+    baseBranch = await git(repo, 'rev-parse', '--abbrev-ref', 'HEAD');
     branch = `task/${short}`;
     worktree = join(WORKTREE_ROOT, short);
     mkdirSync(WORKTREE_ROOT, { recursive: true });
-    gitSync(repo, 'worktree', 'add', worktree, '-b', branch);
+    await git(repo, 'worktree', 'add', worktree, '-b', branch);
     cwd = worktree;
   }
   // Everything from here on can fail (disk, spawn, ...) after `git worktree
@@ -474,8 +470,8 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     // mock (demo only): spawn an idle claude with no workflow prompt — a live
     // session for the status pill, but no turn ever starts, so zero tokens. The
     // demo driver moves the card itself. Real tasks always get the prompt.
-    const prompt = mock ? undefined : (promptOverride ?? (background ? buildBackgroundPrompt(t) : buildTaskPrompt(t)));
-    const agent = reg.create({ cwd, title: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs, mock, tool });
+    const prompt = mock ? undefined : (promptOverride ?? (background ? await buildBackgroundPrompt(t, modelRoute) : await buildTaskPrompt(t, cavecrewAvailable(), modelRoute)));
+    const agent = await reg.create({ cwd, title: t.title, model, scopes, prompt, permissionMode: 'acceptEdits', extraArgs, mock, tool, modelRoute });
     t.sessionId = agent.id;
     taskBySession.set(agent.id, id);
     tasks.set(id, t);
@@ -483,7 +479,7 @@ export function createTask({ repo, title, description, model, implModel, reviewe
     emitTasks();
     return t;
   } catch (e) {
-    if (kind === 'git') { try { gitSync(repo, 'worktree', 'remove', '--force', worktree); gitSync(repo, 'branch', '-D', branch); } catch {} }
+    if (kind === 'git') { try { await git(repo, 'worktree', 'remove', '--force', worktree); await git(repo, 'branch', '-D', branch); } catch {} }
     throw e;
   }
 }

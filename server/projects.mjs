@@ -220,7 +220,7 @@ export async function summary(path, { callSummariser = callProjectSummariser } =
   let headSha = 'none';
   try { headSha = await git(path, 'rev-parse', 'HEAD'); } catch { /* empty repo */ }
 
-  const summariser = getSummariser();
+  const summariser = await getSummariser();
   if (!summariser || !binFor(summariser.group)) {
     return { path, scope, ...deterministicSummary(subjects, stat, porcelain), source: 'deterministic', llm: { ok: false, reason: 'no-summariser' } };
   }

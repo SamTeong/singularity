@@ -4,8 +4,7 @@
 // scopes are exposed. Paths are derived server-side from (cwd, scope) — the
 // client never supplies a path. Writes validate TOML (via @iarna/toml) and back
 // up the existing file (backups.mjs) before overwriting.
-import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, statSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { join, dirname, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { parse as tomlParse } from '@iarna/toml';
@@ -23,23 +22,29 @@ function scopePaths(cwd) {
 
 // Both scopes are editable (project + user). No config.local.toml analog.
 const EDIT_SCOPES = ['project', 'user'];
+let configReadBackend = null;
+export function setCodexConfigReadBackend(backend) { configReadBackend = backend; }
 
-export function readConfig(cwd) {
-  if (!isKnownConfigRoot(cwd)) {
+function requireCodexConfigReadBackend(backend = configReadBackend) {
+  if (!backend) throw new Error('Rust Codex config read backend is not configured');
+  return backend;
+}
+
+export async function readConfig(cwd) {
+  const backend = requireCodexConfigReadBackend();
+  const paths = scopePaths(cwd);
+  if (!await isKnownConfigRoot(cwd)) {
     // cwd is outside known roots; return empty configs to prevent information disclosure
-    const paths = scopePaths(cwd);
     const out = {};
     for (const scope of EDIT_SCOPES) {
       out[scope] = { path: paths[scope], exists: false, content: '', mtime: 0 };
     }
     return out;
   }
-  const paths = scopePaths(cwd);
   const out = {};
   for (const scope of EDIT_SCOPES) {
     const p = paths[scope];
-    const exists = existsSync(p);
-    out[scope] = { path: p, exists, content: exists ? readFileSync(p, 'utf8') : '', mtime: exists ? statSync(p).mtimeMs : 0 };
+    out[scope] = { path: p, ...await backend.codexConfigRead(p) };
   }
   return out;
 }
@@ -47,69 +52,46 @@ export function readConfig(cwd) {
 // Search config.toml content across the given roots. Dedup by path (same root
 // passed twice → one hit). Returns first matching line per file with a trimmed
 // snippet.
-export function searchConfig(roots, q) {
+export async function searchConfig(roots, q) {
   const needle = String(q || '').toLowerCase();
   if (!needle) return [];
-  const seen = new Set();
-  const results = [];
+  const backend = requireCodexConfigReadBackend();
+  const authorized = [];
   for (const cwd of roots || []) {
-    let cfg;
-    try { cfg = readConfig(cwd); } catch { continue; }
-    for (const scope of EDIT_SCOPES) {
-      const { path, content } = cfg[scope];
-      if (!content || seen.has(path)) continue;
-      seen.add(path);
-      const lines = content.split('\n');
-      const i = lines.findIndex((l) => l.toLowerCase().includes(needle));
-      if (i < 0) continue;
-      results.push({ cwd, scope, path, line: i + 1, text: lines[i].trim().slice(0, 200) });
-    }
+    if (!await isKnownConfigRoot(cwd)) continue;
+    const paths = scopePaths(cwd);
+    authorized.push({ cwd, project: paths.project, user: paths.user });
   }
   // Stable order (by path) so clicking a hit — which reorders recent (MRU) and
   // re-runs the search — doesn't reshuffle the list under the cursor.
-  return results.sort((a, b) => a.path.localeCompare(b.path));
+  return backend.codexConfigSearch(authorized, needle);
 }
 
 // Recursively walk `root` for dirs holding .codex/config.toml. Bounded (dir cap)
 // so a huge tree can't hang the daemon; skips noise dirs + all dotdirs (except
 // detecting .codex itself). Returns matching cwd's (the dir that holds .codex),
 // sorted, + a truncated flag.
-const SCAN_SKIP = new Set(['node_modules', 'dist', 'build', 'worktrees', '.cache', 'AppData', 'Temp']);
-export function findConfigRoots(root, cap = 20000) {
-  const hits = [];
-  const stack = [root];
-  let seen = 0;
-  while (stack.length && seen < cap) {
-    const dir = stack.pop();
-    seen++;
-    let ents;
-    try { ents = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    if (ents.some((e) => e.name === '.codex')) {
-      if (existsSync(scopePaths(dir).project)) hits.push(dir);
-    }
-    for (const e of ents) {
-      if (e.isDirectory() && !e.name.startsWith('.') && !SCAN_SKIP.has(e.name)) stack.push(join(dir, e.name));
-    }
-  }
-  return { roots: hits.sort((a, b) => a.localeCompare(b)), truncated: seen >= cap };
+export async function findConfigRoots(root, cap = 20000, backend = configReadBackend) {
+  return requireCodexConfigReadBackend(backend).codexConfigScan(root, cap);
 }
 
-// Config root list: the picker's pinned roots. FS-persisted (survives browser
-// cache clear) under STATE_DIR. Seeded with '~' when absent/empty.
+// Config root list: the picker's pinned roots, persisted by Rust under STATE_DIR.
 const ROOTS_FILE = join(STATE_DIR, 'codex-config-roots.json');
-export function getConfigRoots() {
-  try {
-    const r = JSON.parse(readFileSync(ROOTS_FILE, 'utf8'));
-    return Array.isArray(r) && r.length ? r : ['~'];
-  } catch { return ['~']; }
+let rootsBackend = null;
+export function setConfigRootsBackend(backend) { rootsBackend = backend; }
+export async function getConfigRoots(backend = rootsBackend) {
+  if (!backend) throw new Error('Rust picker roots backend is not configured');
+  return backend.pickerRootsGet(ROOTS_FILE);
 }
-export function setConfigRoots(roots) {
-  const clean = [...new Set((roots || []).filter((r) => typeof r === 'string' && r))].slice(0, 50);
-  try {
-    mkdirSync(STATE_DIR, { recursive: true });
-    writeFileSync(ROOTS_FILE, JSON.stringify(clean, null, 2));
-    return { ok: true, roots: clean };
-  } catch (e) { return { ok: false, error: e.message }; }
+export async function setConfigRoots(roots, backend = rootsBackend) {
+  if (!backend) throw new Error('Rust picker roots backend is not configured');
+  return backend.pickerRootsSet(ROOTS_FILE, roots);
+}
+export function createConfigRootsGetHandler(backend) {
+  return async () => ({ roots: await getConfigRoots(backend) });
+}
+export function createConfigRootsSetHandler(backend) {
+  return async (req) => setConfigRoots(req.body?.roots, backend);
 }
 
 // Resolve a ~-prefixed client path to an absolute one (mirror rules.mjs resolveRoot).
@@ -123,19 +105,19 @@ function resolveRoot(raw) {
 // A write target's cwd must resolve under one of the pinned config roots
 // (getConfigRoots) — mirrors config.mjs isKnownConfigRoot so the editor can't
 // be pointed at an arbitrary directory to plant a config.toml.
-function isKnownConfigRoot(cwd) {
+async function isKnownConfigRoot(cwd) {
   if (!cwd) return false;
   const abs = resolveRoot(cwd); // untildify '~' → home (resolve(cwd) would leave '~' literal)
   if (!abs) return false;
-  return getConfigRoots().some((raw) => {
+  return (await getConfigRoots()).some((raw) => {
     const root = resolveRoot(raw);
     return root && (abs === root || abs.startsWith(root + sep));
   });
 }
 
-export async function writeConfig(cwd, scope, content, mtime, force) {
+export async function writeConfig(cwd, scope, content, mtime, force, backend, logger) {
   if (!EDIT_SCOPES.includes(scope)) return { ok: false, error: 'bad scope' };
-  if (!isKnownConfigRoot(cwd)) return { ok: false, error: 'cwd outside config roots' };
+  if (!await isKnownConfigRoot(cwd)) return { ok: false, error: 'cwd outside config roots' };
   // Enforce the client's cwd→scope mapping: 'user' only for cwd ~ (home),
   // 'project' only for a non-home cwd. Otherwise a project-scope write with
   // cwd ~ would target ~/.codex/config.toml (the user file) and vice versa.
@@ -145,20 +127,30 @@ export async function writeConfig(cwd, scope, content, mtime, force) {
   const paths = scopePaths(cwd);
   const p = paths[scope];
   try { tomlParse(content); } catch (e) { return { ok: false, error: `invalid TOML: ${e.message}` }; }
+  let backup;
   try {
     if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    const backup = await backupFile(p);
+    backup = await backupFile(p);
     if (!backup) mkdirSync(dirname(p), { recursive: true }); // first write of a project scope
     // Re-check: backupFile's await can yield to a concurrent save of this
     // same path landing in between, which the first check (above) can't see.
     if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
       return { ok: false, error: 'changed on disk' };
     }
-    await writeFile(p, content);
-    return { ok: true, backup, path: p, mtime: statSync(p).mtimeMs };
   } catch (e) {
     return { ok: false, error: e.message };
+  }
+  try {
+    const result = await backend.codexConfigWrite(p, content, mtime, force);
+    if (!result.ok && result.error !== 'changed on disk') {
+      logger?.error({ err: result.error }, 'Rust Codex Config write backend failed');
+      return { ok: false, error: 'codex config write failed' };
+    }
+    return result.ok ? { ...result, backup, path: p } : result;
+  } catch (e) {
+    logger?.error({ err: e.message }, 'Rust Codex Config write backend failed');
+    return { ok: false, error: 'codex config write backend unavailable' };
   }
 }

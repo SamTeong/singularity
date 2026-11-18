@@ -1,8 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir, homedir } from 'node:os';
 import { join } from 'node:path';
+import Fastify from 'fastify';
 
 // rules.mjs imports app-dir.mjs (STATE_DIR), which throws without SINGULARITY_HOME.
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
@@ -10,7 +11,7 @@ process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 // Isolate RULES_REF_DIR from the real ~/.agents/rules-reference so tests can
 // plant reference files without touching the user's FS. Must precede the import.
 process.env.SING_RULES_REF = mkdtempSync(join(tmpdir(), 'sing-rules-ref-'));
-const { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, isRulePath, readRuleFile, writeRuleFile, findRuleReference } = await import('./rules.mjs');
+const { getRulesRoots, setRulesRoots, isRulePath, readRuleFile, createRuleWriteHandler, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } = await import('./rules.mjs');
 
 // A base root's rules live at <base>/.claude/rules — make + return that dir.
 const mkRoot = () => {
@@ -29,31 +30,61 @@ test('rules roots persist to FS: default ~, dedup, roundtrip', () => {
   assert.deepEqual(getRulesRoots(), [root]); // read back from disk
 });
 
-test('listRuleFiles finds .md under <base>/.claude/rules, skips non-.md', async () => {
+// The walk and content search run in Rust (rust-backend.test.mjs holds the
+// real-child coverage); rules.mjs owns root resolution and the HTTP mapping.
+test('rules files and search handlers resolve scan dirs and pass payloads through', async () => {
+  const app = Fastify();
   const { root, dir } = mkRoot();
-  mkdirSync(join(dir, 'sub'), { recursive: true });
-  writeFileSync(join(dir, 'a.md'), 'hello world');
-  writeFileSync(join(dir, 'sub', 'b.md'), 'nested rule');
-  writeFileSync(join(dir, 'ignore.txt'), 'not markdown');
-
-  const { files, capped } = await listRuleFiles([root]);
-  assert.equal(capped, false);
-  assert.equal(files.length, 2);
-  const rels = files.map((f) => f.rel).sort();
-  assert.deepEqual(rels, ['a.md', 'sub/b.md']); // rel is relative to the rules dir
-  assert.equal(files.find((f) => f.rel === 'a.md').file, 'a.md');
-  assert.equal(files[0].root, root); // grouped under the picked base
+  const seen = [];
+  const backend = {
+    ruleFiles: async (scans) => {
+      seen.push(['files', scans]);
+      return { files: [{ root: '~', path: 'p', rel: 'r', file: 'f' }], capped: false };
+    },
+    ruleSearch: async (scans, q) => {
+      seen.push(['search', scans, q]);
+      return { results: [{ root: '~', path: 'p', rel: 'r', file: 'f', line: 1, text: 't' }], capped: false };
+    },
+  };
+  app.post('/rules/files', createRuleFilesHandler(backend, app.log));
+  app.post('/rules/search', createRuleSearchHandler(backend, app.log));
+  try {
+    const listed = await app.inject({ method: 'POST', url: '/rules/files', payload: { roots: ['~', root, 123, ''] } });
+    assert.equal(listed.statusCode, 200);
+    assert.deepEqual(listed.json(), { files: [{ root: '~', path: 'p', rel: 'r', file: 'f' }], capped: false });
+    const searched = await app.inject({ method: 'POST', url: '/rules/search', payload: { roots: [root], q: 'find' } });
+    assert.equal(searched.statusCode, 200);
+    assert.deepEqual(searched.json(), { results: [{ root: '~', path: 'p', rel: 'r', file: 'f', line: 1, text: 't' }], capped: false });
+    const noBody = await app.inject({ method: 'POST', url: '/rules/files' });
+    assert.equal(noBody.statusCode, 200);
+    assert.deepEqual(seen, [
+      // '~' resolves to the home rules dir; the mkRoot base resolves to its
+      // <base>/.claude/rules; non-string/empty/unresolvable bases drop silently.
+      ['files', [
+        { root: '~', dir: join(homedir(), '.claude', 'rules') },
+        { root, dir },
+      ]],
+      ['search', [{ root, dir }], 'find'],
+      ['files', []],
+    ]);
+  } finally { await app.close(); }
 });
 
-test('searchRules finds a hit with line + snippet', async () => {
-  const { root, dir } = mkRoot();
-  writeFileSync(join(dir, 'a.md'), 'line one\nfind me here\nline three');
-
-  const { results, capped } = await searchRules([root], 'find me');
-  assert.equal(capped, false);
-  assert.equal(results.length, 1);
-  assert.equal(results[0].line, 2);
-  assert.match(results[0].text, /find me here/);
+test('rules files and search backend failures map to explicit 500 responses', async () => {
+  const app = Fastify();
+  const backend = {
+    ruleFiles: async () => { throw new Error('child exited'); },
+    ruleSearch: async () => { throw new Error('child exited'); },
+  };
+  app.post('/rules/files', createRuleFilesHandler(backend, app.log));
+  app.post('/rules/search', createRuleSearchHandler(backend, app.log));
+  const files = await app.inject({ method: 'POST', url: '/rules/files', payload: { roots: [] } });
+  assert.equal(files.statusCode, 500);
+  assert.deepEqual(files.json(), { ok: false, error: 'rules files backend unavailable' });
+  const search = await app.inject({ method: 'POST', url: '/rules/search', payload: { roots: [], q: 'x' } });
+  assert.equal(search.statusCode, 500);
+  assert.deepEqual(search.json(), { ok: false, error: 'rules search backend unavailable' });
+  await app.close();
 });
 
 test('isRulePath rejects a path outside all persisted rules dirs', () => {
@@ -70,18 +101,26 @@ test('isRulePath rejects a path outside all persisted rules dirs', () => {
   assert.equal(isRulePath(null), false);
 });
 
-test('writeRuleFile then readRuleFile round-trips', async () => {
+test('Rules write handler authorizes in Node and sends empty content through Rust', async () => {
+  const app = Fastify();
   const { root, dir } = mkRoot();
   setRulesRoots([root]);
   const p = join(dir, 'note.md');
-
-  const w = await writeRuleFile(p, '# hello');
-  assert.equal(w.ok, true);
-  assert.equal(typeof w.mtime, 'number');
-  const r = readRuleFile(p);
-  assert.equal(r.ok, true);
-  assert.equal(r.content, '# hello');
-  assert.equal(typeof r.mtime, 'number');
+  const calls = [];
+  app.put('/rules/file', createRuleWriteHandler({
+    ruleWrite: async (...args) => { calls.push(args); return { ok: true, mtime: 1234.5 }; },
+  }, app.log));
+  try {
+    const saved = await app.inject({ method: 'PUT', url: '/rules/file', payload: { path: p, content: '' } });
+    assert.equal(saved.statusCode, 200);
+    assert.deepEqual(saved.json(), { ok: true, mtime: 1234.5 });
+    const outside = await app.inject({ method: 'PUT', url: '/rules/file', payload: { path: join(root, 'outside.md'), content: 'x' } });
+    assert.equal(outside.statusCode, 400);
+    const missing = await app.inject({ method: 'PUT', url: '/rules/file', payload: { path: p } });
+    assert.equal(missing.statusCode, 400);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], [p, '', undefined, undefined]);
+  } finally { await app.close(); }
 });
 
 test('readRuleFile reports mtime on success', () => {
@@ -95,44 +134,58 @@ test('readRuleFile reports mtime on success', () => {
   assert.ok(r.mtime > 0);
 });
 
-test('writeRuleFile rejects a stale mtime with "changed on disk"; force overrides', async () => {
+test('Rules write handler maps conflicts and transport failures', async () => {
+  const app = Fastify();
   const { root, dir } = mkRoot();
   setRulesRoots([root]);
   const p = join(dir, 'g.md');
-  await writeRuleFile(p, 'v1');
-  const stale = readRuleFile(p).mtime;
-  // Externally rewrite + bump mtime past the 1ms guard window.
-  writeFileSync(p, 'v-external');
-  const future = (Date.now() + 5000) / 1000;
-  utimesSync(p, future, future);
-  const rejected = await writeRuleFile(p, 'v2', stale);
-  assert.equal(rejected.ok, false);
-  assert.equal(rejected.error, 'changed on disk');
-  assert.equal(readFileSync(p, 'utf8'), 'v-external');
-  // force overrides the drift.
-  const forced = await writeRuleFile(p, 'v-forced', stale, true);
-  assert.equal(forced.ok, true);
-  assert.equal(typeof forced.mtime, 'number');
-  assert.equal(readFileSync(p, 'utf8'), 'v-forced');
+  app.put('/rules/file', createRuleWriteHandler({
+    ruleWrite: async () => ({ ok: false, error: 'changed on disk' }),
+  }, app.log));
+  app.put('/transport', createRuleWriteHandler({ ruleWrite: async () => { throw new Error('child exited'); } }, app.log));
+  try {
+    const conflict = await app.inject({ method: 'PUT', url: '/rules/file', payload: { path: p, content: 'v2', mtime: 10 } });
+    assert.equal(conflict.statusCode, 409);
+    assert.deepEqual(conflict.json(), { ok: false, error: 'changed on disk' });
+    const transport = await app.inject({ method: 'PUT', url: '/transport', payload: { path: p, content: 'x' } });
+    assert.equal(transport.statusCode, 500);
+    assert.deepEqual(transport.json(), { ok: false, error: 'rules write backend unavailable' });
+  } finally { await app.close(); }
 });
 
-test('findRuleReference pairs <stem>.md with <stem>-reference.md', () => {
-  const { dir } = mkRoot();
-  const rulePath = join(dir, 'skills.md');
-  writeFileSync(rulePath, 'rule body');
+// Reference lookup runs in Rust (see rust-backend.test.mjs for the real-child
+// coverage); rules.mjs owns the configured root and the HTTP mapping.
+test('rules reference handler passes the configured root and preserves payload and HTTP mapping', async () => {
+  const app = Fastify();
   const refDir = process.env.SING_RULES_REF;
-  writeFileSync(join(refDir, 'skills-reference.md'), '# reference body');
-
-  const r = findRuleReference(rulePath);
-  assert.equal(r.ok, true);
-  assert.match(r.path, /skills-reference\.md$/);
-  assert.match(r.content, /reference body/);
+  const backend = {
+    ruleReference: async (path, root) => {
+      assert.equal(root, refDir); // SING_RULES_REF captured at import is passed per call
+      if (path === 'skills.md') return { ok: true, path: join(root, 'skills-reference.md'), content: '# reference body' };
+      if (path === 'lonely.md') return { ok: false, error: 'no reference' };
+      return { ok: false, error: 'no path' };
+    },
+  };
+  app.get('/rules/reference', createRuleReferenceHandler(backend, app.log));
+  try {
+    const hit = await app.inject('/rules/reference?path=skills.md');
+    assert.equal(hit.statusCode, 200);
+    assert.deepEqual(hit.json(), { ok: true, path: join(refDir, 'skills-reference.md'), content: '# reference body' });
+    const missing = await app.inject('/rules/reference?path=lonely.md');
+    assert.equal(missing.statusCode, 404);
+    assert.deepEqual(missing.json(), { ok: false, error: 'no reference' });
+    const empty = await app.inject('/rules/reference');
+    assert.equal(empty.statusCode, 400);
+    assert.deepEqual(empty.json(), { ok: false, error: 'no path' });
+  } finally { await app.close(); }
 });
 
-test('findRuleReference: no companion → ok:false', () => {
-  const { dir } = mkRoot();
-  const rulePath = join(dir, 'lonely.md');
-  writeFileSync(rulePath, 'x');
-  assert.equal(findRuleReference(rulePath).ok, false);
-  assert.equal(findRuleReference('').ok, false);
+test('rules reference backend failures map to explicit 500 responses', async () => {
+  const app = Fastify();
+  const backend = { ruleReference: async () => { throw new Error('child exited'); } };
+  app.get('/rules/reference', createRuleReferenceHandler(backend, app.log));
+  const response = await app.inject('/rules/reference?path=x.md');
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(response.json(), { ok: false, error: 'rules reference backend unavailable' });
+  await app.close();
 });

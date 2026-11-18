@@ -23,7 +23,7 @@ pnpm build:mock      # mock build → web/dist-mock (never touches web/dist)
   - `OLLAMA_BIN`: absent means ollama models are unavailable.
   - `SING_SCOPE_ROOT`: absent means no skill-scopes. The skills viewer auto-detects either flat `~/.claude/skills` + `<project>/.claude/skills` or the grouped layout.
   - `SING_TRUSTED_ROOT`: absent means this clone.
-  - `SING_USAGE_SKILL` / `SING_USAGE_REPORTS`: absent means the usage report degrades silently; `/capabilities` reports them.
+  - `SING_USAGE_REPORTS` sets the spend-report output dir; unset, it defaults to `<dirname(USAGE_REPORT_STATE || ~/.agents/.harness-usage-report/state)>/reports`. Generation is native; no skill path is configured.
   - `SING_TOKEN`: see the Security section of CLAUDE.md.
 - Scripts load `.env` via `node --env-file-if-exists=.env`.
 

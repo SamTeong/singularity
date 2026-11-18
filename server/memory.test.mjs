@@ -3,15 +3,55 @@
 // Run: npm test  (node --test server/)
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { join, sep } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, statSync, utimesSync, readdirSync } from 'node:fs';
+import Fastify from 'fastify';
 import { contains } from './path-containment.mjs';
 
 // memory.mjs imports app-dir.mjs (STATE_DIR), which throws without SINGULARITY_HOME.
 // Point it at a scratch temp dir before a dynamic import (static imports hoist).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
-const { isMemoryPath, getMemoryRoot, setMemoryRoot, listFiles, searchMemory, readMemoryFile, writeMemoryFile } = await import('./memory.mjs');
+const { isMemoryPath, getMemoryRoot, setMemoryRoot, setMemoryReadBackend, listFiles, searchMemory, readMemoryFile, writeMemoryFile, createMemoryWriteHandler } = await import('./memory.mjs');
+const { BACKUPS_DIR } = await import('./app-dir.mjs');
+
+const fileWriter = {
+  async memoryWrite(path, content, mtime, force) {
+    if (mtime != null && !force && Math.abs(statSync(path).mtimeMs - mtime) > 1) return { ok: false, error: 'changed on disk' };
+    writeFileSync(path, content);
+    return { ok: true, mtime: statSync(path).mtimeMs };
+  },
+};
+
+let memoryReadCalls = 0;
+setMemoryReadBackend({
+  async memoryList(root) {
+    return readdirSync(root, { withFileTypes: true }).filter((entry) => entry.isDirectory())
+      .flatMap((entry) => {
+        const dir = join(root, entry.name, 'memory');
+        try { return readdirSync(dir).filter((file) => file.toLowerCase().endsWith('.md')).sort((a, b) => a.localeCompare(b)).map((file) => ({ project: entry.name, file, path: join(dir, file) })); }
+        catch { return []; }
+      }).sort((a, b) => a.project.localeCompare(b.project) || a.file.localeCompare(b.file));
+  },
+  async memorySearch(root, query) {
+    const results = [];
+    for (const { project, file, path } of await this.memoryList(root)) {
+      let lines;
+      try { lines = readFileSync(path, 'utf8').split(/\r?\n/); } catch { continue; }
+      for (let i = 0; i < lines.length; i++) if (lines[i].toLowerCase().includes(query.toLowerCase())) {
+        results.push({ project, file, path, line: i + 1, text: lines[i].trim().slice(0, 200) });
+        if (results.length === 300) return { results, capped: true };
+      }
+    }
+    return { results, capped: false };
+  },
+  async memoryRead(path) {
+    memoryReadCalls++;
+    try { return { ok: true, content: readFileSync(path, 'utf8'), mtime: statSync(path).mtimeMs }; }
+    catch (error) { return { ok: false, error: error.code === 'ENOENT' ? 'not found' : error.message }; }
+  },
+});
 
 // Scratch projects root: <ROOT>/proj/memory/*.md
 const ROOT = mkdtempSync(join(tmpdir(), 'sing-memory-root-'));
@@ -29,11 +69,13 @@ test('memory root persists to FS: default, roundtrip, bad input', () => {
 // isMemoryPath only accepts a root matching server-persisted state (set
 // above) — a caller-invented root (e.g. the drive root) must not pass just
 // because it trivially "contains" the target path.
-test('rejects a caller-supplied root that is not the persisted one, even the drive root', () => {
+test('rejects a caller-supplied root that is not the persisted one, even the drive root', async () => {
   const driveRoot = ROOT.slice(0, ROOT.indexOf(sep) + 1) || sep; // e.g. "C:\" or "/"
   const evil = join(homedir(), 'proj', 'memory', 'secret.md'); // shape-valid, outside ROOT
   assert.equal(isMemoryPath(evil, driveRoot), false);
-  assert.equal(readMemoryFile(evil, driveRoot).ok, false);
+  const before = memoryReadCalls;
+  assert.equal((await readMemoryFile(evil, driveRoot)).ok, false);
+  assert.equal(memoryReadCalls, before);
 });
 
 test('accepts a .md file directly under a project memory/ dir', () => {
@@ -63,43 +105,43 @@ test('contains: traversal rejected, in-root paths accepted', () => {
   assert.equal(contains(ROOT, join(homedir(), 'evil.md')), false); // unrelated path
 });
 
-test('listFiles finds .md files under the given root', () => {
-  const files = listFiles(ROOT);
+test('listFiles finds .md files under the given root', async () => {
+  const files = await listFiles(ROOT);
   assert.equal(files.length, 1);
   assert.equal(files[0].project, 'proj');
   assert.equal(files[0].file, 'a-fact.md');
 });
 
-test('searchMemory finds a matching line under the given root', () => {
-  const { results } = searchMemory('findme', ROOT);
+test('searchMemory finds a matching line under the given root', async () => {
+  const { results } = await searchMemory('findme', ROOT);
   assert.equal(results.length, 1);
   assert.equal(results[0].text, 'findme here');
 });
 
-test('readMemoryFile reads a file within the root, rejects outside it', () => {
+test('readMemoryFile reads a file within the root, rejects outside it', async () => {
   const p = mem('proj', 'memory', 'a-fact.md');
-  const r = readMemoryFile(p, ROOT);
+  const r = await readMemoryFile(p, ROOT);
   assert.equal(r.ok, true);
   assert.match(r.content, /findme here/);
 
-  const outside = readMemoryFile(join(homedir(), 'evil.md'), ROOT);
+  const outside = await readMemoryFile(join(homedir(), 'evil.md'), ROOT);
   assert.equal(outside.ok, false);
 });
 
 test('writeMemoryFile writes within the root, rejects outside it', async () => {
   const p = mem('proj', 'memory', 'a-fact.md');
-  const w = await writeMemoryFile(p, 'updated content', ROOT);
+  const w = await writeMemoryFile(p, 'updated content', ROOT, null, false, fileWriter);
   assert.equal(w.ok, true);
   assert.equal(typeof w.mtime, 'number');
-  assert.equal(readMemoryFile(p, ROOT).content, 'updated content');
+  assert.equal((await readMemoryFile(p, ROOT)).content, 'updated content');
 
-  const outside = await writeMemoryFile(join(homedir(), 'evil.md'), 'x', ROOT);
+  const outside = await writeMemoryFile(join(homedir(), 'evil.md'), 'x', ROOT, null, false, fileWriter);
   assert.equal(outside.ok, false);
 });
 
-test('readMemoryFile reports mtime on success', () => {
+test('readMemoryFile reports mtime on success', async () => {
   const p = mem('proj', 'memory', 'a-fact.md');
-  const r = readMemoryFile(p, ROOT);
+  const r = await readMemoryFile(p, ROOT);
   assert.equal(r.ok, true);
   assert.equal(typeof r.mtime, 'number');
   assert.ok(r.mtime > 0);
@@ -108,18 +150,53 @@ test('readMemoryFile reports mtime on success', () => {
 test('writeMemoryFile rejects a stale mtime with "changed on disk"; force overrides', async () => {
   const p = mem('proj', 'memory', 'g-fact.md');
   writeFileSync(p, 'v1');
-  const stale = readMemoryFile(p, ROOT).mtime;
+  const stale = (await readMemoryFile(p, ROOT)).mtime;
   // Externally rewrite + bump mtime past the 1ms guard window.
   writeFileSync(p, 'v-external');
   const future = (Date.now() + 5000) / 1000;
   utimesSync(p, future, future);
-  const rejected = await writeMemoryFile(p, 'v2', ROOT, stale);
+  const rejected = await writeMemoryFile(p, 'v2', ROOT, stale, false, fileWriter);
   assert.equal(rejected.ok, false);
   assert.equal(rejected.error, 'changed on disk');
   assert.equal(readFileSync(p, 'utf8'), 'v-external');
   // force overrides the drift.
-  const forced = await writeMemoryFile(p, 'v-forced', ROOT, stale, true);
+  const forced = await writeMemoryFile(p, 'v-forced', ROOT, stale, true, fileWriter);
   assert.equal(forced.ok, true);
   assert.equal(typeof forced.mtime, 'number');
   assert.equal(readFileSync(p, 'utf8'), 'v-forced');
+});
+
+test('writeMemoryFile backs up the exact prior bytes before writing', async () => {
+  const p = mem('proj', 'memory', 'backup-check.md');
+  writeFileSync(p, 'unique prior Memory bytes 7f28b4');
+  const key = createHash('sha256').update(p).digest('hex').slice(0, 16);
+  const result = await writeMemoryFile(p, 'replacement', ROOT, null, false, fileWriter);
+  assert.equal(result.ok, true);
+  const backupDir = join(BACKUPS_DIR, key);
+  const backupFile = readdirSync(backupDir).find((name) => name.endsWith('.bak'));
+  assert.ok(backupFile);
+  assert.equal(readFileSync(join(backupDir, backupFile), 'utf8'), 'unique prior Memory bytes 7f28b4');
+  assert.equal(readFileSync(p, 'utf8'), 'replacement');
+});
+
+test('Memory write HTTP handler preserves required fields, conflict, and generic failures', async () => {
+  const app = Fastify();
+  const failed = { memoryWrite: async () => { throw new Error('transport details'); } };
+  app.put('/memory/file', createMemoryWriteHandler(fileWriter));
+  app.put('/memory/fail', createMemoryWriteHandler(failed, { error() {} }));
+  try {
+    const missing = await app.inject({ method: 'PUT', url: '/memory/file', payload: { path: mem('proj', 'memory', 'a.md'), content: null } });
+    assert.equal(missing.statusCode, 400);
+    assert.deepEqual(missing.json(), { ok: false, error: 'path + content required' });
+
+    const p = mem('proj', 'memory', 'http-check.md');
+    writeFileSync(p, 'current');
+    const stale = await app.inject({ method: 'PUT', url: '/memory/file', payload: { path: p, root: ROOT, content: 'rejected', mtime: 0 } });
+    assert.equal(stale.statusCode, 409);
+    assert.deepEqual(stale.json(), { ok: false, error: 'changed on disk' });
+
+    const rejected = await app.inject({ method: 'PUT', url: '/memory/fail', payload: { path: p, root: ROOT, content: 'replacement' } });
+    assert.equal(rejected.statusCode, 400);
+    assert.deepEqual(rejected.json(), { ok: false, error: 'memory write backend unavailable' });
+  } finally { await app.close(); }
 });

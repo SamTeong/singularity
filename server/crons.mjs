@@ -126,10 +126,10 @@ function tick() {
 
 // Spawn the job's description into a fresh agent + record the run. Shared by the
 // scheduler (fire) and manual run (runCron). Does NOT touch nextFire.
-function spawnForJob(job) {
+async function spawnForJob(job) {
   // reg.create's params (title/prompt) are the session-registry contract; the
   // cron stores them as title/description, so map at the call site.
-  const agent = reg.create({ cwd: job.cwd, title: job.title, model: job.model, scopes: job.scopes, prompt: job.description, permissionMode: job.permissionMode, runId: job.pendingRunId });
+  const agent = await reg.create({ cwd: job.cwd, title: job.title, model: job.model, scopes: job.scopes, prompt: job.description, permissionMode: job.permissionMode, runId: job.pendingRunId });
   job.lastSessionId = agent.id;
   job.lastFiredAt = Date.now();
   job.updatedAt = Date.now();
@@ -162,7 +162,7 @@ function beginRun(job) {
 // carries the new nextFire. Clients learn nextFire only from a pushed snapshot (no
 // polling), so a push carrying the boundary that just fired leaves the row counting
 // down past zero ("in -80s") until the next fire. Every path emits exactly once.
-function fire(job) {
+async function fire(job) {
   if (job.pendingRunId || reg.isLive(job.lastSessionId)) {
     logger?.info({ id: job.id }, 'cron skipped — previous run still active');
     recomputeNext(job);
@@ -170,7 +170,7 @@ function fire(job) {
     return;
   }
   recomputeNext(job);
-  try { beginRun(job); spawnForJob(job); }
+  try { beginRun(job); await spawnForJob(job); }
   catch (e) {
     logger?.warn({ id: job.id, err: e.message }, 'cron spawn failed');
     const failed = { ...job, lastError: e.message, updatedAt: Date.now() };
@@ -254,13 +254,13 @@ export function deleteCron(id) {
 
 // Manual "Run now": same overlap rule as the scheduler, but expressed as an
 // error (so the UI can surface it) and does not disturb the scheduled nextFire.
-export function runCron(id) {
+export async function runCron(id) {
   const job = crons.get(id);
   if (!job) throw new Error('no such cron');
   if (job.pendingRunId || reg.isLive(job.lastSessionId)) throw new Error('previous run still active');
   beginRun(job);
   try {
-    return spawnForJob(job);
+    return await spawnForJob(job);
   } catch (e) {
     const agent = reg.findByRunId(job.pendingRunId);
     if (agent) {

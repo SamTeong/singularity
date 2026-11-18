@@ -1,0 +1,10 @@
+{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"session_id":"aaaaaaaa-0000-4000-8000-000000000001","id":"aaaaaaaa-0000-4000-8000-000000000001","cwd":"C:\\proj\\café"}}
+{"timestamp":"2026-01-01T00:00:01Z","type":"turn_context","payload":{"model":"gpt-6.1-sol"}}
+{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"user_message","message":"hi"}}
+{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":1000,"cached_input_tokens":200,"cache_write_input_tokens":0,"output_tokens":100},"total_token_usage":{"input_tokens":1000,"output_tokens":100},"model_context_window":200000},"rate_limits":{"primary":{"used_percent":10,"window_minutes":300,"resets_at":2000000000},"secondary":{"used_percent":5,"window_minutes":10080,"resets_at":2000100000}}}}
+{"timestamp":"2026-01-01T00:00:03Z","type":"response_item","payload":{"type":"custom_tool_call","name":"exec"}}
+{"timestamp":"2026-01-01T00:00:04Z","type":"response_item","payload":{"type":"function_call","name":"wait"}}
+not valid json {{{
+{"timestamp":"2026-01-01T00:00:05Z","type":"event_msg","payload":{"type":"mcp_tool_call_end","invocation":{"server":"lean-ctx","tool":"ctx_read"}}}
+{"timestamp":"2026-01-01T00:00:06Z","type":"turn_context","payload":{"model":"codex-auto-review"}}
+{"timestamp":"2026-01-01T00:00:07Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":200,"cached_input_tokens":50,"cache_write_input_tokens":10,"output_tokens":30},"model_context_window":200000},"rate_limits":{"primary":{"used_percent":20,"window_minutes":10080,"resets_at":2000000000}}}}

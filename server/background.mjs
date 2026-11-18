@@ -19,7 +19,7 @@ import { SHADOW } from './app-dir.mjs';
 import { createTask, updateTask, snapshotTasks } from './tasks.mjs';
 import { getUsage } from './usage.mjs';
 import { parseSession } from './stats.mjs';
-import { isClaudeModel, isCodexModel } from './models.mjs';
+import { getModelRoute } from './models.mjs';
 
 const BACKGROUND_FILE = join(reg.STATE_DIR, 'background.json');
 const FLAGS_FILE = join(reg.STATE_DIR, 'report-flags.json'); // Set of unflagged (dismissed) taskIds; absent = all flagged (need attention)
@@ -222,7 +222,7 @@ async function attemptRun({ bypassWindow, bypassGate, manual }) {
   const pendingConfig = { ...config, jobs: config.jobs.map((d) => d.id === job.id ? pendingJob : d) };
   persist(pendingConfig);
   config = pendingConfig;
-  const task = createTask({
+  const task = await createTask({
     repo: job.cwd, title: job.title, description: job.description, model,
     scopes: job.scopes, tags: ['background'], background: true, permissionSettings: DENY,
     backgroundJobId: job.id, backgroundRunId: runId, conclude: job.conclude,
@@ -264,7 +264,8 @@ async function watchdog() {
   try {
     const job = config.jobs.find((d) => d.lastTaskId === task.id);
     const usage = await getUsage();
-    const backend = isClaudeModel(task.model) ? 'claude' : isCodexModel(task.model) ? 'codex' : 'ollama';
+    const route = await getModelRoute(task.model, task.tool);
+    const backend = route.isClaudeModel ? 'claude' : route.isCodexModel ? 'codex' : 'ollama';
     const tokens = (await parseSession(task.worktree || task.repo, task.sessionId, backend)).tokens;
     decision = job ? watchdogDecision(usage, backend, job, tokens) : 'stop';
   } catch (e) { logger?.warn({ err: e.message }, 'background watchdog poll failed — stopping run (fail closed)'); }

@@ -10,7 +10,23 @@ import { streamChat } from './chat.mjs';
 const SHADOW_WS_OK = new Set(['attach', 'txmeta', 'chat:stop']); // read-only: chat spends tokens
 
 function send(ws, msg) {
-  if (ws.readyState === ws.OPEN) ws.send(typeof msg === 'string' ? msg : JSON.stringify(msg));
+  const payload = typeof msg === 'string' ? msg : JSON.stringify(msg);
+  if (ws.readyState !== ws.OPEN) return;
+  if (ws.initializing) {
+    const bytes = Buffer.byteLength(payload, 'utf8');
+    if (ws.initialFrames.length >= 256 || ws.initialBytes + bytes > 1_048_576) {
+      ws.initializing = false;
+      ws.initialFrames.length = 0;
+      ws.initialBytes = 0;
+      ws.initialOverflow = true;
+      ws.close(1013, 'initial snapshot backlog exceeded');
+      return;
+    }
+    ws.initialFrames.push(payload);
+    ws.initialBytes += bytes;
+    return;
+  }
+  ws.send(payload);
 }
 
 // Terminal *query* escape sequences: xterm.js answers these by writing a reply
@@ -106,21 +122,26 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
     ws.attached = new Set();
+    ws.initializing = true;
+    ws.initialFrames = [];
+    ws.initialBytes = 0;
+    ws.initialOverflow = false;
     sockets.add(ws);
-    send(ws, { t: 'list', agents: reg.snapshot(), recentRepos: reg.getRecentRepos() });
-    send(ws, { t: 'tasks', ...snapshotTasks() });
-    send(ws, { t: 'crons', crons: snapshotCrons() });
-    send(ws, { t: 'background', ...snapshotBackground() });
-    send(ws, { t: 'window-anchor', anchor: snapshotWindowAnchor() });
+    const initial = [
+      { t: 'list', agents: reg.snapshot(), recentRepos: reg.getRecentRepos() },
+      { t: 'tasks', ...snapshotTasks() },
+      { t: 'crons', crons: snapshotCrons() },
+      { t: 'background', ...snapshotBackground() },
+    ];
 
-    ws.on('message', (raw) => {
+    ws.on('message', async (raw) => {
       let m;
       try { m = JSON.parse(raw.toString()); } catch { return; }
       if (SHADOW && !SHADOW_WS_OK.has(m.t)) { send(ws, { t: 'error', msg: 'shadow mode: read-only' }); return; }
       switch (m.t) {
         case 'create': {
           try {
-            const na = reg.create({ cwd: m.cwd, title: m.title, model: m.model, scopes: m.scopes, sessionId: m.sessionId, tool: m.tool });
+            const na = await reg.create({ cwd: m.cwd, title: m.title, model: m.model, scopes: m.scopes, sessionId: m.sessionId, tool: m.tool });
             ws.attached.add(na.id);
             send(ws, { t: 'attached', id: na.id });
           } catch (e) {
@@ -131,7 +152,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
         }
         case 'fork': {
           try {
-            const na = reg.fork(m.id, m.title);
+            const na = await reg.fork(m.id, m.title);
             ws.attached.add(na.id);
             send(ws, { t: 'attached', id: na.id });
           } catch (e) {
@@ -142,7 +163,7 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
         }
         case 'reattach': {
           try {
-            const a = reg.reattach(m.id);
+            const a = await reg.reattach(m.id);
             if (a) { ws.attached.add(a.id); send(ws, { t: 'attached', id: a.id }); }
           } catch (e) {
             send(ws, { t: 'error', msg: `reattach failed: ${e.message}` });
@@ -161,8 +182,12 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
         case 'resize': reg.resize(m.id, m.cols, m.rows); break;
         case 'kill': reg.kill(m.id); break;
         case 'reorder': reg.reorder(m.ids); break;
-        case 'respawn': reg.respawn(m.id); break;
-        case 'respawnAll': reg.respawnAll(); break;
+        case 'respawn':
+          await reg.respawn(m.id).catch((error) => log?.warn({ err: error.message, id: m.id }, 'agent respawn failed'));
+          break;
+        case 'respawnAll':
+          await reg.respawnAll().catch((error) => log?.warn({ err: error.message }, 'agent respawn-all failed'));
+          break;
         case 'chat': {
           // One in-flight chat per socket: a new request cancels the prior.
           if (ws.chatAbort) ws.chatAbort.abort();
@@ -175,7 +200,41 @@ export function attachPtyWs(wss, log, token = null, originAllowed = () => true) 
       }
     });
 
-    ws.on('close', () => { ws.chatAbort?.abort(); sockets.delete(ws); });
+    ws.on('close', () => {
+      ws.chatAbort?.abort();
+      ws.initializing = false;
+      ws.initialFrames.length = 0;
+      ws.initialBytes = 0;
+      sockets.delete(ws);
+    });
+
+    void (async () => {
+      try {
+        const anchor = await snapshotWindowAnchor();
+        if (ws.initialOverflow || ws.readyState !== ws.OPEN) return;
+        const firstFrames = [...initial, { t: 'window-anchor', anchor }];
+        for (const frame of firstFrames) {
+          if (ws.readyState !== ws.OPEN) return;
+          ws.send(JSON.stringify(frame));
+        }
+        ws.initializing = false;
+        const queued = ws.initialFrames;
+        ws.initialFrames = [];
+        ws.initialBytes = 0;
+        for (const frame of queued) {
+          if (ws.readyState !== ws.OPEN) return;
+          ws.send(frame);
+        }
+      } catch (error) {
+        ws.initializing = false;
+        ws.initialFrames.length = 0;
+        ws.initialBytes = 0;
+        if (ws.readyState === ws.OPEN) {
+          log?.error({ err: error?.message ?? String(error) }, 'window-anchor snapshot failed during WebSocket initialization');
+          ws.close(1011, 'initial snapshot failed');
+        }
+      }
+    })();
   });
   log?.info('pty-ws attached at /ws');
 }

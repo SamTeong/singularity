@@ -2,7 +2,7 @@
 // (.claude/agents/<role>.md). These checks pin that branching: defs present →
 // subagents routed via subagent_type; absent → generic fallback, or (with the
 // caveman plugin enabled) the cavecrew fallback.
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync, existsSync, realpathSync, readdirSync, chmodSync, renameSync, readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -29,7 +29,18 @@ process.env.DAEMON_PORT = '4999';
 // 3s, so this doesn't make the other git-backed tests flaky.
 process.env.SING_GIT_TIMEOUT_MS = '3000';
 
-const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, buildCodexBackgroundPrompt, createTask, updateTask, concludeTask, snapshotTasks, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree, git } = await import('./tasks.mjs');
+const modelStore = await import('./model-store.mjs');
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+const taskModule = await import('./tasks.mjs');
+taskModule.setTasksBackend(modelBackend);
+after(async () => {
+  await modelBackend.stop();
+  rmSync(scratch, { recursive: true, force: true });
+});
+
+const { buildTaskPrompt, buildBackgroundPrompt, buildCodexTaskPrompt, buildCodexBackgroundPrompt, createTask, updateTask, concludeTask, snapshotTasks, initTasks, RATE_LIMIT_RE, cleanupGitTask, ensureWorktree, git } = taskModule;
 const reg = await import('./agents.mjs');
 
 function initRepo() {
@@ -69,121 +80,121 @@ function withAgents(files) {
   return cwd;
 }
 
-test('project agent defs present → subagents routed via subagent_type', () => {
+test('project agent defs present → subagents routed via subagent_type', async () => {
   const cwd = withAgents(['reviewer.md', 'senior-software-engineer.md']);
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
+  const p = await buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
   assert.match(p, /subagent_type: "reviewer"/);
   assert.match(p, /subagent_type: "senior-software-engineer"/);
   assert.match(p, /security checklist/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('no defs → generic fallback, no subagent_type', () => {
+test('no defs → generic fallback, no subagent_type', async () => {
   const cwd = withAgents([]);
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
+  const p = await buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
   assert.doesNotMatch(p, /subagent_type/);
   assert.match(p, /spawn a reviewer subagent via the Task tool with model/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('only junior def → impl routes to junior-software-engineer', () => {
+test('only junior def → impl routes to junior-software-engineer', async () => {
   const cwd = withAgents(['junior-software-engineer.md']);
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
+  const p = await buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
   assert.match(p, /subagent_type: "junior-software-engineer"/);
   assert.doesNotMatch(p, /senior-software-engineer/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('no defs + caveman plugin → cavecrew fallback', () => {
+test('no defs + caveman plugin → cavecrew fallback', async () => {
   const cwd = withAgents([]);
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, true);
+  const p = await buildTaskPrompt({ ...baseTask, worktree: cwd }, true);
   assert.match(p, /subagent_type: "caveman:cavecrew-reviewer"/);
   assert.match(p, /caveman:cavecrew-investigator/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('project defs win over cavecrew', () => {
+test('project defs win over cavecrew', async () => {
   const cwd = withAgents(['reviewer.md', 'senior-software-engineer.md']);
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, true);
+  const p = await buildTaskPrompt({ ...baseTask, worktree: cwd }, true);
   assert.doesNotMatch(p, /cavecrew/);
   assert.match(p, /subagent_type: "reviewer"/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('subagent economy guidance in prompt', () => {
+test('subagent economy guidance in prompt', async () => {
   const cwd = withAgents([]);
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
+  const p = await buildTaskPrompt({ ...baseTask, worktree: cwd }, false);
   assert.match(p, /at most 3 subagents/);
   assert.match(p, /write its full output to a file/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('ollama model → turn-economy guidance', () => {
+test('ollama model → turn-economy guidance', async () => {
   const cwd = withAgents([]);
-  const p = buildTaskPrompt({ ...baseTask, model: 'glm-5.2:cloud', worktree: cwd }, false);
+  const p = await buildTaskPrompt({ ...baseTask, model: 'glm-5.2:cloud', worktree: cwd }, false);
   assert.match(p, /no prompt caching/);
   assert.match(p, /batch the board status curl/);
   assert.match(p, /model: glm-5.2:cloud/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('claude model → no turn-economy bullet', () => {
-  const p = buildTaskPrompt(baseTask, false);
+test('claude model → no turn-economy bullet', async () => {
+  const p = await buildTaskPrompt(baseTask, false);
   assert.doesNotMatch(p, /no prompt caching/);
 });
 
-test('max-turn caps injected when set', () => {
-  const p = buildTaskPrompt({ ...baseTask, orchestratorMaxTurns: 30, implMaxTurns: 20, reviewerMaxTurns: 10 }, false);
+test('max-turn caps injected when set', async () => {
+  const p = await buildTaskPrompt({ ...baseTask, orchestratorMaxTurns: 30, implMaxTurns: 20, reviewerMaxTurns: 10 }, false);
   assert.match(p, /orchestrator ≤30/);
   assert.match(p, /implementor subagent ≤20/);
   assert.match(p, /reviewer subagent ≤10/);
   assert.match(p, /soft — self-enforced/);
 });
 
-test('no turn-budget bullet when caps absent', () => {
-  const p = buildTaskPrompt(baseTask, false);
+test('no turn-budget bullet when caps absent', async () => {
+  const p = await buildTaskPrompt(baseTask, false);
   assert.doesNotMatch(p, /Turn budgets/);
 });
 
-test('claude model, no overrides → impl=sonnet, reviewer=opus', () => {
-  const p = buildTaskPrompt(baseTask, false);
+test('claude model, no overrides → impl=sonnet, reviewer=opus', async () => {
+  const p = await buildTaskPrompt(baseTask, false);
   assert.match(p, /model: sonnet\b/);
   assert.match(p, /model: opus\b/);
 });
 
-test('impl/reviewer overrides win over the claude defaults', () => {
-  const p = buildTaskPrompt({ ...baseTask, implModel: 'haiku', reviewerModel: 'opus[1m]' }, false);
+test('impl/reviewer overrides win over the claude defaults', async () => {
+  const p = await buildTaskPrompt({ ...baseTask, implModel: 'haiku', reviewerModel: 'opus[1m]' }, false);
   assert.match(p, /model: haiku\b/);
   assert.match(p, /model: opus\[1m\]/);
   assert.doesNotMatch(p, /model: sonnet\b/);
 });
 
-test('ollama model, no overrides → impl+reviewer mirror the orchestrator', () => {
+test('ollama model, no overrides → impl+reviewer mirror the orchestrator', async () => {
   const cwd = withAgents([]);
-  const p = buildTaskPrompt({ ...baseTask, model: 'glm-5.2:cloud', worktree: cwd }, false);
+  const p = await buildTaskPrompt({ ...baseTask, model: 'glm-5.2:cloud', worktree: cwd }, false);
   const hits = p.match(/model: glm-5\.2:cloud\b/g) || [];
   assert.ok(hits.length >= 2, 'both impl and reviewer spawns use the ollama model');
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('plain-kind prompt also gets turn-economy guidance', () => {
+test('plain-kind prompt also gets turn-economy guidance', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-plain-'));
-  const p = buildTaskPrompt({ ...baseTask, kind: 'plain', repo: cwd, worktree: null, mergeMode: null, model: 'glm-5.2:cloud' }, false);
+  const p = await buildTaskPrompt({ ...baseTask, kind: 'plain', repo: cwd, worktree: null, mergeMode: null, model: 'glm-5.2:cloud' }, false);
   assert.match(p, /no prompt caching/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('buildTaskPrompt terminal column: mergeMode "auto" ends on done', () => {
+test('buildTaskPrompt terminal column: mergeMode "auto" ends on done', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-merge-'));
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd, mergeMode: 'auto' }, false);
+  const p = await buildTaskPrompt({ ...baseTask, worktree: cwd, mergeMode: 'auto' }, false);
   assert.match(p, /"column":"done"/);
   assert.match(p, /complete/);
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('buildTaskPrompt terminal column: mergeMode "manual" never reaches done', () => {
+test('buildTaskPrompt terminal column: mergeMode "manual" never reaches done', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-merge-'));
-  const p = buildTaskPrompt({ ...baseTask, worktree: cwd, mergeMode: 'manual' }, false);
+  const p = await buildTaskPrompt({ ...baseTask, worktree: cwd, mergeMode: 'manual' }, false);
   assert.match(p, /awaiting human merge/);
   assert.doesNotMatch(p, /"column":"done"/);
   rmSync(cwd, { recursive: true, force: true });
@@ -192,12 +203,12 @@ test('buildTaskPrompt terminal column: mergeMode "manual" never reaches done', (
 // Every builder embeds the status-curl URL the agent posts its column moves to.
 // Read the wrong env var and the port interpolates as NaN — nothing throws, the
 // prompt still looks right, and every card silently stops moving.
-test('every prompt builder embeds the daemon port in the status-curl URL', () => {
+test('every prompt builder embeds the daemon port in the status-curl URL', async () => {
   const cwd = mkdtempSync(join(tmpdir(), 'sing-port-'));
   const bg = { ...baseTask, kind: 'plain', repo: cwd, worktree: null, prompt: 'do it' };
   const prompts = [
-    buildTaskPrompt({ ...baseTask, worktree: cwd }, false),
-    buildBackgroundPrompt(bg),
+    await buildTaskPrompt({ ...baseTask, worktree: cwd }, false),
+    await buildBackgroundPrompt(bg),
     buildCodexTaskPrompt({ ...baseTask, worktree: cwd, tool: 'codex' }),
     buildCodexBackgroundPrompt({ ...bg, tool: 'codex' }),
   ];
@@ -208,7 +219,7 @@ test('every prompt builder embeds the daemon port in the status-curl URL', () =>
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('RATE_LIMIT_RE matches 429 + usage-limit strings', () => {
+test('RATE_LIMIT_RE matches 429 + usage-limit strings', async () => {
   assert.match('API Error: Request rejected (429) · you (x) have reached your session usage limit', RATE_LIMIT_RE);
   assert.match('reached your session usage limit', RATE_LIMIT_RE);
   assert.match('Request rejected (429)', RATE_LIMIT_RE);
@@ -370,21 +381,26 @@ test('concludeTask: concurrent calls on the same task conclude it exactly once',
 test('git: a hung subprocess loses to the hard timeout instead of blocking forever', async () => {
   const repo = initRepo();
   try {
-    await assert.rejects(() => git(repo, 'hash-object', '--stdin'), /git hash-object --stdin failed/);
+    await assert.rejects(() => git(repo, 'hash-object', '--stdin'), (error) => {
+      assert.match(error.message, /git hash-object --stdin failed: Command failed:/);
+      assert.equal(error.cause.signal, 'SIGKILL');
+      assert.equal(error.cause.killed, true);
+      return true;
+    });
   } finally {
     rmRepo(repo);
   }
 });
 
-test('buildBackgroundPrompt: conclude "done" moves the card to done as the last action', () => {
-  const p = buildBackgroundPrompt({ ...baseTask, conclude: 'done' });
+test('buildBackgroundPrompt: conclude "done" moves the card to done as the last action', async () => {
+  const p = await buildBackgroundPrompt({ ...baseTask, conclude: 'done' });
   assert.match(p, /move the card to Done/);
   assert.match(p, /tasks\/t1\/status.*-d '\{"column":"done","state":"report ready"\}'/);
   assert.doesNotMatch(p, /Do NOT move the card to done/);
 });
-test('buildBackgroundPrompt: conclude "inreview" (or absent) keeps the human-review text verbatim', () => {
-  const p = buildBackgroundPrompt({ ...baseTask, conclude: 'inreview' });
-  const pAbsent = buildBackgroundPrompt(baseTask);
+test('buildBackgroundPrompt: conclude "inreview" (or absent) keeps the human-review text verbatim', async () => {
+  const p = await buildBackgroundPrompt({ ...baseTask, conclude: 'inreview' });
+  const pAbsent = await buildBackgroundPrompt(baseTask);
   for (const prompt of [p, pAbsent]) {
     assert.match(prompt, /move the card to In Review/);
     assert.match(prompt, /Do NOT move the card to done — a human concludes the run\./);
@@ -396,10 +412,10 @@ test('buildBackgroundPrompt: conclude "inreview" (or absent) keeps the human-rev
 // the top of this file, so routing to a non-claude model makes reg.create's
 // buildSpawn throw synchronously ("ollama not found") — a deterministic failure
 // with no mocking needed.
-test('createTask: failed spawn cleans up the worktree it just created', () => {
+test('createTask: failed spawn cleans up the worktree it just created', async () => {
   const repo = initRepo();
   try {
-    assert.throws(
+    await assert.rejects(
       () => createTask({ repo, title: 'T', description: 'D', model: 'not-a-claude-model', scopes: [] }),
       /ollama not found/,
     );
@@ -414,7 +430,7 @@ test('createTask: failed spawn cleans up the worktree it just created', () => {
 // Codex tasks are single-agent (no Task tool / subagents): the prompt must
 // contain the title + description and never reference subagents or the Task
 // tool. buildTaskPrompt routes to buildCodexTaskPrompt via the early return.
-test('buildCodexTaskPrompt: contains title/description, no Task tool/subagent references', () => {
+test('buildCodexTaskPrompt: contains title/description, no Task tool/subagent references', async () => {
   const p = buildCodexTaskPrompt({ ...baseTask, title: 'My Codex Task', description: 'Do the thing', tool: 'codex' });
   assert.match(p, /My Codex Task/);
   assert.match(p, /Do the thing/);
@@ -422,16 +438,16 @@ test('buildCodexTaskPrompt: contains title/description, no Task tool/subagent re
   assert.doesNotMatch(p, /subagent/);
 });
 
-test('buildTaskPrompt: codex tool returns codex prompt (early return, no subagent refs)', () => {
-  const p = buildTaskPrompt({ ...baseTask, title: 'C Task', description: 'C Desc', tool: 'codex' }, false);
+test('buildTaskPrompt: codex tool returns codex prompt (early return, no subagent refs)', async () => {
+  const p = await buildTaskPrompt({ ...baseTask, title: 'C Task', description: 'C Desc', tool: 'codex' }, false);
   assert.match(p, /C Task/);
   assert.match(p, /C Desc/);
   assert.doesNotMatch(p, /subagent/);
   assert.doesNotMatch(p, /Task tool/);
 });
 
-test('buildBackgroundPrompt: codex tool returns codex background prompt (no subagent refs)', () => {
-  const p = buildBackgroundPrompt({ ...baseTask, title: 'C Bg', description: 'C Bg Desc', tool: 'codex' });
+test('buildBackgroundPrompt: codex tool returns codex background prompt (no subagent refs)', async () => {
+  const p = await buildBackgroundPrompt({ ...baseTask, title: 'C Bg', description: 'C Bg Desc', tool: 'codex' });
   assert.match(p, /C Bg/);
   assert.match(p, /C Bg Desc/);
   assert.doesNotMatch(p, /subagent/);
@@ -441,10 +457,10 @@ test('buildBackgroundPrompt: codex tool returns codex background prompt (no suba
 // optional-env convention) → buildSpawn throws "codex not found" synchronously,
 // and the worktree created just above is cleaned up. Mirrors the existing
 // "not-a-claude-model" → ollama throw test.
-test('createTask: codex tool with no CODEX_BIN throws /codex not found/ and cleans up the worktree', () => {
+test('createTask: codex tool with no CODEX_BIN throws /codex not found/ and cleans up the worktree', async () => {
   const repo = initRepo();
   try {
-    assert.throws(
+    await assert.rejects(
       () => createTask({ repo, title: 'T', description: 'D', model: 'gpt-5.3-codex-spark', scopes: [], tool: 'codex' }),
       /codex not found/,
     );

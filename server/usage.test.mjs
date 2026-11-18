@@ -6,9 +6,11 @@
 // Run: npm test  (node --test server/)
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync, readFileSync, mkdirSync, writeFileSync, utimesSync, renameSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createRustBackend } from './rust-backend.mjs';
 
 const scratch = mkdtempSync(join(tmpdir(), 'singularity-usage-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
@@ -26,11 +28,109 @@ mkdirSync(claudeCfg, { recursive: true });
 process.env.CLAUDE_CONFIG_DIR = claudeCfg;
 const writeCreds = (oauth) => writeFileSync(join(claudeCfg, '.credentials.json'), JSON.stringify({ claudeAiOauth: oauth }));
 
-after(() => { rmSync(scratch, { recursive: true, force: true }); });
+let usageRustBackend;
+after(async () => { await usageRustBackend?.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
-const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, normalizeClaude, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readCodexSnapshot, readCostStateLimits, rotateClaudeHistory, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
+const { parseOllamaHtml, classifyOllamaPage, connectOllamaUsage, preserveOllamaStale, scrapeOllamaOnce, appendOllamaHistory, appendCodexHistory, fetchCodex, readClaudeSnapshot, readClaudeLocal, readCodexSnapshot, readCostStateLimits, claudeOauthToken, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, setUsageClaudeBackend, setUsageOllamaModeConfigBackend, refreshClaudeAuth, refreshOauthGrant, getUsage, sampleCodex, SNAPSHOT_MAX_AGE_MS } = await import('./usage.mjs');
 // The resets lane is its own endpoint; keep it out of every fetch-count assertion below.
 process.env.SING_CODEX_RESETS = '0';
+usageRustBackend = createRustBackend();
+await usageRustBackend.start();
+setUsageNormalizationBackend(usageRustBackend);
+setUsageSnapshotBackend(usageRustBackend);
+setUsageOllamaModeConfigBackend(usageRustBackend);
+let codexFixture = async () => { throw new Error('missing offline Codex fixture'); };
+const codexFixtureSnapshots = new Map();
+const codexFingerprintReads = [];
+let nextCodexFixtureHandle = 0;
+const codexFixtureBackend = {
+  async codexAccountFingerprint(authPath) {
+    codexFingerprintReads.push(authPath);
+    try {
+      const accountId = JSON.parse(readFileSync(authPath, 'utf8'))?.tokens?.account_id;
+      return typeof accountId === 'string' && accountId.length > 0
+        ? createHash('sha256').update(accountId).digest('hex')
+        : null;
+    } catch { return null; }
+  },
+  async codexUsageBegin(authPath) {
+    try {
+      const tokens = JSON.parse(readFileSync(authPath, 'utf8'))?.tokens;
+      if (!tokens?.access_token || !tokens?.account_id) return { kind: 'no_sessions' };
+      const handle = `fixture-${++nextCodexFixtureHandle}`;
+      codexFixtureSnapshots.set(handle, { authPath, tokens: structuredClone(tokens) });
+      return { kind: 'ready', handle };
+    } catch { return { kind: 'no_sessions' }; }
+  },
+  codexUsageFetch(handle) {
+    const snapshot = codexFixtureSnapshots.get(handle);
+    if (!snapshot) throw new Error('fixture credential handle was released');
+    return codexFixture(snapshot.authPath, snapshot.tokens);
+  },
+  codexUsageRelease(handle) { return { released: codexFixtureSnapshots.delete(handle) }; },
+  codexUsageResult(input) { return usageRustBackend.codexUsageResult(input); },
+};
+const codexResponse = (payload, status = 200, retryAfter = null) => ({ kind: 'response', status, retry_after: retryAfter, body: { ok: JSON.stringify(payload) } });
+const nativeFetch = globalThis.fetch;
+const claudeCredentialReads = [];
+const claudeCredentialWrites = [];
+const claudeFixtureBackend = {
+  async claudeCredentialsRead(path) {
+    claudeCredentialReads.push(path);
+    try { return { kind: 'file', text: readFileSync(path, 'utf8') }; }
+    catch (error) { return error.code === 'ENOENT' ? { kind: 'missing' } : { kind: 'read_failure' }; }
+  },
+  async claudeCredentialsWrite(path, tempPath, text) {
+    claudeCredentialWrites.push({ path, tempPath, text });
+    try {
+      writeFileSync(tempPath, text, { mode: 0o600 });
+      renameSync(tempPath, path);
+      return true;
+    } catch {
+      try { writeFileSync(path, text, { mode: 0o600 }); return true; }
+      catch { return false; }
+    }
+  },
+  async claudeUsageFetch(accessToken) {
+    if (globalThis.fetch === nativeFetch) throw new Error('missing offline Claude fixture');
+    const response = await globalThis.fetch('https://fixture.invalid/claude-usage', {
+      method: 'GET', headers: { Authorization: `Bearer ${accessToken}`, 'anthropic-beta': 'oauth-2025-04-20' },
+    });
+    let body = { ok: null };
+    if (response.status === 200) {
+      try { body = { ok: JSON.stringify(await response.json()) }; }
+      catch { body = { err: 'terminated' }; }
+    }
+    return { kind: 'response', status: response.status, retry_after: response.headers?.get?.('retry-after') ?? null, body };
+  },
+  async claudeOauthRefresh() { throw new Error('missing offline Claude OAuth fixture'); },
+};
+let lastCodexAuthPath;
+codexFixture = async (authPath, tokens) => {
+  if (globalThis.fetch === nativeFetch) throw new Error('missing offline Codex fixture');
+  lastCodexAuthPath = authPath;
+  const response = await globalThis.fetch('https://fixture.invalid/usage', {
+    method: 'GET', headers: { Authorization: `Bearer ${tokens.access_token}`, 'ChatGPT-Account-Id': `${tokens.account_id}` },
+  });
+  let body = { ok: null };
+  if (response.status === 200) {
+    try { body = { ok: JSON.stringify(await response.json()) }; }
+    catch { body = { err: 'terminated' }; }
+  }
+  return { kind: 'response', status: response.status, retry_after: response.headers?.get?.('retry-after') ?? null, body };
+};
+const codexFixtureBaseline = codexFixture;
+setUsageCodexBackend(codexFixtureBackend);
+setUsageClaudeBackend(claudeFixtureBackend);
+async function importIsolatedUsage(specifier) {
+  const isolated = await import(specifier);
+  isolated.setUsageNormalizationBackend(usageRustBackend);
+  isolated.setUsageSnapshotBackend(usageRustBackend);
+  isolated.setUsageOllamaModeConfigBackend(usageRustBackend);
+  isolated.setUsageCodexBackend(codexFixtureBackend);
+  isolated.setUsageClaudeBackend(claudeFixtureBackend);
+  return isolated;
+}
 
 const OLLAMA_HTML = `
   <span class="capitalize">pro</span>
@@ -63,8 +163,73 @@ test('connectOllamaUsage: verifies the profile before selecting browser mode', a
   assert.deepEqual(JSON.parse(readFileSync(join(process.env.SINGULARITY_HOME, 'state', 'ollama.json'), 'utf8')), { mode: 'browser' });
 });
 
+test('Ollama config Rust read preserves missing, Node parse errors, BOM, and stable read failures', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?ollama-config-read=${Date.now()}`);
+  const path = join(process.env.SINGULARITY_HOME, 'state', 'ollama.json');
+  mkdirSync(dirname(path), { recursive: true });
+  const read = async () => (await isolated.getUsage({ sources: ['ollama'], force: true })).ollama;
+  try {
+    rmSync(path, { force: true });
+    const missing = await read();
+    assert.deepEqual(
+      { ok: missing.ok, source: missing.source, needsAuth: missing.needsAuth, error: missing.error },
+      { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' },
+    );
+
+    const invalidJson = '{"mode":';
+    writeFileSync(path, invalidJson);
+    let parseMessage;
+    try { JSON.parse(invalidJson); } catch (error) { parseMessage = error.message; }
+    const parse = await read();
+    assert.equal(parse.error, `bad ${path}: ${parseMessage}`);
+    assert.equal(Object.hasOwn(parse, 'needsAuth'), false);
+
+    const bomText = '\uFEFF{}';
+    writeFileSync(path, bomText);
+    let bomMessage;
+    try { JSON.parse(bomText); } catch (error) { bomMessage = error.message; }
+    assert.equal((await read()).error, `bad ${path}: ${bomMessage}`);
+
+    writeFileSync(path, Buffer.from([0xff, 0x7b, 0x7d]));
+    const lossy = await read();
+    assert.match(lossy.error, new RegExp(`^bad ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: `));
+    assert.equal(Object.hasOwn(lossy, 'needsAuth'), false);
+
+    rmSync(path);
+    mkdirSync(path);
+    const failure = await read();
+    assert.match(failure.error, new RegExp(`^bad ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: read failed \\((not-found|permission-denied|already-exists|invalid-input|invalid-data|interrupted|storage-full|other)\\)$`));
+    assert.equal(Object.hasOwn(failure, 'needsAuth'), false);
+  } finally {
+    rmSync(path, { recursive: true, force: true });
+  }
+});
+
+test('connectOllamaUsage rejects stable Rust writer errors with the exact Node temp path and text', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?ollama-config-write=${Date.now()}`);
+  const path = join(process.env.SINGULARITY_HOME, 'state', 'ollama.json');
+  const calls = [];
+  isolated.setUsageOllamaModeConfigBackend({
+    ollamaModeConfigWrite: async (...args) => {
+      calls.push(args);
+      throw new Error(`bad ${path}: rename failed (permission-denied)`);
+    },
+  });
+  const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: async () => {}, content: async () => OLLAMA_HTML };
+  const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => {} }) } };
+  const realNow = Date.now;
+  try {
+    Date.now = () => 987654321;
+    await assert.rejects(isolated.connectOllamaUsage({ playwright, headlessVerifier: async () => parseOllamaHtml(OLLAMA_HTML) }),
+      new RegExp(`^Error: bad ${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: rename failed \\(permission-denied\\)$`));
+  } finally {
+    Date.now = realNow;
+  }
+  assert.deepEqual(calls, [[path, `${path}.${process.pid}.987654321.tmp`, '{"mode":"browser"}']]);
+});
+
 test('connectOllamaUsage: resumes history collection after authentication recovers', async () => {
-  const { connectOllamaUsage: isolatedConnect, runHistorySample: isolatedSample } = await import(`./usage.mjs?history-resume=${Date.now()}`);
+  const { connectOllamaUsage: isolatedConnect, runHistorySample: isolatedSample } = await importIsolatedUsage(`./usage.mjs?history-resume=${Date.now()}`);
   const page = { goto: async () => {}, url: () => 'https://ollama.com/settings', waitForSelector: async () => {}, content: async () => OLLAMA_HTML };
   const playwright = { chromium: { launchPersistentContext: async () => ({ addInitScript: async () => {}, pages: () => [page], close: async () => {} }) } };
   const realNow = Date.now;
@@ -100,7 +265,7 @@ test('connectOllamaUsage: resumes history collection after authentication recove
 });
 
 test('runHistorySample: a good tick caches the reading without a second scrape', async () => {
-  const { runHistorySample: isolatedSample, getUsage: isolatedGetUsage } = await import(`./usage.mjs?history-good=${Date.now()}`);
+  const { runHistorySample: isolatedSample, getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?history-good=${Date.now()}`);
   try {
     await isolatedSample(async () => parseOllamaHtml(OLLAMA_HTML));
     // Within the network floor, getUsage must answer from the cache the tick
@@ -120,7 +285,7 @@ test('runHistorySample: a good tick caches the reading without a second scrape',
 });
 
 test('runHistorySample: a genuine failure still arms the gate (is not skipped as a floor hit)', async () => {
-  const { runHistorySample: isolatedSample } = await import(`./usage.mjs?history-fail=${Date.now()}`);
+  const { runHistorySample: isolatedSample } = await importIsolatedUsage(`./usage.mjs?history-fail=${Date.now()}`);
   const realNow = Date.now;
   try {
     await isolatedSample(async () => parseOllamaHtml(OLLAMA_HTML)); // tick 1: good reading, clears backoff
@@ -152,62 +317,8 @@ const CLAUDE_RAW = {
   extra_usage: { is_enabled: true, used_credits: 12, monthly_limit: 40, utilization: 30 },
 };
 
-test('normalizeClaude: five_hour→session, seven_day→weekly, per-model + extra', () => {
-  const u = normalizeClaude(CLAUDE_RAW, 'max');
-  assert.equal(u.ok, true);
-  assert.equal(u.source, 'claude');
-  assert.equal(u.plan, 'max');
-
-  assert.deepEqual(u.session, { pctUsed: 42, resetsAt: '2026-07-14T13:00:00Z', models: [] });
-  assert.equal(u.weekly.pctUsed, 63.5);
-  assert.equal(u.weekly.resetsAt, '2026-07-19T00:00:00Z');
-  assert.deepEqual(u.weekly.models, [
-    { model: 'sonnet', pctUsed: 30 },
-    { model: 'opus', pctUsed: 71 },
-    { model: 'design', pctUsed: 5 },
-  ]);
-  assert.deepEqual(u.extra, {
-    enabled: true, used: 12, monthlyLimit: 40, pctUsed: 30, resetsAt: null,
-  });
-});
-
-test('normalizeClaude: zero-use window without a reset is unstarted', () => {
-  const u = normalizeClaude({ five_hour: { utilization: 0, resets_at: null }, seven_day: null }, 'max');
-  assert.deepEqual(u.session, { pctUsed: 0, resetsAt: null, models: [], started: false });
-});
-
-test('normalizeClaude: missing windows/extra → nulls, no throw', () => {
-  const u = normalizeClaude({ five_hour: null, seven_day: null }, undefined);
-  assert.equal(u.session, null);
-  assert.equal(u.weekly, null);
-  assert.equal(u.extra, null);
-  assert.equal(u.plan, null);
-});
-
-// Extra-usage-only subscription: no window utilization, spend percentage instead.
-const CLAUDE_EXTRA_ONLY = {
-  five_hour: null,
-  seven_day: null,
-  extra_usage: { is_enabled: true, used_credits: 0, monthly_limit: 20000, utilization: null },
-  spend: {
-    percent: 0,
-    used: { amount_minor: 0, currency: 'USD', exponent: 2 },
-    limit: { amount_minor: 20000, currency: 'USD', exponent: 2 },
-  },
-};
-
-test('normalizeClaude: extra-only plan falls back to top-level spend percent', () => {
-  const u = normalizeClaude(CLAUDE_EXTRA_ONLY, 'max');
-  assert.equal(u.session, null);
-  assert.equal(u.weekly, null);
-  assert.deepEqual(u.extra, {
-    enabled: true, used: 0, monthlyLimit: 20000, pctUsed: 0, resetsAt: null,
-  });
-  assert.equal(normalizeClaude({ ...CLAUDE_EXTRA_ONLY, spend: { ...CLAUDE_EXTRA_ONLY.spend, percent: 25 } }, 'max').extra.pctUsed, 25);
-});
-
-// appendOllamaHistory writes the report skill's snapshot shape and refreshes
-// freshness for unchanged successful samples on a 5-minute heartbeat.
+// appendOllamaHistory writes the report skill's snapshot shape and de-dupes an
+// unchanged reading (idle-debounce refreshes call this often).
 const HISTORY_FILE = join(process.env.USAGE_REPORT_STATE, 'ollama-usage.jsonl');
 const READING = {
   plan: 'pro',
@@ -219,18 +330,17 @@ const READING = {
 };
 
 test('appendOllamaHistory: unchanged readings dedupe inside interval and heartbeat after 5 minutes', async () => {
-  const { appendOllamaHistory: isolatedAppendOllamaHistory } = await import(`./usage.mjs?ollama-heartbeat=${Date.now()}`);
   const realNow = Date.now;
   let now = realNow();
   try {
     rmSync(HISTORY_FILE, { force: true });
     Date.now = () => now;
-    isolatedAppendOllamaHistory(READING);
-    isolatedAppendOllamaHistory(READING); // inside the heartbeat → no extra row
+    await appendOllamaHistory(READING);
+    await appendOllamaHistory(READING); // inside the heartbeat → no extra row
     now += 5 * 60_000;
-    isolatedAppendOllamaHistory(READING); // heartbeat elapsed → same values, newer timestamp
+    await appendOllamaHistory(READING); // heartbeat elapsed → same values, newer timestamp
     const changed = { ...READING, session: { ...READING.session, pctUsed: 28.1 } };
-    isolatedAppendOllamaHistory(changed);
+    await appendOllamaHistory(changed);
 
     const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
     assert.equal(lines.length, 3);
@@ -249,13 +359,13 @@ test('appendOllamaHistory: unchanged readings dedupe inside interval and heartbe
   }
 });
 
-test('appendOllamaHistory retries an identical reading after a failed append', () => {
+test('appendOllamaHistory retries an identical reading after a failed append', async () => {
   const retryReading = { ...READING, session: { ...READING.session, pctUsed: 99.9 } };
   rmSync(HISTORY_FILE, { recursive: true, force: true });
   mkdirSync(HISTORY_FILE);
-  appendOllamaHistory(retryReading); // path is a directory, so the append fails
+  await appendOllamaHistory(retryReading); // path is a directory, so the append fails
   rmSync(HISTORY_FILE, { recursive: true, force: true });
-  appendOllamaHistory(retryReading); // same successful result must be retried
+  await appendOllamaHistory(retryReading); // same successful result must be retried
 
   const lines = readFileSync(HISTORY_FILE, 'utf8').trim().split('\n');
   assert.equal(lines.length, 1);
@@ -273,10 +383,10 @@ const CODEX_READING = {
   weekly: { pctUsed: 12.5, resetsAt: '2026-09-12T00:00:00Z', models: [] },
 };
 
-test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', () => {
-  appendCodexHistory(CODEX_READING);
-  appendCodexHistory(CODEX_READING); // identical → no second line
-  appendCodexHistory({ ...CODEX_READING, session: { ...CODEX_READING.session, pctUsed: 44 } });
+test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', async () => {
+  await appendCodexHistory(CODEX_READING);
+  await appendCodexHistory(CODEX_READING); // identical → no second line
+  await appendCodexHistory({ ...CODEX_READING, session: { ...CODEX_READING.session, pctUsed: 44 } });
 
   const lines = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n');
   assert.equal(lines.length, 2);
@@ -292,13 +402,13 @@ test('appendCodexHistory: skill snapshot shape, dedupes an unchanged reading', (
 });
 
 test('appendCodexHistory: an unchanged reading is rewritten once the 5-min heartbeat has passed', async () => {
-  const { appendCodexHistory: isolatedAppendCodexHistory } = await import(`./usage.mjs?codex-heartbeat=${Date.now()}`);
+  const { appendCodexHistory: isolatedAppendCodexHistory } = await importIsolatedUsage(`./usage.mjs?codex-heartbeat=${Date.now()}`);
   const realNow = Date.now;
   try {
-    isolatedAppendCodexHistory(CODEX_READING);
-    isolatedAppendCodexHistory(CODEX_READING); // within the heartbeat → deduped
+    await isolatedAppendCodexHistory(CODEX_READING);
+    await isolatedAppendCodexHistory(CODEX_READING); // within the heartbeat → deduped
     Date.now = () => realNow() + 5 * 60_000;
-    isolatedAppendCodexHistory(CODEX_READING); // heartbeat elapsed → written again
+    await isolatedAppendCodexHistory(CODEX_READING); // heartbeat elapsed → written again
     const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(rows.length, 2);
     assert.deepEqual(rows[1].session, rows[0].session);
@@ -308,7 +418,7 @@ test('appendCodexHistory: an unchanged reading is rewritten once the 5-min heart
   }
 });
 
-test('appendCodexHistory: retries an unchanged reading after a failed append', () => {
+test('appendCodexHistory: retries an unchanged reading after a failed append', async () => {
   const historyDir = dirname(CODEX_HISTORY_FILE);
   const heldDir = `${historyDir}-held`;
   const reading = { ...CODEX_READING, session: { ...CODEX_READING.session, pctUsed: 41 } };
@@ -317,14 +427,14 @@ test('appendCodexHistory: retries an unchanged reading after a failed append', (
   renameSync(historyDir, heldDir);
   writeFileSync(historyDir, 'blocks directory creation');
   try {
-    appendCodexHistory(reading); // append fails best-effort while parent path is a file
+    await appendCodexHistory(reading); // append fails best-effort while parent path is a file
   } finally {
     rmSync(historyDir, { force: true });
     renameSync(heldDir, historyDir);
   }
 
   try {
-    appendCodexHistory(reading); // same reading must retry before heartbeat expiry
+    await appendCodexHistory(reading); // same reading must retry before heartbeat expiry
     const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].session.utilization, 41);
@@ -333,15 +443,15 @@ test('appendCodexHistory: retries an unchanged reading after a failed append', (
   }
 });
 
-test('appendCodexHistory: an unstarted transition with unchanged limits appends a fresh snapshot', () => {
+test('appendCodexHistory: an unstarted transition with unchanged limits appends a fresh snapshot', async () => {
   const window = { pctUsed: 0, resetsAt: null, models: [] };
-  appendCodexHistory({ ...CODEX_READING, session: window });
-  appendCodexHistory({ ...CODEX_READING, session: { ...window, started: false } });
+  await appendCodexHistory({ ...CODEX_READING, session: window });
+  await appendCodexHistory({ ...CODEX_READING, session: { ...window, started: false } });
   const rows = readFileSync(CODEX_HISTORY_FILE, 'utf8').trim().split('\n').map(JSON.parse);
   assert.equal(rows.length, 2);
   assert.equal(rows[0].session.started, undefined);
   assert.equal(rows[1].session.started, false);
-  assert.equal(readCodexSnapshot().session.started, false);
+  assert.equal((await readCodexSnapshot()).session.started, false);
   rmSync(CODEX_HISTORY_FILE, { force: true });
 });
 
@@ -388,7 +498,7 @@ test('fetchCodex: no codex-usage.jsonl at all reports "no Codex sessions found",
 
 // The live wham/usage API is on-demand only: ?force=1 (the daemon passes force
 // through) is the one thing that makes fetchCodex spend a request.
-test('fetchCodex(true): uses live API headers and normalizes 5h + 7d windows', async () => {
+test('fetchCodex(true): dispatches the auth path and normalizes 5h + 7d windows without credential output', async () => {
   const token = 'test-token';
   const accountId = 'test-account-id';
   writeCodexAuth({ access_token: token, account_id: accountId });
@@ -406,9 +516,8 @@ test('fetchCodex(true): uses live API headers and normalizes 5h + 7d windows', a
   };
   try {
     const u = await fetchCodex(true);
-    assert.equal(request.url, 'https://chatgpt.com/backend-api/wham/usage');
     assert.equal(request.opts.method, 'GET');
-    assert.deepEqual(request.opts.headers, { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId });
+    assert.equal(lastCodexAuthPath, codexAuth);
     assert.equal(u.plan, 'plus');
     assert.equal(u.session.pctUsed, 42);
     assert.equal(u.session.resetsAt, new Date(1786000000 * 1000).toISOString());
@@ -421,28 +530,41 @@ test('fetchCodex(true): uses live API headers and normalizes 5h + 7d windows', a
   }
 });
 
-test('fetchCodex(true): retries a transient live API response', async () => {
+test('fetchCodex(true): does not schedule a second bridge call for a terminal Rust status', async () => {
   writeCodexAuth({ access_token: 'test-token', account_id: 'test-account-id' });
-  const originalFetch = globalThis.fetch;
-  let calls = 0;
-  globalThis.fetch = async () => {
-    calls += 1;
-    if (calls === 1) return { status: 503 };
-    return {
-      status: 200,
-      json: async () => ({
-        plan_type: 'plus',
-        rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18_000, reset_at: 1786000000 } },
-      }),
-    };
+  let bridgeCalls = 0;
+  codexFixture = async () => {
+    bridgeCalls += 1;
+    return { kind: 'response', status: 503, retry_after: null, body: { ok: null } };
   };
   try {
-    const u = await fetchCodex(true);
-    assert.equal(u.plan, 'plus');
+    const result = await fetchCodex(true);
+    assert.equal(result.error, 'HTTP 503');
+    assert.equal(bridgeCalls, 1);
+    assert.equal(codexFixtureSnapshots.size, 0);
   } finally {
+    codexFixture = codexFixtureBaseline;
+  }
+});
+
+test('fetchCodex(true): pins one credential snapshot and releases it after the Rust logical fetch', async () => {
+  writeCodexAuth({ access_token: 'account-A-token', account_id: 'account-A' });
+  const originalFetch = globalThis.fetch;
+  const seen = [];
+  codexFixture = async (_authPath, tokens) => {
+    seen.push([tokens.access_token, tokens.account_id]);
+    writeCodexAuth({ access_token: 'account-B-token', account_id: 'account-B' });
+    return codexResponse({ plan_type: 'plus', rate_limit: { primary_window: { used_percent: 42, limit_window_seconds: 18_000, reset_at: 1786000000 } } });
+  };
+  try {
+    const result = await fetchCodex(true);
+    assert.equal(result.plan, 'plus');
+    assert.deepEqual(seen, [['account-A-token', 'account-A']]);
+    assert.equal(codexFixtureSnapshots.size, 0);
+  } finally {
+    codexFixture = codexFixtureBaseline;
     globalThis.fetch = originalFetch;
   }
-  assert.equal(calls, 2);
 });
 
 // An unused 5h window has not begun, and the live API fills reset_at with a
@@ -451,6 +573,7 @@ test('fetchCodex(true): retries a transient live API response', async () => {
 // countdown that never lands and the window anchor arms a timer it keeps
 // pushing out of reach.
 test('fetchCodex(true): a window that has not begun drops its sliding reset', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
   const originalFetch = globalThis.fetch;
   const nowSec = Math.floor(Date.now() / 1000);
   globalThis.fetch = async () => ({ status: 200, json: async () => ({
@@ -473,6 +596,7 @@ test('fetchCodex(true): a window that has not begun drops its sliding reset', as
 });
 
 test('fetchCodex(true): classifies a weekly-only primary live window', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => ({ status: 200, json: async () => ({
     plan_type: 'pro',
@@ -488,6 +612,7 @@ test('fetchCodex(true): classifies a weekly-only primary live window', async () 
 });
 
 test('fetchCodex(true): a failed live request reports the live error, with no rollout to fall back to', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => { throw new Error('offline'); };
   try {
@@ -496,6 +621,91 @@ test('fetchCodex(true): a failed live request reports the live error, with no ro
     assert.equal(u.error, 'request failed: offline');
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test('fetchCodex(true): non-200 status mapping does not parse its response body', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  const previousFixture = codexFixture;
+  codexFixture = async () => ({ kind: 'response', status: 401, retry_after: null, body: { ok: '{' } });
+  try {
+    const result = await fetchCodex(true);
+    assert.equal(result.error, 'auth rejected');
+    assert.equal(result.ok, false);
+    assert.equal(result.source, 'codex');
+  } finally { codexFixture = previousFixture; }
+});
+
+test('fetchCodex(true): malformed JSON keeps V8 parse wording and is not retried', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  let calls = 0;
+  codexFixture = async () => { calls += 1; return { kind: 'response', status: 200, retry_after: null, body: { ok: '{' } }; };
+  try {
+    const result = await fetchCodex(true);
+    assert.match(result.error, /^parse error: /);
+    assert.equal(calls, 1);
+    assert.equal(codexFixtureSnapshots.size, 0);
+  } finally { codexFixture = codexFixtureBaseline; }
+});
+
+test('fetchCodex(true): body stream failure preserves the caught message and is not retried', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  let calls = 0;
+  codexFixture = async () => { calls += 1; return { kind: 'response', status: 200, retry_after: null, body: { err: 'terminated' } }; };
+  try {
+    const result = await fetchCodex(true);
+    assert.equal(result.error, 'parse error: terminated');
+    assert.equal(calls, 1);
+  } finally { codexFixture = codexFixtureBaseline; }
+});
+
+test('fetchCodex(true): terminal Rust timeout preserves the AbortController message', async () => {
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  let calls = 0;
+  codexFixture = async () => { calls += 1; return { kind: 'timeout_failure' }; };
+  try {
+    const result = await fetchCodex(true);
+    assert.equal(result.error, 'request failed: This operation was aborted');
+    assert.equal(calls, 1);
+  } finally { codexFixture = codexFixtureBaseline; }
+});
+
+test('fetchCodex(true): final public Retry-After is anchored after credential release', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?codex-result-retry-after=${Date.now()}`);
+  writeCodexAuth({ access_token: 'fixture-token', account_id: 'fixture-account' });
+  const originalNow = Date.now;
+  const originalRelease = codexFixtureBackend.codexUsageRelease;
+  let bridgeFetches = 0;
+  let mappedResult;
+  Date.now = () => 1_000;
+  isolated.setUsageCodexBackend({
+    ...codexFixtureBackend,
+    async codexUsageFetch() {
+      bridgeFetches += 1;
+      return { kind: 'response', status: 429, retry_after: 'Thu, 01 Jan 1970 00:00:05 GMT', body: { ok: null } };
+    },
+    async codexUsageRelease(handle) {
+      originalRelease.call(codexFixtureBackend, handle);
+      Date.now = () => 2_000;
+    },
+    async codexUsageResult(input) {
+      mappedResult = input;
+      return usageRustBackend.codexUsageResult(input);
+    },
+  });
+  try {
+    const result = await isolated.fetchCodex(true);
+    assert.equal(bridgeFetches, 1);
+    assert.equal(result.error, 'rate-limited');
+    assert.equal(result.retryAfterMs, 3_000);
+    assert.equal(mappedResult.nowMs, 2_000);
+    assert.equal(mappedResult.status, 429);
+    assert.equal(mappedResult.payloadPresent, false);
+    assert.equal(codexFixtureSnapshots.size, 0);
+  } finally {
+    Date.now = originalNow;
+    codexFixtureBackend.codexUsageRelease = originalRelease;
+    isolated.setUsageCodexBackend(codexFixtureBackend);
   }
 });
 
@@ -513,10 +723,241 @@ test('refreshOauthGrant: dead refresh token → no request', async () => {
   assert.equal(await refreshOauthGrant(), false);
 });
 
+test('refreshOauthGrant: missing, unreadable, or malformed bridge data stops before OAuth and Keychain', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?refresh-guard-read=${Date.now()}`);
+  let oauthCalls = 0;
+  let keychainCalls = 0;
+  isolated.setUsageAuthBackend({ usageKeychain: async () => { keychainCalls += 1; return {}; } }, 'darwin');
+  for (const result of [{ kind: 'missing' }, { kind: 'read_failure' }, { kind: 'file', text: '{' }]) {
+    isolated.setUsageClaudeBackend({ ...claudeFixtureBackend, claudeCredentialsRead: async () => result, claudeOauthRefresh: async () => { oauthCalls += 1; } });
+    assert.equal(await isolated.refreshOauthGrant(), false);
+  }
+  assert.equal(oauthCalls, 0);
+  assert.equal(keychainCalls, 0);
+  isolated.setUsageAuthBackend(null);
+});
+
+test('refreshOauthGrant: merge read failures start empty; parsed null and primitives reject without CLI fallback', async () => {
+  const credentialPath = join(claudeCfg, '.credentials.json');
+  for (const mergeResult of [
+    { kind: 'missing' }, { kind: 'read_failure' }, { kind: 'file', text: '{' },
+  ]) {
+    const isolated = await importIsolatedUsage(`./usage.mjs?merge-read=${Date.now()}-${Math.random()}`);
+    let reads = 0;
+    isolated.setUsageClaudeBackend({
+      ...claudeFixtureBackend,
+      async claudeCredentialsRead() {
+        reads += 1;
+        return reads === 1
+          ? { kind: 'file', text: JSON.stringify({ claudeAiOauth: { refreshToken: 'synthetic-refresh' } }) }
+          : mergeResult;
+      },
+      async claudeOauthRefresh() {
+        return { kind: 'response', status: 200, retry_after: null, body: { ok: JSON.stringify({ access_token: 'synthetic-access', refresh_token: 'rotated' }) } };
+      },
+    });
+    assert.equal(await isolated.refreshOauthGrant(), true);
+    assert.equal(reads, 2);
+    assert.deepEqual(JSON.parse(readFileSync(credentialPath, 'utf8')), {
+      claudeAiOauth: { accessToken: 'synthetic-access', refreshToken: 'rotated' },
+    });
+  }
+
+  for (const text of ['null', '17']) {
+    const isolated = await importIsolatedUsage(`./usage.mjs?merge-value=${Date.now()}-${Math.random()}`);
+    let reads = 0;
+    let cliCalls = 0;
+    isolated.setUsageClaudeBackend({
+      ...claudeFixtureBackend,
+      async claudeCredentialsRead() {
+        reads += 1;
+        return { kind: 'file', text: reads === 1 ? '{"claudeAiOauth":{"refreshToken":"synthetic-refresh"}}' : text };
+      },
+      async claudeOauthRefresh() {
+        return { kind: 'response', status: 200, retry_after: null, body: { ok: '{"access_token":"synthetic-access"}' } };
+      },
+    });
+    isolated.setUsageAuthBackend({ usageAuthStatus: async () => { cliCalls += 1; } }, 'win32');
+    process.env.CLAUDE_BIN = process.execPath;
+    await assert.rejects(isolated.refreshClaudeAuth());
+    assert.equal(reads, 2);
+    assert.equal(cliCalls, 0);
+  }
+});
+
+test('refreshOauthGrant preserves JSON.stringify text, retries in Node, and merges rotated credentials', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?oauth-body=${Date.now()}`);
+  const readStart = claudeCredentialReads.length;
+  const writeStart = claudeCredentialWrites.length;
+  const seen = [];
+  let failOnce = true;
+  isolated.setUsageClaudeBackend({
+    ...claudeFixtureBackend,
+    async claudeOauthRefresh(body, signal, timeoutMs) {
+      seen.push({ body, signal, timeoutMs });
+      if (failOnce) { failOnce = false; throw new Error('synthetic transport failure'); }
+      return { kind: 'response', status: 200, retry_after: null, body: { ok: JSON.stringify({ access_token: 'new-access', refresh_token: 'new-refresh', expires_in: 3600 }) } };
+    },
+  });
+  const refreshTokens = ['synthetic-string-refresh', 17, { nested: [true, 'opaque'] }];
+  for (const refreshToken of refreshTokens) {
+    writeCreds({ accessToken: 'old-access', refreshToken, refreshTokenExpiresAt: Date.now() + 3_600_000, expiresAt: 7, subscriptionType: 'pro', rateLimitTier: 'legacy' });
+    assert.equal(await isolated.refreshOauthGrant(), true);
+  }
+  const expected = refreshTokens.map((refreshToken) => JSON.stringify({ grant_type: 'refresh_token', refresh_token: refreshToken, client_id: '9d1c250a-e61b-44d9-88ed-5944d1962f5e' }));
+  assert.deepEqual(seen.map(({ body }) => body), [expected[0], expected[0], ...expected.slice(1)]);
+  assert.equal(seen.length, 4);
+  // Three grant attempts each read guard+merge once; transport retry stays inside fetchExternal.
+  assert.deepEqual(claudeCredentialReads.slice(readStart), Array(6).fill(join(claudeCfg, '.credentials.json')));
+  const writes = claudeCredentialWrites.slice(writeStart);
+  assert.equal(writes.length, 3);
+  assert.ok(writes.every(({ path, tempPath }) => path === join(claudeCfg, '.credentials.json') && tempPath === `${path}.${process.pid}.tmp`));
+  assert.ok(seen.every(({ timeoutMs }) => timeoutMs === 10_000));
+  const saved = JSON.parse(readFileSync(join(claudeCfg, '.credentials.json'), 'utf8')).claudeAiOauth;
+  assert.equal(saved.accessToken, 'new-access');
+  assert.equal(saved.refreshToken, 'new-refresh');
+  assert.equal(saved.subscriptionType, 'pro');
+  assert.equal(saved.rateLimitTier, 'legacy');
+  assert.equal(JSON.parse(writes.at(-1).text).claudeAiOauth.refreshToken, 'new-refresh');
+});
+
+test('refreshOauthGrant maps false and rejected credential writes to false', async () => {
+  for (const claudeCredentialsWrite of [async () => false, async () => { throw new Error('synthetic writer rejection'); }]) {
+    const isolated = await importIsolatedUsage(`./usage.mjs?writer-failure=${Date.now()}-${Math.random()}`);
+    isolated.setUsageClaudeBackend({
+      ...claudeFixtureBackend,
+      claudeCredentialsWrite,
+      async claudeOauthRefresh() {
+        return { kind: 'response', status: 200, retry_after: null, body: { ok: '{"access_token":"synthetic-access"}' } };
+      },
+    });
+    writeCreds({ refreshToken: 'synthetic-refresh' });
+    assert.equal(await isolated.refreshOauthGrant(), false);
+  }
+});
+
+test('refreshOauthGrant keeps non-200 and invalid JSON failures in Node', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?oauth-response=${Date.now()}`);
+  const results = [
+    { kind: 'response', status: 500, retry_after: null, body: { ok: null } },
+    { kind: 'response', status: 200, retry_after: null, body: { ok: '{' } },
+  ];
+  let nextResult = 0;
+  isolated.setUsageClaudeBackend({ ...claudeFixtureBackend, claudeOauthRefresh: async () => results[Math.min(nextResult++, results.length - 1)] });
+  writeCreds({ refreshToken: 17, expiresAt: 11, subscriptionType: 'keep-me' });
+  const original = readFileSync(join(claudeCfg, '.credentials.json'), 'utf8');
+  assert.equal(await isolated.refreshOauthGrant(), false);
+  assert.equal(await isolated.refreshOauthGrant(), false);
+  assert.equal(readFileSync(join(claudeCfg, '.credentials.json'), 'utf8'), original);
+});
+
+test('refreshOauthGrant leaves raw long Retry-After handling to Node', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?oauth-retry-after=${Date.now()}`);
+  let calls = 0;
+  isolated.setUsageClaudeBackend({
+    ...claudeFixtureBackend,
+    async claudeOauthRefresh() {
+      calls += 1;
+      return { kind: 'response', status: 429, retry_after: '66', body: { ok: null } };
+    },
+  });
+  writeCreds({ refreshToken: 'synthetic-refresh', expiresAt: 22 });
+  assert.equal(await isolated.refreshOauthGrant(), false);
+  assert.equal(calls, 1);
+});
+
+test('claudeOauthToken: file precedence, async Keychain fallback, and quiet failures', async () => {
+  let calls = 0;
+  const credentialPath = join(claudeCfg, '.credentials.json');
+  const readCredentialPath = claudeFixtureBackend.claudeCredentialsRead;
+  const paths = [];
+  claudeFixtureBackend.claudeCredentialsRead = async (path) => {
+    paths.push(path);
+    return readCredentialPath(path);
+  };
+  setUsageAuthBackend({ usageKeychain: async () => {
+    calls++;
+    return { accessToken: 'synthetic-access', refreshToken: 'synthetic-refresh', expiresAt: Date.now() + 60_000, subscriptionType: 'pro' };
+  } }, 'darwin');
+  writeCreds({ accessToken: 'file-access', expiresAt: Date.now() + 60_000, subscriptionType: 'file-plan' });
+  const fromFile = await claudeOauthToken();
+  assert.equal(paths.at(-1), credentialPath);
+  assert.equal(fromFile.accessToken !== undefined, true);
+  assert.equal(fromFile.subscriptionType, 'file-plan');
+  assert.equal(calls, 0);
+
+  writeCreds({ subscriptionType: 'missing-access' });
+  assert.equal(await claudeOauthToken(), null);
+  assert.equal(calls, 0, 'a present credential object retains file precedence without an access token');
+
+  writeFileSync(credentialPath, '{');
+  const malformedFallback = await claudeOauthToken();
+  assert.equal(malformedFallback.accessToken, 'synthetic-access');
+  assert.equal(calls, 1, 'malformed JSON permits the Darwin Keychain fallback');
+  writeFileSync(credentialPath, 'null');
+  assert.equal((await claudeOauthToken()).accessToken, 'synthetic-access');
+  assert.equal(calls, 2, 'a null JSON root retains the existing parse/property failure fallback');
+
+  claudeFixtureBackend.claudeCredentialsRead = async () => ({ kind: 'read_failure' });
+  assert.equal((await claudeOauthToken()).accessToken, 'synthetic-access');
+  assert.equal(calls, 3, 'read failure permits the Darwin Keychain fallback');
+  claudeFixtureBackend.claudeCredentialsRead = readCredentialPath;
+
+  rmSync(credentialPath, { force: true });
+  const fromKeychain = await claudeOauthToken();
+  assert.equal(fromKeychain.accessToken, 'synthetic-access');
+  assert.equal(fromKeychain.subscriptionType, 'pro');
+  assert.equal(calls, 4);
+
+  const logged = [];
+  const originalError = console.error;
+  const originalWarn = console.warn;
+  console.error = (...args) => logged.push(args.join(' '));
+  console.warn = (...args) => logged.push(args.join(' '));
+  try {
+    setUsageAuthBackend({ usageKeychain: async () => {
+      throw new Error('synthetic process failure synthetic-access-secret synthetic-refresh-secret');
+    } }, 'darwin');
+    assert.equal(await claudeOauthToken(), null);
+  } finally {
+    console.error = originalError;
+    console.warn = originalWarn;
+  }
+  assert.equal(logged.join('\n').includes('synthetic-access-secret'), false);
+  assert.equal(logged.join('\n').includes('synthetic-refresh-secret'), false);
+  setUsageAuthBackend({ usageKeychain: async () => { calls++; return {}; } }, 'win32');
+  assert.equal(await claudeOauthToken(), null);
+  assert.equal(calls, 4);
+  setUsageAuthBackend(null);
+  claudeFixtureBackend.claudeCredentialsRead = readCredentialPath;
+});
+
+test('claudeOauthToken preserves JSON value and Number coercions', async () => {
+  setUsageAuthBackend(null);
+  writeCreds({ accessToken: 17, expiresAt: 'not-a-number', subscriptionType: false });
+  assert.deepEqual(await claudeOauthToken(), { accessToken: 17, expiresAt: 'not-a-number', subscriptionType: false });
+
+  writeCreds({ accessToken: 'synthetic-expired', expiresAt: '-1' });
+  assert.equal(await claudeOauthToken(), null);
+
+  writeFileSync(join(claudeCfg, '.credentials.json'), '\uFEFF{"claudeAiOauth":{"accessToken":"synthetic-bom"}}');
+  setUsageAuthBackend({ usageKeychain: async () => ({ accessToken: 'synthetic-keychain' }) }, 'darwin');
+  assert.equal((await claudeOauthToken()).accessToken, 'synthetic-keychain');
+  setUsageAuthBackend(null);
+  rmSync(join(claudeCfg, '.credentials.json'), { force: true });
+});
+
 test('refreshClaudeAuth: falls back to the CLI once, then throttles', async () => {
-  process.env.CLAUDE_BIN = process.execPath; // real exe; `auth status` args just make it exit
+  process.env.CLAUDE_BIN = process.execPath;
+  writeCreds({});
+  const calls = [];
+  setUsageAuthBackend({ usageAuthStatus: async (...args) => { calls.push(args); throw new Error('synthetic spawn failure'); } }, 'win32');
   assert.equal(await refreshClaudeAuth(), true);
   assert.equal(await refreshClaudeAuth(), false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][0], process.execPath);
+  assert.equal(calls[0][1], 10_000);
+  setUsageAuthBackend(null);
 });
 
 // ---- getUsage({ sources }) — the per-card refresh allowlist ----------------------
@@ -554,6 +995,42 @@ test('getUsage: filtered pull on a cold cache fetches only the listed source', a
   // stops at the pre-network auth guard rather than the real endpoint.
   assert.equal(doc.claude.source, 'claude');
   assert.equal(doc.claude.error, 'no-credentials');
+});
+
+test('getUsage keeps synthetic credential failures out of public results', async () => {
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error('fixture rejection synthetic-private-secret'); };
+  try {
+    const cases = [
+      ['missing', null, 'no-credentials'],
+      ['no-token', '{"claudeAiOauth":{}}', 'no-token'],
+      ['expired', JSON.stringify({ claudeAiOauth: { accessToken: 'synthetic-expired', expiresAt: '-1' } }), 'token-expired'],
+      ['malformed', '{"claudeAiOauth":{"accessToken":"synthetic-private-secret"}', 'bad credentials'],
+      ['read-failure', null, 'bad credentials'],
+      ['rejected-fetch', JSON.stringify({ claudeAiOauth: { accessToken: 'synthetic-private-secret', expiresAt: Date.now() + 60_000 } }), 'request failed: fixture rejection [redacted]'],
+    ];
+    for (const [label, text, expected] of cases) {
+      clearClaudeLocal();
+      if (text === null) rmSync(credentialsFile, { force: true });
+      else writeFileSync(credentialsFile, text);
+      const readCredentials = claudeFixtureBackend.claudeCredentialsRead;
+      if (label === 'read-failure') claudeFixtureBackend.claudeCredentialsRead = async () => ({ kind: 'read_failure' });
+      const isolated = await importIsolatedUsage(`./usage.mjs?credential-outcome=${label}-${Date.now()}`);
+      const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+      assert.equal(doc.claude.error, expected);
+      assert.equal(JSON.stringify(doc).includes('synthetic-private-secret'), false);
+      claudeFixtureBackend.claudeCredentialsRead = readCredentials;
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    claudeFixtureBackend.claudeCredentialsRead = async (path) => {
+      try { return { kind: 'file', text: readFileSync(path, 'utf8') }; }
+      catch (error) { return error.code === 'ENOENT' ? { kind: 'missing' } : { kind: 'read_failure' }; }
+    };
+    rmSync(credentialsFile, { force: true });
+    clearClaudeLocal();
+  }
 });
 
 test('getUsage: the allowlist outranks force, and an excluded source is served by reference', async () => {
@@ -636,6 +1113,30 @@ test('getUsage: a forced Claude 429 is an error payload, not a stale reading', a
     assert.equal(calls, 1); // one request: a long Retry-After ends the retry loop
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test('getUsage: Claude transient retries are one Rust bridge operation', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-rust-retry=${Date.now()}`);
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
+  try {
+    writeCreds({ accessToken: 'retry-token', expiresAt: Date.now() + 3_600_000 });
+    clearClaudeLocal();
+    let bridgeCalls = 0;
+    isolated.setUsageClaudeBackend({
+      ...claudeFixtureBackend,
+      async claudeUsageFetch() {
+        bridgeCalls += 1;
+        return { kind: 'response', status: 503, retry_after: null, body: { ok: null } };
+      },
+    });
+    const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, false);
+    assert.equal(bridgeCalls, 1);
+  } finally {
+    if (originalCredentials) writeFileSync(credentialsFile, originalCredentials);
+    else rmSync(credentialsFile, { force: true });
   }
 });
 
@@ -749,7 +1250,7 @@ test('getUsage: automatic incomplete-window retries honor the network floor', as
     calls += 1;
     return { status: 404, headers: { get: () => null } };
   };
-  const isolatedGetUsage = (await import(`./usage.mjs?automatic-floor=${Date.now()}`)).getUsage;
+  const isolatedGetUsage = (await importIsolatedUsage(`./usage.mjs?automatic-floor=${Date.now()}`)).getUsage;
   try {
     await isolatedGetUsage({ sources: ['claude'] });
     await isolatedGetUsage({ sources: ['claude'] });
@@ -798,7 +1299,7 @@ test('getUsage: a local Claude reading establishes identity before an account sw
   const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'account-a.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: 58, resets_at: 1789533000 }, seven_day: { used_percentage: 9, resets_at: 1790096400 } } }));
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?account-switch=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?account-switch=${Date.now()}`);
   const accountA = { expiresAt: Date.now() + 3_600_000 };
   accountA[ACCESS_TOKEN] = ['account', 'a', 'token'].join('-');
   const accountB = { expiresAt: Date.now() + 3_600_000 };
@@ -864,7 +1365,7 @@ test('getUsage: a newer statusline reading outranks the TTL', async () => {
 // The statusline writes usage-snapshots.jsonl once a turn from the same
 // endpoint, so a fresh line spares the daemon a call it would only get 429ed
 // for. Tail-read: the real file is megabytes.
-test('readClaudeSnapshot: serves a fresh tail line, rejects a stale one', () => {
+test('readClaudeSnapshot: serves a fresh tail line, rejects a stale one', async () => {
   const file = join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl');
   const at = new Date();
   const stamp = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
@@ -873,75 +1374,19 @@ test('readClaudeSnapshot: serves a fresh tail line, rejects a stale one', () => 
   writeFileSync(file, `${JSON.stringify({ fetched_at: stamp(at), pad: 'x'.repeat(9000), raw: { five_hour: { utilization: 1 } } })}
 ${JSON.stringify({ fetched_at: stamp(at), raw: CLAUDE_RAW })}\n`);
 
-  const fresh = readClaudeSnapshot();
+  const fresh = await readClaudeSnapshot();
   assert.equal(fresh.raw.five_hour.utilization, 42);
-  assert.equal(normalizeClaude(fresh.raw, 'team').session.pctUsed, 42);
+  const normalized = await readClaudeLocal(null, 'team');
+  assert.equal(normalized.session.pctUsed, 42);
 
-  assert.equal(readClaudeSnapshot(60_000, at.getTime() + 120_000), null);
+  assert.equal(await readClaudeSnapshot(60_000, at.getTime() + 120_000), null);
   writeFileSync(file, 'not json\n');
-  assert.equal(readClaudeSnapshot(), null);
+  assert.equal(await readClaudeSnapshot(), null);
 });
 
 // Before each daemon append, a live file whose FIRST row is from an earlier month
 // moves to usage-snapshots-<that month>.jsonl. Months far from today keep the
 // real-time appends in other tests from tripping the checked-month cache.
-test('rotateClaudeHistory: earlier-month live file moves to its archive; busy link retries; existing archive skips', () => {
-  const dir = process.env.USAGE_REPORT_STATE;
-  const file = join(dir, 'usage-snapshots.jsonl');
-  const archive = join(dir, 'usage-snapshots-2098-11.jsonl');
-  const row = (at) => `${JSON.stringify({ fetched_at: at, raw: CLAUDE_RAW })}\n`;
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(file, row('2098-11-30 23:59:00'));
-  try {
-    rotateClaudeHistory(new Date(2098, 10, 30, 23, 59, 30)); // same month: kept
-    assert.equal(existsSync(archive), false);
-    // The skill appended a December row first: the first row still decides.
-    writeFileSync(file, row('2098-12-01 00:00:05'), { flag: 'a' });
-    rotateClaudeHistory(new Date(2098, 11, 1), { link: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } });
-    assert.equal(existsSync(file), true); // left in place, retried next time
-    assert.equal(existsSync(archive), false);
-    rotateClaudeHistory(new Date(2098, 11, 1));
-    assert.equal(existsSync(file), false);
-    assert.match(readFileSync(archive, 'utf8'), /2098-11-30 23:59:00[\s\S]*2098-12-01 00:00:05/);
-    // readClaudeSnapshot: a missing or empty live file falls back to the newest archive's last row.
-    assert.equal(readClaudeSnapshot(Infinity).raw.five_hour.utilization, 42);
-    writeFileSync(file, '');
-    assert.equal(readClaudeSnapshot(Infinity).raw.five_hour.utilization, 42);
-    // Archive for that month already there (EEXIST, different file): no rotation, the live file stays.
-    writeFileSync(file, row('2098-11-15 00:00:00'));
-    rotateClaudeHistory(new Date(2099, 0, 1));
-    assert.equal(existsSync(file), true);
-    assert.doesNotMatch(readFileSync(archive, 'utf8'), /2098-11-15/);
-  } finally {
-    rmSync(file, { force: true });
-    rmSync(archive, { force: true });
-  }
-});
-
-test('rotateClaudeHistory: unparseable head and failed unlink retry; a linked-but-not-unlinked live file finishes the move', () => {
-  const dir = process.env.USAGE_REPORT_STATE;
-  const file = join(dir, 'usage-snapshots.jsonl');
-  const archive = join(dir, 'usage-snapshots-2097-03.jsonl');
-  mkdirSync(dir, { recursive: true });
-  try {
-    // Partial first line (writer mid-append): nothing cached, the next append retries.
-    writeFileSync(file, '{"fetched_at":"2097-03-0');
-    rotateClaudeHistory(new Date(2097, 3, 2));
-    writeFileSync(file, `${JSON.stringify({ fetched_at: '2097-03-31 10:00:00', raw: CLAUDE_RAW })}\n`);
-    // Link succeeds, unlink fails: both names stay, nothing cached.
-    rotateClaudeHistory(new Date(2097, 3, 2), { unlink: () => { throw Object.assign(new Error('busy'), { code: 'EBUSY' }); } });
-    assert.equal(existsSync(file), true);
-    assert.equal(existsSync(archive), true);
-    // Retry: link hits EEXIST on the same inode, so only the unlink is redone.
-    rotateClaudeHistory(new Date(2097, 3, 2));
-    assert.equal(existsSync(file), false);
-    assert.match(readFileSync(archive, 'utf8'), /2097-03-31 10:00:00/);
-  } finally {
-    rmSync(file, { force: true });
-    rmSync(archive, { force: true });
-  }
-});
-
 test('getUsage: a valid unstarted local session does not trigger OAuth polling', async () => {
   clearClaudeLocal();
   writeCreds({ accessToken: 'unstarted-window-token', expiresAt: Date.now() + 3_600_000 });
@@ -957,10 +1402,11 @@ test('getUsage: a valid unstarted local session does not trigger OAuth polling',
   let calls = 0;
   globalThis.fetch = async () => { calls += 1; return { status: 200, json: async () => CLAUDE_RAW }; };
   try {
-    const isolatedGetUsage = (await import(`./usage.mjs?unstarted=${Date.now()}`)).getUsage;
+    const isolatedGetUsage = (await importIsolatedUsage(`./usage.mjs?unstarted=${Date.now()}`)).getUsage;
     const doc = await isolatedGetUsage({ sources: ['claude'] });
     assert.equal(doc.claude.session.started, false);
-    assert.equal(calls, 0);
+    // The local reading answers the card; the only call is the one resets-only fetch.
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
     clearClaudeLocal();
@@ -971,7 +1417,7 @@ test('getUsage: a valid unstarted local session does not trigger OAuth polling',
 // cost-state/<session>.json on every turn of every session, so the newest file
 // is usually fresher than the snapshot log. Windows only — epoch seconds in,
 // ISO out.
-test('readCostStateLimits: newest usable file wins, stale and rate_limits-less ones are skipped', () => {
+test('readCostStateLimits: newest usable file wins, stale and rate_limits-less ones are skipped', async () => {
   const dir = join(process.env.USAGE_REPORT_STATE, 'cost-state');
   mkdirSync(dir, { recursive: true });
   const write = (name, body, ageMs) => {
@@ -986,14 +1432,14 @@ test('readCostStateLimits: newest usable file wins, stale and rate_limits-less o
   write('newest-usable.json', limits(22), 5_000);
   write('older.json', limits(99), 30_000);
 
-  const fresh = readCostStateLimits();
+  const fresh = await readCostStateLimits();
   assert.equal(fresh.session.pctUsed, 22); // not 99: newest usable, not merely newest
   assert.equal(fresh.session.resetsAt, new Date(1789533000 * 1000).toISOString());
   assert.equal(fresh.weekly.pctUsed, 3);
 
   // Every candidate outside the window → no reading at all, so the caller falls
   // through to the API instead of serving an hour-old percentage as current.
-  assert.equal(readCostStateLimits(1_000), null);
+  assert.equal(await readCostStateLimits(1_000), null);
 });
 
 // The cost-state tier never reaches fetchClaude's append, so readClaudeLocal logs
@@ -1006,23 +1452,23 @@ test('readClaudeLocal: a cost-state reading appends a snapshot row on change onl
   const resets = Math.floor((Date.now() + 3_600_000) / 1000);
   const write = (pct) => writeFileSync(join(dir, 'live.json'), JSON.stringify({ rate_limits: { five_hour: { used_percentage: pct, resets_at: resets }, seven_day: { used_percentage: 3, resets_at: resets + 86_400 } } }));
   const rows = () => (existsSync(file) ? readFileSync(file, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []);
-  const { readClaudeLocal: isolatedReadLocal } = await import(`./usage.mjs?cost-state-append=${Date.now()}`);
+  const { readClaudeLocal: isolatedReadLocal } = await importIsolatedUsage(`./usage.mjs?cost-state-append=${Date.now()}`);
   try {
     write(40);
-    assert.equal(isolatedReadLocal(null, 'max').session.pctUsed, 40);
+    assert.equal((await isolatedReadLocal(null, 'max')).session.pctUsed, 40);
     assert.equal(rows().length, 1);
     const [row] = rows();
     assert.equal(row.source, 'cost-state');
     assert.equal(row.raw.five_hour.utilization, 40);
     assert.equal(row.raw.five_hour.resets_at, new Date(resets * 1000).toISOString());
     assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
-    isolatedReadLocal(null, 'max'); // unchanged: no row
+    await isolatedReadLocal(null, 'max'); // unchanged: no row
     assert.equal(rows().length, 1);
     write(41);
-    isolatedReadLocal(null, 'max');
+    await isolatedReadLocal(null, 'max');
     assert.deepEqual(rows().map((r) => r.raw.five_hour.utilization), [40, 41]);
     // Tier 1 skips these rows: they lack extra_usage / per-model.
-    assert.equal(readClaudeSnapshot(), null);
+    assert.equal(await readClaudeSnapshot(), null);
   } finally {
     clearClaudeLocal();
   }
@@ -1040,7 +1486,7 @@ test('readCodexSnapshot: a fresh Stop-hook record answers with no network', asyn
   mkdirSync(process.env.USAGE_REPORT_STATE, { recursive: true });
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 7, resets_at: '2026-09-22T18:00:00Z' }, weekly: { utilization: 55.5, resets_at: '2026-09-25T00:00:00Z' }, plan_type: 'business' })}\n`);
 
-  const snap = readCodexSnapshot();
+  const snap = await readCodexSnapshot();
   assert.equal(snap.ok, true);
   assert.equal(snap.source, 'codex');
   assert.equal(snap.plan, 'business');
@@ -1057,17 +1503,17 @@ test('readCodexSnapshot: a fresh Stop-hook record answers with no network', asyn
 test('readCodexSnapshot: stale, malformed or missing lines all report "no Codex sessions found" (no rollout to fall back to)', async () => {
   // Stale fetched_at — the same 120s gate the sampler uses.
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date(Date.now() - 10 * 60_000)), session: { utilization: 7, resets_at: null }, weekly: null, plan_type: 'business' })}\n`);
-  assert.equal(readCodexSnapshot(), null);
+  assert.equal(await readCodexSnapshot(), null);
   assert.equal((await fetchCodex()).error, 'no Codex sessions found');
 
   // A last line that does not parse is dropped, not served.
   writeFileSync(CODEX_HISTORY_FILE, 'not json\n');
-  assert.equal(readCodexSnapshot(), null);
+  assert.equal(await readCodexSnapshot(), null);
   assert.equal((await fetchCodex()).error, 'no Codex sessions found');
 
   // No file at all — the hook has never run on this install.
   rmSync(CODEX_HISTORY_FILE, { force: true });
-  assert.equal(readCodexSnapshot(), null);
+  assert.equal(await readCodexSnapshot(), null);
   assert.equal((await fetchCodex()).error, 'no Codex sessions found');
 });
 
@@ -1081,6 +1527,46 @@ const fakeCreds = () => {
   oauth[ACCESS_TOKEN] = ['fake', 'access', 'token'].join('-');
   return oauth;
 };
+
+test('getUsage: a 401 refresh sends the rotated token on the second logical fetch', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-401-refresh=${Date.now()}`);
+  writeCreds({ accessToken: 'old-access-token', refreshToken: 'fixture-refresh-token', refreshTokenExpiresAt: Date.now() + 3_600_000, expiresAt: Date.now() + 3_600_000 });
+  clearClaudeLocal();
+  const originalFetch = globalThis.fetch;
+  const accessTokens = [];
+  let refreshCalls = 0;
+  isolated.setUsageClaudeBackend({
+    ...claudeFixtureBackend,
+    async claudeOauthRefresh() {
+      refreshCalls += 1;
+      return { kind: 'response', status: 200, retry_after: null, body: { ok: JSON.stringify({ access_token: 'new-access-token', expires_in: 3600 }) } };
+    },
+  });
+  globalThis.fetch = async (url, options = {}) => {
+    assert.equal(String(url), 'https://fixture.invalid/claude-usage');
+    accessTokens.push(options.headers.Authorization);
+    return accessTokens.length === 1
+      ? { status: 401, headers: { get: () => null } }
+      : { status: 200, json: async () => CLAUDE_RAW };
+  };
+  try {
+    const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, true);
+  } finally { globalThis.fetch = originalFetch; }
+  assert.deepEqual(accessTokens, ['Bearer old-access-token', 'Bearer new-access-token']);
+  assert.equal(refreshCalls, 1);
+});
+
+test('getUsage: bridge request errors redact the in-memory access token', async () => {
+  const token = 'synthetic-token-that-must-not-escape';
+  writeCreds({ accessToken: token, expiresAt: Date.now() + 3_600_000 });
+  clearClaudeLocal();
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-token-redaction=${Date.now()}`);
+  isolated.setUsageClaudeBackend({ claudeUsageFetch: async () => { throw new Error(`failure ${token}`); } });
+  const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+  assert.equal(doc.claude.ok, false);
+  assert.equal(doc.claude.error.includes(token), false);
+});
 
 test('getUsage: a successful Claude API read is appended to usage-snapshots.jsonl', async () => {
   writeCreds(fakeCreds());
@@ -1099,7 +1585,7 @@ test('getUsage: a successful Claude API read is appended to usage-snapshots.json
   assert.match(row.fetched_at, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
   assert.equal(row.raw.five_hour.utilization, 42);
   // The reader accepts its own writer's row straight back: the local tier is fed.
-  assert.equal(readClaudeSnapshot().raw.five_hour.utilization, 42);
+  assert.equal((await readClaudeSnapshot()).raw.five_hour.utilization, 42);
 });
 
 test('getUsage: a failed Claude API read appends nothing', async () => {
@@ -1222,7 +1708,7 @@ test('sampleCodex: a fresh codex-usage.jsonl line never reaches the live wham AP
 });
 
 test('getUsage: Codex partial snapshots recover missing windows and retain active cached windows', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-partial=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-partial=${Date.now()}`);
   writeCodexAuth({ access_token: 'mock-token', account_id: 'mock-account' });
   mkdirSync(dirname(CODEX_HISTORY_FILE), { recursive: true });
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: null, weekly: { utilization: 9, resets_at: new Date(Date.now() + 7 * 86400_000).toISOString() }, plan_type: 'plus' })}\n`);
@@ -1246,7 +1732,7 @@ test('getUsage: Codex partial snapshots recover missing windows and retain activ
 });
 
 test('getUsage: complete unstarted Codex windows avoid the endpoint, including forced refresh', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-unstarted=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-unstarted=${Date.now()}`);
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 0, resets_at: null, started: false }, weekly: { utilization: 0, resets_at: null, started: false }, plan_type: 'plus' })}\n`);
   const originalFetch = globalThis.fetch;
   let calls = 0;
@@ -1259,8 +1745,48 @@ test('getUsage: complete unstarted Codex windows avoid the endpoint, including f
   } finally { globalThis.fetch = originalFetch; }
 });
 
+test('getUsage: awaits one Codex fingerprint before gates and keeps it through a successful pull', async () => {
+  const { getUsage: isolatedGetUsage, setUsageCodexBackend: isolatedSetUsageCodexBackend } = await importIsolatedUsage(`./usage.mjs?codex-fingerprint-await=${Date.now()}`);
+  const events = [];
+  let releaseFingerprint;
+  const fingerprintReady = new Promise((resolve) => { releaseFingerprint = resolve; });
+  let fingerprintReads = 0;
+  isolatedSetUsageCodexBackend({
+    async codexAccountFingerprint(authPath) {
+      fingerprintReads += 1;
+      events.push(['fingerprint-start', authPath]);
+      const fingerprint = await fingerprintReady;
+      events.push(['fingerprint-finish', fingerprint]);
+      return fingerprint;
+    },
+  });
+  rmSync(CODEX_HISTORY_FILE, { force: true });
+  const pending = isolatedGetUsage({
+    sources: ['codex'],
+    force: true,
+    fetchers: { codex: async () => {
+      events.push(['fetch']);
+      return {
+        ok: true, source: 'codex', plan: 'plus', fetchedAt: new Date().toISOString(),
+        session: { pctUsed: 41, resetsAt: null }, weekly: { pctUsed: 22, resetsAt: null },
+      };
+    } },
+  });
+  await new Promise(setImmediate);
+  assert.deepEqual(events, [['fingerprint-start', codexAuth]]);
+  releaseFingerprint('a'.repeat(64));
+  const result = await pending;
+  assert.equal(fingerprintReads, 1);
+  assert.deepEqual(events, [
+    ['fingerprint-start', codexAuth],
+    ['fingerprint-finish', 'a'.repeat(64)],
+    ['fetch'],
+  ]);
+  assert.equal(result.codex.session.pctUsed, 41);
+});
+
 test('getUsage: Codex account switches discard cached and unidentified snapshot data', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-account-switch=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-account-switch=${Date.now()}`);
   rmSync(CODEX_HISTORY_FILE, { force: true });
   writeCodexAuth({ access_token: 'mock-old-token', account_id: 'mock-old-account' });
   const originalFetch = globalThis.fetch;
@@ -1284,7 +1810,7 @@ test('getUsage: Codex account switches discard cached and unidentified snapshot 
 });
 
 test('getUsage: Codex partial session snapshot fetches the missing weekly window under force', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-missing-weekly=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-missing-weekly=${Date.now()}`);
   mkdirSync(dirname(CODEX_HISTORY_FILE), { recursive: true });
   writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(new Date()), session: { utilization: 13, resets_at: new Date(Date.now() + 18000_000).toISOString() }, weekly: null, plan_type: 'plus' })}\n`);
   writeCodexAuth({ access_token: 'mock-weekly-token', account_id: 'mock-weekly-account' });
@@ -1300,7 +1826,7 @@ test('getUsage: Codex partial session snapshot fetches the missing weekly window
 });
 
 test('getUsage: Codex 429 keeps last-good data stale until Retry-After expires', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-retry-after=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-retry-after=${Date.now()}`);
   rmSync(CODEX_HISTORY_FILE, { force: true });
   writeCodexAuth({ access_token: 'mock-retry-token', account_id: 'mock-retry-account' });
   const originalFetch = globalThis.fetch;
@@ -1334,7 +1860,7 @@ test('getUsage: Codex 429 keeps last-good data stale until Retry-After expires',
 });
 
 test('getUsage: unreadable Codex auth preserves the 429 backoff until an account switch', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-auth-gap=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-auth-gap=${Date.now()}`);
   rmSync(CODEX_HISTORY_FILE, { force: true });
   writeCodexAuth({ access_token: 'mock-gap-token', account_id: 'mock-gap-account' });
   const originalFetch = globalThis.fetch;
@@ -1361,7 +1887,7 @@ test('getUsage: unreadable Codex auth preserves the 429 backoff until an account
 const staleCodexLine = (staleAt) => writeFileSync(CODEX_HISTORY_FILE, `${JSON.stringify({ fetched_at: stampLocal(staleAt), session: { utilization: 5, resets_at: null }, weekly: { utilization: 20, resets_at: null }, plan_type: 'plus' })}\n`);
 
 test('sampleCodex: a stale codex-usage.jsonl falls back to the live wham API, then the floor blocks an immediate repeat', async () => {
-  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-floor=${Date.now()}`);
+  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-floor=${Date.now()}`);
   const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));
   staleCodexLine(staleAt);
   writeCodexAuth({ access_token: '[REDACTED:credential-assignment]', account_id: 'codex-floor-account' });
@@ -1398,7 +1924,7 @@ test('sampleCodex: a stale codex-usage.jsonl falls back to the live wham API, th
 });
 
 test('sampleCodex: the network floor arms even on a failed attempt — a persistent failure cannot retry sooner than 60s', async () => {
-  const { sampleCodex: isolatedSampleCodex } = await import(`./usage.mjs?codex-floor-fail=${Date.now()}`);
+  const { sampleCodex: isolatedSampleCodex } = await importIsolatedUsage(`./usage.mjs?codex-floor-fail=${Date.now()}`);
   const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));
   staleCodexLine(staleAt);
   writeCodexAuth({ access_token: '[REDACTED:credential-assignment]', account_id: 'codex-floor-fail-account' });
@@ -1421,7 +1947,7 @@ test('sampleCodex: the network floor arms even on a failed attempt — a persist
 });
 
 test('getUsage: the network floor also holds on a cold cache (a concurrent automated pull does not double-fetch)', async () => {
-  const { getUsage: isolatedGetUsage } = await import(`./usage.mjs?cold-floor=${Date.now()}`);
+  const { getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?cold-floor=${Date.now()}`);
   let calls = 0;
   let release;
   const gate = new Promise((r) => { release = r; });
@@ -1435,7 +1961,7 @@ test('getUsage: the network floor also holds on a cold cache (a concurrent autom
 });
 
 test('getUsage: manual force=1 bypasses the network floor an automated call just armed', async () => {
-  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await import(`./usage.mjs?codex-floor-manual=${Date.now()}`);
+  const { sampleCodex: isolatedSampleCodex, getUsage: isolatedGetUsage } = await importIsolatedUsage(`./usage.mjs?codex-floor-manual=${Date.now()}`);
   const staleAt = new Date(Date.now() - (SNAPSHOT_MAX_AGE_MS + 60_000));
   staleCodexLine(staleAt);
   writeCodexAuth({ access_token: '[REDACTED:credential-assignment]', account_id: 'codex-floor-manual-account' });
@@ -1462,7 +1988,7 @@ test('getUsage: manual force=1 bypasses the network floor an automated call just
 // an identical WS frame; a manual/forced call (the Refresh button) always
 // pushes, since a user pressing it is not the "nothing changed" case.
 test('getUsage: an automated call does not re-emit an unchanged document; a manual one always does', async () => {
-  const { getUsage: isolatedGetUsage, initUsageAutoRefresh: isolatedInit } = await import(`./usage.mjs?emit-gate=${Date.now()}`);
+  const { getUsage: isolatedGetUsage, initUsageAutoRefresh: isolatedInit } = await importIsolatedUsage(`./usage.mjs?emit-gate=${Date.now()}`);
   let emits = 0;
   isolatedInit({ on() {}, emit(t) { if (t === 'usage') emits += 1; } });
 
@@ -1512,5 +2038,95 @@ test('getUsage: attaches codex resets and keeps the last count on a failed read'
     assert.deepEqual(second.codex.resets, { available: 1, expiresAt: [] });
   } finally {
     process.env.SING_CODEX_RESETS = '0';
+  }
+});
+
+test('getUsage: a complete local claude reading keeps resets and refetches them once per TTL', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-local-resets=${Date.now()}`);
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
+  const originalFetch = globalThis.fetch;
+  const realNow = Date.now;
+  const base = realNow();
+  try {
+    writeCreds({ accessToken: 'local-resets-token', expiresAt: base + 3_600_000 * 4, subscriptionType: 'max' });
+    clearClaudeLocal();
+    let calls = 0;
+    let left = 2;
+    globalThis.fetch = async () => {
+      calls += 1;
+      return { status: 200, headers: { get: () => null }, json: async () => ({
+        five_hour: { utilization: 10, resets_at: new Date(base + 3_600_000).toISOString() },
+        seven_day: { utilization: 5, resets_at: new Date(base + 86_400_000).toISOString() },
+        cedar_ember: { eligible: true, grants: [{ resets_left: left, ends_at: '2026-12-10T22:00:00+00:00' }] },
+      }) };
+    };
+    const writeLocal = (at) => writeFileSync(join(process.env.USAGE_REPORT_STATE, 'usage-snapshots.jsonl'), `${JSON.stringify({
+      fetched_at: new Date(at - 1000).toISOString(),
+      raw: {
+        five_hour: { utilization: 10, resets_at: new Date(base + 3_600_000).toISOString() },
+        seven_day: { utilization: 5, resets_at: new Date(base + 86_400_000).toISOString() },
+      },
+    })}\n`);
+    const want = (n) => ({ available: n, expiresAt: ['2026-12-10T22:00:00.000Z'] });
+    writeLocal(base);
+    const first = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.deepEqual(first.claude.resets, want(2));
+    assert.equal(calls, 1);
+
+    left = 5;
+    Date.now = () => base + 5 * 60_000;
+    writeLocal(Date.now());
+    const within = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.deepEqual(within.claude.resets, want(2));
+    assert.equal(calls, 1);
+
+    Date.now = () => base + 11 * 60_000;
+    writeLocal(Date.now());
+    const past = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.deepEqual(past.claude.resets, want(5));
+    assert.equal(calls, 2);
+  } finally {
+    Date.now = realNow;
+    globalThis.fetch = originalFetch;
+    clearClaudeLocal();
+    if (originalCredentials) writeFileSync(credentialsFile, originalCredentials);
+    else rmSync(credentialsFile, { force: true });
+  }
+});
+
+test('getUsage: a claude 200 body with cedar_ember yields claude.resets in one usage request', async () => {
+  const isolated = await importIsolatedUsage(`./usage.mjs?claude-resets=${Date.now()}`);
+  const credentialsFile = join(claudeCfg, '.credentials.json');
+  const originalCredentials = existsSync(credentialsFile) ? readFileSync(credentialsFile) : null;
+  const originalFetch = globalThis.fetch;
+  try {
+    writeCreds({ accessToken: 'resets-token', expiresAt: Date.now() + 3_600_000, subscriptionType: 'max' });
+    clearClaudeLocal();
+    let calls = 0;
+    const grants = [
+      { resets_left: 1, ends_at: '2026-12-10T22:00:00+00:00' },
+      { resets_left: 1, ends_at: '2026-11-17T07:59:00+00:00' },
+      { resets_left: 0, ends_at: '2027-01-01T00:00:00+00:00' },
+      { resets_left: 'x' },
+    ];
+    globalThis.fetch = async () => {
+      calls += 1;
+      return { status: 200, headers: { get: () => null }, json: async () => ({
+        five_hour: { utilization: 10, resets_at: new Date(Date.now() + 3_600_000).toISOString() },
+        seven_day: { utilization: 5, resets_at: new Date(Date.now() + 86_400_000).toISOString() },
+        cedar_ember: { eligible: true, grants },
+      }) };
+    };
+    const doc = await isolated.getUsage({ sources: ['claude'], force: true });
+    assert.equal(doc.claude.ok, true);
+    assert.deepEqual(doc.claude.resets, { available: 2, expiresAt: ['2026-11-17T07:59:00.000Z', '2026-12-10T22:00:00.000Z'] });
+    assert.equal(calls, 1);
+    assert.equal(isolated.parseClaudeResets({ cedar_ember: { eligible: false, grants: [] } }), null);
+    assert.equal(isolated.parseClaudeResets({}), null);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalCredentials) writeFileSync(credentialsFile, originalCredentials);
+    else rmSync(credentialsFile, { force: true });
   }
 });

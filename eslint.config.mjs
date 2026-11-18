@@ -6,8 +6,9 @@ export default [
   // Generated/vendored trees, all gitignored. `playwright-report/` and
   // `test-results/` are Playwright artifacts — their bundled JS otherwise
   // dominates the report (~1100+ no-undef errors) and buries real source
-  // findings.
-  { ignores: ['web/dist/**', 'web/dist-mock/**', 'vendor/**', '.worktrees/**', '.claude/**', 'playwright-report/**', 'test-results/**', 'e2e/.tmp*/**', 'github-pages/**'] },
+  // findings. The e2e sandbox is under <os tmp>/singularity-e2e, not in-repo.
+  // VERIFY: wave5-js_followup-4
+  { ignores: ['web/dist/**', 'web/dist-mock/**', 'vendor/**', '.worktrees/**', '.claude/**', 'playwright-report/**', 'test-results/**', 'github-pages/**'] },
   js.configs.recommended,
   // best-effort `try { ... } catch {}` is a deliberate idiom throughout the daemon
   { rules: { 'no-empty': ['error', { allowEmptyCatch: true }] } },

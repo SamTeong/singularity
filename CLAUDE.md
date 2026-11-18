@@ -13,6 +13,8 @@ pnpm test            # node --test --test-force-exit "server/*.test.mjs" "web/sr
 pnpm test:e2e-mock   # build:mock + parallel Playwright suite in e2e-mock/
 ```
 
+The daemon builds its Rust backend before starting. Install stable Rust; Windows also needs Visual Studio C++ Build Tools (MSVC).
+
 Before finishing code changes: `pnpm lint && pnpm test`.
 
 - `pnpm build`/`pnpm start` take ~20s+: run with `run_in_background` (or `timeout: 300000`).

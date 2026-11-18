@@ -1,7 +1,8 @@
 // SINGULARITY_SHADOW=1: read-only follower — nothing may write, spawn or rotate tokens.
-import { test } from 'node:test';
+// The Rust backend child inherits the env, so its write paths must honour it too.
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync, readdirSync } from 'node:fs';
+import { mkdtempSync, existsSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -11,8 +12,13 @@ process.env.SINGULARITY_SHADOW = '1';
 
 const reg = await import('./agents.mjs');
 const { shadowAllows } = await import('./app-dir.mjs');
-const { getModels } = await import('./model-store.mjs');
+const { getModels, setModels, getSummariser, setModelsBackend } = await import('./model-store.mjs');
 const { refreshClaudeAuth } = await import('./usage.mjs');
+const { createRustBackend } = await import('./rust-backend.mjs');
+const backend = createRustBackend();
+await backend.start();
+setModelsBackend(backend);
+after(async () => { await backend.stop(); rmSync(home, { recursive: true, force: true }); });
 
 test('shadow: import creates no dirs under SINGULARITY_HOME', () => {
   assert.deepEqual(readdirSync(home), []);
@@ -26,14 +32,23 @@ test('shadow: writeAtomic and persist (via beginDrain) write nothing', () => {
   assert.deepEqual(readdirSync(home), []);
 });
 
-test('shadow: create/reattach/fork throw', () => {
-  assert.throws(() => reg.create({ cwd: home }), /shadow mode: read-only/);
-  assert.throws(() => reg.reattach('nope'), /shadow mode: read-only/);
-  assert.throws(() => reg.fork('nope'), /shadow mode: read-only/);
+test('shadow: create/reattach/fork reject', async () => {
+  await assert.rejects(() => reg.create({ cwd: home }), /shadow mode: read-only/);
+  await assert.rejects(() => reg.reattach('nope'), /shadow mode: read-only/);
+  await assert.rejects(() => reg.fork('nope'), /shadow mode: read-only/);
 });
 
-test('shadow: getModels serves the seed without creating models.json', () => {
-  assert.ok(getModels().models.length > 0);
+test('shadow: the Rust model store serves the seed without creating models.json', async () => {
+  assert.ok((await getModels()).models.length > 0);
+  assert.equal(await getSummariser(), null);
+  assert.deepEqual(readdirSync(home), []);
+});
+
+test('shadow: the Rust bridge refuses state writes', async () => {
+  const seed = await getModels();
+  const result = await setModels({ ...seed, defaultModel: 'opus' });
+  assert.equal(result?.ok, false);
+  assert.match(String(result?.error), /shadow mode: read-only/);
   assert.deepEqual(readdirSync(home), []);
 });
 

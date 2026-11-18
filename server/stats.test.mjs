@@ -14,10 +14,13 @@ const scratch = mkdtempSync(join(tmpdir(), 'singularity-stats-test-'));
 process.env.SINGULARITY_HOME = join(scratch, 'sing');
 const USAGE_REPORT_STATE = join(scratch, 'usage-report-state');
 process.env.USAGE_REPORT_STATE = USAGE_REPORT_STATE;
-after(() => { rmSync(scratch, { recursive: true, force: true }); });
+const statsBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await statsBackend.start();
+after(async () => { await statsBackend.stop(); rmSync(scratch, { recursive: true, force: true }); });
 
 const { encodeCwd } = await import('./agents.mjs');
-const { parseSession, statsFor, sessionStats, COST_STATE_DIR, STATS_CSV, readStatsCsvCosts } = await import('./stats.mjs');
+const { parseSession, statsFor, sessionStats, setStatsBackend, COST_STATE_DIR, STATS_CSV, readStatsCsvCosts } = await import('./stats.mjs');
+setStatsBackend(statsBackend);
 
 function writeTranscript(cwd, id, lines) {
   const dir = join(homedir(), '.claude', 'projects', encodeCwd(cwd));

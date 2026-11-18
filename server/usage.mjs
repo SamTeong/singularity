@@ -14,10 +14,9 @@
 // enough — no cross-session file needed.
 // SECURITY: reads full account credentials (browser profile / OAuth token) but NEVER returns
 // them to the client — only derived %/reset/plan leave this module.
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync, appendFileSync, readdirSync, statSync, openSync, readSync, closeSync, linkSync, unlinkSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { homedir } from 'node:os';
-import { execFile, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE, SHADOW } from './app-dir.mjs';
 import { fetchExternal, retryAfterMs } from './external-fetch.mjs';
@@ -26,6 +25,25 @@ import { newestSnapshotArchive } from './usage-history.mjs';
 const OLLAMA_CFG = join(STATE_DIR, 'ollama.json');
 export const OLLAMA_PROFILE_DIR = join(CACHE_DIR, 'pw-ollama-profile');
 const OLLAMA_SETTINGS_URL = 'https://ollama.com/settings';
+let usageAuthBackend = null;
+let usageAuthPlatform = process.platform;
+let usageNormalizationBackend = null;
+let usageSnapshotBackend = null;
+let usageCodexBackend = null;
+let usageClaudeBackend = null;
+let usageOllamaModeConfigBackend = null;
+export function setUsageAuthBackend(backend, platform = process.platform) {
+  usageAuthBackend = backend;
+  usageAuthPlatform = platform;
+}
+export function setUsageNormalizationBackend(backend) { usageNormalizationBackend = backend; }
+export function setUsageSnapshotBackend(backend) { usageSnapshotBackend = backend; }
+export function setUsageCodexBackend(backend) { usageCodexBackend = backend; }
+export function setUsageClaudeBackend(backend) {
+  usageClaudeBackend = backend;
+  if (backend?.ollamaModeConfigRead && backend?.ollamaModeConfigWrite) usageOllamaModeConfigBackend = backend;
+}
+export function setUsageOllamaModeConfigBackend(backend) { usageOllamaModeConfigBackend = backend; }
 export const PW_STEALTH = {
   channel: 'msedge',
   args: ['--disable-blink-features=AutomationControlled'],
@@ -40,8 +58,9 @@ export async function pwHideWebdriver(ctx) {
 // the refresh below reads and rewrites the same file the CLI does (and so tests
 // can point at a scratch dir instead of the real credentials).
 const CREDENTIALS_PATH = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), '.credentials.json');
-const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
-const USAGE_API_BETA = 'oauth-2025-04-20'; // schema ref: stats.mjs L34
+// cedar_ember=1 adds the redeemable resets to the usage document. The request itself
+// (this URL, claude-cli User-Agent) is made by the Rust claudeUsageFetch bridge.
+const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage?cedar_ember=1';
 // The per-source floor on network/heavy work (the OAuth usage API, the codex
 // wham/usage API, the codex rollout scan, the ollama scrape): at most one
 // attempt every NETWORK_FLOOR_MS, success or failure, for an automated caller
@@ -80,48 +99,14 @@ export function parseOllamaHtml(html) {
 // upgrade path if it ever matters.
 const OLLAMA_HISTORY = join(USAGE_SKILL_STATE, 'ollama-usage.jsonl');
 
-// Last row actually written, so duplicate readings don't spam the file while
-// idle. A successful scrape refreshes persisted freshness at the 5-minute
-// heartbeat, inside the reader's 10-minute freshness window.
-let lastOllamaReading = null;
-let lastOllamaAt = 0;
-const OLLAMA_HEARTBEAT_MS = 5 * 60_000;
-
-function pad2(n) { return String(n).padStart(2, '0'); }
-function localTimestamp(d) {
-  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())} ${pad2(d.getHours())}:${pad2(d.getMinutes())}:${pad2(d.getSeconds())}`;
-}
-
-export function appendOllamaHistory(data) {
-  const now = Date.now();
-  const reading = {
-    sessionUtil: data.session?.pctUsed ?? null, sessionResets: data.session?.resetsAt ?? null,
-    weeklyUtil: data.weekly?.pctUsed ?? null, weeklyResets: data.weekly?.resetsAt ?? null,
-  };
-  if (lastOllamaReading
-    && reading.sessionUtil === lastOllamaReading.sessionUtil && reading.sessionResets === lastOllamaReading.sessionResets
-    && reading.weeklyUtil === lastOllamaReading.weeklyUtil && reading.weeklyResets === lastOllamaReading.weeklyResets
-    && now - lastOllamaAt < OLLAMA_HEARTBEAT_MS) return;
-  const record = {
-    fetched_at: localTimestamp(new Date(now)),
-    session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt } : null,
-    weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt } : null,
-    plan: data.plan ?? null,
-    models: data.weekly?.models ?? [],
-  };
-  if (appendJsonl(OLLAMA_HISTORY, record)) {
-    lastOllamaReading = reading;
-    lastOllamaAt = now;
-  }
-}
-
-function appendJsonl(file, record) {
+export async function appendOllamaHistory(data) {
   if (SHADOW) return false;
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    appendFileSync(file, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-    return true;
-  } catch { return false; } // best-effort, never break /usage
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'append_ollama', path: OLLAMA_HISTORY, reading: data, now_ms: Date.now(),
+    });
+    return result?.appended === true;
+  } catch { return false; }
 }
 
 // ---- Codex usage history (same skill contract as the ollama history above) ----
@@ -132,26 +117,14 @@ function appendJsonl(file, record) {
 // ingestion also appends this file; both writers dedupe against their last
 // reading, and a zero-delta duplicate line is harmless to the estimators.
 const CODEX_HISTORY = join(USAGE_SKILL_STATE, 'codex-usage.jsonl');
-let lastCodexReading = null;
-let lastCodexAt = 0;
-// Heartbeat keeps readers' 10-min freshness gate (fetched_at age) satisfied while quota is idle.
-const CODEX_HEARTBEAT_MS = 5 * 60_000;
-
-export function appendCodexHistory(data) {
-  const reading = JSON.stringify([
-    data.session?.pctUsed ?? null, data.session?.resetsAt ?? null, data.session?.started === false,
-    data.weekly?.pctUsed ?? null, data.weekly?.resetsAt ?? null, data.weekly?.started === false,
-  ]);
-  if (reading === lastCodexReading && Date.now() - lastCodexAt < CODEX_HEARTBEAT_MS) return;
-  if (appendJsonl(CODEX_HISTORY, {
-    fetched_at: localTimestamp(new Date()),
-    session: data.session ? { utilization: data.session.pctUsed, resets_at: data.session.resetsAt, ...(data.session.started === false ? { started: false } : {}) } : null,
-    weekly: data.weekly ? { utilization: data.weekly.pctUsed, resets_at: data.weekly.resetsAt, ...(data.weekly.started === false ? { started: false } : {}) } : null,
-    plan: data.plan ?? null,
-  })) {
-    lastCodexReading = reading;
-    lastCodexAt = Date.now();
-  }
+export async function appendCodexHistory(data) {
+  if (SHADOW) return false;
+  try {
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'append_codex', path: CODEX_HISTORY, reading: data, now_ms: Date.now(),
+    });
+    return result?.appended === true;
+  } catch { return false; }
 }
 
 // fetchClaude's network reads, the usage-report skill's stats.mjs fetch and
@@ -161,101 +134,36 @@ export function appendCodexHistory(data) {
 // for the network; a fresh one is the same payload for free. Tail-read a fixed
 // window rather than the whole file: this log is megabytes and append-only.
 const CLAUDE_HISTORY = join(USAGE_SKILL_STATE, 'usage-snapshots.jsonl');
-const SNAPSHOT_TAIL_BYTES = 8192;
 export const SNAPSHOT_MAX_AGE_MS = 2 * NETWORK_FLOOR_MS; // one missed ~60s statusline tick
 // How old a local reading may be before it is worse than nothing. Capped at the
 // 5h window because past that the session meter describes a window that has
 // already rolled over; anything inside it is served marked stale.
 export const CLAUDE_STALE_MAX_MS = 5 * 3.6e6;
 
-// Last line of a log as JSON; throws when missing, empty or unparseable.
-function lastJsonlRecord(file) {
-  let fd;
+async function appendClaudeHistory(record, limits) {
+  if (SHADOW) return false;
   try {
-    fd = openSync(file, 'r');
-    const size = statSync(file).size;
-    const len = Math.min(size, SNAPSHOT_TAIL_BYTES);
-    const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, size - len);
-    // Only the last complete line matters; a leading fragment from a mid-line
-    // window start is never read.
-    const lines = buf.toString('utf8').split('\n').filter(Boolean);
-    return JSON.parse(lines[lines.length - 1]);
-  } finally { if (fd !== undefined) closeSync(fd); }
+    const costState = record.source === 'cost-state';
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'append_claude', live_path: CLAUDE_HISTORY, archive_dir: USAGE_SKILL_STATE,
+      cost_state: costState, raw: record.raw, now_ms: Date.now(),
+      ...(limits?.fetchedAt ? { fetched_at_ms: Date.parse(limits.fetchedAt) } : {}),
+      ...(limits ? { cost_reading: {
+        session: { pctUsed: limits.session?.pctUsed, resetsAt: limits.session?.resetsAt },
+        weekly: { pctUsed: limits.weekly?.pctUsed, resetsAt: limits.weekly?.resetsAt },
+      } } : {}),
+    });
+    return result?.appended === true;
+  } catch { return false; }
 }
 
-const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-
-// First line of a log ('' when missing or empty); a partial line comes back as-is.
-function firstJsonlLine(file) {
-  let fd;
+export async function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
   try {
-    fd = openSync(file, 'r');
-    const buf = Buffer.alloc(SNAPSHOT_TAIL_BYTES);
-    const n = readSync(fd, buf, 0, buf.length, 0);
-    return buf.toString('utf8', 0, n).split('\n')[0];
-  } catch (e) {
-    if (e.code === 'ENOENT') return '';
-    throw e;
-  } finally { if (fd !== undefined) closeSync(fd); }
-}
-
-// Monthly rotation of usage-snapshots.jsonl, run before each daemon append. The
-// skill's report (stats.mjs --save) appends here too, so the decision uses the live
-// file's FIRST row: when its calendar month (local) is earlier than now, the file
-// moves to usage-snapshots-<first row's month>.jsonl and the append starts a fresh
-// one. Archive names stay monotonic because a fresh file's first row is this month;
-// an archive can still span several months when the daemon was idle across them.
-// The move is linkSync then unlinkSync: link fails atomically with EEXIST, so two
-// daemons sharing the file can never overwrite a finished archive. Any failure
-// (busy file, unparseable head, failed unlink) is not cached and retries on the
-// next append; otherwise the checked month is cached: one head read a month.
-let claudeHistoryMonth = null;
-export function rotateClaudeHistory(now = new Date(), { link = linkSync, unlink = unlinkSync } = {}) {
-  if (SHADOW) return;
-  const month = ym(now);
-  if (claudeHistoryMonth === month) return;
-  let head;
-  try { head = firstJsonlLine(CLAUDE_HISTORY); } catch { return; }
-  if (head) {
-    let at = NaN;
-    try { at = Date.parse(JSON.parse(head).fetched_at); } catch { /* checked below */ }
-    if (Number.isNaN(at)) return; // partial or corrupt head row: retry next append
-    const from = ym(new Date(at));
-    if (from < month) {
-      const target = join(USAGE_SKILL_STATE, `usage-snapshots-${from}.jsonl`);
-      try { link(CLAUDE_HISTORY, target); } catch (e) {
-        if (e.code !== 'EEXIST') return;
-        // Same inode: our earlier link whose unlink failed, so finish the move.
-        let same;
-        try { same = statSync(target).ino === statSync(CLAUDE_HISTORY).ino; } catch { return; }
-        // shortcut: a different existing archive for that month is never merged into or overwritten; rotation skips and the live file keeps growing until merged by hand.
-        if (!same) { claudeHistoryMonth = month; return; }
-      }
-      try { unlink(CLAUDE_HISTORY); } catch { return; }
-    }
-  }
-  claudeHistoryMonth = month;
-}
-
-function appendClaudeHistory(record) {
-  rotateClaudeHistory();
-  return appendJsonl(CLAUDE_HISTORY, record);
-}
-
-export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
-  try {
-    // A just-rotated (missing or empty) live file: the newest archive holds the last row.
-    let file = CLAUDE_HISTORY;
-    try { if (!statSync(file).size) throw new Error('empty'); } catch { file = newestSnapshotArchive() ?? file; }
-    const record = lastJsonlRecord(file);
-    // localTimestamp's 'YYYY-MM-DD HH:MM:SS' has no zone — parsed as local, which
-    // is what wrote it.
-    const at = Date.parse(record.fetched_at);
-    // A cost-state row carries only the windows, not extra_usage or per-model, so
-    // serving it here would blank those; tier 2 answers from the same reading.
-    if (!record.raw || record.source === 'cost-state' || Number.isNaN(at) || now - at > maxAgeMs) return null;
-    return { raw: record.raw, fetchedAt: new Date(at).toISOString() };
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'read_claude', live_path: CLAUDE_HISTORY,
+      selected_archive_path: newestSnapshotArchive(), max_age_ms: Number.isFinite(maxAgeMs) ? maxAgeMs : Number.MAX_SAFE_INTEGER, now_ms: now,
+    });
+    return result ? { raw: result.raw, fetchedAt: result.fetched_at } : null;
   } catch { return null; }
 }
 
@@ -263,31 +171,23 @@ export function readClaudeSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.no
 // end (appendCodexHistory writes daemon-sourced reads to the same file), so a
 // complete fresh tail line resolves the lane with no network. Same fixed
 // tail window, same 120s freshness gate (SNAPSHOT_MAX_AGE_MS).
-export function readCodexSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
-  let fd;
+export async function readCodexSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
   try {
-    fd = openSync(CODEX_HISTORY, 'r');
-    const size = statSync(CODEX_HISTORY).size;
-    const len = Math.min(size, SNAPSHOT_TAIL_BYTES);
-    const buf = Buffer.alloc(len);
-    readSync(fd, buf, 0, len, size - len);
-    const lines = buf.toString('utf8').split('\n').filter(Boolean);
-    const record = JSON.parse(lines[lines.length - 1]);
-    const at = Date.parse(record.fetched_at);
-    if (Number.isNaN(at) || now - at > maxAgeMs) return null;
-    const win = (w) => (Number.isFinite(w?.utilization)
-      ? { pctUsed: w.utilization, resetsAt: w.resets_at ?? null, models: [], ...(w.started === false ? { started: false } : {}) }
-      : null);
-    const session = win(record.session);
-    const weekly = win(record.weekly);
-    if (!session && !weekly) return null;
-    // The Stop hook writes plan_type (the API's own field name); the daemon's
-    // appendCodexHistory writes the normalized payload with `plan`.
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'read_codex', path: CODEX_HISTORY, max_age_ms: Number.isFinite(maxAgeMs) ? maxAgeMs : Number.MAX_SAFE_INTEGER, now_ms: now,
+    });
+    if (!result) return null;
+    const win = (w) => w && ({
+      pctUsed: w.utilization, resetsAt: w.resets_at ?? null, models: [],
+      ...(w.started === false ? { started: false } : {}),
+    });
+    const session = win(result.session);
+    const weekly = win(result.weekly);
     return {
-      ok: true, source: 'codex', plan: record.plan_type ?? record.plan ?? null,
-      fetchedAt: new Date(at).toISOString(), session, weekly,
+      ok: true, source: 'codex', plan: result.plan ?? null,
+      fetchedAt: result.fetched_at, session, weekly,
     };
-  } catch { return null; } finally { if (fd !== undefined) closeSync(fd); }
+  } catch { return null; }
 }
 
 // Second free source, denser than the snapshot log: the statusline writes
@@ -298,51 +198,31 @@ export function readCodexSnapshot(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now
 // extra_usage / per-model carry from the last good reading in fetchClaude.
 const COST_STATE_DIR = join(USAGE_SKILL_STATE, 'cost-state');
 
-export function readCostStateLimits(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
-  let candidates;
+export async function readCostStateLimits(maxAgeMs = SNAPSHOT_MAX_AGE_MS, now = Date.now()) {
   try {
-    candidates = readdirSync(COST_STATE_DIR)
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => {
-        const file = join(COST_STATE_DIR, f);
-        try { return [file, statSync(file).mtimeMs]; } catch { return [file, 0]; }
-      })
-      .filter(([, at]) => now - at <= maxAgeMs)
-      .sort((a, b) => b[1] - a[1]);
-  } catch { return null; }
-  const win = (w) => (Number.isFinite(w?.used_percentage)
-    ? {
-        pctUsed: w.used_percentage,
-        // epoch seconds here, ISO everywhere else in this module
-        resetsAt: Number.isFinite(w.resets_at) ? new Date(w.resets_at * 1000).toISOString() : null,
-        models: [],
-      }
-    : null);
-  for (const [file, at] of candidates) {
-    try {
-      const rl = JSON.parse(readFileSync(file, 'utf8')).rate_limits;
-      const session = win(rl?.five_hour);
-      const weekly = win(rl?.seven_day);
-      if (session || weekly) return { session, weekly, fetchedAt: new Date(at).toISOString() };
-    } catch { /* unreadable or caught mid-write: fall through to the next newest */ }
+    const result = await usageSnapshotBackend.providerUsageSnapshot({
+      operation: 'read_cost_state', directory: COST_STATE_DIR, max_age_ms: Number.isFinite(maxAgeMs) ? maxAgeMs : Number.MAX_SAFE_INTEGER, now_ms: now,
+    });
+    if (!result) return null;
+    const win = (w) => w && ({
+      pctUsed: w.utilization, resetsAt: w.resets_at ?? null, models: [],
+    });
+    return { session: win(result.session), weekly: win(result.weekly), fetchedAt: result.fetched_at };
+  } catch {
+    return null;
   }
-  return null;
 }
 
 // While cost-state stays fresh the network leg never runs, so nothing else
 // appends usage-snapshots.jsonl and the 5h history chart would freeze. Log the
 // cost-state reading in fetchClaude's {fetched_at, raw} shape, only on a change.
-let lastClaudeCostStateReading = null;
-function appendClaudeCostStateSnapshot(limits) {
+async function appendClaudeCostStateSnapshot(limits) {
   if (!limits.session) return;
-  const reading = JSON.stringify([limits.session.pctUsed, limits.session.resetsAt]);
-  if (reading === lastClaudeCostStateReading) return;
   const win = (w) => w && { utilization: w.pctUsed, resets_at: w.resetsAt };
-  if (appendClaudeHistory({
-    fetched_at: localTimestamp(new Date(limits.fetchedAt)),
+  await appendClaudeHistory({
     source: 'cost-state',
     raw: { five_hour: win(limits.session), seven_day: win(limits.weekly) },
-  })) lastClaudeCostStateReading = reading;
+  }, limits);
 }
 
 function hasCompleteWindow(window) {
@@ -406,29 +286,30 @@ function fetchOllamaBrowser() {
 }
 
 async function fetchOllama() {
-  if (!existsSync(OLLAMA_CFG)) return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
   try {
-    if (JSON.parse(readFileSync(OLLAMA_CFG, 'utf8'))?.mode === 'browser') return fetchOllamaBrowser();
+    const config = await usageOllamaModeConfigBackend?.ollamaModeConfigRead(OLLAMA_CFG);
+    if (config.kind === 'missing') return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
+    if (JSON.parse(config.text)?.mode === 'browser') return fetchOllamaBrowser();
   } catch (e) {
-    return { ok: false, source: 'ollama', error: `bad ${OLLAMA_CFG}: ${e.message}` };
+    const error = e.message.startsWith(`bad ${OLLAMA_CFG}: `)
+      ? e.message
+      : `bad ${OLLAMA_CFG}: ${e.message}`;
+    return { ok: false, source: 'ollama', error };
   }
   return { ok: false, source: 'ollama', needsAuth: true, error: 'no-config' };
 }
 
-function writeOllamaBrowserMode() {
-  mkdirSync(dirname(OLLAMA_CFG), { recursive: true });
+async function writeOllamaBrowserMode() {
   const tmp = `${OLLAMA_CFG}.${process.pid}.${Date.now()}.tmp`;
-  writeFileSync(tmp, JSON.stringify({ mode: 'browser' }), { mode: 0o600 });
-  renameSync(tmp, OLLAMA_CFG);
+  const written = await usageOllamaModeConfigBackend?.ollamaModeConfigWrite(
+    OLLAMA_CFG, tmp, JSON.stringify({ mode: 'browser' }),
+  );
+  if (written !== true) throw new Error('Ollama mode config write failed');
 }
 
-export function sanitizeOllamaUsage(data) {
-  return {
-    ok: !!data?.ok, source: 'ollama', plan: data?.plan ?? null,
-    session: data?.session ?? null, weekly: data?.weekly ?? null, extra: null,
-    fetchedAt: data?.fetchedAt ?? null, stale: !!data?.stale,
-    needsAuth: !!data?.needsAuth, error: data?.error ?? null,
-  };
+export async function sanitizeOllamaUsage(data) {
+  if (!usageNormalizationBackend) throw new Error('Rust provider usage normalizer is not configured');
+  return usageNormalizationBackend.providerUsageNormalize('ollama', data);
 }
 
 export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 120_000, headlessVerifier } = {}) {
@@ -460,16 +341,16 @@ export async function connectOllamaUsage({ playwright, waitForUser, timeoutMs = 
       return { ok: false, source: 'ollama', error: 'unavailable' };
     } finally { if (ctx) await ctx.close().catch(() => {}); }
   });
-  if (!interactive.ok) return sanitizeOllamaUsage(interactive);
+  if (!interactive.ok) return await sanitizeOllamaUsage(interactive);
   const verified = await (headlessVerifier ?? fetchOllamaBrowser)();
-  if (!verified.ok) return sanitizeOllamaUsage(verified);
-  writeOllamaBrowserMode();
+  if (!verified.ok) return await sanitizeOllamaUsage(verified);
+  await writeOllamaBrowserMode();
   cache.ollama = { data: null, at: 0 };
   historyPaused = null;
   historyBackoffMs = 0;
   ollamaGate.clear();
   startHistorySampler();
-  return sanitizeOllamaUsage({ ...verified, fetchedAt: new Date().toISOString() });
+  return await sanitizeOllamaUsage({ ...verified, fetchedAt: new Date().toISOString() });
 }
 
 export function preserveOllamaStale(lastGood, failure) {
@@ -487,40 +368,9 @@ export function preserveClaudeStale(lastGood, failure) {
 // ---- Claude: OAuth usage API --------------------------------------------------
 // Schema mirrors stats.mjs (L1795-1812): raw has five_hour, seven_day,
 // seven_day_{sonnet,opus,omelette}, extra_usage; each window {utilization,resets_at}.
-export function normalizeClaude(raw, plan) {
-  const win = (w) => {
-    if (!w || w.utilization == null) return null;
-    const pctUsed = Number(w.utilization);
-    const resetsAt = w.resets_at ?? null;
-    return {
-      pctUsed, resetsAt, models: [],
-      ...(pctUsed === 0 && resetsAt == null ? { started: false } : {}),
-    };
-  };
-  const models = [
-    ['sonnet', raw.seven_day_sonnet],
-    ['opus', raw.seven_day_opus],
-    ['design', raw.seven_day_omelette], // API key omelette → "design" (stats.mjs L1804)
-  ]
-    .filter(([, w]) => w && w.utilization != null)
-    .map(([model, w]) => ({ model, pctUsed: Number(w.utilization) }));
-
-  const weekly = win(raw.seven_day);
-  if (weekly) weekly.models = models;
-  const eu = raw.extra_usage;
-  return {
-    ok: true, source: 'claude', plan: plan ?? null,
-    session: win(raw.five_hour),
-    weekly,
-    extra: eu && typeof eu === 'object'
-      ? { enabled: eu.is_enabled ?? null, used: eu.used_credits ?? null,
-          monthlyLimit: eu.monthly_limit ?? null,
-          // Extra-usage-only subscriptions omit utilization but carry a top-level spend percentage.
-          pctUsed: eu.utilization != null ? Number(eu.utilization)
-            : raw.spend && typeof raw.spend === 'object' && raw.spend.percent != null ? Number(raw.spend.percent) : null,
-          resetsAt: eu.resets_at ?? null }
-      : null,
-  };
+async function normalizeClaude(raw, plan) {
+  if (!usageNormalizationBackend) throw new Error('Rust provider usage normalizer is not configured');
+  return usageNormalizationBackend.providerUsageNormalize('claude', raw, { payloadPresent: raw !== undefined, plan });
 }
 
 // Read the Claude Code OAuth token from ~/.claude/.credentials.json. Returns
@@ -531,14 +381,11 @@ export function normalizeClaude(raw, plan) {
 //
 // macOS note: Claude Code stores its OAuth token in the Keychain under the
 // "Claude Code-credentials" generic password, not in .credentials.json. When
-// the file is absent or has no accessToken on darwin, fall back to
+// the file is absent on darwin, fall back to
 // `security find-generic-password -s "Claude Code-credentials" -w`, which
-// prints the same JSON blob to stdout. This stays synchronous because
-// chat.mjs calls claudeOauthToken() without await — `security` is a fast
-// local lookup so the brief event-loop block is acceptable.
-export function claudeOauthToken() {
-  const fromFile = readCredentialsFile();
-  const oauth = fromFile ?? readKeychainOnDarwin();
+// prints the same JSON blob to stdout. Lookup crosses the private Rust bridge.
+export async function claudeOauthToken() {
+  const { oauth } = await resolveClaudeCredential();
   if (!oauth?.accessToken) return null;
   if (oauth.expiresAt && Number(oauth.expiresAt) < Date.now()) return null;
   return { accessToken: oauth.accessToken, expiresAt: oauth.expiresAt ?? null, subscriptionType: oauth.subscriptionType ?? null };
@@ -548,29 +395,41 @@ export function claudeOauthToken() {
 // without storing or returning either OAuth token. Prefer the longer-lived
 // refresh token so ordinary access-token renewal does not usually look like a
 // switch; rotation is safe to treat conservatively as one.
-function claudeCredentialFingerprint() {
-  const oauth = readCredentialsFile() ?? readKeychainOnDarwin();
+async function claudeCredentialFingerprint() {
+  const { oauth } = await resolveClaudeCredential();
   const secretMaterial = oauth && (oauth.refreshToken || oauth.accessToken);
   return secretMaterial ? createHash('sha256').update(secretMaterial).digest('hex') : null;
 }
 
-function readCredentialsFile() {
-  if (!existsSync(CREDENTIALS_PATH)) return null;
-  try { return JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth; }
+async function resolveClaudeCredential() {
+  let result;
+  try { result = await usageClaudeBackend?.claudeCredentialsRead(CREDENTIALS_PATH); }
+  catch { result = null; }
+  if (result?.kind === 'file' && typeof result.text === 'string') {
+    try { return { oauth: JSON.parse(result.text).claudeAiOauth, fileKind: 'file' }; }
+    catch {
+      return { oauth: await readKeychainOnDarwin(), fileKind: 'parse_failure' };
+    }
+  }
+  const fileKind = result?.kind === 'missing' ? 'missing' : 'read_failure';
+  return { oauth: await readKeychainOnDarwin(), fileKind };
+}
+
+async function readCredentialsFileForRefresh() {
+  try {
+    const result = await usageClaudeBackend?.claudeCredentialsRead(CREDENTIALS_PATH);
+    if (result?.kind !== 'file' || typeof result.text !== 'string') return null;
+    return JSON.parse(result.text).claudeAiOauth;
+  }
   catch { return null; }
 }
 
 // darwin-only Keychain fallback. Returns the parsed claudeAiOauth object or
 // null on any failure (no entry, user denies, parse fail) — never throws.
-function readKeychainOnDarwin() {
-  if (process.platform !== 'darwin') return null;
-  try {
-    const stdout = execFileSync(
-      'security', ['find-generic-password', '-s', 'Claude Code-credentials', '-w'],
-      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] },
-    );
-    return JSON.parse(stdout).claudeAiOauth;
-  } catch { return null; }
+async function readKeychainOnDarwin() {
+  if (usageAuthPlatform !== 'darwin' || !usageAuthBackend) return null;
+  try { return await usageAuthBackend.usageKeychain(usageAuthPlatform); }
+  catch { return null; }
 }
 
 // ---- Keeping the OAuth token alive ------------------------------------------
@@ -586,40 +445,45 @@ const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e'; // Claude Code's
 const AUTH_REFRESH_THROTTLE_MS = 5 * 60_000;
 let lastAuthRefresh = 0;
 
-// Merge a fresh token response into ~/.claude/.credentials.json, preserving
-// every field we didn't get back (subscriptionType, rateLimitTier, …) and any
-// sibling keys the file holds. tmp+rename so a crash can't truncate the file;
-// a plain write is the last resort because losing a just-rotated refresh token
-// costs the user a full re-login, which is worse than a non-atomic write.
-function persistOauth(fresh) {
+// Merge a fresh token response into ~/.claude/.credentials.json in Node, then
+// send the serialized content and exact Node PID temp path to the Rust writer.
+async function persistOauth(fresh) {
   if (SHADOW) return;
   let file = {};
-  try { file = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')); } catch {}
+  try {
+    const result = await usageClaudeBackend?.claudeCredentialsRead(CREDENTIALS_PATH);
+    if (result?.kind === 'file' && typeof result.text === 'string') file = JSON.parse(result.text);
+  } catch {}
   file.claudeAiOauth = { ...file.claudeAiOauth, ...fresh };
   const data = JSON.stringify(file);
   const tmp = `${CREDENTIALS_PATH}.${process.pid}.tmp`;
-  try {
-    writeFileSync(tmp, data, { mode: 0o600 });
-    renameSync(tmp, CREDENTIALS_PATH);
-  } catch {
-    try { writeFileSync(CREDENTIALS_PATH, data, { mode: 0o600 }); } catch { return false; }
-  }
-  return true;
+  try { return await usageClaudeBackend?.claudeCredentialsWrite(CREDENTIALS_PATH, tmp, data) === true; }
+  catch { return false; }
 }
 
 // POST the refresh_token grant. Returns true only when a new access token was
 // obtained AND persisted — a false sends the caller on to the CLI fallback.
 export async function refreshOauthGrant() {
-  const cur = readCredentialsFile(); // file only: the darwin Keychain path is the CLI's job
+  const cur = await readCredentialsFileForRefresh(); // file only: the darwin Keychain path is the CLI's job
   if (!cur?.refreshToken) return false;
   if (cur.refreshTokenExpiresAt && Number(cur.refreshTokenExpiresAt) < Date.now()) return false;
   let resp;
   try {
+    const body = JSON.stringify({ grant_type: 'refresh_token', refresh_token: cur.refreshToken, client_id: OAUTH_CLIENT_ID });
     resp = await fetchExternal(OAUTH_TOKEN_URL, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ grant_type: 'refresh_token', refresh_token: cur.refreshToken, client_id: OAUTH_CLIENT_ID }),
-    }, { timeoutMs: REQ_TIMEOUT_MS });
+      body,
+    }, {
+      timeoutMs: REQ_TIMEOUT_MS,
+      fetcher: async (url, options) => {
+        if (url !== OAUTH_TOKEN_URL || options.method !== 'POST' || options.headers?.['content-type'] !== 'application/json' || typeof options.body !== 'string') {
+          throw new Error('fetch failed');
+        }
+        if (!usageClaudeBackend) throw new Error('fetch failed');
+        return claudeOauthRefreshResponse(await usageClaudeBackend.claudeOauthRefresh(options.body, options.signal, REQ_TIMEOUT_MS));
+      },
+    });
   } catch { return false; }
   if (resp.status !== 200) return false;
   let body;
@@ -642,10 +506,9 @@ export async function refreshClaudeAuth() {
   lastAuthRefresh = Date.now();
   if (await refreshOauthGrant()) return true;
   const bin = process.env.CLAUDE_BIN;
-  if (!bin) return false;
-  return new Promise((resolve) => {
-    execFile(bin, ['auth', 'status'], { timeout: REQ_TIMEOUT_MS, windowsHide: true }, () => resolve(true));
-  });
+  if (!bin || !usageAuthBackend) return false;
+  try { await usageAuthBackend.usageAuthStatus(bin, REQ_TIMEOUT_MS); } catch {}
+  return true;
 }
 
 // The two free tiers, in freshness order. Tier 1: whoever fetched last — us or
@@ -656,10 +519,10 @@ export async function refreshClaudeAuth() {
 // (extra_usage, per-model) from the last good reading. Both are plain file reads,
 // which is why pull() runs this ahead of the TTL gate — that guards the network
 // leg only.
-export function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
-  const snapshot = readClaudeSnapshot(maxAgeMs);
+export async function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
+  const snapshot = await readClaudeSnapshot(maxAgeMs);
   if (snapshot) {
-    const data = normalizeClaude(snapshot.raw, plan);
+    const data = await normalizeClaude(snapshot.raw, plan);
     return {
       ...data,
       session: preferCurrentWindow(data.session, prev?.session),
@@ -668,9 +531,9 @@ export function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
     };
   }
 
-  const limits = readCostStateLimits(maxAgeMs);
+  const limits = await readCostStateLimits(maxAgeMs);
   if (!limits) return null;
-  appendClaudeCostStateSnapshot(limits);
+  await appendClaudeCostStateSnapshot(limits);
   const session = preferCurrentWindow(limits.session, prev?.session);
   const weeklyLimit = preferCurrentWindow(limits.weekly, prev?.weekly);
   const weekly = weeklyLimit && { ...weeklyLimit, models: prev?.weekly?.models ?? limits.weekly?.models ?? [] };
@@ -682,17 +545,20 @@ export function readClaudeLocal(prev, plan, maxAgeMs = SNAPSHOT_MAX_AGE_MS) {
 }
 
 async function fetchClaude(retry = true, prev = cache.claude.data, force = false) {
-  let oauth = claudeOauthToken();
+  let credential = await resolveClaudeCredential();
+  let oauth = credential.oauth;
+  if (!oauth?.accessToken || (oauth.expiresAt && Number(oauth.expiresAt) < Date.now())) oauth = null;
   // Expired token → renew it here rather than making the user open a session.
-  if (!oauth && retry && await refreshClaudeAuth()) oauth = claudeOauthToken();
+  if (!oauth && retry && await refreshClaudeAuth()) {
+    credential = await resolveClaudeCredential();
+    oauth = credential.oauth;
+    if (!oauth?.accessToken || (oauth.expiresAt && Number(oauth.expiresAt) < Date.now())) oauth = null;
+  }
   if (!oauth) {
     // Distinguish no-creds vs expired for the UI's auth prompt.
-    let err;
-    if (!existsSync(CREDENTIALS_PATH)) err = 'no-credentials';
-    else {
-      try { err = JSON.parse(readFileSync(CREDENTIALS_PATH, 'utf8')).claudeAiOauth?.accessToken ? 'token-expired' : 'no-token'; }
-      catch { err = 'bad credentials'; }
-    }
+    const err = credential.fileKind === 'missing' ? 'no-credentials'
+      : credential.fileKind === 'read_failure' || credential.fileKind === 'parse_failure' ? 'bad credentials'
+        : credential.oauth?.accessToken ? 'token-expired' : 'no-token';
     return { ok: false, source: 'claude', needsAuth: true, error: err };
   }
 
@@ -700,17 +566,17 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
   // looked and found nothing fresh by the time it forces, so this is belt and
   // braces there rather than a second chance.
   if (!force) {
-    const local = readClaudeLocal(prev, oauth.subscriptionType);
+    const local = await readClaudeLocal(prev, oauth.subscriptionType);
     if (local) return local;
   }
 
   let resp;
+  const accessToken = String(oauth.accessToken);
+  const safeError = (error) => String(error?.message ?? error).split(accessToken).join('[redacted]');
   try {
-    resp = await fetchExternal(USAGE_API_URL, {
-      headers: { Authorization: `Bearer ${oauth.accessToken}`, 'anthropic-beta': USAGE_API_BETA },
-    }, { timeoutMs: REQ_TIMEOUT_MS });
+    resp = await requestClaudeUsage(accessToken);
   } catch (e) {
-    return { ok: false, source: 'claude', error: `request failed: ${e.message}` };
+    return { ok: false, source: 'claude', error: `request failed: ${safeError(e)}` };
   }
   if (resp.status === 401) {
     // Token looked valid locally but the server rejected it — same cure, once.
@@ -726,11 +592,73 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
     // Feed a fresh network reading back into the statusline's own log so R2
     // tails stay fed for sessions starting mid-idle (readClaudeSnapshot reads
     // {fetched_at, raw}). Failures and file-sourced reads append nothing.
-    appendClaudeHistory({ fetched_at: localTimestamp(new Date()), raw });
-    return normalizeClaude(raw, oauth.subscriptionType);
+    await appendClaudeHistory({ fetched_at: new Date().toISOString(), raw });
+    const data = await normalizeClaude(raw, oauth.subscriptionType);
+    const resets = parseClaudeResets(raw);
+    return resets && data && typeof data === 'object' ? { ...data, resets } : data;
   } catch (e) {
-    return { ok: false, source: 'claude', error: `parse error: ${e.message}` };
+    return { ok: false, source: 'claude', error: `parse error: ${safeError(e)}` };
   }
+}
+
+function requestClaudeUsage(accessToken) {
+  // Rust owns the transient retry loop; keep this one bridge operation
+  // inside fetchExternal's existing timeout/queued-abort boundary.
+  return fetchExternal(USAGE_API_URL, { method: 'GET' }, {
+    retry: false,
+    timeoutMs: REQ_TIMEOUT_MS,
+    fetcher: async (url, options) => {
+      if (url !== USAGE_API_URL || options.method !== 'GET') throw new Error('fetch failed');
+      if (!usageClaudeBackend) throw new Error('fetch failed');
+      return claudeUsageResponse(await usageClaudeBackend.claudeUsageFetch(accessToken, options.signal, REQ_TIMEOUT_MS));
+    },
+  });
+}
+
+// The one resets-only usage call behind a complete local reading. Any failure
+// keeps the old resets; a 429 arms the gate like the network leg.
+async function refreshClaudeResets(slot, fingerprint) {
+  const oauth = await claudeOauthToken();
+  if (!oauth?.accessToken) return;
+  try {
+    const resp = await requestClaudeUsage(String(oauth.accessToken));
+    if (resp.status === 429) {
+      claudeGate.arm(retryAfterMs(resp.headers?.get?.('retry-after')) ?? CLAUDE_RATE_LIMIT_BACKOFF_MS, fingerprint);
+    } else if (resp.status === 200) {
+      const resets = parseClaudeResets(await resp.json());
+      if (resets && slot.data?.ok) slot.data = { ...slot.data, resets };
+    }
+  } catch { /* keep the old resets */ }
+}
+
+function claudeUsageResponse(result) {
+  if (result?.kind === 'transport_failure') throw new Error('fetch failed');
+  if (result?.kind === 'timeout_failure') throw new Error('This operation was aborted');
+  if (result?.kind !== 'response' || !Number.isInteger(result.status)) throw new Error('fetch failed');
+  return {
+    status: result.status,
+    headers: { get: (name) => name.toLowerCase() === 'retry-after' ? result.retry_after ?? null : null },
+    async json() {
+      if (result.body?.err === 'terminated') throw new Error('terminated');
+      if (typeof result.body?.ok !== 'string') throw new Error('terminated');
+      return JSON.parse(result.body.ok);
+    },
+  };
+}
+
+function claudeOauthRefreshResponse(result) {
+  if (result?.kind === 'transport_failure') throw new Error('fetch failed');
+  if (result?.kind === 'timeout_failure') throw new Error('This operation was aborted');
+  if (result?.kind !== 'response' || !Number.isInteger(result.status)) throw new Error('fetch failed');
+  return {
+    status: result.status,
+    headers: { get: (name) => name.toLowerCase() === 'retry-after' ? result.retry_after ?? null : null },
+    async json() {
+      if (result.body?.err === 'terminated') throw new Error('terminated');
+      if (typeof result.body?.ok !== 'string') throw new Error('terminated');
+      return JSON.parse(result.body.ok);
+    },
+  };
 }
 
 // ---- Codex: the Stop hook's snapshot tail, live usage API on demand ---------
@@ -746,32 +674,6 @@ async function fetchClaude(retry = true, prev = cache.claude.data, force = false
 // and the live API is the only other source this lane actually needs.
 export const CODEX_HOME = process.env.CODEX_HOME || join(homedir(), '.codex');
 const CODEX_AUTH_PATH = join(CODEX_HOME, 'auth.json');
-const CODEX_USAGE_API_URL = 'https://chatgpt.com/backend-api/wham/usage';
-
-function normalizeCodexLimits(plan, windows, durationKey, fetchedAt, resetKey = 'resets_at') {
-  let session = null;
-  let weekly = null;
-  for (const w of windows) {
-    const duration = Number(w?.[durationKey]);
-    if (!Number.isFinite(w?.used_percent) || !Number.isFinite(duration)) continue;
-    // A window that has not begun yet: the live API still fills in reset_at,
-    // but as a rolling projection of now + the whole window, so it slides
-    // forward on every poll (seen live: the 5h reset walking 8:31 → 8:32 →
-    // 8:33pm). That is not a reset instant, so drop it and say so — a pinned
-    // reset always has reset_after_seconds below the window length. Rollout
-    // records carry no reset_after_seconds, so they never trip this.
-    const unstarted = Number(w.reset_after_seconds) >= Number(w.limit_window_seconds);
-    const window = {
-      pctUsed: w.used_percent,
-      resetsAt: !unstarted && Number.isFinite(w[resetKey]) ? new Date(w[resetKey] * 1000).toISOString() : null,
-      models: [],
-      ...(unstarted ? { started: false } : {}),
-    };
-    if (duration >= (durationKey === 'window_minutes' ? 1440 : 86400)) weekly = window;
-    else session = window;
-  }
-  return session || weekly ? { ok: true, source: 'codex', plan: plan ?? null, fetchedAt, session, weekly } : null;
-}
 
 // The one answer both branches fall back to: nothing usable was found, either
 // on disk (no fresh Stop-hook record) or, on the live leg, no credentials.
@@ -786,39 +688,58 @@ export async function fetchCodex(force = false) {
   // ?force=1 (the manual Refresh route, or pull()'s own network floor once
   // the automated 5s tick finds this stale) is the only thing that reaches.
   if (!force) {
-    const snapshot = readCodexSnapshot();
+    const snapshot = await readCodexSnapshot();
     return snapshot ?? noCodexData();
   }
 
-  let auth;
-  try { auth = JSON.parse(readFileSync(CODEX_AUTH_PATH, 'utf8')); }
-  catch { return noCodexData(); }
-  const token = auth?.tokens?.access_token;
-  const accountId = auth?.tokens?.account_id;
-  if (!token || !accountId) return noCodexData();
-
   let liveError;
   let resp;
+  let credentialHandle;
   try {
-    resp = await fetchExternal(CODEX_USAGE_API_URL, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${token}`, 'ChatGPT-Account-Id': accountId },
-    }, { timeoutMs: REQ_TIMEOUT_MS });
+    if (!usageCodexBackend) throw new Error('Rust Codex usage backend is not configured');
+    const started = await usageCodexBackend.codexUsageBegin(CODEX_AUTH_PATH);
+    if (started?.kind === 'no_sessions') return noCodexData();
+    credentialHandle = started?.handle;
+    if (!credentialHandle) throw new Error('Rust Codex usage backend returned no credential handle');
+    const result = await usageCodexBackend.codexUsageFetch(credentialHandle);
+    if (result?.kind === 'no_sessions') return noCodexData();
+    if (result?.kind === 'timeout_failure') throw new Error('This operation was aborted');
+    if (result?.kind === 'transport_failure') throw new Error('fetch failed');
+    resp = {
+      status: result.status,
+      headers: { get: (name) => name.toLowerCase() === 'retry-after' ? result.retry_after : null },
+      json: async () => {
+        if (result.body?.err === 'terminated') throw new TypeError('terminated');
+        return JSON.parse(result.body?.ok ?? 'null');
+      },
+    };
   } catch (e) {
     liveError = `request failed: ${e.message}`;
+  } finally {
+    if (credentialHandle) {
+      try { await usageCodexBackend?.codexUsageRelease(credentialHandle); } catch { /* daemon shutdown clears its private handle table */ }
+    }
   }
-  if (resp && resp.status !== 200) {
-    liveError = resp.status === 429 ? 'rate-limited' : resp.status === 401 || resp.status === 403 ? 'auth rejected' : `HTTP ${resp.status}`;
-  } else if (resp) {
-    let raw;
-    try { raw = await resp.json(); }
-    catch (e) { liveError = `parse error: ${e.message}`; }
-    const live = normalizeCodexLimits(raw?.plan_type, [raw?.rate_limit?.primary_window, raw?.rate_limit?.secondary_window], 'limit_window_seconds', new Date().toISOString(), 'reset_at');
-    if (live) return live;
-    liveError ??= 'no usable rate limits';
+  if (resp) {
+    let payload;
+    let parseError;
+    if (resp.status === 200) {
+      try { payload = await resp.json(); }
+      catch (e) { parseError = `parse error: ${e.message}`; }
+    }
+    const fetchedAt = new Date().toISOString();
+    return usageCodexBackend.codexUsageResult({
+      status: resp.status,
+      retryAfter: resp.headers.get('retry-after'),
+      nowMs: resp.status === 429 ? Date.now() : 0,
+      payloadPresent: resp.status === 200 && !parseError,
+      payload,
+      fetchedAt,
+      error: parseError,
+    });
   }
 
-  return { ...noCodexData(), error: liveError ?? 'no usable rate limits', ...(resp?.status === 429 ? { retryAfterMs: retryAfterMs(resp.headers?.get?.('retry-after')) } : {}) };
+  return { ...noCodexData(), error: liveError ?? 'no usable rate limits' };
 }
 
 // Redeemable "usage limit resets" (chatgpt.com Settings ▸ Usage). Separate lane:
@@ -826,6 +747,7 @@ export async function fetchCodex(force = false) {
 // this count would never refresh if it rode on fetchCodex's live leg.
 const CODEX_RESETS_API_URL = 'https://chatgpt.com/backend-api/wham/rate-limit-reset-credits';
 const CODEX_RESETS_TTL_MS = 10 * 60_000;
+const CLAUDE_RESETS_TTL_MS = 10 * 60_000;
 // shortcut: credits[] was empty when probed, so the expiry key is a guess; pin it once a real credit is seen.
 const RESET_EXPIRY_KEYS = ['expires_at', 'expiration_time', 'expires', 'expiry'];
 
@@ -853,6 +775,21 @@ export async function fetchCodexResets() {
     const expiresAt = (Array.isArray(raw.credits) ? raw.credits : []).map(resetExpiry).filter(Boolean).sort();
     return { available: raw.available_count, expiresAt };
   } catch { return null; }
+}
+
+// Claude's redeemable usage-limit resets ("cedar_ember" grants), read from the usage body.
+export function parseClaudeResets(raw) {
+  const ember = raw?.cedar_ember;
+  if (!ember || typeof ember !== 'object' || ember.eligible !== true || !Array.isArray(ember.grants)) return null;
+  let available = 0;
+  const expiresAt = [];
+  for (const g of ember.grants) {
+    if (!Number.isFinite(g?.resets_left) || g.resets_left <= 0) continue;
+    available += g.resets_left;
+    const d = typeof g.ends_at === 'string' ? new Date(g.ends_at) : null;
+    if (d && Number.isFinite(d.getTime())) expiresAt.push(d.toISOString());
+  }
+  return { available, expiresAt: expiresAt.sort() };
 }
 
 // ---- Cache + public API -------------------------------------------------------
@@ -893,10 +830,10 @@ const ollamaGate = rateGate();
 const codexGate = rateGate();
 const CODEX_STALE_MAX_MS = CLAUDE_STALE_MAX_MS;
 
-function codexAccountFingerprint() {
+async function codexAccountFingerprint() {
   try {
-    const accountId = JSON.parse(readFileSync(CODEX_AUTH_PATH, 'utf8'))?.tokens?.account_id;
-    return accountId ? createHash('sha256').update(accountId).digest('hex') : null;
+    const fingerprint = await usageCodexBackend?.codexAccountFingerprint(CODEX_AUTH_PATH);
+    return typeof fingerprint === 'string' && fingerprint.length > 0 ? fingerprint : null;
   } catch { return null; }
 }
 
@@ -907,15 +844,16 @@ function codexAccountFingerprint() {
 // "Couldn't load this: rate-limited" on an empty card. Re-read the local tiers
 // with the gate widened to the 5h window, keep whichever of that / the cached
 // reading is newer, and hand it back marked stale.
-function claudeStaleFloor(slot, failure) {
-  const widened = readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType, CLAUDE_STALE_MAX_MS);
+async function claudeStaleFloor(slot, failure) {
+  const oauth = await claudeOauthToken();
+  const widened = await readClaudeLocal(slot.data, oauth?.subscriptionType, CLAUDE_STALE_MAX_MS);
   const lastGood = slot.data?.ok ? slot.data : null;
   const best = widened && !(lastGood?.fetchedAt > widened.fetchedAt) ? widened : lastGood;
   return best ? preserveClaudeStale(best, failure) : null;
 }
 
-function codexStaleFloor(slot, failure) {
-  const widened = slot.ignoreCodexSnapshot ? null : readCodexSnapshot(CODEX_STALE_MAX_MS);
+async function codexStaleFloor(slot, failure) {
+  const widened = slot.ignoreCodexSnapshot ? null : await readCodexSnapshot(CODEX_STALE_MAX_MS);
   const lastGood = slot.data?.ok ? slot.data : null;
   const merged = widened && lastGood ? {
     ...widened,
@@ -935,7 +873,7 @@ async function pull(src, fetcher, force) {
   // network leg. Only a genuinely newer reading counts; an unchanged one falls
   // through so the gates decide whether the network leg is worth it.
   if (src === 'claude') {
-    claudeFingerprint = claudeCredentialFingerprint();
+    claudeFingerprint = await claudeCredentialFingerprint();
     // The cache is in-memory only (no cross-restart persistence), so a still-null
     // slot.credentialFingerprint means "never established this process," not
     // "switched accounts." Only a fingerprint that actually moved counts.
@@ -947,15 +885,24 @@ async function pull(src, fetcher, force) {
       slot.data = null;
       slot.at = 0;
     }
-    const local = claudeAccountChanged ? null : readClaudeLocal(slot.data, claudeOauthToken()?.subscriptionType);
+    const oauth = await claudeOauthToken();
+    const local = claudeAccountChanged ? null : await readClaudeLocal(slot.data, oauth?.subscriptionType);
     // Complete local windows answer the card without spending the endpoint's
     // account quota. Partial windows reach the existing network floor, with the
     // local reading retained as fallback if that request fails.
     if (local) {
       if (!slot.credentialFingerprint && claudeFingerprint) slot.credentialFingerprint = claudeFingerprint;
       const unchanged = slot.data?.ok && !slot.data.stale && slot.data.fetchedAt === local.fetchedAt;
-      if (!unchanged) slot.data = local;
-      if (hasCompleteWindow(local.session) && hasCompleteWindow(local.weekly)) return slot.data;
+      // A local reading has no resets of its own: keep the last ones.
+      if (!unchanged) slot.data = slot.data?.resets && !local.resets ? { ...local, resets: slot.data.resets } : local;
+      if (hasCompleteWindow(local.session) && hasCompleteWindow(local.weekly)) {
+        // One usage call per TTL keeps resets fresh; never on force alone, never past a blocked gate.
+        if (Date.now() - (slot.resetsAt ?? 0) >= CLAUDE_RESETS_TTL_MS && !claudeGate.blocked(claudeFingerprint)) {
+          slot.resetsAt = Date.now();
+          await refreshClaudeResets(slot, claudeFingerprint);
+        }
+        return slot.data;
+      }
     }
     // Both tiers stale → the network is the only way to fill the card, gated by
     // claudeGate and the network floor below.
@@ -965,16 +912,15 @@ async function pull(src, fetcher, force) {
   // snapshots retain valid windows while the missing window reaches the
   // network floor below.
   if (src === 'codex') {
-    codexFingerprint = codexAccountFingerprint();
+    codexFingerprint = await codexAccountFingerprint();
     const accountChanged = !!slot.credentialFingerprint && !!codexFingerprint && codexFingerprint !== slot.credentialFingerprint;
     if (accountChanged) {
       slot.data = null;
       slot.at = 0;
       slot.credentialFingerprint = codexFingerprint;
       slot.ignoreCodexSnapshot = true;
-      lastCodexReading = null;
     }
-    const snapshot = slot.ignoreCodexSnapshot ? null : readCodexSnapshot();
+    const snapshot = slot.ignoreCodexSnapshot ? null : await readCodexSnapshot();
     if (snapshot) {
       const previous = slot.data?.ok ? slot.data : null;
       const merged = { ...snapshot, session: preferCurrentWindow(snapshot.session, previous?.session), weekly: preferCurrentWindow(snapshot.weekly, previous?.weekly) };
@@ -987,7 +933,7 @@ async function pull(src, fetcher, force) {
       if (complete) return slot.data;
     }
     if (codexGate.blocked(codexFingerprint, true) && slot.data) {
-      slot.data = codexStaleFloor(slot, slot.data) ?? slot.data;
+      slot.data = await codexStaleFloor(slot, slot.data) ?? slot.data;
       return slot.data;
     }
   }
@@ -998,7 +944,7 @@ async function pull(src, fetcher, force) {
   // local tiers can fill it.
   if (src === 'claude' && claudeGate.blocked(claudeFingerprint) && slot.data) {
     if (slot.data.ok) return slot.data;
-    slot.data = claudeStaleFloor(slot, slot.data) ?? slot.data;
+    slot.data = await claudeStaleFloor(slot, slot.data) ?? slot.data;
     return slot.data;
   }
   // The network floor: once every NETWORK_FLOOR_MS per source at most for an
@@ -1020,8 +966,9 @@ async function pull(src, fetcher, force) {
   // ollama/claude never set one, so they still default to "now".
   const data = { fetchedAt: new Date().toISOString(), ...fetched };
   if (src === 'claude' && data.ok) {
-    slot['credentialFingerprint'] = claudeCredentialFingerprint();
+    slot['credentialFingerprint'] = await claudeCredentialFingerprint();
     claudeGate.clear();
+    slot.resetsAt = Date.now(); // the network body just answered resets, present or not
   }
   if (src === 'codex' && data.ok) {
     slot.credentialFingerprint = codexFingerprint;
@@ -1045,25 +992,25 @@ async function pull(src, fetcher, force) {
   // Claude uses the same last-good semantics. This keeps the meters visible while
   // making a failed pull unambiguously stale instead of green.
   if (src === 'claude' && !data.ok) {
-    const floor = claudeStaleFloor(slot, data);
+    const floor = await claudeStaleFloor(slot, data);
     if (floor) {
       slot.data = floor;
       return slot.data;
     }
   }
   if (src === 'codex' && !data.ok) {
-    const floor = codexStaleFloor(slot, data);
+    const floor = await codexStaleFloor(slot, data);
     if (floor) { slot.data = floor; return slot.data; }
   }
   if (src === 'ollama' && data.ok) {
-    appendOllamaHistory(data);
+    await appendOllamaHistory(data);
     // A successful ollama read from ANY path (manual Refresh, idle debounce,
     // reset timer, or the sampler itself) is the "re-enable" signal — clear a
     // prior stop-on-fail and re-arm the sampler's clock.
     historyPaused = null;
     startHistorySampler();
   }
-  if (src === 'codex' && data.ok) appendCodexHistory(data);
+  if (src === 'codex' && data.ok) await appendCodexHistory(data);
   return slot.data;
 }
 
@@ -1107,7 +1054,11 @@ export async function getUsage({ force = false, sources, fetchers } = {}) {
     // A failed read keeps the last count rather than blanking the badge.
     resetsSlot.data = (await (fetchers?.codexResets ?? fetchCodexResets)()) ?? resetsSlot.data;
   }
-  const result = { ollama: ollama ? { ...ollama, historyPaused } : null, claude, codex: codex && resetsSlot.data ? { ...codex, resets: resetsSlot.data } : codex };
+  const result = {
+    ollama: ollama ? { ...ollama, historyPaused } : null,
+    claude,
+    codex: codex && resetsSlot.data ? { ...codex, resets: resetsSlot.data } : codex,
+  };
   // Manual/forced calls (the Refresh button, force=1) always push — a user who
   // pressed the button waiting on an unchanged reading is not a bug. Automated
   // calls (every 5s/60s sampler tick, idle-debounce, reset timers) only push

@@ -1,0 +1,5 @@
+{"type":"assistant","timestamp":"2024-01-01T00:00:03Z","message":{"model":"nested-model","usage":{"input_tokens":2,"output_tokens":4,"cache_creation_input_tokens":5},"content":[{"type":"tool_use","name":"Agent","input":{"subagent_type":"worker"}}]}}
+{"type":"user","timestamp":"1970-01-01T00:00:00Z","message":{"content":[{"type":"tool_result","is_error":true}]},"cwd":"C:/other","gitBranch":"nested"}
+{"type":"assistant","message":{"model":"ignored-sidechain","usage":{"input_tokens":100},"content":[]},"isSidechain":true}
+{"type":"assistant","message":{"model":"ignored-meta","usage":{"input_tokens":100},"content":[]},"isMeta":true}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"toString"}]}}

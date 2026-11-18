@@ -1,12 +1,29 @@
 // Single source of truth for the e2e sandbox layout. Imported by serve.mjs (to
-// boot the isolated daemon), seed.mjs (to build the corpora) and specs (to
-// assert on-disk writes). Pure constants — no FS, no side effects, so a spec can
-// import it without touching the sandbox.
-import { join, dirname } from 'node:path';
+// boot the isolated daemon), seed.mjs (to build the corpora), specs (to assert
+// on-disk writes) and playwright.config.mjs (reporter output). Pure constants —
+// no FS, no side effects, so a spec can import it without touching the sandbox.
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { envPort } from '../../scripts/env-port.mjs';
 
 export const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+// Which daemon the suite drives: the reference Node server (default) or the
+// native `singularity-backend --http` binary. Rejecting an unknown value here,
+// at import time, is deliberate: serve.mjs calls seed() — which wipes TMP — only
+// after its imports evaluate, so a typo fails before any sandbox is rebuilt.
+export const BACKENDS = ['node', 'rust'];
+const requestedBackend = process.env.E2E_BACKEND ?? '';
+export const BACKEND = requestedBackend === '' ? 'node' : requestedBackend;
+if (!BACKENDS.includes(BACKEND)) {
+  throw new Error(`E2E_BACKEND must be one of ${BACKENDS.join('|')} (got ${JSON.stringify(requestedBackend)})`);
+}
+
+// Checkout the `node` backend runs from. Defaults to this repo; point it at
+// another clone to compare the native daemon against a pinned Node checkout.
+export const NODE_ROOT = process.env.E2E_NODE_ROOT ? resolve(process.env.E2E_NODE_ROOT) : REPO_ROOT;
 
 // 4319: not 4317 (the user's real daemon — never restart it) and not 5317
 // (Vite). server/index.mjs derives its Host/Origin allowlist from PORT, so the
@@ -19,7 +36,16 @@ export const PORT = envPort('E2E_PORT', 4319);
 export const TOKEN = 'e2etoken';
 export const BASE_URL = `http://127.0.0.1:${PORT}`;
 
-export const TMP = join(REPO_ROOT, 'e2e', PORT === 4319 ? '.tmp' : `.tmp-${PORT}`);
+// Sandbox root lives outside the repository and is keyed per checkout (a short
+// hash of REPO_ROOT), so two checkouts at their default port never share — and
+// never wipe — each other's fixtures. Within a checkout it stays per-port
+// because serve.mjs wipes it on boot. E2E_TMP_ROOT replaces the base verbatim
+// (CI, constrained tmp); pointing two checkouts at one value shares it again.
+export const CHECKOUT_ID = createHash('sha1').update(REPO_ROOT).digest('hex').slice(0, 8); // VERIFY: wave3-e2e-1
+export const TMP_ROOT = process.env.E2E_TMP_ROOT
+  ? resolve(process.env.E2E_TMP_ROOT)
+  : join(tmpdir(), 'singularity-e2e', CHECKOUT_ID);
+export const TMP = join(TMP_ROOT, String(PORT));
 export const HOME_DIR = join(TMP, 'home');          // SINGULARITY_HOME
 export const STATE_DIR = join(HOME_DIR, 'state');
 export const TRUSTED_DIR = join(TMP, 'trusted');    // SING_TRUSTED_ROOT (.worktrees/.tickets/.reports)

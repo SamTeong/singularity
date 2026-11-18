@@ -2,18 +2,13 @@
 // scanned at <base>/.claude/rules — the Claude Code project convention. Pick a
 // project (or home) dir; its .claude/rules tree is browsable/searchable/editable.
 // Model on wiki.mjs (recursive walk, resolveRoot, mtime line cache) + config.mjs
-// (roots persistence) + memory.mjs (write guard).
+// (roots persistence) + memory.mjs (write guard). The recursive .md walk and
+// content search run in Rust (rust/backend/src/rules.rs); Node keeps roots
+// persistence, the path guard and the guarded read/write.
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
-import { readdir, readFile, stat, writeFile } from 'node:fs/promises';
-import { join, resolve, sep, normalize, basename } from 'node:path';
+import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
 import { STATE_DIR } from './app-dir.mjs';
-import { backupFile } from './backups.mjs';
-
-const RESULT_CAP = 300;
-const FILE_CAP = 2000;
-// Skip dot-dirs + heavy/vendored dirs during the recursive walk.
-const SKIP_DIRS = new Set(['.git', '.obsidian', '.vscode', 'node_modules', '.next', '.cache', 'dist', 'build']);
 
 // Rule root list: FS-persisted (survives browser cache clear) under STATE_DIR.
 // Seeded with '~' (→ ~/.claude/rules) when absent/empty.
@@ -47,76 +42,44 @@ export function resolveRoot(raw) {
   try { return resolve(p); } catch { return null; }
 }
 
-// Search runs per keystroke (250ms debounce); cache file lines by mtime so only
-// changed files are re-read from disk. stat-per-file is cheap; the read isn't.
-const lineCache = new Map(); // path -> { mtimeMs, lines }
-async function readLines(p) {
-  let mtimeMs;
-  try { mtimeMs = (await stat(p)).mtimeMs; } catch { return null; }
-  const hit = lineCache.get(p);
-  if (hit && hit.mtimeMs === mtimeMs) return hit.lines;
-  let lines;
-  try { lines = (await readFile(p, 'utf8')).split(/\r?\n/); } catch { return null; }
-  lineCache.set(p, { mtimeMs, lines });
-  return lines;
-}
-
-// Recursive .md walk under scanDir. Bounded by FILE_CAP. `root` is the base the
-// user picked (used verbatim so the client can group files under it); rel is
-// relative to scanDir, forward-slashed (e.g. "sub/foo.md"); file is the basename.
-async function walk(root, scanDir, dir, out) {
-  let ents;
-  try { ents = await readdir(dir, { withFileTypes: true }); } catch { return; }
-  for (const ent of ents) {
-    if (ent.name.startsWith('.')) continue;
-    const full = join(dir, ent.name);
-    if (ent.isDirectory()) {
-      if (SKIP_DIRS.has(ent.name)) continue;
-      await walk(root, scanDir, full, out);
-      if (out.length >= FILE_CAP) return;
-    } else if (ent.isFile() && ent.name.toLowerCase().endsWith('.md')) {
-      const rel = full.slice(scanDir.length).split(sep).join('/').replace(/^\//, '');
-      out.push({ root, path: full, rel, file: ent.name });
-      if (out.length >= FILE_CAP) return;
-    }
-  }
-}
-
-// List .md files under each base's <base>/.claude/rules. Skips missing dirs.
-export async function listRuleFiles(roots) {
-  const files = [];
-  let capped = false;
+// Scan pairs handed to Rust per request: Node stays the configured-root
+// owner — it resolves each picked base to its <base>/.claude/rules dir, while
+// `root` stays the verbatim base string the client sent (the UI groups files
+// under it). Unresolvable bases are skipped silently.
+function scanRoots(roots) {
+  const scans = [];
   for (const raw of roots || []) {
+    if (typeof raw !== 'string' || !raw) continue;
     const dir = rulesDir(raw);
-    if (!dir || !existsSync(dir)) continue;
-    await walk(raw, dir, dir, files);
-    if (files.length >= FILE_CAP) { capped = true; break; }
+    if (dir) scans.push({ root: raw, dir });
   }
-  return { files, capped };
+  return scans;
 }
 
-// Search .md content across every base's .claude/rules.
-export async function searchRules(roots, q) {
-  const ql = (q || '').toLowerCase();
-  if (!ql) return { results: [], capped: false };
-  const results = [];
-  for (const raw of roots || []) {
-    const dir = rulesDir(raw);
-    if (!dir || !existsSync(dir)) continue;
-    const files = [];
-    await walk(raw, dir, dir, files);
-    for (const f of files) {
-      const lines = await readLines(f.path);
-      if (!lines) continue;
-      for (let i = 0; i < lines.length; i++) {
-        if (lines[i].toLowerCase().includes(ql)) {
-          results.push({ root: f.root, path: f.path, rel: f.rel, file: f.file, line: i + 1, text: lines[i].trim().slice(0, 200) });
-          if (results.length >= RESULT_CAP) return { results, capped: true };
-        }
-      }
+// The recursive .md walk runs in Rust; these routes have no other non-2xx
+// mapping, so a bridge crash is the only 500 path (reference-handler shape).
+export function createRuleFilesHandler(backend, logger) {
+  return async (req, reply) => {
+    try { return await backend.ruleFiles(scanRoots(req.body?.roots)); }
+    catch (error) {
+      logger.error({ err: error.message }, 'Rust Rules files backend failed');
+      reply.code(500);
+      return { ok: false, error: 'rules files backend unavailable' };
     }
-  }
-  return { results, capped: false };
+  };
+}
+
+// Content search with the Rust mtime line cache; empty q yields no results.
+export function createRuleSearchHandler(backend, logger) {
+  return async (req, reply) => {
+    const { roots, q } = req.body || {};
+    try { return await backend.ruleSearch(scanRoots(roots), q); }
+    catch (error) {
+      logger.error({ err: error.message }, 'Rust Rules search backend failed');
+      reply.code(500);
+      return { ok: false, error: 'rules search backend unavailable' };
+    }
+  };
 }
 
 // Path guard: must resolve to a .md under ONE base's <base>/.claude/rules —
@@ -138,38 +101,46 @@ export function readRuleFile(p) {
   catch (e) { return { ok: false, error: e.message }; }
 }
 
-export async function writeRuleFile(p, content, mtime, force) {
+export async function writeRuleFile(p, content, mtime, force, backend, logger) {
   if (!isRulePath(p)) return { ok: false, error: 'path outside rule roots' };
   try {
-    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
-      return { ok: false, error: 'changed on disk' };
-    }
-    await backupFile(p);
-    // Re-check: backupFile's await can yield to a concurrent save of this
-    // same path landing in between, which the first check (above) can't see.
-    if (mtime != null && !force && existsSync(p) && Math.abs(statSync(p).mtimeMs - mtime) > 1) {
-      return { ok: false, error: 'changed on disk' };
-    }
-    await writeFile(p, content);
-    return { ok: true, mtime: statSync(p).mtimeMs };
+    return await backend.ruleWrite(p, content, mtime, force);
   }
-  catch (e) { return { ok: false, error: e.message }; }
+  catch (error) {
+    logger.error({ err: error.message }, 'Rust Rules write backend failed');
+    return { ok: false, error: 'rules write backend unavailable' };
+  }
+}
+
+export function createRuleWriteHandler(backend, logger) {
+  return async (req, reply) => {
+    const { path, content, mtime, force } = req.body || {};
+    if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
+    const result = await writeRuleFile(path, content, mtime, force, backend, logger);
+    if (!result.ok) reply.code(result.error === 'rules write backend unavailable' ? 500 : result.error === 'changed on disk' ? 409 : 400);
+    return result;
+  };
 }
 
 // Companion reference for a rule file. Convention (see global CLAUDE.md): a rule
 // `<stem>.md` pairs with `<stem>-reference.md` under the rules-reference dir.
 // Reference is read-only and lives in a separate tree (not a rule root), so it
 // is NOT writable via /rules/file (isRulePath guards writes to rule roots only).
-// RULES_REF_DIR defaults to the global ~/.agents/rules-reference convention;
-// SING_RULES_REF overrides it (used by tests to isolate from real FS).
+// Node owns the configured root: RULES_REF_DIR defaults to the global
+// ~/.agents/rules-reference convention; SING_RULES_REF overrides it (used by
+// tests to isolate from real FS). The lookup itself runs in Rust.
 const RULES_REF_DIR = process.env.SING_RULES_REF ? resolve(process.env.SING_RULES_REF)
   : join(homedir(), '.agents', 'rules-reference');
-export function findRuleReference(rulePath) {
-  if (!rulePath) return { ok: false, error: 'no path' };
-  const stem = basename(rulePath).replace(/\.md$/i, '');
-  if (!stem) return { ok: false, error: 'no stem' };
-  const ref = join(RULES_REF_DIR, `${stem}-reference.md`);
-  if (!existsSync(ref)) return { ok: false, error: 'no reference' };
-  try { return { ok: true, path: ref, content: readFileSync(ref, 'utf8') }; }
-  catch (e) { return { ok: false, error: e.message }; }
+export function createRuleReferenceHandler(backend, logger) {
+  return async (req, reply) => {
+    let r;
+    try { r = await backend.ruleReference(req.query.path, RULES_REF_DIR); }
+    catch (error) {
+      logger.error({ err: error.message }, 'Rust Rules reference backend failed');
+      reply.code(500);
+      return { ok: false, error: 'rules reference backend unavailable' };
+    }
+    if (!r.ok) reply.code(r.error === 'no reference' ? 404 : 400);
+    return r;
+  };
 }

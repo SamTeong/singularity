@@ -96,7 +96,7 @@ export async function consumeStream(body, send, chatId, signal) {
 }
 
 export async function streamChat({ chatId, question, scope = 'one', project, id, source, file, history = [], root }, send, signal) {
-  const oauth = claudeOauthToken();
+  const oauth = await claudeOauthToken();
   if (!oauth) {
     send({ t: 'chat:error', chatId, needsAuth: true, msg: 'Claude not signed in — run `claude` to log in' });
     return;

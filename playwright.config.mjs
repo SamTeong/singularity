@@ -8,7 +8,10 @@ import { join } from 'node:path';
 import { BASE_URL, TMP, TOKEN } from './e2e/fixtures/paths.mjs';
 
 // A run with E2E_PORT set is a parallel side-run (one spec under development).
-// Keep its artifacts inside its own sandbox dir and off the shared html report.
+// Reporters and test artifacts always live inside this run's sandbox dir, so
+// checkouts and parallel runs never overwrite each other's html report: the
+// default root is keyed per checkout (paths.mjs CHECKOUT_ID) and per port
+// (TMP = <root>/<port>). A side-run also skips the shared html report.
 const sideRun = !!process.env.E2E_PORT;
 
 export default defineConfig({
@@ -19,8 +22,8 @@ export default defineConfig({
   workers: 1,
   forbidOnly: !!process.env.CI,
   retries: 0,
-  reporter: sideRun ? [['line']] : [['list'], ['html', { open: 'never' }]],
-  outputDir: sideRun ? join(TMP, 'test-results') : undefined,
+  reporter: sideRun ? [['line']] : [['list'], ['html', { open: 'never', outputFolder: join(TMP, 'playwright-report') }]],
+  outputDir: join(TMP, 'test-results'),
   // Generous, because every wait here is a fetch + a React remount, and the
   // suite shares one box with whatever else is building. Tight timeouts turned
   // into a steady drip of false failures that moved between runs.

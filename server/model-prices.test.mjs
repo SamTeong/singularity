@@ -10,28 +10,26 @@ import { join } from 'node:path';
 // (see model-store.test.mjs for the SINGULARITY_HOME dynamic-import pattern).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-modelprices-'));
 process.env.USAGE_REPORT_STATE = mkdtempSync(join(tmpdir(), 'sing-usageskill-'));
-const { getModelPrices, putModelPrices } = await import('./model-prices.mjs');
+const { getModelPricesForUsageHistory, getModelPricesPath, validateModelPrices } = await import('./model-prices.mjs');
 
 const PRICING_JSON = join(process.env.USAGE_REPORT_STATE, 'pricing.json');
 const longKey = new Array(66).join('x'); // 65 chars
 
 test('get before any pricing.json exists returns empty-defaults doc', () => {
-  assert.deepEqual(getModelPrices(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+  assert.deepEqual(getModelPricesForUsageHistory(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+  assert.equal(getModelPricesPath(), PRICING_JSON);
 });
 
-test('valid put roundtrips and writes pricing.json', () => {
+test('valid pricing documents normalize without taking filesystem ownership', () => {
   const doc = {
     base: { opus: [15, 75, 1.5, 18.75], 'glm-5.2': [0.6, 2.2, 0.1, 0.1] },
     above_200k: { opus: [20, 100, 2, 25] },
     long_context_threshold: 100000,
     default_key: 'opus',
   };
-  const r = putModelPrices(doc);
+  const r = validateModelPrices(doc);
   assert.deepEqual(r, doc);
-  assert.deepEqual(getModelPrices(), doc);
-
-  const written = JSON.parse(readFileSync(PRICING_JSON, 'utf8'));
-  assert.deepEqual(written, doc);
+  assert.deepEqual(getModelPricesForUsageHistory(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
 });
 
 test('base key order is preserved (match order)', () => {
@@ -41,14 +39,13 @@ test('base key order is preserved (match order)', () => {
     long_context_threshold: 200000,
     default_key: '',
   };
-  putModelPrices(doc);
-  assert.deepEqual(Object.keys(getModelPrices().base), ['sonnet', 'opus']);
+  assert.deepEqual(Object.keys(validateModelPrices(doc).base), ['sonnet', 'opus']);
 });
 
-test('put rejects malformed documents without touching pricing.json', () => {
-  putModelPrices({ base: { opus: [1, 1, 1, 1] }, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+test('validation rejects malformed documents without touching pricing.json', () => {
+  writeFileSync(PRICING_JSON, '{"fixture":"unchanged"}');
   const before = readFileSync(PRICING_JSON, 'utf8');
-  const bad = (doc) => assert.throws(() => putModelPrices(doc));
+  const bad = (doc) => assert.throws(() => validateModelPrices(doc));
 
   bad({ base: 'nope', above_200k: {}, long_context_threshold: 200000, default_key: '' });
   bad({ base: { '': [1, 2, 3, 4] }, above_200k: {}, long_context_threshold: 200000, default_key: '' });
@@ -66,15 +63,12 @@ test('put rejects malformed documents without touching pricing.json', () => {
 
 test('bare (pre-layered) pricing.json: get reads it as base with normalized defaults', () => {
   writeFileSync(PRICING_JSON, JSON.stringify({ opus: [99, 99, 99, 99] }, null, 2));
-  assert.deepEqual(getModelPrices(), { base: { opus: [99, 99, 99, 99] }, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+  assert.deepEqual(getModelPricesForUsageHistory(), { base: { opus: [99, 99, 99, 99] }, above_200k: {}, long_context_threshold: 200000, default_key: '' });
 });
 
 test('unreadable/invalid pricing.json degrades to empty-defaults doc on get', () => {
   writeFileSync(PRICING_JSON, '{not json');
-  assert.deepEqual(getModelPrices(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
+  assert.deepEqual(getModelPricesForUsageHistory(), { base: {}, above_200k: {}, long_context_threshold: 200000, default_key: '' });
 
-  const doc = { base: { sonnet: [3, 15, 0.3, 3.75] }, above_200k: {}, long_context_threshold: 200000, default_key: '' };
-  const r = putModelPrices(doc);
-  assert.deepEqual(r, doc);
-  assert.deepEqual(JSON.parse(readFileSync(PRICING_JSON, 'utf8')), doc);
+  assert.equal(readFileSync(PRICING_JSON, 'utf8'), '{not json');
 });

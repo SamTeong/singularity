@@ -16,7 +16,7 @@
 // called. Same SINGULARITY_HOME-before-dynamic-import harness as the other
 // suites (static imports hoist above the env assignment; app-dir.mjs throws
 // without SINGULARITY_HOME).
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -37,6 +37,12 @@ writeFileSync(join(trusted, '.tickets'), 'not a directory');
 // reach reg.create, but match tasks.test.mjs's convention for determinism).
 delete process.env.OLLAMA_BIN;
 
+const modelStore = await import('./model-store.mjs');
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+after(async () => modelBackend.stop());
+
 const { createTask } = await import('./tasks.mjs');
 
 function initRepo() {
@@ -50,7 +56,7 @@ function initRepo() {
   return repo;
 }
 
-test('createTask: ticketDir failure after git worktree add reclaims worktree + branch', () => {
+test('createTask: ticketDir failure after git worktree add reclaims worktree + branch', async () => {
   const repo = initRepo();
   try {
     // .tickets is a file → mkdirSync(join('.tickets', short), { recursive: true })
@@ -58,7 +64,7 @@ test('createTask: ticketDir failure after git worktree add reclaims worktree + b
     // reg.create is called — a different trigger than the spawn-fail test in
     // tasks.test.mjs. The catch block must remove the worktree and delete the
     // branch it just created.
-    assert.throws(
+    await assert.rejects(
       () => createTask({ repo, title: 'T', description: 'D', model: 'sonnet', scopes: [] }),
       /(ENOTDIR|EEXIST|ENOENT|not a directory)/,
     );

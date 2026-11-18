@@ -4,7 +4,7 @@ import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import { WebSocketServer } from 'ws';
 import { fileURLToPath } from 'node:url';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join } from 'node:path';
 import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { parse as parsePath } from 'node:path';
 import { homedir } from 'node:os';
@@ -13,35 +13,41 @@ import { SHADOW, shadowAllows } from './app-dir.mjs';
 if (!SHADOW) await import('./migrate-state.mjs');
 import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
-import { scanClaude, killClaudePid } from './procs.mjs';
-import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, getConfigRoots, setConfigRoots } from './config.mjs';
-import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, getConfigRoots as getCodexConfigRoots, setConfigRoots as setCodexConfigRoots } from './codex-config.mjs';
-import { listHooks, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
-import { searchMemory, listFiles, readMemoryFile, writeMemoryFile, getMemoryRoot, setMemoryRoot } from './memory.mjs';
-import { getRulesRoots, setRulesRoots, listRuleFiles, searchRules, readRuleFile, writeRuleFile, findRuleReference } from './rules.mjs';
+import { scanClaude, killClaudePid, setProcsBackend } from './procs.mjs';
+import { readConfig, writeConfig, searchConfig, claudeTheme, findConfigRoots, createConfigRootsGetHandler, createConfigRootsSetHandler, setConfigRootsBackend, setConfigReadBackend } from './config.mjs';
+import { readConfig as readCodexConfig, writeConfig as writeCodexConfig, searchConfig as searchCodexConfig, findConfigRoots as findCodexConfigRoots, createConfigRootsGetHandler as createCodexConfigRootsGetHandler, createConfigRootsSetHandler as createCodexConfigRootsSetHandler, setConfigRootsBackend as setCodexConfigRootsBackend, setCodexConfigReadBackend } from './codex-config.mjs';
+import { listHookGroups, searchHooks, readHook, writeHook, getHookRoots, setHookRoots } from './hooks.mjs';
+import { searchMemory, listFiles, readMemoryFile, createMemoryWriteHandler, getMemoryRoot, setMemoryRoot, setMemoryReadBackend } from './memory.mjs';
+import { getRulesRoots, setRulesRoots, readRuleFile, createRuleWriteHandler, createRuleReferenceHandler, createRuleFilesHandler, createRuleSearchHandler } from './rules.mjs';
 // Aliased: `listSessions`/`getSession` are already taken by sessions.mjs above.
-import { listSessions as listPlanSessions, getSession as getPlanSession, resolveSessionDirectory, PLAN_ROOT } from './plans.mjs';
-import { listFiles as wikiFiles, searchWiki, readWikiFile, wikiGraph, wikiSweepHistory, getWikiRoot, setWikiRoot, resolveRoot } from './wiki.mjs';
+import { resolveSessionDirectory, PLAN_ROOT, createPlanSessionsHandler, createPlanSessionHandler } from './plans.mjs';
+import { resolveRoot } from './wiki.mjs';
+import { createRustBackend, createWikiGraphHandler, createModelsHandlers } from './rust-backend.mjs';
+import { createRustPtyBackend } from './rust-pty-backend.mjs';
 import { list as listProjects, add as addProject, remove as removeProject, reorder as reorderProjects, gitStatus as projectStatus, summary as projectSummary, gitOp as projectGitOp, GIT_OPS as PROJECT_GIT_OPS, has as hasProject } from './projects.mjs';
 import { reviewStatus as projectReviewStatus, readReviewFile } from './project-review.mjs';
-import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot } from './sessions.mjs';
+import { listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot, setTranscriptBackend } from './sessions.mjs';
 import { readHistory, ensureHistory, regenerateDay, liveToday, localDay } from './history.mjs';
-import { listSkills, readSkillsDir, readSkill, readSkillFile, writeSkill, writeSkillFile, getSkillsRoots, setSkillsRoots } from './skills.mjs';
-import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, getState as getExplorerState, setState as setExplorerState } from './explorer.mjs';
-import { getConfigState, setConfigState } from './config-state.mjs';
-import { getKeys, setKeys } from './keys.mjs';
-import { statsFor, sessionStats } from './stats.mjs';
-import { getSysStats } from './sysstats.mjs';
-import { getUsage, connectOllamaUsage, initUsageAutoRefresh, CODEX_HOME } from './usage.mjs';
+import { setOneShotBackend } from './one-shot.mjs';
+import { readSkillsDir, setSkillsBackend, createSkillsRootsGetHandler, createSkillsRootsSetHandler, createSkillsListHandler, createSkillReadHandler, createSkillWriteHandler } from './skills.mjs';
+import { listEntries, searchEntries, readEntry, rawEntry, writeEntry, createEntry, deleteEntry, renameEntry, setExplorerBackend } from './explorer.mjs';
+import { getConfigState, setConfigState, setConfigStateBackend } from './config-state.mjs';
+import { getKeys, setKeys, setKeysBackend } from './keys.mjs';
+import { statsFor, sessionStats, setStatsBackend } from './stats.mjs';
+import { getUsage, connectOllamaUsage, initUsageAutoRefresh, setUsageAuthBackend, setUsageNormalizationBackend, setUsageSnapshotBackend, setUsageCodexBackend, setUsageClaudeBackend, CODEX_HOME } from './usage.mjs';
 import { getUsageHistory, HISTORY_PROVIDERS, HISTORY_WINDOWS } from './usage-history.mjs';
-import { getStatus } from './status.mjs';
-import { reportStatus, latestReportHtml, generateReport } from './usagereport.mjs';
-import { initTasks, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
+import { createModelPricesHandler } from './rust-backend.mjs';
+import { createExternalSessionLaunchHandler, createSessionFolderOpenHandler } from './detached-launch.mjs';
+import { createUsageReportHandlers, setUsageReportBackend } from './usagereport.mjs';
+import { initTasks, setTasksBackend, snapshotTasks, createTask, updateTask, concludeTask, deleteHistory } from './tasks.mjs';
 import { initCrons, snapshotCrons, createCron, updateCron, deleteCron, runCron } from './crons.mjs';
 import { initWindowAnchor, snapshotWindowAnchor, pokeProvider } from './window-anchor.mjs';
 import { initBackground, snapshotBackground, createJob, updateJob, deleteJob, reorderJobs, runBackgroundNow, listReports, getReport, setReportFlag } from './background.mjs';
-import { getModels, setModels, restoreDefaults } from './model-store.mjs';
-import { getModelPrices, putModelPrices } from './model-prices.mjs';
+import { setModelsBackend } from './model-store.mjs';
+import { createModelPricesPutHandler, getModelPricesPath } from './model-prices.mjs';
+import { registerTranscriptRoutes } from './transcript-routes.mjs';
+import { registerWikiRoutes, wikiAvailable } from './wiki-routes.mjs';
+import { setCodexIdentityBackend } from './codex-thread.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const HOST = '127.0.0.1';
@@ -74,10 +80,9 @@ function requireEnv() {
   // OLLAMA_BIN + SING_SCOPE_ROOT are optional: absent OLLAMA_BIN fails only
   // ollama-model spawns (clear buildSpawn error); absent SING_SCOPE_ROOT just
   // means no skill-scopes to pick/add-dir. The daemon boots fine without either.
-  // SING_USAGE_SKILL + SING_USAGE_REPORTS are likewise optional (author-specific
-  // harness-usage-report skill): absent → usage-report degrade silently
-  // (usagereport.mjs existsSync-guards its skill path; stats.mjs has an est-cost
-  // fallback). /capabilities reports all of these as available:false.
+  // SING_USAGE_REPORTS is optional: absent → the Rust usage-report backend
+  // falls back to <dirname(USAGE_REPORT_STATE || ~/.agents/.harness-usage-report/state)>/reports.
+  // The report is generated natively, so /capabilities reports it available.
   if (process.env.SING_TOKEN && !/^[A-Za-z0-9_-]+$/.test(process.env.SING_TOKEN)) missing.push('SING_TOKEN (set but contains characters outside [A-Za-z0-9_-])');
   if (missing.length) {
     throw new Error(`Required env vars missing — copy .env.example → .env and fill them in:\n  - ${missing.join('\n  - ')}`);
@@ -120,6 +125,39 @@ const app = Fastify({
     },
   },
 });
+const rustBackend = createRustBackend();
+setTranscriptBackend(rustBackend);
+setStatsBackend(rustBackend);
+setCodexIdentityBackend(rustBackend);
+// portable-pty's Windows ConPTY loads bare-name conpty.dll then falls back to
+// kernel32; it cannot pin node-pty's former package-relative DLL. This is an
+// accepted compatibility difference (portable-pty 0.9.0 win/psuedocon.rs).
+const rustPtyBackend = createRustPtyBackend({
+  executable: join(__dirname, '..', 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend'),
+  cwd: join(__dirname, '..'),
+});
+reg.setPtyBackend(rustPtyBackend);
+setUsageAuthBackend(rustBackend);
+setUsageNormalizationBackend(rustBackend);
+setUsageSnapshotBackend(rustBackend);
+setUsageCodexBackend(rustBackend);
+setUsageClaudeBackend(rustBackend);
+setExplorerBackend(rustBackend);
+setConfigStateBackend(rustBackend);
+setOneShotBackend(rustBackend); // one-shot.mjs CLI exec (history summariser, window-anchor pokes)
+setUsageReportBackend(rustBackend);
+setProcsBackend(rustBackend); // procs.mjs process scan execs + guarded PID kill
+setSkillsBackend(rustBackend); // skills.mjs wrappers (readSkillsDir) dispatch on it
+setConfigRootsBackend(rustBackend);
+setConfigReadBackend(rustBackend);
+setCodexConfigRootsBackend(rustBackend);
+setCodexConfigReadBackend(rustBackend);
+setMemoryReadBackend(rustBackend);
+setModelsBackend(rustBackend); // model-store.mjs dispatches catalogue and routing calls on the shared child
+setTasksBackend(rustBackend);
+setKeysBackend(rustBackend);
+const modelHandlers = createModelsHandlers(rustBackend, join(reg.STATE_DIR, 'models.json'), app.log);
+app.addHook('onClose', async () => rustBackend.stop());
 
 // Safety net: the daemon hosts live PTY agents — an unhandled rejection must be
 // logged and survive, never crash the process.
@@ -143,6 +181,7 @@ async function shutdown() {
   for (const a of live) reg.kill(a.id);
   const deadline = Date.now() + 5000;
   while (live.some((a) => reg.isLive(a.id)) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 100));
+  await rustPtyBackend.stop();
   try { await app.close(); } catch {}
   process.exit(0);
 }
@@ -337,7 +376,7 @@ app.get('/health', async () => ({ ok: true, pid: process.pid, clients: wss?.clie
 app.get('/agent-stats', async () => ({ stats: await statsFor(reg.snapshot()) }));
 
 // Machine-wide CPU% + RAM readout (More menu, below Processes).
-app.get('/sysstats', async () => getSysStats());
+app.get('/sysstats', async () => rustBackend.sysStats());
 
 // Ollama Cloud + Claude subscription usage (5h/7d). Cached; ?force=1 bypasses.
 // Repeated ?source=claude&source=codex limits which sources may hit the network
@@ -350,7 +389,7 @@ app.get('/usage', async (req) => getUsage({
 }));
 // Current 5h window: account % readings + estimated per-session split (usage-history.mjs).
 app.get('/usage/history', async (req, reply) => {
-  const doc = getUsageHistory(req.query.provider, Date.now(), req.query.window ?? '5h');
+  const doc = await getUsageHistory(rustBackend, req.query.provider, Date.now(), req.query.window ?? '5h');
   if (!doc) return reply.code(400).send({ ok: false, error: `provider must be one of ${HISTORY_PROVIDERS.join(', ')}; window one of ${HISTORY_WINDOWS.join(', ')}` });
   return doc;
 });
@@ -361,21 +400,14 @@ app.post('/usage/ollama/connect', async (_req, reply) => {
 });
 
 // Provider status (OpenAI + Claude Atlassian Statuspage). Cached ~20s; ?force=1 bypasses.
-app.get('/status', async (req) => getStatus({ force: req.query.force === '1' }));
+app.get('/status', async (req) => rustBackend.statusGet(req.query.force === '1'));
 
 // Usage report: newest self-contained HTML from the harness-usage-report
 // skill (rendered on demand by /usagereport/refresh, served whole to a sandboxed iframe).
-app.get('/usagereport/status', async () => reportStatus());
-app.get('/usagereport/report', async (req, reply) => {
-  const html = latestReportHtml();
-  if (html == null) return reply.code(404).send({ ok: false, error: 'no report' });
-  return reply.type('text/html').send(html);
-});
-app.post('/usagereport/refresh', async (req, reply) => {
-  const r = await generateReport();
-  if (!r.ok) reply.code(400);
-  return r;
-});
+const usageReportHandlers = createUsageReportHandlers();
+app.get('/usagereport/status', usageReportHandlers.status);
+app.get('/usagereport/report', usageReportHandlers.report);
+app.post('/usagereport/refresh', usageReportHandlers.refresh);
 
 // Dir picker: list subdirectories of `path` (browser can't read the FS). No file listing.
 app.get('/fs/browse', async (req, reply) => {
@@ -433,24 +465,38 @@ app.put('/fs/write', { bodyLimit: 4 * 1024 * 1024 }, async (req, reply) => {
 });
 app.post('/fs/entry', async (req, reply) => {
   const { path, kind } = req.body || {};
-  const r = createEntry(path, kind);
+  const r = await createEntry(path, kind);
   if (!r.ok) reply.code(400);
   return r;
 });
 app.delete('/fs/entry', async (req, reply) => {
-  const r = deleteEntry(req.query.path);
+  const r = await deleteEntry(req.query.path);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
 app.patch('/fs/rename', async (req, reply) => {
   const { from, to } = req.body || {};
-  const r = renameEntry(from, to);
+  const r = await renameEntry(from, to);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
-app.get('/fs/state', async () => ({ state: getExplorerState() }));
-app.put('/fs/state', async (req) => setExplorerState(req.body));
-app.get('/keys', async () => ({ keys: getKeys() }));
+const EXPLORER_STATE_FILE = join(reg.STATE_DIR, 'explorer-state.json');
+const DEFAULT_EXPLORER_STATE = { root: '~', expanded: [], tabs: [], active: null, autosave: false };
+app.get('/fs/state', async () => {
+  try { return { state: await rustBackend.explorerStateGet(EXPLORER_STATE_FILE) }; }
+  catch (error) {
+    app.log.warn({ err: error }, 'Explorer state read failed');
+    return { state: { ...DEFAULT_EXPLORER_STATE } };
+  }
+});
+app.put('/fs/state', async (req) => {
+  try { return await rustBackend.explorerStateSet(EXPLORER_STATE_FILE, req.body); }
+  catch (error) {
+    app.log.warn({ err: error }, 'Explorer state write failed');
+    return { ok: false, error: error.message };
+  }
+});
+app.get('/keys', async () => ({ keys: await getKeys() }));
 app.put('/keys', async (req) => setKeys(req.body));
 
 // Task manager: list claude.exe + this repo's dev-tooling processes, kill a stale/orphaned one by PID.
@@ -460,30 +506,22 @@ app.get('/procs', async () => ({ procs: await scanClaude() }));
 // ALL entries including disabled ones — Settings needs to render them; the
 // picker filters on `enabled`. Free-text in the UI — these are suggestions; any
 // typed value is passed through verbatim.
-app.get('/models', async () => getModels());
+app.get('/models', modelHandlers.get);
 
 // Whole-document replace (add / remove / edit / reorder / enable / default all
 // go through this one route, like PUT /keys). Validation lives in the store.
-app.put('/models', async (req, reply) => {
-  const r = setModels(req.body);
-  if (!r.ok) reply.code(400);
-  return r;
-});
+app.put('/models', modelHandlers.set);
 
 // Re-add any shipped default the user deleted; keeps their additions and edits.
-app.post('/models/restore-defaults', async () => ({ ok: true, state: restoreDefaults() }));
+app.post('/models/restore-defaults', modelHandlers.restore);
 
 // harness-usage-report price overrides (Settings > Models > Prices). Reads
 // and writes the skill's own pricing.json manual override directly — see model-prices.mjs.
-app.get('/models/prices', async () => getModelPrices());
-app.put('/models/prices', async (req, reply) => {
-  try {
-    return putModelPrices(req.body);
-  } catch (e) {
-    reply.code(400);
-    return { error: e.message };
-  }
-});
+app.get('/models/prices', createModelPricesHandler(rustBackend, getModelPricesPath(), app.log));
+app.put('/models/prices', createModelPricesPutHandler(
+  (path, text) => rustBackend.modelPricesWrite(path, text),
+  getModelPricesPath(),
+));
 
 // Home dir, for the client to collapse full paths to `~` on display. Same
 // source as the window.__SING_HOME__ injection above — see displayHome().
@@ -494,21 +532,14 @@ app.get('/env', async () => ({ home: displayHome() }));
 // opaquely. No secrets — just boolean availability + a human hint per feature.
 // Not token-gated (mirrors /health) so the shell can render hints pre-auth.
 app.get('/capabilities', async () => {
-  const wikiRoot = getWikiRoot();
-  const wikiAbs = resolveRoot(wikiRoot);
-  let wikiAvailable = false;
-  if (wikiAbs && existsSync(wikiAbs)) {
-    try { wikiAvailable = readdirSync(wikiAbs, { withFileTypes: true }).some((d) => d.isDirectory() && !d.name.startsWith('.')); }
-    catch { wikiAvailable = false; }
-  }
-  const usageReportAvailable = !!(process.env.SING_USAGE_SKILL && existsSync(process.env.SING_USAGE_SKILL));
+  const wikiIsAvailable = await wikiAvailable(rustBackend);
   return {
     ollama:      { available: !!reg.OLLAMA_BIN, hint: 'Set OLLAMA_BIN in .env to enable Ollama model spawns.' },
     codex:       { available: existsSync(join(CODEX_HOME, 'sessions')), hint: 'Run Codex CLI once to enable the Codex usage card.' },
     codexSpawn:  { available: !!reg.CODEX_BIN, hint: 'Set CODEX_BIN in .env to enable Codex agent/task spawns.' },
     skillScopes: { available: !!(process.env.SING_SCOPE_ROOT && existsSync(process.env.SING_SCOPE_ROOT)), hint: 'Set SING_SCOPE_ROOT in .env to enable skill-scope picking.' },
-    usageReport: { available: usageReportAvailable, hint: 'Set SING_USAGE_SKILL + SING_USAGE_REPORTS in .env to enable the usage report.' },
-    wiki:        { available: wikiAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
+    usageReport: { available: true, hint: 'Optional: set SING_USAGE_REPORTS to override the default reports directory.' },
+    wiki:        { available: wikiIsAvailable, hint: 'Pick a wiki root in the Wiki panel to enable it.' },
     plans:       { available: PLAN_ROOT != null, hint: 'Set SING_PLANS_ROOT in .env to enable the Plans view.' },
     token:       { available: !!process.env.SING_TOKEN, hint: 'Set SING_TOKEN in .env to require an auth token on data endpoints.' },
   };
@@ -527,7 +558,7 @@ app.get('/skill-scopes', async () => {
       .sort((a, b) => a.localeCompare(b));
   } catch {}
   for (const s of scopes) {
-    const r = readSkillsDir(join(root, s, '.claude', 'skills'));
+    const r = await readSkillsDir(join(root, s, '.claude', 'skills'));
     skillsByScope[s] = r ? r.skills.map((k) => k.name) : [];
   }
   return { scopes, skillsByScope };
@@ -554,78 +585,63 @@ app.post('/restart', async (req, reply) => {
 // Continue a session in an external terminal (Windows Terminal / macOS Terminal).
 // detached-spawn wt.exe / osascript with the same resume argv in-app reattach
 // uses (buildSpawn). Gated by the global token hook like the other action POSTs.
-app.post('/session/external', async (req, reply) => {
-  const id = req.body?.id;
-  if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
-  const r = reg.externalLaunch(id);
-  if (!r.ok) return reply.code(400).send(r);
-  try {
-    // r.launcher is an absolute path (agents.mjs resolves the wt.exe alias
-    // stub under WindowsApps on Windows) — argv stays a real array, no shell.
-    spawn(r.launcher, r.launcherArgs, { detached: true, stdio: 'ignore', cwd: r.cwd }).unref();
-  } catch (e) { return reply.code(500).send({ ok: false, error: e.message }); }
-  // Hand-off: drop the session from the dock (kills the in-app pty if live via
-  // removeOnExit, else drops the detached entry). The on-disk session log
-  // survives so the external `claude --resume <id>` continues the conversation.
-  reg.remove(id);
-  return { ok: true };
-});
+app.post('/session/external', createExternalSessionLaunchHandler({ reg, rustBackend }));
 
 // Config editor: 3-scope resolver + backup-then-write.
 app.get('/config', async (req, reply) => {
   const cwd = req.query.cwd;
   if (!cwd) return reply.code(400).send({ error: 'cwd required' });
-  return readConfig(cwd);
+  return await readConfig(cwd);
 });
-app.get('/claude/theme', async () => ({ theme: claudeTheme() }));
+app.get('/claude/theme', async () => ({ theme: await claudeTheme() }));
 // Recursively find dirs under `root` that hold a .claude/settings*.json.
 app.get('/config/scan', async (req, reply) => {
   const root = req.query.root;
   if (!root || !existsSync(root)) return reply.code(400).send({ error: 'bad root' });
-  return findConfigRoots(root);
+  return await findConfigRoots(root);
 });
 // FS-persisted config root list (survives browser cache clear).
-app.get('/config/roots', async () => ({ roots: getConfigRoots() }));
-app.put('/config/roots', async (req) => setConfigRoots(req.body?.roots));
+app.get('/config/roots', createConfigRootsGetHandler(rustBackend));
+app.put('/config/roots', createConfigRootsSetHandler(rustBackend));
 app.post('/config/search', async (req) => {
   const { roots, q } = req.body || {};
-  return { results: searchConfig(roots, q) };
+  return { results: await searchConfig(roots, q) };
 });
 app.put('/config/:scope', async (req, reply) => {
   const { cwd, content, mtime, force } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
-  const r = await writeConfig(cwd, req.params.scope, content, mtime, force);
+  const r = await writeConfig(cwd, req.params.scope, content, mtime, force, rustBackend, app.log);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
 
 // Config editor UI state (open tabs/active/autosave/expanded roots) — FS-persisted.
-app.get('/config/state', async () => ({ state: getConfigState() }));
+app.get('/config/state', async () => ({ state: await getConfigState() }));
 app.put('/config/state', async (req) => setConfigState(req.body));
 
 // Codex config.toml editor: 2-scope resolver + backup-then-write (mirrors /config).
 app.get('/codex-config', async (req, reply) => {
   const cwd = req.query.cwd;
   if (!cwd) return reply.code(400).send({ error: 'cwd required' });
-  return readCodexConfig(cwd);
+  return await readCodexConfig(cwd);
 });
 // Recursively find dirs under `root` that hold a .codex/config.toml.
 app.get('/codex-config/scan', async (req, reply) => {
   const root = req.query.root;
   if (!root || !existsSync(root)) return reply.code(400).send({ error: 'bad root' });
-  return findCodexConfigRoots(root);
+  return await findCodexConfigRoots(root);
 });
 // FS-persisted codex config root list (survives browser cache clear).
-app.get('/codex-config/roots', async () => ({ roots: getCodexConfigRoots() }));
-app.put('/codex-config/roots', async (req) => setCodexConfigRoots(req.body?.roots));
+app.get('/codex-config/roots', createCodexConfigRootsGetHandler(rustBackend));
+app.put('/codex-config/roots', createCodexConfigRootsSetHandler(rustBackend));
 app.post('/codex-config/search', async (req) => {
   const { roots, q } = req.body || {};
-  return { results: searchCodexConfig(roots, q) };
+  return { results: await searchCodexConfig(roots, q) };
 });
 app.put('/codex-config/:scope', async (req, reply) => {
   const { cwd, content, mtime, force } = req.body || {};
   if (!cwd || content == null) return reply.code(400).send({ ok: false, error: 'cwd + content required' });
-  const r = await writeCodexConfig(cwd, req.params.scope, content, mtime, force);
+  const r = await writeCodexConfig(cwd, req.params.scope, content, mtime, force, rustBackend, app.log);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
@@ -634,22 +650,21 @@ app.put('/codex-config/:scope', async (req, reply) => {
 app.get('/hooks/roots', async () => ({ roots: getHookRoots() }));
 app.put('/hooks/roots', async (req) => setHookRoots(req.body?.roots));
 app.post('/hooks/list', async (req) => {
-  const roots = req.body?.roots || [];
-  return { groups: roots.map((cwd) => ({ cwd, files: listHooks(cwd) })) };
+  return { groups: await listHookGroups(req.body?.roots, rustBackend) };
 });
 app.post('/hooks/search', async (req) => {
   const { roots, q } = req.body || {};
-  return { results: searchHooks(roots, q) };
+  return { results: await searchHooks(roots, q, rustBackend) };
 });
 app.get('/hooks/file', async (req, reply) => {
-  const r = readHook(req.query.path);
+  const r = await readHook(req.query.path, rustBackend);
   if (r.error) return reply.code(400).send(r);
   return r;
 });
 app.put('/hooks/file', async (req, reply) => {
   const { path, content, mtime, force } = req.body || {};
   if (!path || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = await writeHook(path, content, mtime, force);
+  const r = await writeHook(path, content, mtime, force, rustBackend, app.log);
   if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
   return r;
 });
@@ -658,7 +673,7 @@ app.put('/hooks/file', async (req, reply) => {
 // agent (curl) as well as UI drags.
 app.get('/tasks', async () => snapshotTasks());
 app.post('/tasks', async (req, reply) => {
-  try { return { ok: true, task: createTask(req.body || {}) }; }
+  try { return { ok: true, task: await createTask(req.body || {}) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/tasks/:id/status', async (req, reply) => {
@@ -690,7 +705,7 @@ app.delete('/crons/:id', async (req, reply) => {
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 app.post('/crons/:id/run', async (req, reply) => {
-  try { return { ok: true, cron: runCron(req.params.id) }; }
+  try { return { ok: true, cron: await runCron(req.params.id) }; }
   catch (e) { return reply.code(errStatus(e)).send({ ok: false, error: e.message }); }
 });
 
@@ -741,104 +756,54 @@ app.patch('/background/reports/:taskId/flag', async (req, reply) => {
 // Memory: cross-project search + guarded read/write under a client-selected root.
 app.get('/memory/root', async () => ({ root: getMemoryRoot() }));
 app.put('/memory/root', async (req) => setMemoryRoot(req.body?.root));
-app.get('/memory/search', async (req) => searchMemory(req.query.q, req.query.root));
-app.get('/memory/files', async (req) => ({ files: listFiles(req.query.root) }));
+app.get('/memory/search', async (req) => {
+  const result = await searchMemory(req.query.q, req.query.root);
+  return result;
+});
+app.get('/memory/files', async (req) => ({ files: await listFiles(req.query.root) }));
 app.get('/memory/file', async (req, reply) => {
-  const r = readMemoryFile(req.query.path, req.query.root);
+  const r = await readMemoryFile(req.query.path, req.query.root);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
-app.put('/memory/file', async (req, reply) => {
-  const { path, content, root, mtime, force } = req.body || {};
-  if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = await writeMemoryFile(path, content, root, mtime, force);
-  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
-  return r;
-});
+app.put('/memory/file', createMemoryWriteHandler(rustBackend, app.log));
 
 // Rules: persisted list of rule dirs (default ~/.claude/rules), each a
 // recursive .md tree — browse + search + guarded read/write.
 app.get('/rules/roots', async () => ({ roots: getRulesRoots() }));
 app.put('/rules/roots', async (req) => setRulesRoots(req.body?.roots));
-app.post('/rules/files', async (req) => listRuleFiles(req.body?.roots));
-app.post('/rules/search', async (req) => {
-  const { roots, q } = req.body || {};
-  return searchRules(roots, q);
-});
+app.post('/rules/files', createRuleFilesHandler(rustBackend, app.log));
+app.post('/rules/search', createRuleSearchHandler(rustBackend, app.log));
 app.get('/rules/file', async (req, reply) => {
   const r = readRuleFile(req.query.path);
   if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
   return r;
 });
-app.put('/rules/file', async (req, reply) => {
-  const { path, content, mtime, force } = req.body || {};
-  if (path == null || content == null) return reply.code(400).send({ ok: false, error: 'path + content required' });
-  const r = await writeRuleFile(path, content, mtime, force);
-  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
-  return r;
-});
+app.put('/rules/file', createRuleWriteHandler(rustBackend, app.log));
 // Companion <stem>-reference.md for a rule file (read-only, separate tree).
-app.get('/rules/reference', async (req, reply) => {
-  const r = findRuleReference(req.query.path);
-  if (!r.ok) reply.code(r.error === 'no reference' ? 404 : 400);
-  return r;
-});
+app.get('/rules/reference', createRuleReferenceHandler(rustBackend, app.log));
 
 // Plans: read-only browse of the handoff plan tree (SING_PLANS_ROOT in .env) —
 // session dirs holding markdown plans + a state.json snapshot. Never written
 // to. Unset root = feature disabled: routes answer empty/404 and
 // /capabilities tells the UI to show the disabled state.
 // VERIFY: plans-index-routes
-app.get('/plans/sessions', async () => listPlanSessions());
-app.get('/plans/session', async (req, reply) => {
-  const r = await getPlanSession(req.query.sid);
-  if (!r.ok) reply.code(r.error === 'not found' ? 404 : r.error === 'plans disabled' ? 404 : 400);
-  return r;
-});
-app.post('/plans/open', async (req, reply) => {
-  const r = await resolveSessionDirectory(req.body?.sid);
-  if (!r.ok) {
-    reply.code(r.error === 'bad sid' ? 400 : 404);
-    return r;
-  }
-  if (process.platform !== 'win32') {
-    reply.code(501);
-    return { ok: false, error: 'unsupported platform' };
-  }
-  try {
-    const explorer = resolve(process.env.SystemRoot || 'C:\\Windows', 'explorer.exe');
-    const child = spawn(explorer, [r.dir], { detached: true, stdio: 'ignore' });
-    const spawned = await new Promise((done) => {
-      child.once('spawn', () => done(true));
-      child.once('error', () => done(false));
-    });
-    if (!spawned) {
-      reply.code(500);
-      return { ok: false, error: 'failed to open session folder' };
-    }
-    child.unref();
-    return { ok: true };
-  } catch {
-    reply.code(500);
-    return { ok: false, error: 'failed to open session folder' };
-  }
-});
+app.get('/plans/sessions', createPlanSessionsHandler(rustBackend, app.log));
+app.get('/plans/session', createPlanSessionHandler(rustBackend, app.log));
+app.post('/plans/open', createSessionFolderOpenHandler({ resolveSessionDirectory, rustBackend }));
 
 // Wiki: recursive .md browse + search + read-only file view under a client-
 // selected root (default ~/wiki). No write — wikis are LLM-authored.
 // FS-persisted wiki root choice (survives browser cache clear).
-app.get('/wiki/root', async () => ({ root: getWikiRoot() }));
-app.put('/wiki/root', async (req) => setWikiRoot(req.body?.root));
-app.get('/wiki/files', async (req) => wikiFiles(req.query.root));
-app.get('/wiki/sweeps', async (req) => wikiSweepHistory(typeof req.query.root === 'string' ? req.query.root : null));
-app.get('/wiki/search', async (req) => searchWiki(req.query.q, req.query.root));
-app.get('/wiki/graph', async (req) => wikiGraph(req.query.root, req.query.wiki));
-app.get('/wiki/file', async (req, reply) => {
-  const r = readWikiFile(req.query.path, req.query.root);
-  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
-  return r;
+registerWikiRoutes(app, rustBackend);
+app.get('/wiki/files', async (req) => rustBackend.files(resolveRoot(req.query.root)));
+app.get('/wiki/sweeps', async (req) => rustBackend.sweeps(typeof req.query.root === 'string' ? req.query.root : null));
+app.get('/wiki/search', async (req) => {
+  const q = req.query.q ?? '';
+  if (q) q.toLowerCase(); // Preserve the existing invalid-array query failure.
+  return rustBackend.search(q, q ? resolveRoot(req.query.root) : null);
 });
-
+app.get('/wiki/graph', createWikiGraphHandler(rustBackend, app.log));
 // Projects: ordered list of git repo toplevels (STATE_DIR/projects.json),
 // each with an on-demand git status readout. Status never runs `git fetch` —
 // ahead/behind are "as of last fetch"; /projects/git runs fetch/rebase/both on click.
@@ -893,76 +858,14 @@ app.get('/projects/review/file', async (req, reply) => {
 // Read-only — no write. Paths server-derived from (scope, skill).
 // FS-persisted skills root choice (survives browser cache clear). Root layout
 // (grouped scope dir vs flat .claude/skills) is auto-detected server-side.
-app.get('/skills/roots', async () => ({ roots: getSkillsRoots() }));
-app.put('/skills/roots', async (req) => setSkillsRoots(req.body?.roots));
-app.get('/skills', async (req) => listSkills(req.query.root));
-app.get('/skill', async (req, reply) => {
-  const flat = req.query.flat === '1';
-  if (req.query.file) {
-    const r = readSkillFile(req.query.root, req.query.scope, req.query.skill, req.query.file, flat);
-    if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
-    return r;
-  }
-  const r = readSkill(req.query.root, req.query.scope, req.query.skill, flat);
-  if (!r.ok) reply.code(r.error === 'not found' ? 404 : 400);
-  return r;
-});
+app.get('/skills/roots', createSkillsRootsGetHandler(rustBackend));
+app.put('/skills/roots', createSkillsRootsSetHandler(rustBackend));
+app.get('/skills', createSkillsListHandler(rustBackend, app.log));
+app.get('/skill', createSkillReadHandler(rustBackend, app.log));
 // Write a skill's SKILL.md (no file) or a supporting file (file present).
-app.put('/skill', async (req, reply) => {
-  const b = req.body || {};
-  const flat = b.flat === true || b.flat === '1';
-  const r = b.file
-    ? await writeSkillFile(b.root, b.scope, b.skill, b.file, b.content, flat, b.mtime, b.force)
-    : await writeSkill(b.root, b.scope, b.skill, b.content, flat, b.mtime, b.force);
-  if (!r.ok) reply.code(r.error === 'changed on disk' ? 409 : 400);
-  return r;
-});
+app.put('/skill', createSkillWriteHandler(rustBackend, app.log));
 
-// Session history: list transcripts (reverse-chrono), read one, search across
-// all or one, under a client-selected root (default ~/.claude/projects).
-// FS-persisted root choice (survives browser cache clear). Chat goes over the
-// WS (streaming) — see pty-ws.mjs.
-app.get('/transcripts/root', async () => ({ root: getSessionsRoot() }));
-app.put('/transcripts/root', async (req) => setSessionsRoot(req.body?.root));
-app.get('/transcripts', async (req) => ({ sessions: await listSessions({ cap: Number(req.query.cap) || 5000, isLive: reg.isLiveSession, root: req.query.root, hideReviews: req.query.hideReviews === '1' }) }));
-// Resolve a registered agent's id to its codex-minted thread uuid — the Sessions
-// dock's "View transcript" button needs this before it can open a codex agent's
-// transcript (its registry id is unrelated to the rollout's thread uuid).
-app.get('/transcripts/codex-thread', async (req, reply) => {
-  const id = req.query?.id;
-  if (!id) return reply.code(400).send({ ok: false, error: 'id required' });
-  const threadId = reg.codexThreadFor(id);
-  if (!threadId) return reply.code(404).send({ ok: false, error: 'not found' });
-  return { ok: true, threadId };
-});
-app.get('/transcript', async (req, reply) => {
-  const { project, id, root, source, file } = req.query || {};
-  if (!project || !id) return reply.code(400).send({ ok: false, error: 'project + id required' });
-  const r = await readSession(project, id, root, source, file);
-  if (r.ok) {
-    // Skill-scopes live only in the agent registry (not the transcript), so
-    // merge them in here for the Resume prefill when the id is a known agent.
-    // For codex threads, the registry lookup is by (thread uuid + cwd), not agent id.
-    const lc = source === 'codex'
-      ? reg.getLaunchConfigForCodexThread(id, r.meta?.cwd)
-      : reg.getLaunchConfig(id);
-    if (lc?.scopes?.length) r.meta.scopes = lc.scopes;
-  }
-  if (!r.ok) reply.code(404);
-  return r;
-});
-app.get('/transcripts/search', (req) => searchSessions(req.query.q, { project: req.query.project, id: req.query.id, root: req.query.root, hideReviews: req.query.hideReviews === '1' }));
-// Live subagents nested under the dock's agent rows (indicator only). Scoped to
-// live agents so it stays cheap — no full 500-session scan like /transcripts.
-app.get('/subagents', async () => {
-  const out = {};
-  for (const a of reg.snapshot()) {
-    if (a.status !== 'running' && a.status !== 'idle' && a.status !== 'starting') continue;
-    const subs = await subagentsFor(a.cwd, a.id, reg.isLive);
-    if (subs.length) out[a.id] = subs;
-  }
-  return { subagents: out };
-});
+registerTranscriptRoutes(app, { reg, listSessions, readSession, searchSessions, subagentsFor, getSessionsRoot, setSessionsRoot });
 // Per-session cost + token breakdown for the visible list page (batched so a
 // page flip is one request; stats.mjs caches each parse by mtime/size).
 app.post('/transcripts/stats', async (req) => {
@@ -1004,17 +907,26 @@ app.post('/history/regenerate', async (req, reply) => {
 }, { prefix: '/api' });
 
 if (SHADOW) app.log.info('shadow mode: read-only');
+// Boot sweep: drop tmp files a hard-killed previous daemon left mid-write. Runs
+// after migrate-state (import above) and before init() loads state from disk.
+if (!SHADOW) reg.sweepTmpFiles({ log: app.log });
 reg.init(app.log);
-initTasks(app.log);
-initCrons(app.log);
-initWindowAnchor({ log: app.log, ...(SHADOW && { enabled: '' }) });
-initBackground(app.log);
-initUsageAutoRefresh(reg.bus);
 // Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors
 // are logged (route-level failures still degrade to a live-only "today").
 ensureHistory().catch((e) => app.log.warn({ err: e.message }, 'history backfill failed'));
 
 let server;
+try {
+  await Promise.all([rustBackend.start(), rustPtyBackend.start()]);
+} catch (error) {
+  app.log.error({ err: error.message }, 'Rust backend failed to start; build it with cargo build --release --manifest-path rust/backend/Cargo.toml');
+  process.exit(1);
+}
+initCrons(app.log);
+initBackground(app.log);
+await initWindowAnchor({ log: app.log, storage: rustBackend, ...(SHADOW && { enabled: '' }) });
+initUsageAutoRefresh(reg.bus);
+initTasks(app.log);
 // ponytail: retry bind — a /restart child waits for the old daemon to free the port
 for (let tries = 20; ; tries--) {
   try {

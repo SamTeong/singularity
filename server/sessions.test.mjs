@@ -4,11 +4,10 @@
 // FS-persisted sessions root. Fixtures follow the agents.test.mjs pattern:
 // write under the real ~/.claude/projects, clean up in a finally.
 // Run: npm test  (node --test server/)
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
-import fsPromises, { open } from 'node:fs/promises';
-import { syncBuiltinESMExports } from 'node:module';
+import fsPromises from 'node:fs/promises';
 import { join } from 'node:path';
 import { homedir, tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
@@ -18,13 +17,18 @@ import { mkdtempSync } from 'node:fs';
 // (static imports hoist above the env assignment).
 process.env.SINGULARITY_HOME = mkdtempSync(join(tmpdir(), 'sing-home-'));
 process.env.CODEX_HOME = join(tmpdir(), 'codex-nonexistent-' + Date.now());
-const CODEX_HOME = process.env.CODEX_HOME;
-const { readSession, sessionText, searchSessions, listSessions, getSessionsRoot, setSessionsRoot, resolveRoot } = await import('./sessions.mjs');
+const modelStore = await import('./model-store.mjs');
+const modelBackend = (await import('./rust-backend.mjs')).createRustBackend();
+await modelBackend.start();
+modelStore.setModelsBackend(modelBackend);
+after(async () => { await modelBackend.stop(); rmSync(process.env.SINGULARITY_HOME, { recursive: true, force: true }); });
+const { readSession, sessionText, searchSessions, listSessions, subagentsFor, getSessionsRoot, setSessionsRoot, resolveRoot, setTranscriptBackend } = await import('./sessions.mjs');
+setTranscriptBackend(modelBackend);
 
 const PROJECTS = join(homedir(), '.claude', 'projects');
 
-function writeSession(project, id, lines) {
-  const dir = join(PROJECTS, project);
+function writeSession(project, id, lines, root = PROJECTS) {
+  const dir = join(root, project);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, `${id}.jsonl`), lines.join('\n') + '\n');
   return dir;
@@ -48,6 +52,105 @@ test('readSession: valid lines parse, a garbage/truncated line is skipped, no th
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('shared Claude parser fixtures retain legacy readSession output', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-transcript-parity-'));
+  const project = 'parity';
+  mkdirSync(join(root, project), { recursive: true });
+  const raw = await fsPromises.readFile(new URL('./fixtures/transcripts/claude.jsonl', import.meta.url), 'utf8');
+  writeFileSync(join(root, project, 'fixture.jsonl'), raw.replace(/\n/g, '\r\n'));
+  try {
+    assert.deepEqual(await readSession(project, 'fixture', root), {
+      ok: true,
+      meta: { cwd: 'C:\\repo', title: 'Final title', turns: 1, firstTs: '2026-10-21T01:00:00Z', lastTs: '2026-10-21T01:00:02Z', model: 'opus' },
+      messages: [
+        { ts: '2026-10-21T01:00:00Z', role: 'user', kind: 'text', text: 'hello 🌍', recap: true },
+        { ts: '2026-10-21T01:00:00Z', role: 'user', kind: 'toolResult', text: 'tool output' },
+        { ts: '2026-10-21T01:00:01Z', role: 'assistant', kind: 'text', text: 'answer' },
+        { ts: '2026-10-21T01:00:01Z', role: 'assistant', kind: 'thinking', text: 'reason' },
+        { ts: '2026-10-21T01:00:01Z', role: 'assistant', kind: 'toolUse', name: 'Read', text: 'small args' },
+        { ts: '2026-10-21T01:00:02Z', role: 'user', kind: 'text', text: `escaped ${String.fromCharCode(0xd83d)}` },
+      ],
+    });
+    const tagged = await fsPromises.readFile(new URL('./fixtures/transcripts/claude-ollama.jsonl', import.meta.url), 'utf8');
+    writeFileSync(join(root, project, 'ollama.jsonl'), tagged);
+    assert.equal((await readSession(project, 'ollama', root)).meta.model, 'glm-5.2:cloud');
+    const toolFixture = await fsPromises.readFile(new URL('./fixtures/transcripts/tool-truncation.jsonl', import.meta.url), 'utf8');
+    writeFileSync(join(root, project, 'tool.jsonl'), toolFixture.replace('REPEAT301', 'x'.repeat(301)));
+    assert.equal((await readSession(project, 'tool', root)).messages[0].text, `${'x'.repeat(300)}…`);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('legacy JS tool truncation exposes a lone high surrogate at the shared emoji boundary fixture', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-transcript-boundary-'));
+  const project = 'boundary';
+  mkdirSync(join(root, project), { recursive: true });
+  const seed = await fsPromises.readFile(new URL('./fixtures/transcripts/unicode-boundary.jsonl', import.meta.url), 'utf8');
+  writeFileSync(join(root, project, 'fixture.jsonl'), seed.replace('REPEAT299', 'x'.repeat(299)));
+  try {
+    const parsed = await readSession(project, 'fixture', root);
+    assert.equal(parsed.messages[0].text.length, 301);
+    assert.equal(parsed.messages[0].text.charCodeAt(299), 0xd83d);
+    assert.equal(parsed.messages[0].text.charAt(300), '…');
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('shared Claude nested source fixture preserves escaped UTF-16 text leaves', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-transcript-surrogates-'));
+  const project = 'surrogates';
+  mkdirSync(join(root, project), { recursive: true });
+  const raw = await fsPromises.readFile(new URL('./fixtures/transcripts/claude-source-escaped.jsonl', import.meta.url), 'utf8');
+  writeFileSync(join(root, project, 'fixture.jsonl'), raw);
+  try {
+    const parsed = await readSession(project, 'fixture', root);
+    assert.deepEqual(parsed.messages.map(({ kind, text }) => [kind, text]), [
+      ['text', `nested user ${String.fromCharCode(0xd83d)}`],
+      ['toolResult', `tool result ${String.fromCharCode(0xde00)}`],
+      ['text', `assistant text ${String.fromCharCode(0xd83d)}`],
+      ['thinking', `assistant thinking ${String.fromCharCode(0xde00)}`],
+      ['toolUse', JSON.stringify({ query: String.fromCharCode(0xd83d) })],
+    ]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('shared Claude raw metadata fixture preserves cwd and ai-title UTF-16 units', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-transcript-raw-meta-'));
+  const project = 'raw-meta';
+  mkdirSync(join(root, project), { recursive: true });
+  const raw = await fsPromises.readFile(new URL('./fixtures/transcripts/claude-metadata-escaped.jsonl', import.meta.url), 'utf8');
+  writeFileSync(join(root, project, 'fixture.jsonl'), raw);
+  const units = (value) => Array.from({ length: value.length }, (_, index) => value.charCodeAt(index));
+  try {
+    const parsed = await readSession(project, 'fixture', root);
+    assert.deepEqual(units(parsed.meta.cwd), [...units('C:\\repo'), 0xd83d]);
+    assert.deepEqual(units(parsed.meta.title), [...units('Claude title '), 0xde00]);
+    assert.deepEqual(units(parsed.messages[0].text), [...units('Claude message '), 0xd83d]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('shared Ollama fixture leaves ambiguous tag aliases unresolved', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-transcript-ambiguous-'));
+  const project = 'ambiguous';
+  mkdirSync(join(root, project), { recursive: true });
+  const original = await modelStore.getModels();
+  const updated = {
+    ...original,
+    models: [
+      ...original.models.filter((model) => !model.id.startsWith('glm-5.3:')),
+      { id: 'glm-5.3:cloud', group: 'ollama', label: '', enabled: true },
+      { id: 'glm-5.3:local', group: 'ollama', label: '', enabled: true },
+    ],
+  };
+  try {
+    assert.equal((await modelStore.setModels(updated)).ok, true);
+    const fixture = await fsPromises.readFile(new URL('./fixtures/transcripts/claude-ollama.jsonl', import.meta.url), 'utf8');
+    writeFileSync(join(root, project, 'fixture.jsonl'), fixture.replace('glm-5.2', 'glm-5.3'));
+    assert.equal((await readSession(project, 'fixture', root)).meta.model, 'glm-5.3');
+  } finally {
+    await modelStore.setModels(original);
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -139,63 +242,35 @@ test('readSession: pathFor rejects project/id containing ".." or separators', as
   assert.deepEqual(await readSession('', 'foo'), { ok: false, error: 'not found' });
 });
 
-test('readSession: Claude and Codex transcripts deleted during read return not found', async () => {
-  const claudeProject = 'sessions-test-delete-during-read';
-  const claudeId = 'deleted-claude';
-  const claudeDir = writeSession(claudeProject, claudeId, ['{}']);
-  const claudeFile = join(claudeDir, `${claudeId}.jsonl`);
-  const codexRelative = join('sessions', 'deleted-codex.jsonl');
-  const codexFile = join(CODEX_HOME, codexRelative);
-  const codexDir = join(CODEX_HOME, 'sessions');
-  mkdirSync(codexDir, { recursive: true });
-  writeFileSync(codexFile, '{}\n');
-  const otherProject = 'sessions-test-read-error';
-  const otherId = 'read-error';
-  const otherDir = writeSession(otherProject, otherId, ['{}']);
-  const otherFile = join(otherDir, `${otherId}.jsonl`);
-  const originalReadFile = fsPromises.readFile;
-  let targetFile;
-  let readError;
-  fsPromises.readFile = async (file, ...args) => {
-    if (file === targetFile) {
-      if (readError.code === 'ENOENT') rmSync(file);
-      throw readError;
-    }
-    return originalReadFile(file, ...args);
-  };
-  syncBuiltinESMExports();
+test('readSession: missing transcript maps to not found and backend read errors propagate', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-sessions-missing-'));
+  const codexRelative = join('sessions', 'missing-codex.jsonl');
+  const originalTranscriptRead = modelBackend.transcriptRead;
   try {
-    targetFile = claudeFile;
-    readError = Object.assign(new Error('deleted'), { code: 'ENOENT' });
-    assert.deepEqual(await readSession(claudeProject, claudeId), { ok: false, error: 'not found' });
-
-    targetFile = codexFile;
+    assert.deepEqual(await readSession('missing-project', 'missing-claude', root), { ok: false, error: 'not found' });
     assert.deepEqual(await readSession('', 'deleted-codex', undefined, 'codex', codexRelative), { ok: false, error: 'not found' });
 
-    targetFile = otherFile;
-    readError = Object.assign(new Error('read failed'), { code: 'EIO' });
-    await assert.rejects(readSession(otherProject, otherId), { code: 'EIO' });
+    modelBackend.transcriptRead = async () => ({ error: 'read failed', code: 'EIO' });
+    await assert.rejects(readSession('read-error-project', 'read-error', root), { code: 'EIO' });
   } finally {
-    fsPromises.readFile = originalReadFile;
-    syncBuiltinESMExports();
-    rmSync(claudeDir, { recursive: true, force: true });
-    rmSync(codexDir, { recursive: true, force: true });
-    rmSync(otherDir, { recursive: true, force: true });
+    modelBackend.transcriptRead = originalTranscriptRead;
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
 test('listSessions: discovers subagent transcripts and attaches them to the parent row', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-sessions-subagents-'));
   const project = 'sessions-test-subagents';
   const parentId = 'parent-1';
   const dir = writeSession(project, parentId, [
     JSON.stringify({ type: 'user', message: { content: 'hi' }, timestamp: '2026-07-15T00:00:00Z' }),
-  ]);
+  ], root);
   const subDir = join(dir, parentId, 'subagents');
   mkdirSync(subDir, { recursive: true });
   writeFileSync(join(subDir, 'agent-x.jsonl'), JSON.stringify({ type: 'user', message: { content: 'sub' } }) + '\n');
   writeFileSync(join(subDir, 'agent-x.meta.json'), JSON.stringify({ agentType: 'reviewer', description: 'checks stuff' }));
   try {
-    const sessions = await listSessions();
+    const sessions = await listSessions({ root });
     const parent = sessions.find((s) => s.project === project && s.id === parentId);
     assert.ok(parent, 'parent row found');
     assert.equal(parent.subagents.length, 1);
@@ -203,7 +278,7 @@ test('listSessions: discovers subagent transcripts and attaches them to the pare
     assert.equal(parent.subagents[0].agentId, 'agent-x');
     assert.equal(parent.subagents[0].title, 'reviewer: checks stuff');
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -224,26 +299,14 @@ test('listSessions: subagent title cache refreshes when sidecar metadata changes
   };
   const title = async ({ root, parentId }) => (await listSessions({ root })).find((s) => s.id === parentId).subagents[0].title;
 
-  await t.test('late sidecar appearance refreshes the prompt title and warm transcript stays cached', async () => {
+  await t.test('late sidecar appearance refreshes the prompt title across warm listings', async () => {
     const f = fixture('parent-meta-appears', false);
-    const probe = await open(f.jsonl, 'r');
-    const handlePrototype = Object.getPrototypeOf(probe);
-    await probe.close();
-    const originalRead = handlePrototype.read;
-    let reads = 0;
-    handlePrototype.read = function (...args) {
-      reads++;
-      return originalRead.apply(this, args);
-    };
     try {
       assert.equal(await title(f), 'prompt title');
-      assert.equal(reads, 2, 'parent and subagent transcript heads are read once');
       assert.equal(await title(f), 'prompt title');
-      assert.equal(reads, 2, 'unchanged transcripts stay warm');
       writeFileSync(f.meta, JSON.stringify({ agentType: 'reviewer', description: 'checks stuff' }));
       assert.equal(await title(f), 'reviewer: checks stuff', 'a newly appearing sidecar refreshes the title');
     } finally {
-      handlePrototype.read = originalRead;
       rmSync(f.root, { recursive: true, force: true });
     }
   });
@@ -294,15 +357,16 @@ test('readSession: nested subagent id opens via the pathFor relaxation; escapes 
 });
 
 test('listSessions: no ai-title falls back to a blurb built from the first real user message, whitespace-collapsed and capped at 140 chars', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-sessions-blurb-'));
   const project = 'sessions-test-blurb';
   const id = 'fixture-blurb';
   const longText = 'first   prompt\nwith   messy   whitespace ' + 'x'.repeat(200);
-  const dir = writeSession(project, id, [
+  writeSession(project, id, [
     JSON.stringify({ type: 'user', isMeta: true, message: { content: '<local-command-caveat>ignore me</local-command-caveat>' } }),
     JSON.stringify({ type: 'user', message: { content: longText } }),
-  ]);
+  ], root);
   try {
-    const sessions = await listSessions();
+    const sessions = await listSessions({ root });
     const row = sessions.find((s) => s.project === project && s.id === id);
     assert.ok(row, 'row found');
     assert.equal(row.title, null);
@@ -310,7 +374,40 @@ test('listSessions: no ai-title falls back to a blurb built from the first real 
     assert.ok(!row.blurb.includes('\n'));
     assert.ok(row.blurb.startsWith('first prompt with messy whitespace'), row.blurb);
   } finally {
-    rmSync(dir, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('listSessions: running is the live process only; a recent mtime stays in activityRecent', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-sessions-running-'));
+  const project = 'sessions-test-running';
+  const liveId = 'parent-live';
+  const idleId = 'parent-idle';
+  const dir = writeSession(project, liveId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })], root);
+  writeSession(project, idleId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })], root);
+  const old = new Date(Date.now() - 60000);
+  utimesSync(join(dir, `${liveId}.jsonl`), old, old); // live but stale on disk
+  const calls = [];
+  try {
+    const sessions = await listSessions({
+      isLive: (id, context) => { calls.push([id, context]); return id === liveId; },
+      root,
+    });
+    const live = sessions.find((s) => s.project === project && s.id === liveId);
+    const idle = sessions.find((s) => s.project === project && s.id === idleId);
+    // VERIFY: wave4-f3-2
+    assert.equal(live.running, true); // the live process wins over a 60s-old mtime
+    assert.equal(live.processLive, true);
+    assert.equal(live.processState, 'live');
+    assert.equal(live.activityRecent, false); // recency is reported separately
+    assert.equal(idle.running, false); // a fresh mtime alone never makes a row running
+    assert.equal(idle.processLive, false);
+    assert.equal(idle.processState, 'unknown');
+    assert.equal(idle.activityRecent, true);
+    const context = calls.find(([id]) => id === liveId)[1];
+    assert.equal(context.source, 'claude');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });
 
@@ -328,6 +425,7 @@ test('listSessions: owned liveness and recent activity remain separate for root,
   for (const id of ['root-live-quiet', 'root-unowned-old']) utimesSync(join(dir, `${id}.jsonl`), old, old);
   for (const id of ['agent-live-quiet', 'agent-unowned-old']) utimesSync(join(childDir, `${id}.jsonl`), old, old);
   const threadId = 'dddddddd-eeee-ffff-0000-111111111111';
+  const CODEX_HOME = process.env.CODEX_HOME;
   const codexDir = join(CODEX_HOME, 'sessions', '2026', '10', '27');
   mkdirSync(codexDir, { recursive: true });
   const codexFile = join(codexDir, `rollout-${threadId}.jsonl`);
@@ -364,12 +462,41 @@ test('listSessions: owned liveness and recent activity remain separate for root,
   }
 });
 
-test('sessions root persists to FS: default, roundtrip, bad input', () => {
-  assert.equal(getSessionsRoot(), '~/.claude/projects'); // default when file absent
+test('listSessions: a subagent runs on its own agentId with the claude-subagent liveness context', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-sessions-subagent-running-'));
+  const project = 'sessions-test-subagent-running';
+  const parentId = 'parent-sub';
+  const dir = writeSession(project, parentId, [JSON.stringify({ type: 'user', message: { content: 'hi' } })], root);
+  const subDir = join(dir, parentId, 'subagents');
+  mkdirSync(subDir, { recursive: true });
+  const subFile = join(subDir, 'agent-live.jsonl');
+  writeFileSync(subFile, JSON.stringify({ type: 'user', message: { content: 'sub' } }) + '\n');
+  const old = new Date(Date.now() - 60000);
+  utimesSync(subFile, old, old); // live subagent, stale mtime
+  const calls = [];
+  try {
+    // VERIFY: wave4-f3-3
+    const sessions = await listSessions({
+      isLive: (id, context) => { calls.push([id, context]); return id === 'agent-live'; },
+      root,
+    });
+    const parent = sessions.find((s) => s.project === project && s.id === parentId);
+    assert.equal(parent.running, false); // the parent itself has no live process
+    assert.equal(parent.subagents[0].running, true);
+    assert.equal(parent.subagents[0].processLive, true);
+    assert.equal(parent.subagents[0].activityRecent, false);
+    assert.equal(calls.find(([id]) => id === 'agent-live')[1].source, 'claude-subagent');
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('sessions root persists to FS: default, roundtrip, bad input', async () => {
+  assert.equal(await getSessionsRoot(), '~/.claude/projects'); // default when file absent
   const scratchRoot = mkdtempSync(join(tmpdir(), 'sing-sessions-root-'));
-  assert.deepEqual(setSessionsRoot(scratchRoot), { ok: true, root: scratchRoot });
-  assert.equal(getSessionsRoot(), scratchRoot); // read back from disk
-  assert.equal(setSessionsRoot('').ok, false); // rejects empty
+  assert.deepEqual(await setSessionsRoot(scratchRoot), { ok: true, root: scratchRoot });
+  assert.equal(await getSessionsRoot(), scratchRoot); // read back from disk
+  assert.equal((await setSessionsRoot('')).ok, false); // rejects empty
   assert.equal(resolveRoot(scratchRoot), scratchRoot);
 });
 
@@ -396,7 +523,7 @@ test('listSessions/readSession/searchSessions scope to an explicit root, ignorin
   }
 });
 
-test('listSessions: unchanged corpus stays cached beyond 200 entries and only changed files are reread', async () => {
+test('Rust transcript service preserves listing results across warm scans and refreshes changed files', async () => {
   const root = mkdtempSync(join(tmpdir(), 'sing-sessions-cache-'));
   const project = 'cache-corpus';
   const dir = join(root, project);
@@ -406,34 +533,51 @@ test('listSessions: unchanged corpus stays cached beyond 200 entries and only ch
     writeFileSync(join(dir, `${id}.jsonl`), JSON.stringify({ type: 'user', message: { content: `prompt ${i}` } }) + '\n');
   }
 
-  const probe = await open(join(dir, 'fixture-000.jsonl'), 'r');
-  const handlePrototype = Object.getPrototypeOf(probe);
-  await probe.close();
-  const originalRead = handlePrototype.read;
-  let contentReads = 0;
-  handlePrototype.read = function (...args) {
-    contentReads++;
-    return originalRead.apply(this, args);
-  };
   try {
     const first = await listSessions({ root });
     assert.equal(first.length, 201);
-    assert.equal(contentReads, 201);
 
-    contentReads = 0;
     const second = await listSessions({ root });
     assert.deepEqual(second.map(({ id, blurb }) => [id, blurb]), first.map(({ id, blurb }) => [id, blurb]));
-    assert.equal(contentReads, 0, 'unchanged files should be served from metadata cache');
 
     writeFileSync(join(dir, 'fixture-100.jsonl'), JSON.stringify({ type: 'user', message: { content: 'updated prompt' } }) + '\n');
     const changedTime = new Date(Date.now() + 2000);
     utimesSync(join(dir, 'fixture-100.jsonl'), changedTime, changedTime);
-    contentReads = 0;
     const third = await listSessions({ root });
     assert.equal(third.find((row) => row.id === 'fixture-100').blurb, 'updated prompt');
-    assert.equal(contentReads, 1, 'only the changed file should be reread');
   } finally {
-    handlePrototype.read = originalRead;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('Rust transcript bridge preserves lone UTF-16 units and applies live state after transcript scans', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'sing-sessions-utf16-'));
+  const cwd = 'C:\\repo';
+  const project = 'C--repo';
+  const id = 'utf16-session';
+  const directory = join(root, project);
+  const subDir = join(directory, id, 'subagents');
+  const unit = String.fromCharCode(0xd800);
+  mkdirSync(subDir, { recursive: true });
+  writeFileSync(join(directory, `${id}.jsonl`), [
+    JSON.stringify({ type: 'ai-title', aiTitle: `title ${unit}` }),
+    JSON.stringify({ type: 'user', cwd, message: { content: `query ${unit}` } }),
+    JSON.stringify({ type: 'assistant', message: { model: 'gpt-6.1-sol', content: [{ type: 'text', text: `answer ${unit}` }] } }),
+  ].join('\n') + '\n');
+  writeFileSync(join(subDir, 'agent-child.jsonl'), JSON.stringify({ type: 'user', message: { content: 'child task' } }) + '\n');
+  writeFileSync(join(subDir, 'agent-child.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'nested' }));
+  try {
+    const rows = await listSessions({ root, isLive: (agentId) => agentId === 'agent-child' });
+    const row = rows.find((item) => item.id === id);
+    assert.equal(row.title, `title ${unit}`);
+    assert.equal(row.subagents[0].title, 'Explore: nested');
+    assert.equal(row.subagents[0].running, true);
+
+    const read = await readSession(project, id, root);
+    assert.equal(read.messages[1].text, `answer ${unit}`);
+    assert.equal((await searchSessions(unit, { root })).results[0].snippet.includes(unit), true);
+
+    const subs = await subagentsFor(cwd, id, (agentId) => agentId === 'agent-child', Date.now(), root);
+    assert.equal(subs[0].running, true);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

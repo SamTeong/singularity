@@ -1,12 +1,11 @@
 // Agent registry: spawn/kill, in-memory ptys, agents.json persistence, recent-repos.
 // Emits 'output'{id,data}, 'status'{id,status}, 'list' — pty-ws fans these out to sockets.
-import { spawn } from 'node-pty';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, accessSync, constants, readdirSync, statSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
-import { isClaudeModel, isCodexModel, validateToolModel } from './models.mjs';
+import { getModelRoute } from './models.mjs';
 import { findCodexThread, codexThreadExists, normPath } from './codex-thread.mjs';
 import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR, SHADOW } from './app-dir.mjs';
 export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR, SHADOW };
@@ -17,8 +16,7 @@ const RECENT_MAX = 10;
 
 // --- app-data dir ---
 // APP_DIR is defined in app-dir.mjs (single source — also imported by the
-// statusline script + usage.mjs, which can't pull in agents.mjs without loading
-// node-pty). The daemon ensures it exists on load.
+// statusline script + usage.mjs, which can't pull in agents.mjs. The daemon ensures it exists on load.
 const STATE_FILE = join(STATE_DIR, 'agents.json');
 // Skill-scopes surface root (for --add-dir <scope> into spawned agents). No
 // default — SING_SCOPE_ROOT must be set in .env. Null when unset; buildSpawn
@@ -30,8 +28,7 @@ if (!SHADOW) {
 }
 
 // --- claude/ollama binaries: absolute paths from .env (no PATH fallback) ---
-// Windows node-pty does NO PATH resolution, so the daemon requires explicit
-// absolute paths. resolveBin returns the .env path if it exists, else null;
+// The daemon requires explicit absolute paths. resolveBin returns the .env path if it exists, else null;
 // index.mjs requireEnv fails the daemon fast on null.
 function resolveBin(envOverride) {
   if (envOverride && existsSync(envOverride)) return envOverride;
@@ -52,6 +49,8 @@ let recentRepos = [];
 // agents.json. While draining we keep them so init() reloads them as 'detached'
 // (resumable) instead of dropping them from the list on restart.
 let draining = false;
+let ptyBackend = null;
+export function setPtyBackend(backend) { ptyBackend = backend; }
 // persist() writes the current fleet as detached (running→detached mapping), so
 // this snapshots every live session to disk at drain time — the authoritative
 // last write. onExit then no-ops (guard below), leaving the file intact.
@@ -85,6 +84,35 @@ export function writeAtomic(file, data, rename = renameSync) {
       Atomics.wait(retrySignal, 0, 0, 20 * attempt);
     }
   }
+}
+
+// A hard kill between writeFileSync and rename leaves `<file>.<pid>.tmp` behind,
+// and a pid-scoped name is never reused. Swept once at boot (index.mjs) before
+// init() loads state: top level of the state/cache dirs only, regular files
+// only, and nothing younger than 60 s — a write in flight is milliseconds old.
+const TMP_RE = /^.+\.\d+\.tmp$/;
+const TMP_STALE_MS = 60_000;
+export function sweepTmpFiles({ dirs = [STATE_DIR, CACHE_DIR], log = logger, now = Date.now() } = {}) {
+  let removed = 0;
+  for (const dir of dirs) {
+    let entries;
+    try { entries = readdirSync(dir, { withFileTypes: true }); }
+    catch (e) {
+      if (e.code !== 'ENOENT') log?.warn({ err: e.message, dir }, 'tmp sweep failed'); // a missing dir just has nothing to sweep
+      continue;
+    }
+    for (const entry of entries) {
+      if (!TMP_RE.test(entry.name) || !entry.isFile()) continue; // skips dirs + symlinks
+      const file = join(dir, entry.name);
+      try {
+        if (now - statSync(file).mtimeMs <= TMP_STALE_MS) continue;
+        unlinkSync(file);
+        removed++;
+      } catch (e) { log?.warn({ err: e.message, file }, 'tmp sweep failed'); }
+    }
+  }
+  if (removed) log?.info({ removed }, 'removed stale tmp files');
+  return removed;
 }
 
 let logger = null;
@@ -141,22 +169,23 @@ export function isLive(id) { return !!agents.get(id)?.proc; }
 // Resolve transcript identity to an owned process without conflating Codex's
 // rollout UUID with the registry key. A missing owner stays unknown to callers;
 // isLiveSession only answers whether this daemon owns a live process.
-export function codexOwnerForThread(threadId, cwd) {
+export async function codexOwnerForThread(threadId, cwd) {
   if (!threadId) return null;
   const wantCwd = cwd ? normPath(cwd) : null;
   for (const a of agents.values()) {
-    if (!(a.tool === 'codex' || isCodexModel(a.model))) continue;
     // Only a live owned process can conflict or be "live"; skip detached records
     // (a restart reloads them with proc:null) before discovery walks the rollout tree.
     if (!a.proc) continue;
     if (wantCwd && (!a.cwd || normPath(a.cwd) !== wantCwd)) continue;
-    if (rememberCodexThread(a) === threadId) return a.id;
+    const route = a.tool === 'codex' ? a.modelRoute : await getModelRoute(a.model, a.tool);
+    if (!(a.tool === 'codex' || route?.isCodexModel)) continue;
+    if (await rememberCodexThread(a, route) === threadId) return a.id;
   }
   return null;
 }
-export function isLiveSession(id, { source, cwd } = {}) {
+export async function isLiveSession(id, { source, cwd } = {}) {
   if (isLive(id)) return true;
-  return source === 'codex' && isLive(codexOwnerForThread(id, cwd));
+  return source === 'codex' && isLive(await codexOwnerForThread(id, cwd));
 }
 export function findByRunId(runId) { return [...agents.values()].find((a) => a.runId === runId) || null; }
 // Launch config for a registered agent (by id), for resuming a past session from
@@ -178,13 +207,13 @@ export function getLaunchConfig(id) {
 // own Windows case/separator handling. Same ceiling as getLaunchConfig: wire()'s
 // onExit deletes an exited agent's registry entry, so scopes are only
 // recoverable while the entry still exists (live or detached).
-export function getLaunchConfigForCodexThread(threadId, cwd) {
+export async function getLaunchConfigForCodexThread(threadId, cwd) {
   if (!threadId || !cwd) return null;
   const wantCwd = normPath(cwd);
   for (const a of agents.values()) {
-    if (!(a.tool === 'codex' || isCodexModel(a.model))) continue;
+    if (!(a.tool === 'codex' || (await getModelRoute(a.model, a.tool)).isCodexModel)) continue;
     if (!a.cwd || normPath(a.cwd) !== wantCwd) continue; // normPath resolve()s — a cwd-less record on disk would throw
-    if (findCodexThread(a.cwd, a.createdAt) === threadId) return getLaunchConfig(a.id);
+    if (await findCodexThread(a.cwd, a.createdAt) === threadId) return getLaunchConfig(a.id);
   }
   return null;
 }
@@ -195,27 +224,32 @@ export function getLaunchConfigForCodexThread(threadId, cwd) {
 // not the registry id, to open a codex session. Same discovery order buildSpawn
 // uses: time-based (cwd+createdAt) else the id itself when it's already a known
 // codex thread for this cwd (agents created from the Transcripts view).
-export function codexThreadFor(id) {
+export async function codexThreadFor(id) {
   const a = agents.get(id);
   if (!a) return null;
-  return rememberCodexThread(a);
+  a.modelRoute = await getModelRoute(a.model, a.tool);
+  return await rememberCodexThread(a);
 }
 // Discovery is by cwd + start-time window (codex has no --session-id to pin an
 // id at spawn), so it can drift to an unrelated codex thread the user started
 // in the same cwd later on — see findCodexThread's ceiling. Pin the first
 // answer onto the agent (persisted) and reuse it from then on: restart/reattach
 // resume the SAME thread they were live on, and repeat lookups skip the walk.
-function rememberCodexThread(a) {
-  if (!(a.tool === 'codex' || isCodexModel(a.model)) || !a.cwd) return null;
+async function rememberCodexThread(a, modelRoute = a.modelRoute) {
+  if (!(a.tool === 'codex' || modelRoute?.isCodexModel) || !a.cwd) return null;
   if (a.threadId) return a.threadId;
-  const found = (a.createdAt && findCodexThread(a.cwd, a.createdAt))
-    || (codexThreadExists(a.id, a.cwd) ? a.id : null);
+  const found = (a.createdAt && await findCodexThread(a.cwd, a.createdAt))
+    || (await codexThreadExists(a.id, a.cwd) ? a.id : null);
   if (found) { a.threadId = found; try { persist(); } catch { /* pin is a cache — a write failure must not fail the caller */ } }
   return found;
 }
 // PIDs of agents this daemon currently owns a live pty for (for process classification).
+export function liveProcessSnapshot() {
+  const live = [...agents.values()].filter((agent) => agent.proc);
+  return { pids: live.map((agent) => agent.pid), sessions: live.map((agent) => agent.id) };
+}
 export function livePids() {
-  return new Set([...agents.values()].filter((a) => a.proc).map((a) => a.pid));
+  return new Set(liveProcessSnapshot().pids);
 }
 
 function emitList() { bus.emit('list', snapshot()); }
@@ -246,6 +280,7 @@ function rememberRepo(cwd) {
 }
 
 function wire(a) {
+  const proc = a.proc;
   // Idle heuristic: Claude Code's TUI spinner emits output continuously while
   // working; a turn waiting for user input goes quiet. No pty output for
   // IDLE_MS while 'running' → mark 'idle'; the next byte flips it back.
@@ -253,13 +288,15 @@ function wire(a) {
     clearTimeout(a.idleTimer);
     a.idleTimer = setTimeout(() => { if (a.status === 'running') setStatus(a, 'idle'); }, IDLE_MS);
   };
-  a.proc.onData((data) => {
+  proc.onData((data) => {
+    if (agents.get(a.id) !== a || a.proc !== proc) return;
     pushBuf(a, data);
     if (a.status === 'starting' || a.status === 'idle') setStatus(a, 'running');
     bus.emit('output', { id: a.id, data });
     armIdle();
   });
-  a.proc.onExit(({ exitCode }) => {
+  proc.onExit((exitCode) => {
+    if (agents.get(a.id) !== a || a.proc !== proc) return;
     clearTimeout(a.idleTimer);
     a.proc = null;
     // Daemon shutdown killed this pty: keep the entry as-is (agents.json already
@@ -272,7 +309,12 @@ function wire(a) {
     if (a.respawnAfterExit) {
       const cfg = a.respawnAfterExit;
       agents.delete(a.id); // drop the dead entry so create() takes the fresh-spawn-over-existing-log path
-      setImmediate(() => { try { create({ sessionId: a.id, ...cfg }); } catch (e) { logger?.warn({ err: e.message }, 'respawn failed'); } });
+      setImmediate(() => {
+        void create({ sessionId: a.id, ...cfg }).catch((e) => {
+          logger?.warn({ err: e.message }, 'respawn failed');
+          bus.emit('respawn-failed', { id: a.id, error: e.message });
+        });
+      });
       persist();
       emitList();
       return;
@@ -286,20 +328,27 @@ function wire(a) {
       return;
     }
     setStatus(a, 'exited'); // status event for crons auto-kill; tracks activeMs
-    const isCodex = a.tool === 'codex' || isCodexModel(a.model);
-    const codexThreadId = isCodex ? rememberCodexThread(a) : null;
-    const resumeCmd = isCodex
-      ? (codexThreadId ? `codex resume ${codexThreadId}` : 'codex')
-      : isClaudeModel(a.model)
-        ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
-        : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
-    bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume: ${resumeCmd}\x1b[0m\r\n` });
-    // Drop the session from the list rather than leaving a dead 'exited' row;
-    // resume still works off the on-disk session log (new session, same id).
-    agents.delete(a.id);
-    persist();
-    emitList();
+    void getModelRoute(a.model, a.tool).then(async (modelRoute) => {
+      const isCodex = a.tool === 'codex' || modelRoute.isCodexModel;
+      const codexThreadId = isCodex ? await rememberCodexThread(a, modelRoute) : null;
+      const resumeCmd = isCodex
+        ? (codexThreadId ? `codex resume ${codexThreadId}` : 'codex')
+        : modelRoute.isClaudeModel
+          ? `claude --resume ${a.id}${a.model && a.model !== 'claude' ? ` --model ${a.model}` : ''}`
+          : `ollama launch claude --model ${a.model} -- --resume ${a.id}`;
+      bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume: ${resumeCmd}\x1b[0m\r\n` });
+    }).catch((error) => {
+      logger?.warn({ err: error.message, id: a.id }, 'could not build agent resume command');
+      bus.emit('output', { id: a.id, data: `\r\n\x1b[90m[agent exited code=${exitCode}] resume command unavailable\x1b[0m\r\n` });
+    }).finally(() => {
+      // Drop the session from the list rather than leaving a dead 'exited' row;
+      // resume still works off the on-disk session log (new session, same id).
+      agents.delete(a.id);
+      persist();
+      emitList();
+    }).catch((error) => logger?.warn({ err: error.message, id: a.id }, 'agent exit cleanup failed'));
   });
+  proc.activate();
 }
 
 // --- codex skill-scoping ---
@@ -347,14 +396,15 @@ function codexScopeConfig(scopes) {
 // Shared by create + reattach so reattach keeps the model + scopes.
 // `prompt` (initial user message) is only sent on a fresh spawn — passing it
 // with --resume would re-submit it as a new message on every reattach.
-export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId: pinned }, prompt) {
+export async function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId: pinned }, prompt, route) {
+  route ??= await getModelRoute(model, tool);
   // ponytail: codex has no --session-id/--name flag to pin an id at spawn (it
   // mints its own uuid) and no Task tool. The uuid is recovered after the fact
   // from its rollout file (findCodexThread) so reattach can `codex resume
   // <uuid>` instead of losing history. Model-driven: a gpt-* model routes here
   // even with tool='claude'. The tool toggle still covers the empty-model case
   // (codex's own default via config.toml).
-  if (tool === 'codex' || isCodexModel(model)) {
+  if (tool === 'codex' || route.isCodexModel) {
     if (!CODEX_BIN) throw new Error('codex not found (CODEX_BIN not set in .env)');
     // Prefer time-based discovery (reattach/respawn, createdAt set); else fall
     // back to the caller-supplied id when it's itself a known codex thread for
@@ -364,8 +414,8 @@ export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extr
     // A pinned thread (rememberCodexThread, carried through respawn/reattach)
     // wins over re-discovery — same thread every time, no time-window drift.
     const threadId = pinned
-      || (createdAt && findCodexThread(cwd, createdAt))
-      || (codexThreadExists(id, cwd) ? id : null);
+      || (createdAt && await findCodexThread(cwd, createdAt))
+      || (await codexThreadExists(id, cwd) ? id : null);
     const args = [];
     if (threadId) args.push('resume', threadId);
     const cfg = codexScopeConfig(scopes);
@@ -388,7 +438,7 @@ export function buildSpawn({ id, title, cwd, model, scopes, permissionMode, extr
   if (permissionMode) claudeArgs.push('--permission-mode', permissionMode);
   claudeArgs.push(...(extraArgs || []));
   if (prompt && !resuming) claudeArgs.push(prompt);
-  if (isClaudeModel(model)) {
+  if (route.isClaudeModel) {
     // claude bin; --model only for a specific (non-default) alias or full id.
     if (model && model !== 'claude') claudeArgs.push('--model', model);
     return { bin: CLAUDE_BIN, args: claudeArgs };
@@ -414,21 +464,6 @@ export function spawnEnv(mock) {
   return env;
 }
 
-// node-pty's raw spawn failure ("posix_spawnp failed." on macOS/Linux) names
-// neither the binary nor the cause. Wrap so the surfaced error is actionable —
-// the usual culprit is CLAUDE_BIN/OLLAMA_BIN pointing at a non-executable file
-// (missing +x, wrong arch, or a path that isn't the real binary).
-function spawnPty(bin, args, opts) {
-  try {
-    return spawn(bin, args, opts);
-  } catch (e) {
-    let hint = '';
-    try { accessSync(bin, constants.X_OK); }
-    catch { hint = ' — not executable; `chmod +x` it or point CLAUDE_BIN/OLLAMA_BIN at the real binary'; }
-    throw new Error(`failed to launch ${bin}: ${e.message}${hint}`, { cause: e });
-  }
-}
-
 // `~` is a shell-ism node never expands — a client that sends it raw (or whose
 // home dir hasn't loaded yet) would spawn into a literal '~' directory. Same
 // 2-liner config.mjs/hooks.mjs/rules.mjs/memory.mjs use on their own inputs.
@@ -438,7 +473,7 @@ export function untildify(p) {
 }
 
 // create new agent (id IS the claude --session-id)
-export function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt, threadId, runId }) {
+export async function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt, threadId, runId, modelRoute }) {
   if (SHADOW) throw new Error('shadow mode: read-only');
   cwd = untildify(cwd);
   const id = (sessionId && sessionId.trim()) || randomUUID();
@@ -451,11 +486,12 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
     // rather than refusing. reattach keeps the original model + skill-scopes.
     return reattach(id);
   }
-  if ((tool === 'codex' || isCodexModel(model)) && codexOwnerForThread(id, cwd)) {
+  if ((tool === 'codex' || (modelRoute ??= await getModelRoute(model, tool)).isCodexModel) && await codexOwnerForThread(id, cwd)) {
     throw new Error('codex thread already in use');
   }
   if (!cwd || !existsSync(cwd)) throw new Error(`working directory does not exist: ${cwd || '(empty)'}`);
-  validateToolModel(tool, model);
+  modelRoute ??= await getModelRoute(model, tool);
+  if (modelRoute.toolModelError) throw new Error(modelRoute.toolModelError);
   const displayName = title || id.slice(0, 8);
   // `createdAt` is only set by respawn() (theme toggle), where the codex thread
   // must be recovered so history survives. A genuinely fresh create must NOT
@@ -463,10 +499,11 @@ export function create({ cwd, title, model, scopes, sessionId, prompt, permissio
   // window it would resume an unrelated codex session the user started in the
   // same cwd by hand.
   const spawnedAt = createdAt || Date.now();
-  const { bin, args } = buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId }, prompt);
+  const { bin, args } = await buildSpawn({ id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, tool, createdAt, threadId }, prompt, modelRoute);
   ensureTrusted(cwd);
-  const proc = spawnPty(bin, args, { cwd, cols: 80, rows: 24, env: spawnEnv(mock), useConptyDll: true });
-  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, runId, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
+  if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
+  const proc = await ptyBackend.spawn({ id, bin, args, cwd, cols: 80, rows: 24, env: spawnEnv(mock) });
+  const a = { id, title: displayName, cwd, model, scopes, permissionMode, extraArgs, mock: !!mock, tool, threadId, runId, modelRoute, activeMs: 0, status: 'starting', pid: proc.pid, createdAt: spawnedAt, proc, buf: [], written: 0 };
   agents.set(id, a);
   wire(a);
   rememberRepo(cwd);
@@ -503,16 +540,16 @@ function sessionLogExists(cwd, id) {
 // else spawn fresh with the same `--session-id` (a session that never had a
 // turn has no log to resume — resuming it errors "No conversation found").
 // buildSpawn keeps the agent's model + skill-scopes from create time.
-export function reattach(id) {
+export async function reattach(id) {
   if (SHADOW) throw new Error('shadow mode: read-only');
   const a = agents.get(id);
   if (!a || a.proc) return a;
-  const { bin, args } = buildSpawn(a);
+  const modelRoute = await getModelRoute(a.model, a.tool);
+  const { bin, args } = await buildSpawn(a, undefined, modelRoute);
   ensureTrusted(a.cwd);
-  const proc = spawnPty(bin, args, {
-    cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock), useConptyDll: true,
-  });
-  a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting';
+  if (!ptyBackend) throw new Error('Rust PTY backend is not configured');
+  const proc = await ptyBackend.spawn({ id, bin, args, cwd: a.cwd, cols: 80, rows: 24, env: spawnEnv(a.mock) });
+  a.proc = proc; a.pid = proc.pid; a.buf = []; a.written = 0; a.status = 'starting'; a.modelRoute = modelRoute;
   wire(a);
   persist();
   emitList();
@@ -521,8 +558,7 @@ export function reattach(id) {
 
 // Resolve wt.exe: prefer the Store App-Execution-Alias path (unambiguous),
 // else fall back to PATH — winget/choco/scoop/portable installs put wt.exe
-// on PATH but not at the alias. node-pty does no PATH resolution, so we
-// resolve to an absolute path ourselves rather than handing it a bare name.
+// on PATH but not at the alias. Resolve to an absolute path before launching it.
 export function resolveWt(env = process.env) {
   if (env.LOCALAPPDATA) {
     const alias = join(env.LOCALAPPDATA, 'Microsoft', 'WindowsApps', 'wt.exe');
@@ -542,10 +578,11 @@ export function resolveWt(env = process.env) {
 // detached-spawn (keeps node:child_process out of this module). Reuses
 // buildSpawn so the resume argv matches in-app reattach (scopes, model,
 // permission-mode, ollama wrapper). `platform` param only for testability.
-export function externalLaunch(id, platform = process.platform, env = process.env) {
+export async function externalLaunch(id, platform = process.platform, env = process.env) {
   const a = agents.get(id);
   if (!a) return { ok: false, error: 'no such session' };
-  const { bin, args } = buildSpawn(a);
+  const modelRoute = await getModelRoute(a.model, a.tool);
+  const { bin, args } = await buildSpawn(a, undefined, modelRoute);
   if (platform === 'win32') {
     // wt.exe is a Windows App Execution Alias: a reparse-point stub that
     // existsSync/statSync reports as EACCES (that's the "flaky" lookup the
@@ -569,7 +606,7 @@ export function externalLaunch(id, platform = process.platform, env = process.en
 // id so claude's own history doesn't collide with the source) into a new
 // session log, then create()s a fresh agent over it — no log yet → create()
 // falls back to a fresh --session-id spawn, i.e. a config-only copy.
-export function fork(srcId, title) {
+export async function fork(srcId, title) {
   if (SHADOW) throw new Error('shadow mode: read-only');
   const src = agents.get(srcId);
   if (!src) throw new Error('source not found');
@@ -581,17 +618,27 @@ export function fork(srcId, title) {
     writeFileSync(join(dir, `${newId}.jsonl`), content);
   }
   // no source log → nothing written → create() spawns fresh with --session-id (fallback = copy)
-  return create({ cwd: src.cwd, title, model: src.model, scopes: src.scopes, sessionId: newId, tool: src.tool });
+  return await create({ cwd: src.cwd, title, model: src.model, scopes: src.scopes, sessionId: newId, tool: src.tool });
 }
 
-export function input(id, data) { agents.get(id)?.proc?.write(data); }
-export function resize(id, cols, rows) { try { agents.get(id)?.proc?.resize(cols, rows); } catch {} }
+export function input(id, data) {
+  const proc = agents.get(id)?.proc;
+  if (proc) void proc.write(data).catch((error) => logger?.warn({ err: error.message, id }, 'agent input failed'));
+}
+export function resize(id, cols, rows) {
+  try { const result = agents.get(id)?.proc?.resize(cols, rows); result?.catch(() => {}); } catch {}
+}
+
+function killPty(proc, id) {
+  try { void proc.kill().catch((error) => logger?.warn({ err: error.message, id }, 'agent kill failed')); }
+  catch (error) { logger?.warn({ err: error.message, id }, 'agent kill failed'); }
+}
 
 // kill live agent; remove dead/detached agent from registry.
 export function kill(id) {
   const a = agents.get(id);
   if (!a) return;
-  if (a.proc) { a.proc.kill(); return; } // onExit -> status exited + persist
+  if (a.proc) { killPty(a.proc, id); return; } // onExit -> status exited + persist
   agents.delete(id);
   persist();
   emitList();
@@ -605,7 +652,7 @@ export function kill(id) {
 export function remove(id) {
   const a = agents.get(id);
   if (!a) return;
-  if (a.proc) { a.removeOnExit = true; a.proc.kill(); return; } // onExit -> delete
+  if (a.proc) { a.removeOnExit = true; killPty(a.proc, id); return; } // onExit -> delete
   agents.delete(id);
   persist();
   emitList();
@@ -613,20 +660,21 @@ export function remove(id) {
 
 // Respawn one live agent: kill it, and its onExit resumes with the same config
 // (log survives → --resume, history kept). Used to pick up a new terminal theme.
-export function respawn(id) {
+export async function respawn(id) {
   const a = agents.get(id);
   if (!a?.proc) return false;
   // Pin the codex thread while the agent is still live: discovery after the kill
   // can drift to a newer codex thread in the same cwd (see rememberCodexThread).
-  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool, createdAt: a.createdAt, threadId: rememberCodexThread(a) || undefined };
-  a.proc.kill();
+  const threadId = await rememberCodexThread(a);
+  a.respawnAfterExit = { title: a.title, cwd: a.cwd, model: a.model, scopes: a.scopes, permissionMode: a.permissionMode, extraArgs: a.extraArgs, tool: a.tool, createdAt: a.createdAt, threadId: threadId || undefined };
+  killPty(a.proc, id);
   return true;
 }
 
 // Respawn every live agent (e.g. after an app theme toggle).
-export function respawnAll() {
+export async function respawnAll() {
   const ids = [];
-  for (const a of agents.values()) if (respawn(a.id)) ids.push(a.id);
+  for (const a of [...agents.values()]) if (await respawn(a.id)) ids.push(a.id);
   return ids;
 }
 
