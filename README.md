@@ -6,15 +6,23 @@ One control plane for your whole fleet of coding agents for spec-driven developm
 
 ## Run
 
+Requires Node/pnpm (versions in `package.json`), Git and stable Rust with Cargo.
+Windows also needs Visual Studio C++ Build Tools (MSVC).
+
 ```
 pnpm bootstrap       # run on first setup to generate .env (CLAUDE_BIN is detected) + wire usage-report + install + start
 pnpm install         # installs dependencies, runs postinstall hook
-pnpm postinstall     # mac: run if agents fail with "posix_spawnp failed"
-pnpm start           # build web + serve on http://127.0.0.1:4317
+pnpm start           # build web + Rust; serve through Node/Fastify on http://127.0.0.1:4317
+pnpm start:rust      # build web + Rust; serve directly through the native Axum daemon
 pnpm build           # build web only (vite build → web/dist); serve separately with `pnpm server`
-pnpm test            # node --test-force-exit "server/*.test.mjs"
+pnpm test            # build Rust, then run all Node unit/integration test groups
 pnpm clean           # reap orphan esbuild/vite procs (fixes build hangs before a fresh build)
 ```
+
+The default Node daemon now delegates migrated services and PTYs to Rust
+subprocesses. Native Rust HTTP is an explicit `start:rust` mode; Node HTTP has
+not been removed. See [Backend runtime and Rust migration](docs/backend.md) for
+ownership, settings, compatibility and native verification.
 
 Dev (with live-reload web):
 
@@ -24,7 +32,27 @@ pnpm dev             # daemon (127.0.0.1:4317) + Vite (127.0.0.1:5317) → brows
 
 Vite proxies `/ws` and all REST requests to daemon. Run components separately with `pnpm server` / `pnpm web`.
 
-Backend modules → routes in `server/index.mjs`. Add a concern = new module + route + co-located test. New server route → also add its prefix to the Vite dev proxy (`web/vite.config.mjs`), or dev falls through to the SPA shell.
+The default HTTP host mounts routes in `server/index.mjs`; migrated service logic
+lives in `rust/backend`. New server route → also add its prefix to the Vite dev
+proxy (`web/vite.config.mjs`), or dev falls through to the SPA shell.
+
+## Testing
+
+```sh
+pnpm lint
+pnpm test:changed --plan  # inspect affected unit groups and browser specs
+pnpm test:changed         # run affected tests, including unchanged consumers
+pnpm test                # full Node unit/integration suite, with Rust prebuild
+cargo test --manifest-path rust/backend/Cargo.toml
+pnpm test:e2e-mock        # browser UI contracts against the in-browser backend
+pnpm test:e2e             # real sandbox daemon and filesystem/API contracts
+```
+
+[Testing](docs/testing.md) covers base selection, explicit unit groups, Rust
+integration prerequisites, CI sharding and artifact cleanup. Folder boundaries
+and dependency rules support affected testing without splitting into packages;
+shared or unknown source changes retain broader coverage. Real daemon E2E is
+local-only; CI selects Node groups and mock browser specs.
 
 ## License
 
@@ -63,17 +91,16 @@ own chrome and breakpoint pixels.
 Run the responsive Playwright projects (mock mode) with:
 
 ```
-pnpm test:e2e-mock -- --project=responsive-narrowest    # 320x667
-pnpm test:e2e-mock -- --project=responsive-phone         # 375x667
-pnpm test:e2e-mock -- --project=responsive-tablet        # 768x1024
-pnpm test:e2e-mock -- --project=responsive-compact-desktop  # 1024x768
-pnpm test:e2e-mock -- --project=responsive-desktop       # 1440x900
+pnpm test:e2e-mock --project=responsive-narrowest   # 320x667
+pnpm test:e2e-mock --project=responsive-desktop     # 1440x900
 ```
 
-Each runs the full 15-route x 2-skin baseline contract (`e2e-mock/responsive.spec.mjs`);
+Each runs the route-catalog × 2-skin baseline contract (`e2e-mock/responsive.spec.mjs`);
 per-feature responsive specs (`e2e-mock/*-responsive.spec.mjs`, `shell-mobile-nav.spec.mjs`,
 `shell-dock-responsive.spec.mjs`) set their own viewports per test and run in
 the default `chromium` project instead, since they exercise live crossings.
+The separate `webkit-iphone-safari-emulation` project covers targeted mobile
+WebKit behavior; it is emulation, not physical-device coverage.
 
 ## Security
 
@@ -86,8 +113,7 @@ served shell so the UI works transparently.
 
 ## Notes
 
-- `CLAUDE_BIN` must be an **absolute path** in `.env` — the daemon does no PATH resolution and Windows node-pty needs a real exe path. `pnpm bootstrap` detects it for you; otherwise set it by hand.
+- `CLAUDE_BIN` must be an **absolute path** in `.env` for the default Node daemon — it validates the executable path rather than resolving it from PATH. `pnpm bootstrap` detects it for you; otherwise set it by hand.
 - App data (registry, tasks, cron jobs, picker roots) lives under `SINGULARITY_HOME` (set in `.env`; `pnpm bootstrap` defaults it to `~/.singularity`). Git worktrees + ticket requirements/plans (`.worktrees/`, `.tickets/<id>/`) live at the repo root, or `SING_TRUSTED_ROOT` if set (trusted, gitignored) so Claude honors the repo's permission rules.
 - Per-session cost is shown as **turns + total tokens + `$`** — the dollar figure comes from the global statusline (`harness-usage-report` skill), the single source of truth for every session; a pricing-table estimate is the fallback when no statusline cost exists. `pnpm bootstrap` wires that cost capture (SessionEnd hook + statusline into `~/.claude/settings.json`); it skips a statusline you already have and never fails bootstrap if the wiring can't be written. Report generation is native — no skill path is configured. Reports land in `SING_USAGE_REPORTS` when set, else `<dirname(USAGE_REPORT_STATE || ~/.agents/.harness-usage-report/state)>/reports`.
 - The UI theme (`@zapac/mui-theme`) is vendored as a tgz in `vendor/`, so `pnpm install` works anywhere — no external path dependency.
-- **`spawn failed: posix_spawnp failed`** on macOS/Linux means node-pty's `spawn-helper` prebuilt lost its execute bit (pnpm's store sometimes extracts it `0644`), so every agent spawn fails. The `postinstall` hook (`scripts/fix-pty-helper.mjs`) restores `+x` automatically after each install; run `pnpm run postinstall` by hand if it recurs. This is not related to `CLAUDE_BIN`.

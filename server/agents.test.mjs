@@ -594,7 +594,11 @@ test('beginDrain: live session persists to agents.json and survives its pty exit
   assert.equal(onDisk.status, 'detached', 'stored as detached (resumable)');
 
   kill(id); // pty dies → onExit must NOT delete the entry while draining
-  await new Promise((r) => setTimeout(r, 500)); // let onExit fire
+  const exitDeadline = Date.now() + 5_000;
+  while (isLive(id) && Date.now() < exitDeadline) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  assert.equal(isLive(id), false, 'pty exits after kill while draining');
   assert.ok(snapshot().find((x) => x.id === id), 'entry retained in registry after pty exit (drain guard)');
   assert.ok(readAgents().find((x) => x.id === id), 'entry retained in agents.json after pty exit');
 });

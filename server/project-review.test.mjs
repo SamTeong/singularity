@@ -52,7 +52,16 @@ function rmRepo(dir) {
     const p = join(dir, e.name);
     if (e.isDirectory()) rmRepo(p); else chmodSync(p, 0o666);
   }
-  rmSync(dir, { recursive: true, force: true });
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  for (let retries = 0; ; retries++) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+      break;
+    } catch (error) {
+      if (!['EPERM', 'EBUSY', 'ENOTEMPTY'].includes(error.code) || retries >= 5) throw error;
+      Atomics.wait(pause, 0, 0, 100);
+    }
+  }
 }
 
 const repo = initRepo();

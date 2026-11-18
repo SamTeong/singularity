@@ -6,6 +6,7 @@
 //   node scripts/test-changed.mjs                 run what changed vs origin/main
 //   node scripts/test-changed.mjs --base main     pick another base ref
 //   node scripts/test-changed.mjs --all           run everything
+//   node scripts/test-changed.mjs --unit web,scripts run named unit buckets only
 //   node scripts/test-changed.mjs --plan          print the selection as JSON; under
 //                                                 GitHub Actions also write step outputs
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -35,6 +36,29 @@ export const FEATURE_SPEC_ALIASES = {
   palette: ['nav'], // command palette is shell-level; nav.spec owns shell routing
 };
 
+// Feature imports that cross route boundaries. A changed producer selects its
+// own specs and the direct/transitive consumers that render its components.
+export const FEATURE_CONSUMERS = {
+  explorer: ['config'],
+  tasks: ['projects'],
+  sessions: ['transcripts'],
+  transcripts: ['tasks'],
+};
+
+// Routes with browser contracts shared across feature boundaries.
+export const SHARED_FEATURE_SPECS = {
+  tasks: ['responsive.spec.mjs', 'webkit-mobile.spec.mjs'],
+  usage: ['webkit-mobile.spec.mjs'],
+  automation: ['tasks-automation-responsive.spec.mjs'],
+  history: ['transcripts.spec.mjs'],
+  transcripts: ['history.spec.mjs'],
+};
+
+export function featureImportSpecifiers(source) {
+  const imports = /(?:from\s*|import\s*\()(['"])([^'"]+)\1|\bimport\s+(['"])([^'"]+)\3/g;
+  return [...source.matchAll(imports)].map((match) => match[2] ?? match[4]);
+}
+
 // Paths that cannot affect any test. Docs, planning data, the standalone Pages
 // app (own workflow) and agent config.
 const IGNORED = [
@@ -59,34 +83,62 @@ export function select(files, mockSpecs) {
     daemon = true;
   };
   const specsFor = (feature) => {
-    const prefixes = FEATURE_SPEC_ALIASES[feature] ?? [feature];
+    const prefixes = [feature, ...(FEATURE_SPEC_ALIASES[feature] ?? [])];
     const hits = mockSpecs.filter((s) => prefixes.some((p) => s === `${p}.spec.mjs` || s.startsWith(`${p}-`)));
     return hits.length ? hits : null;
+  };
+  const featuresFor = (feature) => {
+    const found = new Set();
+    const visit = (current) => {
+      if (found.has(current)) return;
+      found.add(current);
+      (FEATURE_CONSUMERS[current] ?? []).forEach(visit);
+    };
+    visit(feature);
+    return found;
   };
 
   for (const f of files) {
     let m;
     if (IGNORED.some((re) => re.test(f))) continue;
-    if (f.startsWith('server/') || f.startsWith('rust/')) {
+    if (/^server\/[^/]+\.test\.mjs$/.test(f)) {
+      unit.add('server');
+    } else if (/^web\/.*\.test\.mjs$/.test(f)) {
+      unit.add('web');
+    } else if (f.startsWith('server/') || f.startsWith('rust/')) {
       unit.add('server');
       daemon = true;
     } else if ((m = f.match(/^web\/src\/features\/([^/]+)\//))) {
       unit.add('web');
+      unit.add('scripts'); // keep the cross-feature import drift guard active
       daemon = true;
-      const specs = specsFor(m[1]);
-      if (specs) specs.forEach((s) => mock.add(s));
-      else mockAll = true;
+      if (mockSpecs.includes('responsive.spec.mjs')) mock.add('responsive.spec.mjs');
+      for (const feature of featuresFor(m[1])) {
+        const specs = specsFor(feature);
+        if (specs) specs.forEach((s) => mock.add(s));
+        else mockAll = true;
+        (SHARED_FEATURE_SPECS[feature] ?? []).forEach((s) => mock.add(s));
+      }
     } else if (f.startsWith('web/')) {
       // shell, components, hooks, lib, providers, theme, mock backend, vite config
       unit.add('web');
       mockAll = true;
       daemon = true;
     } else if ((m = f.match(/^e2e-mock\/([^/]+\.spec\.mjs)$/))) {
+      unit.add('scripts'); // keep feature/spec mapping checks active for additions and renames
       if (mockSpecs.includes(m[1])) mock.add(m[1]); // a deleted spec needs no run
+    } else if (f.startsWith('e2e/helpers/')) {
+      mockAll = true;
+      daemon = true;
+    } else if (f.startsWith('e2e-mock/helpers/')) {
+      mockAll = true;
     } else if (f.startsWith('e2e-mock/') || f === 'playwright.mock.config.mjs') {
       mockAll = true;
     } else if (f.startsWith('e2e/') || f === 'playwright.config.mjs') {
       daemon = true;
+    } else if (f === '.claude/skills/harness-usage-report/scripts/statusline.mjs') {
+      unit.add('server');
+      unit.add('usageReport');
     } else if (f.startsWith('.claude/skills/harness-usage-report/scripts/')) {
       unit.add('usageReport');
     } else if (/^scripts\/[^/]+\.test\.mjs$/.test(f) || f === 'scripts/test-changed.mjs') {
@@ -135,6 +187,15 @@ function run(cmd, args) {
 function main(argv) {
   const opt = (name) => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
   const specs = listMockSpecs();
+  const unitArg = opt('--unit');
+  if (argv.includes('--unit')) {
+    if (!unitArg) throw new Error('--unit requires a comma-separated group list');
+    const selected = [...new Set(unitArg.split(',').filter(Boolean))];
+    const invalid = selected.filter((k) => !Object.hasOwn(UNIT_GLOBS, k));
+    if (!selected.length || invalid.length) throw new Error(`Invalid --unit groups: ${invalid.join(',') || unitArg}`);
+    runUnitGroups(selected);
+    return;
+  }
   const all = argv.includes('--all');
   const files = all ? [] : changedFiles(opt('--base') ?? 'origin/main');
   const sel = all ? select(['package.json'], specs) : select(files, specs);
@@ -145,6 +206,7 @@ function main(argv) {
     if (process.env.GITHUB_OUTPUT) {
       appendFileSync(process.env.GITHUB_OUTPUT, [
         `unit=${sel.unit.length > 0}`,
+        `unit_groups=${sel.unit.join(',')}`,
         `mock=${sel.mock === ALL ? ALL : sel.mock.length ? 'some' : 'none'}`,
         `mock_specs=${sel.mock === ALL ? '' : sel.mock.join(' ')}`,
         `shards=${JSON.stringify(Array.from({ length: shards }, (_, i) => i + 1))}`,
@@ -156,13 +218,25 @@ function main(argv) {
   }
 
   if (!sel.unit.length && !sel.mock.length && !sel.daemon) return console.log('No test-relevant changes.');
-  if (sel.unit.includes('server') || sel.daemon) run('node', ['scripts/build-rust-backend.mjs']);
-  if (sel.unit.length) run('node', ['--test', '--test-force-exit', ...sel.unit.map((k) => `"${UNIT_GLOBS[k]}"`)]);
+  if (sel.daemon && !sel.unit.includes('server')) run('node', ['scripts/build-rust-backend.mjs']);
+  if (sel.unit.length) runUnitGroups(sel.unit);
   if (sel.mock.length) {
     run('pnpm', ['build:mock']);
     run('pnpm', ['exec', 'playwright', 'test', '--config', 'playwright.mock.config.mjs', ...(sel.mock === ALL ? [] : sel.mock)]);
   }
   if (sel.daemon) run('pnpm', ['test:e2e']);
+}
+
+/** Run only named unit buckets; shared by local selection and CI dispatch. */
+export function runUnitGroups(groups) {
+  for (const { cmd, args } of unitRunPlan(groups)) run(cmd, args);
+}
+
+export function unitRunPlan(groups) {
+  const plan = [];
+  if (groups.includes('server')) plan.push({ cmd: 'node', args: ['scripts/build-rust-backend.mjs'] });
+  plan.push({ cmd: 'node', args: ['--test', '--test-force-exit', ...groups.map((k) => `"${UNIT_GLOBS[k]}"`)] });
+  return plan;
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) main(process.argv.slice(2));
