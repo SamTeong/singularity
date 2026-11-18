@@ -204,8 +204,11 @@ test('board arrow keys traverse sessions and their plan stack; session-id search
   await page.getByText('active', { exact: true }).click();
   await expect(page).not.toHaveURL(/status=active/);
   await page.keyboard.press('Escape');
+  // The popover's focus trap would swallow the search Enter until it closes.
+  await expect(page.getByRole('tab', { name: /status/i })).toBeHidden();
   // Searching the already-selected sid clears the hiding filter, keeps it selected and expanded.
   await search.fill('b0000000-0000-4000-8000-000000000005');
+  await expect(hits.first()).toBeVisible();
   await search.press('Enter');
   await expect(page).not.toHaveURL(/status=/);
   await expect(page).toHaveURL(/sid=b0000000-0000-4000-8000-000000000005/);

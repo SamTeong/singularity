@@ -1080,6 +1080,9 @@ export default function PlansView({ onToast }) {
           // ENTER executes the search: open the top hit (matches are already
           // sorted newest-first by the sessions list).
           if (e.key === 'Enter' && searchMatches.length > 0) {
+            // Focus moves onto the opened card before keypress; without this the
+            // same Enter would click (collapse) it.
+            e.preventDefault();
             const hit = searchMatches[0];
             focusSession(hit.sid);
             setSid(hit.sid);
