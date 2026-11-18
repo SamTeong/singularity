@@ -737,10 +737,6 @@ impl Registry {
     /// spawn and one `session id already in use`, like Node's synchronous
     /// `agents.get`/`agents.set` pair.
     pub fn create(&self, input: CreateAgent) -> Result<AgentWire, String> {
-        // Shadow never spawns: create, reattach and fork all refuse.
-        if crate::shadow::enabled() {
-            return Err(crate::shadow::ERROR.to_owned());
-        }
         let home = self.config.bins.paths.home.clone();
         let cwd = input.cwd.as_deref().map(|raw| untildify_cwd(raw, &home));
         let id = input
@@ -833,9 +829,6 @@ impl Registry {
     /// is returned unchanged (Node's `if (!a || a.proc) return a`), and the
     /// reservation makes that check atomic with the registration.
     pub fn reattach(&self, id: &str) -> Result<Option<AgentWire>, String> {
-        if crate::shadow::enabled() {
-            return Err(crate::shadow::ERROR.to_owned());
-        }
         #[cfg(test)]
         self.interleave(id, InterleaveStage::Enter);
         let reservation = {
@@ -1195,9 +1188,6 @@ impl Registry {
     /// occurrence of the source id rewritten to the new id, then `create()` a
     /// fresh agent over it (no log → a config-only copy).
     pub fn fork(&self, src_id: &str, title: &str) -> Result<AgentWire, String> {
-        if crate::shadow::enabled() {
-            return Err(crate::shadow::ERROR.to_owned());
-        }
         let src = self
             .record(src_id)
             .ok_or_else(|| "source not found".to_owned())?;
@@ -1486,9 +1476,6 @@ impl Registry {
     /// folded into `activeMs`; a genuine write failure is returned with Node's
     /// `agents.json write failed: …` message (the HTTP layer maps it to 500).
     pub fn persist(&self) -> Result<(), String> {
-        if crate::shadow::enabled() {
-            return Ok(()); // shadow: agents.json belongs to the primary daemon
-        }
         let _persisting = self
             .persist_lock
             .lock()

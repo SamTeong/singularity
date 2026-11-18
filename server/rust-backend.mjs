@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const defaultBinary = process.env.SINGULARITY_RUST_BACKEND_BINARY
   ?? resolve(__dirname, '..', 'rust', 'backend', 'target', 'release', process.platform === 'win32' ? 'singularity-backend.exe' : 'singularity-backend');
-const childEnv = Object.fromEntries(['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'WINDIR', 'SINGULARITY_SHADOW']
+const childEnv = Object.fromEntries(['PATH', 'HOME', 'USERPROFILE', 'SystemRoot', 'WINDIR']
   .filter((key) => process.env[key] !== undefined)
   .map((key) => [key, process.env[key]]));
 

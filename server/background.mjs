@@ -15,7 +15,6 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import * as reg from './agents.mjs';
-import { SHADOW } from './app-dir.mjs';
 import { createTask, updateTask, snapshotTasks } from './tasks.mjs';
 import { getUsage } from './usage.mjs';
 import { parseSession } from './stats.mjs';
@@ -304,13 +303,12 @@ export function initBackground(log) {
       const loaded = JSON.parse(readFileSync(BACKGROUND_FILE, 'utf8'));
       const { jobs, migrated } = migrateLegacyConfig(loaded);
       config = { jobs };
-      if (migrated && !SHADOW) persist(); // rewrite state/background.json to the new {jobs} shape
+      if (migrated) persist(); // rewrite state/background.json to the new {jobs} shape
       log?.info({ jobs: config.jobs.length, migrated }, 'loaded background.json');
-    } else if (!SHADOW) {
+    } else {
       persist(); // materialize the shipped default so the file exists
     }
   } catch (e) { log?.warn({ err: e.message }, 'background.json load failed'); }
-  if (SHADOW) return; // read-only: no recovery, intervals or listeners
   const { tasks } = snapshotTasks();
   let recovered = false;
   const recoveredJobs = config.jobs.map((job) => {

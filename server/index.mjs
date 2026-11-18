@@ -9,8 +9,7 @@ import { existsSync, readdirSync, statSync, readFileSync } from 'node:fs';
 import { parse as parsePath } from 'node:path';
 import { homedir } from 'node:os';
 import { spawn } from 'node:child_process';
-import { SHADOW, shadowAllows } from './app-dir.mjs';
-if (!SHADOW) await import('./migrate-state.mjs');
+await import('./migrate-state.mjs');
 import { attachPtyWs } from './pty-ws.mjs';
 import * as reg from './agents.mjs';
 import { scanClaude, killClaudePid, setProcsBackend } from './procs.mjs';
@@ -352,13 +351,6 @@ let wss; // assigned after listen; /health reports live WS client count for dev 
 // change, and re-indenting ~500 lines would bury it in whitespace. The callback
 // param shadows the outer `app` on purpose, so no route line needs editing.
 await app.register(async (app) => {
-
-if (SHADOW) {
-  app.addHook('onRequest', async (req, reply) => {
-    const path = req.raw.url.split('?')[0].replace(/^\/api/, '');
-    if (!shadowAllows(req.method, path)) return reply.code(403).send({ error: 'shadow mode: read-only' });
-  });
-}
 
 // Token gate: guards the whole API surface; health + capabilities stay open.
 if (TOKEN) {
@@ -906,10 +898,9 @@ app.post('/history/regenerate', async (req, reply) => {
 
 }, { prefix: '/api' });
 
-if (SHADOW) app.log.info('shadow mode: read-only');
 // Boot sweep: drop tmp files a hard-killed previous daemon left mid-write. Runs
 // after migrate-state (import above) and before init() loads state from disk.
-if (!SHADOW) reg.sweepTmpFiles({ log: app.log });
+reg.sweepTmpFiles({ log: app.log });
 reg.init(app.log);
 // Fire-and-forget: fills the last 7 days on boot, never blocks listen. Errors
 // are logged (route-level failures still degrade to a live-only "today").
@@ -924,7 +915,7 @@ try {
 }
 initCrons(app.log);
 initBackground(app.log);
-await initWindowAnchor({ log: app.log, storage: rustBackend, ...(SHADOW && { enabled: '' }) });
+await initWindowAnchor({ log: app.log, storage: rustBackend });
 initUsageAutoRefresh(reg.bus);
 initTasks(app.log);
 // ponytail: retry bind — a /restart child waits for the old daemon to free the port

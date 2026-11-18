@@ -281,26 +281,6 @@ fn main() -> io::Result<()> {
         }
         let parsed = serde_json::from_str::<Request>(&line);
         if let Ok(request) = &parsed {
-            if singularity_backend::shadow::enabled()
-                && singularity_backend::shadow::bridge_op_writes(&request.op)
-            {
-                let error = serde_json::json!({ "ok": false, "error": singularity_backend::shadow::ERROR });
-                if request.op == "oneshot_async" {
-                    write_line(
-                        &stdout,
-                        &serde_json::json!({ "type": "oneshot_reply", "id": request.id, "response": error }),
-                    )?;
-                } else {
-                    write_response_line(
-                        &stdout,
-                        request.id.as_ref(),
-                        singularity_backend::transcript_bridge::ResponseBody::Value(error),
-                    )?;
-                }
-                continue;
-            }
-        }
-        if let Ok(request) = &parsed {
             if request.op == "oneshot_async" {
                 let id = request.id.as_ref().and_then(Value::as_str);
                 if let Some(id) = id {

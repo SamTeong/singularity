@@ -18,7 +18,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE, SHADOW } from './app-dir.mjs';
+import { STATE_DIR, CACHE_DIR, USAGE_SKILL_STATE } from './app-dir.mjs';
 import { fetchExternal, retryAfterMs } from './external-fetch.mjs';
 import { newestSnapshotArchive } from './usage-history.mjs';
 
@@ -100,7 +100,6 @@ export function parseOllamaHtml(html) {
 const OLLAMA_HISTORY = join(USAGE_SKILL_STATE, 'ollama-usage.jsonl');
 
 export async function appendOllamaHistory(data) {
-  if (SHADOW) return false;
   try {
     const result = await usageSnapshotBackend.providerUsageSnapshot({
       operation: 'append_ollama', path: OLLAMA_HISTORY, reading: data, now_ms: Date.now(),
@@ -118,7 +117,6 @@ export async function appendOllamaHistory(data) {
 // reading, and a zero-delta duplicate line is harmless to the estimators.
 const CODEX_HISTORY = join(USAGE_SKILL_STATE, 'codex-usage.jsonl');
 export async function appendCodexHistory(data) {
-  if (SHADOW) return false;
   try {
     const result = await usageSnapshotBackend.providerUsageSnapshot({
       operation: 'append_codex', path: CODEX_HISTORY, reading: data, now_ms: Date.now(),
@@ -141,7 +139,6 @@ export const SNAPSHOT_MAX_AGE_MS = 2 * NETWORK_FLOOR_MS; // one missed ~60s stat
 export const CLAUDE_STALE_MAX_MS = 5 * 3.6e6;
 
 async function appendClaudeHistory(record, limits) {
-  if (SHADOW) return false;
   try {
     const costState = record.source === 'cost-state';
     const result = await usageSnapshotBackend.providerUsageSnapshot({
@@ -275,7 +272,6 @@ export async function scrapeOllamaOnce(pw, headless) {
 
 let ollamaBrowserInflight = null;
 function fetchOllamaBrowser() {
-  if (SHADOW) return Promise.resolve({ ok: false, error: 'shadow mode' });
   if (ollamaBrowserInflight) return ollamaBrowserInflight;
   ollamaBrowserInflight = (async () => {
     const pw = await import('playwright-core').catch(() => null);
@@ -448,7 +444,6 @@ let lastAuthRefresh = 0;
 // Merge a fresh token response into ~/.claude/.credentials.json in Node, then
 // send the serialized content and exact Node PID temp path to the Rust writer.
 async function persistOauth(fresh) {
-  if (SHADOW) return;
   let file = {};
   try {
     const result = await usageClaudeBackend?.claudeCredentialsRead(CREDENTIALS_PATH);
@@ -501,7 +496,6 @@ export async function refreshOauthGrant() {
 // Throttled as a pair so a genuinely signed-out user doesn't get a request +
 // spawn on every usage pull.
 export async function refreshClaudeAuth() {
-  if (SHADOW) return false; // the grant rotates the refresh token shared with the primary daemon
   if (Date.now() - lastAuthRefresh < AUTH_REFRESH_THROTTLE_MS) return false;
   lastAuthRefresh = Date.now();
   if (await refreshOauthGrant()) return true;
@@ -1122,7 +1116,6 @@ function scheduleResetRefreshes(result) {
 // network floor as the sampler ticks — not the user's own Refresh press.
 export function initUsageAutoRefresh(bus) {
   usageBus = bus;
-  if (SHADOW) return; // read-only: no idle-triggered pulls, no history sampler
   bus.on('status', ({ status }) => {
     if (status !== 'idle') return;
     clearTimeout(idleTimer);

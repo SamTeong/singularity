@@ -7,8 +7,8 @@ import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
 import { getModelRoute } from './models.mjs';
 import { findCodexThread, codexThreadExists, normPath } from './codex-thread.mjs';
-import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR, SHADOW } from './app-dir.mjs';
-export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR, SHADOW };
+import { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR } from './app-dir.mjs';
+export { APP_DIR, STATE_DIR, CACHE_DIR, WORKTREES_DIR, TICKETS_DIR, REPORTS_DIR };
 
 export const RING_MAX = 256 * 1024; // per-agent in-mem scrollback cap (bytes). Disk ring = Phase 3.
 const IDLE_MS = 2000; // no pty output for this long while running → 'idle' (waiting for input).
@@ -22,10 +22,8 @@ const STATE_FILE = join(STATE_DIR, 'agents.json');
 // default — SING_SCOPE_ROOT must be set in .env. Null when unset; buildSpawn
 // then skips --add-dir. index.mjs requireEnv fails the daemon fast if unset.
 const SCOPE_ROOT = process.env.SING_SCOPE_ROOT || null;
-if (!SHADOW) {
-  mkdirSync(APP_DIR, { recursive: true });
-  mkdirSync(STATE_DIR, { recursive: true });
-}
+mkdirSync(APP_DIR, { recursive: true });
+mkdirSync(STATE_DIR, { recursive: true });
 
 // --- claude/ollama binaries: absolute paths from .env (no PATH fallback) ---
 // The daemon requires explicit absolute paths. resolveBin returns the .env path if it exists, else null;
@@ -69,7 +67,6 @@ const retrySignal = new Int32Array(new SharedArrayBuffer(4));
 // `rename` param defaults to the real renameSync — overridable so tests can
 // inject a fake that fails N times without a mocking framework.
 export function writeAtomic(file, data, rename = renameSync) {
-  if (SHADOW) return;
   // pid-scoped tmp name: ~/.claude.json (ensureTrusted) is Claude Code's own
   // machine-global file, written by every claude process on the box — a fixed
   // `.tmp` lets two writers clobber each other's staged content and rename the
@@ -117,7 +114,6 @@ export function sweepTmpFiles({ dirs = [STATE_DIR, CACHE_DIR], log = logger, now
 
 let logger = null;
 function persist() {
-  if (SHADOW) return;
   const data = {
     agents: [...agents.values()].map(({ id, title, cwd, status, createdAt, model, scopes, permissionMode, extraArgs, activeMs, runningSince, mock, tool, threadId, runId }) => ({
       id, title, cwd, createdAt, model, scopes, permissionMode, extraArgs, mock, tool, threadId, runId,
@@ -474,7 +470,6 @@ export function untildify(p) {
 
 // create new agent (id IS the claude --session-id)
 export async function create({ cwd, title, model, scopes, sessionId, prompt, permissionMode, extraArgs, mock, tool, createdAt, threadId, runId, modelRoute }) {
-  if (SHADOW) throw new Error('shadow mode: read-only');
   cwd = untildify(cwd);
   const id = (sessionId && sessionId.trim()) || randomUUID();
   const existing = agents.get(id);
@@ -541,7 +536,6 @@ function sessionLogExists(cwd, id) {
 // turn has no log to resume — resuming it errors "No conversation found").
 // buildSpawn keeps the agent's model + skill-scopes from create time.
 export async function reattach(id) {
-  if (SHADOW) throw new Error('shadow mode: read-only');
   const a = agents.get(id);
   if (!a || a.proc) return a;
   const modelRoute = await getModelRoute(a.model, a.tool);
@@ -607,7 +601,6 @@ export async function externalLaunch(id, platform = process.platform, env = proc
 // session log, then create()s a fresh agent over it — no log yet → create()
 // falls back to a fresh --session-id spawn, i.e. a config-only copy.
 export async function fork(srcId, title) {
-  if (SHADOW) throw new Error('shadow mode: read-only');
   const src = agents.get(srcId);
   if (!src) throw new Error('source not found');
   const newId = randomUUID();

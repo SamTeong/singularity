@@ -966,8 +966,7 @@ async fn get_summary(State(state): State<ProjectsState>, RawQuery(query): RawQue
     };
     if let Some(text) = cache_text {
         let _ = blocking_value(state, move |_projects| {
-            // Shadow mode is read-only: never create dirs under SINGULARITY_HOME.
-            if let Some(parent) = cache_file.parent().filter(|_| !crate::shadow::enabled()) {
+            if let Some(parent) = cache_file.parent() {
                 let _ = fs::create_dir_all(parent);
             }
             let _ = write_atomic(&cache_file, text.as_bytes());

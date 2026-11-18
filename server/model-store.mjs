@@ -1,5 +1,5 @@
 import { join } from 'node:path';
-import { STATE_DIR, SHADOW } from './app-dir.mjs';
+import { STATE_DIR } from './app-dir.mjs';
 
 const STATE_FILE = join(STATE_DIR, 'models.json');
 let backend;
@@ -42,7 +42,6 @@ export async function getSummariserModel() {
 }
 
 export function getSummariser() {
-  if (SHADOW) return null; // no LLM spawn: callers take the deterministic path
   return modelsBackend().modelsSummariser(STATE_FILE);
 }
 
