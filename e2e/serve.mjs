@@ -18,7 +18,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, statSync, symlinkSync } from 'node:fs';
 import { createServer } from 'node:net';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { BACKEND, NODE_ROOT, REPO_ROOT, PORT, TOKEN, HOME_DIR, TRUSTED_DIR, USAGE_STATE_DIR, TMP, BASE_URL } from './fixtures/paths.mjs';
 import { seed } from './fixtures/seed.mjs';
 
@@ -32,11 +32,12 @@ function nativeBinary() {
   // VERIFY: wave3-e2e-3 — a typo'd override must fail here, not as an uncaught
   // spawn error after seed() rebuilt the sandbox.
   if (override) {
-    if (!existsSync(override)) {
+    const binary = resolve(REPO_ROOT, override);
+    if (!existsSync(binary)) {
       console.error(`[e2e] SINGULARITY_NATIVE_BIN does not exist: ${override}`);
       process.exit(1);
     }
-    return override;
+    return binary;
   }
   const built = ['release', 'debug']
     .map((profile) => join(REPO_ROOT, 'rust', 'backend', 'target', profile, EXE_NAME))

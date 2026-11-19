@@ -4,7 +4,10 @@ use crate::transcript_service::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, value::RawValue};
-use std::{path::PathBuf, sync::Arc};
+use std::{
+    path::PathBuf,
+    sync::{Arc, RwLock},
+};
 
 /// Node defaults `now` to `Date.now()` (`server/sessions.mjs:473`).
 fn wall_clock_ms() -> u64 {
@@ -15,21 +18,25 @@ fn wall_clock_ms() -> u64 {
 
 #[derive(Default)]
 pub struct TranscriptServices {
-    cached: Option<(ServiceKey, Arc<TranscriptService>)>,
+    cached: Option<(ServiceKey, Arc<TranscriptService>, Arc<RwLock<Vec<Value>>>)>,
 }
 
+// The model catalog is not part of the key: a catalog edit swaps it in place so
+// the (expensive to rebuild) transcript metadata cache survives.
 #[derive(PartialEq, Eq)]
 struct ServiceKey {
     state_dir: PathBuf,
     claude_home: PathBuf,
     codex_home: PathBuf,
-    model_catalog: String,
+    cache_dir: Option<PathBuf>,
 }
 
 #[derive(Clone, Default, Deserialize)]
 #[serde(default)]
 pub struct TranscriptRequest {
     pub state_dir: Option<String>,
+    /// Optional: where list metadata persists across restarts.
+    pub cache_dir: Option<String>,
     pub claude_home: Option<String>,
     pub codex_home: Option<String>,
     pub model_catalog: Option<Vec<Value>>,
@@ -62,7 +69,9 @@ pub enum ResponseBody {
 }
 
 impl TranscriptServices {
-    fn service(
+    /// Resolves (or reuses) the service for these inputs. Cheap; runs on the
+    /// caller's thread so `dispatch_on` can run the slow work elsewhere.
+    pub fn service(
         &mut self,
         request: &TranscriptRequest,
     ) -> Result<Arc<TranscriptService>, ResponseBody> {
@@ -70,33 +79,53 @@ impl TranscriptServices {
         let claude_home = request.claude_home.as_deref().ok_or_else(invalid_inputs)?;
         let codex_home = request.codex_home.as_deref().ok_or_else(invalid_inputs)?;
         let catalog = request.model_catalog.clone().ok_or_else(invalid_inputs)?;
-        let catalog_json = serde_json::to_string(&catalog).expect("catalog values serialize");
         let key = ServiceKey {
             state_dir: PathBuf::from(state_dir),
             claude_home: PathBuf::from(claude_home),
             codex_home: PathBuf::from(codex_home),
-            model_catalog: catalog_json,
+            cache_dir: request.cache_dir.as_deref().map(PathBuf::from),
         };
-        if let Some((cached_key, service)) = &self.cached {
+        if let Some((cached_key, service, current)) = &self.cached {
             if cached_key == &key {
+                let mut current = current.write().unwrap_or_else(|e| e.into_inner());
+                if *current != catalog {
+                    *current = catalog;
+                    // Search items are parsed with the catalog; list metadata is not.
+                    service.clear_search_cache();
+                }
                 return Ok(service.clone());
             }
         }
-        let service = Arc::new(TranscriptService::new(Inputs {
+        let current = Arc::new(RwLock::new(catalog.clone()));
+        let source = current.clone();
+        let mut service = TranscriptService::new(Inputs {
             state_dir: key.state_dir.clone(),
             claude_home: key.claude_home.clone(),
             codex_home: key.codex_home.clone(),
             model_catalog: catalog,
+        })
+        .with_catalog_source(Arc::new(move || {
+            source.read().unwrap_or_else(|e| e.into_inner()).clone()
         }));
-        self.cached = Some((key, service.clone()));
+        if let Some(dir) = &key.cache_dir {
+            service = service.with_persist(dir.join("transcript-meta.json"));
+        }
+        let service = Arc::new(service);
+        self.cached = Some((key, service.clone(), current));
         Ok(service)
     }
 
     pub fn dispatch(&mut self, op: &str, request: &TranscriptRequest) -> ResponseBody {
-        let service = match self.service(request) {
-            Ok(service) => service,
-            Err(error) => return error,
-        };
+        match self.service(request) {
+            Ok(service) => dispatch_on(&service, op, request),
+            Err(error) => error,
+        }
+    }
+}
+
+/// Runs one transcript operation; safe to call off the bridge's main thread.
+pub fn dispatch_on(service: &TranscriptService, op: &str, request: &TranscriptRequest) -> ResponseBody {
+    {
         let result = match op {
             "transcript_root_get" => serde_json::to_string(&service.get_root())
                 .map_err(|e| crate::transcript_service::Error::Parse(e.to_string())),

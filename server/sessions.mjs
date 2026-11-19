@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { join, resolve, sep, normalize } from 'node:path';
 import { homedir } from 'node:os';
-import { STATE_DIR } from './app-dir.mjs';
+import { CACHE_DIR, STATE_DIR } from './app-dir.mjs';
 import { CODEX_HOME } from './usage.mjs';
 import { getModels } from './model-store.mjs';
 
@@ -19,6 +19,7 @@ export function setTranscriptBackend(backend) {
 async function inputs() {
   return {
     state_dir: STATE_DIR,
+    cache_dir: CACHE_DIR,
     claude_home: homedir(),
     codex_home: CODEX_HOME,
     model_catalog: (await getModels()).models,

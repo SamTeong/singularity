@@ -444,6 +444,47 @@ test('Rust status replies bypass ordinary FIFO and correlate out of order', asyn
   } finally { await backend.stop(); }
 });
 
+test('Rust transcript ops do not block the ordinary FIFO and correlate out of order', async () => {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  child.kill = () => true;
+  const requests = [];
+  child.stdin.write = (chunk, callback) => {
+    const request = JSON.parse(String(chunk));
+    requests.push(request);
+    if (request.type !== 'transcript_request') queueMicrotask(() => child.stdout.write(`${JSON.stringify({ id: request.id, response: { ok: true } })}\n`));
+    callback?.();
+    return true;
+  };
+  child.stdin.end = () => queueMicrotask(() => child.emit('exit', 0, null));
+  const backend = createRustBackend({ spawnProcess: () => {
+    queueMicrotask(() => {
+      child.emit('spawn');
+      child.stdout.write('{"ready":true}\n');
+    });
+    return child;
+  } });
+  try {
+    await backend.start();
+    const list = backend.transcriptsList({ state_dir: 's' }, { cap: 5 });
+    const read = backend.transcriptRead({ state_dir: 's' }, { transcript_id: 'x' });
+    // Pending transcript ops leave the ordinary queue free.
+    assert.deepEqual(await backend.sysStats(), { ok: true });
+    const transcript = requests.filter(({ type }) => type === 'transcript_request');
+    assert.deepEqual(transcript.map(({ op }) => op), ['transcripts_list', 'transcripts_read']);
+    assert.equal(transcript[0].cap, 5);
+    child.stdout.write(`${JSON.stringify({ id: transcript[1].id, type: 'transcript_reply', response: { read: 1 } })}\n`);
+    child.stdout.write(`${JSON.stringify({ id: transcript[0].id, type: 'transcript_reply', response: [] })}\n`);
+    assert.deepEqual(await read, { read: 1 });
+    assert.deepEqual(await list, []);
+    const orphan = backend.transcriptsList({}, {});
+    await backend.stop();
+    await assert.rejects(orphan);
+  } finally { await backend.stop(); }
+});
+
 test('Rust async one-shot FIFO leaves ordinary and status requests independent', async () => {
   const child = new EventEmitter();
   child.stdin = new PassThrough();
