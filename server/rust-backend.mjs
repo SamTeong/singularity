@@ -69,18 +69,21 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
       pump();
     });
   };
-  const statusRequest = (force) => {
+  // Bypasses the ordinary FIFO: Rust answers out of order with a typed reply.
+  const asyncRequest = (body) => {
     if (!child || closed) return Promise.reject(new Error('Rust backend is not running'));
     return new Promise((resolveRequest, rejectRequest) => {
       const id = requestId();
       pendingStatus.set(id, { resolve: resolveRequest, reject: rejectRequest });
       try {
-        child.stdin.write(`${JSON.stringify({ op: 'status_get', type: 'status_request', id, force })}\n`, (error) => {
+        child.stdin.write(`${JSON.stringify({ ...body, id })}\n`, (error) => {
           if (error) fail(error);
         });
       } catch (error) { fail(error); }
     });
   };
+  const statusRequest = (force) => asyncRequest({ op: 'status_get', type: 'status_request', force });
+  const transcriptRequest = (body) => asyncRequest({ ...body, type: 'transcript_request' });
 
   const oneShotRequest = (body) => {
     if (!child || closed) return Promise.reject(new Error('Rust backend is not running'));
@@ -185,9 +188,9 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
             resolveStartup();
             return;
           }
-          if (response?.type === 'status_reply' && typeof response.id === 'string') {
+          if ((response?.type === 'status_reply' || response?.type === 'transcript_reply') && typeof response.id === 'string') {
             const pending = pendingStatus.get(response.id);
-            if (!pending) return fail(new Error('Rust backend returned an unknown status reply ID'));
+            if (!pending) return fail(new Error(`Rust backend returned an unknown ${response.type} ID`));
             pendingStatus.delete(response.id);
             pending.resolve(response.response);
             return;
@@ -290,19 +293,19 @@ export function createRustBackend({ binaryPath = defaultBinary, spawnProcess = s
     },
 
     transcriptsList(inputs, options) {
-      return request({ ...inputs, ...options, op: 'transcripts_list' });
+      return transcriptRequest({ ...inputs, ...options, op: 'transcripts_list' });
     },
 
     transcriptRead(inputs, options) {
-      return request({ ...inputs, ...options, op: 'transcripts_read' });
+      return transcriptRequest({ ...inputs, ...options, op: 'transcripts_read' });
     },
 
     transcriptsSearch(inputs, options) {
-      return request({ ...inputs, ...options, op: 'transcripts_search' });
+      return transcriptRequest({ ...inputs, ...options, op: 'transcripts_search' });
     },
 
     transcriptSubagents(inputs, options) {
-      return request({ ...inputs, ...options, op: 'transcript_subagents' });
+      return transcriptRequest({ ...inputs, ...options, op: 'transcript_subagents' });
     },
 
     codexThreadFind(codexHome, cwd, spawnedAt) {

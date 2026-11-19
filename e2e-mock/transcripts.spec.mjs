@@ -96,6 +96,30 @@ test('list order, rich transcript render, URL write + cold reload, and Resume pr
   await expect(page.getByRole('dialog')).toHaveCount(0);
 });
 
+test('a pending first transcript list shows loading, not an empty list', async ({ page }) => {
+  await page.addInitScript(() => {
+    window.__releaseTranscriptList = null;
+    const wrap = (originalFetch) => (input, init) => {
+      const rawUrl = typeof input === 'string' || input instanceof URL ? String(input) : input.url;
+      const url = new URL(rawUrl, location.origin);
+      if (url.pathname === '/api/transcripts') {
+        return new Promise((resolve) => {
+          window.__releaseTranscriptList = () => resolve(new Response(JSON.stringify({ sessions: [] }), { headers: { 'content-type': 'application/json' } }));
+        });
+      }
+      return originalFetch(input, init);
+    };
+    let current = wrap(window.fetch);
+    Object.defineProperty(window, 'fetch', { configurable: true, get: () => current, set: (v) => { current = wrap(v); } });
+  });
+  await gotoView(page, 'Transcripts');
+  await expect(visible(page.getByText('Loading transcripts…', { exact: true })).first()).toBeVisible();
+  await expect(page.getByText('No transcripts.', { exact: true })).not.toBeVisible();
+  await page.waitForFunction(() => typeof window.__releaseTranscriptList === 'function');
+  await page.evaluate(() => window.__releaseTranscriptList());
+  await expect(visible(page.getByText('No transcripts.', { exact: true })).first()).toBeVisible();
+});
+
 test('a successful empty poll clears the prior transcript list error', async ({ page }) => {
   await page.addInitScript(() => {
     window.__recoverTranscriptList = false;

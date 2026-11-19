@@ -10,13 +10,19 @@ use std::{
     fs,
     io::{self, BufRead, BufReader, Read},
     path::{Component, Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::UNIX_EPOCH,
 };
 
 const DEFAULT_ROOT: &str = "~/.claude/projects";
 const PEEK_BYTES: u64 = 65_536;
+const META_CAP: usize = 20_000;
 const CODEX_CAP: usize = 5_000;
+/// Head reads are I/O-latency bound (per-open cost dominates), so use more threads than cores.
+const HEAD_READ_THREADS: usize = 16;
 const SEARCH_CAP: usize = 200;
 const RUNNING_MS: u64 = 30_000;
 
@@ -163,12 +169,13 @@ pub struct SearchResponse {
     pub results: Vec<SearchResult>,
     pub capped: bool,
 }
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Key {
     mtime: f64,
     size: u64,
 }
-#[derive(Clone)]
+// Raw tokens here are always truthy (never `null`), so an Option round-trips.
+#[derive(Clone, Serialize, Deserialize)]
 struct Meta {
     key: Key,
     cwd: Option<Box<RawValue>>,
@@ -176,7 +183,7 @@ struct Meta {
     blurb: Option<Box<RawValue>>,
     sidecar: Option<Key>,
 }
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct CodexMeta {
     cwd: Option<Box<RawValue>>,
     title: Box<RawValue>,
@@ -206,7 +213,19 @@ pub struct TranscriptService {
     cache: Mutex<Cache>,
     catalog_source: Option<Arc<dyn Fn() -> Vec<Value> + Send + Sync>>,
     stat: Arc<StatFn>,
+    persist: Option<PathBuf>,
+    dirty: AtomicBool,
+    /// Overlapping lists wait, then hit the warm cache, instead of all scanning cold.
+    list_lock: Mutex<()>,
 }
+/// On-disk list metadata, so the first list after a restart skips re-reading file heads.
+#[derive(Default, Serialize, Deserialize)]
+struct Persisted {
+    v: u32,
+    meta: Vec<(PathBuf, Meta)>,
+    codex: Vec<(PathBuf, Key, CodexMeta)>,
+}
+const PERSIST_VERSION: u32 = 1;
 
 impl TranscriptService {
     pub fn new(inputs: Inputs) -> Self {
@@ -215,6 +234,62 @@ impl TranscriptService {
             cache: Mutex::new(Cache::default()),
             catalog_source: None,
             stat: Arc::new(file_key),
+            persist: None,
+            dirty: AtomicBool::new(false),
+            list_lock: Mutex::new(()),
+        }
+    }
+    /// Loads list metadata from `file` and saves it back after a list that changed it.
+    /// Entries are still validated by mtime+size, so a stale file only costs re-reads.
+    pub fn with_persist(mut self, file: PathBuf) -> Self {
+        let doc = fs::read(&file)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Persisted>(&b).ok())
+            .filter(|d| d.v == PERSIST_VERSION)
+            .unwrap_or_default();
+        let cache = self.cache.get_mut().unwrap_or_else(|e| e.into_inner());
+        for (path, meta) in doc.meta.into_iter().take(META_CAP) {
+            cache.meta_fifo.push_back(path.clone());
+            cache.meta.insert(path, meta);
+        }
+        for (path, key, meta) in doc.codex.into_iter().take(CODEX_CAP) {
+            cache.codex_fifo.push_back(path.clone());
+            cache.codex_meta.insert(path, (key, meta));
+        }
+        self.persist = Some(file);
+        self
+    }
+    fn save_persisted(&self) {
+        let Some(file) = &self.persist else { return };
+        if !self.dirty.swap(false, Ordering::Relaxed) {
+            return;
+        }
+        let bytes = {
+            let Ok(cache) = self.cache.lock() else { return };
+            let doc = Persisted {
+                v: PERSIST_VERSION,
+                meta: cache
+                    .meta_fifo
+                    .iter()
+                    .filter_map(|p| Some((p.clone(), cache.meta.get(p)?.clone())))
+                    .collect(),
+                codex: cache
+                    .codex_fifo
+                    .iter()
+                    .filter_map(|p| {
+                        let (k, m) = cache.codex_meta.get(p)?;
+                        Some((p.clone(), k.clone(), m.clone()))
+                    })
+                    .collect(),
+            };
+            serde_json::to_vec(&doc)
+        };
+        // Best effort: a failed save only means the next restart rescans.
+        if let Ok(bytes) = bytes {
+            let _ = file
+                .parent()
+                .map_or(Ok(()), fs::create_dir_all)
+                .and_then(|_| crate::fs_atomic::write_atomic(file, &bytes));
         }
     }
     #[cfg(test)]
@@ -230,6 +305,13 @@ impl TranscriptService {
     ) -> Self {
         self.catalog_source = Some(source);
         self
+    }
+    /// Drops catalog-derived search items after a model catalog change.
+    pub fn clear_search_cache(&self) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.search.clear();
+            cache.search_fifo.clear();
+        }
     }
     fn catalog(&self) -> std::borrow::Cow<'_, [Value]> {
         match &self.catalog_source {
@@ -306,7 +388,39 @@ impl TranscriptService {
         confined(&base, &path).then_some(path)
     }
     pub fn list(&self, o: &ListOptions) -> Result<Vec<SessionRow>, Error> {
+        let _one_at_a_time = self.list_lock.lock().unwrap_or_else(|e| e.into_inner());
+        let rows = self.list_rows(o);
+        self.save_persisted();
+        rows
+    }
+    /// Fills the meta cache for every Claude head in parallel; the serial walk then hits cache.
+    fn prewarm_claude(&self, root: &Path) {
+        let mut jobs: Vec<(PathBuf, Option<PathBuf>)> = Vec::new();
+        let Ok(projects) = crate::fs_sorted::read_dir(root) else { return };
+        for project in projects.flatten() {
+            let Ok(entries) = crate::fs_sorted::read_dir(project.path()) else { continue };
+            for e in entries.flatten() {
+                let name = os_string(e.file_name());
+                let Some(id) = name.strip_suffix(".jsonl") else { continue };
+                let subs = project.path().join(id).join("subagents");
+                jobs.push((e.path(), None));
+                let Ok(subs) = crate::fs_sorted::read_dir(subs) else { continue };
+                for s in subs.flatten() {
+                    let sname = os_string(s.file_name());
+                    if let Some(aid) = sname.strip_suffix(".jsonl") {
+                        let side = s.path().with_file_name(format!("{aid}.meta.json"));
+                        jobs.push((s.path(), Some(side)));
+                    }
+                }
+            }
+        }
+        par_each(&jobs, |(path, side)| {
+            let _ = self.peek_meta(path, side.as_deref());
+        });
+    }
+    fn list_rows(&self, o: &ListOptions) -> Result<Vec<SessionRow>, Error> {
         let root = self.resolve_root(o.root.as_deref());
+        self.prewarm_claude(&root);
         let mut rows = Vec::new();
         let project_entries = match crate::fs_sorted::read_dir(&root) {
             Ok(entries) => Some(entries),
@@ -618,6 +732,7 @@ impl TranscriptService {
             }
             c.meta.insert(path.into(), meta.clone());
             evict_meta(&mut c);
+            self.dirty.store(true, Ordering::Relaxed);
         }
         Ok(Some(meta))
     }
@@ -675,6 +790,11 @@ impl TranscriptService {
         for d in ["sessions", "archived_sessions"] {
             collect_rollouts(&self.inputs.codex_home.join(d), &mut files)
         }
+        par_each(&files, |p| {
+            if let Ok(key) = file_key(p) {
+                self.codex_metadata(p, &key, o.hide_reviews);
+            }
+        });
         let mut rows = Vec::new();
         let mut sources = HashMap::new();
         for p in files {
@@ -767,6 +887,7 @@ impl TranscriptService {
                 .get(path)
                 .and_then(|(old_key, value)| same_key(old_key, key).then(|| value.clone()))
         });
+        let mut changed = metadata.is_none();
         if metadata.is_none() {
             let head = read_head(path, PEEK_BYTES).unwrap_or_default();
             let parsed = parse_codex_with_tool_limit(&head, 500).ok()?;
@@ -836,6 +957,10 @@ impl TranscriptService {
         if hide_reviews && metadata.review.is_none() {
             let first_user = scan_codex_first_user_text(path).ok()?;
             metadata.review = Some(first_user.is_some_and(|text| raw_text_starts_review(&text)));
+            changed = true;
+        }
+        if changed {
+            self.dirty.store(true, Ordering::Relaxed);
         }
         if let Ok(mut cache) = self.cache.lock() {
             if !cache.codex_meta.contains_key(path) {
@@ -1145,7 +1270,7 @@ fn same_key(a: &Key, b: &Key) -> bool {
     a.mtime == b.mtime && a.size == b.size
 }
 fn evict_meta(cache: &mut Cache) {
-    while cache.meta.len() > 20_000 {
+    while cache.meta.len() > META_CAP {
         let Some(path) = cache.meta_fifo.pop_front() else {
             break;
         };
@@ -1159,6 +1284,24 @@ fn evict_search(cache: &mut Cache) {
         };
         cache.search.remove(&path);
     }
+}
+/// Runs `f` over `items` on a small scoped thread pool (no rayon dependency).
+fn par_each<T: Sync>(items: &[T], f: impl Fn(&T) + Sync) {
+    let threads = HEAD_READ_THREADS.min(items.len());
+    if threads <= 1 {
+        items.iter().for_each(f);
+        return;
+    }
+    let next = AtomicUsize::new(0);
+    std::thread::scope(|s| {
+        for _ in 0..threads {
+            s.spawn(|| {
+                while let Some(item) = items.get(next.fetch_add(1, Ordering::Relaxed)) {
+                    f(item);
+                }
+            });
+        }
+    });
 }
 fn read_head(path: &Path, n: u64) -> io::Result<String> {
     let f = fs::File::open(path)?;
@@ -1554,6 +1697,39 @@ mod tests {
         assert_eq!(s.catalog()[0]["id"], "m0");
         assert_eq!(s.catalog()[0]["id"], "m1");
         assert!(t.service().catalog().is_empty());
+    }
+    #[test]
+    fn list_metadata_persists_across_service_instances() {
+        let t = Temp::new();
+        let root = t.0.join("projects");
+        create_dir_all(root.join("p").join("s1").join("subagents")).unwrap();
+        write(
+            root.join("p").join("s1.jsonl"),
+            "{\"type\":\"ai-title\",\"title\":\"Hi\",\"cwd\":\"C:/w\"}\n{\"type\":\"user\",\"message\":{\"content\":\"hello\"}}\n",
+        )
+        .unwrap();
+        write(root.join("p").join("s1").join("subagents").join("a1.jsonl"), "{}\n").unwrap();
+        let file = t.0.join("cache").join("transcript-meta.json");
+        let o = ListOptions {
+            root: Some(root.to_string_lossy().into_owned()),
+            ..ListOptions::default()
+        };
+        let first = t.service().with_persist(file.clone());
+        let rows = serde_json::to_string(&first.list(&o).unwrap()).unwrap();
+        assert!(file.is_file());
+        let second = t.service().with_persist(file.clone());
+        {
+            let cache = second.cache.lock().unwrap();
+            assert_eq!(cache.meta.len(), 2, "session + subagent heads restored");
+        }
+        assert_eq!(serde_json::to_string(&second.list(&o).unwrap()).unwrap(), rows);
+        // Nothing changed, so the second list skipped the save.
+        assert!(!second.dirty.load(Ordering::Relaxed));
+        // A corrupt file is ignored, not fatal.
+        write(&file, "not json").unwrap();
+        let third = t.service().with_persist(file);
+        assert!(third.cache.lock().unwrap().meta.is_empty());
+        assert_eq!(serde_json::to_string(&third.list(&o).unwrap()).unwrap(), rows);
     }
     #[test]
     fn explicit_root_and_confined_paths() {

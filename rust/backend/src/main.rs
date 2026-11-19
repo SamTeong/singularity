@@ -377,6 +377,39 @@ fn main() -> io::Result<()> {
                 }
             }
         }
+        if let Ok(request) = &parsed {
+            // Slow filesystem scans run off the main loop so they cannot block other ops.
+            if matches!(
+                request.op.as_str(),
+                "transcripts_list"
+                    | "transcripts_read"
+                    | "transcripts_search"
+                    | "transcript_subagents"
+            ) && request.message_type.as_deref() == Some("transcript_request")
+            {
+                if let Some(id) = request.id.clone() {
+                    let body = match transcript_services.service(&request.transcript) {
+                        Ok(service) => {
+                            let (op, transcript) = (request.op.clone(), request.transcript.clone());
+                            let stdout = stdout.clone();
+                            let shutting_down = shutting_down.clone();
+                            std::thread::spawn(move || {
+                                let body = singularity_backend::transcript_bridge::dispatch_on(
+                                    &service,
+                                    &op,
+                                    &transcript,
+                                );
+                                let _ = write_transcript_reply(&stdout, &shutting_down, &id, body);
+                            });
+                            continue;
+                        }
+                        Err(body) => body,
+                    };
+                    write_transcript_reply(&stdout, &shutting_down, &id, body)?;
+                    continue;
+                }
+            }
+        }
         let id = parsed.as_ref().ok().and_then(|request| request.id.clone());
         let mut raw_response = None;
         let response = match parsed {
@@ -1200,6 +1233,41 @@ fn dispatch_wiki_wire_line<W: Write>(stdout: &Mutex<W>, line: &str) -> io::Resul
         id.as_ref(),
         singularity_backend::transcript_bridge::ResponseBody::Raw(body),
     )?;
+    Ok(true)
+}
+
+/// `{type:"transcript_reply", id, response}`; the raw body is written without re-parsing.
+fn write_transcript_reply<W: Write>(
+    stdout: &Mutex<W>,
+    shutting_down: &AtomicBool,
+    id: &Value,
+    body: singularity_backend::transcript_bridge::ResponseBody,
+) -> io::Result<bool> {
+    #[derive(serde::Serialize)]
+    struct Reply<'a> {
+        #[serde(rename = "type")]
+        kind: &'static str,
+        id: &'a Value,
+        response: &'a RawValue,
+    }
+    let raw = match body {
+        singularity_backend::transcript_bridge::ResponseBody::Raw(raw) => raw,
+        singularity_backend::transcript_bridge::ResponseBody::Value(value) => {
+            serde_json::value::to_raw_value(&value)?
+        }
+    };
+    let mut stdout = stdout
+        .lock()
+        .map_err(|_| io::Error::other("stdout writer poisoned"))?;
+    if shutting_down.load(Ordering::Acquire) {
+        return Ok(false);
+    }
+    serde_json::to_writer(
+        &mut *stdout,
+        &Reply { kind: "transcript_reply", id, response: &raw },
+    )?;
+    stdout.write_all(b"\n")?;
+    stdout.flush()?;
     Ok(true)
 }
 

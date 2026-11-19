@@ -105,6 +105,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const [stats, setStats] = useState({}); // id -> { costUsd, costSource, inputTokens, ... }
   const [loadErr, setLoadErr] = useState(null);
   const [sessErr, setSessErr] = useState(null);
+  // A cold transcript scan can take minutes; don't show "No transcripts." meanwhile.
+  const [sessLoaded, setSessLoaded] = useState(false);
   const [expanded, setExpanded] = useState(new Set()); // "project:id" -> subagent tree expanded
   // null until /sessions/root resolves — see the mount effect below. Keeps the
   // session list from ever being fetched against a guessed root (it used to
@@ -155,8 +157,8 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
       const currentRequest = ++request;
       fetch(`/api/transcripts?root=${encodeURIComponent(untildify(root))}${hideReviews ? '&hideReviews=1' : ''}`)
         .then((r) => { if (!r.ok) throw new Error('Failed to load transcripts'); return r.json(); })
-        .then((d) => { if (current && currentRequest === request) { setSessErr(null); setSessions(d.sessions || []); } })
-        .catch(() => { if (current && currentRequest === request) setSessErr('Failed to load transcripts.'); })
+        .then((d) => { if (current && currentRequest === request) { setSessErr(null); setSessions(d.sessions || []); setSessLoaded(true); } })
+        .catch(() => { if (current && currentRequest === request) { setSessErr('Failed to load transcripts.'); setSessLoaded(true); } })
         .finally(() => {
           listRequestRef.current = false;
           if (listLoadRef.current && listLoadRef.current !== load) listLoadRef.current();
@@ -351,7 +353,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
                 />
               </Stack>
               <Typography variant="code" sx={{ color: 'text.secondary', fontSize: 11, mt: 1, ml: 2, display: 'block' }}>
-                {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : `${filteredSessions.length} transcript${filteredSessions.length === 1 ? '' : 's'}`}
+                {leftResults ? `${leftResults.length}${capped ? '+ (capped)' : ''} matches` : !sessLoaded ? 'Loading…' : `${filteredSessions.length} transcript${filteredSessions.length === 1 ? '' : 's'}`}
               </Typography>
             </RailHeader>
             <List dense sx={{ flex: 1, overflow: 'auto', px: 0.5, pt: 0 }}>
@@ -426,7 +428,7 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
                   );
                 })
               )}
-              {!leftResults && filteredSessions.length === 0 && <EmptyListLine>{sessErr || 'No transcripts.'}</EmptyListLine>}
+              {!leftResults && filteredSessions.length === 0 && <EmptyListLine>{sessErr || (sessLoaded ? 'No transcripts.' : 'Loading transcripts…')}</EmptyListLine>}
               {leftResults && leftResults.length === 0 && <Typography sx={{ p: 2, color: 'text.secondary', fontSize: 13 }}>No matches.</Typography>}
             </List>
             <Box sx={(t) => ({ width: '100%', display: 'flex', justifyContent: 'center', py: 1, borderTop: `1px solid ${getTokens(t).glass.stroke}`, flexShrink: 0 })}>

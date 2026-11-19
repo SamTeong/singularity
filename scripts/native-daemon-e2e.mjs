@@ -36,7 +36,8 @@ const candidate = (profile) => join(repo, 'rust', 'backend', 'target', profile, 
 const built = [candidate('release'), candidate('debug')]
   .filter((path) => existsSync(path))
   .sort((left, right) => statSync(right).mtimeMs - statSync(left).mtimeMs);
-const binary = process.env.SINGULARITY_NATIVE_BIN ?? built[0];
+const configuredBinary = process.env.SINGULARITY_NATIVE_BIN;
+const binary = configuredBinary ? resolve(repo, configuredBinary) : built[0];
 if (!binary) {
   console.error('native backend binary not found; run cargo build --release --manifest-path rust/backend/Cargo.toml');
   process.exit(1);
