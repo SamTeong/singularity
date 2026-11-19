@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
@@ -74,6 +75,30 @@ test('spawn failures reject and later generations ignore stale output', async (t
   assert.equal(second.generation, first.generation + 1);
   assert.deepEqual(firstSeen.events, []);
   assert.deepEqual(secondSeen.events, []);
+});
+
+test('superseded exit releases the old handle without stale callbacks and stop kills only the live generation', async (t) => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'sing-pty-kill-'));
+  const killLog = path.join(dir, 'kills.log');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const backend = createRustPtyBackend({
+    executable: process.execPath, args: [fakeService], cwd: root,
+    env: { ...process.env, PTY_KILL_LOG: killLog }, logger: { error() {} },
+  });
+  t.after(() => backend.stop());
+  const first = await backend.spawn({ id: 'superseded', bin: 'defer-exit', args: [], cwd: root, env: {} });
+  const firstSeen = handlers(first);
+  firstSeen.activate();
+  // The fixture flushes first's exit before accepting this spawn, so by the time
+  // spawn() resolves the adapter has seen a superseded exit frame.
+  const second = await backend.spawn({ id: 'superseded', bin: 'ok', args: [], cwd: root, env: {} });
+  const secondSeen = handlers(second);
+  secondSeen.activate();
+  assert.deepEqual(firstSeen.events, [], 'superseded exit publishes no data or exit callback');
+  await second.write('ping'); // the live generation still round-trips
+  await backend.stop();
+  const kills = readFileSync(killLog, 'utf8').split('\n').filter(Boolean);
+  assert.deepEqual(kills, [String(second.generation)], 'stop kills only the current generation, not the superseded handle');
 });
 
 test('real PTY preserves command cwd/env and reports its PID while round-tripping input, resize, kill, and exit', { skip: !existsSync(binary) && 'Build rust/backend first' }, async (t) => {

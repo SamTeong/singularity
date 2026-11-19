@@ -133,6 +133,10 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
   const chatIdRef = useRef(null);
   const listRequestRef = useRef(false);
   const listLoadRef = useRef(null);
+  // Owns the in-flight /api/transcript response: bumped by every open() and by
+  // pickRoot(), so a request issued for an earlier selection or root can never
+  // paint its transcript or clear the current request's loading flag.
+  const txRequestRef = useRef(0);
 
   // Load the FS-persisted root once on mount (sessions load via the [root]
   // effect, which waits for this to resolve). Falls back to DEFAULT_ROOT once
@@ -214,10 +218,16 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
     updateQuery({ project: item.project, session: item.id, source: item.source || null });
     loadStats([item]); // ensure detail-header stats even when opened from search
     setLoadingFile(true);
+    // VERIFY: transcript-request-ownership
+    const requestId = ++txRequestRef.current;
     const src = item.source === 'codex' ? `&source=codex${item.file ? `&file=${encodeURIComponent(item.file)}` : ''}` : '';
     fetch(`/api/transcript?project=${encodeURIComponent(item.project)}&id=${encodeURIComponent(item.id)}&root=${encodeURIComponent(untildify(root))}${src}`).then((r) => r.json()).then((d) => {
+      if (requestId !== txRequestRef.current) return;
       setTranscript(d.ok ? d : null);
-    }).catch(() => { setTranscript(null); setLoadErr('Failed to load transcript.'); }).finally(() => setLoadingFile(false));
+    }).catch(() => {
+      if (requestId !== txRequestRef.current) return;
+      setTranscript(null); setLoadErr('Failed to load transcript.');
+    }).finally(() => { if (requestId === txRequestRef.current) setLoadingFile(false); });
   };
 
   // A URL-derived transcript is present on FIRST mount, so this races the async
@@ -232,11 +242,20 @@ export default function SessionHistory({ active, sendMsg, registerChat, onResume
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openSession, root, sessions]);
 
+  // VERIFY: transcripts-root-switch-reset
+  // VERIFY: transcripts-root-same-noop
   const pickRoot = (p) => {
-    setRoot(p); setPicking(false);
+    setPicking(false);
+    // Preserve the loaded list when choosing the same root.
+    if (p === root) return;
+    txRequestRef.current++; // an in-flight transcript belongs to the old root
+    setRoot(p);
     // Drop the open transcript from the URL too — it belongs to the old root,
     // and leaving it there would have the effect below re-open it immediately.
-    setSel(null); setTranscript(null); setMatches(null); setPage(1);
+    setSel(null); setTranscript(null); setMatches(null); setCapped(false); setPage(1);
+    // Everything below is root-scoped: drop it and show the cold-scan loading
+    // state until the [root] effect's list lands (ordinary polls keep it).
+    setSessions([]); setSessLoaded(false); setSessErr(null); setExpanded(new Set());
     updateQuery({ q: null, project: null, session: null, source: null });
     fetch('/api/transcripts/root', { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ root: p }) }).catch(() => {});
   };
